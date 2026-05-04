@@ -586,10 +586,32 @@ pub fn lower_expr(ast: &IrExprNode, ctx: &mut LoweringCtx<'_>) -> Result<CgExprI
                 })
             }
         }
-        IrExpr::Namespace(_) => Err(LoweringError::UnsupportedAstNode {
-            ast_label: "Namespace",
-            span,
-        }),
+        IrExpr::Namespace(ns) => {
+            // A bare namespace token is a *qualifier*, not a value. The
+            // resolver routes unqualified `tick` to
+            // `IrExpr::Namespace(NamespaceId::Tick)`; the author
+            // typically meant a qualified field on it (e.g.
+            // `world.tick` for the per-tick counter). Surface the gap
+            // as a typed diagnostic so verb `when` predicates that
+            // mistakenly write `(tick % 3 == 0)` produce a pointed
+            // error instead of silently dropping their MaskPredicate
+            // op. See `docs/superpowers/notes/2026-05-04-diplomacy_probe.md`
+            // Gap #1.
+            //
+            // The qualified-form hint is closed-set per namespace — only
+            // a handful of stdlib namespaces have a single canonical
+            // value-bearing field; for the rest we default to a generic
+            // hint so the diagnostic still points at the surface area.
+            let hint: &'static str = match ns {
+                NamespaceId::Tick | NamespaceId::World => "world.tick",
+                _ => "<namespace>.<field>",
+            };
+            Err(LoweringError::BareNamespaceInExpression {
+                ns: *ns,
+                hint,
+                span,
+            })
+        }
         IrExpr::Event(_) => Err(LoweringError::UnsupportedAstNode {
             ast_label: "Event",
             span,

@@ -261,6 +261,23 @@ pub enum LoweringError {
         span: Span,
     },
 
+    /// A bare namespace identifier (e.g. `tick`) appeared in expression
+    /// position. The DSL's stdlib namespaces (`world`, `tick`, `cascade`,
+    /// `rng`, …) are *qualifier* tokens — they have no value of their
+    /// own; the author meant a qualified field on one of them. The
+    /// resolver routes an unqualified `tick` to
+    /// `IrExpr::Namespace(NamespaceId::Tick)`, which the CG lowering
+    /// rejects here so the gap surfaces as a typed diagnostic instead
+    /// of silently dropping the surrounding expression (e.g. a verb's
+    /// `when (tick % 3 == 0)` predicate). The hint string names the
+    /// qualified form the author probably wanted (today: `world.tick`).
+    /// See `docs/superpowers/notes/2026-05-04-diplomacy_probe.md` Gap #1.
+    BareNamespaceInExpression {
+        ns: NamespaceId,
+        hint: &'static str,
+        span: Span,
+    },
+
     /// `IrExpr::NamespaceField { ns: Config, field, .. }` whose
     /// `(ns, field)` pair has no [`ConfigConstId`] in
     /// [`super::expr::LoweringCtx::config_const_ids`]. Either the
@@ -1028,6 +1045,15 @@ impl fmt::Display for LoweringError {
                 field,
                 span.start,
                 span.end
+            ),
+            LoweringError::BareNamespaceInExpression { ns, hint, span } => write!(
+                f,
+                "lowering: bare namespace `{}` at {}..{} has no value — \
+                 use the qualified field form (`{}`)",
+                ns.name(),
+                span.start,
+                span.end,
+                hint,
             ),
             LoweringError::UnknownConfigField { ns, field, span } => write!(
                 f,

@@ -61,6 +61,16 @@ pub struct EventRing {
     tail_zero: wgpu::Buffer,
     indirect_args_0: wgpu::Buffer,
     sim_cfg: wgpu::Buffer,
+    /// Host-side estimate of the per-tick tail position. Reset to 0
+    /// by [`Self::clear_tail_in`]; bumped by [`Self::note_emits`]
+    /// after each producer dispatch with the upper bound that
+    /// producer could append. Read by [`Self::tail_value`] so a
+    /// chronicle / fold dispatch can size its `event_count` to cover
+    /// every prior emit in the same tick — without hard-coding
+    /// `agent_count * N_producers` constants that silently drop
+    /// events when a new producer is added. See
+    /// `docs/superpowers/notes/2026-05-04-diplomacy_probe.md` Gap #2.
+    tail_estimate: u32,
 }
 
 impl EventRing {
@@ -104,7 +114,14 @@ impl EventRing {
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             },
         );
-        Self { ring, tail, tail_zero, indirect_args_0, sim_cfg }
+        Self {
+            ring,
+            tail,
+            tail_zero,
+            indirect_args_0,
+            sim_cfg,
+            tail_estimate: 0,
+        }
     }
 
     /// The producer-side ring (`array<atomic<u32>>` on producer
@@ -137,8 +154,50 @@ impl EventRing {
     /// Encode a per-tick `tail = 0` clear into the supplied
     /// command encoder. Call at the start of every `step()` before
     /// any producer kernel writes events.
-    pub fn clear_tail_in(&self, encoder: &mut wgpu::CommandEncoder) {
+    ///
+    /// Also resets the host-side [`Self::tail_value`] estimate to 0
+    /// so the per-tick chain rebuilds the estimate from scratch via
+    /// [`Self::note_emits`] calls.
+    pub fn clear_tail_in(&mut self, encoder: &mut wgpu::CommandEncoder) {
         encoder.copy_buffer_to_buffer(&self.tail_zero, 0, &self.tail, 0, 4);
+        self.tail_estimate = 0;
+    }
+
+    /// Bump the host-side per-tick tail estimate by `n` slots after a
+    /// producer dispatch. `n` must be the upper bound on slots that
+    /// producer could have appended to the ring this tick — typically
+    /// the dispatch's `agent_count` (one ActionSelected per scoring
+    /// thread) or `agent_count * N` for a producer that emits N
+    /// events per agent. Using an upper bound is safe because the
+    /// per-handler tag filter inside every consumer body skips
+    /// non-matching slots.
+    ///
+    /// This is the host-side mirror of the GPU `event_tail` counter:
+    /// the runtime bumps the estimate as it queues producer kernels;
+    /// downstream chronicle / fold dispatches read [`Self::tail_value`]
+    /// for their `event_count` cfg field. The estimate is never read
+    /// back from the GPU buffer (that would force a host-GPU sync
+    /// every tick), so it stays accurate only as long as the runtime
+    /// faithfully calls `note_emits` for every producer; missing a
+    /// call surfaces as missed events in the consumer.
+    ///
+    /// See `docs/superpowers/notes/2026-05-04-diplomacy_probe.md` Gap #2.
+    pub fn note_emits(&mut self, n: u32) {
+        self.tail_estimate = self.tail_estimate.saturating_add(n);
+    }
+
+    /// Current host-side per-tick tail estimate. Returns the sum of
+    /// every [`Self::note_emits`] call since the last
+    /// [`Self::clear_tail_in`]. Use as the `event_count` cfg field on
+    /// a consumer (chronicle / fold) dispatch that runs AFTER one or
+    /// more producers in the same tick. The cooperating per-handler
+    /// tag filter inside the consumer body still rejects
+    /// non-matching slots, so passing the upper bound is correct.
+    ///
+    /// See `docs/superpowers/notes/2026-05-04-diplomacy_probe.md` Gap #2
+    /// for the multi-stage cascade pattern this accessor enables.
+    pub fn tail_value(&self) -> u32 {
+        self.tail_estimate
     }
 }
 

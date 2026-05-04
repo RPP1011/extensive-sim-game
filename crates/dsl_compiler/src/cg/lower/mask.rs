@@ -354,7 +354,14 @@ fn predicate_node_ty(
                 .get(&view_id)
                 .map(|(args, result)| (args.clone(), *result))
         };
-    let tc_ctx = TypeCheckCtx::with_view_signature(&prog.exprs, resolver);
+    // Pass the full `prog` (not just `&prog.exprs`) so the type checker
+    // can refine `Read(ConfigConst)` reads against
+    // `prog.config_const_values` via `ExprArena::config_const_ty`.
+    // Without this, `world.tick % config.<ns>.<u32_field>` fails the
+    // mask predicate's type check with `BinaryOperandTyMismatch`
+    // because the rhs defaults to F32. See Gap #3 in
+    // `docs/superpowers/notes/2026-05-04-diplomacy_probe.md`.
+    let tc_ctx = TypeCheckCtx::with_view_signature(prog, resolver);
     type_check(node, predicate_id, &tc_ctx).map_err(|e| {
         LoweringError::MaskPredicateTypeCheckFailure {
             mask: mask_id,

@@ -922,6 +922,25 @@ impl CgExpr {
 /// partially-constructed arenas.
 pub trait ExprArena {
     fn get(&self, id: CgExprId) -> Option<&CgExpr>;
+
+    /// Optional refinement: surface the typed scalar for a
+    /// [`DataHandle::ConfigConst`] read so the type checker can pick
+    /// `CgTy::U32` / `CgTy::I32` / `CgTy::F32` based on the config
+    /// field's declared type instead of the `data_handle_ty` default
+    /// (which is always [`CgTy::F32`] because the bare
+    /// [`crate::cg::data_handle::ConfigConstId`] doesn't carry a type
+    /// tag). The default impl returns `None` so a slice / vec arena
+    /// stays inert; [`crate::cg::program::CgProgram`] overrides to
+    /// consult its `config_const_values` map. Closes Gap #3 from
+    /// `docs/superpowers/notes/2026-05-04-diplomacy_probe.md` —
+    /// `world.tick % config.<ns>.<u32_field>` typed correctly without
+    /// a `BinaryOperandTyMismatch`.
+    fn config_const_ty(
+        &self,
+        _id: crate::cg::data_handle::ConfigConstId,
+    ) -> Option<CgTy> {
+        None
+    }
 }
 
 impl ExprArena for [CgExpr] {
@@ -1240,7 +1259,22 @@ pub fn type_check(
     ctx: &TypeCheckCtx<'_>,
 ) -> Result<CgTy, TypeError> {
     match expr {
-        CgExpr::Read(h) => Ok(data_handle_ty(h)),
+        CgExpr::Read(h) => {
+            // Refine ConfigConst reads via the arena's typed registry
+            // (CgProgram-side config_const_values). The bare
+            // `data_handle_ty(ConfigConst { id })` defaults every
+            // config field to F32 because the id alone has no type
+            // tag; the arena-aware path consults the registered
+            // ConfigConstValue variant and returns U32 / I32 / F32
+            // accordingly. Closes Gap #3 from
+            // `docs/superpowers/notes/2026-05-04-diplomacy_probe.md`.
+            if let crate::cg::data_handle::DataHandle::ConfigConst { id } = h {
+                if let Some(refined) = ctx.arena.config_const_ty(*id) {
+                    return Ok(refined);
+                }
+            }
+            Ok(data_handle_ty(h))
+        }
         CgExpr::Lit(v) => Ok(v.ty()),
 
         CgExpr::Binary { op, lhs, rhs, ty } => {

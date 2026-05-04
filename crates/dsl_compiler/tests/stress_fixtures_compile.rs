@@ -1497,3 +1497,192 @@ fn diplomacy_probe_compile_gate() {
         art.kernel_index,
     );
 }
+
+/// Gap #1 follow-up from `2026-05-04-diplomacy_probe.md`: a bare
+/// `tick` token in a verb's `when` clause must surface a typed
+/// `BareNamespaceInExpression` diagnostic naming the qualified-form
+/// hint (`world.tick`), instead of silently dropping the surrounding
+/// MaskPredicate op via the generic `UnsupportedAstNode { ast_label:
+/// "Namespace" }` arm.
+///
+/// Inline-source so the assertion is co-located with the expected
+/// behaviour. The probe writes `when (tick % 3 == 0)` (the bare-token
+/// form the diplomacy probe tripped on); the expected diagnostic is
+/// the typed variant pointing the author at `world.tick`.
+#[test]
+fn bare_tick_in_verb_when_surfaces_typed_diagnostic() {
+    use dsl_compiler::cg::lower::error::LoweringError;
+    use dsl_ast::ir::NamespaceId;
+
+    let src = r#"
+event Tick { }
+
+@replayable
+@gpu_amenable
+event Done { actor: AgentId }
+
+entity Pinger : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+verb Ping(self) =
+  action PingAction
+  when  (tick % 3 == 0)
+  emit  Done { actor: self }
+  score 1.0
+"#;
+    let prog = dsl_compiler::parse(src).expect("parse bare-tick verb source");
+    let comp = dsl_ast::resolve::resolve(prog).expect("resolve bare-tick verb source");
+    let outcome = dsl_compiler::cg::lower::lower_compilation_to_cg(&comp);
+
+    // Either the lowering returns Ok with diagnostics on the side OR
+    // it returns Err with diagnostics inline; both shapes route the
+    // typed error variant through `o.diagnostics` per the existing
+    // populate_config_consts contract. Inspect both.
+    let diags = match &outcome {
+        Ok(_) => Vec::new(),
+        Err(o) => o.diagnostics.clone(),
+    };
+    let saw_typed_bare = diags.iter().any(|d| {
+        matches!(
+            d,
+            LoweringError::BareNamespaceInExpression {
+                ns: NamespaceId::Tick,
+                hint: "world.tick",
+                ..
+            }
+        )
+    });
+    assert!(
+        saw_typed_bare,
+        "expected typed BareNamespaceInExpression{{ ns: Tick, hint: \"world.tick\" }} diagnostic; \
+         got {} diagnostics:\n{}",
+        diags.len(),
+        diags
+            .iter()
+            .map(|d| format!("  {d}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    // Pre-fix this would have been the generic UnsupportedAstNode
+    // arm — pin against accidental regression.
+    let saw_legacy_drop = diags.iter().any(|d| {
+        matches!(
+            d,
+            LoweringError::UnsupportedAstNode {
+                ast_label: "Namespace",
+                ..
+            }
+        )
+    });
+    assert!(
+        !saw_legacy_drop,
+        "bare `tick` token must NOT route through UnsupportedAstNode{{ ast_label: \"Namespace\" }} \
+         (legacy silent-drop arm); got diagnostics:\n{}",
+        diags
+            .iter()
+            .map(|d| format!("  {d}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+}
+
+/// Gap #3 follow-up from `2026-05-04-diplomacy_probe.md`: a
+/// `config.<ns>.<u32_field>` reference in arithmetic position must
+/// resolve to `CgTy::U32` (not `CgTy::F32`) so
+/// `world.tick % config.<ns>.<u32_field>` lowers without a
+/// `BinaryOperandTyMismatch { lhs: U32, rhs: F32 }`.
+///
+/// Pre-fix: `data_handle_ty(ConfigConst{id})` defaulted every config
+/// field to `CgTy::F32` regardless of declared type. The fix routes
+/// `Read(ConfigConst)` through `ExprArena::config_const_ty(id)`,
+/// which `CgProgram` now overrides to consult its
+/// `config_const_values` map; a `u32`-declared field returns
+/// `CgTy::U32` and the Mod operator picks the `BinaryOp::ModU32`
+/// arm cleanly.
+///
+/// Inline-source shape so the assertion is co-located with the
+/// expected behaviour and shares the trade_market hygiene fix's
+/// pattern (config_u32_field_emits_with_u32_suffix_in_kernel_const).
+#[test]
+fn config_u32_field_lowers_typed_in_arithmetic_position() {
+    let src = r#"
+event Tick { }
+
+@replayable
+@gpu_amenable
+event Done { actor: AgentId }
+
+entity Pinger : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config diplomacy {
+  observation_tick_mod: u32 = 3,
+}
+
+verb Ping(self) =
+  action PingAction
+  when  (world.tick % config.diplomacy.observation_tick_mod == 0)
+  emit  Done { actor: self }
+  score 1.0
+"#;
+    let prog = dsl_compiler::parse(src).expect("parse u32-config arithmetic source");
+    let comp = dsl_ast::resolve::resolve(prog).expect("resolve u32-config arithmetic source");
+    let cg = dsl_compiler::cg::lower::lower_compilation_to_cg(&comp).unwrap_or_else(|o| {
+        let diag_text = o
+            .diagnostics
+            .iter()
+            .map(|d| format!("  {d}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        panic!(
+            "lower expected clean (Gap #3 fix); got {} diagnostics:\n{diag_text}",
+            o.diagnostics.len(),
+        );
+    });
+
+    // Mask op must exist — pre-fix the BinaryOperandTyMismatch would
+    // drop it; post-fix the typed ModU32 lowers cleanly.
+    let mut mask_count = 0;
+    for op in &cg.ops {
+        if matches!(
+            &op.kind,
+            dsl_compiler::cg::op::ComputeOpKind::MaskPredicate { .. }
+        ) {
+            mask_count += 1;
+        }
+    }
+    assert_eq!(
+        mask_count, 1,
+        "expected 1 MaskPredicate op (Gap #3 fix preserves the verb `when` clause); got {mask_count}",
+    );
+
+    // The mask kernel WGSL must reference `config_<id>` (the typed
+    // u32 const) on the rhs of the `%` op. Pre-fix the const
+    // declaration was emitted but the mask body was dropped entirely
+    // (no MaskPredicate op).
+    let sched = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&sched.schedule, &cg)
+        .expect("emit u32-config arithmetic program");
+    let mask_body = kernel_body_containing(&art, "mask").unwrap_or_else(|| {
+        panic!(
+            "no mask kernel emitted (Gap #3 regression?); available: {:?}",
+            art.kernel_index
+        )
+    });
+    assert!(
+        mask_body.contains("(tick % config_"),
+        "mask kernel must lower `world.tick % config.diplomacy.observation_tick_mod` to \
+         `(tick % config_<id>)`; got body:\n{mask_body}",
+    );
+    assert!(
+        mask_body.contains(": u32 = 3u;"),
+        "config const must emit as `u32 = 3u` (typed-routing fingerprint); got body:\n{mask_body}",
+    );
+}

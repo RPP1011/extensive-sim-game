@@ -980,6 +980,30 @@ impl ExprArena for CgProgram {
     fn get(&self, id: CgExprId) -> Option<&CgExpr> {
         ExprArena::get(&self.exprs, id)
     }
+
+    /// Refine a `ConfigConst` read's type from the registered
+    /// [`ConfigConstValue`] variant. Returns `Some(CgTy::U32)` for a
+    /// `u32`-declared field (e.g. `observation_tick_mod: u32 = 3`),
+    /// `Some(CgTy::I32)` for an `i32`-declared field, and
+    /// `Some(CgTy::F32)` for an `f32`-declared field. Returns `None`
+    /// when the id has no entry (driver skipped non-numeric defaults
+    /// or hand-built test programs that bypass `set_config_const_value`);
+    /// the type checker then falls back to the `data_handle_ty` default.
+    /// Closes Gap #3 from
+    /// `docs/superpowers/notes/2026-05-04-diplomacy_probe.md` —
+    /// `world.tick % config.<ns>.<u32_field>` lowers without a
+    /// `BinaryOperandTyMismatch`.
+    fn config_const_ty(
+        &self,
+        id: crate::cg::data_handle::ConfigConstId,
+    ) -> Option<crate::cg::expr::CgTy> {
+        use crate::cg::expr::CgTy;
+        self.config_const_values.get(&id.0).map(|v| match v {
+            ConfigConstValue::U32(_) => CgTy::U32,
+            ConfigConstValue::I32(_) => CgTy::I32,
+            ConfigConstValue::F32(_) => CgTy::F32,
+        })
+    }
 }
 
 impl StmtArena for CgProgram {

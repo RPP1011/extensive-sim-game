@@ -467,6 +467,13 @@ impl CompiledSim for DiplomacyProbeState {
             &mut encoder,
             self.agent_count,
         );
+        // ObserveAndAct's emit-Observed body adds one slot per alive
+        // agent (worst case: all alive). The host-side EventRing tail
+        // estimate tracks this so downstream chronicle / fold dispatches
+        // can size their `event_count` from `event_ring.tail_value()`
+        // without hard-coding `agent_count * N_producers`. See Gap #2 in
+        // `docs/superpowers/notes/2026-05-04-diplomacy_probe.md`.
+        self.event_ring.note_emits(self.agent_count);
 
         // (3) Mask round — `fused_mask_verb_ProposeAlliance` writes
         // BOTH mask_0 (ProposeAlliance, `tick % 3 == 0`) AND mask_1
@@ -524,18 +531,29 @@ impl CompiledSim for DiplomacyProbeState {
             self.agent_count,
         );
 
+        // (4b) Note that the scoring kernel emits one ActionSelected
+        // per agent into the ring; bump the host-side EventRing tail
+        // estimate so the downstream chronicles' `event_count` covers
+        // both the Observed slots (from step 2) and the ActionSelected
+        // slots (from step 4). Closes Gap #2 from
+        // `docs/superpowers/notes/2026-05-04-diplomacy_probe.md` —
+        // replaces the manual `agent_count * 2` constant that would
+        // silently miss events if a future probe added a third
+        // producer round.
+        self.event_ring.note_emits(self.agent_count);
+
         // (5) ProposeAlliance chronicle — reads ActionSelected slots,
         // gates on `action_id == 0u`, emits AllianceProposed (kind 2u).
-        // event_count sized to cover BOTH the Observed events (kind 1u,
-        // emitted in step 2) AND the ActionSelected events (kind 4u,
-        // emitted in step 4) — the chronicle dispatches over the full
-        // upper bound and the per-handler tag check inside the body
-        // skips non-ActionSelected slots. Without this the chronicle
-        // would only iterate slots 0..N (all Observed) and miss the
-        // N..2N ActionSelected slots entirely.
+        // event_count is sized via `event_ring.tail_value()`, the
+        // host-tracked sum of every prior `note_emits` call this tick
+        // (Observed + ActionSelected = `agent_count * 2` so far).
+        // The per-handler tag check inside the body skips
+        // non-ActionSelected slots; passing the upper bound is safe
+        // and adapts automatically to new producers added upstream.
+        let chronicle_event_count = self.event_ring.tail_value();
         let propose_chronicle_cfg =
             physics_verb_chronicle_ProposeAlliance::PhysicsVerbChronicleProposeAllianceCfg {
-                event_count: self.agent_count.saturating_mul(2),
+                event_count: chronicle_event_count,
                 tick: self.tick as u32,
                 _pad0: 0,
                 _pad1: 0,
@@ -558,13 +576,21 @@ impl CompiledSim for DiplomacyProbeState {
             &mut encoder,
             self.agent_count.saturating_mul(2),
         );
+        // The ProposeAlliance chronicle's gate-passes slots produce
+        // up to one AllianceProposed event per agent (whichever
+        // ActionSelected matched `action_id == 0u`). Bump the tail
+        // estimate so the downstream Betray chronicle + folds see
+        // these slots when sizing their `event_count`.
+        self.event_ring.note_emits(self.agent_count);
 
         // (6) Betray chronicle — reads ActionSelected slots, gates on
-        // `action_id == 1u`, emits Betrayed (kind 3u). Same sizing
-        // rationale as the ProposeAlliance chronicle (step 5).
+        // `action_id == 1u`, emits Betrayed (kind 3u). event_count is
+        // again sourced from `event_ring.tail_value()` to cover every
+        // upstream emit (Observed + ActionSelected + AllianceProposed).
+        let betray_chronicle_event_count = self.event_ring.tail_value();
         let betray_chronicle_cfg =
             physics_verb_chronicle_Betray::PhysicsVerbChronicleBetrayCfg {
-                event_count: self.agent_count.saturating_mul(2),
+                event_count: betray_chronicle_event_count,
                 tick: self.tick as u32,
                 _pad0: 0,
                 _pad1: 0,
@@ -587,6 +613,11 @@ impl CompiledSim for DiplomacyProbeState {
             &mut encoder,
             self.agent_count.saturating_mul(2),
         );
+        // Betray chronicle's gate-passes slots produce up to one
+        // Betrayed event per agent. Tail estimate after this round
+        // covers everything the folds will see (Observed +
+        // ActionSelected + AllianceProposed + Betrayed = up to 4N).
+        self.event_ring.note_emits(self.agent_count);
 
         // (7) seed_indirect_0 — keeps indirect args buffer warm.
         let seed_cfg = seed_indirect_0::SeedIndirect0Cfg {
@@ -612,18 +643,17 @@ impl CompiledSim for DiplomacyProbeState {
         );
 
         // (8-10) Three folds reading the SAME ring, partitioned by
-        // per-handler tag filter (kind 1u/2u/3u). event_count sized
-        // to cover all kinds emitted this tick:
-        //   - N Observed (ObserveAndAct, kind 1u)
-        //   - N ActionSelected (scoring, kind 4u)
-        //   - up to N AllianceProposed OR Betrayed (chronicles, kinds
-        //     2u/3u — the ProposeAlliance chronicle dispatches over
-        //     the agent_count ActionSelected slots and emits when
-        //     gate passes; same for Betray)
-        //
-        // Upper bound: N (Observed) + N (ActionSelected) + 2N (both
-        // chronicles, only one passes its gate per slot) = 4N.
-        let event_count_estimate = self.agent_count.saturating_mul(4);
+        // per-handler tag filter (kind 1u/2u/3u). event_count sourced
+        // from `event_ring.tail_value()` — the host-side sum of every
+        // prior `note_emits` call this tick (Observed + ActionSelected
+        // + AllianceProposed + Betrayed, up to 4N for the diplomacy
+        // probe). Closes Gap #2 from
+        // `docs/superpowers/notes/2026-05-04-diplomacy_probe.md`:
+        // pre-fix this was a hard-coded `agent_count * 4` constant
+        // that would silently miss events if a future cascade round
+        // added a producer; post-fix the estimate adapts automatically
+        // to every `note_emits` call upstream.
+        let event_count_estimate = self.event_ring.tail_value();
 
         // (8) fold_trust — atomicOr u32 fold filtered on tag 1u
         // (Observed). second_key_pop = agent_count so the
