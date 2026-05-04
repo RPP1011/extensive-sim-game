@@ -112,6 +112,25 @@ pub struct ForagingState {
     colony_intake_cfg_buf: wgpu::Buffer,
     colony_intake_decay_cfg_buf: wgpu::Buffer,
 
+    /// `pheromone_trail(ant: Agent, food: Food) -> f32` storage.
+    /// `@decay(rate=0.88)` → has_anchor=true. SLICE 2 PROBE for the
+    /// `pair_map` storage gap fix (2026-05-03): the view is keyed on
+    /// (Agent, Food) but Item-SoA storage hasn't landed, so today's
+    /// `Drop { carried: AgentId }` event makes the second key an
+    /// AgentId-typed slot. We size the storage as `agent_count ×
+    /// agent_count` and treat `second_key_pop = agent_count`. With
+    /// the WanderAndDrop emit `Drop { ant: self, carried: self }`,
+    /// only diagonal slots `(i, i)` accumulate at rate 1/tick — each
+    /// converges to `1 / (1 - 0.88) ≈ 8.33`. Off-diagonal stays at
+    /// 0 (no inter-ant Drop events).
+    ///
+    /// Once Item-SoA lowers, `second_key_pop` switches to the Food
+    /// entity's population and the storage shrinks to `agent_count ×
+    /// food_count`.
+    pheromone_trail: ViewStorage,
+    pheromone_trail_cfg_buf: wgpu::Buffer,
+    pheromone_trail_decay_cfg_buf: wgpu::Buffer,
+
     cache: dispatch::KernelCache,
     pos_cache: Vec<Vec3>,
     dirty: bool,
@@ -210,7 +229,8 @@ impl ForagingState {
         let pd_cfg = fold_pheromone_deposits::FoldPheromoneDepositsCfg {
             event_count: 0,
             tick: 0,
-            _pad: [0; 2],
+            second_key_pop: 1,
+            _pad: 0,
         };
         let pheromone_deposits_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -222,7 +242,8 @@ impl ForagingState {
         let pd_decay_cfg = decay_pheromone_deposits::DecayPheromoneDepositsCfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            slot_count: agent_count,
+            _pad: 0,
         };
         let pheromone_deposits_decay_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -247,7 +268,8 @@ impl ForagingState {
         let ci_cfg = fold_colony_intake::FoldColonyIntakeCfg {
             event_count: 0,
             tick: 0,
-            _pad: [0; 2],
+            second_key_pop: 1,
+            _pad: 0,
         };
         let colony_intake_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -259,12 +281,57 @@ impl ForagingState {
         let ci_decay_cfg = decay_colony_intake::DecayColonyIntakeCfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            slot_count: agent_count,
+            _pad: 0,
         };
         let colony_intake_decay_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("foraging_runtime::colony_intake_decay_cfg"),
                 contents: bytemuck::bytes_of(&ci_decay_cfg),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        );
+
+        // SLICE 2 — pair_map pheromone_trail storage. Sized
+        // `agent_count × agent_count` because the carried field is
+        // currently AgentId (Item-SoA storage hasn't landed). The
+        // fold body composes `view_storage_primary[ant *
+        // second_key_pop + carried]` with `second_key_pop ==
+        // agent_count` so the `(i, i)` diagonal accumulates per-tick
+        // and off-diagonal slots stay at 0.
+        let pheromone_trail = ViewStorage::new(
+            &gpu,
+            "foraging_runtime::pheromone_trail",
+            agent_count * agent_count,
+            true,  // has_anchor (carries @decay rate=0.88)
+            false, // no top-K storage hint
+        );
+        let pt_cfg = fold_pheromone_trail::FoldPheromoneTrailCfg {
+            event_count: 0,
+            tick: 0,
+            // pair_map: second key is currently AgentId (Drop.carried
+            // is AgentId until Item-SoA storage lowers), so
+            // second_key_pop == agent_count for now.
+            second_key_pop: agent_count,
+            _pad: 0,
+        };
+        let pheromone_trail_cfg_buf = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("foraging_runtime::pheromone_trail_cfg"),
+                contents: bytemuck::bytes_of(&pt_cfg),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        );
+        let pt_decay_cfg = decay_pheromone_trail::DecayPheromoneTrailCfg {
+            agent_cap: agent_count,
+            tick: 0,
+            slot_count: agent_count * agent_count, // pair_map: agent_cap × second_pop
+            _pad: 0,
+        };
+        let pheromone_trail_decay_cfg_buf = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("foraging_runtime::pheromone_trail_decay_cfg"),
+                contents: bytemuck::bytes_of(&pt_decay_cfg),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             },
         );
@@ -283,6 +350,9 @@ impl ForagingState {
             colony_intake,
             colony_intake_cfg_buf,
             colony_intake_decay_cfg_buf,
+            pheromone_trail,
+            pheromone_trail_cfg_buf,
+            pheromone_trail_decay_cfg_buf,
             cache: dispatch::KernelCache::default(),
             pos_cache: pos_host,
             dirty: false,
@@ -315,6 +385,23 @@ impl ForagingState {
     /// end-to-end.
     pub fn colony_intakes(&mut self) -> &[f32] {
         self.colony_intake.readback(&self.gpu)
+    }
+
+    /// Per-(ant, carried) pheromone_trail accumulator, flattened in
+    /// row-major order: slot `[ant * agent_count + carried]` holds
+    /// the decayed Drop count from `Drop { ant, carried }`. Length
+    /// = `agent_count × agent_count`. With WanderAndDrop emitting
+    /// `Drop { ant: self, carried: self }` only diagonal slots
+    /// `(i, i)` accumulate; each converges to ~8.33 (`@decay(rate
+    /// = 0.88)` steady state).
+    pub fn pheromone_trail(&mut self) -> &[f32] {
+        self.pheromone_trail.readback(&self.gpu)
+    }
+
+    /// Number of agents (ants) in the simulation. Useful as the
+    /// stride for [`Self::pheromone_trail`] readback indexing.
+    pub fn agent_count(&self) -> u32 {
+        self.agent_count
     }
 
     fn read_positions(&mut self) -> &[Vec3] {
@@ -408,7 +495,8 @@ impl CompiledSim for ForagingState {
         let pd_decay_cfg = decay_pheromone_deposits::DecayPheromoneDepositsCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            slot_count: self.agent_count,
+            _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.pheromone_deposits_decay_cfg_buf,
@@ -433,7 +521,8 @@ impl CompiledSim for ForagingState {
         let pd_cfg = fold_pheromone_deposits::FoldPheromoneDepositsCfg {
             event_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            second_key_pop: 1,
+            _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.pheromone_deposits_cfg_buf,
@@ -464,7 +553,8 @@ impl CompiledSim for ForagingState {
         let ci_decay_cfg = decay_colony_intake::DecayColonyIntakeCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            slot_count: self.agent_count,
+            _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.colony_intake_decay_cfg_buf,
@@ -490,7 +580,8 @@ impl CompiledSim for ForagingState {
         let ci_cfg = fold_colony_intake::FoldColonyIntakeCfg {
             event_count: 0,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            second_key_pop: 1,
+            _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.colony_intake_cfg_buf,
@@ -514,10 +605,69 @@ impl CompiledSim for ForagingState {
             1u32, // event_count=0 → 1 workgroup × 64 threads, all early-return
         );
 
+        // (5a) decay_pheromone_trail — pair_map decay multiplies
+        // every (ant, carried) slot. Dispatch covers `slot_count`
+        // (= agent_cap × agent_cap) so the anchor reaches every
+        // pair, not just the diagonal `agent_cap` slots.
+        let pt_decay_cfg = decay_pheromone_trail::DecayPheromoneTrailCfg {
+            agent_cap: self.agent_count,
+            tick: self.tick as u32,
+            slot_count: self.agent_count * self.agent_count,
+            _pad: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.pheromone_trail_decay_cfg_buf,
+            0,
+            bytemuck::bytes_of(&pt_decay_cfg),
+        );
+        let pt_decay_bindings = decay_pheromone_trail::DecayPheromoneTrailBindings {
+            view_storage_primary: self.pheromone_trail.primary(),
+            cfg: &self.pheromone_trail_decay_cfg_buf,
+        };
+        dispatch::dispatch_decay_pheromone_trail(
+            &mut self.cache,
+            &pt_decay_bindings,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count * self.agent_count,
+        );
+
+        // (5b) fold_pheromone_trail — RMW
+        // `view_storage_primary[ant * agent_cap + carried] += 1.0`
+        // per Drop event.
+        let pt_cfg = fold_pheromone_trail::FoldPheromoneTrailCfg {
+            event_count,
+            tick: self.tick as u32,
+            second_key_pop: self.agent_count,
+            _pad: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.pheromone_trail_cfg_buf,
+            0,
+            bytemuck::bytes_of(&pt_cfg),
+        );
+        let pt_bindings = fold_pheromone_trail::FoldPheromoneTrailBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            view_storage_primary: self.pheromone_trail.primary(),
+            view_storage_anchor: self.pheromone_trail.anchor(),
+            view_storage_ids: self.pheromone_trail.ids(),
+            sim_cfg: self.event_ring.sim_cfg(),
+            cfg: &self.pheromone_trail_cfg_buf,
+        };
+        dispatch::dispatch_fold_pheromone_trail(
+            &mut self.cache,
+            &pt_bindings,
+            &self.gpu.device,
+            &mut encoder,
+            event_count.max(1),
+        );
+
         self.gpu.queue.submit(Some(encoder.finish()));
         self.dirty = true;
         self.pheromone_deposits.mark_dirty();
         self.colony_intake.mark_dirty();
+        self.pheromone_trail.mark_dirty();
         self.tick += 1;
     }
 

@@ -138,17 +138,32 @@ pub struct EmitCtx<'a> {
     /// route through `lower_op_body` — those paths stay on the
     /// default per-agent shape.
     pub dispatch: std::cell::Cell<Option<crate::cg::dispatch::DispatchShape>>,
-    /// View-fold body emit scratch: the LocalId of the last
+    /// View-fold body emit scratch: the LocalIds of every
     /// `Let { value: EventField, ty: AgentId, … }` emitted in the
-    /// current stmt list. ViewStorage assigns ("self += value")
-    /// pick up this local as the per-row index, so the assign
-    /// becomes a CAS-loop over `view_storage_primary[local_<N>]`
-    /// (`atomicLoad` + `atomicCompareExchangeWeak`). Cleared on
-    /// every stmt-list emit start so cross-list state can't leak.
+    /// current stmt list, in source order. ViewStorage assigns
+    /// ("self += value") pick up these locals to index into
+    /// `view_storage_primary`. The shape depends on the view's
+    /// storage hint (looked up via
+    /// [`crate::cg::program::ViewSignature::storage_hint`]):
     ///
-    /// Tracking via interior mutability mirrors `tile_walk_index` —
-    /// keeps the existing `&EmitCtx` signature intact.
-    pub view_target_local: std::cell::Cell<Option<u32>>,
+    /// - `PairMap` (2-D pair-keyed): index =
+    ///   `local_<first> * cfg.second_key_pop + local_<second>`. Both
+    ///   binders flow into the address compose so the per-(k1, k2)
+    ///   slot accumulates independently — without this, single-keying
+    ///   on the last binder folded all `(*, k2)` events into the same
+    ///   slot.
+    /// - Single-key (default): index = `local_<last>` — the legacy
+    ///   shape. Kept by routing the LAST AgentId binder.
+    ///
+    /// The CAS-loop wrapper (`atomicLoad` +
+    /// `atomicCompareExchangeWeak`) is the same in both shapes; only
+    /// the index expression differs.
+    ///
+    /// Cleared on every stmt-list emit start so cross-list state
+    /// can't leak. Tracking via interior mutability mirrors
+    /// `tile_walk_index` — keeps the existing `&EmitCtx` signature
+    /// intact.
+    pub view_target_locals: std::cell::RefCell<Vec<u32>>,
 
     /// Cross-agent target-read scratch.
     ///
@@ -192,7 +207,7 @@ impl<'a> EmitCtx<'a> {
             naming: HandleNamingStrategy::Structural,
             tile_walk_index: std::cell::RefCell::new(None),
             dispatch: std::cell::Cell::new(None),
-            view_target_local: std::cell::Cell::new(None),
+            view_target_locals: std::cell::RefCell::new(Vec::new()),
             pending_target_lets: std::cell::RefCell::new(Vec::new()),
             bound_target_exprs: std::cell::RefCell::new(std::collections::HashSet::new()),
         }
@@ -1135,21 +1150,56 @@ fn lower_cg_stmt_body_to_wgsl(
             // this never runs.
             if let DataHandle::ViewStorage { view, slot } = target {
                 let rhs = lower_cg_expr_to_wgsl(*value, ctx)?;
-                // When the surrounding stmt list captured a per-row
-                // index local (e.g. `Let local_<N> = EventField(by,
-                // AgentId)` set `view_target_local` to N), emit the
-                // accumulator add directly: `view_storage_<slot>[
-                // local_<N>] = view_storage_<slot>[local_<N>] + rhs`.
-                // Without an index local fall back to the phony
-                // discard for now — non-fold callers (e.g. driver
-                // tests) drive Assign-to-ViewStorage in shapes that
-                // don't surface a binder yet.
-                if let Some(idx_local) = ctx.view_target_local.get() {
+                // When the surrounding stmt list captured per-row
+                // index locals (e.g. `Let local_<N> = EventField(by,
+                // AgentId)`), emit the accumulator add directly:
+                // `view_storage_<slot>[<idx>] = view_storage_<slot>[
+                // <idx>] + rhs`. Without index locals fall back to a
+                // phony discard for now — non-fold callers (e.g.
+                // driver tests) drive Assign-to-ViewStorage in shapes
+                // that don't surface a binder yet.
+                //
+                // The index expression depends on the view's storage
+                // hint (looked up via
+                // `prog.view_signatures[view].storage_hint`):
+                //
+                // - PairMap with 2+ AgentId binders: `local_<first> *
+                //   cfg.second_key_pop + local_<second>`. Composes a
+                //   2-D pair index so each (k1, k2) slot accumulates
+                //   independently. The runtime supplies the
+                //   second-key population through cfg.second_key_pop
+                //   (= agent_cap for Agent×Agent, item count for
+                //   Agent×Item, …).
+                // - Otherwise: `local_<last>` — single-key shape,
+                //   matches the legacy emit that all single-key
+                //   views (kill_count, threat_level, …) ship with.
+                let locals = ctx.view_target_locals.borrow();
+                if !locals.is_empty() {
                     let storage = format!(
                         "view_storage_{}",
                         view_slot_token(*slot),
                     );
-                    let _ = view; // structural emit names by slot
+                    let storage_hint = ctx
+                        .prog
+                        .view_signatures
+                        .get(&view.0)
+                        .and_then(|sig| sig.storage_hint);
+                    let is_pair_map = matches!(
+                        storage_hint,
+                        Some(crate::cg::program::CgStorageHint::PairMap)
+                    );
+                    let idx_expr = if is_pair_map && locals.len() >= 2 {
+                        format!(
+                            "(local_{} * cfg.second_key_pop + local_{})",
+                            locals[0], locals[1]
+                        )
+                    } else {
+                        // Single-key: index by the LAST AgentId binder
+                        // (mirrors the pre-fix shape — every shipped
+                        // single-key view's fold body binds a single
+                        // event-row key like `by` or `actor`).
+                        format!("local_{}", locals[locals.len() - 1])
+                    };
                     // The view storage binding is
                     // `array<atomic<u32>>` (see
                     // build_view_fold_bindings) but every shipped
@@ -1168,9 +1218,10 @@ fn lower_cg_stmt_body_to_wgsl(
                     // `view_signatures`.
                     return Ok(format!(
                         "loop {{\n\
-                         \x20   let old = atomicLoad(&{storage}[local_{idx_local}]);\n\
+                         \x20   let _idx = {idx_expr};\n\
+                         \x20   let old = atomicLoad(&{storage}[_idx]);\n\
                          \x20   let new_val = bitcast<u32>(bitcast<f32>(old) + ({rhs}));\n\
-                         \x20   let result = atomicCompareExchangeWeak(&{storage}[local_{idx_local}], old, new_val);\n\
+                         \x20   let result = atomicCompareExchangeWeak(&{storage}[_idx], old, new_val);\n\
                          \x20   if (result.exchanged) {{ break; }}\n\
                          }}"
                     ));
@@ -1241,10 +1292,21 @@ fn lower_cg_stmt_body_to_wgsl(
             let v = lower_cg_expr_to_wgsl(*value, ctx)?;
             // View-fold target-row capture: when the let extracts an
             // event field of type AgentId (the `on Killed { by:
-            // predator }` binder shape), record the local id so any
-            // subsequent ViewStorage assign in the same stmt list
-            // uses it as the per-row index. See the Assign-to-
+            // predator, prey: victim }` binder shape), append the
+            // local id so any subsequent ViewStorage assign in the
+            // same stmt list can index into a 1-D or 2-D address
+            // based on the view's storage hint. See the Assign-to-
             // ViewStorage arm above for the consumer.
+            //
+            // Source order matters: pair_map composes
+            // `local_<first> * cfg.second_key_pop + local_<second>`
+            // — the first AgentId binder is the outer (k1) key and
+            // the second is the inner (k2) key. The fold-handler
+            // lowering walks the event-pattern bindings in
+            // declaration order (`pattern.bindings.iter()` in
+            // `synthesize_pattern_binding_lets`), so the WGSL Let
+            // statements emit in the same order — guaranteeing
+            // `(by, prey)` lands as `(local_first, local_second)`.
             if matches!(ty, CgTy::AgentId) {
                 if let Some(value_node) =
                     <CgProgram as ExprArena>::get(ctx.prog, *value)
@@ -1252,7 +1314,7 @@ fn lower_cg_stmt_body_to_wgsl(
                     if matches!(value_node, CgExpr::Read(DataHandle::EventRing { .. }))
                         || is_event_field_read(value_node)
                     {
-                        ctx.view_target_local.set(Some(local.0));
+                        ctx.view_target_locals.borrow_mut().push(local.0);
                     }
                 }
             }
@@ -1551,8 +1613,8 @@ pub fn lower_cg_stmt_list_to_wgsl(
     // Reset per-list scratch so the view-fold target-local capture
     // from a previous stmt list (e.g. an earlier handler in the same
     // op) can't leak into this one. The per-stmt Let/Assign sequence
-    // re-establishes the target_local for the current list.
-    let saved_view_target = ctx.view_target_local.replace(None);
+    // re-establishes the target locals for the current list.
+    let saved_view_targets = ctx.view_target_locals.replace(Vec::new());
 
     // Snapshot the cross-agent target-let bound set so any new
     // bindings emitted inside this list (which live in WGSL block
@@ -1625,10 +1687,10 @@ pub fn lower_cg_stmt_list_to_wgsl(
         let stmt_id = list.stmts[idx];
         parts.push(lower_cg_stmt_to_wgsl(stmt_id, ctx)?);
     }
-    // Restore the outer scope's view-fold target-local capture so a
+    // Restore the outer scope's view-fold target-locals capture so a
     // nested stmt list (e.g. an If branch inside a fold body) can't
     // permanently reset it for the surrounding handler.
-    ctx.view_target_local.set(saved_view_target);
+    ctx.view_target_locals.replace(saved_view_targets);
     // Restore the outer scope's cross-agent target-let bound set so
     // bindings emitted inside this list don't shadow outer-scope
     // identifiers when control returns to the surrounding emit.

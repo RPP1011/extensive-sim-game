@@ -199,7 +199,8 @@ impl BarteringState {
         let tc_cfg = fold_trade_count::FoldTradeCountCfg {
             event_count: 0,
             tick: 0,
-            _pad: [0; 2],
+            second_key_pop: 1,
+            _pad: 0,
         };
         let trade_count_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -322,7 +323,8 @@ impl CompiledSim for BarteringState {
         let tc_cfg = fold_trade_count::FoldTradeCountCfg {
             event_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            second_key_pop: 1,
+            _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.trade_count_cfg_buf,

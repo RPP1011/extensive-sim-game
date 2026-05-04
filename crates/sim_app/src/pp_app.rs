@@ -91,6 +91,63 @@ fn main() {
         wolf_max,
         kc_steady_state,
     );
+
+    // Read back per-pair `predator_focus` accumulator. The view is
+    // `pair_map`-keyed: slot `[k1 * agent_count + k2]` holds the
+    // decayed kill count from `by = k1, prey = k2`. With
+    // `@decay(rate = 0.98, per = tick)` the per-pair steady state is
+    // `producer_rate / (1 - 0.98) = producer_rate × 50`.
+    //
+    // Pre-fix the runtime allocated only `agent_count` slots and the
+    // fold body single-keyed on `prey` (the second binder), so every
+    // wolf's `Killed { by: self, prey: self }` event collapsed onto
+    // slot `[self]` — the readback looked identical to `kill_count`
+    // (only with rate 0.98 instead of 0.95). Post-fix the storage is
+    // `agent_count × agent_count` and the fold body indexes
+    // `[by * agent_count + prey]`. Wolves emit `by = prey = self`,
+    // so only diagonal slots `(i, i)` accumulate; off-diagonals stay
+    // at 0.
+    let pf = sim.predator_focus().to_vec();
+    let agent_count = AGENT_COUNT as usize;
+    assert_eq!(
+        pf.len(),
+        agent_count * agent_count,
+        "predator_focus storage should be agent_count² for pair_map",
+    );
+    let mut diag_min = f32::INFINITY;
+    let mut diag_max = 0.0_f32;
+    let mut diag_sum = 0.0_f32;
+    let mut diag_wolf_n = 0u32;
+    let mut off_diag_max = 0.0_f32;
+    let mut off_diag_sum = 0.0_f32;
+    let mut off_diag_n = 0u32;
+    for k1 in 0..agent_count {
+        for k2 in 0..agent_count {
+            let v = pf[k1 * agent_count + k2];
+            if k1 == k2 {
+                if k1 % 2 == 1 {
+                    // Wolf diagonal slot — should converge to ~50.
+                    diag_min = diag_min.min(v);
+                    diag_max = diag_max.max(v);
+                    diag_sum += v;
+                    diag_wolf_n += 1;
+                }
+            } else {
+                off_diag_max = off_diag_max.max(v);
+                off_diag_sum += v;
+                off_diag_n += 1;
+            }
+        }
+    }
+    let pf_steady_state = 1.0_f32 / (1.0 - 0.98);
+    let diag_mean = diag_sum / diag_wolf_n as f32;
+    let off_diag_mean = if off_diag_n > 0 { off_diag_sum / off_diag_n as f32 } else { 0.0 };
+    println!(
+        "pp_app: predator_focus (pair_map) — wolf diagonal: min={:.2} mean={:.2} \
+         max={:.2} (expected ~{:.2} each via @decay(rate=0.98)); off-diagonal: \
+         max={:.4} mean={:.4} (expected 0.0 — no inter-wolf Killed events)",
+        diag_min, diag_mean, diag_max, pf_steady_state, off_diag_max, off_diag_mean,
+    );
 }
 
 /// Print one summary line: tick + per-creature centroid + axis-aligned

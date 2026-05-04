@@ -261,7 +261,8 @@ impl EcosystemState {
         let recent_browse_cfg = fold_recent_browse::FoldRecentBrowseCfg {
             event_count: 0,
             tick: 0,
-            _pad: [0; 2],
+            second_key_pop: 1,
+            _pad: 0,
         };
         let recent_browse_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -273,7 +274,8 @@ impl EcosystemState {
         let predator_pressure_cfg = fold_predator_pressure::FoldPredatorPressureCfg {
             event_count: 0,
             tick: 0,
-            _pad: [0; 2],
+            second_key_pop: 1,
+            _pad: 0,
         };
         let predator_pressure_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -285,7 +287,8 @@ impl EcosystemState {
         let plant_pressure_cfg = fold_plant_pressure::FoldPlantPressureCfg {
             event_count: 0,
             tick: 0,
-            _pad: [0; 2],
+            second_key_pop: 1,
+            _pad: 0,
         };
         let plant_pressure_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -297,7 +300,8 @@ impl EcosystemState {
         let recent_browse_decay_cfg = decay_recent_browse::DecayRecentBrowseCfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            slot_count: agent_count,
+            _pad: 0,
         };
         let recent_browse_decay_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -310,7 +314,8 @@ impl EcosystemState {
             decay_predator_pressure::DecayPredatorPressureCfg {
                 agent_cap: agent_count,
                 tick: 0,
-                _pad: [0; 2],
+                slot_count: agent_count,
+            _pad: 0,
             };
         let predator_pressure_decay_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -322,7 +327,8 @@ impl EcosystemState {
         let plant_pressure_decay_cfg = decay_plant_pressure::DecayPlantPressureCfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            slot_count: agent_count,
+            _pad: 0,
         };
         let plant_pressure_decay_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -534,7 +540,8 @@ impl CompiledSim for EcosystemState {
         let rb_decay_cfg = decay_recent_browse::DecayRecentBrowseCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            slot_count: self.agent_count,
+            _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.recent_browse_decay_cfg_buf,
@@ -559,7 +566,8 @@ impl CompiledSim for EcosystemState {
         let rb_cfg = fold_recent_browse::FoldRecentBrowseCfg {
             event_count: event_count_estimate,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            second_key_pop: 1,
+            _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.recent_browse_cfg_buf,
@@ -590,7 +598,8 @@ impl CompiledSim for EcosystemState {
         let pp_decay_cfg = decay_predator_pressure::DecayPredatorPressureCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            slot_count: self.agent_count,
+            _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.predator_pressure_decay_cfg_buf,
@@ -611,7 +620,8 @@ impl CompiledSim for EcosystemState {
         let pp_cfg = fold_predator_pressure::FoldPredatorPressureCfg {
             event_count: event_count_estimate,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            second_key_pop: 1,
+            _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.predator_pressure_cfg_buf,
@@ -639,7 +649,8 @@ impl CompiledSim for EcosystemState {
         let plp_decay_cfg = decay_plant_pressure::DecayPlantPressureCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            slot_count: self.agent_count,
+            _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.plant_pressure_decay_cfg_buf,
@@ -660,7 +671,8 @@ impl CompiledSim for EcosystemState {
         let plp_cfg = fold_plant_pressure::FoldPlantPressureCfg {
             event_count: event_count_estimate,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            second_key_pop: 1,
+            _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.plant_pressure_cfg_buf,

@@ -763,6 +763,23 @@ fn storage_hint_label(hint: StorageHint) -> &'static str {
     }
 }
 
+/// Project the source-level [`StorageHint`] down to the CG-side
+/// [`crate::cg::program::CgStorageHint`] subset that the WGSL emit +
+/// dispatch sizing path branches on. Keeps `cg/program.rs` decoupled
+/// from the dsl_ast variant detail. Today only [`StorageHint::PairMap`]
+/// flows through as a distinct shape; every other variant collapses
+/// to the single-key emit form.
+pub fn project_storage_hint(hint: StorageHint) -> crate::cg::program::CgStorageHint {
+    use crate::cg::program::CgStorageHint;
+    match hint {
+        StorageHint::PairMap => CgStorageHint::PairMap,
+        StorageHint::PerEntityTopK { .. }
+        | StorageHint::SymmetricPairTopK { .. }
+        | StorageHint::PerEntityRing { .. }
+        | StorageHint::LazyCached => CgStorageHint::SingleKey,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

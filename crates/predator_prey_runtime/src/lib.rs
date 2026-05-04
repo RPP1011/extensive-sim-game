@@ -241,17 +241,27 @@ impl PredatorPreyState {
             true,
             true,
         );
+        // `predator_focus` is `pair_map`-keyed: per-(by_agent,
+        // prey_agent) bucket. The compiler's fold body composes
+        // `view_storage_primary[k1 * cfg.second_key_pop + k2]` so the
+        // storage MUST be over-allocated to `agent_cap × second_pop`
+        // (= `agent_cap × agent_cap` for this Agent×Agent view).
+        // Pre-fix the slot count was `agent_cap` and the fold
+        // collapsed every (*, k2) event into the same slot — see the
+        // pair_map gap doc on `assets/sim/foraging_colony.sim` line
+        // ~126.
         let predator_focus = ViewStorage::new(
             &gpu,
             "predator_prey_runtime::predator_focus",
-            agent_count,
+            agent_count * agent_count,
             true,
             true,
         );
         let kill_count_cfg = fold_kill_count::FoldKillCountCfg {
             event_count: 0,
             tick: 0,
-            _pad: [0; 2],
+            second_key_pop: 1,
+            _pad: 0,
         };
         let kill_count_cfg_buf =
             gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -262,7 +272,12 @@ impl PredatorPreyState {
         let predator_focus_cfg = fold_predator_focus::FoldPredatorFocusCfg {
             event_count: 0,
             tick: 0,
-            _pad: [0; 2],
+            // `predator_focus(a: Agent, b: Agent)` — both keys are
+            // Agent, so the second-key population is `agent_count`.
+            // The fold body composes
+            // `view_storage_primary[k1 * second_key_pop + k2]`.
+            second_key_pop: agent_count,
+            _pad: 0,
         };
         let predator_focus_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -274,7 +289,8 @@ impl PredatorPreyState {
         let kill_count_decay_cfg = decay_kill_count::DecayKillCountCfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            slot_count: agent_count,
+            _pad: 0,
         };
         let kill_count_decay_cfg_buf =
             gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -285,7 +301,8 @@ impl PredatorPreyState {
         let predator_focus_decay_cfg = decay_predator_focus::DecayPredatorFocusCfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            slot_count: (agent_count) * (agent_count), // pair_map: agent_cap × second_pop
+            _pad: 0,
         };
         let predator_focus_decay_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -327,6 +344,28 @@ impl PredatorPreyState {
     /// calls without an intervening `step()` skip the readback.
     pub fn kill_counts(&mut self) -> &[f32] {
         self.kill_count.readback(&self.gpu)
+    }
+
+    /// Per-(by_agent, prey_agent) `predator_focus` accumulator,
+    /// flattened in row-major order: slot `[k1 * agent_count + k2]`
+    /// holds the decayed kill count from `by = k1, prey = k2`.
+    /// Length = `agent_count × agent_count`. The view carries
+    /// `@decay(rate = 0.98, per = tick)` so the steady-state per-pair
+    /// value is `producer_rate / (1 - 0.98) = producer_rate × 50`.
+    /// In the current placeholder MoveWolf emit `Killed { by: self,
+    /// prey: self }`, only diagonal slots `(i, i)` accumulate at
+    /// rate 1/tick, so each diagonal converges to ~50 and every
+    /// off-diagonal stays at 0.
+    pub fn predator_focus(&mut self) -> &[f32] {
+        self.predator_focus.readback(&self.gpu)
+    }
+
+    /// Stride between consecutive `by_agent` rows in the
+    /// [`Self::predator_focus`] readback. Equal to `agent_count`
+    /// (the second-key population for this Agent×Agent view). Use
+    /// this to index `predator_focus()[by * agent_count() + prey]`.
+    pub fn agent_count(&self) -> u32 {
+        self.agent_count
     }
 
     /// Run every host-side invariant check the compiler synthesized
@@ -489,7 +528,8 @@ impl CompiledSim for PredatorPreyState {
         let kc_cfg = fold_kill_count::FoldKillCountCfg {
             event_count: event_count_estimate,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            second_key_pop: 1,
+            _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.kill_count_cfg_buf,
@@ -499,7 +539,11 @@ impl CompiledSim for PredatorPreyState {
         let pf_cfg = fold_predator_focus::FoldPredatorFocusCfg {
             event_count: event_count_estimate,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            // pair_map: second key is Agent, so second_key_pop ==
+            // agent_cap. Fold body indexes `view_storage_primary[
+            // by_agent * agent_cap + prey_agent]`.
+            second_key_pop: self.agent_count,
+            _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.predator_focus_cfg_buf,
@@ -516,7 +560,8 @@ impl CompiledSim for PredatorPreyState {
         let kc_decay_cfg = decay_kill_count::DecayKillCountCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            slot_count: self.agent_count,
+            _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.kill_count_decay_cfg_buf,
@@ -560,7 +605,8 @@ impl CompiledSim for PredatorPreyState {
         let pf_decay_cfg = decay_predator_focus::DecayPredatorFocusCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            slot_count: (self.agent_count) * (self.agent_count), // pair_map: agent_cap × second_pop
+            _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.predator_focus_decay_cfg_buf,
@@ -571,12 +617,15 @@ impl CompiledSim for PredatorPreyState {
             view_storage_primary: self.predator_focus.primary(),
             cfg: &self.predator_focus_decay_cfg_buf,
         };
+        // pair_map decay: dispatch covers `slot_count` (= agent_cap²)
+        // threads — one per (k1, k2) slot — so the anchor multiplier
+        // touches every pair, not just the diagonal `agent_cap` slots.
         dispatch::dispatch_decay_predator_focus(
             &mut self.cache,
             &pf_decay_bindings,
             &self.gpu.device,
             &mut encoder,
-            self.agent_count,
+            self.agent_count * self.agent_count,
         );
 
         // (5b) fold_predator_focus — same shape, different storage.

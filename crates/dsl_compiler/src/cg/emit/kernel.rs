@@ -1623,15 +1623,31 @@ fn build_generic_cfg_build_expr(cfg_struct: &str) -> String {
 ///   from the cascade tail / per-fold indirect-args buffer at dispatch
 ///   time. Task 5.7 wires the dispatch-time population.
 fn build_view_fold_cfg_struct_decl(cfg_struct: &str) -> String {
+    // `second_key_pop` joined the layout when `pair_map` storage hints
+    // started lowering with a real 2-D index in the fold body's RMW
+    // (`view_storage_primary[k1 * cfg.second_key_pop + k2]`). For
+    // single-key views the runtime sets it to 1 so the index reduces
+    // to `k1 * 1 + 0` ≡ `k1` — the WGSL template uses the field
+    // unconditionally, the runtime supplies the discriminator. The
+    // fourth slot stays as `_pad: u32` to preserve the 16-byte uniform
+    // alignment.
     format!(
         "#[repr(C)]\n\
          #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]\n\
-         pub struct {cfg_struct} {{ pub event_count: u32, pub tick: u32, pub _pad: [u32; 2] }}"
+         pub struct {cfg_struct} {{ pub event_count: u32, pub tick: u32, pub second_key_pop: u32, pub _pad: u32 }}"
     )
 }
 
 fn build_view_fold_cfg_build_expr(cfg_struct: &str) -> String {
-    format!("{cfg_struct} {{ event_count: 0, tick: state.tick, _pad: [0; 2] }}")
+    // `second_key_pop = 1` is the safe default for non-PairMap views;
+    // PairMap-keyed runtimes overwrite this with the second-key entity
+    // population (`agent_cap` for Agent×Agent, item count for
+    // Agent×Item, …) when they upload the cfg per-tick. The compile-
+    // time default is harmless for non-PairMap views since their fold
+    // body indexes `local_<k> * 1 + 0 ≡ local_<k>`.
+    format!(
+        "{cfg_struct} {{ event_count: 0, tick: state.tick, second_key_pop: 1, _pad: 0 }}"
+    )
 }
 
 /// Synthesise the 7-binding [`KernelBinding`] vector for a ViewFold
@@ -1847,16 +1863,27 @@ fn build_view_fold_wgsl_body(
 /// `agent_cap` and reads `cfg.tick` for diagnostic / future variable-
 /// rate use.
 fn build_view_decay_cfg_struct_decl(cfg_struct: &str) -> String {
+    // `slot_count` joined the layout when `pair_map` storage hints
+    // started over-allocating ViewStorage to `agent_cap × second_pop`.
+    // The decay loop early-returns past `slot_count` so 2-D pair views
+    // iterate every (k1, k2) pair, while single-key views set
+    // `slot_count == agent_cap` and the loop bound matches the legacy
+    // shape. `agent_cap` stays in the struct for diagnostic continuity
+    // (not consulted by the kernel body anymore).
     format!(
         "#[repr(C)]\n\
          #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]\n\
-         pub struct {cfg_struct} {{ pub agent_cap: u32, pub tick: u32, pub _pad: [u32; 2] }}"
+         pub struct {cfg_struct} {{ pub agent_cap: u32, pub tick: u32, pub slot_count: u32, pub _pad: u32 }}"
     )
 }
 
 fn build_view_decay_cfg_build_expr(cfg_struct: &str) -> String {
+    // `slot_count = state.agent_cap()` is the safe default for
+    // single-key views; PairMap-keyed runtimes overwrite this with
+    // `agent_cap × second_pop` when they upload the decay cfg
+    // per-tick.
     format!(
-        "{cfg_struct} {{ agent_cap: state.agent_cap(), tick: state.tick as u32, _pad: [0; 2] }}"
+        "{cfg_struct} {{ agent_cap: state.agent_cap(), tick: state.tick as u32, slot_count: state.agent_cap(), _pad: 0 }}"
     )
 }
 
@@ -1913,7 +1940,11 @@ fn build_view_decay_wgsl_body(rate_bits: u32) -> String {
     let rate = f32::from_bits(rate_bits);
     let mut out = String::new();
     out.push_str("    let k = gid.x;\n");
-    out.push_str("    if (k >= cfg.agent_cap) { return; }\n");
+    // `cfg.slot_count` is the over-allocated slot count for PairMap
+    // views (= agent_cap × second_pop); for single-key views the
+    // runtime sets `slot_count == agent_cap`, so the early-return
+    // bound stays equivalent to the legacy `k >= cfg.agent_cap` form.
+    out.push_str("    if (k >= cfg.slot_count) { return; }\n");
     writeln!(
         out,
         "    let old = bitcast<f32>(atomicLoad(&view_storage_primary[k]));"
@@ -4098,7 +4129,11 @@ mod tests {
         };
         let ctx = EmitCtx::structural(&prog);
         let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
-        // ViewFold cfg fields: event_count, tick, _pad: [u32; 2].
+        // ViewFold cfg fields: event_count, tick, second_key_pop, _pad.
+        // `second_key_pop` joined the layout with the pair_map storage
+        // emit gap fix (2026-05-03) — drives the 2-D `(k1 *
+        // second_key_pop + k2)` index. Single-key views set the field
+        // to 1 at runtime so the index reduces to `k_last`.
         assert!(
             spec.cfg_struct_decl.contains("event_count: u32"),
             "decl: {}",
@@ -4110,13 +4145,23 @@ mod tests {
             spec.cfg_struct_decl
         );
         assert!(
-            spec.cfg_struct_decl.contains("_pad: [u32; 2]"),
+            spec.cfg_struct_decl.contains("second_key_pop: u32"),
+            "decl: {}",
+            spec.cfg_struct_decl
+        );
+        assert!(
+            spec.cfg_struct_decl.contains("_pad: u32"),
             "decl: {}",
             spec.cfg_struct_decl
         );
         assert!(
             spec.cfg_build_expr
                 .contains("event_count: 0, tick: state.tick"),
+            "build_expr: {}",
+            spec.cfg_build_expr
+        );
+        assert!(
+            spec.cfg_build_expr.contains("second_key_pop: 1"),
             "build_expr: {}",
             spec.cfg_build_expr
         );
@@ -4551,10 +4596,15 @@ mod tests {
         // ViewFold cfg shape pinned explicitly. The cfg struct name
         // is derived from the kernel name, which collapses to
         // `fold_threat_level` post Task 5.7-iter2 (no event suffix).
-        assert!(spec.cfg_struct_decl.contains("event_count: u32, pub tick: u32, pub _pad: [u32; 2]"));
+        // `second_key_pop` joined the layout with the pair_map storage
+        // emit gap fix (2026-05-03) — fold body composes
+        // `[k1 * cfg.second_key_pop + k2]` for 2-D pair views.
+        assert!(spec.cfg_struct_decl.contains(
+            "event_count: u32, pub tick: u32, pub second_key_pop: u32, pub _pad: u32"
+        ));
         assert_eq!(
             spec.cfg_build_expr,
-            "FoldThreatLevelCfg { event_count: 0, tick: state.tick, _pad: [0; 2] }"
+            "FoldThreatLevelCfg { event_count: 0, tick: state.tick, second_key_pop: 1, _pad: 0 }"
         );
     }
 

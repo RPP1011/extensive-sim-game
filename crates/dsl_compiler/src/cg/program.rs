@@ -365,6 +365,39 @@ pub struct ViewSignature {
     /// Result type — also the underlying scalar type of the view's
     /// `Primary` storage slot.
     pub result: super::expr::CgTy,
+    /// Storage hint copied from the source-level
+    /// `@materialized(storage = <hint>)` annotation. Drives the
+    /// per-storage-shape WGSL emit + dispatch sizing — most notably
+    /// `PairMap` enables the 2-D `(k1 * second_pop + k2)` index in the
+    /// fold body's RMW. `None` means the view is not materialized (or
+    /// the test fixture didn't populate the hint); structurally
+    /// equivalent to "single-key dense_per_agent" for emit purposes.
+    #[serde(default)]
+    pub storage_hint: Option<CgStorageHint>,
+}
+
+/// CG-side storage-hint enum mirroring the discriminator subset of
+/// [`dsl_ast::ir::StorageHint`] that the WGSL emit + dispatch sizing
+/// path actually consults. Decoupled from the AST type so the cg crate
+/// doesn't pull `dsl_ast` into [`CgProgram`] purely for variant labels;
+/// the lowering driver translates AST → CG hint at registration time.
+///
+/// Today the only variant the emit branches on is [`Self::PairMap`]
+/// (composes a 2-D index in the fold body's RMW). The other variants
+/// reduce to the same single-key emit shape, so we collapse them into
+/// [`Self::SingleKey`] until the per-shape WGSL templates land.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CgStorageHint {
+    /// 2-D pair-keyed map. Fold body's RMW indexes
+    /// `view_storage_primary[k1 * cfg.second_key_pop + k2]`; decay
+    /// kernel iterates `cfg.slot_count` slots (= `agent_cap *
+    /// second_key_pop` for Agent×Agent).
+    PairMap,
+    /// Every other shape (`PerEntityTopK`, `SymmetricPairTopK`,
+    /// `PerEntityRing`, `LazyCached`). Fold body's RMW indexes
+    /// `view_storage_primary[k_last]`; decay kernel iterates
+    /// `cfg.agent_cap` slots.
+    SingleKey,
 }
 
 // ---------------------------------------------------------------------------

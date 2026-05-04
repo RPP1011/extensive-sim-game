@@ -63,6 +63,14 @@ pub struct LoweringCtx<'a> {
     /// validate operand types; the builder's `validate_expr_refs`
     /// catches dangling ids and the lowering catches arity at AST level.
     pub view_signatures: HashMap<ViewId, (Vec<CgTy>, CgTy)>,
+    /// Per-view CG-side storage hint — `view_id → CgStorageHint`. Only
+    /// materialized views are present; lazy views skip the entry. The
+    /// driver registers entries alongside [`Self::view_signatures`]; the
+    /// snapshot lands on
+    /// [`crate::cg::program::ViewSignature::storage_hint`] before the
+    /// kernel-emit composer reads it back. Empty for tests that don't
+    /// drive view emission.
+    pub view_storage_hints: HashMap<ViewId, crate::cg::program::CgStorageHint>,
     /// Sum-type variant-name → typed [`VariantId`] resolver, keyed on
     /// the source-level variant identifier (`"Damage"`, `"Heal"`, …).
     /// Used by physics-pass `Match` lowering to resolve arm patterns
@@ -252,6 +260,7 @@ impl<'a> LoweringCtx<'a> {
             builder,
             view_ids: HashMap::new(),
             view_signatures: HashMap::new(),
+            view_storage_hints: HashMap::new(),
             variant_ids: HashMap::new(),
             event_kind_ids: HashMap::new(),
             event_field_indices: HashMap::new(),
@@ -394,6 +403,20 @@ impl<'a> LoweringCtx<'a> {
         result: CgTy,
     ) -> Option<(Vec<CgTy>, CgTy)> {
         self.view_signatures.insert(view_id, (args, result))
+    }
+
+    /// Register the CG-side storage hint of `view_id`. Materialized-only;
+    /// lazy views skip the entry. The driver populates this alongside
+    /// [`Self::register_view_signature`] from
+    /// `populate_view_bodies_and_signatures`. Returns the prior entry
+    /// if any (caller-side defect; the driver allocates each view id
+    /// once).
+    pub fn register_view_storage_hint(
+        &mut self,
+        view_id: ViewId,
+        hint: crate::cg::program::CgStorageHint,
+    ) -> Option<crate::cg::program::CgStorageHint> {
+        self.view_storage_hints.insert(view_id, hint)
     }
 
     /// Register a `(NamespaceId, "<block>.<field>")` → typed

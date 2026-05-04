@@ -3183,6 +3183,7 @@ mod tests {
             crate::cg::program::ViewSignature {
                 args: vec![CgTy::AgentId],
                 result: CgTy::F32,
+                storage_hint: None,
             },
         );
         b.set_view_signatures(sigs);
@@ -3230,6 +3231,7 @@ mod tests {
             crate::cg::program::ViewSignature {
                 args: vec![CgTy::AgentId],
                 result: CgTy::U32,
+                storage_hint: None,
             },
         );
         b.set_view_signatures(sigs);
@@ -3272,6 +3274,7 @@ mod tests {
             crate::cg::program::ViewSignature {
                 args: vec![CgTy::AgentId],
                 result: CgTy::I32,
+                storage_hint: None,
             },
         );
         b.set_view_signatures(sigs);
@@ -3314,6 +3317,7 @@ mod tests {
             crate::cg::program::ViewSignature {
                 args: vec![CgTy::AgentId],
                 result: CgTy::F32,
+                storage_hint: None,
             },
         );
         b.set_view_signatures(sigs);

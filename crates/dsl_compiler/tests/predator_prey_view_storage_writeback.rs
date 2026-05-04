@@ -52,14 +52,22 @@ fn predator_prey_kill_count_fold_emits_storage_writeback() {
 
     // The Let binder lowers to `local_0` (the by-id from the Killed
     // event field). The Assign-to-ViewStorage then writes through a
-    // CAS loop over `view_storage_primary[local_0]`.
+    // CAS loop indexed by `_idx = local_0` (single-key shape — the
+    // PairMap gap fix added the `_idx` binding so the 2-D pair_map
+    // path can compose `_idx = (local_<k1> * cfg.second_key_pop +
+    // local_<k2>)`; single-key views like kill_count keep `_idx =
+    // local_<single>`).
     assert!(
-        fold_wgsl.contains("atomicLoad(&view_storage_primary[local_0])"),
-        "fold_kill_count should emit atomicLoad on view_storage_primary[local_0] — got:\n{fold_wgsl}"
+        fold_wgsl.contains("let _idx = local_0;"),
+        "fold_kill_count should bind the row index `_idx = local_0` for single-key shape — got:\n{fold_wgsl}"
     );
     assert!(
-        fold_wgsl.contains("atomicCompareExchangeWeak(&view_storage_primary[local_0]"),
-        "fold_kill_count should emit atomicCompareExchangeWeak on view_storage_primary[local_0] — got:\n{fold_wgsl}"
+        fold_wgsl.contains("atomicLoad(&view_storage_primary[_idx])"),
+        "fold_kill_count should emit atomicLoad on view_storage_primary[_idx] — got:\n{fold_wgsl}"
+    );
+    assert!(
+        fold_wgsl.contains("atomicCompareExchangeWeak(&view_storage_primary[_idx]"),
+        "fold_kill_count should emit atomicCompareExchangeWeak on view_storage_primary[_idx] — got:\n{fold_wgsl}"
     );
     assert!(
         fold_wgsl.contains("bitcast<u32>(bitcast<f32>(old) + (1.0))"),

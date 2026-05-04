@@ -171,7 +171,8 @@ impl SwarmStormState {
         let pc_cfg = fold_pulse_count::FoldPulseCountCfg {
             event_count: 0,
             tick: 0,
-            _pad: [0; 2],
+            second_key_pop: 1,
+            _pad: 0,
         };
         let pulse_count_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -183,7 +184,8 @@ impl SwarmStormState {
         let rpi_cfg = fold_recent_pulse_intensity::FoldRecentPulseIntensityCfg {
             event_count: 0,
             tick: 0,
-            _pad: [0; 2],
+            second_key_pop: 1,
+            _pad: 0,
         };
         let recent_pulse_intensity_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -195,7 +197,8 @@ impl SwarmStormState {
         let rpi_decay_cfg = decay_recent_pulse_intensity::DecayRecentPulseIntensityCfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            slot_count: agent_count,
+            _pad: 0,
         };
         let recent_pulse_intensity_decay_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -329,7 +332,8 @@ impl CompiledSim for SwarmStormState {
         let pc_cfg = fold_pulse_count::FoldPulseCountCfg {
             event_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            second_key_pop: 1,
+            _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.pulse_count_cfg_buf,
@@ -339,7 +343,8 @@ impl CompiledSim for SwarmStormState {
         let rpi_cfg = fold_recent_pulse_intensity::FoldRecentPulseIntensityCfg {
             event_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            second_key_pop: 1,
+            _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.recent_pulse_intensity_cfg_buf,
@@ -388,7 +393,8 @@ impl CompiledSim for SwarmStormState {
         let rpi_decay_cfg = decay_recent_pulse_intensity::DecayRecentPulseIntensityCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            slot_count: self.agent_count,
+            _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.recent_pulse_intensity_decay_cfg_buf,

@@ -127,6 +127,74 @@ fn main() {
          view's compile + decay + fold-dispatch path is healthy)",
         TICKS,
     );
+
+    // SLICE 2 PROBE — pair_map storage gap fix (2026-05-03).
+    // `pheromone_trail(ant: Agent, food: Food)` was uncommented in
+    // the .sim file as part of the same fix that landed the 2-D
+    // index in the fold body. Today the carried field is AgentId
+    // (Item-SoA storage hasn't landed) so the runtime sizes the
+    // storage as `agent_count × agent_count` and `second_key_pop ==
+    // agent_count`. With WanderAndDrop emitting `Drop { ant: self,
+    // carried: self }` only diagonal slots `(i, i)` accumulate;
+    // each converges to ~8.33 (`@decay(rate = 0.88)` steady state).
+    // Off-diagonal slots stay at exactly 0 — the gold-standard pair
+    // map observable.
+    let pt = sim.pheromone_trail().to_vec();
+    let agent_count = AGENT_COUNT as usize;
+    assert_eq!(
+        pt.len(),
+        agent_count * agent_count,
+        "pheromone_trail storage should be agent_count² for pair_map",
+    );
+    let mut diag_min = f32::INFINITY;
+    let mut diag_max = 0.0_f32;
+    let mut diag_sum = 0.0_f32;
+    let mut off_diag_max = 0.0_f32;
+    let mut off_diag_sum = 0.0_f32;
+    let mut off_diag_n = 0u32;
+    for k1 in 0..agent_count {
+        for k2 in 0..agent_count {
+            let v = pt[k1 * agent_count + k2];
+            if k1 == k2 {
+                diag_min = diag_min.min(v);
+                diag_max = diag_max.max(v);
+                diag_sum += v;
+            } else {
+                off_diag_max = off_diag_max.max(v);
+                off_diag_sum += v;
+                off_diag_n += 1;
+            }
+        }
+    }
+    let pt_steady = 1.0_f32 / (1.0 - 0.88);
+    let diag_mean = diag_sum / agent_count as f32;
+    let off_diag_mean = if off_diag_n > 0 {
+        off_diag_sum / off_diag_n as f32
+    } else {
+        0.0
+    };
+    println!(
+        "foraging_app: pheromone_trail (pair_map, rate=0.88, diagonal steady ~{:.3}) \
+         — diagonal: min={:.3} mean={:.3} max={:.3}; off-diagonal: max={:.4} mean={:.4} \
+         (expected 0.0 — only `Drop {{ ant: self, carried: self }}` emits)",
+        pt_steady, diag_min, diag_mean, diag_max, off_diag_max, off_diag_mean,
+    );
+    let pt_tol = pt_steady * 0.05;
+    assert!(
+        (diag_mean - pt_steady).abs() <= pt_tol,
+        "pheromone_trail diagonal mean {:.4} not within ±5% of analytical {:.4}",
+        diag_mean, pt_steady,
+    );
+    assert!(
+        off_diag_max.abs() < 1e-3,
+        "pheromone_trail off-diagonal max {} should be ~0 (no inter-ant Drop events)",
+        off_diag_max,
+    );
+    println!(
+        "foraging_app: OK — pheromone_trail diagonal mean ≈ {:.3} (target {:.3}, \
+         tol ±{:.3}); off-diagonal stays at 0",
+        diag_mean, pt_steady, pt_tol,
+    );
 }
 
 /// One per-tick log line: centroid + max axis-aligned span.

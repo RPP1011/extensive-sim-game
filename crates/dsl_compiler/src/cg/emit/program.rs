@@ -203,7 +203,7 @@ pub fn emit_cg_program(
         naming: HandleNamingStrategy::Structural,
         tile_walk_index: std::cell::RefCell::new(None),
         dispatch: std::cell::Cell::new(None),
-        view_target_local: std::cell::Cell::new(None),
+        view_target_locals: std::cell::RefCell::new(Vec::new()),
         pending_target_lets: std::cell::RefCell::new(Vec::new()),
         bound_target_exprs: std::cell::RefCell::new(std::collections::HashSet::new()),
     };
@@ -506,10 +506,21 @@ fn compose_wgsl_cfg_struct(spec: &KernelSpec) -> String {
     // the event ring. Layout matches `build_generic_cfg_struct_decl`
     // (Rust side): { agent_cap: u32, tick: u32, _pad0: u32, _pad1: u32 }.
     let fields = match spec.kind {
-        KernelKind::ViewFold => "event_count: u32, tick: u32, _pad0: u32, _pad1: u32",
-        KernelKind::ViewDecay | KernelKind::Generic => {
-            "agent_cap: u32, tick: u32, _pad0: u32, _pad1: u32"
-        }
+        // `second_key_pop` joined the layout with the pair_map storage
+        // gap fix (2026-05-03): fold body's RMW indexes
+        // `view_storage_primary[k1 * cfg.second_key_pop + k2]` for
+        // 2-D views; single-key views set the field to 1 so the index
+        // reduces to `k_last`. Mirrors the Rust `FoldXxxCfg` struct
+        // (build_view_fold_cfg_struct_decl).
+        KernelKind::ViewFold => "event_count: u32, tick: u32, second_key_pop: u32, _pad0: u32",
+        // `slot_count` joined the layout in lockstep — pair_map views
+        // over-allocate `agent_cap × second_pop` slots; the decay
+        // kernel iterates `slot_count` instead of `agent_cap` so the
+        // anchor multiplier reaches every (k1, k2). Single-key views
+        // set `slot_count == agent_cap`. Mirrors
+        // build_view_decay_cfg_struct_decl.
+        KernelKind::ViewDecay => "agent_cap: u32, tick: u32, slot_count: u32, _pad0: u32",
+        KernelKind::Generic => "agent_cap: u32, tick: u32, _pad0: u32, _pad1: u32",
     };
     format!("struct {ty} {{ {fields} }};\n", ty = cfg.wgsl_ty)
 }

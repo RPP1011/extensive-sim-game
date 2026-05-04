@@ -298,11 +298,13 @@ pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOu
         .view_signatures
         .iter()
         .map(|(view_id, (args, result))| {
+            let storage_hint = ctx.view_storage_hints.get(view_id).copied();
             (
                 view_id.0,
                 crate::cg::program::ViewSignature {
                     args: args.clone(),
                     result: *result,
+                    storage_hint,
                 },
             )
         })
@@ -1011,7 +1013,7 @@ fn populate_view_bodies_and_signatures(
                     });
                 }
             }
-            (ViewKind::Materialized(_), ViewBodyIR::Fold { .. }) => {
+            (ViewKind::Materialized(hint), ViewBodyIR::Fold { .. }) => {
                 let arg_tys: Vec<crate::cg::expr::CgTy> = view
                     .params
                     .iter()
@@ -1019,6 +1021,11 @@ fn populate_view_bodies_and_signatures(
                     .collect();
                 let result_ty = super::expr::ir_type_to_cg_ty(&view.return_ty);
                 ctx.register_view_signature(view_id, arg_tys, result_ty);
+                // Mirror the AST-level storage hint into the CG-side
+                // enum so the kernel emit + dispatch sizing path can
+                // branch on it without pulling dsl_ast into program.rs.
+                let cg_hint = super::view::project_storage_hint(*hint);
+                ctx.register_view_storage_hint(view_id, cg_hint);
             }
             // Kind/body mismatches are reported at lower_view time
             // with a structural diagnostic; the registry walk skips

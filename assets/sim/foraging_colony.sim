@@ -123,32 +123,31 @@ view pheromone_deposits(ant: Agent) -> f32 {
   clamp: [0.0, 1000.0],
 }
 
-// GAP (slice-2 probe, surfaced 2026-05-03): once Item-SoA +
-// pair_map lowering land, this view becomes the real pheromone-
-// trail map: per-(ant, food-slot) intensity. The view PARSES +
-// LOWERS + EMITS today (uncommenting it produces fold + decay
-// kernels), but the emitted WGSL treats `storage = pair_map`
-// identically to dense_per_agent — both kernels iterate
-// `agent_cap` slots and the fold's RMW addresses
-// `view_storage_primary[event_ring[idx*10+3]]` (the `carried`
-// field) without composing a 2-D `(ant, food)` index. So the
-// view becomes a duplicate of `pheromone_deposits` rather than a
-// per-pair map. The emit-side gap to fix:
-//   - decay loop: dispatch `agent_cap × num_food` slots, not just
-//     `agent_cap`.
-//   - fold RMW: index = `event[ant_field] * num_food +
-//     event[food_field]`, not just `event[food_field]`.
-// Spec §5.2 storage hint `pair_map` exists; predator_focus in
-// predator_prey_min uses it but is also single-key today, so the
-// gap is consistent across fixtures.
+// pair_map storage gap fix (2026-05-03): the WGSL emit now composes
+// `view_storage_primary[k1 * cfg.second_key_pop + k2]` for views
+// whose `@materialized(storage = pair_map)` flows through the CG-
+// side `CgStorageHint::PairMap` discriminator, and the decay kernel
+// iterates `cfg.slot_count` slots. The fixture runtimes set
+// `second_key_pop` + `slot_count` per the second-key entity
+// population (= `agent_count` for Agent×Agent; = `food_count` once
+// Item-SoA storage lands).
 //
-// @materialized(on_event = [Drop], storage = pair_map)
-// @decay(rate = 0.88, per = tick)
-// view pheromone_trail(ant: Agent, food: Food) -> f32 {
-//   initial: 0.0,
-//   on Drop { ant: a, carried: f, pos: _ } { self += 1.0 }
-//   clamp: [0.0, 100.0],
-// }
+// Today `Drop.carried` is `AgentId` (not yet `ItemId` — see Item-
+// SoA gap above), so `pheromone_trail`'s second key resolves to an
+// Agent slot. `foraging_runtime` over-allocates the storage as
+// `agent_count × agent_count` and asserts the per-`(i, i)` diagonal
+// converges to `1 / (1 - 0.88) ≈ 8.33` while every off-diagonal
+// stays at 0 (no inter-ant Drop events). Once Item-SoA lands, the
+// runtime swaps `second_key_pop` for the food count and the storage
+// shrinks accordingly.
+//
+@materialized(on_event = [Drop], storage = pair_map)
+@decay(rate = 0.88, per = tick)
+view pheromone_trail(ant: Agent, food: Food) -> f32 {
+  initial: 0.0,
+  on Drop { ant: a, carried: f, pos: _ } { self += 1.0 }
+  clamp: [0.0, 100.0],
+}
 
 // SLICE 3 PROBE: uncommenting `colony_intake` to stress-test
 // `view ... (colony: Group)` keying — the first Group-targeted
