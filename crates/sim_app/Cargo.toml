@@ -41,6 +41,11 @@ ecosystem_runtime = { path = "../ecosystem_runtime" }
 # declarations (declaration-only today) + per-tick Drop emit folded
 # into a `@decay`-anchored pheromone_deposits view.
 foraging_runtime = { path = "../foraging_runtime" }
+# Auction-market fixture — first to exercise the `auctions.*`
+# namespace lowering (B1 stub `auctions_place_bid(...) -> bool`).
+# Per-tick Bid emit folded into bid_activity (@decay) AND
+# good_bid_total (no decay) — stresses both fold paths in one fixture.
+auction_runtime = { path = "../auction_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -77,3 +82,7 @@ path = "src/ecosystem_app.rs"
 [[bin]]
 name = "foraging_app"
 path = "src/foraging_app.rs"
+
+[[bin]]
+name = "auction_app"
+path = "src/auction_app.rs"

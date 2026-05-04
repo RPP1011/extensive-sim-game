@@ -1,0 +1,39 @@
+[package]
+name = "auction_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/auction_market.sim` —
+# the auction-market fixture: third sequential implementation in the
+# planned order (ecosystem → foraging → auction). Mirrors the
+# foraging_runtime / bartering_runtime shape: build.rs runs
+# dsl_compiler at compile time, OUT_DIR/generated.rs gets pulled in
+# via `include!`. Hand-written orchestration in src/lib.rs wraps the
+# compiler-emitted dispatch modules.
+#
+# Stress targets surfaced by this fixture (relative to siblings):
+# - `entity Good : Item` + `entity Faction : Group` declarations
+#   alongside the `Trader : Agent` (declaration-only today — no
+#   field on either is read by the active rule body).
+# - First fixture to exercise the `auctions.*` namespace lowering
+#   (commit 5a00259c). The B1 stub `auctions_place_bid(...)` lands
+#   in the WGSL body but is a semantic no-op (`return true`).
+# - Two views: `bid_activity` (Agent-keyed, @decay) and
+#   `good_bid_total` (Agent-keyed, no decay, @materialized) —
+#   stresses both the decay + non-decay fold paths in one fixture.
+# - The would-be `good_clearing_price` (Item-keyed) and
+#   `faction_pressure` (Group-keyed) views stay commented out behind
+#   `// GAP:` markers in the .sim file.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

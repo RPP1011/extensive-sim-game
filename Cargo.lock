@@ -82,6 +82,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "auction_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1597,6 +1610,7 @@ dependencies = [
 name = "sim_app"
 version = "0.1.0"
 dependencies = [
+ "auction_runtime",
  "bartering_runtime",
  "boids_runtime",
  "crowd_navigation_runtime",

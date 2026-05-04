@@ -150,12 +150,20 @@ view good_bid_total(good: Agent) -> f32 {
 //   clamp: [0.0, 100000.0],
 // }
 
-// GAP: once Group-SoA lowers, faction-level bid aggregation:
-//
-// @materialized(on_event = [Bid])
-// @decay(rate = 0.95, per = tick)
-// view faction_pressure(faction: Group) -> f32 {
-//   initial: 0.0,
-//   on Bid { trader: t, good: _, amount: a } { self += a }
-//   clamp: [0.0, 1000000.0],
-// }
+// SLICE 2 PROBE (2026-05-03): faction-level bid aggregation,
+// Group-keyed view. The fold body matches `trader: t` (binder) but
+// the view is keyed on `faction: Group` — there is no `faction`
+// field on the Bid event, so the per-event fold either no-ops or
+// resolves the key from a placeholder. Today's auction_runtime
+// reports the fixture compiles + lowers + emits with this view
+// uncommented and the fold runs cleanly as a no-op-or-uniform
+// dispatch (same end-to-end shape as foraging's colony_intake
+// SLICE 3 probe). Uncommenting confirms the Group-keyed view path
+// in the auction context.
+@materialized(on_event = [Bid])
+@decay(rate = 0.95, per = tick)
+view faction_pressure(faction: Group) -> f32 {
+  initial: 0.0,
+  on Bid { trader: t, good: _, amount: a } { self += a }
+  clamp: [0.0, 1000000.0],
+}
