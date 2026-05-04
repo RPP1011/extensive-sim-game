@@ -818,6 +818,10 @@ impl RngPurpose {
             RngPurpose::Sample => 2,
             RngPurpose::Shuffle => 3,
             RngPurpose::Conception => 4,
+            RngPurpose::Uniform => 5,
+            RngPurpose::Gauss => 6,
+            RngPurpose::Coin => 7,
+            RngPurpose::UniformInt => 8,
         }
     }
 }
