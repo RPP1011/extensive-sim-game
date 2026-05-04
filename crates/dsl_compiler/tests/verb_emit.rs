@@ -388,6 +388,75 @@ verb Strike(self, target: Agent) =
     );
 }
 
+/// Gap #1 regression (verb-fire probe, 2026-05-04): a verb with no
+/// `target` param (e.g., `verb Pray(self) = action PrayAction ...`)
+/// must still synthesise a `verb_chronicle_<name>` rule whose body's
+/// `if action_id == <lit>` lowers cleanly. Before the
+/// `fresh_local_after` -> stateful `fresh_local` fix in
+/// `cg/lower/verb_expand.rs::synthesize_cascade_physics`, the
+/// fallback LocalRef for the absent `target` and the freshly
+/// allocated `action_id` LocalRef collided on the same id; the
+/// pattern-binding-let synthesiser then recorded `action_id: U32`
+/// followed by `target: AgentId` against the same local, retyping
+/// `action_id` to AgentId, which made the cascade's gate fail to
+/// lower with `BinaryOperandTyMismatch (lhs: agent_id, rhs: u32)` —
+/// the entire `verb_chronicle_Pray` rule was dropped silently.
+///
+/// This test asserts: zero `BinaryOperandTyMismatch` diagnostics
+/// for a target-less verb, AND the `verb_chronicle_<name>` physics
+/// rule survives lowering (was previously dropped).
+#[test]
+fn target_less_verb_chronicle_lowers_without_operand_ty_mismatch() {
+    let src = r#"
+event Tick { }
+event Prayed { who: AgentId, }
+entity Agent_ : Agent { alive: bool, }
+scoring {
+  PrayAction = 1.0
+}
+verb Pray(self) =
+  action PrayAction
+  when  self.alive
+  emit  Prayed { who: self }
+  score 1.0
+"#;
+    let prog = dsl_compiler::parse(src).expect("parse");
+    let comp = dsl_ast::resolve::resolve(prog).expect("resolve");
+    let outcome = dsl_compiler::cg::lower::lower_compilation_to_cg(&comp);
+    let (program, diagnostics) = match outcome {
+        Ok(p) => (p, Vec::new()),
+        Err(o) => (o.program, o.diagnostics),
+    };
+    let mismatches: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| {
+            matches!(
+                d,
+                dsl_compiler::cg::lower::LoweringError::BinaryOperandTyMismatch { .. }
+            )
+        })
+        .collect();
+    assert!(
+        mismatches.is_empty(),
+        "expected zero BinaryOperandTyMismatch on target-less verb cascade; got {:?}",
+        mismatches,
+    );
+    // The verb_chronicle_Pray rule must survive lowering all the way
+    // to a named physics-rule entry in the interner — before the fix
+    // the body failed to lower and the entire rule was dropped.
+    let chronicle_present = program
+        .interner
+        .physics_rules
+        .values()
+        .any(|n| n == "verb_chronicle_Pray");
+    assert!(
+        chronicle_present,
+        "expected verb_chronicle_Pray to survive lowering; \
+         interner.physics_rules: {:?}",
+        program.interner.physics_rules.values().collect::<Vec<_>>(),
+    );
+}
+
 /// Slice 5.7 acceptance probe: with the let-bound-AgentId-local
 /// field-access fix landed (Phase 7 follow-up to commit `38c4c969`),
 /// the verb cascade's body `pos: self.pos` no longer surfaces an

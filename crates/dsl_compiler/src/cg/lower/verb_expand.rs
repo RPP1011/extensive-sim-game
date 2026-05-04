@@ -394,19 +394,32 @@ fn synthesize_cascade_physics(
     // to a fresh LocalRef when a param is absent keeps the binding
     // shape uniform — the body simply doesn't reference the missing
     // binder.
+    // Stateful allocator: `fresh_local_after` previously returned the
+    // SAME LocalRef on every call (it was a pure `max(verb.params.local) + 1`),
+    // which collided distinct synthesised binders onto a single LocalRef.
+    // Concretely, when a verb has no `target` param the absent-target
+    // fallback and the action_id allocation both produced the same
+    // LocalRef; `synthesize_pattern_binding_lets` then recorded the
+    // bindings against that single local with conflicting types
+    // (action_id: U32 followed by target: AgentId), and the cascade
+    // body's `if action_id == 0` failed to lower with
+    // `BinaryOperandTyMismatch`. Threading a mutable counter ensures
+    // every fallback / synthesis call gets a distinct LocalRef. See
+    // `docs/superpowers/notes/2026-05-04-verb-fire-probe.md` (Gap #1).
+    let mut next_local = first_unused_local(verb);
     let self_local = verb
         .params
         .iter()
         .find(|p| p.name == "self")
         .map(|p| p.local)
-        .unwrap_or_else(|| fresh_local_after(verb));
+        .unwrap_or_else(|| fresh_local(&mut next_local));
     let target_local = verb
         .params
         .iter()
         .find(|p| p.name == "target")
         .map(|p| p.local)
-        .unwrap_or_else(|| fresh_local_after(verb));
-    let action_id_local = fresh_local_after(verb);
+        .unwrap_or_else(|| fresh_local(&mut next_local));
+    let action_id_local = fresh_local(&mut next_local);
 
     let bindings = vec![
         IrPatternBinding {
@@ -495,13 +508,25 @@ fn synthesize_cascade_physics(
     }
 }
 
-/// Allocate a fresh [`LocalRef`] strictly past every LocalRef the
+/// Compute the first LocalRef id strictly past every LocalRef the
 /// verb already uses for its params. Doesn't query the resolver's
 /// scope (we're post-resolution); instead picks `max(verb.params.local) + 1`.
-/// Verbs with no params get `LocalRef(0)`.
-fn fresh_local_after(verb: &VerbIR) -> LocalRef {
+/// Verbs with no params start at `LocalRef(0)`. Used as the seed for
+/// the [`fresh_local`] stateful allocator below.
+fn first_unused_local(verb: &VerbIR) -> u16 {
     let max = verb.params.iter().map(|p| p.local.0).max();
-    LocalRef(max.map(|m| m.saturating_add(1)).unwrap_or(0))
+    max.map(|m| m.saturating_add(1)).unwrap_or(0)
+}
+
+/// Stateful counterpart to [`first_unused_local`]: returns a fresh
+/// [`LocalRef`] and post-increments the counter. Each call yields a
+/// distinct LocalRef, so synthesised binders never collide on a
+/// single local (see Gap #1 rationale at the call site in
+/// [`synthesize_cascade_physics`]).
+fn fresh_local(next: &mut u16) -> LocalRef {
+    let r = LocalRef(*next);
+    *next = next.saturating_add(1);
+    r
 }
 
 // Suppress dead-code warning: kept for the (still-typed) closed-set
