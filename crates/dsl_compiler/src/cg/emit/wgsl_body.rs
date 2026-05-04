@@ -654,6 +654,12 @@ fn builtin_name(id: BuiltinId) -> String {
         // WGSL has a built-in `vec3<f32>` constructor; emit the call
         // as-is so `vec3(x, y, z)` lowers to `vec3<f32>(x, y, z)`.
         Vec3Ctor => "vec3<f32>".to_string(),
+        // WGSL native scalar conversion `f32(<u32-or-i32>)`. Emitted
+        // as-is so `AsF32(U32)` / `AsF32(I32)` produce `f32(<arg>)`.
+        // The `NumericTy` payload is informational at IR level (it
+        // pins the source type for typing); WGSL infers the source
+        // from the argument's type.
+        AsF32(_) => "f32".to_string(),
     }
 }
 

@@ -514,6 +514,18 @@ pub enum BuiltinId {
     /// the Boids fixture a vec3 literal form without going through
     /// `agents.pos(...)`. Phase-7-post-nuke unlock #1.
     Vec3Ctor,
+
+    // --- Casts ---
+    /// `f32(x)` where `x: U32 | I32` — promote an integer scalar to
+    /// f32. Lowers to WGSL `f32(<arg>)`. Inserted implicitly by
+    /// `lower_binary` when one operand is `F32` and the peer is `U32`
+    /// or `I32` so mixed-type arith like `1000.0 - hp_u32` lowers as
+    /// `1000.0 - f32(hp_u32)`. The carried [`NumericTy`] is the
+    /// SOURCE type (`U32` or `I32`); `F32` is rejected (no-op cast)
+    /// at construction by the only call site (the lowering helper).
+    /// Closes Gap #2 from
+    /// `docs/superpowers/notes/2026-05-04-pair_scoring_probe.md`.
+    AsF32(NumericTy),
 }
 
 /// Typed signature of a builtin call. `args` is the list of expected
@@ -568,6 +580,10 @@ impl BuiltinId {
                 args: vec![CgTy::F32, CgTy::F32, CgTy::F32],
                 result: CgTy::Vec3F32,
             },
+            AsF32(t) => BuiltinSignature::Fixed {
+                args: vec![t.cg_ty()],
+                result: CgTy::F32,
+            },
         }
     }
 
@@ -591,6 +607,7 @@ impl BuiltinId {
             Entity => "entity".to_string(),
             ViewCall { view } => format!("view_call.#{}", view.0),
             Vec3Ctor => "vec3".to_string(),
+            AsF32(t) => format!("as_f32.{}", t.label()),
         }
     }
 }

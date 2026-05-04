@@ -1837,8 +1837,8 @@ verb Ping(self) =
 }
 
 /// `pair_scoring_probe` compile-gate — NEGATIVE test pinning the
-/// REMAINING gap (after Gaps #1 + #3 closed) that blocks PAIR-FIELD
-/// SCORING (spec §8.3) end-to-end.
+/// REMAINING gap (Gap #4 — per-pair argmax kernel) that blocks
+/// PAIR-FIELD SCORING (spec §8.3) end-to-end.
 ///
 /// **History.** The fixture's `verb Heal(self, target: Agent) = ...
 /// score (1000.0 - agents.cooldown_next_ready_tick(target))` originally
@@ -1846,30 +1846,31 @@ verb Ping(self) =
 /// `from` clause) AND Gap #2 (f32/u32 mismatch). The 2026-05-04 close
 /// of Gaps #1 + #3 (relax `mask::lower_mask`'s gate for the canonical
 /// `Positional([("target", _, AgentId)])` head + mirror that head shape
-/// onto the verb-injected scoring entry) eliminated Gap #1; only Gap #2
-/// remains. Discovery doc:
+/// onto the verb-injected scoring entry) eliminated Gap #1. The
+/// follow-up close of Gap #2 (implicit `u32`→`f32` promotion in
+/// `lower_binary` — see `BuiltinId::AsF32`) now lets lowering succeed
+/// outright. Discovery doc:
 /// `docs/superpowers/notes/2026-05-04-pair_scoring_probe.md`.
 ///
-/// **What this test now pins.** The lowering fails with EXACTLY ONE
-/// diagnostic — the score-expression's `f32 - u32` arithmetic
-/// mismatch. The mask op + the scoring op (with its now-correctly
-/// shaped per-pair candidate binder) get dropped from the partial
-/// program because the score expression's lowering fails before the
-/// scoring entry's body type-checks. The chronicle + view-fold still
-/// emit — they don't reference `target.<field>` in a typed-arithmetic
-/// position.
+/// **What this test now pins.** Lowering succeeds and the scoring
+/// kernel emits, but Gap #4 (per-pair argmax) is still open: the
+/// scoring kernel structurally dispatches per-actor with the
+/// per-pair candidate binder UNRESOLVED — the row body emits a
+/// `target_expr_<n>` identifier that isn't declared anywhere in the
+/// kernel scope, and `best_target` falls through to the
+/// `0xFFFFFFFFu` sentinel because no inner candidate loop runs. The
+/// emitted WGSL would not pass naga validation (the unresolved
+/// identifier is the structural signature).
 ///
-/// **What surfaces if Gap #2 closes next.** The arithmetic mismatch is
-/// either fixed by a typed-coercion pass in `lower_binary_op` (implicit
-/// u32→f32 widening) or by a caller-side cast surface
-/// (`f32(target.cooldown_next_ready_tick)`). When that lands, this
-/// test fails — the `expect_err` flips. The test then needs updating
-/// to either:
+/// **What surfaces if Gap #4 closes next.** Either:
+///   - The scoring kernel grows an inner `for (var per_pair_candidate
+///     ...) { ... }` loop that binds the candidate's slot id and
+///     drives `best_target = per_pair_candidate` on argmax wins, OR
+///   - Equivalent 2D dispatch with a per-actor reduction.
 ///
-///   - Assert Gap #4's fingerprint (per-pair argmax kernel structurally
-///     dispatches per-actor instead of per-(actor, candidate)), OR
-///   - Flip to positive if Gap #4 is also closed and the probe app
-///     observes FULL FIRE.
+/// In both cases this test fails — flip the assertions to expect a
+/// per-pair iteration fingerprint and / or check
+/// `pair_scoring_probe_app` for FULL FIRE.
 #[test]
 fn pair_scoring_probe_negative_compile_gate() {
     use dsl_compiler::cg::lower::lower_compilation_to_cg;
@@ -1880,8 +1881,8 @@ fn pair_scoring_probe_negative_compile_gate() {
     let comp = dsl_ast::resolve::resolve(prog).expect("resolve pair_scoring_probe.sim");
 
     // Surface counts pre-lower — these confirm the parser + resolver
-    // accept `target.<field>` shape (the remaining Gap is a CG-pass
-    // type-check defect, not a parse/resolve gap).
+    // accept `target.<field>` shape; the remaining Gap is in the
+    // kernel-emit layer, not the parse / resolve / lower passes.
     assert_eq!(
         comp.verbs.len(),
         1,
@@ -1899,80 +1900,94 @@ fn pair_scoring_probe_negative_compile_gate() {
         "second verb param must be named `target`"
     );
 
-    // Lower MUST fail with the (now-singleton) Gap #2 diagnostic. If a
-    // future commit closes Gap #2 (typed coercion / cast), this
-    // assertion's `expect_err` flips.
-    let outcome = lower_compilation_to_cg(&comp);
-    let diags = match outcome {
-        Ok(_) => panic!(
-            "EXPECTED LOWER FAILURE (Gap #2 — score-expression f32/u32 mismatch) — \
-             pair_scoring_probe.sim should fail lower with \
-             `BinaryOperandTyMismatch`. Lower SUCCEEDED — this means a future \
-             commit closed Gap #2; update this negative test to assert Gap #4's \
-             fingerprint (per-pair argmax kernel) or flip to positive FULL FIRE \
-             if Gap #4 is also closed.",
-        ),
-        Err(o) => o.diagnostics,
-    };
-
-    let diag_strings: Vec<String> = diags.iter().map(|d| format!("{d}")).collect();
-
-    // Gap #1 MUST NOT surface — the 2026-05-04 close eliminated it.
-    // Re-introducing the gate would silently regress pair-scoring; pin
-    // its absence so a future refactor can't bring it back.
-    let has_mask_head_gap = diag_strings.iter().any(|s| {
-        s.contains("head shape `positional`") && s.contains("requires a `from` clause")
+    // Lower MUST succeed — Gap #2 (f32/u32 mismatch in the score
+    // expression) was closed by the implicit `u32 → f32` promotion in
+    // `lower_binary` (see `cg::lower::expr::promote_int_to_f32`). If
+    // a regression re-introduces the operand-type-mismatch error,
+    // this `expect` panic surfaces it loudly.
+    let cg = lower_compilation_to_cg(&comp).unwrap_or_else(|o| {
+        let diag_strings: Vec<String> = o.diagnostics.iter().map(|d| format!("{d}")).collect();
+        panic!(
+            "EXPECTED LOWER SUCCESS (Gaps #1 + #2 + #3 closed) — got {} diagnostic(s):\n  {}\n\
+             If `binary `Sub` ... lhs is f32, rhs is u32` reappears, the implicit \
+             u32→f32 cast in `lower_binary` (BuiltinId::AsF32) was lost.",
+            o.diagnostics.len(),
+            diag_strings.join("\n  ")
+        )
     });
-    assert!(
-        !has_mask_head_gap,
-        "Gap #1 (mask positional head requires `from` clause) MUST NOT \
-         surface — the 2026-05-04 close routed `Positional([(\"target\", _, \
-         AgentId)])` heads through `PerPair {{ source: AllAgents }}`. Got:\n{}",
-        diag_strings.join("\n  ")
-    );
 
-    let has_arith_gap = diag_strings.iter().any(|s| {
-        s.contains("binary `Sub`") && s.contains("lhs is f32, rhs is u32")
-    });
-    assert!(
-        has_arith_gap,
-        "Gap #2 (score-expression f32/u32 mismatch) must surface in lower diagnostics; got:\n{}",
-        diag_strings.join("\n  ")
-    );
-
-    // Even though lower failed, the partial program drives downstream
-    // schedule + emit. With Gap #1 closed, the partial-emit set now
-    // INCLUDES the verb-synthesised mask kernel (the mask predicate
-    // `target != self` lowers cleanly — only the score expression
-    // fails). The scoring op is still dropped because the score
-    // expression's `f32 - u32` mismatch fails to lower the entry.
-    let cg = lower_compilation_to_cg(&comp).err().expect("must fail").program;
+    // Schedule + emit MUST succeed too — the verb-synth scoring entry
+    // lowers to a complete CG op, and the kernel composer wires the
+    // bindings.
     let sched = dsl_compiler::cg::schedule::synthesize_schedule(
         &cg,
         dsl_compiler::cg::schedule::ScheduleStrategy::Default,
     );
     let art = dsl_compiler::cg::emit::emit_cg_program(&sched.schedule, &cg)
-        .expect("partial CG emit should succeed even when lower failed");
+        .expect("CG emit should succeed");
 
     let kernel_set: std::collections::BTreeSet<String> =
         art.kernel_index.iter().cloned().collect();
+    // The scoring kernel is now PRESENT (it was dropped from the
+    // partial-emit set under the Gap #2 regime). The mask + chronicle
+    // + fold remain.
+    assert!(
+        kernel_set.contains("scoring"),
+        "scoring kernel MUST be present now that Gap #2 is closed; got: {:?}",
+        kernel_set
+    );
     assert!(
         kernel_set.iter().any(|k| k.contains("physics_verb_chronicle_Heal")),
-        "partial-emit set MUST include the chronicle physics rule (the verb's \
-         emit body lowered cleanly even though scoring didn't); got: {:?}",
+        "chronicle physics rule MUST be present; got: {:?}",
         kernel_set
     );
     assert!(
         kernel_set.iter().any(|k| k.contains("fold_received")),
-        "partial-emit set MUST include the view-fold (declared at top level — \
-         independent of verb's scoring failure); got: {:?}",
+        "view-fold MUST be present; got: {:?}",
         kernel_set
     );
     assert!(
-        !kernel_set.iter().any(|k| k == "scoring"),
-        "partial-emit set MUST NOT include a scoring kernel (verb scoring \
-         entry references target.<field> in an `f32 - u32` arithmetic \
-         position; Gap #2 dropped the entry); got: {:?}",
+        kernel_set.iter().any(|k| k.contains("mask_verb_Heal")),
+        "verb-synthesised mask kernel MUST be present (Gap #1 close); got: {:?}",
         kernel_set
     );
+
+    // Pin Gap #4 fingerprint in the emitted scoring WGSL. Today the
+    // scoring kernel:
+    //   - emits the row's f32-promoted utility expression (Gap #2
+    //     close), AND
+    //   - leaves the per-pair candidate read UNBOUND — the WGSL
+    //     references `target_expr_<n>` (an internal sentinel from the
+    //     PerPairCandidateId-aware lowering) without declaring it in
+    //     the kernel scope. No `per_pair_candidate` inner loop runs;
+    //     `best_target` falls through to `0xFFFFFFFFu`.
+    let scoring_wgsl = art
+        .wgsl_files
+        .iter()
+        .find(|(k, _)| k.as_str() == "scoring.wgsl")
+        .map(|(_, v)| v.clone())
+        .expect("scoring.wgsl must be present in wgsl_files");
+
+    // Confirm Gap #2 is structurally closed: the row body now wraps
+    // the u32 SoA read in `f32(...)`. (If this assertion fails, the
+    // implicit-promotion path regressed.)
+    assert!(
+        scoring_wgsl.contains("f32(agent_cooldown_next_ready_tick"),
+        "Gap #2 close fingerprint missing — the score row should wrap the u32 \
+         SoA read in `f32(...)`; got scoring.wgsl:\n{scoring_wgsl}"
+    );
+
+    // Confirm Gap #4 is still open: no inner candidate loop binds
+    // `per_pair_candidate`. When the per-pair argmax kernel lands,
+    // `per_pair_candidate` will appear in the kernel body and this
+    // assertion flips.
+    assert!(
+        !scoring_wgsl.contains("per_pair_candidate"),
+        "Gap #4 (per-pair argmax kernel) appears CLOSED — `per_pair_candidate` \
+         identifier is now present in the scoring kernel. Update this test to \
+         the positive FULL-FIRE form (assert kernel iterates per-pair, drives \
+         `best_target = per_pair_candidate` on argmax wins, and the probe app \
+         observes received[0]=3500). Got scoring.wgsl:\n{scoring_wgsl}"
+    );
 }
+

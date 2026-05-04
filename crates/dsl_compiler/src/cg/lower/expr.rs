@@ -1343,6 +1343,20 @@ fn lower_binary(
         return Ok(id);
     }
 
+    // Implicit `u32`/`i32` → `f32` promotion when the peer operand is
+    // f32. Mirrors WGSL's lack of auto-promotion at the IR level by
+    // wrapping the integer side in a `BuiltinId::AsF32(<src>)` cast,
+    // so `1000.0 - hp_u32` lowers as `1000.0 - f32(hp_u32)`. Closes
+    // Gap #2 of the pair_scoring probe (gap chain in
+    // `docs/superpowers/notes/2026-05-04-pair_scoring_probe.md`).
+    // Scope: only applies to numeric ops (arith + compare). Logical
+    // `And`/`Or` reject earlier in `pick_binary_op` regardless. The
+    // promotion is one-directional (int → f32), never the reverse —
+    // demoting f32 to int is lossy and stays an explicit user-side
+    // cast.
+    let (lhs_id, lhs_ty, rhs_id, rhs_ty) =
+        promote_int_to_f32(ctx, lhs_id, lhs_ty, rhs_id, rhs_ty, span)?;
+
     if lhs_ty != rhs_ty {
         return Err(LoweringError::BinaryOperandTyMismatch {
             op,
@@ -1472,6 +1486,68 @@ fn coerce_int_literal_to_signed(
         if v <= i32::MAX as u32 {
             let new_lhs = add(ctx, CgExpr::Lit(LitValue::I32(v as i32)), span)?;
             return Ok((new_lhs, CgTy::I32, rhs_id, rhs_ty));
+        }
+    }
+    Ok((lhs_id, lhs_ty, rhs_id, rhs_ty))
+}
+
+/// Implicit `u32` / `i32` → `f32` promotion for mixed-type binary
+/// arithmetic and comparison. When exactly one operand is `F32` and
+/// the other is `U32` or `I32`, wrap the integer side in a
+/// [`BuiltinId::AsF32`] cast and return the updated tuple. WGSL
+/// itself doesn't auto-promote — the cast lowers to `f32(<arg>)` at
+/// emit time. Falls through (returns the input tuple unchanged) for
+/// any other type combination, including `Tick` / `AgentId` — those
+/// stay an explicit-cast surface concern.
+///
+/// Asymmetric direction is intentional: f32 → int is lossy and would
+/// hide truncation bugs; the user must opt into it explicitly. The
+/// integer-side widening is loss-free for `i32` (representable
+/// exactly up to `2^24`; larger magnitudes round to nearest f32) and
+/// for `u32` under the same bound.
+fn promote_int_to_f32(
+    ctx: &mut LoweringCtx<'_>,
+    lhs_id: CgExprId,
+    lhs_ty: CgTy,
+    rhs_id: CgExprId,
+    rhs_ty: CgTy,
+    span: Span,
+) -> Result<(CgExprId, CgTy, CgExprId, CgTy), LoweringError> {
+    fn int_src(ty: CgTy) -> Option<NumericTy> {
+        match ty {
+            CgTy::U32 => Some(NumericTy::U32),
+            CgTy::I32 => Some(NumericTy::I32),
+            _ => None,
+        }
+    }
+    // lhs:f32, rhs:int — promote rhs.
+    if lhs_ty == CgTy::F32 {
+        if let Some(src) = int_src(rhs_ty) {
+            let new_rhs = add(
+                ctx,
+                CgExpr::Builtin {
+                    fn_id: BuiltinId::AsF32(src),
+                    args: vec![rhs_id],
+                    ty: CgTy::F32,
+                },
+                span,
+            )?;
+            return Ok((lhs_id, lhs_ty, new_rhs, CgTy::F32));
+        }
+    }
+    // lhs:int, rhs:f32 — promote lhs.
+    if rhs_ty == CgTy::F32 {
+        if let Some(src) = int_src(lhs_ty) {
+            let new_lhs = add(
+                ctx,
+                CgExpr::Builtin {
+                    fn_id: BuiltinId::AsF32(src),
+                    args: vec![lhs_id],
+                    ty: CgTy::F32,
+                },
+                span,
+            )?;
+            return Ok((new_lhs, CgTy::F32, rhs_id, rhs_ty));
         }
     }
     Ok((lhs_id, lhs_ty, rhs_id, rhs_ty))
@@ -3682,6 +3758,81 @@ mod tests {
             } => {
                 assert_eq!(lhs_ty, CgTy::I32);
                 assert_eq!(rhs_ty, CgTy::U32);
+            }
+            other => panic!("expected BinaryOperandTyMismatch, got {other:?}"),
+        }
+    }
+
+    // ---- Implicit u32/i32 → f32 promotion (Gap #2 of pair_scoring probe) ----
+
+    /// `1000.0 - self.level` (f32 lhs, u32 rhs) lowers to
+    /// `1000.0 - f32(self.level)` — the rhs is wrapped in
+    /// `BuiltinId::AsF32(U32)`, then the SubF32 op is picked.
+    #[test]
+    fn binary_f32_minus_u32_promotes_rhs_to_f32() {
+        let ast = node(IrExpr::Binary(
+            BinOp::Sub,
+            Box::new(node(IrExpr::LitFloat(1000.0))),
+            Box::new(field_self("level")),
+        ));
+        let s = lower_to_string(&ast).unwrap();
+        assert_eq!(
+            s,
+            "(sub.f32 (lit 1000.0f32) (builtin.as_f32.u32 (read agent.self.level)))",
+            "expected u32→f32 cast on rhs, got {s:?}"
+        );
+    }
+
+    /// Symmetric: `self.level * 2.0` (u32 lhs, f32 rhs) — lhs wraps.
+    #[test]
+    fn binary_u32_times_f32_promotes_lhs_to_f32() {
+        let ast = node(IrExpr::Binary(
+            BinOp::Mul,
+            Box::new(field_self("level")),
+            Box::new(node(IrExpr::LitFloat(2.0))),
+        ));
+        let s = lower_to_string(&ast).unwrap();
+        assert_eq!(
+            s,
+            "(mul.f32 (builtin.as_f32.u32 (read agent.self.level)) (lit 2.0f32))",
+            "expected u32→f32 cast on lhs, got {s:?}"
+        );
+    }
+
+    /// I32-source promotion: `self.slow_factor_q8 < 0.5` (i32 lhs,
+    /// f32 rhs). Verifies the NumericTy::I32 arm of the cast.
+    #[test]
+    fn binary_i32_lt_f32_promotes_lhs_to_f32() {
+        let ast = node(IrExpr::Binary(
+            BinOp::Lt,
+            Box::new(field_self("slow_factor_q8")),
+            Box::new(node(IrExpr::LitFloat(0.5))),
+        ));
+        let s = lower_to_string(&ast).unwrap();
+        assert_eq!(
+            s,
+            "(lt.f32 (builtin.as_f32.i32 (read agent.self.slow_factor_q8)) (lit 0.5f32))",
+            "expected i32→f32 cast on lhs, got {s:?}"
+        );
+    }
+
+    /// Promotion is one-directional. `self.level - self.engaged_with`
+    /// (u32 - agent_id) is NOT a numeric mixed-type case, so the
+    /// existing `BinaryOperandTyMismatch` still fires.
+    #[test]
+    fn binary_u32_minus_agent_id_still_rejected() {
+        let ast = node(IrExpr::Binary(
+            BinOp::Sub,
+            Box::new(field_self("level")),
+            Box::new(field_self("engaged_with")),
+        ));
+        let err = lower_to_string(&ast).unwrap_err();
+        match err {
+            LoweringError::BinaryOperandTyMismatch {
+                lhs_ty, rhs_ty, ..
+            } => {
+                assert_eq!(lhs_ty, CgTy::U32);
+                assert_eq!(rhs_ty, CgTy::AgentId);
             }
             other => panic!("expected BinaryOperandTyMismatch, got {other:?}"),
         }
