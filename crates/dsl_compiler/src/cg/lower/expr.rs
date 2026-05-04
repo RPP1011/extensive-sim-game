@@ -1543,8 +1543,20 @@ fn pick_binary_op(op: BinOp, ty: CgTy, span: Span) -> Result<BinaryOp, LoweringE
             })
         }
 
-        // Mod — no CG variant in v1.
-        (BinOp::Mod, _) => Err(LoweringError::UnsupportedBinaryOp { op, span }),
+        // Mod — F32, U32, I32. `Tick` is treated as U32 for parity
+        // with the comparison ops, so cooldown gates of the form
+        // `tick % cooldown_ticks == 0u` lower cleanly. WGSL emits the
+        // native `%` operator. See the abilities-probe discovery doc
+        // (`docs/superpowers/notes/2026-05-04-abilities_probe.md`,
+        // Gap #3).
+        (BinOp::Mod, CgTy::F32) => Ok(BinaryOp::ModF32),
+        (BinOp::Mod, CgTy::U32) | (BinOp::Mod, CgTy::Tick) => Ok(BinaryOp::ModU32),
+        (BinOp::Mod, CgTy::I32) => Ok(BinaryOp::ModI32),
+        (BinOp::Mod, _) => Err(LoweringError::IllTypedExpression {
+            expected: CgTy::F32,
+            got: ty,
+            span,
+        }),
     }
 }
 
@@ -3477,18 +3489,50 @@ mod tests {
         );
     }
 
+    /// `BinOp::Mod` lowers to `BinaryOp::ModU32` for u32 operands. The
+    /// pretty-print exercises both the `mod.u32` label and the WGSL `%`
+    /// operator path. Closes Gap #3 from
+    /// `docs/superpowers/notes/2026-05-04-abilities_probe.md`.
     #[test]
-    fn binary_mod_unsupported() {
+    fn binary_mod_u32() {
         let ast = node(IrExpr::Binary(
             BinOp::Mod,
             Box::new(node(IrExpr::LitInt(7))),
             Box::new(node(IrExpr::LitInt(3))),
         ));
-        let err = lower_to_string(&ast).unwrap_err();
-        assert!(matches!(
-            err,
-            LoweringError::UnsupportedBinaryOp { op: BinOp::Mod, .. }
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(mod.u32 (lit 7u32) (lit 3u32))"
+        );
+    }
+
+    /// `BinOp::Mod` lowers to `BinaryOp::ModI32` when both operands are
+    /// i32-typed. `slow_factor_q8` is i16 widened to i32 in CG IR (see
+    /// `unary_neg_i32`'s comment for the same i32-source pattern).
+    #[test]
+    fn binary_mod_i32() {
+        let ast = node(IrExpr::Binary(
+            BinOp::Mod,
+            Box::new(field_self("slow_factor_q8")),
+            Box::new(field_self("slow_factor_q8")),
         ));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(mod.i32 (read agent.self.slow_factor_q8) (read agent.self.slow_factor_q8))"
+        );
+    }
+
+    /// `BinOp::Mod` lowers to `BinaryOp::ModF32` for f32 operands —
+    /// matching WGSL's native `%` overload for floats.
+    #[test]
+    fn binary_mod_f32() {
+        let ast = node(IrExpr::Binary(
+            BinOp::Mod,
+            Box::new(node(IrExpr::LitFloat(7.5))),
+            Box::new(node(IrExpr::LitFloat(2.0))),
+        ));
+        let s = lower_to_string(&ast).unwrap();
+        assert!(s.starts_with("(mod.f32 "), "expected mod.f32, got {s}");
     }
 
     #[test]

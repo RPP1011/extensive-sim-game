@@ -168,6 +168,15 @@ pub enum BinaryOp {
     SubI32,
     MulI32,
     DivI32,
+    /// Modulo (remainder). Lowered from `BinOp::Mod` for f32/u32/i32
+    /// operands. WGSL emits the native `%` operator. Used by
+    /// cooldown-style mask gates (`tick % cooldown_ticks == 0u`) and
+    /// the natural ability-system shape — see the abilities-probe
+    /// discovery doc (`docs/superpowers/notes/2026-05-04-abilities_probe.md`,
+    /// Gap #3).
+    ModF32,
+    ModU32,
+    ModI32,
 
     // --- Vec3 arithmetic (Phase 7 boids fixture) ---
     //
@@ -233,15 +242,12 @@ impl BinaryOp {
     pub fn operand_ty(self) -> CgTy {
         use BinaryOp::*;
         match self {
-            AddF32 | SubF32 | MulF32 | DivF32 | LtF32 | LeF32 | GtF32 | GeF32 | EqF32 | NeF32 => {
-                CgTy::F32
-            }
-            AddU32 | SubU32 | MulU32 | DivU32 | LtU32 | LeU32 | GtU32 | GeU32 | EqU32 | NeU32 => {
-                CgTy::U32
-            }
-            AddI32 | SubI32 | MulI32 | DivI32 | LtI32 | LeI32 | GtI32 | GeI32 | EqI32 | NeI32 => {
-                CgTy::I32
-            }
+            AddF32 | SubF32 | MulF32 | DivF32 | ModF32 | LtF32 | LeF32 | GtF32 | GeF32 | EqF32
+            | NeF32 => CgTy::F32,
+            AddU32 | SubU32 | MulU32 | DivU32 | ModU32 | LtU32 | LeU32 | GtU32 | GeU32 | EqU32
+            | NeU32 => CgTy::U32,
+            AddI32 | SubI32 | MulI32 | DivI32 | ModI32 | LtI32 | LeI32 | GtI32 | GeI32 | EqI32
+            | NeI32 => CgTy::I32,
             AddVec3 | SubVec3 | MulVec3ByF32 | DivVec3ByF32 => CgTy::Vec3F32,
             EqAgentId | NeAgentId => CgTy::AgentId,
             EqBool | NeBool | And | Or => CgTy::Bool,
@@ -269,9 +275,9 @@ impl BinaryOp {
     pub fn result_ty(self) -> CgTy {
         use BinaryOp::*;
         match self {
-            AddF32 | SubF32 | MulF32 | DivF32 => CgTy::F32,
-            AddU32 | SubU32 | MulU32 | DivU32 => CgTy::U32,
-            AddI32 | SubI32 | MulI32 | DivI32 => CgTy::I32,
+            AddF32 | SubF32 | MulF32 | DivF32 | ModF32 => CgTy::F32,
+            AddU32 | SubU32 | MulU32 | DivU32 | ModU32 => CgTy::U32,
+            AddI32 | SubI32 | MulI32 | DivI32 | ModI32 => CgTy::I32,
             AddVec3 | SubVec3 | MulVec3ByF32 | DivVec3ByF32 => CgTy::Vec3F32,
             // Every comparison and logical op produces `Bool`.
             LtF32 | LeF32 | GtF32 | GeF32 | EqF32 | NeF32 | LtU32 | LeU32 | GtU32 | GeU32
@@ -298,6 +304,9 @@ impl BinaryOp {
             SubI32 => "sub.i32",
             MulI32 => "mul.i32",
             DivI32 => "div.i32",
+            ModF32 => "mod.f32",
+            ModU32 => "mod.u32",
+            ModI32 => "mod.i32",
             AddVec3 => "add.vec3",
             SubVec3 => "sub.vec3",
             MulVec3ByF32 => "mul.vec3.f32",
@@ -1546,6 +1555,9 @@ mod tests {
             BinaryOp::SubI32,
             BinaryOp::MulI32,
             BinaryOp::DivI32,
+            BinaryOp::ModF32,
+            BinaryOp::ModU32,
+            BinaryOp::ModI32,
             BinaryOp::LtF32,
             BinaryOp::LeF32,
             BinaryOp::GtF32,

@@ -597,6 +597,7 @@ fn binary_op_to_wgsl(op: BinaryOp) -> &'static str {
         SubF32 | SubU32 | SubI32 | SubVec3 => "-",
         MulF32 | MulU32 | MulI32 | MulVec3ByF32 => "*",
         DivF32 | DivU32 | DivI32 | DivVec3ByF32 => "/",
+        ModF32 | ModU32 | ModI32 => "%",
         LtF32 | LtU32 | LtI32 => "<",
         LeF32 | LeU32 | LeI32 => "<=",
         GtF32 | GtU32 | GtI32 => ">",

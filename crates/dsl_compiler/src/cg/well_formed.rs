@@ -2051,6 +2051,7 @@ fn detect_cycles(prog: &CgProgram, errors: &mut Vec<CgError>) {
             crate::cg::op::ComputeOpKind::SpatialQuery { .. }
         );
         let consumer_is_guarded_per_agent = is_guarded_per_agent_physics(prog, op);
+        let consumer_chronicle_gate = chronicle_action_id_gate(prog, op);
         for r in &op.reads {
             if let Some(producers) = writers.get(&r.cycle_edge_key()) {
                 for &producer in producers {
@@ -2082,6 +2083,30 @@ fn detect_cycles(prog: &CgProgram, errors: &mut Vec<CgError>) {
                         && is_guarded_per_agent_physics(prog, producer_op)
                     {
                         continue;
+                    }
+                    // Verb-cascade chronicle pair: two PerEvent
+                    // PhysicsRule ops listening on the same source
+                    // event ring (same on_event) whose bodies are a
+                    // pattern-binding prelude (`Let` stmts) followed by
+                    // a single top-level `if (action_id_local == <lit>)
+                    // { … }` guard with DIFFERENT literal RHS values.
+                    // Each PerEvent thread reads ONE event with ONE
+                    // action_id, so only one of the two If guards
+                    // matches per thread — the kernels are mutually
+                    // exclusive even though both Read+Append the same
+                    // event ring (CycleEdgeKey collapses access mode).
+                    // Surfaces in `assets/sim/abilities_probe.sim` with
+                    // its Strike + Heal verbs (action_id 0 vs 1).
+                    if let (Some(a), Some(b)) = (
+                        consumer_chronicle_gate,
+                        chronicle_action_id_gate(prog, producer_op),
+                    ) {
+                        if a.source_ring == b.source_ring
+                            && a.on_event == b.on_event
+                            && a.action_id != b.action_id
+                        {
+                            continue;
+                        }
                     }
                     adj[producer.0 as usize].insert(consumer.0);
                 }
@@ -2135,6 +2160,110 @@ fn is_guarded_per_agent_physics(prog: &CgProgram, op: &crate::cg::op::ComputeOp)
         None => return false,
     };
     matches!(stmt, CgStmt::If { else_: None, .. })
+}
+
+/// Chronicle-pair disjoint-gate descriptor.
+///
+/// Returned by [`chronicle_action_id_gate`] when an op matches the
+/// verb-cascade chronicle shape: a `PerEvent` `PhysicsRule` whose body
+/// is a sequence of `CgStmt::Let` binders (the event-pattern prelude)
+/// followed by exactly one trailing `CgStmt::If { cond, else_: None }`
+/// where `cond` is `<local> == <u32-lit>`. The literal value names the
+/// `action_id` the gate selects on; two such ops with the same
+/// `(source_ring, on_event)` and DIFFERENT `action_id` literals are
+/// mutually exclusive at runtime (each PerEvent thread sees one event,
+/// one action_id; only the matching guard fires).
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+struct ChronicleGate {
+    source_ring: crate::cg::data_handle::EventRingId,
+    on_event: crate::cg::op::EventKindId,
+    action_id: u32,
+}
+
+/// Extract the chronicle gate descriptor for `op`, or `None` if the op
+/// doesn't match the verb-cascade chronicle shape.
+///
+/// The shape mirrors what `cg::lower::verb_expand::synthesize_cascade_physics`
+/// emits: each `verb_chronicle_<name>` PhysicsRule binds the event's
+/// pattern fields via `Let` stmts (synthesised by
+/// [`super::event_binding::synthesize_pattern_binding_lets`]), then
+/// runs `if (action_id == <verb's stable id>) { <emit body> }`. Two
+/// such ops sharing source ring + on_event but with different action_id
+/// literals are guaranteed disjoint at the per-thread level — see the
+/// abilities-probe discovery doc (`docs/superpowers/notes/2026-05-04-abilities_probe.md`,
+/// Gap #2).
+fn chronicle_action_id_gate(
+    prog: &CgProgram,
+    op: &crate::cg::op::ComputeOp,
+) -> Option<ChronicleGate> {
+    use crate::cg::expr::{BinaryOp, CgExpr, LitValue};
+    use crate::cg::op::ComputeOpKind;
+    let source_ring = match op.shape {
+        DispatchShape::PerEvent { source_ring } => source_ring,
+        _ => return None,
+    };
+    let (body_id, on_event) = match &op.kind {
+        ComputeOpKind::PhysicsRule {
+            body,
+            on_event: Some(ev),
+            ..
+        } => (*body, *ev),
+        _ => return None,
+    };
+    let stmts = &prog.stmt_lists.get(body_id.0 as usize)?.stmts;
+    // Scan past the `Let` prelude; the gate must be the final stmt and
+    // every preceding stmt must be a `Let` (the pattern-binder prelude).
+    let last_id = *stmts.last()?;
+    for stmt_id in stmts.iter().take(stmts.len().saturating_sub(1)) {
+        let prelude_stmt = prog.stmts.get(stmt_id.0 as usize)?;
+        if !matches!(prelude_stmt, CgStmt::Let { .. }) {
+            return None;
+        }
+    }
+    let last = prog.stmts.get(last_id.0 as usize)?;
+    let cond_id = match last {
+        CgStmt::If {
+            cond,
+            else_: None,
+            ..
+        } => *cond,
+        _ => return None,
+    };
+    let cond = prog.exprs.get(cond_id.0 as usize)?;
+    let (lhs_id, rhs_id) = match cond {
+        CgExpr::Binary {
+            op: BinaryOp::EqU32,
+            lhs,
+            rhs,
+            ..
+        } => (*lhs, *rhs),
+        _ => return None,
+    };
+    // Accept either operand order: `local == lit` or `lit == local`.
+    let extract_lit = |id: crate::cg::data_handle::CgExprId| -> Option<u32> {
+        match prog.exprs.get(id.0 as usize)? {
+            CgExpr::Lit(LitValue::U32(v)) => Some(*v),
+            _ => None,
+        }
+    };
+    let is_local_read = |id: crate::cg::data_handle::CgExprId| -> bool {
+        matches!(
+            prog.exprs.get(id.0 as usize),
+            Some(CgExpr::ReadLocal { .. })
+        )
+    };
+    let action_id = if is_local_read(lhs_id) {
+        extract_lit(rhs_id)?
+    } else if is_local_read(rhs_id) {
+        extract_lit(lhs_id)?
+    } else {
+        return None;
+    };
+    Some(ChronicleGate {
+        source_ring,
+        on_event,
+        action_id,
+    })
 }
 
 /// Tarjan's strongly-connected-components algorithm. Iterative
@@ -2797,6 +2926,229 @@ mod tests {
         // Single op writes + reads view[0].primary — that's a self-edge,
         // not a cycle. check_well_formed should pass.
         assert_eq!(check_well_formed(&prog), Ok(()));
+    }
+
+    // -----------------------------------------------------------------
+    // 7b. Verb-cascade chronicle pair — disjoint action_id gates
+    // -----------------------------------------------------------------
+
+    /// Two `verb_chronicle_<name>` PhysicsRule ops listening on the
+    /// same source event ring (ActionSelected) with bodies of the
+    /// shape `{ let action_id = …; if (action_id == <lit>) { … } }`,
+    /// where the literals differ, should NOT be reported as a cycle.
+    ///
+    /// Each PerEvent thread reads ONE event with ONE action_id; only
+    /// one of the two If guards matches per thread, so the kernels are
+    /// mutually exclusive at runtime even though both Read+Append the
+    /// shared ring (CycleEdgeKey collapses access mode → both edges
+    /// land on the same key).
+    ///
+    /// Closes Gap #2 from
+    /// `docs/superpowers/notes/2026-05-04-abilities_probe.md`.
+    #[test]
+    fn verb_chronicle_pair_with_disjoint_action_ids_not_cycle() {
+        use crate::cg::stmt::LocalId;
+        let mut b = CgProgramBuilder::new();
+
+        // Build body for op#0: gate on action_id == 0u (Strike).
+        let action_id_local_0 = LocalId(0);
+        let local_read_0 = b
+            .add_expr(CgExpr::ReadLocal {
+                local: action_id_local_0,
+                ty: CgTy::U32,
+            })
+            .unwrap();
+        let lit_zero = b.add_expr(CgExpr::Lit(LitValue::U32(0))).unwrap();
+        let cond_strike = b
+            .add_expr(CgExpr::Binary {
+                op: BinaryOp::EqU32,
+                lhs: local_read_0,
+                rhs: lit_zero,
+                ty: CgTy::Bool,
+            })
+            .unwrap();
+        // Pattern-binding prelude: Let action_id = …. The value can be
+        // any U32-typed expr; reuse the literal so we don't need an
+        // EventField. The cycle predicate only checks `Let { .. }`'s
+        // outer shape, not the rhs.
+        let let_strike = b
+            .add_stmt(CgStmt::Let {
+                local: action_id_local_0,
+                value: lit_zero,
+                ty: CgTy::U32,
+            })
+            .unwrap();
+        let then_strike = b.add_stmt_list(CgStmtList::new(Vec::new())).unwrap();
+        let if_strike = b
+            .add_stmt(CgStmt::If {
+                cond: cond_strike,
+                then: then_strike,
+                else_: None,
+            })
+            .unwrap();
+        let body_strike = b
+            .add_stmt_list(CgStmtList::new(vec![let_strike, if_strike]))
+            .unwrap();
+
+        b.add_op(
+            ComputeOpKind::PhysicsRule {
+                rule: PhysicsRuleId(0),
+                on_event: Some(EventKindId(0)),
+                body: body_strike,
+                replayable: ReplayabilityFlag::Replayable,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+        )
+        .unwrap();
+
+        // Build body for op#1: gate on action_id == 1u (Heal).
+        let action_id_local_1 = LocalId(1);
+        let local_read_1 = b
+            .add_expr(CgExpr::ReadLocal {
+                local: action_id_local_1,
+                ty: CgTy::U32,
+            })
+            .unwrap();
+        let lit_one = b.add_expr(CgExpr::Lit(LitValue::U32(1))).unwrap();
+        let cond_heal = b
+            .add_expr(CgExpr::Binary {
+                op: BinaryOp::EqU32,
+                lhs: local_read_1,
+                rhs: lit_one,
+                ty: CgTy::Bool,
+            })
+            .unwrap();
+        let let_heal = b
+            .add_stmt(CgStmt::Let {
+                local: action_id_local_1,
+                value: lit_one,
+                ty: CgTy::U32,
+            })
+            .unwrap();
+        let then_heal = b.add_stmt_list(CgStmtList::new(Vec::new())).unwrap();
+        let if_heal = b
+            .add_stmt(CgStmt::If {
+                cond: cond_heal,
+                then: then_heal,
+                else_: None,
+            })
+            .unwrap();
+        let body_heal = b
+            .add_stmt_list(CgStmtList::new(vec![let_heal, if_heal]))
+            .unwrap();
+
+        b.add_op(
+            ComputeOpKind::PhysicsRule {
+                rule: PhysicsRuleId(1),
+                on_event: Some(EventKindId(0)),
+                body: body_heal,
+                replayable: ReplayabilityFlag::Replayable,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+        )
+        .unwrap();
+
+        let mut prog = b.finish();
+
+        // Both ops Read+Append the same ring — CycleEdgeKey collapses
+        // access mode, so without the chronicle relax this would form
+        // an SCC of size 2.
+        prog.ops[0].record_read(DataHandle::EventRing {
+            ring: EventRingId(0),
+            kind: EventRingAccess::Read,
+        });
+        prog.ops[0].record_write(DataHandle::EventRing {
+            ring: EventRingId(0),
+            kind: EventRingAccess::Append,
+        });
+        prog.ops[1].record_read(DataHandle::EventRing {
+            ring: EventRingId(0),
+            kind: EventRingAccess::Read,
+        });
+        prog.ops[1].record_write(DataHandle::EventRing {
+            ring: EventRingId(0),
+            kind: EventRingAccess::Append,
+        });
+
+        let result = check_well_formed(&prog);
+        // Should NOT fail with a cycle — disjoint gates make the two
+        // chronicles mutually exclusive at the per-event-thread level.
+        assert!(
+            !matches!(&result, Err(errs) if errs.iter().any(|e| matches!(e, CgError::Cycle { .. }))),
+            "expected no Cycle error for disjoint chronicle pair, got {result:?}",
+        );
+    }
+
+    /// Negative case — two PerEvent PhysicsRule ops listening on the
+    /// same source ring with bodies that DON'T match the gated chronicle
+    /// shape (no leading-Let-only prelude, no `local == lit` guard) must
+    /// still report a cycle when they Read+Append the shared ring. This
+    /// pins the gate's specificity: only the disjoint-literal shape
+    /// gets relaxed, not arbitrary PerEvent pairs.
+    #[test]
+    fn unguarded_per_event_physics_pair_still_cycles() {
+        let mut b = CgProgramBuilder::new();
+        let body_a = b.add_stmt_list(CgStmtList::new(Vec::new())).unwrap();
+        let body_b = b.add_stmt_list(CgStmtList::new(Vec::new())).unwrap();
+        b.add_op(
+            ComputeOpKind::PhysicsRule {
+                rule: PhysicsRuleId(0),
+                on_event: Some(EventKindId(0)),
+                body: body_a,
+                replayable: ReplayabilityFlag::Replayable,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+        )
+        .unwrap();
+        b.add_op(
+            ComputeOpKind::PhysicsRule {
+                rule: PhysicsRuleId(1),
+                on_event: Some(EventKindId(0)),
+                body: body_b,
+                replayable: ReplayabilityFlag::Replayable,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+        )
+        .unwrap();
+        let mut prog = b.finish();
+        prog.ops[0].record_read(DataHandle::EventRing {
+            ring: EventRingId(0),
+            kind: EventRingAccess::Read,
+        });
+        prog.ops[0].record_write(DataHandle::EventRing {
+            ring: EventRingId(0),
+            kind: EventRingAccess::Append,
+        });
+        prog.ops[1].record_read(DataHandle::EventRing {
+            ring: EventRingId(0),
+            kind: EventRingAccess::Read,
+        });
+        prog.ops[1].record_write(DataHandle::EventRing {
+            ring: EventRingId(0),
+            kind: EventRingAccess::Append,
+        });
+
+        let errs = check_well_formed(&prog)
+            .expect_err("unguarded chronicle pair should still cycle");
+        let saw_cycle = errs.iter().any(|e| {
+            matches!(
+                e,
+                CgError::Cycle { ops } if ops.contains(&OpId(0)) && ops.contains(&OpId(1))
+            )
+        });
+        assert!(saw_cycle, "missing Cycle for unguarded pair in {:?}", errs);
     }
 
     // -----------------------------------------------------------------
