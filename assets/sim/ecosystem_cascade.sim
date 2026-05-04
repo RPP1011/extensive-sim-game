@@ -1,0 +1,161 @@
+// ecosystem_cascade — three-tier event cascade fixture (Plants ←
+// Herbivores ← Carnivores). Each tier emits a Death event when
+// consumed by the next; biomass views per tier track recent
+// activity via @decay anchors.
+//
+// Stress targets:
+//   - Multi-tier event chain across replayable rings: Plant Eaten →
+//     Herbivore "alive but ate", Herbivore Eaten → Carnivore "alive
+//     but ate". Two distinct Eaten event kinds (PlantEaten,
+//     HerbivoreEaten); two fold consumers per kind.
+//   - Per-handler `where (self.creature_type == X)` discriminator
+//     across THREE entity types (vs predator_prey's two), exercises
+//     the cycle-detector relax on guarded PerAgent rules with a
+//     wider variant fan-out.
+//   - @decay across multiple views (one per tier), validating the
+//     decay schedule synthesizer with N anchors in flight.
+//   - Cross-tier scoring potential — `recent_browse` measures
+//     herbivore feeding activity; `predator_pressure` aggregates
+//     carnivore strikes. Useful for downstream verb / probe /
+//     metric work once those decl kinds emit.
+//
+// Item / Group entity types are NOT used here — this fixture is
+// runnable end-to-end on the current compiler without depending on
+// Item/Group SoA storage (still landing in a parallel agent's work).
+// See foraging_colony.sim and auction_market.sim for fixtures that
+// exercise those entity surfaces.
+
+event Tick { }
+
+@replayable
+@gpu_amenable
+event PlantEaten {
+  plant: AgentId,
+  by:    AgentId,
+  pos:   vec3,
+}
+
+@replayable
+@gpu_amenable
+event HerbivoreEaten {
+  prey:  AgentId,
+  by:    AgentId,
+  pos:   vec3,
+}
+
+entity Plant : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Herbivore : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Carnivore : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config ecosystem {
+  step_scale:        f32 = 0.5,
+  // Plants drift slowly (passive — they're plants, but a tiny
+  // stochastic motion exercises the per-tick integrator).
+  plant_speed:       f32 = 0.05,
+  herbivore_speed:   f32 = 0.4,
+  carnivore_speed:   f32 = 0.55,
+  // Browse / strike weights tuned so per-tick velocity deltas
+  // stay in plant/herbivore/carnivore_speed range.
+  browse_weight:     f32 = 0.0002,
+  strike_weight:     f32 = 0.00025,
+  flee_weight:       f32 = 0.00018,
+}
+
+// Per-tier physics rules. Each emits the appropriate Eaten event
+// per tick (1 emit / agent / tick) so the views accumulate
+// observably without depending on a real strike-radius spatial
+// filter (that's the per-pair body-iter work tracked separately).
+
+physics MovePlant @phase(per_agent) {
+  on Tick {} where (self.creature_type == Plant) {
+    let new_pos = self.pos + self.vel * config.ecosystem.plant_speed;
+    agents.set_pos(self, new_pos);
+  }
+}
+
+physics MoveHerbivore @phase(per_agent) {
+  on Tick {} where (self.creature_type == Herbivore) {
+    // Sum a flee-from-carnivores push so the herbivore biomass
+    // view picks up real motion, not just constant velocity.
+    let flee_force = sum(other in agents where
+      if (other != self) && (other.creature_type == Carnivore) {
+        self.pos - other.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let new_vel = self.vel + flee_force * config.ecosystem.flee_weight;
+    let new_pos = self.pos + new_vel * config.ecosystem.herbivore_speed;
+    agents.set_vel(self, new_vel);
+    agents.set_pos(self, new_pos);
+    // Per-tick PlantEaten emit — uses self as both plant + by so
+    // the fold downstream has a deterministic per-Herbivore tick
+    // increment. Real per-pair strike resolution (closest plant
+    // within radius) lands once spatial body-iter in physics
+    // bodies works.
+    emit PlantEaten { plant: self, by: self, pos: new_pos }
+  }
+}
+
+physics MoveCarnivore @phase(per_agent) {
+  on Tick {} where (self.creature_type == Carnivore) {
+    let chase_force = sum(other in agents where
+      if (other != self) && (other.creature_type == Herbivore) {
+        other.pos - self.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let new_vel = self.vel + chase_force * config.ecosystem.strike_weight;
+    let new_pos = self.pos + new_vel * config.ecosystem.carnivore_speed;
+    agents.set_vel(self, new_vel);
+    agents.set_pos(self, new_pos);
+    emit HerbivoreEaten { prey: self, by: self, pos: new_pos }
+  }
+}
+
+// Per-Herbivore browse activity (PlantEaten events targeting `by`).
+// @decay(rate=0.92) means recent browsers rank higher than ones
+// that ate long ago — a downstream "active forager" probe / metric
+// reads off this view.
+@materialized(on_event = [PlantEaten])
+@decay(rate = 0.92, per = tick)
+view recent_browse(by: Agent) -> f32 {
+  initial: 0.0,
+  on PlantEaten { by: forager } { self += 1.0 }
+  clamp: [0.0, 1000.0],
+}
+
+// Per-Carnivore strike activity (HerbivoreEaten events). Slower
+// decay (0.95) so apex predator activity persists longer in the
+// ranking.
+@materialized(on_event = [HerbivoreEaten])
+@decay(rate = 0.95, per = tick)
+view predator_pressure(by: Agent) -> f32 {
+  initial: 0.0,
+  on HerbivoreEaten { by: hunter } { self += 1.0 }
+  clamp: [0.0, 1000.0],
+}
+
+// Per-Plant predation pressure (how often each plant slot is
+// recorded as eaten). With self-targeting in the placeholder emit
+// above this is a per-Herbivore counter, but the view's `plant`
+// binder resolves correctly so when the per-pair body-iter work
+// lands and emits real `plant: <closest_target>` payloads, this
+// view starts ranking the most-eaten plants.
+@materialized(on_event = [PlantEaten])
+@decay(rate = 0.90, per = tick)
+view plant_pressure(plant: Agent) -> f32 {
+  initial: 0.0,
+  on PlantEaten { plant: prey } { self += 1.0 }
+  clamp: [0.0, 1000.0],
+}

@@ -1,0 +1,154 @@
+// auction_market — economic simulation fixture exercising Item +
+// Group entity types with bidding events. Designed as the third
+// stage of Item/Group surface coverage (after bartering parses
+// the entity surfaces and foraging_colony stresses pair-keyed
+// Item access).
+//
+// Stress targets:
+//   - `entity X : Item` declaration with multiple typed fields
+//     (asking_price, quality), preparing for the multi-field
+//     Item-SoA emit work.
+//   - `entity X : Group` declaration with treasury/membership
+//     fields, exercising the Group-SoA emit work.
+//   - The `auctions.*` namespace flagged in the spec audit as
+//     entirely untested (zero coverage). Once the auctions
+//     namespace lowers, bid placement / allocation resolution
+//     would route through `auctions.place_bid(good, amount)` and
+//     `auctions.allocate(good)` calls.
+//   - Multi-event-kind producer: each Trader emits Bid every
+//     tick; per-tick allocation rule emits Allocated per resolved
+//     auction. Two distinct event rings sharing one tick.
+//   - Per-Trader running bid count via @decay (active bidders
+//     rank higher) — a metric source candidate downstream.
+//
+// GAPs documented inline. Today this fixture parses + lowers,
+// exercises the Item/Group entity-decl surfaces, and produces a
+// per-Trader Bid count. Full bid-allocation resolution waits on
+// the `auctions.*` namespace lowering (currently parsed-only per
+// the spec audit).
+
+event Tick { }
+
+@replayable
+@gpu_amenable
+event Bid {
+  trader:    AgentId,
+  // GAP: should be `good: ItemId` once Item field access lowers.
+  // Today: stuck-at-self via the engaged_with placeholder
+  // pattern bartering uses.
+  good:      AgentId,
+  amount:    f32,
+}
+
+@replayable
+@gpu_amenable
+event Allocated {
+  // GAP: when `auctions.allocate(good)` lowers, this fires once
+  // per resolved auction with the winning trader + final price.
+  // Today: never emitted (no allocation rule).
+  good:      AgentId,
+  winner:    AgentId,
+  final_price: f32,
+}
+
+entity Trader : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Good : Item {
+  // GAP: not yet read by any rule. Once Item-SoA lower lands,
+  // a Trader's Bid amount could be capped by `items.asking_price(
+  // self.engaged_with) * config.bid_premium_ceiling`.
+  asking_price: f32,
+  quality:      f32,
+}
+
+entity Faction : Group {
+  // GAP: not yet read. Once Group-SoA lower lands, a Trader's
+  // bid budget per tick could derive from `groups.treasury(
+  // self.affiliation) / groups.member_count(self.affiliation)`.
+  treasury:     f32,
+  member_count: f32,
+}
+
+config market {
+  step_scale:        f32 = 0.05,
+  // Per-tick bid amount. Real implementation derives this from
+  // the trader's wealth / the good's asking_price; for the smoke
+  // shape this is a constant.
+  bid_amount:        f32 = 10.0,
+  // Premium multiplier on Bid events from a "wealthy" trader.
+  // Future: gate on `groups.treasury(self.affiliation) >
+  // <threshold>` once Group-SoA reads work.
+  premium_multiplier: f32 = 1.5,
+}
+
+// Per-Trader integrator + per-tick Bid emit. Each trader places
+// one Bid event per tick on its `engaged_with` slot (the
+// hub-and-spokes target — same workaround bartering.sim uses).
+physics WanderAndBid @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    let new_pos = self.pos + self.vel * config.market.step_scale;
+    agents.set_pos(self, new_pos);
+    // Bid amount is a constant today. Once Item-SoA lowers, the
+    // amount becomes a function of `items.asking_price(
+    // self.engaged_with)`. Once Group-SoA lowers, the bid is
+    // gated by faction treasury.
+    emit Bid {
+      trader: self,
+      good:   self,
+      amount: config.market.bid_amount,
+    }
+    // GAP: per-tick allocation rule needs `auctions.allocate(...)`
+    // namespace call. Today the auctions namespace parses but no
+    // lowering — fold below operates on Bid events directly so a
+    // counter still accumulates.
+  }
+}
+
+// Per-Trader running bid count via @decay. Tracks "active
+// bidders" — recent participants rank higher than dormant ones.
+// A future metric `metric active_bidder_share = …` would consume
+// this via the metric-emit pipeline.
+@materialized(on_event = [Bid])
+@decay(rate = 0.90, per = tick)
+view bid_activity(trader: Agent) -> f32 {
+  initial: 0.0,
+  on Bid { trader: who, good: _, amount: _ } { self += 1.0 }
+  clamp: [0.0, 1000.0],
+}
+
+// Per-Good total bid value (no decay — auctions resolve
+// cumulatively, not via decay). Each tick the running sum grows
+// by `amount` per Bid targeting that good. Once Item-SoA lowers
+// + the per-tick allocation rule fires Allocated events, a
+// sibling `allocation_value` view would rank actually-cleared
+// auctions.
+@materialized(on_event = [Bid])
+view good_bid_total(good: Agent) -> f32 {
+  initial: 0.0,
+  on Bid { trader: _, good: g, amount: a } { self += a }
+  clamp: [0.0, 100000.0],
+}
+
+// GAP: once `auctions.allocate(good)` lowers + Allocated events
+// fire, this view ranks goods by realised sale price (not just
+// total bid pressure). Stubbed:
+//
+// @materialized(on_event = [Allocated])
+// view good_clearing_price(good: Item) -> f32 {
+//   initial: 0.0,
+//   on Allocated { good: g, winner: _, final_price: p } { self += p }
+//   clamp: [0.0, 100000.0],
+// }
+
+// GAP: once Group-SoA lowers, faction-level bid aggregation:
+//
+// @materialized(on_event = [Bid])
+// @decay(rate = 0.95, per = tick)
+// view faction_pressure(faction: Group) -> f32 {
+//   initial: 0.0,
+//   on Bid { trader: t, good: _, amount: a } { self += a }
+//   clamp: [0.0, 1000000.0],
+// }

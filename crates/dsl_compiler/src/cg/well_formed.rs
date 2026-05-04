@@ -1142,6 +1142,28 @@ fn check_data_handle_consistency(
             | AgentRef::EventTarget
             | AgentRef::PerPairCandidate => None,
         },
+        // Item / Group fields: the target id is a `CgExprId` (no
+        // AgentRef wrapper) — verify it's in range.
+        DataHandle::ItemField { target, .. } => {
+            if target.0 >= expr_arena_len {
+                Some(HandleConsistencyReason::AgentRefTargetExprOutOfRange {
+                    referenced: *target,
+                    arena_len: expr_arena_len,
+                })
+            } else {
+                None
+            }
+        }
+        DataHandle::GroupField { target, .. } => {
+            if target.0 >= expr_arena_len {
+                Some(HandleConsistencyReason::AgentRefTargetExprOutOfRange {
+                    referenced: *target,
+                    arena_len: expr_arena_len,
+                })
+            } else {
+                None
+            }
+        }
         DataHandle::ViewStorage { .. }
         | DataHandle::EventRing { .. }
         | DataHandle::ConfigConst { .. }

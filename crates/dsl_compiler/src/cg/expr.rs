@@ -780,22 +780,12 @@ pub enum CgExpr {
 /// per P10.
 pub fn data_handle_ty(h: &DataHandle) -> CgTy {
     use crate::cg::data_handle::{
-        AgentFieldTy, DataHandle as H, EventRingAccess, SpatialStorageKind, ViewStorageSlot,
+        DataHandle as H, EventRingAccess, SpatialStorageKind, ViewStorageSlot,
     };
     match h {
-        H::AgentField { field, .. } => match field.ty() {
-            AgentFieldTy::F32 => CgTy::F32,
-            AgentFieldTy::U32 => CgTy::U32,
-            AgentFieldTy::I16 => CgTy::I32,
-            AgentFieldTy::Bool => CgTy::Bool,
-            AgentFieldTy::Vec3 => CgTy::Vec3F32,
-            // Packed enum tags are read as u32 on the GPU side; the
-            // engine widens u8 → u32 at the binding boundary.
-            AgentFieldTy::EnumU8 | AgentFieldTy::OptEnumU32 => CgTy::U32,
-            // OptAgentId reads as AgentId at the IR level; sentinel
-            // handling is an emit-time concern.
-            AgentFieldTy::OptAgentId => CgTy::AgentId,
-        },
+        H::AgentField { field, .. } => agent_field_ty_to_cg(field.ty()),
+        H::ItemField { field, .. } => agent_field_ty_to_cg(field.ty),
+        H::GroupField { field, .. } => agent_field_ty_to_cg(field.ty),
         H::ViewStorage { view, slot } => match slot {
             // The "primary" storage of any view is opaque at the IR
             // layer — its element type is view-shape-specific. The
@@ -863,6 +853,25 @@ pub fn data_handle_ty(h: &DataHandle) -> CgTy {
             "plumbing handle 'SnapshotKick' is not expression-readable; \
              data_handle_ty should never see this in practice"
         ),
+    }
+}
+
+/// Map an [`AgentFieldTy`] (the per-field primitive tag shared between
+/// `AgentFieldId`, `ItemFieldId`, and `GroupFieldId`) to the
+/// expression-typing [`CgTy`] surfaced by [`data_handle_ty`].
+fn agent_field_ty_to_cg(ty: crate::cg::data_handle::AgentFieldTy) -> CgTy {
+    use crate::cg::data_handle::AgentFieldTy;
+    match ty {
+        AgentFieldTy::F32 => CgTy::F32,
+        AgentFieldTy::U32 => CgTy::U32,
+        AgentFieldTy::I16 => CgTy::I32,
+        AgentFieldTy::Bool => CgTy::Bool,
+        AgentFieldTy::Vec3 => CgTy::Vec3F32,
+        // Packed enum tags read as u32 on the GPU side; widening
+        // happens at the binding boundary.
+        AgentFieldTy::EnumU8 | AgentFieldTy::OptEnumU32 => CgTy::U32,
+        // OptAgentId reads as AgentId at the IR level.
+        AgentFieldTy::OptAgentId => CgTy::AgentId,
     }
 }
 

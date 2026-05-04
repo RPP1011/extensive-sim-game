@@ -236,6 +236,18 @@ fn structural_handle_name(h: &DataHandle) -> String {
         DataHandle::AgentField { field, target } => {
             format!("agent_{}_{}", agent_ref_token(target), field.snake())
         }
+        // Item / Group field handles emit the same structural shape
+        // the kernel binding names use; WGSL bodies that read them
+        // produce `<entity>_<field>[<expr>]` via the dedicated
+        // `Read` arm in `lower_cg_expr_to_wgsl` rather than this
+        // generic name. Keeping a stable structural name for the
+        // catch-all fallback path.
+        DataHandle::ItemField { field, target } => {
+            format!("item_{}_{}_target_{}", field.entity, field.slot, target.0)
+        }
+        DataHandle::GroupField { field, target } => {
+            format!("group_{}_{}_target_{}", field.entity, field.slot, target.0)
+        }
         DataHandle::ViewStorage { view, slot } => {
             format!("view_{}_{}", view.0, view_slot_token(*slot))
         }

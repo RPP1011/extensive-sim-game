@@ -1,0 +1,152 @@
+// foraging_colony — ant-foraging fixture exercising Item +
+// Group entity types alongside Agents, plus a pair-keyed @decay
+// view (pheromone trail) that's closer to the spec's intended
+// pheromone-grid pattern than the per-agent views in
+// predator_prey.
+//
+// Stress targets:
+//   - `entity X : Item` declaration + (once Item-SoA lower lands)
+//     field access via `items.<field>(<expr>)` or equivalent.
+//   - `entity X : Group` declaration + (once Group-SoA lower
+//     lands) field access via `groups.<field>(<expr>)`.
+//   - Pair-keyed view storage with @decay (pheromone trail keyed
+//     by ant-id × food-id).
+//   - Multi-emit per tick per ant (Drop event each tick the ant
+//     is "carrying", verifying the dispatch-size fix
+//     `2889d387` continues to hold under per-agent multi-emit).
+//   - bartering.sim already covers the parser+resolver Item/Group
+//     surfaces; this fixture is the next stage that EXERCISES the
+//     fields once the lower/emit work lands.
+//
+// GAPs documented inline with `// GAP:` markers — physics rules
+// and views referencing Item / Group fields are guarded so the
+// fixture parses + lowers TODAY (treating Items / Groups as
+// declaration-only), and grows naturally as the SoA storage
+// arrives.
+
+event Tick { }
+
+@replayable
+@gpu_amenable
+event Drop {
+  ant:    AgentId,
+  // GAP: once Item field access lowers, this should be `food:
+  // ItemId` referencing the carried food slot. ItemId already
+  // packs as u32 in the event ring (per the bartering fixture's
+  // existing Trade event), so the type IS plumbed through; the
+  // gap is just that the runtime can't yet resolve `self.carried`
+  // to a meaningful ItemId.
+  carried: AgentId,
+  pos:    vec3,
+}
+
+@replayable
+@gpu_amenable
+event Deposited {
+  ant:    AgentId,
+  // GAP: once Group field access lowers, this should be `colony:
+  // GroupId` so the deposit fold can rank colonies by recent
+  // intake.
+  colony: AgentId,
+  amount: f32,
+}
+
+entity Ant : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Food : Item {
+  // Item bodies parse + resolve today (per bartering.sim) but
+  // SoA storage isn't allocated → `items.position(food)` reads
+  // would compile to a dropped-field stub. Once Item-SoA lower
+  // lands, ants would read `items.position(self.engaged_with)`
+  // to get their carried-food's spawn point.
+  position: vec3,
+  quantity: f32,
+}
+
+entity Colony : Group {
+  // Same caveat as Food. Once Group-SoA lower lands, deposit
+  // events would carry `groups.center(colony)` so the per-tick
+  // ant body can navigate home.
+  center: vec3,
+  member_count: f32,
+}
+
+config foraging {
+  // Per-tick wander velocity scale. Ants drift even when not
+  // carrying — the placeholder integrator below applies this
+  // unconditionally.
+  wander_scale:    f32 = 0.05,
+  // Pheromone deposit weight. Each Drop event contributes this
+  // much to the per-pair pheromone view; @decay(rate=0.88) means
+  // a recent trail dominates older traces.
+  deposit_weight:  f32 = 1.0,
+  // How often (every Nth tick) an ant emits a Drop event. Set
+  // to 1 to match crowd_navigation's per-agent-per-tick shape;
+  // higher values would test the modulo gating the metric
+  // emit_every annotation introduced.
+  drop_every:      f32 = 1.0,
+}
+
+// Per-Ant integrator. Today: drift + per-tick Drop emit. Once
+// Item-SoA lands: should pull toward `items.position(
+// self.engaged_with)` if the ant is carrying, else wander.
+physics WanderAndDrop @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    let new_pos = self.pos + self.vel * config.foraging.wander_scale;
+    agents.set_pos(self, new_pos);
+    // Per-tick Drop emit. `carried` is self for now (so the
+    // pheromone view's pair-key is (self, self) — diagonal
+    // entries only). Real per-pair behavior lands once Items
+    // emit a real ItemId target.
+    emit Drop { ant: self, carried: self, pos: new_pos }
+    // GAP: a `Deposited` emit gated on "ant just reached its
+    // colony center" needs spatial body-iter in physics + Group
+    // field access. Stubbed out here:
+    // emit Deposited { ant: self, colony: <closest_colony>,
+    //                  amount: config.foraging.deposit_weight }
+  }
+}
+
+// Per-Ant pheromone deposit count. Accumulates Drop events whose
+// `ant` matches each ant's slot. @decay simulates pheromone
+// evaporation. Once the carried-food field works, a sister view
+// keyed on `(ant, carried)` would emerge as the actual pheromone
+// trail map.
+@materialized(on_event = [Drop])
+@decay(rate = 0.88, per = tick)
+view pheromone_deposits(ant: Agent) -> f32 {
+  initial: 0.0,
+  on Drop { ant: who, carried: _, pos: _ } { self += 1.0 }
+  clamp: [0.0, 1000.0],
+}
+
+// GAP: once Item-SoA + pair_map storage land, this view becomes
+// the real pheromone-trail map: per-(ant, food-slot) intensity.
+// Spec §5.2 storage hint `pair_map` already exists; the IR shape
+// is wired (predator_focus in predator_prey_min uses it). The
+// missing piece is that `food: Food` (Item) needs SoA addressable
+// via the same DataHandle path as Agent slots.
+//
+// @materialized(on_event = [Drop], storage = pair_map)
+// @decay(rate = 0.88, per = tick)
+// view pheromone_trail(ant: Agent, food: Food) -> f32 {
+//   initial: 0.0,
+//   on Drop { ant: a, carried: f, pos: _ } { self += 1.0 }
+//   clamp: [0.0, 100.0],
+// }
+
+// GAP: once Group-SoA lands, this view ranks colonies by recent
+// haul. Right now the Deposited event is never emitted (see the
+// commented stub above), so this view would silently zero out
+// even with the fix in place.
+//
+// @materialized(on_event = [Deposited])
+// @decay(rate = 0.95, per = tick)
+// view colony_intake(colony: Group) -> f32 {
+//   initial: 0.0,
+//   on Deposited { ant: _, colony: c, amount: a } { self += a }
+//   clamp: [0.0, 10000.0],
+// }

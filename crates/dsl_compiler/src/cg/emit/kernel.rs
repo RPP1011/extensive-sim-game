@@ -737,6 +737,40 @@ fn handle_to_binding_metadata(h: &DataHandle, prog: &CgProgram) -> Option<Bindin
             base_access: AccessMode::ReadStorage,
             wgsl_ty: agent_field_wgsl_ty(field.ty()),
         }),
+        DataHandle::ItemField { field, target: _ } => {
+            // Per-Item SoA field — emit a bare external binding named
+            // `<entity_snake>_<field_snake>`. The per-fixture runtime
+            // is responsible for allocating + binding the buffer at
+            // dispatch time. Read-only at this slice (no write surface
+            // routed through the lowering yet); upgrades to RW would
+            // happen via the same `record_write` path AgentField uses.
+            let (entity_name, field_name, _) = prog
+                .entity_field_catalog
+                .resolve_item(*field)
+                .unwrap_or(("item", "field", AgentFieldTy::U32));
+            Some(BindingMetadata {
+                bg_source: BgSource::External(item_field_external_name(
+                    entity_name,
+                    field_name,
+                )),
+                base_access: AccessMode::ReadStorage,
+                wgsl_ty: agent_field_wgsl_ty(field.ty),
+            })
+        }
+        DataHandle::GroupField { field, target: _ } => {
+            let (entity_name, field_name, _) = prog
+                .entity_field_catalog
+                .resolve_group(*field)
+                .unwrap_or(("group", "field", AgentFieldTy::U32));
+            Some(BindingMetadata {
+                bg_source: BgSource::External(item_field_external_name(
+                    entity_name,
+                    field_name,
+                )),
+                base_access: AccessMode::ReadStorage,
+                wgsl_ty: agent_field_wgsl_ty(field.ty),
+            })
+        }
         DataHandle::ViewStorage { view, slot } => Some(BindingMetadata {
             bg_source: BgSource::Resident(view_storage_resident_field(*view, *slot, prog)),
             base_access: AccessMode::ReadStorage,
@@ -949,6 +983,30 @@ fn handle_to_binding_metadata(h: &DataHandle, prog: &CgProgram) -> Option<Bindin
 /// here is informational — the true on-disk layout lives in the legacy
 /// pack/unpack pipeline). We surface the structurally honest type so
 /// downstream lowerings can specialise per-field if they choose.
+/// External binding name for an Item / Group SoA field. The
+/// per-fixture runtime allocates a `<entity_snake>_<field_snake>`
+/// buffer (e.g. `coin_weight`) and binds it on the kernel's external
+/// bind group. Pulled out of the per-handle metadata so the structural
+/// binding name + the BGL composer's external lookup stay in lockstep.
+pub(crate) fn item_field_external_name(entity_name: &str, field_name: &str) -> String {
+    format!("{}_{}", to_snake_case(entity_name), field_name)
+}
+
+/// Convert a PascalCase / camelCase identifier to snake_case. Used for
+/// the entity-name half of the Item / Group binding name.
+fn to_snake_case(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    for (i, ch) in s.chars().enumerate() {
+        if ch.is_uppercase() && i != 0 {
+            out.push('_');
+        }
+        for low in ch.to_lowercase() {
+            out.push(low);
+        }
+    }
+    out
+}
+
 fn agent_field_wgsl_ty(ty: AgentFieldTy) -> String {
     match ty {
         AgentFieldTy::F32 => "array<f32>".into(),
@@ -1102,6 +1160,22 @@ fn structural_binding_name(h: &DataHandle) -> String {
             // The storage is shared across all per-thread accesses;
             // the binding name keys off the field, not the agent ref.
             format!("agent_{}", field.snake())
+        }
+        DataHandle::ItemField { field, target: _ } => {
+            // Per-Item SoA: `<entity_snake>_<field_snake>` keyed on
+            // the entity-ref + slot. The structural form delegates
+            // the (name, name) lookup to `item_field_structural_name`
+            // since `structural_binding_name` doesn't have a CgProgram
+            // handle (BGL composer-side calls do; this helper is used
+            // by the IR-walk that lacks one). Falls back to the opaque
+            // `item_<entity>_<slot>` form when no name is interned;
+            // the BGL composer's `handle_to_binding_metadata` arm
+            // produces the catalog-resolved form for the external
+            // bind group declaration.
+            format!("item_{}_{}", field.entity, field.slot)
+        }
+        DataHandle::GroupField { field, target: _ } => {
+            format!("group_{}_{}", field.entity, field.slot)
         }
         DataHandle::ViewStorage { view, slot } => {
             format!("view_{}_{}", view.0, view_slot_field(*slot))

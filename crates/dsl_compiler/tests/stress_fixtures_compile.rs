@@ -335,3 +335,133 @@ fn bartering_emits_item_id_in_trade_payload() {
         "fold should index event ring by event_idx; got:\n{fold_body}",
     );
 }
+
+// ----- Sequential-implementation backlog fixtures (2026-05-03) -----
+//
+// Three new fixtures land in declaration form before their runtimes
+// + sim_app binaries do, so the compile-gate tests catch any future
+// parser/lower/emit regression that would block the sequential
+// implementation work (ecosystem → foraging → auction).
+
+/// `ecosystem_cascade.sim` declares 3 entity types (Plant, Herbivore,
+/// Carnivore) all rooted at Agent, 2 distinct Eaten event rings, 3
+/// per-tier physics rules, and 3 @decay-annotated views. Compile-
+/// gate only — no observables to assert until the runtime crate
+/// lands. The presence of 3 distinct fold kernels for the 3 views
+/// confirms the schedule synthesizer correctly partitions per-view
+/// dispatch (decay → fold pairs for each).
+#[test]
+fn ecosystem_cascade_compiles() {
+    let path = workspace_path("assets/sim/ecosystem_cascade.sim");
+    let art = compile_sim(&path).unwrap_or_else(|e| {
+        panic!("ecosystem_cascade.sim failed at: {e}");
+    });
+    assert!(!art.kernel_index.is_empty(), "no kernels emitted");
+    // 3 fold kernels for the 3 views (recent_browse,
+    // predator_pressure, plant_pressure).
+    let fold_kernels: Vec<_> = art
+        .kernel_index
+        .iter()
+        .filter(|name| name.starts_with("fold_"))
+        .collect();
+    assert!(
+        fold_kernels.len() >= 3,
+        "expected >=3 fold kernels (one per view); got {}: {:?}",
+        fold_kernels.len(),
+        fold_kernels,
+    );
+    // Each @decay-annotated view should also yield a decay kernel
+    // (per the verb/probe/metric plan + the earlier B2 close).
+    let decay_kernels: Vec<_> = art
+        .kernel_index
+        .iter()
+        .filter(|name| name.starts_with("decay_"))
+        .collect();
+    assert_eq!(
+        decay_kernels.len(),
+        3,
+        "expected 3 decay kernels (one per @decay view); got: {:?}",
+        decay_kernels,
+    );
+    eprintln!(
+        "[ecosystem_cascade] {} kernels: {:?}",
+        art.kernel_index.len(),
+        art.kernel_index,
+    );
+}
+
+/// `foraging_colony.sim` declares Ant : Agent, Food : Item, Colony :
+/// Group — exercising all 3 entity-root variants in one file, plus
+/// `@decay` on a per-Ant view and a multi-emit-ready physics rule.
+/// Item / Group bodies are declaration-only today (per the bartering
+/// fixture's GAP commentary); this test pins the resolve + emit
+/// shape so when the Item/Group SoA lower lands, the fixture's
+/// diff is bounded.
+#[test]
+fn foraging_colony_compiles() {
+    let path = workspace_path("assets/sim/foraging_colony.sim");
+    let art = compile_sim(&path).unwrap_or_else(|e| {
+        panic!("foraging_colony.sim failed at: {e}");
+    });
+    assert!(!art.kernel_index.is_empty(), "no kernels emitted");
+    // pheromone_deposits view fold should exist (the only @decay
+    // view that's enabled today; the pair_map + Group views are
+    // commented out behind the SoA gap).
+    let pheromone = kernel_body_containing(&art, "pheromone_deposits");
+    assert!(
+        pheromone.is_some(),
+        "expected pheromone_deposits fold kernel; available: {:?}",
+        art.wgsl_files.keys().collect::<Vec<_>>(),
+    );
+    eprintln!(
+        "[foraging_colony] {} kernels: {:?}",
+        art.kernel_index.len(),
+        art.kernel_index,
+    );
+}
+
+/// `auction_market.sim` declares Trader : Agent, Good : Item,
+/// Faction : Group plus 2 distinct event kinds (Bid, Allocated).
+/// Bid is emitted per-tick; Allocated is declared but not yet
+/// emitted (waits on auctions.* namespace lowering). Compile-gate
+/// confirms both event rings are routed and the Bid producer +
+/// fold consumers wire through.
+#[test]
+fn auction_market_compiles() {
+    let path = workspace_path("assets/sim/auction_market.sim");
+    let art = compile_sim(&path).unwrap_or_else(|e| {
+        panic!("auction_market.sim failed at: {e}");
+    });
+    assert!(!art.kernel_index.is_empty(), "no kernels emitted");
+    // 2 view folds today: bid_activity (decay) + good_bid_total
+    // (no decay).
+    let bid_activity = kernel_body_containing(&art, "bid_activity");
+    let good_bid_total = kernel_body_containing(&art, "good_bid_total");
+    assert!(
+        bid_activity.is_some() && good_bid_total.is_some(),
+        "expected both bid_activity + good_bid_total folds; available: {:?}",
+        art.wgsl_files.keys().collect::<Vec<_>>(),
+    );
+    // The Bid producer kernel should atomicStore the 3 payload
+    // fields (trader, good, amount) into the ring past the header.
+    let bid_producer = kernel_body_containing(&art, "WanderAndBid")
+        .or_else(|| kernel_body_containing(&art, "physics"))
+        .unwrap_or_else(|| {
+            panic!(
+                "no Bid producer kernel found; available: {:?}",
+                art.wgsl_files.keys().collect::<Vec<_>>()
+            );
+        });
+    let payload_stores = bid_producer.matches("atomicStore(&event_ring[slot * 10u + 2u]").count()
+        + bid_producer.matches("atomicStore(&event_ring[slot * 10u + 3u]").count()
+        + bid_producer.matches("atomicStore(&event_ring[slot * 10u + 4u]").count();
+    assert_eq!(
+        payload_stores, 3,
+        "expected 3 Bid payload stores (trader, good, amount); got {payload_stores}",
+    );
+    eprintln!(
+        "[auction_market] {} kernels: {:?}",
+        art.kernel_index.len(),
+        art.kernel_index,
+    );
+}

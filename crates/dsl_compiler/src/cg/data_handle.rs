@@ -61,6 +61,45 @@ pub struct ConfigConstId(pub u32);
 pub struct CgExprId(pub u32);
 
 // ---------------------------------------------------------------------------
+// Item / Group field ids (per-fixture catalog-indexed)
+// ---------------------------------------------------------------------------
+//
+// Unlike [`AgentFieldId`] (a closed enum mirroring the engine's SoA),
+// Items + Groups are user-declared per fixture (`entity Coin : Item {
+// weight: f32 }`). The variant set is therefore unknown at compile
+// time of the dsl_compiler crate. The `*FieldId` types here are
+// opaque (entity_ref, slot) pairs that index into the per-program
+// [`crate::cg::program::EntityFieldCatalog`]; the catalog resolves
+// the pair to a (entity name, field name, primitive type) triple at
+// emit time.
+
+/// Per-Item-decl SoA field id. `entity` references the
+/// [`dsl_ast::ir::EntityRef`] of the declaring entity (must have
+/// `EntityRoot::Item`); `slot` is the field's position in the
+/// declaration's field list (0-based, in source order). The `ty`
+/// payload mirrors [`AgentFieldId::ty`]: it lets pure typing helpers
+/// like [`crate::cg::expr::data_handle_ty`] decide the field's
+/// primitive without consulting
+/// [`crate::cg::program::EntityFieldCatalog`]. The catalog still
+/// owns the (entity name, field name) string pair the WGSL emit
+/// + per-fixture runtime use to name the SoA buffer.
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ItemFieldId {
+    pub entity: u16,
+    pub slot: u16,
+    pub ty: AgentFieldTy,
+}
+
+/// Per-Group-decl SoA field id. Same shape as [`ItemFieldId`] but for
+/// `EntityRoot::Group` declarations.
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct GroupFieldId {
+    pub entity: u16,
+    pub slot: u16,
+    pub ty: AgentFieldTy,
+}
+
+// ---------------------------------------------------------------------------
 // Per-agent field id
 // ---------------------------------------------------------------------------
 
@@ -730,6 +769,24 @@ pub enum DataHandle {
         target: AgentRef,
     },
 
+    /// Per-Item SoA field — declared via `entity X : Item { ... }` in
+    /// the .sim source. `field` is opaque (entity ref + slot) and
+    /// resolves against [`crate::cg::program::EntityFieldCatalog`] at
+    /// emit time. `target` is a [`CgExprId`] that evaluates to a
+    /// `u32` item slot id (Items are catalog-indexed so there's no
+    /// "self item" — every read carries an explicit index expression).
+    ItemField {
+        field: ItemFieldId,
+        target: CgExprId,
+    },
+
+    /// Per-Group SoA field — declared via `entity X : Group { ... }`
+    /// in the .sim source. Same shape as [`Self::ItemField`].
+    GroupField {
+        field: GroupFieldId,
+        target: CgExprId,
+    },
+
     /// Materialized view storage. `view` is the view's stable id;
     /// `slot` is which of the view's storage layers (primary,
     /// anchor, ids, counts, cursors — depends on storage hint).
@@ -869,6 +926,20 @@ impl DataHandle {
             DataHandle::AgentField { field, target } => {
                 write!(f, "agent.{}.{}", target, field)
             }
+            DataHandle::ItemField { field, target } => {
+                write!(
+                    f,
+                    "item[#{}.{}].target(#{})",
+                    field.entity, field.slot, target.0
+                )
+            }
+            DataHandle::GroupField { field, target } => {
+                write!(
+                    f,
+                    "group[#{}.{}].target(#{})",
+                    field.entity, field.slot, target.0
+                )
+            }
             DataHandle::ViewStorage { view, slot } => {
                 write!(f, "view[")?;
                 write_named_id(f, names.name_for(IdKind::View, view.0), view.0)?;
@@ -982,6 +1053,8 @@ impl DataHandle {
             // an explicit decision here rather than silently falling
             // into the `Other` bucket via a wildcard.
             DataHandle::AgentField { .. }
+            | DataHandle::ItemField { .. }
+            | DataHandle::GroupField { .. }
             | DataHandle::ViewStorage { .. }
             | DataHandle::ConfigConst { .. }
             | DataHandle::MaskBitmap { .. }
@@ -1411,6 +1484,40 @@ mod tests {
         };
         assert_eq!(format!("{}", h), "event_ring[#4].drain");
         assert_roundtrip(&h);
+    }
+
+    #[test]
+    fn item_field_display_and_roundtrip() {
+        let h = DataHandle::ItemField {
+            field: ItemFieldId { entity: 1, slot: 0, ty: AgentFieldTy::F32 },
+            target: CgExprId(7),
+        };
+        assert_eq!(format!("{}", h), "item[#1.0].target(#7)");
+        assert_roundtrip(&h);
+    }
+
+    #[test]
+    fn group_field_display_and_roundtrip() {
+        let h = DataHandle::GroupField {
+            field: GroupFieldId { entity: 2, slot: 1, ty: AgentFieldTy::F32 },
+            target: CgExprId(3),
+        };
+        assert_eq!(format!("{}", h), "group[#2.1].target(#3)");
+        assert_roundtrip(&h);
+    }
+
+    #[test]
+    fn item_field_cycle_edge_key_other() {
+        // Item / Group fields keep full identity for cycle detection
+        // (parallel to AgentField).
+        let h = DataHandle::ItemField {
+            field: ItemFieldId { entity: 1, slot: 0, ty: AgentFieldTy::F32 },
+            target: CgExprId(0),
+        };
+        match h.cycle_edge_key() {
+            CycleEdgeKey::Other(inner) => assert_eq!(inner, h),
+            CycleEdgeKey::Ring(_) => panic!("ItemField must not collapse into Ring key"),
+        }
     }
 
     #[test]

@@ -478,6 +478,73 @@ pub enum WgslAccessForm {
     UniformField { binding: String, field: String },
 }
 
+// ---------------------------------------------------------------------------
+// Entity field catalog (Item + Group)
+// ---------------------------------------------------------------------------
+
+/// Per-fixture catalog of `entity X : Item { ... }` and `entity X :
+/// Group { ... }` field declarations.
+///
+/// Items + Groups are catalog-indexed entities (no SoA dispatch,
+/// read-only or write-via-events), so their per-field SoA storage
+/// is per-fixture rather than per-engine-baked. The catalog resolves
+/// opaque [`crate::cg::data_handle::ItemFieldId`] /
+/// [`crate::cg::data_handle::GroupFieldId`] pairs to the names + types
+/// the WGSL emit and per-fixture runtime use to declare and bind the
+/// underlying buffers. Populated by the driver's
+/// `populate_entity_field_catalog` from `comp.entities`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntityFieldCatalog {
+    /// Item entities, keyed by [`dsl_ast::ir::EntityRef`] ordinal.
+    pub items: BTreeMap<u16, EntityFieldRecord>,
+    /// Group entities, keyed by [`dsl_ast::ir::EntityRef`] ordinal.
+    pub groups: BTreeMap<u16, EntityFieldRecord>,
+}
+
+/// Per-entity field declaration record. `entity_name` is the
+/// source-level entity identifier (`"Coin"`); `fields` lists the
+/// declared fields in source order. Both are consumed by emit-time
+/// naming (`<entity_snake>_<field_snake>`) and by the per-fixture
+/// runtime.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntityFieldRecord {
+    pub entity_name: String,
+    pub fields: Vec<EntityFieldEntry>,
+}
+
+/// Per-field entry inside an [`EntityFieldRecord`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntityFieldEntry {
+    pub name: String,
+    pub ty: super::data_handle::AgentFieldTy,
+}
+
+impl EntityFieldCatalog {
+    /// Resolve an [`crate::cg::data_handle::ItemFieldId`] to its
+    /// (entity name, field name, type) triple. Returns `None` if the
+    /// catalog has no entry for the given (entity, slot) pair —
+    /// indicates a stale handle (the lowering should have surfaced
+    /// `UnknownItemField` before producing the handle).
+    pub fn resolve_item(
+        &self,
+        id: super::data_handle::ItemFieldId,
+    ) -> Option<(&str, &str, super::data_handle::AgentFieldTy)> {
+        let rec = self.items.get(&id.entity)?;
+        let fld = rec.fields.get(id.slot as usize)?;
+        Some((rec.entity_name.as_str(), fld.name.as_str(), fld.ty))
+    }
+    /// Resolve a [`crate::cg::data_handle::GroupFieldId`] — same
+    /// shape as [`Self::resolve_item`].
+    pub fn resolve_group(
+        &self,
+        id: super::data_handle::GroupFieldId,
+    ) -> Option<(&str, &str, super::data_handle::AgentFieldTy)> {
+        let rec = self.groups.get(&id.entity)?;
+        let fld = rec.fields.get(id.slot as usize)?;
+        Some((rec.entity_name.as_str(), fld.name.as_str(), fld.ty))
+    }
+}
+
 /// Helper — record a name in an interner table. Idempotent: passing
 /// the same id twice with the same name is a no-op. Conflicting names
 /// surface as [`BuilderError::DuplicateInternEntry`]. Used by every
@@ -710,6 +777,16 @@ pub struct CgProgram {
     /// config goes through a future cfg-uniform extension; today every
     /// config field is a compile-time constant.
     pub config_const_values: BTreeMap<u32, f32>,
+    /// Per-fixture catalog of `entity X : Item { ... }` and `entity Y :
+    /// Group { ... }` field declarations. Resolves opaque
+    /// [`crate::cg::data_handle::ItemFieldId`] /
+    /// [`crate::cg::data_handle::GroupFieldId`] pairs (entity ref +
+    /// slot) to the (entity name, field name, primitive type) triple
+    /// the WGSL emit and per-fixture runtime use to name and type the
+    /// SoA buffer. Populated by the driver's
+    /// `populate_entity_field_catalog`. Empty for fixtures that
+    /// declare no Item / Group entities.
+    pub entity_field_catalog: EntityFieldCatalog,
 }
 
 impl CgProgram {
@@ -958,6 +1035,15 @@ impl CgProgramBuilder {
             id.0,
             name.into(),
         )
+    }
+
+    /// Replace the program's [`EntityFieldCatalog`] in one shot. Called
+    /// by the driver's `populate_entity_field_catalog` after walking
+    /// `comp.entities` for every `EntityRoot::Item` / `EntityRoot::Group`
+    /// declaration. Idempotent only with respect to repeated identical
+    /// catalogs — last-write-wins; the driver only calls this once.
+    pub fn set_entity_field_catalog(&mut self, catalog: EntityFieldCatalog) {
+        self.inner.entity_field_catalog = catalog;
     }
 
     // --- Diagnostic push ------------------------------------------------

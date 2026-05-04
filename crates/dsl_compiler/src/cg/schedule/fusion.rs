@@ -719,6 +719,8 @@ fn same_view_view_fold_accumulator(
             slot: _,
         }) => *vh == view,
         CycleEdgeKey::Other(DataHandle::AgentField { .. })
+        | CycleEdgeKey::Other(DataHandle::ItemField { .. })
+        | CycleEdgeKey::Other(DataHandle::GroupField { .. })
         | CycleEdgeKey::Other(DataHandle::ConfigConst { .. })
         | CycleEdgeKey::Other(DataHandle::MaskBitmap { .. })
         | CycleEdgeKey::Other(DataHandle::ScoringOutput)
@@ -790,6 +792,8 @@ fn first_view_storage_write(op: &ComputeOp) -> Option<DataHandle> {
     op.writes.iter().find_map(|h| match h {
         DataHandle::ViewStorage { .. } => Some(h.clone()),
         DataHandle::AgentField { .. }
+        | DataHandle::ItemField { .. }
+        | DataHandle::GroupField { .. }
         | DataHandle::ConfigConst { .. }
         | DataHandle::MaskBitmap { .. }
         | DataHandle::ScoringOutput
@@ -812,6 +816,8 @@ fn first_event_ring_append(op: &ComputeOp) -> Option<DataHandle> {
         } => Some(h.clone()),
         DataHandle::EventRing { .. }
         | DataHandle::AgentField { .. }
+        | DataHandle::ItemField { .. }
+        | DataHandle::GroupField { .. }
         | DataHandle::ViewStorage { .. }
         | DataHandle::ConfigConst { .. }
         | DataHandle::MaskBitmap { .. }
