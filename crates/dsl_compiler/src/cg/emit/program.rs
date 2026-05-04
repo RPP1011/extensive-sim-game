@@ -203,6 +203,9 @@ pub fn emit_cg_program(
         naming: HandleNamingStrategy::Structural,
         tile_walk_index: std::cell::RefCell::new(None),
         dispatch: std::cell::Cell::new(None),
+        view_target_local: std::cell::Cell::new(None),
+        pending_target_lets: std::cell::RefCell::new(Vec::new()),
+        bound_target_exprs: std::cell::RefCell::new(std::collections::HashSet::new()),
     };
 
     for (stage_idx, stage) in schedule.stages.iter().enumerate() {
@@ -498,9 +501,13 @@ fn compose_wgsl_cfg_struct(spec: &KernelSpec) -> String {
         .iter()
         .find(|b| matches!(b.bg_source, BgSource::Cfg))
         .expect("KernelSpec must carry a cfg binding");
+    // Generic-kernel cfg gained `tick: u32` when PerAgent rules with
+    // `emit <Event>` bodies started writing the tick header word into
+    // the event ring. Layout matches `build_generic_cfg_struct_decl`
+    // (Rust side): { agent_cap: u32, tick: u32, _pad0: u32, _pad1: u32 }.
     let fields = match spec.kind {
         KernelKind::ViewFold => "event_count: u32, tick: u32, _pad0: u32, _pad1: u32",
-        KernelKind::Generic => "agent_cap: u32, _pad0: u32, _pad1: u32, _pad2: u32",
+        KernelKind::Generic => "agent_cap: u32, tick: u32, _pad0: u32, _pad1: u32",
     };
     format!("struct {ty} {{ {fields} }};\n", ty = cfg.wgsl_ty)
 }

@@ -295,21 +295,29 @@ fn lower_one_handler(
     per_agent: bool,
     ctx: &mut LoweringCtx<'_>,
 ) -> Result<OpId, LoweringError> {
-    // The handler's `where_clause` is part of the dispatch predicate,
-    // not the body — at this layer we treat it as a deferral until
-    // the driver wires per-handler-where filtering. None of today's
-    // physics rules use `where`, so this branch is a defensive
-    // no-op.
-    if let Some(_where_expr) = &handler.where_clause {
-        // The rule-pattern carries its own span; reuse it for the
-        // diagnostic anchor. Surfacing as a deferred AST node lets
-        // the driver task light it up cleanly when needed.
-        return Err(LoweringError::UnsupportedPhysicsStmt {
-            rule: rule_id,
-            ast_label: "where",
-            span: handler.pattern.span(),
-        });
-    }
+    // Per-handler `where` clause lowers as a body-wrapping guard.
+    // Without a real "early return" CgStmt the cleanest in-band shape
+    // is `if (where_expr) { ...body... }`: the kernel still dispatches
+    // PerAgent over every slot, but non-matching agents skip every
+    // statement in the body. Common use case: per-creature-type splits
+    // (`where self.creature_type == Wolf`) where two PerAgent rules
+    // share the same field and must not both fire on every agent.
+    //
+    // The expression lowering may push fold-driven pre-statements onto
+    // `ctx.pending_pre_stmts`; we drain them here so they execute
+    // BEFORE the If guard (otherwise the pre-stmts that compute the
+    // cond would be sequenced wrong). For typical scalar where-clauses
+    // (creature_type/comparison) this drain is empty.
+    let where_cond_id = if let Some(where_expr) = &handler.where_clause {
+        Some(lower_expr(where_expr, ctx)?)
+    } else {
+        None
+    };
+    let where_pre_stmts: Vec<CgStmtId> = if where_cond_id.is_some() {
+        std::mem::take(&mut ctx.pending_pre_stmts)
+    } else {
+        Vec::new()
+    };
 
     // Tag-pattern handlers (`on tag SomeTag { ... }`) are resolved
     // at registry-walk time but not yet lowered through `lower_physics`
@@ -351,7 +359,35 @@ fn lower_one_handler(
 
     // Lower the handler body.
     let body_stmt_ids = lower_stmt_list(rule_id, &handler.body, ctx)?;
-    prelude_stmt_ids.extend(body_stmt_ids);
+    // If the handler had a `where` clause, wrap the lowered body in a
+    // `CgStmt::If { cond: where_expr, then: body, else_: None }` so
+    // the per-thread dispatch only commits writes for matching agents.
+    // The where-clause's pre-statements (drained above) sit BEFORE
+    // the If — they compute values the cond depends on. The prelude
+    // (event-pattern binders) stays outside the If; for PerAgent rules
+    // there are no pattern binders to extract, so the prelude is empty.
+    let post_prelude_ids: Vec<CgStmtId> = if let Some(cond_id) = where_cond_id {
+        let body_list = CgStmtList::new(body_stmt_ids);
+        let body_inner_id = ctx
+            .builder
+            .add_stmt_list(body_list)
+            .map_err(|e| LoweringError::BuilderRejected {
+                error: e,
+                span: handler.span,
+            })?;
+        let if_stmt = CgStmt::If {
+            cond: cond_id,
+            then: body_inner_id,
+            else_: None,
+        };
+        let if_id = push_stmt(if_stmt, handler.span, ctx)?;
+        let mut combined = where_pre_stmts;
+        combined.push(if_id);
+        combined
+    } else {
+        body_stmt_ids
+    };
+    prelude_stmt_ids.extend(post_prelude_ids);
     let stmt_ids = prelude_stmt_ids;
     let list = CgStmtList::new(stmt_ids);
     let body_list_id = ctx

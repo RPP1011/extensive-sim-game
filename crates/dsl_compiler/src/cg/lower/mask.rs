@@ -41,7 +41,7 @@
 //! into the dispatch shape.
 
 use dsl_ast::ast::Span;
-use dsl_ast::ir::{IrActionHeadShape, IrExpr, IrExprNode, MaskIR, NamespaceId};
+use dsl_ast::ir::{IrActionHeadShape, IrExprNode, MaskIR};
 
 use crate::cg::data_handle::{CgExprId, MaskId};
 use crate::cg::dispatch::{DispatchShape, PerPairSource};
@@ -50,6 +50,7 @@ use crate::cg::op::{ComputeOpKind, OpId, SpatialQueryKind};
 
 use super::error::LoweringError;
 use super::expr::{lower_expr, LoweringCtx};
+use super::spatial::try_recognise_spatial_iter;
 
 // ---------------------------------------------------------------------------
 // Public entry point
@@ -140,7 +141,7 @@ pub fn lower_mask(
     // spatial-query-kind) pairing. Done before lowering the predicate
     // so a mismatched pair is a hard error that does not produce a
     // half-built program.
-    let shape = resolve_dispatch_shape(mask_id, spatial_query_kind, ir)?;
+    let shape = resolve_dispatch_shape(mask_id, spatial_query_kind, ir, ctx)?;
 
     // Step 2: lower the predicate body. Reuses the expression-level
     // lowering — the predicate is just a `IrExprNode` whose value
@@ -245,6 +246,7 @@ fn resolve_dispatch_shape(
     mask_id: MaskId,
     spatial_query_kind: Option<SpatialQueryKind>,
     ir: &MaskIR,
+    ctx: &mut LoweringCtx<'_>,
 ) -> Result<DispatchShape, LoweringError> {
     match (&ir.candidate_source, spatial_query_kind) {
         // Self-only mask — no `from` clause, no spatial query.
@@ -253,7 +255,7 @@ fn resolve_dispatch_shape(
         // Pair-driven mask — `from query.nearby_agents(...)` resolves
         // to a per-pair dispatch over the named spatial query.
         (Some(source), Some(kind)) => {
-            validate_from_clause_shape(mask_id, source)?;
+            validate_from_clause_shape(mask_id, source, ctx)?;
             Ok(DispatchShape::PerPair {
                 source: PerPairSource::SpatialQuery(kind),
             })
@@ -296,18 +298,29 @@ fn resolve_dispatch_shape(
 ///     to produce a `SpatialQueryKind::FilteredWalk`. Until then
 ///     this arm is dead-code on the existing fixtures (no
 ///     `from spatial.*` clause in `assets/sim/`).
+///
+/// **Slice 2a (stdlib-into-CG-IR):** the recognised-shape table is
+/// owned by [`super::spatial::lower_spatial_namespace_call`]; this
+/// helper delegates the structural check, then maps unrecognised
+/// expression shapes to the mask-specific
+/// `UnsupportedMaskFromClause` variant (so mask consumers still
+/// see a mask-typed error rather than a generic
+/// `UnsupportedNamespaceCall`).
 fn validate_from_clause_shape(
     mask_id: MaskId,
     source: &IrExprNode,
+    ctx: &mut LoweringCtx<'_>,
 ) -> Result<(), LoweringError> {
-    match &source.kind {
-        IrExpr::NamespaceCall { ns, method, args }
-            if *ns == NamespaceId::Query && method == "nearby_agents" && args.len() == 2 =>
-        {
-            Ok(())
-        }
-        IrExpr::NamespaceCall { ns: NamespaceId::Spatial, .. } => Ok(()),
-        _ => Err(LoweringError::UnsupportedMaskFromClause {
+    // Try the shared recogniser first. If the expression is a
+    // recognised spatial call, we're done. If it's a malformed spatial
+    // call (e.g. `query.nearby_agents` with the wrong arity), the
+    // helper's typed error propagates unchanged. If the expression is
+    // not a spatial call at all (`Ok(None)`), we map to the
+    // mask-specific `UnsupportedMaskFromClause` so the caller sees a
+    // mask-typed error.
+    match try_recognise_spatial_iter(source, ctx)? {
+        Some(_) => Ok(()),
+        None => Err(LoweringError::UnsupportedMaskFromClause {
             mask: mask_id,
             span: source.span,
         }),
@@ -362,6 +375,7 @@ mod tests {
     use dsl_ast::ast::{BinOp, Span as AstSpan};
     use dsl_ast::ir::{
         IrActionHead, IrActionHeadShape, IrCallArg, IrExpr, IrExprNode, IrType, LocalRef, MaskIR,
+        NamespaceId,
     };
 
     use crate::cg::data_handle::{AgentFieldId, AgentRef, DataHandle};

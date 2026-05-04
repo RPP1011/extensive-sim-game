@@ -23,8 +23,10 @@
 
 pub mod bgl;
 pub mod context;
+pub mod event_ring;
 pub mod kernel;
 
 pub use bgl::{bgl_storage, bgl_uniform};
 pub use context::{GpuContext, GpuContextError};
+pub use event_ring::{EventRing, ViewStorage, EVENT_RING_CAP_SLOTS, EVENT_STRIDE_U32};
 pub use kernel::Kernel;

@@ -1,0 +1,247 @@
+// predator_prey_min — incremental working fixture for the PP staged
+// implementation (tasks #59-#69). The full design target lives at
+// `predator_prey.sim` and stays untouched as the spec; each PP stage
+// COPIES one surface from the full file into this minimal one as the
+// supporting compiler / runtime work lands. When this file matches
+// the full file, we delete this and rename — at which point all
+// stages are done.
+//
+// Stage 1 (current): single physics rule guarded by a per-handler
+// `where (self.alive)` clause. The where-clause CG lowering wraps
+// the body in `if (cond) { ... }` so non-matching agents skip every
+// statement. The full design target's `where (self.creature_type ==
+// Hare)` form (and the corresponding two-rule split between MoveHare
+// + MoveWolf) needs three more compiler pieces:
+//
+//   1. `IrExpr::Entity(EntityRef)` → discriminant-constant lowering
+//      (currently surfaces as `UnsupportedAstNode { ast_label: "Entity" }`).
+//   2. `AgentField::CreatureType` (`OptEnumU32`) ↔ `u32` literal
+//      comparison surface.
+//   3. Two-rule PerAgent cycle resolution: today two PerAgent rules
+//      both writing `pos` (or even reading the other's writes) form
+//      a write-write SCC in `well_formed::detect_cycles`, regardless
+//      of whether the where-clauses are runtime-disjoint. The cycle
+//      goes away once the schedule synthesizer can either (a) merge
+//      mutually-exclusive rules into one PerAgent op with branching,
+//      or (b) be told to skip the SCC when where-clauses are proven
+//      disjoint at compile time.
+//
+// Each of those is a focused follow-up sub-stage. Stage 2 then layers
+// per-event ring allocation on top.
+
+event Tick { }
+
+// Replayable: the kill is part of the deterministic sim record. View-folds
+// + downstream `count_kills` consumers reduce off this ring.
+@replayable
+@gpu_amenable
+event Killed {
+  by:    AgentId,
+  prey:  AgentId,
+  // Position of the kill — useful for spatial views (e.g. "killing field"
+  // density heatmap). Carries vec3 not because the event-fold needs it,
+  // but because @traced consumers want to render it.
+  pos:   vec3,
+}
+
+entity Hare : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Wolf : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config hunt {
+  step_scale:     f32 = 0.5,
+  strike_radius:  f32 = 1.5,
+  prey_speed:     f32 = 0.5,
+  predator_speed: f32 = 0.6,
+  // N²-fold sums over all opposite-creature agents; with ~32 agents
+  // per side at the smoke scale, weights are scaled down so the
+  // per-tick velocity delta stays in roughly the prey/predator_speed
+  // range (otherwise the feedback explodes within a few ticks).
+  chase_weight:   f32 = 0.0001,
+  flee_weight:    f32 = 0.00015,
+}
+
+// Spatial filter for prey within strike distance. The compiler routes
+// this through the spatial-grid hash; @top_k(1) means only the single
+// closest candidate is considered.
+//
+// Stage 3 declares the query; no rule consumes it yet (the emit-side
+// StrikePrey lives at Stage 7, when PerEvent + emit on Killed lands).
+// Until then, the query is exercised at parse + resolve + (where
+// possible) lower; the unused-but-declared shape is the same one
+// boids.sim's `spatial_query nearby_other` follows.
+@spatial(radius = 1.5, kind = [Agent])
+@top_k(1)
+query closest_prey(self: Agent) -> [Agent]
+sort_by distance(self, _) limit 1 {
+  candidate != self
+}
+
+// Same shape as boids' `nearby_other` — the spatial fold path that
+// resolves binders correctly (the bare `for other in agents` lowering
+// has a binder-resolution gap to fix later).
+spatial_query nearby_other(self: AgentId, candidate: AgentId) = candidate != self
+
+// Materialized + decaying: per-predator kill count, fed by Killed
+// events, decaying at 0.95/tick so a recently-prolific hunter ranks
+// higher than one that killed long ago. The decay is the
+// anchor-pattern reduction the engine schedules each tick before
+// the event-fold replays the per-tick deltas.
+//
+// Stage 5 added the view; Stage 6 layers the @decay annotation on
+// top. Nothing emits Killed yet (Stage 7's StrikePrey is the
+// intended emitter); without emits the storage stays at 0 and the
+// decay multiplications are no-ops, but the kernel is still emitted.
+@materialized(on_event = [Killed])
+@decay(rate = 0.95, per = tick)
+view kill_count(by: Agent) -> f32 {
+  initial: 0.0,
+  on Killed { by: predator } { self += 1.0 }
+  clamp: [0.0, 1000.0],
+}
+
+// Pair-storage materialized view: how aggressive predator `a` has
+// been toward prey `b` recently. Stage 9 layers the pair-storage
+// shape on top of Stage 5/6's per-agent + decay infrastructure.
+// Per-handler `where` (`predator == a && victim == b`) is trimmed
+// because the fold-handler parser doesn't accept where today (same
+// constraint that affected kill_count).
+@materialized(on_event = [Killed], storage = pair_map)
+@decay(rate = 0.98, per = tick)
+view predator_focus(a: Agent, b: Agent) -> f32 {
+  initial: 0.0,
+  on Killed { by: predator, prey: victim } { self += 1.0 }
+  clamp: [0.0, 100.0],
+}
+
+// ---------------------------------------------------------------------------
+// Stage 10 — masks / verbs / scoring / invariant (declarative slice)
+// ---------------------------------------------------------------------------
+
+// Bounded-population invariant: per-predator kill count stays under
+// a saturation cap. `@debug_only` scopes the check to dev runs; the
+// invariant references the materialized kill_count view from Stage 5.
+//
+// Mask + verb + scoring rows from the design target stay deferred:
+// parametric mask heads (`mask Strike(t)`) need the `from <query>`
+// clause to lower today (UnsupportedMaskHeadShape), and the verb +
+// scoring infrastructure builds on the mask. They land once the
+// from-clause spatial-query routing wires up (Phase 7 Task 2.6's
+// PerPairSource variant for catalog-driven sources).
+invariant bounded_kill_count(a: Agent) @debug_only {
+  kill_count(a) < 1000.0
+}
+
+// Per-creature movement split. Both rules dispatch PerAgent over the
+// shared SoA, gated by their `where (self.creature_type == <Entity>)`
+// guard so each thread only commits writes for matching agents. The
+// schedule's cycle detector treats two PerAgent guarded rules as
+// mutually exclusive (`detect_cycles` skips read→write edges between
+// them) — sequencing them in op-id order is safe because non-matching
+// threads early-return via the If wrap.
+//
+// The `Hare` / `Wolf` operands lower to their declaration-order
+// EntityRef discriminants (Hare = 0, Wolf = 1 — same order as the
+// `entity Hare` / `entity Wolf` declarations above). The runtime
+// sets each spawned agent's CreatureType slot to its EntityRef
+// discriminant so the comparison resolves correctly per agent.
+
+// Hares flee — sum (self.pos - other.pos) push-away vectors over
+// every Wolf in the bare-`agents` N²-fold. The fold-binder bare-read
+// (`other != self`) resolves to `per_pair_candidate` per the
+// `lower_bare_local` Step-0 guard.
+physics MoveHare @phase(per_agent) {
+  on Tick {} where (self.creature_type == Hare) {
+    let flee_force = sum(other in agents where
+      if (other != self) && (other.creature_type == Wolf) {
+        self.pos - other.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let new_vel = self.vel + flee_force * config.hunt.flee_weight;
+    let new_pos = self.pos + new_vel * config.hunt.prey_speed;
+    agents.set_vel(self, new_vel);
+    agents.set_pos(self, new_pos);
+  }
+}
+
+// Wolves chase — sum (other.pos - self.pos) pull-toward vectors
+// over every Hare. Same fold shape, opposite direction + speed.
+//
+// Future: emit Killed events from this rule once the runtime wires
+// up the event ring + fold dispatch chain. The compiler-side emit
+// surface works (uncomment the `emit Killed { … }` line below to
+// verify physics_MoveWolf gains an event_ring binding); the runtime
+// piece is the lift — see pp_runtime/src/lib.rs for the missing
+// event_ring/event_tail/view_storage allocation + the per-tick
+// MoveWolf → seed_indirect_0 → fold_kill_count → fold_predator_focus
+// dispatch chain (mirrors the design target's PerEvent shape).
+physics MoveWolf @phase(per_agent) {
+  on Tick {} where (self.creature_type == Wolf) {
+    let chase_force = sum(other in agents where
+      if (other != self) && (other.creature_type == Hare) {
+        other.pos - self.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let new_vel = self.vel + chase_force * config.hunt.chase_weight;
+    let new_pos = self.pos + new_vel * config.hunt.predator_speed;
+    agents.set_vel(self, new_vel);
+    agents.set_pos(self, new_pos);
+    emit Killed { by: self, prey: self, pos: new_pos }
+    //
+    // Producer-side gap (~4-8h to land):
+    //   1. `lower_emit_to_wgsl` is currently a B1 phony discard ("real
+    //      ring-append pending") — even with all bindings wired, the
+    //      kernel body still emits `_ = (value);` instead of an
+    //      atomicAdd-to-tail + payload write to event_ring[slot * 10
+    //      + offset]. Implementing the real WGSL emit unlocks the
+    //      producer side.
+    //   2. Op writes need to include EventRing-Append + EventTail so
+    //      the binding-generator includes the tail.
+    //   3. Runtime needs a ResidentPathContext (batch_events_ring +
+    //      batch_events_tail buffers) — compiler-emitted dispatch
+    //      helpers reference `&sources.resident.batch_events_tail`.
+    //   4. Runtime: view_storage_{primary,anchor,ids} + per-tick
+    //      dispatch chain (clear tail → MoveWolf → seed_indirect_0
+    //      → fold_kill_count → fold_predator_focus).
+  }
+}
+
+// Per-event chronicle handler — fires once per Killed event landed
+// last tick, emits a DeathCry record (Stage 8 will route to a
+// non-replayable ring with a String payload). Stage 7 lands the
+// PerEvent dispatch shape itself: `on Killed { ... } { emit ... }`
+// without a per-handler where, so every Killed event triggers a
+// DeathCry. Without an actual emit of Killed today the kernel runs
+// against an empty ring.
+@phase(post)
+@cpu_only
+physics ChronicleDeath {
+  on Killed { by: hunter, prey: victim, pos: _ } {
+    emit DeathCry {
+      victim:    victim,
+      killer:    hunter,
+      utterance: "the chase ends in stillness",
+    }
+  }
+}
+
+// Non-replayable chronicle event. Stage 8 will route this to a
+// distinct ring; Stage 7 declares it so ChronicleDeath has a target.
+// Non-replayable chronicle event with a free-form String payload.
+// Routed to the chronicle ring (host-side prose), so the deterministic
+// replay isn't sensitive to chronicle wording.
+@non_replayable
+@traced
+event DeathCry {
+  victim:    AgentId,
+  killer:    AgentId,
+  utterance: String,
+}

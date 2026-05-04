@@ -559,10 +559,28 @@ pub fn lower_expr(ast: &IrExprNode, ctx: &mut LoweringCtx<'_>) -> Result<CgExprI
             ast_label: "Event",
             span,
         }),
-        IrExpr::Entity(_) => Err(LoweringError::UnsupportedAstNode {
-            ast_label: "Entity",
-            span,
-        }),
+        IrExpr::Entity(r) => {
+            // Entity-name-as-value: lower to its declaration-order
+            // discriminant. Used in `where (self.creature_type ==
+            // <EntityName>)` per-handler filters; the per-creature
+            // SoA AgentField::CreatureType (`AgentFieldTy::OptEnumU32`,
+            // CgTy::U32 at the expression layer) is compared against
+            // this constant so the where-guard's body only fires for
+            // matching agents.
+            //
+            // Discriminant convention: EntityRef.0 (declaration order
+            // index). The runtime is responsible for setting
+            // `agent.creature_type = entity_ref_index` when spawning
+            // an agent of that entity declaration. Since the
+            // EntityRef index is stable across compiles for a given
+            // .sim, the runtime can hard-code or look up the mapping
+            // off `comp.entities` order.
+            add(
+                ctx,
+                CgExpr::Lit(LitValue::U32(r.0 as u32)),
+                span,
+            )
+        }
         IrExpr::View(_) => Err(LoweringError::UnsupportedAstNode {
             ast_label: "View",
             span,
@@ -1015,6 +1033,22 @@ fn lower_bare_local(
     span: Span,
     ctx: &mut LoweringCtx<'_>,
 ) -> Result<CgExprId, LoweringError> {
+    // Step 0: fold-binder name takes precedence over any conflicting
+    // let-bound local registration. The resolver may have given the
+    // outer-let's LocalRef the same numeric index as the fold binder
+    // (the AST scopes are independent — one numbers within the body,
+    // the other within the fold), and `local_ids` indexes by that
+    // numeric LocalRef. Without this guard a bare-binder read like
+    // `other != self` inside `for other in agents` resolves to
+    // `local_X` (the outer let) instead of `per_pair_candidate`,
+    // producing WGSL referencing an undefined identifier. The
+    // matching guard in `lower_field` already does this — see the
+    // `IrExpr::Local(_, local_name) if fold_binder_name == local_name`
+    // arm.
+    if ctx.fold_binder_name.as_deref() == Some(name) {
+        return add(ctx, CgExpr::PerPairCandidateId, span);
+    }
+
     // Step 1: let-bound local.
     if let Some(&local_id) = ctx.local_ids.get(&local_ref) {
         let ty = ctx.local_tys.get(&local_id).copied().ok_or(
@@ -2174,15 +2208,30 @@ fn lower_fold_over_agents(
     //   1 because the runtime sizes its CELL_SIZE constant equal to
     //   the per-fixture perception radius. A future surface will
     //   thread the radius from the call args.
-    let spatial_mode = match iter.map(|n| &n.kind) {
-        Some(IrExpr::Namespace(NamespaceId::Agents)) => false,
-        Some(IrExpr::NamespaceCall { ns: NamespaceId::Spatial, .. }) => true,
-        _ => {
-            return Err(LoweringError::UnsupportedAstNode {
-                ast_label: "Fold (iter is not `agents` or `spatial.<query>`)",
-                span,
-            });
-        }
+    //
+    // Slice 2a (stdlib-into-CG-IR plan): the spatial-iter recognition
+    // is delegated to `super::spatial::try_recognise_spatial_iter`
+    // so mask / fold / future per-pair body-iter consumers all walk
+    // the same shape table. The fold path uses just the `is this a
+    // spatial iter?` boolean; the returned `SpatialIterShape`'s
+    // radius_cells is consumed when the helper grows beyond the
+    // hard-coded `1` (a future surface threads the radius from a
+    // call arg).
+    let spatial_iter_shape = match iter {
+        None => None,
+        Some(node) => match &node.kind {
+            IrExpr::Namespace(NamespaceId::Agents) => None,
+            IrExpr::NamespaceCall { ns: NamespaceId::Spatial, .. }
+            | IrExpr::NamespaceCall { ns: NamespaceId::Query, .. } => {
+                super::spatial::try_recognise_spatial_iter(node, ctx)?
+            }
+            _ => {
+                return Err(LoweringError::UnsupportedAstNode {
+                    ast_label: "Fold (iter is not `agents` or `spatial.<query>`)",
+                    span,
+                });
+            }
+        },
     };
 
     // Push the binder onto the fold-binder slot so body reads of
@@ -2283,17 +2332,18 @@ fn lower_fold_over_agents(
     // result. Variant choice: spatial-iter folds become
     // ForEachNeighbor (bounded 27-cell walk); plain-`agents` folds
     // become ForEachAgent (unbounded N² walk).
-    let stmt = if spatial_mode {
+    let stmt = if let Some(shape) = spatial_iter_shape {
         CgStmt::ForEachNeighbor {
             acc_local,
             acc_ty,
             init: init_id,
             projection: projection_id,
-            // Hard-coded cell-radius for v1: CELL_SIZE is sized to
-            // match the per-fixture perception radius, so a single-
-            // cell neighborhood (3³ cells) covers everything inside
-            // that radius. Larger fold radii would bump this.
-            radius_cells: 1,
+            // Cell radius comes from the helper-recognised shape.
+            // Today every shape returns 1 (CELL_SIZE matches each
+            // fixture's perception radius, so a 3³ neighbourhood
+            // covers it); when the helper threads call-arg radii
+            // through, this picks up the new value automatically.
+            radius_cells: shape.radius_cells,
         }
     } else {
         CgStmt::ForEachAgent {

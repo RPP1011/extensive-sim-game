@@ -438,6 +438,22 @@ mod stdlib {
             (NamespaceId::Query, "nearby_kin") => {
                 Some((2, IrType::List(Box::new(IrType::AgentId))))
             }
+            // Top-K topological neighbour query — sibling of `nearby_kin`.
+            // Returns up to `k` same-species neighbours of `center`
+            // sorted ascending by distance (ties broken on raw
+            // `AgentId`), drawn from candidates inside `max_radius`.
+            // Signature:
+            //   `nearest_k(center: AgentId, k: u32 literal, max_radius: f32)
+            //    -> List<AgentId>`
+            // The `k` argument MUST be a non-negative integer literal so
+            // the GPU emitter (planned, see PP Stage 3 / task #62) can
+            // bake the heap size into a compile-time `array<u32, K>`.
+            // CPU lowering: `crate::spatial::nearest_k(state, ...)`.
+            // Used for topological neighbour patterns (Ballerini-style
+            // flocking, K-closest threat assessment, etc.).
+            (NamespaceId::Query, "nearest_k") => {
+                Some((3, IrType::List(Box::new(IrType::AgentId))))
+            }
             // -------------------------------------------------------------
             // Roadmap §1 — Memberships. Predicates on `cold_memberships`.
             // All return bool. The `kind` arg of `is_group_member` would
@@ -965,9 +981,37 @@ fn collect(
                     span: d.span,
                 });
             }
-            Decl::Query(_) => {
-                // Queries are not a milestone-1a surface yet. Skip silently;
-                // 1b will handle.
+            Decl::Query(d) => {
+                // The modern `query <name>(...) -> ... sort_by ... limit
+                // ... { <body> }` surface registers as a SpatialQueryIR
+                // alongside the legacy `spatial_query <name>(...) =
+                // <expr>` form. Pass-1 reserves the symbol slot + carries
+                // the annotations (so `@top_k(K)` and `@spatial(...)` are
+                // visible to consumers). The richer fields (sort_by,
+                // limit, return_ty, body filter) lower in pass-2 once a
+                // physics rule consumes the query — until then the
+                // placeholder filter `LitBool(true)` mirrors the
+                // SpatialQueryIR pass-1 convention. Stage 3 lock-in:
+                // declared queries appear in `comp.spatial_queries` even
+                // before any consumer wires them.
+                check_dup(symbols, "spatial_query", &d.name, d.span, |s| {
+                    s.spatial_queries.contains_key(&d.name)
+                })?;
+                let idx = push_idx(comp.spatial_queries.len(), "spatial_query")?;
+                symbols
+                    .spatial_queries
+                    .insert(d.name.clone(), SpatialQueryRef(idx));
+                symbols.record_first("spatial_query", &d.name, d.span);
+                comp.spatial_queries.push(SpatialQueryIR {
+                    name: d.name.clone(),
+                    params: Vec::new(),
+                    filter: IrExprNode {
+                        kind: IrExpr::LitBool(true),
+                        span: d.span,
+                    },
+                    annotations: d.annotations.clone(),
+                    span: d.span,
+                });
             }
             Decl::SpatialQuery(d) => {
                 // Phase 7 Task 4. Pass-1 reserves the slot + records

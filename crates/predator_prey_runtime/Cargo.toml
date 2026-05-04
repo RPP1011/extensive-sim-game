@@ -1,0 +1,29 @@
+[package]
+name = "predator_prey_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/predator_prey.sim`.
+# Mirrors `boids_runtime` shape: build.rs runs dsl_compiler at compile
+# time, OUT_DIR/generated.rs gets pulled in via `include!`. Hand-
+# written orchestration in src/lib.rs wraps the compiler-emitted
+# dispatch modules. See `crates/boids_runtime/Cargo.toml` for the
+# shared pattern.
+#
+# Stage 0 scope: skeleton + trivial single-rule integrator. Later PP
+# stages (#60-#69) grow this crate alongside the .sim fixture as new
+# DSL surfaces (where-clause filters, event rings, materialized views,
+# top-K queries, masks, scoring, invariants) come online.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

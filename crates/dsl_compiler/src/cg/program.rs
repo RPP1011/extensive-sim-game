@@ -305,6 +305,26 @@ pub struct EventLayout {
     pub fields: BTreeMap<String, FieldLayout>,
 }
 
+impl EventLayout {
+    /// Return the GPU-representable fields in declaration order.
+    /// Sort key is `word_offset_in_payload`: `populate_event_kinds`
+    /// assigns offsets cumulatively as fields are walked, so sorting
+    /// by offset reconstructs the original AST field order.
+    /// Non-GPU-representable fields (Strings, lists) are skipped at
+    /// layout-population time and never land here.
+    ///
+    /// Used by [`crate::cg::emit::wgsl_body::lower_emit_to_wgsl`] to
+    /// resolve `EventField { event, index }` (the
+    /// declaration-ordered index used in `CgStmt::Emit`) back to a
+    /// concrete `(name, FieldLayout)` pair without needing a separate
+    /// index → name lookup table.
+    pub fn fields_in_declaration_order(&self) -> Vec<(&String, &FieldLayout)> {
+        let mut v: Vec<(&String, &FieldLayout)> = self.fields.iter().collect();
+        v.sort_by_key(|(_, layout)| layout.word_offset_in_payload);
+        v
+    }
+}
+
 /// Per-field layout entry within an [`EventLayout`].
 ///
 /// `word_offset_in_payload` is the 0-based u32-word offset within the

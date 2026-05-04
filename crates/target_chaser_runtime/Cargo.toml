@@ -1,0 +1,25 @@
+[package]
+name = "target_chaser_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/target_chaser.sim`.
+# Stress fixture for slice 1 of stdlib-into-CG-IR — exercises the
+# cross-agent target read codepath end-to-end on real WGSL. Mirrors
+# the existing pp/pc/cn runtime shape (build.rs runs dsl_compiler at
+# compile time, OUT_DIR/generated.rs gets pulled in via include!),
+# adapted for the engaged_with target buffer + single-physics-rule
+# integrator.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

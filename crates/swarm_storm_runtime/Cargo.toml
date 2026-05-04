@@ -1,0 +1,23 @@
+[package]
+name = "swarm_storm_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/swarm_event_storm.sim`.
+# Stress fixture for Phase 7+8 wired primitives — 4 emits per
+# agent per tick into a single ring, fed into a plain accumulator
+# fold and a @decay-anchored fold. Mirrors the existing
+# pp/pc/cn runtime shape.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

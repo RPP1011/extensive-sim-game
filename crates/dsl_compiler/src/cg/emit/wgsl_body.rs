@@ -29,11 +29,16 @@
 //!   a slot-aware strategy that emits the actual buffer access form
 //!   (e.g. `agents.hp[gid.x]` or `view_3_primary[a]`).
 //! - **`AgentRef::Target(expr_id)`.** A target reference is a per-thread
-//!   runtime value — no structural name can name it. The Structural
-//!   strategy emits the placeholder `agent_target_expr_<N>_<field>`
-//!   (where `<N>` is the [`CgExprId`]'s numeric value); Task 4.2
-//!   replaces this with a runtime-resolved buffer access using the
-//!   target expression's lowered value.
+//!   runtime value: a `CgExprId` whose lowered WGSL produces the slot
+//!   index into the agent SoA. The first `Read` / `Assign` of an
+//!   `AgentField { target: Target(expr_id), … }` within a block emits
+//!   `agent_<field>[target_expr_<N>]` AND queues a stmt-prefix
+//!   `let target_expr_<N>: u32 = <lowered_target>;` via
+//!   [`EmitCtx::pending_target_lets`]; subsequent reads in the same
+//!   block reuse the binding without re-emitting (`bound_target_exprs`).
+//!   The bound set is cloned + restored at every stmt-list boundary so
+//!   inner-block bindings can't leak outward. Mirrors the existing
+//!   `AgentRef::PerPairCandidate` pre-binding pattern.
 //! - **Custom builtins.** [`BuiltinId::PlanarDistance`],
 //!   [`BuiltinId::ZSeparation`], [`BuiltinId::SaturatingAdd`],
 //!   `is_hostile`, `kin_count_within`, etc. are emitted as direct
@@ -133,6 +138,49 @@ pub struct EmitCtx<'a> {
     /// route through `lower_op_body` — those paths stay on the
     /// default per-agent shape.
     pub dispatch: std::cell::Cell<Option<crate::cg::dispatch::DispatchShape>>,
+    /// View-fold body emit scratch: the LocalId of the last
+    /// `Let { value: EventField, ty: AgentId, … }` emitted in the
+    /// current stmt list. ViewStorage assigns ("self += value")
+    /// pick up this local as the per-row index, so the assign
+    /// becomes a CAS-loop over `view_storage_primary[local_<N>]`
+    /// (`atomicLoad` + `atomicCompareExchangeWeak`). Cleared on
+    /// every stmt-list emit start so cross-list state can't leak.
+    ///
+    /// Tracking via interior mutability mirrors `tile_walk_index` —
+    /// keeps the existing `&EmitCtx` signature intact.
+    pub view_target_local: std::cell::Cell<Option<u32>>,
+
+    /// Cross-agent target-read scratch.
+    ///
+    /// When a `Read(AgentField { target: AgentRef::Target(expr_id), … })`
+    /// is lowered for the first time within a block, the expression
+    /// emit pushes `(expr_id, lowered_target_wgsl)` here and adds
+    /// `expr_id` to [`Self::bound_target_exprs`]. The next call to
+    /// [`lower_cg_stmt_to_wgsl`] drains entries pushed during *this*
+    /// stmt's expression sub-tree and emits them as
+    /// `let target_expr_<N>: u32 = <wgsl>;` lines BEFORE the stmt body,
+    /// so the body's `agent_<field>[target_expr_<N>]` access has a
+    /// declared identifier in scope.
+    ///
+    /// Per-stmt: each `lower_cg_stmt_to_wgsl` call snapshots the
+    /// length, lowers the body (which may push), then drains entries
+    /// `[snapshot..end]` as the stmt's pre-bindings.
+    pub pending_target_lets: std::cell::RefCell<Vec<(CgExprId, String)>>,
+
+    /// Set of `CgExprId`s already pre-bound as `let target_expr_<N>`
+    /// in the surrounding block. A `Target(_)` read whose `expr_id` is
+    /// in this set reuses the existing binding (just emits
+    /// `agent_<field>[target_expr_<N>]`); an `expr_id` not in the set
+    /// triggers a new pending entry.
+    ///
+    /// Save+restore at every stmt-list boundary
+    /// ([`lower_cg_stmt_list_to_wgsl`]) so a binding emitted in an
+    /// inner scope (e.g. inside an `if` body) can't leak into the
+    /// surrounding scope where its declaration isn't visible. Outer-
+    /// scope bindings *are* visible to nested scopes (WGSL
+    /// function-scope let), so save+restore is the right asymmetry:
+    /// inherit on entry, restore on exit.
+    pub bound_target_exprs: std::cell::RefCell<std::collections::HashSet<CgExprId>>,
 }
 
 impl<'a> EmitCtx<'a> {
@@ -144,6 +192,9 @@ impl<'a> EmitCtx<'a> {
             naming: HandleNamingStrategy::Structural,
             tile_walk_index: std::cell::RefCell::new(None),
             dispatch: std::cell::Cell::new(None),
+            view_target_local: std::cell::Cell::new(None),
+            pending_target_lets: std::cell::RefCell::new(Vec::new()),
+            bound_target_exprs: std::cell::RefCell::new(std::collections::HashSet::new()),
         }
     }
 
@@ -153,9 +204,13 @@ impl<'a> EmitCtx<'a> {
     /// # Limitations
     ///
     /// - With [`HandleNamingStrategy::Structural`], every variant
-    ///   produces a deterministic identifier; [`AgentRef::Target`] is
-    ///   rendered as a placeholder (`agent_target_expr_<N>_<field>`)
-    ///   that Task 4.2 will replace with a runtime-resolved access.
+    ///   produces a deterministic identifier; [`AgentRef::Target(id)`]
+    ///   renders as `agent_target_expr_<N>_<field>` *for the bare
+    ///   handle name only* (snapshot tests). The active per-stmt emit
+    ///   uses [`agent_field_access`]'s indexed form
+    ///   `agent_<field>[target_expr_<N>]` paired with a hoisted
+    ///   `let target_expr_<N>` — see the module-level note for the
+    ///   threading mechanism.
     /// - Plumbing-only handles ([`DataHandle::AliveBitmap`],
     ///   [`DataHandle::IndirectArgs`], [`DataHandle::AgentScratch`],
     ///   [`DataHandle::SimCfgBuffer`], [`DataHandle::SnapshotKick`])
@@ -213,10 +268,13 @@ fn structural_handle_name(h: &DataHandle) -> String {
 ///   - `PerPairCandidate` → `per_pair_candidate` (PerPair preamble-bound)
 ///   - `Actor` → `actor_id` (PerEvent preamble-bound)
 ///
-/// `Target(_)` is NOT handled here — callers fall back to a typed-
-/// default literal (read) or a phony discard (assign) for that case
-/// because the per-thread target index isn't threaded into kernel-
-/// local scope yet (Phase 8 follow-up).
+/// `Target(expr_id)` resolves to `target_expr_<N>` (where `<N>` is
+/// `expr_id.0`) — the caller is responsible for ensuring a stmt-prefix
+/// `let target_expr_<N>: u32 = <wgsl>;` is in scope. The `Read` /
+/// `Assign` arms of [`lower_cg_expr_to_wgsl`] / [`lower_cg_stmt_to_wgsl`]
+/// queue that binding via [`EmitCtx::pending_target_lets`] on first
+/// reference; the public stmt-emit drains pending entries as
+/// pre-stmt let lines.
 ///
 /// The binding side (`structural_binding_name` in `cg/emit/kernel.rs`)
 /// already drops the agent-ref discriminator and uses just
@@ -230,7 +288,16 @@ fn agent_field_access(field: AgentFieldId, target: &AgentRef) -> String {
         AgentRef::PerPairCandidate => "per_pair_candidate".to_string(),
         AgentRef::Target(id) => format!("target_expr_{}", id.0),
     };
-    format!("agent_{}[{}]", field.snake(), index)
+    let raw = format!("agent_{}[{}]", field.snake(), index);
+    // Bool fields are stored as `array<u32>` on the GPU (boolean
+    // storage isn't host-shareable in WGSL, see `kernel.rs`'s
+    // `AgentFieldTy::Bool => "array<u32>"`); coerce back to bool at
+    // every read site so the WGSL type-checker accepts the value in
+    // bool position (`if`, `&&`, `!`, etc.).
+    match field.ty() {
+        AgentFieldTy::Bool => format!("({raw} != 0u)"),
+        _ => raw,
+    }
 }
 
 /// Identifier token for an [`AgentRef`]. `Target(expr_id)` maps to the
@@ -247,6 +314,15 @@ fn agent_ref_token(target: &AgentRef) -> String {
         AgentRef::Target(id) => format!("target_expr_{}", id.0),
         AgentRef::PerPairCandidate => "per_pair_candidate".to_string(),
     }
+}
+
+/// True iff `expr` is a `CgExpr::EventField` read — the binder
+/// extraction shape that fold-handler bodies produce when they
+/// destructure event payload fields like `on Killed { by: predator }`.
+/// Used by the per-stmt emit to recognise the per-row index local
+/// for downstream `Assign { target: ViewStorage, … }` writes.
+fn is_event_field_read(expr: &CgExpr) -> bool {
+    matches!(expr, CgExpr::EventField { .. })
 }
 
 fn view_slot_token(slot: ViewStorageSlot) -> &'static str {
@@ -288,28 +364,6 @@ fn rng_purpose_token(purpose: RngPurpose) -> &'static str {
 fn agent_scratch_token(kind: AgentScratchKind) -> &'static str {
     match kind {
         AgentScratchKind::Packed => "packed",
-    }
-}
-
-/// Typed-default WGSL literal for an [`AgentFieldTy`]. Used by B1 as
-/// the fallback for an unresolved `AgentField{target: Target(_)}` read
-/// — the slot-aware naming strategy (Path B) replaces this with a real
-/// buffer access. The values are chosen so mask predicates that read
-/// through unresolved targets evaluate to `false` (no bitmap bit set)
-/// and numerics produce a clean zero.
-fn b1_default_for_field_ty(ty: AgentFieldTy) -> &'static str {
-    match ty {
-        AgentFieldTy::F32 => "0.0",
-        AgentFieldTy::U32 => "0u",
-        // WGSL has no native i16; the SoA stores i16 but the GPU
-        // mirror widens to i32. Default to 0 in i32 form.
-        AgentFieldTy::I16 => "0",
-        AgentFieldTy::Bool => "false",
-        AgentFieldTy::Vec3 => "vec3<f32>(0.0)",
-        AgentFieldTy::EnumU8 => "0u",
-        // Optional fields use 0xFFFFFFFFu as the "None" sentinel on
-        // GPU per the AgentFieldTy::OptAgentId / OptEnumU32 docs.
-        AgentFieldTy::OptAgentId | AgentFieldTy::OptEnumU32 => "0xFFFFFFFFu",
     }
 }
 
@@ -614,12 +668,40 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
             //   EventTarget → preamble-bound `event_target_id`
             //   PerPairCandidate → preamble-bound `per_pair_candidate`
             //   Actor → preamble-bound `actor_id`
-            //   Target(_) → still a B1 typed-default fallback —
-            //     the per-thread target index isn't yet threaded
-            //     into kernel-local scope (Phase 8 follow-up).
+            //   Target(expr_id) → stmt-scope hoisted `target_expr_<N>`
+            //     (see `pending_target_lets` on EmitCtx). The first
+            //     reference within a block lowers the target expression
+            //     to WGSL, queues a pre-stmt
+            //     `let target_expr_<N>: u32 = <wgsl>;` for the enclosing
+            //     stmt, and returns `agent_<field>[target_expr_<N>]`.
+            //     Subsequent references in the same block reuse the
+            //     binding without re-emitting.
             if let DataHandle::AgentField { field, target } = handle {
-                if matches!(target, AgentRef::Target(_)) {
-                    return Ok(b1_default_for_field_ty(field.ty()).to_string());
+                if let AgentRef::Target(target_expr_id) = target {
+                    // Skip re-binding if the same target expression
+                    // has already been hoisted in the surrounding
+                    // block. The bound set is cloned + restored at
+                    // every stmt-list boundary so inner-scope
+                    // bindings can't leak outward.
+                    let already_bound = ctx
+                        .bound_target_exprs
+                        .borrow()
+                        .contains(target_expr_id);
+                    if !already_bound {
+                        // Recursive lowering: the target expression
+                        // itself may contain further `Target(_)` reads;
+                        // each pushes its own pending entry, all
+                        // emitted before the enclosing stmt.
+                        let target_wgsl =
+                            lower_cg_expr_to_wgsl(*target_expr_id, ctx)?;
+                        ctx.pending_target_lets
+                            .borrow_mut()
+                            .push((*target_expr_id, target_wgsl));
+                        ctx.bound_target_exprs
+                            .borrow_mut()
+                            .insert(*target_expr_id);
+                    }
+                    return Ok(agent_field_access(*field, target));
                 }
                 // Tile-walk substitution: when the tiled-MoveBoid emit
                 // path is active and we're inside its inner cell-walk
@@ -883,6 +965,35 @@ fn indent_block(s: &str, indent: usize) -> String {
 /// [`EmitError::StmtIdOutOfRange`], or
 /// [`EmitError::StmtListIdOutOfRange`] for any dangling id.
 pub fn lower_cg_stmt_to_wgsl(stmt_id: CgStmtId, ctx: &EmitCtx) -> Result<String, EmitError> {
+    // Snapshot the pending-target-let buffer length so we can detect
+    // entries pushed *during this stmt's expression sub-tree* and
+    // drain them as the stmt's pre-bindings. Entries already in the
+    // buffer at entry belong to a caller's stmt and must not be
+    // consumed here. See `EmitCtx::pending_target_lets` doc.
+    let snapshot_len = ctx.pending_target_lets.borrow().len();
+    let body = lower_cg_stmt_body_to_wgsl(stmt_id, ctx)?;
+    let mut pending = ctx.pending_target_lets.borrow_mut();
+    if pending.len() == snapshot_len {
+        return Ok(body);
+    }
+    let new_lets: Vec<(CgExprId, String)> = pending.drain(snapshot_len..).collect();
+    drop(pending);
+    let lets_wgsl: String = new_lets
+        .iter()
+        .map(|(id, w)| format!("let target_expr_{}: u32 = {};", id.0, w))
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok(format!("{}\n{}", lets_wgsl, body))
+}
+
+/// Inner per-stmt lowering. Produces the raw WGSL fragment for the
+/// stmt body without the cross-agent target pre-bindings — those are
+/// drained + prepended by the public [`lower_cg_stmt_to_wgsl`]
+/// wrapper.
+fn lower_cg_stmt_body_to_wgsl(
+    stmt_id: CgStmtId,
+    ctx: &EmitCtx,
+) -> Result<String, EmitError> {
     let arena_len = ctx.prog.stmts.len() as u32;
     let node = <CgProgram as StmtArena>::get(ctx.prog, stmt_id).ok_or(
         EmitError::StmtIdOutOfRange {
@@ -901,19 +1012,75 @@ pub fn lower_cg_stmt_to_wgsl(stmt_id: CgStmtId, ctx: &EmitCtx) -> Result<String,
             // we evaluate the RHS as a phony WGSL discard so the body
             // parses; for trivial fixtures the fold loop is empty so
             // this never runs.
-            if let DataHandle::ViewStorage { .. } = target {
+            if let DataHandle::ViewStorage { view, slot } = target {
                 let rhs = lower_cg_expr_to_wgsl(*value, ctx)?;
+                // When the surrounding stmt list captured a per-row
+                // index local (e.g. `Let local_<N> = EventField(by,
+                // AgentId)` set `view_target_local` to N), emit the
+                // accumulator add directly: `view_storage_<slot>[
+                // local_<N>] = view_storage_<slot>[local_<N>] + rhs`.
+                // Without an index local fall back to the phony
+                // discard for now — non-fold callers (e.g. driver
+                // tests) drive Assign-to-ViewStorage in shapes that
+                // don't surface a binder yet.
+                if let Some(idx_local) = ctx.view_target_local.get() {
+                    let storage = format!(
+                        "view_storage_{}",
+                        view_slot_token(*slot),
+                    );
+                    let _ = view; // structural emit names by slot
+                    // The view storage binding is
+                    // `array<atomic<u32>>` (see
+                    // build_view_fold_bindings) but every shipped
+                    // view today is f32-typed. The accumulator add
+                    // is racy under contention (multiple GPU threads
+                    // writing the same slot per tick) so we emit a
+                    // CAS loop: atomicLoad → bitcast<f32> → add rhs
+                    // → bitcast<u32> → atomicCompareExchangeWeak,
+                    // retrying on the weak-CAS failure path. This
+                    // satisfies P11 (Reduction Determinism) at the
+                    // cost of a per-thread spin under heavy
+                    // contention; sort-then-fold is a future
+                    // enhancement that side-steps the spin entirely.
+                    // When non-f32 view storage lands, this
+                    // branches on the view's element type from
+                    // `view_signatures`.
+                    return Ok(format!(
+                        "loop {{\n\
+                         \x20   let old = atomicLoad(&{storage}[local_{idx_local}]);\n\
+                         \x20   let new_val = bitcast<u32>(bitcast<f32>(old) + ({rhs}));\n\
+                         \x20   let result = atomicCompareExchangeWeak(&{storage}[local_{idx_local}], old, new_val);\n\
+                         \x20   if (result.exchanged) {{ break; }}\n\
+                         }}"
+                    ));
+                }
                 return Ok(format!("_ = ({});", rhs));
             }
             // AgentField writes emit indexed access on the shared SoA
             // binding (`agent_<field>[<index>] = <value>`). See the
             // matching Read arm above for the agent-ref → index map.
-            // Target(_) writes fall back to a phony discard until the
-            // per-thread target index threading lands.
+            // Target(expr_id) writes go through the same stmt-scope
+            // pre-binding as reads (`pending_target_lets`), so
+            // `agents.set_<field>(other, value)` becomes
+            // `agent_<field>[target_expr_<N>] = <value>;` with the
+            // target index hoisted to a stmt-prefix `let`.
             if let DataHandle::AgentField { field, target: agent_ref } = target {
                 let rhs = lower_cg_expr_to_wgsl(*value, ctx)?;
-                if matches!(agent_ref, AgentRef::Target(_)) {
-                    return Ok(format!("_ = ({});", rhs));
+                if let AgentRef::Target(target_expr_id) = agent_ref {
+                    let already_bound = ctx
+                        .bound_target_exprs
+                        .borrow()
+                        .contains(target_expr_id);
+                    if !already_bound {
+                        let target_wgsl =
+                            lower_cg_expr_to_wgsl(*target_expr_id, ctx)?;
+                        ctx.pending_target_lets
+                            .borrow_mut()
+                            .push((*target_expr_id, target_wgsl));
+                        ctx.bound_target_exprs
+                            .borrow_mut()
+                            .insert(*target_expr_id);
+                    }
                 }
                 let lhs = agent_field_access(*field, agent_ref);
                 return Ok(format!("{} = {};", lhs, rhs));
@@ -951,6 +1118,23 @@ pub fn lower_cg_stmt_to_wgsl(stmt_id: CgStmtId, ctx: &EmitCtx) -> Result<String,
             // `IrExpr::Local` resolution lands at the expression
             // layer (Task 5.5d).
             let v = lower_cg_expr_to_wgsl(*value, ctx)?;
+            // View-fold target-row capture: when the let extracts an
+            // event field of type AgentId (the `on Killed { by:
+            // predator }` binder shape), record the local id so any
+            // subsequent ViewStorage assign in the same stmt list
+            // uses it as the per-row index. See the Assign-to-
+            // ViewStorage arm above for the consumer.
+            if matches!(ty, CgTy::AgentId) {
+                if let Some(value_node) =
+                    <CgProgram as ExprArena>::get(ctx.prog, *value)
+                {
+                    if matches!(value_node, CgExpr::Read(DataHandle::EventRing { .. }))
+                        || is_event_field_read(value_node)
+                    {
+                        ctx.view_target_local.set(Some(local.0));
+                    }
+                }
+            }
             Ok(format!(
                 "let local_{}: {} = {};",
                 local.0,
@@ -1014,24 +1198,146 @@ pub fn lower_cg_stmt_to_wgsl(stmt_id: CgStmtId, ctx: &EmitCtx) -> Result<String,
 /// is empty so this code is dead at runtime; for non-trivial fixtures
 /// emitted events vanish, but that's the same B1 trade-off ViewStorage
 /// Assign uses (and the same task list — Tasks 9-11).
+/// Lower a `CgStmt::Emit` to a real WGSL ring-append: atomicAdd a
+/// slot off `event_tail`, then write the tag + tick + payload words
+/// to `event_ring[slot * stride + offset]`. Bounds-checked against
+/// `event_ring_cap` so a producer that overflows the ring drops the
+/// event silently (the runtime's per-tick clear ensures the ring
+/// holds at most one tick's worth of events; if the cap is hit the
+/// fixture is producing more events than configured for).
+///
+/// Bindings touched:
+///   - `event_ring`: `var<storage, read_write> array<u32>`
+///   - `event_tail`: `var<storage, read_write> atomic<u32>`
+///   - kernel preamble-bound `tick: u32` (header word 1)
+///
+/// The PhysicsRule op's reads/writes table must record EventRing
+/// (Append) + EventTail so the binding-generator includes both
+/// bindings; without that the WGSL emitted here references undeclared
+/// identifiers. See `cg/lower/physics.rs::lower_emit` for the
+/// op-side metadata wire-up (Phase-8 task piece 2).
 fn lower_emit_to_wgsl(
     event_id: u32,
     fields: &[(EventField, CgExprId)],
     ctx: &EmitCtx,
 ) -> Result<String, EmitError> {
+    let kind = crate::cg::op::EventKindId(event_id);
+    let layout = ctx
+        .prog
+        .event_layouts
+        .get(&event_id)
+        .ok_or(EmitError::UnregisteredEventKind { kind })?;
+    let stride = layout.record_stride_u32;
+    let header = layout.header_word_count;
+    let buf = layout.buffer_name.as_str();
+    let ordered = layout.fields_in_declaration_order();
+
+    // Pre-evaluate every payload value-expr BEFORE touching the
+    // tail counter. Lowering a value may emit auxiliary `let`s into
+    // the surrounding stmt list (fold pre-pass) — doing it before
+    // the atomicAdd keeps the slot-acquired window short and avoids
+    // double-evaluating the expression in the bounds-check vs the
+    // commit branch.
+    // The producer-side `event_ring` binding is `array<atomic<u32>>`
+    // (per `handle_to_binding_metadata` for EventRing-Append), so
+    // ring writes go through `atomicStore(&ring[idx], value)`. Slot
+    // ownership comes from the atomicAdd on `event_tail`, so the
+    // atomicStore here only needs to write into a slot we already
+    // own — no race vs. other producers.
+    let mut field_writes: Vec<String> = Vec::with_capacity(fields.len());
+    for (field_ref, expr_id) in fields {
+        let layout_entry = ordered
+            .get(field_ref.index as usize)
+            .ok_or(EmitError::UnregisteredEventKind { kind })?;
+        let (_name, fl) = layout_entry;
+        let value_wgsl = lower_cg_expr_to_wgsl(*expr_id, ctx)?;
+        let off = header + fl.word_offset_in_payload;
+        let store = |out: &mut Vec<String>, off: u32, val: String| {
+            out.push(format!(
+                "    atomicStore(&{buf}[slot * {stride}u + {off}u], {val});",
+            ));
+        };
+        match fl.ty {
+            CgTy::AgentId | CgTy::U32 | CgTy::Tick => {
+                store(&mut field_writes, off, format!("({value_wgsl})"));
+            }
+            CgTy::I32 | CgTy::F32 => {
+                store(
+                    &mut field_writes,
+                    off,
+                    format!("bitcast<u32>({value_wgsl})"),
+                );
+            }
+            CgTy::Vec3F32 => {
+                // Materialize once so we don't re-evaluate the
+                // source vec3 expression three times across the
+                // .x/.y/.z stores.
+                let tmp = format!("_emit_v_{}_{}", event_id, field_ref.index);
+                field_writes
+                    .push(format!("    let {tmp}: vec3<f32> = ({value_wgsl});"));
+                store(&mut field_writes, off, format!("bitcast<u32>({tmp}.x)"));
+                store(&mut field_writes, off + 1, format!("bitcast<u32>({tmp}.y)"));
+                store(&mut field_writes, off + 2, format!("bitcast<u32>({tmp}.z)"));
+            }
+            CgTy::Bool => {
+                store(
+                    &mut field_writes,
+                    off,
+                    format!("select(0u, 1u, ({value_wgsl}))"),
+                );
+            }
+            CgTy::ViewKey { .. } => {
+                return Err(EmitError::EventFieldUnsupportedType {
+                    kind,
+                    word_offset_in_payload: fl.word_offset_in_payload,
+                    got: fl.ty,
+                });
+            }
+        }
+    }
+
+    // Wrap the ring-append in `{ … }` so the `slot` let doesn't
+    // collide with sibling emits. `event_ring_cap` is supplied as a
+    // wgsl const by the kernel preamble (todo: thread through
+    // PhysicsRule cfg uniform). For now hardcode 65536 slots — the
+    // runtime allocates that many u32-words / stride.
     let mut out = String::new();
-    out.push_str(&format!("// emit event#{} (B1 phony discard — real ring-append pending)\n", event_id));
-    for (_field, expr_id) in fields {
-        let v = lower_cg_expr_to_wgsl(*expr_id, ctx)?;
-        out.push_str(&format!("_ = ({});\n", v));
+    out.push_str(&format!("// emit event#{event_id} ({} fields)\n", fields.len()));
+    out.push_str("{\n");
+    // Tail is `array<atomic<u32>>` with a single element — slot 0 is
+    // the count. atomicAdd returns the prior value (this producer's
+    // unique slot index).
+    out.push_str("    let slot = atomicAdd(&event_tail[0], 1u);\n");
+    // Bounds check — silently drop if ring full. Runtime sizes
+    // event_ring to `DEFAULT_EVENT_RING_CAP_SLOTS * stride * 4` bytes.
+    out.push_str(&format!(
+        "    if (slot < {}u) {{\n",
+        DEFAULT_EVENT_RING_CAP_SLOTS
+    ));
+    // Tag + tick header words also go through atomicStore since the
+    // binding is `array<atomic<u32>>`.
+    out.push_str(&format!(
+        "        atomicStore(&{buf}[slot * {stride}u + 0u], {event_id}u);\n"
+    ));
+    out.push_str(&format!(
+        "        atomicStore(&{buf}[slot * {stride}u + 1u], tick);\n"
+    ));
+    for line in &field_writes {
+        // Each `field_writes` entry already starts with 4-space
+        // indent; bump to 8 for the nested-if scope.
+        out.push_str(&format!("    {line}\n"));
     }
-    // Drop trailing newline so callers can wrap with their own indent
-    // without doubled blank lines.
-    if out.ends_with('\n') {
-        out.pop();
-    }
+    out.push_str("    }\n");
+    out.push_str("}");
     Ok(out)
 }
+
+/// Default event-ring slot capacity — 65 536 events per tick. The
+/// runtime sizes the `event_ring` buffer to `cap * stride * 4` bytes;
+/// the WGSL emitter bounds-checks `slot < cap` to silently drop
+/// overflow producers. A future tunable would thread this through the
+/// per-rule cfg uniform.
+const DEFAULT_EVENT_RING_CAP_SLOTS: u32 = 65_536;
 
 /// Lower a [`CgStmt::Match`] as a scrutinee-bound `if`-chain. WGSL's
 /// `switch` would be a future-tense option; today the chain is the
@@ -1121,6 +1427,20 @@ pub fn lower_cg_stmt_list_to_wgsl(
             arena_len,
         },
     )?;
+    // Reset per-list scratch so the view-fold target-local capture
+    // from a previous stmt list (e.g. an earlier handler in the same
+    // op) can't leak into this one. The per-stmt Let/Assign sequence
+    // re-establishes the target_local for the current list.
+    let saved_view_target = ctx.view_target_local.replace(None);
+
+    // Snapshot the cross-agent target-let bound set so any new
+    // bindings emitted inside this list (which live in WGSL block
+    // scope) can't leak into the surrounding scope when the list
+    // returns. Outer-scope bindings *do* remain visible to nested
+    // emit (cloned-then-restored, not reset-then-restored) — this
+    // matches WGSL's function-scope let visibility, where an
+    // outer-block binding is in scope inside any nested block.
+    let saved_bound_targets = ctx.bound_target_exprs.borrow().clone();
 
     // Fold-fusion pre-pass: collect every `ForEachNeighbor` in the
     // list whose `init` + `projection` are pure (no `ReadLocal`
@@ -1184,6 +1504,14 @@ pub fn lower_cg_stmt_list_to_wgsl(
         let stmt_id = list.stmts[idx];
         parts.push(lower_cg_stmt_to_wgsl(stmt_id, ctx)?);
     }
+    // Restore the outer scope's view-fold target-local capture so a
+    // nested stmt list (e.g. an If branch inside a fold body) can't
+    // permanently reset it for the surrounding handler.
+    ctx.view_target_local.set(saved_view_target);
+    // Restore the outer scope's cross-agent target-let bound set so
+    // bindings emitted inside this list don't shadow outer-scope
+    // identifiers when control returns to the surrounding emit.
+    ctx.bound_target_exprs.replace(saved_bound_targets);
     Ok(parts.join("\n"))
 }
 
@@ -1704,7 +2032,7 @@ mod tests {
         let ctx = EmitCtx::structural(&prog);
         assert_eq!(
             lower_cg_expr_to_wgsl(not_alive, &ctx).unwrap(),
-            "(!agent_alive[agent_id])"
+            "(!(agent_alive[agent_id] != 0u))"
         );
 
         // abs(slow_factor_q8)
@@ -1899,18 +2227,23 @@ mod tests {
                     field: AgentFieldId::Alive,
                     target: AgentRef::EventTarget,
                 },
-                "agent_alive[event_target_id]",
+                "(agent_alive[event_target_id] != 0u)",
             ),
             (
-                // B1 no-op fallback: AgentRef::Target reads to a typed
-                // default (vec3 → vec3<f32>(0.0)) until Path B's
-                // slot-aware naming threads the target id into a real
-                // buffer access. See `b1_default_for_field_ty`.
+                // Slice 1 (2026-05-03 stdlib-into-CG-IR): `Target(_)`
+                // reads now emit indexed access against the SoA.
+                // The pre-stmt `let target_expr_<N>: u32 = …;` binding
+                // is queued via `pending_target_lets` and drained by
+                // `lower_cg_stmt_to_wgsl`; this `lower_cg_expr_to_wgsl`-
+                // only test only sees the indexed access form. The
+                // dedicated `target_read_emits_stmt_scope_let_binding`
+                // test below covers the let-emission via the stmt-
+                // level wrapper.
                 DataHandle::AgentField {
                     field: AgentFieldId::Pos,
                     target: AgentRef::Target(target_expr_id),
                 },
-                "vec3<f32>(0.0)",
+                "agent_pos[target_expr_0]",
             ),
             (
                 DataHandle::ViewStorage {
@@ -2090,7 +2423,37 @@ mod tests {
 
     #[test]
     fn lower_emit_stmt() {
+        use crate::cg::program::{EventLayout, FieldLayout};
         let mut prog = empty_prog();
+        // Real ring-append needs an event layout to resolve field
+        // indices to (offset, ty). Two F32 fields at consecutive
+        // payload offsets (0, 1).
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert(
+            "hp".to_string(),
+            FieldLayout {
+                word_offset_in_payload: 0,
+                word_count: 1,
+                ty: CgTy::F32,
+            },
+        );
+        fields.insert(
+            "zero".to_string(),
+            FieldLayout {
+                word_offset_in_payload: 1,
+                word_count: 1,
+                ty: CgTy::F32,
+            },
+        );
+        prog.event_layouts.insert(
+            7,
+            EventLayout {
+                record_stride_u32: 10,
+                header_word_count: 2,
+                buffer_name: "event_ring".to_string(),
+                fields,
+            },
+        );
         let hp = push_expr(
             &mut prog,
             CgExpr::Read(DataHandle::AgentField {
@@ -2122,11 +2485,25 @@ mod tests {
             },
         );
         let ctx = EmitCtx::structural(&prog);
-        // B1 no-op fallback: per-field WGSL phony discards so the body
-        // parses; real ring-append form is a future task.
-        assert_eq!(
-            lower_cg_stmt_to_wgsl(s, &ctx).unwrap(),
-            "// emit event#7 (B1 phony discard — real ring-append pending)\n_ = (agent_hp[agent_id]);\n_ = (0.0);"
+        let wgsl = lower_cg_stmt_to_wgsl(s, &ctx).unwrap();
+        // Real ring-append form: atomicAdd to event_tail[0], bounds-
+        // check, then atomicStore tag/tick/payload writes. F32
+        // fields wrap in bitcast<u32>.
+        assert!(
+            wgsl.contains("let slot = atomicAdd(&event_tail[0], 1u);"),
+            "expected atomicAdd-to-tail; got:\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("atomicStore(&event_ring[slot * 10u + 0u], 7u);"),
+            "expected tag (event id 7) write; got:\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("atomicStore(&event_ring[slot * 10u + 2u], bitcast<u32>(agent_hp[agent_id]));"),
+            "expected hp f32 bitcast write at offset 2; got:\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("atomicStore(&event_ring[slot * 10u + 3u], bitcast<u32>(0.0));"),
+            "expected zero f32 bitcast write at offset 3; got:\n{wgsl}"
         );
     }
 
@@ -2963,5 +3340,296 @@ mod tests {
             }
             other => panic!("expected UnregisteredNamespaceMethod, got {other:?}"),
         }
+    }
+
+    /// `CgStmt::Emit` lowers to a real ring-append: atomicAdd a slot
+    /// off `event_tail`, then write the tag + tick + payload words to
+    /// `event_ring[slot * stride + offset]`. Replaces the prior B1
+    /// phony-discard placeholder. The (event_kind, field index) lookup
+    /// resolves through `EventLayout::fields_in_declaration_order`.
+    ///
+    /// This test pins the WGSL shape directly via the per-stmt emit
+    /// path, independent of the kernel-binding generator (which still
+    /// needs to declare both `event_ring: array<u32>` and
+    /// `event_tail: atomic<u32>` for non-test compilation; tracked
+    /// separately).
+    #[test]
+    fn emit_lowers_to_ring_append_with_atomic_tail() {
+        use crate::cg::op::EventKindId;
+        use crate::cg::program::{EventLayout, FieldLayout};
+        use crate::cg::stmt::{CgStmt, EventField};
+
+        // Killed { by: AgentId, prey: AgentId, pos: Vec3F32 } — same
+        // shape predator_prey_min.sim's Killed declares.
+        let mut prog = empty_prog();
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert(
+            "by".to_string(),
+            FieldLayout {
+                word_offset_in_payload: 0,
+                word_count: 1,
+                ty: CgTy::AgentId,
+            },
+        );
+        fields.insert(
+            "prey".to_string(),
+            FieldLayout {
+                word_offset_in_payload: 1,
+                word_count: 1,
+                ty: CgTy::AgentId,
+            },
+        );
+        fields.insert(
+            "pos".to_string(),
+            FieldLayout {
+                word_offset_in_payload: 2,
+                word_count: 3,
+                ty: CgTy::Vec3F32,
+            },
+        );
+        prog.event_layouts.insert(
+            1,
+            EventLayout {
+                record_stride_u32: 10,
+                header_word_count: 2,
+                buffer_name: "event_ring".to_string(),
+                fields,
+            },
+        );
+
+        let by_value = push_expr(&mut prog, CgExpr::AgentSelfId);
+        let prey_value = push_expr(&mut prog, CgExpr::AgentSelfId);
+        let pos_value = push_expr(
+            &mut prog,
+            CgExpr::Lit(LitValue::Vec3F32 { x: 1.0, y: 2.0, z: 3.0 }),
+        );
+        let stmt = CgStmt::Emit {
+            event: EventKindId(1),
+            fields: vec![
+                (EventField { event: EventKindId(1), index: 0 }, by_value),
+                (EventField { event: EventKindId(1), index: 1 }, prey_value),
+                (EventField { event: EventKindId(1), index: 2 }, pos_value),
+            ],
+        };
+        let stmt_id = push_stmt(&mut prog, stmt);
+        let ctx = EmitCtx::structural(&prog);
+        let wgsl = lower_cg_stmt_to_wgsl(stmt_id, &ctx).expect("Emit lowers");
+
+        // Atomic-add the slot off event_tail[0].
+        assert!(
+            wgsl.contains("let slot = atomicAdd(&event_tail[0], 1u);"),
+            "expected atomicAdd-to-tail; got:\n{wgsl}"
+        );
+        // Bounds check before commit.
+        assert!(
+            wgsl.contains("if (slot < 65536u)"),
+            "expected slot bounds check; got:\n{wgsl}"
+        );
+        // Tag write at offset 0 (event_id is 1) via atomicStore.
+        assert!(
+            wgsl.contains("atomicStore(&event_ring[slot * 10u + 0u], 1u);"),
+            "expected tag write at offset 0; got:\n{wgsl}"
+        );
+        // Tick write at offset 1.
+        assert!(
+            wgsl.contains("atomicStore(&event_ring[slot * 10u + 1u], tick);"),
+            "expected tick write at offset 1; got:\n{wgsl}"
+        );
+        // by AgentId at payload offset 0 (header+0 = 2).
+        assert!(
+            wgsl.contains("atomicStore(&event_ring[slot * 10u + 2u], (agent_id));"),
+            "expected `by` at offset 2; got:\n{wgsl}"
+        );
+        // prey AgentId at payload offset 1 (header+1 = 3).
+        assert!(
+            wgsl.contains("atomicStore(&event_ring[slot * 10u + 3u], (agent_id));"),
+            "expected `prey` at offset 3; got:\n{wgsl}"
+        );
+        // Vec3 pos with bitcast<u32>(.x/.y/.z) at offsets 4/5/6.
+        assert!(
+            wgsl.contains("bitcast<u32>(_emit_v_1_2.x)"),
+            "expected vec3 .x bitcast; got:\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("atomicStore(&event_ring[slot * 10u + 4u], bitcast<u32>(_emit_v_1_2.x));"),
+            "expected vec3 .x at offset 4; got:\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("atomicStore(&event_ring[slot * 10u + 6u], bitcast<u32>(_emit_v_1_2.z));"),
+            "expected vec3 .z at offset 6; got:\n{wgsl}"
+        );
+        // No phony discard left over from the old B1 placeholder.
+        assert!(
+            !wgsl.contains("_ = ("),
+            "phony discard should be gone; got:\n{wgsl}"
+        );
+    }
+
+    // ---- Cross-agent target reads via stmt-scope let hoisting ----
+    //
+    // Slice 1 (2026-05-03 "stdlib into CG IR" plan) replaces the prior
+    // B1 typed-default fallback for `Read(AgentField{Target(_)})` with
+    // a real `let target_expr_<N>: u32 = …;` pre-binding emitted at
+    // stmt scope, so `agents.pos(other)` becomes `agent_pos[
+    // target_expr_<N>]` paired with a hoisted let declaring the index.
+    // These tests lock the behavior so a later refactor can't silently
+    // re-introduce a placeholder.
+
+    /// `Read(AgentField{Pos, Target(some_lit_id)})` lowered as the
+    /// value of an `Assign { target: AgentField{Pos, Self_}, … }`
+    /// stmt produces:
+    /// ```text
+    /// let target_expr_0: u32 = 11u;
+    /// agent_pos[agent_id] = agent_pos[target_expr_0];
+    /// ```
+    /// The pre-binding is the slice 1 fix; without it the body
+    /// returns `vec3<f32>(0.0)` (the B1 placeholder).
+    #[test]
+    fn target_read_emits_stmt_scope_let_binding() {
+        let mut prog = empty_prog();
+        // Target expression: a literal AgentId(11) stand-in for a
+        // computed cross-agent reference (in real DSL this would be
+        // `agents.engaged_with_or(self, fallback)` etc.).
+        let target_id_expr = push_expr(&mut prog, CgExpr::Lit(LitValue::AgentId(11)));
+        // RHS: `agents.pos(target)` — Read of AgentField{Pos,
+        // Target(target_id_expr)}.
+        let rhs = push_expr(
+            &mut prog,
+            CgExpr::Read(DataHandle::AgentField {
+                field: AgentFieldId::Pos,
+                target: AgentRef::Target(target_id_expr),
+            }),
+        );
+        // LHS: `self.pos = …` (Assign target Pos on Self_).
+        let assign = push_stmt(
+            &mut prog,
+            CgStmt::Assign {
+                target: DataHandle::AgentField {
+                    field: AgentFieldId::Pos,
+                    target: AgentRef::Self_,
+                },
+                value: rhs,
+            },
+        );
+        let ctx = EmitCtx::structural(&prog);
+        let wgsl = lower_cg_stmt_to_wgsl(assign, &ctx).expect("stmt lowers");
+        // Pre-binding for the target expression — emitted at stmt
+        // scope so the indexed access has a declared identifier.
+        assert!(
+            wgsl.contains("let target_expr_0: u32 = 11u;"),
+            "expected pre-stmt let binding; got:\n{wgsl}"
+        );
+        // Indexed access on the SoA, NOT the old B1 default.
+        assert!(
+            wgsl.contains("agent_pos[target_expr_0]"),
+            "expected indexed access; got:\n{wgsl}"
+        );
+        assert!(
+            !wgsl.contains("vec3<f32>(0.0)"),
+            "B1 typed-default placeholder must not appear; got:\n{wgsl}"
+        );
+    }
+
+    /// Two reads of the same target expression within one stmt
+    /// (`Pos` and `Vel` both on `Target(N)`) emit a single
+    /// `let target_expr_<N>` pre-binding, not two. Validates the
+    /// `bound_target_exprs` dedup on first reference.
+    #[test]
+    fn duplicate_target_reads_share_one_let_binding() {
+        let mut prog = empty_prog();
+        let target_id_expr = push_expr(&mut prog, CgExpr::Lit(LitValue::AgentId(7)));
+        // Read pos and vel on the same Target(target_id_expr).
+        let pos_read = push_expr(
+            &mut prog,
+            CgExpr::Read(DataHandle::AgentField {
+                field: AgentFieldId::Pos,
+                target: AgentRef::Target(target_id_expr),
+            }),
+        );
+        let vel_read = push_expr(
+            &mut prog,
+            CgExpr::Read(DataHandle::AgentField {
+                field: AgentFieldId::Vel,
+                target: AgentRef::Target(target_id_expr),
+            }),
+        );
+        // Compose: `self.pos = pos_read + vel_read` so both reads
+        // appear in one stmt's expression sub-tree.
+        let sum = push_expr(
+            &mut prog,
+            CgExpr::Binary {
+                op: BinaryOp::AddVec3,
+                lhs: pos_read,
+                rhs: vel_read,
+                ty: CgTy::Vec3F32,
+            },
+        );
+        let assign = push_stmt(
+            &mut prog,
+            CgStmt::Assign {
+                target: DataHandle::AgentField {
+                    field: AgentFieldId::Pos,
+                    target: AgentRef::Self_,
+                },
+                value: sum,
+            },
+        );
+        let ctx = EmitCtx::structural(&prog);
+        let wgsl = lower_cg_stmt_to_wgsl(assign, &ctx).expect("stmt lowers");
+        // Exactly one let-binding for target_expr_0.
+        let count = wgsl.matches("let target_expr_0: u32 =").count();
+        assert_eq!(
+            count, 1,
+            "expected one let binding for the shared target expr; got {count}:\n{wgsl}"
+        );
+        // Both indexed accesses present.
+        assert!(
+            wgsl.contains("agent_pos[target_expr_0]"),
+            "expected agent_pos indexed access; got:\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("agent_vel[target_expr_0]"),
+            "expected agent_vel indexed access; got:\n{wgsl}"
+        );
+    }
+
+    /// `Assign { target: AgentField{Pos, Target(N)}, value }`
+    /// (`agents.set_pos(other, …)`) emits the same pre-binding +
+    /// indexed write, replacing the prior phony `_ = (…);` discard.
+    #[test]
+    fn target_assign_emits_indexed_write_not_phony_discard() {
+        let mut prog = empty_prog();
+        let target_id_expr = push_expr(&mut prog, CgExpr::Lit(LitValue::AgentId(3)));
+        let rhs = push_expr(
+            &mut prog,
+            CgExpr::Read(DataHandle::AgentField {
+                field: AgentFieldId::Pos,
+                target: AgentRef::Self_,
+            }),
+        );
+        let assign = push_stmt(
+            &mut prog,
+            CgStmt::Assign {
+                target: DataHandle::AgentField {
+                    field: AgentFieldId::Pos,
+                    target: AgentRef::Target(target_id_expr),
+                },
+                value: rhs,
+            },
+        );
+        let ctx = EmitCtx::structural(&prog);
+        let wgsl = lower_cg_stmt_to_wgsl(assign, &ctx).expect("stmt lowers");
+        assert!(
+            wgsl.contains("let target_expr_0: u32 = 3u;"),
+            "expected pre-stmt let; got:\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("agent_pos[target_expr_0] = agent_pos[agent_id];"),
+            "expected indexed write; got:\n{wgsl}"
+        );
+        assert!(
+            !wgsl.contains("_ = ("),
+            "phony discard from the old placeholder must not appear; got:\n{wgsl}"
+        );
     }
 }

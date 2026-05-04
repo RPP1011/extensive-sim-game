@@ -349,8 +349,19 @@ pub fn kernel_topology_to_spec_and_body(
     //    handle is binding-relevant — Rng / ConfigConst are not). Skip
     //    handles that have no binding metadata.
     let mut typed_bindings: Vec<TypedBinding> = Vec::new();
+    let mut needs_event_tail = false;
     for (key, agg) in &handle_set {
         let canonical = canonical_handle(key, &agg.first_seen);
+        // Any EventRing access — Read (consumer paths like
+        // SeedIndirectArgs that need to know the ring depth) or
+        // Append (producers that atomicAdd to acquire a slot) — needs
+        // the sibling `event_tail` binding. The fold path
+        // (build_view_fold_bindings) hardcodes event_tail in slot 1
+        // for its own bindings; the generic path here synthesizes
+        // the same binding shape post-loop.
+        if let DataHandle::EventRing { .. } = &canonical {
+            needs_event_tail = true;
+        }
         let Some(meta) = handle_to_binding_metadata(&canonical, prog) else {
             // Rng + ConfigConst route through the cfg uniform / inline
             // helpers, not as standalone bindings.
@@ -364,6 +375,30 @@ pub fn kernel_topology_to_spec_and_body(
             access,
             wgsl_ty: meta.wgsl_ty,
             bg_source: meta.bg_source,
+        });
+    }
+
+    // 6b. Synthesize a sibling `event_tail` binding when any op in
+    //     this kernel does `EventRing-Append`. The resident-context
+    //     field `batch_events_tail` is the source-of-truth single
+    //     atomic<u32> counter the runtime allocates alongside the
+    //     event ring; producer kernels atomicAdd against it to
+    //     acquire write slots.
+    //
+    //     Sort key uses a synthetic `Ring(EventRingId(u32::MAX))` so
+    //     the tail consistently sorts after any real ring-keyed
+    //     binding (deterministic ordering). Name "event_tail" is the
+    //     identifier the WGSL emit body in
+    //     `lower_emit_to_wgsl` references unconditionally.
+    if needs_event_tail {
+        typed_bindings.push(TypedBinding {
+            sort_key: crate::cg::data_handle::CycleEdgeKey::Ring(
+                crate::cg::data_handle::EventRingId(u32::MAX),
+            ),
+            name: "event_tail".to_string(),
+            access: AccessMode::AtomicStorage,
+            wgsl_ty: "u32".to_string(),
+            bg_source: BgSource::Resident("batch_events_tail".to_string()),
         });
     }
 
@@ -1403,15 +1438,23 @@ fn compute_op_kind_short(kind: &ComputeOpKind) -> &'static str {
 ///   Mask, scoring, physics, spatial, and plumbing kernels share this
 ///   placeholder today; Task 5.5 will refine.
 fn build_generic_cfg_struct_decl(cfg_struct: &str) -> String {
+    // `tick: u32` joined the layout when PerAgent rules with `emit
+    // <Event>` bodies started referencing `tick` in the per-tick
+    // event payload header. Backwards-compat note: every runtime
+    // constructs cfg manually (per-fixture lib.rs), so the new
+    // field surfaces as a missing-field error at the per-fixture
+    // build site — caller updates that in lockstep.
     format!(
         "#[repr(C)]\n\
          #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]\n\
-         pub struct {cfg_struct} {{ pub agent_cap: u32, pub _pad: [u32; 3] }}"
+         pub struct {cfg_struct} {{ pub agent_cap: u32, pub tick: u32, pub _pad: [u32; 2] }}"
     )
 }
 
 fn build_generic_cfg_build_expr(cfg_struct: &str) -> String {
-    format!("{cfg_struct} {{ agent_cap: state.agent_cap(), _pad: [0; 3] }}")
+    format!(
+        "{cfg_struct} {{ agent_cap: state.agent_cap(), tick: state.tick as u32, _pad: [0; 2] }}"
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1496,8 +1539,18 @@ fn build_view_fold_bindings(view_name: &str, cfg_struct: &str) -> Vec<KernelBind
         KernelBinding {
             slot: 2,
             name: "view_storage_primary".into(),
-            access: AccessMode::ReadWriteStorage,
-            wgsl_ty: "array<u32>".into(),
+            // B1 fix: the fold body emits a CAS loop over this slot
+            // (`atomicLoad` + `atomicCompareExchangeWeak`) so the WGSL
+            // type must be `array<atomic<u32>>`. AccessMode::AtomicStorage
+            // wraps `wgsl_ty="u32"` into the atomic array form via
+            // `lower_wgsl_bindings`. Rust BGL entry is unchanged
+            // (`bgl_storage(N, false)` covers both atomic and
+            // non-atomic). Anchor/ids slots remain non-atomic — they
+            // alias primary's buffer via `unwrap_or(primary_buf)` at
+            // record time but the WGSL declarations are independent
+            // (the kernel body never indexes anchor/ids today).
+            access: AccessMode::AtomicStorage,
+            wgsl_ty: "u32".into(),
             bg_source: BgSource::ViewHandle {
                 accessor: accessor.clone(),
                 tuple_idx: 0,
@@ -2526,13 +2579,16 @@ fn seed_indirect_args_body(ring_id: u32) -> String {
     // suffix because there's still one args buffer per ring (today
     // single ring, so single buffer).
     format!(
-        "// PlumbingKind::SeedIndirectArgs (ring={ring_id}) — adapted from\n\
-        // engine_gpu_rules/src/seed_indirect.wgsl. Reads tail count from\n\
-        // event_ring[0] (post-iter-2 unified single ring); writes\n\
-        // (wg, 1, 1) into indirect_args_{ring_id} so the next per-event\n\
-        // dispatch on ring={ring_id} launches ceil(n/64) workgroups\n\
-        // (capped at CAP_WG=4096).\n\
-        let n = event_ring[0];\n\
+        "// PlumbingKind::SeedIndirectArgs (ring={ring_id}) — reads tail\n\
+        // count from event_tail[0] (the separate atomic counter\n\
+        // producers atomicAdd against; see the EventRing-Append emit\n\
+        // body in `lower_emit_to_wgsl`). The earlier convention read\n\
+        // event_ring[0] under a tail-at-offset-0 assumption that\n\
+        // overlapped event payload words; the separate-buffer split\n\
+        // resolves the conflict. Writes (wg, 1, 1) into\n\
+        // indirect_args_{ring_id} so the next per-event dispatch on\n\
+        // ring={ring_id} launches ceil(n/64) workgroups (CAP_WG=4096).\n\
+        let n = atomicLoad(&event_tail[0]);\n\
         let req = (n + 63u) / 64u;\n\
         var wg: u32 = req;\n\
         if (wg > 4096u) {{ wg = 4096u; }}\n\
@@ -2580,8 +2636,14 @@ fn plumbing_body_for_kind(kind: &PlumbingKind) -> String {
 fn thread_indexing_preamble(dispatch: &DispatchShape) -> String {
     match dispatch {
         DispatchShape::PerAgent => {
+            // `tick` is bound from the cfg uniform so PerAgent rules
+            // with `emit <Event>` bodies can write the tick header
+            // word into the event ring (every event payload starts
+            // with [tag, tick]). Always emitted even for non-emitting
+            // kernels — naga drops the unused let cleanly.
             "let agent_id = gid.x;\n\
-             if (agent_id >= cfg.agent_cap) { return; }\n\n"
+             if (agent_id >= cfg.agent_cap) { return; }\n\
+             let tick = cfg.tick;\n\n"
                 .to_string()
         }
         DispatchShape::PerEvent { source_ring } => format!(
@@ -4197,10 +4259,14 @@ mod tests {
                 "array<u32>".to_string(),
             ),
             (
+                // B1 fix: primary slot is AtomicStorage so the
+                // CAS-loop write-back type-checks. wgsl_ty="u32"
+                // is wrapped to `array<atomic<u32>>` by
+                // `lower_wgsl_bindings`.
                 2,
                 "view_storage_primary".to_string(),
-                "ReadWriteStorage".to_string(),
-                "array<u32>".to_string(),
+                "AtomicStorage".to_string(),
+                "u32".to_string(),
             ),
             (
                 3,

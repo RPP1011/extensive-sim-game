@@ -1287,6 +1287,16 @@ fn lower_all_physics(
 ) {
     for (i, rule) in comp.physics.iter().enumerate() {
         let rule_id = PhysicsRuleId(i as u32);
+        // `@cpu_only` physics rules emit only on the host side
+        // (chronicle prose with String payloads, dev-time logging,
+        // …). The CG / WGSL pipeline doesn't get an op for them so
+        // the GPU emit doesn't try to lower their bodies — every
+        // GPU-only invariant (no Strings, only Pod fields, no
+        // host-side intrinsics) is bypassed for the rule. The host
+        // runtime walks `comp.physics` directly to dispatch them.
+        if rule.cpu_only {
+            continue;
+        }
         let resolutions = match build_physics_handler_resolutions(rule, event_rings) {
             Ok(r) => r,
             Err(e) => {
