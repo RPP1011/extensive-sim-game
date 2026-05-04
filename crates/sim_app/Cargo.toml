@@ -192,6 +192,14 @@ tower_defense_runtime = { path = "../tower_defense_runtime" }
 # boss self-heal). Closest approximation to actual game encounter
 # combat across all prior sims.
 boss_fight_runtime = { path = "../boss_fight_runtime" }
+# Megaswarm 10000 — sixteenth REAL fixture and the third SCALE-UP for
+# pair-field scoring (10000 agents → 100M mask cells/verb/tick, 100x
+# mass_battle_100v100 and 10x megaswarm_1000). First fixture to exceed
+# `max_compute_workgroups_per_dimension` (typically 65535) on a single
+# PerPair dispatch — handled by chunked 1D dispatches with cfg._pad0
+# repurposed as `pair_offset`. Performance probe: does pair-field
+# scoring stay competitive past the per-dispatch hardware ceiling?
+megaswarm_10000_runtime = { path = "../megaswarm_10000_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -332,3 +340,7 @@ path = "src/tower_defense_app.rs"
 [[bin]]
 name = "boss_fight_app"
 path = "src/boss_fight_app.rs"
+
+[[bin]]
+name = "megaswarm_10000_app"
+path = "src/megaswarm_10000_app.rs"

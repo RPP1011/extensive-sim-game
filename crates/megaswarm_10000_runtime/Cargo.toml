@@ -1,0 +1,25 @@
+[package]
+name = "megaswarm_10000_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/megaswarm_10000.sim`.
+# Sixteenth REAL gameplay-shaped fixture: 10000-agent SCALE-UP for
+# pair-field scoring (100M mask cells per verb per tick, 100x the
+# per-tick mask workload of mass_battle_100v100 and 10x megaswarm_1000).
+# First fixture to exceed `max_compute_workgroups_per_dimension`
+# (typically 65535) on a single PerPair dispatch — handled by chunked
+# 1D dispatches with `cfg._pad0` repurposed as `pair_offset`.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

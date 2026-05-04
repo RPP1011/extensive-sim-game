@@ -1142,6 +1142,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "megaswarm_10000_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "megaswarm_1000_runtime"
 version = "0.1.0"
 dependencies = [
@@ -1809,6 +1822,7 @@ dependencies = [
  "foraging_runtime",
  "glam",
  "mass_battle_100v100_runtime",
+ "megaswarm_10000_runtime",
  "megaswarm_1000_runtime",
  "pair_scoring_probe_runtime",
  "particle_collision_runtime",

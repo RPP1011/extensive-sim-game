@@ -1,0 +1,157 @@
+// megaswarm_10000 — SIXTEENTH real gameplay-shaped fixture and the
+// THIRD scale-up for pair-field scoring. 10x the megaswarm_1000
+// per-tick mask workload: 100M mask cells per verb (= 200M cells/tick
+// across the two team-mirrored verbs), against megaswarm_1000's 1M.
+//
+// SHAPE — same as megaswarm_1000, just bigger. Two team-mirrored verbs
+// (RedStrike + BlueStrike) so the per-actor argmax can score-out
+// same-team targets via the `if (target.level == <enemy>) ... else
+// { -1e9 }` pattern proven by tactical_squad_5v5. The single-verb
+// shape from the original brief degenerates because the inner argmax
+// has no per-candidate predicate filter and the score expr can't see
+// `self.*` (binder-shadowing Gap E from duel_1v1) — both teams end up
+// targeting the same lowest-HP slot.
+//
+// Composition: 5000 Red (level=1) vs 5000 Blue (level=2) = 10000
+// agents total. Each alive agent strikes every tick. Red emits Damaged
+// via RedStrike, Blue via BlueStrike. Damage = 1000/strike at HP=100
+// — same single-strike-kill economy as megaswarm_1000 (the apply
+// kernel uses non-atomic RMW so only ~one strike's value lands per
+// target per tick; sizing damage past HP guarantees the surviving
+// write crosses the death threshold → 1 kill/team/tick under
+// symmetric pile-on → mutual KO ~tick 5000 if run to completion).
+//
+// LEVEL / TEAM ENCODING:
+//   level = 1u → Red
+//   level = 2u → Blue
+//
+// PERFORMANCE PROBE — THE point of this sim. agent_cap=10000 means
+// each PerPair mask kernel needs agent_cap² = 100 000 000 threads
+// dispatched across 1 562 500 workgroups (at workgroup_size=64). That
+// EXCEEDS the typical wgpu/Vulkan/Metal `max_compute_workgroups_per_
+// dimension` limit of 65535. The runtime works around this by
+// chunking the 1D PerPair dispatch into ~32 calls of ~50000
+// workgroups each, advancing `cfg._pad0` (repurposed as `pair_offset`
+// by the dsl_compiler PerPair preamble) between calls so each chunk
+// covers its own slice of the global pair grid.
+//
+// PREDICTED PERF — megaswarm_1000 ran 0.27 ms/tick avg with linear
+// scaling. Linear extrapolation to 10x scale predicts ~2.7 ms/tick.
+// Real scaling will likely be SUPERLINEAR because of:
+//   - 10000 inner-argmax candidates per actor (vs 1000) — 10x score
+//     evaluations × 10x actors = 100x scoring kernel work
+//   - ~32 separate dispatch calls per mask kernel per tick (chunking
+//     overhead — pipeline state changes, command-buffer growth)
+//   - Larger event ring (5000 ActionSelected + 5000 Damaged + ~5000
+//     Defeated per tick = 15000 events vs 1500 for megaswarm_1000)
+//
+// PROBE FOCUS — first sim past 1000 agents. Surfaces:
+//   - PerPair dispatch beyond `max_compute_workgroups_per_dimension`
+//     (chunked 1D, with cfg._pad0 as pair_offset — see dsl_compiler
+//     `mask_predicate_per_pair_body_with_prefix` and the PerPair
+//     preamble in `kernel.rs`)
+//   - scoring inner loop over 10000 candidates per actor across 2 rows
+//   - event ring sized for ~30000 events/tick
+//   - per-source fold over view storage at 10000-row aggregate
+//   - the cumulative cost of the "2D dispatch is needed" workaround
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Defeated {
+  combatant: AgentId,
+}
+
+entity Combatant : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config combat {
+  // 1000-dmg per strike at HP=100 means a single landed strike kills.
+  // The apply kernel uses non-atomic RMW so when N attackers pile on
+  // the same target, only one strike's value actually applies (last
+  // write wins). With 1000 dmg vs HP=100 that one write definitely
+  // crosses the death threshold → 1 kill/tick under perfect pile-on.
+  // 5000 kills/team → wipe in ~5000 ticks. Run length is bounded by
+  // MAX_TICKS in the harness rather than by run-to-completion.
+  strike_damage: f32 = 1000.0,
+}
+
+// ---- RedStrike — Red attacks Blue ------------------------------
+//
+// Mask gates on (self.level==1 ∧ alive ∧ target alive ∧
+// self.level != target.level). The score's if/else routes
+// non-Blue candidates to -1e9 so Red argmax only ever picks Blues.
+// Pattern: same as tactical_squad_5v5's `if target.alive { … } else
+// { -1000000.0 }` but extended with team predicate.
+verb RedStrike(self, target: Agent) =
+  action RedStrikeAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && self.level == 1
+        && target.level == 2)
+  emit Damaged { source: self, target: target, amount: config.combat.strike_damage }
+  // Score: pick Blue with lowest HP. Non-Blue (or dead) candidates
+  // get -1e9 → never wins argmax. Sentinel-HP dead Blue would
+  // already lose argmax via the (1000 - 1e9) term.
+  score (if target.level == 2 { 1000.0 - target.hp } else { -1000000000.0 })
+
+// ---- BlueStrike — Blue attacks Red ------------------------------
+//
+// Mirror of RedStrike with team labels swapped.
+verb BlueStrike(self, target: Agent) =
+  action BlueStrikeAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && self.level == 2
+        && target.level == 1)
+  emit Damaged { source: self, target: target, amount: config.combat.strike_damage }
+  score (if target.level == 1 { 1000.0 - target.hp } else { -1000000000.0 })
+
+// ---- Apply damage ----------------------------------------------
+//
+// Standard chronicle: subtract dmg from target HP; on hp<=0 flip
+// alive=0 AND set sentinel HP=1e9 so the dead agent's score in the
+// next tick's argmax is deeply negative. NOTE — apply uses non-
+// atomic RMW on agent_hp so when many concurrent strikes target
+// the same agent their writes race and only ~one strike's worth
+// of damage actually applies. This is a known compiler gap (apply
+// not atomicized); the runtime works around the dead-but-not-
+// sentinel-HP fallout via a CPU-side `sweep_dead_to_sentinel`
+// pass after each step.
+@phase(post)
+physics ApplyDamage {
+  on Damaged { source: _, target: t, amount: a } {
+    if (agents.alive(t)) {
+      let new_hp = agents.hp(t) - a;
+      if (new_hp <= 0.0) {
+        agents.set_hp(t, 1000000000.0);
+        agents.set_alive(t, false);
+        emit Defeated { combatant: t }
+      } else {
+        agents.set_hp(t, new_hp);
+      }
+    }
+  }
+}
+
+// ---- Per-source observability view -----------------------------
+//
+// Single fold over Damaged for total damage dealt by each agent.
+// Same shape as megaswarm_1000's damage_dealt view.
+@materialized(on_event = [Damaged])
+view damage_dealt(source: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: s, target: _, amount: a } { self += a }
+  clamp: [0.0, 10000000.0],
+}
