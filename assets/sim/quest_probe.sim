@@ -1,0 +1,141 @@
+// quest_probe — discovery probe for `entity X : Quest` AND `quests.*`
+// namespace. Both surfaces are documented in spec but never exercised
+// in any fixture today.
+//
+// Spec context:
+//   - `docs/spec/dsl.md:653-663` — `Quest` listed alongside `Agent`,
+//     `Item`, `Group`, `Auction`, `Invite`, `Document`, `ChronicleEntry`
+//     in the typed-entity table (so designers expect to be able to
+//     write `entity X : Quest { ... }`).
+//   - `docs/spec/dsl.md:871` — "Six legacy collection namespaces —
+//     `agents`, `items`, `groups`, `quests`, `auctions`, `tick` — are
+//     used as iteration sources in aggregations …". So `quests` is a
+//     reserved namespace word in addition to a per-quest singular
+//     `quest.*` namespace (`docs/spec/dsl.md:1072`).
+//
+// The fix-up plan (try-then-fall-back):
+//
+//   (1) Try `entity Mission : Quest { reward: f32 }` first. The
+//       parser today only accepts `Agent`, `Item`, `Group` as entity
+//       roots (`crates/dsl_ast/src/parser.rs:374-385`) — every other
+//       root keyword is rejected with a typed parse error. We expect
+//       this fixture to parse-fail on Quest if uncommented; the
+//       Quest-rooted line is COMMENTED OUT below so the rest of the
+//       fixture compiles. Discovery: this is the first probe to
+//       surface the `EntityRoot::Quest` gap end-to-end.
+//
+//   (2) Fall back to bartering's pattern — `entity Mission : Item`
+//       — to keep the fixture self-contained. The Item entity-root
+//       pattern is fully wired (lowering routes to a per-Item SoA
+//       through `populate_entity_field_catalog`); we use it as the
+//       "Quest analog" to keep the per-tick pipeline live.
+//
+//   (3) Try a `quests.*` namespace call from a physics body (e.g.
+//       `quests.is_active(0u)`) — also commented out below. The
+//       resolver routes `quests` through `NamespaceId::Quests` (see
+//       `crates/dsl_ast/src/resolve.rs:117`) but the CG namespace
+//       registry (`crates/dsl_compiler/src/cg/lower/driver.rs:672:
+//       populate_namespace_registry`) ONLY registers `agents`,
+//       `query`, `world`, `auctions` — `quests` has zero methods.
+//       Calling any method falls through to
+//       `LoweringError::UnsupportedNamespaceCall`. The probe leaves
+//       this commented out and documents the gap.
+//
+// FULL FIRE prediction (analytical) for the live shape:
+//
+//   With AGENT_COUNT = 32, TICKS = 100, the per-tick `physics` rule
+//   emits one `ProgressTick` per alive Adventurer per tick and the
+//   view fold-body `self += 1u` accumulates the per-agent count.
+//
+//   Each Adventurer fires once per tick, so per-slot value should be
+//   100 after 100 ticks.
+//
+//   GAP PREDICTION (b) — the WGSL emitter routes `+= <rhs>` self-update
+//   on a `u32`-result view through the `atomicOr(&storage[idx], rhs)`
+//   path (`crates/dsl_compiler/src/cg/emit/wgsl_body.rs:1326-1338`),
+//   not the f32 CAS+add path that the operator's `+=` semantics
+//   imply. With rhs = `1u` constant, this is idempotent: every emit
+//   ORs `1u` into the slot, leaving it at `1u` regardless of fire
+//   count. So the FULL FIRE prediction collapses to "every slot
+//   reads `1u` after 100 ticks", NOT `100u`.
+//
+//   The probe app reports both numbers and lets the OUTCOME line
+//   discriminate. A future fix would need to either:
+//     (a) add a separate fold semantic (`u32_add`) that emits
+//         `atomicAdd(&storage[idx], rhs)` (commutative + associative,
+//         no CAS — same P11-trivial guarantee as `atomicOr`), or
+//     (b) reject `+=` on u32 views at lower time and force `|=`
+//         (the only operator that matches the current emit shape).
+
+event Tick { }
+
+@replayable @gpu_amenable
+event ProgressTick {
+  agent: AgentId,
+  quest: u32,         // quest id — synthetic, not bound to any entity
+}
+
+// COMMENTED OUT — see (1) above. This line would parse-fail today
+// with: "expected `Agent`, `Item`, or `Group`; got `Quest`" from
+// `crates/dsl_ast/src/parser.rs:381`. Uncomment to reproduce the
+// gap; the rest of the fixture compiles unchanged.
+// entity Mission : Quest { reward: f32 }
+
+// Live Adventurer entity — Agent root, standard SoA shape that
+// every other probe uses. Holds `pos` + `vel` so the per-fixture
+// runtime can allocate the `alive` SoA + minimal Agent state.
+entity Adventurer : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+// Fall-back "Quest analog" using the Item entity root — see (2)
+// above. The Item path is fully wired (bartering exercises it) so
+// the fixture's per-Item SoA is allocated by the runtime. The
+// `reward` field is a primitive f32 which lowers cleanly via the
+// `populate_entity_field_catalog` path.
+entity Mission : Item {
+  reward: f32,
+}
+
+config quest {
+  // Per-emit progress increment. Held as u32 to match the view's
+  // `+= 1u` self-update RHS — the WGSL emitter today routes any
+  // `+=` on a u32-result view through `atomicOr`, so the runtime-
+  // observable value will be `1u` regardless of how many times the
+  // emit fires (idempotent OR). See module-level GAP PREDICTION.
+  threshold: u32 = 10,
+}
+
+// Per-agent rule — every alive Adventurer emits exactly one
+// ProgressTick per tick with `quest = 0u`. The view fold-body
+// (below) consumes ProgressTick and accumulates per-agent counts.
+//
+// COMMENTED OUT — would surface `LoweringError::UnsupportedNamespace
+// Call` because the CG namespace registry doesn't register a
+// `quests.*` method (`crates/dsl_compiler/src/cg/lower/driver.rs:672:
+// populate_namespace_registry`). Discovery gap documented in
+// `docs/superpowers/notes/2026-05-04-quest_probe.md`.
+//   let active = quests.is_active(0u);
+//   if (active) {
+//     emit ProgressTick { agent: self, quest: 0 }
+//   }
+physics ProgressAndComplete @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    emit ProgressTick { agent: self, quest: 0 }
+  }
+}
+
+// Per-agent progress counter, u32 result. Drives the SECOND
+// discovery surface — `+= 1u` on a u32 view. The view's body
+// lowers cleanly (the `+=` operator is accepted alongside `|=` by
+// `crates/dsl_compiler/src/cg/lower/view.rs:564`) but the WGSL
+// emitter's u32-view branch (`atomicOr`) silently miscompiles the
+// add semantics to OR semantics, leaving the per-slot value at
+// `1u` regardless of fire count.
+@materialized(on_event = [ProgressTick])
+view progress(agent: Agent) -> u32 {
+  initial: 0,
+  on ProgressTick { agent: a, quest: q } { self += 1 }
+  clamp: [0, 4294967295],
+}

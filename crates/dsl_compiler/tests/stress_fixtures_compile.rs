@@ -2291,3 +2291,129 @@ fn stdlib_math_probe_compile_gate() {
     );
 }
 
+/// `quest_probe` compile-gate. Pins the structural surface of the
+/// SMALLEST end-to-end probe of `entity X : Quest` AND the `quests.*`
+/// namespace — both surfaces are documented in spec but never
+/// exercised in any fixture today.
+///
+/// Spec context:
+///   - `docs/spec/dsl.md:653-663` — `Quest` listed alongside `Agent`,
+///     `Item`, `Group` etc. in the typed-entity table.
+///   - `docs/spec/dsl.md:871,1072` — `quests` legacy namespace +
+///     singular `quest` namespace both registered.
+///
+/// Discovery target — the fixture is the SMALLEST .sim that:
+///   - Declares an `Adventurer : Agent` entity (live).
+///   - Declares a `Mission : Item` entity as a Quest analog (live —
+///     the `Quest` root keyword is rejected at parse time today).
+///   - Emits one `ProgressTick` per alive Adventurer per tick.
+///   - Folds into a `progress(agent: Agent) -> u32` view via `+= 1u`.
+///
+/// What this locks:
+///   - 1 PhysicsRule (`ProgressAndComplete`) + 1 ViewFold (`progress`)
+///     ops emitted from the live shape.
+///   - `Mission : Item` reaches the entity_field_catalog (per-Item
+///     SoA allocation surface).
+///   - The u32-view fold-body lowers via the `+=` operator gate at
+///     `crates/dsl_compiler/src/cg/lower/view.rs:564`.
+///   - The WGSL emitter routes `+= 1u` on a u32-result view to
+///     `atomicOr(&storage[idx], (1u))` per the result-type-only
+///     branching in `crates/dsl_compiler/src/cg/emit/wgsl_body.rs:
+///     1326-1338`. This is the LIVE GAP: `+=` semantics silently
+///     map to bitwise-OR semantics, leaving the per-slot value at
+///     `1u` regardless of fire count. Locked here so a future fix
+///     (separate u32_add fold semantic OR reject `+=` on u32 views)
+///     surfaces as a test failure.
+///
+/// Discovery doc: `docs/superpowers/notes/2026-05-04-quest_probe.md`.
+#[test]
+fn quest_probe_compile_gate() {
+    use dsl_compiler::cg::lower::lower_compilation_to_cg;
+    let path = workspace_path("assets/sim/quest_probe.sim");
+    let src = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let prog = dsl_compiler::parse(&src).expect("parse quest_probe.sim");
+    let comp = dsl_ast::resolve::resolve(prog).expect("resolve quest_probe.sim");
+    let cg = lower_compilation_to_cg(&comp).unwrap_or_else(|o| {
+        for d in &o.diagnostics {
+            eprintln!("[quest_probe lower diag] {d}");
+        }
+        o.program
+    });
+    let sched = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&sched.schedule, &cg)
+        .expect("emit quest_probe");
+
+    // Op-level invariants: physics rule + view fold present.
+    let mut physics_count = 0;
+    let mut viewfold_count = 0;
+    for op in &cg.ops {
+        match &op.kind {
+            dsl_compiler::cg::op::ComputeOpKind::PhysicsRule { .. } => physics_count += 1,
+            dsl_compiler::cg::op::ComputeOpKind::ViewFold { .. } => viewfold_count += 1,
+            _ => {}
+        }
+    }
+    assert_eq!(
+        physics_count, 1,
+        "expected 1 PhysicsRule op (ProgressAndComplete); got {physics_count}",
+    );
+    assert_eq!(
+        viewfold_count, 1,
+        "expected 1 ViewFold op (progress); got {viewfold_count}",
+    );
+
+    // Entity catalog: the `Mission : Item` declaration must reach
+    // the per-fixture entity_field_catalog (Item path is fully
+    // wired; this asserts the Quest fall-back analog populates it).
+    let mission_in_items = cg
+        .entity_field_catalog
+        .items
+        .values()
+        .any(|rec| rec.entity_name == "Mission");
+    assert!(
+        mission_in_items,
+        "Mission : Item must populate entity_field_catalog.items; got items: {:?}",
+        cg.entity_field_catalog
+            .items
+            .values()
+            .map(|r| &r.entity_name)
+            .collect::<Vec<_>>(),
+    );
+
+    // The `progress` fold body must use `atomicOr` — the u32-view
+    // emit branch. Locks the LIVE GAP: `+= 1u` on a u32 view
+    // routes through the same emit branch as `|=`, so the
+    // operator-vs-result-type mismatch is silently elided.
+    let progress_body = kernel_body_containing(&art, "progress")
+        .unwrap_or_else(|| panic!("no fold_progress kernel emitted: {:?}", art.kernel_index));
+    assert!(
+        progress_body.contains("atomicOr"),
+        "fold_progress must use atomicOr (u32 view branch — `+= 1u` \
+         silently routes here). Got body:\n{progress_body}",
+    );
+
+    // All emitted WGSL must be naga-clean (the gap is a SEMANTIC
+    // miscompile, not a syntactic one — naga still validates).
+    let mut errs = Vec::new();
+    for (name, body) in &art.wgsl_files {
+        if let Err(e) = naga::front::wgsl::parse_str(body) {
+            errs.push(format!("  {name}: {e}"));
+        }
+    }
+    assert!(
+        errs.is_empty(),
+        "quest_probe emitted {} naga-invalid WGSL kernels:\n{}",
+        errs.len(),
+        errs.join("\n"),
+    );
+
+    eprintln!(
+        "[quest_probe] {} kernels emitted: {:?}",
+        art.kernel_index.len(),
+        art.kernel_index,
+    );
+}

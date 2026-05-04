@@ -1372,6 +1372,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "quest_probe_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1676,6 +1689,7 @@ dependencies = [
  "pair_scoring_probe_runtime",
  "particle_collision_runtime",
  "predator_prey_runtime",
+ "quest_probe_runtime",
  "stdlib_math_probe_runtime",
  "stochastic_probe_runtime",
  "swarm_storm_runtime",

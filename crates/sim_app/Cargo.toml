@@ -85,6 +85,15 @@ pair_scoring_probe_runtime = { path = "../pair_scoring_probe_runtime" }
 # four omitted-gap surfaces stay commented in the .sim with citations
 # to the responsible compiler arms.
 stdlib_math_probe_runtime = { path = "../stdlib_math_probe_runtime" }
+# Quest probe — discovery probe of `entity X : Quest` AND the
+# `quests.*` namespace. Both surfaces are documented in spec but
+# never exercised by any prior fixture. Surfaces THREE gaps:
+# (A) `EntityRoot::Quest` not in the parser's accept set, (B) `quests.*`
+# namespace registered in the resolver but ZERO methods in the CG
+# registry, (C) `+= 1u` on a u32-result view silently lowers to
+# `atomicOr` per the result-type-only emit branch. See
+# `docs/superpowers/notes/2026-05-04-quest_probe.md`.
+quest_probe_runtime = { path = "../quest_probe_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -161,3 +170,7 @@ path = "src/pair_scoring_probe_app.rs"
 [[bin]]
 name = "stdlib_math_probe_app"
 path = "src/stdlib_math_probe_app.rs"
+
+[[bin]]
+name = "quest_probe_app"
+path = "src/quest_probe_app.rs"
