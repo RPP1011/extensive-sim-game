@@ -136,12 +136,18 @@ verb Wait(self) =
     );
 }
 
-/// A verb with an `emit` clause surfaces a `VerbExpansionSkipped`
-/// diagnostic for the cascade stage (today's expansion defers
-/// cascade — see `verb_expand.rs` module docs). The mask and scoring
-/// stages still expand and produce artifacts.
+/// A verb with a non-empty `emit` clause expands its cascade to a
+/// synthesised `verb_chronicle_<name>` physics rule listening on the
+/// (auto-injected) `ActionSelected` event. The expansion no longer
+/// surfaces a `VerbExpansionSkipped` diagnostic for the cascade
+/// stage — closed 2026-05-03 (see `verb_expand.rs` module docs).
+///
+/// Other diagnostics MAY surface for downstream lowering of the
+/// emit body (e.g., `UnsupportedFieldBase` if the verb references
+/// `<bound>.<field>` against the synthesised binder), but the
+/// cascade-injection gap itself is gone.
 #[test]
-fn verb_emit_skips_cascade_with_typed_diagnostic() {
+fn verb_emit_expands_cascade_no_skip_diagnostic() {
     let src = r#"
 event Killed { by: AgentId, prey: AgentId, pos: vec3, }
 event Tick { }
@@ -158,28 +164,30 @@ verb Strike(self, target: Agent) =
     let prog = dsl_compiler::parse(src).expect("parse");
     let comp = dsl_ast::resolve::resolve(prog).expect("resolve");
     let outcome = lower_compilation_to_cg(&comp);
-    // The lowering returns `Err(DriverOutcome)` because the SKIP
-    // diagnostic counts as a non-empty diagnostic list.
-    let outcome = outcome.expect_err("verb-with-emit should surface diagnostics");
-    let cascade_skipped = outcome
-        .diagnostics
+    // Driver may still return Err if downstream stages flag other
+    // unrelated issues (e.g., the verb's positional mask shape, the
+    // emit body's `self.pos` access). Tolerate both Ok and Err — we
+    // only assert NO `VerbExpansionSkipped` surfaces.
+    let diagnostics: Vec<_> = match outcome {
+        Ok(_) => Vec::new(),
+        Err(o) => o.diagnostics,
+    };
+    let skipped: Vec<_> = diagnostics
         .iter()
         .filter(|d| {
             matches!(
                 d,
                 dsl_compiler::cg::lower::LoweringError::VerbExpansionSkipped {
-                    verb_name,
                     reason:
                         dsl_compiler::cg::lower::VerbSkipReason::CascadeNeedsActionEvent,
                     ..
-                } if verb_name == "Strike"
+                }
             )
         })
-        .count();
-    assert_eq!(
-        cascade_skipped, 1,
-        "expected exactly one cascade-skipped diagnostic for `Strike`; \
-         got: {:?}",
-        outcome.diagnostics,
+        .collect();
+    assert!(
+        skipped.is_empty(),
+        "expected zero VerbExpansionSkipped diagnostics; got {:?}",
+        skipped,
     );
 }

@@ -294,17 +294,33 @@ Compilation:
 
 ### 2.6 `verb` (composition sugar)
 
-> ⚠️ **Audit 2026-04-26 — partial close (2026-05-03, Slice A):** the silent-drop is closed for the **mask + scoring**
-> stages of verb expansion. The compiler now expands every `VerbIR` at lower time
-> (`crates/dsl_compiler/src/cg/lower/verb_expand.rs`) into a synthetic `MaskIR` named `verb_<name>` (whose predicate is
-> the verb's `when` clause) and — when the verb declares a `score` clause — a synthetic `ScoringEntryIR` named
-> `verb_<name>` appended to the first `ScoringIR` block (or a synthesised block when none exist). The existing
-> mask / scoring lowering and emit passes pick up the synthesised entries automatically; no new emit file is
-> introduced. **Cascade injection is still deferred (SKIP):** the verb's `emit` clause needs an "action selected"
-> event source the current event taxonomy doesn't expose, so verbs with non-empty `emits` surface a
-> `LoweringError::VerbExpansionSkipped { reason: CascadeNeedsActionEvent }` diagnostic — the gap is visible at
-> lower time rather than silently absent. Stress test: `crates/dsl_compiler/tests/verb_emit.rs`. §2.8 `invariant`,
-> §2.9 `probe`, and §2.11 `metric` were also partially closed 2026-05-03 (see those callouts).
+> ✅ **Audit 2026-04-26 — closed (2026-05-03, Slices A + cascade-followup):** the silent-drop is closed for all
+> three stages of verb expansion (mask + scoring + cascade). The compiler expands every `VerbIR` at lower time
+> (`crates/dsl_compiler/src/cg/lower/verb_expand.rs`):
+>
+> 1. **Mask** — synthetic `MaskIR` named `verb_<name>` (whose predicate is the verb's `when` clause).
+> 2. **Scoring** — when the verb declares a `score` clause, a synthetic `ScoringEntryIR` named `verb_<name>`
+>    appended to the first `ScoringIR` block (or a synthesised block when none exist).
+> 3. **Cascade (closed 2026-05-03)** — when the verb declares a non-empty `emit`, the expander injects
+>    (idempotently, once per `Compilation`) an `ActionSelected` `EventIR` with the fixed payload
+>    `{ actor: AgentId, action_id: U32, target: AgentId }`, allocates a stable `action_id: u32` per
+>    cascade-bearing verb (source-order over the subset of verbs with non-empty emit, starting at 0), and
+>    synthesises a `physics verb_chronicle_<name>` rule whose handler binds
+>    `on ActionSelected { actor: <verb's `self` LocalRef>, action_id: <fresh LocalRef>,
+>    target: <verb's `target` LocalRef when present, else fresh> }` and runs the verb's `emit` clauses inside
+>    an `if (action_id == <verb_id>) { … }` body gate. (The gate lives inside `body` rather than the
+>    `where_clause` field so the binder context is populated before it lowers — see the
+>    `synthesize_cascade_physics` doc-comment for the ordering rationale.)
+>
+> The existing mask / scoring / physics lowering + emit passes pick up the synthesised entries automatically;
+> no new emit file or top-level CG IR variant is introduced. The runtime side (the scoring kernel writing
+> `ActionSelected` per tick when a verb-derived row wins the per-agent argmax) is a separate slice; the
+> compiler closes the IR-shape gap so cascade physics handlers exist in the lowered program. A verb whose
+> emit body reads `<bound>.<field>` (e.g., `self.pos`) on the synthesised binder may still surface as
+> `UnsupportedFieldBase` from the downstream physics expression lowering — that's an orthogonal expression-
+> layer gap, not a verb-expansion regression. Stress tests: `crates/dsl_compiler/tests/verb_emit.rs`,
+> `crates/dsl_compiler/src/cg/lower/verb_expand.rs::tests`.
+> §2.8 `invariant`, §2.9 `probe`, and §2.11 `metric` were also partially closed 2026-05-03 (see those callouts).
 > See `docs/superpowers/notes/2026-04-26-audit-language-stdlib.md` for detail.
 
 `verb` declares a named gameplay action that composes an existing micro primitive with additional mask predicates, cascades, and scoring entries. It does NOT add to the closed categorical action vocabulary.
@@ -330,8 +346,9 @@ Adding a `verb` does not bump the schema hash. Adding a new micro primitive does
 > `EmittedArtifacts.rust_files`); per-fixture runtimes consume it via `state.check_invariants()`. Unsupported
 > shapes (multi-arg scope, quantifiers, field access, vec3 views) emit a `// SKIP <reason>` comment so the gap is
 > visible at build time rather than silent. Implementation: `crates/dsl_compiler/src/cg/emit/invariants.rs`,
-> stress test: `crates/predator_prey_runtime/tests/invariant_violation.rs`. §2.6 `verb` was partially closed
-> 2026-05-03 by Slice A of the verb/probe/metric emit plan (mask + scoring; cascade still SKIP). §2.9 `probe`
+> stress test: `crates/predator_prey_runtime/tests/invariant_violation.rs`. §2.6 `verb` was fully closed
+> 2026-05-03 (mask + scoring via Slice A; cascade via the cascade-followup, which synthesises
+> `ActionSelected` + `verb_chronicle_<name>` physics handlers — see its callout for detail). §2.9 `probe`
 > and §2.11 `metric` were partially closed 2026-05-03 by Slices B + C of the same plan (see their respective
 > callouts below).
 
@@ -369,7 +386,8 @@ Cascades that write a field in the invariant's support must annotate `@must_pres
 > `Skipped { reason }` runtime payload so the gap is visible at build time AND at runtime, not silent.
 > Implementation: `crates/dsl_compiler/src/cg/emit/probes.rs`, stress tests:
 > `crates/dsl_compiler/tests/probe_emit_runtime.rs` + `crates/predator_prey_runtime/tests/probe_drives.rs`.
-> The §2.6 `verb` callout above remains accurate — that one is still silent-drop pending Slice A.
+> The §2.6 `verb` callout above is now fully closed (mask + scoring landed Slice A 2026-05-03; cascade
+> followup landed 2026-05-03 — see that callout for shape).
 
 Named CI regression assertions: fixture scenario → seeded event trajectory → behavioural check against the utility backend. Probes live in `probes/` alongside their seed scenarios.
 

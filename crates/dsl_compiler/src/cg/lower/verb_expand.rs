@@ -53,24 +53,62 @@
 //!   `ScoringIR` block in the compilation. When no scoring block exists
 //!   yet, a synthetic block is created.
 //!
-//! - **Cascade injection — DEFERRED (SKIP):** the verb's `emit` clause
-//!   needs an "action selected" event source to wire as the trigger; no
-//!   such event kind exists in the current event taxonomy. Surfaced as
-//!   a `LoweringError::VerbExpansionSkipped` diagnostic naming the
-//!   reason; a future plan that introduces an `ActionSelected` event
-//!   ring (or equivalent) lifts the SKIP.
+//! - **Cascade injection (closed 2026-05-03):** the verb expander
+//!   synthesises a per-`Compilation`-singleton `ActionSelected` event
+//!   kind (payload `{ actor: AgentId, action_id: U32, target: AgentId }`)
+//!   the first time a verb with non-empty `emit` is seen. Each such
+//!   verb gets a stable `action_id: u32` (allocated in source order
+//!   over verbs with non-empty emit) and a synthesised `physics
+//!   verb_chronicle_<name>` rule whose handler binds
+//!   `on ActionSelected { actor: <verb's `self` LocalRef>, action_id:
+//!   <fresh LocalRef>, target: <verb's `target` LocalRef when present;
+//!   else fresh> }`, guards on `where action_id_local == <verb's id
+//!   literal>`, and runs the verb's `emit` clauses as the body. The
+//!   synthesised event + physics land in `comp.events` / `comp.physics`
+//!   before driver Phase-1 registry walks pick them up — no new IR
+//!   variant is introduced.
+//!
+//!   The runtime side (the scoring kernel writing `ActionSelected` per
+//!   tick when a verb's row wins the per-agent argmax) is a separate
+//!   slice; the compiler now closes the IR-shape gap so the cascade
+//!   physics handler exists in the lowered program. A verb whose body
+//!   reads `<bound>.<field>` (e.g., `self.pos`) on the synthesised
+//!   binding still surfaces as an `UnsupportedFieldBase` from the
+//!   downstream physics lowering — that's an orthogonal expression-
+//!   layer gap, not a verb-expansion regression.
 //!
 //! Today's verbs in fixture files are limited shapes: `verb Strike`
 //! (predator_prey), `verb Wait` / `verb MoveToward` (crowd_navigation).
-//! All three expand to mask + scoring; none expand to cascade.
+//! Wait/MoveToward expand to mask + scoring (no `emit`); Strike
+//! additionally synthesises a cascade physics handler on
+//! `ActionSelected`.
 
-use dsl_ast::ast::Span;
+use dsl_ast::ast::{BinOp, Span};
 use dsl_ast::ir::{
-    Compilation, IrActionHead, IrActionHeadShape, IrExpr, IrExprNode, IrType, MaskIR,
+    Compilation, EventField, EventIR, EventRef, IrActionHead, IrActionHeadShape,
+    IrEventPattern, IrExpr, IrExprNode, IrPattern, IrPatternBinding,
+    IrPhysicsPattern, IrStmt, IrType, LocalRef, MaskIR, PhysicsHandlerIR, PhysicsIR,
     ScoringEntryIR, ScoringIR, VerbIR,
 };
 
 use super::error::LoweringError;
+
+/// Reserved name for the synthesised "an action was selected this tick"
+/// event the verb expander injects on demand. The payload is fixed:
+/// `{ actor: AgentId, action_id: U32, target: AgentId }`. The runtime
+/// side (the scoring kernel writing the event when a verb-derived row
+/// wins the per-agent argmax) is a separate slice; the compiler injects
+/// the IR shape so cascade handlers can be authored against it.
+pub const ACTION_SELECTED_EVENT_NAME: &str = "ActionSelected";
+
+/// Synthetic field name for the "no target" sentinel an actor uses
+/// when the verb's action has no target binder (e.g., `verb Wait(self)
+/// = action Hold ...`). Today we still emit the field — the value is
+/// reused as `actor` for shape symmetry; downstream cascade bodies
+/// gate on `action_id` and ignore the target.
+const ACTION_SELECTED_FIELD_ACTOR: &str = "actor";
+const ACTION_SELECTED_FIELD_ACTION_ID: &str = "action_id";
+const ACTION_SELECTED_FIELD_TARGET: &str = "target";
 
 /// Result of [`expand_verbs`] — the rewritten compilation plus any
 /// diagnostics emitted while attempting per-verb expansion. The
@@ -82,14 +120,34 @@ pub struct VerbExpansionOutcome {
 }
 
 /// Expand every `verb` declaration in `comp` into its constituent
-/// mask + scoring (cascade is deferred — see module docs). Returns a
-/// new [`Compilation`] that owns the injected primitives plus a
-/// diagnostic list naming any verb shape the pass could not fully
-/// expand.
+/// mask + scoring + cascade primitives. Returns a new [`Compilation`]
+/// that owns the injected primitives plus a diagnostic list naming
+/// any verb shape the pass could not fully expand.
 ///
 /// The original `comp` is consumed by reference and cloned; the
 /// caller decides whether to retain the pre-expansion shape (e.g.,
 /// for diff tooling) or discard it.
+///
+/// # Cascade injection contract
+///
+/// The first verb with a non-empty `emit` triggers a one-time
+/// injection of the `ActionSelected` event kind into `comp.events`
+/// (idempotent — re-runs of the pass on the same compilation reuse
+/// the prior entry). Each emit-bearing verb then gets:
+///
+/// - A stable `action_id: u32` allocated in source-order over the
+///   subset of verbs with non-empty emit (verb #0 with emit → 0,
+///   verb #1 with emit → 1, …). Verbs without emit don't consume an
+///   id.
+/// - A synthesised [`PhysicsIR`] named `verb_chronicle_<verb_name>`
+///   whose handler binds `on ActionSelected { actor, action_id,
+///   target }` and gates the verb's `emit` clauses on
+///   `action_id == <verb's stable id>`.
+///
+/// The synthesised event + physics land in `comp.events` /
+/// `comp.physics`; the existing driver's Phase-1 registry walks
+/// (`populate_event_kinds`, `lower_all_physics`) pick them up
+/// automatically — no new IR variant is introduced.
 pub fn expand_verbs(comp: &Compilation) -> VerbExpansionOutcome {
     let mut out = comp.clone();
     let mut diagnostics = Vec::new();
@@ -98,8 +156,36 @@ pub fn expand_verbs(comp: &Compilation) -> VerbExpansionOutcome {
     // Borrowing `out.verbs` for iteration would conflict with the
     // mutating injects below; clone the small VerbIR list once.
     let verbs = out.verbs.clone();
+
+    // Pre-pass: inject the ActionSelected event kind once if any verb
+    // has a non-empty emit. Returning the EventRef so each verb's
+    // synthesised cascade handler binds against the same kind id (the
+    // driver assigns EventKindId by source order in `comp.events`).
+    let action_selected_ref = if verbs.iter().any(|v| !v.emits.is_empty()) {
+        Some(inject_action_selected_event(&mut out))
+    } else {
+        None
+    };
+
+    // Stable per-verb action_id allocator. Each verb with a non-empty
+    // emit consumes the next id; verbs without emit are skipped so
+    // the id space is contiguous over the cascade-bearing subset.
+    let mut next_action_id: u32 = 0;
     for verb in &verbs {
-        expand_one_verb(verb, &mut out, &mut diagnostics);
+        let assigned_action_id = if verb.emits.is_empty() {
+            None
+        } else {
+            let id = next_action_id;
+            next_action_id += 1;
+            Some(id)
+        };
+        expand_one_verb(
+            verb,
+            assigned_action_id,
+            action_selected_ref,
+            &mut out,
+            &mut diagnostics,
+        );
     }
 
     VerbExpansionOutcome {
@@ -108,10 +194,71 @@ pub fn expand_verbs(comp: &Compilation) -> VerbExpansionOutcome {
     }
 }
 
-/// Per-verb expansion: inject mask + (optional) scoring entry, surface
-/// a SKIP diagnostic for the deferred cascade.
+/// Inject (or reuse) the singleton `ActionSelected` event kind into
+/// `comp.events`. Idempotent: a re-run on the same compilation walks
+/// `comp.events` for an existing entry by name and returns its
+/// `EventRef` rather than appending a duplicate.
+///
+/// The fixed payload is `{ actor: AgentId, action_id: U32, target:
+/// AgentId }`. Adding an entry to `comp.events` is sufficient — the
+/// driver's [`super::driver::populate_event_kinds`] walks the table
+/// in source order and assigns each entry an `EventKindId(i)` plus
+/// an `EventLayout`. The `EventField` shape for `AgentId` and `U32`
+/// already maps to one u32 word in
+/// [`super::driver::cg_ty_for_event_field`].
+fn inject_action_selected_event(comp: &mut Compilation) -> EventRef {
+    if let Some((idx, _)) = comp
+        .events
+        .iter()
+        .enumerate()
+        .find(|(_, e)| e.name == ACTION_SELECTED_EVENT_NAME)
+    {
+        return EventRef(idx as u16);
+    }
+    let idx = comp.events.len();
+    let span = Span::dummy();
+    comp.events.push(EventIR {
+        name: ACTION_SELECTED_EVENT_NAME.to_string(),
+        fields: vec![
+            EventField {
+                name: ACTION_SELECTED_FIELD_ACTOR.to_string(),
+                ty: IrType::AgentId,
+                span,
+            },
+            EventField {
+                name: ACTION_SELECTED_FIELD_ACTION_ID.to_string(),
+                ty: IrType::U32,
+                span,
+            },
+            EventField {
+                name: ACTION_SELECTED_FIELD_TARGET.to_string(),
+                ty: IrType::AgentId,
+                span,
+            },
+        ],
+        tags: Vec::new(),
+        annotations: Vec::new(),
+        span,
+    });
+    EventRef(idx as u16)
+}
+
+/// Per-verb expansion: inject mask + (optional) scoring entry +
+/// (when the verb declares a non-empty `emit`) a synthesised
+/// cascade physics handler that fires `on ActionSelected { … }` and
+/// runs the verb's emit clauses gated on the verb's stable
+/// `action_id`.
+///
+/// `assigned_action_id` is `Some(id)` when the verb has a non-empty
+/// `emit` (the caller pre-allocated the id from the cascade-bearing
+/// verb subset). `action_selected_ref` is the `EventRef` for the
+/// (already-injected) `ActionSelected` event kind — `Some` whenever
+/// at least one verb in the compilation needs a cascade. Both are
+/// always either both `Some` or both `None` for any given verb.
 fn expand_one_verb(
     verb: &VerbIR,
+    assigned_action_id: Option<u32>,
+    action_selected_ref: Option<EventRef>,
     comp: &mut Compilation,
     diagnostics: &mut Vec<LoweringError>,
 ) {
@@ -174,23 +321,199 @@ fn expand_one_verb(
         // utility backend selects via some other table).
     }
 
-    // -- (3) Cascade handler injection — DEFERRED -------------------------
+    // -- (3) Cascade handler injection ----------------------------------
     //
-    // The cascade trigger needs an "action selected" event source so
-    // the synthesised PhysicsHandlerIR has something to bind `on
-    // <Event>` against. No such event exists in the current
-    // taxonomy; the IR doesn't yet support `on <Action>`-style
-    // physics patterns either. Surface a SKIP diagnostic for any
-    // verb that has a non-empty `emits` list so the gap is visible
-    // at lower time rather than silently absent from the emitted
-    // physics kernel set.
+    // For every verb with a non-empty `emit`, synthesise a physics
+    // rule named `verb_chronicle_<verb_name>` whose handler binds
+    // `on ActionSelected { actor: <verb's `self` LocalRef>, action_id:
+    // <fresh LocalRef>, target: <verb's `target` LocalRef when present
+    // — else fresh> }`, gates on `action_id_local == <verb's stable
+    // id>`, and runs the verb's `emit` clauses as the body. The
+    // synthesised event was injected by the per-`expand_verbs` pre-
+    // pass; this site just appends the matching `PhysicsIR`.
+    //
+    // The event-pattern binders deliberately reuse the verb's own
+    // `LocalRef`s for `self` / `target` so the verb's emit body —
+    // which references `self` / `target` through those same refs —
+    // resolves through the binding context the driver's
+    // `synthesize_pattern_binding_lets` lays down. A fresh LocalRef
+    // is allocated for the `action_id` binder (the verb's params
+    // never include it).
     if !verb.emits.is_empty() {
-        diagnostics.push(LoweringError::VerbExpansionSkipped {
-            verb_name: verb.name.clone(),
-            reason: VerbSkipReason::CascadeNeedsActionEvent,
-            span: verb.span,
-        });
+        let event_ref = action_selected_ref
+            .expect("ActionSelected event ref is always pre-injected when any verb has emits");
+        let action_id = assigned_action_id
+            .expect("assigned_action_id is always Some when verb.emits is non-empty");
+        let physics = synthesize_cascade_physics(
+            verb,
+            &synthetic_name,
+            action_id,
+            event_ref,
+        );
+        comp.physics.push(physics);
     }
+    // Tail use of `diagnostics` — kept in the signature so future
+    // typed deferrals can be appended without re-threading the
+    // parameter. (`VerbExpansionSkipped` no longer fires.)
+    let _ = diagnostics;
+}
+
+/// Synthesise the cascade [`PhysicsIR`] for one verb. Caller passes
+/// the verb's stable `action_id` and the pre-injected
+/// `ActionSelected` event ref.
+///
+/// Shape:
+///
+/// ```text
+/// physics verb_chronicle_<name> {
+///     on ActionSelected { actor: <verb_self>, action_id: <fresh>, target: <verb_target_or_fresh> }
+///     where action_id_local == <action_id>
+///     {
+///         <verb.emits, lifted as IrStmt::Emit>
+///     }
+/// }
+/// ```
+///
+/// The handler binds the event's `actor` field to the verb's `self`
+/// LocalRef and the event's `target` field to the verb's `target`
+/// LocalRef (when present). The verb's emit body references those
+/// same LocalRefs, so reads of bare `self` / `target` resolve through
+/// the binding context's `local_ids` map — see the cascade-injection
+/// rationale in [`expand_one_verb`].
+fn synthesize_cascade_physics(
+    verb: &VerbIR,
+    _synthetic_name: &str,
+    action_id: u32,
+    event_ref: EventRef,
+) -> PhysicsIR {
+    let span = verb.span;
+
+    // Resolve the verb's `self` and `target` LocalRefs from its param
+    // list (param names match the convention every shipped verb
+    // follows: `self` first, optional `target` second). Falling back
+    // to a fresh LocalRef when a param is absent keeps the binding
+    // shape uniform — the body simply doesn't reference the missing
+    // binder.
+    let self_local = verb
+        .params
+        .iter()
+        .find(|p| p.name == "self")
+        .map(|p| p.local)
+        .unwrap_or_else(|| fresh_local_after(verb));
+    let target_local = verb
+        .params
+        .iter()
+        .find(|p| p.name == "target")
+        .map(|p| p.local)
+        .unwrap_or_else(|| fresh_local_after(verb));
+    let action_id_local = fresh_local_after(verb);
+
+    let bindings = vec![
+        IrPatternBinding {
+            field: ACTION_SELECTED_FIELD_ACTOR.to_string(),
+            value: IrPattern::Bind {
+                name: "self".to_string(),
+                local: self_local,
+            },
+            span,
+        },
+        IrPatternBinding {
+            field: ACTION_SELECTED_FIELD_ACTION_ID.to_string(),
+            value: IrPattern::Bind {
+                name: "action_id".to_string(),
+                local: action_id_local,
+            },
+            span,
+        },
+        IrPatternBinding {
+            field: ACTION_SELECTED_FIELD_TARGET.to_string(),
+            value: IrPattern::Bind {
+                name: "target".to_string(),
+                local: target_local,
+            },
+            span,
+        },
+    ];
+
+    let pattern = IrPhysicsPattern::Kind(IrEventPattern {
+        name: ACTION_SELECTED_EVENT_NAME.to_string(),
+        event: Some(event_ref),
+        bindings,
+        span,
+    });
+
+    // Body: lift each `IrEmit` from the verb to an `IrStmt::Emit`,
+    // wrapped in `if (action_id_local == <lit>) { … }` so the cascade
+    // only fires for the verb that owns this rule.
+    //
+    // Why not use the `where_clause` field on `PhysicsHandlerIR`?
+    // The physics lowering (`lower_one_handler`) lowers the
+    // where-clause BEFORE [`super::event_binding::synthesize_pattern_binding_lets`]
+    // populates the binder context. Reading `action_id` from the
+    // where-clause would surface as `UnsupportedLocalBinding`. The
+    // `if` lives inside `body` instead — `lower_stmt_list` runs
+    // after the binders are in scope, so the `IrStmt::If` cond
+    // resolves the binder cleanly.
+    let action_id_lhs = IrExprNode {
+        kind: IrExpr::Local(action_id_local, "action_id".to_string()),
+        span,
+    };
+    let action_id_rhs = IrExprNode {
+        kind: IrExpr::LitInt(action_id as i64),
+        span,
+    };
+    let action_id_eq = IrExprNode {
+        kind: IrExpr::Binary(BinOp::Eq, Box::new(action_id_lhs), Box::new(action_id_rhs)),
+        span,
+    };
+    let emit_stmts: Vec<IrStmt> = verb
+        .emits
+        .iter()
+        .cloned()
+        .map(IrStmt::Emit)
+        .collect();
+    let body: Vec<IrStmt> = vec![IrStmt::If {
+        cond: action_id_eq,
+        then_body: emit_stmts,
+        else_body: None,
+        span,
+    }];
+
+    let handler = PhysicsHandlerIR {
+        pattern,
+        where_clause: None,
+        body,
+        span,
+    };
+
+    PhysicsIR {
+        name: format!("verb_chronicle_{}", verb.name),
+        handlers: vec![handler],
+        annotations: Vec::new(),
+        cpu_only: false,
+        span,
+    }
+}
+
+/// Allocate a fresh [`LocalRef`] strictly past every LocalRef the
+/// verb already uses for its params. Doesn't query the resolver's
+/// scope (we're post-resolution); instead picks `max(verb.params.local) + 1`.
+/// Verbs with no params get `LocalRef(0)`.
+fn fresh_local_after(verb: &VerbIR) -> LocalRef {
+    let max = verb.params.iter().map(|p| p.local.0).max();
+    LocalRef(max.map(|m| m.saturating_add(1)).unwrap_or(0))
+}
+
+// Suppress dead-code warning: kept for the (still-typed) closed-set
+// reason enum on [`LoweringError::VerbExpansionSkipped`]. No call
+// site fires today, but the variant carries `VerbSkipReason` and
+// removing the enum would force a wider error-surface refactor for a
+// follow-on stage. Future deferrals (e.g., a verb shape that fails a
+// cascade-precondition check) can re-introduce values without
+// reshaping the diagnostic carrier.
+#[allow(dead_code)]
+fn _verb_skip_reason_kept() -> VerbSkipReason {
+    VerbSkipReason::CascadeNeedsActionEvent
 }
 
 /// Build the synthesised mask's `IrActionHead` from the verb's
@@ -347,7 +670,14 @@ verb Wait(self) =
     }
 
     #[test]
-    fn verb_with_emit_surfaces_skip_diagnostic() {
+    fn verb_with_emit_injects_cascade_event_and_handler() {
+        // 2026-05-03: cascade injection landed. A verb with a non-empty
+        // `emit` triggers (1) a singleton ActionSelected event-kind
+        // injection into `comp.events` and (2) a synthesised
+        // `verb_chronicle_<name>` physics rule listening on
+        // ActionSelected, gated on `where action_id == <verb id>`,
+        // whose body runs the verb's emits. The mask + scoring stages
+        // still expand. No `VerbExpansionSkipped` diagnostic surfaces.
         let src = r#"
 event Killed { by: AgentId, prey: AgentId, pos: vec3, }
 event Tick { }
@@ -362,8 +692,11 @@ verb Strike(self, target: Agent) =
   score 1.0
 "#;
         let comp = compile(src);
+        let pre_event_count = comp.events.len();
+        let pre_physics_count = comp.physics.len();
         let outcome = expand_verbs(&comp);
-        // Mask + scoring still expanded.
+
+        // Mask + scoring stages still expand (regression guard).
         assert!(
             outcome
                 .compilation
@@ -381,26 +714,139 @@ verb Strike(self, target: Agent) =
                 .any(|e| e.head.name == "verb_Strike"),
             "expected verb_Strike scoring entry in expansion"
         );
-        // Cascade SKIP diagnostic surfaced.
-        let skipped = outcome
-            .diagnostics
-            .iter()
-            .filter(|d| {
-                matches!(
-                    d,
-                    LoweringError::VerbExpansionSkipped {
-                        verb_name,
-                        reason: VerbSkipReason::CascadeNeedsActionEvent,
-                        ..
-                    } if verb_name == "Strike"
-                )
-            })
-            .count();
+
+        // Cascade injection — singleton ActionSelected event landed.
         assert_eq!(
-            skipped, 1,
-            "expected one cascade-deferred SKIP diagnostic for Strike; got {:?}",
-            outcome.diagnostics,
+            outcome.compilation.events.len(),
+            pre_event_count + 1,
+            "expected exactly one synthesised ActionSelected event"
         );
+        let action_selected = outcome
+            .compilation
+            .events
+            .iter()
+            .find(|e| e.name == ACTION_SELECTED_EVENT_NAME)
+            .expect("ActionSelected event present");
+        assert_eq!(
+            action_selected.fields.len(),
+            3,
+            "ActionSelected payload = {{ actor, action_id, target }}"
+        );
+        assert_eq!(action_selected.fields[0].name, "actor");
+        assert_eq!(action_selected.fields[1].name, "action_id");
+        assert_eq!(action_selected.fields[2].name, "target");
+        assert!(matches!(action_selected.fields[0].ty, IrType::AgentId));
+        assert!(matches!(action_selected.fields[1].ty, IrType::U32));
+        assert!(matches!(action_selected.fields[2].ty, IrType::AgentId));
+
+        // Cascade injection — synthesised physics handler landed.
+        assert_eq!(
+            outcome.compilation.physics.len(),
+            pre_physics_count + 1,
+            "expected one synthesised verb_chronicle_<verb> physics rule"
+        );
+        let chronicle = outcome
+            .compilation
+            .physics
+            .iter()
+            .find(|p| p.name == "verb_chronicle_Strike")
+            .expect("verb_chronicle_Strike physics present");
+        assert_eq!(chronicle.handlers.len(), 1);
+        let handler = &chronicle.handlers[0];
+        match &handler.pattern {
+            IrPhysicsPattern::Kind(p) => {
+                assert_eq!(p.name, ACTION_SELECTED_EVENT_NAME);
+                assert!(p.event.is_some(), "event ref resolved");
+                assert_eq!(p.bindings.len(), 3, "actor + action_id + target binders");
+            }
+            other => panic!("expected Kind-pattern; got {other:?}"),
+        }
+        // The action_id gate lives inside the body as an `If` (NOT a
+        // where-clause) so it lowers AFTER the binder context is
+        // populated — see `synthesize_cascade_physics`'s comment.
+        assert!(
+            handler.where_clause.is_none(),
+            "expected no where-clause; gate lives inside body as If"
+        );
+        assert_eq!(
+            handler.body.len(),
+            1,
+            "verb has one emit; handler body wraps it in one If stmt"
+        );
+        match &handler.body[0] {
+            IrStmt::If { then_body, else_body, .. } => {
+                assert!(else_body.is_none());
+                assert_eq!(then_body.len(), 1, "one emit inside the gate");
+                match &then_body[0] {
+                    IrStmt::Emit(e) => assert_eq!(e.event_name, "Killed"),
+                    other => panic!("expected Emit inside If; got {other:?}"),
+                }
+            }
+            other => panic!("expected If; got {other:?}"),
+        }
+
+        // No SKIP diagnostic — cascade is fully expanded at the IR
+        // level. (Downstream lowering of `self.pos` against the
+        // synthesised binding is an orthogonal expression-layer gap;
+        // not a verb-expansion regression.)
+        for diag in &outcome.diagnostics {
+            assert!(
+                !matches!(diag, LoweringError::VerbExpansionSkipped { .. }),
+                "expected zero VerbExpansionSkipped diagnostics; got {diag:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn action_selected_event_injection_is_idempotent_across_multiple_verbs() {
+        // Two verbs with non-empty emit must share a single
+        // ActionSelected event entry; each gets its own
+        // `verb_chronicle_<name>` physics rule with a distinct
+        // action_id literal in the where-clause.
+        let src = r#"
+event Killed { by: AgentId, prey: AgentId, pos: vec3, }
+event Tick { }
+entity Agent_ : Agent { pos: vec3, alive: bool, }
+scoring {
+  AttackTarget = 1.0
+  Hold = 0.5
+}
+verb Strike(self, target: Agent) =
+  action AttackTarget(target: target)
+  when  self.alive
+  emit  Killed { by: self, prey: target, pos: self.pos }
+  score 1.0
+verb StrikeAgain(self, target: Agent) =
+  action AttackTarget(target: target)
+  when  self.alive
+  emit  Killed { by: self, prey: target, pos: self.pos }
+  score 0.5
+"#;
+        let comp = compile(src);
+        let pre_event_count = comp.events.len();
+        let outcome = expand_verbs(&comp);
+        // Singleton — only one ActionSelected event.
+        assert_eq!(
+            outcome
+                .compilation
+                .events
+                .iter()
+                .filter(|e| e.name == ACTION_SELECTED_EVENT_NAME)
+                .count(),
+            1,
+        );
+        assert_eq!(outcome.compilation.events.len(), pre_event_count + 1);
+        // Two synthesised physics rules, one per verb.
+        assert!(outcome
+            .compilation
+            .physics
+            .iter()
+            .any(|p| p.name == "verb_chronicle_Strike"));
+        assert!(outcome
+            .compilation
+            .physics
+            .iter()
+            .any(|p| p.name == "verb_chronicle_StrikeAgain"));
     }
 
     #[test]
