@@ -698,6 +698,182 @@ fn event_kind_filter_probe_compiles_with_tag_guard() {
 /// If anyone re-lands the AST belief-read surfaces under the same
 /// fixture name, this test will need to be re-pointed at a separate
 /// fixture or split into pre-/post-fix variants.
+/// `trade_market_probe.sim` is the FIRST fixture that combines all
+/// the recently-landed compiler surfaces in one program:
+///   - 4 distinct Item entity declarations + 1 Group declaration
+///   - Multi-event-kind producer (TradeExecuted + PriceObserved
+///     share one event ring, two distinct kind tags at offset 0)
+///   - ToM-shape `pair_map` `u32` view (`price_belief`) — atomicOr
+///     fold (post-`51b5853b`)
+///   - Mixed view-fold storage in one program: u32 pair_map +
+///     f32 with @decay + f32 no-decay
+///
+/// Pins the compile-time invariants that surfaced during the
+/// discovery probe (see `docs/superpowers/notes/2026-05-04-trade_
+/// market_probe.md`):
+///   - Lower is clean (no diagnostics).
+///   - 10 kernels emitted: physics_WanderAndTrade + 3 fold kernels
+///     (price_belief, trader_volume, hub_volume) + 1 decay kernel
+///     (trader_volume only — hub_volume has no @decay) + 5 admin.
+///   - The producer body has TWO tag stores at offset 0
+///     (`atomicStore(&event_ring[slot * 10u + 0u], <kind>u)`) —
+///     one per emit, distinct kind ids.
+///   - Each fold body guards on the per-handler kind tag at offset
+///     0 (the cb24fd69 multi-kind ring partition shape).
+///   - `fold_price_belief` uses WGSL native `atomicOr` (NOT a CAS
+///     loop) — the `|=` accumulator + `u32` view return type
+///     selects the bit-OR emit branch.
+#[test]
+fn trade_market_probe_combines_landed_surfaces() {
+    use dsl_compiler::cg::lower::lower_compilation_to_cg;
+    let path = workspace_path("assets/sim/trade_market_probe.sim");
+    let src = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let prog = dsl_compiler::parse(&src).expect("parse trade_market_probe.sim");
+    let comp = dsl_ast::resolve::resolve(prog).expect("resolve trade_market_probe.sim");
+
+    // Catalog sanity: 7 entities — 2 Agent (Trader, Hub) + 4 Item
+    // (Wood/Iron/Grain/Cloth) + 1 Group (Guild).
+    let mut agents = 0;
+    let mut items = 0;
+    let mut groups = 0;
+    for e in &comp.entities {
+        match e.root {
+            dsl_compiler::ast::EntityRoot::Agent => agents += 1,
+            dsl_compiler::ast::EntityRoot::Item => items += 1,
+            dsl_compiler::ast::EntityRoot::Group => groups += 1,
+        }
+    }
+    assert_eq!(agents, 2, "expected 2 Agent entities (Trader + Hub)");
+    assert_eq!(
+        items, 4,
+        "expected 4 distinct Item entities (Wood/Iron/Grain/Cloth) — \
+         this is the first fixture with multiple Item declarations"
+    );
+    assert_eq!(groups, 1, "expected 1 Group entity (Guild)");
+
+    let cg = lower_compilation_to_cg(&comp).unwrap_or_else(|o| {
+        let diag_text = o
+            .diagnostics
+            .iter()
+            .map(|d| format!("{d}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        panic!(
+            "trade_market_probe.sim lower expected clean; got {} diagnostics:\n{diag_text}",
+            o.diagnostics.len(),
+        );
+    });
+    let sched = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&sched.schedule, &cg)
+        .expect("emit trade_market_probe");
+
+    // 3 fold kernels: price_belief, trader_volume, hub_volume.
+    let fold_names: Vec<_> = art
+        .kernel_index
+        .iter()
+        .filter(|n| n.starts_with("fold_"))
+        .cloned()
+        .collect();
+    assert_eq!(
+        fold_names.len(),
+        3,
+        "expected 3 fold kernels (price_belief, trader_volume, hub_volume); got: {:?}",
+        fold_names,
+    );
+    // 1 decay kernel: trader_volume (the only @decay view).
+    let decay_names: Vec<_> = art
+        .kernel_index
+        .iter()
+        .filter(|n| n.starts_with("decay_"))
+        .cloned()
+        .collect();
+    assert_eq!(
+        decay_names.len(),
+        1,
+        "expected 1 decay kernel (trader_volume); got: {:?}",
+        decay_names,
+    );
+
+    // Producer must emit TWO tag stores at offset 0 (one per emit:
+    // TradeExecuted + PriceObserved).
+    let producer = kernel_body_containing(&art, "WanderAndTrade")
+        .or_else(|| kernel_body_containing(&art, "physics"))
+        .unwrap_or_else(|| {
+            panic!(
+                "no physics kernel found; available: {:?}",
+                art.wgsl_files.keys().collect::<Vec<_>>()
+            );
+        });
+    let tag_stores = producer
+        .matches("atomicStore(&event_ring[slot * 10u + 0u]")
+        .count();
+    assert_eq!(
+        tag_stores, 2,
+        "expected 2 tag stores in WanderAndTrade producer (one per emit); got {tag_stores} in:\n{producer}",
+    );
+
+    // Per-handler tag filter (cb24fd69) — every fold body must
+    // guard on the kind tag at offset 0.
+    let guard_pattern = "if (event_ring[event_idx * 10u + 0u] ==";
+    for view_name in ["price_belief", "trader_volume", "hub_volume"] {
+        let kernel_name = format!("fold_{view_name}");
+        let body = kernel_body_containing(&art, &kernel_name).unwrap_or_else(|| {
+            panic!("expected {kernel_name} kernel");
+        });
+        assert!(
+            body.contains(guard_pattern),
+            "{kernel_name} body must guard on per-handler event-kind tag; got:\n{body}",
+        );
+    }
+
+    // ToM shape: fold_price_belief uses atomicOr (the post-`51b5853b`
+    // u32 fold branch) NOT the f32 CAS+add loop.
+    let pb_body = kernel_body_containing(&art, "price_belief")
+        .expect("fold_price_belief kernel missing");
+    assert!(
+        pb_body.contains("atomicOr"),
+        "expected atomicOr in fold_price_belief body (u32 view + |= accumulator); got:\n{pb_body}",
+    );
+    assert!(
+        !pb_body.contains("atomicCompareExchangeWeak"),
+        "expected NO CAS loop in u32 fold body; got:\n{pb_body}",
+    );
+
+    // The two f32 view folds DO use the CAS+add loop (no atomic
+    // float add in WGSL; the `+= a` accumulator on a `-> f32` view
+    // routes through the CAS loop). We pick the fold kernel by
+    // exact-name lookup because `kernel_body_containing("trader_volume")`
+    // would also match `decay_trader_volume` (substring containment).
+    let tv_body = art
+        .wgsl_files
+        .get("fold_trader_volume.wgsl")
+        .map(|s| s.as_str())
+        .expect("fold_trader_volume.wgsl missing");
+    assert!(
+        tv_body.contains("atomicCompareExchangeWeak"),
+        "expected CAS+add loop in fold_trader_volume body (f32 view); got:\n{tv_body}",
+    );
+    let hv_body = art
+        .wgsl_files
+        .get("fold_hub_volume.wgsl")
+        .map(|s| s.as_str())
+        .expect("fold_hub_volume.wgsl missing");
+    assert!(
+        hv_body.contains("atomicCompareExchangeWeak"),
+        "expected CAS+add loop in fold_hub_volume body (f32 view); got:\n{hv_body}",
+    );
+
+    eprintln!(
+        "[trade_market_probe] {} kernels: {:?}",
+        art.kernel_index.len(),
+        art.kernel_index,
+    );
+}
+
 #[test]
 fn tom_probe_lowers_clean_and_emits_belief_kernels() {
     use dsl_compiler::cg::lower::lower_compilation_to_cg;

@@ -50,6 +50,11 @@ auction_runtime = { path = "../auction_runtime" }
 verb_probe_runtime = { path = "../verb_probe_runtime" }
 # ToM probe — discovery probe of the Theory-of-Mind belief-read path.
 tom_probe_runtime = { path = "../tom_probe_runtime" }
+# Trade-market probe — first fixture combining multi-event-kind ring
+# (TradeExecuted + PriceObserved) + ToM-shape pair_map u32 view +
+# mixed view-fold storage (u32 + f32 @decay + f32 no-decay) +
+# multiple Item entity declarations in one program.
+trade_market_runtime = { path = "../trade_market_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -98,3 +103,7 @@ path = "src/verb_fire_app.rs"
 [[bin]]
 name = "tom_probe_app"
 path = "src/tom_probe_app.rs"
+
+[[bin]]
+name = "trade_market_app"
+path = "src/trade_market_app.rs"

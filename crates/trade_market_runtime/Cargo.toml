@@ -1,0 +1,31 @@
+[package]
+name = "trade_market_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/trade_market_probe.sim` —
+# the FIRST fixture that combines ALL of the recently-landed surfaces:
+#   - Items (4 distinct: Wood/Iron/Grain/Cloth) + Group (Guild)
+#   - Multi-event-kind producer (TradeExecuted + PriceObserved share
+#     one ring) with per-handler tag filter on the consumer side
+#   - ToM-shape pair_map u32 view with bit-OR fold (price_belief)
+#   - Mixed view-fold storage in one program: u32 (price_belief) +
+#     f32 with @decay (trader_volume) + f32 no-decay (hub_volume)
+#
+# Discovery probe — see docs/superpowers/notes/2026-05-04-trade_market_probe.md
+# for the gap chain. Mirrors auction_runtime + tom_probe_runtime
+# layouts (build.rs concatenates compiler-emitted modules; src/lib.rs
+# wires the per-tick dispatch).
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

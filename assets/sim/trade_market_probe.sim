@@ -1,0 +1,242 @@
+// trade_market_probe — multi-resource market with spatial hubs and
+// information-mechanic probe. The FIRST fixture that combines ALL of
+// the recently-landed surfaces in one place:
+//
+//   - Items + Groups (multiple Item declarations alongside one Group)
+//   - Multi-event-kind producer (TradeExecuted + PriceObserved share
+//     a single physics rule body and a single event ring)
+//   - Per-handler tag filter (multi-event-kind ring fold partition,
+//     `cb24fd69`-style)
+//   - Theory-of-Mind shape: `pair_map` u32 view with bit-OR fold
+//     (the post-fix tom_probe shape, `51b5853b`)
+//   - Mixed view-fold storage: u32 (price_belief) + f32 with @decay
+//     (trader_volume) + f32 no-decay (hub_volume) in ONE program
+//
+// The probe is a DISCOVERY shape — we expect at least one gap to
+// surface from the combination of features. The verb slice is left
+// commented out below; uncommenting it would ALSO probe the verb
+// cascade integration, but that depends on too many surfaces at once
+// (spatial body-form physics + per-pair lowering + scoring pickup).
+//
+// Body-form spatial walks (slice 2b) are NOT used here — every
+// emit's `seller`/`hub` field is bound to `self`, mirroring the
+// auction-market placeholder pattern (see auction_market.sim's GAP
+// comments). The hub-and-trader network is a logical fixture target
+// once spatial.nearby_hubs(self) lowers cleanly inside multi-emit
+// physics rules; today we sidestep it.
+//
+// FULL FIRE observable (asserted by trade_market_app):
+//   - trader_volume[i] > 0 for every Trader slot (each trader emits
+//     `trade_amount` per tick into the buyer key, which is `self`)
+//   - hub_volume[i] > 0 for every Trader slot (seller key is `self`
+//     per the placeholder)
+//   - price_belief[i*N + i] == observation_bit for every i
+//     (diagonal — observer=hub=self per the placeholder)
+//   - price_belief[i*N + j] == 0 for every i != j (off-diagonal)
+
+event Tick { }
+
+@replayable
+@gpu_amenable
+event TradeExecuted {
+  buyer:    AgentId,
+  seller:   AgentId,
+  // Resource id 0..3 packed as u32. Once full Item-id flow lands
+  // through event payloads beyond the bartering ItemId pattern,
+  // this becomes `resource: ItemId` keyed against the per-Item SoA
+  // catalog directly.
+  resource: u32,
+  amount:   f32,
+  price:    f32,
+}
+
+@replayable
+@gpu_amenable
+event PriceObserved {
+  observer: AgentId,
+  hub:      AgentId,
+  resource: u32,
+  // Fixed-point price belief: each emission contributes one bit to
+  // the observer's per-(observer, hub) belief bitset via the
+  // `price_belief` view's `|=` accumulator. The runtime feeds
+  // `observation_bit = 1` so the diagonal converges to `1u`.
+  price_q8: u32,
+}
+
+@replayable
+@gpu_amenable
+event Shipment {
+  // Declared but never emitted today — placeholder for the eventual
+  // hub→hub freight cascade that needs spatial body-form physics +
+  // per-pair lowering. See GAP block below.
+  from_hub: AgentId,
+  to_hub:   AgentId,
+  resource: u32,
+  amount:   f32,
+}
+
+entity Trader : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Hub : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+// Four per-resource Item declarations — exercises the
+// entity_field_catalog populating multiple distinct Item rows in
+// one program (bartering covered ONE Item; this is the first
+// fixture with FOUR). Each carries a `base_price: f32` SoA the
+// runtime allocates as a 4-element buffer; the lowering arms produce
+// `wood_base_price`, `iron_base_price`, `grain_base_price`,
+// `cloth_base_price` external bindings via the snake_case rule
+// (`item_field_external_name` in cg/emit/kernel.rs:1039).
+//
+// GAP probe: the active rule body doesn't read these today (no
+// `items.base_price(<id>)` call). The runtime allocates the
+// buffers and the catalog records the entries; the WGSL emit only
+// references whatever's actually read in the rule. So the
+// observable here is "the build still succeeds with 4 distinct
+// Item entities declared" — a PARSE + RESOLVE + lowering surface
+// only. Actually using all 4 in one rule body is the next stage.
+entity Wood  : Item { base_price: f32 }
+entity Iron  : Item { base_price: f32 }
+entity Grain : Item { base_price: f32 }
+entity Cloth : Item { base_price: f32 }
+
+// Trader cliques — one Group declaration alongside the Item rows.
+// Same deal as Wood/Iron/Grain/Cloth: declared today, runtime
+// allocates the SoA but the rule body doesn't read it. Probes
+// "Group + multiple Items in one program" coexistence.
+entity Guild : Group { size: f32 }
+
+config market {
+  step_scale:        f32 = 0.05,
+  trade_radius:      f32 = 1.5,
+  trade_amount:      f32 = 1.0,
+  ship_radius:       f32 = 3.0,
+  // Fixed value the runtime feeds into PriceObserved's price_q8
+  // field. With observation_bit = 1u, the OR-fold pins the
+  // diagonal of the belief bitset to 1u after the first tick.
+  observation_bit:   u32 = 1,
+}
+
+// Per-Trader integrator + multi-event emit. Each tick emits ONE
+// TradeExecuted + ONE PriceObserved into the shared event ring.
+// Both events route through `self` placeholders (buyer = seller =
+// self for TradeExecuted; observer = hub = self for PriceObserved)
+// — the auction/tom_probe placeholder pattern. Real multi-resource
+// market routing depends on:
+//   1. spatial.nearby_hubs(self) iter inside this body to find a
+//      target hub (slice 2b body-form, landed in
+//      particle_collision_min)
+//   2. per-pair scoring + argmax to pick the most profitable
+//      resource (verb cascade, see commented-out block below)
+//   3. real Item-typed `resource: ItemId` field (Item-SoA flow
+//      through event payloads beyond the bartering pattern)
+//
+// Today's body fires both event kinds unconditionally and
+// surfaces the multi-event-ring + multi-view-fold combination.
+physics WanderAndTrade @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    let new_pos = self.pos + self.vel * config.market.step_scale;
+    agents.set_pos(self, new_pos);
+    emit TradeExecuted {
+      buyer:    self,
+      seller:   self,
+      resource: 0,
+      amount:   config.market.trade_amount,
+      price:    config.market.trade_amount,
+    }
+    // GAP probe: `price_q8: config.market.observation_bit` (where
+    // observation_bit is declared `u32`) crashes the WGSL emit with
+    // "automatic conversions cannot convert elements of `f32` to
+    // `u32`" — the compiler emits all config values as `f32` consts
+    // regardless of declared type, then drops them straight into
+    // `atomicStore(&event_ring[... + 5u], (config_N))` which expects
+    // u32. See `docs/superpowers/notes/2026-05-04-trade_market_probe.md`
+    // GAP #1 for the gap-chain. WORKAROUND: use a literal 1 here so
+    // the emit body packs a u32 directly. Once the config-emit type
+    // round-trip lands, this can become `config.market.observation_bit`
+    // again.
+    emit PriceObserved {
+      observer: self,
+      hub:      self,
+      resource: 0,
+      price_q8: 1,
+    }
+  }
+}
+
+// Per-(observer, hub) price belief bitset — the ToM `pair_map` u32
+// shape (post-`51b5853b`). Each PriceObserved emission OR's its
+// `price_q8` field into the slot indexed by (observer, hub). With
+// `observation_bit = 1u` and the placeholder routing observer = hub
+// = self, only the diagonal cells flip to 1u; off-diagonal cells
+// stay at 0u. After the first tick the diagonal is set; subsequent
+// ticks are idempotent (OR'ing a set bit is a no-op).
+//
+// Compiler surfaces stressed: `view ... -> u32` return type plumbed
+// through view_signatures, `|=` accumulator parsed + lowered + emit
+// branches to atomicOr (P11 trivial), `pair_map` storage hint maps
+// to the 2-D index `local_obs * cfg.second_key_pop + local_sub`.
+@materialized(on_event = [PriceObserved], storage = pair_map)
+view price_belief(observer: Agent, hub: Agent) -> u32 {
+  initial: 0,
+  on PriceObserved { observer: o, hub: h, resource: _, price_q8: bit } { self |= bit }
+  clamp: [0, 4294967295],
+}
+
+// Per-Trader trade volume — f32 with @decay, mirroring auction's
+// bid_activity shape. The fold body matches `buyer: b` (binder).
+// Each TradeExecuted emit lands `trade_amount` on the buyer's slot;
+// with placeholder `buyer = self`, every slot accumulates 1.0 per
+// tick under decay 0.95 — steady-state per slot ≈
+// `1.0 / (1 - 0.95) = 20.0`.
+@materialized(on_event = [TradeExecuted])
+@decay(rate = 0.95, per = tick)
+view trader_volume(buyer: Agent) -> f32 {
+  initial: 0.0,
+  on TradeExecuted { buyer: b, seller: _, resource: _, amount: a, price: _ } { self += a }
+  clamp: [0.0, 100000.0],
+}
+
+// Per-hub volume per resource — single-key view today (keyed on
+// seller). Once Item-typed `resource: ItemId` flows through event
+// payloads, a sister view keyed on `(seller, resource)` would
+// emerge as the actual per-hub-per-resource volume table.
+//
+// No decay here: the goal is to probe whether the SAME multi-event
+// ring drives both a u32 view (price_belief, atomicOr) AND an f32
+// view with @decay (trader_volume) AND an f32 view without @decay
+// (hub_volume) cleanly. With placeholder `seller = self`, every
+// slot grows by `trade_amount` per tick → after T ticks per slot =
+// `T * trade_amount`.
+@materialized(on_event = [TradeExecuted])
+view hub_volume(seller: Agent) -> f32 {
+  initial: 0.0,
+  on TradeExecuted { buyer: _, seller: s, resource: _, amount: a, price: _ } { self += a }
+  clamp: [0.0, 100000.0],
+}
+
+// VERB SLICE — left commented because it depends on too many
+// surfaces at once: per-pair scoring requires the pair-axis flow,
+// the cascade physics rule needs the chronicle-emit lowering, AND
+// the body would need to evaluate `spatial.nearby_hubs(self)` to
+// pick a target. Uncomment to probe the verb-integration gap
+// explicitly; otherwise this is documentation of the next slice
+// of the trade-market cascade.
+//
+// verb ExecuteTrade(self) =
+//   action Trade
+//   when self.alive
+//   emit TradeExecuted {
+//     buyer:    self,
+//     seller:   self,
+//     resource: 0u,
+//     amount:   config.market.trade_amount,
+//     price:    config.market.trade_amount,
+//   }
+//   score config.market.trade_amount
