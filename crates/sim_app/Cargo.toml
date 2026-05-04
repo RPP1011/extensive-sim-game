@@ -143,6 +143,13 @@ mass_battle_100v100_runtime = { path = "../mass_battle_100v100_runtime" }
 # a real `items.base_price(0)` field from an Item entity in a verb's
 # `when` clause.
 trade_market_real_runtime = { path = "../trade_market_real_runtime" }
+# Quest Arc Real — EIGHTH real fixture and FIRST sim with multi-
+# stage per-agent state machines. 30 Adventurers each cycle through
+# 5 stages (Accept→Hunt→Collect→Return→Complete→reset) with stage
+# state encoded in the per-agent `mana` SoA field. Composes
+# duel_1v1's verb-cascade + chronicle pipeline with mana-as-stage-
+# register for the FSM.
+quest_arc_real_runtime = { path = "../quest_arc_real_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -251,3 +258,7 @@ path = "src/mass_battle_100v100_app.rs"
 [[bin]]
 name = "trade_market_real_app"
 path = "src/trade_market_real_app.rs"
+
+[[bin]]
+name = "quest_arc_real_app"
+path = "src/quest_arc_real_app.rs"
