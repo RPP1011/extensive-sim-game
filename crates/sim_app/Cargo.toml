@@ -102,6 +102,13 @@ quest_probe_runtime = { path = "../quest_probe_runtime" }
 # PerPair tick preamble, Bool LHS rewrite). See
 # `docs/superpowers/notes/2026-05-04-duel_1v1.md`.
 duel_1v1_runtime = { path = "../duel_1v1_runtime" }
+# Duel 25v25 — first SCALE-UP fixture (25 Red vs 25 Blue squad
+# scuffle). Sidesteps duel_1v1's PerPair `mask_k=1u` placeholder
+# (Gap W) by doing target-finding via spatial body-form physics.
+# Per-tick: spatial-hash → ScanAndStrike (per-agent walk + emit
+# Damaged for cross-team neighbours) → ApplyDamage chronicle.
+# Discovery doc: docs/superpowers/notes/2026-05-04-duel_25v25.md.
+duel_25v25_runtime = { path = "../duel_25v25_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -186,3 +193,7 @@ path = "src/quest_probe_app.rs"
 [[bin]]
 name = "duel_1v1_app"
 path = "src/duel_1v1_app.rs"
+
+[[bin]]
+name = "duel_25v25_app"
+path = "src/duel_25v25_app.rs"

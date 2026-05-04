@@ -1,0 +1,179 @@
+// duel_25v25 — first SCALE-UP fixture: 25 Red vs 25 Blue squad
+// scuffle. Natural escalation from `duel_1v1.sim` (commit ff1aa387).
+//
+// Where 1v1 used per-pair scoring (verb cascade), 25v25 uses SPATIAL
+// body-form physics for "find nearby enemies" — sidesteps Gap W
+// (PerPair `mask_k=1u` placeholder) by doing target-finding via the
+// spatial-grid hash inside a chronicle physics rule.
+//
+// Pattern matches `particle_collision_min.sim` (commit 134c5df8) for
+// the body-form spatial walk: `for other in spatial.<query>(self) {
+// emit ... }`. Each Combatant per tick scans its 27-cell
+// neighbourhood, filters opposing creature_type via a body-side
+// `if (other.creature_type != self.creature_type)` predicate (the
+// spatial_query filter is currently informational at the body-iter
+// site — see particle_collision_min comments), and emits one
+// Damaged event per enemy in range.
+//
+// SHAPE: 25 RedCombatants + 25 BlueCombatants on a single Agent SoA.
+// Position-based team segregation at init: Red on left half (x<0),
+// Blue on right half (x>0). Per-tick chain:
+//
+//   1. spatial_build_hash (5 phases)
+//   2. ScanAndStrike — body-form spatial walk emits Damaged per
+//      neighbour in range whose creature_type opposes ours (gated
+//      every 2 ticks via cooldown). @phase(per_agent).
+//   3. ApplyDamage — chronicle physics reads Damaged, decrements
+//      target HP, sets alive=false on HP<=0, emits Defeated.
+//      @phase(post).
+//   4. fold_damage_dealt — per-source f32 accumulator
+//   5. fold_defeats_received — per-target f32 count
+//
+// Win condition: one squad fully eliminated, OR after MAX_TICKS the
+// side with more survivors wins.
+//
+// PROBE FOCUS: stress spatial body-form at 50 agents (vs 1 agent in
+// particle_collision_min) AND combine it with the @phase(post)
+// chronicle damage-application path the duel_1v1 fixture proved out.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Defeated {
+  combatant: AgentId,
+}
+
+// Two entity types — distinguished by creature_type discriminant
+// (Red=0 by declaration order, Blue=1). The runtime sets each
+// agent's slot to its EntityRef-derived index per the
+// `predator_prey_min` precedent.
+entity RedCombatant : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity BlueCombatant : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config combat {
+  // Strike damage per emit. With 50 hp and ~1.5 cell radius, the
+  // first few ticks usually deal multi-target hits — so a low
+  // per-emit damage (5.0) keeps the battle from collapsing in 1-2
+  // ticks. Tunable to taste.
+  strike_damage:   f32 = 5.0,
+  // Spatial neighbour radius (matches @spatial radius below).
+  strike_radius:   f32 = 1.5,
+  // Cooldown gate — only emit damage every 2 ticks. Same
+  // `world.tick % cooldown == 0u` pattern duel_1v1 uses, except
+  // here it gates the emit inside the spatial-walk body rather
+  // than a verb's `when` clause.
+  cooldown_strike: u32 = 2,
+}
+
+// Spatial-grid neighbour filter. Today the body of this filter is
+// INFORMATIONAL only at the body-form iter site
+// (particle_collision_min documents this in its source comments) —
+// the inner spatial loop visits every candidate slot the
+// spatial-grid surfaces; team-check is done body-side via an `if`
+// predicate inside the physics rule.
+@spatial(radius = 1.5, kind = [Agent])
+spatial_query nearby_enemies(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// ScanAndStrike — body-form spatial walk. Each Combatant per tick:
+//   - Skips if dead (per-handler where).
+//   - Skips off-cooldown ticks (per-handler where).
+//   - Walks the 27-cell neighbourhood of self.
+//   - For each neighbour candidate, emits Damaged if creature_type
+//     opposes ours (body-side `if` because the spatial filter is
+//     informational at the body-iter site today).
+//
+// @phase(per_agent) so the dispatch grid is one thread per agent
+// (matching particle_collision_min's MoveParticle rule shape).
+physics ScanAndStrike @phase(per_agent) {
+  // Cooldown literal (2) inlined — `config.<ns>.<u32_field>` resolves
+  // to f32 at lowering today (diplomacy_probe Gap #3) so the
+  // `cooldown_strike` config field stays declared but unreferenced
+  // until the config-type-resolution fix lands. duel_1v1 uses the
+  // same workaround.
+  on Tick {} where (self.alive
+                    && (world.tick % 2 == 0)) {
+    for other in spatial.nearby_enemies(self) {
+      // Body-side team check: only emit damage when the candidate's
+      // creature_type differs from ours. Today's body-form spatial
+      // walk routes `other.<field>` reads through PerPairCandidate
+      // (the same path boids' fold form uses for `other.pos`), so
+      // this predicate lowers via AgentField::CreatureType reads
+      // against `agent_creature_type[per_pair_candidate]`.
+      //
+      // The inner per-pair-candidate loop also visits self (its own
+      // grid cell contains its own slot), so a `candidate != self`
+      // check is also needed; the inequality below catches both
+      // (self has same creature_type as self, so self emits get
+      // skipped automatically).
+      // Two body-side gates: opposing team AND target still alive.
+      // Without the alive check, dead Combatants would keep being
+      // hit each tick, dramatically inflating both damage_dealt and
+      // defeats_received (Defeated re-fires every time HP crosses
+      // zero again).
+      if (other.creature_type != self.creature_type
+          && other.alive) {
+        emit Damaged {
+          source: self,
+          target: other,
+          amount: config.combat.strike_damage,
+        }
+      }
+    }
+  }
+}
+
+// ApplyDamage — chronicle physics. On each Damaged event, decrement
+// target HP, set alive=false on HP<=0, emit Defeated. Same shape as
+// duel_1v1's ApplyDamage rule.
+//
+// The Defeated emit is gated on `old_hp > 0.0` (the value BEFORE
+// the subtract), so corpses don't keep firing Defeated each time a
+// new Damaged event lands at a stale slot. This handles the
+// race-window where multiple Damaged events for the same target
+// land in the same tick (the first transition emits Defeated; the
+// rest see old_hp <= 0 and skip).
+@phase(post)
+physics ApplyDamage {
+  on Damaged { source: _, target: t, amount: a } {
+    let old_hp = agents.hp(t);
+    let new_hp = old_hp - a;
+    agents.set_hp(t, new_hp);
+    if (old_hp > 0.0 && new_hp <= 0.0) {
+      agents.set_alive(t, false);
+      emit Defeated { combatant: t }
+    }
+  }
+}
+
+// Per-source damage_dealt — observability view (same shape as
+// duel_1v1 to keep the runtime/app comparable).
+@materialized(on_event = [Damaged])
+view damage_dealt(source: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: s, target: _, amount: a } { self += a }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-target defeats_received — counts how many times each agent
+// was killed (should be 0 or 1 per agent over the battle).
+@materialized(on_event = [Defeated])
+view defeats_received(combatant: Agent) -> f32 {
+  initial: 0.0,
+  on Defeated { combatant: c } { self += 1.0 }
+  clamp: [0.0, 100.0],
+}

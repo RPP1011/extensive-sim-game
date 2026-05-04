@@ -2629,3 +2629,121 @@ fn duel_1v1_compile_gate() {
         art.kernel_index,
     );
 }
+
+/// First SCALE-UP fixture (25 Red vs 25 Blue squad scuffle) — compiles
+/// `assets/sim/duel_25v25.sim` end-to-end. Sidesteps the duel_1v1 verb
+/// cascade's Gap W (PerPair `mask_k=1u` placeholder) by doing
+/// target-finding via SPATIAL body-form physics: each Combatant per
+/// tick walks its 27-cell neighbourhood and emits Damaged for any
+/// nearby agent of the opposing creature_type.
+///
+/// Op-level invariants:
+///   - 2 entity types (RedCombatant, BlueCombatant) sharing one Agent
+///     SoA, with creature_type discriminant per the predator_prey_min
+///     precedent.
+///   - 2 PhysicsRule ops: ScanAndStrike (per_agent + spatial body-form
+///     emit) + ApplyDamage (post chronicle, agents.set_hp/set_alive
+///     + Defeated emit).
+///   - 2 ViewFold ops: damage_dealt + defeats_received.
+///   - Spatial body-form physics with creature_type body-side filter
+///     (the spatial_query body filter is informational at the body-iter
+///     site today — see particle_collision_min comments).
+///
+/// Discovery doc: `docs/superpowers/notes/2026-05-04-duel_25v25.md`.
+#[test]
+fn duel_25v25_compile_gate() {
+    use dsl_compiler::cg::lower::lower_compilation_to_cg;
+    let path = workspace_path("assets/sim/duel_25v25.sim");
+    let src = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let prog = dsl_compiler::parse(&src).expect("parse duel_25v25.sim");
+    let comp = dsl_ast::resolve::resolve(prog).expect("resolve duel_25v25.sim");
+    // Tolerate lower diagnostics — duel_25v25 inherits the
+    // duel_1v1 P6 + cycle warnings (chronicle ApplyDamage writes
+    // agent.hp/alive; the well_formed checker doesn't yet model
+    // @phase(post) authored mutation as legitimate).
+    let cg = lower_compilation_to_cg(&comp).unwrap_or_else(|o| {
+        for d in &o.diagnostics {
+            eprintln!("[duel_25v25 lower diag] {d}");
+        }
+        o.program
+    });
+    let sched = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&sched.schedule, &cg)
+        .expect("emit duel_25v25");
+
+    let mut physics_count = 0;
+    let mut viewfold_count = 0;
+    for op in &cg.ops {
+        match &op.kind {
+            dsl_compiler::cg::op::ComputeOpKind::PhysicsRule { .. } => physics_count += 1,
+            dsl_compiler::cg::op::ComputeOpKind::ViewFold { .. } => viewfold_count += 1,
+            _ => {}
+        }
+    }
+    assert!(
+        physics_count >= 2,
+        "expected at least 2 PhysicsRule ops (ScanAndStrike + ApplyDamage); got {physics_count}",
+    );
+    assert_eq!(
+        viewfold_count, 2,
+        "expected 2 ViewFold ops (damage_dealt + defeats_received); got {viewfold_count}",
+    );
+
+    // ScanAndStrike body must contain a spatial-grid neighbour walk
+    // (locks the body-form path against any silent regression to
+    // ForEachAgent fallback).
+    let scan_body = kernel_body_containing(&art, "ScanAndStrike")
+        .unwrap_or_else(|| {
+            panic!(
+                "no ScanAndStrike kernel emitted; available: {:?}",
+                art.kernel_index
+            )
+        });
+    assert!(
+        scan_body.contains("spatial_grid_starts"),
+        "ScanAndStrike must emit a spatial-grid neighbour walk; got body:\n{scan_body}",
+    );
+    assert!(
+        scan_body.contains("agent_creature_type["),
+        "ScanAndStrike must read agent_creature_type for the body-side \
+         team filter; got body:\n{scan_body}",
+    );
+
+    // ApplyDamage must write agent_hp + agent_alive (same shape as
+    // duel_1v1, post-Bool-LHS-rewrite).
+    let apply_body = kernel_body_containing(&art, "ApplyDamage")
+        .unwrap_or_else(|| {
+            panic!(
+                "no ApplyDamage kernel emitted; available: {:?}",
+                art.kernel_index
+            )
+        });
+    assert!(
+        apply_body.contains("agent_hp["),
+        "ApplyDamage must write agent_hp; got body:\n{apply_body}",
+    );
+
+    // All emitted WGSL must be naga-clean.
+    let mut errs = Vec::new();
+    for (name, body) in &art.wgsl_files {
+        if let Err(e) = naga::front::wgsl::parse_str(body) {
+            errs.push(format!("  {name}: {e}"));
+        }
+    }
+    assert!(
+        errs.is_empty(),
+        "duel_25v25 emitted {} naga-invalid WGSL kernels:\n{}",
+        errs.len(),
+        errs.join("\n"),
+    );
+
+    eprintln!(
+        "[duel_25v25] {} kernels emitted: {:?}",
+        art.kernel_index.len(),
+        art.kernel_index,
+    );
+}
