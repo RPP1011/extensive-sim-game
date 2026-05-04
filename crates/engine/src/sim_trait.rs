@@ -43,6 +43,31 @@
 
 use glam::Vec3;
 
+/// Per-agent snapshot for visualization / introspection. Parallel
+/// arrays indexed by agent slot. `positions.len() == creature_types.len()
+/// == alive.len()`. Sims that don't track creature types should fill
+/// `creature_types` with zeros.
+#[derive(Default)]
+pub struct AgentSnapshot {
+    pub positions: Vec<Vec3>,
+    pub creature_types: Vec<u32>,
+    pub alive: Vec<u32>,
+}
+
+/// One creature type's display attributes (single glyph + ANSI 256-
+/// color foreground). Indexed by the creature_type discriminant.
+#[derive(Clone, Copy)]
+pub struct VizGlyph {
+    pub glyph: char,
+    pub fg_color: u8,
+}
+
+impl VizGlyph {
+    pub const fn new(glyph: char, fg_color: u8) -> Self {
+        Self { glyph, fg_color }
+    }
+}
+
 /// Uniform interface for every per-fixture compiled simulation.
 ///
 /// Implementors live in `{fixture}_runtime` crates; the application
@@ -74,4 +99,36 @@ pub trait CompiledSim {
     /// host-readable slice exists. CPU implementations that already
     /// keep host-side `Vec<Vec3>` ignore the mutability.
     fn positions(&mut self) -> &[Vec3];
+
+    // -- Visualization surface (default = "no viz") -----------------
+    //
+    // Sims that want ASCII rendering implement these three. Defaults
+    // return empty / None so existing fixtures don't have to opt in.
+
+    /// Snapshot per-agent positions + creature_type + alive bit in one
+    /// pass. Cheaper than three separate `&mut self` readbacks because
+    /// GPU implementations can batch buffer-to-staging copies.
+    ///
+    /// Default returns an empty snapshot (sims without viz support).
+    fn snapshot(&mut self) -> AgentSnapshot {
+        AgentSnapshot::default()
+    }
+
+    /// Glyph + color per creature_type discriminant. Index into the
+    /// returned slice = creature_type value. Sims that don't track
+    /// creature types return a single-element table.
+    ///
+    /// Default returns empty (sim opts out of viz).
+    fn glyph_table(&self) -> Vec<VizGlyph> {
+        Vec::new()
+    }
+
+    /// Default viewport min/max in world coordinates (axes used: x,y;
+    /// z ignored). Renderer uses this to project agents onto its grid.
+    /// Returning `None` lets the caller pick.
+    ///
+    /// Default returns None.
+    fn default_viewport(&self) -> Option<(Vec3, Vec3)> {
+        None
+    }
 }

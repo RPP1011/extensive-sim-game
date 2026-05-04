@@ -525,6 +525,14 @@ impl PredatorPreyRealState {
     pub fn read_hunger(&self) -> Vec<f32> {
         self.read_f32(&self.agent_hunger_buf, "hunger")
     }
+    /// Snapshot agent world-space positions (XYZ). Used by the
+    /// ASCII renderer to project world coords onto the terminal grid.
+    pub fn read_positions(&self) -> Vec<Vec3> {
+        self.read_pos_padded()
+            .into_iter()
+            .map(|p| Vec3::new(p.x, p.y, p.z))
+            .collect()
+    }
     pub fn read_creature_type(&self) -> Vec<u32> {
         self.read_u32(&self.agent_creature_type_buf, "creature_type")
     }
@@ -1189,6 +1197,29 @@ impl CompiledSim for PredatorPreyRealState {
     fn agent_count(&self) -> u32 { self.agent_count }
     fn tick(&self) -> u64 { self.tick }
     fn positions(&mut self) -> &[Vec3] { &[] }
+
+    fn snapshot(&mut self) -> engine::AgentSnapshot {
+        engine::AgentSnapshot {
+            positions: self.read_positions(),
+            creature_types: self.read_creature_type(),
+            alive: self.read_alive(),
+        }
+    }
+
+    fn glyph_table(&self) -> Vec<engine::VizGlyph> {
+        // creature_type discriminants: Wolf=0, Sheep=1.
+        // ANSI 256: 196 = bright red, 47 = bright green.
+        vec![
+            engine::VizGlyph::new('W', 196),
+            engine::VizGlyph::new('s', 47),
+        ]
+    }
+
+    fn default_viewport(&self) -> Option<(Vec3, Vec3)> {
+        // Initial layout: wolves at x∈[4,14], y∈[-5,5];
+        // sheep at x∈[-9.5,-0.5], y∈[-3.5,3.5]. Pad ~3 for births.
+        Some((Vec3::new(-15.0, -8.0, 0.0), Vec3::new(20.0, 8.0, 0.0)))
+    }
 }
 
 pub fn make_sim(seed: u64, agent_count: u32) -> Box<dyn CompiledSim> {

@@ -369,6 +369,38 @@ impl CompiledSim for FlockingSkirmishState {
     fn positions(&mut self) -> &[Vec3] {
         self.read_positions()
     }
+
+    fn snapshot(&mut self) -> engine::AgentSnapshot {
+        let positions = self.read_positions().to_vec();
+        let hp = self.read_hp();
+        let red_count = self.red_count as usize;
+        // Team via slot range: Red = [0..red_count), Blue = [red_count..).
+        let creature_types: Vec<u32> = (0..self.agent_count as usize)
+            .map(|i| if i < red_count { 0 } else { 1 })
+            .collect();
+        // Sim has no explicit alive bit — derive from HP > 0.
+        let alive: Vec<u32> = hp.iter().map(|h| if *h > 0.0 { 1 } else { 0 }).collect();
+        engine::AgentSnapshot {
+            positions,
+            creature_types,
+            alive,
+        }
+    }
+
+    fn glyph_table(&self) -> Vec<engine::VizGlyph> {
+        // Slot 0 = Red, slot 1 = Blue.
+        // ANSI 256: 196 = bright red, 33 = bright blue.
+        vec![
+            engine::VizGlyph::new('R', 196),
+            engine::VizGlyph::new('B', 33),
+        ]
+    }
+
+    fn default_viewport(&self) -> Option<(Vec3, Vec3)> {
+        // Init scatters Red around (-15..-5, -15..15) and Blue around
+        // (5..15, -15..15). 30×30 viewport with margin tracks both flocks.
+        Some((Vec3::new(-25.0, -20.0, 0.0), Vec3::new(25.0, 20.0, 0.0)))
+    }
 }
 
 /// Build a boxed `CompiledSim` so the `sim_app` runner can switch

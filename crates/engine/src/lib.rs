@@ -51,7 +51,7 @@ pub mod view;
 
 pub use backend::ComputeBackend;
 pub use gpu::{bgl_storage, bgl_uniform, GpuContext, GpuContextError, Kernel};
-pub use sim_trait::CompiledSim;
+pub use sim_trait::{AgentSnapshot, CompiledSim, VizGlyph};
 /// Re-export SimScratch from its new home so call sites that previously
 /// wrote `engine::step::SimScratch` can be updated to `engine::scratch::SimScratch`.
 pub use scratch::SimScratch;

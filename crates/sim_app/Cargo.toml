@@ -366,3 +366,11 @@ path = "src/objective_capture_app.rs"
 [[bin]]
 name = "scripted_battle_app"
 path = "src/scripted_battle_app.rs"
+
+[[bin]]
+name = "predator_prey_viz_app"
+path = "src/predator_prey_viz_app.rs"
+
+[[bin]]
+name = "flocking_viz_app"
+path = "src/flocking_viz_app.rs"
