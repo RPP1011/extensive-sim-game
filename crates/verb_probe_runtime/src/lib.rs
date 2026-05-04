@@ -294,6 +294,7 @@ impl CompiledSim for VerbProbeState {
         let scoring_bindings = scoring::ScoringBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
+            mask_0_bitmap: &self.mask_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
             cfg: &self.scoring_cfg_buf,
         };

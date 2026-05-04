@@ -312,6 +312,24 @@ pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOu
     // bearing ops.
     wire_action_selected_writes(&arena_snapshot, ctx.builder.ops_mut());
 
+    // -- Phase 4c: ScoringArgmax mask-bitmap reads ----------------------
+    //
+    // The scoring kernel emit (`cg::emit::kernel::lower_scoring_argmax_body`)
+    // wraps each row whose action name matches a registered mask name
+    // (the verb expander's `verb_<Name>` convention) in a mask-bit
+    // gate. The gate body references `mask_<id>_bitmap` — an
+    // `atomic<u32>` storage binding — so the binding scanner needs to
+    // see a `MaskBitmap { mask: <id> }` read on the ScoringArgmax op
+    // before BGL synthesis runs. Without this wiring, the WGSL would
+    // reference an undeclared identifier.
+    //
+    // Closing GAP #3 from the verb-fire probe report
+    // (`docs/superpowers/notes/2026-05-04-verb-fire-probe.md`):
+    // before this change, the scoring kernel walked every row
+    // unconditionally and the verb's mask predicate had no
+    // observable effect on argmax.
+    wire_scoring_mask_reads(&arena_snapshot, ctx.builder.ops_mut());
+
     // -- Phase 5: cycle gate (user-op-only program) ---------------------
     //
     // The plan amendment scopes the cycle gate to the program built
@@ -1903,6 +1921,71 @@ fn wire_action_selected_writes(prog: &CgProgram, ops: &mut [ComputeOp]) {
                 ring: EventRingId(0),
                 kind: EventRingAccess::Append,
             });
+        }
+    }
+}
+
+/// Wire the implicit `MaskBitmap { mask }` reads each
+/// [`ComputeOpKind::ScoringArgmax`] op acquires by virtue of the
+/// scoring kernel's WGSL body emit
+/// (`cg::emit::kernel::lower_scoring_argmax_body`) wrapping each
+/// row in a mask-bit gate when the row's action name matches a
+/// registered mask name.
+///
+/// The auto-walker for `ScoringArgmax` only collects reads from
+/// utility / target / guard expressions (see
+/// [`ComputeOpKind::compute_dependencies`]); the mask-gate
+/// reference is synthesised in the body template, not in any
+/// `CgExpr` node, so the driver records the read explicitly here.
+/// Same shape as `wire_action_selected_writes` for the `event_ring`
+/// emit — both close binding-scanner gaps the kernel emit
+/// introduces.
+///
+/// The bridge from row → mask is the shared interner name: the
+/// verb expander (`cg::lower::verb_expand`) creates the scoring
+/// entry head and the mask head with the same synthetic name
+/// (`verb_<Name>`), so every row whose action interns to a name
+/// also bound by a mask gets the mask read recorded. Standard
+/// rows (`Hold`, `MoveToward`, …) have no matching mask and
+/// contribute nothing here.
+///
+/// Duplicates are tolerated by `record_read` (it does no
+/// dedup — see [`ComputeOp::record_read`]'s contract) but a row
+/// only contributes once per (op, mask) pair because rows in a
+/// single scoring decl have distinct action names.
+fn wire_scoring_mask_reads(prog: &CgProgram, ops: &mut [ComputeOp]) {
+    // Pre-build a name → MaskId table so the per-row lookup is
+    // constant-time. Cheap (one BTreeMap walk per scoring op);
+    // would matter only if we had thousands of masks, which the
+    // engine doesn't.
+    let mask_by_name: std::collections::HashMap<&str, MaskId> = prog
+        .interner
+        .masks
+        .iter()
+        .map(|(id, name)| (name.as_str(), MaskId(*id)))
+        .collect();
+
+    for op in ops.iter_mut() {
+        if let ComputeOpKind::ScoringArgmax { rows, .. } = &op.kind {
+            // Collect distinct mask ids first so we don't push the
+            // same handle twice when a single mask gates multiple
+            // rows (today rows have distinct action names so this
+            // is defensive only — but cheap and explicit).
+            let mut to_record: Vec<MaskId> = Vec::new();
+            for row in rows {
+                let Some(action_name) = prog.interner.get_action_name(row.action) else {
+                    continue;
+                };
+                let Some(mask_id) = mask_by_name.get(action_name).copied() else {
+                    continue;
+                };
+                if !to_record.contains(&mask_id) {
+                    to_record.push(mask_id);
+                }
+            }
+            for mask_id in to_record {
+                op.record_read(DataHandle::MaskBitmap { mask: mask_id });
+            }
         }
     }
 }

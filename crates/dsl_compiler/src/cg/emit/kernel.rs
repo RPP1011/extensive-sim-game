@@ -2590,11 +2590,41 @@ fn lower_scoring_argmax_body(
         };
         let action_lit = format!("{}u", row.action.0);
 
+        // Verb-cascade gap #3 (probe report 2026-05-04): a row whose
+        // action name matches a registered mask is gated by that
+        // mask's per-agent bitmap. The mask name is the verb's
+        // `verb_<Name>` synthetic name (see `cg::lower::verb_expand`)
+        // — the same name the verb expander uses for both the mask
+        // head and the scoring entry head, so the action-id ↔
+        // mask-id bridge is exactly the shared interner name. Rows
+        // with no matching mask (the conventional standard heads —
+        // `Hold`, `MoveToward`, etc.) skip the gate and behave as
+        // before.
+        //
+        // The bitmap lives on `mask_<id>_bitmap` (atomic u32 array,
+        // see `BindingMetadata` for `DataHandle::MaskBitmap`); the
+        // driver records the corresponding `MaskBitmap` read on the
+        // ScoringArgmax op so the binding scanner declares the
+        // identifier (`cg::lower::driver::wire_scoring_mask_reads`).
+        let mask_gate_open = mask_for_action(row.action, ctx).map(|mask_id| {
+            format!(
+                "    let mask_{0}_word_for_row_{i} = agent_id >> 5u;\n\
+                 \x20   let mask_{0}_bit_for_row_{i}  = 1u << (agent_id & 31u);\n\
+                 \x20   let mask_{0}_loaded_for_row_{i} = atomicLoad(&mask_{0}_bitmap[mask_{0}_word_for_row_{i}]);\n\
+                 \x20   if ((mask_{0}_loaded_for_row_{i} & mask_{0}_bit_for_row_{i}) != 0u) {{\n",
+                mask_id.0,
+            )
+        });
+        let mask_gate_close = if mask_gate_open.is_some() { "    }\n" } else { "" };
+
         match row.guard {
             Some(guard_id) => {
                 let guard_wgsl = lower_cg_expr_to_wgsl(guard_id, ctx)?;
                 writeln!(out, "// row {i}: action=#{} (guarded)", row.action.0).unwrap();
                 writeln!(out, "{{").unwrap();
+                if let Some(open) = &mask_gate_open {
+                    out.push_str(open);
+                }
                 writeln!(out, "    let guard_{i}: bool = {guard_wgsl};").unwrap();
                 writeln!(out, "    if (guard_{i}) {{").unwrap();
                 writeln!(out, "        let utility_{i}: f32 = {utility_wgsl};").unwrap();
@@ -2604,17 +2634,22 @@ fn lower_scoring_argmax_body(
                 writeln!(out, "            best_target = {target_wgsl};").unwrap();
                 writeln!(out, "        }}").unwrap();
                 writeln!(out, "    }}").unwrap();
+                out.push_str(mask_gate_close);
                 writeln!(out, "}}").unwrap();
             }
             None => {
                 writeln!(out, "// row {i}: action=#{}", row.action.0).unwrap();
                 writeln!(out, "{{").unwrap();
+                if let Some(open) = &mask_gate_open {
+                    out.push_str(open);
+                }
                 writeln!(out, "    let utility_{i}: f32 = {utility_wgsl};").unwrap();
                 writeln!(out, "    if (utility_{i} > best_utility) {{").unwrap();
                 writeln!(out, "        best_utility = utility_{i};").unwrap();
                 writeln!(out, "        best_action = {action_lit};").unwrap();
                 writeln!(out, "        best_target = {target_wgsl};").unwrap();
                 writeln!(out, "    }}").unwrap();
+                out.push_str(mask_gate_close);
                 writeln!(out, "}}").unwrap();
             }
         }
@@ -2714,6 +2749,31 @@ fn lower_scoring_argmax_body(
     }
 
     Ok(out)
+}
+
+/// Find the [`MaskId`] whose interned name matches the given
+/// action's interned name, when both exist in the program's
+/// interner. Returns `None` when either side is unregistered or no
+/// mask shares the action's name.
+///
+/// The verb expander (`cg::lower::verb_expand`) creates the
+/// scoring entry head and the mask head with the same synthetic
+/// name (`verb_<Name>`), so the action-id ↔ mask-id bridge is the
+/// shared interner name. Standard scoring rows (`Hold`,
+/// `MoveToward`, …) have no matching mask and fall through to
+/// `None`, leaving them ungated — same behaviour as before this
+/// change.
+fn mask_for_action(
+    action: crate::cg::op::ActionId,
+    ctx: &EmitCtx<'_>,
+) -> Option<MaskId> {
+    let action_name = ctx.prog.interner.get_action_name(action)?;
+    ctx.prog
+        .interner
+        .masks
+        .iter()
+        .find(|(_, name)| name.as_str() == action_name)
+        .map(|(id, _)| MaskId(*id))
 }
 
 /// Find the [`EventKindId`] of the verb-expander-injected
@@ -4049,6 +4109,152 @@ mod tests {
         assert!(
             body.contains("if (slot < 65536u)"),
             "missing bounds check; body: {body}"
+        );
+    }
+
+    /// Verb-fire probe GAP #3 close: when a row's action name matches
+    /// a registered mask name (the verb expander's `verb_<Name>`
+    /// convention — same name for the synthesised mask head and the
+    /// scoring entry head), the row's per-agent body must be wrapped
+    /// in a mask-bit gate that consults `mask_<id>_bitmap[agent_id /
+    /// 32]` for the agent's bit.
+    ///
+    /// Without the gate, the verb's `when` predicate would have no
+    /// observable effect on argmax (the mask kernel would set the bit,
+    /// but the scoring kernel would walk every row unconditionally
+    /// and the predicate would silently fail to filter — the gap the
+    /// 2026-05-04 verb-fire-probe surfaced).
+    #[test]
+    fn scoring_argmax_gates_row_by_mask_bitmap_when_action_name_matches_mask() {
+        let mut prog = CgProgram::default();
+        let utility = push_expr(&mut prog, CgExpr::Lit(LitValue::F32(1.0)));
+        // Pretend the verb expander has interned the action and the
+        // mask under the same synthetic name `verb_Pray` (action #0,
+        // mask #3 — distinct ids, shared name). The driver wires the
+        // MaskBitmap read separately (`wire_scoring_mask_reads`); we
+        // mirror that wiring here so the binding-name scanner emits
+        // `mask_3_bitmap` against this kernel.
+        let action_id = ActionId(0);
+        let mask_id = MaskId(3);
+        prog.interner
+            .actions
+            .insert(action_id.0, "verb_Pray".to_string());
+        prog.interner
+            .masks
+            .insert(mask_id.0, "verb_Pray".to_string());
+        let kind = ComputeOpKind::ScoringArgmax {
+            scoring: ScoringId(0),
+            rows: vec![ScoringRowOp {
+                action: action_id,
+                utility,
+                target: None,
+                guard: None,
+            }],
+        };
+        let mut probe = ComputeOp::new(
+            OpId(0),
+            kind,
+            DispatchShape::PerAgent,
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        probe.record_read(crate::cg::data_handle::DataHandle::MaskBitmap { mask: mask_id });
+        let op_id = push_op(&mut prog, probe);
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: DispatchShape::PerAgent,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let (_spec, body) = kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
+
+        // The atomic load on the mask bitmap word for this agent.
+        assert!(
+            body.contains("let mask_3_word_for_row_0 = agent_id >> 5u;"),
+            "missing mask word derivation; body: {body}"
+        );
+        assert!(
+            body.contains("let mask_3_bit_for_row_0  = 1u << (agent_id & 31u);"),
+            "missing mask bit derivation; body: {body}"
+        );
+        assert!(
+            body.contains(
+                "let mask_3_loaded_for_row_0 = atomicLoad(&mask_3_bitmap[mask_3_word_for_row_0]);"
+            ),
+            "missing atomicLoad on bitmap; body: {body}"
+        );
+        // The gate condition itself.
+        assert!(
+            body.contains("if ((mask_3_loaded_for_row_0 & mask_3_bit_for_row_0) != 0u)"),
+            "missing mask-bit gate condition; body: {body}"
+        );
+        // The gate must precede the utility evaluation (so an unset
+        // bit short-circuits the row entirely, never touching
+        // best_utility).
+        let gate_pos = body
+            .find("if ((mask_3_loaded_for_row_0 & mask_3_bit_for_row_0) != 0u)")
+            .unwrap();
+        let utility_pos = body.find("let utility_0: f32 = 1").unwrap();
+        assert!(
+            gate_pos < utility_pos,
+            "mask-bit gate must precede utility evaluation; body: {body}"
+        );
+    }
+
+    /// Negation: a row whose action name does NOT match any registered
+    /// mask (the conventional standard heads — `Hold`, `MoveToward`,
+    /// etc.) must NOT be wrapped in a mask-bit gate. The change to the
+    /// scoring body must remain a strict no-op for non-verb rows.
+    #[test]
+    fn scoring_argmax_does_not_gate_row_when_action_name_has_no_matching_mask() {
+        let mut prog = CgProgram::default();
+        let utility = push_expr(&mut prog, CgExpr::Lit(LitValue::F32(0.1)));
+        // Action name `Hold` has no mask companion (the standard
+        // scoring head).
+        prog.interner.actions.insert(0, "Hold".to_string());
+        // Register an unrelated mask under a different name to ensure
+        // the lookup is name-based, not id-based.
+        prog.interner.masks.insert(0, "low_hp".to_string());
+        let kind = ComputeOpKind::ScoringArgmax {
+            scoring: ScoringId(0),
+            rows: vec![ScoringRowOp {
+                action: ActionId(0),
+                utility,
+                target: None,
+                guard: None,
+            }],
+        };
+        let probe = ComputeOp::new(
+            OpId(0),
+            kind,
+            DispatchShape::PerAgent,
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let op_id = push_op(&mut prog, probe);
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: DispatchShape::PerAgent,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let (_spec, body) = kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
+
+        // No mask gate of any kind on row 0.
+        assert!(
+            !body.contains("mask_0_bitmap"),
+            "unexpected mask binding reference for ungated row; body: {body}"
+        );
+        assert!(
+            !body.contains("mask_0_word_for_row_0"),
+            "unexpected mask gate scaffolding for ungated row; body: {body}"
+        );
+        // Utility evaluation still lands at the top of the row block.
+        assert!(
+            body.contains("let utility_0: f32 = "),
+            "utility row should still emit; body: {body}"
         );
     }
 
