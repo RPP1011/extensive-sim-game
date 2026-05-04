@@ -1,0 +1,25 @@
+[package]
+name = "bartering_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/bartering.sim`. The
+# fixture is the entity-root coverage probe (Item + Group entity
+# declarations + ItemId in event payload). Mirrors the
+# `swarm_storm_runtime` shape — it has the same event-ring + view-
+# fold scaffolding (single fold over a single event kind) — adapted
+# for the engaged_with target buffer that the IdleDrift physics
+# rule needs to route Trade.receiver.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

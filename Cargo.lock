@@ -103,6 +103,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "bartering_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1558,6 +1571,7 @@ dependencies = [
 name = "sim_app"
 version = "0.1.0"
 dependencies = [
+ "bartering_runtime",
  "boids_runtime",
  "crowd_navigation_runtime",
  "engine",

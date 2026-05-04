@@ -30,6 +30,9 @@ target_chaser_runtime = { path = "../target_chaser_runtime" }
 # Swarm-event-storm stress fixture for Phase 7+8 primitives (multi-emit
 # producer + 2 view-folds with @decay anchor).
 swarm_storm_runtime = { path = "../swarm_storm_runtime" }
+# Bartering fixture — entity-root coverage probe (Item + Group entity
+# declarations + ItemId in event payload).
+bartering_runtime = { path = "../bartering_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -54,3 +57,7 @@ path = "src/tc_app.rs"
 [[bin]]
 name = "ses_app"
 path = "src/ses_app.rs"
+
+[[bin]]
+name = "bartering_app"
+path = "src/bartering_app.rs"

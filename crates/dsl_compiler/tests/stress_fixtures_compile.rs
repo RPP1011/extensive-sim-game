@@ -233,3 +233,105 @@ fn swarm_event_storm_emits_both_folds_with_decay_anchor() {
         "decay fold should reference anchor or decay rate; got:\n{decayed}",
     );
 }
+
+/// `bartering.sim` is the entity-root coverage fixture
+/// (`docs/spec/dsl.md` §2.1). Pre-existing fixtures (boids,
+/// predator_prey, particle_collision, crowd_navigation,
+/// target_chaser, swarm_event_storm, spatial_probe) only declare
+/// `entity ... : Agent`, leaving the Item + Group root surfaces
+/// untested end-to-end. This fixture declares one of each root
+/// kind plus a `Trade` event with an `item: ItemId` payload field,
+/// so a regression that broke the parser's `Item` / `Group` keyword
+/// handling, the resolver's `EntityRoot::{Item,Group}` carry-through,
+/// or the event-field codegen for `ItemId` would surface as a
+/// compile failure here rather than silent acceptance.
+#[test]
+fn bartering_compiles() {
+    let path = workspace_path("assets/sim/bartering.sim");
+    let art = compile_sim(&path).unwrap_or_else(|e| {
+        panic!("bartering.sim failed at: {e}");
+    });
+    assert!(!art.kernel_index.is_empty(), "no kernels emitted");
+    eprintln!(
+        "[bartering] {} kernels: {:?}",
+        art.kernel_index.len(),
+        art.kernel_index,
+    );
+}
+
+/// Lock the IR-level entity-root carry-through: parsing +
+/// resolving `bartering.sim` MUST yield a `Compilation` whose
+/// `entities` vector contains the three distinct root kinds
+/// (Agent / Item / Group). Today the lowering + emit passes
+/// don't do anything with the Item + Group rows (see the GAP
+/// note in the .sim file), so this test guards the upstream
+/// surfaces until those passes catch up — without it, somebody
+/// could silently drop Item + Group entities at resolve time
+/// and no other test would notice.
+#[test]
+fn bartering_resolves_three_distinct_entity_roots() {
+    let path = workspace_path("assets/sim/bartering.sim");
+    let src = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let prog = dsl_compiler::parse(&src).expect("parse bartering.sim");
+    let comp = dsl_ast::resolve::resolve(prog).expect("resolve bartering.sim");
+    let mut saw_agent = false;
+    let mut saw_item = false;
+    let mut saw_group = false;
+    for e in &comp.entities {
+        match e.root {
+            dsl_compiler::ast::EntityRoot::Agent => saw_agent = true,
+            dsl_compiler::ast::EntityRoot::Item => saw_item = true,
+            dsl_compiler::ast::EntityRoot::Group => saw_group = true,
+        }
+    }
+    assert!(saw_agent, "expected an Agent-rooted entity in bartering.sim");
+    assert!(saw_item, "expected an Item-rooted entity in bartering.sim");
+    assert!(saw_group, "expected a Group-rooted entity in bartering.sim");
+}
+
+/// `bartering.sim`'s `Trade` event payload contains
+/// `item: ItemId`. Confirm the IdleDrift physics body actually
+/// emits a record into the event ring whose payload reflects the
+/// ItemId slot (an unconditional u32 store, like `AgentId`).
+/// Without this assertion a regression that silently dropped
+/// non-AgentId ID kinds from event payloads would compile clean
+/// but produce a malformed event ring — the fold downstream would
+/// then read garbage and the runtime observable in `bartering_app`
+/// would fall apart.
+#[test]
+fn bartering_emits_item_id_in_trade_payload() {
+    let path = workspace_path("assets/sim/bartering.sim");
+    let art = compile_sim(&path).expect("bartering compiles");
+    let body = kernel_body_containing(&art, "IdleDrift")
+        .or_else(|| kernel_body_containing(&art, "physics"))
+        .unwrap_or_else(|| {
+            panic!(
+                "no physics kernel found in artifacts; available: {:?}",
+                art.wgsl_files.keys().collect::<Vec<_>>()
+            );
+        });
+    // The Trade event has 3 payload fields (giver, receiver, item)
+    // — the producer should issue 3 atomicStore-into-payload-slot
+    // ops past the standard kind+tick header (slots 0 + 1).
+    let payload_stores = body.matches("atomicStore(&event_ring[slot * 10u + 2u]").count()
+        + body.matches("atomicStore(&event_ring[slot * 10u + 3u]").count()
+        + body.matches("atomicStore(&event_ring[slot * 10u + 4u]").count();
+    assert_eq!(
+        payload_stores, 3,
+        "expected 3 payload stores (giver, receiver, item) into the event ring; got {payload_stores} in:\n{body}",
+    );
+    // Sanity-check the fold consumes the receiver field (offset
+    // 3 = 2-slot header + 0-th payload field after the typed
+    // re-ordering).
+    let fold_body = kernel_body_containing(&art, "trade_count").unwrap_or_else(|| {
+        panic!(
+            "no trade_count fold kernel; available: {:?}",
+            art.wgsl_files.keys().collect::<Vec<_>>()
+        );
+    });
+    assert!(
+        fold_body.contains("event_ring[event_idx * 10u +"),
+        "fold should index event ring by event_idx; got:\n{fold_body}",
+    );
+}
