@@ -501,7 +501,7 @@ pub fn kernel_topology_to_spec_and_body(
     //    cfg shape ViewFold uses, because the preamble emitted by
     //    `thread_indexing_preamble` references `cfg.event_count` for
     //    every PerEvent dispatch regardless of whether the body has an
-    //    Emit op (the body just consumes events). Two fixtures
+    //    Emit op (the body just consumes events). Three fixtures
     //    independently surfaced this:
     //      - trade_market_real's `physics ApplyTrade` (consumes Trade,
     //        emits nothing) — without this gate, the classifier dropped
@@ -509,6 +509,8 @@ pub fn kernel_topology_to_spec_and_body(
     //        cfg.event_count)` failed to type-check at WGSL compile.
     //      - quest_arc_real's `ApplyStageAdvance` (reads StageAdvanced,
     //        writes mana, emits nothing) — same shape.
+    //      - village_day_cycle's `ApplyHarvest` (reads WorkDone, writes
+    //        wealth, emits nothing) — same shape.
     //    Closing the gap by stamping PerEventEmit for every PerEvent
     //    dispatch; the second-pass `event_ring` binding upgrade below
     //    is also required so reads of the consumed event ring
@@ -2058,10 +2060,10 @@ fn per_event_op_kind_tag(
 /// PerEventEmit unconditionally for any PerEvent-dispatched kernel,
 /// since the PerEvent preamble references `cfg.event_count`
 /// regardless of whether the body emits (closing the trade_market_real
-/// + quest_arc_real Apply-only-PerEvent cfg-mismatch gaps). Kept as
-/// `#[allow(dead_code)]` because future kernel kinds may want to
-/// discriminate PerAgent rules with vs without Emit bodies for
-/// cfg-shape selection.
+/// + quest_arc_real + village_day_cycle Apply-only-PerEvent cfg-
+/// mismatch gaps). Kept as `#[allow(dead_code)]` because future kernel
+/// kinds may want to discriminate PerAgent rules with vs without Emit
+/// bodies for cfg-shape selection.
 #[allow(dead_code)]
 fn body_ops_have_emit(body_ops: &[OpId], prog: &CgProgram) -> bool {
     for op_id in body_ops {
@@ -5945,10 +5947,10 @@ mod tests {
         // _pad0 }` cfg shape so the preamble's `event_idx >=
         // cfg.event_count` early-return resolves; the classifier
         // stamps PerEventEmit unconditionally for PerEvent dispatch.
-        // Both trade_market_real (ApplyTrade — consumes Trade, emits
-        // nothing) and quest_arc_real (ApplyStageAdvance — consumes
-        // StageAdvanced, writes mana) surfaced the prior Generic-with-
-        // agent_cap cfg WGSL parse failure for Apply-only PerEvent.
+        // trade_market_real (ApplyTrade), quest_arc_real
+        // (ApplyStageAdvance), and village_day_cycle (ApplyHarvest /
+        // ApplyEat / ApplyEnergyDecay) all surfaced the prior Generic-
+        // with-agent_cap cfg WGSL parse failure for Apply-only PerEvent.
         let mut prog4 = CgProgram::default();
         let ring = EventRingId(1);
         let prod = seed_indirect_op(&mut prog4, ring);

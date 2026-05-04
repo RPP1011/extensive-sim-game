@@ -150,6 +150,11 @@ trade_market_real_runtime = { path = "../trade_market_real_runtime" }
 # duel_1v1's verb-cascade + chronicle pipeline with mana-as-stage-
 # register for the FSM.
 quest_arc_real_runtime = { path = "../quest_arc_real_runtime" }
+# Village Day Cycle — NINTH real fixture and FIRST composite gameplay
+# sim. 30 Villagers cycle through a 4-phase day (Morning Work →
+# Midday Trade → Evening Eat → Night Rest) gated by `world.tick % 100`
+# arithmetic, plus periodic energy drain and starvation.
+village_day_cycle_runtime = { path = "../village_day_cycle_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -262,3 +267,7 @@ path = "src/trade_market_real_app.rs"
 [[bin]]
 name = "quest_arc_real_app"
 path = "src/quest_arc_real_app.rs"
+
+[[bin]]
+name = "village_day_cycle_app"
+path = "src/village_day_cycle_app.rs"

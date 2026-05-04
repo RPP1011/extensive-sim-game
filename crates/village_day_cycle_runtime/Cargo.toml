@@ -1,0 +1,31 @@
+[package]
+name = "village_day_cycle_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/village_day_cycle.sim` —
+# the NINTH real gameplay-shaped fixture (and the FIRST composite
+# gameplay sim). 30 Villagers cycle through a 4-phase day
+# (Morning Work → Midday Trade → Evening Eat → Night Rest) gated by
+# the `world.tick % 100` arithmetic. Energy decays each tick and
+# is restored by Eating; food is harvested by Working. mana stores
+# food, hp stores energy, and the duel_1v1 IfStmt → set_alive(false)
+# path applies starvation death verbatim.
+#
+# Mirrors `duel_1v1_runtime` shape: build.rs lowers the .sim through
+# the DSL compiler into `OUT_DIR/generated.rs`; src/lib.rs owns the
+# GPU context, per-buffer storage, kernel cache, and per-tick
+# dispatch chain.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }
