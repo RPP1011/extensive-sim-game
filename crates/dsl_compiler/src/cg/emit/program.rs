@@ -204,6 +204,8 @@ pub fn emit_cg_program(
         tile_walk_index: std::cell::RefCell::new(None),
         dispatch: std::cell::Cell::new(None),
         view_target_local: std::cell::Cell::new(None),
+        pending_target_lets: std::cell::RefCell::new(Vec::new()),
+        bound_target_exprs: std::cell::RefCell::new(std::collections::HashSet::new()),
     };
 
     for (stage_idx, stage) in schedule.stages.iter().enumerate() {
