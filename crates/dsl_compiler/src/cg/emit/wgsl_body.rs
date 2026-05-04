@@ -938,6 +938,15 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
             for a in args {
                 parts.push(lower_cg_expr_to_wgsl(*a, ctx)?);
             }
+            // Gap #A close (stdlib_math_probe, 2026-05-04): WGSL has
+            // `log` (natural log) and `log2` natively, but no `log10`.
+            // Emit the math identity `log2(x) / log2(10.0)` inline so
+            // no kernel prelude is required. `log2(10.0)` is a
+            // constant — WGSL's optimiser folds the divisor.
+            if matches!(fn_id, BuiltinId::Log10) {
+                debug_assert_eq!(parts.len(), 1, "log10 takes one arg");
+                return Ok(format!("(log2({}) / log2(10.0))", parts[0]));
+            }
             Ok(format!("{}({})", builtin_name(*fn_id), parts.join(", ")))
         }
         CgExpr::Rng { purpose, ty: _ } => {
@@ -949,10 +958,24 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
             // purpose is a stable numeric id from
             // `RngPurpose::wgsl_id()` (WGSL has no string literals —
             // stochastic_probe Gap #3, 2026-05-04).
-            Ok(format!(
+            //
+            // Gap #D close (stdlib_math_probe, 2026-05-04): the
+            // typed-RNG `Coin` purpose carries `CgTy::Bool` per the
+            // typed-RNG invariant in `data_handle.rs` (purpose →
+            // CgTy). The bare `per_agent_u32(...)` call returns u32 —
+            // assigning it into a `let local_N: bool = ...` fails the
+            // naga text parser ("expected `bool`, but got `u32`").
+            // Wrap the u32 draw in a bit-extract `(... & 1u) == 0u`
+            // so the expression types as bool.
+            let raw = format!(
                 "per_agent_u32(seed, agent_id, tick, {}u)",
                 purpose.wgsl_id()
-            ))
+            );
+            if matches!(purpose, RngPurpose::Coin) {
+                Ok(format!("(({} & 1u) == 0u)", raw))
+            } else {
+                Ok(raw)
+            }
         }
         CgExpr::Select {
             cond,

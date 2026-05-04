@@ -2,13 +2,17 @@
 //! N ticks across two seeded runs, asserts per-slot count = TICKS
 //! and byte-identical determinism (P5).
 //!
-//! Outcome (a) FULL FIRE for every RETAINED surface (Tier 1 math
-//! stdlib + Tier 2 `rng.action() % 4u` bucket emit). Five gaps
-//! surfaced (Gaps #A-#E) and stay as commented-out `let`s in the
-//! .sim with citations to the responsible compiler arms; the
+//! Outcome (a) FULL FIRE for every RETAINED surface: Tier 1 math
+//! stdlib (`floor` / `ceil` / `round` / `log2` / `log10` / `abs`),
+//! Tier 2 spatial stdlib (`planar_distance` / `z_separation`), Tier 3
+//! `rng.coin()`, and Tier 4 `rng.action() % 4u` bucket emit. Three
+//! of the five originally-surfaced gaps are closed (Gaps #A, #B, #D,
+//! 2026-05-04); two remain (Gap #C `rng.uniform_int`, Gap #E
+//! `rng.uniform`/`rng.gauss`) and stay as commented-out `let`s in
+//! the .sim with citations to the responsible compiler arms. The
 //! catch_unwind wrappers below surface any regression that
-//! re-introduces a gap surface as OUTCOME (b) WGSL VALIDATION
-//! FAILED.
+//! re-introduces a still-open gap surface as OUTCOME (b) WGSL
+//! VALIDATION FAILED.
 //!
 //! Discovery doc: `docs/superpowers/notes/2026-05-04-stdlib_math_probe.md`.
 
@@ -146,14 +150,18 @@ fn report_outcome(counts1: &[f32], counts2: &[f32]) {
         println!(
             "stdlib_math_probe_app: OUTCOME = (a) FULL FIRE — every retained surface \
              wired end-to-end:\n  \
-             1. Tier 1 math stdlib (floor/ceil/round/log2/abs) lowers + emits + \
-                FULL-validator-clean\n  \
-             2. Tier 2 bucket emit via rng.action() % 4 fires every tick (proven \
+             1. Tier 1 math stdlib (floor/ceil/round/log2/log10/abs) lowers + emits + \
+                FULL-validator-clean (log10 via Gap #A inline rewrite to \
+                log2(x)/log2(10.0))\n  \
+             2. Tier 2 spatial stdlib (planar_distance / z_separation) lowers + emits + \
+                FULL-validator-clean (Gap #B prelude-shim inject in cg/emit/program.rs)\n  \
+             3. Tier 3 rng.coin() emits ((per_agent_u32(...) & 1u) == 0u) (Gap #D bool-from-u32)\n  \
+             4. Tier 4 bucket emit via rng.action() % 4 fires every tick (proven \
                 pure-by-stochastic-probe Action purpose)\n  \
-             3. P5 determinism holds (byte-identical sampled_count across two runs)\n  \
-             4. Per-slot count = TICKS = {} on every slot\n  \
-             — see discovery doc Gaps #A-#E for the four omitted typed-RNG / \
-             prelude-shim / i32-source surfaces",
+             5. P5 determinism holds (byte-identical sampled_count across two runs)\n  \
+             6. Per-slot count = TICKS = {} on every slot\n  \
+             — Gaps #C (rng.uniform_int — needs i32 source) and #E (rng.uniform / \
+             rng.gauss — needs per-purpose abstract-type-clean conversion) remain open",
             EXPECTED_PER_SLOT as u32,
         );
     } else if !det_ok {

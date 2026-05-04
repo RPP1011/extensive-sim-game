@@ -148,6 +148,33 @@ fn per_agent_u32(seed: u32, agent_id: u32, tick: u32, purpose: u32) -> u32 {
 ";
 
 // ---------------------------------------------------------------------------
+// Spatial-builtin prelude — XY-plane distance + Z separation
+// ---------------------------------------------------------------------------
+
+/// WGSL helpers for the spatial stdlib pair `planar_distance` /
+/// `z_separation`. Substring-injected into any kernel module whose
+/// body references either function call (mirror of the RNG prelude
+/// injection pattern). Closes Gap #B from
+/// `docs/superpowers/notes/2026-05-04-stdlib_math_probe.md`.
+///
+/// `planar_distance(a, b)` — XY-plane (Z-ignored) Euclidean distance.
+/// `z_separation(a, b)` — absolute Z-axis difference.
+const SPATIAL_BUILTIN_WGSL_PRELUDE: &str = "\
+// Spatial-stdlib helpers — emitted when the body calls either
+// `planar_distance(` or `z_separation(`. Closes Gap #B of
+// stdlib_math_probe (2026-05-04).
+fn planar_distance(a: vec3<f32>, b: vec3<f32>) -> f32 {
+    let d = a - b;
+    return sqrt(d.x * d.x + d.y * d.y);
+}
+
+fn z_separation(a: vec3<f32>, b: vec3<f32>) -> f32 {
+    return abs(a.z - b.z);
+}
+
+";
+
+// ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
@@ -430,6 +457,16 @@ fn compose_wgsl_file(
     // (2026-05-04).
     if body.contains("per_agent_u32(") {
         out.push_str(RNG_WGSL_PRELUDE);
+        out.push('\n');
+    }
+
+    // Spatial-stdlib prelude: emit `planar_distance` / `z_separation`
+    // helpers when the body references either by call form. Substring
+    // gate mirrors the RNG prelude pattern above (a comment naming
+    // either function won't trigger the emit because the trailing `(`
+    // is required). Closes Gap #B from stdlib_math_probe (2026-05-04).
+    if body.contains("planar_distance(") || body.contains("z_separation(") {
+        out.push_str(SPATIAL_BUILTIN_WGSL_PRELUDE);
         out.push('\n');
     }
 

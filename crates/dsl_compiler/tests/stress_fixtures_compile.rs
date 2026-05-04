@@ -2063,12 +2063,14 @@ fn pair_scoring_probe_full_fire_compile_gate() {
 ///     accumulating per-slot fire count = TICKS.
 ///
 /// The probe surfaced FIVE compiler gaps (Gaps #A-#E in
-/// `docs/superpowers/notes/2026-05-04-stdlib_math_probe.md`); the
-/// fixture body retains ONLY the surfaces that survive both the
-/// `naga::front::wgsl::parse_str` text parser AND the full
-/// `wgpu::Device::create_shader_module` validator. The omitted-gap
-/// surfaces stay as commented-out `let` bindings in the .sim with
-/// citations to the responsible compiler arms; this test pins:
+/// `docs/superpowers/notes/2026-05-04-stdlib_math_probe.md`).
+/// Three are now closed (Gaps #A, #B, #D); two remain (Gap #C
+/// `rng.uniform_int` — needs i32 source surface; Gap #E
+/// `rng.uniform`/`rng.gauss` — needs per-purpose abstract-type-clean
+/// conversion). The fixture body retains every surface whose
+/// emit-side close has landed; the still-open gap surfaces stay as
+/// commented-out `let` bindings in the .sim with citations. This
+/// test pins:
 ///
 ///   (a) the structural surface (1 PhysicsRule + 1 ViewFold);
 ///   (b) the math stdlib lowering — the physics WGSL body must
@@ -2079,7 +2081,15 @@ fn pair_scoring_probe_full_fire_compile_gate() {
 ///       the rng.action() Action-purpose path, locked by stochastic
 ///       _probe Gaps #1/#2/#3, still emits cleanly when composed
 ///       with `% 4u` modulo);
-///   (d) every emitted WGSL kernel passes naga TEXT validation.
+///   (d) the closed-gap fingerprints — Gap #A's `log2(10.0)`
+///       divisor (math identity rewrite for `log10`), Gap #B's
+///       bare `planar_distance(` / `z_separation(` calls (prelude-
+///       shimmed in the wrapping module), and Gap #D's
+///       `((per_agent_u32(...) & 1u) == 0u)` (bool-from-u32 for
+///       `rng.coin()`);
+///   (e) every emitted WGSL kernel passes naga TEXT validation —
+///       this also verifies the spatial-builtin prelude is injected
+///       (any missing prelude ⇒ "no definition in scope" error).
 ///       (Note: this does NOT catch Gap #E's full-validator-only
 ///       reject — the wgpu validator runs only at runtime in
 ///       `create_shader_module`. The sim_app harness catches that
@@ -2159,28 +2169,65 @@ fn stdlib_math_probe_compile_gate() {
          got body:\n{body}",
     );
 
-    // GAP REGRESSION GUARDS — the omitted-gap surfaces (Gaps #A-#E)
-    // must NOT reappear in the physics body. If a future edit
-    // re-introduces one without first closing the corresponding
-    // compiler gap, the runtime panics in `create_shader_module`
-    // (Gap #E) or naga text-parse (Gaps #A, #B, #D). These pins
-    // surface the regression at compile-gate time.
+    // GAP CLOSE FINGERPRINTS — Gaps #A, #B, #D are now closed; the
+    // probe re-introduces the previously-omitted surfaces and this
+    // test pins the new emit shapes against accidental rename /
+    // regression.
+    //
+    // Gap #A close (2026-05-04): `log10(x)` rewrites at the Builtin
+    // emit site to `(log2(<x>) / log2(10.0))` — math identity, no
+    // prelude. The bare WGSL identifier `log10(` MUST NOT appear
+    // (no native), but BOTH `log2(` and the divisor `log2(10.0)`
+    // MUST appear together as the fingerprint of the rewrite.
     assert!(
         !body.contains("log10("),
-        "Gap #A regression — `log10(` reappeared in physics_SampleAndBucket but \
-         WGSL has no native log10. Got body:\n{body}",
+        "Gap #A regression — bare `log10(` reappeared but WGSL has no native \
+         log10. Got body:\n{body}",
     );
     assert!(
-        !body.contains("planar_distance(") && !body.contains("z_separation("),
-        "Gap #B regression — `planar_distance` / `z_separation` reappeared but no \
-         kernel-prelude shim defines them. Got body:\n{body}",
+        body.contains("log2(") && body.contains("log2(10.0)"),
+        "Gap #A close — `log10(x)` should rewrite to `(log2(x) / log2(10.0))` \
+         at the Builtin emit site; missing `log2(10.0)` divisor in body:\n{body}",
     );
-    // Coin / Uniform / Gauss / UniformInt fingerprints are the
-    // `purpose` u32 ids (7 / 5 / 6 / 8 from `RngPurpose::wgsl_id`).
-    // Any of these in the physics body proves Gap #C/#D/#E
-    // re-entered.
+
+    // Gap #B close (2026-05-04): `planar_distance(a, b)` and
+    // `z_separation(a, b)` emit as bare WGSL calls; a kernel-prelude
+    // shim (`SPATIAL_BUILTIN_WGSL_PRELUDE` in `cg/emit/program.rs`)
+    // is substring-injected when either call appears. This test
+    // operates on the kernel body alone; the prelude lives in the
+    // wrapping module file. Pin the call shapes here; the prelude
+    // injection is verified by the naga TEXT validation pass below
+    // (any missing prelude ⇒ "no definition in scope" error).
+    assert!(
+        body.contains("planar_distance("),
+        "Gap #B close — `planar_distance(self.pos, self.pos)` should lower to \
+         a bare WGSL call; missing token in body:\n{body}",
+    );
+    assert!(
+        body.contains("z_separation("),
+        "Gap #B close — `z_separation(self.pos, self.pos)` should lower to \
+         a bare WGSL call; missing token in body:\n{body}",
+    );
+
+    // Gap #D close (2026-05-04): `rng.coin()` lowers to
+    // `CgExpr::Rng { Coin, Bool }` and now emits the bool-typed
+    // expression `((per_agent_u32(seed, agent_id, tick, 7u) & 1u)
+    // == 0u)` (purpose id 7u = RngPurpose::Coin::wgsl_id). The
+    // surrounding `let local_N: bool = ...` accepts a bool RHS.
+    assert!(
+        body.contains("(per_agent_u32(seed, agent_id, tick, 7u) & 1u) == 0u"),
+        "Gap #D close — `rng.coin()` should emit \
+         `((per_agent_u32(seed, agent_id, tick, 7u) & 1u) == 0u)` (bool from \
+         u32 bit-extract); missing fingerprint in body:\n{body}",
+    );
+
+    // Gap #C / Gap #E REMAIN OPEN — the `rng.uniform_int` / `rng.uniform`
+    // / `rng.gauss` purposes (8 / 5 / 6) MUST NOT appear in the
+    // physics body. If a future edit re-introduces one without
+    // first closing the corresponding compiler gap, the runtime
+    // panics in `create_shader_module` (Gap #E) or the lower step
+    // drops the rule outright (Gap #C).
     for (gap, purpose_id) in [
-        ("Gap #D (rng.coin)", 7u32),
         ("Gap #E (rng.uniform)", 5u32),
         ("Gap #E (rng.gauss)", 6u32),
         ("Gap #C (rng.uniform_int)", 8u32),

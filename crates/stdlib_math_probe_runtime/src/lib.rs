@@ -34,6 +34,13 @@ pub struct StdlibMathProbeState {
     /// 1 = alive, 0 = dead. All-1 init so every slot's `self.alive`
     /// gate evaluates true.
     agent_alive_buf: wgpu::Buffer,
+    /// Per-agent position (vec3<f32>, 16-byte aligned per WGSL std430
+    /// for vec3 in arrays). Read by the physics body's
+    /// `planar_distance(self.pos, self.pos)` and
+    /// `z_separation(self.pos, self.pos)` calls (Gap #B close,
+    /// 2026-05-04). Initialised to all-zero — the spatial calls
+    /// evaluate to 0.0 but exercise the WGSL emit + prelude wiring.
+    agent_pos_buf: wgpu::Buffer,
 
     // -- Event ring + per-view storage --
     event_ring: EventRing,
@@ -64,6 +71,20 @@ impl StdlibMathProbeState {
             gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("stdlib_math_probe_runtime::agent_alive"),
                 contents: bytemuck::cast_slice(&alive_init),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            });
+        // Per-agent position SoA — 4 × f32 per slot (vec3 + pad for
+        // std430 16-byte alignment). All-zero init: the probe's
+        // spatial calls are `planar_distance(self.pos, self.pos)` and
+        // `z_separation(self.pos, self.pos)` — both evaluate to 0
+        // regardless of input, so the buffer's contents don't shift
+        // the observable. The buffer's job is to satisfy the BGL
+        // binding the physics kernel now declares (Gap #B close).
+        let pos_init: Vec<f32> = vec![0.0_f32; (agent_count as usize) * 4];
+        let agent_pos_buf =
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("stdlib_math_probe_runtime::agent_pos"),
+                contents: bytemuck::cast_slice(&pos_init),
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             });
 
@@ -126,6 +147,7 @@ impl StdlibMathProbeState {
         Self {
             gpu,
             agent_alive_buf,
+            agent_pos_buf,
             event_ring,
             sampled_count,
             sampled_count_cfg_buf,
@@ -191,6 +213,7 @@ impl CompiledSim for StdlibMathProbeState {
         let physics_bindings = physics_SampleAndBucket::PhysicsSampleAndBucketBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
+            agent_pos: &self.agent_pos_buf,
             agent_alive: &self.agent_alive_buf,
             cfg: &self.physics_cfg_buf,
         };
