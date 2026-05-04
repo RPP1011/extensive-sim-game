@@ -102,6 +102,15 @@ quest_probe_runtime = { path = "../quest_probe_runtime" }
 # PerPair tick preamble, Bool LHS rewrite). See
 # `docs/superpowers/notes/2026-05-04-duel_1v1.md`.
 duel_1v1_runtime = { path = "../duel_1v1_runtime" }
+# Village Day Cycle — NINTH real fixture and FIRST composite
+# gameplay sim. 30 Villagers cycle through a 4-phase day
+# (Morning Work → Midday Trade → Evening Eat → Night Rest) gated
+# by `world.tick % 100` arithmetic, plus periodic energy drain
+# and starvation. Composes the duel_1v1 SoA-write surface,
+# quest_arc_real verb-cascade-with-Conservative-schedule shape,
+# and the pair_scoring_probe u32→f32 promotion path opened in
+# commit 3f28febb.
+village_day_cycle_runtime = { path = "../village_day_cycle_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -186,3 +195,7 @@ path = "src/quest_probe_app.rs"
 [[bin]]
 name = "duel_1v1_app"
 path = "src/duel_1v1_app.rs"
+
+[[bin]]
+name = "village_day_cycle_app"
+path = "src/village_day_cycle_app.rs"

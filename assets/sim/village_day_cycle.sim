@@ -1,0 +1,243 @@
+// village_day_cycle — NINTH real gameplay-shaped fixture and FIRST
+// composite gameplay sim. Combines time-of-day phase gating
+// (lifecycle), per-agent state (food storage in `mana`),
+// per-agent vitality (energy in `hp`), and aggregated village
+// observability (cumulative folds).
+//
+// Composition: 30 Villagers (encoded as the shared Agent SoA, like
+// quest_arc_real). Each villager runs through a 4-phase day:
+//
+//   - Morning  (tick % 100 in 0..30):  Work — harvest from field.
+//                                      Food storage (`mana`) +1.0.
+//   - Midday   (tick % 100 in 30..50): Trade — convert 1 food into
+//                                      energy (light snack).
+//   - Evening  (tick % 100 in 50..80): Eat — consume 2 stored food
+//                                      for big energy boost (+15).
+//   - Night    (tick % 100 in 80..100): Rest — no action; energy
+//                                      decay paused.
+//
+// PROBE FOCUS: phase-based behavior switching driven by the
+// `world.tick % CYCLE_LENGTH` arithmetic pattern. Demonstrates that
+// the verb-cascade scoring kernel can drive distinctly-different
+// behavior in different tick-mod windows of the same agent — the
+// platform's smallest-shape composite gameplay fixture.
+//
+// ## Why mana-as-food?
+//
+// duel_1v1 (commit ff1aa387) wires `agents.set_mana(self, value)`
+// end-to-end. Reusing the f32 `mana` SoA field for stored food
+// avoids inventing a new per-agent buffer surface — the same trick
+// quest_arc_real uses for stage-as-mana.
+//
+// ## Why hp-as-energy?
+//
+// duel_1v1 also wires `agents.set_hp(self, value)` and the
+// IfStmt → set_alive(false) path for hp <= 0. We reuse the same
+// surface verbatim: `hp` is energy, decays each tick by 0.4, and
+// when hp <= 0 we set_alive(false) (villager starvation death).
+//
+// ## Why no `target` predicate?
+//
+// Same constraint as quest_arc_real: the mask kernel today
+// hardcodes mask_k=1 (TODO task-5.7 in
+// crates/dsl_compiler/src/cg/lower/kernel.rs), so any
+// `target == self` predicate only ever passes for agent_id==0.
+// All four phase verbs are self-only with `self` resolved to the
+// actor slot in the chronicle. The target slot in the
+// ActionSelected output is unused.
+
+event Tick { }
+
+// Per-phase action signals. Each apply handler reads the event,
+// reads + writes the relevant SoA fields.
+@replayable @gpu_amenable
+event WorkDone {
+  villager: AgentId,
+}
+
+@replayable @gpu_amenable
+event TradeDone {
+  villager: AgentId,
+}
+
+@replayable @gpu_amenable
+event AteFood {
+  villager: AgentId,
+}
+
+@replayable @gpu_amenable
+event RestDone {
+  villager: AgentId,
+}
+
+@replayable @gpu_amenable
+event EnergyDrained {
+  villager: AgentId,
+}
+
+entity Villager : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config village {
+  // Day cycle length (ticks per full day-night).
+  cycle_length: f32 = 100.0,
+  // Phase boundaries — written as f32 because all `world.tick %
+  // 100` math is u32 but compared back to f32 thresholds via the
+  // u32→f32 promotion path opened in pair_scoring_probe (commit
+  // 3f28febb).
+  morning_end:  f32 = 30.0,
+  midday_end:   f32 = 50.0,
+  evening_end:  f32 = 80.0,
+  // Per-action effects.
+  work_yield:   f32 = 1.0,
+  trade_gain:   f32 = 3.0,   // small energy from trade snack
+  trade_cost:   f32 = 1.0,   // food spent on trade
+  eat_gain:     f32 = 15.0,  // energy from full meal
+  eat_cost:     f32 = 2.0,   // food spent on full meal
+  energy_decay: f32 = 0.4,
+}
+
+// stage 0: WORK (morning). Fires when (tick % 100) < 30 AND every
+// 3rd tick (work has a 3-tick cycle so we don't generate one work
+// per tick — limits food-stockpile growth). Self-only.
+verb WorkHarvest(self, target: Agent) =
+  action WorkAction
+  when (self.alive
+        && (world.tick % 100) < 30
+        && (world.tick % 3 == 0))
+  emit WorkDone { villager: self }
+  score 100.0
+
+// stage 1: TRADE (midday). Fires when (tick % 100) >= 30 AND < 50
+// AND every 4th tick. Requires at least 1 food stored (`mana >=
+// trade_cost`) so traders without food fall through to Rest.
+verb TradeFood(self, target: Agent) =
+  action TradeAction
+  when (self.alive
+        && (world.tick % 100) >= 30
+        && (world.tick % 100) < 50
+        && (world.tick % 4 == 0)
+        && self.mana >= config.village.trade_cost)
+  emit TradeDone { villager: self }
+  score 100.0
+
+// stage 2: EAT (evening). Fires when (tick % 100) >= 50 AND < 80
+// AND every 5th tick. Requires at least 2 food stored. Restores
+// substantial energy.
+verb EatFood(self, target: Agent) =
+  action EatAction
+  when (self.alive
+        && (world.tick % 100) >= 50
+        && (world.tick % 100) < 80
+        && (world.tick % 5 == 0)
+        && self.mana >= config.village.eat_cost)
+  emit AteFood { villager: self }
+  score 100.0
+
+// stage 3: REST (night). Fires when (tick % 100) >= 80 AND every
+// 10th tick. The Rest event itself is recorded for observability
+// only; energy decay is suppressed during the night by the
+// EnergyDecay rule (which fires every tick) gating itself on
+// (tick % 100) < 80 — see ApplyEnergyDecay below.
+verb Rest(self, target: Agent) =
+  action RestAction
+  when (self.alive
+        && (world.tick % 100) >= 80
+        && (world.tick % 10 == 0))
+  emit RestDone { villager: self }
+  score 100.0
+
+// Periodic energy drain — fires when (tick % 100) < 80 AND every
+// other tick (so we get 40 drain ticks per 100-tick day, draining
+// 16 hp per day at 0.4 hp/tick — meaning a villager with no food
+// would die in ~6 days).
+verb DrainEnergy(self, target: Agent) =
+  action DrainAction
+  when (self.alive
+        && (world.tick % 100) < 80
+        && (world.tick % 2 == 0))
+  emit EnergyDrained { villager: self }
+  score 50.0
+
+// ----- Apply handlers (chronicle physics) -----
+
+// WorkDone → mana += work_yield. Mana is the food storage register.
+@phase(post)
+physics ApplyWork {
+  on WorkDone { villager: v } {
+    let new_food = agents.mana(v) + 1.0;
+    agents.set_mana(v, new_food);
+  }
+}
+
+// TradeDone → mana -= trade_cost, hp += trade_gain (small bump).
+@phase(post)
+physics ApplyTrade {
+  on TradeDone { villager: v } {
+    let new_food = agents.mana(v) - 1.0;
+    agents.set_mana(v, new_food);
+    let new_energy = agents.hp(v) + 3.0;
+    agents.set_hp(v, new_energy);
+  }
+}
+
+// AteFood → mana -= eat_cost, hp += eat_gain (full meal).
+@phase(post)
+physics ApplyEat {
+  on AteFood { villager: v } {
+    let new_food = agents.mana(v) - 2.0;
+    agents.set_mana(v, new_food);
+    let new_energy = agents.hp(v) + 15.0;
+    agents.set_hp(v, new_energy);
+  }
+}
+
+// EnergyDrained → hp -= 0.4. Starvation: if hp <= 0, set_alive(false).
+// Uses the duel_1v1 IfStmt → set_alive(false) shape verbatim.
+@phase(post)
+physics ApplyEnergyDecay {
+  on EnergyDrained { villager: v } {
+    let new_energy = agents.hp(v) - 0.4;
+    agents.set_hp(v, new_energy);
+    if (new_energy <= 0.0) {
+      agents.set_alive(v, false);
+    }
+  }
+}
+
+// ----- Observability fold views -----
+
+// Cumulative work done per villager (food harvested over the
+// whole run).
+@materialized(on_event = [WorkDone])
+view total_work(villager: Agent) -> f32 {
+  initial: 0.0,
+  on WorkDone { villager: v } { self += 1.0 }
+  clamp: [0.0, 1000000.0],
+}
+
+// Cumulative trades performed per villager.
+@materialized(on_event = [TradeDone])
+view total_trades(villager: Agent) -> f32 {
+  initial: 0.0,
+  on TradeDone { villager: v } { self += 1.0 }
+  clamp: [0.0, 1000000.0],
+}
+
+// Cumulative full meals eaten per villager.
+@materialized(on_event = [AteFood])
+view total_eats(villager: Agent) -> f32 {
+  initial: 0.0,
+  on AteFood { villager: v } { self += 1.0 }
+  clamp: [0.0, 1000000.0],
+}
+
+// Cumulative rest periods per villager.
+@materialized(on_event = [RestDone])
+view total_rests(villager: Agent) -> f32 {
+  initial: 0.0,
+  on RestDone { villager: v } { self += 1.0 }
+  clamp: [0.0, 1000000.0],
+}

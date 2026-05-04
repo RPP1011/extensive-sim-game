@@ -496,15 +496,26 @@ pub fn kernel_topology_to_spec_and_body(
     });
 
     // 9. Build the cfg struct decl + cfg-construction expression — per
-    //    classified kind. ViewFold is handled above; PerEvent-dispatched
-    //    physics rules whose body contains an `Emit` (the verb-cascade
-    //    chronicle pattern) need the same `event_count + tick` cfg
-    //    shape ViewFold uses, so the body's `if event_idx >=
-    //    cfg.event_count { return; }` early-return guard resolves and
-    //    the `Emit` writes still see `tick`. Other generic kernels
-    //    keep the placeholder shape today.
-    let is_per_event_emit = matches!(dispatch, DispatchShape::PerEvent { .. })
-        && body_ops_have_emit(&body_ops, prog);
+    //    classified kind. ViewFold is handled above; ALL PerEvent-
+    //    dispatched physics rules need the same `event_count + tick`
+    //    cfg shape ViewFold uses, because the body's `if event_idx >=
+    //    cfg.event_count { return; }` early-return guard (emitted by
+    //    `build_dispatch_preamble` for every PerEvent dispatch
+    //    unconditionally) needs the `event_count` field on the cfg
+    //    struct. Pre-2026-05-04 the gate only fired when the body
+    //    contained an `Emit`, leaving Apply-only PerEvent rules
+    //    (e.g. quest_arc_real's ApplyStageAdvance / village_day_cycle's
+    //    ApplyHarvest, which read events and write SoA but emit
+    //    nothing) with the Generic `agent_cap`-typed cfg struct — the
+    //    WGSL then referenced `cfg.event_count` against a struct that
+    //    didn't declare it, surfacing as a naga validation error at
+    //    runtime. The fix-comment at line 3596-3598 in this file
+    //    flagged this exact case ahead of time. Closing the gap by
+    //    stamping PerEventEmit for every PerEvent dispatch (the
+    //    comment's recommended fix); the second-pass `event_ring`
+    //    binding upgrade below is also required so reads of the
+    //    consumed event ring type-check as `array<atomic<u32>>`.
+    let is_per_event_emit = matches!(dispatch, DispatchShape::PerEvent { .. });
     let (cfg_struct_decl, cfg_build_expr, kernel_kind) = if is_per_event_emit {
         (
             build_per_event_emit_cfg_struct_decl(&cfg_struct),
@@ -2043,6 +2054,14 @@ fn per_event_op_kind_tag(
 /// `cg::lower::driver::collect_emits_in_list` (private to that
 /// module) — duplicated here rather than re-exported so the emit
 /// layer's helper stays a leaf with no upstream coupling.
+///
+/// As of 2026-05-04 the `is_per_event_emit` gate at line 506 stamps
+/// PerEventEmit for every PerEvent dispatch (closing the
+/// quest_arc_real / village_day_cycle Apply-only-PerEvent
+/// cfg-mismatch gap), so this helper is currently unreferenced.
+/// Kept as defensive scaffolding for the next future call site
+/// (e.g. a future kind that needs emit-vs-no-emit discrimination).
+#[allow(dead_code)]
 fn body_ops_have_emit(body_ops: &[OpId], prog: &CgProgram) -> bool {
     for op_id in body_ops {
         let Ok(op) = resolve_op(prog, *op_id) else {
@@ -5828,7 +5847,21 @@ mod tests {
         let spec3 = kernel_topology_to_spec(&topology3, &prog3, &ctx3).unwrap();
         assert_eq!(spec3.kind, KernelKind::Generic);
 
-        // Indirect (physics consumer) → Generic.
+        // Indirect (physics consumer) → PerEventEmit.
+        //
+        // Pre-2026-05-04 the gate at line 506 narrowed PerEventEmit
+        // to PerEvent dispatches whose body contained an `Emit`,
+        // leaving Apply-only PerEvent bodies (e.g. quest_arc_real's
+        // ApplyStageAdvance, village_day_cycle's ApplyHarvest /
+        // ApplyEat / ApplyEnergyDecay) with the Generic
+        // `agent_cap`-typed cfg struct — but the WGSL preamble at
+        // line 3599 stamps `if (event_idx >= cfg.event_count)
+        // { return; }` unconditionally for any PerEvent dispatch,
+        // so Generic-cfg'd PerEvent kernels failed naga validation
+        // at runtime. The gap was flagged ahead of time in the
+        // comment at line 3596. Closing the gap by stamping
+        // PerEventEmit for every PerEvent dispatch; this assertion
+        // records the new behavior.
         let mut prog4 = CgProgram::default();
         let ring = EventRingId(1);
         let prod = seed_indirect_op(&mut prog4, ring);
@@ -5839,7 +5872,7 @@ mod tests {
         };
         let ctx4 = EmitCtx::structural(&prog4);
         let spec4 = kernel_topology_to_spec(&topology4, &prog4, &ctx4).unwrap();
-        assert_eq!(spec4.kind, KernelKind::Generic);
+        assert_eq!(spec4.kind, KernelKind::PerEventEmit);
     }
 
     // ---- 13. Plumbing body templates (Task 5.6d) ----
