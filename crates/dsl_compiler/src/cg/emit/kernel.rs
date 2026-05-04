@@ -2625,8 +2625,117 @@ fn lower_scoring_argmax_body(
     out.push_str("scoring_output[scoring_base + 0u] = best_action;\n");
     out.push_str("scoring_output[scoring_base + 1u] = best_target;\n");
     out.push_str("scoring_output[scoring_base + 2u] = bitcast<u32>(best_utility);\n");
-    out.push_str("scoring_output[scoring_base + 3u] = 0u;");
+    out.push_str("scoring_output[scoring_base + 3u] = 0u;\n");
+
+    // -- ActionSelected event emit ----------------------------------------
+    //
+    // Emit a per-agent `ActionSelected { actor: agent_id, action_id:
+    // best_action, target: best_target }` event so the verb cascade
+    // physics rules (synthesised by `cg::lower::verb_expand`'s
+    // `verb_chronicle_<name>` injection) have something to consume. The
+    // chronicle rule's `if action_id == <verb_id>` filter handles
+    // per-verb gating downstream — the scoring kernel emits one event
+    // per agent per tick unconditionally, mirroring the existing
+    // producer pattern (`atomicAdd(&event_tail[0], 1u)` for slot
+    // ownership + `atomicStore(&event_ring[slot * stride + N], ...)`
+    // per payload word; see `wgsl_body.rs::lower_emit_to_wgsl`).
+    //
+    // Gated on the program containing an `ActionSelected` event kind:
+    // a fixture without any `verb` decl lacks the synthesised event
+    // (verb_expand's `inject_action_selected_event` only fires when at
+    // least one verb has a non-empty `emit`), so the scoring kernel
+    // skips the emit and stays binding-clean (no event_ring /
+    // event_tail bindings declared on the kernel — see
+    // `compute_dependencies` for ScoringArgmax in `cg::op`).
+    //
+    // The driver is responsible for recording the
+    // `EventRing { Append }` write on the ScoringArgmax op's writes
+    // list when the ActionSelected event exists; without that, the
+    // binding scanner won't emit the `event_ring` + `event_tail`
+    // bindings the WGSL below references. See
+    // `cg::lower::driver::wire_action_selected_writes`.
+    if let Some(action_selected_kind) = find_action_selected_kind(ctx.prog) {
+        let layout = ctx
+            .prog
+            .event_layouts
+            .get(&action_selected_kind.0)
+            .expect("ActionSelected layout registered alongside the event kind");
+        let stride = layout.record_stride_u32;
+        let header = layout.header_word_count;
+        // Field offsets within the record. The verb expander pins the
+        // ActionSelected payload as `{ actor: AgentId, action_id: U32,
+        // target: AgentId }` in declaration order — actor is the first
+        // payload word (offset = header + 0), action_id the second,
+        // target the third. We hardcode the offsets here rather than
+        // looking them up by field name because the verb expander
+        // owns the schema and the offsets are stable contract.
+        let actor_off = header;
+        let action_id_off = header + 1;
+        let target_off = header + 2;
+        let kind_tag = action_selected_kind.0;
+
+        out.push('\n');
+        out.push_str("// emit ActionSelected { actor: agent_id, action_id: best_action, target: best_target }\n");
+        out.push_str("{\n");
+        out.push_str("    let slot = atomicAdd(&event_tail[0], 1u);\n");
+        writeln!(
+            out,
+            "    if (slot < {}u) {{",
+            crate::cg::emit::wgsl_body::default_event_ring_cap_slots(),
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        atomicStore(&event_ring[slot * {stride}u + 0u], {kind_tag}u);"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        atomicStore(&event_ring[slot * {stride}u + 1u], tick);"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        atomicStore(&event_ring[slot * {stride}u + {actor_off}u], agent_id);"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        atomicStore(&event_ring[slot * {stride}u + {action_id_off}u], best_action);"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        atomicStore(&event_ring[slot * {stride}u + {target_off}u], best_target);"
+        )
+        .unwrap();
+        out.push_str("    }\n");
+        out.push_str("}");
+    }
+
     Ok(out)
+}
+
+/// Find the [`EventKindId`] of the verb-expander-injected
+/// `ActionSelected` event in `prog`, returning `None` when no verb
+/// in the source compilation declared a non-empty `emit` (so the
+/// expander never injected the event kind).
+///
+/// Reverses the `prog.interner.event_kinds` (id → name) map by
+/// scanning for the canonical name. The name is fixed by
+/// [`crate::cg::lower::verb_expand::ACTION_SELECTED_EVENT_NAME`];
+/// importing the constant directly keeps the two sides
+/// (verb_expand injection + scoring kernel emit) coupled at compile
+/// time.
+fn find_action_selected_kind(
+    prog: &CgProgram,
+) -> Option<crate::cg::op::EventKindId> {
+    use crate::cg::lower::verb_expand::ACTION_SELECTED_EVENT_NAME;
+    prog.interner
+        .event_kinds
+        .iter()
+        .find(|(_, name)| name.as_str() == ACTION_SELECTED_EVENT_NAME)
+        .map(|(id, _)| crate::cg::op::EventKindId(*id))
 }
 
 // ---------------------------------------------------------------------------
@@ -3744,6 +3853,203 @@ mod tests {
         );
         assert!(body.contains("best_action = 5u;"), "body: {body}");
         assert!(body.contains("best_target = 2u;"), "body: {body}");
+    }
+
+    /// When the program has no `ActionSelected` event kind registered
+    /// (no verb cascade in source), the scoring kernel body must NOT
+    /// emit any ring-append. Regression guard: a fixture without verbs
+    /// stays binding-clean — no `event_ring` / `event_tail` references
+    /// in the WGSL body.
+    #[test]
+    fn scoring_argmax_omits_action_selected_emit_without_event_kind() {
+        let mut prog = CgProgram::default();
+        let utility = push_expr(&mut prog, CgExpr::Lit(LitValue::F32(1.0)));
+        let kind = ComputeOpKind::ScoringArgmax {
+            scoring: ScoringId(0),
+            rows: vec![ScoringRowOp {
+                action: ActionId(0),
+                utility,
+                target: None,
+                guard: None,
+            }],
+        };
+        let probe = ComputeOp::new(
+            OpId(0),
+            kind,
+            DispatchShape::PerAgent,
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let op_id = push_op(&mut prog, probe);
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: DispatchShape::PerAgent,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let (_spec, body) =
+            kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
+
+        assert!(
+            !body.contains("ActionSelected"),
+            "no ActionSelected emit comment expected when event kind absent; body: {body}"
+        );
+        assert!(
+            !body.contains("event_tail"),
+            "no event_tail reference expected without ActionSelected; body: {body}"
+        );
+        assert!(
+            !body.contains("event_ring"),
+            "no event_ring reference expected without ActionSelected; body: {body}"
+        );
+    }
+
+    /// When the program HAS an `ActionSelected` event kind registered
+    /// (the verb expander injected it), the scoring kernel body emits
+    /// the per-agent ring-append after argmax. The emit shape must
+    /// mirror `wgsl_body::lower_emit_to_wgsl` (atomicAdd-tail,
+    /// atomicStore-ring with bounds check) and write the right field
+    /// payload words: actor=agent_id, action_id=best_action,
+    /// target=best_target.
+    #[test]
+    fn scoring_argmax_emits_action_selected_when_event_kind_present() {
+        use crate::cg::lower::verb_expand::ACTION_SELECTED_EVENT_NAME;
+        use crate::cg::program::EventLayout;
+        use std::collections::BTreeMap;
+
+        let mut prog = CgProgram::default();
+        let utility = push_expr(&mut prog, CgExpr::Lit(LitValue::F32(2.0)));
+
+        // Register the ActionSelected event kind on the program — the
+        // shape verb_expand + populate_event_kinds produce in the live
+        // pipeline. Layout matches `populate_event_kinds`'s defaults
+        // (stride=10, header=2) and the verb expander's payload order
+        // (`actor, action_id, target` as offsets 0/1/2 of the payload).
+        let action_selected_id: u32 = 7;
+        prog.interner.event_kinds.insert(
+            action_selected_id,
+            ACTION_SELECTED_EVENT_NAME.to_string(),
+        );
+        let mut fields = BTreeMap::new();
+        fields.insert(
+            "actor".to_string(),
+            crate::cg::program::FieldLayout {
+                word_offset_in_payload: 0,
+                word_count: 1,
+                ty: CgTy::AgentId,
+            },
+        );
+        fields.insert(
+            "action_id".to_string(),
+            crate::cg::program::FieldLayout {
+                word_offset_in_payload: 1,
+                word_count: 1,
+                ty: CgTy::U32,
+            },
+        );
+        fields.insert(
+            "target".to_string(),
+            crate::cg::program::FieldLayout {
+                word_offset_in_payload: 2,
+                word_count: 1,
+                ty: CgTy::AgentId,
+            },
+        );
+        prog.event_layouts.insert(
+            action_selected_id,
+            EventLayout {
+                record_stride_u32: 10,
+                header_word_count: 2,
+                buffer_name: "event_ring".to_string(),
+                fields,
+            },
+        );
+        // The driver wires `EventRing { Append }` on every
+        // ScoringArgmax op via `wire_action_selected_writes` — mirror
+        // that here so the binding scanner declares event_ring +
+        // event_tail bindings on the kernel.
+        let kind = ComputeOpKind::ScoringArgmax {
+            scoring: ScoringId(0),
+            rows: vec![ScoringRowOp {
+                action: ActionId(0),
+                utility,
+                target: None,
+                guard: None,
+            }],
+        };
+        let mut probe = ComputeOp::new(
+            OpId(0),
+            kind,
+            DispatchShape::PerAgent,
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        probe.record_write(crate::cg::data_handle::DataHandle::EventRing {
+            ring: crate::cg::data_handle::EventRingId(0),
+            kind: crate::cg::data_handle::EventRingAccess::Append,
+        });
+        // Need an event ring name interned so structural binding namer
+        // produces "event_ring" (post-iter-2 unification).
+        prog.interner
+            .event_rings
+            .insert(0, "batch_events".to_string());
+        let op_id = push_op(&mut prog, probe);
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: DispatchShape::PerAgent,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let (_spec, body) =
+            kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
+
+        // Argmax skeleton still present.
+        assert!(
+            body.contains("scoring_output[scoring_base + 0u] = best_action;"),
+            "body: {body}"
+        );
+
+        // ActionSelected emit shape.
+        assert!(
+            body.contains("// emit ActionSelected"),
+            "missing emit comment; body: {body}"
+        );
+        assert!(
+            body.contains("let slot = atomicAdd(&event_tail[0], 1u);"),
+            "missing tail atomicAdd; body: {body}"
+        );
+        // Tag write: kind id 7, header offset 0.
+        assert!(
+            body.contains("atomicStore(&event_ring[slot * 10u + 0u], 7u);"),
+            "missing kind-tag store; body: {body}"
+        );
+        // Tick: header offset 1.
+        assert!(
+            body.contains("atomicStore(&event_ring[slot * 10u + 1u], tick);"),
+            "missing tick store; body: {body}"
+        );
+        // actor=agent_id @ payload offset 0 → record offset 2.
+        assert!(
+            body.contains("atomicStore(&event_ring[slot * 10u + 2u], agent_id);"),
+            "missing actor store; body: {body}"
+        );
+        // action_id=best_action @ payload offset 1 → record offset 3.
+        assert!(
+            body.contains("atomicStore(&event_ring[slot * 10u + 3u], best_action);"),
+            "missing action_id store; body: {body}"
+        );
+        // target=best_target @ payload offset 2 → record offset 4.
+        assert!(
+            body.contains("atomicStore(&event_ring[slot * 10u + 4u], best_target);"),
+            "missing target store; body: {body}"
+        );
+        // Bounds check.
+        assert!(
+            body.contains("if (slot < 65536u)"),
+            "missing bounds check; body: {body}"
+        );
     }
 
     // ---- 10. Semantic kernel naming (Task 5.2) ----

@@ -136,6 +136,202 @@ verb Wait(self) =
     );
 }
 
+/// Closes the scoring-kernel ActionSelected emit gap. When a verb
+/// declares a non-empty `emit`, the verb expander injects a singleton
+/// `ActionSelected` event kind. The driver then records an
+/// `EventRing { Append }` write on every `ScoringArgmax` op (via
+/// `wire_action_selected_writes`) so the binding scanner declares
+/// `event_ring` + `event_tail` bindings on the scoring kernel; the
+/// scoring kernel's WGSL body
+/// (`cg::emit::kernel::lower_scoring_argmax_body`) inlines the
+/// per-agent ring-append after argmax.
+///
+/// Asserts the round-trip on the CG program (not the schedule):
+/// today's stress fixtures don't ship a scoring decl that lands a
+/// `scoring` kernel through the full schedule synth, so we drive the
+/// kernel emit directly via [`kernel_topology_to_spec_and_body`] for
+/// the ScoringArgmax op produced by the lowering.
+#[test]
+fn scoring_kernel_emits_action_selected_when_verb_present() {
+    use dsl_compiler::cg::dispatch::DispatchShape;
+    use dsl_compiler::cg::emit::kernel_topology_to_spec_and_body;
+    use dsl_compiler::cg::emit::wgsl_body::{EmitCtx, HandleNamingStrategy};
+    use dsl_compiler::cg::schedule::synthesis::KernelTopology;
+
+    fn build_emit_ctx<'a>(prog: &'a CgProgram) -> EmitCtx<'a> {
+        EmitCtx {
+            prog,
+            naming: HandleNamingStrategy::Structural,
+            tile_walk_index: std::cell::RefCell::new(None),
+            dispatch: std::cell::Cell::new(None),
+            view_target_locals: std::cell::RefCell::new(Vec::new()),
+            pending_target_lets: std::cell::RefCell::new(Vec::new()),
+            bound_target_exprs: std::cell::RefCell::new(std::collections::HashSet::new()),
+        }
+    }
+
+    fn scoring_op_index(cg: &CgProgram) -> usize {
+        cg.ops
+            .iter()
+            .position(|op| matches!(op.kind, ComputeOpKind::ScoringArgmax { .. }))
+            .expect("expected exactly one ScoringArgmax op in the lowered program")
+    }
+
+    // -- Negative half: verb without `emit` --
+    //
+    // The verb expander does NOT inject ActionSelected for an
+    // emit-less verb, so the scoring kernel stays binding-clean.
+    // Confirms the gating works.
+    let no_emit_src = r#"
+event Tick { }
+entity Agent_ : Agent { pos: vec3, alive: bool, }
+scoring {
+  Hold = 0.5
+}
+verb Wait(self) =
+  action Hold
+  when  self.alive
+  score 0.75
+"#;
+    let (cg_no_emit, _) = compile_inline(no_emit_src);
+    let scoring_idx = scoring_op_index(&cg_no_emit);
+    let scoring_writes = &cg_no_emit.ops[scoring_idx].writes;
+    let has_event_ring_write = scoring_writes.iter().any(|h| {
+        matches!(
+            h,
+            dsl_compiler::cg::data_handle::DataHandle::EventRing { .. }
+        )
+    });
+    assert!(
+        !has_event_ring_write,
+        "no-verb-emit scoring op must not record EventRing-Append; got writes={:?}",
+        scoring_writes,
+    );
+    let topology_no = KernelTopology::Split {
+        op: dsl_compiler::cg::op::OpId(scoring_idx as u32),
+        dispatch: DispatchShape::PerAgent,
+    };
+    let ctx_no = build_emit_ctx(&cg_no_emit);
+    let (_spec_no, body_no) =
+        kernel_topology_to_spec_and_body(&topology_no, &cg_no_emit, &ctx_no)
+            .expect("scoring kernel emits cleanly without verb-emit");
+    assert!(
+        !body_no.contains("ActionSelected"),
+        "no-verb-emit fixture must not emit ActionSelected; body: {body_no}",
+    );
+    assert!(
+        !body_no.contains("event_tail"),
+        "no-verb-emit fixture's scoring kernel must not reference event_tail; body: {body_no}",
+    );
+
+    // -- Positive half: verb with `emit` --
+    //
+    // ActionSelected event is injected; the driver records an
+    // EventRing-Append on the ScoringArgmax op; the kernel emit
+    // inlines the ring-append.
+    let emit_src = r#"
+event Killed { by: AgentId, prey: AgentId, pos: vec3, }
+event Tick { }
+entity Agent_ : Agent { pos: vec3, alive: bool, }
+scoring {
+  AttackTarget = 1.0
+}
+verb Strike(self, target: Agent) =
+  action AttackTarget(target: target)
+  when  self.alive
+  emit  Killed { by: self, prey: target, pos: self.pos }
+  score 1.0
+"#;
+    let prog = dsl_compiler::parse(emit_src).expect("parse");
+    let comp = dsl_ast::resolve::resolve(prog).expect("resolve");
+    // Tolerate downstream diagnostics — chronicle physics rule's
+    // body may surface UnsupportedFieldBase on `self.pos`. The
+    // ScoringArgmax op + ActionSelected event still land in the
+    // best-effort program.
+    let cg_emit = match lower_compilation_to_cg(&comp) {
+        Ok(p) => p,
+        Err(outcome) => outcome.program,
+    };
+
+    // Driver-wired write must be present.
+    let scoring_idx = scoring_op_index(&cg_emit);
+    let scoring_writes = &cg_emit.ops[scoring_idx].writes;
+    let event_ring_writes: Vec<_> = scoring_writes
+        .iter()
+        .filter_map(|h| match h {
+            dsl_compiler::cg::data_handle::DataHandle::EventRing { ring, kind } => {
+                Some((*ring, *kind))
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(
+        event_ring_writes
+            .iter()
+            .any(|(_, k)| matches!(
+                k,
+                dsl_compiler::cg::data_handle::EventRingAccess::Append
+            )),
+        "verb-emit scoring op must record EventRing-Append; got writes={:?}",
+        scoring_writes,
+    );
+
+    // Drive the kernel-emit directly so we don't depend on the
+    // scheduler routing the scoring op into a stage.
+    let topology = KernelTopology::Split {
+        op: dsl_compiler::cg::op::OpId(scoring_idx as u32),
+        dispatch: DispatchShape::PerAgent,
+    };
+    let ctx = build_emit_ctx(&cg_emit);
+    let (spec, body) = kernel_topology_to_spec_and_body(&topology, &cg_emit, &ctx)
+        .expect("scoring kernel emits cleanly with verb-emit");
+    // Bindings: scanner must declare event_ring + event_tail (the
+    // emit body references both unconditionally when a verb cascade
+    // is present).
+    let binding_names: Vec<&str> = spec
+        .bindings
+        .iter()
+        .map(|b| b.name.as_str())
+        .collect();
+    assert!(
+        binding_names.contains(&"event_ring"),
+        "scoring kernel must declare event_ring binding; got {:?}",
+        binding_names,
+    );
+    assert!(
+        binding_names.contains(&"event_tail"),
+        "scoring kernel must declare event_tail binding; got {:?}",
+        binding_names,
+    );
+
+    // Argmax skeleton still present.
+    assert!(
+        body.contains("scoring_output[scoring_base + 0u] = best_action;"),
+        "argmax skeleton intact; body: {body}",
+    );
+    // ActionSelected ring-append shape — mirrors lower_emit_to_wgsl.
+    assert!(
+        body.contains("// emit ActionSelected"),
+        "missing ActionSelected emit comment; body: {body}",
+    );
+    assert!(
+        body.contains("atomicAdd(&event_tail[0], 1u)"),
+        "missing event_tail atomicAdd; body: {body}",
+    );
+    assert!(
+        body.contains("agent_id);"),
+        "missing agent_id store (actor); body: {body}",
+    );
+    assert!(
+        body.contains("best_action);"),
+        "missing best_action store (action_id); body: {body}",
+    );
+    assert!(
+        body.contains("best_target);"),
+        "missing best_target store (target); body: {body}",
+    );
+}
+
 /// A verb with a non-empty `emit` clause expands its cascade to a
 /// synthesised `verb_chronicle_<name>` physics rule listening on the
 /// (auto-injected) `ActionSelected` event. The expansion no longer

@@ -292,6 +292,26 @@ pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOu
     wire_source_ring_reads(ctx.builder.ops_mut());
     apply_emit_destination_rings(ctx.builder.ops_mut(), &emit_writes);
 
+    // -- Phase 4b: ActionSelected ring-write wiring on ScoringArgmax ---
+    //
+    // The verb expander (`cg::lower::verb_expand`) injects an
+    // `ActionSelected { actor, action_id, target }` event kind the
+    // first time a verb declares a non-empty `emit`, plus a
+    // `verb_chronicle_<name>` physics rule that listens on it. The
+    // scoring kernel's WGSL body
+    // (`cg::emit::kernel::lower_scoring_argmax_body`) emits one
+    // `ActionSelected` per agent per tick when the program has the
+    // event kind registered — but the binding scanner only declares
+    // the `event_ring` + `event_tail` bindings on a kernel when at
+    // least one of its ops records an `EventRing { Append }` write.
+    //
+    // The auto-walker can't synthesize this write (the emit lives in
+    // the kernel-emit body template, not in `CgStmt::Emit`), so the
+    // driver records it explicitly here — symmetric to the
+    // `apply_emit_destination_rings` call above for `CgStmt::Emit`-
+    // bearing ops.
+    wire_action_selected_writes(&arena_snapshot, ctx.builder.ops_mut());
+
     // -- Phase 5: cycle gate (user-op-only program) ---------------------
     //
     // The plan amendment scopes the cycle gate to the program built
@@ -1833,6 +1853,54 @@ fn apply_emit_destination_rings(ops: &mut [ComputeOp], pairs: &[(usize, EventRin
         if let Some(op) = ops.get_mut(op_index) {
             op.record_write(DataHandle::EventRing {
                 ring,
+                kind: EventRingAccess::Append,
+            });
+        }
+    }
+}
+
+/// Wire the implicit `EventRing { Append }` write each
+/// [`ComputeOpKind::ScoringArgmax`] op acquires by virtue of the
+/// scoring kernel's WGSL body emitting the verb-expander-injected
+/// `ActionSelected` event after per-agent argmax.
+///
+/// The scoring kernel's body emit
+/// (`cg::emit::kernel::lower_scoring_argmax_body`) inlines the
+/// ring-append for `ActionSelected` only when the program has the
+/// event kind registered (a verb with non-empty `emit` exists). The
+/// gating shape mirrors the WGSL emit's gate so the binding scanner
+/// declares the `event_ring` + `event_tail` bindings exactly when
+/// the body references them — a fixture without any verb cascade
+/// stays binding-clean.
+///
+/// `prog` is the snapshot taken in Phase 4. The function inspects
+/// `prog.interner.event_kinds` for the canonical name; the
+/// destination ring is the post-iter-2 unified `EventRingId(0)`
+/// (matching the emit-walker's allocation rule in
+/// [`collect_emit_destination_rings`]).
+fn wire_action_selected_writes(prog: &CgProgram, ops: &mut [ComputeOp]) {
+    use crate::cg::lower::verb_expand::ACTION_SELECTED_EVENT_NAME;
+
+    // Gate: only emit when the verb expander injected the event
+    // kind. Pre-iter-2 the kind id was per-event; today the ring is
+    // shared so we just need to know the kind exists.
+    let has_action_selected = prog
+        .interner
+        .event_kinds
+        .values()
+        .any(|name| name.as_str() == ACTION_SELECTED_EVENT_NAME);
+    if !has_action_selected {
+        return;
+    }
+
+    for op in ops.iter_mut() {
+        if matches!(op.kind, ComputeOpKind::ScoringArgmax { .. }) {
+            // Same allocation rule as `collect_emit_destination_rings`:
+            // every event kind shares the unified `EventRingId(0)`
+            // post-iter-2; the structural namer drops the ring suffix
+            // so the resulting binding lands as `event_ring`.
+            op.record_write(DataHandle::EventRing {
+                ring: EventRingId(0),
                 kind: EventRingAccess::Append,
             });
         }
