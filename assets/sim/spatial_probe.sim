@@ -1,0 +1,58 @@
+// spatial_probe — slice-2b stress fixture for stdlib-into-CG-IR
+// (docs/superpowers/plans/2026-05-03-stdlib-into-cg-ir.md). Exercises
+// the shared `lower_spatial_namespace_call` helper from a physics rule
+// body via the existing fold path: `sum(other in spatial.<name>(self)
+// where ...)` projects per-neighbour and returns to a `let`. The fold
+// shape lowers to `CgStmt::ForEachNeighbor` (bounded 27-cell walk),
+// driven by the recogniser-returned `SpatialIterShape` rather than
+// the prior inline match in `expr::lower_fold_over_agents`.
+//
+// Fixture stays minimal: one entity, one config, one named
+// spatial_query, one physics rule that consumes it inside a vec3 fold
+// projection. Compiling this end-to-end (via the stress_fixtures
+// pipeline test) confirms slice 2b's wiring lights up in physics
+// contexts. The companion test in `tests/stress_fixtures_compile.rs`
+// asserts the emitted physics kernel actually contains a
+// neighbour-walk loop (the `spatial_grid_offsets` reference is the
+// signature of the bounded-walk WGSL shape).
+
+event Tick { }
+
+entity SpatialProbeAgent : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config probe {
+  perception_radius: f32 = 6.0,
+  step_scale:        f32 = 0.5,
+}
+
+// Phase 7 named spatial query. Filter accepts any non-self
+// candidate; the bounded-walk emit handles the radius gate via the
+// per-cell hash. Same shape boids.sim uses; minimised to the
+// smallest unit that exercises the helper in a physics rule.
+spatial_query nearby_probe(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// Per-tick physics rule. The fold body produces a per-neighbour vec3
+// projection (push-away vector), summed over the bounded
+// neighbourhood. Lowering walks `IrExpr::Fold { iter:
+// spatial.nearby_probe(self) }` and the helper recognises the iter
+// as a `SpatialIterFlavour::Spatial { method: "nearby_probe" }`,
+// driving the `CgStmt::ForEachNeighbor` allocation.
+physics ProbeMove @phase(per_agent) {
+  on Tick {} {
+    let push = sum(other in spatial.nearby_probe(self) where
+      if (other != self)
+         && (distance(self.pos, other.pos) < config.probe.perception_radius) {
+        self.pos - other.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let new_vel = self.vel + push * 0.1;
+    let new_pos = self.pos + new_vel * config.probe.step_scale;
+    agents.set_vel(self, new_vel);
+    agents.set_pos(self, new_pos);
+  }
+}

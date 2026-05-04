@@ -44,5 +44,8 @@ pub use mask::lower_mask;
 pub use physics::{lower_physics, ReplayabilityFlag};
 pub use plumbing::{lower_plumbing, synthesize_plumbing_ops};
 pub use scoring::lower_scoring;
-pub use spatial::lower_spatial_queries;
+pub use spatial::{
+    lower_spatial_namespace_call, lower_spatial_queries, try_recognise_spatial_iter,
+    SpatialIterFlavour, SpatialIterShape,
+};
 pub use view::{lower_view, HandlerResolution};

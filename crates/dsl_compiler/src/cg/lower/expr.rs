@@ -2208,15 +2208,30 @@ fn lower_fold_over_agents(
     //   1 because the runtime sizes its CELL_SIZE constant equal to
     //   the per-fixture perception radius. A future surface will
     //   thread the radius from the call args.
-    let spatial_mode = match iter.map(|n| &n.kind) {
-        Some(IrExpr::Namespace(NamespaceId::Agents)) => false,
-        Some(IrExpr::NamespaceCall { ns: NamespaceId::Spatial, .. }) => true,
-        _ => {
-            return Err(LoweringError::UnsupportedAstNode {
-                ast_label: "Fold (iter is not `agents` or `spatial.<query>`)",
-                span,
-            });
-        }
+    //
+    // Slice 2a (stdlib-into-CG-IR plan): the spatial-iter recognition
+    // is delegated to `super::spatial::try_recognise_spatial_iter`
+    // so mask / fold / future per-pair body-iter consumers all walk
+    // the same shape table. The fold path uses just the `is this a
+    // spatial iter?` boolean; the returned `SpatialIterShape`'s
+    // radius_cells is consumed when the helper grows beyond the
+    // hard-coded `1` (a future surface threads the radius from a
+    // call arg).
+    let spatial_iter_shape = match iter {
+        None => None,
+        Some(node) => match &node.kind {
+            IrExpr::Namespace(NamespaceId::Agents) => None,
+            IrExpr::NamespaceCall { ns: NamespaceId::Spatial, .. }
+            | IrExpr::NamespaceCall { ns: NamespaceId::Query, .. } => {
+                super::spatial::try_recognise_spatial_iter(node, ctx)?
+            }
+            _ => {
+                return Err(LoweringError::UnsupportedAstNode {
+                    ast_label: "Fold (iter is not `agents` or `spatial.<query>`)",
+                    span,
+                });
+            }
+        },
     };
 
     // Push the binder onto the fold-binder slot so body reads of
@@ -2317,17 +2332,18 @@ fn lower_fold_over_agents(
     // result. Variant choice: spatial-iter folds become
     // ForEachNeighbor (bounded 27-cell walk); plain-`agents` folds
     // become ForEachAgent (unbounded N² walk).
-    let stmt = if spatial_mode {
+    let stmt = if let Some(shape) = spatial_iter_shape {
         CgStmt::ForEachNeighbor {
             acc_local,
             acc_ty,
             init: init_id,
             projection: projection_id,
-            // Hard-coded cell-radius for v1: CELL_SIZE is sized to
-            // match the per-fixture perception radius, so a single-
-            // cell neighborhood (3³ cells) covers everything inside
-            // that radius. Larger fold radii would bump this.
-            radius_cells: 1,
+            // Cell radius comes from the helper-recognised shape.
+            // Today every shape returns 1 (CELL_SIZE matches each
+            // fixture's perception radius, so a 3³ neighbourhood
+            // covers it); when the helper threads call-arg radii
+            // through, this picks up the new value automatically.
+            radius_cells: shape.radius_cells,
         }
     } else {
         CgStmt::ForEachAgent {

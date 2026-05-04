@@ -154,6 +154,52 @@ fn swarm_event_storm_emits_four_pulses_per_tick() {
     );
 }
 
+/// Slice 2b probe (stdlib-into-CG-IR plan) — confirms a physics
+/// rule body that consumes a Phase 7 named spatial_query through
+/// the existing `sum(other in spatial.<name>(self) where ...)`
+/// fold shape lowers end-to-end via the shared
+/// `lower_spatial_namespace_call` helper. Without slice 2a's
+/// recogniser extraction this codepath worked already (boids does
+/// it) — the test pins the helper's continued coverage of physics
+/// rule contexts so a regression in the fold-iter classification
+/// fails here rather than silently skipping the spatial walk.
+///
+/// The `spatial_probe.sim` fixture is intentionally minimal: one
+/// entity, one named query, one fold-bearing physics rule. The
+/// neighbour-walk WGSL shape is recognisable by its
+/// `spatial_grid_offsets` references (the bounded-walk template
+/// reads grid offsets to enumerate candidates).
+#[test]
+fn spatial_probe_compiles_and_emits_neighbour_walk() {
+    let path = workspace_path("assets/sim/spatial_probe.sim");
+    let art = compile_sim(&path).unwrap_or_else(|e| {
+        panic!("spatial_probe.sim failed at: {e}");
+    });
+    assert!(!art.kernel_index.is_empty(), "no kernels emitted");
+    let body = kernel_body_containing(&art, "ProbeMove")
+        .or_else(|| kernel_body_containing(&art, "physics"))
+        .unwrap_or_else(|| {
+            panic!(
+                "no physics kernel found; available: {:?}",
+                art.wgsl_files.keys().collect::<Vec<_>>()
+            );
+        });
+    // Bounded-neighbour walk template references grid offsets; if
+    // the spatial-iter recogniser ever silently falls back to
+    // ForEachAgent (the unbounded N² path), this assertion catches
+    // it (ForEachAgent emits a `for (var per_pair_candidate ... <
+    // cfg.agent_cap` loop with no grid-offset reference).
+    assert!(
+        body.contains("spatial_grid_offsets") || body.contains("grid_starts"),
+        "expected bounded-neighbour walk references in physics body; got:\n{body}",
+    );
+    eprintln!(
+        "[spatial_probe] {} kernels emitted: {:?}",
+        art.kernel_index.len(),
+        art.kernel_index,
+    );
+}
+
 /// `swarm_event_storm` declares a `@decay(rate=0.85)` view alongside
 /// a non-decayed view; both consume from the same Pulse ring.
 /// Confirm both fold kernels exist and the decay one references
