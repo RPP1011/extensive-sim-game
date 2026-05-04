@@ -130,6 +130,12 @@ predator_prey_real_runtime = { path = "../predator_prey_real_runtime" }
 # but the 2-agent population trivialised the argmax. Closes the
 # verb-mask `mask_k=1u` placeholder gap inline (Task 5.7).
 tactical_squad_5v5_runtime = { path = "../tactical_squad_5v5_runtime" }
+# Mass-battle 100 vs 100 — sixth REAL gameplay-shaped fixture and
+# the first SCALE-UP for pair-field scoring (200 agents,
+# agent_cap × agent_cap mask grid). 10 Tank + 10 Healer + 80 DPS
+# per team × 2 teams. Stress-tests the per-pair mask + scoring
+# kernels at workloads beyond the duel_1v1 template (2 agents).
+mass_battle_100v100_runtime = { path = "../mass_battle_100v100_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -230,3 +236,7 @@ path = "src/predator_prey_real_app.rs"
 [[bin]]
 name = "tactical_squad_5v5_app"
 path = "src/tactical_squad_5v5_app.rs"
+
+[[bin]]
+name = "mass_battle_100v100_app"
+path = "src/mass_battle_100v100_app.rs"

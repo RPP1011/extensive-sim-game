@@ -3233,11 +3233,12 @@ fn mask_predicate_per_agent_body(mask: MaskId, predicate_wgsl: &str) -> String {
 /// dispatch caller must enqueue `agent_cap * agent_cap` threads (the
 /// runtime helper currently dispatches only `agent_cap` for direct
 /// PerAgent kernels — PerPair callers must size the dispatch to the
-/// pair count themselves; see `tactical_squad_5v5_runtime` for the
-/// expected pattern). When the caller dispatches only `agent_cap`
-/// threads (as the duel_1v1_runtime does today) the kernel
-/// degenerates to `(actor=N, cand=0)` per thread for `N < agent_cap`,
-/// which matches the previous `mask_k=1u` behaviour.
+/// pair count themselves; see `tactical_squad_5v5_runtime` and
+/// `mass_battle_100v100_runtime` for the expected pattern). When the
+/// caller dispatches only `agent_cap` threads (as the duel_1v1_runtime
+/// originally did) the kernel degenerates to `(actor=N, cand=0)` per
+/// thread for `N < agent_cap`, which matches the previous `mask_k=1u`
+/// behaviour.
 ///
 /// Originally the literal `mask_k = 1u` (TODO task-5.7) — switched to
 /// `cfg.agent_cap` so pair-field mask predicates that reference
@@ -3247,13 +3248,8 @@ fn mask_predicate_per_agent_body(mask: MaskId, predicate_wgsl: &str) -> String {
 /// silently miscompiled any mask predicate where the slot-0 candidate
 /// failed the predicate (e.g. team Red actors scanning team Red
 /// agent-0 → predicate false → entire actor's mask bit never sets).
-///
-/// `agent_id` / `per_pair_candidate` are aliased to the per-mask
-/// derivations so the predicate body — which refers to those names
-/// directly via [`crate::cg::expr::CgExpr::AgentSelfId`] /
-/// [`crate::cg::expr::CgExpr::PerPairCandidateId`] —
-/// resolves cleanly. Path B's slot-aware lowering will fold the alias
-/// step into its naming strategy.
+/// The `mass_battle_100v100` sim (200 agents × 200 cand × 4 verbs)
+/// is the first SCALE-UP fixture exercising the full pair grid.
 fn mask_predicate_per_pair_body(mask: MaskId, predicate_wgsl: &str) -> String {
     format!(
         "// PerPair MaskPredicate — derive (agent, cand) from `pair`.\n\
