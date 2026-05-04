@@ -175,6 +175,12 @@ tactical_horde_500_runtime = { path = "../tactical_horde_500_runtime" }
 # actually deplete via Eat→ApplyEat chronicle. 1000-tick run probes
 # long-term ecological equilibrium.
 trophic_3tier_runtime = { path = "../trophic_3tier_runtime" }
+# Flocking skirmish — THIRTEENTH REAL fixture and FIRST to bring boids
+# dynamics into a combat context. 100 Red + 100 Blue agents share one
+# Agent SoA via the `creature_type` discriminant; same-team neighbours
+# trigger flocking (alignment+cohesion+separation), opposing-team
+# neighbours trigger combat (chase/flee + HP attrition).
+flocking_skirmish_runtime = { path = "../flocking_skirmish_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -303,3 +309,7 @@ path = "src/tactical_horde_500_app.rs"
 [[bin]]
 name = "trophic_3tier_app"
 path = "src/trophic_3tier_app.rs"
+
+[[bin]]
+name = "flocking_skirmish_app"
+path = "src/flocking_skirmish_app.rs"
