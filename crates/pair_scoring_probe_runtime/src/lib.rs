@@ -337,11 +337,12 @@ impl CompiledSim for PairScoringProbeState {
             mask_bytes.max(4),
         );
 
-        // (2) mask_verb_Heal — per-pair (agent, cand=0) atomicOr into
-        // mask_0_bitmap when `target != self`. Note: the emitted body
-        // hardcodes `mask_0_k = 1u` (TODO task-5.7), so only cand=0
-        // is checked per actor; agent 0's bit therefore stays clear
-        // (predicate fails for agent=0, cand=0).
+        // (2) mask_verb_Heal — per-pair (agent, cand) atomicOr into
+        // mask_0_bitmap when `target != self`. The emitted body now
+        // aliases `mask_0_k = cfg.agent_cap` (compiler change from
+        // mass_battle_100v100 prep), so the runtime must dispatch
+        // `agent_cap × agent_cap` threads to cover every (actor,
+        // cand) pair.
         let mask_cfg = mask_verb_Heal::MaskVerbHealCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
@@ -362,7 +363,7 @@ impl CompiledSim for PairScoringProbeState {
             &mask_bindings,
             &self.gpu.device,
             &mut encoder,
-            self.agent_count,
+            self.agent_count * self.agent_count,
         );
 
         // (3) scoring — per-actor argmax over per_pair_candidate,

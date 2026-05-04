@@ -102,6 +102,12 @@ quest_probe_runtime = { path = "../quest_probe_runtime" }
 # PerPair tick preamble, Bool LHS rewrite). See
 # `docs/superpowers/notes/2026-05-04-duel_1v1.md`.
 duel_1v1_runtime = { path = "../duel_1v1_runtime" }
+# Mass-battle 100 vs 100 — sixth REAL gameplay-shaped fixture and
+# the first SCALE-UP for pair-field scoring (200 agents,
+# agent_cap × agent_cap mask grid). 10 Tank + 10 Healer + 80 DPS
+# per team × 2 teams. Stress-tests the per-pair mask + scoring
+# kernels at workloads beyond the duel_1v1 template (2 agents).
+mass_battle_100v100_runtime = { path = "../mass_battle_100v100_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -186,3 +192,7 @@ path = "src/quest_probe_app.rs"
 [[bin]]
 name = "duel_1v1_app"
 path = "src/duel_1v1_app.rs"
+
+[[bin]]
+name = "mass_battle_100v100_app"
+path = "src/mass_battle_100v100_app.rs"

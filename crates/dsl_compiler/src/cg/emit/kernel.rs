@@ -3228,8 +3228,9 @@ fn mask_predicate_per_agent_body(mask: MaskId, predicate_wgsl: &str) -> String {
 
 /// PerPair dispatch — derive `(agent, cand)` from `pair = gid.x`,
 /// bound-check `agent`, evaluate the predicate, atomic-OR the
-/// agent's bit. `mask_<ID>_k` placeholder is `1u` until Task 5.7
-/// wires `cfg.per_pair_candidates`.
+/// agent's bit. `mask_<ID>_k = cfg.agent_cap` so PerPair iterates
+/// every (actor, candidate) slot pair when the runtime dispatches
+/// `agent_cap × agent_cap` threads.
 ///
 /// `agent_id` / `per_pair_candidate` are aliased to the per-mask
 /// derivations so the predicate body — which refers to those names
@@ -3237,10 +3238,21 @@ fn mask_predicate_per_agent_body(mask: MaskId, predicate_wgsl: &str) -> String {
 /// [`crate::cg::expr::CgExpr::PerPairCandidateId`] —
 /// resolves cleanly. Path B's slot-aware lowering will fold the alias
 /// step into its naming strategy.
+///
+/// Earlier landings hardcoded `mask_<ID>_k = 1u`, which collapsed
+/// the per-pair grid to one candidate per actor (cand always 0).
+/// This degraded predicates like `target == self` to "agent_id ==
+/// 0 only" and `target.alive` to "slot-0.alive only", silently
+/// breaking every fixture beyond the duel_1v1 template. The
+/// mass_battle_100v100 sim (200 agents × 200 cand × 4 verbs) is
+/// the first fixture to actually need the full grid; runtimes that
+/// want full pair iteration must dispatch `agent_cap × agent_cap`
+/// threads (i.e. pass `agent_cap * agent_cap` to the dispatcher's
+/// `agent_cap` parameter).
 fn mask_predicate_per_pair_body(mask: MaskId, predicate_wgsl: &str) -> String {
     format!(
         "// PerPair MaskPredicate — derive (agent, cand) from `pair`.\n\
-         let mask_{0}_k = 1u; // TODO(task-5.7): read from cfg.per_pair_candidates.\n\
+         let mask_{0}_k = cfg.agent_cap;\n\
          let mask_{0}_agent = pair / mask_{0}_k;\n\
          let mask_{0}_cand  = pair % mask_{0}_k;\n\
          if (mask_{0}_agent >= cfg.agent_cap) {{ return; }}\n\

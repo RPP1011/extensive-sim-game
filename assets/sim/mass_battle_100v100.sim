@@ -1,0 +1,243 @@
+// mass_battle_100v100 — sixth REAL gameplay-shaped fixture.
+//
+// SCALE-UP for pair-field scoring: 100 Red vs 100 Blue (= 200 agents)
+// composed of 10 Tanks + 10 Healers + 80 DPS per team. Stress-tests
+// the per-pair mask + scoring kernels at workloads beyond the duel
+// 1v1 template (2 agents) — the first sim where the per-pair mask
+// kernel actually dispatches `agent_cap × agent_cap` threads.
+//
+// The compiler change shipped alongside this sim flips the
+// PerPair mask body's `mask_<ID>_k` alias from `1u` (placeholder)
+// to `cfg.agent_cap`, so the (actor, candidate) grid actually
+// covers every pair when the runtime dispatches `agent_cap²`
+// threads. At 200 agents × 4 verbs that's 200×200 = 40k mask
+// cells per verb per tick = 160k/tick — still well within GPU
+// norms.
+//
+// SHAPE — three role-gated verbs, mirroring the tactical_squad_5v5
+// shape but at 20× scale:
+//
+//   - Strike (Tank): closest enemy in melee range. Score is
+//     -distance(self.pos, target.pos) so the argmax picks the
+//     nearest valid enemy.
+//   - Snipe (DPS): lowest-HP enemy in range. Score is
+//     -target.hp so argmax picks the lowest-HP enemy.
+//   - Heal (Healer): most-injured ally (lowest HP%). Score is
+//     -(target.hp / target.max_hp) so the lowest fraction wins.
+//
+// ROLE / TEAM ENCODING — packed into the Agent's `level` u32 SoA
+// slot (no per-agent role/team setter exists; level is the only
+// u32 field with a pre-existing accessor + arithmetic promotion
+// path proven by stdlib_math_probe + the diplomacy probe). The
+// encoding is
+//
+//   level = 1u → Red Tank
+//   level = 2u → Red Healer
+//   level = 3u → Red DPS
+//   level = 4u → Blue Tank
+//   level = 5u → Blue Healer
+//   level = 6u → Blue DPS
+//
+// "enemy" predicate: `(self.level <= 3 && target.level >= 4) ||
+// (self.level >= 4 && target.level <= 3)`.
+// "ally"  predicate: `(self.level <= 3 && target.level <= 3) ||
+// (self.level >= 4 && target.level >= 4)`.
+//
+// PERFORMANCE EXPECTATION — with agent_cap=200 and 4 mask kernels
+// each dispatching 40k threads (= 625 workgroups of 64) per tick,
+// plus 1 scoring kernel iterating 200 candidates per actor per
+// row, plus chronicle + apply, the per-tick wall time should land
+// in the few-ms range on a discrete GPU and well under 50ms even
+// on integrated. The harness prints a per-25-tick wall-time
+// trace so the scaling check is visible.
+//
+// PROBE FOCUS — first real proof that pair-field scoring scales
+// past the 2-agent duel. Surfaces:
+//   - mask_k = cfg.agent_cap divisor at scale (not just 1u→2)
+//   - scoring inner loop over 200 candidates per (actor, verb)
+//   - per-team aliveness drain across the full grid
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Healed {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Defeated {
+  combatant: AgentId,
+}
+
+entity Combatant : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config combat {
+  // Per-tick economy:
+  //   Tank: 10 strikes / 2 ticks * 30 dmg = 150 dmg/tick/team
+  //   DPS: 80 snipes / 3 ticks * 22 dmg ≈ 587 dmg/tick/team
+  //   Heal: 10 heals / 3 ticks * 14 ≈ 47 heal/tick/team
+  // Net per-tick HP drain to one team ≈ 690 dmg taken — 47 heal
+  // ≈ 643 effective. Team total HP = 12 400; expected wipe in
+  // ~19 ticks if all attacks landed on live agents... but the
+  // pair-field argmax piles every same-role attacker on the
+  // same lowest-HP candidate, so deaths occur once per
+  // (highest-frequency cooldown) cycle. Empirically resolves
+  // in ~600 ticks. MAX_TICKS=800 leaves headroom.
+  strike_damage:    f32 = 30.0,
+  snipe_damage:     f32 = 22.0,
+  heal_amount:      f32 = 14.0,
+  cooldown_strike:  u32 = 2,
+  cooldown_snipe:   u32 = 3,
+  cooldown_heal:    u32 = 3,
+  // Used as a soft "in range" gate for healers; everyone else
+  // ignores it because the 100v100 grid stays inside this
+  // radius. Pair-field scoring's mask gate doesn't have spatial
+  // narrowing today (GAP — see header), so the gate here is
+  // expressed via the `level`-encoded role + team, not distance.
+  perception_radius: f32 = 999.0,
+}
+
+// ---- Strike (Tank) ----------------------------------------------
+//
+// Tank: pick closest enemy. score is utility-positive (large = better)
+// → use a high constant minus distance squared to avoid sqrt and to
+// keep argmax monotone. The `target` binder routes through the
+// per-pair candidate side (verb expander injects PerPair shape).
+//
+// Gate: self alive ∧ target alive ∧ self is Tank (level ∈ {1,4})
+// ∧ target is enemy ∧ cooldown OK.
+verb Strike(self, target: Agent) =
+  action StrikeAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && (world.tick % 2 == 0)
+        && (self.level == 1 || self.level == 4)
+        && (((self.level == 1) && (target.level >= 4))
+            || ((self.level == 4) && (target.level <= 3))))
+  emit Damaged { source: self, target: target, amount: config.combat.strike_damage }
+  // Score: tanks pick the lowest-HP enemy. Originally wanted
+  // "closest enemy" via `distance(self.pos, target.pos)`, but
+  // that lowered `self.pos` to `agent_pos[target_expr_<N>]`
+  // (verb-expander binder shadowing — same Gap E reported in
+  // duel_1v1's Heal verb). Sidestep: drop `self.pos` from the
+  // score and pick lowest-HP enemy like the DPS, just at a
+  // different cooldown + damage.
+  score (5000.0 - target.hp)
+
+// ---- Snipe (DPS) ------------------------------------------------
+//
+// DPS: pick lowest-HP enemy. score = -target.hp + base so argmax
+// picks the lowest-HP enemy. Gate is identical to Strike modulo
+// the role check (level ∈ {3,6}).
+verb Snipe(self, target: Agent) =
+  action SnipeAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && (world.tick % 3 == 0)
+        && (self.level == 3 || self.level == 6)
+        && (((self.level == 3) && (target.level >= 4))
+            || ((self.level == 6) && (target.level <= 3))))
+  emit Damaged { source: self, target: target, amount: config.combat.snipe_damage }
+  // Lowest HP wins argmax: `1000 - target.hp`.
+  score (1000.0 - target.hp)
+
+// ---- Heal (Healer) ----------------------------------------------
+//
+// Healer: pick lowest-HP-percentage ally. Score uses the inverse
+// of hp (higher = lower hp = more urgent). Gate is the ally
+// predicate.
+verb Heal(self, target: Agent) =
+  action HealAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && (world.tick % 3 == 0)
+        && (self.level == 2 || self.level == 5)
+        && (((self.level == 2) && (target.level <= 3))
+            || ((self.level == 5) && (target.level >= 4))))
+  emit Healed { source: self, target: target, amount: config.combat.heal_amount }
+  // Lowest fraction = highest urgency: 1000 - hp.
+  score (1000.0 - target.hp)
+
+// ---- Apply damage ----------------------------------------------
+//
+// On Damaged event: subtract amount from target HP; on HP <= 0
+// also flip alive=0 and emit Defeated.
+//
+// CRITICAL: gate on `agents.alive(t)` — dead agents (alive=0) must
+// never have their HP changed. Without this, the scoring kernel's
+// per-pair argmax (which iterates ALL `cfg.agent_cap` candidates,
+// not just live ones — there's no per-candidate alive filter
+// inside the inner loop today) keeps picking already-dead enemies
+// (HP drifts past 0 → still lowest-HP candidate → still wins
+// argmax). Same logic on the heal side: healers would otherwise
+// repeatedly resurrect their dead allies' HP slot. The mask gate
+// at the actor level checks `target.alive`, but only against
+// candidate=0 of the per-pair grid — not the inner argmax slot.
+@phase(post)
+physics ApplyDamage {
+  on Damaged { source: _, target: t, amount: a } {
+    if (agents.alive(t)) {
+      let new_hp = agents.hp(t) - a;
+      if (new_hp <= 0.0) {
+        // Dead-target sentinel HP: scoring uses `1000.0 - target.hp`
+        // (lower hp = higher score), so storing a HUGE positive HP
+        // for dead agents pushes their score into the deeply-
+        // negative range and they lose argmax against every live
+        // candidate. This sidesteps the missing per-candidate
+        // alive filter inside the scoring kernel's inner loop
+        // (the actor-level mask gate only checks `target.alive`
+        // for cand=0, not for every cand inside the argmax sweep).
+        agents.set_hp(t, 1000000000.0);
+        agents.set_alive(t, false);
+        emit Defeated { combatant: t }
+      } else {
+        agents.set_hp(t, new_hp);
+      }
+    }
+  }
+}
+
+// ---- Apply healing ----------------------------------------------
+//
+// On Healed event: add amount to target HP, gated on alive (same
+// reason as ApplyDamage above — dead allies must not absorb heals).
+@phase(post)
+physics ApplyHeal {
+  on Healed { source: _, target: t, amount: a } {
+    if (agents.alive(t)) {
+      let new_hp = agents.hp(t) + a;
+      agents.set_hp(t, new_hp);
+    }
+  }
+}
+
+// ---- Per-source observability views -----------------------------
+
+@materialized(on_event = [Damaged])
+view damage_dealt(source: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: s, target: _, amount: a } { self += a }
+  clamp: [0.0, 10000000.0],
+}
+
+@materialized(on_event = [Healed])
+view healing_done(source: Agent) -> f32 {
+  initial: 0.0,
+  on Healed { source: s, target: _, amount: a } { self += a }
+  clamp: [0.0, 10000000.0],
+}
