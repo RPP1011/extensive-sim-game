@@ -102,6 +102,13 @@ quest_probe_runtime = { path = "../quest_probe_runtime" }
 # PerPair tick preamble, Bool LHS rewrite). See
 # `docs/superpowers/notes/2026-05-04-duel_1v1.md`.
 duel_1v1_runtime = { path = "../duel_1v1_runtime" }
+# Quest Arc Real — EIGHTH real fixture and FIRST sim with multi-
+# stage per-agent state machines. 30 Adventurers each cycle through
+# 5 stages (Accept→Hunt→Collect→Return→Complete→reset) with stage
+# state encoded in the per-agent `mana` SoA field. Composes
+# duel_1v1's verb-cascade + chronicle pipeline with mana-as-stage-
+# register for the FSM.
+quest_arc_real_runtime = { path = "../quest_arc_real_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -186,3 +193,7 @@ path = "src/quest_probe_app.rs"
 [[bin]]
 name = "duel_1v1_app"
 path = "src/duel_1v1_app.rs"
+
+[[bin]]
+name = "quest_arc_real_app"
+path = "src/quest_arc_real_app.rs"

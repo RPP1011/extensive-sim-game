@@ -1,0 +1,191 @@
+// quest_arc_real — EIGHTH real gameplay-shaped fixture. First sim
+// with MULTI-STAGE PER-AGENT STATE MACHINES.
+//
+// Composition: 30 Adventurers; each runs an independent multi-stage
+// quest cycle (accept → hunt monster → collect item → return to
+// town → complete → reset). Stage progress is encoded in the
+// per-agent `mana` SoA field (f32) — values 0.0..=4.0 act as a
+// 5-state state machine; cumulative completed quests in `level`
+// (u32) via a chronicle increment.
+//
+// Why mana-as-stage?
+//   - The duel_1v1 fixture (commit ff1aa387) already wires
+//     `agents.set_mana(self_or_target, value)` end-to-end through
+//     the chronicle physics surface. No new compiler work needed.
+//   - quest_probe (commit d0fc9f1d) declared `entity X : Quest` as
+//     an accept-only stub but no `quests.<field>(idx)` accessor or
+//     per-Quest SoA buffer is wired (zero methods registered on
+//     NamespaceId::Quests beyond the `is_active` bool stub). To
+//     drive a stage counter through the namespace today we'd have
+//     to either (a) extend the resolver + namespace registry +
+//     emit + per-Quest SoA buffer (hundreds of LOC), or (b) reuse
+//     the already-wired Agent SoA. We pick (b).
+//
+// Per-agent state machine (5 stages, each gated by `self.mana ==
+// STAGE_N`):
+//
+//   stage 0 (Accept):    waiting at town. Cooldown 3 ticks → advance
+//   stage 1 (Hunt):      seeking monster. Cooldown 4 ticks → advance
+//   stage 2 (Collect):   picking up item. Cooldown 3 ticks → advance
+//   stage 3 (Return):    walking home. Cooldown 5 ticks → advance
+//   stage 4 (Complete):  emit QuestCompleted, reset mana=0, level+1
+//
+// Each stage is a separate `verb`; the `when` clause's
+// `self.mana == STAGE_N` predicate is the per-stage gate. Verbs
+// that are mutually exclusive on stage produce mutually exclusive
+// scoring rows, so per-agent argmax picks the correct one each
+// tick (or none if the cooldown gate masks all rows out).
+//
+// PROBE FOCUS: per-agent multi-stage state machine driven by
+// world events. Demonstrates that the duel_1v1-shaped pipeline
+// composes for state-machine semantics — no per-agent sub-FSM
+// runtime, just `mana` as a state register driven by emitted
+// `StageAdvance` events.
+
+event Tick { }
+
+// Per-stage advance signal. Physics handler reads the event,
+// reads the agent's current mana, writes mana + 1.0.
+@replayable @gpu_amenable
+event StageAdvanced {
+  agent: AgentId,
+}
+
+// Quest cycle completion. Physics handler resets mana=0, increments
+// level (cumulative quests-completed counter).
+@replayable @gpu_amenable
+event QuestCompleted {
+  agent: AgentId,
+}
+
+entity Adventurer : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config quest {
+  // Stage gate values — held as f32 to align with the mana field's
+  // type (AgentFieldTy::F32 per crates/dsl_compiler/src/cg/data_handle.rs:238).
+  stage_accept:    f32 = 0.0,
+  stage_hunt:      f32 = 1.0,
+  stage_collect:   f32 = 2.0,
+  stage_return:    f32 = 3.0,
+  stage_complete:  f32 = 4.0,
+}
+
+// IMPORTANT: each verb deliberately omits a `target == self` (or
+// `target != self`) predicate. The mask kernel today (TODO task-5.7
+// in `crates/dsl_compiler/src/cg/lower/kernel.rs`'s
+// `mask_predicate_per_pair_body_with_prefix` and the WGSL emitter
+// at `crates/dsl_compiler/src/cg/emit/mask_kernel.rs`) hardcodes
+// `mask_k = 1u`, so `per_pair_candidate = pair % 1 = 0` for ALL
+// agents. With `target == self` the mask gate becomes
+// `per_pair_candidate (==0) == agent_id`, which only ever passes
+// for `agent_id == 0` — duel_1v1 has the inverse asymmetry on
+// `target != self` (only Hero B attacks Hero A). For a 30-agent
+// per-agent state machine we need EVERY agent to fire its own
+// quest cycle, so we drop the target-vs-self predicate. The
+// emitted `StageAdvanced { agent: self }` resolves `self` to the
+// actor slot in the chronicle (`local_2 = event_ring[idx*10+2]`),
+// which is what we want — the target field carried in
+// ActionSelected is unused by these verbs' chronicle bodies.
+
+// stage 0 → 1 (Accept quest at town). Fires every 3rd tick when
+// mana == 0.0. Emits StageAdvanced; ApplyStageAdvance physics writes
+// mana+1.
+verb AcceptQuest(self, target: Agent) =
+  action AcceptAction
+  when (self.alive
+        && self.mana == config.quest.stage_accept
+        && (world.tick % 3 == 0))
+  emit StageAdvanced { agent: self }
+  score 100.0
+
+// stage 1 → 2 (Hunt monster). Fires every 4th tick when mana == 1.0.
+verb HuntMonster(self, target: Agent) =
+  action HuntAction
+  when (self.alive
+        && self.mana == config.quest.stage_hunt
+        && (world.tick % 4 == 0))
+  emit StageAdvanced { agent: self }
+  score 100.0
+
+// stage 2 → 3 (Collect quest item). Fires every 3rd tick when mana == 2.0.
+verb CollectItem(self, target: Agent) =
+  action CollectAction
+  when (self.alive
+        && self.mana == config.quest.stage_collect
+        && (world.tick % 3 == 0))
+  emit StageAdvanced { agent: self }
+  score 100.0
+
+// stage 3 → 4 (Return to town). Fires every 5th tick when mana == 3.0.
+verb ReturnHome(self, target: Agent) =
+  action ReturnAction
+  when (self.alive
+        && self.mana == config.quest.stage_return
+        && (world.tick % 5 == 0))
+  emit StageAdvanced { agent: self }
+  score 100.0
+
+// stage 4 → reset (Complete quest). Fires every tick when mana == 4.0
+// (no further cooldown). Emits QuestCompleted; ApplyQuestCompleted
+// physics resets mana=0 and increments level.
+verb CompleteQuest(self, target: Agent) =
+  action CompleteAction
+  when (self.alive
+        && self.mana == config.quest.stage_complete)
+  emit QuestCompleted { agent: self }
+  score 100.0
+
+// Apply stage advancement — chronicle physics. Reads agent's
+// current mana, writes mana+1.0. Same shape as duel_1v1's
+// ApplyDamage (`agents.hp(t) - a` then `agents.set_hp(t, new_hp)`).
+@phase(post)
+physics ApplyStageAdvance {
+  on StageAdvanced { agent: a } {
+    let new_stage = agents.mana(a) + 1.0;
+    agents.set_mana(a, new_stage);
+  }
+}
+
+// Apply quest completion — reset stage to 0 (start a new quest)
+// AND increment level (cumulative quests completed). Demonstrates
+// the full cycle 0→1→2→3→4→0.
+//
+// NOTE: `level` is a u32 SoA field (AgentFieldId::Level →
+// AgentFieldTy::U32). The agents.set_<field> namespace today
+// recognises {pos, vel, hp, alive, mana} only (see
+// crates/dsl_compiler/src/cg/lower/physics.rs:751-759). We could
+// add `set_level` for u32 cumulative counts, but the smaller
+// inline-fix is to reuse the f32 fold-view path: emit
+// QuestCompleted, fold into a `quests_completed` f32 view via
+// `+= 1.0` (CAS-add path, P11-trivial). Reading the per-agent
+// completed-quest count from the runtime then comes from the
+// view storage, not the SoA. mana reset is the only SoA write.
+@phase(post)
+physics ApplyQuestCompleted {
+  on QuestCompleted { agent: a } {
+    agents.set_mana(a, 0.0);
+  }
+}
+
+// Per-agent cumulative completed quests — observability view.
+// f32 result so `+= 1.0` lowers via the CAS-add emit branch
+// (NOT the u32 atomicOr branch surfaced in quest_probe).
+@materialized(on_event = [QuestCompleted])
+view quests_completed(agent: Agent) -> f32 {
+  initial: 0.0,
+  on QuestCompleted { agent: a } { self += 1.0 }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-agent stage advances — observability view (counts every
+// StageAdvanced emit per agent — should be ~4 × quests_completed
+// in the steady state).
+@materialized(on_event = [StageAdvanced])
+view stage_advances(agent: Agent) -> f32 {
+  initial: 0.0,
+  on StageAdvanced { agent: a } { self += 1.0 }
+  clamp: [0.0, 1000000.0],
+}
