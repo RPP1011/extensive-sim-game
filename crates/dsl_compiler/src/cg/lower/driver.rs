@@ -1871,6 +1871,13 @@ fn collect_emits_in_list(list_id: CgStmtListId, prog: &CgProgram, out: &mut Vec<
                     collect_emits_in_list(arm.body, prog, out);
                 }
             }
+            CgStmt::ForEachNeighborBody { body, .. } => {
+                // Body-form spatial walk carries an emit-bearing
+                // body — descend into it so the per-pair
+                // `Emit { … }` statements register their event
+                // ring writes via `record_write` upstream.
+                collect_emits_in_list(*body, prog, out);
+            }
             CgStmt::Assign { .. }
             | CgStmt::Let { .. }
             | CgStmt::ForEachAgent { .. }

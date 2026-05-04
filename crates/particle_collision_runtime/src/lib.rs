@@ -56,6 +56,26 @@ pub struct ParticleCollisionState {
     collision_count: ViewStorage,
     collision_count_cfg_buf: wgpu::Buffer,
 
+    // ---- Spatial-grid (slice 2b body-form spatial query) -------------
+    /// Sorted-by-cell agent ids — `array<u32>` sized `agent_cap`. After
+    /// the five-phase counting sort populates this, cell `c`'s agent
+    /// ids occupy `[spatial_grid_starts[c] .. spatial_grid_starts[c +
+    /// 1])`. Mirrors the boids spatial layout — same WGSL constants
+    /// from `dsl_compiler::cg::emit::spatial`, no per-fixture knobs.
+    spatial_grid_cells: wgpu::Buffer,
+    /// Per-cell atomic counters. Triple-duty across counting sort.
+    spatial_grid_offsets: wgpu::Buffer,
+    /// Per-cell start offsets after the prefix scan — `array<u32>`
+    /// sized `num_cells + 1`. Read by the body-form spatial walk emit
+    /// (`spatial_grid_starts[_cell]`/`[+1]`) to bound each cell's
+    /// candidate slice.
+    spatial_grid_starts: wgpu::Buffer,
+    /// Per-workgroup-chunk total used by the parallel prefix scan.
+    spatial_chunk_sums: wgpu::Buffer,
+    /// Pre-allocated zero buffer used as the COPY_SRC for the per-tick
+    /// offsets clear.
+    spatial_offsets_zero: wgpu::Buffer,
+
     cache: dispatch::KernelCache,
     pos_cache: Vec<Vec3>,
     dirty: bool,
@@ -149,6 +169,53 @@ impl ParticleCollisionState {
             },
         );
 
+        // ---- Spatial-grid buffers (slice 2b body-form spatial query) -
+        // Constants live in `dsl_compiler::cg::emit::spatial` so the
+        // host-side allocation matches the WGSL `const` declarations
+        // the build.rs emit produces. Same layout boids_runtime uses:
+        // bounded counting sort, no per-cell cap on `cells`,
+        // `starts[c..c+1]` slices the cell's agent-id range.
+        use dsl_compiler::cg::emit::spatial as sp;
+        let agent_cap_bytes = (agent_count as u64) * 4;
+        let offsets_size = sp::offsets_bytes();
+        let starts_size = ((sp::num_cells() as u64) + 1) * 4;
+        let spatial_grid_cells = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("particle_collision_runtime::spatial_grid_cells"),
+            size: agent_cap_bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let spatial_grid_offsets = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("particle_collision_runtime::spatial_grid_offsets"),
+            size: offsets_size,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let spatial_grid_starts = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("particle_collision_runtime::spatial_grid_starts"),
+            size: starts_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let chunk_size = dsl_compiler::cg::dispatch::PER_SCAN_CHUNK_WORKGROUP_X;
+        let num_chunks = sp::num_cells().div_ceil(chunk_size);
+        let chunk_sums_size = (num_chunks as u64) * 4;
+        let spatial_chunk_sums = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("particle_collision_runtime::spatial_chunk_sums"),
+            size: chunk_sums_size,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        let zeros: Vec<u8> = vec![0u8; offsets_size as usize];
+        let spatial_offsets_zero =
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("particle_collision_runtime::spatial_offsets_zero"),
+                contents: &zeros,
+                usage: wgpu::BufferUsages::COPY_SRC,
+            });
+
         Self {
             gpu,
             pos_buf,
@@ -158,6 +225,11 @@ impl ParticleCollisionState {
             event_ring,
             collision_count,
             collision_count_cfg_buf,
+            spatial_grid_cells,
+            spatial_grid_offsets,
+            spatial_grid_starts,
+            spatial_chunk_sums,
+            spatial_offsets_zero,
             cache: dispatch::KernelCache::default(),
             pos_cache: pos_host,
             dirty: false,
@@ -167,12 +239,22 @@ impl ParticleCollisionState {
         }
     }
 
-    /// Per-particle collision-count accumulator readback. Each
-    /// MoveParticle emit fires `Collision { a: self, b: self,
-    /// impulse }` so each Particle slot increments its own
-    /// collision_count by 2 per tick (the view's two `on Collision
-    /// { a/b: agent } { self += 1.0 }` handlers BOTH match when
-    /// a == b == self).
+    /// Per-particle collision-count accumulator readback.
+    ///
+    /// Stage 1 (slice 2b): the body-form spatial walk in
+    /// `MoveParticle` emits one `Collision { a: self, b: other,
+    /// impulse }` event per (self, other) candidate slot in the
+    /// 27-cell neighbourhood. Each event hits BOTH the
+    /// `on Collision { a: agent }` and `on Collision { b: agent }`
+    /// handlers, incrementing `collision_count[a]` AND
+    /// `collision_count[b]` by 1.0. With the auto-spread the
+    /// initial particles are dispersed so the per-cell density is
+    /// ~1; the per-tick total is therefore approximately
+    /// `2 * (sum over self of cells_in_neighbourhood)` which
+    /// scales with N (linear in agent count) rather than N²
+    /// (full N² walk) or N (the prior placeholder per-self emit).
+    /// See pc_app.rs for the analytical derivation pinned at the
+    /// fixture's seeded layout.
     pub fn collision_counts(&mut self) -> &[f32] {
         self.collision_count.readback(&self.gpu)
     }
@@ -225,16 +307,99 @@ impl CompiledSim for ParticleCollisionState {
                 label: Some("particle_collision_runtime::step"),
             });
 
-        // Clear event_tail before producers run.
+        // Clear event_tail + spatial offsets before producers run.
         self.event_ring.clear_tail_in(&mut encoder);
+        let offsets_size = dsl_compiler::cg::emit::spatial::offsets_bytes();
+        encoder.copy_buffer_to_buffer(
+            &self.spatial_offsets_zero,
+            0,
+            &self.spatial_grid_offsets,
+            0,
+            offsets_size,
+        );
 
-        // (1) MoveParticle — emits one Collision event per particle
-        // per tick.
+        // (1) Spatial-hash counting sort (5 phases). Required input
+        // for the body-form spatial walk emitted into MoveParticle.
+        // Same layout as boids — see boids_runtime::step for the
+        // fixture-agnostic narrative.
+        let count_b = spatial_build_hash_count::SpatialBuildHashCountBindings {
+            agent_pos: &self.pos_buf,
+            spatial_grid_offsets: &self.spatial_grid_offsets,
+            cfg: &self.cfg_buf,
+        };
+        dispatch::dispatch_spatial_build_hash_count(
+            &mut self.cache,
+            &count_b,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+        let scan_local_b = spatial_build_hash_scan_local::SpatialBuildHashScanLocalBindings {
+            spatial_grid_offsets: &self.spatial_grid_offsets,
+            spatial_grid_starts: &self.spatial_grid_starts,
+            spatial_chunk_sums: &self.spatial_chunk_sums,
+            cfg: &self.cfg_buf,
+        };
+        dispatch::dispatch_spatial_build_hash_scan_local(
+            &mut self.cache,
+            &scan_local_b,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+        let scan_carry_b = spatial_build_hash_scan_carry::SpatialBuildHashScanCarryBindings {
+            spatial_chunk_sums: &self.spatial_chunk_sums,
+            cfg: &self.cfg_buf,
+        };
+        dispatch::dispatch_spatial_build_hash_scan_carry(
+            &mut self.cache,
+            &scan_carry_b,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+        let scan_add_b = spatial_build_hash_scan_add::SpatialBuildHashScanAddBindings {
+            spatial_grid_offsets: &self.spatial_grid_offsets,
+            spatial_grid_starts: &self.spatial_grid_starts,
+            spatial_chunk_sums: &self.spatial_chunk_sums,
+            cfg: &self.cfg_buf,
+        };
+        dispatch::dispatch_spatial_build_hash_scan_add(
+            &mut self.cache,
+            &scan_add_b,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+        let scatter_b = spatial_build_hash_scatter::SpatialBuildHashScatterBindings {
+            agent_pos: &self.pos_buf,
+            spatial_grid_cells: &self.spatial_grid_cells,
+            spatial_grid_offsets: &self.spatial_grid_offsets,
+            spatial_grid_starts: &self.spatial_grid_starts,
+            cfg: &self.cfg_buf,
+        };
+        dispatch::dispatch_spatial_build_hash_scatter(
+            &mut self.cache,
+            &scatter_b,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+
+        // (2) MoveParticle — body-form spatial walk emits one Collision
+        // event per (self, other) candidate slot in the 27-cell
+        // neighbourhood. `agent_pos` is read-write here because the
+        // physics rule both reads it (for the walk's self-cell
+        // computation) and writes the integrated position before the
+        // walk.
         let bindings = physics_MoveParticle::PhysicsMoveParticleBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
             agent_pos: &self.pos_buf,
             agent_vel: &self.vel_buf,
+            spatial_grid_cells: &self.spatial_grid_cells,
+            spatial_grid_offsets: &self.spatial_grid_offsets,
+            spatial_grid_starts: &self.spatial_grid_starts,
             cfg: &self.cfg_buf,
         };
         dispatch::dispatch_physics_moveparticle(
@@ -245,7 +410,7 @@ impl CompiledSim for ParticleCollisionState {
             self.agent_count,
         );
 
-        // (2) seed_indirect_0 — keeps indirect-args buffer warm.
+        // (3) seed_indirect_0 — keeps indirect-args buffer warm.
         let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
@@ -260,9 +425,21 @@ impl CompiledSim for ParticleCollisionState {
             self.agent_count,
         );
 
-        // event_count = agent_count (one Collision per particle).
+        // event_count = static upper bound covering the per-pair
+        // emit. Each particle's body-form walk visits up to
+        // (27 cells × MAX_PER_CELL) candidates; emitting
+        // `agent_count * MAX_PER_CELL * 27` covers the worst case.
+        // The kernel's `if (event_idx >= cfg.event_count) return;`
+        // gate skips empty event-ring slots beyond the actual tail.
+        // The DEFAULT_EVENT_RING_CAP_SLOTS is 65536 so as long as
+        // the upper bound stays below that the ring never overflows.
+        use dsl_compiler::cg::emit::spatial as sp;
+        let event_count = std::cmp::min(
+            self.agent_count.saturating_mul(sp::MAX_PER_CELL).saturating_mul(27),
+            65536,
+        );
         let cc_cfg = fold_collision_count::FoldCollisionCountCfg {
-            event_count: self.agent_count,
+            event_count,
             tick: self.tick as u32,
             second_key_pop: 1,
             _pad: 0,
@@ -273,7 +450,7 @@ impl CompiledSim for ParticleCollisionState {
             bytemuck::bytes_of(&cc_cfg),
         );
 
-        // (3) fold_collision_count — RMW view_storage_primary by
+        // (4) fold_collision_count — RMW view_storage_primary by
         // 1.0 per Collision event whose `a` OR `b` matches the
         // slot.
         let cc_bindings = fold_collision_count::FoldCollisionCountBindings {
@@ -290,7 +467,7 @@ impl CompiledSim for ParticleCollisionState {
             &cc_bindings,
             &self.gpu.device,
             &mut encoder,
-            self.agent_count,
+            event_count,
         );
 
         self.gpu.queue.submit(Some(encoder.finish()));

@@ -355,6 +355,45 @@ pub enum CgStmt {
         projection: CgExprId,
         radius_cells: u32,
     },
+
+    /// **Spatial-grid-bounded body iteration** — same per-cell walk
+    /// as [`Self::ForEachNeighbor`], but the body is a per-candidate
+    /// statement list rather than a fold accumulator. Lowered from
+    /// `IrStmt::For { binder, iter: spatial.<query>(self), body, .. }`
+    /// in physics rule bodies (slice 2b of the stdlib-into-CG-IR
+    /// plan).
+    ///
+    /// Unlike the fold form, the body can carry side effects
+    /// (typically `emit <Event> { … }` to surface a per-pair record)
+    /// and references to `<binder>.<field>` / `<binder>` resolve
+    /// through [`crate::cg::data_handle::AgentRef::PerPairCandidate`]
+    /// just like the fold's projection.
+    ///
+    /// # WGSL emit shape
+    ///
+    /// Mirrors [`Self::ForEachNeighbor`]'s 27-cell global-memory walk
+    /// scaffolding — the body executes once per neighbour candidate
+    /// with `per_pair_candidate` bound to the candidate's slot id.
+    ///
+    /// # Binder
+    ///
+    /// `binder` is the [`LocalId`] introduced by the source-level
+    /// `for <binder> in …` clause. The lowering registers
+    /// `local_ids[ast_ref] = binder` and records
+    /// `local_tys[binder] = AgentId` — the WGSL emit does NOT consult
+    /// `binder` directly because `per_pair_candidate` is the
+    /// kernel-side name for the same slot id; the field is carried
+    /// for diagnostic / future-emit-shape clarity.
+    ///
+    /// # Cell radius
+    ///
+    /// `radius_cells` mirrors [`Self::ForEachNeighbor`]'s field —
+    /// inclusive half-width of the cell neighborhood walked.
+    ForEachNeighborBody {
+        binder: LocalId,
+        body: CgStmtListId,
+        radius_cells: u32,
+    },
 }
 
 impl fmt::Display for CgStmt {
@@ -414,6 +453,17 @@ impl fmt::Display for CgStmt {
                     f,
                     "for_each_neighbor(acc={}: {}, init=expr#{}, proj=expr#{}, r={})",
                     acc_local, acc_ty, init.0, projection.0, radius_cells
+                )
+            }
+            CgStmt::ForEachNeighborBody {
+                binder,
+                body,
+                radius_cells,
+            } => {
+                write!(
+                    f,
+                    "for_each_neighbor_body(binder={}, body=stmts#{}, r={})",
+                    binder, body.0, radius_cells
                 )
             }
         }
@@ -708,6 +758,26 @@ pub fn collect_stmt_dependencies(
             // get dispatched before it).
             collect_expr_reads(*init, exprs, reads);
             collect_expr_reads(*projection, exprs, reads);
+            reads.push(DataHandle::SpatialStorage {
+                kind: super::data_handle::SpatialStorageKind::GridCells,
+            });
+            reads.push(DataHandle::SpatialStorage {
+                kind: super::data_handle::SpatialStorageKind::GridOffsets,
+            });
+            reads.push(DataHandle::SpatialStorage {
+                kind: super::data_handle::SpatialStorageKind::GridStarts,
+            });
+        }
+        CgStmt::ForEachNeighborBody { body, .. } => {
+            // Body-form spatial walk. The body's own statements
+            // contribute reads/writes via the recursive list walk
+            // (e.g. an inner Emit's field-value reads + the host-
+            // recorded ring write). The walker must ALSO surface
+            // the three spatial bindings the WGSL emit reads —
+            // mirrors `ForEachNeighbor`'s structural surface so
+            // the BGL composer + schedule synthesizer treat both
+            // forms identically.
+            collect_list_dependencies(*body, exprs, stmts, lists, reads, writes);
             reads.push(DataHandle::SpatialStorage {
                 kind: super::data_handle::SpatialStorageKind::GridCells,
             });

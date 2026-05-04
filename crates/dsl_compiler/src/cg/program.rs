@@ -1273,6 +1273,14 @@ impl CgProgramBuilder {
                 self.check_expr_id(*init)?;
                 self.check_expr_id(*projection)
             }
+            CgStmt::ForEachNeighborBody { body, .. } => {
+                // The nested body stmt list must already exist; its
+                // children (statements + their expression ids) are
+                // validated when each was added. The `binder` LocalId
+                // is arena-independent and `radius_cells` is a
+                // primitive payload.
+                self.check_list_id(*body)
+            }
         }
     }
 

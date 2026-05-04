@@ -1337,6 +1337,11 @@ fn lower_cg_stmt_body_to_wgsl(
             // loop in the order given.
             emit_fused_for_each_neighbor(&[node], ctx)
         }
+        CgStmt::ForEachNeighborBody {
+            binder: _,
+            body,
+            radius_cells,
+        } => emit_for_each_neighbor_body(*body, *radius_cells, ctx),
         CgStmt::ForEachAgent {
             acc_local,
             acc_ty,
@@ -1984,6 +1989,57 @@ fn emit_fused_for_each_neighbor(
         );
         Ok(body)
     }
+}
+
+/// Emit a per-candidate body block for [`CgStmt::ForEachNeighborBody`].
+///
+/// Mirrors the cell-walk path of [`emit_fused_for_each_neighbor`] but
+/// substitutes the body's lowered WGSL for the per-candidate
+/// accumulator update line. Each candidate slot id is bound to
+/// `per_pair_candidate` (matching the existing pair-bound emit
+/// convention) so the body's `agent_<field>[per_pair_candidate]`
+/// accesses (lowered via [`AgentRef::PerPairCandidate`]) resolve
+/// against the global SoA buffers.
+///
+/// The emit is wrapped in `{}` so the helper-level locals
+/// (`_self_cell_f`, `_self_cx`, …) don't leak into the surrounding
+/// kernel scope — the same scoping the fold-form path uses.
+fn emit_for_each_neighbor_body(
+    body_list: crate::cg::stmt::CgStmtListId,
+    radius_cells: u32,
+    ctx: &EmitCtx,
+) -> Result<String, EmitError> {
+    let body_wgsl = lower_cg_stmt_list_to_wgsl(body_list, ctx)?;
+    let r = radius_cells as i32;
+    // Indent each line of the body so it nests cleanly inside the
+    // 4-deep loop chain (3 cell-axis loops + 1 candidate loop). Six
+    // levels of 4-space indent → 24 spaces.
+    let indented_body = indent_block(&body_wgsl, 6);
+    let out = format!(
+        "{{\n\
+         \x20   let _self_cell_f = (agent_pos[agent_id] + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
+         \x20   let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
+         \x20   let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
+         \x20   let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
+         \x20   let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
+         \x20   for (var dz: i32 = -{r}; dz <= {r}; dz = dz + 1) {{\n\
+         \x20       for (var dy: i32 = -{r}; dy <= {r}; dy = dy + 1) {{\n\
+         \x20           for (var dx: i32 = -{r}; dx <= {r}; dx = dx + 1) {{\n\
+         \x20               let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
+         \x20               let _start = spatial_grid_starts[_cell];\n\
+         \x20               let _end = spatial_grid_starts[_cell + 1u];\n\
+         \x20               for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {{\n\
+         \x20                   let per_pair_candidate = spatial_grid_cells[_i];\n\
+         {indented_body}\n\
+         \x20               }}\n\
+         \x20           }}\n\
+         \x20       }}\n\
+         \x20   }}\n\
+         }}",
+        r = r,
+        indented_body = indented_body,
+    );
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------
@@ -3779,6 +3835,44 @@ mod tests {
     /// `Assign { target: AgentField{Pos, Target(N)}, value }`
     /// (`agents.set_pos(other, …)`) emits the same pre-binding +
     /// indexed write, replacing the prior phony `_ = (…);` discard.
+    #[test]
+    fn for_each_neighbor_body_emits_per_candidate_walk_with_inner_emit() {
+        // Body-form spatial walk: empty stmt body smoke-test pinning
+        // the per-candidate cell-walk scaffold. Slice 2b of the
+        // stdlib-into-CG-IR plan. The emitted WGSL must contain:
+        //
+        // - The 4-deep loop chain: 3 cell-axis iterators (`dz/dy/dx`)
+        //   plus the inner per-candidate loop bound by
+        //   `spatial_grid_starts[_cell..+1]`.
+        // - The `let per_pair_candidate = spatial_grid_cells[_i];`
+        //   binding — the pair-bound emit convention's slot id.
+        let mut prog = empty_prog();
+        // Empty inner body; the test focuses on the scaffold.
+        let inner_list = push_list(&mut prog, CgStmtList::new(vec![]));
+        let body_stmt = push_stmt(
+            &mut prog,
+            CgStmt::ForEachNeighborBody {
+                binder: LocalId(7),
+                body: inner_list,
+                radius_cells: 1,
+            },
+        );
+        let ctx = EmitCtx::structural(&prog);
+        let wgsl = lower_cg_stmt_to_wgsl(body_stmt, &ctx).expect("body-form spatial walk lowers");
+        assert!(
+            wgsl.contains("let per_pair_candidate = spatial_grid_cells[_i];"),
+            "expected per-candidate slot binding; got:\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("for (var dz: i32 = -1; dz <= 1; dz = dz + 1)"),
+            "expected the cell-walk z-axis loop; got:\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("let _start = spatial_grid_starts[_cell];"),
+            "expected the cell-slice start binding; got:\n{wgsl}"
+        );
+    }
+
     #[test]
     fn target_assign_emits_indexed_write_not_phony_discard() {
         let mut prog = empty_prog();
