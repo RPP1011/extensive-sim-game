@@ -1749,6 +1749,7 @@ dependencies = [
  "stdlib_math_probe_runtime",
  "stochastic_probe_runtime",
  "swarm_storm_runtime",
+ "tactical_squad_5v5_runtime",
  "target_chaser_runtime",
  "tom_probe_runtime",
  "trade_market_runtime",
@@ -1845,6 +1846,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "tactical_squad_5v5_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
 ]
 
 [[package]]

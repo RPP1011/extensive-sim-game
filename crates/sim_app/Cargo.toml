@@ -123,6 +123,13 @@ foraging_real_runtime = { path = "../foraging_real_runtime" }
 # on hunger<=0). Five distinct alive-bitmap-flip surfaces fire across
 # both species in a single run. See `assets/sim/predator_prey_real.sim`.
 predator_prey_real_runtime = { path = "../predator_prey_real_runtime" }
+# Tactical squad 5v5 — FIFTH real fixture. 5 vs 5 with role distribution
+# (Tank + Healer + 3 DPS per team). First fixture to actually exercise
+# pair-field scoring for target selection (DPS picks lowest-HP enemy;
+# Healer picks lowest-HP ally) — the duel_1v1 had pair-field scoring
+# but the 2-agent population trivialised the argmax. Closes the
+# verb-mask `mask_k=1u` placeholder gap inline (Task 5.7).
+tactical_squad_5v5_runtime = { path = "../tactical_squad_5v5_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -219,3 +226,7 @@ path = "src/foraging_real_app.rs"
 [[bin]]
 name = "predator_prey_real_app"
 path = "src/predator_prey_real_app.rs"
+
+[[bin]]
+name = "tactical_squad_5v5_app"
+path = "src/tactical_squad_5v5_app.rs"
