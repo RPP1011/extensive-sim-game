@@ -1,0 +1,35 @@
+[package]
+name = "predator_prey_real_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime for `assets/sim/predator_prey_real.sim` —
+# fourth REAL fixture: COMBAT + LIFECYCLE composed on TWO live
+# creature types simultaneously.
+#
+# Mirrors `foraging_real_runtime` for the spatial body-form +
+# chronicle-physics + CPU-side birth-slot scaffolding. Adds:
+#   - Combat path on top of lifecycle: WolfHunt emits Damaged →
+#     ApplyKill subtracts hp + sets alive=false (sheep combat
+#     death) AND increments wolf hunger (wolves eat).
+#   - Two-species birth machinery: wolves born when total kills
+#     crosses KILLS_PER_WOLF_BIRTH, sheep born every
+#     SHEEP_BREED_INTERVAL ticks proportional to well-fed-sheep
+#     count.
+#
+# build.rs lowers the .sim through the DSL compiler into
+# `OUT_DIR/generated.rs`; src/lib.rs owns the GPU context, per-buffer
+# storage, kernel cache, and per-tick dispatch chain.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

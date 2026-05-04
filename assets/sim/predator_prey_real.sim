@@ -1,0 +1,287 @@
+// predator_prey_real — fourth REAL fixture: COMBAT + LIFECYCLE composed.
+//
+// Natural escalation from `foraging_real.sim` (commit 6558c758). Where
+// foraging_real demonstrated LIFECYCLE on a single creature type
+// (Ants eating FoodPiles, with births + deaths flipping the alive
+// bitmap both directions), predator_prey_real composes COMBAT (per-tick
+// spatial walk emitting Damaged events from one creature_type to
+// another) WITH LIFECYCLE (per-tick energy decay → death; eats /
+// well-fed-window threshold → birth) on TWO live creature types
+// simultaneously.
+//
+// Architectural target this fixture hits that the prior three did not:
+//   - duel_25v25     : SCALE-UP combat via spatial body-form (no births)
+//   - foraging_real  : LIFECYCLE on one creature type (Ants; food was
+//                      passive)
+//   - predator_prey_real : COMBAT + LIFECYCLE on TWO creature types
+//                          simultaneously (wolves hunt sheep AND breed
+//                          AND starve; sheep graze AND breed AND get
+//                          eaten AND starve)
+//
+// SHAPE: shared Agent SoA discriminated by `creature_type`:
+//   - creature_type=0 → Wolf. Hunger=energy (decays each tick, refilled
+//     via meat_gain on Damaged target). Hp=meat-stockpile credit
+//     (incremented per kill — drives wolf births CPU-side).
+//   - creature_type=1 → Sheep. Hunger=energy (decays each tick,
+//     refilled by uniform graze_rate per tick). Hp=health (decremented
+//     by Damaged events from wolves; on hp<=0 set_alive=false).
+//
+// Per-tick chain:
+//
+//   1. spatial_build_hash (5 phases) — same as foraging_real /
+//      duel_25v25.
+//   2. WolfHunt @phase(per_agent) — each alive Wolf walks its 27-cell
+//      neighbourhood. For each alive Sheep neighbour, emits one Damaged
+//      event (gated every 2 ticks via `world.tick % 2 == 0` cooldown).
+//   3. ApplyKill @phase(post) — chronicle physics. For each Damaged
+//      event:
+//      - sheep.hp -= strike_damage; if hp<=0 → set_alive(sheep, false)
+//        + emit Killed. (the sheep alive=true → false direction —
+//        combat death)
+//      - wolf.hunger += meat_gain (the wolf eats the sheep — even
+//        partial bites add energy).
+//      - wolf.hp += 1.0 (kill-credit; CPU sums for wolf births).
+//   4. SheepGraze @phase(per_agent) — each alive Sheep adds graze_rate
+//      to hunger (uniform regrowth proxy — no separate Grass entity).
+//   5. EnergyDecay @phase(per_agent) — every alive agent (wolf OR
+//      sheep) drains decay_rate from hunger. If hunger<=0 →
+//      set_alive(self, false) + emit Starved (the second alive=true →
+//      false path — starvation death). Both species starve via the
+//      SAME rule, distinguished by per-handler `where (self.alive)`
+//      gate.
+//   6. fold kills_total(by: Wolf) — per-source wolf-kill credit. CPU
+//      sums to drive wolf births.
+//   7. fold sheep_killed_total(prey: Sheep) — observability mirror.
+//   8. fold wolf_starved_total + sheep_starved_total — per-creature
+//      starvation observability (same Starved event, both sides fold
+//      it; CPU partitions by creature_type at readback).
+//
+// Lifecycle (the killer-feature composition):
+//   - DEATHS in DSL (TWO causes per-creature):
+//     * Wolves: starvation only (no predator preys on wolves).
+//       EnergyDecay's set_alive(self, false) on hunger<=0.
+//     * Sheep: combat death (ApplyKill's set_alive(sheep, false) on
+//       hp<=0) AND starvation (EnergyDecay's set_alive(self, false)
+//       on hunger<=0).
+//   - BIRTHS on CPU side (BOTH species):
+//     * Wolves: when total kills crosses each integer multiple of
+//       KILLS_PER_WOLF_BIRTH, runtime flips next dead Wolf slot
+//       alive=1 with hunger=INITIAL_WOLF_ENERGY, hp=0. (Models
+//       reproduction from successful hunting.)
+//     * Sheep: every SHEEP_BREED_INTERVAL ticks, runtime counts
+//       well-fed sheep (hunger > SHEEP_BREED_THRESHOLD); for each
+//       pair, flips one dead Sheep slot alive=1 with
+//       hunger=INITIAL_SHEEP_ENERGY, hp=INITIAL_SHEEP_HP. (Models
+//       herbivore reproduction by being well-fed.)
+//
+// Termination: app reports either:
+//   - "wolves crashed at tick T (sheep took over)" — wolf count → 0
+//     while sheep persist
+//   - "sheep crashed at tick T (wolves starved)" — sheep count → 0;
+//     wolves die off shortly after
+//   - "stable oscillation reached at tick T" — MAX_TICKS, both species
+//     persist with non-trivial population dynamics observed
+//   - "both extinct at tick T" — total population = 0
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Killed {
+  prey: AgentId,
+}
+
+@replayable @gpu_amenable
+event Starved {
+  victim: AgentId,
+}
+
+// One entity per logical kind, both routed through the Agent SoA via
+// `creature_type` discriminant (0=Wolf, 1=Sheep). Same shared-SoA
+// pattern duel_25v25 + foraging_real used.
+entity Wolf : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Sheep : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config eco {
+  // Spatial perception radius (matches @spatial below). At 1.5 the
+  // 27-cell window gives wolves a healthy hunting horizon.
+  hunt_radius:          f32 = 1.5,
+  // Damage per Wolf strike. With sheep starting at hp=20, ~5 hits
+  // drop a sheep — slow enough that the within-tick race-window
+  // doesn't trivialise combat (multiple wolves piling on one sheep
+  // each get to register a partial-damage Damaged event).
+  strike_damage:        f32 = 4.0,
+  // Energy gain per Damaged event for the attacking wolf. Wolves
+  // that successfully hunt regain energy from each blow.
+  meat_gain:            f32 = 4.0,
+  // Sheep graze rate (uniform regrowth proxy — no separate Grass
+  // entity). Each alive sheep adds this to hunger per tick.
+  graze_rate:           f32 = 1.0,
+  // Per-tick energy decay for ALL alive agents. With initial=50,
+  // wolf+sheep both starve in 50 ticks if no food/no hunting.
+  // Wolves usually net-gain when hunting; sheep usually net-gain
+  // when alive (graze_rate >= decay_rate by tuning).
+  decay_rate:           f32 = 1.0,
+}
+
+// Spatial-grid filter. Body-side `if` actually selects sheep targets
+// (same informational-only @spatial pattern duel_25v25 + foraging_real
+// use; the body-form walk visits every neighbour and the predicate
+// filters).
+@spatial(radius = 1.5, kind = [Agent])
+spatial_query nearby_sheep(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// WolfHunt — body-form spatial walk. Each alive Wolf per tick (gated
+// every 2 ticks) walks its 27-cell neighbourhood. For each neighbour
+// that IS an alive Sheep, emits one Damaged event.
+//
+// Body-side filters (same shape as foraging_real AntFeed +
+// duel_25v25 ScanAndStrike):
+//   - other != self (skip self-pairing)
+//   - other.creature_type == Sheep (only sheep, not other wolves)
+//   - other.alive (skip already-dead sheep)
+//
+// Per-handler `where`: only wolves act, only every 2 ticks. Discriminator
+// follows the foraging_real pattern: `self.creature_type == Wolf`
+// resolves to the entity-declaration discriminant (=0 by source order).
+physics WolfHunt @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && self.creature_type == Wolf
+                    && (world.tick % 6 == 0)) {
+    for other in spatial.nearby_sheep(self) {
+      if ((other != self)
+          && (other.creature_type == Sheep)
+          && other.alive) {
+        emit Damaged {
+          source: self,
+          target: other,
+          amount: config.eco.strike_damage,
+        }
+      }
+    }
+  }
+}
+
+// ApplyKill — chronicle physics. For each Damaged event:
+//   - Decrement target.hp by strike_damage.
+//   - If hp drops to/below 0, set_alive(target, false) + emit Killed
+//     (mirrors duel_25v25 ApplyDamage's defeat gate).
+//   - Increment source.hunger by meat_gain (wolf eats — even partial
+//     bites add energy to support energy-driven hunting cycles).
+//   - Increment source.hp by 1.0 (kill-credit; CPU sums per-source
+//     via the kills_total view to drive wolf births).
+//
+// The `old_hp > 0.0` guard prevents repeated Killed emits when
+// multiple Damaged events for the same already-dead sheep land in
+// the same tick (same race-window guard duel_25v25 + foraging_real
+// proved out).
+@phase(post)
+physics ApplyKill {
+  on Damaged { source: s, target: t, amount: a } {
+    let old_hp = agents.hp(t);
+    let new_hp = old_hp - a;
+    agents.set_hp(t, new_hp);
+    if (old_hp > 0.0 && new_hp <= 0.0) {
+      agents.set_alive(t, false);
+      emit Killed { prey: t }
+    }
+    let cur_hunger = agents.hunger(s);
+    agents.set_hunger(s, cur_hunger + config.eco.meat_gain);
+    let cur_credit = agents.hp(s);
+    agents.set_hp(s, cur_credit + 1.0);
+  }
+}
+
+// SheepGraze — per-sheep per-tick graze. Models uniform grass
+// regrowth without a separate Grass entity. Only fires for live
+// Sheep (creature_type==1).
+//
+// Hunger has no clamp here — EnergyDecay subtracts each tick, so
+// sheep settle near a saturation point determined by the
+// graze_rate vs decay_rate ratio (and the cap is enforced
+// implicitly by the energy net-balance).
+physics SheepGraze @phase(per_agent) {
+  on Tick {} where (self.alive && self.creature_type == Sheep) {
+    let cur_hunger = agents.hunger(self);
+    agents.set_hunger(self, cur_hunger + config.eco.graze_rate);
+  }
+}
+
+// EnergyDecay — per-agent per-tick hunger drain + universal death
+// gate. Fires for ALL alive agents (both wolves AND sheep) — the
+// `where (self.alive)` gate skips dead slots; the per-creature_type
+// distinction lives in what fills hunger up (WolfHunt eats meat via
+// ApplyKill; SheepGraze eats grass).
+//
+// Death gate: when hunger drops to/below 0, set_alive(self, false)
+// + emit Starved. CPU partitions Starved events by creature_type at
+// readback to attribute deaths.
+//
+// The `old_hunger > 0.0` guard prevents repeated Starved emits if
+// the rule fires again on a slot with already-zero hunger between
+// the alive=false write and the next tick's alive-bitmap refresh.
+physics EnergyDecay @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    let old_hunger = agents.hunger(self);
+    let new_hunger = old_hunger - config.eco.decay_rate;
+    agents.set_hunger(self, new_hunger);
+    if (old_hunger > 0.0 && new_hunger <= 0.0) {
+      agents.set_alive(self, false);
+      emit Starved { victim: self }
+    }
+  }
+}
+
+// Per-source wolf-kill credit. Summed CPU-side by the runtime each
+// tick; integer multiples of KILLS_PER_WOLF_BIRTH trigger CPU-side
+// alive-bitmap flips (the alive=false → true direction for wolves).
+@materialized(on_event = [Killed])
+view kills_total(by: Agent) -> f32 {
+  initial: 0.0,
+  on Killed { prey: _ } { self += 1.0 }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-target sheep-killed observability mirror. `kills_total` and
+// `sheep_killed_total` both fold the same Killed event but on
+// different keys (kills_total per source via Killed.by, but the
+// event no longer carries `by` — see note below; sheep_killed_total
+// per target via Killed.prey).
+//
+// NOTE: Killed event payload only carries `prey: AgentId` (the slain
+// sheep). The wolf source is implicit (whichever wolf's Damaged
+// caused the hp<=0 transition). kills_total folds without a per-
+// source key — its accumulator is global per slot whose `prey` slot
+// reaches 0 — which means runtime-side we sum the WHOLE view to get
+// total kills (rather than indexing per-wolf). That's fine for
+// driving wolf births — the colony-stockpile pattern foraging_real
+// uses for ant births is exactly the same shape.
+@materialized(on_event = [Killed])
+view sheep_killed_total(prey: Agent) -> f32 {
+  initial: 0.0,
+  on Killed { prey: p } { self += 1.0 }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-victim starvation count. CPU-side partitions by creature_type
+// to compute wolf vs sheep starvation deltas.
+@materialized(on_event = [Starved])
+view starved_total(victim: Agent) -> f32 {
+  initial: 0.0,
+  on Starved { victim: v } { self += 1.0 }
+  clamp: [0.0, 100.0],
+}

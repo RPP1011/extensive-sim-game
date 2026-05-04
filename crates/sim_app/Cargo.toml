@@ -115,6 +115,14 @@ duel_25v25_runtime = { path = "../duel_25v25_runtime" }
 # the alive-bitmap-flip-both-directions architectural surface no prior
 # fixture has exercised. See `assets/sim/foraging_real.sim`.
 foraging_real_runtime = { path = "../foraging_real_runtime" }
+# Predator-prey real — fourth REAL fixture: COMBAT + LIFECYCLE composed
+# on TWO simultaneously-live creature types. Wolves hunt sheep via
+# spatial body-form (WolfHunt → Damaged → ApplyKill chronicle) AND
+# breed off kill-credit; sheep graze, breed off well-fed-pair check,
+# AND die both via combat (set_alive on hp<=0) and starvation (set_alive
+# on hunger<=0). Five distinct alive-bitmap-flip surfaces fire across
+# both species in a single run. See `assets/sim/predator_prey_real.sim`.
+predator_prey_real_runtime = { path = "../predator_prey_real_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -207,3 +215,7 @@ path = "src/duel_25v25_app.rs"
 [[bin]]
 name = "foraging_real_app"
 path = "src/foraging_real_app.rs"
+
+[[bin]]
+name = "predator_prey_real_app"
+path = "src/predator_prey_real_app.rs"
