@@ -1,0 +1,24 @@
+[package]
+name = "megaswarm_1000_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/megaswarm_1000.sim`.
+# Tenth REAL gameplay-shaped fixture: 1000-agent SCALE-UP for
+# pair-field scoring (1M mask cells per tick, 5x the per-tick
+# workload of mass_battle_100v100). Mirrors mass_battle_100v100
+# shape but with ONE verb (Strike) instead of three to isolate
+# the scaling characteristics rather than verb-cascade overhead.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

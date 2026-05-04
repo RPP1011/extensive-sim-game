@@ -1116,6 +1116,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "megaswarm_1000_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1768,6 +1781,7 @@ dependencies = [
  "foraging_runtime",
  "glam",
  "mass_battle_100v100_runtime",
+ "megaswarm_1000_runtime",
  "pair_scoring_probe_runtime",
  "particle_collision_runtime",
  "predator_prey_real_runtime",
