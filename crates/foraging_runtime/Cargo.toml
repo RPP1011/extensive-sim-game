@@ -1,0 +1,33 @@
+[package]
+name = "foraging_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/foraging_colony.sim` —
+# ant-foraging fixture exercising the per-tick Drop emit + a single
+# pheromone_deposits view (`@decay(rate=0.88)`). Mirrors the
+# crowd_navigation_runtime / bartering_runtime shape: build.rs runs
+# dsl_compiler at compile time, OUT_DIR/generated.rs gets pulled in
+# via `include!`. Hand-written orchestration in src/lib.rs wraps the
+# compiler-emitted dispatch modules.
+#
+# Stress targets surfaced by this fixture (relative to siblings):
+# - `entity Food : Item` + `entity Colony : Group` declarations alongside
+#   the `Ant : Agent` (the .sim file currently keeps the bodies "soft",
+#   exercising parser + resolver entity-root coverage; SoA storage for
+#   Item / Group bodies + the views keyed by them stays gated behind
+#   `// GAP:` markers in the .sim file until lower lands, see
+#   commented-out `pheromone_trail` and `colony_intake` view bodies).
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

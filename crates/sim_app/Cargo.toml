@@ -37,6 +37,10 @@ bartering_runtime = { path = "../bartering_runtime" }
 # Herbivore ← Carnivore) with two distinct event kinds and three
 # @decay-anchored views.
 ecosystem_runtime = { path = "../ecosystem_runtime" }
+# Foraging-colony fixture — single-Agent SoA + Item / Group entity
+# declarations (declaration-only today) + per-tick Drop emit folded
+# into a `@decay`-anchored pheromone_deposits view.
+foraging_runtime = { path = "../foraging_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -69,3 +73,7 @@ path = "src/bartering_app.rs"
 [[bin]]
 name = "ecosystem_app"
 path = "src/ecosystem_app.rs"
+
+[[bin]]
+name = "foraging_app"
+path = "src/foraging_app.rs"

@@ -123,12 +123,24 @@ view pheromone_deposits(ant: Agent) -> f32 {
   clamp: [0.0, 1000.0],
 }
 
-// GAP: once Item-SoA + pair_map storage land, this view becomes
-// the real pheromone-trail map: per-(ant, food-slot) intensity.
-// Spec §5.2 storage hint `pair_map` already exists; the IR shape
-// is wired (predator_focus in predator_prey_min uses it). The
-// missing piece is that `food: Food` (Item) needs SoA addressable
-// via the same DataHandle path as Agent slots.
+// GAP (slice-2 probe, surfaced 2026-05-03): once Item-SoA +
+// pair_map lowering land, this view becomes the real pheromone-
+// trail map: per-(ant, food-slot) intensity. The view PARSES +
+// LOWERS + EMITS today (uncommenting it produces fold + decay
+// kernels), but the emitted WGSL treats `storage = pair_map`
+// identically to dense_per_agent — both kernels iterate
+// `agent_cap` slots and the fold's RMW addresses
+// `view_storage_primary[event_ring[idx*10+3]]` (the `carried`
+// field) without composing a 2-D `(ant, food)` index. So the
+// view becomes a duplicate of `pheromone_deposits` rather than a
+// per-pair map. The emit-side gap to fix:
+//   - decay loop: dispatch `agent_cap × num_food` slots, not just
+//     `agent_cap`.
+//   - fold RMW: index = `event[ant_field] * num_food +
+//     event[food_field]`, not just `event[food_field]`.
+// Spec §5.2 storage hint `pair_map` exists; predator_focus in
+// predator_prey_min uses it but is also single-key today, so the
+// gap is consistent across fixtures.
 //
 // @materialized(on_event = [Drop], storage = pair_map)
 // @decay(rate = 0.88, per = tick)
@@ -138,15 +150,14 @@ view pheromone_deposits(ant: Agent) -> f32 {
 //   clamp: [0.0, 100.0],
 // }
 
-// GAP: once Group-SoA lands, this view ranks colonies by recent
-// haul. Right now the Deposited event is never emitted (see the
-// commented stub above), so this view would silently zero out
-// even with the fix in place.
-//
-// @materialized(on_event = [Deposited])
-// @decay(rate = 0.95, per = tick)
-// view colony_intake(colony: Group) -> f32 {
-//   initial: 0.0,
-//   on Deposited { ant: _, colony: c, amount: a } { self += a }
-//   clamp: [0.0, 10000.0],
-// }
+// SLICE 3 PROBE: uncommenting `colony_intake` to stress-test
+// `view ... (colony: Group)` keying — the first Group-targeted
+// view anywhere. Deposited is never emitted (no rule fires it),
+// so a successful compile would yield a zero-fold no-op view.
+@materialized(on_event = [Deposited])
+@decay(rate = 0.95, per = tick)
+view colony_intake(colony: Group) -> f32 {
+  initial: 0.0,
+  on Deposited { ant: _, colony: c, amount: a } { self += a }
+  clamp: [0.0, 10000.0],
+}
