@@ -479,6 +479,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ecosystem_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1574,6 +1587,7 @@ dependencies = [
  "bartering_runtime",
  "boids_runtime",
  "crowd_navigation_runtime",
+ "ecosystem_runtime",
  "engine",
  "glam",
  "particle_collision_runtime",

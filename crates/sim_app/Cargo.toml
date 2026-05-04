@@ -33,6 +33,10 @@ swarm_storm_runtime = { path = "../swarm_storm_runtime" }
 # Bartering fixture — entity-root coverage probe (Item + Group entity
 # declarations + ItemId in event payload).
 bartering_runtime = { path = "../bartering_runtime" }
+# Ecosystem-cascade fixture — three-tier event cascade (Plant ←
+# Herbivore ← Carnivore) with two distinct event kinds and three
+# @decay-anchored views.
+ecosystem_runtime = { path = "../ecosystem_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -61,3 +65,7 @@ path = "src/ses_app.rs"
 [[bin]]
 name = "bartering_app"
 path = "src/bartering_app.rs"
+
+[[bin]]
+name = "ecosystem_app"
+path = "src/ecosystem_app.rs"

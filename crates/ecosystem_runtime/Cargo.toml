@@ -1,0 +1,29 @@
+[package]
+name = "ecosystem_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/ecosystem_cascade.sim` —
+# three-tier event cascade fixture (Plant ← Herbivore ← Carnivore).
+# Mirrors the predator_prey_runtime / swarm_storm_runtime shape:
+# build.rs runs dsl_compiler at compile time, OUT_DIR/generated.rs
+# gets pulled in via `include!`. Hand-written orchestration in
+# src/lib.rs wraps the compiler-emitted dispatch modules.
+#
+# What's new vs the precedents: three entity types via where-clause
+# discriminator, two distinct event kinds (PlantEaten + HerbivoreEaten),
+# three @decay-anchored views (recent_browse, predator_pressure,
+# plant_pressure).
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }
