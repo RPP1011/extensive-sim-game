@@ -102,6 +102,13 @@ quest_probe_runtime = { path = "../quest_probe_runtime" }
 # PerPair tick preamble, Bool LHS rewrite). See
 # `docs/superpowers/notes/2026-05-04-duel_1v1.md`.
 duel_1v1_runtime = { path = "../duel_1v1_runtime" }
+# Multi-zone world — the NINETEENTH real sim. First sim with PER-
+# AGENT LOCATION-BASED CONTEXT (zone migration). Each agent's `level`
+# u32 SoA slot encodes a zone id (0=Forest, 1=Town, 2=Dungeon); each
+# verb gates on `when self.level == X`. Migration is CPU-side: each
+# tick the runtime reads back hp/mana, computes the new zone per
+# adventurer, and writes back into agent_level via queue.write_buffer.
+multi_zone_world_runtime = { path = "../multi_zone_world_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -186,3 +193,7 @@ path = "src/quest_probe_app.rs"
 [[bin]]
 name = "duel_1v1_app"
 path = "src/duel_1v1_app.rs"
+
+[[bin]]
+name = "multi_zone_world_app"
+path = "src/multi_zone_world_app.rs"

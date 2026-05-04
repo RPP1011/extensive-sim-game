@@ -1,0 +1,196 @@
+// multi_zone_world — first sim with PER-AGENT LOCATION-BASED CONTEXT.
+//
+// The 18 prior sims operate in a single homogeneous space — every
+// agent obeys the same rules. This sim gives each agent a `level`
+// field that encodes its **zone** (a discrete location identifier),
+// and gates each verb on the agent's current zone.
+//
+//   - Forest (zone=0): Adventurer gathers wood. `mana` accumulates.
+//   - Town   (zone=1): Adventurer trades wood for gold. `mana` -10,
+//                      `hp` +5 per trade.
+//   - Dungeon(zone=2): Adventurer attacks Monster. Damaged event hits
+//                      Monster `hp`; on death, CPU side respawns +
+//                      rewards the killer.
+//
+// Migration is CPU-side: each tick the runtime reads back per-agent
+// `hp`/`mana` and writes new values into `agent_level` per the rule:
+//
+//   - Forest + wood >= 20 → Town
+//   - Town   + wood == 0 + gold >= 100 → Dungeon
+//   - Dungeon + hp drops below 50 → Forest (recover)
+//
+// The DSL surface here is the per-zone verb gating — `when (self.level
+// == X)` — combined with the existing verb cascade + chronicle physics
+// + ApplyDamage / ApplyHeal pipeline from duel_1v1.
+//
+// SHAPE: 35 agents total in shared Agent SoA:
+//   - Slots 0..29 (30 agents): Adventurer (level = zone)
+//   - Slots 30..34 (5 agents):  Monster   (level = 2 always; hp = monster HP)
+//
+// FIELD MAP (Adventurer):
+//   - hp    = gold   (initial 0; +5 per trade; -50 per dungeon attempt
+//                     on damage taken; pinned to 0 lower bound)
+//   - mana  = wood   (initial 0; +1 per gather; -10 per trade)
+//   - level = zone   (initial 0=Forest)
+//   - alive = 1
+//
+// FIELD MAP (Monster):
+//   - hp    = monster_hp (initial 100)
+//   - mana  = unused
+//   - level = 2 (Dungeon)
+//   - alive = 1
+
+event Tick { }
+
+@replayable @gpu_amenable
+event WoodGathered {
+  gatherer: AgentId,
+  amount:   f32,
+}
+
+@replayable @gpu_amenable
+event TradeMade {
+  trader: AgentId,
+  // Wood spent (typically 10) and gold earned (typically 5).
+  wood_spent: f32,
+  gold_earned: f32,
+}
+
+@replayable @gpu_amenable
+event DungeonAttacked {
+  // Adventurer in Dungeon swung this tick. Tracker-only on the GPU
+  // side; combat resolution happens CPU-side in
+  // `cpu_migration_step()` (sidestep — pair-field scoring across
+  // many slots is blocked by the mask emitter's `mask_k=1u`).
+  attacker: AgentId,
+  amount:   f32,
+}
+
+entity Adventurer : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Monster : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config zones {
+  // Forest — gather wood every 5 ticks (cheap output).
+  gather_amount:    f32 = 1.0,
+  gather_period:    u32 = 5,
+  // Town — trade 10 wood for 5 gold every 5 ticks.
+  trade_wood_cost:  f32 = 10.0,
+  trade_gold_gain:  f32 = 5.0,
+  trade_period:     u32 = 5,
+  // Dungeon — attack monster for 12 dmg every 3 ticks.
+  attack_damage:    f32 = 12.0,
+  attack_period:    u32 = 3,
+  // Trade gate: must have enough wood.
+  trade_min_wood:   f32 = 10.0,
+  // Dungeon gate: must have at least this much gold (treated as
+  // "willingness to risk" — adventurers without gold won't fight).
+  dungeon_min_gold: f32 = 50.0,
+}
+
+// ---------------------------------------------------------------------
+// Verb 0 — GatherWood. Fires when self is alive, in Forest (level==0),
+// and the per-zone tick gate is open. Self-targeted (no spatial query
+// needed); chronicle emits WoodGathered. ApplyGather adds amount to
+// `mana` (= wood inventory).
+// ---------------------------------------------------------------------
+verb GatherWood(self) =
+  action GatherAction
+  when (self.alive
+        && self.level == 0
+        && (world.tick % 5 == 0))
+  emit WoodGathered { gatherer: self, amount: config.zones.gather_amount }
+  score 1.0
+
+// ---------------------------------------------------------------------
+// Verb 1 — TradeWoodForGold. Fires when self alive, in Town (level==1),
+// has at least 10 wood, and the trade tick gate is open. Self-targeted.
+// Chronicle emits TradeMade. ApplyTrade decrements mana by 10, adds 5
+// to hp (= gold).
+// ---------------------------------------------------------------------
+verb TradeWoodForGold(self) =
+  action TradeAction
+  when (self.alive
+        && self.level == 1
+        && (world.tick % 5 == 0)
+        && self.mana >= config.zones.trade_min_wood)
+  emit TradeMade {
+    trader: self,
+    wood_spent: config.zones.trade_wood_cost,
+    gold_earned: config.zones.trade_gold_gain,
+  }
+  score 1.0
+
+// ---------------------------------------------------------------------
+// Verb 2 — DungeonStrike. Fires when self alive, in Dungeon
+// (level==2). Emits a `DungeonStrike` tracker event into the chronicle
+// (consumed CPU-side via the damage_dealt view-fold below). Combat
+// resolution + monster death + adventurer retreat happen on the CPU
+// migration pass — see lib.rs `cpu_migration_step()`. Sidestep:
+// pair-field scoring against MONSTER slots is blocked by the mask
+// emitter's hardcoded `mask_k=1u` (TODO task-5.7 in fused_mask_verb_*
+// codegen), so Damaged-against-target is resolved on the CPU.
+// ---------------------------------------------------------------------
+verb DungeonStrike(self) =
+  action StrikeAction
+  when (self.alive
+        && self.level == 2
+        && (world.tick % 3 == 0))
+  emit DungeonAttacked { attacker: self, amount: config.zones.attack_damage }
+  score 1.0
+
+// NOTE — apply-physics removed. The natural shape would be:
+//
+//   physics ApplyGather { on WoodGathered { ... agents.set_mana(g, ...) } }
+//   physics ApplyTrade  { on TradeMade   { ... agents.set_mana/set_hp(...) } }
+//
+// But the schedule synthesizer FUSED the verb chronicles (which emit
+// WoodGathered/TradeMade) into the SAME PerEvent kernel as the apply
+// rules — a single dispatch where one thread emits a kind=1 event and
+// another thread tries to consume it. WGSL atomic writes don't cross-
+// publish within a single dispatch (no inter-workgroup barrier mid-
+// dispatch), so the consumer threads never see the producer's emits.
+//
+// Sidestep (Slice A): apply mana/hp updates CPU-side in
+// `cpu_migration_step()` by replaying the per-tick deltas from the
+// `wood_gathered_total` and `gold_earned_total` views. The DSL surface
+// for zone-gated verb scoring + chronicle still drives the events;
+// the CPU layer just owns the agent SoA writes for hp/mana.
+//
+// (The duel_1v1 fixture sees the chronicles + apply as separate
+// kernels because Spell's score reads agent.hp, creating a true
+// write/read cycle that suppresses the fusion. We don't want that
+// shape here.)
+
+
+// Per-source view: total wood gathered (cumulative).
+@materialized(on_event = [WoodGathered])
+view wood_gathered_total(gatherer: Agent) -> f32 {
+  initial: 0.0,
+  on WoodGathered { gatherer: g, amount: a } { self += a }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-source view: total gold earned via trade (cumulative).
+@materialized(on_event = [TradeMade])
+view gold_earned_total(trader: Agent) -> f32 {
+  initial: 0.0,
+  on TradeMade { trader: t, wood_spent: _, gold_earned: g } { self += g }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-source view: total damage swung in dungeon (CPU resolves the
+// actual monster damage; this just observes how often dungeon
+// adventurers swung).
+@materialized(on_event = [DungeonAttacked])
+view damage_dealt(attacker: Agent) -> f32 {
+  initial: 0.0,
+  on DungeonAttacked { attacker: a, amount: amt } { self += amt }
+  clamp: [0.0, 1000000.0],
+}

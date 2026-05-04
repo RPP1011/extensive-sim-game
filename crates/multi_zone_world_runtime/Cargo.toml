@@ -1,0 +1,26 @@
+[package]
+name = "multi_zone_world_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/multi_zone_world.sim` —
+# the FIRST sim with PER-AGENT LOCATION-BASED CONTEXT (zone migration).
+# Uses the per-agent `level` u32 SoA slot as a discrete zone register
+# (0=Forest, 1=Town, 2=Dungeon) and gates each verb on the agent's
+# current zone via `when self.level == X`. Migration is CPU-side: each
+# tick the runtime reads back agent hp/mana, computes the new zone per
+# adventurer, and writes back into `agent_level` via queue.write_buffer.
+# Mirrors duel_1v1_runtime's GPU-context + per-buffer storage shape.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }
