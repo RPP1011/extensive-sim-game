@@ -1,0 +1,217 @@
+// tower_defense — first GAME-SHAPED fixture: a recognizable tower defense
+// game built by composing primitives the platform already exercises.
+//
+// Composition (all share the Combatant Agent SoA, role = mana band):
+//   - 1 Base at slot 0:        mana = 1.0, hp = 1000.0, alive = 1
+//   - 10 Defenders at 1..=10:  mana = 2.0, hp = 100.0,  alive = 1
+//   - 100 Enemy slots 11..110: mana = 3.0, hp = 20.0    (alive = 0
+//                              until a CPU-side wave fills the slot).
+//
+// The mana SoA field acts as a stable role tag — verb gates use mana
+// bands to distinguish defender / enemy / base. The duel_1v1 fixture
+// already proved `self.mana` reads compile + the mana value is never
+// implicitly decremented by the engine, so it's safe as a role tag.
+// We additionally need `target.mana` (per-pair candidate mana read)
+// which lowers via the same arm as `target.hp` (precedent:
+// pair_scoring_probe close, commit 3f28febb).
+//
+// Per-tick:
+//   - Defender Shoot verb (pair-field scoring): self in defender mana
+//     band, target alive, target in enemy mana band, in defender_range.
+//     Argmax over distance picks the closest enemy. Chronicle emits
+//     Damaged → ApplyDamage subtracts HP.
+//   - Enemy march physics (per_agent): every alive enemy advances
+//     toward the base position by `march_speed`. When the enemy is
+//     within `base_hit_radius` of the base, it emits BaseHit and
+//     self-expires. The CPU-side wave spawner re-uses the slot for the
+//     next wave (alive = 0 → available).
+//   - BaseHit folded into base_damage_taken view (no DSL-side base-HP
+//     write — the runtime tracks base HP CPU-side, decremented by the
+//     view delta each tick). This sidesteps the "AgentId literal 0"
+//     coercion gap (the expression layer doesn't surface AgentId
+//     literals — see scoring.rs:722). The win/loss decision is made
+//     CPU-side from the base HP counter + alive-enemy count.
+//
+// Wave spawning lives CPU-side in tower_defense_runtime: every K ticks
+// the runtime walks the enemy slot range, finds slots with alive == 0,
+// and writes hp + alive + spawn position for the next batch (escalating
+// wave size). All wave logic stays out of the DSL — the DSL describes
+// per-tick per-agent rules; lifecycle / spawning is the runtime's job
+// (precedent: the runtime crates own initial state writes; the DSL
+// only describes per-tick steady-state behavior).
+//
+// COMPILED-PLATFORM PRIMITIVES THIS COMPOSES (precedents in parens):
+//   - Pair-field scoring `target.<field>` in verb `score` (3f28febb)
+//   - Per-pair `when` predicates with target.alive + mana bands
+//     (duel_1v1.sim, pair_scoring_probe.sim)
+//   - Verb cascade emit Damaged → ApplyDamage chronicle (duel_1v1)
+//   - `agents.set_hp` / `agents.set_alive` on non-self target via the
+//     pending_target_lets prefix (duel_1v1, set_hp/set_alive setters)
+//   - Per-agent physics with vec3 ops + `if` projection (boids.sim)
+//   - Multiple event kinds in one ring with per-handler tag filters
+//     (diplomacy_probe.sim, duel_1v1.sim)
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event BaseHit {
+  enemy:  AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Defeated {
+  combatant: AgentId,
+}
+
+entity Combatant : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config td {
+  // Defender attack stats.
+  defender_damage:   f32 = 4.0,
+  defender_range:    f32 = 30.0,
+  // Enemy march + base attack stats.
+  march_speed:       f32 = 0.5,
+  base_damage:       f32 = 5.0,
+  // Mana role-tag bands. Defender ∈ [1.5, 2.5]; enemy ∈ [2.5, 3.5];
+  // base ∈ [0.5, 1.5]. Set by the runtime at init.
+  defender_mana_min: f32 = 1.5,
+  defender_mana_max: f32 = 2.5,
+  enemy_mana_min:    f32 = 2.5,
+  enemy_mana_max:    f32 = 3.5,
+  // Distance the enemy must be from the base to deal damage. Set
+  // larger than `march_speed` so the enemy always crosses the gate
+  // before overshooting (one tick of cushion).
+  base_hit_radius:   f32 = 2.0,
+  // Base position. Constant per scenario; the runtime initialises
+  // slot 0's pos to this exact vec3 so the per-agent physics rule
+  // can navigate by reading the constant rather than slot 0 directly
+  // (sidesteps the AgentId-literal-0 coercion gap — see file header).
+  base_pos_x:        f32 = 50.0,
+  base_pos_y:        f32 = 0.0,
+  base_pos_z:        f32 = 0.0,
+}
+
+// Defender shoot verb. PerPair scoring: each defender (self in
+// defender mana band) ranks every alive enemy (target alive, target in
+// enemy mana band) by inverse-distance; argmax picks the closest enemy
+// in range. Pair-field scoring fires the per-pair-candidate inner loop
+// (precedent: pair_scoring_probe close — commit 3f28febb).
+verb Shoot(self, target: Agent) =
+  action ShootAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && self.mana >= config.td.defender_mana_min
+        && self.mana <= config.td.defender_mana_max
+        && target.mana >= config.td.enemy_mana_min
+        && target.mana <= config.td.enemy_mana_max
+        && distance(self.pos, target.pos) < config.td.defender_range)
+  emit Damaged { source: self, target: target, amount: config.td.defender_damage }
+  // GAP WORKAROUND (binder shadowing — same shape as duel_1v1's Heal):
+  //   The natural `score (range - distance(self.pos, target.pos))`
+  //   lowers `self.pos` in the score body to
+  //   `agent_pos[target_expr_<N>]` instead of `agent_pos[agent_id]` —
+  //   the verb expander's binder shadowing routes `self` through the
+  //   PerPairCandidate buffer when the verb has a `target` param.
+  //   See duel_1v1.sim's Heal NOTE for the same gap surface.
+  //
+  // Workaround: score "closer to the base = higher priority". The
+  // base is at a fixed config position, so the score body needs only
+  // `target.pos` (which lowers correctly to per_pair_candidate) and
+  // a constant vec3 — sidestepping the `self.*` shadowing path.
+  // Functionally similar: defenders prefer enemies advancing on the
+  // base over enemies still at the spawn line.
+  score (100.0 - distance(target.pos, vec3(config.td.base_pos_x,
+                                           config.td.base_pos_y,
+                                           config.td.base_pos_z)))
+
+// ---- Apply damage chronicle (duel_1v1 precedent) ---------------------
+//
+// On each Damaged event reduce the target's HP. If HP drops to zero
+// flip alive=false and emit Defeated for observability. Re-uses the
+// duel_1v1 chronicle shape verbatim — same handler, same setter calls.
+@phase(post)
+physics ApplyDamage {
+  on Damaged { source: _, target: t, amount: a } {
+    let new_hp = agents.hp(t) - a;
+    agents.set_hp(t, new_hp);
+    if (new_hp <= 0.0) {
+      agents.set_alive(t, false);
+      emit Defeated { combatant: t }
+    }
+  }
+}
+
+// ---- Enemy march + base-hit physics ----------------------------------
+//
+// Per-agent rule. Only enemies advance — gated by `self.mana` falling
+// in the enemy mana band so defenders + base no-op. The march vector
+// is `(base_pos - self.pos) * (march_speed / max(distance, eps))` —
+// a unit-vector toward the base scaled by `march_speed`. This keeps
+// the rule purely vec3-arithmetic with no per-component (.x/.y/.z)
+// projection (the expression layer's `lower_field` arm only matches
+// agent-rooted bases — `vec3.x` falls through as
+// UnsupportedFieldBase).
+//
+// When the enemy is within `base_hit_radius` of the base it emits
+// BaseHit and self-expires. The CPU-side wave spawner re-uses the
+// slot.
+physics MarchEnemies @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && self.mana >= config.td.enemy_mana_min
+                    && self.mana <= config.td.enemy_mana_max) {
+    let base_pos = vec3(config.td.base_pos_x,
+                        config.td.base_pos_y,
+                        config.td.base_pos_z);
+    let to_base = base_pos - self.pos;
+    let dist = distance(self.pos, base_pos);
+    if (dist < config.td.base_hit_radius) {
+      // Enemy in melee range of the base — strike + expire.
+      agents.set_alive(self, false);
+      emit BaseHit { enemy: self, amount: config.td.base_damage }
+    } else {
+      // Step toward the base. `to_base / dist` ≈ unit vector;
+      // multiplying by march_speed gives a fixed per-tick step. The
+      // `dist` divide is safe because the if-branch above guards the
+      // dist < base_hit_radius case (and base_hit_radius > 0).
+      let step = to_base * (config.td.march_speed / dist);
+      let new_pos = self.pos + step;
+      agents.set_pos(self, new_pos);
+    }
+  }
+}
+
+// ---- Observability views (no-decay, accumulate-forever) --------------
+
+// Per-source defender_damage_dealt — total damage each slot has
+// dealt. Reads off the Damaged ring keyed on `source`. Used by the
+// harness to report the "total defender damage" trace (sum across
+// defender slots).
+@materialized(on_event = [Damaged])
+view defender_damage_dealt(source: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: s, target: _, amount: a } { self += a }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-source base_damage_taken — every BaseHit folds into the
+// enemy's slot. The runtime sums across all slots each tick to get
+// cumulative base damage; subtracts that from the CPU-side base HP
+// counter (initialised to 1000.0).
+@materialized(on_event = [BaseHit])
+view base_damage_taken(source: Agent) -> f32 {
+  initial: 0.0,
+  on BaseHit { enemy: e, amount: a } { self += a }
+  clamp: [0.0, 1000000.0],
+}

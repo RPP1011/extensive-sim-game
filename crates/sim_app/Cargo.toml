@@ -102,6 +102,12 @@ quest_probe_runtime = { path = "../quest_probe_runtime" }
 # PerPair tick preamble, Bool LHS rewrite). See
 # `docs/superpowers/notes/2026-05-04-duel_1v1.md`.
 duel_1v1_runtime = { path = "../duel_1v1_runtime" }
+# Tower defense — first GAME-SHAPED fixture (not a duel, not a probe).
+# 1 base + 10 defenders + 100 enemy slots; CPU-side wave spawner walks
+# enemy slots every K ticks. Composes verb cascade + per-agent physics
+# + multi-event-kind ring + non-self target setters into a recognizable
+# tower-defense gameplay loop.
+tower_defense_runtime = { path = "../tower_defense_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -186,3 +192,7 @@ path = "src/quest_probe_app.rs"
 [[bin]]
 name = "duel_1v1_app"
 path = "src/duel_1v1_app.rs"
+
+[[bin]]
+name = "tower_defense_app"
+path = "src/tower_defense_app.rs"

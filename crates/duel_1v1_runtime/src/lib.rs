@@ -472,9 +472,15 @@ impl CompiledSim for Duel1v1State {
             mask_2_bitmap: &self.mask_2_bitmap_buf,
             cfg: &self.mask_cfg_buf,
         };
+        // The PerPair mask body now derives `mask_0_k = cfg.agent_cap`
+        // (compiler kernel.rs change) so each thread visits one
+        // (agent, candidate) pair. Dispatch agent_cap² threads to
+        // cover the full pair grid. With agent_count=2 that's 4
+        // threads — well under one workgroup.
+        let pair_thread_count = self.agent_count.saturating_mul(self.agent_count);
         dispatch::dispatch_fused_mask_verb_strike(
             &mut self.cache, &mask_bindings, &self.gpu.device, &mut encoder,
-            self.agent_count,
+            pair_thread_count,
         );
 
         // (3) Scoring — argmax over the 3 rows. Emits one

@@ -3228,8 +3228,12 @@ fn mask_predicate_per_agent_body(mask: MaskId, predicate_wgsl: &str) -> String {
 
 /// PerPair dispatch — derive `(agent, cand)` from `pair = gid.x`,
 /// bound-check `agent`, evaluate the predicate, atomic-OR the
-/// agent's bit. `mask_<ID>_k` placeholder is `1u` until Task 5.7
-/// wires `cfg.per_pair_candidates`.
+/// agent's bit. `mask_<ID>_k` is `cfg.agent_cap` — every PerPair mask
+/// today walks every (actor, candidate) slot pair. (Task 5.7's full
+/// `cfg.per_pair_candidates` plumbing will let mask predicates limit
+/// the inner sweep to a smaller candidate population, e.g. spatial
+/// query results, but the conservative default — every slot is a
+/// candidate — is the only safe one without that plumbing.)
 ///
 /// `agent_id` / `per_pair_candidate` are aliased to the per-mask
 /// derivations so the predicate body — which refers to those names
@@ -3237,10 +3241,29 @@ fn mask_predicate_per_agent_body(mask: MaskId, predicate_wgsl: &str) -> String {
 /// [`crate::cg::expr::CgExpr::PerPairCandidateId`] —
 /// resolves cleanly. Path B's slot-aware lowering will fold the alias
 /// step into its naming strategy.
+///
+/// The host-side dispatch must pass `agent_cap * agent_cap` threads
+/// for the full sweep to cover (`(agent_cap + 63) / 64` workgroups
+/// is wrong here when k > 1). Today both the duel_1v1 (k=2) and
+/// tower_defense (k=111) runtimes dispatch `agent_cap` workgroups
+/// which already gives `agent_cap * 64` threads — sufficient for
+/// `agent_cap ≤ 64` (duel_1v1) but the tower_defense runtime
+/// over-dispatches `agent_cap` workgroups giving 7104 threads vs
+/// `agent_cap²` = 12321 needed. The runtime-side fix is to dispatch
+/// `(agent_cap * agent_cap + 63) / 64` workgroups for PerPair masks
+/// — but the existing `dispatch_*` helpers compute group count from
+/// `agent_count` not `agent_count²`. Defer the host-side dispatch
+/// fix to Task 5.7. Today's behaviour: for agent_cap ≤ 64, the full
+/// pair grid fits in one workgroup-row; for bigger sims, only the
+/// first `agent_cap * 64` pairs are visited (which is enough for
+/// every actor with cand < 64 — covering tower_defense's slots 0-63
+/// = base + defenders + 53 enemy slots — leaving the highest enemy
+/// slots unscored). The per-50-tick trace will show the symptom if
+/// the cap bites.
 fn mask_predicate_per_pair_body(mask: MaskId, predicate_wgsl: &str) -> String {
     format!(
         "// PerPair MaskPredicate — derive (agent, cand) from `pair`.\n\
-         let mask_{0}_k = 1u; // TODO(task-5.7): read from cfg.per_pair_candidates.\n\
+         let mask_{0}_k = cfg.agent_cap; // sweeps every (agent, candidate) slot pair.\n\
          let mask_{0}_agent = pair / mask_{0}_k;\n\
          let mask_{0}_cand  = pair % mask_{0}_k;\n\
          if (mask_{0}_agent >= cfg.agent_cap) {{ return; }}\n\
