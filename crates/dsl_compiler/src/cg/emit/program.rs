@@ -93,6 +93,61 @@ use super::kernel::{kernel_topology_to_spec_and_body, KernelEmitError};
 use super::wgsl_body::{EmitCtx, HandleNamingStrategy};
 
 // ---------------------------------------------------------------------------
+// RNG prelude — WGSL mirror of `engine::rng::per_agent_u32_pcg`
+// ---------------------------------------------------------------------------
+
+/// WGSL implementation of the deterministic per-agent RNG primitive.
+///
+/// Emitted into any kernel module whose body references
+/// `per_agent_u32(` (substring scan in [`compose_wgsl_file`]). The
+/// host parity helper at [`engine::rng::per_agent_u32_pcg`] mirrors
+/// this exact mixing chain so the cross-backend stream is bit-equal
+/// under shared inputs (P11 — see `tests/rng_cross_backend.rs`).
+///
+/// # Mixing chain
+///
+/// Each input scalar is folded through the splitmix64-style
+/// finalizer (variant from David Stafford's mix13 — wrapped to u32 at
+/// the boundary). Folds are sequential (seed → agent_id → tick →
+/// purpose), each round combining the running state with the next
+/// scalar via xor + multiply + xorshift. The output is the low 32
+/// bits of the final state.
+///
+/// # Why a custom hash (not ahash)
+///
+/// The host-side [`engine::rng::per_agent_u32`] uses ahash's `&[u8]`
+/// hash, which doesn't translate to WGSL (no string/byte type). The
+/// WGSL prelude needs a pure-integer mixing chain expressible in
+/// shader code; the host parity helper uses the same chain so streams
+/// stay bit-equal. The legacy host helper stays in place for runtime
+/// construction-time RNG (e.g. initial-position scattering in
+/// `boids_runtime`, `foraging_runtime`, etc.) — those paths never run
+/// on GPU and the byte-slice purpose surface is more ergonomic there.
+///
+/// See `docs/superpowers/notes/2026-05-04-stochastic_probe.md` (Gap
+/// #2) for the discovery doc.
+const RNG_WGSL_PRELUDE: &str = "\
+// Deterministic per-agent RNG (PCG-style splitmix mix). Mirror of
+// `engine::rng::per_agent_u32_pcg`; bit-equal cross-backend (P11).
+fn rng_mix64(x: u32) -> u32 {
+    var z: u32 = x;
+    z = (z ^ (z >> 16u)) * 0x7feb352du;
+    z = (z ^ (z >> 15u)) * 0x846ca68bu;
+    z = z ^ (z >> 16u);
+    return z;
+}
+
+fn per_agent_u32(seed: u32, agent_id: u32, tick: u32, purpose: u32) -> u32 {
+    var s: u32 = rng_mix64(seed ^ 0x9E3779B9u);
+    s = rng_mix64(s ^ agent_id);
+    s = rng_mix64(s ^ tick);
+    s = rng_mix64(s ^ purpose);
+    return s;
+}
+
+";
+
+// ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
@@ -363,6 +418,21 @@ fn compose_wgsl_file(
         out.push('\n');
     }
 
+    // Emit the deterministic per-agent RNG primitive iff the kernel
+    // body references it. Substring-keyed on `per_agent_u32(` so a
+    // comment that incidentally names the function doesn't trigger
+    // the emit. Body source is `RNG_WGSL_PRELUDE` — the WGSL mirror of
+    // `engine::rng::per_agent_u32_pcg` (host-side parity helper). Both
+    // sides are pure-Rust / pure-WGSL implementations of the same
+    // PCG-XSH-RR mixing chain over the (seed, agent_id, tick,
+    // purpose_id) tuple, so the cross-backend stream is bit-equal
+    // under shared inputs (P11). See stochastic_probe Gap #2 close
+    // (2026-05-04).
+    if body.contains("per_agent_u32(") {
+        out.push_str(RNG_WGSL_PRELUDE);
+        out.push('\n');
+    }
+
     // PerCell topologies (today only the tiled-MoveBoid kernel)
     // need module-level `var<workgroup>` declarations for the
     // cooperative tile arrays — they're shared across all lanes of
@@ -534,9 +604,15 @@ fn compose_wgsl_cfg_struct(spec: &KernelSpec) -> String {
         // body's `if event_idx >= cfg.event_count { return; }`
         // guard needs the per-tick event count from the runtime, and
         // the `Emit` writes still need `tick` for the event header
-        // word. Mirrors `build_per_event_emit_cfg_struct_decl`.
-        KernelKind::PerEventEmit => "event_count: u32, tick: u32, _pad0: u32, _pad1: u32",
-        KernelKind::Generic => "agent_cap: u32, tick: u32, _pad0: u32, _pad1: u32",
+        // word. `seed: u32` joined when the rng.* surface wired
+        // through (stochastic_probe Gaps #1-#3 close, 2026-05-04).
+        // Mirrors `build_per_event_emit_cfg_struct_decl`.
+        KernelKind::PerEventEmit => "event_count: u32, tick: u32, seed: u32, _pad0: u32",
+        // Generic kernels (physics/mask/plumbing) carry `seed: u32`
+        // so the kernel preamble can bind `let seed = cfg.seed;` for
+        // any `per_agent_u32(seed, agent_id, tick, purpose)` call the
+        // body lowers from `rng.*`. Mirrors `build_generic_cfg_struct_decl`.
+        KernelKind::Generic => "agent_cap: u32, tick: u32, seed: u32, _pad0: u32",
     };
     format!("struct {ty} {{ {fields} }};\n", ty = cfg.wgsl_ty)
 }

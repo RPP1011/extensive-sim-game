@@ -184,7 +184,7 @@ impl VerbProbeState {
         let cfg_init = mask_verb_Pray::MaskVerbPrayCfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         let mk_cfg = |label: &str| -> wgpu::Buffer {
             gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -198,8 +198,8 @@ impl VerbProbeState {
         let chronicle_cfg_init = physics_verb_chronicle_Pray::PhysicsVerbChroniclePrayCfg {
             event_count: 0,
             tick: 0,
+            seed: 0,
             _pad0: 0,
-            _pad1: 0,
         };
         let chronicle_cfg_buf =
             gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -291,7 +291,7 @@ impl CompiledSim for VerbProbeState {
         let mask_cfg = mask_verb_Pray::MaskVerbPrayCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.mask_cfg_buf,
@@ -316,7 +316,7 @@ impl CompiledSim for VerbProbeState {
         let scoring_cfg = scoring::ScoringCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.scoring_cfg_buf,
@@ -358,8 +358,8 @@ impl CompiledSim for VerbProbeState {
         let chronicle_cfg = physics_verb_chronicle_Pray::PhysicsVerbChroniclePrayCfg {
             event_count: self.agent_count,
             tick: self.tick as u32,
+            seed: 0,
             _pad0: 0,
-            _pad1: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_cfg_buf,
@@ -385,7 +385,7 @@ impl CompiledSim for VerbProbeState {
         let seed_cfg = seed_indirect_0::SeedIndirect0Cfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.seed_cfg_buf,

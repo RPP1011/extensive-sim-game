@@ -206,7 +206,7 @@ impl DiplomacyProbeState {
         let observe_cfg_init = physics_ObserveAndAct::PhysicsObserveAndActCfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         let observe_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -219,7 +219,7 @@ impl DiplomacyProbeState {
             fused_mask_verb_ProposeAlliance::FusedMaskVerbProposeAllianceCfg {
                 agent_cap: agent_count,
                 tick: 0,
-                _pad: [0; 2],
+                seed: 0, _pad: 0,
             };
         let mask_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -231,7 +231,7 @@ impl DiplomacyProbeState {
         let scoring_cfg_init = scoring::ScoringCfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         let scoring_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -244,8 +244,8 @@ impl DiplomacyProbeState {
             physics_verb_chronicle_ProposeAlliance::PhysicsVerbChronicleProposeAllianceCfg {
                 event_count: 0,
                 tick: 0,
+                seed: 0,
                 _pad0: 0,
-                _pad1: 0,
             };
         let chronicle_propose_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -258,8 +258,8 @@ impl DiplomacyProbeState {
             physics_verb_chronicle_Betray::PhysicsVerbChronicleBetrayCfg {
                 event_count: 0,
                 tick: 0,
+                seed: 0,
                 _pad0: 0,
-                _pad1: 0,
             };
         let chronicle_betray_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -271,7 +271,7 @@ impl DiplomacyProbeState {
         let seed_cfg_init = seed_indirect_0::SeedIndirect0Cfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         let seed_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -447,7 +447,7 @@ impl CompiledSim for DiplomacyProbeState {
         let observe_cfg = physics_ObserveAndAct::PhysicsObserveAndActCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.observe_cfg_buf,
@@ -483,7 +483,7 @@ impl CompiledSim for DiplomacyProbeState {
             fused_mask_verb_ProposeAlliance::FusedMaskVerbProposeAllianceCfg {
                 agent_cap: self.agent_count,
                 tick: self.tick as u32,
-                _pad: [0; 2],
+                seed: 0, _pad: 0,
             };
         self.gpu
             .queue
@@ -508,7 +508,7 @@ impl CompiledSim for DiplomacyProbeState {
         let scoring_cfg = scoring::ScoringCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.scoring_cfg_buf,
@@ -555,8 +555,8 @@ impl CompiledSim for DiplomacyProbeState {
             physics_verb_chronicle_ProposeAlliance::PhysicsVerbChronicleProposeAllianceCfg {
                 event_count: chronicle_event_count,
                 tick: self.tick as u32,
+                seed: 0,
                 _pad0: 0,
-                _pad1: 0,
             };
         self.gpu.queue.write_buffer(
             &self.chronicle_propose_cfg_buf,
@@ -592,8 +592,8 @@ impl CompiledSim for DiplomacyProbeState {
             physics_verb_chronicle_Betray::PhysicsVerbChronicleBetrayCfg {
                 event_count: betray_chronicle_event_count,
                 tick: self.tick as u32,
+                seed: 0,
                 _pad0: 0,
-                _pad1: 0,
             };
         self.gpu.queue.write_buffer(
             &self.chronicle_betray_cfg_buf,
@@ -623,7 +623,7 @@ impl CompiledSim for DiplomacyProbeState {
         let seed_cfg = seed_indirect_0::SeedIndirect0Cfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         self.gpu
             .queue

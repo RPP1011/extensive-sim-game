@@ -163,6 +163,61 @@ impl EventRing {
         self.tail_estimate = 0;
     }
 
+    /// Encode a per-tick header-word clear for the first `max_slots`
+    /// ring entries. Call at the start of every `step()` (before any
+    /// producer dispatch) when the producer's per-tick emit count is
+    /// **variable** — i.e. less than the upper bound the consumer's
+    /// `event_count` cfg field reports. Without this, slots that
+    /// stale events from previous ticks left at `kind=1u` get
+    /// re-folded by the next consumer dispatch, double-counting them.
+    ///
+    /// The clear writes a `0u` (`kind == 0u`, the sentinel "no event"
+    /// tag) to header word `[0]` of each slot in `0..max_slots`,
+    /// overwriting whatever stale tag the previous tick left there.
+    /// `max_slots` must be the upper bound on this tick's producer
+    /// emit count (typically `agent_count` for one-emit-per-agent
+    /// rules); slots beyond that are unaffected (the producer never
+    /// reaches them, so they keep whatever tag they last held — which
+    /// the consumer's `event_count` upper bound never lets it walk
+    /// past).
+    ///
+    /// **When you don't need this:** producers that emit exactly
+    /// `agent_count` events per tick (every alive agent fires
+    /// unconditionally — e.g. cooldown_probe's `CheckAndCast` rule)
+    /// always overwrite the same slot range, so the consumer never
+    /// reads stale headers. Only stochastic / conditional producers
+    /// need the per-tick clear.
+    ///
+    /// See `docs/superpowers/notes/2026-05-04-stochastic_probe.md`
+    /// (Gap #2 follow-up) for the discovery.
+    pub fn clear_ring_headers_in(
+        &self,
+        gpu: &crate::gpu::GpuContext,
+        encoder: &mut wgpu::CommandEncoder,
+        max_slots: u32,
+    ) {
+        if max_slots == 0 {
+            return;
+        }
+        // Lazy-init a zero scratch buffer sized for the first
+        // `max_slots * stride` u32 words. Writing through `queue`
+        // would also work but requires a separate submission boundary;
+        // a buffer-to-buffer copy fuses cleanly into the per-tick
+        // encoder. Allocating per-call is cheap (the buffer is small)
+        // but if profiling shows overhead, hoist into `Self`.
+        let needed_bytes =
+            (max_slots as u64) * (EVENT_STRIDE_U32 as u64) * 4;
+        let zeros = vec![0u8; needed_bytes as usize];
+        let scratch = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("EventRing::clear_ring_headers_in::scratch"),
+                contents: &zeros,
+                usage: wgpu::BufferUsages::COPY_SRC,
+            },
+        );
+        encoder.copy_buffer_to_buffer(&scratch, 0, &self.ring, 0, needed_bytes);
+    }
+
     /// Bump the host-side per-tick tail estimate by `n` slots after a
     /// producer dispatch. `n` must be the upper bound on slots that
     /// producer could have appended to the ring this tick — typically

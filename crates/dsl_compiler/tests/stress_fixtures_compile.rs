@@ -1513,18 +1513,19 @@ fn diplomacy_probe_compile_gate() {
 ///   - IfStmt with an RNG-derived comparison on the LHS (no
 ///     DataHandle on the predicate).
 ///
-/// **WGSL gap (HIGH severity, surfaced by this probe):** the physics
-/// body emits the literal call `per_agent_u32(seed, agent_id, tick,
-/// "action")` per `cg/emit/wgsl_body.rs:944`, but neither `seed`,
-/// `per_agent_u32`, nor the string-literal purpose tag is bound by
-/// the WGSL emit pipeline. Naga rejects the kernel at
-/// `parse_str` time. This test asserts:
+/// **WGSL gap (closed 2026-05-04 — Gaps #1, #2, #3):** the physics
+/// body lowers `rng.action()` to a `per_agent_u32(seed, agent_id,
+/// tick, 1u)` call (numeric purpose id from `RngPurpose::wgsl_id()`,
+/// not a string literal). The WGSL prelude in
+/// `cg/emit/program.rs::RNG_WGSL_PRELUDE` defines the function; the
+/// kernel preamble binds `let seed = cfg.seed;` from the per-rule cfg
+/// uniform's new `seed: u32` field. This test asserts:
 ///
 ///  (a) the body contains the `per_agent_u32(` call (proves the
 ///      lowering arm fired);
-///  (b) naga validation FAILS today on `physics_MaybeFire` (locks the
-///      observed-broken shape — flip to `is_empty()` once the gap
-///      closes).
+///  (b) the purpose tag is the numeric `1u` (Action's `wgsl_id`),
+///      NOT the legacy `"action"` string literal;
+///  (c) naga validation now PASSES on `physics_MaybeFire` end-to-end.
 ///
 /// Discovery doc: `docs/superpowers/notes/2026-05-04-stochastic_probe.md`.
 #[test]
@@ -1580,18 +1581,24 @@ fn stochastic_probe_compile_gate() {
         "physics_MaybeFire must lower `rng.action()` to a `per_agent_u32(...)` call \
          in WGSL; got body without that token:\n{body}",
     );
+    // Purpose tag is now a numeric WGSL u32 literal (Action.wgsl_id() = 1)
+    // — not the legacy `"action"` string literal (Gap #3 close, 2026-05-04).
     assert!(
-        body.contains("\"action\""),
-        "physics_MaybeFire must emit the purpose tag as `\"action\"` (today's broken \
-         string-literal form — once Gap #3 closes this assertion flips to a u32 const \
-         lookup); got body:\n{body}",
+        body.contains("1u"),
+        "physics_MaybeFire must emit the purpose tag as the numeric `1u` \
+         (Action.wgsl_id()); got body:\n{body}",
+    );
+    assert!(
+        !body.contains("\"action\""),
+        "physics_MaybeFire still contains a literal `\"action\"` string — Gap #3 \
+         (numeric purpose tag) regressed; got body:\n{body}",
     );
 
-    // Naga validation MUST FAIL on `physics_MaybeFire` today — the
-    // WGSL has THREE undeclared symbols (`seed`, `per_agent_u32`, and
-    // the string literal `"action"`). This locks the observed broken
-    // shape; when any of Gaps #1–#3 close this assertion flips and
-    // the gap punch list in the discovery doc shrinks.
+    // Naga validation MUST PASS on `physics_MaybeFire` today — Gaps
+    // #1, #2, #3 closed (2026-05-04). The kernel preamble binds
+    // `let seed = cfg.seed;` (Gap #1), the WGSL `RNG_WGSL_PRELUDE`
+    // defines `per_agent_u32` (Gap #2), and the purpose is a u32
+    // literal (Gap #3). All other kernels stay naga-clean.
     let physics_kernel_name = art
         .wgsl_files
         .keys()
@@ -1599,36 +1606,42 @@ fn stochastic_probe_compile_gate() {
         .cloned()
         .expect("physics_MaybeFire wgsl key present");
     let physics_body = art.wgsl_files.get(&physics_kernel_name).unwrap();
+    // The WGSL prelude must be present in the rng-touching kernel.
+    assert!(
+        physics_body.contains("fn per_agent_u32("),
+        "physics_MaybeFire must include the RNG_WGSL_PRELUDE `fn per_agent_u32(...)` \
+         definition (Gap #2 close); got body:\n{physics_body}",
+    );
+    assert!(
+        physics_body.contains("seed: u32"),
+        "physics_MaybeFire's cfg struct must carry `seed: u32` (Gap #1 close); \
+         got body:\n{physics_body}",
+    );
     let physics_naga = naga::front::wgsl::parse_str(physics_body);
     assert!(
-        physics_naga.is_err(),
-        "physics_MaybeFire WGSL is unexpectedly naga-clean — Gap #1/#2/#3 in \
-         docs/superpowers/notes/2026-05-04-stochastic_probe.md may have closed. \
-         Update this assertion to `physics_naga.is_ok()` and add positive \
-         assertions on the new RNG lowering shape.",
+        physics_naga.is_ok(),
+        "physics_MaybeFire WGSL must be naga-clean now that Gaps #1/#2/#3 closed; \
+         got error: {:?}\nbody:\n{physics_body}",
+        physics_naga.err(),
     );
 
-    // Every OTHER kernel (the fold + the plumbing kernels) must
-    // remain naga-clean — the gap is contained to the rng-touching
-    // physics body.
-    let mut other_errs = Vec::new();
+    // Every kernel (the rng-touching physics body + the fold + the
+    // plumbing kernels) must be naga-clean.
+    let mut all_errs = Vec::new();
     for (name, body) in &art.wgsl_files {
-        if name == &physics_kernel_name {
-            continue;
-        }
         if let Err(e) = naga::front::wgsl::parse_str(body) {
-            other_errs.push(format!("  {name}: {e}"));
+            all_errs.push(format!("  {name}: {e}"));
         }
     }
     assert!(
-        other_errs.is_empty(),
-        "stochastic_probe non-physics kernels emitted {} naga-invalid WGSL:\n{}",
-        other_errs.len(),
-        other_errs.join("\n"),
+        all_errs.is_empty(),
+        "stochastic_probe emitted {} naga-invalid WGSL kernels:\n{}",
+        all_errs.len(),
+        all_errs.join("\n"),
     );
 
     eprintln!(
-        "[stochastic_probe] {} kernels emitted: {:?}; physics_MaybeFire naga-FAILS as expected",
+        "[stochastic_probe] {} kernels emitted: {:?}; physics_MaybeFire naga-clean (Gaps #1/#2/#3 closed)",
         art.kernel_index.len(),
         art.kernel_index,
     );

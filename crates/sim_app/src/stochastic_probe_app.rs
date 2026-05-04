@@ -40,10 +40,14 @@ const TICKS: u64 = 1000;
 /// activation_threshold_q100u`.
 const PROBABILITY: f64 = 0.30;
 /// Per-slot tolerance for the binomial distribution. With p=0.30,
-/// T=1000, std-dev ≈ √(1000 × 0.3 × 0.7) ≈ 14.5; ±5% of mean (= ±15)
-/// is roughly 1σ, so most slots should fit, but the harness reports
-/// all slots so any miss is visible.
-const PER_SLOT_TOLERANCE_FRACTION: f64 = 0.05;
+/// T=1000, std-dev σ ≈ √(1000 × 0.3 × 0.7) ≈ 14.5. The harness uses
+/// a 3σ band (≈ ±43.5, or ~14.5% of the mean) so the per-slot pass
+/// rate is essentially the binomial probability (>99.7% per slot,
+/// expected ~32/32 across the slot count). A ±5% (= ±15 ≈ 1σ) band
+/// would require a much larger T to pass every slot — at T=1000 the
+/// expected per-slot pass rate is only ~68%, so 32 slots would
+/// statistically miss ~10.
+const PER_SLOT_TOLERANCE_FRACTION: f64 = 0.15;
 
 fn main() {
     println!(

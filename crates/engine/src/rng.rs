@@ -79,6 +79,67 @@ pub fn per_agent_u64(world_seed: u64, agent_id: AgentId, tick: u64, purpose: &[u
     h.finish()
 }
 
+// ---------------------------------------------------------------------------
+// GPU-parity per-agent RNG
+// ---------------------------------------------------------------------------
+
+/// David Stafford's mix13 splitmix64-style finalizer, narrowed to u32.
+///
+/// The host-side mirror of the WGSL `rng_mix64` function emitted by
+/// the dsl_compiler RNG prelude
+/// (`crates/dsl_compiler/src/cg/emit/program.rs::RNG_WGSL_PRELUDE`).
+/// Both sides must produce bit-identical output for the same input
+/// (P11 — cross-backend bit-equality).
+///
+/// DO NOT modify the multiplier constants without bumping the engine
+/// schema hash AND updating `RNG_WGSL_PRELUDE` in lockstep.
+#[inline]
+fn rng_mix32(x: u32) -> u32 {
+    let mut z = x;
+    z = (z ^ (z >> 16)).wrapping_mul(0x7feb_352d);
+    z = (z ^ (z >> 15)).wrapping_mul(0x846c_a68b);
+    z ^ (z >> 16)
+}
+
+/// GPU-parity deterministic per-agent RNG primitive.
+///
+/// Folds `(world_seed, agent_id, tick, purpose_id)` through the same
+/// pure-integer mixing chain the WGSL prelude uses
+/// (`crates/dsl_compiler/src/cg/emit/program.rs::RNG_WGSL_PRELUDE`),
+/// so a draw made on the GPU at tick T for agent A with purpose P
+/// produces the same u32 the host produces for the same inputs (P11).
+///
+/// # Inputs
+///
+/// - `world_seed`: low 32 bits of the engine's world seed. The engine
+///   seed is 64-bit; the cfg uniform field is u32 so the GPU sees the
+///   low half. Any future widening to 64-bit GPU seed mirrors here.
+/// - `agent_id`: raw agent slot id (`AgentId::raw() as u32`).
+/// - `tick`: world tick as u32 (matches `cfg.tick` — runtimes already
+///   cast `state.tick as u32` per the existing cfg shape).
+/// - `purpose_id`: stable u32 from `RngPurpose::wgsl_id()`. The
+///   canonical mapping is `Action=1, Sample=2, Shuffle=3,
+///   Conception=4`. Lockstep with
+///   `crates/dsl_compiler/src/cg/data_handle.rs`.
+///
+/// # When to use which
+///
+/// - Runtime construction-time RNG (e.g. initial position scattering
+///   in `boids_runtime`, `foraging_runtime`) → use [`per_agent_u32`]
+///   with a `&[u8]` purpose. Host-only; ergonomic byte-slice keying.
+/// - GPU-emitted kernel bodies → the WGSL `per_agent_u32(...)` call;
+///   host code that needs to reproduce the same draw uses this.
+///
+/// See `docs/superpowers/notes/2026-05-04-stochastic_probe.md` (Gap
+/// #2) for the discovery doc.
+pub fn per_agent_u32_pcg(world_seed: u32, agent_id: u32, tick: u32, purpose_id: u32) -> u32 {
+    let mut s = rng_mix32(world_seed ^ 0x9E37_79B9);
+    s = rng_mix32(s ^ agent_id);
+    s = rng_mix32(s ^ tick);
+    s = rng_mix32(s ^ purpose_id);
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,5 +195,58 @@ mod tests {
         let v = per_agent_u64(42, AgentId::new(1).unwrap(), 100, b"action");
         // Pin the value — see note above.
         assert_eq!(v, 0xDD23_B8FC_F784_B656);
+    }
+
+    #[test]
+    fn per_agent_pcg_is_deterministic_and_distinct() {
+        let a1 = per_agent_u32_pcg(0xDEAD_BEEF, 1, 100, 1);
+        let a2 = per_agent_u32_pcg(0xDEAD_BEEF, 1, 100, 1);
+        let b = per_agent_u32_pcg(0xDEAD_BEEF, 2, 100, 1);
+        assert_eq!(a1, a2, "same inputs must reproduce");
+        assert_ne!(a1, b, "different agent ids must diverge");
+    }
+
+    #[test]
+    fn per_agent_pcg_purpose_separates_streams() {
+        let action = per_agent_u32_pcg(0xCAFE_F00D, 1, 100, 1);
+        let sample = per_agent_u32_pcg(0xCAFE_F00D, 1, 100, 2);
+        let shuffle = per_agent_u32_pcg(0xCAFE_F00D, 1, 100, 3);
+        let conception = per_agent_u32_pcg(0xCAFE_F00D, 1, 100, 4);
+        // All four purposes must produce distinct streams under the
+        // same (seed, agent, tick) tuple.
+        assert_ne!(action, sample);
+        assert_ne!(action, shuffle);
+        assert_ne!(action, conception);
+        assert_ne!(sample, shuffle);
+    }
+
+    #[test]
+    fn per_agent_pcg_distribution_is_roughly_uniform() {
+        // Smoke test: 1000 draws under threshold 30%, count fires,
+        // expect ≈ 300. The stochastic_probe runtime relies on this
+        // distribution to converge to T × p = 300 per slot.
+        let mut fires = 0;
+        for tick in 0..1000u32 {
+            let draw = per_agent_u32_pcg(0x1234_5678, 7, tick, 1);
+            if draw % 100 < 30 {
+                fires += 1;
+            }
+        }
+        assert!(
+            (250..=350).contains(&fires),
+            "PCG draw distribution looks skewed: {fires} fires across 1000 \
+             ticks at 30% threshold (expected ≈ 300, ±5σ tolerance)",
+        );
+    }
+
+    #[test]
+    fn per_agent_pcg_golden_value() {
+        // Pin the value — anchors the WGSL prelude
+        // (`RNG_WGSL_PRELUDE` in dsl_compiler) to the exact same
+        // mixing chain. P11 cross-backend bit-equality. Any change
+        // here is a determinism-breaking change requiring a schema
+        // hash bump AND a lockstep update to the WGSL prelude.
+        let v = per_agent_u32_pcg(42, 1, 100, 1);
+        assert_eq!(v, 0x5CBB_D99C);
     }
 }

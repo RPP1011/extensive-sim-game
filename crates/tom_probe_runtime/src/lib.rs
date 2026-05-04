@@ -115,7 +115,8 @@ impl TomProbeState {
             physics_WhatIBelieve::PhysicsWhatIBelieveCfg {
                 agent_cap: agent_count,
                 tick: 0,
-                _pad: [0, 0],
+                seed: 0,
+                _pad: 0,
             };
         let physics_cfg_buf =
             gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -229,7 +230,8 @@ impl CompiledSim for TomProbeState {
         let physics_cfg = physics_WhatIBelieve::PhysicsWhatIBelieveCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0, 0],
+            seed: 0,
+            _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.physics_cfg_buf,
