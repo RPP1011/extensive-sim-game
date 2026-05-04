@@ -32,12 +32,13 @@ fn main() {
         &cg,
         dsl_compiler::cg::schedule::ScheduleStrategy::Default,
     );
-    let artifacts = dsl_compiler::cg::emit::emit_cg_program_with_invariants(
-        &schedule_result.schedule,
-        &cg,
-        &comp,
-    )
-    .expect("emit predator_prey CG program");
+    let artifacts =
+        dsl_compiler::cg::emit::emit_cg_program_with_invariants_metrics_and_probes(
+            &schedule_result.schedule,
+            &cg,
+            &comp,
+        )
+        .expect("emit predator_prey CG program");
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
 
@@ -92,7 +93,7 @@ fn main() {
             .unwrap_or_else(|| panic!("missing rust file {key} for kernel {kernel_name}"));
         wrap_module(kernel_name, content);
     }
-    for sibling in ["schedule", "dispatch", "invariants"] {
+    for sibling in ["schedule", "dispatch", "invariants", "metrics", "probes"] {
         let key = format!("{sibling}.rs");
         if let Some(content) = artifacts.rust_files.get(&key) {
             wrap_module(sibling, content);

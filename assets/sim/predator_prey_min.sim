@@ -138,6 +138,28 @@ invariant bounded_kill_count(a: Agent) @debug_only {
   kill_count(a) < 1000.0
 }
 
+// Smoke probe: drive the runtime forward through a small number of
+// ticks under the test harness and confirm a constant-foldable
+// assertion holds. The compiler's slice-B probe emit pass synthesises
+// a `pub fn run_smoke_drive<State: CompiledSim>(state) -> ProbeOutcome`
+// from this declaration; the `predator_prey_runtime` crate re-exports
+// it via `OUT_DIR/generated.rs::probes` (see build.rs's sibling list).
+//
+// Today's emit pass only handles constant-foldable scalar asserts —
+// the binder-bound shape (`count[a in agents where …]`) needs the
+// resolver to bind the binder before slice B can lift it. This probe
+// uses the constant-foldable form so it exercises the full emit +
+// runtime drive path; the failing-shape companion is exercised at
+// the test-fixture level (see `tests/probe_drives.rs`).
+probe smoke_drive {
+  scenario "synthetic_smoke"
+  seed 42
+  ticks 3
+  assert {
+    count[1.0] == 1.0
+  }
+}
+
 // Per-creature movement split. Both rules dispatch PerAgent over the
 // shared SoA, gated by their `where (self.creature_type == <Entity>)`
 // guard so each thread only commits writes for matching agents. The

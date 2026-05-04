@@ -294,7 +294,7 @@ Compilation:
 
 ### 2.6 `verb` (composition sugar)
 
-> ❌ **Audit 2026-04-26 — silent-drop:** `verb` declarations parse and resolve to `VerbIR`, but **`EmittedArtifacts` has no verb output and no emit pass exists**. A `.sim` file with `verb` declarations compiles silently to nothing. Same status applies to §2.9 `probe` (still silent-drop). §2.8 `invariant` was partially closed 2026-05-03 (see callout). §2.11 `metric` was partially closed 2026-05-03 by Slice C of the verb/probe/metric emit plan (see callout below for shape).
+> ❌ **Audit 2026-04-26 — silent-drop:** `verb` declarations parse and resolve to `VerbIR`, but **`EmittedArtifacts` has no verb output and no emit pass exists**. A `.sim` file with `verb` declarations compiles silently to nothing. §2.8 `invariant` was partially closed 2026-05-03 (see callout). §2.9 `probe` was partially closed 2026-05-03 by Slice B of the verb/probe/metric emit plan (see callout under §2.9). §2.11 `metric` was partially closed 2026-05-03 by Slice C of the same plan (see callout below for shape).
 > See `docs/superpowers/notes/2026-04-26-audit-language-stdlib.md` for detail.
 
 `verb` declares a named gameplay action that composes an existing micro primitive with additional mask predicates, cascades, and scoring entries. It does NOT add to the closed categorical action vocabulary.
@@ -320,8 +320,9 @@ Adding a `verb` does not bump the schema hash. Adding a new micro primitive does
 > `EmittedArtifacts.rust_files`); per-fixture runtimes consume it via `state.check_invariants()`. Unsupported
 > shapes (multi-arg scope, quantifiers, field access, vec3 views) emit a `// SKIP <reason>` comment so the gap is
 > visible at build time rather than silent. Implementation: `crates/dsl_compiler/src/cg/emit/invariants.rs`,
-> stress test: `crates/predator_prey_runtime/tests/invariant_violation.rs`. The §2.6 `verb`, §2.9 `probe`, §2.11
-> `metric` callouts above remain accurate — those three are still silent-drop.
+> stress test: `crates/predator_prey_runtime/tests/invariant_violation.rs`. The §2.6 `verb` callout above
+> remains accurate — that one is still silent-drop. §2.9 `probe` and §2.11 `metric` were partially closed
+> 2026-05-03 by Slices B + C of the verb/probe/metric emit plan (see their respective callouts below).
 
 ```
 invariant <name>(<scope>) @<mode> { <predicate> }
@@ -343,6 +344,21 @@ invariant append_only_trace_schema() @static {
 Cascades that write a field in the invariant's support must annotate `@must_preserve(<invariant>)`.
 
 ### 2.9 `probe` declaration
+
+> ⚠️ **Audit 2026-04-26 — partial close (2026-05-03, Slice B):** the silent-drop is closed for the
+> **constant-foldable scalar shape** — `count[<lit>] <op> <lit>` (and the analogous `pr[…|…] <op> <lit>` /
+> `mean[…|…] <op> <lit>` heads when both sides constant-fold to a numeric literal). The compiler synthesises
+> a generic `pub fn run_<name><State: CompiledSim>(state: &mut State) -> ProbeOutcome` per probe into
+> `probes.rs` (added to `EmittedArtifacts.rust_files`); the runner drives the supplied [`engine::CompiledSim`]
+> through the declared `ticks` step()s and evaluates each assert against the constant-folded scalars,
+> returning a typed `ProbeOutcome::{Passed, Failed, Skipped}`. Per-fixture runtimes consume the artifact via
+> the build-script sibling list (see `predator_prey_runtime/build.rs`'s `["schedule", "dispatch", "invariants",
+> "metrics", "probes"]` loop). Unsupported assert shapes (binder-bound aggregates, view calls, per-tick
+> event-ring queries, `forall t in 0..ticks` quantifiers) emit a `// SKIP <reason>` comment + a typed
+> `Skipped { reason }` runtime payload so the gap is visible at build time AND at runtime, not silent.
+> Implementation: `crates/dsl_compiler/src/cg/emit/probes.rs`, stress tests:
+> `crates/dsl_compiler/tests/probe_emit_runtime.rs` + `crates/predator_prey_runtime/tests/probe_drives.rs`.
+> The §2.6 `verb` callout above remains accurate — that one is still silent-drop pending Slice A.
 
 Named CI regression assertions: fixture scenario → seeded event trajectory → behavioural check against the utility backend. Probes live in `probes/` alongside their seed scenarios.
 
