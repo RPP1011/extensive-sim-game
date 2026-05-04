@@ -323,6 +323,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "cooldown_probe_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "core-foundation"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1627,6 +1640,7 @@ dependencies = [
  "auction_runtime",
  "bartering_runtime",
  "boids_runtime",
+ "cooldown_probe_runtime",
  "crowd_navigation_runtime",
  "ecosystem_runtime",
  "engine",

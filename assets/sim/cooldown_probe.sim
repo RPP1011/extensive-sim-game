@@ -1,0 +1,106 @@
+// cooldown_probe — discovery probe for the per-agent cooldown SoA AND
+// (optionally) the `abilities.*` namespace methods.
+//
+// This is the FOLLOW-UP probe to abilities_probe (see Gap #4 in
+// `docs/superpowers/notes/2026-05-04-abilities_probe.md`):
+//
+// > `agents.cooldown_next_ready_tick` SoA + `abilities.*` namespace
+// > methods registered in spec but no fixture exercises them
+// > end-to-end. Follow-up: `cooldown_probe.sim`.
+//
+// SHAPE: each Caster has a per-agent `cooldown_next_ready_tick` SoA
+// slot. The runtime initializes it to a STAGGERED pattern (slot N
+// → ready_at = N) so per-slot fire counts vary analytically. The
+// per-tick physics rule reads `agents.cooldown_next_ready_tick(self)`
+// and emits an `ActivationLogged` event when `tick >= ready_at`.
+//
+// PROBE FOCUS — two surfaces:
+//
+//   1. `agents.cooldown_next_ready_tick(self)` — per-agent SoA field
+//      read via the same `agents.<field>(<expr>)` lowering arm that
+//      target_chaser exercises with `agents.pos(...)`. The field id
+//      is `AgentFieldId::CooldownNextReadyTick` (registered in
+//      `crates/dsl_compiler/src/cg/data_handle.rs:313`); the spec
+//      table at `docs/spec/dsl.md` lists the field. Today no .sim
+//      fixture reads it.
+//
+//   2. `world.tick` read in physics body, then `tick >= ready_at`
+//      gating an `emit`. Tests the tick-preamble binding (`let tick =
+//      cfg.tick;` per commit `e5ec7699`) reaches the physics-body
+//      scope and the IrStmt::If lowering routes the gate cleanly.
+//
+// Optional follow-up surface (NOT exercised in this probe — would
+// require AbilityId registry population which the bare verb-only
+// path doesn't seed):
+//
+//   3. `abilities.on_cooldown(0u)` — the inverted form documented in
+//      `crates/dsl_ast/src/resolve.rs:381`. Would need the abilities
+//      namespace to be populated in the CG `populate_namespace_registry`
+//      driver (currently the registry has agents/query/world/auctions
+//      only — abilities is parsed at the AST resolve layer but not
+//      lowered through CG).
+//
+// FULL FIRE prediction (analytical):
+//
+//   With AGENT_COUNT=32, TICKS=100, init `ready_at[N] = N`:
+//   per-slot fire count = max(0, TICKS - N) = 100 - N
+//
+//     activations[0]  = 100   (always ready)
+//     activations[1]  = 99
+//     activations[2]  = 98
+//     ...
+//     activations[31] = 69
+//
+//   sum = sum(100 - N for N in 0..32) = 32*100 - 31*32/2 = 3200 - 496 = 2704
+//
+// If the field-read path lowers and the `if (tick >= ready_at) {
+// emit }` works end-to-end, the per-slot pattern matches above.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event ActivationLogged {
+  caster:    AgentId,
+  activated: f32,    // 1.0 marker — folded into per-caster activation count
+}
+
+entity Caster : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config cooldown {
+  // Marker amount per activation — the fold accumulates this per
+  // ActivationLogged event so per-slot count = activations.
+  log_amount: f32 = 1.0,
+}
+
+// Per-agent rule: each Caster reads its own cooldown_next_ready_tick
+// SoA slot, compares to world.tick, emits ActivationLogged when
+// ready. Staggered initialization means slot N fires (TICKS - N)
+// times.
+//
+// `agents.cooldown_next_ready_tick(self)` lowers via the
+// `(NamespaceId::Agents, field) if args.len() == 1` arm in
+// `crates/dsl_compiler/src/cg/lower/expr.rs:2597` to
+// `Read(AgentField{CooldownNextReadyTick, AgentRef::Target(self_id)})`.
+// `world.tick` lowers via the world-namespace registry to the
+// kernel-preamble `tick` local.
+physics CheckAndCast @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    let ready_at = agents.cooldown_next_ready_tick(self);
+    if (world.tick >= ready_at) {
+      emit ActivationLogged { caster: self, activated: config.cooldown.log_amount }
+    }
+  }
+}
+
+// Per-caster activation counter — fed by ActivationLogged. Each
+// emit bumps the slot by `log_amount = 1.0`. After T ticks with
+// the staggered init pattern: activations[N] = max(0, T - N).
+@materialized(on_event = [ActivationLogged])
+view activations(caster: Agent) -> f32 {
+  initial: 0.0,
+  on ActivationLogged { caster: c, activated: a } { self += a }
+  clamp: [0.0, 1000000.0],
+}

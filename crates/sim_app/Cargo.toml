@@ -59,6 +59,10 @@ trade_market_runtime = { path = "../trade_market_runtime" }
 # (two competing verbs Strike+Heal, two event kinds DamageDealt+Healed,
 # two view-folds damage_total+healing_done).
 abilities_runtime = { path = "../abilities_runtime" }
+# Cooldown probe — follow-up to abilities_probe Gap #4. Drives the
+# per-agent cooldown_next_ready_tick SoA + world.tick preamble +
+# `if (tick >= ready_at) { emit }` gating end-to-end.
+cooldown_probe_runtime = { path = "../cooldown_probe_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -115,3 +119,7 @@ path = "src/trade_market_app.rs"
 [[bin]]
 name = "abilities_app"
 path = "src/abilities_app.rs"
+
+[[bin]]
+name = "cooldown_probe_app"
+path = "src/cooldown_probe_app.rs"
