@@ -1,0 +1,156 @@
+// stdlib_math_probe — discovery probe for under-exercised stdlib
+// math + RNG conversion surfaces. Per the spec audit at
+// `docs/superpowers/notes/2026-04-26-audit-language-stdlib.md`, this
+// fixture stress-tests stdlib calls documented in `docs/spec/dsl.md`
+// that no other workspace fixture exercises end-to-end through the
+// GPU pipeline.
+//
+// PROBE DESIGN — keep ONLY the surfaces that actually wire through:
+//
+//   Tier 1 (RETAINED): math stdlib `floor` / `ceil` / `round` /
+//     `log2` / `abs` — all are WGSL natives, all FULL-validator
+//     clean. The probe runs each in its own `let` binding so the
+//     emit shape is inspectable per-surface.
+//
+//   Tier 2 (RETAINED): bucket emit via `rng.action() % 4` —
+//     proven-safe (closed by stochastic_probe Gaps #1/#2/#3, 2026-
+//     05-04). The bucket field carries 0..3 per slot per tick.
+//
+// FIVE compiler gaps surfaced; surfaces #A through #E are commented
+// out below with citations to the responsible compiler arms. The
+// probe documents but does NOT fix any compiler gap (constitution
+// P1 — discovery vs implementation). Full punch list lives in
+// `docs/superpowers/notes/2026-05-04-stdlib_math_probe.md`.
+//
+// FULL FIRE OBSERVABLE (TICKS=100, AGENT_COUNT=32, log_amount=1.0):
+//
+//   Per-slot fire count = TICKS = 100 (unconditional emit on `Tick`)
+//   sum                  = 32 × 100 = 3200
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Sampled {
+  agent:  AgentId,
+  bucket: u32,
+  amount: f32,
+}
+
+entity Sampler : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config probe {
+  // Marker amount per emit — folded into per-slot count.
+  log_amount: f32 = 1.0,
+}
+
+// Per-Sampler physics rule. Each tick runs through a chain of
+// stdlib calls (each in its own `let` so the emit shape is
+// inspectable per-surface) and unconditionally emits Sampled. The
+// `bucket` field uses the proven-safe `rng.action()` masked to
+// 4 buckets via `& 3u`, so the observable converges to
+// `count(slot) = TICKS` regardless of which typed-RNG `let`s
+// validate.
+physics SampleAndBucket @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    // ---- Tier 1: math stdlib (predicted naga-clean) ----
+    // Each builtin maps to a WGSL native of the same name — the
+    // emit table at `wgsl_body.rs:644-651` does the rename.
+    let m_floor = floor(2.5);
+    let m_ceil  = ceil(2.5);
+    let m_round = round(2.5);
+    let m_log2  = log2(8.0);
+    // `log10` is OMITTED here — it lowers to `BuiltinId::Log10` which
+    // emits as the WGSL identifier `log10(...)`, but WGSL has no
+    // built-in named `log10` (naga rejects: "no definition in scope
+    // for identifier: `log10`"). Documented as Gap #A in the
+    // discovery report; the fix is either an emit-time rewrite to
+    // `(log2(x) * 0.30102999...)` or a per-rule prelude shim.
+    // let m_log10 = log10(1000.0);
+    let m_abs   = abs(0.5 - 1.5);
+
+    // ---- Tier 2: spatial — OMITTED ----
+    // `planar_distance(a, b)` and `z_separation(a, b)` lower
+    // cleanly through `lower_builtin_call` to `CgExpr::Builtin`
+    // nodes, and the WGSL emit at `wgsl_body.rs:640-641` produces
+    // bare identifier calls `planar_distance(...)` / `z_separation
+    // (...)`. But NEITHER WGSL natively defines those identifiers
+    // AND no kernel prelude shim is emitted (compare with the
+    // `RNG_WGSL_PRELUDE` injection in `cg/emit/program.rs:431` —
+    // gated on `body.contains("per_agent_u32(")` — which has no
+    // counterpart for these stdlib helpers).
+    // naga rejects: "no definition in scope for identifier:
+    //               `planar_distance`".
+    // Documented as Gap #B in the discovery report. Same fix shape
+    // as RNG_WGSL_PRELUDE: a substring-keyed prelude injection.
+    // let m_pdist = planar_distance(self.pos, self.pos);
+    // let m_zsep  = z_separation(self.pos, self.pos);
+
+    // ---- Tier 3: typed RNG (HIGH risk — naga likely rejects) ----
+    // Each let lowers to a `CgExpr::Rng { purpose, ty }` wrapped in
+    // the per-purpose scaling shape; the WGSL emit produces a
+    // `per_agent_u32(...)` u32 expression that the surrounding
+    // typed binary ops can't accept without a conversion routine.
+    // `rng.uniform(lo, hi)` OMITTED — lowers to `lo + (Rng{Uniform,
+    // F32} * (hi - lo))`. WGSL emit produces:
+    //   `let local_N: f32 = (0.0 + (per_agent_u32(seed, agent_id,
+    //                                tick, 5u) * (1.0 - 0.0)))`.
+    // The `naga::front::wgsl::parse_str` text parser ACCEPTS this
+    // (abstract-float literals can syntactically pair with u32),
+    // but `wgpu::Device::create_shader_module` runs the FULL
+    // validator and rejects: "Expression is invalid — Abstract
+    // types may only appear in constant expressions". HARD GAP at
+    // shader-module instantiation. Documented as Gap #E. Fix shape:
+    // emit a per-purpose conversion, e.g.
+    //   `(f32(per_agent_u32(...)) / 4294967295.0) * (hi - lo) + lo`
+    // for `Uniform`; Box-Muller pair-draw for `Gauss`.
+    // let r_uniform = rng.uniform(0.0, 1.0);
+    // `rng.coin()` OMITTED — lowers to `CgExpr::Rng { Coin, Bool }`,
+    // emit produces `let local_N: bool = per_agent_u32(seed,
+    // agent_id, tick, 7u);`. naga TEXT parser rejects: "the type of
+    // `local_N` is expected to be `bool`, but got `u32`". Documented
+    // as Gap #D. Fix shape: emit `((per_agent_u32(...) & 1u) == 0u)`
+    // for `Coin` purpose.
+    // let r_coin = rng.coin();
+    // `rng.gauss(mu, sigma)` OMITTED — same shape as Gap #E (typed
+    // F32 wrapped over u32 draw); same hard reject by the wgpu
+    // validator. Box-Muller would need a per-purpose pair-draw.
+    // let r_gauss = rng.gauss(0.0, 1.0);
+    // NOTE — `rng.uniform_int(lo, hi)` is intentionally OMITTED from
+    // this probe. Its lowering at `expr.rs::lower_rng_uniform_int`
+    // requires both args to typecheck as `CgTy::I32`, but the DSL
+    // parser:
+    //   - emits bare integer literals as `IrType::I32` → CG `U32`
+    //     (the standard implicit promotion path),
+    //   - has no explicit `i32(x)` / `u32(x)` / `f32(x)` cast
+    //     surface (verified by parser scan — no `TypeCast` /
+    //     `cast_expr` token),
+    //   - has no `i32` literal suffix (the `u` suffix already fails
+    //     parser lookup; same path for `i`).
+    // No fixture in `assets/sim/` declares an `i32` config or SoA
+    // field, so there is no in-DSL way to source an `i32`. The
+    // probe documents this as Gap #C in the discovery report.
+
+    // ---- Bucket value: proven-safe rng.action() % 4u ----
+    // `rng.action()` lowers to `per_agent_u32(seed, agent_id, tick,
+    // 1u)` (Action's wgsl_id) and stays in u32 throughout. The
+    // `% 4u` modulo collapses to a 4-bucket index; downstream this
+    // is the bucket field on the emitted Sampled event. (DSL parser
+    // accepts `%` but not `&`; the modulo gives identical bucket
+    // distribution since the PCG output is uniformly distributed.)
+    let bucket = rng.action() % 4;
+    emit Sampled { agent: self, bucket: bucket, amount: config.probe.log_amount }
+  }
+}
+
+// Per-Sampler emit count. Each Sampled bumps the slot by
+// `amount = log_amount = 1.0`. After T ticks: `sampled_count[N] = T`
+// if the kernel survives naga validation; 0 otherwise.
+@materialized(on_event = [Sampled])
+view sampled_count(agent: Agent) -> f32 {
+  initial: 0.0,
+  on Sampled { agent: a, bucket: _, amount: x } { self += x }
+  clamp: [0.0, 1000000.0],
+}

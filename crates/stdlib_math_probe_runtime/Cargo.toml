@@ -1,0 +1,27 @@
+[package]
+name = "stdlib_math_probe_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/stdlib_math_probe.sim` —
+# discovery probe stress-testing under-exercised stdlib math + RNG
+# conversion surfaces. Mirrors `stochastic_probe_runtime` shape (single
+# physics rule + single fold + no @decay): build.rs lowers the .sim
+# through the DSL compiler into `OUT_DIR/generated.rs`; src/lib.rs
+# owns the GPU context, per-buffer storage, kernel cache, and per-tick
+# dispatch chain. Adds a per-Sampler `pos: vec3<f32>` SoA so the
+# `self.pos` reads in math-stdlib `let` bindings have a real backing
+# buffer (mirrors target_chaser_runtime::pos_buf).
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

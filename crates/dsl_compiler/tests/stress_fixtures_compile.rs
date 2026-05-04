@@ -2051,3 +2051,171 @@ fn pair_scoring_probe_full_fire_compile_gate() {
     }
 }
 
+/// `stdlib_math_probe` compile-gate. Pins the structural surface of
+/// the smallest end-to-end probe stress-testing under-exercised
+/// stdlib math + RNG conversion surfaces:
+///
+///   - 1 PhysicsRule (`SampleAndBucket`) per-agent, running a tier
+///     of stdlib `let` bindings (`floor` / `ceil` / `round` /
+///     `log2` / `abs`) and emitting `Sampled` unconditionally with
+///     the bucket value drawn from `rng.action() % 4u`.
+///   - 1 ViewFold (`sampled_count`) on `Sampled` (kind = 1u),
+///     accumulating per-slot fire count = TICKS.
+///
+/// The probe surfaced FIVE compiler gaps (Gaps #A-#E in
+/// `docs/superpowers/notes/2026-05-04-stdlib_math_probe.md`); the
+/// fixture body retains ONLY the surfaces that survive both the
+/// `naga::front::wgsl::parse_str` text parser AND the full
+/// `wgpu::Device::create_shader_module` validator. The omitted-gap
+/// surfaces stay as commented-out `let` bindings in the .sim with
+/// citations to the responsible compiler arms; this test pins:
+///
+///   (a) the structural surface (1 PhysicsRule + 1 ViewFold);
+///   (b) the math stdlib lowering — the physics WGSL body must
+///       contain at least `floor(`, `ceil(`, `round(`, `log2(`, and
+///       `abs(` calls (proves all five `BuiltinId` arms emit);
+///   (c) the safe bucket-emit lowering — the body must contain
+///       `(per_agent_u32(seed, agent_id, tick, 1u) % 4u)` (proves
+///       the rng.action() Action-purpose path, locked by stochastic
+///       _probe Gaps #1/#2/#3, still emits cleanly when composed
+///       with `% 4u` modulo);
+///   (d) every emitted WGSL kernel passes naga TEXT validation.
+///       (Note: this does NOT catch Gap #E's full-validator-only
+///       reject — the wgpu validator runs only at runtime in
+///       `create_shader_module`. The sim_app harness catches that
+///       via `catch_unwind`.)
+///
+/// Discovery doc: `docs/superpowers/notes/2026-05-04-stdlib_math_probe.md`.
+#[test]
+fn stdlib_math_probe_compile_gate() {
+    use dsl_compiler::cg::lower::lower_compilation_to_cg;
+    let path = workspace_path("assets/sim/stdlib_math_probe.sim");
+    let src = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let prog = dsl_compiler::parse(&src).expect("parse stdlib_math_probe.sim");
+    let comp = dsl_ast::resolve::resolve(prog).expect("resolve stdlib_math_probe.sim");
+    let cg = lower_compilation_to_cg(&comp).unwrap_or_else(|o| {
+        for d in &o.diagnostics {
+            eprintln!("[stdlib_math_probe lower diag] {d}");
+        }
+        o.program
+    });
+    let sched = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&sched.schedule, &cg)
+        .expect("emit stdlib_math_probe");
+
+    // Op-level invariants: physics rule + view fold present.
+    let mut physics_count = 0;
+    let mut viewfold_count = 0;
+    for op in &cg.ops {
+        match &op.kind {
+            dsl_compiler::cg::op::ComputeOpKind::PhysicsRule { .. } => physics_count += 1,
+            dsl_compiler::cg::op::ComputeOpKind::ViewFold { .. } => viewfold_count += 1,
+            _ => {}
+        }
+    }
+    assert_eq!(
+        physics_count, 1,
+        "expected 1 PhysicsRule op (SampleAndBucket); got {physics_count}",
+    );
+    assert_eq!(
+        viewfold_count, 1,
+        "expected 1 ViewFold op (sampled_count); got {viewfold_count}",
+    );
+
+    // Math-stdlib fingerprints — each retained Tier 1 surface must
+    // appear as a bare WGSL call in the physics body. This locks the
+    // `wgsl_body.rs::builtin_name` arms for Floor / Ceil / Round /
+    // Log2 / Abs against accidental rename.
+    let body = kernel_body_containing(&art, "SampleAndBucket")
+        .or_else(|| kernel_body_containing(&art, "physics"))
+        .unwrap_or_else(|| panic!(
+            "no physics_SampleAndBucket kernel in artifacts: {:?}",
+            art.kernel_index,
+        ));
+    for needle in ["floor(", "ceil(", "round(", "log2(", "abs("] {
+        assert!(
+            body.contains(needle),
+            "physics_SampleAndBucket must lower the {} stdlib call to a bare WGSL \
+             call; got body without that token:\n{body}",
+            needle.trim_end_matches('('),
+        );
+    }
+
+    // Bucket-emit fingerprint — `rng.action() % 4u` must lower to
+    // `per_agent_u32(seed, agent_id, tick, 1u) % 4u`. The `1u` is
+    // Action's `wgsl_id`; the `% 4u` is the BinaryOp::ModU32 arm.
+    assert!(
+        body.contains("per_agent_u32(seed, agent_id, tick, 1u)"),
+        "physics_SampleAndBucket must lower `rng.action()` to \
+         `per_agent_u32(seed, agent_id, tick, 1u)` (Action's wgsl_id); got body:\n{body}",
+    );
+    assert!(
+        body.contains("% 4u"),
+        "physics_SampleAndBucket must compose the bucket via `% 4u` (BinaryOp::ModU32); \
+         got body:\n{body}",
+    );
+
+    // GAP REGRESSION GUARDS — the omitted-gap surfaces (Gaps #A-#E)
+    // must NOT reappear in the physics body. If a future edit
+    // re-introduces one without first closing the corresponding
+    // compiler gap, the runtime panics in `create_shader_module`
+    // (Gap #E) or naga text-parse (Gaps #A, #B, #D). These pins
+    // surface the regression at compile-gate time.
+    assert!(
+        !body.contains("log10("),
+        "Gap #A regression — `log10(` reappeared in physics_SampleAndBucket but \
+         WGSL has no native log10. Got body:\n{body}",
+    );
+    assert!(
+        !body.contains("planar_distance(") && !body.contains("z_separation("),
+        "Gap #B regression — `planar_distance` / `z_separation` reappeared but no \
+         kernel-prelude shim defines them. Got body:\n{body}",
+    );
+    // Coin / Uniform / Gauss / UniformInt fingerprints are the
+    // `purpose` u32 ids (7 / 5 / 6 / 8 from `RngPurpose::wgsl_id`).
+    // Any of these in the physics body proves Gap #C/#D/#E
+    // re-entered.
+    for (gap, purpose_id) in [
+        ("Gap #D (rng.coin)", 7u32),
+        ("Gap #E (rng.uniform)", 5u32),
+        ("Gap #E (rng.gauss)", 6u32),
+        ("Gap #C (rng.uniform_int)", 8u32),
+    ] {
+        let needle = format!(", {purpose_id}u)");
+        assert!(
+            !body.contains(&needle),
+            "{gap} regression — purpose id {purpose_id}u (per RngPurpose::wgsl_id) \
+             reappeared in physics_SampleAndBucket without first closing the \
+             responsible WGSL emit gap. Got body:\n{body}",
+        );
+    }
+
+    // Naga TEXT validation MUST be clean across all kernels. (Gap
+    // #E's full-validator reject is NOT caught here — wgpu's
+    // create_shader_module runs the additional FULL validator that
+    // rejects abstract-type binary ops; that's surfaced by the
+    // sim_app harness, not this test.)
+    let mut errs = Vec::new();
+    for (name, body) in &art.wgsl_files {
+        if let Err(e) = naga::front::wgsl::parse_str(body) {
+            errs.push(format!("  {name}: {e}"));
+        }
+    }
+    assert!(
+        errs.is_empty(),
+        "stdlib_math_probe emitted {} naga-invalid WGSL kernels:\n{}",
+        errs.len(),
+        errs.join("\n"),
+    );
+
+    eprintln!(
+        "[stdlib_math_probe] {} kernels emitted: {:?}",
+        art.kernel_index.len(),
+        art.kernel_index,
+    );
+}
+

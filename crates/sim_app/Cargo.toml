@@ -78,6 +78,13 @@ stochastic_probe_runtime = { path = "../stochastic_probe_runtime" }
 # scoring expression. Outcome (b) NO FIRE — the gap chain is
 # documented in docs/superpowers/notes/2026-05-04-pair_scoring_probe.md.
 pair_scoring_probe_runtime = { path = "../pair_scoring_probe_runtime" }
+# Stdlib math probe — discovery probe stress-testing under-exercised
+# stdlib math + RNG conversion surfaces. Surfaces 5 gaps (Gaps #A-#E)
+# in `docs/superpowers/notes/2026-05-04-stdlib_math_probe.md`. The
+# probe body retains only the surfaces that actually wire through;
+# four omitted-gap surfaces stay commented in the .sim with citations
+# to the responsible compiler arms.
+stdlib_math_probe_runtime = { path = "../stdlib_math_probe_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -150,3 +157,7 @@ path = "src/stochastic_probe_app.rs"
 [[bin]]
 name = "pair_scoring_probe_app"
 path = "src/pair_scoring_probe_app.rs"
+
+[[bin]]
+name = "stdlib_math_probe_app"
+path = "src/stdlib_math_probe_app.rs"
