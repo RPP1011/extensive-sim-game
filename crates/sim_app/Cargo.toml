@@ -102,6 +102,13 @@ quest_probe_runtime = { path = "../quest_probe_runtime" }
 # PerPair tick preamble, Bool LHS rewrite). See
 # `docs/superpowers/notes/2026-05-04-duel_1v1.md`.
 duel_1v1_runtime = { path = "../duel_1v1_runtime" }
+# Scripted battle — second REAL gameplay-shaped fixture (after duel_1v1)
+# and the FIRST sim with a one-way scripted narrative arc. Three phases
+# (peaceful/assault/aftermath) gated on world.tick — different verbs
+# fire in different phases. Builds on duel_1v1's verb cascade +
+# chronicle pipeline and adds `world.tick >= L && world.tick < R`
+# phase-gate predicates in `when` clauses.
+scripted_battle_runtime = { path = "../scripted_battle_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -186,3 +193,7 @@ path = "src/quest_probe_app.rs"
 [[bin]]
 name = "duel_1v1_app"
 path = "src/duel_1v1_app.rs"
+
+[[bin]]
+name = "scripted_battle_app"
+path = "src/scripted_battle_app.rs"

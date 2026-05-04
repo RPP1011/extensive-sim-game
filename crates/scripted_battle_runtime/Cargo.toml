@@ -1,0 +1,35 @@
+[package]
+name = "scripted_battle_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/scripted_battle.sim` — the
+# SECOND real gameplay-shaped fixture and FIRST sim with a one-way
+# scripted narrative arc (3 phases, each gating a different verb set
+# via `world.tick >= L && world.tick < R` predicates).
+#
+# Build script lowers the .sim through dsl_compiler and concatenates
+# the emitted WGSL + Rust into OUT_DIR/generated.rs (mirrors
+# duel_1v1_runtime/build.rs verbatim except for the fixture path).
+# Per-tick CPU side adds two scripted-narrative interventions on top
+# of the GPU dispatch chain:
+#   - At tick 200 (Phase 1 → Phase 2): set every Enemy slot's
+#     alive=false → true via a copy_buffer_to_buffer. Wakes the
+#     waves so VillagerStrike + EnemyStrike masks start passing.
+#   - At tick 500 (Phase 2 → Phase 3): set every Enemy slot's
+#     alive=true → false. Quiets the assault so the verb cascade
+#     emits no more Damaged events; surviving villagers keep
+#     healing via ForageAftermath.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }
