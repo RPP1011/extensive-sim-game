@@ -102,6 +102,13 @@ quest_probe_runtime = { path = "../quest_probe_runtime" }
 # PerPair tick preamble, Bool LHS rewrite). See
 # `docs/superpowers/notes/2026-05-04-duel_1v1.md`.
 duel_1v1_runtime = { path = "../duel_1v1_runtime" }
+# Trade-market-real — second REAL gameplay-shaped fixture (after
+# duel_1v1). 50 Traders + 10 Goods share an Agent SoA via mana-marker
+# discrimination; pair-field scoring picks the cheapest in-stock good
+# per trader per tick. First sim to drive economic gameplay off
+# `target.<field>` reads on goods + a witness `items.base_price(0)`
+# read on a real Item entity.
+trade_market_real_runtime = { path = "../trade_market_real_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -186,3 +193,7 @@ path = "src/quest_probe_app.rs"
 [[bin]]
 name = "duel_1v1_app"
 path = "src/duel_1v1_app.rs"
+
+[[bin]]
+name = "trade_market_real_app"
+path = "src/trade_market_real_app.rs"

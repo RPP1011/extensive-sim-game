@@ -503,8 +503,17 @@ pub fn kernel_topology_to_spec_and_body(
     //    cfg.event_count { return; }` early-return guard resolves and
     //    the `Emit` writes still see `tick`. Other generic kernels
     //    keep the placeholder shape today.
-    let is_per_event_emit = matches!(dispatch, DispatchShape::PerEvent { .. })
-        && body_ops_have_emit(&body_ops, prog);
+    // Any PerEvent dispatch shape needs the `{ event_count, tick,
+    // seed, _pad0 }` cfg shape — the preamble emitted by
+    // `thread_indexing_preamble` references `cfg.event_count` for
+    // PerEvent regardless of whether the body has an Emit op (the
+    // body just consumes events). trade_market_real surfaced this:
+    // its `physics ApplyTrade` rule is PerEvent (consumes Trade) but
+    // emits no event of its own — without this gate, the classifier
+    // dropped to `Generic` (`agent_cap` cfg), and the PerEvent
+    // preamble's `if (event_idx >= cfg.event_count)` failed to
+    // type-check at WGSL compile.
+    let is_per_event_emit = matches!(dispatch, DispatchShape::PerEvent { .. });
     let (cfg_struct_decl, cfg_build_expr, kernel_kind) = if is_per_event_emit {
         (
             build_per_event_emit_cfg_struct_decl(&cfg_struct),
@@ -2043,6 +2052,14 @@ fn per_event_op_kind_tag(
 /// `cg::lower::driver::collect_emits_in_list` (private to that
 /// module) — duplicated here rather than re-exported so the emit
 /// layer's helper stays a leaf with no upstream coupling.
+///
+/// Currently unused: the `is_per_event_emit` gate now stamps
+/// PerEventEmit unconditionally for any PerEvent-dispatched kernel,
+/// since the PerEvent preamble references `cfg.event_count`
+/// regardless of whether the body emits. Kept as `#[allow(dead_code)]`
+/// because future kernel kinds may want to discriminate PerAgent
+/// rules with vs without Emit bodies for cfg-shape selection.
+#[allow(dead_code)]
 fn body_ops_have_emit(body_ops: &[OpId], prog: &CgProgram) -> bool {
     for op_id in body_ops {
         let Ok(op) = resolve_op(prog, *op_id) else {
@@ -2064,7 +2081,9 @@ fn body_ops_have_emit(body_ops: &[OpId], prog: &CgProgram) -> bool {
 
 /// Recursive walk: `true` iff the statement list named by `list_id`
 /// contains at least one [`CgStmt::Emit`], descending through `If`
-/// arms, `Match` arms, and `ForEachNeighborBody`.
+/// arms, `Match` arms, and `ForEachNeighborBody`. See
+/// [`body_ops_have_emit`] for the dead-code rationale.
+#[allow(dead_code)]
 fn stmt_list_has_emit(list_id: crate::cg::stmt::CgStmtListId, prog: &CgProgram) -> bool {
     use crate::cg::stmt::CgStmt;
     let Some(list) = prog.stmt_lists.get(list_id.0 as usize) else {
@@ -2692,14 +2711,59 @@ fn lower_op_body(
 ) -> Result<String, KernelEmitError> {
     match &op.kind {
         ComputeOpKind::MaskPredicate { mask, predicate } => {
+            // Snapshot the pending-target-let buffer so we can detect
+            // entries pushed by the predicate sub-tree (typically
+            // `items.<field>(<idx>)` reads, which queue a
+            // `let target_expr_<N>: u32 = <wgsl>;` pre-binding via
+            // [`crate::cg::emit::wgsl_body::EmitCtx::pending_target_lets`]).
+            // The mask body templates substitute the predicate WGSL
+            // inline as a single expression — without draining the
+            // buffer here, the predicate references `target_expr_<N>`
+            // identifiers that no enclosing stmt ever hoists.
+            // trade_market_real surfaced this for `items.base_price(0)`
+            // inside a verb's `when` clause.
+            //
+            // After lowering the predicate expression we drain any new
+            // entries from the buffer and prepend them as plain
+            // `let target_expr_<N>: u32 = <expr>;` lines BEFORE the
+            // template body — the templates' `let mask_<id>_value`
+            // line then sees the bindings already in scope.
+            let snapshot_len = ctx.pending_target_lets.borrow().len();
             let predicate_wgsl = lower_cg_expr_to_wgsl(*predicate, ctx)?;
+            let mut pending = ctx.pending_target_lets.borrow_mut();
+            let new_lets: Vec<(crate::cg::CgExprId, String)> =
+                pending.drain(snapshot_len..).collect();
+            drop(pending);
+            // The hoisted let lines may reference `agent_id` (PerAgent
+            // dispatch) or `agent_id` / `per_pair_candidate` (PerPair),
+            // so they must land AFTER the template binds those ids —
+            // i.e. spliced into the predicate text before the
+            // `let mask_<id>_value: bool = ...;` line. We do this by
+            // wrapping the predicate in a block: `{ <lets>; <pred_expr> }`
+            // is illegal WGSL, but we can emit the lets as siblings of
+            // `let mask_<id>_value` by injecting them via the template
+            // string — see `mask_predicate_*_body` which now accepts
+            // a `prefix_lets` argument.
+            let lets_prefix = if new_lets.is_empty() {
+                String::new()
+            } else {
+                let lines: Vec<String> = new_lets
+                    .iter()
+                    .map(|(id, w)| format!("    let target_expr_{}: u32 = {};", id.0, w))
+                    .collect();
+                format!("{}\n", lines.join("\n"))
+            };
             match dispatch {
-                DispatchShape::PerAgent => {
-                    Ok(mask_predicate_per_agent_body(*mask, &predicate_wgsl))
-                }
-                DispatchShape::PerPair { .. } => {
-                    Ok(mask_predicate_per_pair_body(*mask, &predicate_wgsl))
-                }
+                DispatchShape::PerAgent => Ok(mask_predicate_per_agent_body_with_prefix(
+                    *mask,
+                    &lets_prefix,
+                    &predicate_wgsl,
+                )),
+                DispatchShape::PerPair { .. } => Ok(mask_predicate_per_pair_body_with_prefix(
+                    *mask,
+                    &lets_prefix,
+                    &predicate_wgsl,
+                )),
                 DispatchShape::PerEvent { .. }
                 | DispatchShape::OneShot
                 | DispatchShape::PerWord
@@ -3214,9 +3278,22 @@ fn find_action_selected_kind(
 /// `thread_indexing_preamble`. Each mask op uses per-id-suffixed
 /// locals (`mask_<ID>_word`, `mask_<ID>_bit`) so a Fused kernel with
 /// multiple `MaskPredicate` ops doesn't redeclare `word`/`bit`.
-fn mask_predicate_per_agent_body(mask: MaskId, predicate_wgsl: &str) -> String {
+/// PerAgent dispatch — splices a `prefix` string between the
+/// `agent_id` resolution and the predicate evaluation. Used to hoist
+/// `let target_expr_<N>` bindings produced by `items.<field>(<idx>)`
+/// reads inside the predicate. See the MaskPredicate arm of
+/// [`lower_op_body`]. The prefix is empty when the predicate has no
+/// item/group field reads (no pending lets to drain), which keeps
+/// the per-agent body output bit-for-bit identical to the prior
+/// wrapped form.
+fn mask_predicate_per_agent_body_with_prefix(
+    mask: MaskId,
+    prefix: &str,
+    predicate_wgsl: &str,
+) -> String {
     format!(
-        "let mask_{0}_value: bool = {1};\n\
+        "{prefix}\
+         let mask_{0}_value: bool = {1};\n\
          if (mask_{0}_value) {{\n\
          \x20   let mask_{0}_word = agent_id >> 5u;\n\
          \x20   let mask_{0}_bit  = 1u << (agent_id & 31u);\n\
@@ -3237,7 +3314,20 @@ fn mask_predicate_per_agent_body(mask: MaskId, predicate_wgsl: &str) -> String {
 /// [`crate::cg::expr::CgExpr::PerPairCandidateId`] —
 /// resolves cleanly. Path B's slot-aware lowering will fold the alias
 /// step into its naming strategy.
-fn mask_predicate_per_pair_body(mask: MaskId, predicate_wgsl: &str) -> String {
+/// PerPair dispatch — splices a `prefix` string AFTER the `agent_id`
+/// / `per_pair_candidate` aliases are bound and BEFORE the predicate
+/// evaluation. The prefix typically carries
+/// `let target_expr_<N>: u32 = <wgsl>;` lines hoisted from
+/// `items.<field>(<idx>)` / `groups.<field>(<idx>)` reads inside the
+/// predicate. See the MaskPredicate arm of [`lower_op_body`]. The
+/// prefix is empty when the predicate has no item/group field reads,
+/// which keeps the per-pair body output bit-for-bit identical to the
+/// prior wrapped form.
+fn mask_predicate_per_pair_body_with_prefix(
+    mask: MaskId,
+    prefix: &str,
+    predicate_wgsl: &str,
+) -> String {
     format!(
         "// PerPair MaskPredicate — derive (agent, cand) from `pair`.\n\
          let mask_{0}_k = 1u; // TODO(task-5.7): read from cfg.per_pair_candidates.\n\
@@ -3247,6 +3337,7 @@ fn mask_predicate_per_pair_body(mask: MaskId, predicate_wgsl: &str) -> String {
          let agent_id = mask_{0}_agent;\n\
          let per_pair_candidate = mask_{0}_cand;\n\
          \n\
+         {prefix}\
          let mask_{0}_value: bool = {1};\n\
          if (mask_{0}_value) {{\n\
          \x20   let mask_{0}_word = mask_{0}_agent >> 5u;\n\
@@ -5828,7 +5919,13 @@ mod tests {
         let spec3 = kernel_topology_to_spec(&topology3, &prog3, &ctx3).unwrap();
         assert_eq!(spec3.kind, KernelKind::Generic);
 
-        // Indirect (physics consumer) → Generic.
+        // Indirect (physics consumer) → PerEventEmit. Any PerEvent-
+        // dispatched kernel needs the `{ event_count, tick, seed,
+        // _pad0 }` cfg shape so the preamble's `event_idx >=
+        // cfg.event_count` early-return resolves; the classifier
+        // stamps PerEventEmit unconditionally for PerEvent dispatch
+        // (trade_market_real surfaced the prior `Generic`-with-
+        // `agent_cap`-cfg WGSL parse failure).
         let mut prog4 = CgProgram::default();
         let ring = EventRingId(1);
         let prod = seed_indirect_op(&mut prog4, ring);
@@ -5839,7 +5936,7 @@ mod tests {
         };
         let ctx4 = EmitCtx::structural(&prog4);
         let spec4 = kernel_topology_to_spec(&topology4, &prog4, &ctx4).unwrap();
-        assert_eq!(spec4.kind, KernelKind::Generic);
+        assert_eq!(spec4.kind, KernelKind::PerEventEmit);
     }
 
     // ---- 13. Plumbing body templates (Task 5.6d) ----
