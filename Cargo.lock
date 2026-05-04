@@ -1176,6 +1176,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "objective_capture_10v10_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1700,6 +1713,7 @@ dependencies = [
  "engine",
  "foraging_runtime",
  "glam",
+ "objective_capture_10v10_runtime",
  "pair_scoring_probe_runtime",
  "particle_collision_runtime",
  "predator_prey_runtime",

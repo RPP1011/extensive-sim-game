@@ -102,6 +102,16 @@ quest_probe_runtime = { path = "../quest_probe_runtime" }
 # PerPair tick preamble, Bool LHS rewrite). See
 # `docs/superpowers/notes/2026-05-04-duel_1v1.md`.
 duel_1v1_runtime = { path = "../duel_1v1_runtime" }
+# Objective Capture 10v10 — first COMPETITIVE OBJECTIVE-CONTROL
+# fixture. 10 Red vs 10 Blue race for hold time on a central
+# control point. Two-layer execution: GPU runs the compiled .sim
+# (verb cascade + chronicle + view-fold) for end-to-end smoke;
+# host-side authoritative layer drives the real 10v10 (proper
+# team-filtered targeting, movement-toward-objective, contest
+# scoring). The .sim documents the full intended shape; current
+# compiler gaps (mask_k=1 hardcoded, score `self.<field>`
+# truncation) are sidestepped via the host layer.
+objective_capture_10v10_runtime = { path = "../objective_capture_10v10_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -186,3 +196,7 @@ path = "src/quest_probe_app.rs"
 [[bin]]
 name = "duel_1v1_app"
 path = "src/duel_1v1_app.rs"
+
+[[bin]]
+name = "objective_capture_10v10_app"
+path = "src/objective_capture_app.rs"
