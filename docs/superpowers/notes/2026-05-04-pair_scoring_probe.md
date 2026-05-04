@@ -27,17 +27,63 @@ The score uses `cooldown_next_ready_tick` as a proxy "injury indicator"
 analytical: with `ready_at[N] = N * 10`, slot 0 has the lowest
 cooldown → highest inverted score → every healer picks slot 0.
 
-## Outcome
+## Outcome (closure update — 2026-05-04 PM)
 
-**OUTCOME (b) NO FIRE — the gap chain blocks pair-field scoring at
-compile time.**
+**OUTCOME (a) FULL FIRE — pair-field scoring ships end-to-end.**
 
 ```
-pair_scoring_probe_app: starting — seed=0x000A11C014715005 agents=8 ticks=100
-pair_scoring_probe_app: finished — final tick=100 agents=8 received.len()=8
+pair_scoring_probe_app: received readback — min=0.000 mean=437.500 max=3500.000 sum=3500.000
+pair_scoring_probe_app: nonzero slots: 1/8 (fraction = 12.5%)
+pair_scoring_probe_app: expected (FULL FIRE): received[0]=3500, received[1..]=0  → expected sum = 3500
+pair_scoring_probe_app: preview received[0..8] = [3500.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+pair_scoring_probe_app: OUTCOME = (a) FULL FIRE — pair-field scoring picked the lowest-cooldown target every tick.
+```
+
+The four originally-anticipated gaps (Gaps #1-#4) all closed in
+sequence. Two STILL-OPEN gaps surfaced after them and closed
+together in this commit:
+
+- **Gap A (compiler)** — `cg::lower::expr::lower_namespace_call`'s
+  `(NamespaceId::Agents, field) if args.len() == 1` arm wrapped the
+  arg expression as `AgentRef::Target(<expr_id>)` unconditionally.
+  When the arg lowered to `CgExpr::PerPairCandidateId`, the emit
+  side rendered `agent_<field>[target_expr_<N>]` — relying on a
+  stmt-prefix `let target_expr_<N>: u32 = <wgsl>;` hoist that the
+  scoring kernel emit (`cg::emit::kernel::lower_scoring_argmax_body`)
+  doesn't run. Result: invalid WGSL with an undefined identifier.
+  Fix: structural fold — when `target_id` resolves to
+  `CgExpr::PerPairCandidateId` / `CgExpr::AgentSelfId`, collapse to
+  `AgentRef::PerPairCandidate` / `AgentRef::Self_` directly so the
+  emit side renders `agent_<field>[per_pair_candidate]` /
+  `agent_<field>[agent_id]` with no hoist needed.
+
+- **Gap B (compiler)** — `cg::lower::scoring::lower_standard_row`
+  set `ctx.target_local = true` for `Positional([("target", _,
+  AgentId)])` heads but did NOT shadow the binder's `LocalRef` in
+  `ctx.local_ids`. The verb expander's earlier chronicle-physics
+  lowering (`synthesize_cascade_physics`) registers the verb's
+  `target` LocalRef → some `LocalId` for the chronicle's
+  `on ActionSelected { target: <verb_target_local> }` event-pattern
+  binder. When scoring lowering then ran the score body, bare
+  `target` hit `lower_bare_local`'s Step 1 (let-bound local) FIRST
+  and resolved to `ReadLocal { local: <chronicle's local id> }` —
+  bypassing Step 2-3's `target_local`-aware
+  `PerPairCandidateId` arm. The downstream per-pair detector
+  (`expr_references_per_pair_candidate`) then saw no candidate-side
+  reference and the scoring kernel emitted with no inner candidate
+  loop. Fix: temporarily `remove(&binder_local_ref)` from
+  `ctx.local_ids` before lowering the row body, restore after.
+
+The runtime (`crates/pair_scoring_probe_runtime/src/lib.rs`) was
+also rewritten to dispatch the full per-tick chain (mask + scoring
++ chronicle + fold) instead of the reduced (b) NO-FIRE shape.
+
+Original gap chain (preserved for context — all closed):
+
+```
+[BEFORE FIX]
 pair_scoring_probe_app: received readback — min=0.000 mean=0.000 max=0.000 sum=0.000
 pair_scoring_probe_app: nonzero slots: 0/8 (fraction = 0.0%)
-pair_scoring_probe_app: expected (FULL FIRE): received[0]=3500, received[1..]=0  → expected sum = 3500
 pair_scoring_probe_app: preview received[0..8] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 pair_scoring_probe_app: OUTCOME = (b) NO FIRE — every slot stayed at 0.0
 ```
@@ -46,6 +92,7 @@ The fixture parses + resolves cleanly; lowering produces TWO typed
 diagnostics that drop the mask + scoring kernels from the partial CG
 program; the chronicle + view-fold still emit and dispatch but never
 see an `ActionSelected` event because no scoring kernel produced one.
+(All gaps closed by 2026-05-04 PM — see closure update above.)
 
 ## Gap chain
 

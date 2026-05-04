@@ -1836,43 +1836,46 @@ verb Ping(self) =
     );
 }
 
-/// `pair_scoring_probe` compile-gate — NEGATIVE test pinning the
-/// REMAINING gap (Gap #4 — per-pair argmax kernel) that blocks
-/// PAIR-FIELD SCORING (spec §8.3) end-to-end.
+/// `pair_scoring_probe` compile-gate — POSITIVE test pinning the
+/// FULL-FIRE shape of PAIR-FIELD SCORING (spec §8.3) end-to-end.
 ///
 /// **History.** The fixture's `verb Heal(self, target: Agent) = ...
 /// score (1000.0 - agents.cooldown_next_ready_tick(target))` originally
-/// produced two diagnostics — Gap #1 (mask positional head requires
-/// `from` clause) AND Gap #2 (f32/u32 mismatch). The 2026-05-04 close
-/// of Gaps #1 + #3 (relax `mask::lower_mask`'s gate for the canonical
-/// `Positional([("target", _, AgentId)])` head + mirror that head shape
-/// onto the verb-injected scoring entry) eliminated Gap #1. The
-/// follow-up close of Gap #2 (implicit `u32`→`f32` promotion in
-/// `lower_binary` — see `BuiltinId::AsF32`) now lets lowering succeed
-/// outright. Discovery doc:
+/// produced two compile-time diagnostics — Gap #1 (mask positional
+/// head requires `from` clause) AND Gap #2 (f32/u32 mismatch). The
+/// 2026-05-04 closes (Gaps #1 + #3 + #2 + #4) and the follow-up
+/// 2026-05-04 closes (Gap A — per-pair candidate read folding in
+/// `cg::lower::expr::lower_namespace_call`; Gap B — verb-binder
+/// LocalRef shadowing in `cg::lower::scoring::lower_standard_row`)
+/// brought the chain end-to-end. Discovery doc:
 /// `docs/superpowers/notes/2026-05-04-pair_scoring_probe.md`.
 ///
-/// **What this test now pins.** Lowering succeeds and the scoring
-/// kernel emits, but Gap #4 (per-pair argmax) is still open: the
-/// scoring kernel structurally dispatches per-actor with the
-/// per-pair candidate binder UNRESOLVED — the row body emits a
-/// `target_expr_<n>` identifier that isn't declared anywhere in the
-/// kernel scope, and `best_target` falls through to the
-/// `0xFFFFFFFFu` sentinel because no inner candidate loop runs. The
-/// emitted WGSL would not pass naga validation (the unresolved
-/// identifier is the structural signature).
+/// **What this test now pins.** Lowering succeeds, the scoring
+/// kernel emits with:
+///   - per-pair candidate inner loop (`for (var per_pair_candidate
+///     ...) { ... }`) wrapping the row body,
+///   - the score expression's `agents.cooldown_next_ready_tick(target)`
+///     read collapsed to `agent_cooldown_next_ready_tick[per_pair_candidate]`
+///     (no `target_expr_<N>` indirection — the structural fold in
+///     `lower_namespace_call` resolves the read to
+///     `AgentRef::PerPairCandidate` directly when the arg lowers to
+///     `PerPairCandidateId`),
+///   - `best_target = per_pair_candidate` on argmax wins (so the
+///     ActionSelected payload carries the candidate slot, not the
+///     `0xFFFFFFFFu` sentinel).
 ///
-/// **What surfaces if Gap #4 closes next.** Either:
-///   - The scoring kernel grows an inner `for (var per_pair_candidate
-///     ...) { ... }` loop that binds the candidate's slot id and
-///     drives `best_target = per_pair_candidate` on argmax wins, OR
-///   - Equivalent 2D dispatch with a per-actor reduction.
-///
-/// In both cases this test fails — flip the assertions to expect a
-/// per-pair iteration fingerprint and / or check
-/// `pair_scoring_probe_app` for FULL FIRE.
+/// **What surfaces if a regression re-introduces the gap.** The
+/// assertions below pin each fingerprint:
+///   - `f32(agent_cooldown_next_ready_tick[per_pair_candidate])` —
+///     direct candidate-id read (no `target_expr_<N>`),
+///   - `for (var per_pair_candidate: u32 = 0u; per_pair_candidate < cfg.agent_cap` —
+///     the inner candidate loop,
+///   - `best_target = per_pair_candidate` — the argmax winner is the
+///     candidate slot, not the sentinel.
+/// A regression on any of these fails the assertion with the
+/// emitted WGSL in the panic message.
 #[test]
-fn pair_scoring_probe_negative_compile_gate() {
+fn pair_scoring_probe_full_fire_compile_gate() {
     use dsl_compiler::cg::lower::lower_compilation_to_cg;
     let path = workspace_path("assets/sim/pair_scoring_probe.sim");
     let src = std::fs::read_to_string(&path)
@@ -1880,9 +1883,8 @@ fn pair_scoring_probe_negative_compile_gate() {
     let prog = dsl_compiler::parse(&src).expect("parse pair_scoring_probe.sim");
     let comp = dsl_ast::resolve::resolve(prog).expect("resolve pair_scoring_probe.sim");
 
-    // Surface counts pre-lower — these confirm the parser + resolver
-    // accept `target.<field>` shape; the remaining Gap is in the
-    // kernel-emit layer, not the parse / resolve / lower passes.
+    // Surface counts pre-lower — confirm the parser + resolver still
+    // accept the `verb V(self, target: Agent) = ... score ...` shape.
     assert_eq!(
         comp.verbs.len(),
         1,
@@ -1900,25 +1902,18 @@ fn pair_scoring_probe_negative_compile_gate() {
         "second verb param must be named `target`"
     );
 
-    // Lower MUST succeed — Gap #2 (f32/u32 mismatch in the score
-    // expression) was closed by the implicit `u32 → f32` promotion in
-    // `lower_binary` (see `cg::lower::expr::promote_int_to_f32`). If
-    // a regression re-introduces the operand-type-mismatch error,
+    // Lower MUST succeed — Gaps #1 + #2 + #3 closed. If a regression
+    // re-introduces the f32/u32 mismatch or the positional-head reject,
     // this `expect` panic surfaces it loudly.
     let cg = lower_compilation_to_cg(&comp).unwrap_or_else(|o| {
         let diag_strings: Vec<String> = o.diagnostics.iter().map(|d| format!("{d}")).collect();
         panic!(
-            "EXPECTED LOWER SUCCESS (Gaps #1 + #2 + #3 closed) — got {} diagnostic(s):\n  {}\n\
-             If `binary `Sub` ... lhs is f32, rhs is u32` reappears, the implicit \
-             u32→f32 cast in `lower_binary` (BuiltinId::AsF32) was lost.",
+            "EXPECTED LOWER SUCCESS — got {} diagnostic(s):\n  {}",
             o.diagnostics.len(),
             diag_strings.join("\n  ")
         )
     });
 
-    // Schedule + emit MUST succeed too — the verb-synth scoring entry
-    // lowers to a complete CG op, and the kernel composer wires the
-    // bindings.
     let sched = dsl_compiler::cg::schedule::synthesize_schedule(
         &cg,
         dsl_compiler::cg::schedule::ScheduleStrategy::Default,
@@ -1928,12 +1923,9 @@ fn pair_scoring_probe_negative_compile_gate() {
 
     let kernel_set: std::collections::BTreeSet<String> =
         art.kernel_index.iter().cloned().collect();
-    // The scoring kernel is now PRESENT (it was dropped from the
-    // partial-emit set under the Gap #2 regime). The mask + chronicle
-    // + fold remain.
     assert!(
         kernel_set.contains("scoring"),
-        "scoring kernel MUST be present now that Gap #2 is closed; got: {:?}",
+        "scoring kernel MUST be present; got: {:?}",
         kernel_set
     );
     assert!(
@@ -1948,19 +1940,10 @@ fn pair_scoring_probe_negative_compile_gate() {
     );
     assert!(
         kernel_set.iter().any(|k| k.contains("mask_verb_Heal")),
-        "verb-synthesised mask kernel MUST be present (Gap #1 close); got: {:?}",
+        "verb-synthesised mask kernel MUST be present; got: {:?}",
         kernel_set
     );
 
-    // Pin Gap #4 fingerprint in the emitted scoring WGSL. Today the
-    // scoring kernel:
-    //   - emits the row's f32-promoted utility expression (Gap #2
-    //     close), AND
-    //   - leaves the per-pair candidate read UNBOUND — the WGSL
-    //     references `target_expr_<n>` (an internal sentinel from the
-    //     PerPairCandidateId-aware lowering) without declaring it in
-    //     the kernel scope. No `per_pair_candidate` inner loop runs;
-    //     `best_target` falls through to `0xFFFFFFFFu`.
     let scoring_wgsl = art
         .wgsl_files
         .iter()
@@ -1968,26 +1951,103 @@ fn pair_scoring_probe_negative_compile_gate() {
         .map(|(_, v)| v.clone())
         .expect("scoring.wgsl must be present in wgsl_files");
 
-    // Confirm Gap #2 is structurally closed: the row body now wraps
-    // the u32 SoA read in `f32(...)`. (If this assertion fails, the
-    // implicit-promotion path regressed.)
+    // FULL-FIRE fingerprint #1: u32→f32 promotion of the SoA read
+    // (Gap #2 close).
     assert!(
         scoring_wgsl.contains("f32(agent_cooldown_next_ready_tick"),
         "Gap #2 close fingerprint missing — the score row should wrap the u32 \
          SoA read in `f32(...)`; got scoring.wgsl:\n{scoring_wgsl}"
     );
 
-    // Confirm Gap #4 is still open: no inner candidate loop binds
-    // `per_pair_candidate`. When the per-pair argmax kernel lands,
-    // `per_pair_candidate` will appear in the kernel body and this
-    // assertion flips.
+    // FULL-FIRE fingerprint #2: inner per-pair candidate loop wraps
+    // the row body (Gap #4 close — kernel iterates over candidates).
     assert!(
-        !scoring_wgsl.contains("per_pair_candidate"),
-        "Gap #4 (per-pair argmax kernel) appears CLOSED — `per_pair_candidate` \
-         identifier is now present in the scoring kernel. Update this test to \
-         the positive FULL-FIRE form (assert kernel iterates per-pair, drives \
-         `best_target = per_pair_candidate` on argmax wins, and the probe app \
-         observes received[0]=3500). Got scoring.wgsl:\n{scoring_wgsl}"
+        scoring_wgsl.contains("for (var per_pair_candidate: u32 = 0u; per_pair_candidate < cfg.agent_cap"),
+        "FULL-FIRE per-pair inner loop missing — Gap #4 close requires the \
+         row body to wrap in `for (var per_pair_candidate ...) {{ ... }}`; \
+         got scoring.wgsl:\n{scoring_wgsl}"
     );
+
+    // FULL-FIRE fingerprint #3: the agent-field read collapses to
+    // `agent_cooldown_next_ready_tick[per_pair_candidate]` directly
+    // (Gap A close — `lower_namespace_call` folds `AgentRef::Target(
+    // <PerPairCandidateId>)` to `AgentRef::PerPairCandidate`). Without
+    // this fold the row body would reference a `target_expr_<N>`
+    // identifier the scoring emit doesn't drain into a `let`.
+    assert!(
+        scoring_wgsl.contains("agent_cooldown_next_ready_tick[per_pair_candidate]"),
+        "Gap A close fingerprint missing — the score row should read \
+         `agent_cooldown_next_ready_tick[per_pair_candidate]` directly \
+         (no target_expr_<N> indirection); got scoring.wgsl:\n{scoring_wgsl}"
+    );
+    assert!(
+        !scoring_wgsl.contains("target_expr_"),
+        "REGRESSION — `target_expr_<N>` identifier reappeared in scoring.wgsl. \
+         The `lower_namespace_call` structural fold for `PerPairCandidateId` / \
+         `AgentSelfId` was lost. Got scoring.wgsl:\n{scoring_wgsl}"
+    );
+
+    // FULL-FIRE fingerprint #4: argmax winner sets `best_target =
+    // per_pair_candidate`. The ActionSelected payload's target field
+    // carries the candidate slot id downstream to the chronicle.
+    assert!(
+        scoring_wgsl.contains("best_target = per_pair_candidate"),
+        "FULL-FIRE per-pair argmax-winner assignment missing — the row body \
+         should set `best_target = per_pair_candidate` on argmax wins; \
+         got scoring.wgsl:\n{scoring_wgsl}"
+    );
+
+    // Gap B (binder LocalRef shadowing) close: the row's `target`
+    // reference must lower to `PerPairCandidateId` (NOT `ReadLocal`
+    // pointing at the chronicle's event-pattern binder). Verify by
+    // inspecting the scoring op's row utility expression — it must
+    // transitively reference `PerPairCandidateId`.
+    use dsl_compiler::cg::expr::{CgExpr, ExprArena};
+    use dsl_compiler::cg::op::ComputeOpKind;
+    let scoring_op = cg
+        .ops
+        .iter()
+        .find(|op| matches!(op.kind, ComputeOpKind::ScoringArgmax { .. }))
+        .expect("scoring op must exist");
+    if let ComputeOpKind::ScoringArgmax { rows, .. } = &scoring_op.kind {
+        assert_eq!(rows.len(), 1, "expected 1 row (Heal); got {}", rows.len());
+        // Walk the utility expression tree looking for PerPairCandidateId.
+        fn walks_per_pair_candidate(
+            id: dsl_compiler::cg::data_handle::CgExprId,
+            cg: &dsl_compiler::cg::program::CgProgram,
+        ) -> bool {
+            let Some(node) = ExprArena::get(cg, id) else { return false; };
+            match node {
+                CgExpr::PerPairCandidateId => true,
+                CgExpr::Read(handle) => {
+                    use dsl_compiler::cg::data_handle::{AgentRef, DataHandle};
+                    matches!(
+                        handle,
+                        DataHandle::AgentField {
+                            target: AgentRef::PerPairCandidate,
+                            ..
+                        }
+                    )
+                }
+                CgExpr::Binary { lhs, rhs, .. } => {
+                    walks_per_pair_candidate(*lhs, cg)
+                        || walks_per_pair_candidate(*rhs, cg)
+                }
+                CgExpr::Unary { arg, .. } => walks_per_pair_candidate(*arg, cg),
+                CgExpr::Builtin { args, .. } | CgExpr::NamespaceCall { args, .. } => {
+                    args.iter().any(|a| walks_per_pair_candidate(*a, cg))
+                }
+                _ => false,
+            }
+        }
+        assert!(
+            walks_per_pair_candidate(rows[0].utility, &cg),
+            "Gap B close fingerprint missing — scoring row utility expression \
+             must transitively reference `PerPairCandidateId` (or a \
+             `Read(AgentField{{ target: PerPairCandidate }})`); the verb's \
+             `target` LocalRef leaked through chronicle-physics's local_ids \
+             registration."
+        );
+    }
 }
 

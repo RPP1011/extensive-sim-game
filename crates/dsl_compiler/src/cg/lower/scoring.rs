@@ -305,7 +305,7 @@ fn lower_standard_row(
     // before action-id resolution — `action: None` signals the gate
     // fired before resolution succeeded.
     let positional_target_binder = match &entry.head.shape {
-        IrActionHeadShape::None => false,
+        IrActionHeadShape::None => None,
         IrActionHeadShape::Positional(binders) => {
             // Today's CG-IR routing only recognises a single
             // `target: AgentId` positional binder. Anything else
@@ -321,7 +321,10 @@ fn lower_standard_row(
                     span: entry.head.span,
                 });
             }
-            true
+            // Carry the binder's `LocalRef` through so we can
+            // shadow it in `local_ids` for the body lowering. See
+            // the save/restore protocol below.
+            Some(binders[0].1)
         }
         IrActionHeadShape::Named(_) => {
             return Err(LoweringError::UnsupportedScoringHeadShape {
@@ -339,12 +342,34 @@ fn lower_standard_row(
     // duration of the body lowering. Restore the flag after so
     // downstream rows don't observe a leaked binding (mirrors
     // `super::mask::lower_mask`'s save/restore protocol).
+    //
+    // ALSO shadow the binder's `LocalRef` in `ctx.local_ids` for the
+    // body lowering. Without this, an upstream pass (today the verb
+    // expander's chronicle-physics lowering — `cg::lower::verb_expand::
+    // synthesize_cascade_physics`) may have registered the verb's
+    // `target` LocalRef → some LocalId for the chronicle's
+    // event-pattern binder. `lower_bare_local`'s Step 1 (let-bound
+    // local) wins over Step 2-3 (structural `target`/`candidate`
+    // names), so a bare `target` reference in the score body would
+    // resolve to `ReadLocal { local: <chronicle-local> }` instead of
+    // `PerPairCandidateId`. The downstream per-pair detector
+    // (`expr_references_per_pair_candidate` in `cg::emit::kernel`)
+    // then sees no candidate-side reference, the scoring kernel
+    // skips the inner candidate loop, and the WGSL body emits an
+    // unresolved `target_expr_<N>` identifier — the gap pinned by
+    // the pair_scoring_probe (2026-05-04). Shadowing here keeps the
+    // verb-injected scoring entry's body lowering hermetic.
     let prev_target_local = ctx.target_local;
-    if positional_target_binder {
+    let prev_local_id = positional_target_binder
+        .and_then(|binder_local| ctx.local_ids.remove(&binder_local).map(|id| (binder_local, id)));
+    if positional_target_binder.is_some() {
         ctx.target_local = true;
     }
     let utility_result = lower_expr(&entry.expr, ctx);
     ctx.target_local = prev_target_local;
+    if let Some((binder_local, prior_id)) = prev_local_id {
+        ctx.local_ids.insert(binder_local, prior_id);
+    }
     let utility = utility_result?;
 
     check_utility_f32(scoring_id, action, utility, entry.expr.span, ctx)?;

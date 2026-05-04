@@ -3029,12 +3029,29 @@ fn lower_namespace_call(
                     span,
                 }
             })?;
-            // `data_handle_ty` produces the right `CgTy` for whatever
-            // primitive the field carries — we use it to satisfy the
-            // type checker's claimed-result rule on `Read`.
+            // Structural-folding optimisation: if `target_id` resolves
+            // to a structural agent identifier (`PerPairCandidateId` /
+            // `AgentSelfId`), collapse the `AgentRef::Target(<expr>)`
+            // indirection to the matching structural variant directly.
+            // The downstream WGSL emitter renders structural variants
+            // with kernel-bound identifiers (`per_pair_candidate`,
+            // `agent_id`) — no `target_expr_<N>` hoist needed. Without
+            // this fold the scoring kernel emits a `target_expr_<N>`
+            // identifier inside its row body that is never declared (the
+            // hoist relies on a stmt wrapper the scoring emit doesn't
+            // run), producing invalid WGSL — see Gap A in
+            // `docs/superpowers/notes/2026-05-04-pair_scoring_probe.md`.
+            let target_ref = match crate::cg::expr::ExprArena::get(
+                ctx.builder.program(),
+                target_id,
+            ) {
+                Some(CgExpr::PerPairCandidateId) => AgentRef::PerPairCandidate,
+                Some(CgExpr::AgentSelfId) => AgentRef::Self_,
+                _ => AgentRef::Target(target_id),
+            };
             let handle = DataHandle::AgentField {
                 field: field_id,
-                target: AgentRef::Target(target_id),
+                target: target_ref,
             };
             // Sanity: the field's primitive type must round-trip
             // through `data_handle_ty` — otherwise `Read` wouldn't
