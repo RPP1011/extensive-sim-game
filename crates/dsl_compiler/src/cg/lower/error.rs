@@ -797,6 +797,28 @@ pub enum LoweringError {
         got: usize,
         span: Span,
     },
+
+    // -- Verb expansion (Slice A: verb-probe-metric-emit plan) -----------
+
+    /// A `verb` declaration's expansion partially completed: mask and
+    /// scoring entries injected, but the cascade-handler stage
+    /// deferred because the current event taxonomy lacks an
+    /// "action selected" event source to wire as the trigger.
+    /// Mirrors the `// SKIP <reason>` precedent from the invariant
+    /// emit (`crates/dsl_compiler/src/cg/emit/invariants.rs`) — the
+    /// gap is visible in the diagnostic stream rather than silently
+    /// absent from the emitted physics kernel set.
+    ///
+    /// `verb_name` is the source-level identifier so authors can
+    /// pinpoint which `verb` to revisit when a future plan adds the
+    /// missing event source. `reason` is closed-set (today only one
+    /// variant — `CascadeNeedsActionEvent`); future stages add
+    /// further values without proliferating string payloads.
+    VerbExpansionSkipped {
+        verb_name: String,
+        reason: super::verb_expand::VerbSkipReason,
+        span: Span,
+    },
 }
 
 /// Closed-set discriminant for which sub-expression of a scoring row
@@ -1328,6 +1350,12 @@ impl fmt::Display for LoweringError {
                 f,
                 "lowering: view#{} call at {}..{} expected {} argument(s), got {}",
                 view.0, span.start, span.end, expected, got
+            ),
+            LoweringError::VerbExpansionSkipped { verb_name, reason, span } => write!(
+                f,
+                "lowering: verb `{}` at {}..{} expansion partially completed (mask + scoring \
+                 injected): {}",
+                verb_name, span.start, span.end, reason
             ),
         }
     }

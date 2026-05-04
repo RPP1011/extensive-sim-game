@@ -164,6 +164,24 @@ pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOu
     let mut builder = CgProgramBuilder::new();
     let mut diagnostics: Vec<LoweringError> = Vec::new();
 
+    // -- Phase 0: verb expansion (Slice A: verb-probe-metric-emit plan) -
+    //
+    // `verb` declarations are composition sugar over (mask, cascade,
+    // scoring entry) — see `docs/spec/dsl.md` §2.6. The plan
+    // `docs/superpowers/plans/2026-05-03-verb-probe-metric-emit.md`
+    // calls for the compiler to inject those primitives at lower
+    // time so the existing mask / physics / scoring lowering passes
+    // pick them up automatically. Today's expansion covers mask +
+    // scoring; cascade is deferred (no action-selected event
+    // source); see `verb_expand.rs` for the supported-shape table.
+    //
+    // Run before any registry population so the synthesised
+    // scoring entries' action heads land in `populate_actions`'s
+    // walk and the synthesised mask appears in `lower_all_masks`.
+    let expansion = super::verb_expand::expand_verbs(comp);
+    let comp = &expansion.compilation;
+    diagnostics.extend(expansion.diagnostics);
+
     // -- Phase 1: registry population (allocates ids on the builder) -----
     //
     // Each registry has one id per source occurrence, allocated in

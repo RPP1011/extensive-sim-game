@@ -35,6 +35,7 @@ pub mod physics;
 pub mod plumbing;
 pub mod scoring;
 pub mod spatial;
+pub mod verb_expand;
 pub mod view;
 
 pub use driver::{lower_compilation_to_cg, DriverOutcome};
@@ -48,4 +49,5 @@ pub use spatial::{
     lower_spatial_namespace_call, lower_spatial_queries, try_recognise_spatial_iter,
     SpatialIterFlavour, SpatialIterShape,
 };
+pub use verb_expand::{expand_verbs, VerbExpansionOutcome, VerbSkipReason};
 pub use view::{lower_view, HandlerResolution};

@@ -294,7 +294,18 @@ Compilation:
 
 ### 2.6 `verb` (composition sugar)
 
-> ❌ **Audit 2026-04-26 — silent-drop:** `verb` declarations parse and resolve to `VerbIR`, but **`EmittedArtifacts` has no verb output and no emit pass exists**. A `.sim` file with `verb` declarations compiles silently to nothing. Same status applies to §2.9 `probe` (still silent-drop). §2.8 `invariant` was partially closed 2026-05-03 (see callout). §2.11 `metric` was partially closed 2026-05-03 by Slice C of the verb/probe/metric emit plan (see callout below for shape).
+> ⚠️ **Audit 2026-04-26 — partial close (2026-05-03, Slice A):** the silent-drop is closed for the **mask + scoring**
+> stages of verb expansion. The compiler now expands every `VerbIR` at lower time
+> (`crates/dsl_compiler/src/cg/lower/verb_expand.rs`) into a synthetic `MaskIR` named `verb_<name>` (whose predicate is
+> the verb's `when` clause) and — when the verb declares a `score` clause — a synthetic `ScoringEntryIR` named
+> `verb_<name>` appended to the first `ScoringIR` block (or a synthesised block when none exist). The existing
+> mask / scoring lowering and emit passes pick up the synthesised entries automatically; no new emit file is
+> introduced. **Cascade injection is still deferred (SKIP):** the verb's `emit` clause needs an "action selected"
+> event source the current event taxonomy doesn't expose, so verbs with non-empty `emits` surface a
+> `LoweringError::VerbExpansionSkipped { reason: CascadeNeedsActionEvent }` diagnostic — the gap is visible at
+> lower time rather than silently absent. Stress test: `crates/dsl_compiler/tests/verb_emit.rs`. The §2.9 `probe`
+> callout below remains accurate; §2.8 `invariant` and §2.11 `metric` were partially closed 2026-05-03 (see those
+> callouts).
 > See `docs/superpowers/notes/2026-04-26-audit-language-stdlib.md` for detail.
 
 `verb` declares a named gameplay action that composes an existing micro primitive with additional mask predicates, cascades, and scoring entries. It does NOT add to the closed categorical action vocabulary.
@@ -320,8 +331,9 @@ Adding a `verb` does not bump the schema hash. Adding a new micro primitive does
 > `EmittedArtifacts.rust_files`); per-fixture runtimes consume it via `state.check_invariants()`. Unsupported
 > shapes (multi-arg scope, quantifiers, field access, vec3 views) emit a `// SKIP <reason>` comment so the gap is
 > visible at build time rather than silent. Implementation: `crates/dsl_compiler/src/cg/emit/invariants.rs`,
-> stress test: `crates/predator_prey_runtime/tests/invariant_violation.rs`. The §2.6 `verb`, §2.9 `probe`, §2.11
-> `metric` callouts above remain accurate — those three are still silent-drop.
+> stress test: `crates/predator_prey_runtime/tests/invariant_violation.rs`. The §2.6 `verb` callout above was
+> partially closed 2026-05-03 by Slice A of the verb/probe/metric emit plan (mask + scoring; cascade still SKIP).
+> §2.9 `probe` remains silent-drop; §2.11 `metric` was partially closed 2026-05-03 by Slice C.
 
 ```
 invariant <name>(<scope>) @<mode> { <predicate> }
