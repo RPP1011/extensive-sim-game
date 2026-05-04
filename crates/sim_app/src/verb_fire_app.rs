@@ -10,26 +10,26 @@
 //!   - 32 `PrayCompleted` events (chronicle physics rule)
 //! After 100 ticks: faith[i] = 100.0 for every i.
 //!
-//! ## Observed (today, with chronicle physics rule dropped)
+//! ## Observed (with Gaps #1–#4 closed)
 //!
-//! The compiler's verb-expand pass synthesises a
-//! `verb_chronicle_Pray` physics handler that consumes
-//! `ActionSelected` and emits `PrayCompleted`. That handler's body
-//! contains `if action_id == 0` — which fails to lower because the
-//! `action_id` binder local collides with the `target` binder local
-//! (both are allocated by `fresh_local_after()` in
-//! `crates/dsl_compiler/src/cg/lower/verb_expand.rs:502-505` when the
-//! verb has no `target` param). The `action_id` binder ends up typed
-//! as `AgentId` (the last `record_local_ty` write), so the `==`
-//! against `LitInt(0)` (typed `U32`) trips
-//! `BinaryOperandTyMismatch`. The PhysicsRule op for the cascade
-//! never lands in CG, so no `verb_chronicle_Pray` kernel emits.
+//! The verb cascade now fires end-to-end:
+//!   - Gap #1 (compiler `fresh_local_after` LocalRef collision) →
+//!     closed by stateful binder allocation (`bb176401`).
+//!   - Gap #2 (schedule fusion eating chronicle→fold boundary) →
+//!     closed by no-fuse rule for producer + same-event consumer.
+//!   - Gap #3 (scoring kernel ignored mask bitmap) → closed by
+//!     compiler emitting the bitmap gate.
+//!   - Gap #4 (runtime did not dispatch the chronicle physics rule
+//!     between scoring and fold) → closed by `verb_probe_runtime`
+//!     adding the chronicle dispatch + sentinel pre-stamp of the
+//!     ring buffer (so workgroup-rounding threads beyond the actual
+//!     scoring tail don't spuriously emit).
 //!
-//! Result: only `ActionSelected` events (kind tag = 2) ever land in
-//! the ring. `fold_faith` filters by `kind == 1u` (PrayCompleted), so
-//! every event is filtered out. `faith[i] = 0.0` for every i.
+//! Result: every agent slot accumulates `faith_step = 1.0` per tick,
+//! so after 100 ticks `faith[i] = 100.0` for all i — matching the
+//! analytical observable.
 //!
-//! Full discovery write-up: `docs/superpowers/notes/2026-05-04-verb-fire-probe.md`.
+//! Discovery write-up: `docs/superpowers/notes/2026-05-04-verb-fire-probe.md`.
 
 use engine::CompiledSim;
 use verb_probe_runtime::VerbProbeState;

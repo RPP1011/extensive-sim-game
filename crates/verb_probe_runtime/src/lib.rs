@@ -7,28 +7,43 @@
 //! storage, the kernel cache, the event ring, and the per-tick
 //! dispatch chain.
 //!
-//! ## Per-tick chain (intended)
+//! ## Per-tick chain (orchestrated)
+//!
+//! Closes Gap #4 from `2026-05-04-verb-fire-probe.md` — the verb
+//! cascade has THREE rounds within a tick that the runtime now
+//! dispatches in order:
 //!
 //! 1. clear event_tail = 0
-//! 2. mask_verb_Pray — sets bitmap bit when `self.alive` (always true)
-//! 3. scoring — argmax picks verb_Pray (action_id=0); each agent slot
-//!    atomically appends an `ActionSelected{actor=agent, action_id=0,
-//!    target=NO_TARGET}` event onto the ring
-//! 4. seed_indirect_0 — reads tail count to compute fold workgroup count
-//! 5. (verb_chronicle_Pray — would consume ActionSelected and emit
-//!    PrayCompleted, BUT this kernel was DROPPED by the compiler due
-//!    to a LocalRef collision in `verb_expand.rs` — see the discovery
-//!    notes at `docs/superpowers/notes/2026-05-04-verb-fire-probe.md`)
-//! 6. fold_faith — reads PrayCompleted (tag=1) events; accumulates
-//!    `faith[prayer] += faith_delta`. With step 5 dropped, no
-//!    PrayCompleted events ever land, so the fold body sees only
-//!    ActionSelected events (tag=2) which it filters out — the faith
-//!    storage stays at 0.
+//! 2. (Round 1, mask) `mask_verb_Pray` — sets bitmap bit when
+//!    `self.alive` (always true)
+//! 3. (Round 1, scoring) `scoring` — argmax picks verb_Pray
+//!    (action_id=0); each agent slot atomically appends an
+//!    `ActionSelected{actor=agent, action_id=0, target=NO_TARGET}`
+//!    event onto the ring (kind tag = 2u)
+//! 4. (Round 2, chronicle) `physics_verb_chronicle_Pray` — reads
+//!    each ActionSelected slot, gates on `action_id == 0`, and emits
+//!    `PrayCompleted{prayer: actor, faith_delta: config.faith_step}`
+//!    (kind tag = 1u). Dispatched with a generous workgroup count
+//!    (`agent_count` threads, rounded to a 64-thread workgroup); the
+//!    ring is sentinel-pre-stamped at construction (every `+3`
+//!    `action_id` slot = `0xFFFFFFFFu`) so workgroup-rounding threads
+//!    that read past the actual scoring tail find a non-zero
+//!    `action_id` and skip emission. From tick 1 onward, those slots
+//!    hold prior-tick `PrayCompleted` payloads where `+3` =
+//!    `bitcast<u32>(faith_delta)` ≈ `0x3f800000` — also non-zero, so
+//!    no spurious emission.
+//! 5. seed_indirect_0 — reads tail count to compute fold workgroup
+//!    count (kept for parity with the original schedule; not
+//!    consumed by today's direct dispatches)
+//! 6. (Round 3, fold) `fold_faith` — reads PrayCompleted events
+//!    (tag=1, the kind filter landed in `cb24fd69` for view-fold
+//!    bodies). Dispatched with `event_count = agent_count * 2` to
+//!    cover both ActionSelected + PrayCompleted slots; the per-handler
+//!    tag check ignores ActionSelected.
 //! 7. kick_snapshot — flag the snapshot slot.
 //!
-//! Observable: `faith()` should be all-zero after N ticks (gap (b)
-//! in the discovery report). When the chronicle gap is closed,
-//! `faith[i] = N * faith_step = N` for every alive slot.
+//! Observable: with `faith_step = 1.0`, every alive slot's faith
+//! value should equal the tick count (e.g. `100.0` after 100 ticks).
 
 use engine::sim_trait::CompiledSim;
 use engine::GpuContext;
@@ -37,7 +52,7 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::gpu::{EventRing, ViewStorage, EVENT_RING_CAP_SLOTS, EVENT_STRIDE_U32};
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -92,6 +107,7 @@ pub struct VerbProbeState {
     // -- Per-kernel cfg uniforms (each is repr(C) {agent_cap, tick, _pad}) --
     mask_cfg_buf: wgpu::Buffer,
     scoring_cfg_buf: wgpu::Buffer,
+    chronicle_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
     #[allow(dead_code)]
     snapshot_cfg_buf: wgpu::Buffer,
@@ -158,6 +174,41 @@ impl VerbProbeState {
             false, // no top-K ids
         );
 
+        // Sentinel pre-stamp of the event ring's `+3` slot in every
+        // record. The compiled `physics_verb_chronicle_Pray` kernel
+        // has neither an `event_count` bound nor a kind-tag check
+        // (the cb24fd69 fix only added that to view-fold bodies, not
+        // physics-rule bodies). When we direct-dispatch the chronicle
+        // with `agent_count` threads rounded up to a 64-thread
+        // workgroup, the rounding threads (e.g. 32..63 at
+        // agent_count=32) read past the actual scoring tail. If those
+        // slots were zero-initialised, their `action_id` (= u32 at
+        // `event_idx*10 + 3`) would be `0u`, the chronicle's
+        // `if (local_1 == 0u)` predicate would match, and they'd
+        // emit spurious `PrayCompleted` events with `actor = 0` —
+        // skewing `faith[0]` on tick 0. Stamping `0xFFFFFFFFu` into
+        // every slot's `+3` word makes the predicate fail for any
+        // unused/stale slot. From tick 1 onward, those slots hold
+        // prior-tick PrayCompleted payloads where `+3` is
+        // `bitcast<u32>(faith_delta)` ≈ `0x3f800000` — also non-zero,
+        // so the fix continues to hold past tick 0. Total upload:
+        // 65536 × 4 bytes = 256 KB, one-time.
+        {
+            let cap = EVENT_RING_CAP_SLOTS as usize;
+            let stride = EVENT_STRIDE_U32 as usize;
+            let mut sentinel = vec![0u32; cap * stride];
+            let mut i = 0usize;
+            while i < cap {
+                sentinel[i * stride + 3] = 0xFFFF_FFFFu32;
+                i += 1;
+            }
+            gpu.queue.write_buffer(
+                event_ring.ring(),
+                0,
+                bytemuck::cast_slice(&sentinel),
+            );
+        }
+
         // Per-kernel cfg uniforms. Each kernel's struct shape is
         // `{ agent_cap: u32, tick: u32, _pad: [u32; 2] }` (compatible
         // across mask/scoring/seed/snapshot — they all share the same
@@ -176,6 +227,7 @@ impl VerbProbeState {
         };
         let mask_cfg_buf = mk_cfg("verb_probe_runtime::mask_cfg");
         let scoring_cfg_buf = mk_cfg("verb_probe_runtime::scoring_cfg");
+        let chronicle_cfg_buf = mk_cfg("verb_probe_runtime::chronicle_cfg");
         let seed_cfg_buf = mk_cfg("verb_probe_runtime::seed_cfg");
         let snapshot_cfg_buf = mk_cfg("verb_probe_runtime::snapshot_cfg");
 
@@ -204,6 +256,7 @@ impl VerbProbeState {
             faith_cfg_buf,
             mask_cfg_buf,
             scoring_cfg_buf,
+            chronicle_cfg_buf,
             seed_cfg_buf,
             snapshot_cfg_buf,
             cache: dispatch::KernelCache::default(),
@@ -306,7 +359,44 @@ impl CompiledSim for VerbProbeState {
             self.agent_count,
         );
 
-        // (4) seed_indirect_0 — reads event_tail, populates
+        // (4) physics_verb_chronicle_Pray — Round 2 of the cascade.
+        // Reads each ActionSelected slot the scoring kernel just
+        // emitted, gates on `action_id == 0` (Pray's id), and emits
+        // a `PrayCompleted{ prayer: actor, faith_delta:
+        // config.faith_step }` event (kind tag = 1u).
+        //
+        // Dispatch threads = `agent_count` (matches the scoring
+        // emit count: one ActionSelected per alive slot). The
+        // workgroup-rounding (next multiple of 64) gives extra
+        // threads that read past the actual scoring tail; the
+        // sentinel pre-stamp at construction guarantees those slots'
+        // `+3` (action_id) word is non-zero, so the chronicle's
+        // predicate fails and no spurious emissions land.
+        let chronicle_cfg = physics_verb_chronicle_Pray::PhysicsVerbChroniclePrayCfg {
+            agent_cap: self.agent_count,
+            tick: self.tick as u32,
+            _pad: [0; 2],
+        };
+        self.gpu.queue.write_buffer(
+            &self.chronicle_cfg_buf,
+            0,
+            bytemuck::bytes_of(&chronicle_cfg),
+        );
+        let chronicle_bindings =
+            physics_verb_chronicle_Pray::PhysicsVerbChroniclePrayBindings {
+                event_ring: self.event_ring.ring(),
+                event_tail: self.event_ring.tail(),
+                cfg: &self.chronicle_cfg_buf,
+            };
+        dispatch::dispatch_physics_verb_chronicle_pray(
+            &mut self.cache,
+            &chronicle_bindings,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+
+        // (5) seed_indirect_0 — reads event_tail, populates
         // indirect_args_0 with workgroup count.
         let seed_cfg = seed_indirect_0::SeedIndirect0Cfg {
             agent_cap: self.agent_count,
@@ -332,25 +422,14 @@ impl CompiledSim for VerbProbeState {
             self.agent_count,
         );
 
-        // (5) (intended: verb_chronicle_Pray dispatch — but this
-        // kernel was DROPPED by the compiler. See the discovery
-        // notes at `docs/superpowers/notes/2026-05-04-verb-fire-probe.md`.)
-        //
-        // Without this stage, fold_faith below sees only the
-        // ActionSelected events the scoring kernel produced — those
-        // carry kind tag 2u, which fold_faith filters out (`if
-        // event_ring[..0u] == 1u`). The faith view storage therefore
-        // stays at 0 across all ticks.
-
-        // (6) fold_faith — reads event_ring, RMWs view_storage_primary.
-        // Bound generously: agent_count is plenty since the scoring
-        // kernel emits ~agent_count events/tick total. (Future work:
-        // read back event_tail to size this exactly; for now we accept
-        // the approximation — agents that didn't emit events are
-        // silently skipped by the in-kernel `event_ring[..0u] == 1u`
-        // tag check, which today filters every emitted event since no
-        // PrayCompleted events ever materialise.)
-        let event_count_estimate = self.agent_count * 2; // ActionSelected + (would-be) PrayCompleted
+        // (6) fold_faith — Round 3. Reads PrayCompleted events
+        // (kind tag = 1u, filtered by the per-handler tag check
+        // landed in cb24fd69) and RMWs view_storage_primary.
+        // event_count is sized generously to cover both event kinds
+        // (ActionSelected from Round 1 + PrayCompleted from Round 2):
+        // total ~= 2 × agent_count slots/tick. The in-kernel tag
+        // check ignores the ActionSelected slots.
+        let event_count_estimate = self.agent_count * 2;
         let faith_cfg = fold_faith::FoldFaithCfg {
             event_count: event_count_estimate,
             tick: self.tick as u32,
