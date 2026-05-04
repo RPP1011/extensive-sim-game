@@ -102,6 +102,17 @@ quest_probe_runtime = { path = "../quest_probe_runtime" }
 # PerPair tick preamble, Bool LHS rewrite). See
 # `docs/superpowers/notes/2026-05-04-duel_1v1.md`.
 duel_1v1_runtime = { path = "../duel_1v1_runtime" }
+# Flocking skirmish — THIRTEENTH REAL fixture and FIRST to bring boids
+# dynamics into a combat context. 100 Red + 100 Blue agents share one
+# Agent SoA via the `creature_type` discriminant. The same per-agent
+# body-form walk over `agents` produces flocking forces (alignment +
+# cohesion + separation) for SAME-team neighbours AND combat forces
+# (chase if numerically advantaged, flee otherwise) + per-tick HP
+# attrition for OPPOSING-team neighbours — the architectural target is
+# team-aware spatial body-form interaction, expressed entirely through
+# the existing predator_prey_min two-creature-type sum-fold pattern
+# plus per_agent `agents.set_hp` writes.
+flocking_skirmish_runtime = { path = "../flocking_skirmish_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -186,3 +197,7 @@ path = "src/quest_probe_app.rs"
 [[bin]]
 name = "duel_1v1_app"
 path = "src/duel_1v1_app.rs"
+
+[[bin]]
+name = "flocking_skirmish_app"
+path = "src/flocking_skirmish_app.rs"

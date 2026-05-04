@@ -1,0 +1,334 @@
+// flocking_skirmish — THIRTEENTH real fixture and the first to bring
+// boids dynamics into a combat context. Two opposing flocks (Red and
+// Blue) share the Agent SoA via the `creature_type` discriminant
+// pattern (predator_prey_min precedent: Hare = 0, Wolf = 1; here
+// Red = 0, Blue = 1).
+//
+// ARCHITECTURAL TARGET: team-aware spatial body-form interaction.
+// The same `for other in agents` walk produces DIFFERENT effects per
+// neighbour based on `target.creature_type` vs `self.creature_type`:
+//
+//   - SAME team  → flocking force contribution
+//                  (alignment + cohesion + separation)
+//   - OPPOSING   → combat force contribution
+//                  (chase if numerically advantaged or in attack range,
+//                   flee otherwise) + per-tick HP attrition when very
+//                   close
+//
+// This is the boids primitive (alignment + separation + cohesion) the
+// engine was originally built on (`assets/sim/boids.sim`) crossed with
+// duel_1v1's HP/combat surface, expressed entirely through the
+// per-agent body-form sum-fold pattern that predator_prey_min already
+// proves out at the compiler level.
+//
+// SHAPE
+//   - Two `: Agent` entities (Red / Blue), shared SoA with pos/vel/hp
+//   - Per-creature physics rule guarded by
+//     `where (self.creature_type == Red)` (and Blue)
+//   - Each rule's body is ONE pass over `agents`, with a creature-type
+//     branch INSIDE the fold projection picking flock vs combat vector
+//   - HP attrition computed via a parallel sum-fold over enemies
+//     within attack_radius and applied to self via `agents.set_hp`
+//   - Run length 200-300 ticks; observable per-50-tick trace of:
+//       alive count per team (= count where hp > 0)
+//       average distance to nearest same-team neighbour (tightness)
+//       wall time / tick
+//
+// COMPILER GAPS THIS PROBES
+//   - `agents.set_hp(self, ...)` from a per_agent rule (not via
+//     ApplyDamage chronicle) — duel_1v1 already proved set_hp from a
+//     chronicle PerEvent rule; this fixture exercises it from
+//     PerAgent, with self as the target slot (no AgentRef::Target
+//     binding shadowing risk because we always write our own slot).
+//   - Two creature types BOTH writing hp in the same per-agent
+//     dispatch (one thread per slot, gated on creature_type).
+//     predator_prey_min already showed two PerAgent rules with
+//     mutually-exclusive where-clauses can co-exist in one schedule;
+//     adding hp to the read/write set should follow the same path.
+
+// ---------------------------------------------------------------------------
+// Events
+// ---------------------------------------------------------------------------
+
+event Tick { }
+
+// ---------------------------------------------------------------------------
+// Entities — two creature types over a shared Agent SoA
+// ---------------------------------------------------------------------------
+
+entity Red : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Blue : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+config flock {
+  // Boids parameters — every per-agent fold sums over all neighbours
+  // in perception range, so weights are scaled DOWN by ~1/N where N
+  // ~= local density. With 100 same-team agents within perception
+  // radius at startup, alignment_weight=0.001 means the per-tick
+  // velocity match contribution is ~0.1 (matches a typical
+  // tick-to-tick velocity delta).
+  perception_radius:  f32 = 30.0,
+  separation_radius:  f32 = 1.8,
+  // Boids weights. Tuned for ~100-agent local density: each fold sums
+  // over up to ~99 neighbours, so weights are scaled down by
+  // ~1/(N * range) to keep per-tick velocity deltas in the 0.05-0.5
+  // range. Separation has the same N denominator but a much smaller
+  // gating distance (1.8 vs 30) so far fewer terms contribute.
+  alignment_weight:   f32 = 0.0005,
+  cohesion_weight:    f32 = 0.00005,
+  separation_weight:  f32 = 0.05,
+
+  // Combat parameters — chase/flee + HP attrition.
+  // attack_radius: distance within which each enemy contributes
+  //   `damage_per_tick` to incoming damage. With 4 enemies on you,
+  //   damage = 4 hp/tick → ~25 ticks to kill at 100 hp.
+  attack_radius:      f32 = 4.0,
+  damage_per_tick:    f32 = 1.5,
+  // chase_weight / flee_weight: per-enemy contribution to the
+  // chase/flee force vector. Same N-scaling logic as cohesion: the
+  // sum-fold accumulates over all enemy neighbours in perception
+  // range, so the weight needs to bring 99 * ~10-unit deltas down
+  // to ~0.1-unit velocity contributions per tick. Flee weight ~2x
+  // chase: outnumbered agents really want to disengage.
+  chase_weight:       f32 = 0.00008,
+  flee_weight:        f32 = 0.00015,
+  // Velocity damping per tick. 0.95 holds momentum long enough for
+  // initial approach to carry both flocks into combat range, but
+  // damps fast enough to prevent post-collision flyaway.
+  inertia:            f32 = 0.95,
+}
+
+// ---------------------------------------------------------------------------
+// Per-tick physics — TEAM-AWARE BODY-FORM PATTERN
+// ---------------------------------------------------------------------------
+//
+// The body of MoveRed runs ONE pass over `agents`, with the projection
+// picking different vector contributions based on `other.creature_type`
+// vs `self.creature_type`. The same shape is mirrored in MoveBlue
+// (creature-type literals swapped).
+//
+// Pattern (the central idea this whole fixture demonstrates):
+//
+//   sum(other in agents where
+//     if (other != self)
+//        && (other.creature_type == <SAME>)
+//        && distance < perception_radius {
+//       <flock-vector>
+//     } else if (other != self)
+//        && (other.creature_type == <ENEMY>)
+//        && distance < perception_radius {
+//       <combat-vector>
+//     } else {
+//       vec3(0, 0, 0)
+//     })
+//
+// Note: rather than nest one giant if-else inside a single sum, we run
+// SEPARATE folds per-effect. Each fold is one body-form pass; the
+// schedule fuses them into a single PerAgent kernel invocation per
+// rule, so the work is one walk over neighbours regardless of how
+// many sums we write.
+
+physics MoveRed @phase(per_agent) {
+  on Tick {} where (self.creature_type == Red) {
+    // ---- SAME-team flocking forces (Red sees Red) -----------------------
+    let cohesion_sum = sum(other in agents where
+      if (other != self)
+         && (other.creature_type == Red)
+         && distance(self.pos, other.pos) < config.flock.perception_radius {
+        other.pos - self.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let alignment_sum = sum(other in agents where
+      if (other != self)
+         && (other.creature_type == Red)
+         && distance(self.pos, other.pos) < config.flock.perception_radius {
+        other.vel - self.vel
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let separation_sum = sum(other in agents where
+      if (other != self)
+         && (other.creature_type == Red)
+         && distance(self.pos, other.pos) < config.flock.separation_radius {
+        self.pos - other.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+
+    // ---- OPPOSING-team combat forces (Red sees Blue) --------------------
+    // Local enemy count within perception range — proxy for "am I
+    // outnumbered at this spot". Used to pick chase vs flee.
+    let enemies_seen = sum(other in agents where
+      if (other != self)
+         && (other.creature_type == Blue)
+         && distance(self.pos, other.pos) < config.flock.perception_radius {
+        1.0
+      } else {
+        0.0
+      });
+    // Local same-team count — denominator for the outnumbered check.
+    let allies_seen = sum(other in agents where
+      if (other != self)
+         && (other.creature_type == Red)
+         && distance(self.pos, other.pos) < config.flock.perception_radius {
+        1.0
+      } else {
+        0.0
+      });
+
+    // Chase vector — sum of (other.pos - self.pos) over enemies within
+    // perception. Pulls toward enemies.
+    let chase_sum = sum(other in agents where
+      if (other != self)
+         && (other.creature_type == Blue)
+         && distance(self.pos, other.pos) < config.flock.perception_radius {
+        other.pos - self.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    // Flee vector — sum of (self.pos - other.pos) over enemies. Push
+    // away. Same magnitude as chase but opposite sign — the per-agent
+    // body picks one of the two below based on local advantage.
+    let flee_sum = sum(other in agents where
+      if (other != self)
+         && (other.creature_type == Blue)
+         && distance(self.pos, other.pos) < config.flock.perception_radius {
+        self.pos - other.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+
+    // ---- HP attrition — sum #enemies within attack_radius -------------
+    // Each enemy in attack_radius contributes `damage_per_tick`.
+    let damage_taken = sum(other in agents where
+      if (other != self)
+         && (other.creature_type == Blue)
+         && distance(self.pos, other.pos) < config.flock.attack_radius {
+        config.flock.damage_per_tick
+      } else {
+        0.0
+      });
+
+    // ---- Compose forces ------------------------------------------------
+    // Combat term: chase if we have local advantage (allies >= enemies),
+    // otherwise flee. Inlined as `if (cond) { v } else { -v } * weight`
+    // shape via the fold-projection trick the boids fixture uses.
+    let combat_force = if (allies_seen >= enemies_seen) {
+      chase_sum * config.flock.chase_weight
+    } else {
+      flee_sum * config.flock.flee_weight
+    };
+    let flock_force = cohesion_sum * config.flock.cohesion_weight
+                    + alignment_sum * config.flock.alignment_weight
+                    + separation_sum * config.flock.separation_weight;
+
+    let new_vel = self.vel * config.flock.inertia + flock_force + combat_force;
+    let new_pos = self.pos + new_vel;
+    let new_hp = self.hp - damage_taken;
+
+    agents.set_vel(self, new_vel);
+    agents.set_pos(self, new_pos);
+    agents.set_hp(self, new_hp);
+  }
+}
+
+physics MoveBlue @phase(per_agent) {
+  on Tick {} where (self.creature_type == Blue) {
+    // Mirror of MoveRed with creature-type literals swapped.
+    let cohesion_sum = sum(other in agents where
+      if (other != self)
+         && (other.creature_type == Blue)
+         && distance(self.pos, other.pos) < config.flock.perception_radius {
+        other.pos - self.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let alignment_sum = sum(other in agents where
+      if (other != self)
+         && (other.creature_type == Blue)
+         && distance(self.pos, other.pos) < config.flock.perception_radius {
+        other.vel - self.vel
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let separation_sum = sum(other in agents where
+      if (other != self)
+         && (other.creature_type == Blue)
+         && distance(self.pos, other.pos) < config.flock.separation_radius {
+        self.pos - other.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+
+    let enemies_seen = sum(other in agents where
+      if (other != self)
+         && (other.creature_type == Red)
+         && distance(self.pos, other.pos) < config.flock.perception_radius {
+        1.0
+      } else {
+        0.0
+      });
+    let allies_seen = sum(other in agents where
+      if (other != self)
+         && (other.creature_type == Blue)
+         && distance(self.pos, other.pos) < config.flock.perception_radius {
+        1.0
+      } else {
+        0.0
+      });
+
+    let chase_sum = sum(other in agents where
+      if (other != self)
+         && (other.creature_type == Red)
+         && distance(self.pos, other.pos) < config.flock.perception_radius {
+        other.pos - self.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let flee_sum = sum(other in agents where
+      if (other != self)
+         && (other.creature_type == Red)
+         && distance(self.pos, other.pos) < config.flock.perception_radius {
+        self.pos - other.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+
+    let damage_taken = sum(other in agents where
+      if (other != self)
+         && (other.creature_type == Red)
+         && distance(self.pos, other.pos) < config.flock.attack_radius {
+        config.flock.damage_per_tick
+      } else {
+        0.0
+      });
+
+    let combat_force = if (allies_seen >= enemies_seen) {
+      chase_sum * config.flock.chase_weight
+    } else {
+      flee_sum * config.flock.flee_weight
+    };
+    let flock_force = cohesion_sum * config.flock.cohesion_weight
+                    + alignment_sum * config.flock.alignment_weight
+                    + separation_sum * config.flock.separation_weight;
+
+    let new_vel = self.vel * config.flock.inertia + flock_force + combat_force;
+    let new_pos = self.pos + new_vel;
+    let new_hp = self.hp - damage_taken;
+
+    agents.set_vel(self, new_vel);
+    agents.set_pos(self, new_pos);
+    agents.set_hp(self, new_hp);
+  }
+}

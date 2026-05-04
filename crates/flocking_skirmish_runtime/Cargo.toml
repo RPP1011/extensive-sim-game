@@ -1,0 +1,30 @@
+[package]
+name = "flocking_skirmish_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/flocking_skirmish.sim`.
+# Mirrors `predator_prey_runtime` shape: build.rs runs dsl_compiler at
+# compile time, OUT_DIR/generated.rs gets pulled in via `include!`.
+# Hand-written orchestration in src/lib.rs wraps the compiler-emitted
+# dispatch modules. See `crates/predator_prey_runtime/Cargo.toml` for
+# the shared pattern.
+#
+# This is the THIRTEENTH real fixture — first to bring boids dynamics
+# into a combat context. Two flocks (Red/Blue) share the Agent SoA via
+# the `creature_type` discriminant, and the same per-agent body-form
+# walk produces flocking forces (same-team neighbours) AND combat
+# forces + HP attrition (opposing-team neighbours).
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }
