@@ -21,14 +21,16 @@
 //!    every agent emits `ActionSelected{ actor=agent, action_id=0,
 //!    target=NO_TARGET }` (kind tag = 3u). The losing-row mask
 //!    (mask_1) is loaded but Heal's utility never beats Strike's.
-//! 4. **Strike chronicle** — *blocked by Gap #1.* The Strike
-//!    chronicle physics rule got fused into
-//!    `fused_fold_healing_done_healed`, whose WGSL body references
-//!    an undeclared `view_storage_primary` (only `view_1_primary`
-//!    is bound). The shader fails naga validation, so this runtime
-//!    SKIPS that fused-kernel dispatch entirely. Consequence: no
-//!    `DamageDealt` events ever land in the ring, so
-//!    `damage_total` stays at its `initial: 0.0`.
+//! 4. **Strike chronicle** — `physics_verb_chronicle_Strike` reads
+//!    the ActionSelected slots emitted in round 3, gates on
+//!    `action_id == 0u` (Strike's id), and emits one
+//!    `DamageDealt{ attacker=agent, target=agent, amount=10.0 }`
+//!    event per alive agent. Pre-Gap-#1-fix the schedule fused this
+//!    chronicle with `fold_healing_done` into the broken
+//!    `fused_fold_healing_done_healed` kernel; post-Rule-5 (in
+//!    `cg/schedule/fusion.rs::cross_domain_split_decision`) the
+//!    cross-class (PhysicsRule, ViewFold) pair always splits, and
+//!    each kernel keeps its native binding-set shape.
 //! 5. **Heal chronicle** — `physics_verb_chronicle_Heal` reads the
 //!    ActionSelected slots emitted in round 3, gates on
 //!    `action_id == 1u` (Heal's id). Heal NEVER wins argmax — every
@@ -36,18 +38,21 @@
 //!    no `Healed` events are emitted. Dispatched anyway to exercise
 //!    the kernel's binding shape.
 //! 6. **seed_indirect_0** — keeps the indirect-args buffer warm.
-//! 7. **fold_damage_total** — dispatched to exercise the per-handler
-//!    tag-filter codepath. The body gates on `event_ring[..tag..]
-//!    == 1u` (DamageDealt tag); since no DamageDealt events landed,
-//!    the fold accumulates zero into every slot.
+//! 7. **fold_damage_total** — RMW per `DamageDealt` event (kind=1u).
+//!    Each tick consumes the agent_count Strike-emits and
+//!    accumulates `amount` into `attacker`'s slot.
+//! 8. **fold_healing_done** — RMW per `Healed` event (kind=2u). Heal
+//!    never fires so the body's per-handler tag check rejects every
+//!    ActionSelected slot; the fold accumulates zero into every
+//!    slot.
 //!
 //! ## Observable
 //!
-//! - `damage_total[i]` = 0.0 for every slot — Gap #1 blocks the
-//!   Strike chronicle.
-//! - `healing_done` is NOT directly readable today; the fold kernel
-//!   fails to load. The runtime exposes only `damage_total` for the
-//!   sim_app to read back.
+//! - `damage_total[i]` ≈ `TICKS × strike_damage` = `100 × 10.0` =
+//!   1000.0 for every alive slot. OUTCOME (a) FULL FIRE.
+//! - `healing_done[i]` = 0.0 for every slot — Heal never wins
+//!   argmax, so no Healed events land in the ring. Negative-control
+//!   observable confirming the per-handler tag check works.
 //!
 //! See `docs/superpowers/notes/2026-05-04-abilities_probe.md` for the
 //! discovery doc + gap punch list.
@@ -109,16 +114,24 @@ pub struct AbilitiesProbeState {
     // -- Event ring + per-view storage --
     event_ring: EventRing,
     /// Per-attacker damage_total view storage. Fed by `DamageDealt`
-    /// events (kind tag = 1u). Today's runtime never sees a
-    /// DamageDealt event because the Strike chronicle was fused into
-    /// the broken `fused_fold_healing_done_healed` kernel (Gap #1)
-    /// — so damage_total stays at 0.0.
+    /// events (kind tag = 1u). Post-Gap-#1-fix the Strike chronicle
+    /// dispatches as a standalone kernel and the fold consumes its
+    /// emits — damage_total converges to TICKS × strike_damage.
     damage_total: ViewStorage,
     damage_total_cfg_buf: wgpu::Buffer,
+    /// Per-target healing_done view storage. Fed by `Healed` events
+    /// (kind tag = 2u). Heal never wins the scoring argmax (Strike
+    /// has higher utility) so the chronicle never emits a Healed
+    /// event — healing_done stays at 0.0 every slot. The fold
+    /// kernel still dispatches cleanly (the per-handler tag check
+    /// guards against ActionSelected slots).
+    healing_done: ViewStorage,
+    healing_done_cfg_buf: wgpu::Buffer,
 
     // -- Per-kernel cfg uniforms --
     mask_cfg_buf: wgpu::Buffer,
     scoring_cfg_buf: wgpu::Buffer,
+    chronicle_strike_cfg_buf: wgpu::Buffer,
     chronicle_heal_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
     #[allow(dead_code)]
@@ -176,8 +189,8 @@ impl AbilitiesProbeState {
             mapped_at_creation: false,
         });
 
-        // Event ring + damage_total view storage (per-agent f32, no
-        // anchor, no ids — view declares no @decay).
+        // Event ring + per-view storage (per-agent f32, no anchor,
+        // no ids — neither view declares @decay).
         let event_ring = EventRing::new(&gpu, "abilities_runtime");
         let damage_total = ViewStorage::new(
             &gpu,
@@ -185,6 +198,13 @@ impl AbilitiesProbeState {
             agent_count,
             false, // no @decay anchor
             false, // no top-K ids
+        );
+        let healing_done = ViewStorage::new(
+            &gpu,
+            "abilities_runtime::healing_done",
+            agent_count,
+            false,
+            false,
         );
 
         // Per-kernel cfg uniforms.
@@ -209,6 +229,20 @@ impl AbilitiesProbeState {
             &wgpu::util::BufferInitDescriptor {
                 label: Some("abilities_runtime::scoring_cfg"),
                 contents: bytemuck::bytes_of(&scoring_cfg_init),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        );
+        let chronicle_strike_cfg_init =
+            physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeCfg {
+                event_count: 0,
+                tick: 0,
+                _pad0: 0,
+                _pad1: 0,
+            };
+        let chronicle_strike_cfg_buf = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("abilities_runtime::chronicle_strike_cfg"),
+                contents: bytemuck::bytes_of(&chronicle_strike_cfg_init),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             },
         );
@@ -264,6 +298,19 @@ impl AbilitiesProbeState {
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             },
         );
+        let healing_cfg_init = fold_healing_done::FoldHealingDoneCfg {
+            event_count: 0,
+            tick: 0,
+            second_key_pop: 1,
+            _pad: 0,
+        };
+        let healing_done_cfg_buf = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("abilities_runtime::healing_done_cfg"),
+                contents: bytemuck::bytes_of(&healing_cfg_init),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        );
 
         Self {
             gpu,
@@ -276,8 +323,11 @@ impl AbilitiesProbeState {
             event_ring,
             damage_total,
             damage_total_cfg_buf,
+            healing_done,
+            healing_done_cfg_buf,
             mask_cfg_buf,
             scoring_cfg_buf,
+            chronicle_strike_cfg_buf,
             chronicle_heal_cfg_buf,
             seed_cfg_buf,
             snapshot_cfg_buf,
@@ -289,12 +339,23 @@ impl AbilitiesProbeState {
     }
 
     /// Per-attacker damage_total accumulator (one f32 per slot).
-    /// Today (Gap #1 active): zero for every slot — the Strike
-    /// chronicle was fused into the broken
-    /// `fused_fold_healing_done_healed` kernel and is never
-    /// dispatched, so no `DamageDealt` events land in the ring.
+    /// Post-Gap-#1-fix: each tick the Strike chronicle emits one
+    /// `DamageDealt{ attacker=agent, target=agent, amount=10.0 }`
+    /// per alive agent (Strike always wins argmax over Heal); the
+    /// fold accumulates `amount` into `attacker`'s slot. After
+    /// TICKS=100 each slot reads `1000.0`.
     pub fn damage_total(&mut self) -> &[f32] {
         self.damage_total.readback(&self.gpu)
+    }
+
+    /// Per-target healing_done accumulator (one f32 per slot).
+    /// Heal NEVER wins the scoring argmax (Strike scores 10.0 vs
+    /// Heal's 5.0) so the chronicle never emits a Healed event;
+    /// every slot stays at 0.0. Useful as a negative-control
+    /// observable that proves the per-handler tag check inside the
+    /// fold body correctly rejects ActionSelected slots.
+    pub fn healing_done(&mut self) -> &[f32] {
+        self.healing_done.readback(&self.gpu)
     }
 
     pub fn agent_count(&self) -> u32 {
@@ -393,14 +454,38 @@ impl CompiledSim for AbilitiesProbeState {
             self.agent_count,
         );
 
-        // (4) Strike chronicle — *blocked by Gap #1.* The Strike
-        // chronicle was fused into `fused_fold_healing_done_healed`,
-        // whose WGSL body references an undeclared
-        // `view_storage_primary` (only `view_1_primary` is in the
-        // bindings). Naga rejects the shader at module-creation
-        // time, so we DO NOT instantiate that kernel. Consequence:
-        // no DamageDealt events ever reach the ring; damage_total
-        // stays at 0.0 for every slot. See discovery doc Gap #1.
+        // (4) Strike chronicle — post-Gap-#1-fix this is a
+        // standalone `physics_verb_chronicle_Strike` kernel (Rule 5
+        // in fusion.rs blocks ViewFold/PhysicsRule cross-class
+        // fusion). Reads ActionSelected slots, gates on
+        // `action_id == 0u` (Strike's id). Strike ALWAYS wins
+        // argmax, so every slot's gate passes and one DamageDealt
+        // event lands in the ring per agent per tick.
+        let strike_chronicle_cfg =
+            physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeCfg {
+                event_count: self.agent_count,
+                tick: self.tick as u32,
+                _pad0: 0,
+                _pad1: 0,
+            };
+        self.gpu.queue.write_buffer(
+            &self.chronicle_strike_cfg_buf,
+            0,
+            bytemuck::bytes_of(&strike_chronicle_cfg),
+        );
+        let strike_chronicle_bindings =
+            physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeBindings {
+                event_ring: self.event_ring.ring(),
+                event_tail: self.event_ring.tail(),
+                cfg: &self.chronicle_strike_cfg_buf,
+            };
+        dispatch::dispatch_physics_verb_chronicle_strike(
+            &mut self.cache,
+            &strike_chronicle_bindings,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
 
         // (5) Heal chronicle — exercised even though it never fires.
         // Reads ActionSelected slots emitted in round 3, gates on
@@ -493,20 +578,49 @@ impl CompiledSim for AbilitiesProbeState {
             event_count_estimate,
         );
 
-        // (8) `fused_fold_healing_done_healed` — *NOT DISPATCHED.*
-        // Naga rejects the shader (Gap #1: undeclared
-        // `view_storage_primary`). Even if dispatched and the shader
-        // somehow compiled, the kernel fuses the Strike chronicle
-        // (which we DO want) with the healing_done fold (which is
-        // empty because Heal never wins). The right fix is at the
-        // emit/fusion layer; runtime-side workarounds would mask
-        // the real defect.
+        // (8) fold_healing_done — RMW per `Healed` event (kind=2u).
+        // Post-Gap-#1-fix this is a standalone fold kernel (Rule 5
+        // in fusion.rs prevents the broken ViewFold + PhysicsRule
+        // fusion that produced the un-dispatchable
+        // `fused_fold_healing_done_healed` kernel pre-fix). Heal
+        // never wins argmax so no Healed events are emitted; the
+        // per-handler tag check inside the fold body rejects the
+        // ActionSelected slots, and healing_done stays at 0.0 every
+        // slot. The kernel still binds + dispatches cleanly.
+        let healing_cfg = fold_healing_done::FoldHealingDoneCfg {
+            event_count: event_count_estimate,
+            tick: self.tick as u32,
+            second_key_pop: 1,
+            _pad: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.healing_done_cfg_buf,
+            0,
+            bytemuck::bytes_of(&healing_cfg),
+        );
+        let healing_bindings = fold_healing_done::FoldHealingDoneBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            view_storage_primary: self.healing_done.primary(),
+            view_storage_anchor: self.healing_done.anchor(),
+            view_storage_ids: self.healing_done.ids(),
+            sim_cfg: self.event_ring.sim_cfg(),
+            cfg: &self.healing_done_cfg_buf,
+        };
+        dispatch::dispatch_fold_healing_done(
+            &mut self.cache,
+            &healing_bindings,
+            &self.gpu.device,
+            &mut encoder,
+            event_count_estimate,
+        );
 
         // (9) kick_snapshot — host-side artefact; skipped, same
         // pattern as verb_probe_runtime.
 
         self.gpu.queue.submit(Some(encoder.finish()));
         self.damage_total.mark_dirty();
+        self.healing_done.mark_dirty();
         self.tick += 1;
     }
 

@@ -485,6 +485,23 @@ enum JoinDecision {
 ///    both walk orders (producer-then-consumer AND consumer-then-
 ///    producer) — within a single fused kernel each thread runs the
 ///    ops in serial program order, so neither order is safe.
+/// 5. **Cross-class ViewFold/PhysicsRule split** — a `ViewFold` op
+///    and a `PhysicsRule` op must split, even if their event-kind
+///    sets don't intersect (rule 4 doesn't fire) and their writes
+///    are disjoint. The two op classes have incompatible
+///    binding-set shapes: ViewFold-classified kernels emit the
+///    legacy 7-binding fold layout (`view_storage_primary`,
+///    `view_storage_anchor`, `view_storage_ids`, ...), while a
+///    fused kernel containing a PhysicsRule routes through the
+///    Generic emit path that names ViewStorage bindings as
+///    `view_<id>_<slot>`. The fold body's `view_storage_<slot>`
+///    identifier (synthesized by `wgsl_body::lower_cg_stmt_body_to_wgsl`'s
+///    Assign-to-ViewStorage path) then references an undeclared
+///    binding, and naga rejects the shader at module-creation time.
+///    Sequential dispatch is the safe default: each fold kernel
+///    keeps its `fold_<view>` binding shape; each chronicle keeps
+///    its PerEventEmit binding shape. Closes Gap #1 of
+///    `docs/superpowers/notes/2026-05-04-abilities_probe.md`.
 fn decide_join(
     prog: &CgProgram,
     current_shape: &Option<DispatchShape>,
@@ -625,6 +642,37 @@ fn cross_domain_split_decision(
             ComputeOpKind::PhysicsRule { .. },
             ComputeOpKind::PhysicsRule { .. },
         ) => None,
+        // Rule 5 — cross-class (ViewFold, PhysicsRule) and
+        // (PhysicsRule, ViewFold) splits. Even when rule 4
+        // (producer/consumer) doesn't fire (the chronicle emits an
+        // event the fold doesn't subscribe to, or the bodies are
+        // empty), fusing the two classes into one kernel forces the
+        // emit-side `classify_kernel` into the Generic path, which
+        // names ViewStorage bindings as `view_<id>_<slot>` rather
+        // than the legacy fold-layout `view_storage_<slot>`. The
+        // fold body's WGSL still references `view_storage_<slot>`
+        // (synthesized in `cg/emit/wgsl_body.rs::lower_cg_stmt_body_to_wgsl`'s
+        // ViewStorage-Assign arm), so naga rejects the shader. Pick
+        // the ViewFold side's first ViewStorage write as the witness
+        // so the diagnostic names a concrete view; fall back to a
+        // synthetic ViewStorage handle if neither side records one
+        // (empty-body test fixtures).
+        (
+            ComputeOpKind::ViewFold { view, .. },
+            ComputeOpKind::PhysicsRule { .. },
+        )
+        | (
+            ComputeOpKind::PhysicsRule { .. },
+            ComputeOpKind::ViewFold { view, .. },
+        ) => {
+            let witness = first_view_storage_write(prev)
+                .or_else(|| first_view_storage_write(next))
+                .unwrap_or(DataHandle::ViewStorage {
+                    view: *view,
+                    slot: crate::cg::data_handle::ViewStorageSlot::Primary,
+                });
+            Some(JoinDecision::SplitWrite(witness))
+        }
         // SpatialQuery ops never fuse with anything. The semantics
         // require BuildHash to fully populate the spatial grid in
         // its own dispatch BEFORE any consumer kernel reads from it
@@ -687,11 +735,9 @@ fn cross_domain_split_decision(
         | (ComputeOpKind::Plumbing { .. }, _)
         | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::MaskPredicate { .. })
         | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::ScoringArgmax { .. })
-        | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::PhysicsRule { .. })
         | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::Plumbing { .. })
         | (ComputeOpKind::PhysicsRule { .. }, ComputeOpKind::MaskPredicate { .. })
         | (ComputeOpKind::PhysicsRule { .. }, ComputeOpKind::ScoringArgmax { .. })
-        | (ComputeOpKind::PhysicsRule { .. }, ComputeOpKind::ViewFold { .. })
         | (ComputeOpKind::PhysicsRule { .. }, ComputeOpKind::Plumbing { .. }) => None,
     }
 }
@@ -2184,16 +2230,22 @@ mod tests {
 
     // --- 17. Producer emits an event nobody in the next op consumes ---
     //
-    // The split predicate is keyed on the producer's emit set
-    // intersecting the consumer's `on_event` — when they don't
-    // overlap, fusion is allowed (no round-trip race exists).
-
+    // Pre-rule-5: rule 4's producer/consumer split was keyed on the
+    // producer's emit set intersecting the consumer's `on_event` —
+    // when they don't overlap, rule 4 alone allowed fusion. Post-
+    // rule-5 (cross-class ViewFold/PhysicsRule split, abilities
+    // probe Gap #1): the (PhysicsRule, ViewFold) pair always splits
+    // even when rule 4 doesn't fire, because the two op classes
+    // have incompatible binding-set shapes. This test now pins the
+    // post-rule-5 behaviour.
     #[test]
-    fn physics_rule_emit_unrelated_event_still_fuses_with_view_fold() {
+    fn physics_rule_emit_unrelated_event_splits_from_view_fold() {
         let mut b = CgProgramBuilder::new();
         let ring = EventRingId(0);
         let view = ViewId(0);
-        // p0 emits #2; v0 consumes #1 — disjoint, no race.
+        // p0 emits #2; v0 consumes #1 — disjoint event sets (rule 4
+        // doesn't fire), but rule 5 still splits the (PhysicsRule,
+        // ViewFold) cross-class pair.
         let p0 = add_emitting_physics_rule_op(
             &mut b,
             crate::cg::op::PhysicsRuleId(0),
@@ -2206,15 +2258,76 @@ mod tests {
         let prog = b.finish();
 
         let deps = dependency_graph(&prog);
-        let (groups, _diagnostics) = fusion_decisions(&prog, &deps);
+        let (groups, diagnostics) = fusion_decisions(&prog, &deps);
 
-        // One Indirect group — the cross-domain rule didn't fire,
-        // and the conventional WAW check passes (writes are disjoint
-        // because the empty view-fold body records no view storage
-        // writes here, and the physics-rule's emit-ring write is
-        // distinct from the view fold's reads).
-        assert_eq!(groups.len(), 1, "groups: {:?}", groups);
-        assert_eq!(groups[0].ops, vec![p0, v0]);
+        // Two singleton Indirect groups — rule 5 cross-class split.
+        assert_eq!(groups.len(), 2, "groups: {:?}", groups);
+        assert_eq!(groups[0].ops, vec![p0]);
+        assert_eq!(groups[1].ops, vec![v0]);
+
+        // The split surfaces as a SplitWriteConflict diagnostic.
+        let split = diagnostics
+            .iter()
+            .find(|d| matches!(d.kind, FusionDiagnosticKind::SplitWriteConflict { .. }))
+            .expect("expected SplitWriteConflict diagnostic for cross-class split");
+        assert_eq!(split.ops, vec![p0, v0]);
+    }
+
+    // --- 18. Cross-class split also fires for non-emitting PhysicsRule -
+    //
+    // Closes Gap #1 of `docs/superpowers/notes/2026-05-04-abilities_probe.md`.
+    // The exact abilities_probe shape: `ViewFold(healing_done, on=Healed)`
+    // followed by `PhysicsRule(verb_chronicle_Strike, on=ActionSelected)`
+    // emitting `DamageDealt`. The fold subscribes to `Healed`; the
+    // chronicle emits `DamageDealt` — disjoint event sets (rule 4
+    // doesn't fire) but rule 5 still splits the cross-class pair so
+    // the fold's `view_storage_<slot>` body identifier resolves
+    // against the legacy 7-binding fold layout (rather than the
+    // Generic-path `view_<id>_<slot>` rename).
+    #[test]
+    fn view_fold_splits_from_physics_rule_emitting_disjoint_event() {
+        let mut b = CgProgramBuilder::new();
+        let ring = EventRingId(0);
+        let view = ViewId(1);
+        // v0 reads event #2 (Healed)
+        let v0 = add_view_fold_op(&mut b, view, EventKindId(2), ring);
+        // p0 reads event #3 (ActionSelected) and emits #1 (DamageDealt)
+        // — neither matches the fold's #2 subscription.
+        let p0 = add_emitting_physics_rule_op(
+            &mut b,
+            crate::cg::op::PhysicsRuleId(0),
+            EventKindId(3),
+            ReplayabilityFlag::NonReplayable,
+            ring,
+            EventKindId(1),
+        );
+        let mut prog = b.finish();
+        // Mirror the abilities_probe shape: the fold body records a
+        // ViewStorage write (the CAS-loop accumulator).
+        prog.ops[v0.0 as usize].record_write(view_primary_handle(view));
+
+        let deps = dependency_graph(&prog);
+        let (groups, diagnostics) = fusion_decisions(&prog, &deps);
+
+        // Two singleton Indirect groups — rule 5 cross-class split.
+        assert_eq!(groups.len(), 2, "groups: {:?}", groups);
+        assert_eq!(groups[0].ops, vec![v0]);
+        assert_eq!(groups[1].ops, vec![p0]);
+
+        // Witness should be the fold's ViewStorage write.
+        let split = diagnostics
+            .iter()
+            .find(|d| matches!(d.kind, FusionDiagnosticKind::SplitWriteConflict { .. }))
+            .expect("expected SplitWriteConflict diagnostic for cross-class split");
+        match &split.kind {
+            FusionDiagnosticKind::SplitWriteConflict { handle } => match handle {
+                DataHandle::ViewStorage { view: w_view, .. } => {
+                    assert_eq!(*w_view, view, "witness on wrong view: {:?}", handle);
+                }
+                other => panic!("expected ViewStorage witness, got: {:?}", other),
+            },
+            _ => unreachable!(),
+        }
     }
 
     // --- bonus: EventRing write conflict via cycle_edge_key projection -

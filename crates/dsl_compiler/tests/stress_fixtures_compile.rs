@@ -1252,23 +1252,21 @@ fn abilities_probe_compile_gate() {
     );
 }
 
-/// Probe Gap #1 — naga validation of the abilities probe surfaces a
-/// fused-kernel binding-rename gap. The schedule fuses
-/// `fold_healing_done` (consumer of `Healed`) with the Strike
-/// chronicle (producer of `DamageDealt`) into
-/// `fused_fold_healing_done_healed`. The fused kernel's bindings
-/// struct exposes `view_1_primary`, but the WGSL body still
-/// references the un-renamed `view_storage_primary` from the fold's
-/// pre-fusion emit template.
+/// Probe Gap #1 — naga validation of the abilities probe must stay
+/// clean. Pre-fix the schedule fused `fold_healing_done` (consumer
+/// of `Healed`) with the Strike chronicle (producer of
+/// `DamageDealt`) into `fused_fold_healing_done_healed`, and the
+/// fused kernel's WGSL body referenced an undeclared
+/// `view_storage_primary` (the fused-kernel bindings struct exposes
+/// `view_<id>_<slot>` per the Generic emit path).
 ///
-/// This test PINS the gap as a known-failing assertion. When the
-/// emit pass is fixed (likely in `kernel.rs::build_view_fold_wgsl_
-/// body` or the fusion-rename pass), the `naga_err_msgs` count drops
-/// to zero and this test starts to PASS — which is the trigger to
-/// remove the `#[ignore]` and convert it into a "must stay clean"
-/// invariant.
+/// Closed by Rule 5 in `cg/schedule/fusion.rs::cross_domain_split_decision`:
+/// any `(ViewFold, PhysicsRule)` or `(PhysicsRule, ViewFold)` pair
+/// now splits regardless of write/event overlap, so the fold keeps
+/// its legacy `fold_<view>` 7-binding layout and the chronicle
+/// emits as a standalone `physics_<verb>` kernel. Both naga-validate
+/// cleanly.
 #[test]
-#[ignore = "Gap #1: fused kernel references undeclared `view_storage_primary` — see docs/superpowers/notes/2026-05-04-abilities_probe.md"]
 fn abilities_probe_naga_clean() {
     use dsl_compiler::cg::lower::lower_compilation_to_cg;
     let path = workspace_path("assets/sim/abilities_probe.sim");
@@ -1292,5 +1290,102 @@ fn abilities_probe_naga_clean() {
         "abilities_probe emitted {} naga-invalid WGSL kernels:\n{}",
         errs.len(),
         errs.join("\n"),
+    );
+}
+
+/// `cooldown_probe` compile-gate. Pins the structural surface that the
+/// follow-up probe (closing Gap #4 in the abilities probe discovery
+/// doc) exercises end-to-end:
+///
+///   - 1 PhysicsRule (`CheckAndCast`) reading the per-agent
+///     `cooldown_next_ready_tick` SoA via `agents.cooldown_next_ready_
+///     tick(self)` AND `world.tick`, then `if (tick >= ready_at) {
+///     emit ActivationLogged }`.
+///   - 1 ViewFold (`activations`) on `ActivationLogged` (kind = 1u).
+///
+/// Locks the per-agent SoA-field-read codepath for the cooldown SoA
+/// — the spec table at `docs/spec/dsl.md` registers the field and
+/// `CooldownNextReadyTick` is in `AgentFieldId::all_variants` (see
+/// `crates/dsl_compiler/src/cg/data_handle.rs:368`) but no other
+/// fixture reads it. Plus the WGSL must validate naga-clean.
+///
+/// Discovery doc: `docs/superpowers/notes/2026-05-04-cooldown_probe.md`.
+#[test]
+fn cooldown_probe_compile_gate() {
+    use dsl_compiler::cg::lower::lower_compilation_to_cg;
+    let path = workspace_path("assets/sim/cooldown_probe.sim");
+    let src = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let prog = dsl_compiler::parse(&src).expect("parse cooldown_probe.sim");
+    let comp = dsl_ast::resolve::resolve(prog).expect("resolve cooldown_probe.sim");
+    let cg = lower_compilation_to_cg(&comp).unwrap_or_else(|o| {
+        for d in &o.diagnostics {
+            eprintln!("[cooldown_probe lower diag] {d}");
+        }
+        o.program
+    });
+    let sched = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&sched.schedule, &cg)
+        .expect("emit cooldown_probe");
+
+    // Op-level invariants: physics rule + view fold present.
+    let mut physics_count = 0;
+    let mut viewfold_count = 0;
+    for op in &cg.ops {
+        match &op.kind {
+            dsl_compiler::cg::op::ComputeOpKind::PhysicsRule { .. } => physics_count += 1,
+            dsl_compiler::cg::op::ComputeOpKind::ViewFold { .. } => viewfold_count += 1,
+            _ => {}
+        }
+    }
+    assert_eq!(
+        physics_count, 1,
+        "expected 1 PhysicsRule op (CheckAndCast); got {physics_count}",
+    );
+    assert_eq!(
+        viewfold_count, 1,
+        "expected 1 ViewFold op (activations); got {viewfold_count}",
+    );
+
+    // The CheckAndCast physics kernel must bind the cooldown SoA AND
+    // reference the per-agent slot in its body. This locks the
+    // `agents.cooldown_next_ready_tick(self)` lowering path.
+    let body = kernel_body_containing(&art, "CheckAndCast")
+        .or_else(|| kernel_body_containing(&art, "physics"))
+        .unwrap_or_else(|| panic!(
+            "no physics_CheckAndCast kernel in artifacts: {:?}",
+            art.kernel_index,
+        ));
+    assert!(
+        body.contains("agent_cooldown_next_ready_tick"),
+        "physics_CheckAndCast must bind the cooldown SoA — \
+         `agents.cooldown_next_ready_tick(self)` should lower to \
+         `agent_cooldown_next_ready_tick[<idx>]` in the WGSL body. \
+         Got body without that binding:\n{body}",
+    );
+
+    // Naga validation MUST be clean (no fused-kernel rename gap on
+    // this probe — single physics rule + single fold, no fusion
+    // collisions).
+    let mut errs = Vec::new();
+    for (name, w) in &art.wgsl_files {
+        if let Err(e) = naga::front::wgsl::parse_str(w) {
+            errs.push(format!("  {name}: {e}"));
+        }
+    }
+    assert!(
+        errs.is_empty(),
+        "cooldown_probe emitted {} naga-invalid WGSL kernels:\n{}",
+        errs.len(),
+        errs.join("\n"),
+    );
+
+    eprintln!(
+        "[cooldown_probe] {} kernels emitted: {:?}",
+        art.kernel_index.len(),
+        art.kernel_index,
     );
 }

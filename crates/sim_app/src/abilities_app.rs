@@ -47,6 +47,7 @@ fn main() {
     }
 
     let damage = sim.damage_total().to_vec();
+    let healing = sim.healing_done().to_vec();
     println!(
         "abilities_app: finished — final tick={} agents={} damage_total.len()={}",
         sim.tick(),
@@ -75,10 +76,11 @@ fn main() {
          (= TICKS={} × strike_damage={:.3})",
         expected_per_slot, TICKS, STRIKE_DAMAGE,
     );
+    let (h_min, h_mean, h_max, h_sum, _h_zero) = stats(&healing);
     println!(
-        "abilities_app: healing_done view — UNREADABLE today \
-         (the only fold kernel for healing_done is the broken \
-         fused_fold_healing_done_healed; not dispatched)",
+        "abilities_app: healing_done readback — min={:.3} mean={:.3} max={:.3} sum={:.3} \
+         (negative-control: Heal never wins argmax; expected all-0.0)",
+        h_min, h_mean, h_max, h_sum,
     );
 
     // OUTCOME classification.
