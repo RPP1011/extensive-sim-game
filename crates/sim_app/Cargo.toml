@@ -25,6 +25,8 @@ predator_prey_runtime = { path = "../predator_prey_runtime" }
 particle_collision_runtime = { path = "../particle_collision_runtime" }
 # Crowd navigation sibling fixture — cn_app drives it.
 crowd_navigation_runtime = { path = "../crowd_navigation_runtime" }
+# Target-chaser stress fixture for slice 1 (cross-agent target reads).
+target_chaser_runtime = { path = "../target_chaser_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -41,3 +43,7 @@ path = "src/pc_app.rs"
 [[bin]]
 name = "cn_app"
 path = "src/cn_app.rs"
+
+[[bin]]
+name = "tc_app"
+path = "src/tc_app.rs"

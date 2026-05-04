@@ -527,7 +527,31 @@ pub fn collect_expr_reads(id: CgExprId, exprs: &dyn ExprArena, out: &mut Vec<Dat
         return;
     };
     match node {
-        CgExpr::Read(h) => out.push(h.clone()),
+        CgExpr::Read(h) => {
+            out.push(h.clone());
+            // Slice 1 (stdlib-into-CG-IR) follow-up: an `AgentField`
+            // handle whose `target` is `AgentRef::Target(expr_id)`
+            // carries an embedded expression — the per-thread index
+            // into the SoA. The kernel binding-scanner consumes
+            // `op.reads` to decide which `agent_<field>` buffers a
+            // kernel binds; if we don't recurse into the target
+            // expression here, any AgentField reads it contains
+            // (e.g. `agents.pos(self.engaged_with)` → the inner
+            // `Read(AgentField{EngagedWith, Self_})`) won't appear
+            // in `op.reads`, and the kernel would reference an
+            // undeclared `agent_engaged_with` binding at WGSL
+            // validation time. Mirrors the slice-1 emit-side
+            // hoisting: every `Target(_)` reference contributes
+            // its target expression's reads to the op's binding
+            // surface.
+            if let DataHandle::AgentField {
+                target: crate::cg::data_handle::AgentRef::Target(target_expr_id),
+                ..
+            } = h
+            {
+                collect_expr_reads(*target_expr_id, exprs, out);
+            }
+        }
         CgExpr::Lit(_) => {}
         CgExpr::Binary { lhs, rhs, .. } => {
             collect_expr_reads(*lhs, exprs, out);
