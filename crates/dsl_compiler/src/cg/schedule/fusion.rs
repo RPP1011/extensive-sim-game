@@ -60,8 +60,9 @@ use std::collections::BTreeSet;
 
 use crate::cg::data_handle::{CycleEdgeKey, DataHandle, EventRingId, ViewId};
 use crate::cg::dispatch::{DispatchShape, PerPairSource};
-use crate::cg::op::{ComputeOp, ComputeOpKind, OpId};
+use crate::cg::op::{ComputeOp, ComputeOpKind, EventKindId, OpId};
 use crate::cg::program::CgProgram;
+use crate::cg::stmt::{CgStmt, CgStmtListId};
 
 use super::topology::{topological_sort, DepGraph};
 
@@ -471,6 +472,19 @@ enum JoinDecision {
 ///    co-accumulator pattern, NOT a fusion blocker. Both handlers
 ///    contribute to the same view storage; fusion is the *desired*
 ///    outcome.
+/// 4. **Producer/consumer event-ring split** — when one op's body
+///    emits an event kind X (`PhysicsRule` with `Emit { event: X }`)
+///    and the other op consumes that same event kind X (`PhysicsRule`
+///    with `on_event: Some(X)` or `ViewFold` with `on_event: X`), the
+///    two must split into separate dispatches. Fusing them into one
+///    kernel races on the shared event ring: the consumer reads slot
+///    N before the producer's same-thread write becomes visible
+///    (no cross-workgroup barrier inside a single dispatch), so the
+///    consumer either sees stale events from the prior tick or
+///    misses the freshly-emitted ones entirely. This applies in
+///    both walk orders (producer-then-consumer AND consumer-then-
+///    producer) — within a single fused kernel each thread runs the
+///    ops in serial program order, so neither order is safe.
 fn decide_join(
     prog: &CgProgram,
     current_shape: &Option<DispatchShape>,
@@ -504,9 +518,9 @@ fn decide_join(
             return waw_check(prog, current_ops, current_writes, op_writes);
         }
     };
-    // Cross-domain split (rules 1 + 2) — fires regardless of write
-    // disjointness.
-    if let Some(decision) = cross_domain_split_decision(prev_op, op) {
+    // Cross-domain split (rules 1 + 2 + 4) — fires regardless of
+    // write disjointness.
+    if let Some(decision) = cross_domain_split_decision(prog, prev_op, op) {
         return decision;
     }
     // Same-view ViewFold accumulator override (rule 3) and the
@@ -545,9 +559,23 @@ fn waw_check(
 /// exhaustive over [`ComputeOpKind`] — every variant pair is
 /// considered explicitly.
 fn cross_domain_split_decision(
+    prog: &CgProgram,
     prev: &ComputeOp,
     next: &ComputeOp,
 ) -> Option<JoinDecision> {
+    // Rule 4 (producer/consumer event-ring split) — fires before the
+    // structural pair-match below so it covers (PhysicsRule, ViewFold)
+    // and (PhysicsRule, PhysicsRule) cascades that the pair-match
+    // would otherwise hand off to the WAW check. Walks each side's
+    // body once for emitted event kinds, intersects with the other
+    // side's `on_event`. A non-empty intersection means same-tick
+    // event-ring round-trip — un-fusable for read-before-write
+    // correctness (see rule-4 doc on `decide_join`).
+    if let Some(witness) = producer_consumer_event_witness(prog, prev, next) {
+        return Some(JoinDecision::SplitWrite(
+            event_ring_split_witness(prev, next, witness),
+        ));
+    }
     match (&prev.kind, &next.kind) {
         // Cross-view ViewFold split — different views are different
         // kernel-ownership domains, even if writes don't intersect.
@@ -785,6 +813,150 @@ fn cross_replayability_split_witness(
     // in practice.
     DataHandle::IndirectArgs {
         ring: EventRingId(0),
+    }
+}
+
+/// True iff `prev` and `next` are tied by a same-tick event-ring
+/// round-trip — one side's body emits an event kind the other side
+/// consumes via its `on_event`. Returns the witness `EventKindId`
+/// (the first kind in the intersection, in the producer's source
+/// order) so the diagnostic can identify which event triggered the
+/// split.
+///
+/// This catches the cascade-physics → view-fold pattern (see GAP #2
+/// in `docs/superpowers/notes/2026-05-04-verb-fire-probe.md`):
+/// fusing a `PhysicsRule` whose body `Emit { event: PrayCompleted }`
+/// with a `ViewFold { on_event: PrayCompleted }` would let the fold
+/// read the ring before the rule's same-thread `Emit` is visible
+/// (no cross-workgroup barrier inside one dispatch). The same race
+/// applies symmetrically for (consumer, producer) walk order — each
+/// thread runs them in serial program order, so neither order is
+/// safe.
+fn producer_consumer_event_witness(
+    prog: &CgProgram,
+    prev: &ComputeOp,
+    next: &ComputeOp,
+) -> Option<EventKindId> {
+    // prev produces, next consumes
+    if let Some(witness) = event_round_trip_witness(prog, prev, next) {
+        return Some(witness);
+    }
+    // next produces, prev consumes (symmetric)
+    event_round_trip_witness(prog, next, prev)
+}
+
+/// Returns the first `EventKindId` that `producer` emits in its body
+/// AND that `consumer` lists as its `on_event`. Returns `None` if
+/// either op isn't event-shaped, or if the producer emits no event
+/// the consumer reads.
+fn event_round_trip_witness(
+    prog: &CgProgram,
+    producer: &ComputeOp,
+    consumer: &ComputeOp,
+) -> Option<EventKindId> {
+    let consumed = match &consumer.kind {
+        ComputeOpKind::ViewFold { on_event, .. } => *on_event,
+        ComputeOpKind::PhysicsRule { on_event: Some(k), .. } => *k,
+        // PerAgent PhysicsRule (on_event=None), or any non-event-
+        // consuming kind, can't be a same-tick consumer of a ring
+        // event.
+        ComputeOpKind::PhysicsRule { on_event: None, .. }
+        | ComputeOpKind::MaskPredicate { .. }
+        | ComputeOpKind::ScoringArgmax { .. }
+        | ComputeOpKind::ViewDecay { .. }
+        | ComputeOpKind::SpatialQuery { .. }
+        | ComputeOpKind::Plumbing { .. } => return None,
+    };
+    let body = match &producer.kind {
+        ComputeOpKind::PhysicsRule { body, .. } => *body,
+        // ViewFold bodies write view storage, not new events; the
+        // other event-shaped kinds don't carry emit-bearing bodies.
+        ComputeOpKind::ViewFold { .. }
+        | ComputeOpKind::MaskPredicate { .. }
+        | ComputeOpKind::ScoringArgmax { .. }
+        | ComputeOpKind::ViewDecay { .. }
+        | ComputeOpKind::SpatialQuery { .. }
+        | ComputeOpKind::Plumbing { .. } => return None,
+    };
+    let mut emits: Vec<EventKindId> = Vec::new();
+    collect_emits_in_list(body, prog, &mut emits);
+    emits.into_iter().find(|e| *e == consumed)
+}
+
+/// Recursively collect every `CgStmt::Emit`'s `EventKindId` from the
+/// statement list `list_id`, descending through `If` arms (both
+/// `then` and `else_`), `Match` arm bodies, and
+/// `ForEachNeighborBody` bodies. Mirrors the driver's
+/// `collect_emits_in_list` (in `cg/lower/driver.rs`); duplicated
+/// here to keep the schedule layer free of a `lower` dependency
+/// (the schedule analyzer must stay below lowering in the dep
+/// graph). Listed exhaustively over `CgStmt` variants — adding a
+/// new emit-bearing statement variant forces an explicit case here.
+fn collect_emits_in_list(
+    list_id: CgStmtListId,
+    prog: &CgProgram,
+    out: &mut Vec<EventKindId>,
+) {
+    let Some(list) = prog.stmt_lists.get(list_id.0 as usize) else {
+        return;
+    };
+    for &stmt_id in &list.stmts {
+        let Some(stmt) = prog.stmts.get(stmt_id.0 as usize) else {
+            continue;
+        };
+        match stmt {
+            CgStmt::Emit { event, .. } => out.push(*event),
+            CgStmt::If { then, else_, .. } => {
+                collect_emits_in_list(*then, prog, out);
+                if let Some(else_list) = else_ {
+                    collect_emits_in_list(*else_list, prog, out);
+                }
+            }
+            CgStmt::Match { arms, .. } => {
+                for arm in arms {
+                    collect_emits_in_list(arm.body, prog, out);
+                }
+            }
+            CgStmt::ForEachNeighborBody { body, .. } => {
+                collect_emits_in_list(*body, prog, out);
+            }
+            CgStmt::Assign { .. }
+            | CgStmt::Let { .. }
+            | CgStmt::ForEachAgent { .. }
+            | CgStmt::ForEachNeighbor { .. } => {}
+        }
+    }
+}
+
+/// Synthesize a representative `DataHandle` for a producer/consumer
+/// event-ring split. Prefer the producer side's first `EventRing`
+/// `Append` (the write that races against the consumer's read); fall
+/// back to either side's other writes; final fallback is a synthetic
+/// `EventRing { ring: 0, Append }` so the diagnostic message reads
+/// sensibly. The `_witness_kind` is recorded on the
+/// `event_round_trip_witness` return for future diagnostic
+/// messaging — the structural fusion-block itself only needs *some*
+/// representative handle.
+fn event_ring_split_witness(
+    prev: &ComputeOp,
+    next: &ComputeOp,
+    _witness_kind: EventKindId,
+) -> DataHandle {
+    if let Some(h) = first_event_ring_append(prev) {
+        return h;
+    }
+    if let Some(h) = first_event_ring_append(next) {
+        return h;
+    }
+    if let Some(h) = prev.writes.first() {
+        return h.clone();
+    }
+    if let Some(h) = next.writes.first() {
+        return h.clone();
+    }
+    DataHandle::EventRing {
+        ring: EventRingId(0),
+        kind: crate::cg::data_handle::EventRingAccess::Append,
     }
 }
 
@@ -1883,6 +2055,166 @@ mod tests {
             .find(|d| matches!(d.kind, FusionDiagnosticKind::SplitWriteConflict { .. }))
             .expect("expected SplitWriteConflict diagnostic");
         assert_eq!(split.ops, vec![p0, p1]);
+    }
+
+    // --- helpers for producer/consumer split tests --------------------
+
+    /// Add a `PhysicsRule` op whose body emits a single
+    /// `Emit { event: emits, fields: [] }` statement. Records the
+    /// destination ring as an `EventRing { ring: dest_ring, Append }`
+    /// write so the WAW projection sees the ring.
+    fn add_emitting_physics_rule_op(
+        builder: &mut CgProgramBuilder,
+        rule: crate::cg::op::PhysicsRuleId,
+        on_event: EventKindId,
+        replayable: ReplayabilityFlag,
+        ring: EventRingId,
+        emits: EventKindId,
+    ) -> OpId {
+        use crate::cg::stmt::CgStmt;
+        let emit_stmt = builder
+            .add_stmt(CgStmt::Emit {
+                event: emits,
+                fields: Vec::new(),
+            })
+            .unwrap();
+        let body = builder
+            .add_stmt_list(CgStmtList::new(vec![emit_stmt]))
+            .unwrap();
+        builder
+            .add_op(
+                ComputeOpKind::PhysicsRule {
+                    rule,
+                    on_event: Some(on_event),
+                    body,
+                    replayable,
+                },
+                DispatchShape::PerEvent { source_ring: ring },
+                Span::dummy(),
+            )
+            .unwrap()
+    }
+
+    // --- 15. Producer + same-event-consumer pair does NOT fuse --------
+    //
+    // Closes GAP #2 from
+    // `docs/superpowers/notes/2026-05-04-verb-fire-probe.md`. The
+    // cascade physics rule (verb_chronicle_*) emits PrayCompleted; the
+    // view-fold for the faith view consumes PrayCompleted. Fusing
+    // them lets the fold read the event ring before the rule's same-
+    // thread Emit becomes visible (no cross-workgroup barrier inside
+    // one dispatch).
+
+    #[test]
+    fn physics_rule_emit_does_not_fuse_with_same_event_view_fold() {
+        let mut b = CgProgramBuilder::new();
+        let ring = EventRingId(0);
+        let view = ViewId(0);
+        // p0 reads event #0 (ActionSelected) and emits #1 (PrayCompleted).
+        let p0 = add_emitting_physics_rule_op(
+            &mut b,
+            crate::cg::op::PhysicsRuleId(0),
+            EventKindId(0),
+            ReplayabilityFlag::NonReplayable,
+            ring,
+            EventKindId(1),
+        );
+        // v0 reads event #1 (PrayCompleted) — the round-trip
+        // consumer.
+        let v0 = add_view_fold_op(&mut b, view, EventKindId(1), ring);
+        let prog = b.finish();
+
+        let deps = dependency_graph(&prog);
+        let (groups, diagnostics) = fusion_decisions(&prog, &deps);
+
+        // Two singleton Indirect groups — the producer/consumer rule
+        // forced a split despite the shared dispatch shape.
+        assert_eq!(
+            groups.len(),
+            2,
+            "expected the (producer, consumer) pair to split; got {:?}",
+            groups
+        );
+        assert_eq!(groups[0].ops, vec![p0]);
+        assert_eq!(groups[1].ops, vec![v0]);
+
+        // The split surfaces as a SplitWriteConflict diagnostic
+        // pointing at the producer's event-ring append.
+        let split = diagnostics
+            .iter()
+            .find(|d| matches!(d.kind, FusionDiagnosticKind::SplitWriteConflict { .. }))
+            .expect("expected SplitWriteConflict diagnostic for round-trip split");
+        assert_eq!(split.ops, vec![p0, v0]);
+    }
+
+    // --- 16. Symmetric: consumer-first + producer-second also splits --
+
+    #[test]
+    fn view_fold_does_not_fuse_with_subsequent_emitting_physics_rule() {
+        // Reverse the walk order: consumer first, producer second.
+        // Within a single fused kernel each thread runs the ops in
+        // serial program order — so the consumer would still race
+        // (it runs before the producer's Emit).
+        let mut b = CgProgramBuilder::new();
+        let ring = EventRingId(0);
+        let view = ViewId(0);
+        let v0 = add_view_fold_op(&mut b, view, EventKindId(1), ring);
+        let p0 = add_emitting_physics_rule_op(
+            &mut b,
+            crate::cg::op::PhysicsRuleId(0),
+            EventKindId(0),
+            ReplayabilityFlag::NonReplayable,
+            ring,
+            EventKindId(1),
+        );
+        let prog = b.finish();
+
+        let deps = dependency_graph(&prog);
+        let (groups, _diagnostics) = fusion_decisions(&prog, &deps);
+
+        assert_eq!(
+            groups.len(),
+            2,
+            "expected the (consumer, producer) pair to split; got {:?}",
+            groups
+        );
+        assert_eq!(groups[0].ops, vec![v0]);
+        assert_eq!(groups[1].ops, vec![p0]);
+    }
+
+    // --- 17. Producer emits an event nobody in the next op consumes ---
+    //
+    // The split predicate is keyed on the producer's emit set
+    // intersecting the consumer's `on_event` — when they don't
+    // overlap, fusion is allowed (no round-trip race exists).
+
+    #[test]
+    fn physics_rule_emit_unrelated_event_still_fuses_with_view_fold() {
+        let mut b = CgProgramBuilder::new();
+        let ring = EventRingId(0);
+        let view = ViewId(0);
+        // p0 emits #2; v0 consumes #1 — disjoint, no race.
+        let p0 = add_emitting_physics_rule_op(
+            &mut b,
+            crate::cg::op::PhysicsRuleId(0),
+            EventKindId(0),
+            ReplayabilityFlag::NonReplayable,
+            ring,
+            EventKindId(2),
+        );
+        let v0 = add_view_fold_op(&mut b, view, EventKindId(1), ring);
+        let prog = b.finish();
+
+        let deps = dependency_graph(&prog);
+        let (groups, _diagnostics) = fusion_decisions(&prog, &deps);
+
+        // One Indirect group — the cross-domain rule didn't fire,
+        // and the conventional WAW check passes (writes are disjoint
+        // because the empty view-fold body records no view storage
+        // writes here, and the physics-rule's emit-ring write is
+        // distinct from the view fold's reads).
+        assert_eq!(groups.len(), 1, "groups: {:?}", groups);
+        assert_eq!(groups[0].ops, vec![p0, v0]);
     }
 
     // --- bonus: EventRing write conflict via cycle_edge_key projection -
