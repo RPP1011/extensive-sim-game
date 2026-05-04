@@ -2889,3 +2889,150 @@ fn foraging_real_compile_gate() {
         art.kernel_index,
     );
 }
+
+/// `predator_prey_real` compile-gate. Pins the structural surface of
+/// the FOURTH REAL fixture — first to compose COMBAT + LIFECYCLE on
+/// TWO simultaneously-live creature types.
+///
+/// Locks:
+///   - 4 PhysicsRule ops (WolfHunt + ApplyKill + SheepGraze +
+///     EnergyDecay)
+///   - 3 ViewFold ops (kills_total + sheep_killed_total +
+///     starved_total)
+///   - 0 MaskPredicate, 0 ScoringArgmax (no verb cascade — all
+///     decision logic in physics rule bodies + chronicle)
+///   - WolfHunt binds spatial-grid + agent_pos (body-form spatial
+///     walk → ForEachNeighborBody implicit self.pos read)
+///   - ApplyKill writes agent_hp + agent_alive + agent_hunger
+///     (chronicle physics: combat death + wolf-eats-sheep)
+///   - EnergyDecay writes agent_alive (universal starvation gate)
+///   - SheepGraze writes agent_hunger (uniform graze regrowth)
+#[test]
+fn predator_prey_real_compile_gate() {
+    use dsl_compiler::cg::lower::lower_compilation_to_cg;
+    let path = workspace_path("assets/sim/predator_prey_real.sim");
+    let src = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let prog = dsl_compiler::parse(&src).expect("parse predator_prey_real.sim");
+    let comp = dsl_ast::resolve::resolve(prog).expect("resolve predator_prey_real.sim");
+    // Tolerate the inherited P6 false-positive warnings on chronicle
+    // physics writes to agent fields (same shape duel_1v1 + duel_25v25
+    // + foraging_real fixtures live with).
+    let cg = lower_compilation_to_cg(&comp).unwrap_or_else(|o| {
+        for d in &o.diagnostics {
+            eprintln!("[predator_prey_real lower diag] {d}");
+        }
+        o.program
+    });
+    let sched = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&sched.schedule, &cg)
+        .expect("emit predator_prey_real");
+
+    let mut mask_count = 0;
+    let mut physics_count = 0;
+    let mut viewfold_count = 0;
+    let mut scoring_rows = 0;
+    for op in &cg.ops {
+        match &op.kind {
+            dsl_compiler::cg::op::ComputeOpKind::MaskPredicate { .. } => mask_count += 1,
+            dsl_compiler::cg::op::ComputeOpKind::PhysicsRule { .. } => physics_count += 1,
+            dsl_compiler::cg::op::ComputeOpKind::ViewFold { .. } => viewfold_count += 1,
+            dsl_compiler::cg::op::ComputeOpKind::ScoringArgmax { rows, .. } => {
+                scoring_rows = rows.len();
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        mask_count, 0,
+        "predator_prey_real has no verbs → 0 MaskPredicate ops; got {mask_count}",
+    );
+    assert_eq!(
+        scoring_rows, 0,
+        "predator_prey_real has no verbs → 0 scoring rows; got {scoring_rows}",
+    );
+    assert_eq!(
+        physics_count, 4,
+        "expected 4 PhysicsRule ops (WolfHunt + ApplyKill + SheepGraze + EnergyDecay); \
+         got {physics_count}",
+    );
+    assert_eq!(
+        viewfold_count, 3,
+        "expected 3 ViewFold ops (kills_total + sheep_killed_total + starved_total); \
+         got {viewfold_count}",
+    );
+
+    // ApplyKill must write agent_hp (sheep.hp decrement) AND
+    // agent_alive (set_alive on hp<=0 — combat death) AND
+    // agent_hunger (wolf.hunger += meat_gain — wolf eats sheep).
+    let apply_body = kernel_body_containing(&art, "ApplyKill")
+        .unwrap_or_else(|| panic!("no ApplyKill kernel emitted: {:?}", art.kernel_index));
+    assert!(
+        apply_body.contains("agent_hp["),
+        "ApplyKill must write agent_hp (sheep.hp decrement); got body:\n{apply_body}",
+    );
+    assert!(
+        apply_body.contains("agent_alive["),
+        "ApplyKill must write agent_alive (set_alive on hp<=0); got body:\n{apply_body}",
+    );
+    assert!(
+        apply_body.contains("agent_hunger["),
+        "ApplyKill must write agent_hunger (wolf.hunger += meat_gain); got body:\n{apply_body}",
+    );
+
+    // EnergyDecay must write agent_alive (universal starvation gate)
+    // and read+write agent_hunger.
+    let decay_body = kernel_body_containing(&art, "EnergyDecay")
+        .unwrap_or_else(|| panic!("no EnergyDecay kernel emitted: {:?}", art.kernel_index));
+    assert!(
+        decay_body.contains("agent_alive["),
+        "EnergyDecay must write agent_alive (set_alive on hunger<=0); got body:\n{decay_body}",
+    );
+    assert!(
+        decay_body.contains("agent_hunger["),
+        "EnergyDecay must read+write agent_hunger; got body:\n{decay_body}",
+    );
+
+    // SheepGraze must write agent_hunger (per-sheep += graze_rate).
+    let graze_body = kernel_body_containing(&art, "SheepGraze")
+        .unwrap_or_else(|| panic!("no SheepGraze kernel emitted: {:?}", art.kernel_index));
+    assert!(
+        graze_body.contains("agent_hunger["),
+        "SheepGraze must write agent_hunger (uniform regrowth proxy); got body:\n{graze_body}",
+    );
+
+    // WolfHunt (body-form spatial walk) must bind agent_pos —
+    // mirrors foraging_real AntFeed's locking of the
+    // ForEachNeighborBody implicit-self.pos-read fix.
+    let hunt_body = kernel_body_containing(&art, "WolfHunt")
+        .unwrap_or_else(|| panic!("no WolfHunt kernel emitted: {:?}", art.kernel_index));
+    assert!(
+        hunt_body.contains("agent_pos: array<vec3<f32>>")
+            || hunt_body.contains("agent_pos: array<vec3"),
+        "WolfHunt must bind agent_pos — ForEachNeighborBody implicit \
+         self.pos read fix; got body:\n{hunt_body}",
+    );
+
+    // All emitted WGSL must be naga-clean.
+    let mut errs = Vec::new();
+    for (name, body) in &art.wgsl_files {
+        if let Err(e) = naga::front::wgsl::parse_str(body) {
+            errs.push(format!("  {name}: {e}"));
+        }
+    }
+    assert!(
+        errs.is_empty(),
+        "predator_prey_real emitted {} naga-invalid WGSL kernels:\n{}",
+        errs.len(),
+        errs.join("\n"),
+    );
+
+    eprintln!(
+        "[predator_prey_real] {} kernels emitted: {:?}",
+        art.kernel_index.len(),
+        art.kernel_index,
+    );
+}
