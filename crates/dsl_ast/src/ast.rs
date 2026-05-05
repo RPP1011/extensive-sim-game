@@ -811,3 +811,123 @@ pub enum FoldKind {
     Max,
     Min,
 }
+
+// ---------------------------------------------------------------------------
+// `.ability` file AST (Wave 1.0 subset of `docs/spec/ability_dsl_unified.md`)
+//
+// Parses the surface from spec §4 (`ability` blocks) — header properties
+// (target / range / cooldown / cast / hint) plus zero-or-more bare effect
+// statements. Modifier slots (in / for / when / chance / [TAGS] / scaling /
+// nested), `passive` / `template` / `structure` blocks, and `deliver`
+// blocks are deliberately deferred to later slices (Waves 1.1-1.5). When
+// the parser sees a modifier token mid-effect it records the simple
+// positional arguments collected so far and skips the rest of the line.
+// See `crates/dsl_ast/src/ability_parser.rs` for the parser.
+// ---------------------------------------------------------------------------
+
+/// A single `.ability` source file. Currently holds only `ability` decls;
+/// future slices add `passive`, `template`, and `structure`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct AbilityFile {
+    pub abilities: Vec<AbilityDecl>,
+    // Future (Wave 1.1+): passives, templates, structures.
+}
+
+/// A parsed `ability <Name> { headers... effects... }` block.
+///
+/// `headers` is the list of header properties in source order. Duplicate
+/// header keys are rejected at parse time. `effects` is the list of bare
+/// effect statements in source order. The Wave 1.0 parser does NOT support
+/// `deliver` / `recast` / `morph` blocks — those are parse errors today
+/// (deferred to Wave 1.4).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct AbilityDecl {
+    pub name: String,
+    pub headers: Vec<AbilityHeader>,
+    pub effects: Vec<EffectStmt>,
+    pub span: Span,
+}
+
+/// One header property line inside an `ability` block. Header keys cap out
+/// at the five Wave 1.0 properties (target / range / cooldown / cast /
+/// hint). Other spec-listed headers (cost / charges / recharge / toggle /
+/// recast / morph / form / require_skill / require_tool / zone_tag /
+/// unstoppable) are deferred — encountering one is a parse error today.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum AbilityHeader {
+    Target(TargetMode),
+    Range(f32),
+    Cooldown(Duration),
+    Cast(Duration),
+    Hint(HintName),
+}
+
+/// One effect statement: a verb name plus zero-or-more positional args.
+///
+/// Wave 1.0 captures only the leading positional args (numbers / durations
+/// / percents / strings / idents). When the parser encounters a modifier
+/// keyword (`in`, `for`, `when`, `chance`, `stacking`, `+`) or a
+/// bracketed power-tag list (`[FIRE: 60]`) or a nested-effects block
+/// (`{ ... }`), it stops collecting args and skips to the end of the
+/// statement. Modifier capture lands in Wave 1.5. `args` therefore
+/// reflects only the verb's required scalar arguments — sufficient for
+/// the five combat-core verbs (damage / heal / shield / stun / slow)
+/// plus the simple control verbs.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct EffectStmt {
+    pub verb: String,
+    pub args: Vec<EffectArg>,
+    pub span: Span,
+    // Future (Wave 1.5): modifier slots (in / for / when / chance /
+    // tags / stacking / scaling / lifetime / nested).
+}
+
+/// One positional argument in an effect statement. The Wave 1.0 parser
+/// records the literal kind it saw; lowering (Wave 1.6) is responsible
+/// for verb-specific type checking (e.g. `damage` wants `Number`,
+/// `stun` wants `Duration`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum EffectArg {
+    Number(f32),
+    Duration(Duration),
+    Percent(f32),
+    String(String),
+    Ident(String),
+}
+
+/// Target mode for an ability — sets the dispatch shape (PerAgent /
+/// PerPair) per spec §4.3. Variant set matches the eight modes the spec
+/// table lists; `Self_` uses a trailing underscore because `self` is a
+/// Rust keyword.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum TargetMode {
+    Enemy,
+    Self_,
+    Ally,
+    SelfAoe,
+    Ground,
+    Direction,
+    Vector,
+    Global,
+}
+
+/// Hint enum used for scoring metadata only (spec §4.2). Six variants
+/// matching the existing `.ability` corpus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum HintName {
+    Damage,
+    Defense,
+    CrowdControl,
+    Utility,
+    Heal,
+    Economic,
+}
+
+/// A normalized duration in milliseconds. The lexer accepts `5s`,
+/// `300ms`, `1.5s`, and bare `5000` (interpreted as ms per the spec
+/// §6 lowering note that durations on the GPU side are tick-quantized
+/// from millis).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Duration {
+    pub millis: u32,
+}
