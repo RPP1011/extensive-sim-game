@@ -47,8 +47,9 @@ pub use program::{
     Area, Delivery, EffectOp, Gate, TargetSelector, MAX_ABILITIES, MAX_EFFECTS_PER_PROGRAM,
 };
 pub use program::AbilityProgram;
-pub use program::{AbilityHint, AbilityTag, MAX_TAGS_PER_PROGRAM};
+pub use program::{AbilityHint, AbilityTag, StackingMode, MAX_TAGS_PER_PROGRAM};
 pub use registry::{AbilityRegistry, AbilityRegistryBuilder};
 pub use packed::{
     PackedAbilityRegistry, EFFECT_KIND_EMPTY, HINT_NONE_SENTINEL, NUM_ABILITY_TAGS,
+    STACKING_NONE_SENTINEL,
 };

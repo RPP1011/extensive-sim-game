@@ -168,10 +168,81 @@ fn lowering_chance_modifier_returns_unimplemented() {
     assert_modifier(err, "chance");
 }
 
+// ---------------------------------------------------------------------------
+// Wave 1.5#3 — `stacking <mode>` modifier lowering. Effect-statement
+// stacking modes are captured into `program.stackings`, indexed parallel
+// to `program.effects`. Apply handlers default to `Refresh` for any
+// effect that didn't carry the modifier (per project_buff_stacking_rule).
+// ---------------------------------------------------------------------------
+
 #[test]
-fn lowering_stacking_modifier_returns_unimplemented() {
-    let err = lower_inline("ability X { target: enemy cooldown: 1s heal 10 stacking refresh }");
-    assert_modifier(err, "stacking");
+fn lowering_stacking_refresh() {
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::StackingMode;
+    let file = parse_ability_file(
+        "ability X { target: enemy range: 5.0 cooldown: 1s stun for 2s stacking refresh }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("stacking refresh must lower");
+    assert_eq!(prog.effects.len(), 1);
+    assert_eq!(prog.stackings.len(), 1, "one effect → one stackings slot");
+    assert_eq!(prog.stackings[0], Some(StackingMode::Refresh));
+}
+
+#[test]
+fn lowering_stacking_stack() {
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::StackingMode;
+    let file = parse_ability_file(
+        "ability X { target: enemy range: 5.0 cooldown: 1s stun for 2s stacking stack }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("stacking stack must lower");
+    assert_eq!(prog.stackings[0], Some(StackingMode::Stack));
+}
+
+#[test]
+fn lowering_stacking_extend() {
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::StackingMode;
+    let file = parse_ability_file(
+        "ability X { target: enemy range: 5.0 cooldown: 1s stun for 2s stacking extend }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("stacking extend must lower");
+    assert_eq!(prog.stackings[0], Some(StackingMode::Extend));
+}
+
+#[test]
+fn lowering_no_stacking_is_empty() {
+    // Bare effect with no stacking modifier: the lowering pass leaves
+    // `program.stackings` empty (apply handlers treat empty + None
+    // identically as Refresh per the project memo). This keeps Wave 1
+    // corpus output bit-stable.
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    let file = parse_ability_file(
+        "ability X { target: enemy range: 5.0 cooldown: 1s stun for 2s }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("bare stun must lower");
+    assert!(
+        prog.stackings.is_empty(),
+        "no stacking modifier → empty stackings smallvec; got {:?}",
+        prog.stackings,
+    );
+}
+
+#[test]
+fn lowering_stacking_with_chance_lowers_stacking_then_errors_on_chance() {
+    // Wave 1.5#3 retires the stacking short-circuit. With both
+    // `chance` and `stacking` present, the lowering pass surfaces the
+    // chance modifier error (slot 5 in spec §6.1) — stacking (slot 6)
+    // would have been the loser anyway. The point is that stacking
+    // alone NO LONGER errors, but chance still does.
+    let err = lower_inline(
+        "ability X { target: enemy cooldown: 1s heal 10 chance 25% stacking refresh }",
+    );
+    assert_modifier(err, "chance");
 }
 
 #[test]
