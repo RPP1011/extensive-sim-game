@@ -41,11 +41,95 @@ fn assert_modifier(err: LowerError, expected: &'static str) -> dsl_ast::ast::Spa
 // 1. One test per modifier slot
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Wave 1.5#2 — `in <shape>(args)` modifier lowering. Effect-statement
+// area shapes are captured into `program.per_effect_areas`, indexed
+// parallel to `program.effects`. `EffectAreaShape` is the second
+// per-effect SoA modifier with variant data — its 4×f32 args block
+// round-trips through the engine `ShapeKind` discriminant + `args`
+// straight into the SoA pair (`area_kinds` + `area_args`) at pack
+// time. Apply handlers default to "single-target effect (use
+// program.area)" for any effect that didn't carry the modifier.
+// Unknown shape names surface as `UnknownShape` (not
+// `ModifierNotImplemented`) so the diagnostic names the offending
+// shape rather than the slot.
+// ---------------------------------------------------------------------------
+
 #[test]
-fn lowering_in_modifier_returns_unimplemented() {
-    let err = lower_inline("ability X { target: enemy cooldown: 1s damage 50 in circle(2.5) }");
-    let span = assert_modifier(err, "in");
-    assert!(span.start < span.end, "span must be non-empty");
+fn lowering_in_circle() {
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::ShapeKind;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 in circle(2.5) }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("circle must lower");
+    assert_eq!(prog.effects.len(), 1);
+    assert_eq!(prog.per_effect_areas.len(), 1, "one effect → one area slot");
+    let area = prog.per_effect_areas[0].expect("slot 0 has shape");
+    assert_eq!(area.kind, ShapeKind::Circle);
+    assert_eq!(area.args, [2.5, 0.0, 0.0, 0.0]);
+}
+
+#[test]
+fn lowering_in_cone() {
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::ShapeKind;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 in cone(8.0, 45.0) }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("cone must lower");
+    let area = prog.per_effect_areas[0].expect("slot 0 has shape");
+    assert_eq!(area.kind, ShapeKind::Cone);
+    assert_eq!(area.args, [8.0, 45.0, 0.0, 0.0]);
+}
+
+#[test]
+fn lowering_in_line() {
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::ShapeKind;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 in line(10, 1.5) }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("line must lower");
+    let area = prog.per_effect_areas[0].expect("slot 0 has shape");
+    assert_eq!(area.kind, ShapeKind::Line);
+    assert_eq!(area.args, [10.0, 1.5, 0.0, 0.0]);
+}
+
+#[test]
+fn lowering_in_unknown_shape_errors() {
+    use dsl_compiler::ability_lower::LowerError;
+    let err = lower_inline(
+        "ability X { target: enemy cooldown: 1s damage 50 in spaghetti(5) }"
+    );
+    match err {
+        LowerError::UnknownShape { ref shape, .. } => {
+            assert_eq!(shape, "spaghetti", "shape name should round-trip in error");
+        }
+        other => panic!("expected UnknownShape(spaghetti); got {other:?}"),
+    }
+}
+
+#[test]
+fn lowering_no_in_is_none() {
+    // Bare effect with no `in <shape>` modifier: the lowering pass
+    // leaves `program.per_effect_areas` empty (apply handlers treat
+    // empty + None identically as "single-target effect"). Keeps Wave
+    // 1 corpus output bit-stable.
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("bare damage must lower");
+    assert!(
+        prog.per_effect_areas.is_empty(),
+        "no `in` modifier → empty per_effect_areas smallvec; got {:?}",
+        prog.per_effect_areas,
+    );
 }
 
 #[test]
@@ -431,15 +515,18 @@ fn lowering_wave_1_corpus_still_works() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn slot_order_in_takes_precedence_over_for() {
-    // Per spec §6.1 the slot evaluation order is in/tags/for/when/chance/
-    // stacking/scaling/lifetime/nested. With both `in` and `for`
-    // populated, `in` fires first so the diagnostic points at the
-    // shape modifier — stable for authors.
+fn slot_order_in_lowers_alongside_for_error_on_damage() {
+    // Wave 1.5#2 retired the `in` short-circuit. With both `in` and
+    // `for` populated on a non-duration-bearing verb (damage), the
+    // `in` aggregator runs to completion (storing the shape in
+    // `program.per_effect_areas`) and THEN the `for` slot trips with
+    // ModifierNotImplemented{for} — DoT semantics need a new EffectOp
+    // variant that hasn't landed yet. Stable diagnostic for authors:
+    // the offending slot is named, not "in".
     let err = lower_inline(
         "ability X { target: enemy cooldown: 1s damage 50 in circle(2.0) for 3s }",
     );
-    assert_modifier(err, "in");
+    assert_modifier(err, "for");
 }
 
 #[test]
@@ -467,21 +554,20 @@ fn slot_order_unknown_tag_takes_precedence_over_chance() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn lowering_lol_corpus_excerpt_returns_clear_modifier_message() {
+fn lowering_lol_corpus_excerpt_lowers_with_in_and_tags() {
     // Real-world-shaped ability source. The brief's named canary
     // (Aatrox.ability) needs Wave 1.4 (`recast:` / `deliver` blocks),
     // and most LoL hero files mix Wave 1.1 headers (`cost:`) with
-    // Wave 1.5 modifiers — those would surface `HeaderNotImplemented`
-    // before the modifier check. So we lift Renekton's
-    // `CulltheMeek` body verbatim into an inline test source: it uses
-    // ONLY Wave 1.5 modifier surfaces (`in circle(N)`, `[TAG: N]`)
-    // with Wave 1.0 headers, exercising the canonical real-world
-    // shape without the unrelated Wave 1.1 surfaces tripping first.
+    // Wave 1.5 modifiers. Renekton's `CulltheMeek` body uses ONLY
+    // Wave 1.5 modifier surfaces (`in circle(N)`, `[TAG: N]`) with
+    // Wave 1.0 headers, exercising the canonical real-world shape.
     //
-    // The brief's intent for this test is "sanity that the user gets
-    // a useful error" — we assert (a) the modifier-name lands in the
-    // message, and (b) per spec §6.1 slot order, `in` (slot 1) fires
-    // before `tags` (slot 2).
+    // Wave 1.5#2 retired the `in` short-circuit; the `[TAG]` slot was
+    // retired in Wave 1.5#1. Both modifiers now lower cleanly into
+    // their respective per-effect SoA columns, so the corpus excerpt
+    // round-trips end-to-end. This guards that the per-ability
+    // aggregators handle a multi-effect program without interfering.
+    use engine::ability::program::{AbilityTag, ShapeKind};
     let src = r#"
 ability CulltheMeek {
     target: self
@@ -491,22 +577,18 @@ ability CulltheMeek {
     damage 15 in circle(4.0) [PHYSICAL: 50]
     heal 15
 }"#;
-    let err = lower_inline(src);
-    let span = match &err {
-        LowerError::ModifierNotImplemented { modifier, span, .. } => {
-            assert_eq!(*modifier, "in", "expected `in` slot to fire first; got `{modifier}`");
-            *span
-        }
-        other => panic!("expected ModifierNotImplemented; got {other:?}"),
-    };
-    assert!(span.start < span.end, "span must be non-empty");
-    let msg = err.to_string();
-    assert!(
-        msg.contains("modifier slot"),
-        "expected modifier-slot diagnostic; got: {msg}"
-    );
-    assert!(
-        msg.contains("`in`"),
-        "expected diagnostic to name the `in` slot; got: {msg}"
-    );
+    let file = dsl_ast::parse_ability_file(src).expect("parser");
+    let prog = dsl_compiler::ability_lower::lower_ability_decl(&file.abilities[0])
+        .expect("CulltheMeek excerpt must lower");
+    assert_eq!(prog.effects.len(), 2, "damage + heal");
+    // First effect: in circle(4.0) — second effect (heal) has no shape.
+    assert_eq!(prog.per_effect_areas.len(), 2, "areas vec parallel to effects");
+    let area0 = prog.per_effect_areas[0].expect("damage has shape");
+    assert_eq!(area0.kind, ShapeKind::Circle);
+    assert_eq!(area0.args[0], 4.0, "circle radius");
+    assert!(prog.per_effect_areas[1].is_none(), "heal has no shape");
+    // Tag aggregation: PHYSICAL: 50.
+    assert_eq!(prog.tags.len(), 1);
+    assert_eq!(prog.tags[0].0, AbilityTag::Physical);
+    assert_eq!(prog.tags[0].1, 50.0);
 }

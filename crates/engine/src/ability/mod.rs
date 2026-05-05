@@ -47,9 +47,13 @@ pub use program::{
     Area, Delivery, EffectOp, Gate, TargetSelector, MAX_ABILITIES, MAX_EFFECTS_PER_PROGRAM,
 };
 pub use program::AbilityProgram;
-pub use program::{AbilityHint, AbilityTag, LifetimeMode, StackingMode, MAX_TAGS_PER_PROGRAM};
+pub use program::{
+    AbilityHint, AbilityTag, EffectAreaShape, LifetimeMode, ShapeKind, StackingMode,
+    MAX_TAGS_PER_PROGRAM,
+};
 pub use registry::{AbilityRegistry, AbilityRegistryBuilder};
 pub use packed::{
     PackedAbilityRegistry, CHANCE_NONE_SENTINEL, EFFECT_KIND_EMPTY, HINT_NONE_SENTINEL,
-    LIFETIME_KIND_NONE_SENTINEL, NUM_ABILITY_TAGS, STACKING_NONE_SENTINEL,
+    LIFETIME_KIND_NONE_SENTINEL, NUM_ABILITY_TAGS, SHAPE_KIND_NONE_SENTINEL,
+    STACKING_NONE_SENTINEL,
 };
