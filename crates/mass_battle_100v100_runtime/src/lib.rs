@@ -39,7 +39,7 @@
 //! space and verbs that gate on `target.*` will silently see a
 //! zero-bit mask. See `step()` below.
 
-use engine::sim_trait::CompiledSim;
+use engine::sim_trait::{AgentSnapshot, CompiledSim, VizGlyph};
 use engine::GpuContext;
 use glam::Vec3;
 use wgpu::util::DeviceExt;
@@ -656,9 +656,218 @@ impl CompiledSim for MassBattle100v100State {
     fn agent_count(&self) -> u32 { self.agent_count }
     fn tick(&self) -> u64 { self.tick }
     fn positions(&mut self) -> &[Vec3] { &[] }
+
+    /// Snapshot per-agent state for the universal `viz_app` renderer.
+    ///
+    /// Like `tactical_squad_5v5_runtime`, this fixture has no movement
+    /// physics — the .sim declares `pos: vec3` on the role entities but
+    /// no kernel writes a position buffer. We therefore SYNTHESIZE a
+    /// stationary 2-D layout per slot index: Red [0..100] on the left
+    /// (x = -10), Blue [100..200] on the right (x = +10), with each
+    /// team arranged in a 10×10 grid in (y, z). This keeps both teams
+    /// legible in the ASCII grid even though the actual sim is purely
+    /// event-driven HP/heal arithmetic.
+    ///
+    /// `creature_types` encoding (4 entries, indexed by
+    /// `team_bit | (dead_bit << 1)`):
+    ///
+    /// |  i | team | state |
+    /// |----|------|-------|
+    /// |  0 | Red  | alive |
+    /// |  1 | Blue | alive |
+    /// |  2 | Red  | dead  |
+    /// |  3 | Blue | dead  |
+    ///
+    /// Team comes from a REAL SoA read of `agent_level_buf` (decoded
+    /// via the `level_for(team, role)` inverse: `(level - 1) / 3`),
+    /// not an index-derived heuristic — slots could in principle be
+    /// reordered without breaking the encoding, although the
+    /// constructor today hard-codes the index→(team, role) layout
+    /// (Red [0..PER_TEAM], Blue [PER_TEAM..2*PER_TEAM]). The role bit
+    /// (Tank/Healer/DPS) is intentionally collapsed into the single
+    /// team glyph here — at 200 agents per scene, distinct per-role
+    /// glyphs would dominate the screen with letter noise; team color
+    /// is what matters at this scale. The `alive` field is read from
+    /// `agent_alive_buf`; `agent_count` stays constant (no
+    /// spawn/despawn) so dead slots remain in the snapshot at their
+    /// original positions, just rendered with the tombstone glyph.
+    /// HP defence-in-depth zeros the alive bit if hp <= 0 even when
+    /// the alive buffer hasn't been flipped yet.
+    ///
+    /// Initial-state safe: GPU buffers are populated by
+    /// `create_buffer_init` at construction, so calling `snapshot()`
+    /// before any `step()` returns 200 alive slots with deterministic
+    /// team discriminants.
+    fn snapshot(&mut self) -> AgentSnapshot {
+        let n = self.agent_count as usize;
+        // Synthetic 2-D layout — Red on x=-10, Blue on x=+10. Within
+        // each team, 100 slots laid out in a 10×10 grid in (y, z) so
+        // every slot is visible in the ASCII grid. The renderer only
+        // uses x/y for projection, but we set z too for completeness.
+        let positions: Vec<Vec3> = (0..n)
+            .map(|i| {
+                let team = if (i as u32) < PER_TEAM { 0u32 } else { 1u32 };
+                let local = (i as u32 % PER_TEAM) as i32; // 0..100
+                let row = local / 10; // 0..10
+                let col = local % 10; // 0..10
+                let x = if team == 0 { -10.0 } else { 10.0 };
+                let y = (col as f32) - 4.5; // centered: -4.5..+4.5
+                let z = (row as f32) - 4.5;
+                Vec3::new(x, y, z)
+            })
+            .collect();
+
+        let level: Vec<u32> = self.read_level();
+        let alive_raw: Vec<u32> = self.read_alive();
+        let hp: Vec<f32> = self.read_hp();
+        // Defence-in-depth: treat hp<=0 as dead even if the alive bit
+        // hasn't been written yet by ApplyDamage (mirrors the
+        // tactical_squad_5v5 / duel_abilities approach).
+        let alive: Vec<u32> = alive_raw
+            .iter()
+            .zip(hp.iter())
+            .map(|(&a, &h)| if a != 0 && h > 0.0 { 1 } else { 0 })
+            .collect();
+
+        // 4-entry encoding (2 teams × 2 alive states). Decode team
+        // from `agent_level`: levels 1..=3 → Red (team_bit=0),
+        // levels 4..=6 → Blue (team_bit=1). Inverse of `level_for()`.
+        // Clamp via saturating_sub so a stray level=0 (shouldn't
+        // happen) maps to Red rather than panicking.
+        let creature_types: Vec<u32> = (0..n)
+            .map(|i| {
+                let team_bit = level[i].saturating_sub(1) / 3;
+                let team_bit = team_bit & 1; // 0 = Red, 1 = Blue
+                let dead_bit = if alive[i] == 0 { 1u32 } else { 0u32 };
+                team_bit | (dead_bit << 1)
+            })
+            .collect();
+
+        AgentSnapshot { positions, creature_types, alive }
+    }
+
+    /// 4 glyphs matching the `snapshot.creature_types` encoding:
+    ///
+    /// - `r` in bright red (196) for alive Red team
+    /// - `b` in bright cyan (51) for alive Blue team
+    /// - tombstone × in grey (240) for dead variants of either team
+    fn glyph_table(&self) -> Vec<VizGlyph> {
+        vec![
+            VizGlyph::new('r', 196),        // 0: Red alive
+            VizGlyph::new('b', 51),         // 1: Blue alive
+            VizGlyph::new('\u{00D7}', 240), // 2: Red dead
+            VizGlyph::new('\u{00D7}', 240), // 3: Blue dead
+        ]
+    }
+
+    /// Default viewport tight around the synthetic stationary layout
+    /// from `snapshot()` — Red at x=-10, Blue at x=+10, 10×10 grids
+    /// per team spanning y,z ∈ [-4.5, +4.5]. ±12 keeps every slot on
+    /// screen with breathing room for the 200-agent scene.
+    fn default_viewport(&self) -> Option<(Vec3, Vec3)> {
+        Some((Vec3::new(-12.0, -6.0, 0.0), Vec3::new(12.0, 6.0, 0.0)))
+    }
 }
 
 pub fn make_sim(seed: u64, _agent_count: u32) -> Box<dyn CompiledSim> {
     // agent_count is fixed by the per-team / per-role layout.
     Box::new(MassBattle100v100State::new(seed))
+}
+
+#[cfg(test)]
+mod viz_tests {
+    use super::*;
+
+    /// Snapshot before any tick must report initial state: 200 slots
+    /// (100 Red, 100 Blue), every slot alive, and `creature_types`
+    /// reflecting the deterministic per-slot team layout from `new()`.
+    /// Guards the construction-only readback path so `viz_app` can
+    /// render frame 0 with content instead of a blank grid.
+    #[test]
+    fn snapshot_after_construction_returns_initial_state() {
+        let mut state = MassBattle100v100State::new(0xCAFE_F00D);
+        let snap = state.snapshot();
+
+        let n = TOTAL_AGENTS as usize;
+        assert_eq!(snap.positions.len(), n, "positions length");
+        assert_eq!(snap.creature_types.len(), n, "creature_types length");
+        assert_eq!(snap.alive.len(), n, "alive length");
+
+        // No combat at tick 0 — every slot must be alive.
+        let alive_total: u32 = snap.alive.iter().sum();
+        assert_eq!(
+            alive_total, TOTAL_AGENTS,
+            "every slot must be alive at construction; got {}",
+            alive_total,
+        );
+
+        // Per-slot encoding: Red [0..PER_TEAM] → 0, Blue [PER_TEAM..]
+        // → 1 (no dead bit set). The constructor's hard-coded layout
+        // puts Red first (levels 1..=3) and Blue second (levels 4..=6).
+        for (i, &ct) in snap.creature_types.iter().enumerate() {
+            let expected = if (i as u32) < PER_TEAM { 0u32 } else { 1u32 };
+            assert_eq!(
+                ct, expected,
+                "slot {i}: creature_type must reflect team layout from new(); got {ct}, expected {expected}",
+            );
+        }
+
+        // Glyph table must be addressable for every encoded value the
+        // snapshot can produce (4 entries, max index = 3).
+        let glyphs = state.glyph_table();
+        assert_eq!(glyphs.len(), 4, "glyph_table must have 4 entries");
+        for (i, &ct) in snap.creature_types.iter().enumerate() {
+            assert!(
+                (ct as usize) < glyphs.len(),
+                "slot {i}: creature_type {ct} out of glyph_table range",
+            );
+        }
+
+        // Synthetic positions must lie inside the default viewport box
+        // (the renderer scales out if not, but the opening framing
+        // should fit).
+        let (vmin, vmax) = state.default_viewport().expect("viewport");
+        for (i, p) in snap.positions.iter().enumerate() {
+            assert!(
+                p.x >= vmin.x - 0.001 && p.x <= vmax.x + 0.001
+                    && p.y >= vmin.y - 0.001 && p.y <= vmax.y + 0.001,
+                "slot {i} synthetic pos {p:?} outside default viewport [{vmin:?}, {vmax:?}]",
+            );
+        }
+    }
+
+    /// After ticking the simulation forward, either at least one HP
+    /// readback must have moved off its starting value (Strike/Snipe
+    /// landing or Heal applying) or the alive count must have dropped
+    /// (a kill happened). Proves the snapshot reflects live GPU state
+    /// rather than cached construction-time values.
+    #[test]
+    fn snapshot_after_tick_reflects_state_change() {
+        let mut state = MassBattle100v100State::new(0xCAFE_F00D);
+        let initial_hp = state.read_hp();
+        let initial_alive_total: u32 = state.snapshot().alive.iter().sum();
+
+        for _ in 0..50 {
+            state.step();
+        }
+
+        let snap = state.snapshot();
+        let n = TOTAL_AGENTS as usize;
+        assert_eq!(snap.positions.len(), n);
+        assert_eq!(snap.alive.len(), n);
+
+        let hp_now = state.read_hp();
+        let any_hp_moved = initial_hp.iter().zip(hp_now.iter()).any(|(a, b)| {
+            (a - b).abs() > 0.01
+        });
+        let alive_total_now: u32 = snap.alive.iter().sum();
+        let alive_changed = alive_total_now != initial_alive_total;
+
+        assert!(
+            any_hp_moved || alive_changed,
+            "after 50 ticks, expected HP movement or kill; saw HP unchanged \
+             and alive_total stable ({})",
+            alive_total_now,
+        );
+    }
 }
