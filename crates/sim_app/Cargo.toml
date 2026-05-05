@@ -102,6 +102,14 @@ quest_probe_runtime = { path = "../quest_probe_runtime" }
 # PerPair tick preamble, Bool LHS rewrite). See
 # `docs/superpowers/notes/2026-05-04-duel_1v1.md`.
 duel_1v1_runtime = { path = "../duel_1v1_runtime" }
+# Crafting diffusion — TWENTY-FIRST real sim and FIRST sim that
+# tests INFORMATION SHARING as a propagation primitive. 50 Traders
+# in 5 specialization groups exchange recipe-knowledge bitmasks
+# through pairwise trades. CPU-only today (the natural DSL chronicle
+# `agents.set_mana(r, mana | other_mana)` does not lower because
+# bitwise `|` is not in the parser's operator table). The .sim file
+# documents the design intent; the runtime owns the per-tick step.
+crafting_diffusion_runtime = { path = "../crafting_diffusion_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -186,3 +194,11 @@ path = "src/quest_probe_app.rs"
 [[bin]]
 name = "duel_1v1_app"
 path = "src/duel_1v1_app.rs"
+
+[[bin]]
+name = "crafting_diffusion_app"
+path = "src/crafting_diffusion_app.rs"
+
+[[bin]]
+name = "viz_app"
+path = "src/viz_app.rs"

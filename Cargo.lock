@@ -372,6 +372,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "crafting_diffusion_runtime"
+version = "0.1.0"
+dependencies = [
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+]
+
+[[package]]
 name = "criterion"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1693,6 +1703,7 @@ dependencies = [
  "bartering_runtime",
  "boids_runtime",
  "cooldown_probe_runtime",
+ "crafting_diffusion_runtime",
  "crowd_navigation_runtime",
  "diplomacy_probe_runtime",
  "duel_1v1_runtime",
