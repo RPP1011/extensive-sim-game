@@ -206,6 +206,18 @@ pub enum AgentFieldId {
     SlowFactorQ8,
     CooldownNextReadyTick,
 
+    // --- Hot SoA: Wave 2 piece 1 control statuses (root/silence/fear/taunt) ---
+    RootExpiresAtTick,
+    SilenceExpiresAtTick,
+    FearExpiresAtTick,
+    TauntExpiresAtTick,
+
+    // --- Hot SoA: Wave 2 piece 4 buff multipliers (lifesteal + damage_taken) ---
+    LifestealFracQ8,
+    LifestealExpiresAtTick,
+    DamageTakenMultQ8,
+    DamageTakenMultExpiresAtTick,
+
     // --- Cold SoA: identity and lifecycle ---
     CreatureType,
     SpawnTick,
@@ -241,12 +253,15 @@ impl AgentFieldId {
             | Altruism | Curiosity => AgentFieldTy::F32,
 
             // u32 — monotonic counters + tick stamps + level
-            Level | StunExpiresAtTick | SlowExpiresAtTick | CooldownNextReadyTick => {
+            Level | StunExpiresAtTick | SlowExpiresAtTick | CooldownNextReadyTick
+            | RootExpiresAtTick | SilenceExpiresAtTick | FearExpiresAtTick
+            | TauntExpiresAtTick | LifestealExpiresAtTick
+            | DamageTakenMultExpiresAtTick => {
                 AgentFieldTy::U32
             }
 
-            // i16 — q8 fixed-point slow factor
-            SlowFactorQ8 => AgentFieldTy::I16,
+            // i16 — q8 fixed-point factors (slow + Wave 2 piece 4 buffs)
+            SlowFactorQ8 | LifestealFracQ8 | DamageTakenMultQ8 => AgentFieldTy::I16,
 
             // bool — alive flag
             Alive => AgentFieldTy::Bool,
@@ -311,6 +326,14 @@ impl AgentFieldId {
             SlowExpiresAtTick => "slow_expires_at_tick",
             SlowFactorQ8 => "slow_factor_q8",
             CooldownNextReadyTick => "cooldown_next_ready_tick",
+            RootExpiresAtTick => "root_expires_at_tick",
+            SilenceExpiresAtTick => "silence_expires_at_tick",
+            FearExpiresAtTick => "fear_expires_at_tick",
+            TauntExpiresAtTick => "taunt_expires_at_tick",
+            LifestealFracQ8 => "lifesteal_frac_q8",
+            LifestealExpiresAtTick => "lifesteal_expires_at_tick",
+            DamageTakenMultQ8 => "damage_taken_mult_q8",
+            DamageTakenMultExpiresAtTick => "damage_taken_mult_expires_at_tick",
             CreatureType => "creature_type",
             SpawnTick => "spawn_tick",
             GridId => "grid_id",
@@ -366,6 +389,14 @@ impl AgentFieldId {
             SlowExpiresAtTick,
             SlowFactorQ8,
             CooldownNextReadyTick,
+            RootExpiresAtTick,
+            SilenceExpiresAtTick,
+            FearExpiresAtTick,
+            TauntExpiresAtTick,
+            LifestealFracQ8,
+            LifestealExpiresAtTick,
+            DamageTakenMultQ8,
+            DamageTakenMultExpiresAtTick,
             CreatureType,
             SpawnTick,
             GridId,
@@ -430,6 +461,14 @@ impl AgentFieldId {
             "curiosity" => Curiosity,
             "engaged_with" => EngagedWith,
             "stun_expires_at_tick" => StunExpiresAtTick,
+            "root_expires_at_tick" => RootExpiresAtTick,
+            "silence_expires_at_tick" => SilenceExpiresAtTick,
+            "fear_expires_at_tick" => FearExpiresAtTick,
+            "taunt_expires_at_tick" => TauntExpiresAtTick,
+            "lifesteal_frac_q8" => LifestealFracQ8,
+            "lifesteal_expires_at_tick" => LifestealExpiresAtTick,
+            "damage_taken_mult_q8" => DamageTakenMultQ8,
+            "damage_taken_mult_expires_at_tick" => DamageTakenMultExpiresAtTick,
             "slow_expires_at_tick" => SlowExpiresAtTick,
             "slow_factor_q8" => SlowFactorQ8,
             "cooldown_next_ready_tick" => CooldownNextReadyTick,
@@ -1684,12 +1723,13 @@ mod tests {
                 "all_variants entry {v:?} did not round-trip through snake"
             );
         }
-        // A spot-check on count — the enum has 39 variants today (38
-        // wolf-sim baseline + Vel added 2026-05-02 for the Boids
-        // fixture); if a new variant lands and `all_variants` isn't
+        // A spot-check on count — the enum has 47 variants today (38
+        // wolf-sim baseline + Vel added 2026-05-02 for the Boids fixture
+        // + 4 control statuses Wave 2 piece 1 + 4 buff multipliers Wave
+        // 2 piece 4); if a new variant lands and `all_variants` isn't
         // updated, this assertion fails before the round-trip loop
         // above can.
-        assert_eq!(all.len(), 39);
+        assert_eq!(all.len(), 47);
     }
 
     #[test]

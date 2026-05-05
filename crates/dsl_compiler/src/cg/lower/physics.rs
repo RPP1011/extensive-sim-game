@@ -745,9 +745,12 @@ fn lower_expr_stmt(
 
 /// Map an `agents.set_<field>` method name to the `AgentFieldId` it
 /// writes. Returns `None` for any other method name. Today's recognised
-/// set covers position + velocity (the boids fixture's needs) plus
-/// the duel_1v1-fixture surface (HP, alive, mana, shield_hp).
-/// Extend here when new fixtures need to write more agent fields.
+/// set covers position + velocity (the boids fixture's needs), the
+/// duel_1v1-fixture surface (HP, alive, mana, shield_hp), the Wave 2
+/// piece 1 control statuses (root/silence/fear/taunt expires), and
+/// the Wave 2 piece 4 buff multipliers (lifesteal + damage_taken_mult,
+/// each with its own expires-at-tick partner). Extend here when new
+/// fixtures need to write more agent fields.
 fn agents_setter_field(method: &str) -> Option<&'static AgentFieldId> {
     match method {
         "set_pos" => Some(&AgentFieldId::Pos),
@@ -756,6 +759,16 @@ fn agents_setter_field(method: &str) -> Option<&'static AgentFieldId> {
         "set_alive" => Some(&AgentFieldId::Alive),
         "set_mana" => Some(&AgentFieldId::Mana),
         "set_shield_hp" => Some(&AgentFieldId::ShieldHp),
+        // Wave 2 piece 1 control statuses
+        "set_root_expires_at_tick" => Some(&AgentFieldId::RootExpiresAtTick),
+        "set_silence_expires_at_tick" => Some(&AgentFieldId::SilenceExpiresAtTick),
+        "set_fear_expires_at_tick" => Some(&AgentFieldId::FearExpiresAtTick),
+        "set_taunt_expires_at_tick" => Some(&AgentFieldId::TauntExpiresAtTick),
+        // Wave 2 piece 4 buff multipliers
+        "set_lifesteal_frac_q8" => Some(&AgentFieldId::LifestealFracQ8),
+        "set_lifesteal_expires_at_tick" => Some(&AgentFieldId::LifestealExpiresAtTick),
+        "set_damage_taken_mult_q8" => Some(&AgentFieldId::DamageTakenMultQ8),
+        "set_damage_taken_mult_expires_at_tick" => Some(&AgentFieldId::DamageTakenMultExpiresAtTick),
         // foraging_real fixture: per-ant `hunger` is repurposed as
         // an energy counter (decays each tick, reset on Eat). Used
         // by `EnergyDecay` (per_agent: agents.set_hunger(self,
