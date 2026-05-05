@@ -13,17 +13,15 @@
 //   ShieldUp : cooldown 40 ticks (4s), self-target, shield 50.0
 //   Mend     : cooldown 30 ticks (3s), self-target, heal 25.0
 //
-// SHIELD MODELLING NOTE: the engine's agent SoA today exposes setters for
-// hp/alive/mana/hunger only (see `crates/dsl_compiler/src/cg/lower/physics.rs`
-// `agents_setter_field`). There is no `shield_hp` SoA field or `set_shield`
-// setter today, and adding one is engine work that belongs in a later wave
-// (the task spec for this wave explicitly forbids engine surface extensions).
-// So the ShieldUp chronicle below emits a distinct `Shielded` event but
-// applies it as +HP via the existing `set_hp` setter — semantically a heal,
-// but with its own event kind so the chronicle topology mirrors what a
-// real shield handler would look like once `shield_hp` lands. The
-// binding-check still asserts the .ability lowered to `EffectOp::Shield(50.0)`;
-// only the .sim's runtime *behaviour* is shield-as-buffer-hp.
+// SHIELD MODELLING: `hot_shield_hp: Vec<f32>` lives in the agent SoA
+// (`crates/engine/src/state/mod.rs`); the dsl_compiler exposes
+// `agents.set_shield_hp` (see `cg/lower/physics.rs::agents_setter_field`)
+// for chronicle writes. ShieldUp emits a `Shielded` event; ApplyShield
+// adds the amount onto the target's shield_hp slot. Damage absorption
+// (shield_hp drained before hp) is the natural next refinement to
+// ApplyDamage but isn't required for this acceptance fixture — the
+// binding-check still asserts the .ability lowered to
+// `EffectOp::Shield(50.0)`.
 //
 // The runtime tick chain is the same shape as duel_1v1's:
 //   1. clears
@@ -152,14 +150,17 @@ physics ApplyHeal {
   }
 }
 
-// Apply shield — semantically a heal today (no shield_hp SoA), but the
-// dedicated event kind keeps the chronicle topology shield-shaped for
-// when the real shield_hp setter lands.
+// Apply shield — writes the per-agent `shield_hp` SoA buffer (via the
+// `set_shield_hp` setter wired in dsl_compiler/cg/lower/physics.rs).
+// True shield semantics: shield_hp absorbs incoming damage before hp
+// (the absorption side lives in ApplyDamage when we want to model it
+// fully — for Wave 1 the shield_hp value just shows up in observability
+// and the binding-check still asserts EffectOp::Shield(50.0) lowered).
 @phase(post)
 physics ApplyShield {
   on Shielded { source: _, target: t, amount: a } {
-    let new_hp = agents.hp(t) + a;
-    agents.set_hp(t, new_hp);
+    let new_shield = agents.shield_hp(t) + a;
+    agents.set_shield_hp(t, new_shield);
   }
 }
 

@@ -746,8 +746,8 @@ fn lower_expr_stmt(
 /// Map an `agents.set_<field>` method name to the `AgentFieldId` it
 /// writes. Returns `None` for any other method name. Today's recognised
 /// set covers position + velocity (the boids fixture's needs) plus
-/// the duel_1v1-fixture surface (HP, alive, mana). Extend here when
-/// new fixtures need to write more agent fields.
+/// the duel_1v1-fixture surface (HP, alive, mana, shield_hp).
+/// Extend here when new fixtures need to write more agent fields.
 fn agents_setter_field(method: &str) -> Option<&'static AgentFieldId> {
     match method {
         "set_pos" => Some(&AgentFieldId::Pos),
@@ -755,6 +755,7 @@ fn agents_setter_field(method: &str) -> Option<&'static AgentFieldId> {
         "set_hp" => Some(&AgentFieldId::Hp),
         "set_alive" => Some(&AgentFieldId::Alive),
         "set_mana" => Some(&AgentFieldId::Mana),
+        "set_shield_hp" => Some(&AgentFieldId::ShieldHp),
         // foraging_real fixture: per-ant `hunger` is repurposed as
         // an energy counter (decays each tick, reset on Eat). Used
         // by `EnergyDecay` (per_agent: agents.set_hunger(self,

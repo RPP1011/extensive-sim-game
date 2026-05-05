@@ -87,6 +87,10 @@ pub struct DuelAbilitiesState {
     /// gates wires through cleanly), hence `#[allow(dead_code)]`.
     #[allow(dead_code)]
     agent_mana_buf: wgpu::Buffer,
+    /// Per-agent shield HP — written by ApplyShield (Shielded event
+    /// handler), read back via the agent_shield_hp() getter for
+    /// observability. Starts at 0.0 for every slot.
+    agent_shield_hp_buf: wgpu::Buffer,
 
     // -- Mask bitmaps (one per verb in source order: Strike=0,
     //    ShieldUp=1, Mend=2) --
@@ -153,6 +157,12 @@ impl DuelAbilitiesState {
             label: Some("duel_abilities_runtime::agent_mana"),
             contents: bytemuck::cast_slice(&mana_init),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+        let shield_hp_init: Vec<f32> = vec![0.0_f32; agent_count as usize];
+        let agent_shield_hp_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_abilities_runtime::agent_shield_hp"),
+            contents: bytemuck::cast_slice(&shield_hp_init),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
 
         // Three mask bitmaps — one per verb. Cleared each tick.
@@ -301,6 +311,7 @@ impl DuelAbilitiesState {
             agent_hp_buf,
             agent_alive_buf,
             agent_mana_buf,
+            agent_shield_hp_buf,
             mask_0_bitmap_buf,
             mask_1_bitmap_buf,
             mask_2_bitmap_buf,
@@ -540,6 +551,7 @@ impl CompiledSim for DuelAbilitiesState {
             event_tail: self.event_ring.tail(),
             agent_hp: &self.agent_hp_buf,
             agent_alive: &self.agent_alive_buf,
+            agent_shield_hp: &self.agent_shield_hp_buf,
             cfg: &self.apply_cfg_buf,
         };
         dispatch::dispatch_physics_applydamage_and_applyheal_and_applyshield(
