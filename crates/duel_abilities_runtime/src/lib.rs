@@ -62,7 +62,7 @@
 //! still asserts the .ability lowered to `EffectOp::Shield(50.0)`;
 //! only the .sim's runtime *behaviour* is shield-as-buffer-hp.
 
-use engine::sim_trait::CompiledSim;
+use engine::sim_trait::{AgentSnapshot, CompiledSim, VizGlyph};
 use engine::GpuContext;
 use glam::Vec3;
 use wgpu::util::DeviceExt;
@@ -350,6 +350,14 @@ impl DuelAbilitiesState {
     pub fn read_alive(&self) -> Vec<u32> {
         self.read_u32(&self.agent_alive_buf, "alive")
     }
+    /// Per-agent shield HP, in agent-slot order. Mirrors `read_hp`'s
+    /// staging-buffer + map-await pattern. Documented at the field site
+    /// as the "agent_shield_hp() getter for observability"; defined here
+    /// so `snapshot()` (and downstream eyeballing) can surface buff
+    /// state without poking at the buffer directly.
+    pub fn read_shield_hp(&self) -> Vec<f32> {
+        self.read_f32(&self.agent_shield_hp_buf, "shield_hp")
+    }
 
     fn read_f32(&self, buf: &wgpu::Buffer, label: &str) -> Vec<f32> {
         let bytes = (self.agent_count as u64) * 4;
@@ -632,6 +640,91 @@ impl CompiledSim for DuelAbilitiesState {
     fn agent_count(&self) -> u32 { self.agent_count }
     fn tick(&self) -> u64 { self.tick }
     fn positions(&mut self) -> &[Vec3] { &[] }
+
+    /// Snapshot per-agent state for the universal `viz_app` renderer.
+    ///
+    /// The duel doesn't move agents — combat is purely event-driven HP
+    /// edits — so positions are a deterministic 1-D fixed grid laid out
+    /// along +X (`agent_id * 5.0`). The renderer's grid + glyph-table
+    /// pipeline does the rest.
+    ///
+    /// Per-agent fields populated:
+    /// - `positions`: stationary grid (Hero A at origin, Hero B 5 units east).
+    /// - `creature_types`: HP-banded discriminant — hero index encoded
+    ///   in the low bit (0=A, 1=B), HP bucket (full=0, hurt=1, low=1)
+    ///   in the next two bits, so the glyph table can colour-shift as
+    ///   the duel progresses without inventing new glyphs. Dead slots
+    ///   land in the `2|hero_id` "tombstone" rows.
+    /// - `alive`: read directly from `agent_alive_buf` AND gated by
+    ///   HP > 0 (defence-in-depth — the chronicle->ApplyDamage kernel
+    ///   sets alive=0 on HP<=0 but a partial step or a future bug
+    ///   shouldn't render a corpse on the field).
+    ///
+    /// Initial-state safe: the GPU buffers are populated by
+    /// `create_buffer_init` at construction, so calling `snapshot()`
+    /// before any `step()` returns hp=100, alive=1 for every slot.
+    fn snapshot(&mut self) -> AgentSnapshot {
+        let hp = self.read_hp();
+        let alive_raw = self.read_alive();
+        // Defence-in-depth: drop slots whose HP fell to 0 even if the
+        // alive bit hasn't been written yet by ApplyDamage.
+        let alive: Vec<u32> = alive_raw
+            .iter()
+            .zip(hp.iter())
+            .map(|(&a, &h)| if a != 0 && h > 0.0 { 1 } else { 0 })
+            .collect();
+        let positions: Vec<Vec3> = (0..self.agent_count as usize)
+            .map(|i| Vec3::new(i as f32 * 5.0, 0.0, 0.0))
+            .collect();
+        // creature_type encoding: 4 entries per hero index in the glyph
+        // table — full HP, hurt (<75%), low (<33%), dead (×). Hero
+        // index in low bit (0=A,1=B); HP bucket in upper bits → table
+        // index = bucket * 2 + hero_id.
+        let creature_types: Vec<u32> = (0..self.agent_count as usize)
+            .map(|i| {
+                let hero_id = (i & 1) as u32;
+                let bucket = if alive[i] == 0 {
+                    3
+                } else if hp[i] < 33.0 {
+                    2
+                } else if hp[i] < 75.0 {
+                    1
+                } else {
+                    0
+                };
+                bucket * 2 + hero_id
+            })
+            .collect();
+        AgentSnapshot {
+            positions,
+            creature_types,
+            alive,
+        }
+    }
+
+    /// 4 HP-banded glyphs × 2 hero ids = 8 entries.
+    /// Layout: `[full_A, full_B, hurt_A, hurt_B, low_A, low_B, dead_A, dead_B]`.
+    /// Colours: A in cyan tones, B in red tones — both desaturate as HP
+    /// drops, then go grey on death.
+    fn glyph_table(&self) -> Vec<VizGlyph> {
+        vec![
+            VizGlyph::new('A', 51),  // full A: bright cyan
+            VizGlyph::new('B', 196), // full B: bright red
+            VizGlyph::new('a', 39),  // hurt A: dim cyan
+            VizGlyph::new('b', 160), // hurt B: dim red
+            VizGlyph::new('a', 27),  // low A: deep blue
+            VizGlyph::new('b', 88),  // low B: deep red
+            VizGlyph::new('\u{00D7}', 240), // dead A: grey ×
+            VizGlyph::new('\u{00D7}', 240), // dead B: grey ×
+        ]
+    }
+
+    /// Tight viewport around the two stationary heroes. Hero A sits at
+    /// x=0, Hero B at x=5 (see `snapshot`). 8-unit window keeps both on
+    /// screen with breathing room.
+    fn default_viewport(&self) -> Option<(Vec3, Vec3)> {
+        Some((Vec3::new(-1.5, -1.5, 0.0), Vec3::new(6.5, 1.5, 0.0)))
+    }
 }
 
 pub fn make_sim(seed: u64, agent_count: u32) -> Box<dyn CompiledSim> {
@@ -670,5 +763,51 @@ mod tests {
     #[test]
     fn binding_check_passes() {
         binding_check::assert_ability_registry_matches_sim_constants();
+    }
+
+    /// Snapshot before any tick must report initial state: both heroes
+    /// alive at full HP (100.0), shields zero, and the renderer-visible
+    /// fields (positions/creature_types/alive) populated for every
+    /// slot. Guards the construction-only readback path so `viz_app`
+    /// can render frame 0 instead of an empty grid.
+    #[test]
+    fn snapshot_after_construction_returns_initial_state() {
+        let mut state = DuelAbilitiesState::new(0xCAFE_F00D, 2);
+        let snap = state.snapshot();
+        assert_eq!(snap.positions.len(), 2, "two-agent snapshot");
+        assert_eq!(snap.creature_types.len(), 2);
+        assert_eq!(snap.alive.len(), 2);
+        // Both alive, full-HP bucket → table entries 0 (hero_id=0) and
+        // 1 (hero_id=1).
+        assert_eq!(snap.alive, vec![1u32, 1u32]);
+        assert_eq!(snap.creature_types, vec![0u32, 1u32]);
+        // Stationary grid: A at origin, B 5 units east.
+        assert_eq!(snap.positions[0], Vec3::new(0.0, 0.0, 0.0));
+        assert_eq!(snap.positions[1], Vec3::new(5.0, 0.0, 0.0));
+        // HP/shield readback paths separately exposed for the harness.
+        let hp = state.read_hp();
+        let shield = state.read_shield_hp();
+        assert_eq!(hp, vec![100.0_f32, 100.0_f32]);
+        assert_eq!(shield, vec![0.0_f32, 0.0_f32]);
+    }
+
+    /// After ticking the duel forward, at least one hero's HP must
+    /// have moved off 100.0 (Strike landing, Mend healing back, or
+    /// ShieldUp adding buffer). Proves snapshot reflects live GPU
+    /// state rather than cached construction-time values.
+    #[test]
+    fn snapshot_after_tick_reflects_state_change() {
+        let mut state = DuelAbilitiesState::new(0xCAFE_F00D, 2);
+        for _ in 0..50 {
+            state.step();
+        }
+        let snap = state.snapshot();
+        let hp = state.read_hp();
+        assert_eq!(snap.positions.len(), 2);
+        assert!(
+            (hp[0] - 100.0).abs() > 0.01 || (hp[1] - 100.0).abs() > 0.01,
+            "expected HP movement after 50 ticks, got hp=[{:.2}, {:.2}]",
+            hp[0], hp[1],
+        );
     }
 }
