@@ -34,7 +34,7 @@
 //! enemy neighbours per Combatant in the contested zone, an
 //! agent typically takes ~5-15 dmg per active tick.
 
-use engine::sim_trait::CompiledSim;
+use engine::sim_trait::{AgentSnapshot, CompiledSim, VizGlyph};
 use engine::GpuContext;
 use glam::Vec3;
 use wgpu::util::DeviceExt;
@@ -336,6 +336,42 @@ impl Duel25v25State {
     /// Per-agent creature_type readback (0 = Red, 1 = Blue).
     pub fn read_creature_type(&self) -> Vec<u32> {
         self.read_u32(&self.agent_creature_type_buf, "creature_type")
+    }
+
+    /// Per-agent position readback. Positions are static in this fixture
+    /// (no kernel writes to `agent_pos_buf` after construction) but the
+    /// readback path is real GPU staging — `snapshot()` calls it so a
+    /// future runtime that grows a `MoveCombatant` rule will surface
+    /// movement automatically without touching the viz contract.
+    pub fn read_pos(&self) -> Vec<Vec3> {
+        let bytes = (self.agent_count as u64) * std::mem::size_of::<Vec3Padded>() as u64;
+        let staging = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("duel_25v25_runtime::pos_staging"),
+            size: bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self
+            .gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("duel_25v25_runtime::read_pos"),
+            });
+        encoder.copy_buffer_to_buffer(&self.agent_pos_buf, 0, &staging, 0, bytes);
+        self.gpu.queue.submit(Some(encoder.finish()));
+        let slice = staging.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = sender.send(r);
+        });
+        self.gpu.device.poll(wgpu::PollType::Wait).expect("poll");
+        let _ = receiver.recv().expect("map_async result");
+        let mapped = slice.get_mapped_range();
+        let padded: &[Vec3Padded] = bytemuck::cast_slice(&mapped);
+        let v: Vec<Vec3> = padded.iter().map(|p| Vec3::new(p.x, p.y, p.z)).collect();
+        drop(mapped);
+        staging.unmap();
+        v
     }
 
     fn read_f32(&self, buf: &wgpu::Buffer, label: &str) -> Vec<f32> {
@@ -654,8 +690,200 @@ impl CompiledSim for Duel25v25State {
     fn agent_count(&self) -> u32 { self.agent_count }
     fn tick(&self) -> u64 { self.tick }
     fn positions(&mut self) -> &[Vec3] { &[] }
+
+    /// Snapshot per-agent state for the universal `viz_app` renderer.
+    ///
+    /// Unlike `mass_battle_100v100_runtime` (which synthesises a stationary
+    /// 2-D layout because its sim never declares a written `pos` field),
+    /// duel_25v25 has a REAL `agent_pos_buf` populated by `create_buffer_init`
+    /// at construction. No kernel writes back to it today (the .sim has no
+    /// MoveCombatant rule — combat is purely event-driven HP arithmetic),
+    /// so the readback returns the deterministic init grid every tick. The
+    /// path is wired through real GPU staging, however, so a future
+    /// `physics MoveCombatant` rule that mutates `pos` would surface
+    /// instantly without the viz contract changing.
+    ///
+    /// `creature_types` encoding (4 entries, indexed by
+    /// `team_bit | (dead_bit << 1)`):
+    ///
+    /// |  i | team | state |
+    /// |----|------|-------|
+    /// |  0 | Red  | alive |
+    /// |  1 | Blue | alive |
+    /// |  2 | Red  | dead  |
+    /// |  3 | Blue | dead  |
+    ///
+    /// Team comes from a REAL SoA read of `agent_creature_type_buf`
+    /// (Red=0, Blue=1 by EntityRef declaration order in
+    /// `duel_25v25.sim`). The `alive` field is read from
+    /// `agent_alive_buf`; `agent_count` stays constant (no spawn /
+    /// despawn) so dead slots remain in the snapshot at their original
+    /// positions, just rendered with the tombstone glyph. HP defence-
+    /// in-depth zeros the alive bit if hp <= 0 even when the alive
+    /// buffer hasn't been flipped yet (mirrors mass_battle_100v100 +
+    /// tactical_squad_5v5).
+    ///
+    /// Initial-state safe: GPU buffers are populated by
+    /// `create_buffer_init` at construction, so calling `snapshot()`
+    /// before any `step()` returns 50 alive slots with deterministic
+    /// team discriminants.
+    fn snapshot(&mut self) -> AgentSnapshot {
+        let positions: Vec<Vec3> = self.read_pos();
+        let team_disc: Vec<u32> = self.read_creature_type();
+        let alive_raw: Vec<u32> = self.read_alive();
+        let hp: Vec<f32> = self.read_hp();
+        // Defence-in-depth: treat hp<=0 as dead even if the alive bit
+        // hasn't been written yet by ApplyDamage.
+        let alive: Vec<u32> = alive_raw
+            .iter()
+            .zip(hp.iter())
+            .map(|(&a, &h)| if a != 0 && h > 0.0 { 1 } else { 0 })
+            .collect();
+
+        let n = self.agent_count as usize;
+        let creature_types: Vec<u32> = (0..n)
+            .map(|i| {
+                let team_bit = team_disc[i] & 1; // 0 = Red, 1 = Blue
+                let dead_bit = if alive[i] == 0 { 1u32 } else { 0u32 };
+                team_bit | (dead_bit << 1)
+            })
+            .collect();
+
+        AgentSnapshot { positions, creature_types, alive }
+    }
+
+    /// 4 glyphs matching the `snapshot.creature_types` encoding:
+    ///
+    /// - `r` in bright red (196) for alive Red team
+    /// - `b` in bright cyan (51) for alive Blue team
+    /// - tombstone × in grey (240) for dead variants of either team
+    fn glyph_table(&self) -> Vec<VizGlyph> {
+        vec![
+            VizGlyph::new('r', 196),        // 0: Red alive
+            VizGlyph::new('b', 51),         // 1: Blue alive
+            VizGlyph::new('\u{00D7}', 240), // 2: Red dead
+            VizGlyph::new('\u{00D7}', 240), // 3: Blue dead
+        ]
+    }
+
+    /// Default viewport tight around the init grid laid out by `new()`:
+    /// Red at x ∈ [-2.0, -0.4], Blue at x ∈ [0.4, 2.0], y,z ∈ [-1.6, 1.6]
+    /// (5×5 per-team grid with 0.8-unit spacing). ±3 keeps every slot on
+    /// screen with breathing room. Agents don't move today — no kernel
+    /// writes to `agent_pos_buf` — so this framing stays valid for the
+    /// full battle. The renderer auto-scales if a future MoveCombatant
+    /// rule pushes agents outside.
+    fn default_viewport(&self) -> Option<(Vec3, Vec3)> {
+        Some((Vec3::new(-3.0, -3.0, 0.0), Vec3::new(3.0, 3.0, 0.0)))
+    }
 }
 
 pub fn make_sim(seed: u64, agent_count: u32) -> Box<dyn CompiledSim> {
     Box::new(Duel25v25State::new(seed, agent_count))
+}
+
+#[cfg(test)]
+mod viz_tests {
+    use super::*;
+
+    /// Snapshot before any tick must report initial state: 50 slots
+    /// (25 Red, 25 Blue), every slot alive, and `creature_types` reflecting
+    /// the deterministic per-slot team layout from `new()` (even slots
+    /// Red, odd slots Blue). Guards the construction-only readback path
+    /// so `viz_app` can render frame 0 with content instead of a blank
+    /// grid.
+    #[test]
+    fn snapshot_after_construction_returns_initial_state() {
+        let mut state = Duel25v25State::new(0xCAFE_F00D, 50);
+        let snap = state.snapshot();
+
+        assert_eq!(snap.positions.len(), 50, "positions length");
+        assert_eq!(snap.creature_types.len(), 50, "creature_types length");
+        assert_eq!(snap.alive.len(), 50, "alive length");
+
+        // No combat at tick 0 — every slot must be alive.
+        let alive_total: u32 = snap.alive.iter().sum();
+        assert_eq!(
+            alive_total, 50,
+            "every slot must be alive at construction; got {}",
+            alive_total,
+        );
+
+        // Per-slot encoding: even slot → Red (creature_type=0,
+        // dead_bit=0 → encoded 0); odd slot → Blue (creature_type=1,
+        // dead_bit=0 → encoded 1). Mirrors the constructor's hard-coded
+        // `is_red = slot % 2 == 0` layout.
+        for (i, &ct) in snap.creature_types.iter().enumerate() {
+            let expected = if i % 2 == 0 { 0u32 } else { 1u32 };
+            assert_eq!(
+                ct, expected,
+                "slot {i}: creature_type must reflect even=Red/odd=Blue layout from new(); got {ct}, expected {expected}",
+            );
+        }
+
+        // Glyph table must be addressable for every encoded value the
+        // snapshot can produce (4 entries, max index = 3).
+        let glyphs = state.glyph_table();
+        assert_eq!(glyphs.len(), 4, "glyph_table must have 4 entries");
+        for (i, &ct) in snap.creature_types.iter().enumerate() {
+            assert!(
+                (ct as usize) < glyphs.len(),
+                "slot {i}: creature_type {ct} out of glyph_table range",
+            );
+        }
+
+        // Real-GPU position readback must match the constructor's init
+        // grid layout (Red on x ∈ [-2.0, -0.4], Blue on x ∈ [0.4, 2.0]).
+        // Cross-checks the `agent_pos_buf` round-trip against the
+        // deterministic init pattern.
+        let (vmin, vmax) = state.default_viewport().expect("viewport");
+        for (i, p) in snap.positions.iter().enumerate() {
+            // Team-side x check.
+            if i % 2 == 0 {
+                assert!(p.x < 0.0, "slot {i} (Red) should have x<0; got {p:?}");
+            } else {
+                assert!(p.x > 0.0, "slot {i} (Blue) should have x>0; got {p:?}");
+            }
+            // Inside default viewport.
+            assert!(
+                p.x >= vmin.x - 0.001 && p.x <= vmax.x + 0.001
+                    && p.y >= vmin.y - 0.001 && p.y <= vmax.y + 0.001,
+                "slot {i} pos {p:?} outside default viewport [{vmin:?}, {vmax:?}]",
+            );
+        }
+    }
+
+    /// After ticking the simulation forward, either at least one HP
+    /// readback must have moved off its starting value (a Damaged event
+    /// landing) or the alive count must have dropped (a Defeated event
+    /// firing). Proves the snapshot reflects live GPU state rather than
+    /// cached construction-time values.
+    #[test]
+    fn snapshot_after_tick_reflects_state_change() {
+        let mut state = Duel25v25State::new(0xCAFE_F00D, 50);
+        let initial_hp = state.read_hp();
+        let initial_alive_total: u32 = state.snapshot().alive.iter().sum();
+
+        for _ in 0..50 {
+            state.step();
+        }
+
+        let snap = state.snapshot();
+        assert_eq!(snap.positions.len(), 50);
+        assert_eq!(snap.alive.len(), 50);
+
+        let hp_now = state.read_hp();
+        let any_hp_moved = initial_hp.iter().zip(hp_now.iter()).any(|(a, b)| {
+            (a - b).abs() > 0.01
+        });
+        let alive_total_now: u32 = snap.alive.iter().sum();
+        let alive_changed = alive_total_now != initial_alive_total;
+
+        assert!(
+            any_hp_moved || alive_changed,
+            "after 50 ticks, expected HP movement or kill; saw HP unchanged \
+             and alive_total stable ({})",
+            alive_total_now,
+        );
+    }
 }
