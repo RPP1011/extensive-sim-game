@@ -51,7 +51,7 @@
 
 use engine::ids::AgentId;
 use engine::rng::per_agent_u32;
-use engine::sim_trait::CompiledSim;
+use engine::sim_trait::{AgentSnapshot, CompiledSim, VizGlyph};
 use engine::GpuContext;
 use glam::Vec3;
 use wgpu::util::DeviceExt;
@@ -993,6 +993,53 @@ impl CompiledSim for BoidsState {
         }
         &self.pos_cache
     }
+
+    /// Snapshot per-agent positions + creature_type + alive bit for the
+    /// `viz_app` ASCII renderer. Boids is a single-species, immortal
+    /// fixture — no `EntityRef` discriminant, no `Killed → SoA` writeback
+    /// — so the encoding is trivial:
+    ///
+    /// - `positions`: read from `pos_buf` via the existing `dirty`-gated
+    ///   `readback_positions` path (same `pos_staging` round-trip used
+    ///   by `positions()`). `create_buffer_init` populates `pos_buf` at
+    ///   construction so calling `snapshot()` before any `step()`
+    ///   returns the deterministic spawn cube.
+    /// - `creature_types`: every slot is `0` (single glyph table entry).
+    /// - `alive`: every slot is `1` (boids never die in this fixture).
+    fn snapshot(&mut self) -> AgentSnapshot {
+        // Drives the `dirty` flush via the existing pos_staging path.
+        let positions: Vec<Vec3> = self.positions().to_vec();
+        let n = positions.len();
+        AgentSnapshot {
+            positions,
+            creature_types: vec![0u32; n],
+            alive: vec![1u32; n],
+        }
+    }
+
+    /// Single-entry glyph table — every boid renders identically. Middle
+    /// dot (U+00B7) in cyan (ANSI 256-color 51): visible against the
+    /// `viz_app` dark background, low visual weight so dense flocks read
+    /// as a cloud rather than a wall of glyphs.
+    fn glyph_table(&self) -> Vec<VizGlyph> {
+        vec![VizGlyph::new('\u{00B7}', 51)]
+    }
+
+    /// Default zoom around the deterministic spawn cube. `auto_spread`
+    /// already returns the half-extent the swarm occupies at
+    /// construction (`cbrt(N) * CELL_SIZE / 2`, clamped to
+    /// `[CELL_SIZE/2, WORLD_HALF_EXTENT]`); +20% breathing room keeps
+    /// the early flocking visible without immediate auto-rescale. The
+    /// renderer auto-scales if positions wander outside, so this is
+    /// just the opening framing — boids tend to spread well past the
+    /// initial cube as they accelerate.
+    fn default_viewport(&self) -> Option<(Vec3, Vec3)> {
+        let span = Self::auto_spread(self.agent_count) * 1.2;
+        Some((
+            Vec3::new(-span, -span, 0.0),
+            Vec3::new(span, span, 0.0),
+        ))
+    }
 }
 
 /// Construct a boxed [`CompiledSim`] for the application crate.
@@ -1006,4 +1053,105 @@ pub fn make_sim(seed: u64, agent_count: u32) -> Box<dyn CompiledSim> {
 fn normalise(raw: u32) -> f32 {
     let half = (u32::MAX / 2) as f32;
     (raw as f32 - half) / half
+}
+
+#[cfg(test)]
+mod viz_tests {
+    use super::*;
+
+    /// Snapshot before any tick must report initial state: all agents
+    /// alive, every creature_type slot zero (single-species fixture),
+    /// and `agent_count` positions read back from the construction-time
+    /// `pos_buf` upload. Guards the construction-only readback path so
+    /// `viz_app` can render frame 0 with content instead of a blank
+    /// grid.
+    #[test]
+    fn snapshot_after_construction_returns_initial_state() {
+        let agent_count = 16u32;
+        let mut state = BoidsState::new(0xCAFE_F00D, agent_count);
+        let snap = state.snapshot();
+
+        assert_eq!(
+            snap.positions.len(),
+            agent_count as usize,
+            "positions length must match agent_count",
+        );
+        assert_eq!(
+            snap.creature_types.len(),
+            agent_count as usize,
+            "creature_types length must match agent_count",
+        );
+        assert_eq!(
+            snap.alive.len(),
+            agent_count as usize,
+            "alive length must match agent_count",
+        );
+
+        // Boids fixture: every slot alive, every creature_type 0.
+        let alive_total: u32 = snap.alive.iter().sum();
+        assert_eq!(
+            alive_total, agent_count,
+            "every boid must report alive (immortal in this fixture); got alive={:?}",
+            snap.alive,
+        );
+        assert!(
+            snap.creature_types.iter().all(|&c| c == 0),
+            "single-species fixture must report creature_type=0 for every slot; got {:?}",
+            snap.creature_types,
+        );
+
+        // Positions must be finite (no NaN / infinity) and lie within
+        // the auto-spread half-extent the constructor used (±tiny eps
+        // for f32 round-trip through `Vec3Padded`).
+        let spread = BoidsState::auto_spread(agent_count);
+        for (i, p) in snap.positions.iter().enumerate() {
+            assert!(
+                p.x.is_finite() && p.y.is_finite() && p.z.is_finite(),
+                "slot {i} position {p:?} must be finite",
+            );
+            assert!(
+                p.x.abs() <= spread + 0.001
+                    && p.y.abs() <= spread + 0.001
+                    && p.z.abs() <= spread + 0.001,
+                "slot {i} position {p:?} outside auto-spread cube ±{spread}",
+            );
+        }
+
+        // Single-entry glyph table — `creature_types` indexes line up.
+        let glyphs = state.glyph_table();
+        assert_eq!(glyphs.len(), 1, "boids glyph_table must have 1 entry");
+    }
+
+    /// After ticking the simulation forward, the boid integrator
+    /// (`physics_MoveBoid`) advances every agent by its velocity each
+    /// step — so at least one slot's position must have shifted by more
+    /// than a tiny epsilon. Proves the snapshot reflects live GPU
+    /// state, not a cached construction-time copy.
+    #[test]
+    fn snapshot_after_tick_reflects_movement() {
+        let agent_count = 16u32;
+        let mut state = BoidsState::new(0xCAFE_F00D, agent_count);
+        let initial = state.snapshot().positions.clone();
+
+        for _ in 0..50 {
+            state.step();
+        }
+
+        let snap = state.snapshot();
+        assert_eq!(snap.positions.len(), agent_count as usize);
+
+        const EPS: f32 = 0.001;
+        let any_moved = initial.iter().zip(snap.positions.iter()).any(|(a, b)| {
+            (a.x - b.x).abs() > EPS
+                || (a.y - b.y).abs() > EPS
+                || (a.z - b.z).abs() > EPS
+        });
+        assert!(
+            any_moved,
+            "after 50 ticks, expected at least one boid to drift > {EPS} units; \
+             initial[0]={:?} final[0]={:?}",
+            initial.first(),
+            snap.positions.first(),
+        );
+    }
 }
