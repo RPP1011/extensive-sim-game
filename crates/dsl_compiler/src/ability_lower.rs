@@ -88,8 +88,8 @@ use dsl_ast::ast::{
     AbilityDecl, AbilityFile, AbilityHeader, EffectArg, EffectStmt, HintName, Span, TargetMode,
 };
 use engine::ability::program::{
-    AbilityHint, AbilityProgram, Area, Delivery, EffectOp, Gate, MAX_EFFECTS_PER_PROGRAM,
-    TargetSelector,
+    AbilityHint, AbilityProgram, AbilityTag, Area, Delivery, EffectOp, Gate,
+    MAX_EFFECTS_PER_PROGRAM, MAX_TAGS_PER_PROGRAM, TargetSelector,
 };
 use engine::ability::AbilityId;
 use smallvec::SmallVec;
@@ -147,6 +147,18 @@ pub enum LowerError {
         modifier: &'static str,
         span:     Span,
     },
+    /// Wave 1.5 modifier lowering #1 (tag vocabulary): a `[TAG: value]`
+    /// modifier named a tag not in the engine's `AbilityTag` vocabulary
+    /// (PHYSICAL/MAGICAL/CROWD_CONTROL/HEAL/DEFENSE/UTILITY today).
+    /// Surfaced so authors don't silently lose tag-based scoring weight.
+    UnknownTag { tag: String, span: Span },
+    /// Wave 1.5 modifier lowering #1 (tag vocabulary): an ability's
+    /// effects collectively declared more distinct tags than the
+    /// `MAX_TAGS_PER_PROGRAM` budget. Today this matches
+    /// `AbilityTag::COUNT == 6` so the only way to trip is duplicating
+    /// tag names — but that path lands as a duplicate at the per-effect
+    /// site instead. Future-proof for a wider tag vocabulary.
+    TagBudgetExceeded { ability: String, count: usize, max: usize, span: Span },
     /// Wave 1.4 parser accepted a `deliver <method> { params } { body }`
     /// body block. Lowering requires delivery-method SoA buffers +
     /// on_hit / on_arrival / on_tick hook dispatch (spec §9), all Wave
@@ -211,6 +223,14 @@ impl std::fmt::Display for LowerError {
             LowerError::ModifierNotImplemented { verb, modifier, .. } => write!(
                 f,
                 "effect verb `{verb}` carries a `{modifier}` modifier slot that is parsed but lowering is Wave 2+"
+            ),
+            LowerError::UnknownTag { tag, .. } => write!(
+                f,
+                "unknown power tag `[{tag}: …]`; valid tags: PHYSICAL / MAGICAL / CROWD_CONTROL / HEAL / DEFENSE / UTILITY"
+            ),
+            LowerError::TagBudgetExceeded { ability, count, max, .. } => write!(
+                f,
+                "ability `{ability}` declares {count} distinct power tags but the per-program budget is {max}"
             ),
             LowerError::DeliverBlockNotImplemented { ability, method, .. } => write!(
                 f,
@@ -405,7 +425,33 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     }
 
     let mut effects: SmallVec<[EffectOp; MAX_EFFECTS_PER_PROGRAM]> = SmallVec::new();
+    // Wave 1.5 modifier lowering #1: aggregate `[TAG: value]` slots
+    // across all effects into program.tags (sum-per-tag).
+    let mut tag_acc: SmallVec<[(AbilityTag, f32); MAX_TAGS_PER_PROGRAM]> = SmallVec::new();
     for stmt in &decl.effects {
+        // Per-effect tags first — fail fast on unknown tag names so the
+        // verb-dispatch error doesn't hide them.
+        for tag in &stmt.tags {
+            let parsed = AbilityTag::parse(&tag.name).ok_or_else(|| LowerError::UnknownTag {
+                tag:  tag.name.clone(),
+                span: tag.span,
+            })?;
+            // Sum-per-tag aggregation. Linear scan is fine — at most
+            // MAX_TAGS_PER_PROGRAM == 6 entries.
+            if let Some(slot) = tag_acc.iter_mut().find(|(t, _)| *t == parsed) {
+                slot.1 += tag.value;
+            } else {
+                if tag_acc.len() >= MAX_TAGS_PER_PROGRAM {
+                    return Err(LowerError::TagBudgetExceeded {
+                        ability: decl.name.clone(),
+                        count:   tag_acc.len() + 1,
+                        max:     MAX_TAGS_PER_PROGRAM,
+                        span:    tag.span,
+                    });
+                }
+                tag_acc.push((parsed, tag.value));
+            }
+        }
         let op = lower_effect_stmt(stmt)?;
         effects.push(op);
     }
@@ -416,7 +462,7 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
         gate,
         effects,
         hint,
-        tags: SmallVec::new(),
+        tags: tag_acc,
     })
 }
 
@@ -443,13 +489,8 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             span:     area.span,
         });
     }
-    if let Some(tag) = stmt.tags.first() {
-        return Err(LowerError::ModifierNotImplemented {
-            verb:     stmt.verb.clone(),
-            modifier: "tags",
-            span:     tag.span,
-        });
-    }
+    // Tags handled by the per-ability aggregator in `lower_ability_decl`
+    // (Wave 1.5 modifier lowering #1) — no short-circuit here.
     if let Some(d) = &stmt.duration {
         return Err(LowerError::ModifierNotImplemented {
             verb:     stmt.verb.clone(),

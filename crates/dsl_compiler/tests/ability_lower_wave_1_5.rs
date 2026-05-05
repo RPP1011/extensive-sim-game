@@ -49,9 +49,45 @@ fn lowering_in_modifier_returns_unimplemented() {
 }
 
 #[test]
-fn lowering_tags_modifier_returns_unimplemented() {
-    let err = lower_inline("ability X { target: enemy cooldown: 1s damage 50 [PHYSICAL: 60] }");
-    assert_modifier(err, "tags");
+fn lowering_tags_aggregate_into_program() {
+    // Wave 1.5 modifier lowering #1 (tag vocabulary) — known tag names
+    // now lower into program.tags instead of erroring with
+    // ModifierNotImplemented{tags}.
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::AbilityTag;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 [PHYSICAL: 60] }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("known tag must lower");
+    assert_eq!(prog.tags.len(), 1);
+    assert_eq!(prog.tags[0].0, AbilityTag::Physical);
+    assert_eq!(prog.tags[0].1, 60.0);
+}
+
+#[test]
+fn lowering_tags_unknown_name_errors() {
+    let err = lower_inline("ability X { target: enemy cooldown: 1s damage 50 [WIND: 30] }");
+    match err {
+        LowerError::UnknownTag { ref tag, .. } => assert_eq!(tag, "WIND"),
+        other => panic!("expected UnknownTag(WIND); got {other:?}"),
+    }
+}
+
+#[test]
+fn lowering_tags_aggregate_across_effects() {
+    // Multi-effect summation: PHYSICAL: 30 on damage + PHYSICAL: 40 on
+    // a second damage effect → program.tags has Physical=70.
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::AbilityTag;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s\n damage 30 [PHYSICAL: 30]\n damage 20 [PHYSICAL: 40]\n}"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("known tags must lower");
+    assert_eq!(prog.tags.len(), 1);
+    assert_eq!(prog.tags[0].0, AbilityTag::Physical);
+    assert_eq!(prog.tags[0].1, 70.0);
 }
 
 #[test]
@@ -135,11 +171,20 @@ fn slot_order_in_takes_precedence_over_for() {
 }
 
 #[test]
-fn slot_order_tags_takes_precedence_over_chance() {
+fn slot_order_unknown_tag_takes_precedence_over_chance() {
+    // FIRE isn't in the engine's AbilityTag vocabulary today (Wave
+    // 1.5#1 fixed enum: PHYSICAL/MAGICAL/CROWD_CONTROL/HEAL/DEFENSE/
+    // UTILITY). The unknown-tag error fires per-effect during the tag
+    // aggregation pass BEFORE the chance modifier short-circuit gets
+    // a chance to fire — so the diagnostic is "unknown tag", not
+    // "chance modifier not implemented".
     let err = lower_inline(
         "ability X { target: enemy cooldown: 1s damage 50 [FIRE: 60] chance 25% }",
     );
-    assert_modifier(err, "tags");
+    match err {
+        LowerError::UnknownTag { ref tag, .. } => assert_eq!(tag, "FIRE"),
+        other => panic!("expected UnknownTag(FIRE) before chance check; got {other:?}"),
+    }
 }
 
 // ---------------------------------------------------------------------------
