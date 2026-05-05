@@ -89,7 +89,7 @@ use dsl_ast::ast::{
 };
 use engine::ability::program::{
     AbilityHint, AbilityProgram, AbilityTag, Area, Delivery, EffectOp, Gate,
-    MAX_EFFECTS_PER_PROGRAM, MAX_TAGS_PER_PROGRAM, TargetSelector,
+    MAX_EFFECTS_PER_PROGRAM, MAX_TAGS_PER_PROGRAM, StackingMode, TargetSelector,
 };
 use engine::ability::AbilityId;
 use smallvec::SmallVec;
@@ -143,7 +143,9 @@ pub enum LowerError {
     ModifierNotImplemented {
         verb:     String,
         /// Slot identifier — one of "in" / "tags" / "for" / "when" /
-        /// "chance" / "stacking" / "scaling" / "lifetime" / "nested".
+        /// "chance" / "scaling" / "lifetime" / "nested". "stacking"
+        /// was retired in Wave 1.5#3 (now lowered into
+        /// `program.stackings`).
         modifier: &'static str,
         span:     Span,
     },
@@ -501,6 +503,17 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     // Wave 1.5 modifier lowering #1: aggregate `[TAG: value]` slots
     // across all effects into program.tags (sum-per-tag).
     let mut tag_acc: SmallVec<[(AbilityTag, f32); MAX_TAGS_PER_PROGRAM]> = SmallVec::new();
+    // Wave 1.5 modifier lowering #3: per-effect stacking mode, index
+    // parallel to `effects`. We ALWAYS push one slot per effect (even
+    // `None`) when ANY effect carried a `stacking` modifier — but to
+    // avoid serialising an extra column on programs that don't use the
+    // modifier at all, we keep the smallvec empty in the all-`None`
+    // case. Apply handlers MUST treat empty `program.stackings` and a
+    // populated slice with `None` slots both as
+    // `StackingMode::Refresh` per `project_buff_stacking_rule.md`.
+    let mut stackings_acc: SmallVec<[Option<StackingMode>; MAX_EFFECTS_PER_PROGRAM]> =
+        SmallVec::new();
+    let mut any_stacking = false;
     for stmt in &decl.effects {
         // Per-effect tags first — fail fast on unknown tag names so the
         // verb-dispatch error doesn't hide them.
@@ -525,8 +538,24 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
                 tag_acc.push((parsed, tag.value));
             }
         }
+        // Wave 1.5#3: capture the per-effect stacking mode BEFORE the
+        // verb dispatch (which would otherwise discard it). Map the
+        // parser AST enum onto the engine enum 1:1.
+        let mapped = stmt.stacking.map(map_stacking_mode);
+        if mapped.is_some() {
+            any_stacking = true;
+        }
+        stackings_acc.push(mapped);
         let op = lower_effect_stmt(stmt)?;
         effects.push(op);
+    }
+
+    // Discard the all-`None` aggregator so the resulting program looks
+    // identical to the Wave 1 corpus output for sources that don't use
+    // the modifier. Apply handlers + the SoA packer treat empty +
+    // all-`None` identically.
+    if !any_stacking {
+        stackings_acc.clear();
     }
 
     Ok(AbilityProgram {
@@ -536,6 +565,7 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
         effects,
         hint,
         tags: tag_acc,
+        stackings: stackings_acc,
     })
 }
 
@@ -596,13 +626,11 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             span:     ch.span,
         });
     }
-    if stmt.stacking.is_some() {
-        return Err(LowerError::ModifierNotImplemented {
-            verb:     stmt.verb.clone(),
-            modifier: "stacking",
-            span:     stmt.span,
-        });
-    }
+    // Wave 1.5#3: `stacking <mode>` is consumed by the per-ability
+    // aggregator in `lower_ability_decl` (one slot per effect, parallel
+    // to `program.effects`). The verb dispatch below stays oblivious —
+    // apply handlers read `program.stackings[i]` to pick a policy. No
+    // short-circuit here.
     if let Some(s) = stmt.scalings.first() {
         return Err(LowerError::ModifierNotImplemented {
             verb:     stmt.verb.clone(),
@@ -856,6 +884,20 @@ fn map_hint(h: &HintName, decl: &AbilityDecl) -> Result<AbilityHint, LowerError>
 
 fn target_reserved(mode: &str, decl: &AbilityDecl) -> LowerError {
     LowerError::TargetModeReserved { mode: mode.to_string(), span: decl.span }
+}
+
+/// Wave 1.5#3: map the parser AST `StackingMode` (Refresh / Stack /
+/// Extend) onto the engine runtime `StackingMode` enum. The variants
+/// are 1:1 today; this helper exists so a future divergence (the spec
+/// hints at `additive` / `max` aliases mapping to `Stack` / `Refresh`
+/// per the project_buff_stacking_rule memo) lands in one place.
+#[inline]
+fn map_stacking_mode(m: dsl_ast::ast::StackingMode) -> StackingMode {
+    match m {
+        dsl_ast::ast::StackingMode::Refresh => StackingMode::Refresh,
+        dsl_ast::ast::StackingMode::Stack => StackingMode::Stack,
+        dsl_ast::ast::StackingMode::Extend => StackingMode::Extend,
+    }
 }
 
 fn require_arity(stmt: &EffectStmt, expected: usize) -> Result<(), LowerError> {

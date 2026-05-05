@@ -39,7 +39,8 @@
 //!   `HashMap` iteration leakage, no time-of-day inputs, no thread state.
 
 use super::program::{
-    Area, Delivery, EffectOp, MAX_EFFECTS_PER_PROGRAM, MAX_TAGS_PER_PROGRAM, TargetSelector,
+    Area, Delivery, EffectOp, MAX_EFFECTS_PER_PROGRAM, MAX_TAGS_PER_PROGRAM, StackingMode,
+    TargetSelector,
 };
 use super::{AbilityProgram, AbilityRegistry, AbilityTag};
 
@@ -61,6 +62,14 @@ pub const NUM_ABILITY_TAGS: usize = AbilityTag::COUNT;
 /// LifeSteal/DamageModify). GPU dispatch loops break early on this
 /// sentinel.
 pub const EFFECT_KIND_EMPTY: u32 = 0xFF;
+
+/// Sentinel for the `stackings` column when an effect did not carry an
+/// explicit `stacking <mode>` modifier in the source DSL. Apply
+/// handlers should treat this slot as `StackingMode::Refresh` per
+/// `project_buff_stacking_rule.md`. Distinct from any `StackingMode`
+/// discriminant (0..=2 today: Refresh/Stack/Extend) so a GPU shader
+/// doing `payload == STACKING_NONE_SENTINEL` is one cmp.
+pub const STACKING_NONE_SENTINEL: u8 = 0xFF;
 
 // Compile-time guard: `MAX_TAGS_PER_PROGRAM` and `NUM_ABILITY_TAGS` must
 // stay aligned. Both are derived from `AbilityTag::COUNT` today; a future
@@ -133,6 +142,16 @@ pub struct PackedAbilityRegistry {
     /// for any tag not present on the program.
     /// Length: `n_abilities * NUM_ABILITY_TAGS`.
     pub tag_values: Vec<f32>,
+
+    // -- Stacking rows (flat, stride = MAX_EFFECTS_PER_PROGRAM = 4). --
+
+    /// Per-effect stacking mode encoded as `StackingMode as u8`, or
+    /// `STACKING_NONE_SENTINEL` (0xFF) when the source effect did not
+    /// carry an explicit `stacking <mode>` modifier. Apply handlers
+    /// should treat the sentinel as `StackingMode::Refresh` per
+    /// `project_buff_stacking_rule.md`.
+    /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM`.
+    pub stackings: Vec<u8>,
 }
 
 impl PackedAbilityRegistry {
@@ -158,6 +177,13 @@ impl PackedAbilityRegistry {
         let tag_total = n * NUM_ABILITY_TAGS;
         let mut tag_values = vec![0.0_f32; tag_total];
 
+        // Stackings: pre-fill with the "no stacking modifier" sentinel
+        // so empty effect slots and effects without a `stacking <mode>`
+        // modifier share a single resting value. Per-effect overrides
+        // are written by `pack_program_stackings`.
+        let stacking_total = n * MAX_EFFECTS_PER_PROGRAM;
+        let mut stackings = vec![STACKING_NONE_SENTINEL; stacking_total];
+
         for slot in 0..n {
             // `AbilityId` is 1-based; the registry's `get` accepts an id,
             // so reconstruct it from the slot. The registry guarantees
@@ -180,6 +206,7 @@ impl PackedAbilityRegistry {
                 &mut effect_payload_b,
             );
             pack_program_tags(program, slot, &mut tag_values);
+            pack_program_stackings(program, slot, &mut stackings);
         }
 
         Self {
@@ -193,6 +220,7 @@ impl PackedAbilityRegistry {
             effect_payload_a,
             effect_payload_b,
             tag_values,
+            stackings,
         }
     }
 
@@ -272,6 +300,40 @@ fn pack_program_tags(program: &AbilityProgram, slot: usize, tag_values: &mut [f3
     let base = slot * NUM_ABILITY_TAGS;
     for &(tag, value) in program.tags.iter() {
         tag_values[base + tag.index()] = value;
+    }
+}
+
+/// Splat one program's per-effect stacking modes into the row-major
+/// `stackings` buffer. Slots already pre-filled with
+/// `STACKING_NONE_SENTINEL`; only `Some(StackingMode)` entries
+/// overwrite. `program.stackings` is index-parallel to `program.effects`
+/// when populated; an empty `program.stackings` slice means no effect
+/// carried a `stacking <mode>` modifier (every slot stays at the
+/// sentinel).
+fn pack_program_stackings(program: &AbilityProgram, slot: usize, stackings: &mut [u8]) {
+    let base = slot * MAX_EFFECTS_PER_PROGRAM;
+    for (i, mode) in program.stackings.iter().enumerate() {
+        // Defensive bounds: `lower_ability_decl` enforces
+        // `program.stackings.len() <= MAX_EFFECTS_PER_PROGRAM`, but a
+        // future hand-built program could violate it; clamp instead of
+        // panicking on the startup pack path.
+        if i >= MAX_EFFECTS_PER_PROGRAM {
+            break;
+        }
+        if let Some(m) = mode {
+            stackings[base + i] = pack_stacking(*m);
+        }
+    }
+}
+
+/// Encode a `StackingMode` to its u8 discriminant. Pinned by
+/// `crates/engine/src/schema_hash.rs` (the `StackingMode:` line).
+#[inline]
+fn pack_stacking(m: StackingMode) -> u8 {
+    match m {
+        StackingMode::Refresh => 0,
+        StackingMode::Stack => 1,
+        StackingMode::Extend => 2,
     }
 }
 
@@ -391,6 +453,7 @@ mod tests {
         assert!(p.effect_payload_a.is_empty());
         assert!(p.effect_payload_b.is_empty());
         assert!(p.tag_values.is_empty());
+        assert!(p.stackings.is_empty());
     }
 
     #[test]
@@ -858,5 +921,68 @@ mod tests {
         assert_eq!(p1.effect_payload_a, p2.effect_payload_a);
         assert_eq!(p1.effect_payload_b, p2.effect_payload_b);
         assert_eq!(p1.tag_values, p2.tag_values);
+        assert_eq!(p1.stackings, p2.stackings);
+    }
+
+    // -- Wave 1.5#3 — stacking-mode pack tests. The `stackings` column
+    // mirrors `effect_kinds`'s row-major layout (stride =
+    // MAX_EFFECTS_PER_PROGRAM); slots without a `stacking <mode>`
+    // modifier carry `STACKING_NONE_SENTINEL` (0xFF). Apply handlers
+    // treat the sentinel as `StackingMode::Refresh`. -----------------
+    #[test]
+    fn pack_stackings_default_all_sentinel() {
+        // No effect carries `stacking <mode>`; every column slot must be
+        // the none-sentinel — including the empty effect tail (slots
+        // 1..MAX_EFFECTS_PER_PROGRAM). This guards the pre-fill path so
+        // the apply-handler doesn't need to special-case empty slots.
+        let prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: false, line_of_sight: false },
+            [EffectOp::Damage { amount: 10.0 }],
+        );
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        assert_eq!(p.stackings.len(), MAX_EFFECTS_PER_PROGRAM);
+        for (i, s) in p.stackings.iter().enumerate() {
+            assert_eq!(
+                *s, STACKING_NONE_SENTINEL,
+                "slot {i} must default to STACKING_NONE_SENTINEL",
+            );
+        }
+    }
+
+    #[test]
+    fn pack_stackings_per_effect_override() {
+        // Two effects: slot 0 carries `stacking stack`, slot 1 has no
+        // stacking modifier. Empty slots 2..MAX stay at the sentinel.
+        // Discriminants: Refresh=0, Stack=1, Extend=2.
+        use smallvec::SmallVec;
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [
+                EffectOp::Damage { amount: 10.0 },
+                EffectOp::Stun { duration_ticks: 20 },
+            ],
+        );
+        let mut sv: SmallVec<[Option<StackingMode>; MAX_EFFECTS_PER_PROGRAM]> = SmallVec::new();
+        sv.push(Some(StackingMode::Stack));
+        sv.push(None);
+        prog.stackings = sv;
+
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        assert_eq!(p.stackings.len(), MAX_EFFECTS_PER_PROGRAM);
+        // Stack discriminant == 1.
+        assert_eq!(p.stackings[0], 1, "slot 0 has `stacking stack`");
+        assert_eq!(p.stackings[1], STACKING_NONE_SENTINEL, "slot 1 has no modifier");
+        for i in 2..MAX_EFFECTS_PER_PROGRAM {
+            assert_eq!(
+                p.stackings[i], STACKING_NONE_SENTINEL,
+                "empty slot {i} must stay at sentinel",
+            );
+        }
     }
 }

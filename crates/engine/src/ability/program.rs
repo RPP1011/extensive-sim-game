@@ -354,6 +354,28 @@ impl AbilityTag {
 /// upper bound since each tag appears at most once per ability.
 pub const MAX_TAGS_PER_PROGRAM: usize = AbilityTag::COUNT;
 
+/// Per-effect stacking mode controlling apply-handler behavior when
+/// the same effect is dispatched against an agent that already has it
+/// active. See `project_buff_stacking_rule.md` for the canonical rule
+/// (max-with-tiebreak default for pure single-slot buffs, additive for
+/// damage-leaning multipliers).
+///
+/// Numeric discriminants are pinned so `PackedAbilityRegistry`'s
+/// `stackings` column packs cleanly. Renaming or reordering bumps the
+/// schema hash.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum StackingMode {
+    /// Re-application resets duration to full magnitude. Default for
+    /// effects that didn't carry an explicit `stacking` modifier.
+    Refresh = 0,
+    /// Each application increments a counter; magnitude scales with
+    /// stack count.
+    Stack = 1,
+    /// New duration = remaining + new (additive duration extension).
+    Extend = 2,
+}
+
 /// Compiled ability — the unit `AbilityRegistry` stores and `CastHandler`
 /// dispatches.
 ///
@@ -376,6 +398,14 @@ pub struct AbilityProgram {
     /// effects. One entry per `(tag, value)` pair — lookup is linear;
     /// max length is `MAX_TAGS_PER_PROGRAM == AbilityTag::COUNT`.
     pub tags:     SmallVec<[(AbilityTag, f32); MAX_TAGS_PER_PROGRAM]>,
+    /// Wave 1.5#3: per-effect stacking mode. `None` for effects that
+    /// didn't carry a `stacking <mode>` modifier — apply handlers
+    /// should default to `StackingMode::Refresh` per the
+    /// `project_buff_stacking_rule.md` contract. Index parallel to
+    /// `effects`; a populated `stackings` slice is either empty (no
+    /// effect carried the modifier) or has one slot per effect (None
+    /// for the unmarked ones).
+    pub stackings: SmallVec<[Option<StackingMode>; MAX_EFFECTS_PER_PROGRAM]>,
 }
 
 impl AbilityProgram {
@@ -393,12 +423,13 @@ impl AbilityProgram {
         let mut v: SmallVec<[EffectOp; MAX_EFFECTS_PER_PROGRAM]> = SmallVec::new();
         for e in effects { v.push(e); }
         Self {
-            delivery: Delivery::Instant,
-            area:     Area::SingleTarget { range },
+            delivery:  Delivery::Instant,
+            area:      Area::SingleTarget { range },
             gate,
-            effects:  v,
-            hint:     None,
-            tags:     SmallVec::new(),
+            effects:   v,
+            hint:      None,
+            tags:      SmallVec::new(),
+            stackings: SmallVec::new(),
         }
     }
 
