@@ -50,6 +50,6 @@ pub use program::AbilityProgram;
 pub use program::{AbilityHint, AbilityTag, StackingMode, MAX_TAGS_PER_PROGRAM};
 pub use registry::{AbilityRegistry, AbilityRegistryBuilder};
 pub use packed::{
-    PackedAbilityRegistry, EFFECT_KIND_EMPTY, HINT_NONE_SENTINEL, NUM_ABILITY_TAGS,
-    STACKING_NONE_SENTINEL,
+    PackedAbilityRegistry, CHANCE_NONE_SENTINEL, EFFECT_KIND_EMPTY, HINT_NONE_SENTINEL,
+    NUM_ABILITY_TAGS, STACKING_NONE_SENTINEL,
 };

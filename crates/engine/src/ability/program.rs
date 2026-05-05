@@ -406,6 +406,18 @@ pub struct AbilityProgram {
     /// effect carried the modifier) or has one slot per effect (None
     /// for the unmarked ones).
     pub stackings: SmallVec<[Option<StackingMode>; MAX_EFFECTS_PER_PROGRAM]>,
+    /// Wave 1.5#5: per-effect probability gate. Q16 fixed-point:
+    /// `0` = 0% (never fires), `65534` ≈ 100% (always fires; one less
+    /// than `u16::MAX` so the SoA sentinel `CHANCE_NONE_SENTINEL =
+    /// 0xFFFF` stays unambiguous). Apply handlers compare
+    /// `per_agent_u32(seed, agent_id, tick, purpose) & 0xFFFF` against
+    /// this value to decide whether the effect fires this tick. `None`
+    /// for effects that didn't carry a `chance N%` modifier — apply
+    /// handlers should default to "always fires" (no RNG gate). Index
+    /// parallel to `effects`; a populated `chances` slice is either
+    /// empty (no effect carried the modifier) or has one slot per
+    /// effect (None for the unmarked ones).
+    pub chances: SmallVec<[Option<u16>; MAX_EFFECTS_PER_PROGRAM]>,
 }
 
 impl AbilityProgram {
@@ -430,6 +442,7 @@ impl AbilityProgram {
             hint:      None,
             tags:      SmallVec::new(),
             stackings: SmallVec::new(),
+            chances:   SmallVec::new(),
         }
     }
 
