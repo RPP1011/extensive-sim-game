@@ -34,7 +34,7 @@
 
 use engine::ids::AgentId;
 use engine::rng::per_agent_u32;
-use engine::sim_trait::CompiledSim;
+use engine::sim_trait::{AgentSnapshot, CompiledSim, VizGlyph};
 use engine::GpuContext;
 use glam::Vec3;
 use wgpu::util::DeviceExt;
@@ -208,7 +208,9 @@ impl EcosystemState {
             gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("ecosystem_runtime::creature_type"),
                 contents: bytemuck::cast_slice(&creature_init),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
             });
         // All three physics_Move<Tier>Cfg structs are byte-identical
         // (agent_cap + tick + 8 bytes pad), so one cfg buffer is safe
@@ -411,6 +413,50 @@ impl EcosystemState {
 
     pub fn plant_pressures(&mut self) -> &[f32] {
         self.plant_pressure.readback(&self.gpu)
+    }
+
+    /// One-shot GPU readback of the per-slot `creature_type`
+    /// discriminant (Plant=0, Herbivore=1, Carnivore=2 — declaration
+    /// order in `ecosystem_cascade.sim`). Mirrors the
+    /// `predator_prey_runtime::read_creature_types` shape: ad-hoc
+    /// staging buffer + map_async + poll/wait. Allocates a fresh
+    /// staging buffer per call — `snapshot()` only fires at viz cadence
+    /// (~10 Hz) so the cost is acceptable.
+    ///
+    /// Distinct from the host-only `creature_types()` accessor above,
+    /// which synthesises the discriminants from declaration-order
+    /// without touching the GPU. The viz path goes through this so it
+    /// reflects the real SoA contents (defence-in-depth against any
+    /// future kernel that mutates `creature_type`).
+    fn read_creature_types_gpu(&self) -> Vec<u32> {
+        let bytes = (self.agent_count as u64) * 4;
+        let staging = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("ecosystem_runtime::creature_type_staging"),
+            size: bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self.gpu.device.create_command_encoder(
+            &wgpu::CommandEncoderDescriptor {
+                label: Some("ecosystem_runtime::creature_type::copy"),
+            },
+        );
+        encoder.copy_buffer_to_buffer(
+            &self.creature_type_buf, 0, &staging, 0, bytes,
+        );
+        self.gpu.queue.submit(Some(encoder.finish()));
+        let slice = staging.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = sender.send(r);
+        });
+        self.gpu.device.poll(wgpu::PollType::Wait).expect("poll");
+        let _ = receiver.recv().expect("map_async result");
+        let mapped = slice.get_mapped_range();
+        let v: Vec<u32> = bytemuck::cast_slice(&mapped).to_vec();
+        drop(mapped);
+        staging.unmap();
+        v
     }
 
     fn read_positions(&mut self) -> &[Vec3] {
@@ -715,6 +761,88 @@ impl CompiledSim for EcosystemState {
     fn positions(&mut self) -> &[Vec3] {
         self.read_positions()
     }
+
+    /// Snapshot per-agent state for the universal `viz_app` renderer.
+    ///
+    /// `ecosystem_cascade.sim` declares `pos: vec3` on all three
+    /// entities AND the per-tier physics rules write to it through
+    /// `agents.set_pos`, so positions come from a real GPU readback
+    /// of `pos_buf` (no synthesised layout).
+    ///
+    /// `creature_types` encoding (6 entries, indexed by
+    /// `tier * 2 + dead_bit`):
+    ///
+    /// |  i | tier      | state |
+    /// |----|-----------|-------|
+    /// |  0 | Plant     | alive |
+    /// |  1 | Plant     | dead  |
+    /// |  2 | Herbivore | alive |
+    /// |  3 | Herbivore | dead  |
+    /// |  4 | Carnivore | alive |
+    /// |  5 | Carnivore | dead  |
+    ///
+    /// `tier` derives from a REAL SoA read of `creature_type_buf`:
+    /// the .sim's entity-declaration order pins Plant=0 / Herbivore=1
+    /// / Carnivore=2.
+    ///
+    /// `alive`: ecosystem_cascade has no Eaten→SoA writeback path
+    /// (no `agent_alive_buf`) — the views accumulate Eaten events
+    /// but no field flips a kill bit. Following `predator_prey_runtime`
+    /// Stage 0's approach, every slot reports alive (1) and the dead
+    /// variants (1/3/5 in the encoding above) currently never fire.
+    /// When a future per-pair body-iter resolves real strikes and
+    /// emits an ApplyDefeat handler, swap this for a `read_alive()`
+    /// GPU readback.
+    ///
+    /// Initial-state safe: GPU buffers are populated by
+    /// `create_buffer_init` at construction, so calling `snapshot()`
+    /// before any `step()` returns the deterministic spawn cube with
+    /// the contiguous-band tier assignment from `new()`.
+    fn snapshot(&mut self) -> AgentSnapshot {
+        // Position readback first — drives `dirty` flush via the
+        // existing pos_staging path.
+        let positions: Vec<Vec3> = self.read_positions().to_vec();
+        let tiers: Vec<u32> = self.read_creature_types_gpu();
+        let n = self.agent_count as usize;
+        // No Eaten→SoA writeback today — every slot is alive.
+        let alive: Vec<u32> = vec![1u32; n];
+        let creature_types: Vec<u32> = (0..n)
+            .map(|i| {
+                let tier = tiers[i] & 0b11; // 0 plant, 1 herb, 2 carn
+                let dead_bit = if alive[i] == 0 { 1 } else { 0 };
+                tier * 2 + dead_bit
+            })
+            .collect();
+        AgentSnapshot { positions, creature_types, alive }
+    }
+
+    /// 6 entries matching the `snapshot.creature_types` encoding:
+    /// `[plant_alive, plant_dead, herb_alive, herb_dead, carn_alive,
+    /// carn_dead]`. Plant=green `p`, Herbivore=amber `h`, Carnivore=red
+    /// `C`. All dead variants share a grey tombstone × so the renderer
+    /// has a uniform "removed" indicator.
+    fn glyph_table(&self) -> Vec<VizGlyph> {
+        vec![
+            VizGlyph::new('p', 47),         // 0: plant alive (green)
+            VizGlyph::new('\u{00D7}', 240), // 1: plant dead (grey ×)
+            VizGlyph::new('h', 215),        // 2: herbivore alive (amber)
+            VizGlyph::new('\u{00D7}', 240), // 3: herbivore dead (grey ×)
+            VizGlyph::new('C', 196),        // 4: carnivore alive (red)
+            VizGlyph::new('\u{00D7}', 240), // 5: carnivore dead (grey ×)
+        ]
+    }
+
+    /// Default zoom around the deterministic spawn cube. `new()`
+    /// derives per-axis spreads from `cbrt(agent_count)` (so a 64-agent
+    /// fixture spans roughly `[-4, 4]` per axis); ±5 keeps every spawn
+    /// on screen with breathing room for the per-tier integrators
+    /// (plant_speed=0.05, herbivore_speed=0.4, carnivore_speed=0.55,
+    /// all bounded by config). The renderer auto-scales if positions
+    /// wander outside.
+    fn default_viewport(&self) -> Option<(Vec3, Vec3)> {
+        let span = (self.agent_count as f32).cbrt().max(1.0) + 1.0;
+        Some((Vec3::new(-span, -span, 0.0), Vec3::new(span, span, 0.0)))
+    }
 }
 
 /// Build a boxed `CompiledSim` so the `sim_app` runner can switch
@@ -722,4 +850,125 @@ impl CompiledSim for EcosystemState {
 /// `boids_runtime::make_sim`.
 pub fn make_sim(seed: u64, agent_count: u32) -> Box<dyn CompiledSim> {
     Box::new(EcosystemState::new(seed, agent_count))
+}
+
+#[cfg(test)]
+mod viz_tests {
+    use super::*;
+
+    /// Snapshot before any tick must report initial state: every agent
+    /// alive, deterministic three-tier creature_type assignment from
+    /// the contiguous-band split in `new()`, and positions inside the
+    /// spawn cube derived from the `cbrt(agent_count)` spread. Guards
+    /// the construction-only readback path so `viz_app` can render
+    /// frame 0 with content instead of a blank arena.
+    #[test]
+    fn snapshot_after_construction_returns_initial_state() {
+        const N: u32 = 9; // 3 plants + 3 herbivores + 3 carnivores
+        let mut state = EcosystemState::new(0xCAFE_F00D, N);
+        let snap = state.snapshot();
+
+        assert_eq!(snap.positions.len(), N as usize, "positions length");
+        assert_eq!(
+            snap.creature_types.len(),
+            N as usize,
+            "creature_types length",
+        );
+        assert_eq!(snap.alive.len(), N as usize, "alive length");
+
+        // No Eaten→SoA writeback path today — every slot must be alive.
+        let alive_total: u32 = snap.alive.iter().sum();
+        assert_eq!(
+            alive_total, N,
+            "every slot must be alive at construction (no Eaten→SoA \
+             path); got alive={:?}",
+            snap.alive,
+        );
+
+        // Three-way contiguous-band split per `new()`: third = N/3 = 3,
+        // so slots [0..3) = Plant (encoded 0), [3..6) = Herbivore
+        // (encoded 2), [6..9) = Carnivore (encoded 4). Encoded value
+        // = tier*2 because every dead_bit = 0.
+        let third = N / 3;
+        for (i, &ct) in snap.creature_types.iter().enumerate() {
+            let i_u = i as u32;
+            let expected_tier = if i_u < third {
+                0u32
+            } else if i_u < 2 * third {
+                1u32
+            } else {
+                2u32
+            };
+            let expected = expected_tier * 2;
+            assert_eq!(
+                ct, expected,
+                "slot {i}: tier band must match contiguous split \
+                 (expected tier={expected_tier}, encoded={expected}); \
+                 got {ct}",
+            );
+        }
+
+        // Tier counts must match the runtime's own accounting.
+        let plant_n = snap.creature_types.iter().filter(|&&c| c == 0).count();
+        let herb_n = snap.creature_types.iter().filter(|&&c| c == 2).count();
+        let carn_n = snap.creature_types.iter().filter(|&&c| c == 4).count();
+        assert_eq!(plant_n as u32, state.plant_count(), "plant count");
+        assert_eq!(herb_n as u32, state.herbivore_count(), "herbivore count");
+        assert_eq!(carn_n as u32, state.carnivore_count(), "carnivore count");
+
+        // Positions must lie inside the deterministic spawn cube.
+        let spread = (N as f32).cbrt().max(1.0);
+        for (i, p) in snap.positions.iter().enumerate() {
+            assert!(
+                p.x.abs() <= spread + 0.001
+                    && p.y.abs() <= spread + 0.001
+                    && p.z.abs() <= spread + 0.001,
+                "slot {i} position {p:?} outside spawn cube ±{spread}",
+            );
+        }
+
+        // Glyph table must cover every encoded value the snapshot can
+        // produce (6 entries, max index = 5).
+        let glyphs = state.glyph_table();
+        assert_eq!(glyphs.len(), 6, "glyph_table must have 6 entries");
+        for (i, &ct) in snap.creature_types.iter().enumerate() {
+            assert!(
+                (ct as usize) < glyphs.len(),
+                "slot {i}: creature_type {ct} out of glyph_table range",
+            );
+        }
+    }
+
+    /// After ticking the simulation forward, every per-tier integrator
+    /// advances its band by `vel * speed` per step, so at least one
+    /// slot's position must have changed from the initial spawn. Proves
+    /// the snapshot reflects live GPU state, not a cached construction-
+    /// time copy.
+    #[test]
+    fn snapshot_after_tick_reflects_state_change() {
+        const N: u32 = 9;
+        let mut state = EcosystemState::new(0xCAFE_F00D, N);
+        let initial = state.snapshot().positions.clone();
+
+        for _ in 0..50 {
+            state.step();
+        }
+
+        let snap = state.snapshot();
+        assert_eq!(snap.positions.len(), N as usize);
+
+        let any_moved = initial
+            .iter()
+            .zip(snap.positions.iter())
+            .any(|(a, b)| {
+                (a.x - b.x).abs() > 1e-6
+                    || (a.y - b.y).abs() > 1e-6
+                    || (a.z - b.z).abs() > 1e-6
+            });
+        assert!(
+            any_moved,
+            "after 50 ticks, expected per-tier integrator to drift at \
+             least one slot; saw all positions identical",
+        );
+    }
 }
