@@ -51,7 +51,7 @@
 //! After step(), CPU-side `process_births()` reads eat_count + alive,
 //! flips dead Ant slots back to alive=1 with reset state.
 
-use engine::sim_trait::CompiledSim;
+use engine::sim_trait::{AgentSnapshot, CompiledSim, VizGlyph};
 use engine::GpuContext;
 use glam::Vec3;
 use wgpu::util::DeviceExt;
@@ -101,6 +101,12 @@ struct Vec3Padded {
 impl From<Vec3> for Vec3Padded {
     fn from(v: Vec3) -> Self {
         Self { x: v.x, y: v.y, z: v.z, _pad: 0.0 }
+    }
+}
+
+impl From<Vec3Padded> for Vec3 {
+    fn from(p: Vec3Padded) -> Self {
+        Vec3::new(p.x, p.y, p.z)
     }
 }
 
@@ -1025,8 +1031,203 @@ impl CompiledSim for ForagingRealState {
     fn agent_count(&self) -> u32 { self.agent_count }
     fn tick(&self) -> u64 { self.tick }
     fn positions(&mut self) -> &[Vec3] { &[] }
+
+    /// Snapshot per-agent state for the universal `viz_app` renderer.
+    ///
+    /// `foraging_real.sim` is the FIRST fixture where the alive bitmap
+    /// flips BOTH directions during a run (births via CPU-side
+    /// `process_births` + deaths via in-DSL `agents.set_alive(self,
+    /// false)` from `EnergyDecay` and `ApplyEat`). Unlike the
+    /// ecosystem/predator_prey precedents (which had no kill path and
+    /// hard-coded `alive = vec![1; n]`), this snapshot performs a real
+    /// readback of `agent_alive_buf`.
+    ///
+    /// `creature_types` encoding (2 entries — single creature kind
+    /// "ant"; food piles are not surfaced in the viz today since the
+    /// .sim's two entities share an Agent SoA but the viz table is
+    /// per-creature-state):
+    ///
+    /// |  i | kind | state |
+    /// |----|------|-------|
+    /// |  0 | Ant  | alive |
+    /// |  1 | Ant  | dead  |
+    ///
+    /// Positions come from a real GPU readback of `agent_pos_buf` via
+    /// the existing `read_pos_padded` helper. Initial-state safe:
+    /// buffers are populated by `create_buffer_init` at construction,
+    /// so calling `snapshot()` before any `step()` returns the
+    /// deterministic spawn layout (live ants on a 7×8 grid + dead
+    /// placeholder slots at origin).
+    fn snapshot(&mut self) -> AgentSnapshot {
+        let pos_padded = self.read_pos_padded();
+        let positions: Vec<Vec3> = pos_padded.iter().map(|p| (*p).into()).collect();
+        let alive = self.read_alive();
+        let n = self.agent_count as usize;
+        let creature_types: Vec<u32> = (0..n)
+            .map(|i| if alive[i] == 1 { 0u32 } else { 1u32 })
+            .collect();
+        AgentSnapshot { positions, creature_types, alive }
+    }
+
+    /// 2 entries matching the `snapshot.creature_types` encoding:
+    /// `[ant_alive, ant_dead]`. Live ants render in amber `a`; dead
+    /// slots share the grey tombstone × the precedent runtimes use.
+    fn glyph_table(&self) -> Vec<VizGlyph> {
+        vec![
+            VizGlyph::new('a', 215),        // 0: ant alive (amber)
+            VizGlyph::new('\u{00D7}', 240), // 1: ant dead (grey ×)
+        ]
+    }
+
+    /// Default zoom around the colony spawn area. `new()` lays ants on
+    /// a 7×8 grid stepped 0.6 (x ∈ [-2.1, 2.1]) and food piles on a
+    /// 4×5 grid stepped 0.8 (x ∈ [-1.6, 2.4]); ±4 keeps every spawn on
+    /// screen with breathing room for the per-tick integrator drift
+    /// and any newborn ants that the CPU-side birth ring scatters back
+    /// into the active grid. The renderer auto-scales if positions
+    /// wander outside.
+    fn default_viewport(&self) -> Option<(Vec3, Vec3)> {
+        Some((Vec3::new(-4.0, -4.0, 0.0), Vec3::new(4.0, 4.0, 0.0)))
+    }
 }
 
 pub fn make_sim(seed: u64, agent_count: u32) -> Box<dyn CompiledSim> {
     Box::new(ForagingRealState::new(seed, agent_count))
+}
+
+#[cfg(test)]
+mod viz_tests {
+    use super::*;
+
+    /// Snapshot before any tick must report initial state: every Ant
+    /// slot in [0..INITIAL_ANTS) alive and every dead-placeholder Ant
+    /// slot (in [INITIAL_ANTS+INITIAL_FOOD..SLOT_CAP)) reporting dead.
+    /// FoodPile slots in [INITIAL_ANTS..INITIAL_ANTS+INITIAL_FOOD) are
+    /// also surfaced through `alive` (they live in the shared Agent
+    /// SoA), and the snapshot encodes them per the alive bit (live →
+    /// 0, dead → 1) — their `creature_type` discriminant is not part
+    /// of the viz table today (single-creature display kind: ant).
+    /// Guards the construction-only readback so `viz_app` can render
+    /// frame 0 with content instead of a blank arena.
+    #[test]
+    fn snapshot_after_construction_returns_initial_state() {
+        let mut state = ForagingRealState::new(0xCAFE_F00D, INITIAL_ANTS);
+        let snap = state.snapshot();
+
+        let n = SLOT_CAP as usize;
+        assert_eq!(snap.positions.len(), n, "positions length");
+        assert_eq!(snap.creature_types.len(), n, "creature_types length");
+        assert_eq!(snap.alive.len(), n, "alive length");
+
+        // Live slots: [0..INITIAL_ANTS) (ants) AND
+        // [INITIAL_ANTS..INITIAL_ANTS+INITIAL_FOOD) (food piles).
+        let live_total = (INITIAL_ANTS + INITIAL_FOOD) as usize;
+        for slot in 0..n {
+            let expected_alive = if slot < live_total { 1u32 } else { 0u32 };
+            assert_eq!(
+                snap.alive[slot], expected_alive,
+                "slot {slot}: alive bit must match init layout (live=[0..{live_total}), \
+                 dead-placeholders=[{live_total}..{n})); got {}",
+                snap.alive[slot],
+            );
+            // Encoding: alive→0 (ant alive glyph), dead→1 (× glyph).
+            let expected_ct = if expected_alive == 1 { 0u32 } else { 1u32 };
+            assert_eq!(
+                snap.creature_types[slot], expected_ct,
+                "slot {slot}: creature_types encoding must match alive bit",
+            );
+        }
+
+        // Glyph table must cover every encoded value the snapshot can
+        // produce (2 entries: 0 = alive, 1 = dead).
+        let glyphs = state.glyph_table();
+        assert_eq!(glyphs.len(), 2, "glyph_table must have 2 entries");
+        for (i, &ct) in snap.creature_types.iter().enumerate() {
+            assert!(
+                (ct as usize) < glyphs.len(),
+                "slot {i}: creature_type {ct} out of glyph_table range",
+            );
+        }
+
+        // Default viewport must bound the spawn area on x,y. Live ants
+        // sit on a 7×8 grid step 0.6 (extent ±2.1) and food piles on a
+        // 4×5 grid step 0.8 (extent ±2.4); ±4 viewport must contain
+        // both.
+        let view = state.default_viewport().expect("viewport");
+        assert!(view.0.x <= -2.5 && view.1.x >= 2.5, "viewport x must contain spawn area");
+        assert!(view.0.y <= -2.5 && view.1.y >= 2.5, "viewport y must contain spawn area");
+    }
+
+    /// After ticking long enough for the EnergyDecay path to fire,
+    /// SOME state must change vs the construction-time snapshot. With
+    /// `decay_rate=4.0` and `INITIAL_ENERGY=50`, ants in food-poor
+    /// slots starve in ≤13 ticks (50/4 = 12.5); a comfortable ceiling
+    /// of 200 ticks gives the spatial walk + ApplyEat + EnergyDecay
+    /// chain plenty of room to either move ants (position drift) OR
+    /// kill at least one (alive bit flip). Proves the snapshot
+    /// reflects live GPU state, not a cached construction-time copy.
+    #[test]
+    fn snapshot_after_tick_reflects_state_change() {
+        let mut state = ForagingRealState::new(0xCAFE_F00D, INITIAL_ANTS);
+        let initial = state.snapshot();
+        let initial_alive_total: u32 = initial.alive.iter().sum();
+
+        for _ in 0..200 {
+            state.step();
+        }
+
+        let snap = state.snapshot();
+        let n = SLOT_CAP as usize;
+        assert_eq!(snap.positions.len(), n);
+        assert_eq!(snap.alive.len(), n);
+        assert_eq!(snap.creature_types.len(), n);
+
+        let any_moved = initial.positions.iter().zip(snap.positions.iter()).any(|(a, b)| {
+            (a.x - b.x).abs() > 1e-6
+                || (a.y - b.y).abs() > 1e-6
+                || (a.z - b.z).abs() > 1e-6
+        });
+        let alive_total: u32 = snap.alive.iter().sum();
+        let alive_changed = alive_total != initial_alive_total;
+        assert!(
+            any_moved || alive_changed,
+            "after 200 ticks, expected position drift OR an alive-bit flip; \
+             saw all positions identical and alive total unchanged ({initial_alive_total})",
+        );
+    }
+
+    /// Diagnostic probe — confirms the alive bitmap actually flips
+    /// (births and/or deaths) within the test horizon. Not a strict
+    /// assertion: just prints the first-flip tick on cargo test
+    /// `--nocapture` so future fixture authors can sanity-check the
+    /// lifecycle path without re-instrumenting. Marked `#[ignore]` so
+    /// CI doesn't pay the extra ~200 GPU steps on every run.
+    #[test]
+    #[ignore]
+    fn probe_alive_bit_flips_within_200_ticks() {
+        let mut state = ForagingRealState::new(0xCAFE_F00D, INITIAL_ANTS);
+        let initial_alive: u32 = state.snapshot().alive.iter().sum();
+        eprintln!(
+            "PROBE tick=0 alive_total={initial_alive} ants={} food={}",
+            state.count_alive_ants(), state.count_alive_food(),
+        );
+        let mut first_flip: Option<u32> = None;
+        for tick in 1..=200u32 {
+            state.step();
+            let alive: u32 = state.snapshot().alive.iter().sum();
+            if alive != initial_alive && first_flip.is_none() {
+                first_flip = Some(tick);
+                eprintln!(
+                    "PROBE first alive flip at tick={tick} alive_total={alive} \
+                     ants={} food={} births={} deaths={}",
+                    state.count_alive_ants(), state.count_alive_food(),
+                    state.births_so_far(), state.deaths_so_far(),
+                );
+            }
+        }
+        eprintln!(
+            "PROBE final first_flip={first_flip:?} births_total={} deaths_total={}",
+            state.births_so_far(), state.deaths_so_far(),
+        );
+    }
 }
