@@ -825,12 +825,18 @@ pub enum FoldKind {
 // See `crates/dsl_ast/src/ability_parser.rs` for the parser.
 // ---------------------------------------------------------------------------
 
-/// A single `.ability` source file. Currently holds only `ability` decls;
-/// future slices add `passive`, `template`, and `structure`.
+/// A single `.ability` source file. Wave 1.0 only held `ability` decls;
+/// Wave 1.1 added `passive` blocks. `template` / `structure` top-level
+/// blocks are still deferred (Waves 1.2 / 1.3).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct AbilityFile {
     pub abilities: Vec<AbilityDecl>,
-    // Future (Wave 1.1+): passives, templates, structures.
+    /// Wave 1.1: top-level `passive <Name> { ... }` blocks per spec §5.
+    /// The parser populates this in source order; lowering of passives
+    /// is deferred to Wave 2+ (`dsl_compiler::ability_lower` errors with
+    /// `PassiveBlockNotImplemented` if this vec is non-empty).
+    pub passives: Vec<PassiveDecl>,
+    // Future (Waves 1.2 / 1.3): templates, structures.
 }
 
 /// A parsed `ability <Name> { headers... effects... }` block.
@@ -848,11 +854,11 @@ pub struct AbilityDecl {
     pub span: Span,
 }
 
-/// One header property line inside an `ability` block. Header keys cap out
-/// at the five Wave 1.0 properties (target / range / cooldown / cast /
-/// hint). Other spec-listed headers (cost / charges / recharge / toggle /
-/// recast / morph / form / require_skill / require_tool / zone_tag /
-/// unstoppable) are deferred — encountering one is a parse error today.
+/// One header property line inside an `ability` block. Wave 1.0 covered
+/// the five core properties (`target`, `range`, `cooldown`, `cast`,
+/// `hint`); Wave 1.1 added `cost`, `charges`, `recharge`, `toggle` per
+/// spec §4.2. Still deferred: `recast` / `morph` / `form` /
+/// `require_skill` / `require_tool` / `zone_tag` / `unstoppable`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum AbilityHeader {
     Target(TargetMode),
@@ -860,6 +866,62 @@ pub enum AbilityHeader {
     Cooldown(Duration),
     Cast(Duration),
     Hint(HintName),
+    /// Wave 1.1: resource cost (mana / stamina / hp / gold). Spec §4.2
+    /// describes it as `cost: int` with the "mana/resource" predicate.
+    /// We accept either a bare number (default resource = mana, matching
+    /// the existing LoL hero corpus) or `cost: <amount> <resource>` /
+    /// `cost: <amount>% <resource>` for the full form. Item costs are
+    /// reserved for Wave 4.
+    Cost(CostSpec),
+    /// Wave 1.1: max stored charges (per-agent SoA in the future). Spec
+    /// §4.2 lists `charges: int`.
+    Charges(u32),
+    /// Wave 1.1: per-charge regen time. Spec §4.2 lists `recharge:
+    /// duration` separately from `cooldown:`.
+    Recharge(Duration),
+    /// Wave 1.1: marker (no value) — declares this ability as a toggle.
+    /// Spec §4.2 lists `toggle / toggle_cost` (flag / f32); the
+    /// `toggle_cost` companion field is deferred to Wave 2+ (its
+    /// per-tick drain semantics need engine-side accounting we don't
+    /// have yet).
+    Toggle,
+}
+
+/// Resource cost expression for the `cost:` header.
+///
+/// Spec §4.2 lists `cost: int` as a "mana/resource gate in mask
+/// predicate". This struct generalises the surface to four resources
+/// with either a flat amount or a percent of max.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct CostSpec {
+    pub resource: CostResource,
+    pub amount:   CostAmount,
+    pub span:     Span,
+}
+
+/// The resource a `cost:` header debits from.
+///
+/// Per spec §4.2 the listed resources are mana / stamina / hp / gold.
+/// Item costs (`consume <item> <n>`) live in their own effect verb and
+/// are not exposed via `cost:`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum CostResource {
+    Mana,
+    Stamina,
+    Hp,
+    Gold,
+}
+
+/// Cost magnitude — either a flat scalar or a percent of the resource's
+/// max. The percent form preserves the percentage-scalar convention the
+/// Wave 1.0 parser already uses for `EffectArg::Percent` (e.g. `25%`
+/// stores `25.0`, NOT `0.25`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub enum CostAmount {
+    Flat(f32),
+    /// Percentage scalar, matching `EffectArg::Percent`. `25% mana`
+    /// stores `25.0`.
+    PercentOfMax(f32),
 }
 
 /// One effect statement: a verb name plus zero-or-more positional args.
@@ -930,4 +992,46 @@ pub enum HintName {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Duration {
     pub millis: u32,
+}
+
+// ---------------------------------------------------------------------------
+// Wave 1.1: passive top-level form (spec §5).
+// ---------------------------------------------------------------------------
+
+/// A parsed `passive <Name> { headers... effects... }` block. The body
+/// shape mirrors `AbilityDecl` — passives reuse `EffectStmt` (spec §5
+/// states the body is a regular effect block). The four trigger event
+/// kinds in §5.2 are kept as a string for now (24+ values; a finite enum
+/// would lock us in too early — Wave 2 lowering will catalog them).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PassiveDecl {
+    pub name:    String,
+    pub headers: Vec<PassiveHeader>,
+    pub effects: Vec<EffectStmt>,
+    pub span:    Span,
+}
+
+/// One header property line inside a `passive` block.
+///
+/// Spec §5 lists `trigger:` (event kind), an optional `cooldown:`
+/// (between successive trigger fires), and an optional `range:`
+/// (modifier on the trigger predicate). `hint:` reuses ability §4.2
+/// shape. Spec §5.2 also mentions optional modifiers in parens
+/// (`by:`, type filters); those are not parsed in Wave 1.1 — they fall
+/// through `skip_modifier_tail` like the effect-line modifiers do.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum PassiveHeader {
+    /// `trigger: on_damage_taken | on_kill | on_ability_use | periodic
+    /// | on_voxel_placed | …` (24 kinds in §5.2 plus the `periodic`
+    /// special-case). Stored as a string until lowering catalogs them.
+    Trigger(String),
+    /// `cooldown:` between successive trigger fires. Optional —
+    /// triggerless passives have no cooldown.
+    Cooldown(Duration),
+    /// `range:` filter on the trigger predicate (per §5.3 "by-agent /
+    /// range filters compile to mask predicate clauses"). Optional.
+    Range(f32),
+    /// Tag/category — same shape and semantics as ability `hint:` per
+    /// spec §4.2.
+    Hint(HintName),
 }
