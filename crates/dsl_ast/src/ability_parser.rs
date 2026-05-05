@@ -1110,7 +1110,7 @@ fn parse_effect(c: &mut Cursor) -> PResult<EffectStmt> {
             return Err(ParseErr::at(
                 here(c),
                 format!(
-                    "unknown modifier or trailing token `{}` in effect `{verb}`; expected one of: in / [TAG: …] / for / when / chance / stacking / + N% stat / until_caster_dies / damageable_hp / {{ nested }}",
+                    "unknown modifier or trailing token `{}` in effect `{verb}`; expected one of: in / [TAG: …] / for / when / chance / stacking / + N% stat / until_caster_dies / damageable_hp / break_on_damage / {{ nested }}",
                     peek_word_for_error(c)
                 ),
             ));
@@ -1199,10 +1199,22 @@ fn parse_effect(c: &mut Cursor) -> PResult<EffectStmt> {
             if lifetime.is_some() {
                 return Err(ParseErr::at(
                     Span::new(mod_start, c.pos),
-                    format!("duplicate lifetime modifier on effect `{verb}` — at most one of `until_caster_dies` / `damageable_hp` allowed"),
+                    format!("duplicate lifetime modifier on effect `{verb}` — at most one of `until_caster_dies` / `damageable_hp` / `break_on_damage` allowed"),
                 ));
             }
             lifetime = Some(parse_damageable_hp(c)?);
+            continue;
+        }
+        if starts_with_keyword(c, "break_on_damage") {
+            if lifetime.is_some() {
+                return Err(ParseErr::at(
+                    Span::new(mod_start, c.pos),
+                    format!("duplicate lifetime modifier on effect `{verb}` — at most one of `until_caster_dies` / `damageable_hp` / `break_on_damage` allowed"),
+                ));
+            }
+            let s = c.pos;
+            c.bump("break_on_damage".len());
+            lifetime = Some(EffectLifetime::BreakOnDamage { span: Span::new(s, c.pos) });
             continue;
         }
         // Defensive: shouldn't be reachable because is_modifier_start
@@ -1252,6 +1264,7 @@ fn is_modifier_start(c: &Cursor) -> bool {
         || starts_with_keyword(c, "stacking")
         || starts_with_keyword(c, "until_caster_dies")
         || starts_with_keyword(c, "damageable_hp")
+        || starts_with_keyword(c, "break_on_damage")
 }
 
 /// After hitting a `\n` inside an effect statement, peek past the

@@ -1165,6 +1165,12 @@ pub enum EffectLifetime {
     /// `damageable_hp(N)` — voxel-style damage budget; effect dies
     /// when this HP pool is depleted.
     DamageableHp { hp: f32, span: Span },
+    /// `break_on_damage` — effect ends when caster takes damage.
+    /// Used by stealth-style abilities (LoL: Akali/Elise/MonkeyKing
+    /// stealth-for-3s-break_on_damage). Spec drift: not in spec §6.1
+    /// originally; surface added 2026-05-04 to close the LoL-corpus
+    /// long tail (#85 follow-up — last 25/172 files used this token).
+    BreakOnDamage { span: Span },
 }
 
 /// One positional argument in an effect statement. The Wave 1.0 parser

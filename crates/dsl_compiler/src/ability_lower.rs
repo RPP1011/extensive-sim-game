@@ -488,6 +488,7 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
         let span = match lt {
             dsl_ast::ast::EffectLifetime::UntilCasterDies { span } => *span,
             dsl_ast::ast::EffectLifetime::DamageableHp { span, .. } => *span,
+            dsl_ast::ast::EffectLifetime::BreakOnDamage { span } => *span,
         };
         return Err(LowerError::ModifierNotImplemented {
             verb:     stmt.verb.clone(),
