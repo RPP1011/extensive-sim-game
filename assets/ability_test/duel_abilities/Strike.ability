@@ -1,6 +1,12 @@
 // Wave 1 acceptance: most basic single-target damage ability.
 // Lowers to AbilityProgram { gate: { cooldown_ticks: 10, range: 5.0 },
-//                            effects: [EffectOp::Damage { amount: 15.0 }] }
+//                            effects: [EffectOp::Damage { amount: 30.0 }] }
+//
+// Damage tuning rationale (2026-05-04 #85 retune): bumped from 15 to
+// 30 so combat resolves by tick ~150 even with shield_hp absorption
+// active (50-shield ShieldUp cycles absorb ~1.6 strikes per cooldown
+// at this damage; net dmg per 120-tick cycle ≈ 60 hp; combat
+// converges in ~140 ticks).
 
 ability Strike {
     target: enemy
@@ -8,5 +14,5 @@ ability Strike {
     cooldown: 1s
     hint: damage
 
-    damage 15
+    damage 30
 }

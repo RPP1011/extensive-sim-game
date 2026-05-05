@@ -70,7 +70,7 @@ pub fn assert_ability_registry_matches_sim_constants() {
     let built = dsl_compiler::ability_registry::build_registry(&files)
         .expect("build_registry over duel_abilities corpus");
 
-    // ---- Strike: cooldown 10 ticks, range 5.0, hostile_only, damage 15.0 ----
+    // ---- Strike: cooldown 10 ticks, range 5.0, hostile_only, damage 30.0 ----
     let strike_id = *built.names.get("Strike")
         .expect("Strike registered in name table");
     let strike = built.registry.get(strike_id)
@@ -93,16 +93,16 @@ pub fn assert_ability_registry_matches_sim_constants() {
     }
     assert_eq!(
         strike.effects.len(), 1,
-        "Strike must have exactly one effect (damage 15)",
+        "Strike must have exactly one effect (damage 30)",
     );
     match &strike.effects[0] {
         EffectOp::Damage { amount } => assert_eq!(
-            *amount, 15.0,
-            "Strike damage must be 15.0 — .ability `damage 15`, .sim \
+            *amount, 30.0,
+            "Strike damage must be 30.0 — .ability `damage 30`, .sim \
              config.combat.strike_damage",
         ),
         other => panic!(
-            "Strike effect[0]: expected Damage(15.0), got {other:?}",
+            "Strike effect[0]: expected Damage(30.0), got {other:?}",
         ),
     }
 

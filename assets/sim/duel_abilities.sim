@@ -72,7 +72,7 @@ config combat {
   // Hand-mirrored from .ability files. Binding check in
   // crates/duel_abilities_runtime asserts these match the lowered
   // AbilityProgram values from assets/ability_test/duel_abilities/.
-  strike_damage:    f32 = 15.0,   // Strike.ability: damage 15
+  strike_damage:    f32 = 30.0,   // Strike.ability: damage 30 (#85 retune)
   shieldup_amount:  f32 = 50.0,   // ShieldUp.ability: shield 50
   mend_amount:      f32 = 25.0,   // Mend.ability: heal 25
   cooldown_strike:  u32 = 10,     // Strike.ability: cooldown 1s == 10 ticks
@@ -128,19 +128,22 @@ verb Mend(self, target: Agent) =
   emit Healed { source: self, target: self, amount: config.combat.mend_amount }
   score 300.0
 
-// Apply damage. Mirror of duel_1v1.sim's ApplyDamage.
-// TODO: shield_hp damage absorption belongs here (drain shield_hp
-// before bleeding into hp). The natural `min(s, a)` form now compiles
-// cleanly thanks to the WGSL math prelude (#84 closed) — the remaining
-// blocker is the scoring equilibrium: with absorption active and the
-// current scores (Strike 200-target.hp, ShieldUp 250, Mend 300), agent
-// 1 takes 0 damage over 200 ticks because both agents prefer self-heal
-// /self-shield over Strike. Filed as #85: needs score retuning so combat
-// still resolves by tick 200 with shield absorption active.
+// Apply damage with shield_hp absorption.
+//
+// Real shield semantics: incoming damage drains shield_hp before any
+// of it bleeds through to hp. With strike_damage retuned from 15 → 30
+// (#85), the per-cycle math works: 50-shield ShieldUp absorbs ~1.6
+// strikes; net dmg per 120-tick cycle ≈ 60 hp; combat resolves
+// around tick 140. Uses pairwise `min()` — emits min_f32 in WGSL,
+// resolved via the math-stdlib prelude wired in #84.
 @phase(post)
 physics ApplyDamage {
   on Damaged { source: _, target: t, amount: a } {
-    let new_hp = agents.hp(t) - a;
+    let s = agents.shield_hp(t);
+    let absorbed = min(s, a);
+    let bleed = a - absorbed;
+    agents.set_shield_hp(t, s - absorbed);
+    let new_hp = agents.hp(t) - bleed;
     agents.set_hp(t, new_hp);
     if (new_hp <= 0.0) {
       agents.set_alive(t, false);
