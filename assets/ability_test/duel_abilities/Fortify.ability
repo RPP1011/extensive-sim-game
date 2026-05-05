@@ -1,0 +1,14 @@
+// Wave 2 piece N: DamageModify E2E demo. Caster gains a 5-second
+// window during which incoming damage is scaled to 50%. Lowers to
+// AbilityProgram { effects: [EffectOp::DamageModify{duration_ticks: 50,
+// multiplier_q8: 128}] }. The .sim verb writes damage_taken_mult_q8 +
+// damage_taken_mult_expires_at_tick; ApplyDamage reads target's
+// damage_taken_mult and scales bleed by mult_q8 / 256.0 before
+// subtracting from hp.
+
+ability Fortify {
+    target: self
+    cooldown: 8s
+
+    damage_modify 0.5 5s
+}

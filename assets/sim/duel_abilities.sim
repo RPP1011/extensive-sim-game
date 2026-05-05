@@ -88,6 +88,19 @@ event SetLifesteal {
   expires_at: u32,
 }
 
+// Wave 2 piece N: DamageModify E2E demo. Fortify emits SetDamageMod
+// as a state-set event; the new ApplyDamageModActivation chronicle
+// drains it into the per-agent damage_taken_mult_q8 +
+// damage_taken_mult_expires_at_tick SoA fields. Once active,
+// ApplyDamage's TARGET lookup scales bleed-through damage by
+// `mult_q8/256` before subtracting from hp.
+@replayable @gpu_amenable
+event SetDamageMod {
+  target_agent: AgentId,
+  mult_q8:      i16,
+  expires_at:   u32,
+}
+
 entity Combatant : Agent {
   pos: vec3,
   vel: vec3,
@@ -114,6 +127,10 @@ config combat {
   vampirize_dur:     u32 = 50,    // Vampirize.ability: lifesteal duration 5s = 50 ticks
   cooldown_vampirize: u32 = 80,   // Vampirize.ability: cooldown 8s
   hp_vampire_floor:  f32 = 30.0,  // only Vampirize when hurt enough to want it
+  fortify_mult_q8:   i16 = 128,   // Fortify.ability: damage_modify 0.5 → q8 = 128
+  fortify_dur:       u32 = 50,    // Fortify.ability: damage_modify duration 5s = 50 ticks
+  cooldown_fortify:  u32 = 80,    // Fortify.ability: cooldown 8s
+  hp_fortify_floor:  f32 = 70.0,  // pre-emptive: Fortify when hurt-not-low (above hp_vampire_floor)
 }
 
 // Strike — cooldown 10 ticks, range gate (range field stays declared but
@@ -222,6 +239,26 @@ verb Vampirize(self, target: Agent) =
                       expires_at: world.tick + config.combat.vampirize_dur }
   score 350.0
 
+// Fortify — Wave 2 piece N: DamageModify E2E demo. Self-cast, cooldown
+// 80 ticks (8s). Emits SetDamageMod to write the damage_taken_mult SoA
+// fields (mult_q8 = 128 = 0.5x, expires_at = world.tick + 50). Gated on
+// `self.hp < hp_fortify_floor=70` so it fires PRE-EMPTIVELY when
+// noticeably hurt — but not so low (< 30) that Vampirize takes over.
+//
+// Score 275 sits ABOVE ShieldUp (250) so it preempts when in the
+// "hurt-not-low" band, but BELOW Mend (300) and Vampirize (350) so the
+// healing/lifesteal verbs win when their lower-HP gates trigger.
+// Strike's pair-field score (200..100) and Bleed (75) stay below.
+verb Fortify(self, target: Agent) =
+  action FortifyAction
+  when (self.alive
+        && target == self
+        && (world.tick % config.combat.cooldown_fortify == 0)
+        && self.hp < config.combat.hp_fortify_floor)
+  emit SetDamageMod { target_agent: self, mult_q8: config.combat.fortify_mult_q8,
+                      expires_at: world.tick + config.combat.fortify_dur }
+  score 275.0
+
 // Apply damage with shield_hp absorption.
 //
 // Real shield semantics: incoming damage drains shield_hp before any
@@ -235,7 +272,21 @@ physics ApplyDamage {
   on Damaged { source: src, target: t, amount: a } {
     let s = agents.shield_hp(t);
     let absorbed = min(s, a);
-    let bleed = a - absorbed;
+    let bleed_raw = a - absorbed;
+    // Wave 2 piece N — DamageModify demo. Read TARGET's damage_taken
+    // mult window and, if active, scale bleed-through damage by
+    // `mult/256` before subtracting from hp. The SoA default is 256
+    // (1.0×) — the expiry-tick gate keeps an EXPIRED buff from
+    // applying. The DSL auto-promotes the i16-backed
+    // `damage_taken_mult_q8` (read as i32) to f32 in mixed arithmetic
+    // via promote_int_to_f32 (cg/lower/expr).
+    let mult_q8 = agents.damage_taken_mult_q8(t);
+    let mult_expires = agents.damage_taken_mult_expires_at_tick(t);
+    let bleed = if (mult_expires > world.tick) {
+      bleed_raw * mult_q8 / 256.0
+    } else {
+      bleed_raw
+    };
     agents.set_shield_hp(t, s - absorbed);
     let new_hp = agents.hp(t) - bleed;
     agents.set_hp(t, new_hp);
@@ -301,6 +352,18 @@ physics ApplyLifestealActivation {
   on SetLifesteal { caster: c, frac_q8: f, expires_at: e } {
     agents.set_lifesteal_frac_q8(c, f);
     agents.set_lifesteal_expires_at_tick(c, e);
+  }
+}
+
+// Apply damage_modify activation — drains SetDamageMod events emitted
+// by Fortify and writes the per-agent damage_taken_mult SoA (mult_q8 +
+// expires timestamp). ApplyDamage reads these on each Damaged event to
+// scale incoming bleed-through damage by `mult_q8/256`.
+@phase(post)
+physics ApplyDamageModActivation {
+  on SetDamageMod { target_agent: t, mult_q8: m, expires_at: e } {
+    agents.set_damage_taken_mult_q8(t, m);
+    agents.set_damage_taken_mult_expires_at_tick(t, e);
   }
 }
 
