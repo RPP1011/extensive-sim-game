@@ -1098,8 +1098,8 @@ pub enum TargetMode {
     Global,
 }
 
-/// Hint enum used for scoring metadata only (spec §4.2). Six variants
-/// matching the existing `.ability` corpus.
+/// Hint enum used for scoring metadata only (spec §4.2). Seven variants
+/// matching the existing `.ability` corpus + the LoL-corpus `buff` token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum HintName {
     Damage,
@@ -1108,6 +1108,11 @@ pub enum HintName {
     Utility,
     Heal,
     Economic,
+    /// LoL corpus uses `hint: buff` for ally-empowering abilities (e.g.
+    /// haste, damage amp). Lowering routes Buff → AbilityHint::Utility
+    /// today; if the engine grows a dedicated `Buff` hint variant
+    /// (schema-hash bump), update both arms.
+    Buff,
 }
 
 /// A normalized duration in milliseconds. The lexer accepts `5s`,

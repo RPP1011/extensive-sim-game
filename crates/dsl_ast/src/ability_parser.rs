@@ -492,11 +492,12 @@ fn parse_hint(c: &mut Cursor) -> PResult<HintName> {
         "utility" => HintName::Utility,
         "heal" => HintName::Heal,
         "economic" => HintName::Economic,
+        "buff" => HintName::Buff,
         other => {
             return Err(ParseErr::at(
                 Span::new(name_span_start, name_span_start + other.len()),
                 format!(
-                    "unknown hint `{other}` — expected one of: damage, defense, crowd_control, utility, heal, economic"
+                    "unknown hint `{other}` — expected one of: damage, defense, crowd_control, utility, heal, economic, buff"
                 ),
             ));
         }

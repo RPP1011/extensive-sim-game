@@ -526,6 +526,12 @@ fn map_hint(h: &HintName, decl: &AbilityDecl) -> Result<AbilityHint, LowerError>
         // hint deterministic; if/when the engine grows a `Heal` variant
         // (schema-hash bump) update both arms.
         HintName::Heal => Ok(AbilityHint::Defense),
+        // The engine `AbilityHint` does not carry a `Buff` variant today;
+        // route to `Utility` per `docs/spec/ability_dsl_unified.md §4.2`
+        // (buffs and other ally-empowering effects share the utility
+        // scoring bucket). If/when the engine grows a dedicated `Buff`
+        // variant (schema-hash bump) update both arms.
+        HintName::Buff => Ok(AbilityHint::Utility),
         HintName::Economic => Err(LowerError::HintReserved {
             hint: "economic".to_string(),
             span: decl.span,
