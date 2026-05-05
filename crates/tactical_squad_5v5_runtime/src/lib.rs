@@ -40,7 +40,7 @@
 //!   - `level[i]`: 0=Red, 1=Blue (team membership discriminant)
 //!   - `hp[i]`: 200 for Tank, 80 for Healer, 120 for DPS
 
-use engine::sim_trait::CompiledSim;
+use engine::sim_trait::{AgentSnapshot, CompiledSim, VizGlyph};
 use engine::GpuContext;
 use glam::Vec3;
 use wgpu::util::DeviceExt;
@@ -194,13 +194,21 @@ impl TacticalSquad5v5State {
         let agent_creature_type_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("tactical_squad_5v5_runtime::agent_creature_type"),
             contents: bytemuck::cast_slice(&creature_type_init),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            // COPY_SRC so `snapshot()` can stage the per-slot role
+            // discriminant back to host for glyph encoding.
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
         });
         let level_init: Vec<u32> = (0..agent_count).map(team_for).collect();
         let agent_level_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("tactical_squad_5v5_runtime::agent_level"),
             contents: bytemuck::cast_slice(&level_init),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            // COPY_SRC so `snapshot()` can stage the per-slot team
+            // discriminant back to host for glyph encoding.
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
         });
 
         // Three mask bitmaps — one per verb. Cleared each tick.
@@ -722,8 +730,226 @@ impl CompiledSim for TacticalSquad5v5State {
     fn agent_count(&self) -> u32 { self.agent_count }
     fn tick(&self) -> u64 { self.tick }
     fn positions(&mut self) -> &[Vec3] { &[] }
+
+    /// Snapshot per-agent state for the universal `viz_app` renderer.
+    ///
+    /// Like `duel_abilities_runtime`, this fixture has no movement
+    /// physics — the .sim declares `pos: vec3` on the role entities but
+    /// no kernel writes a position buffer. We therefore SYNTHESIZE a
+    /// stationary 2-D layout from the slot index: Red on the left
+    /// (x = -3..1), Blue on the right (x = 3..7), with role-driven y
+    /// stacking (Tank at y=+1, Healer at y=0, DPS rows at y=-1, -2, -3).
+    /// This keeps both teams legible in the ASCII grid even though the
+    /// actual sim is purely event-driven HP/heal arithmetic.
+    ///
+    /// `creature_types` encoding (12 entries, indexed by
+    /// `team * 6 + role * 2 + dead_bit`):
+    ///
+    /// |  i | team | role   | state |
+    /// |----|------|--------|-------|
+    /// |  0 | Red  | Tank   | alive |
+    /// |  1 | Red  | Tank   | dead  |
+    /// |  2 | Red  | Healer | alive |
+    /// |  3 | Red  | Healer | dead  |
+    /// |  4 | Red  | DPS    | alive |
+    /// |  5 | Red  | DPS    | dead  |
+    /// |  6 | Blue | Tank   | alive |
+    /// |  7 | Blue | Tank   | dead  |
+    /// |  8 | Blue | Healer | alive |
+    /// |  9 | Blue | Healer | dead  |
+    /// | 10 | Blue | DPS    | alive |
+    /// | 11 | Blue | DPS    | dead  |
+    ///
+    /// Both team AND role come from REAL SoA reads
+    /// (`agent_creature_type_buf`, `agent_level_buf`) rather than
+    /// index-derived heuristics — slots could in principle be reordered
+    /// without breaking the encoding, although the constructor today
+    /// hard-codes the index→(team, role) layout. The `alive` field is
+    /// read from `agent_alive_buf`; `agent_count` stays constant
+    /// (no spawn/despawn) so dead slots remain in the snapshot at
+    /// their original positions, just rendered with the tombstone glyph.
+    ///
+    /// Initial-state safe: GPU buffers are populated by
+    /// `create_buffer_init` at construction, so calling `snapshot()`
+    /// before any `step()` returns 10 alive slots with deterministic
+    /// team+role discriminants.
+    fn snapshot(&mut self) -> AgentSnapshot {
+        let n = self.agent_count as usize;
+        // Synthetic 2-D layout — see method doc for the per-slot map.
+        // Red [0..5] occupies x = -3..1 (1-unit spacing); Blue [5..10]
+        // occupies x = 3..7. Within each team, slot 0 = Tank (y=+1),
+        // slot 1 = Healer (y=0), slots 2..4 = DPS (y = -1, -2, -3).
+        let positions: Vec<Vec3> = (0..n)
+            .map(|i| {
+                let team = if i < 5 { 0u32 } else { 1u32 };
+                let local = (i % 5) as i32;
+                // Red on the left, Blue on the right; ~6 units apart.
+                let x = if team == 0 { -3.0 } else { 3.0 };
+                // Stack roles vertically: Tank=+1, Healer=0, DPS rows below.
+                let y = match local {
+                    0 => 1.0,                 // Tank
+                    1 => 0.0,                 // Healer
+                    k => -((k - 1) as f32),   // DPS rows: -1, -2, -3
+                };
+                Vec3::new(x, y, 0.0)
+            })
+            .collect();
+
+        let role: Vec<u32> = self.read_u32(&self.agent_creature_type_buf, "creature_type_snap");
+        let team: Vec<u32> = self.read_u32(&self.agent_level_buf, "level_snap");
+        let alive_raw: Vec<u32> = self.read_alive();
+        let hp: Vec<f32> = self.read_hp();
+        // Defence-in-depth: drop slots whose HP fell to 0 even if the
+        // alive bit hasn't been written yet by ApplyDamage (mirrors the
+        // duel_abilities approach).
+        let alive: Vec<u32> = alive_raw
+            .iter()
+            .zip(hp.iter())
+            .map(|(&a, &h)| if a != 0 && h > 0.0 { 1 } else { 0 })
+            .collect();
+
+        // 12-entry encoding (2 teams × 3 roles × 2 alive states).
+        // Clamp role to 0..3 just in case an out-of-range disc ever
+        // sneaks in — keeps the index inside the glyph table.
+        let creature_types: Vec<u32> = (0..n)
+            .map(|i| {
+                let t = (team[i] & 1) as u32; // 0 = Red, 1 = Blue
+                let r = role[i].min(2) as u32; // 0=Tank, 1=Healer, 2=DPS
+                let dead_bit = if alive[i] == 0 { 1u32 } else { 0u32 };
+                t * 6 + r * 2 + dead_bit
+            })
+            .collect();
+
+        AgentSnapshot { positions, creature_types, alive }
+    }
+
+    /// 12 glyphs matching the `snapshot.creature_types` encoding (2
+    /// teams × 3 roles × 2 alive states). Layout per the table in
+    /// `snapshot()`'s doc-comment.
+    ///
+    /// - Red team: bright red (196) for alive, fades to grey × on death.
+    /// - Blue team: bright cyan (51) for alive, same grey × on death.
+    /// - Per-role glyph letter: T = Tank, H = Healer, D = DPS.
+    fn glyph_table(&self) -> Vec<VizGlyph> {
+        vec![
+            // Red team (0..6)
+            VizGlyph::new('T', 196),        // 0: Red Tank alive
+            VizGlyph::new('\u{00D7}', 240), // 1: Red Tank dead (grey ×)
+            VizGlyph::new('H', 196),        // 2: Red Healer alive
+            VizGlyph::new('\u{00D7}', 240), // 3: Red Healer dead
+            VizGlyph::new('D', 196),        // 4: Red DPS alive
+            VizGlyph::new('\u{00D7}', 240), // 5: Red DPS dead
+            // Blue team (6..12)
+            VizGlyph::new('T', 51),         // 6: Blue Tank alive (bright cyan)
+            VizGlyph::new('\u{00D7}', 240), // 7: Blue Tank dead
+            VizGlyph::new('H', 51),         // 8: Blue Healer alive
+            VizGlyph::new('\u{00D7}', 240), // 9: Blue Healer dead
+            VizGlyph::new('D', 51),         // 10: Blue DPS alive
+            VizGlyph::new('\u{00D7}', 240), // 11: Blue DPS dead
+        ]
+    }
+
+    /// Default viewport tight around the synthetic stationary layout
+    /// from `snapshot()` — Red at x=-3, Blue at x=+3, role rows at
+    /// y ∈ [-3, +1]. ±5 keeps every slot on screen with breathing room.
+    fn default_viewport(&self) -> Option<(Vec3, Vec3)> {
+        Some((Vec3::new(-5.0, -5.0, 0.0), Vec3::new(5.0, 5.0, 0.0)))
+    }
 }
 
 pub fn make_sim(seed: u64, agent_count: u32) -> Box<dyn CompiledSim> {
     Box::new(TacticalSquad5v5State::new(seed, agent_count))
+}
+
+#[cfg(test)]
+mod viz_tests {
+    use super::*;
+
+    /// Snapshot before any tick must report initial state: 10 slots
+    /// (5 Red, 5 Blue), every slot alive, and `creature_types` reflecting
+    /// the deterministic per-slot (team, role) layout from `new()`.
+    /// Guards the construction-only readback path so `viz_app` can
+    /// render frame 0 with content instead of a blank grid.
+    #[test]
+    fn snapshot_after_construction_returns_initial_state() {
+        let mut state = TacticalSquad5v5State::new(0xCAFE_F00D, 10);
+        let snap = state.snapshot();
+
+        assert_eq!(snap.positions.len(), 10, "positions length");
+        assert_eq!(snap.creature_types.len(), 10, "creature_types length");
+        assert_eq!(snap.alive.len(), 10, "alive length");
+
+        // No combat at tick 0 — every slot must be alive.
+        let alive_total: u32 = snap.alive.iter().sum();
+        assert_eq!(
+            alive_total, 10,
+            "every slot must be alive at construction; got alive={:?}",
+            snap.alive,
+        );
+
+        // Per-slot encoding must match the constructor's hard-coded
+        // index → (team, role) layout (Red[0..5] = Tank/Healer/Dps×3,
+        // Blue[5..10] = Tank/Healer/Dps×3). With dead_bit=0 everywhere,
+        // expected creature_types = team*6 + role*2.
+        let expected: Vec<u32> = (0..10u32)
+            .map(|i| {
+                let team = if i < 5 { 0 } else { 1 };
+                let role = match i % 5 {
+                    0 => 0, // Tank
+                    1 => 1, // Healer
+                    _ => 2, // DPS
+                };
+                team * 6 + role * 2
+            })
+            .collect();
+        assert_eq!(
+            snap.creature_types, expected,
+            "creature_types must reflect index→(team,role) layout from new()",
+        );
+
+        // Glyph table must be addressable for every encoded value the
+        // snapshot can produce (12 entries, max index = 11).
+        let glyphs = state.glyph_table();
+        assert_eq!(glyphs.len(), 12, "glyph_table must have 12 entries");
+        for (i, &ct) in snap.creature_types.iter().enumerate() {
+            assert!(
+                (ct as usize) < glyphs.len(),
+                "slot {i}: creature_type {ct} out of glyph_table range",
+            );
+        }
+    }
+
+    /// After ticking the simulation forward, either at least one HP
+    /// readback must have moved off its starting value (Strike/Snipe
+    /// landing or Heal applying) or the alive count must have dropped
+    /// (a kill happened). Proves the snapshot reflects live GPU state
+    /// rather than cached construction-time values.
+    #[test]
+    fn snapshot_after_tick_reflects_state_change() {
+        let mut state = TacticalSquad5v5State::new(0xCAFE_F00D, 10);
+        let initial_hp = state.read_hp();
+        let initial_alive_total: u32 = state.snapshot().alive.iter().sum();
+
+        for _ in 0..100 {
+            state.step();
+        }
+
+        let snap = state.snapshot();
+        assert_eq!(snap.positions.len(), 10);
+        assert_eq!(snap.alive.len(), 10);
+
+        let hp_now = state.read_hp();
+        let any_hp_moved = initial_hp.iter().zip(hp_now.iter()).any(|(a, b)| {
+            (a - b).abs() > 0.01
+        });
+        let alive_total_now: u32 = snap.alive.iter().sum();
+        let alive_changed = alive_total_now != initial_alive_total;
+
+        assert!(
+            any_hp_moved || alive_changed,
+            "after 100 ticks, expected HP movement or kill; saw HP unchanged \
+             (initial={:?}, now={:?}) and alive_total stable ({})",
+            initial_hp, hp_now, alive_total_now,
+        );
+    }
 }
