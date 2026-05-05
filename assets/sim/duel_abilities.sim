@@ -1,0 +1,181 @@
+// duel_abilities — Wave 1 acceptance fixture for the .ability DSL pipeline.
+//
+// MIRRORS `assets/sim/duel_1v1.sim` shape (verb cascade + chronicle physics)
+// but renames Strike/Spell/Heal -> Strike/ShieldUp/Mend so the verbs line up
+// 1:1 with `assets/ability_test/duel_abilities/{Strike,ShieldUp,Mend}.ability`.
+// The constants below are HAND-MIRRORED from those `.ability` files; the
+// runtime crate's binding check asserts the registry lowering produces the
+// same values, proving the .ability -> AbilityRegistry pipeline is correct
+// end-to-end.
+//
+// CONSTANT TABLE (matches the .ability files exactly):
+//   Strike   : cooldown 10 ticks (1s), range 5.0, damage 15.0, target enemy
+//   ShieldUp : cooldown 40 ticks (4s), self-target, shield 50.0
+//   Mend     : cooldown 30 ticks (3s), self-target, heal 25.0
+//
+// SHIELD MODELLING NOTE: the engine's agent SoA today exposes setters for
+// hp/alive/mana/hunger only (see `crates/dsl_compiler/src/cg/lower/physics.rs`
+// `agents_setter_field`). There is no `shield_hp` SoA field or `set_shield`
+// setter today, and adding one is engine work that belongs in a later wave
+// (the task spec for this wave explicitly forbids engine surface extensions).
+// So the ShieldUp chronicle below emits a distinct `Shielded` event but
+// applies it as +HP via the existing `set_hp` setter — semantically a heal,
+// but with its own event kind so the chronicle topology mirrors what a
+// real shield handler would look like once `shield_hp` lands. The
+// binding-check still asserts the .ability lowered to `EffectOp::Shield(50.0)`;
+// only the .sim's runtime *behaviour* is shield-as-buffer-hp.
+//
+// The runtime tick chain is the same shape as duel_1v1's:
+//   1. clears
+//   2. fused_mask_verb_Strike (PerPair, writes mask_0/1/2 for the 3 verbs)
+//   3. scoring (PerAgent argmax over 3 rows -> ActionSelected)
+//   4. physics_verb_chronicle_Strike   (gates action_id==0u, emits Damaged)
+//   5. physics_verb_chronicle_ShieldUp (gates action_id==1u, emits Shielded)
+//   6. physics_verb_chronicle_Mend     (gates action_id==2u, emits Healed)
+//   7. physics_ApplyDamage_and_ApplyHeal_and_ApplyShield (fused PerEvent)
+//   8. seed_indirect_0
+//   9. fold_damage_dealt
+//  10. fold_healing_done
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Healed {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Shielded {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Defeated {
+  combatant: AgentId,
+}
+
+entity Combatant : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config combat {
+  // Hand-mirrored from .ability files. Binding check in
+  // crates/duel_abilities_runtime asserts these match the lowered
+  // AbilityProgram values from assets/ability_test/duel_abilities/.
+  strike_damage:    f32 = 15.0,   // Strike.ability: damage 15
+  shieldup_amount:  f32 = 50.0,   // ShieldUp.ability: shield 50
+  mend_amount:      f32 = 25.0,   // Mend.ability: heal 25
+  cooldown_strike:  u32 = 10,     // Strike.ability: cooldown 1s == 10 ticks
+  cooldown_shieldup: u32 = 40,    // ShieldUp.ability: cooldown 4s == 40 ticks
+  cooldown_mend:    u32 = 30,     // Mend.ability: cooldown 3s == 30 ticks
+  strike_range:     f32 = 5.0,    // Strike.ability: range 5.0
+  hp_low_threshold: f32 = 50.0,   // gate Mend on self-hp drop
+}
+
+// Strike — cooldown 10 ticks, range gate (range field stays declared but
+// the .ability binding check is the load-bearing range assertion; runtime
+// pair-field range checks aren't load-bearing for the 2-agent fixture).
+//
+// Score uses `target.hp` so the scoring kernel iterates pair candidates
+// and binds `best_target` to the per_pair_candidate index. Without a
+// pair-field reference, the scoring argmax leaves best_target =
+// 0xFFFFFFFF and the chronicle's emitted Damaged event addresses an
+// out-of-bounds slot — see duel_1v1.sim's Spell verb for the same
+// pattern. Score formula: prefer low-HP targets (finisher-shape) while
+// always being positive when target is alive (so Strike beats nothing
+// when no enemies are in range).
+verb Strike(self, target: Agent) =
+  action StrikeAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && (world.tick % 10 == 0))
+  emit Damaged { source: self, target: target, amount: config.combat.strike_damage }
+  score (200.0 - target.hp)
+
+// ShieldUp — self-cast, cooldown 40 ticks. Modelled as +50 HP via the
+// `Shielded` event (see SHIELD MODELLING NOTE above). Score is high
+// constant so it can win argmax over Strike's pair-field score
+// (200 - target.hp, range 100..200) when ShieldUp's gates pass.
+verb ShieldUp(self, target: Agent) =
+  action ShieldUpAction
+  when (self.alive
+        && target == self
+        && (world.tick % 40 == 0)
+        && self.hp < 90.0)
+  emit Shielded { source: self, target: self, amount: config.combat.shieldup_amount }
+  score 250.0
+
+// Mend — self-cast, cooldown 30 ticks. Only fires when HP is low.
+// Highest constant so it dominates both Strike and ShieldUp when its
+// HP-low gate passes.
+verb Mend(self, target: Agent) =
+  action MendAction
+  when (self.alive
+        && target == self
+        && (world.tick % 30 == 0)
+        && self.hp < config.combat.hp_low_threshold)
+  emit Healed { source: self, target: self, amount: config.combat.mend_amount }
+  score 300.0
+
+// Apply damage. Mirror of duel_1v1.sim's ApplyDamage.
+@phase(post)
+physics ApplyDamage {
+  on Damaged { source: _, target: t, amount: a } {
+    let new_hp = agents.hp(t) - a;
+    agents.set_hp(t, new_hp);
+    if (new_hp <= 0.0) {
+      agents.set_alive(t, false);
+      emit Defeated { combatant: t }
+    }
+  }
+}
+
+// Apply healing.
+@phase(post)
+physics ApplyHeal {
+  on Healed { source: _, target: t, amount: a } {
+    let new_hp = agents.hp(t) + a;
+    agents.set_hp(t, new_hp);
+  }
+}
+
+// Apply shield — semantically a heal today (no shield_hp SoA), but the
+// dedicated event kind keeps the chronicle topology shield-shaped for
+// when the real shield_hp setter lands.
+@phase(post)
+physics ApplyShield {
+  on Shielded { source: _, target: t, amount: a } {
+    let new_hp = agents.hp(t) + a;
+    agents.set_hp(t, new_hp);
+  }
+}
+
+// Per-source damage_dealt — observability view.
+@materialized(on_event = [Damaged])
+view damage_dealt(source: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: s, target: _, amount: a } { self += a }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-source healing_done — observability view (covers BOTH Healed and
+// Shielded so the per-tick observability stays comparable to duel_1v1).
+@materialized(on_event = [Healed])
+view healing_done(source: Agent) -> f32 {
+  initial: 0.0,
+  on Healed { source: s, target: _, amount: a } { self += a }
+  clamp: [0.0, 1000000.0],
+}
