@@ -41,6 +41,13 @@ proptest = "1.5"
 dhat = "0.3"
 criterion = "0.5"
 hex = "0.4"
+# Wave 1.9 integration test: pack the Wave 1 corpus through the full
+# parse + lower + registry-build + pack pipeline. Dev-only — `engine`
+# itself does not depend on the DSL crates (those depend on `engine`).
+# The cycle is `engine[dev] -> dsl_compiler -> engine[normal]`, which
+# Cargo allows because dev-deps don't propagate to non-test builds.
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }
 
 [[bench]]
 name = "tick_throughput"

@@ -637,6 +637,7 @@ dependencies = [
  "criterion",
  "dhat",
  "dsl_ast",
+ "dsl_compiler",
  "engine_data",
  "glam",
  "hex",

@@ -51,6 +51,7 @@ pub fn schema_hash() -> [u8; 32] {
     h.update(b"AbilityId=NonZeroU32;MAX_EFFECTS_PER_PROGRAM=4");
     h.update(b"Delivery:Instant=0;Area:SingleTarget{range=f32};Gate{cooldown_ticks=u32,hostile_only=bool,line_of_sight=bool};TargetSelector:Target=0,Caster=1");
     h.update(b"EffectOp:Damage=0{amount=f32},Heal=1{amount=f32},Shield=2{amount=f32},Stun=3{duration_ticks=u32},Slow=4{duration_ticks=u32,factor_q8=i16},TransferGold=5{amount=i32},ModifyStanding=6{delta=i16},CastAbility=7{ability=AbilityId,selector=TargetSelector}");
+    h.update(b"PackedAbilityRegistry:SoA{hints=Vec<u32>,cooldown_ticks=Vec<u32>,range=Vec<f32>,gate_flags=Vec<u32>{bit0=hostile_only,bit1=los},delivery_kind=Vec<u32>,effect_kinds=Vec<u32>{stride=MAX_EFFECTS_PER_PROGRAM,empty=0xFF},effect_payload_a=Vec<u32>,effect_payload_b=Vec<u32>,tag_values=Vec<f32>{stride=NUM_ABILITY_TAGS=6}};HINT_NONE_SENTINEL=0xFFFFFFFF;EFFECT_KIND_EMPTY=0xFF");
     h.update(b"MicroTarget:None,Agent,Position,ItemSlot,AbilityIdx,Ability{id=AbilityId,target=AgentId},Query,Opaque");
     h.update(b"EventPacking:QuestPosted:resolution_tag+min_parties_byte,BidPlaced:amount_f32bits,AnnounceEmitted:audience_tag_u8+fact_payload_u64le,RecordMemory:confidence_f32bits,AgentCast:depth_u8");
     h.update(b"Lane:Validation=0,Effect=1,Reaction=2,Audit=3");
