@@ -145,6 +145,14 @@ pub enum EffectOp {
     TransferGold { amount: i64 },
     ModifyStanding { delta: i16 },
     CastAbility { ability: AbilityId, selector: TargetSelector },
+    // Wave 2 piece 1 — control verbs (mirror of
+    // `engine::ability::program::EffectOp::{Root,Silence,Fear,Taunt}`).
+    // Discriminants pinned by the engine schema_hash; this mirror keeps
+    // the DSL eval surface in lockstep.
+    Root { duration_ticks: u32 },
+    Silence { duration_ticks: u32 },
+    Fear { duration_ticks: u32 },
+    Taunt { duration_ticks: u32 },
 }
 
 /// Target selection for `CastAbility` effects.  Mirrors

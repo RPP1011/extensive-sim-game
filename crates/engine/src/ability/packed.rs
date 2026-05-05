@@ -54,8 +54,9 @@ pub const NUM_ABILITY_TAGS: usize = AbilityTag::COUNT;
 
 /// Effect-op kind tag for an empty slot (program had fewer than
 /// `MAX_EFFECTS_PER_PROGRAM` effects). Distinct from any `EffectOp`
-/// discriminant (0..=7 today). GPU dispatch loops break early on this
-/// sentinel.
+/// discriminant (0..=11 today, including the Wave 2 piece 1 control
+/// verbs Root/Silence/Fear/Taunt). GPU dispatch loops break early on
+/// this sentinel.
 pub const EFFECT_KIND_EMPTY: u32 = 0xFF;
 
 // Compile-time guard: `MAX_TAGS_PER_PROGRAM` and `NUM_ABILITY_TAGS` must
@@ -289,6 +290,8 @@ fn pack_delivery(d: Delivery) -> u32 {
 /// * `TransferGold`                -> `(disc, amount as i32 as u32, 0)`
 /// * `ModifyStanding`              -> `(disc, delta as i16 as u32, 0)`
 /// * `CastAbility`                 -> `(disc, ability.raw(), selector as u32)`
+/// * `Root` / `Silence` / `Fear` / `Taunt`
+///                                 -> `(disc, duration_ticks, 0)`  (Wave 2 piece 1; same shape as `Stun`)
 ///
 /// Sign-bearing payloads use sign-preserving bitcasts (`as i16 as u32`)
 /// so a GPU shader doing `bitcast<i32>(payload_a)` recovers the signed
@@ -310,6 +313,11 @@ fn pack_effect(op: EffectOp) -> (u32, u32, u32) {
         EffectOp::CastAbility { ability, selector } => {
             (7, ability.raw(), pack_selector(selector))
         }
+        // Wave 2 piece 1 — control verbs share `Stun`'s shape exactly.
+        EffectOp::Root { duration_ticks } => (8, duration_ticks, 0),
+        EffectOp::Silence { duration_ticks } => (9, duration_ticks, 0),
+        EffectOp::Fear { duration_ticks } => (10, duration_ticks, 0),
+        EffectOp::Taunt { duration_ticks } => (11, duration_ticks, 0),
     }
 }
 
@@ -535,6 +543,73 @@ mod tests {
         assert_eq!(p.effect_payload_a[0], 7);
         // Caster selector == 1.
         assert_eq!(p.effect_payload_b[0], 1);
+    }
+
+    // -- Wave 2 piece 1 — control verb pack tests. Each mirrors the
+    // Stun shape exactly: discriminant + duration in `payload_a`,
+    // `payload_b` zero. ---------------------------------------------------
+    #[test]
+    fn pack_root_payload() {
+        let prog = AbilityProgram::new_single_target(
+            1.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Root { duration_ticks: 20 }],
+        );
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // Root discriminant == 8.
+        assert_eq!(p.effect_kinds[0], 8);
+        assert_eq!(p.effect_payload_a[0], 20);
+        assert_eq!(p.effect_payload_b[0], 0);
+    }
+
+    #[test]
+    fn pack_silence_payload() {
+        let prog = AbilityProgram::new_single_target(
+            1.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Silence { duration_ticks: 30 }],
+        );
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // Silence discriminant == 9.
+        assert_eq!(p.effect_kinds[0], 9);
+        assert_eq!(p.effect_payload_a[0], 30);
+        assert_eq!(p.effect_payload_b[0], 0);
+    }
+
+    #[test]
+    fn pack_fear_payload() {
+        let prog = AbilityProgram::new_single_target(
+            1.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Fear { duration_ticks: 15 }],
+        );
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // Fear discriminant == 10.
+        assert_eq!(p.effect_kinds[0], 10);
+        assert_eq!(p.effect_payload_a[0], 15);
+        assert_eq!(p.effect_payload_b[0], 0);
+    }
+
+    #[test]
+    fn pack_taunt_payload() {
+        let prog = AbilityProgram::new_single_target(
+            1.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Taunt { duration_ticks: 40 }],
+        );
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // Taunt discriminant == 11.
+        assert_eq!(p.effect_kinds[0], 11);
+        assert_eq!(p.effect_payload_a[0], 40);
+        assert_eq!(p.effect_payload_b[0], 0);
     }
 
     #[test]

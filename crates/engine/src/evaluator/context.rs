@@ -102,6 +102,13 @@ fn engine_to_dsl_effect_op(op: &EngineEffectOp) -> DslEffectOp {
                 selector: dsl_selector,
             }
         }
+        // Wave 2 piece 1 — control verbs. Mirror surfaces them through
+        // the DSL eval API at parity; runtime gating (cast/move/intent)
+        // still lands in later Wave 2 pieces.
+        EngineEffectOp::Root    { duration_ticks } => DslEffectOp::Root    { duration_ticks: *duration_ticks },
+        EngineEffectOp::Silence { duration_ticks } => DslEffectOp::Silence { duration_ticks: *duration_ticks },
+        EngineEffectOp::Fear    { duration_ticks } => DslEffectOp::Fear    { duration_ticks: *duration_ticks },
+        EngineEffectOp::Taunt   { duration_ticks } => DslEffectOp::Taunt   { duration_ticks: *duration_ticks },
     }
 }
 

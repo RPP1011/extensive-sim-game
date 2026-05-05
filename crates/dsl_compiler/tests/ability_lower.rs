@@ -140,6 +140,60 @@ fn lower_wave1_corpus_mend() {
 }
 
 // ---------------------------------------------------------------------------
+// Wave 2 piece 1 — control verbs (root / silence / fear / taunt).
+// All four mirror `stun`'s shape: one `<duration>` arg → `EffectOp::*
+// { duration_ticks }` with the same 100ms/tick conversion.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lowers_root() {
+    let src = "ability Snare { target: enemy range: 5 cooldown: 1s root 2s }";
+    let file = parse_ability_file(src).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+    assert_eq!(prog.effects.len(), 1);
+    match prog.effects[0] {
+        EffectOp::Root { duration_ticks } => assert_eq!(duration_ticks, 20, "2s @ 100ms = 20 ticks"),
+        ref other => panic!("expected Root; got {other:?}"),
+    }
+}
+
+#[test]
+fn lowers_silence() {
+    let src = "ability Hush { target: enemy range: 6 cooldown: 1s silence 3s }";
+    let file = parse_ability_file(src).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+    assert_eq!(prog.effects.len(), 1);
+    match prog.effects[0] {
+        EffectOp::Silence { duration_ticks } => assert_eq!(duration_ticks, 30, "3s @ 100ms = 30 ticks"),
+        ref other => panic!("expected Silence; got {other:?}"),
+    }
+}
+
+#[test]
+fn lowers_fear() {
+    let src = "ability Howl { target: enemy range: 4 cooldown: 1s fear 1500ms }";
+    let file = parse_ability_file(src).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+    assert_eq!(prog.effects.len(), 1);
+    match prog.effects[0] {
+        EffectOp::Fear { duration_ticks } => assert_eq!(duration_ticks, 15, "1500ms @ 100ms = 15 ticks"),
+        ref other => panic!("expected Fear; got {other:?}"),
+    }
+}
+
+#[test]
+fn lowers_taunt() {
+    let src = "ability Provoke { target: enemy range: 3 cooldown: 1s taunt 4s }";
+    let file = parse_ability_file(src).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+    assert_eq!(prog.effects.len(), 1);
+    match prog.effects[0] {
+        EffectOp::Taunt { duration_ticks } => assert_eq!(duration_ticks, 40, "4s @ 100ms = 40 ticks"),
+        ref other => panic!("expected Taunt; got {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Error paths
 // ---------------------------------------------------------------------------
 

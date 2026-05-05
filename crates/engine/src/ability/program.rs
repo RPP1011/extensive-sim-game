@@ -121,6 +121,37 @@ pub enum EffectOp {
     /// Re-cast another ability. `selector` picks whose slot becomes the nested
     /// target. Recursion is bounded by `MAX_CASCADE_ITERATIONS = 8`.
     CastAbility { ability: AbilityId, selector: TargetSelector } = 7,
+
+    // --- Control / status verbs (Wave 2 piece 1) ---
+    // These mirror `Stun`'s shape exactly: one absolute-tick expiry stored
+    // in a per-agent SoA mirror (`hot_<verb>_expires_at_tick`). The kernels
+    // that read those mirrors as cast / movement / target gates land in
+    // later Wave 2 pieces; this slice only adds the variants + payload
+    // packing + DSL lowering arms so authoring sites can compile against
+    // the new verbs.
+    /// Set `hot_root_expires_at_tick` on target. Longer root wins (max rule).
+    /// Runtime semantic: target cannot move while `state.tick < expires_at`.
+    Root    { duration_ticks: u32 } = 8,
+
+    /// Set `hot_silence_expires_at_tick` on target. Longer silence wins.
+    /// Runtime semantic: target cannot cast abilities while
+    /// `state.tick < expires_at`.
+    Silence { duration_ticks: u32 } = 9,
+
+    /// Set `hot_fear_expires_at_tick` on target. Longer fear wins.
+    /// Runtime semantic: target movement intent flips to flee-from-source
+    /// while `state.tick < expires_at`.
+    Fear    { duration_ticks: u32 } = 10,
+
+    /// Set `hot_taunt_expires_at_tick` on target. Longer taunt wins.
+    /// Runtime semantic: target's target-selector is forced to the cascade's
+    /// `source` (carried on the Damaged event) while
+    /// `state.tick < expires_at`. The "force-attack-source" coupling
+    /// requires a richer payload than `{ duration_ticks }` alone — this
+    /// slice ships the duration mirror; a follow-up wave wires the
+    /// per-agent `taunt_source: Option<AgentId>` field once the runtime
+    /// gate lands.
+    Taunt   { duration_ticks: u32 } = 11,
 }
 
 /// Coarse ability-category hint, per `.ability` DSL `hint:` field.

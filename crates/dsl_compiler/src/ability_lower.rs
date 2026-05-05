@@ -10,9 +10,10 @@
 //!   then ignored), `hint` (damage/defense/crowd_control/utility/heal —
 //!   `economic` is reserved per §4.2).
 //!
-//! * **Effect verbs covered (8 of the 27 catalog entries):** `damage`,
+//! * **Effect verbs covered (12 of the 27 catalog entries):** `damage`,
 //!   `heal`, `shield`, `stun`, `slow`, `transfer_gold`,
-//!   `modify_standing`, `cast`. These match the existing 8 `EffectOp`
+//!   `modify_standing`, `cast`, plus the Wave 2 piece 1 control verbs
+//!   `root`, `silence`, `fear`, `taunt`. These match the 12 `EffectOp`
 //!   variants on the engine side. Unknown verbs / arity mismatches are
 //!   surfaced as errors.
 //!
@@ -21,7 +22,7 @@
 //!     - Other target modes (ally/self_aoe/ground/direction/vector/global)
 //!       and `economic` hint — error today, wired by their respective
 //!       waves.
-//!     - The remaining 19 EffectOp variants (Knockback, Teleport, ApplyStatus,
+//!     - The remaining 15 EffectOp variants (Knockback, Teleport, ApplyStatus,
 //!       SummonAlly, etc.) — Waves 2-5.
 //!     - Two-phase split validator + ability-name resolution for
 //!       `cast <Name>` — Wave 1.7 (registry wiring).
@@ -177,7 +178,7 @@ impl std::fmt::Display for LowerError {
             LowerError::UnknownEffectVerb { verb, suggestion, .. } => {
                 write!(
                     f,
-                    "unknown effect verb '{verb}'; valid verbs at this stage: damage / heal / shield / stun / slow / transfer_gold / modify_standing / cast"
+                    "unknown effect verb '{verb}'; valid verbs at this stage: damage / heal / shield / stun / slow / transfer_gold / modify_standing / cast / root / silence / fear / taunt"
                 )?;
                 if let Some(s) = suggestion {
                     write!(f, " (did you mean '{s}'?)")?;
@@ -519,6 +520,31 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             let dur = require_duration_arg(stmt, 0)?;
             require_arity(stmt, 1)?;
             Ok(EffectOp::Stun { duration_ticks: duration_to_ticks(dur) })
+        }
+        // Wave 2 piece 1 — four new control verbs. Each takes a single
+        // `<duration>` arg and lowers to the matching `EffectOp::*`
+        // variant; runtime gating (move/cast suppression, flee/taunt
+        // intent rerouting) lands in later Wave 2 pieces alongside the
+        // mask-builder updates.
+        "root" => {
+            let dur = require_duration_arg(stmt, 0)?;
+            require_arity(stmt, 1)?;
+            Ok(EffectOp::Root { duration_ticks: duration_to_ticks(dur) })
+        }
+        "silence" => {
+            let dur = require_duration_arg(stmt, 0)?;
+            require_arity(stmt, 1)?;
+            Ok(EffectOp::Silence { duration_ticks: duration_to_ticks(dur) })
+        }
+        "fear" => {
+            let dur = require_duration_arg(stmt, 0)?;
+            require_arity(stmt, 1)?;
+            Ok(EffectOp::Fear { duration_ticks: duration_to_ticks(dur) })
+        }
+        "taunt" => {
+            let dur = require_duration_arg(stmt, 0)?;
+            require_arity(stmt, 1)?;
+            Ok(EffectOp::Taunt { duration_ticks: duration_to_ticks(dur) })
         }
         "slow" => {
             // `slow <factor:f32> <duration>` — two positional args. The

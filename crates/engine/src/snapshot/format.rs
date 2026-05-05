@@ -515,6 +515,20 @@ fn write_state(w: &mut W, state: &SimState) {
     for &v in state.hot_cooldown_next_ready_tick() {
         w.u32(v);
     }
+    // Wave 2 piece 1 — control-verb expiry mirrors. Same encoding as
+    // `hot_stun_expires_at_tick` above.
+    for &v in state.hot_root_expires_at_tick() {
+        w.u32(v);
+    }
+    for &v in state.hot_silence_expires_at_tick() {
+        w.u32(v);
+    }
+    for &v in state.hot_fear_expires_at_tick() {
+        w.u32(v);
+    }
+    for &v in state.hot_taunt_expires_at_tick() {
+        w.u32(v);
+    }
 
     // Cold scalars (cap-length, one tuple per slot).
     for slot in 0..cap_usize {
@@ -653,6 +667,10 @@ fn read_state(
         state.hot_slow_factor_q8_mut_slice()[slot] = r.i16("hot_slow_factor_q8")?;
     }
     read_u32_slice(r, cap_usize, "hot_cooldown", state.hot_cooldown_next_ready_tick_mut_slice())?;
+    read_u32_slice(r, cap_usize, "hot_root_expires", state.hot_root_expires_at_tick_mut_slice())?;
+    read_u32_slice(r, cap_usize, "hot_silence_expires", state.hot_silence_expires_at_tick_mut_slice())?;
+    read_u32_slice(r, cap_usize, "hot_fear_expires", state.hot_fear_expires_at_tick_mut_slice())?;
+    read_u32_slice(r, cap_usize, "hot_taunt_expires", state.hot_taunt_expires_at_tick_mut_slice())?;
 
     // Cold scalars.
     for slot in 0..cap_usize {
