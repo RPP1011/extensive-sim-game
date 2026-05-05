@@ -20,6 +20,7 @@ pub use ast::{
     DeliverBlock, Duration, EffectArea, EffectArg, EffectChance, EffectCondition, EffectDuration,
     EffectLifetime, EffectScaling, EffectStmt, EffectTag, HintName, MorphBlock, PassiveDecl,
     PassiveHeader, Program, RecastValue, Span, Spanned, StackingMode, TargetMode,
+    TemplateArg, TemplateDecl, TemplateInstantiation, TemplateParam, TemplateParamTy,
 };
 pub use error::ParseError;
 pub use ir::Compilation;

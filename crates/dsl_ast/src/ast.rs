@@ -826,8 +826,8 @@ pub enum FoldKind {
 // ---------------------------------------------------------------------------
 
 /// A single `.ability` source file. Wave 1.0 only held `ability` decls;
-/// Wave 1.1 added `passive` blocks. `template` / `structure` top-level
-/// blocks are still deferred (Waves 1.2 / 1.3).
+/// Wave 1.1 added `passive` blocks. Wave 1.2 adds `template` blocks.
+/// `structure` top-level blocks are still deferred (Wave 1.3).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct AbilityFile {
     pub abilities: Vec<AbilityDecl>,
@@ -836,7 +836,15 @@ pub struct AbilityFile {
     /// is deferred to Wave 2+ (`dsl_compiler::ability_lower` errors with
     /// `PassiveBlockNotImplemented` if this vec is non-empty).
     pub passives: Vec<PassiveDecl>,
-    // Future (Waves 1.2 / 1.3): templates, structures.
+    /// Wave 1.2: top-level `template <Name>(<params>) { ... }` blocks
+    /// per spec §11. Parser populates in source order. Template
+    /// expansion (parameter substitution into `$ident` references in
+    /// the body) lands at Wave 2+ — this slice only stores the parsed
+    /// surface. Lowering of a non-empty `templates` vec surfaces
+    /// `LowerError::TemplateBlockNotImplemented` so authors don't run
+    /// with silently-dropped template definitions.
+    pub templates: Vec<TemplateDecl>,
+    // Future (Wave 1.3): structures.
 }
 
 /// A parsed `ability <Name> { headers... effects... }` block.
@@ -872,6 +880,14 @@ pub struct AbilityDecl {
     /// Wave 1.4: optional `morph { effects } into <Other>` block. `None`
     /// for the LoL corpus (no morph usage); ships for spec coverage.
     pub morph:   Option<MorphBlock>,
+    /// Wave 1.2: optional `: TemplateName(arg1, arg2, ...)` clause sitting
+    /// between the ability name and the `{` body brace. Per spec §11 this
+    /// instantiates a template, supplying positional args; the body block
+    /// can still hold headers / effects that the template lowering layer
+    /// (Wave 2+) merges with the template's expanded effects. `None` for
+    /// the Wave 1 corpus (no instantiation usage). Lowering of a
+    /// `Some(_)` value surfaces `TemplateInstantiationNotImplemented`.
+    pub instantiates: Option<TemplateInstantiation>,
     pub span: Span,
 }
 
@@ -1268,4 +1284,90 @@ pub enum PassiveHeader {
     /// Tag/category — same shape and semantics as ability `hint:` per
     /// spec §4.2.
     Hint(HintName),
+}
+
+// ---------------------------------------------------------------------------
+// Wave 1.2: template top-level form (spec §11) + ability instantiation.
+// ---------------------------------------------------------------------------
+
+/// A parsed `template <Name>(<params>) { <effects> }` block per spec §11.
+///
+/// Body re-uses the existing `EffectStmt` vocabulary (Wave 1.5 modifier
+/// slots included). Parameter substitution (`$ident` references in the
+/// body) happens at expansion time, not parse time. This slice stores
+/// effects with `$ident` tokens parsed as Ident-shaped EffectArgs;
+/// expansion (Wave 2+) replaces them with the bound `TemplateArg`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TemplateDecl {
+    pub name:    String,
+    pub params:  Vec<TemplateParam>,
+    pub effects: Vec<EffectStmt>,
+    pub span:    Span,
+}
+
+/// One `(<param>, <param>, ...)` entry in a template's parameter list.
+///
+/// Spec §11.1 grammar:
+/// ```text
+/// template_param = IDENT [ ":" type_name [ "=" default_val ] ] ;
+/// ```
+/// The type and default are independently optional; an unbound,
+/// non-default param is required at instantiation.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TemplateParam {
+    pub name:    String,
+    pub ty:      Option<TemplateParamTy>,
+    pub default: Option<TemplateArg>,
+    pub span:    Span,
+}
+
+/// Parameter type-tag from spec §11.1 `type_name` — the closed set of
+/// names the spec admits at the type slot of a template parameter.
+///
+/// `Material` and `Structure` reference enum / decl shapes spec'd
+/// elsewhere (`.sim` materials, .ability §12 structures). The set is
+/// intentionally narrow — anything outside this list is a parse error,
+/// to keep the surface tight as more decl kinds land.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub enum TemplateParamTy {
+    Int,
+    Float,
+    Bool,
+    Material,
+    Structure,
+}
+
+/// One positional argument supplied to a template instantiation, or one
+/// default value attached to a template parameter.
+///
+/// Stored shape-tagged because the grammar (§11.1) admits four literal
+/// forms; semantic resolution (e.g. matching a `Material` ident against
+/// the `.sim` material catalog, or coercing `Number(3)` to a typed
+/// `Int`) is template-expansion's job (Wave 2+).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum TemplateArg {
+    /// Numeric literal — int or float; lowering will coerce to template
+    /// param type.
+    Number(f32),
+    /// Bare identifier — usually a Material name (`fire`, `frost`) or a
+    /// Structure. Stored verbatim; semantic resolution at
+    /// template-expansion time.
+    Ident(String),
+    /// String literal `"…"`.
+    String(String),
+    /// Boolean literal `true` / `false`.
+    Bool(bool),
+}
+
+/// `: TemplateName(arg1, arg2, ...)` clause attached to an ability
+/// declaration per spec §11. Stored on the `AbilityDecl` rather than
+/// inlined into the body so callers can detect "this ability is a
+/// template instance" without walking the effect list.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TemplateInstantiation {
+    /// Name of the template being instantiated.
+    pub name: String,
+    /// Positional args; arity / type checking lives at expansion time.
+    pub args: Vec<TemplateArg>,
+    pub span: Span,
 }
