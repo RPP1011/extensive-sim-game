@@ -11,5 +11,5 @@ ability Vampirize {
     target: self
     cooldown: 8s
 
-    lifesteal 0.5 5s
+    lifesteal 0.5 5s [UTILITY: 50] [HEAL: 50]
 }

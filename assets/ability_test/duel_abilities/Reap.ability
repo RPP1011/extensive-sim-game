@@ -13,5 +13,5 @@ ability Reap {
     cooldown: 2s
     hint: damage
 
-    execute 20
+    execute 20 [PHYSICAL: 100]
 }

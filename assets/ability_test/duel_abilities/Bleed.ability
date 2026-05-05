@@ -19,5 +19,5 @@ ability Bleed {
     target: self
     cooldown: 5s
 
-    self_damage 5 + 5% max_hp
+    self_damage 5 + 5% max_hp [PHYSICAL: 50]
 }

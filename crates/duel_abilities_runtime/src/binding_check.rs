@@ -24,7 +24,7 @@
 use std::path::PathBuf;
 
 use engine::ability::{
-    program::{Area, EffectOp, EffectScaling, ScalingStatRef, StackingMode},
+    program::{AbilityTag, Area, EffectOp, EffectScaling, ScalingStatRef, StackingMode},
     PackedAbilityRegistry,
 };
 
@@ -479,6 +479,61 @@ pub fn assert_ability_registry_matches_sim_constants() {
         "Daze chance must be Some(32768) — .ability `chance 50%`, \
          q16 = (0.5 * 65535).round() = 32768, clamped below the \
          CHANCE_NONE_SENTINEL=0xFFFF reservation",
+    );
+
+    // ---- Wave 1.5#1 tag-vocabulary E2E ----
+    //   Each .ability declares a single primary tag (Vampirize is the
+    //   one multi-tag entry: UTILITY + HEAL). Tags lower to
+    //   program.tags via the per-effect aggregator in
+    //   `dsl_compiler::ability_lower` — same-tag values across
+    //   multiple effects sum into one (tag, weight) pair. The .sim
+    //   doesn't read tags today; they're metadata for AI/UI filtering
+    //   and registry-driven dispatch (later). The binding check pins
+    //   the lowered values so corpus drift surfaces immediately.
+    let tag_value = |program: &engine::ability::AbilityProgram, t: AbilityTag| -> f32 {
+        program.tags.iter().find(|(tt, _)| *tt == t).map(|(_, v)| *v).unwrap_or(0.0)
+    };
+    assert_eq!(
+        tag_value(strike, AbilityTag::Physical), 100.0,
+        "Strike must be tagged [PHYSICAL: 100]",
+    );
+    assert_eq!(
+        tag_value(mend, AbilityTag::Heal), 100.0,
+        "Mend must be tagged [HEAL: 100]",
+    );
+    assert_eq!(
+        tag_value(reap, AbilityTag::Physical), 100.0,
+        "Reap must be tagged [PHYSICAL: 100]",
+    );
+    assert_eq!(
+        tag_value(bleed, AbilityTag::Physical), 50.0,
+        "Bleed must be tagged [PHYSICAL: 50] (self-cost half-weight)",
+    );
+    assert_eq!(
+        tag_value(shieldup, AbilityTag::Defense), 100.0,
+        "ShieldUp must be tagged [DEFENSE: 100]",
+    );
+    assert_eq!(
+        tag_value(fortify, AbilityTag::Defense), 100.0,
+        "Fortify must be tagged [DEFENSE: 100]",
+    );
+    assert_eq!(
+        tag_value(daze, AbilityTag::CrowdControl), 100.0,
+        "Daze must be tagged [CROWD_CONTROL: 100]",
+    );
+    // Vampirize is the multi-tag canary — the lowering must keep both
+    // entries distinct (no accidental same-tag aggregation).
+    assert_eq!(
+        tag_value(vampirize, AbilityTag::Utility), 50.0,
+        "Vampirize must be tagged [UTILITY: 50]",
+    );
+    assert_eq!(
+        tag_value(vampirize, AbilityTag::Heal), 50.0,
+        "Vampirize must also be tagged [HEAL: 50] — multi-tag canary",
+    );
+    assert_eq!(
+        vampirize.tags.len(), 2,
+        "Vampirize must have exactly two distinct tags (UTILITY, HEAL)",
     );
 
     // ---- Smoke-pack: prove the GPU SoA layout works on this corpus ----

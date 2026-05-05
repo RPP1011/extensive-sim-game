@@ -14,5 +14,5 @@ ability Strike {
     cooldown: 1s
     hint: damage
 
-    damage 30
+    damage 30 [PHYSICAL: 100]
 }

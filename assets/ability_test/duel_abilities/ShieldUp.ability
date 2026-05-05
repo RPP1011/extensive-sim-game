@@ -15,5 +15,5 @@ ability ShieldUp {
     cooldown: 4s
     hint: defense
 
-    shield 50 stacking stack
+    shield 50 stacking stack [DEFENSE: 100]
 }

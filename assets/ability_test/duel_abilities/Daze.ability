@@ -13,5 +13,5 @@ ability Daze {
     cooldown: 4s
     hint: crowd_control
 
-    stun 1s chance 50%
+    stun 1s chance 50% [CROWD_CONTROL: 100]
 }

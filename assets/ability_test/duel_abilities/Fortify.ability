@@ -18,5 +18,5 @@ ability Fortify {
     target: self
     cooldown: 8s
 
-    damage_modify 0.5 5s stacking refresh
+    damage_modify 0.5 5s stacking refresh [DEFENSE: 100]
 }
