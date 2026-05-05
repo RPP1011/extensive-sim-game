@@ -30,7 +30,7 @@ fn main() {
     // runtime's binding check re-parses these at startup, so a corpus
     // edit needs to surface as a stale-build trigger.
     let corpus_dir = workspace_root.join("assets/ability_test/duel_abilities");
-    for name in ["Strike.ability", "ShieldUp.ability", "Mend.ability", "Bleed.ability", "Reap.ability", "Vampirize.ability", "Fortify.ability"] {
+    for name in ["Strike.ability", "ShieldUp.ability", "Mend.ability", "Bleed.ability", "Reap.ability", "Vampirize.ability", "Fortify.ability", "Daze.ability"] {
         println!("cargo:rerun-if-changed={}", corpus_dir.join(name).display());
     }
 

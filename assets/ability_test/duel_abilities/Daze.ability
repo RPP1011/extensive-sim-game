@@ -1,0 +1,14 @@
+// Wave 2 piece N: Stun E2E demo. Caster stuns target for 1s.
+// Lowers to AbilityProgram { effects: [EffectOp::Stun{duration_ticks:10}] }.
+// The .sim verb writes target's hot_stun_expires_at_tick; offensive
+// verbs gate on `agents.stun_expires_at_tick(self) <= world.tick`,
+// so a stunned target can't cast Strike/Bleed/Reap/Vampirize/etc.
+
+ability Daze {
+    target: enemy
+    range: 5.0
+    cooldown: 4s
+    hint: crowd_control
+
+    stun 1s
+}

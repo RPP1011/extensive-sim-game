@@ -57,6 +57,8 @@ pub fn assert_ability_registry_matches_sim_constants() {
         .expect("read Vampirize.ability");
     let fortify_src = std::fs::read_to_string(corpus.join("Fortify.ability"))
         .expect("read Fortify.ability");
+    let daze_src = std::fs::read_to_string(corpus.join("Daze.ability"))
+        .expect("read Daze.ability");
 
     let files = vec![
         (
@@ -93,6 +95,11 @@ pub fn assert_ability_registry_matches_sim_constants() {
             "Fortify.ability".to_string(),
             dsl_ast::parse_ability_file(&fortify_src)
                 .expect("parse Fortify.ability"),
+        ),
+        (
+            "Daze.ability".to_string(),
+            dsl_ast::parse_ability_file(&daze_src)
+                .expect("parse Daze.ability"),
         ),
     ];
     let built = dsl_compiler::ability_registry::build_registry(&files)
@@ -352,18 +359,65 @@ pub fn assert_ability_registry_matches_sim_constants() {
         ),
     }
 
+    // ---- Daze: cooldown 40 ticks, range 5.0, hostile_only, stun 10 ticks ----
+    //   Wave 2 piece N: Stun E2E demo + FIRST verb-status cast-gate.
+    //   Lowers via `dsl_compiler::ability_lower::lower_effect_stmt`
+    //   ("stun" match arm) to `EffectOp::Stun { duration_ticks: 10 }`
+    //   — `1s` == 10 ticks at the fixed 100ms tick. The .sim verb's own
+    //   `when` clause gates emission on `target.hp > hp_daze_floor`
+    //   (don't waste a stun on a finisher candidate), and the new
+    //   ApplyStun chronicle drains Stunned events into the per-agent
+    //   hot_stun_expires_at_tick SoA field. Every offensive verb's
+    //   `when` clause (Strike/ShieldUp/Mend/Bleed/Reap/Vampirize/
+    //   Fortify/Daze) reads that field via
+    //   `agents.stun_expires_at_tick(self) <= world.tick` and skips
+    //   casting while the window is active.
+    let daze_id = *built.names.get("Daze")
+        .expect("Daze registered in name table");
+    let daze = built.registry.get(daze_id)
+        .expect("Daze resolves to a program");
+    assert_eq!(
+        daze.gate.cooldown_ticks, 40,
+        "Daze cooldown must be 40 ticks (4s) — .sim verb gate \
+         (world.tick % 40 == 0) and .ability `cooldown: 4s` must agree",
+    );
+    assert!(
+        daze.gate.hostile_only,
+        "Daze must be hostile_only — .ability `target: enemy`",
+    );
+    match daze.area {
+        Area::SingleTarget { range } => assert_eq!(
+            range, 5.0,
+            "Daze range must be 5.0 — .ability `range: 5.0`",
+        ),
+    }
+    assert_eq!(
+        daze.effects.len(), 1,
+        "Daze must have exactly one effect (stun 1s)",
+    );
+    match &daze.effects[0] {
+        EffectOp::Stun { duration_ticks } => assert_eq!(
+            *duration_ticks, 10,
+            "Daze stun duration must be 10 ticks (1s) — .ability \
+             `stun 1s`, .sim config.combat.daze_dur",
+        ),
+        other => panic!(
+            "Daze effect[0]: expected Stun(10), got {other:?}",
+        ),
+    }
+
     // ---- Smoke-pack: prove the GPU SoA layout works on this corpus ----
     // PackedAbilityRegistry::pack runs its own per-program packing
     // walk; if the registry contains anything pack can't encode this
     // panics. Confirms the lowering output is consumable by the
     // Wave 1.9 GPU buffer producer. Also verifies SelfDamage (op#17),
-    // Execute (op#16), LifeSteal (op#18), and DamageModify (op#19)
-    // pack cleanly via the Wave 2 piece 3+4 packer arms in
+    // Execute (op#16), LifeSteal (op#18), DamageModify (op#19), and
+    // Stun (op#3) pack cleanly via the Wave 2 piece 3+4 packer arms in
     // `engine::ability::packed::pack_effect_op`.
     let packed = PackedAbilityRegistry::pack(&built.registry);
     assert_eq!(
-        packed.n_abilities, 7,
-        "PackedAbilityRegistry must contain exactly 7 abilities \
-         (Strike, ShieldUp, Mend, Bleed, Reap, Vampirize, Fortify)",
+        packed.n_abilities, 8,
+        "PackedAbilityRegistry must contain exactly 8 abilities \
+         (Strike, ShieldUp, Mend, Bleed, Reap, Vampirize, Fortify, Daze)",
     );
 }
