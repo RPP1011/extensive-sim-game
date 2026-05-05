@@ -352,6 +352,24 @@ pub fn assert_ability_registry_matches_sim_constants() {
             "Reap effect[0]: expected Execute(20.0), got {other:?}",
         ),
     }
+    // Wave 1.5#2 in-shape — Reap declares `in cone(45deg, 5.0)`,
+    // lowered to per_effect_areas[0] = Some(EffectAreaShape {
+    // kind: Cone, args: [45.0, 5.0, 0, 0] }). Cone is the canonical
+    // 2-arg shape (angle_deg, radius); arg ordering matches the spec
+    // §8.1 constructor signature. Like Strike's circle, this is
+    // metadata-only in the 2-agent fixture — the .sim's single-target
+    // verb behavior is unchanged. Adding shape variety to the corpus
+    // so packed-args ordering surfaces if shape parsing ever drifts.
+    assert_eq!(
+        reap.per_effect_areas.len(), 1,
+        "Reap must have one area slot (parallel to one effect)",
+    );
+    assert_eq!(
+        reap.per_effect_areas[0],
+        Some(EffectAreaShape { kind: ShapeKind::Cone, args: [45.0, 5.0, 0.0, 0.0] }),
+        "Reap area must be Cone(45deg, 5.0) — .ability \
+         `in cone(45deg, 5.0)`; spec §8.1 cone(angle_deg, radius)",
+    );
 
     // ---- Vampirize: cooldown 80 ticks, self-target, lifesteal 0.5 5s ----
     //   Wave 2 piece N: LifeSteal E2E demo. Lowers via
