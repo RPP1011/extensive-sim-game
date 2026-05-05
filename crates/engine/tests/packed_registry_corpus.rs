@@ -4,13 +4,16 @@
 //! (`engine::ability::PackedAbilityRegistry::pack`).
 //!
 //! The corpus lives at `assets/ability_test/duel_abilities/{Strike,
-//! ShieldUp, Mend, Bleed}.ability` and exercises the four header / effect
-//! shapes Wave 1+2 ships:
+//! ShieldUp, Mend, Bleed, Reap}.ability` and exercises the five header /
+//! effect shapes Wave 1+2 ships:
 //!   * `Strike`   -> enemy-target + range + cooldown + damage hint
 //!   * `ShieldUp` -> self-target + cooldown + defense hint + shield effect
 //!   * `Mend`     -> self-target + cooldown + heal hint + heal effect
 //!   * `Bleed`    -> self-target + cooldown + self_damage (Wave 2 piece N
 //!                   SelfDamage E2E demo, EffectOp::SelfDamage discriminant 17)
+//!   * `Reap`     -> enemy-target + range + cooldown + execute (Wave 2
+//!                   piece N Execute E2E demo, EffectOp::Execute
+//!                   discriminant 16)
 //!
 //! This test guards the boundary between the DSL pipeline and the GPU-
 //! facing layout: any drift in slot ordering, payload encoding, or
@@ -50,31 +53,34 @@ fn load(name: &str) -> (String, dsl_ast::AbilityFile) {
 
 #[test]
 fn pack_duel_corpus_end_to_end() {
-    // Load the four corpus files; preserve the canonical input order so
+    // Load the five corpus files; preserve the canonical input order so
     // the resulting `AbilityId` slots are deterministic.
     let strike = load("Strike");
     let shield_up = load("ShieldUp");
     let mend = load("Mend");
     let bleed = load("Bleed");
+    let reap = load("Reap");
 
-    let files = vec![strike, shield_up, mend, bleed];
+    let files = vec![strike, shield_up, mend, bleed, reap];
     let built = build_registry(&files).expect("registry build must succeed");
 
-    // Four abilities; name table covers all four.
-    assert_eq!(built.registry.len(), 4);
+    // Five abilities; name table covers all five.
+    assert_eq!(built.registry.len(), 5);
     assert!(built.names.contains_key("Strike"));
     assert!(built.names.contains_key("ShieldUp"));
     assert!(built.names.contains_key("Mend"));
     assert!(built.names.contains_key("Bleed"));
+    assert!(built.names.contains_key("Reap"));
 
     let strike_slot = built.names["Strike"].slot();
     let shield_slot = built.names["ShieldUp"].slot();
     let mend_slot = built.names["Mend"].slot();
     let bleed_slot = built.names["Bleed"].slot();
+    let reap_slot = built.names["Reap"].slot();
 
     let packed = PackedAbilityRegistry::pack(&built.registry);
 
-    assert_eq!(packed.n_abilities, 4);
+    assert_eq!(packed.n_abilities, 5);
 
     // -- Strike: range 5.0, cooldown 1s == 10 ticks, hostile_only set. --
     // Damage value is 30.0 since the #85 retune (re-enabled shield_hp
@@ -133,8 +139,21 @@ fn pack_duel_corpus_end_to_end() {
         "Bleed effect 0 is SelfDamage (discriminant 17)");
     assert_eq!(packed.effect_payload_a[bleed_eff_base], 5.0_f32.to_bits());
 
-    // Delivery is Instant (=0) for all four — no other variant exists.
-    for slot in [strike_slot, shield_slot, mend_slot, bleed_slot] {
+    // -- Reap: cooldown 2s == 20 ticks, range 5.0; enemy-target Execute. --
+    //   Wave 2 piece N Execute E2E demo. Discriminant 16 per
+    //   `engine::ability::packed::pack_effect_op` (matches the schema
+    //   hash entry `Execute=16{hp_threshold=f32}`).
+    assert_eq!(packed.cooldown_ticks[reap_slot], 20);
+    assert_eq!(packed.range[reap_slot], 5.0);
+    assert_eq!(packed.gate_flags[reap_slot], 0b01,
+        "Reap has target: enemy -> hostile_only bit set");
+    let reap_eff_base = reap_slot * MAX_EFFECTS_PER_PROGRAM;
+    assert_eq!(packed.effect_kinds[reap_eff_base], 16,
+        "Reap effect 0 is Execute (discriminant 16)");
+    assert_eq!(packed.effect_payload_a[reap_eff_base], 20.0_f32.to_bits());
+
+    // Delivery is Instant (=0) for all five — no other variant exists.
+    for slot in [strike_slot, shield_slot, mend_slot, bleed_slot, reap_slot] {
         assert_eq!(packed.delivery_kind[slot], 0);
     }
 }

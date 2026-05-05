@@ -16,6 +16,12 @@
 //             (Wave 2 piece N — first SelfDamage E2E demo. The verb
 //              emits a Damaged event with target=self, reusing the
 //              existing ApplyDamage chronicle with shield absorption.)
+//   Reap     : cooldown 20 ticks (2s), range 5.0, execute 20, target enemy
+//             (Wave 2 piece N — Execute E2E demo. Conditional-emit
+//              gated on target.hp < reap_threshold; on fire emits
+//              Defeated drained by the new ApplyDefeat chronicle.
+//              Score 500 dominates every other verb when its finisher
+//              gate is satisfied.)
 //
 // SHIELD MODELLING: `hot_shield_hp: Vec<f32>` lives in the agent SoA
 // (`crates/engine/src/state/mod.rs`); the dsl_compiler exposes
@@ -29,16 +35,18 @@
 //
 // The runtime tick chain is the same shape as duel_1v1's:
 //   1. clears
-//   2. fused_mask_verb_Strike (PerPair, writes mask_0/1/2/3 for the 4 verbs)
-//   3. scoring (PerAgent argmax over 4 rows -> ActionSelected)
+//   2. fused_mask_verb_Strike (PerPair, writes mask_0/1/2/3/4 for the 5 verbs)
+//   3. scoring (PerAgent argmax over 5 rows -> ActionSelected)
 //   4. physics_verb_chronicle_Strike   (gates action_id==0u, emits Damaged)
 //   5. physics_verb_chronicle_ShieldUp (gates action_id==1u, emits Shielded)
 //   6. physics_verb_chronicle_Mend     (gates action_id==2u, emits Healed)
 //   7. physics_verb_chronicle_Bleed    (gates action_id==3u, emits Damaged self)
-//   8. physics_ApplyDamage_and_ApplyHeal_and_ApplyShield (fused PerEvent)
-//   9. seed_indirect_0
-//  10. fold_damage_dealt
-//  11. fold_healing_done
+//   8. physics_verb_chronicle_Reap     (gates action_id==4u, emits Defeated)
+//   9. physics_ApplyDamage_and_ApplyHeal_and_ApplyShield (+ApplyDefeat
+//      if the compiler fuses, otherwise a separate physics_ApplyDefeat)
+//  10. seed_indirect_0
+//  11. fold_damage_dealt
+//  12. fold_healing_done
 
 event Tick { }
 
@@ -85,6 +93,8 @@ config combat {
   cooldown_mend:    u32 = 30,     // Mend.ability: cooldown 3s == 30 ticks
   cooldown_bleed:   u32 = 50,     // Bleed.ability: cooldown 5s == 50 ticks
   bleed_amount:     f32 = 5.0,    // Bleed.ability: self_damage 5
+  reap_threshold:   f32 = 20.0,   // Reap.ability: execute 20
+  cooldown_reap:    u32 = 20,     // Reap.ability: cooldown 2s == 20 ticks
   strike_range:     f32 = 5.0,    // Strike.ability: range 5.0
   hp_low_threshold: f32 = 50.0,   // gate Mend on self-hp drop
   hp_bleed_floor:   f32 = 50.0,   // only Bleed when healthy enough to afford it
@@ -153,6 +163,29 @@ verb Bleed(self, target: Agent) =
   emit Damaged { source: self, target: self, amount: config.combat.bleed_amount }
   score 75.0
 
+// Reap — Wave 2 piece N: Execute E2E demo. Enemy-target, cooldown 20
+// ticks (2s), gates on `target.hp < reap_threshold` so the verb only
+// fires as a finisher. On fire, emits a Defeated event drained by the
+// new ApplyDefeat chronicle.
+//
+// SCORING NOTE: the score formula MUST reference a pair-field (target.hp)
+// so the scoring kernel iterates per_pair_candidate and binds best_target
+// to the actual victim. Without a pair-field reference, best_target stays
+// at the 0xFFFFFFFF sentinel and ApplyDefeat would write `set_alive(SENTINEL)`
+// — same caveat the existing Strike verb documents. `1000 - target.hp`
+// stays comfortably above Mend (300), ShieldUp (250), Strike (200..100),
+// Bleed (75) for any target.hp ∈ [0, 100], so Reap dominates argmax
+// whenever its finisher gate (target.hp < 20) is satisfied.
+verb Reap(self, target: Agent) =
+  action ReapAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && target.hp < config.combat.reap_threshold
+        && (world.tick % config.combat.cooldown_reap == 0))
+  emit Defeated { combatant: target }
+  score (1000.0 - target.hp)
+
 // Apply damage with shield_hp absorption.
 //
 // Real shield semantics: incoming damage drains shield_hp before any
@@ -197,6 +230,19 @@ physics ApplyShield {
   on Shielded { source: _, target: t, amount: a } {
     let new_shield = agents.shield_hp(t) + a;
     agents.set_shield_hp(t, new_shield);
+  }
+}
+
+// Apply defeat — drains Defeated events emitted by Reap (and by any
+// other future verb that wants to kill outright). The existing
+// ApplyDamage block already emits Defeated INLINE on its hp<=0 branch
+// (and sets alive=false there), so this block + ApplyDamage's inline
+// path both idempotently set alive=false. No write conflict — both
+// write the same value.
+@phase(post)
+physics ApplyDefeat {
+  on Defeated { combatant: c } {
+    agents.set_alive(c, false);
   }
 }
 

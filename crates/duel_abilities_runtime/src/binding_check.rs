@@ -51,6 +51,8 @@ pub fn assert_ability_registry_matches_sim_constants() {
         .expect("read Mend.ability");
     let bleed_src = std::fs::read_to_string(corpus.join("Bleed.ability"))
         .expect("read Bleed.ability");
+    let reap_src = std::fs::read_to_string(corpus.join("Reap.ability"))
+        .expect("read Reap.ability");
 
     let files = vec![
         (
@@ -72,6 +74,11 @@ pub fn assert_ability_registry_matches_sim_constants() {
             "Bleed.ability".to_string(),
             dsl_ast::parse_ability_file(&bleed_src)
                 .expect("parse Bleed.ability"),
+        ),
+        (
+            "Reap.ability".to_string(),
+            dsl_ast::parse_ability_file(&reap_src)
+                .expect("parse Reap.ability"),
         ),
     ];
     let built = dsl_compiler::ability_registry::build_registry(&files)
@@ -203,17 +210,56 @@ pub fn assert_ability_registry_matches_sim_constants() {
         ),
     }
 
+    // ---- Reap: cooldown 20 ticks, range 5.0, hostile_only, execute 20.0 ----
+    //   Wave 2 piece N: Execute E2E demo. Lowers via
+    //   `dsl_compiler::ability_lower::lower_effect_stmt` ("execute"
+    //   match arm) to `EffectOp::Execute { hp_threshold: 20.0 }`. The
+    //   .sim verb gates emission on `target.hp < reap_threshold` so the
+    //   chronicle only fires Defeated when the finisher condition holds.
+    let reap_id = *built.names.get("Reap")
+        .expect("Reap registered in name table");
+    let reap = built.registry.get(reap_id).expect("Reap resolves to a program");
+    assert_eq!(
+        reap.gate.cooldown_ticks, 20,
+        "Reap cooldown must be 20 ticks (2s) — .sim verb gate \
+         (world.tick % 20 == 0) and .ability `cooldown: 2s` must agree",
+    );
+    assert!(
+        reap.gate.hostile_only,
+        "Reap must be hostile_only — .ability `target: enemy`",
+    );
+    match reap.area {
+        Area::SingleTarget { range } => assert_eq!(
+            range, 5.0,
+            "Reap range must be 5.0 — .ability `range: 5.0`",
+        ),
+    }
+    assert_eq!(
+        reap.effects.len(), 1,
+        "Reap must have exactly one effect (execute 20)",
+    );
+    match &reap.effects[0] {
+        EffectOp::Execute { hp_threshold } => assert_eq!(
+            *hp_threshold, 20.0,
+            "Reap execute threshold must be 20.0 — .ability \
+             `execute 20`, .sim config.combat.reap_threshold",
+        ),
+        other => panic!(
+            "Reap effect[0]: expected Execute(20.0), got {other:?}",
+        ),
+    }
+
     // ---- Smoke-pack: prove the GPU SoA layout works on this corpus ----
     // PackedAbilityRegistry::pack runs its own per-program packing
     // walk; if the registry contains anything pack can't encode this
     // panics. Confirms the lowering output is consumable by the
     // Wave 1.9 GPU buffer producer. Also verifies SelfDamage (op#17)
-    // packs cleanly via the Wave 2 piece 3 packer arm in
-    // `engine::ability::packed::pack_effect_op`.
+    // and Execute (op#16) pack cleanly via the Wave 2 piece 3 packer
+    // arms in `engine::ability::packed::pack_effect_op`.
     let packed = PackedAbilityRegistry::pack(&built.registry);
     assert_eq!(
-        packed.n_abilities, 4,
-        "PackedAbilityRegistry must contain exactly 4 abilities \
-         (Strike, ShieldUp, Mend, Bleed)",
+        packed.n_abilities, 5,
+        "PackedAbilityRegistry must contain exactly 5 abilities \
+         (Strike, ShieldUp, Mend, Bleed, Reap)",
     );
 }

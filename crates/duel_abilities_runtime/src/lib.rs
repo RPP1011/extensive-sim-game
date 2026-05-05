@@ -29,17 +29,18 @@
 //!
 //! ## Tick chain (mirror of duel_1v1)
 //!
-//! Two `Combatant : Agent` entities (Hero A vs Hero B) with four
-//! abilities (Strike, ShieldUp, Mend, Bleed). Per-tick:
+//! Two `Combatant : Agent` entities (Hero A vs Hero B) with five
+//! abilities (Strike, ShieldUp, Mend, Bleed, Reap). Per-tick:
 //!
-//!   1. clear_tail + clear 4 mask bitmaps + zero scoring_output
+//!   1. clear_tail + clear 5 mask bitmaps + zero scoring_output
 //!   2. fused_mask_verb_Strike — PerPair, writes mask_0 (Strike,
 //!      cooldown=10), mask_1 (ShieldUp, cooldown=40 + self.hp<90),
 //!      mask_2 (Mend, cooldown=30 + self HP < 50), mask_3 (Bleed,
-//!      cooldown=50 + self.hp > 50). Kernel name stays
-//!      `fused_mask_verb_Strike` — the compiler names fused mask
-//!      kernels after the first verb in source order, not all verbs.
-//!   3. scoring — PerAgent argmax over the 4 competing rows
+//!      cooldown=50 + self.hp > 50), mask_4 (Reap, cooldown=20 +
+//!      target.hp < 20). Kernel name stays `fused_mask_verb_Strike` —
+//!      the compiler names fused mask kernels after the first verb in
+//!      source order, not all verbs.
+//!   3. scoring — PerAgent argmax over the 5 competing rows
 //!   4. physics_verb_chronicle_Strike   — gates action_id==0u, emits Damaged
 //!   5. physics_verb_chronicle_ShieldUp — gates action_id==1u, emits Shielded
 //!   6. physics_verb_chronicle_Mend     — gates action_id==2u, emits Healed
@@ -47,13 +48,21 @@
 //!      Damaged{source=self,target=self,amount=5}. Reuses the existing
 //!      ApplyDamage chronicle (no new physics block); shield_hp
 //!      absorbs first, then bleed-through hits hp.
-//!   8. physics_ApplyDamage_and_ApplyHeal_and_ApplyShield — fused PerEvent
-//!      kernel that reads Damaged/Healed/Shielded events and writes
-//!      per-target HP via `agents.set_hp`. On HP<=0 also sets alive=0
-//!      and emits Defeated.
-//!   9. seed_indirect_0
-//!  10. fold_damage_dealt
-//!  11. fold_healing_done
+//!   8. physics_verb_chronicle_Reap     — gates action_id==4u, emits
+//!      Defeated{combatant=target}. Wave 2 piece N Execute E2E demo;
+//!      conditional-emit gated by the verb's `target.hp < threshold`
+//!      `when` clause. Drained by the new ApplyDefeat physics block,
+//!      which the compiler fuses into the existing PerEvent group →
+//!      kernel renamed `physics_ApplyDamage_and_ApplyHeal_and_ApplyShield_and_ApplyDefeat`.
+//!   9. physics_ApplyDamage_and_ApplyHeal_and_ApplyShield_and_ApplyDefeat —
+//!      fused PerEvent kernel that reads Damaged/Healed/Shielded/Defeated
+//!      events. ApplyDamage's hp<=0 branch still emits Defeated INLINE
+//!      and calls `set_alive(t, false)`; ApplyDefeat handles
+//!      Reap-emitted Defeated events the same way. Both paths
+//!      idempotently set alive=false — no write conflict.
+//!  10. seed_indirect_0
+//!  11. fold_damage_dealt
+//!  12. fold_healing_done
 //!
 //! ## Shield modelling note
 //!
@@ -100,11 +109,12 @@ pub struct DuelAbilitiesState {
     agent_shield_hp_buf: wgpu::Buffer,
 
     // -- Mask bitmaps (one per verb in source order: Strike=0,
-    //    ShieldUp=1, Mend=2, Bleed=3) --
+    //    ShieldUp=1, Mend=2, Bleed=3, Reap=4) --
     mask_0_bitmap_buf: wgpu::Buffer, // Strike
     mask_1_bitmap_buf: wgpu::Buffer, // ShieldUp
     mask_2_bitmap_buf: wgpu::Buffer, // Mend
     mask_3_bitmap_buf: wgpu::Buffer, // Bleed (Wave 2 SelfDamage demo)
+    mask_4_bitmap_buf: wgpu::Buffer, // Reap  (Wave 2 Execute demo)
     mask_bitmap_zero_buf: wgpu::Buffer,
     mask_bitmap_words: u32,
 
@@ -126,6 +136,7 @@ pub struct DuelAbilitiesState {
     chronicle_shieldup_cfg_buf: wgpu::Buffer,
     chronicle_mend_cfg_buf: wgpu::Buffer,
     chronicle_bleed_cfg_buf: wgpu::Buffer,
+    chronicle_reap_cfg_buf: wgpu::Buffer,
     apply_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
 
@@ -189,6 +200,7 @@ impl DuelAbilitiesState {
         let mask_1_bitmap_buf = mk_mask("duel_abilities_runtime::mask_1_bitmap");
         let mask_2_bitmap_buf = mk_mask("duel_abilities_runtime::mask_2_bitmap");
         let mask_3_bitmap_buf = mk_mask("duel_abilities_runtime::mask_3_bitmap");
+        let mask_4_bitmap_buf = mk_mask("duel_abilities_runtime::mask_4_bitmap");
         let zero_words: Vec<u32> = vec![0u32; mask_bitmap_words.max(4) as usize];
         let mask_bitmap_zero_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_abilities_runtime::mask_bitmap_zero"),
@@ -290,8 +302,26 @@ impl DuelAbilitiesState {
             contents: bytemuck::bytes_of(&chronicle_bleed_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        let chronicle_reap_cfg_init =
+            physics_verb_chronicle_Reap::PhysicsVerbChronicleReapCfg {
+                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            };
+        let chronicle_reap_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_abilities_runtime::chronicle_reap_cfg"),
+            contents: bytemuck::bytes_of(&chronicle_reap_cfg_init),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        // Wave 2 piece N adds an `ApplyDefeat` physics block to the
+        // .sim. The compiler fused it into the existing PerEvent group
+        // (Damaged/Healed/Shielded already shared a kernel because all
+        // three are PerEvent over the same ring). The fused kernel was
+        // therefore RENAMED to
+        // `physics_ApplyDamage_and_ApplyHeal_and_ApplyShield_and_ApplyDefeat`
+        // — bindings/cfg structs and the dispatch helper inherit the
+        // longer name. The bind-group SoA didn't grow; ApplyDefeat
+        // only touches `agent_alive`, which the kernel already had.
         let apply_cfg_init =
-            physics_ApplyDamage_and_ApplyHeal_and_ApplyShield::PhysicsApplyDamageAndApplyHealAndApplyShieldCfg {
+            physics_ApplyDamage_and_ApplyHeal_and_ApplyShield_and_ApplyDefeat::PhysicsApplyDamageAndApplyHealAndApplyShieldAndApplyDefeatCfg {
                 event_count: 0, tick: 0, seed: 0, _pad0: 0,
             };
         let apply_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -335,6 +365,7 @@ impl DuelAbilitiesState {
             mask_1_bitmap_buf,
             mask_2_bitmap_buf,
             mask_3_bitmap_buf,
+            mask_4_bitmap_buf,
             mask_bitmap_zero_buf,
             mask_bitmap_words,
             scoring_output_buf,
@@ -350,6 +381,7 @@ impl DuelAbilitiesState {
             chronicle_shieldup_cfg_buf,
             chronicle_mend_cfg_buf,
             chronicle_bleed_cfg_buf,
+            chronicle_reap_cfg_buf,
             apply_cfg_buf,
             seed_cfg_buf,
             cache: dispatch::KernelCache::default(),
@@ -433,6 +465,31 @@ impl DuelAbilitiesState {
     pub fn agent_count(&self) -> u32 { self.agent_count }
     pub fn tick(&self) -> u64 { self.tick }
     pub fn seed(&self) -> u64 { self.seed }
+
+    /// Test-only HP override. Writes the supplied values directly to the
+    /// `agent_hp` SoA so a test can preconfigure a state where Reap's
+    /// `target.hp < threshold` gate is satisfied at the next tick%20==0
+    /// boundary. The natural duel never produces a target.hp ∈ (0, 20)
+    /// at a tick%20==0 boundary — Strike's 30-damage step skips the
+    /// (0, 10] window — so we engineer the state to surface the
+    /// Defeated event from Reap rather than Strike's inline emit.
+    ///
+    /// Length must equal `agent_count`. Panics on mismatch.
+    #[doc(hidden)]
+    pub fn override_hp_for_test(&self, hp: &[f32]) {
+        assert_eq!(
+            hp.len(),
+            self.agent_count as usize,
+            "override_hp_for_test: length must match agent_count",
+        );
+        self.gpu.queue.write_buffer(
+            &self.agent_hp_buf,
+            0,
+            bytemuck::cast_slice(hp),
+        );
+        // No submit needed — the queue serialises writes ahead of the
+        // next encoder.submit on `step()`.
+    }
 }
 
 impl CompiledSim for DuelAbilitiesState {
@@ -443,7 +500,7 @@ impl CompiledSim for DuelAbilitiesState {
 
         // (1) Per-tick clears.
         self.event_ring.clear_tail_in(&mut encoder);
-        let max_slots_per_tick = self.agent_count * 4;
+        let max_slots_per_tick = self.agent_count * 5;
         self.event_ring.clear_ring_headers_in(
             &self.gpu, &mut encoder, max_slots_per_tick,
         );
@@ -453,6 +510,7 @@ impl CompiledSim for DuelAbilitiesState {
             &self.mask_1_bitmap_buf,
             &self.mask_2_bitmap_buf,
             &self.mask_3_bitmap_buf,
+            &self.mask_4_bitmap_buf,
         ] {
             encoder.copy_buffer_to_buffer(
                 &self.mask_bitmap_zero_buf, 0, buf, 0, mask_bytes.max(4),
@@ -484,6 +542,7 @@ impl CompiledSim for DuelAbilitiesState {
             mask_1_bitmap: &self.mask_1_bitmap_buf,
             mask_2_bitmap: &self.mask_2_bitmap_buf,
             mask_3_bitmap: &self.mask_3_bitmap_buf,
+            mask_4_bitmap: &self.mask_4_bitmap_buf,
             cfg: &self.mask_cfg_buf,
         };
         dispatch::dispatch_fused_mask_verb_strike(
@@ -514,6 +573,7 @@ impl CompiledSim for DuelAbilitiesState {
             mask_1_bitmap: &self.mask_1_bitmap_buf,
             mask_2_bitmap: &self.mask_2_bitmap_buf,
             mask_3_bitmap: &self.mask_3_bitmap_buf,
+            mask_4_bitmap: &self.mask_4_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
             cfg: &self.scoring_cfg_buf,
         };
@@ -594,16 +654,43 @@ impl CompiledSim for DuelAbilitiesState {
             self.agent_count,
         );
 
-        // (8) ApplyDamage + ApplyHeal + ApplyShield — fused PerEvent kernel.
-        let event_count_estimate = self.agent_count * 4;
-        let apply_cfg = physics_ApplyDamage_and_ApplyHeal_and_ApplyShield::PhysicsApplyDamageAndApplyHealAndApplyShieldCfg {
+        // (7b) Reap chronicle — Wave 2 Execute demo. Gates on
+        // action_id==4u and emits Defeated{combatant=target}. The verb's
+        // own `when` clause already gated on `target.hp < threshold`, so
+        // the chronicle fires only when the finisher condition holds. The
+        // ApplyDefeat handler (fused into the PerEvent kernel below)
+        // drains the Defeated event via `agents.set_alive(t, false)`.
+        let reap_cfg = physics_verb_chronicle_Reap::PhysicsVerbChronicleReapCfg {
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.chronicle_reap_cfg_buf, 0, bytemuck::bytes_of(&reap_cfg),
+        );
+        let reap_bindings = physics_verb_chronicle_Reap::PhysicsVerbChronicleReapBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            cfg: &self.chronicle_reap_cfg_buf,
+        };
+        dispatch::dispatch_physics_verb_chronicle_reap(
+            &mut self.cache, &reap_bindings, &self.gpu.device, &mut encoder,
+            self.agent_count,
+        );
+
+        // (8) ApplyDamage + ApplyHeal + ApplyShield + ApplyDefeat — fused
+        // PerEvent kernel. Adding ApplyDefeat as a 4th `on Defeated{...}`
+        // arm caused the compiler's PerEvent fusion pass to merge it into
+        // the existing trio, renaming the kernel + structs accordingly.
+        // Only `agent_alive` is touched by the new arm; binding shape
+        // unchanged.
+        let event_count_estimate = self.agent_count * 5;
+        let apply_cfg = physics_ApplyDamage_and_ApplyHeal_and_ApplyShield_and_ApplyDefeat::PhysicsApplyDamageAndApplyHealAndApplyShieldAndApplyDefeatCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
             seed: 0, _pad0: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_cfg_buf, 0, bytemuck::bytes_of(&apply_cfg),
         );
-        let apply_bindings = physics_ApplyDamage_and_ApplyHeal_and_ApplyShield::PhysicsApplyDamageAndApplyHealAndApplyShieldBindings {
+        let apply_bindings = physics_ApplyDamage_and_ApplyHeal_and_ApplyShield_and_ApplyDefeat::PhysicsApplyDamageAndApplyHealAndApplyShieldAndApplyDefeatBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
             agent_hp: &self.agent_hp_buf,
@@ -611,7 +698,7 @@ impl CompiledSim for DuelAbilitiesState {
             agent_shield_hp: &self.agent_shield_hp_buf,
             cfg: &self.apply_cfg_buf,
         };
-        dispatch::dispatch_physics_applydamage_and_applyheal_and_applyshield(
+        dispatch::dispatch_physics_applydamage_and_applyheal_and_applyshield_and_applydefeat(
             &mut self.cache, &apply_bindings, &self.gpu.device, &mut encoder,
             event_count_estimate,
         );
@@ -907,6 +994,62 @@ mod tests {
              means Bleed fired far too many times or shield_hp is \
              negative; got hp={:.2}, shield={:.2}",
             hp[0], shield[0],
+        );
+    }
+
+    /// Wave 2 Execute E2E demo. Reap fires a Defeated event when its
+    /// `target.hp < threshold` gate is satisfied at a tick%20==0
+    /// boundary, drained by the new ApplyDefeat physics block (fused
+    /// into the existing PerEvent kernel as
+    /// `physics_ApplyDamage_and_ApplyHeal_and_ApplyShield_and_ApplyDefeat`).
+    ///
+    /// Why we engineer the HP rather than play it out: Strike's 30-
+    /// damage step skips the (0, 10] HP window, so the natural duel
+    /// never lands target.hp ∈ (0, 20) at a tick%20==0 boundary. The
+    /// trace from `0xCAFE_F00D` shows agent A dies at tick 30 (Mend
+    /// +25 then Strike −30 → hp=5 with alive=0 from Strike's inline
+    /// Defeated emit). To exercise Reap specifically we override HP to
+    /// 15.0 for both agents BEFORE tick 0 — Reap's gate then fires
+    /// for both at tick 0:
+    ///
+    ///   * tick%20==0 → cooldown gate satisfied
+    ///   * target.hp=15 < reap_threshold=20 → finisher gate satisfied
+    ///   * target.alive && target!=self → both true in 2-agent fixture
+    ///   * Reap score 500 dominates Strike (200-15=185), Mend (300),
+    ///     ShieldUp (250); Bleed not eligible (hp=15 ≯ 50)
+    ///
+    /// **Reap-killed signal:** the Defeated event from Reap sets
+    /// alive=false WITHOUT touching HP. So if Reap killed the agent,
+    /// HP at death is the unmodified 15.0. If Strike had been the
+    /// killer instead, HP would be at most 15-30 = -15. We therefore
+    /// assert `alive==0 && hp > 0.0`, which can ONLY be produced by
+    /// the Reap → Defeated → ApplyDefeat path.
+    ///
+    /// Cooldown=20 means Reap fires at tick 0 (the very first step);
+    /// 5 steps gives plenty of margin even if argmax ordering changes.
+    #[test]
+    fn reap_kills_enemy_when_below_threshold() {
+        let mut state = DuelAbilitiesState::new(0xCAFE_F00D, 2);
+        // Engineer the state: both agents at HP=15, well under
+        // reap_threshold=20.
+        state.override_hp_for_test(&[15.0, 15.0]);
+        // Tick 0 satisfies tick%20==0; Reap fires for both agents.
+        // 5 ticks is overkill but cheap and robust.
+        for _ in 0..5 {
+            state.step();
+        }
+        let hp = state.read_hp();
+        let alive = state.read_alive();
+        // At least one agent must have died (alive=0). The Reap signal
+        // is hp>0 at death — Strike would have driven hp to ≤-15.
+        let reap_killed_a = alive[0] == 0 && hp[0] > 0.0;
+        let reap_killed_b = alive[1] == 0 && hp[1] > 0.0;
+        assert!(
+            reap_killed_a || reap_killed_b,
+            "expected Reap to kill at least one agent (alive=0 && hp>0) — \
+             Strike-kill leaves hp<=0 from the inline ApplyDamage path; \
+             got alive=[{}, {}], hp=[{:.2}, {:.2}]",
+            alive[0], alive[1], hp[0], hp[1],
         );
     }
 }
