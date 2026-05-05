@@ -122,6 +122,20 @@ fn engine_to_dsl_effect_op(op: &EngineEffectOp) -> DslEffectOp {
         // Wave 2 piece N work.
         EngineEffectOp::Execute    { hp_threshold } => DslEffectOp::Execute    { hp_threshold: *hp_threshold },
         EngineEffectOp::SelfDamage { amount }       => DslEffectOp::SelfDamage { amount: *amount },
+        // Wave 2 piece 4 — buff verbs. Per-fixture apply handlers
+        // (LifeSteal → write `hot_lifesteal_*` slot under the
+        // max-with-duration-tiebreak rule and feed a per-cascade
+        // damage→heal hook; DamageModify → write `hot_damage_taken_*`
+        // slot under the same rule and have ApplyDamage scale
+        // bleed-through by `mult_q8 / 256`) are Wave 2 piece N work.
+        EngineEffectOp::LifeSteal    { duration_ticks, fraction_q8 } => DslEffectOp::LifeSteal {
+            duration_ticks: *duration_ticks,
+            fraction_q8:    *fraction_q8,
+        },
+        EngineEffectOp::DamageModify { duration_ticks, multiplier_q8 } => DslEffectOp::DamageModify {
+            duration_ticks:  *duration_ticks,
+            multiplier_q8:   *multiplier_q8,
+        },
     }
 }
 

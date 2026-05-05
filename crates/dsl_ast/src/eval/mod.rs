@@ -167,6 +167,12 @@ pub enum EffectOp {
     // Discriminants 16..=17 pinned by the engine schema_hash.
     Execute    { hp_threshold: f32 },
     SelfDamage { amount: f32 },
+    // Wave 2 piece 4 — buff verbs (mirror of
+    // `engine::ability::program::EffectOp::{LifeSteal,DamageModify}`).
+    // Each carries the same `(duration_ticks, q8 magnitude)` payload as
+    // `Slow`. Discriminants 18..=19 pinned by the engine schema_hash.
+    LifeSteal    { duration_ticks: u32, fraction_q8: i16 },
+    DamageModify { duration_ticks: u32, multiplier_q8: i16 },
 }
 
 /// Target selection for `CastAbility` effects.  Mirrors

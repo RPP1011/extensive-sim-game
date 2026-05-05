@@ -10,13 +10,14 @@
 //!   then ignored), `hint` (damage/defense/crowd_control/utility/heal —
 //!   `economic` is reserved per §4.2).
 //!
-//! * **Effect verbs covered (18 of the 27 catalog entries):** `damage`,
+//! * **Effect verbs covered (20 of the 27 catalog entries):** `damage`,
 //!   `heal`, `shield`, `stun`, `slow`, `transfer_gold`,
 //!   `modify_standing`, `cast`, the Wave 2 piece 1 control verbs
 //!   `root`, `silence`, `fear`, `taunt`, the Wave 2 piece 2
-//!   movement verbs `dash`, `blink`, `knockback`, `pull`, plus the
-//!   Wave 2 piece 3 advanced verbs `execute`, `self_damage`. These
-//!   match the 18 `EffectOp` variants on the engine side. Unknown
+//!   movement verbs `dash`, `blink`, `knockback`, `pull`, the
+//!   Wave 2 piece 3 advanced verbs `execute`, `self_damage`, plus the
+//!   Wave 2 piece 4 buff verbs `lifesteal`, `damage_modify`. These
+//!   match the 20 `EffectOp` variants on the engine side. Unknown
 //!   verbs / arity mismatches are surfaced as errors.
 //!
 //! * **Out of scope (deferred to later waves):**
@@ -24,8 +25,8 @@
 //!     - Other target modes (ally/self_aoe/ground/direction/vector/global)
 //!       and `economic` hint — error today, wired by their respective
 //!       waves.
-//!     - The remaining 9 EffectOp variants (Teleport, ApplyStatus,
-//!       SummonAlly, LifeSteal, DamageModify, etc.) — Waves 2-5.
+//!     - The remaining 7 EffectOp variants (Teleport, ApplyStatus,
+//!       SummonAlly, etc.) — Waves 2-5.
 //!     - Two-phase split validator + ability-name resolution for
 //!       `cast <Name>` — Wave 1.7 (registry wiring).
 //!
@@ -180,7 +181,7 @@ impl std::fmt::Display for LowerError {
             LowerError::UnknownEffectVerb { verb, suggestion, .. } => {
                 write!(
                     f,
-                    "unknown effect verb '{verb}'; valid verbs at this stage: damage / heal / shield / stun / slow / transfer_gold / modify_standing / cast / root / silence / fear / taunt / dash / blink / knockback / pull / execute / self_damage"
+                    "unknown effect verb '{verb}'; valid verbs at this stage: damage / heal / shield / stun / slow / transfer_gold / modify_standing / cast / root / silence / fear / taunt / dash / blink / knockback / pull / execute / self_damage / lifesteal / damage_modify"
                 )?;
                 if let Some(s) = suggestion {
                     write!(f, " (did you mean '{s}'?)")?;
@@ -594,6 +595,33 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             let amount = require_number_arg(stmt, 0)?;
             require_arity(stmt, 1)?;
             Ok(EffectOp::SelfDamage { amount })
+        }
+        // Wave 2 piece 4 — two new buff verbs. Both mirror `slow`'s shape:
+        // `<f32 magnitude> <duration>` → `EffectOp::* { duration_ticks,
+        // <field>_q8 }` with the same q8 pack rule (`magnitude * 256`,
+        // clamped into `i16::MIN..=i16::MAX`). Apply-handler stacking
+        // semantics (single per-agent slot, max-with-duration-tiebreak)
+        // are documented on the SoA fields and follow the project
+        // buff-stacking rule.
+        "lifesteal" => {
+            let fraction = require_number_arg(stmt, 0)?;
+            let dur = require_duration_arg(stmt, 1)?;
+            require_arity(stmt, 2)?;
+            let fraction_q8 = (fraction * 256.0).round().clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+            Ok(EffectOp::LifeSteal {
+                duration_ticks: duration_to_ticks(dur),
+                fraction_q8,
+            })
+        }
+        "damage_modify" => {
+            let mult = require_number_arg(stmt, 0)?;
+            let dur = require_duration_arg(stmt, 1)?;
+            require_arity(stmt, 2)?;
+            let multiplier_q8 = (mult * 256.0).round().clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+            Ok(EffectOp::DamageModify {
+                duration_ticks: duration_to_ticks(dur),
+                multiplier_q8,
+            })
         }
         "slow" => {
             // `slow <factor:f32> <duration>` — two positional args. The

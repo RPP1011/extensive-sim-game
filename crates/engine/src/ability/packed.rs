@@ -54,10 +54,11 @@ pub const NUM_ABILITY_TAGS: usize = AbilityTag::COUNT;
 
 /// Effect-op kind tag for an empty slot (program had fewer than
 /// `MAX_EFFECTS_PER_PROGRAM` effects). Distinct from any `EffectOp`
-/// discriminant (0..=17 today, including the Wave 2 piece 1 control
+/// discriminant (0..=19 today, including the Wave 2 piece 1 control
 /// verbs Root/Silence/Fear/Taunt, the Wave 2 piece 2 movement verbs
-/// Dash/Blink/Knockback/Pull, and the Wave 2 piece 3 advanced verbs
-/// Execute/SelfDamage). GPU dispatch loops break early on this
+/// Dash/Blink/Knockback/Pull, the Wave 2 piece 3 advanced verbs
+/// Execute/SelfDamage, and the Wave 2 piece 4 buff verbs
+/// LifeSteal/DamageModify). GPU dispatch loops break early on this
 /// sentinel.
 pub const EFFECT_KIND_EMPTY: u32 = 0xFF;
 
@@ -298,6 +299,8 @@ fn pack_delivery(d: Delivery) -> u32 {
 ///                                 -> `(disc, f32::to_bits(distance), 0)`  (Wave 2 piece 2; same shape as `Damage`)
 /// * `Execute`                     -> `(disc, f32::to_bits(hp_threshold), 0)`  (Wave 2 piece 3; same shape as `Damage`)
 /// * `SelfDamage`                  -> `(disc, f32::to_bits(amount), 0)`        (Wave 2 piece 3; same shape as `Damage`)
+/// * `LifeSteal`                   -> `(disc, duration_ticks, fraction_q8 as i16 as u32)`   (Wave 2 piece 4; same shape as `Slow`)
+/// * `DamageModify`                -> `(disc, duration_ticks, multiplier_q8 as i16 as u32)` (Wave 2 piece 4; same shape as `Slow`)
 ///
 /// Sign-bearing payloads use sign-preserving bitcasts (`as i16 as u32`)
 /// so a GPU shader doing `bitcast<i32>(payload_a)` recovers the signed
@@ -338,6 +341,15 @@ fn pack_effect(op: EffectOp) -> (u32, u32, u32) {
         // existing ApplyDamage handler drains.
         EffectOp::Execute    { hp_threshold } => (16, hp_threshold.to_bits(), 0),
         EffectOp::SelfDamage { amount }       => (17, amount.to_bits(), 0),
+        // Wave 2 piece 4 — buff verbs share `Slow`'s payload shape exactly:
+        // `payload_a = duration_ticks`, `payload_b = q8_magnitude as i16 as
+        // u32` (sign-preserving widen so a GPU shader can `bitcast<i32>`).
+        EffectOp::LifeSteal    { duration_ticks, fraction_q8 } => {
+            (18, duration_ticks, fraction_q8 as i32 as u32)
+        }
+        EffectOp::DamageModify { duration_ticks, multiplier_q8 } => {
+            (19, duration_ticks, multiplier_q8 as i32 as u32)
+        }
     }
 }
 
@@ -732,6 +744,82 @@ mod tests {
         assert_eq!(p.effect_kinds[0], 17);
         assert_eq!(p.effect_payload_a[0], 7.5_f32.to_bits());
         assert_eq!(p.effect_payload_b[0], 0);
+    }
+
+    // -- Wave 2 piece 4 — buff verb pack tests. Each mirrors the `Slow`
+    // shape exactly: discriminant + `duration_ticks` in `payload_a`,
+    // sign-extended q8 magnitude in `payload_b`. --------------------------
+    #[test]
+    fn pack_lifesteal_payload() {
+        // `lifesteal 0.5 (4s = 40 ticks)` → fraction_q8 = 128 (0.5 * 256).
+        let prog = AbilityProgram::new_single_target(
+            0.0,
+            Gate { cooldown_ticks: 0, hostile_only: false, line_of_sight: false },
+            [EffectOp::LifeSteal { duration_ticks: 40, fraction_q8: 128 }],
+        );
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // LifeSteal discriminant == 18.
+        assert_eq!(p.effect_kinds[0], 18);
+        assert_eq!(p.effect_payload_a[0], 40);
+        // 128 sign-extends to itself in u32 (positive value).
+        assert_eq!(p.effect_payload_b[0], 128);
+    }
+
+    #[test]
+    fn pack_lifesteal_payload_sign_extends_negative_q8() {
+        // Negative fraction is nonsensical at the spec layer (no anti-heal),
+        // but the bitcast contract still has to round-trip. Confirms the
+        // `as i16 as u32` widen sets the high u32 bits per i16's sign so
+        // GPU `bitcast<i32>(payload_b)` recovers `-1` losslessly.
+        let prog = AbilityProgram::new_single_target(
+            0.0,
+            Gate { cooldown_ticks: 0, hostile_only: false, line_of_sight: false },
+            [EffectOp::LifeSteal { duration_ticks: 10, fraction_q8: -1 }],
+        );
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        assert_eq!(p.effect_kinds[0], 18);
+        assert_eq!(p.effect_payload_a[0], 10);
+        // -1 as i16 sign-extended into u32 == 0xFFFFFFFF.
+        assert_eq!(p.effect_payload_b[0], 0xFFFF_FFFF);
+    }
+
+    #[test]
+    fn pack_damage_modify_payload() {
+        // `damage_modify 1.5 (3s = 30 ticks)` → multiplier_q8 = 384 (1.5 * 256).
+        let prog = AbilityProgram::new_single_target(
+            0.0,
+            Gate { cooldown_ticks: 0, hostile_only: false, line_of_sight: false },
+            [EffectOp::DamageModify { duration_ticks: 30, multiplier_q8: 384 }],
+        );
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // DamageModify discriminant == 19.
+        assert_eq!(p.effect_kinds[0], 19);
+        assert_eq!(p.effect_payload_a[0], 30);
+        // 384 fits as a positive i16 → u32 == 384.
+        assert_eq!(p.effect_payload_b[0], 384);
+    }
+
+    #[test]
+    fn pack_damage_modify_payload_sign_extends_negative_q8() {
+        // Sign-preservation guard for the multiplier bitcast.
+        let prog = AbilityProgram::new_single_target(
+            0.0,
+            Gate { cooldown_ticks: 0, hostile_only: false, line_of_sight: false },
+            [EffectOp::DamageModify { duration_ticks: 5, multiplier_q8: -64 }],
+        );
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        assert_eq!(p.effect_kinds[0], 19);
+        assert_eq!(p.effect_payload_a[0], 5);
+        // -64 as i16 sign-extended into u32 == 0xFFFFFFC0.
+        assert_eq!(p.effect_payload_b[0], 0xFFFF_FFC0);
     }
 
     #[test]
