@@ -130,11 +130,13 @@ verb Mend(self, target: Agent) =
 
 // Apply damage. Mirror of duel_1v1.sim's ApplyDamage.
 // TODO: shield_hp damage absorption belongs here (drain shield_hp
-// before bleeding into hp). Attempted 2026-05-04 — perturbed the
-// scoring equilibrium so combat no longer resolved by tick 200, and
-// the natural `min()` form hit a separate engine bug (min_f32 emitted
-// without preamble helper). Needs proper score retuning + the min_f32
-// fix together. Filed as a follow-up task.
+// before bleeding into hp). The natural `min(s, a)` form now compiles
+// cleanly thanks to the WGSL math prelude (#84 closed) — the remaining
+// blocker is the scoring equilibrium: with absorption active and the
+// current scores (Strike 200-target.hp, ShieldUp 250, Mend 300), agent
+// 1 takes 0 damage over 200 ticks because both agents prefer self-heal
+// /self-shield over Strike. Filed as #85: needs score retuning so combat
+// still resolves by tick 200 with shield absorption active.
 @phase(post)
 physics ApplyDamage {
   on Damaged { source: _, target: t, amount: a } {

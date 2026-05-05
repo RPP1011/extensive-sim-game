@@ -175,6 +175,39 @@ fn z_separation(a: vec3<f32>, b: vec3<f32>) -> f32 {
 ";
 
 // ---------------------------------------------------------------------------
+// Math-stdlib prelude — typed min/max/clamp wrappers
+// ---------------------------------------------------------------------------
+
+/// WGSL helpers for the math stdlib pairs `min(a, b)` / `max(a, b)` /
+/// `clamp(x, lo, hi)`. The dsl_compiler emits typed names
+/// (`min_f32`, `min_u32`, etc.) per `BuiltinId` ordinal — the WGSL
+/// builtins themselves are unsuffixed, so each suffixed name needs a
+/// thin delegating wrapper. Without this prelude, kernels that lower
+/// pairwise `min(s, a)` against an f32 SoA field fail wgpu validation
+/// with "no definition in scope for identifier: 'min_f32'".
+///
+/// Substring-injected mirroring the RNG / spatial preludes. Closes
+/// task #84 surfaced by an attempted shield_hp absorption refinement
+/// in `assets/sim/duel_abilities.sim` (2026-05-04).
+const STDLIB_MATH_WGSL_PRELUDE: &str = "\
+// Math-stdlib helpers — emitted when the body calls any of
+// `min_f32` / `max_f32` / `min_u32` / `max_u32` / `clamp_f32` /
+// `clamp_u32` / `min_i32` / `max_i32`. The dsl_compiler emits these
+// typed names per `BuiltinId` ordinal; WGSL's `min`/`max`/`clamp`
+// are unsuffixed builtins, so each suffixed name delegates here.
+fn min_f32(a: f32, b: f32) -> f32 { return min(a, b); }
+fn max_f32(a: f32, b: f32) -> f32 { return max(a, b); }
+fn min_u32(a: u32, b: u32) -> u32 { return min(a, b); }
+fn max_u32(a: u32, b: u32) -> u32 { return max(a, b); }
+fn min_i32(a: i32, b: i32) -> i32 { return min(a, b); }
+fn max_i32(a: i32, b: i32) -> i32 { return max(a, b); }
+fn clamp_f32(x: f32, lo: f32, hi: f32) -> f32 { return clamp(x, lo, hi); }
+fn clamp_u32(x: u32, lo: u32, hi: u32) -> u32 { return clamp(x, lo, hi); }
+fn clamp_i32(x: i32, lo: i32, hi: i32) -> i32 { return clamp(x, lo, hi); }
+
+";
+
+// ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
@@ -467,6 +500,20 @@ fn compose_wgsl_file(
     // is required). Closes Gap #B from stdlib_math_probe (2026-05-04).
     if body.contains("planar_distance(") || body.contains("z_separation(") {
         out.push_str(SPATIAL_BUILTIN_WGSL_PRELUDE);
+        out.push('\n');
+    }
+
+    // Math-stdlib prelude: emit suffixed min/max/clamp wrappers when
+    // the body calls any of them. Substring gate per call form
+    // (trailing `(`). Closes task #84 surfaced by duel_abilities's
+    // attempted shield absorption (2026-05-04).
+    if body.contains("min_f32(")  || body.contains("max_f32(")
+        || body.contains("min_u32(")  || body.contains("max_u32(")
+        || body.contains("min_i32(")  || body.contains("max_i32(")
+        || body.contains("clamp_f32(") || body.contains("clamp_u32(")
+        || body.contains("clamp_i32(")
+    {
+        out.push_str(STDLIB_MATH_WGSL_PRELUDE);
         out.push('\n');
     }
 
