@@ -1,0 +1,115 @@
+// crafting_diffusion — twenty-first real sim. The first fixture that
+// tests INFORMATION SHARING as a propagation primitive.
+//
+// Prior 20 sims propagated state through:
+//   - DAMAGE (combat sims) — adversarial scalar reduction
+//   - LIFECYCLE (births/deaths) — population dynamics
+//   - TRADE goods (auction/bartering) — scalar resource transfer
+//   - ECOLOGY (predator/prey, ecosystem cascade) — event chains
+//   - MIGRATION (multi-zone) — agent zone changes
+//
+// crafting_diffusion is the FIRST sim where two interacting agents
+// MERGE KNOWLEDGE. The state being shared is a u32 bitmask of recipe
+// indices known by each Trader. After a trade, both participants know
+// the union of their pre-trade knowledge sets. This is associative +
+// commutative, so the order of pairwise meetings doesn't affect the
+// asymptote, only the time-to-convergence.
+//
+// ## Architectural payoff
+//
+// 50 Traders distributed across 5 specialization groups (10 per group).
+// Each group starts knowing only 2 of the 10 recipes:
+//   - Group 0 (wood): bits 0, 1 → mana = 0b0000000011 = 3
+//   - Group 1 (iron): bits 2, 3 → mana = 0b0000001100 = 12
+//   - Group 2 (gem):  bits 4, 5 → mana = 0b0000110000 = 48
+//   - Group 3 (herb): bits 6, 7 → mana = 0b0011000000 = 192
+//   - Group 4 (bone): bits 8, 9 → mana = 0b1100000000 = 768
+//
+// Per tick: each Trader looks for any nearby Trader of a DIFFERENT
+// group with information it doesn't have, and emits KnowledgeShared.
+// The chronicle merges bits via `mana = mana | other.mana`. Eventually
+// every Trader knows every recipe (full mask = 1023).
+//
+// ## DSL gap and sidestep
+//
+// The natural DSL shape — `agents.set_mana(self, mana | other_mana)`
+// — does NOT lower today. The parser does not accept `|` (bitwise OR)
+// as a binary operator (`crates/dsl_ast/src/parser.rs` only registers
+// `||` for logical Or and `&&` for logical And; bitwise `|` / `&`
+// are not in the operator table). The view-fold path supports
+// `atomicOr` for `+=` on u32 views (see `quest_probe`), but the
+// per-agent setter path needs an arithmetic `|` expression that
+// doesn't exist in the surface language.
+//
+// Per the compiler-gap policy ("inline-fix small targeted gaps,
+// sidestep larger gaps with workaround + GAP comment"), this fixture
+// SIDESTEPS by performing the knowledge merge in the runtime's
+// CPU-side step() rather than emitting a GPU kernel from the chronicle.
+// The .sim file documents the intended shape but the runtime owns
+// the simulation today.
+//
+// FUTURE WORK to land bitwise ops in the DSL:
+//   1. Add `BinOp::BitOr` / `BitAnd` / `BitXor` / `BitNot` to
+//      `dsl_ast::ast::BinOp` enum.
+//   2. Register `|` (prec ~5) and `&` (prec ~6) in the parser's
+//      operator table.
+//   3. Add type rules in `lower_binop` for u32 RHS+LHS → u32 result.
+//   4. Wire `agents.set_mana(t, expr)` to bitcast f32→u32 for the
+//      LHS read and u32→f32 for the write (or migrate `mana` to a
+//      true u32 SoA field — currently AgentFieldId::Mana is f32).
+//
+// Once that lands, the chronicle below becomes:
+//   on KnowledgeShared { recipient: r, source: s } {
+//     let merged = u32(agents.mana(r)) | u32(agents.mana(s));
+//     agents.set_mana(r, f32(merged));
+//   }
+
+event Tick { }
+
+@replayable @gpu_amenable
+event KnowledgeShared {
+  recipient: AgentId,
+  source:    AgentId,
+}
+
+entity Trader : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config crafting {
+  // Number of distinct recipes in the tech tree. With 5 groups of 2
+  // recipes each, full convergence is `mana = (1 << 10) - 1 = 1023`.
+  num_recipes:        u32 = 10,
+  // Group count — partitions the agent population.
+  num_groups:         u32 = 5,
+  // Spatial radius inside which two Traders can detect each other
+  // for trade. Smaller → slower diffusion; larger → faster.
+  trade_radius:       f32 = 6.0,
+  // Per-agent trade cooldown. A Trader emits at most one
+  // KnowledgeShared event every `trade_cooldown` ticks.
+  trade_cooldown:     u32 = 5,
+  // Wandering speed scale. Random-walk velocity per tick is
+  // (uniform[-1,1) * speed) on x and z.
+  wander_speed:       f32 = 0.4,
+  // Group spawn ring radius. Each group's traders cluster around
+  // a per-group anchor evenly spaced on a circle of this radius.
+  spawn_radius:       f32 = 24.0,
+}
+
+// Movement is documented here for clarity but the runtime owns
+// integration today (see SIDESTEP note above — bitwise ops are not
+// available in the surface language so the runtime hosts the entire
+// step until the gap closes). A `physics MoveTrader` rule is omitted
+// to avoid a "writes pos but no other rule reads it" no-op kernel.
+
+// Per-agent KnowledgeShared count — observability only. Lowers
+// cleanly via the `+= 1u` u32 view path (same shape as quest_probe).
+// Note the same atomicOr-vs-atomicAdd operator caveat applies; the
+// per-tick CPU runtime publishes its own trade count for the harness.
+@materialized(on_event = [KnowledgeShared])
+view trades_received(recipient: Agent) -> u32 {
+  initial: 0,
+  on KnowledgeShared { recipient: r, source: _ } { self += 1 }
+  clamp: [0, 4294967295],
+}

@@ -224,6 +224,12 @@ multi_zone_world_runtime = { path = "../multi_zone_world_runtime" }
 # verb cascade; CPU-side runtime spawns next room's enemies when the
 # prior room clears.
 dungeon_crawl_runtime = { path = "../dungeon_crawl_runtime" }
+# Crafting diffusion — 21st REAL fixture and FIRST sim where state
+# propagates through agent interactions (knowledge bits via trade,
+# not damage). 5 groups × 10 traders, each starts with 2 recipe bits
+# in mana; trade meetings union the bitmasks. Convergence: every
+# agent learns every recipe through the trade graph.
+crafting_diffusion_runtime = { path = "../crafting_diffusion_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -396,3 +402,7 @@ path = "src/multi_zone_world_app.rs"
 [[bin]]
 name = "dungeon_crawl_app"
 path = "src/dungeon_crawl_app.rs"
+
+[[bin]]
+name = "crafting_diffusion_app"
+path = "src/crafting_diffusion_app.rs"

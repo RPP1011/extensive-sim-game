@@ -1,0 +1,30 @@
+[package]
+name = "crafting_diffusion_runtime"
+version = "0.1.0"
+edition = "2021"
+
+# Per-fixture runtime crate for `assets/sim/crafting_diffusion.sim` —
+# the TWENTY-FIRST real sim. Tests INFORMATION SHARING as a propagation
+# primitive: per-agent recipe-knowledge bitmasks merge through pairwise
+# trades.
+#
+# CPU-only today (no GPU dispatch). The .sim file documents the
+# intended chronicle (`agents.set_mana(r, mana | other_mana)`) but
+# the surface language does NOT yet parse bitwise `|` (only logical
+# `||` is registered). Per the compiler-gap policy, the runtime owns
+# the per-tick simulation while the gap stays open. The .sim file's
+# parse + resolve + lower path is exercised at the workspace level
+# through `dsl_compiler` tests so the documented declarations don't
+# rot — the per-tick step is implemented in src/lib.rs against the
+# `engine::CompiledSim` trait directly.
+
+[dependencies]
+engine = { path = "../engine" }
+glam = "0.29"
+
+[dev-dependencies]
+# For the integration test that confirms the .sim file parses +
+# resolves cleanly so the documented declarative shape doesn't
+# bit-rot while the bitwise-operator gap stays open.
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

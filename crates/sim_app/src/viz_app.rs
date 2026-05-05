@@ -71,6 +71,7 @@ const SIMS: &[(&str, Factory, u32, &str)] = &[
     ("scripted_battle",       scripted_battle_runtime::make_sim,           75,  "3-phase scripted narrative arc"),
     ("multi_zone_world",      multi_zone_world_runtime::make_sim,          35,  "Forest/Town/Dungeon zone migration"),
     ("dungeon_crawl",         dungeon_crawl_runtime::make_sim,             35,  "5 heroes traverse 3 sequential rooms"),
+    ("crafting_diffusion",    crafting_diffusion_runtime::make_sim,        50,  "5 groups share recipe knowledge"),
 ];
 
 fn print_help() {

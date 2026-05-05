@@ -27,6 +27,14 @@
 //! anything speculatively — every method here is a contract that every
 //! future fixture's runtime must satisfy.
 //!
+//! ## Visualization (default = "no viz")
+//!
+//! Sims that want ASCII rendering implement three optional methods —
+//! [`CompiledSim::snapshot`], [`CompiledSim::glyph_table`], and
+//! [`CompiledSim::default_viewport`]. Defaults return empty so existing
+//! fixtures don't have to opt in. The `viz_app` binary in `sim_app`
+//! drives any sim that overrides them.
+//!
 //! ## What's NOT in the trait
 //!
 //! - **Construction.** Each fixture's constructor signature varies
@@ -47,7 +55,7 @@ use glam::Vec3;
 /// arrays indexed by agent slot. `positions.len() == creature_types.len()
 /// == alive.len()`. Sims that don't track creature types should fill
 /// `creature_types` with zeros.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct AgentSnapshot {
     pub positions: Vec<Vec3>,
     pub creature_types: Vec<u32>,
@@ -56,7 +64,7 @@ pub struct AgentSnapshot {
 
 /// One creature type's display attributes (single glyph + ANSI 256-
 /// color foreground). Indexed by the creature_type discriminant.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct VizGlyph {
     pub glyph: char,
     pub fg_color: u8,
