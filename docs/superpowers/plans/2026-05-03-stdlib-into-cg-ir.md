@@ -58,7 +58,7 @@
   - P10 (No Runtime Panic): PASS — every new lowering returns `Result<…, LoweringError>` or `Result<…, EmitError>`; no `unwrap` on the deterministic path.
   - P11 (Reduction Determinism): N/A — no reductions added.
 
-- **Runtime gate:** running `cargo run -p sim_app --bin pp_app && --bin pc_app && --bin cn_app` after each slice and asserting the printed view-fold totals match the pre-refactor numbers. Concretely:
+- **Runtime gate:** running each of `cargo run -p sim_app --bin pp_app --features bin-pp_app`, `cargo run -p sim_app --bin pc_app --features bin-pc_app`, and `cargo run -p sim_app --bin cn_app --features bin-cn_app` after each slice and asserting the printed view-fold totals match the pre-refactor numbers. Concretely:
   - Slice 1 gate: pp/pc/cn all emit unchanged totals (kill_count=200/slot, collision_count=200/slot, stuck_count=100/slot). Refactor should be observably invisible.
   - Slice 2 gate: same totals still hold; additionally `compile-dsl --cg-canonical` on a probe fixture that uses `query.nearby_agents` in a physics body emits a per-pair physics kernel without the `Unsupported` rejection.
   - Slice 3 gate: pc_app produces an observable that reflects real per-pair collision detection (not the placeholder single-event-per-particle emit). Exact target depends on the design-target body; documented when slice 3 lands.

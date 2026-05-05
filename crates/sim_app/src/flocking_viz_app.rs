@@ -5,7 +5,7 @@
 //! contains zero per-sim viz logic — glyphs, viewport bounds, and the
 //! per-agent snapshot all come through the `CompiledSim` trait.
 //!
-//! Run with `cargo run --bin flocking_viz_app --release`.
+//! Run with `cargo run --bin flocking_viz_app --features bin-flocking_viz_app --release`.
 
 mod viz;
 

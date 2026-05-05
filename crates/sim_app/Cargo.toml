@@ -8,6 +8,14 @@ edition = "2021"
 # here. Switching from boids to a future fixture means changing the
 # `package = "..."` rename below to the target's runtime crate name;
 # nothing in src/ needs to change.
+#
+# Build gating: every per-fixture runtime is `optional = true`, and
+# every `[[bin]]` is gated by a `bin-<name>` feature that pulls in
+# only the runtime that binary needs. `cargo build -p sim_app` builds
+# nothing extra; `cargo build -p sim_app --bin foo_app --features bin-foo_app`
+# builds just that fixture. The `default = ["test-fixtures"]` feature
+# pulls the four runtimes referenced by `tests/cross_fixture_determinism.rs`
+# so `cargo test -p sim_app` keeps working without flags.
 
 [dependencies]
 engine = { path = "../engine" }
@@ -15,76 +23,76 @@ glam = "0.29"
 
 # The boids fixture, aliased to a fixture-agnostic name so the
 # original sim_app harness in src/main.rs stays sim-agnostic.
-sim_runtime = { path = "../boids_runtime", package = "boids_runtime" }
+sim_runtime = { path = "../boids_runtime", package = "boids_runtime", optional = true }
 # Sibling per-creature predator/prey demo. Imported under its real
 # name (no rename) — the pp_app binary in src/pp_app.rs is fixture-
 # aware and introspects per-creature counts via the runtime API.
-predator_prey_runtime = { path = "../predator_prey_runtime" }
+predator_prey_runtime = { path = "../predator_prey_runtime", optional = true }
 # Particle collision sibling fixture — pc_app drives it through the
 # CompiledSim trait.
-particle_collision_runtime = { path = "../particle_collision_runtime" }
+particle_collision_runtime = { path = "../particle_collision_runtime", optional = true }
 # Crowd navigation sibling fixture — cn_app drives it.
-crowd_navigation_runtime = { path = "../crowd_navigation_runtime" }
+crowd_navigation_runtime = { path = "../crowd_navigation_runtime", optional = true }
 # Target-chaser stress fixture for slice 1 (cross-agent target reads).
-target_chaser_runtime = { path = "../target_chaser_runtime" }
+target_chaser_runtime = { path = "../target_chaser_runtime", optional = true }
 # Swarm-event-storm stress fixture for Phase 7+8 primitives (multi-emit
 # producer + 2 view-folds with @decay anchor).
-swarm_storm_runtime = { path = "../swarm_storm_runtime" }
+swarm_storm_runtime = { path = "../swarm_storm_runtime", optional = true }
 # Bartering fixture — entity-root coverage probe (Item + Group entity
 # declarations + ItemId in event payload).
-bartering_runtime = { path = "../bartering_runtime" }
+bartering_runtime = { path = "../bartering_runtime", optional = true }
 # Ecosystem-cascade fixture — three-tier event cascade (Plant ←
 # Herbivore ← Carnivore) with two distinct event kinds and three
 # @decay-anchored views.
-ecosystem_runtime = { path = "../ecosystem_runtime" }
+ecosystem_runtime = { path = "../ecosystem_runtime", optional = true }
 # Foraging-colony fixture — single-Agent SoA + Item / Group entity
 # declarations (declaration-only today) + per-tick Drop emit folded
 # into a `@decay`-anchored pheromone_deposits view.
-foraging_runtime = { path = "../foraging_runtime" }
+foraging_runtime = { path = "../foraging_runtime", optional = true }
 # Auction-market fixture — first to exercise the `auctions.*`
 # namespace lowering (B1 stub `auctions_place_bid(...) -> bool`).
 # Per-tick Bid emit folded into bid_activity (@decay) AND
 # good_bid_total (no decay) — stresses both fold paths in one fixture.
-auction_runtime = { path = "../auction_runtime" }
+auction_runtime = { path = "../auction_runtime", optional = true }
 # Verb-fire probe — discovery probe of the verb cascade end-to-end.
-verb_probe_runtime = { path = "../verb_probe_runtime" }
+verb_probe_runtime = { path = "../verb_probe_runtime", optional = true }
 # ToM probe — discovery probe of the Theory-of-Mind belief-read path.
-tom_probe_runtime = { path = "../tom_probe_runtime" }
+tom_probe_runtime = { path = "../tom_probe_runtime", optional = true }
 # Trade-market probe — first fixture combining multi-event-kind ring
 # (TradeExecuted + PriceObserved) + ToM-shape pair_map u32 view +
 # mixed view-fold storage (u32 + f32 @decay + f32 no-decay) +
 # multiple Item entity declarations in one program.
-trade_market_runtime = { path = "../trade_market_runtime" }
+trade_market_runtime = { path = "../trade_market_runtime", optional = true }
 # Abilities probe — smallest end-to-end probe of the ability system
 # (two competing verbs Strike+Heal, two event kinds DamageDealt+Healed,
 # two view-folds damage_total+healing_done).
-abilities_runtime = { path = "../abilities_runtime" }
+abilities_runtime = { path = "../abilities_runtime", optional = true }
 # Cooldown probe — follow-up to abilities_probe Gap #4. Drives the
 # per-agent cooldown_next_ready_tick SoA + world.tick preamble +
 # `if (tick >= ready_at) { emit }` gating end-to-end.
-cooldown_probe_runtime = { path = "../cooldown_probe_runtime" }
+cooldown_probe_runtime = { path = "../cooldown_probe_runtime", optional = true }
 # Diplomacy probe — first fixture combining ALL of: pair_map u32 view
 # (ToM shape), verb cascade with TWO competing verbs gated on
 # disjoint Mod-tick predicates, three distinct event kinds in one
 # ring with per-handler tag filters, two Group entity declarations.
-diplomacy_probe_runtime = { path = "../diplomacy_probe_runtime" }
+diplomacy_probe_runtime = { path = "../diplomacy_probe_runtime", optional = true }
 # Stochastic probe — discovery probe of the `rng.*` namespace in a
 # real per-agent physics body. First fixture to exercise
 # `rng.action()` end-to-end with a per-tick activation gate;
 # verifies P5 determinism and per-slot binomial convergence.
-stochastic_probe_runtime = { path = "../stochastic_probe_runtime" }
+stochastic_probe_runtime = { path = "../stochastic_probe_runtime", optional = true }
 # Pair-scoring probe — discovery probe of PAIR-FIELD SCORING (spec
 # §8.3). Attempts the canonical `target.<field>` pattern in a verb's
 # scoring expression. Outcome (b) NO FIRE — the gap chain is
 # documented in docs/superpowers/notes/2026-05-04-pair_scoring_probe.md.
-pair_scoring_probe_runtime = { path = "../pair_scoring_probe_runtime" }
+pair_scoring_probe_runtime = { path = "../pair_scoring_probe_runtime", optional = true }
 # Stdlib math probe — discovery probe stress-testing under-exercised
 # stdlib math + RNG conversion surfaces. Surfaces 5 gaps (Gaps #A-#E)
 # in `docs/superpowers/notes/2026-05-04-stdlib_math_probe.md`. The
 # probe body retains only the surfaces that actually wire through;
 # four omitted-gap surfaces stay commented in the .sim with citations
 # to the responsible compiler arms.
-stdlib_math_probe_runtime = { path = "../stdlib_math_probe_runtime" }
+stdlib_math_probe_runtime = { path = "../stdlib_math_probe_runtime", optional = true }
 # Quest probe — discovery probe of `entity X : Quest` AND the
 # `quests.*` namespace. Both surfaces are documented in spec but
 # never exercised by any prior fixture. Surfaces THREE gaps:
@@ -93,7 +101,7 @@ stdlib_math_probe_runtime = { path = "../stdlib_math_probe_runtime" }
 # registry, (C) `+= 1u` on a u32-result view silently lowers to
 # `atomicOr` per the result-type-only emit branch. See
 # `docs/superpowers/notes/2026-05-04-quest_probe.md`.
-quest_probe_runtime = { path = "../quest_probe_runtime" }
+quest_probe_runtime = { path = "../quest_probe_runtime", optional = true }
 # Duel 1v1 — first REAL gameplay-shaped fixture (not a coverage
 # probe). Two Combatants duel with three abilities (Strike, Spell,
 # Heal) compiled through the verb cascade + cooldown gates + pair-
@@ -101,14 +109,14 @@ quest_probe_runtime = { path = "../quest_probe_runtime" }
 # 3 inline (set_hp/set_alive/set_mana setters + non-self target,
 # PerPair tick preamble, Bool LHS rewrite). See
 # `docs/superpowers/notes/2026-05-04-duel_1v1.md`.
-duel_1v1_runtime = { path = "../duel_1v1_runtime" }
+duel_1v1_runtime = { path = "../duel_1v1_runtime", optional = true }
 # Duel 25v25 — first SCALE-UP fixture (25 Red vs 25 Blue squad
 # scuffle). Sidesteps duel_1v1's PerPair `mask_k=1u` placeholder
 # (Gap W) by doing target-finding via spatial body-form physics.
 # Per-tick: spatial-hash → ScanAndStrike (per-agent walk + emit
 # Damaged for cross-team neighbours) → ApplyDamage chronicle.
 # Discovery doc: docs/superpowers/notes/2026-05-04-duel_25v25.md.
-duel_25v25_runtime = { path = "../duel_25v25_runtime" }
+duel_25v25_runtime = { path = "../duel_25v25_runtime", optional = true }
 # Duel abilities — Wave 1 acceptance fixture for the .ability DSL pipeline.
 # Mirrors duel_1v1's verb-cascade shape (Strike/ShieldUp/Mend) but the
 # constants are hand-mirrored from `assets/ability_test/duel_abilities/*.ability`
@@ -124,7 +132,7 @@ duel_abilities_runtime = { path = "../duel_abilities_runtime" }
 # (DSL EnergyDecay) actually flipping during a single run. Surfaces
 # the alive-bitmap-flip-both-directions architectural surface no prior
 # fixture has exercised. See `assets/sim/foraging_real.sim`.
-foraging_real_runtime = { path = "../foraging_real_runtime" }
+foraging_real_runtime = { path = "../foraging_real_runtime", optional = true }
 # Predator-prey real — fourth REAL fixture: COMBAT + LIFECYCLE composed
 # on TWO simultaneously-live creature types. Wolves hunt sheep via
 # spatial body-form (WolfHunt → Damaged → ApplyKill chronicle) AND
@@ -132,76 +140,76 @@ foraging_real_runtime = { path = "../foraging_real_runtime" }
 # AND die both via combat (set_alive on hp<=0) and starvation (set_alive
 # on hunger<=0). Five distinct alive-bitmap-flip surfaces fire across
 # both species in a single run. See `assets/sim/predator_prey_real.sim`.
-predator_prey_real_runtime = { path = "../predator_prey_real_runtime" }
+predator_prey_real_runtime = { path = "../predator_prey_real_runtime", optional = true }
 # Tactical squad 5v5 — FIFTH real fixture. 5 vs 5 with role distribution
 # (Tank + Healer + 3 DPS per team). First fixture to actually exercise
 # pair-field scoring for target selection (DPS picks lowest-HP enemy;
 # Healer picks lowest-HP ally) — the duel_1v1 had pair-field scoring
 # but the 2-agent population trivialised the argmax. Closes the
 # verb-mask `mask_k=1u` placeholder gap inline (Task 5.7).
-tactical_squad_5v5_runtime = { path = "../tactical_squad_5v5_runtime" }
+tactical_squad_5v5_runtime = { path = "../tactical_squad_5v5_runtime", optional = true }
 # Mass-battle 100 vs 100 — sixth REAL gameplay-shaped fixture and
 # the first SCALE-UP for pair-field scoring (200 agents,
 # agent_cap × agent_cap mask grid). 10 Tank + 10 Healer + 80 DPS
 # per team × 2 teams. Stress-tests the per-pair mask + scoring
 # kernels at workloads beyond the duel_1v1 template (2 agents).
-mass_battle_100v100_runtime = { path = "../mass_battle_100v100_runtime" }
+mass_battle_100v100_runtime = { path = "../mass_battle_100v100_runtime", optional = true }
 # Trade-market-real — seventh REAL gameplay-shaped fixture and the
 # first to drive ECONOMIC gameplay. 50 Traders + 10 Goods share an
 # Agent SoA via mana-marker discrimination; pair-field scoring picks
 # the cheapest in-stock good per trader per tick. First sim to read
 # a real `items.base_price(0)` field from an Item entity in a verb's
 # `when` clause.
-trade_market_real_runtime = { path = "../trade_market_real_runtime" }
+trade_market_real_runtime = { path = "../trade_market_real_runtime", optional = true }
 # Quest Arc Real — EIGHTH real fixture and FIRST sim with multi-
 # stage per-agent state machines. 30 Adventurers each cycle through
 # 5 stages (Accept→Hunt→Collect→Return→Complete→reset) with stage
 # state encoded in the per-agent `mana` SoA field. Composes
 # duel_1v1's verb-cascade + chronicle pipeline with mana-as-stage-
 # register for the FSM.
-quest_arc_real_runtime = { path = "../quest_arc_real_runtime" }
+quest_arc_real_runtime = { path = "../quest_arc_real_runtime", optional = true }
 # Village Day Cycle — NINTH real fixture and FIRST composite gameplay
 # sim. 30 Villagers cycle through a 4-phase day (Morning Work →
 # Midday Trade → Evening Eat → Night Rest) gated by `world.tick % 100`
 # arithmetic, plus periodic energy drain and starvation.
-village_day_cycle_runtime = { path = "../village_day_cycle_runtime" }
+village_day_cycle_runtime = { path = "../village_day_cycle_runtime", optional = true }
 # Megaswarm 1000 — TENTH real fixture and the second SCALE-UP for
 # pair-field scoring (1000 agents → 1M mask cells per tick, 5x the
 # per-tick workload of mass_battle_100v100). 500 Red + 500 Blue
 # free-for-all with ONE verb (Strike). Performance probe — answers
 # "does pair-field scoring scale to 1000² without spatial narrowing?"
-megaswarm_1000_runtime = { path = "../megaswarm_1000_runtime" }
+megaswarm_1000_runtime = { path = "../megaswarm_1000_runtime", optional = true }
 # Tactical horde 500 — ELEVENTH real fixture. Combines mass_battle_100v100's
 # 3-verb cascade (Tank Strike + DPS Snipe + Healer Heal) with megaswarm_1000's
 # 1000-agent population, so pair-field scoring runs THREE verbs against
 # 1M cells/verb = 3M mask cells/tick. Tests whether multi-verb cascade
 # at 1000-agent scale holds together — the load-bearing question for
 # unit-scale tactical strategy gameplay.
-tactical_horde_500_runtime = { path = "../tactical_horde_500_runtime" }
+tactical_horde_500_runtime = { path = "../tactical_horde_500_runtime", optional = true }
 # Trophic 3-tier — TWELFTH REAL fixture and FIRST three-tier food web.
 # Grass (creature_type=0) + Herbivore (1) + Carnivore (2) all in a
 # single shared Agent SoA. Builds on predator_prey_real but replaces
 # the uniform graze_rate proxy with a real Grass entity that herbivores
 # actually deplete via Eat→ApplyEat chronicle. 1000-tick run probes
 # long-term ecological equilibrium.
-trophic_3tier_runtime = { path = "../trophic_3tier_runtime" }
+trophic_3tier_runtime = { path = "../trophic_3tier_runtime", optional = true }
 # Flocking skirmish — THIRTEENTH REAL fixture and FIRST to bring boids
 # dynamics into a combat context. 100 Red + 100 Blue agents share one
 # Agent SoA via the `creature_type` discriminant; same-team neighbours
 # trigger flocking (alignment+cohesion+separation), opposing-team
 # neighbours trigger combat (chase/flee + HP attrition).
-flocking_skirmish_runtime = { path = "../flocking_skirmish_runtime" }
+flocking_skirmish_runtime = { path = "../flocking_skirmish_runtime", optional = true }
 # Tower defense — fourteenth REAL fixture and first GAME-SHAPED sim
 # (not a duel, not a probe). 1 base + 10 defenders + 100 enemy slots;
 # CPU-side wave spawner walks enemy slots every K ticks. Composes
 # verb cascade + per-agent physics + multi-event-kind ring +
 # non-self target setters into a recognizable TD gameplay loop.
-tower_defense_runtime = { path = "../tower_defense_runtime" }
+tower_defense_runtime = { path = "../tower_defense_runtime", optional = true }
 # Boss fight — fifteenth REAL fixture and first ASYMMETRIC RPG combat
 # (1 Boss vs 5 Heroes with cooldown-gated abilities + phase-based
 # boss self-heal). Closest approximation to actual game encounter
 # combat across all prior sims.
-boss_fight_runtime = { path = "../boss_fight_runtime" }
+boss_fight_runtime = { path = "../boss_fight_runtime", optional = true }
 # Megaswarm 10000 — sixteenth REAL fixture and the third SCALE-UP for
 # pair-field scoring (10000 agents → 100M mask cells/verb/tick, 100x
 # mass_battle_100v100 and 10x megaswarm_1000). First fixture to exceed
@@ -209,7 +217,7 @@ boss_fight_runtime = { path = "../boss_fight_runtime" }
 # PerPair dispatch — handled by chunked 1D dispatches with cfg._pad0
 # repurposed as `pair_offset`. Performance probe: does pair-field
 # scoring stay competitive past the per-dispatch hardware ceiling?
-megaswarm_10000_runtime = { path = "../megaswarm_10000_runtime" }
+megaswarm_10000_runtime = { path = "../megaswarm_10000_runtime", optional = true }
 # Objective Capture 10v10 — seventeenth REAL fixture and first
 # COMPETITIVE OBJECTIVE-CONTROL gameplay. 10 Red vs 10 Blue race for
 # hold time on a central control point. Two-layer execution: GPU
@@ -217,117 +225,201 @@ megaswarm_10000_runtime = { path = "../megaswarm_10000_runtime" }
 # end-to-end smoke; host-side authoritative layer drives the real
 # 10v10 (team-filtered targeting, movement-toward-objective, contest
 # scoring).
-objective_capture_10v10_runtime = { path = "../objective_capture_10v10_runtime" }
+objective_capture_10v10_runtime = { path = "../objective_capture_10v10_runtime", optional = true }
 # Scripted battle — eighteenth REAL fixture and FIRST sim with a one-way
 # scripted narrative arc. Three phases (peaceful gather → assault →
 # aftermath) gated on world.tick — different verbs fire in different
 # phases. Adds `world.tick >= L && world.tick < R` phase-gate predicates
 # in `when` clauses.
-scripted_battle_runtime = { path = "../scripted_battle_runtime" }
+scripted_battle_runtime = { path = "../scripted_battle_runtime", optional = true }
 # Multi-zone world — nineteenth REAL fixture and FIRST sim with
 # per-agent location-based context (zone migration). Each agent's
 # `level` u32 encodes a zone id (Forest/Town/Dungeon); verbs gate on
 # `when self.level == X`. Migration is CPU-side per-tick.
-multi_zone_world_runtime = { path = "../multi_zone_world_runtime" }
+multi_zone_world_runtime = { path = "../multi_zone_world_runtime", optional = true }
 # Dungeon crawl — 20th REAL fixture and FIRST sim with multi-
 # encounter sequencing (rooms cleared in series). DSL is duel_1v1's
 # verb cascade; CPU-side runtime spawns next room's enemies when the
 # prior room clears.
-dungeon_crawl_runtime = { path = "../dungeon_crawl_runtime" }
+dungeon_crawl_runtime = { path = "../dungeon_crawl_runtime", optional = true }
 # Crafting diffusion — 21st REAL fixture and FIRST sim where state
 # propagates through agent interactions (knowledge bits via trade,
 # not damage). 5 groups × 10 traders, each starts with 2 recipe bits
 # in mana; trade meetings union the bitmasks. Convergence: every
 # agent learns every recipe through the trade graph.
-crafting_diffusion_runtime = { path = "../crafting_diffusion_runtime" }
+crafting_diffusion_runtime = { path = "../crafting_diffusion_runtime", optional = true }
+
+[features]
+# `cargo build -p sim_app` and `cargo test -p sim_app` both activate this.
+# It pulls only the four runtimes used by tests/cross_fixture_determinism.rs,
+# so default builds stay light. Override with `--no-default-features` to skip
+# even those.
+default = ["test-fixtures"]
+
+# Runtimes referenced unconditionally by tests/cross_fixture_determinism.rs.
+test-fixtures = [
+    "dep:sim_runtime",
+    "dep:crowd_navigation_runtime",
+    "dep:particle_collision_runtime",
+    "dep:predator_prey_runtime",
+]
+
+# Per-binary features. Each pulls in only the runtime that binary needs.
+# Build pattern: `cargo build -p sim_app --bin foo_app --features bin-foo_app`.
+bin-sim_app = ["dep:sim_runtime"]
+bin-pp_app = ["dep:predator_prey_runtime"]
+bin-pc_app = ["dep:particle_collision_runtime"]
+bin-cn_app = ["dep:crowd_navigation_runtime"]
+bin-tc_app = ["dep:target_chaser_runtime"]
+bin-ses_app = ["dep:swarm_storm_runtime"]
+bin-bartering_app = ["dep:bartering_runtime"]
+bin-ecosystem_app = ["dep:ecosystem_runtime"]
+bin-foraging_app = ["dep:foraging_runtime"]
+bin-auction_app = ["dep:auction_runtime"]
+bin-verb_fire_app = ["dep:verb_probe_runtime"]
+bin-tom_probe_app = ["dep:tom_probe_runtime"]
+bin-trade_market_app = ["dep:trade_market_runtime"]
+bin-abilities_app = ["dep:abilities_runtime"]
+bin-cooldown_probe_app = ["dep:cooldown_probe_runtime"]
+bin-diplomacy_probe_app = ["dep:diplomacy_probe_runtime"]
+bin-stochastic_probe_app = ["dep:stochastic_probe_runtime"]
+bin-pair_scoring_probe_app = ["dep:pair_scoring_probe_runtime"]
+bin-stdlib_math_probe_app = ["dep:stdlib_math_probe_runtime"]
+bin-quest_probe_app = ["dep:quest_probe_runtime"]
+bin-duel_1v1_app = ["dep:duel_1v1_runtime"]
+bin-duel_25v25_app = ["dep:duel_25v25_runtime"]
+bin-foraging_real_app = ["dep:foraging_real_runtime"]
+bin-predator_prey_real_app = ["dep:predator_prey_real_runtime"]
+bin-tactical_squad_5v5_app = ["dep:tactical_squad_5v5_runtime"]
+bin-mass_battle_100v100_app = ["dep:mass_battle_100v100_runtime"]
+bin-trade_market_real_app = ["dep:trade_market_real_runtime"]
+bin-quest_arc_real_app = ["dep:quest_arc_real_runtime"]
+bin-village_day_cycle_app = ["dep:village_day_cycle_runtime"]
+bin-megaswarm_1000_app = ["dep:megaswarm_1000_runtime"]
+bin-tactical_horde_500_app = ["dep:tactical_horde_500_runtime"]
+bin-trophic_3tier_app = ["dep:trophic_3tier_runtime"]
+bin-flocking_skirmish_app = ["dep:flocking_skirmish_runtime"]
+bin-tower_defense_app = ["dep:tower_defense_runtime"]
+bin-boss_fight_app = ["dep:boss_fight_runtime"]
+bin-megaswarm_10000_app = ["dep:megaswarm_10000_runtime"]
+bin-objective_capture_10v10_app = ["dep:objective_capture_10v10_runtime"]
+bin-scripted_battle_app = ["dep:scripted_battle_runtime"]
+bin-predator_prey_viz_app = ["dep:predator_prey_real_runtime"]
+bin-flocking_viz_app = ["dep:flocking_skirmish_runtime"]
+bin-viz_app = ["dep:sim_runtime"]
+bin-multi_zone_world_app = ["dep:multi_zone_world_runtime"]
+bin-dungeon_crawl_app = ["dep:dungeon_crawl_runtime"]
+bin-crafting_diffusion_app = ["dep:crafting_diffusion_runtime"]
 
 [[bin]]
 name = "sim_app"
 path = "src/main.rs"
+required-features = ["bin-sim_app"]
 
 [[bin]]
 name = "pp_app"
 path = "src/pp_app.rs"
+required-features = ["bin-pp_app"]
 
 [[bin]]
 name = "pc_app"
 path = "src/pc_app.rs"
+required-features = ["bin-pc_app"]
 
 [[bin]]
 name = "cn_app"
 path = "src/cn_app.rs"
+required-features = ["bin-cn_app"]
 
 [[bin]]
 name = "tc_app"
 path = "src/tc_app.rs"
+required-features = ["bin-tc_app"]
 
 [[bin]]
 name = "ses_app"
 path = "src/ses_app.rs"
+required-features = ["bin-ses_app"]
 
 [[bin]]
 name = "bartering_app"
 path = "src/bartering_app.rs"
+required-features = ["bin-bartering_app"]
 
 [[bin]]
 name = "ecosystem_app"
 path = "src/ecosystem_app.rs"
+required-features = ["bin-ecosystem_app"]
 
 [[bin]]
 name = "foraging_app"
 path = "src/foraging_app.rs"
+required-features = ["bin-foraging_app"]
 
 [[bin]]
 name = "auction_app"
 path = "src/auction_app.rs"
+required-features = ["bin-auction_app"]
 
 [[bin]]
 name = "verb_fire_app"
 path = "src/verb_fire_app.rs"
+required-features = ["bin-verb_fire_app"]
 
 [[bin]]
 name = "tom_probe_app"
 path = "src/tom_probe_app.rs"
+required-features = ["bin-tom_probe_app"]
 
 [[bin]]
 name = "trade_market_app"
 path = "src/trade_market_app.rs"
+required-features = ["bin-trade_market_app"]
 
 [[bin]]
 name = "abilities_app"
 path = "src/abilities_app.rs"
+required-features = ["bin-abilities_app"]
 
 [[bin]]
 name = "cooldown_probe_app"
 path = "src/cooldown_probe_app.rs"
+required-features = ["bin-cooldown_probe_app"]
 
 [[bin]]
 name = "diplomacy_probe_app"
 path = "src/diplomacy_probe_app.rs"
+required-features = ["bin-diplomacy_probe_app"]
 
 [[bin]]
 name = "stochastic_probe_app"
 path = "src/stochastic_probe_app.rs"
+required-features = ["bin-stochastic_probe_app"]
 
 [[bin]]
 name = "pair_scoring_probe_app"
 path = "src/pair_scoring_probe_app.rs"
+required-features = ["bin-pair_scoring_probe_app"]
 
 [[bin]]
 name = "stdlib_math_probe_app"
 path = "src/stdlib_math_probe_app.rs"
+required-features = ["bin-stdlib_math_probe_app"]
 
 [[bin]]
 name = "quest_probe_app"
 path = "src/quest_probe_app.rs"
+required-features = ["bin-quest_probe_app"]
 
 [[bin]]
 name = "duel_1v1_app"
 path = "src/duel_1v1_app.rs"
+required-features = ["bin-duel_1v1_app"]
 
 [[bin]]
 name = "duel_25v25_app"
 path = "src/duel_25v25_app.rs"
+required-features = ["bin-duel_25v25_app"]
 
 [[bin]]
 name = "duel_abilities_app"
@@ -336,87 +428,109 @@ path = "src/duel_abilities_app.rs"
 [[bin]]
 name = "foraging_real_app"
 path = "src/foraging_real_app.rs"
+required-features = ["bin-foraging_real_app"]
 
 [[bin]]
 name = "predator_prey_real_app"
 path = "src/predator_prey_real_app.rs"
+required-features = ["bin-predator_prey_real_app"]
 
 [[bin]]
 name = "tactical_squad_5v5_app"
 path = "src/tactical_squad_5v5_app.rs"
+required-features = ["bin-tactical_squad_5v5_app"]
 
 [[bin]]
 name = "mass_battle_100v100_app"
 path = "src/mass_battle_100v100_app.rs"
+required-features = ["bin-mass_battle_100v100_app"]
 
 [[bin]]
 name = "trade_market_real_app"
 path = "src/trade_market_real_app.rs"
+required-features = ["bin-trade_market_real_app"]
 
 [[bin]]
 name = "quest_arc_real_app"
 path = "src/quest_arc_real_app.rs"
+required-features = ["bin-quest_arc_real_app"]
 
 [[bin]]
 name = "village_day_cycle_app"
 path = "src/village_day_cycle_app.rs"
+required-features = ["bin-village_day_cycle_app"]
 
 [[bin]]
 name = "megaswarm_1000_app"
 path = "src/megaswarm_1000_app.rs"
+required-features = ["bin-megaswarm_1000_app"]
 
 [[bin]]
 name = "tactical_horde_500_app"
 path = "src/tactical_horde_500_app.rs"
+required-features = ["bin-tactical_horde_500_app"]
 
 [[bin]]
 name = "trophic_3tier_app"
 path = "src/trophic_3tier_app.rs"
+required-features = ["bin-trophic_3tier_app"]
 
 [[bin]]
 name = "flocking_skirmish_app"
 path = "src/flocking_skirmish_app.rs"
+required-features = ["bin-flocking_skirmish_app"]
 
 [[bin]]
 name = "tower_defense_app"
 path = "src/tower_defense_app.rs"
+required-features = ["bin-tower_defense_app"]
 
 [[bin]]
 name = "boss_fight_app"
 path = "src/boss_fight_app.rs"
+required-features = ["bin-boss_fight_app"]
 
 [[bin]]
 name = "megaswarm_10000_app"
 path = "src/megaswarm_10000_app.rs"
+required-features = ["bin-megaswarm_10000_app"]
 
 [[bin]]
 name = "objective_capture_10v10_app"
 path = "src/objective_capture_app.rs"
+required-features = ["bin-objective_capture_10v10_app"]
 
 [[bin]]
 name = "scripted_battle_app"
 path = "src/scripted_battle_app.rs"
+required-features = ["bin-scripted_battle_app"]
 
 [[bin]]
 name = "predator_prey_viz_app"
 path = "src/predator_prey_viz_app.rs"
+required-features = ["bin-predator_prey_viz_app"]
 
 [[bin]]
 name = "flocking_viz_app"
 path = "src/flocking_viz_app.rs"
+required-features = ["bin-flocking_viz_app"]
 
 [[bin]]
 name = "viz_app"
 path = "src/viz_app.rs"
+required-features = ["bin-viz_app"]
 
 [[bin]]
 name = "multi_zone_world_app"
 path = "src/multi_zone_world_app.rs"
+required-features = ["bin-multi_zone_world_app"]
 
 [[bin]]
 name = "dungeon_crawl_app"
 path = "src/dungeon_crawl_app.rs"
+required-features = ["bin-dungeon_crawl_app"]
 
 [[bin]]
 name = "crafting_diffusion_app"
 path = "src/crafting_diffusion_app.rs"
+required-features = ["bin-crafting_diffusion_app"]

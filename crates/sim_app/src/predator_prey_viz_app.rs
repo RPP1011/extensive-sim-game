@@ -6,7 +6,7 @@
 //! about the runtime's CONSTRUCTOR and the sim-specific stat readouts
 //! (kills, births) — the rest comes through the trait.
 //!
-//! Run with `cargo run --bin predator_prey_viz_app --release`.
+//! Run with `cargo run --bin predator_prey_viz_app --features bin-predator_prey_viz_app --release`.
 
 mod viz;
 

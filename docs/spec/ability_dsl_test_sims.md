@@ -66,7 +66,7 @@ ability Mend {
 - Per-tick ASCII viz shows hero HP swings as abilities fire
 - Combat resolves to one hero down by tick ~200 (similar curve to
   current duel_1v1)
-- `cargo run --bin viz_app -- duel_abilities` renders
+- `cargo run --bin viz_app --features bin-viz_app -- duel_abilities` renders
 
 **What this catches:** parser bugs, AST→IR lowering bugs, AbilityRegistry
 serialization bugs, Gate field mapping bugs, EffectOp dispatch bugs.
@@ -136,7 +136,7 @@ ability Fireball {
 - Lifesteal verb generates per-hit heal events
 - Stacking modes resolve correctly (refresh extends duration; stack
   accumulates; extend adds to existing)
-- `cargo run --bin viz_app -- tactical_squad_abilities` renders status
+- `cargo run --bin viz_app --features bin-viz_app -- tactical_squad_abilities` renders status
   effects as glyph color changes
 
 **What this catches:** modifier-slot parser bugs, shape rasterization
@@ -230,7 +230,7 @@ ability Decree {
   when spy invisible AND not re-observed)
 - Combat between nobles is gated on standing threshold — duels fire
   only after slander accumulates
-- `cargo run --bin viz_app -- spy_network` renders agents colored by
+- `cargo run --bin viz_app --features bin-viz_app -- spy_network` renders agents colored by
   believed creature type (i.e. disguised spies look like commoners)
 
 **What this catches:** BeliefState SoA layout bugs, decay phase ordering
@@ -304,7 +304,7 @@ ability Tunneler {
 - Voxel revert queue pops at lifetime expiry
 - Damageable voxels track HP across multiple `damage`-vs-voxel events
 - Walls block movement (resolve_movement honors voxel storage)
-- `cargo run --bin viz_app -- siege_defense` renders voxel layer as
+- `cargo run --bin viz_app --features bin-viz_app -- siege_defense` renders voxel layer as
   background grid overlay
 
 **What this catches:** voxel storage subsystem bugs, mask rasterization
@@ -391,7 +391,7 @@ ability TradeWith {
 - Tool wear accumulates; broken tools fail recipes
 - `RepairForge` is itself a recipe that targets an owned tool
 - ApplyTrade chronicle moves both gold AND commodity counts
-- `cargo run --bin viz_app -- village_crafting_real` renders villagers
+- `cargo run --bin viz_app --features bin-viz_app -- village_crafting_real` renders villagers
   colored by primary skill, glyph indicating current activity
 
 **What this catches:** RecipeRegistry serialization, inventory variable-
