@@ -5,24 +5,21 @@
 //! - `program`  — `AbilityProgram` IR + `EffectOp` / `Area` / `Delivery` / `Gate`
 //! - `registry` — `AbilityRegistry` + append-only builder
 //!
-//! The `cast` cascade dispatch handler lived here until 2026-04-19, when
-//! the DSL compiler grew `for ... in <collection>` loops and `match` over
-//! sum-type variants (`EffectOp::*`). Cast dispatch is now a plain
-//! DSL-emitted physics rule — see `assets/sim/physics.sim::cast` and the
-//! generated `crates/engine/src/generated/physics/cast.rs`. `EffectOp` and
-//! `TargetSelector` are treated as stdlib-known sum types by the
-//! compiler (see `qualified_variant_name` in
-//! `crates/dsl_compiler/src/emit_physics.rs`). The last hand-written
-//! cascade handler with game logic is retired.
-//!
-//! Task 157 retired `gate::evaluate_cast_gate` — the caster-side
-//! conjunction (alive + un-stunned + cooldown-ready + known +
-//! not-engaged-elsewhere) is now `mask Cast(ability: AbilityId)` in
-//! `assets/sim/masks.sim`, lowered to `crate::generated::mask::
-//! mask_cast`. Target-side filters (target alive, in-range, hostility
-//! matches) live on the engine mask-build path in
-//! `crate::mask::inferred_cast_target`. This retired the last
-//! hand-written game-logic predicate in the engine crate.
+//! Today the engine ships only the host-side ability data model:
+//! `AbilityProgram` (the lowered IR per ability), `AbilityRegistry`
+//! (the slot-stable `Vec<AbilityProgram>`), and `PackedAbilityRegistry`
+//! (the SoA layout for GPU consumption — Wave 1.9). Cast dispatch
+//! itself is **per-fixture**, not engine-wide: each per-fixture `.sim`
+//! authors its own `verb` declarations and `physics Apply*` chronicle
+//! blocks (see `assets/sim/duel_1v1.sim` or `assets/sim/duel_abilities.sim`
+//! for the canonical 1v1 shape). There is no global `physics.sim`
+//! cast cascade today; the previous engine-side cascade-handler design
+//! (`gate::evaluate_cast_gate`, `crate::generated::physics::cast`,
+//! `assets/sim/masks.sim`) was deleted in the 2026-05-02 wolf-sim
+//! wipe. A registry-driven kernel-emit path (so kernels read
+//! `PackedAbilityRegistry` storage buffers and dispatch on `AbilityId`
+//! rather than reading hand-mirrored .sim verb constants) is Wave 2+
+//! work.
 //!
 //! Task 143 deleted the `expire` module — stun / slow are now stored as
 //! absolute expiry ticks (`stun_expires_at_tick` / `slow_expires_at_tick`)
@@ -31,12 +28,13 @@
 //! retired; every time-gated combat field is now a synthetic boundary
 //! read off `state.tick`.
 //!
-//! Per-effect cascade handlers (`damage`, `heal`, `shield`, `stun`, `slow`,
-//! `transfer_gold`, `modify_standing`, `opportunity_attack`, `record_memory`,
-//! `cast`) are compiler-emitted from `assets/sim/physics.sim`; the legacy
-//! hand-written files that used to live here (one per effect, plus
-//! `record_memory.rs` and `cast.rs`) were deleted as each migrated to DSL.
-//! Consumers reach them at `crate::generated::physics::<name>::*`.
+//! Per-effect dispatch is per-fixture — each `.sim` file owns its own
+//! `physics ApplyDamage` / `ApplyHeal` / `ApplyShield` / etc. blocks
+//! (compiler-emitted into `OUT_DIR/generated.rs` of the per-fixture
+//! runtime crate). The engine crate ships zero hand-written cascade
+//! handlers. The `EffectOp` catalog (Damage / Heal / Shield / Stun /
+//! Slow / TransferGold / ModifyStanding / CastAbility) is the
+//! canonical lowering target for each `.ability` effect verb.
 
 mod id;
 pub use id::AbilityId;
