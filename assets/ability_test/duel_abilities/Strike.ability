@@ -1,12 +1,24 @@
 // Wave 1 acceptance: most basic single-target damage ability.
 // Lowers to AbilityProgram { gate: { cooldown_ticks: 10, range: 5.0 },
-//                            effects: [EffectOp::Damage { amount: 30.0 }] }
+//                            effects: [EffectOp::Damage { amount: 30.0 }],
+//                            per_effect_areas: [Some(EffectAreaShape{
+//                                kind: Circle, args: [0.5, 0, 0, 0] })] }
 //
 // Damage tuning rationale (2026-05-04 #85 retune): bumped from 15 to
 // 30 so combat resolves by tick ~150 even with shield_hp absorption
 // active (50-shield ShieldUp cycles absorb ~1.6 strikes per cooldown
 // at this damage; net dmg per 120-tick cycle ≈ 60 hp; combat
 // converges in ~140 ticks).
+//
+// `in circle(0.5)` exercises Wave 1.5#2 in-shape lowering — declares
+// the AOE intent at the .ability surface (lands in
+// program.per_effect_areas as ShapeKind::Circle, args[0] = 0.5). The
+// 0.5 radius is small enough to be effectively single-target in the
+// duel_abilities 2-agent fixture (no second enemy can be inside the
+// disc), so the .sim's existing single-target verb is correct
+// behavior. Real AOE spatial dispatch (verb iterating multiple
+// candidates via spatial.within / for_each_neighbor) lands in a
+// multi-agent fixture later — this E2E pins the lowering metadata.
 
 ability Strike {
     target: enemy
@@ -14,5 +26,5 @@ ability Strike {
     cooldown: 1s
     hint: damage
 
-    damage 30 [PHYSICAL: 100]
+    damage 30 in circle(0.5) [PHYSICAL: 100]
 }

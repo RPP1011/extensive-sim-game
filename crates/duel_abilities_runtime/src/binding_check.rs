@@ -25,7 +25,8 @@ use std::path::PathBuf;
 
 use engine::ability::{
     program::{
-        AbilityTag, Area, EffectOp, EffectScaling, LifetimeMode, ScalingStatRef, StackingMode,
+        AbilityTag, Area, EffectAreaShape, EffectOp, EffectScaling, LifetimeMode, ScalingStatRef,
+        ShapeKind, StackingMode,
     },
     PackedAbilityRegistry,
 };
@@ -142,6 +143,27 @@ pub fn assert_ability_registry_matches_sim_constants() {
             "Strike effect[0]: expected Damage(30.0), got {other:?}",
         ),
     }
+    // Wave 1.5#2 in-shape modifier — Strike.ability declares
+    // `in circle(0.5)`, lowered to program.per_effect_areas[0] =
+    // Some(EffectAreaShape { kind: Circle, args: [0.5, 0, 0, 0] }).
+    // The 0.5 radius is small enough to be effectively single-target
+    // in the duel_abilities 2-agent fixture (no second enemy can be
+    // inside the disc), so the .sim's existing single-target verb
+    // behavior is correct. Real AOE spatial dispatch — verb iterating
+    // multiple candidates via spatial.within / for_each_neighbor —
+    // lands in a multi-agent fixture later. The binding check pins
+    // the lowered metadata so corpus drift surfaces immediately.
+    assert_eq!(
+        strike.per_effect_areas.len(), 1,
+        "Strike must have one area slot (parallel to one effect)",
+    );
+    assert_eq!(
+        strike.per_effect_areas[0],
+        Some(EffectAreaShape { kind: ShapeKind::Circle, args: [0.5, 0.0, 0.0, 0.0] }),
+        "Strike area must be Circle(0.5) — .ability `in circle(0.5)`; \
+         args use the shape's positional vocabulary (radius for circle), \
+         zero-padded to 4 slots",
+    );
 
     // ---- ShieldUp: cooldown 40 ticks, self-target, shield 50.0 ----
     let shieldup_id = *built.names.get("ShieldUp")
