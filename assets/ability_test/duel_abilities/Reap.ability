@@ -1,0 +1,17 @@
+// Wave 2 piece N: Execute E2E demo. Instant-kills target if their hp
+// is below threshold. Lowers to EffectOp::Execute{hp_threshold: 20.0}.
+//
+// Conditional-emit path: the verb's `when` clause gates on target.hp <
+// threshold; on fire it emits a Defeated event the new ApplyDefeat
+// chronicle drains via agents.set_alive(c, false). Distinct from the
+// existing inline Defeated emit in ApplyDamage's hp<=0 branch — both
+// idempotently set alive=false.
+
+ability Reap {
+    target: enemy
+    range: 5.0
+    cooldown: 2s
+    hint: damage
+
+    execute 20
+}
