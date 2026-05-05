@@ -177,6 +177,24 @@ pub enum LowerError {
         into:    String,
         span:    Span,
     },
+    /// Wave 1.2 parser accepted a top-level `template <Name>(<params>) { ... }`
+    /// block. Template expansion (parameter substitution into `$ident`
+    /// references in the body, depth-bounded recursion per spec §11.3)
+    /// is Wave 2+ work. Surfaced loudly so authors don't run with a
+    /// silently-dropped template definition.
+    TemplateBlockNotImplemented {
+        name: String,
+        span: Span,
+    },
+    /// Wave 1.2 parser accepted an ability with a `: TemplateName(args)`
+    /// instantiation clause. Without the template-expansion engine the
+    /// lowering layer can't substitute the args into the template body,
+    /// so this surfaces here.
+    TemplateInstantiationNotImplemented {
+        ability:  String,
+        template: String,
+        span:     Span,
+    },
 }
 
 impl std::fmt::Display for LowerError {
@@ -240,6 +258,14 @@ impl std::fmt::Display for LowerError {
                 f,
                 "ability `{ability}` morphs into `{into}` — parsed by Wave 1.4 but lowering is Wave 2+ (form-swap state machinery not yet wired)"
             ),
+            LowerError::TemplateBlockNotImplemented { name, .. } => write!(
+                f,
+                "`template {name}(…)` is parsed by Wave 1.2 but lowering is Wave 2+ (template expansion engine + `$param` substitution not yet wired)"
+            ),
+            LowerError::TemplateInstantiationNotImplemented { ability, template, .. } => write!(
+                f,
+                "ability `{ability}` instantiates `{template}(…)` — parsed by Wave 1.2 but lowering is Wave 2+ (template expansion engine not yet wired)"
+            ),
         }
     }
 }
@@ -263,6 +289,15 @@ pub fn lower_ability_file(file: &AbilityFile) -> Result<Vec<AbilityProgram>, Low
         return Err(LowerError::PassiveBlockNotImplemented {
             name: passive.name.clone(),
             span: passive.span,
+        });
+    }
+    // Wave 1.2: top-level `template` blocks parse but expansion lives
+    // at Wave 2+. Surface the first one so a silently-dropped template
+    // never reaches the registry.
+    if let Some(template) = file.templates.first() {
+        return Err(LowerError::TemplateBlockNotImplemented {
+            name: template.name.clone(),
+            span: template.span,
         });
     }
     let mut out = Vec::with_capacity(file.abilities.len());
@@ -292,6 +327,21 @@ pub fn lower_ability_file(file: &AbilityFile) -> Result<Vec<AbilityProgram>, Low
 ///
 /// Body semantics: see crate-level docs.
 pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerError> {
+    // -- Wave 1.2: ability with `: TemplateName(args)` instantiation.
+    // Without the expansion engine the lowering layer can't substitute
+    // args into the template body. Surface BEFORE the header / body
+    // passes so authors of `ability Fireball : ElementalBolt(fire, 4.0)
+    // { target: ground … }` see the template-not-implemented diagnostic
+    // immediately rather than a misleading TargetModeReserved error on
+    // a body shape they didn't pick.
+    if let Some(inst) = &decl.instantiates {
+        return Err(LowerError::TemplateInstantiationNotImplemented {
+            ability:  decl.name.clone(),
+            template: inst.name.clone(),
+            span:     inst.span,
+        });
+    }
+
     // -- Header pass: collect the gate / area / hint into mutable scratch
     // values. We resolve `target:` first so a later `range:` can overwrite
     // the SingleTarget's range field. The Wave 1.0 parser already rejects

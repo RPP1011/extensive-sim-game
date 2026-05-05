@@ -104,6 +104,7 @@ pub fn parse_ability_file(source: &str) -> Result<AbilityFile, ParseError> {
     c.skip_ws();
     let mut abilities = Vec::new();
     let mut passives = Vec::new();
+    let mut templates = Vec::new();
     while !c.eof() {
         let kw = peek_ident(&c);
         match kw.as_deref() {
@@ -115,16 +116,19 @@ pub fn parse_ability_file(source: &str) -> Result<AbilityFile, ParseError> {
                 Ok(decl) => passives.push(decl),
                 Err(e) => return Err(ParseError::new(source, e.span, e.context, e.message)),
             },
-            Some("template") | Some("structure") => {
-                // Out of scope for Wave 1.1; report a clean parse error so
+            Some("template") => match parse_template_decl(&mut c) {
+                Ok(decl) => templates.push(decl),
+                Err(e) => return Err(ParseError::new(source, e.span, e.context, e.message)),
+            },
+            Some("structure") => {
+                // Out of scope for Wave 1.2; report a clean parse error so
                 // hero templates that include these blocks fail loudly
                 // rather than silently producing a partial AST.
-                let kw = kw.unwrap();
                 return Err(ParseError::new(
                     source,
                     here(&c),
                     vec!["parsing top-level `.ability` decl".to_string()],
-                    format!("`{kw}` blocks are not supported in this parser slice (Wave 1.1); only `ability` and `passive` blocks are recognised"),
+                    "`structure` blocks are not supported in this parser slice (Wave 1.2); only `ability`, `passive`, and `template` blocks are recognised".to_string(),
                 ));
             }
             Some(other) => {
@@ -132,7 +136,7 @@ pub fn parse_ability_file(source: &str) -> Result<AbilityFile, ParseError> {
                     source,
                     here(&c),
                     Vec::new(),
-                    format!("expected `ability` or `passive` (top-level); got `{other}`"),
+                    format!("expected `ability`, `passive`, or `template` (top-level); got `{other}`"),
                 ));
             }
             None => {
@@ -140,13 +144,13 @@ pub fn parse_ability_file(source: &str) -> Result<AbilityFile, ParseError> {
                     source,
                     here(&c),
                     Vec::new(),
-                    "expected `ability` or `passive` (top-level)".to_string(),
+                    "expected `ability`, `passive`, or `template` (top-level)".to_string(),
                 ));
             }
         }
         c.skip_ws();
     }
-    Ok(AbilityFile { abilities, passives })
+    Ok(AbilityFile { abilities, passives, templates })
 }
 
 // ---------------------------------------------------------------------------
@@ -159,6 +163,31 @@ fn ability_decl(c: &mut Cursor) -> PResult<AbilityDecl> {
         .map_err(|e| e.with_context("parsing `ability` declaration"))?;
     let name = ident(c).map_err(|e| e.with_context("parsing ability name"))?;
     c.skip_ws();
+    // Wave 1.2: optional `: TemplateName(arg1, arg2, ...)` instantiation
+    // clause sits between the ability name and the `{` body brace.
+    let instantiates = if c.starts_with_char(':') {
+        let inst_start = c.pos;
+        c.bump(1);
+        let tmpl_name = ident(c).map_err(|e| {
+            e.with_context(format!(
+                "parsing template name in `ability {name} : <Template>(...)` instantiation"
+            ))
+        })?;
+        c.skip_ws();
+        let args = parse_template_arg_list(c).map_err(|e| {
+            e.with_context(format!(
+                "parsing template arg list in `ability {name} : {tmpl_name}(...)` instantiation"
+            ))
+        })?;
+        c.skip_ws();
+        Some(TemplateInstantiation {
+            name: tmpl_name,
+            args,
+            span: Span::new(inst_start, c.pos),
+        })
+    } else {
+        None
+    };
     expect_char(c, '{')
         .map_err(|e| e.with_context("parsing ability body (expected `{`)"))?;
     let mut headers: Vec<AbilityHeader> = Vec::new();
@@ -241,15 +270,31 @@ fn ability_decl(c: &mut Cursor) -> PResult<AbilityDecl> {
             effects.push(effect);
         }
     }
-    if headers.is_empty() && effects.is_empty() && deliver.is_none() && morph.is_none() {
+    // Wave 1.2: a body can be empty when `: TemplateName(...)` supplies
+    // the effects via expansion (the `{ }` is still required to keep the
+    // grammar regular). Permit empty bodies in that case only.
+    if headers.is_empty()
+        && effects.is_empty()
+        && deliver.is_none()
+        && morph.is_none()
+        && instantiates.is_none()
+    {
         return Err(ParseErr::at(
             Span::new(start, c.pos),
             format!(
-                "ability `{name}` has empty body — at least one header, effect, deliver block, or morph block is required"
+                "ability `{name}` has empty body — at least one header, effect, deliver block, morph block, or `: TemplateName(...)` instantiation is required"
             ),
         ));
     }
-    Ok(AbilityDecl { name, headers, effects, deliver, morph, span: Span::new(start, c.pos) })
+    Ok(AbilityDecl {
+        name,
+        headers,
+        effects,
+        deliver,
+        morph,
+        instantiates,
+        span: Span::new(start, c.pos),
+    })
 }
 
 /// Return `true` if the cursor sits at the start of a header line —
@@ -408,6 +453,256 @@ fn check_duplicate_passive_header(
         ));
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Wave 1.2 — `template <Name>(<params>) { <effects> }` block (spec §11)
+// ---------------------------------------------------------------------------
+
+/// Parse a `template <Name>(<params>) { <effects> }` block per spec
+/// §11. Cursor sits at the `template` keyword; on success it sits past
+/// the closing body brace.
+///
+/// Grammar:
+/// ```text
+/// template_decl  := "template" IDENT "(" [ template_param ("," template_param)* [","] ] ")"
+///                   "{" effect_stmt* "}"
+/// template_param := IDENT [ ":" type_name [ "=" default_val ] ]
+/// type_name      := "int" | "float" | "bool" | "Material" | "Structure"
+/// default_val    := number | ident | string | "true" | "false"
+/// ```
+///
+/// The body re-uses `parse_effect`, so the full Wave 1.5 modifier
+/// surface (`in <shape>`, `[TAG: …]`, `for <dur>`, `when <cond>`,
+/// `chance N%`, `stacking …`, `+ N% stat_ref`, `until_caster_dies` /
+/// `damageable_hp`, nested `{ … }`) is available inside a template.
+/// Empty body `template Empty() { }` is allowed (spec doesn't forbid;
+/// useful as a marker template).
+fn parse_template_decl(c: &mut Cursor) -> PResult<TemplateDecl> {
+    let start = c.pos;
+    expect_keyword(c, "template")
+        .map_err(|e| e.with_context("parsing `template` declaration"))?;
+    let name = ident(c).map_err(|e| e.with_context("parsing template name"))?;
+    c.skip_ws();
+    expect_char(c, '(').map_err(|e| {
+        e.with_context(format!(
+            "parsing template `{name}` parameter list (expected `(`)"
+        ))
+    })?;
+    let mut params: Vec<TemplateParam> = Vec::new();
+    loop {
+        c.skip_ws();
+        if c.starts_with_char(')') {
+            c.bump(1);
+            break;
+        }
+        if c.eof() {
+            return Err(ParseErr::at(
+                here(c),
+                format!("unexpected end of input inside template `{name}` parameter list"),
+            ));
+        }
+        let p = parse_template_param(c).map_err(|e| {
+            e.with_context(format!("parsing parameter in template `{name}`"))
+        })?;
+        // Reject duplicate param names — same surface as duplicate
+        // headers/effects elsewhere.
+        if params.iter().any(|q| q.name == p.name) {
+            return Err(ParseErr::at(
+                p.span,
+                format!(
+                    "duplicate parameter `{}` in template `{name}`",
+                    p.name
+                ),
+            ));
+        }
+        params.push(p);
+        c.skip_ws();
+        if c.starts_with_char(',') {
+            c.bump(1);
+            continue;
+        }
+        if c.starts_with_char(')') {
+            c.bump(1);
+            break;
+        }
+        return Err(ParseErr::at(
+            here(c),
+            format!(
+                "expected `,` or `)` in template `{name}` parameter list; got `{}`",
+                peek_word_for_error(c)
+            ),
+        ));
+    }
+    c.skip_ws();
+    expect_char(c, '{').map_err(|e| {
+        e.with_context(format!("parsing template `{name}` body (expected `{{`)"))
+    })?;
+    let mut effects: Vec<EffectStmt> = Vec::new();
+    loop {
+        c.skip_ws();
+        if c.starts_with_char('}') {
+            c.bump(1);
+            break;
+        }
+        if c.eof() {
+            return Err(ParseErr::at(
+                here(c),
+                format!("unexpected end of input inside template `{name}` body"),
+            ));
+        }
+        // Defensive: a `template` keyword inside the body is almost
+        // certainly a typo / misnesting. Fail loudly with a clear
+        // diagnostic rather than parsing it as an effect verb (which
+        // would defer the surprise to lowering).
+        if starts_with_keyword(c, "template") {
+            return Err(ParseErr::at(
+                here(c),
+                format!(
+                    "nested `template` block inside `template {name}` is not allowed"
+                ),
+            ));
+        }
+        let stmt = parse_effect(c).map_err(|e| {
+            e.with_context(format!("parsing effect in template `{name}`"))
+        })?;
+        effects.push(stmt);
+    }
+    Ok(TemplateDecl {
+        name,
+        params,
+        effects,
+        span: Span::new(start, c.pos),
+    })
+}
+
+/// Parse one `<name> [: <ty>] [= <default>]` template parameter entry.
+fn parse_template_param(c: &mut Cursor) -> PResult<TemplateParam> {
+    let start = c.pos;
+    let name = ident(c).map_err(|e| e.with_context("parsing template parameter name"))?;
+    c.skip_ws();
+    let ty = if c.starts_with_char(':') {
+        c.bump(1);
+        c.skip_ws();
+        let ty_start = c.pos;
+        let ty_name = ident(c).map_err(|e| {
+            e.with_context(format!(
+                "parsing type annotation for template parameter `{name}`"
+            ))
+        })?;
+        let parsed = match ty_name.as_str() {
+            "int" => TemplateParamTy::Int,
+            "float" => TemplateParamTy::Float,
+            "bool" => TemplateParamTy::Bool,
+            "Material" => TemplateParamTy::Material,
+            "Structure" => TemplateParamTy::Structure,
+            other => {
+                return Err(ParseErr::at(
+                    Span::new(ty_start, ty_start + other.len()),
+                    format!(
+                        "unknown template parameter type `{other}` — spec §11.1 admits only: int, float, bool, Material, Structure"
+                    ),
+                ));
+            }
+        };
+        Some(parsed)
+    } else {
+        None
+    };
+    c.skip_ws();
+    let default = if c.starts_with_char('=') {
+        c.bump(1);
+        c.skip_ws();
+        Some(parse_template_arg(c).map_err(|e| {
+            e.with_context(format!(
+                "parsing default value for template parameter `{name}`"
+            ))
+        })?)
+    } else {
+        None
+    };
+    Ok(TemplateParam { name, ty, default, span: Span::new(start, c.pos) })
+}
+
+/// Parse a `(arg, arg, ...)` template argument list. Cursor sits at
+/// `(`; on success it sits past the closing `)`.
+///
+/// Empty arg lists (`()`) are accepted — they pair with empty parameter
+/// lists for marker templates and sometimes appear when every template
+/// param has a default.
+fn parse_template_arg_list(c: &mut Cursor) -> PResult<Vec<TemplateArg>> {
+    expect_char(c, '(').map_err(|e| e.with_context("parsing `(` of template argument list"))?;
+    let mut args: Vec<TemplateArg> = Vec::new();
+    loop {
+        c.skip_ws();
+        if c.starts_with_char(')') {
+            c.bump(1);
+            break;
+        }
+        if c.eof() {
+            return Err(ParseErr::at(
+                here(c),
+                "unexpected end of input inside template argument list".to_string(),
+            ));
+        }
+        let arg = parse_template_arg(c)
+            .map_err(|e| e.with_context("parsing template argument"))?;
+        args.push(arg);
+        c.skip_ws();
+        if c.starts_with_char(',') {
+            c.bump(1);
+            continue;
+        }
+        if c.starts_with_char(')') {
+            c.bump(1);
+            break;
+        }
+        return Err(ParseErr::at(
+            here(c),
+            format!(
+                "expected `,` or `)` inside template argument list; got `{}`",
+                peek_word_for_error(c)
+            ),
+        ));
+    }
+    Ok(args)
+}
+
+/// Parse one `TemplateArg` — number / ident / string / bool literal.
+///
+/// Bool literals (`true` / `false`) are recognised before the generic
+/// ident path so they don't roundtrip as `Ident("true")`.
+fn parse_template_arg(c: &mut Cursor) -> PResult<TemplateArg> {
+    c.skip_ws();
+    if c.starts_with_char('"') {
+        let s = string_lit(c)?;
+        return Ok(TemplateArg::String(s));
+    }
+    if peek_number_or_sign(c) {
+        let (val, _is_float) = number_literal(c)?;
+        return Ok(TemplateArg::Number(val as f32));
+    }
+    if let Some(name) = peek_ident(c) {
+        // Bool first — `true` / `false` keywords would otherwise be
+        // captured as plain idents and bool semantics would be lost.
+        if name == "true" {
+            c.bump(name.len());
+            return Ok(TemplateArg::Bool(true));
+        }
+        if name == "false" {
+            c.bump(name.len());
+            return Ok(TemplateArg::Bool(false));
+        }
+        c.bump(name.len());
+        return Ok(TemplateArg::Ident(name));
+    }
+    Err(ParseErr::at(
+        here(c),
+        format!(
+            "expected template argument (number / ident / string / bool); got `{}`",
+            peek_word_for_error(c)
+        ),
+    ))
 }
 
 // ---------------------------------------------------------------------------
