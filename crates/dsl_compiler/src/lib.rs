@@ -25,6 +25,11 @@ pub use dsl_ast::tokens;
 // Compute-Graph IR — the canonical emission path.
 pub mod cg;
 
+// Wave 1.6 — `.ability` AST -> engine-runtime `AbilityProgram` lowering.
+// See `ability_lower.rs` for scope (only the 8 currently-implemented
+// `EffectOp` variants and the 5 Wave-1 header keys are wired today).
+pub mod ability_lower;
+
 // Shared kernel-emit infrastructure (reused by `cg::emit::*`).
 pub mod kernel_binding_ir;
 pub mod kernel_lowerings;
