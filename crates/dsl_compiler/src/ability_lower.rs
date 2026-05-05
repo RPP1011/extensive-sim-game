@@ -88,7 +88,7 @@ use dsl_ast::ast::{
     AbilityDecl, AbilityFile, AbilityHeader, EffectArg, EffectStmt, HintName, Span, TargetMode,
 };
 use engine::ability::program::{
-    AbilityHint, AbilityProgram, AbilityTag, Area, Delivery, EffectOp, Gate,
+    AbilityHint, AbilityProgram, AbilityTag, Area, Delivery, EffectOp, Gate, LifetimeMode,
     MAX_EFFECTS_PER_PROGRAM, MAX_TAGS_PER_PROGRAM, StackingMode, TargetSelector,
 };
 use engine::ability::AbilityId;
@@ -143,10 +143,11 @@ pub enum LowerError {
     ModifierNotImplemented {
         verb:     String,
         /// Slot identifier — one of "in" / "tags" / "for" / "when" /
-        /// "scaling" / "lifetime" / "nested". "stacking" was retired
-        /// in Wave 1.5#3 (now lowered into `program.stackings`).
-        /// "chance" was retired in Wave 1.5#5 (now lowered into
-        /// `program.chances`).
+        /// "scaling" / "nested". "stacking" was retired in Wave 1.5#3
+        /// (now lowered into `program.stackings`). "chance" was retired
+        /// in Wave 1.5#5 (now lowered into `program.chances`).
+        /// "lifetime" was retired in Wave 1.5#8 (now lowered into
+        /// `program.lifetimes`).
         modifier: &'static str,
         span:     Span,
     },
@@ -520,6 +521,17 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     // aggregator uses, so Wave 1 corpus output stays bit-stable.
     let mut chances_acc: SmallVec<[Option<u16>; MAX_EFFECTS_PER_PROGRAM]> = SmallVec::new();
     let mut any_chance = false;
+    // Wave 1.5#8: per-effect lifetime modifier, index parallel to
+    // `effects`. Same "all-`None` → empty smallvec" optimization the
+    // chances/stackings aggregators use, so Wave 1 corpus output stays
+    // bit-stable. The `damageable_hp(N)` variant is the first per-
+    // effect modifier we lower with variant data — its f32 hp pool
+    // round-trips through `LifetimeMode::DamageableHp(hp)` straight
+    // into `program.lifetimes`, then into the SoA pair
+    // (`lifetime_kinds` + `lifetime_payloads`) at pack time.
+    let mut lifetimes_acc: SmallVec<[Option<LifetimeMode>; MAX_EFFECTS_PER_PROGRAM]> =
+        SmallVec::new();
+    let mut any_lifetime = false;
     for stmt in &decl.effects {
         // Per-effect tags first — fail fast on unknown tag names so the
         // verb-dispatch error doesn't hide them.
@@ -568,6 +580,26 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
             any_chance = true;
         }
         chances_acc.push(chance);
+        // Wave 1.5#8: capture the per-effect lifetime modifier BEFORE
+        // the verb dispatch (which would otherwise need to ignore it).
+        // Map the parser AST enum onto the engine enum 1:1; only the
+        // `DamageableHp` variant carries data, threaded through as a
+        // bare f32.
+        let lifetime = stmt.lifetime.as_ref().map(|lt| match lt {
+            dsl_ast::ast::EffectLifetime::UntilCasterDies { .. } => {
+                LifetimeMode::UntilCasterDies
+            }
+            dsl_ast::ast::EffectLifetime::DamageableHp { hp, .. } => {
+                LifetimeMode::DamageableHp(*hp)
+            }
+            dsl_ast::ast::EffectLifetime::BreakOnDamage { .. } => {
+                LifetimeMode::BreakOnDamage
+            }
+        });
+        if lifetime.is_some() {
+            any_lifetime = true;
+        }
+        lifetimes_acc.push(lifetime);
         let op = lower_effect_stmt(stmt)?;
         effects.push(op);
     }
@@ -582,6 +614,9 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     if !any_chance {
         chances_acc.clear();
     }
+    if !any_lifetime {
+        lifetimes_acc.clear();
+    }
 
     Ok(AbilityProgram {
         delivery: Delivery::Instant,
@@ -592,6 +627,7 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
         tags: tag_acc,
         stackings: stackings_acc,
         chances: chances_acc,
+        lifetimes: lifetimes_acc,
     })
 }
 
@@ -662,18 +698,12 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             span:     s.span,
         });
     }
-    if let Some(lt) = &stmt.lifetime {
-        let span = match lt {
-            dsl_ast::ast::EffectLifetime::UntilCasterDies { span } => *span,
-            dsl_ast::ast::EffectLifetime::DamageableHp { span, .. } => *span,
-            dsl_ast::ast::EffectLifetime::BreakOnDamage { span } => *span,
-        };
-        return Err(LowerError::ModifierNotImplemented {
-            verb:     stmt.verb.clone(),
-            modifier: "lifetime",
-            span,
-        });
-    }
+    // Wave 1.5#8: `until_caster_dies` / `damageable_hp(N)` /
+    // `break_on_damage` are consumed by the per-ability aggregator in
+    // `lower_ability_decl` (one slot per effect, parallel to
+    // `program.effects`). The verb dispatch below stays oblivious —
+    // apply handlers read `program.lifetimes[i]` to pick the lifetime
+    // semantic. No short-circuit here.
     if !stmt.nested.is_empty() {
         return Err(LowerError::ModifierNotImplemented {
             verb:     stmt.verb.clone(),

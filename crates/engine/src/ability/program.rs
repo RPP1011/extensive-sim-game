@@ -376,6 +376,63 @@ pub enum StackingMode {
     Extend = 2,
 }
 
+/// Per-effect lifetime modifier — when does this effect end?
+///
+/// `UntilCasterDies` ties the effect to the caster's `hot_alive` flag;
+/// `DamageableHp(N)` is a separate HP pool that depletes as the effect
+/// absorbs damage (voxel-style); `BreakOnDamage` ends on the next
+/// caster-damage event (LoL-style stealth pattern — Akali / Elise /
+/// MonkeyKing all use the "stealth-for-3s, break_on_damage" idiom).
+///
+/// The discriminant is exposed via [`LifetimeMode::discriminant`] so
+/// the SoA packer can drop it into a `u8` column. Variant ordinals
+/// (0/1/2) are pinned by `crates/engine/src/schema_hash.rs` (the
+/// `LifetimeMode:` line); reordering or renaming any variant bumps
+/// the schema hash.
+///
+/// `DamageableHp` carries a payload (initial hp), which is the first
+/// per-effect SoA column we have with variant data — see
+/// `PackedAbilityRegistry::lifetime_payloads`.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum LifetimeMode {
+    /// `until_caster_dies` — apply handlers tear the effect down when
+    /// `hot_alive[caster] == false`.
+    UntilCasterDies,
+    /// `damageable_hp(N)` — the effect carries its own HP pool of
+    /// initial value `N`; apply handlers decrement it as the effect
+    /// absorbs damage and tear the effect down at zero.
+    DamageableHp(f32),
+    /// `break_on_damage` — apply handlers tear the effect down on the
+    /// next `Damaged{target=caster, ...}` event the caster receives.
+    BreakOnDamage,
+}
+
+impl LifetimeMode {
+    /// Stable u8 discriminant for the SoA `lifetime_kinds` column.
+    /// Pinned by `crates/engine/src/schema_hash.rs` (the
+    /// `LifetimeMode:` line). Apply handlers + the GPU dispatch
+    /// kernel switch on this value to pick the lifetime semantic.
+    #[inline]
+    pub fn discriminant(self) -> u8 {
+        match self {
+            LifetimeMode::UntilCasterDies => 0,
+            LifetimeMode::DamageableHp(_) => 1,
+            LifetimeMode::BreakOnDamage   => 2,
+        }
+    }
+
+    /// Payload value for the SoA `lifetime_payloads` column. Only
+    /// `DamageableHp` carries a meaningful value — the other two
+    /// variants pack `0.0` so the column is dense + has no gap.
+    #[inline]
+    pub fn payload_f32(self) -> f32 {
+        match self {
+            LifetimeMode::DamageableHp(hp) => hp,
+            _ => 0.0,
+        }
+    }
+}
+
 /// Compiled ability — the unit `AbilityRegistry` stores and `CastHandler`
 /// dispatches.
 ///
@@ -418,6 +475,18 @@ pub struct AbilityProgram {
     /// empty (no effect carried the modifier) or has one slot per
     /// effect (None for the unmarked ones).
     pub chances: SmallVec<[Option<u16>; MAX_EFFECTS_PER_PROGRAM]>,
+    /// Wave 1.5#8: per-effect lifetime modifier. `None` for effects
+    /// that didn't carry one of the three lifetime modifiers
+    /// (`until_caster_dies` / `damageable_hp(N)` / `break_on_damage`)
+    /// — apply handlers should treat the slot as "effect persists
+    /// indefinitely (or for the verb's own duration if the verb has
+    /// one)". Index parallel to `effects`; a populated `lifetimes`
+    /// slice is either empty (no effect carried the modifier) or has
+    /// one slot per effect (`None` for the unmarked ones).
+    /// `LifetimeMode::DamageableHp` is the first per-effect modifier
+    /// with variant data (an `f32` hp pool), so the SoA packer
+    /// requires TWO columns (`lifetime_kinds` + `lifetime_payloads`).
+    pub lifetimes: SmallVec<[Option<LifetimeMode>; MAX_EFFECTS_PER_PROGRAM]>,
 }
 
 impl AbilityProgram {
@@ -443,6 +512,7 @@ impl AbilityProgram {
             tags:      SmallVec::new(),
             stackings: SmallVec::new(),
             chances:   SmallVec::new(),
+            lifetimes: SmallVec::new(),
         }
     }
 
