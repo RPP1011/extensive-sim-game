@@ -143,9 +143,10 @@ pub enum LowerError {
     ModifierNotImplemented {
         verb:     String,
         /// Slot identifier — one of "in" / "tags" / "for" / "when" /
-        /// "chance" / "scaling" / "lifetime" / "nested". "stacking"
-        /// was retired in Wave 1.5#3 (now lowered into
-        /// `program.stackings`).
+        /// "scaling" / "lifetime" / "nested". "stacking" was retired
+        /// in Wave 1.5#3 (now lowered into `program.stackings`).
+        /// "chance" was retired in Wave 1.5#5 (now lowered into
+        /// `program.chances`).
         modifier: &'static str,
         span:     Span,
     },
@@ -514,6 +515,11 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     let mut stackings_acc: SmallVec<[Option<StackingMode>; MAX_EFFECTS_PER_PROGRAM]> =
         SmallVec::new();
     let mut any_stacking = false;
+    // Wave 1.5#5: per-effect chance gate, index parallel to `effects`.
+    // Same "all-`None` → empty smallvec" optimization the stackings
+    // aggregator uses, so Wave 1 corpus output stays bit-stable.
+    let mut chances_acc: SmallVec<[Option<u16>; MAX_EFFECTS_PER_PROGRAM]> = SmallVec::new();
+    let mut any_chance = false;
     for stmt in &decl.effects {
         // Per-effect tags first — fail fast on unknown tag names so the
         // verb-dispatch error doesn't hide them.
@@ -546,6 +552,22 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
             any_stacking = true;
         }
         stackings_acc.push(mapped);
+        // Wave 1.5#5: capture the per-effect `chance N%` BEFORE the
+        // verb dispatch. Q16 fixed-point: clamp to `0..=65534` so
+        // `u16::MAX` stays reserved as `CHANCE_NONE_SENTINEL`. Authors
+        // who want "always" should omit the modifier entirely; an
+        // explicit `chance 100%` lowers to `Some(65534)` (one less
+        // than the sentinel), which the apply-handler RNG gate
+        // (`per_agent_u32(...) & 0xFFFF < q16`) treats as "fires
+        // 65534/65536 of the time" — indistinguishable from "always"
+        // at the 16-bit RNG resolution.
+        let chance = stmt.chance.as_ref().map(|c| {
+            (c.p * 65535.0).round().clamp(0.0, 65534.0) as u16
+        });
+        if chance.is_some() {
+            any_chance = true;
+        }
+        chances_acc.push(chance);
         let op = lower_effect_stmt(stmt)?;
         effects.push(op);
     }
@@ -557,6 +579,9 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     if !any_stacking {
         stackings_acc.clear();
     }
+    if !any_chance {
+        chances_acc.clear();
+    }
 
     Ok(AbilityProgram {
         delivery: Delivery::Instant,
@@ -566,6 +591,7 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
         hint,
         tags: tag_acc,
         stackings: stackings_acc,
+        chances: chances_acc,
     })
 }
 
@@ -619,13 +645,11 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             span:     cond.span,
         });
     }
-    if let Some(ch) = &stmt.chance {
-        return Err(LowerError::ModifierNotImplemented {
-            verb:     stmt.verb.clone(),
-            modifier: "chance",
-            span:     ch.span,
-        });
-    }
+    // Wave 1.5#5: `chance N%` is consumed by the per-ability
+    // aggregator in `lower_ability_decl` (one slot per effect, parallel
+    // to `program.effects`). The verb dispatch below stays oblivious —
+    // apply handlers read `program.chances[i]` to decide whether to fire
+    // the effect this tick. No short-circuit here.
     // Wave 1.5#3: `stacking <mode>` is consumed by the per-ability
     // aggregator in `lower_ability_decl` (one slot per effect, parallel
     // to `program.effects`). The verb dispatch below stays oblivious —

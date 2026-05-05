@@ -162,10 +162,73 @@ fn lowering_when_modifier_returns_unimplemented() {
     assert_modifier(err, "when");
 }
 
+// ---------------------------------------------------------------------------
+// Wave 1.5#5 — `chance N%` modifier lowering. Effect-statement chance
+// gates are captured into `program.chances`, indexed parallel to
+// `program.effects`, encoded as Q16 fixed-point u16 (`p * 65535`,
+// clamped to `0..=65534` so `u16::MAX = 65535` stays reserved as the
+// `CHANCE_NONE_SENTINEL`). Apply handlers default to "always fires"
+// for any effect that didn't carry the modifier.
+// ---------------------------------------------------------------------------
+
 #[test]
-fn lowering_chance_modifier_returns_unimplemented() {
-    let err = lower_inline("ability X { target: enemy cooldown: 1s damage 50 chance 25% }");
-    assert_modifier(err, "chance");
+fn lowering_chance_25_percent() {
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 chance 25% }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("chance 25% must lower");
+    assert_eq!(prog.effects.len(), 1);
+    assert_eq!(prog.chances.len(), 1, "one effect → one chances slot");
+    // (0.25 * 65535).round() = 16384.
+    assert_eq!(prog.chances[0], Some(16384));
+}
+
+#[test]
+fn lowering_chance_100_percent_clamped_below_sentinel() {
+    // `chance 100%` would naïvely encode to 65535, but that value is
+    // reserved as the `CHANCE_NONE_SENTINEL` so the SoA column stays
+    // unambiguous. Lowering clamps to 65534 — at 16-bit RNG resolution
+    // (`per_agent_u32 & 0xFFFF < 65534`) this is indistinguishable
+    // from "always fires".
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 chance 100% }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("chance 100% must lower");
+    assert_eq!(prog.chances[0], Some(65534), "sentinel value 65535 reserved");
+}
+
+#[test]
+fn lowering_chance_0_percent() {
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 chance 0% }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("chance 0% must lower");
+    assert_eq!(prog.chances[0], Some(0));
+}
+
+#[test]
+fn lowering_no_chance_is_empty() {
+    // Bare effect with no chance modifier: the lowering pass leaves
+    // `program.chances` empty (apply handlers treat empty + None
+    // identically as "always fires"). This keeps Wave 1 corpus output
+    // bit-stable.
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("bare damage must lower");
+    assert!(
+        prog.chances.is_empty(),
+        "no chance modifier → empty chances smallvec; got {:?}",
+        prog.chances,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -233,16 +296,25 @@ fn lowering_no_stacking_is_empty() {
 }
 
 #[test]
-fn lowering_stacking_with_chance_lowers_stacking_then_errors_on_chance() {
-    // Wave 1.5#3 retires the stacking short-circuit. With both
-    // `chance` and `stacking` present, the lowering pass surfaces the
-    // chance modifier error (slot 5 in spec §6.1) — stacking (slot 6)
-    // would have been the loser anyway. The point is that stacking
-    // alone NO LONGER errors, but chance still does.
-    let err = lower_inline(
-        "ability X { target: enemy cooldown: 1s heal 10 chance 25% stacking refresh }",
-    );
-    assert_modifier(err, "chance");
+fn lowering_stacking_with_chance_lowers_both_modifiers() {
+    // Wave 1.5#5 retires the chance short-circuit too. With both
+    // `chance` and `stacking` present, BOTH modifiers lower into their
+    // respective per-effect SoA columns. This regression-guards that
+    // the aggregators don't interfere with each other and that the
+    // ordering of slot-checks in `lower_effect_stmt` doesn't
+    // accidentally re-error on a now-supported slot.
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::StackingMode;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s heal 10 chance 25% stacking refresh }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0])
+        .expect("chance + stacking together must lower");
+    assert_eq!(prog.chances.len(), 1);
+    assert_eq!(prog.chances[0], Some(16384), "chance 25% → q16 16384");
+    assert_eq!(prog.stackings.len(), 1);
+    assert_eq!(prog.stackings[0], Some(StackingMode::Refresh));
 }
 
 #[test]
@@ -304,15 +376,18 @@ fn slot_order_unknown_tag_takes_precedence_over_chance() {
     // FIRE isn't in the engine's AbilityTag vocabulary today (Wave
     // 1.5#1 fixed enum: PHYSICAL/MAGICAL/CROWD_CONTROL/HEAL/DEFENSE/
     // UTILITY). The unknown-tag error fires per-effect during the tag
-    // aggregation pass BEFORE the chance modifier short-circuit gets
-    // a chance to fire — so the diagnostic is "unknown tag", not
-    // "chance modifier not implemented".
+    // aggregation pass BEFORE the chance aggregator (Wave 1.5#5) gets
+    // a turn — so the diagnostic is "unknown tag" rather than a
+    // silently-lowered chance gate riding alongside an invalid tag.
+    // (Wave 1.5#5 retired the `chance` ModifierNotImplemented error;
+    // this test now guards that the per-effect tag pass still
+    // short-circuits before the chance aggregator runs.)
     let err = lower_inline(
         "ability X { target: enemy cooldown: 1s damage 50 [FIRE: 60] chance 25% }",
     );
     match err {
         LowerError::UnknownTag { ref tag, .. } => assert_eq!(tag, "FIRE"),
-        other => panic!("expected UnknownTag(FIRE) before chance check; got {other:?}"),
+        other => panic!("expected UnknownTag(FIRE) before chance aggregator; got {other:?}"),
     }
 }
 

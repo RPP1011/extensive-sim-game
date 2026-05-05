@@ -71,6 +71,20 @@ pub const EFFECT_KIND_EMPTY: u32 = 0xFF;
 /// doing `payload == STACKING_NONE_SENTINEL` is one cmp.
 pub const STACKING_NONE_SENTINEL: u8 = 0xFF;
 
+/// Sentinel for the `chances` column when an effect has no `chance`
+/// modifier. The Q16 fixed-point encoding of `chance N%` packs
+/// `0..=65534` (0%..~100%) into the column, with `65535` (`u16::MAX`)
+/// reserved as the "no modifier authored" marker. Apply handlers
+/// should treat `CHANCE_NONE_SENTINEL` as "always fires" (no RNG
+/// gate) — distinct from `0` (encoded "0%": never fires).
+///
+/// Sentinel-vs-100% conflict resolution: the lowering pass clamps the
+/// q16 encoding to `0..=65534` so `chance 100%` lowers to
+/// `Some(65534)` (one less than `u16::MAX`). Authors who want
+/// "always" should omit the modifier — both produce the same runtime
+/// behavior, but the column stays a single-cmp test.
+pub const CHANCE_NONE_SENTINEL: u16 = u16::MAX;
+
 // Compile-time guard: `MAX_TAGS_PER_PROGRAM` and `NUM_ABILITY_TAGS` must
 // stay aligned. Both are derived from `AbilityTag::COUNT` today; a future
 // refactor that decouples them would bump the schema hash and need a
@@ -152,6 +166,18 @@ pub struct PackedAbilityRegistry {
     /// `project_buff_stacking_rule.md`.
     /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM`.
     pub stackings: Vec<u8>,
+
+    // -- Chance rows (flat, stride = MAX_EFFECTS_PER_PROGRAM = 4). --
+
+    /// Per-effect probability gate, q16 fixed-point. Valid values
+    /// `0..=65534` encode `0% ..≈ 100%`; `CHANCE_NONE_SENTINEL` (0xFFFF
+    /// = u16::MAX) marks slots where the source effect did not carry a
+    /// `chance N%` modifier. Apply handlers should treat the sentinel
+    /// as "always fires" (no RNG gate); for non-sentinel values they
+    /// compare `per_agent_u32(seed, agent_id, tick, purpose) & 0xFFFF`
+    /// against the slot.
+    /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM`.
+    pub chances: Vec<u16>,
 }
 
 impl PackedAbilityRegistry {
@@ -184,6 +210,13 @@ impl PackedAbilityRegistry {
         let stacking_total = n * MAX_EFFECTS_PER_PROGRAM;
         let mut stackings = vec![STACKING_NONE_SENTINEL; stacking_total];
 
+        // Chances: pre-fill with the "no chance modifier" sentinel so
+        // empty effect slots and effects without `chance N%` share a
+        // single resting value. Per-effect overrides are written by
+        // `pack_program_chances`.
+        let chance_total = n * MAX_EFFECTS_PER_PROGRAM;
+        let mut chances = vec![CHANCE_NONE_SENTINEL; chance_total];
+
         for slot in 0..n {
             // `AbilityId` is 1-based; the registry's `get` accepts an id,
             // so reconstruct it from the slot. The registry guarantees
@@ -207,6 +240,7 @@ impl PackedAbilityRegistry {
             );
             pack_program_tags(program, slot, &mut tag_values);
             pack_program_stackings(program, slot, &mut stackings);
+            pack_program_chances(program, slot, &mut chances);
         }
 
         Self {
@@ -221,6 +255,7 @@ impl PackedAbilityRegistry {
             effect_payload_b,
             tag_values,
             stackings,
+            chances,
         }
     }
 
@@ -322,6 +357,33 @@ fn pack_program_stackings(program: &AbilityProgram, slot: usize, stackings: &mut
         }
         if let Some(m) = mode {
             stackings[base + i] = pack_stacking(*m);
+        }
+    }
+}
+
+/// Splat one program's per-effect chance gates into the row-major
+/// `chances` buffer. Slots already pre-filled with
+/// `CHANCE_NONE_SENTINEL`; only `Some(q16)` entries overwrite.
+/// `program.chances` is index-parallel to `program.effects` when
+/// populated; an empty `program.chances` slice means no effect carried
+/// a `chance N%` modifier (every slot stays at the sentinel).
+///
+/// Defensive clamp: the lowering pass already keeps q16 in
+/// `0..=65534` (one less than `u16::MAX`) so the sentinel stays
+/// unambiguous, but if a hand-built program slips through with
+/// `Some(u16::MAX)` we coerce it to `65534` rather than collide with
+/// "no modifier authored".
+fn pack_program_chances(program: &AbilityProgram, slot: usize, chances: &mut [u16]) {
+    let base = slot * MAX_EFFECTS_PER_PROGRAM;
+    for (i, ch) in program.chances.iter().enumerate() {
+        if i >= MAX_EFFECTS_PER_PROGRAM {
+            break;
+        }
+        if let Some(q16) = ch {
+            // Reserve `u16::MAX` as the none-sentinel even on the
+            // hand-built path.
+            let v = if *q16 == CHANCE_NONE_SENTINEL { CHANCE_NONE_SENTINEL - 1 } else { *q16 };
+            chances[base + i] = v;
         }
     }
 }
@@ -454,6 +516,7 @@ mod tests {
         assert!(p.effect_payload_b.is_empty());
         assert!(p.tag_values.is_empty());
         assert!(p.stackings.is_empty());
+        assert!(p.chances.is_empty());
     }
 
     #[test]
@@ -922,6 +985,7 @@ mod tests {
         assert_eq!(p1.effect_payload_b, p2.effect_payload_b);
         assert_eq!(p1.tag_values, p2.tag_values);
         assert_eq!(p1.stackings, p2.stackings);
+        assert_eq!(p1.chances, p2.chances);
     }
 
     // -- Wave 1.5#3 — stacking-mode pack tests. The `stackings` column
@@ -981,6 +1045,69 @@ mod tests {
         for i in 2..MAX_EFFECTS_PER_PROGRAM {
             assert_eq!(
                 p.stackings[i], STACKING_NONE_SENTINEL,
+                "empty slot {i} must stay at sentinel",
+            );
+        }
+    }
+
+    // -- Wave 1.5#5 — chance-modifier pack tests. The `chances` column
+    // mirrors `effect_kinds`'s row-major layout (stride =
+    // MAX_EFFECTS_PER_PROGRAM); slots without a `chance N%` modifier
+    // carry `CHANCE_NONE_SENTINEL` (0xFFFF). Apply handlers treat the
+    // sentinel as "always fires". Q16 fixed-point: `0..=65534` encode
+    // `0%..~100%`; `65535` reserved as the sentinel. ----------------
+    #[test]
+    fn pack_chances_default_all_sentinel() {
+        // No effect carries `chance N%`; every column slot must be the
+        // none-sentinel — including the empty effect tail (slots
+        // 1..MAX_EFFECTS_PER_PROGRAM). This guards the pre-fill path so
+        // apply handlers don't need to special-case empty slots.
+        let prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: false, line_of_sight: false },
+            [EffectOp::Damage { amount: 10.0 }],
+        );
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        assert_eq!(p.chances.len(), MAX_EFFECTS_PER_PROGRAM);
+        for (i, c) in p.chances.iter().enumerate() {
+            assert_eq!(
+                *c, CHANCE_NONE_SENTINEL,
+                "slot {i} must default to CHANCE_NONE_SENTINEL",
+            );
+        }
+    }
+
+    #[test]
+    fn pack_chances_per_effect_override() {
+        // Two effects: slot 0 carries `chance 25%` (q16 = 16384), slot
+        // 1 has no chance modifier. Empty slots 2..MAX stay at the
+        // sentinel.
+        use smallvec::SmallVec;
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [
+                EffectOp::Damage { amount: 10.0 },
+                EffectOp::Stun { duration_ticks: 20 },
+            ],
+        );
+        let mut sv: SmallVec<[Option<u16>; MAX_EFFECTS_PER_PROGRAM]> = SmallVec::new();
+        // 0.25 * 65534 = 16383.5 → 16384 after round.
+        sv.push(Some(16384));
+        sv.push(None);
+        prog.chances = sv;
+
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        assert_eq!(p.chances.len(), MAX_EFFECTS_PER_PROGRAM);
+        assert_eq!(p.chances[0], 16384, "slot 0 has `chance 25%`");
+        assert_eq!(p.chances[1], CHANCE_NONE_SENTINEL, "slot 1 has no modifier");
+        for i in 2..MAX_EFFECTS_PER_PROGRAM {
+            assert_eq!(
+                p.chances[i], CHANCE_NONE_SENTINEL,
                 "empty slot {i} must stay at sentinel",
             );
         }
