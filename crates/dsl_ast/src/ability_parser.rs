@@ -25,17 +25,44 @@
 //! opaque source slice (the ~80-atom condition grammar in spec §10
 //! lands in a later wave).
 //!
+//! Wave 1.4 closes the body-block surface (spec §4.4 body items):
+//! * `recast: <int|dur>` and `recast_window: <duration>` headers (spec
+//!   §4.2).
+//! * `deliver <method> { params } { body }` block — captured opaquely
+//!   as a verbatim source slice. The corpus uses
+//!   `deliver projectile { speed: 16.0 } { on_hit { … } }` and four
+//!   other delivery methods (channel / zone / chain / tether / trap);
+//!   the inner params + on_*/on_arrival hooks belong to spec §9 and
+//!   are wave 2+. Opaque capture lets the parser succeed on the 110
+//!   LoL files that use deliver without committing to delivery-hook
+//!   grammar.
+//! * `morph { effects } into <Other>` block — full grammar (no LoL
+//!   corpus usage today, but the spec calls it out as one of three
+//!   body-block forms).
+//!
+//! Spec §4.4 / §23.1 says deliver and bare effects are mutually
+//! exclusive. Wave 1.4 deliberately admits coexistence at parse time
+//! because the LoL corpus has at least one such case (Ahri.SpiritRush
+//! pairs `deliver projectile {…} {…}` with `dash to_target`).
+//! Mutual-exclusion enforcement now lives in the lowering layer
+//! (`LowerError::MixedBody`) — same diagnostic, just one stage later.
+//! This deviation is documented on `AbilityDecl` and re-noted in
+//! `crates/dsl_compiler/src/ability_lower.rs` Wave 1.4 docs.
+//!
 //! Out of scope for this slice (handled in later Waves):
 //! - `template` / `structure` top-level blocks (Waves 1.2 / 1.3)
-//! - `deliver` / `recast` / `morph` body blocks (Wave 1.4)
 //! - The condition grammar inside `when … [else …]` — Wave 2.
 //! - Shape vocabulary validation (12 primitives in spec §8) — Wave 2.
 //! - Tag-name vocabulary lookup against `AbilityTag` — Wave 2.
 //! - `cast_on <selector>` modifier (separate from these 9) — Wave 2.
-//! - Lowering of the new headers / `passive` blocks / modifier slots
+//! - Inner delivery params + on_hit/on_arrival/on_tick hook grammar
+//!   (spec §9) — Wave 2+. Captured opaquely in `DeliverBlock.raw`.
+//! - Lowering of the new headers / `passive` blocks / modifier slots /
+//!   deliver / morph / recast headers
 //!   (`crates/dsl_compiler/src/ability_lower.rs` errors with
 //!   `HeaderNotImplemented` / `PassiveBlockNotImplemented` /
-//!   `ModifierNotImplemented` for them pending Wave 2+ engine schema
+//!   `ModifierNotImplemented` / `DeliverBlockNotImplemented` /
+//!   `MorphBlockNotImplemented` pending Wave 2+ engine schema
 //!   changes).
 //!
 //! The parser shares the lexer infrastructure (`Cursor`, `is_ident_start`,
@@ -136,6 +163,8 @@ fn ability_decl(c: &mut Cursor) -> PResult<AbilityDecl> {
         .map_err(|e| e.with_context("parsing ability body (expected `{`)"))?;
     let mut headers: Vec<AbilityHeader> = Vec::new();
     let mut effects: Vec<EffectStmt> = Vec::new();
+    let mut deliver: Option<DeliverBlock> = None;
+    let mut morph:   Option<MorphBlock>   = None;
     loop {
         c.skip_ws();
         if c.starts_with_char('}') {
@@ -147,11 +176,14 @@ fn ability_decl(c: &mut Cursor) -> PResult<AbilityDecl> {
                 .with_context(format!("parsing ability `{name}`")));
         }
         // Decide: header (`<ident>:`) vs marker header (`toggle`) vs
-        // effect (`<ident> ...`). We peek an ident and look for a `:`
-        // after it — same heuristic the spec implies (header keys are
-        // `key: value`, effect verbs are bare). The Wave 1.1 marker
-        // header `toggle` (spec §4.2 lists it as a flag) is a special
-        // case: bare keyword, no colon, no value.
+        // body block (`deliver` / `morph`) vs effect (`<ident> ...`).
+        // We peek an ident and look for a `:` after it — same heuristic
+        // the spec implies (header keys are `key: value`, effect verbs
+        // are bare). The Wave 1.1 marker header `toggle` (spec §4.2
+        // lists it as a flag) is a special case: bare keyword, no
+        // colon, no value. Wave 1.4 adds two body-block forms: `deliver
+        // <method> { params } { body }` and `morph { effects } into
+        // <Other>`. Both are tried before falling through to effects.
         if is_header_start(c) {
             let header = parse_header(c)
                 .map_err(|e| e.with_context(format!("parsing header in ability `{name}`")))?;
@@ -175,19 +207,49 @@ fn ability_decl(c: &mut Cursor) -> PResult<AbilityDecl> {
             if c.starts_with_char(',') {
                 c.bump(1);
             }
+        } else if starts_with_keyword(c, "deliver") {
+            if deliver.is_some() {
+                return Err(ParseErr::at(
+                    here(c),
+                    format!(
+                        "ability `{name}` has more than one `deliver` block — at most one allowed per spec §4.4"
+                    ),
+                ));
+            }
+            deliver = Some(
+                parse_deliver_block(c).map_err(|e| {
+                    e.with_context(format!("parsing `deliver` block in ability `{name}`"))
+                })?,
+            );
+        } else if starts_with_keyword(c, "morph") {
+            if morph.is_some() {
+                return Err(ParseErr::at(
+                    here(c),
+                    format!(
+                        "ability `{name}` has more than one `morph` block — at most one allowed per spec §4.4"
+                    ),
+                ));
+            }
+            morph = Some(
+                parse_morph_block(c).map_err(|e| {
+                    e.with_context(format!("parsing `morph` block in ability `{name}`"))
+                })?,
+            );
         } else {
             let effect = parse_effect(c)
                 .map_err(|e| e.with_context(format!("parsing effect in ability `{name}`")))?;
             effects.push(effect);
         }
     }
-    if headers.is_empty() && effects.is_empty() {
+    if headers.is_empty() && effects.is_empty() && deliver.is_none() && morph.is_none() {
         return Err(ParseErr::at(
             Span::new(start, c.pos),
-            format!("ability `{name}` has empty body — at least one header or effect is required"),
+            format!(
+                "ability `{name}` has empty body — at least one header, effect, deliver block, or morph block is required"
+            ),
         ));
     }
-    Ok(AbilityDecl { name, headers, effects, span: Span::new(start, c.pos) })
+    Ok(AbilityDecl { name, headers, effects, deliver, morph, span: Span::new(start, c.pos) })
 }
 
 /// Return `true` if the cursor sits at the start of a header line —
@@ -274,7 +336,23 @@ fn parse_passive_header(c: &mut Cursor) -> PResult<PassiveHeader> {
             // `periodic`); we store the bare ident verbatim so lowering
             // can validate against the catalog without a parser re-rev
             // when new triggers land.
-            let evt = ident(c).map_err(|e| e.with_context("parsing `trigger:` event name"))?;
+            //
+            // Wave 1.4 also accepts the optional `(args)` form spec'd
+            // for `periodic(<duration>)` (and noted in §5.2 as "All
+            // triggers support optional modifiers (`range:`, `by:`,
+            // type-specific filters) inside parens"). Args are captured
+            // verbatim into the trigger string (e.g. `"periodic(5s)"`)
+            // so the AST stays a flat enum until lowering can catalog
+            // each modifier shape.
+            let trig_start = c.pos;
+            let _ = ident(c).map_err(|e| e.with_context("parsing `trigger:` event name"))?;
+            // Optional `(args)` — capture balanced parens verbatim.
+            if c.starts_with_char('(') {
+                consume_balanced_parens(c).map_err(|e| {
+                    e.with_context("parsing `trigger: <name>(args)` argument list")
+                })?;
+            }
+            let evt = c.src[trig_start..c.pos].to_string();
             PassiveHeader::Trigger(evt)
         }
         "cooldown" => {
@@ -333,6 +411,248 @@ fn check_duplicate_passive_header(
 }
 
 // ---------------------------------------------------------------------------
+// Wave 1.4 — `deliver <method> { params } { body }` body block
+// ---------------------------------------------------------------------------
+
+/// Parse a `deliver` body block. Cursor sits at the `deliver` keyword;
+/// on success it sits past the matching `}` of the body block.
+///
+/// Grammar (per spec §9 + the LoL corpus shape):
+/// ```text
+/// deliver_block := "deliver" METHOD_IDENT "{" ...params... "}" "{" ...body... "}"
+/// ```
+/// The method ident is one of the six delivery methods in §9
+/// (`projectile`, `channel`, `zone`, `chain`, `tether`, `trap`); we
+/// accept any ident so the LoL corpus's full method set lands without a
+/// parser re-rev when new methods are spec'd. Validation is lowering's
+/// job.
+///
+/// Both inner braces are captured **opaquely** as part of `raw`. The
+/// inner params (`speed: 16.0`, `duration: 2s, tick: 500ms`) and the
+/// body's hook blocks (`on_hit { … }`, `on_arrival { … }`,
+/// `on_tick { … }`) belong to spec §9 and are wave-2+ work. The opaque
+/// capture lets the parser succeed on every well-formed deliver
+/// invocation in the corpus while reserving a clean diagnostic
+/// (`LowerError::DeliverBlockNotImplemented`) for the lowering layer.
+///
+/// We do balance braces inside the params + body so a stray `{` /
+/// `}` inside (e.g. nested hook block) doesn't terminate early.
+/// String literals are also tracked — a `"}"` inside a string does NOT
+/// close the block.
+fn parse_deliver_block(c: &mut Cursor) -> PResult<DeliverBlock> {
+    let start = c.pos;
+    expect_keyword(c, "deliver")
+        .map_err(|e| e.with_context("parsing `deliver` body block"))?;
+    skip_inline_ws_only(c);
+    let method = ident(c)
+        .map_err(|e| e.with_context("parsing delivery method ident after `deliver`"))?;
+    // Params block — `{ key: val [, key: val]* }`. Captured opaquely
+    // (skip-balanced).
+    skip_ws_no_newline_terminator(c);
+    if !c.starts_with_char('{') {
+        return Err(ParseErr::at(
+            here(c),
+            format!(
+                "expected `{{` to open delivery params after `deliver {method}`; got `{}`",
+                peek_word_for_error(c)
+            ),
+        ));
+    }
+    consume_balanced_braces(c).map_err(|e| {
+        e.with_context(format!("parsing params block of `deliver {method} {{ … }}`"))
+    })?;
+    // Body block — `{ on_hit { … } | on_arrival { … } | … }`. Same
+    // opaque-balanced capture.
+    skip_ws_no_newline_terminator(c);
+    if !c.starts_with_char('{') {
+        return Err(ParseErr::at(
+            here(c),
+            format!(
+                "expected `{{` to open body of `deliver {method} {{ params }} {{ body }}`; got `{}`",
+                peek_word_for_error(c)
+            ),
+        ));
+    }
+    consume_balanced_braces(c).map_err(|e| {
+        e.with_context(format!("parsing body block of `deliver {method} {{ … }}`"))
+    })?;
+    Ok(DeliverBlock {
+        method,
+        raw:  c.src[start..c.pos].to_string(),
+        span: Span::new(start, c.pos),
+    })
+}
+
+/// Skip whitespace (any kind) AND `// …` line comments AND `# …` line
+/// comments, while staying inside the same logical statement. Used by
+/// the deliver / morph parsers to walk past inline whitespace + an
+/// optional comment between `}` and the next `{` without crossing more
+/// than one newline. We allow newlines because the corpus formats
+/// `deliver projectile { speed: 16.0 } {` on two lines:
+///
+/// ```text
+/// deliver projectile { speed: 16.0 } {
+///     on_hit { … }
+/// }
+/// ```
+///
+/// `c.skip_ws()` already handles both whitespace and comments — we
+/// just delegate, the name is for callsite clarity.
+fn skip_ws_no_newline_terminator(c: &mut Cursor) {
+    c.skip_ws();
+}
+
+/// Consume a `{ … }` block, balancing inner braces. Cursor must sit at
+/// `{`; on success it sits past the matching `}`. Tracks string
+/// literals so braces inside strings don't count.
+///
+/// Errors with a clear message on EOF mid-block.
+fn consume_balanced_braces(c: &mut Cursor) -> PResult<()> {
+    if !c.starts_with_char('{') {
+        return Err(ParseErr::at(here(c), "expected `{`"));
+    }
+    let block_start = c.pos;
+    c.bump(1);
+    let mut depth: u32 = 1;
+    while depth > 0 {
+        let Some(ch) = c.peek_char() else {
+            return Err(ParseErr::at(
+                Span::new(block_start, c.pos),
+                "unexpected end of input inside `{ … }` block".to_string(),
+            ));
+        };
+        // Line comments — skip to EOL but don't decrement depth.
+        if c.starts_with("//") {
+            while let Some(cc) = c.peek_char() {
+                if cc == '\n' {
+                    break;
+                }
+                c.bump(cc.len_utf8());
+            }
+            continue;
+        }
+        // String literal — skip past matching quote with `\` escapes.
+        if ch == '"' {
+            c.bump(1);
+            while let Some(qc) = c.peek_char() {
+                if qc == '\\' {
+                    c.bump(1);
+                    if let Some(esc) = c.peek_char() {
+                        c.bump(esc.len_utf8());
+                    }
+                    continue;
+                }
+                if qc == '"' {
+                    c.bump(1);
+                    break;
+                }
+                c.bump(qc.len_utf8());
+            }
+            continue;
+        }
+        match ch {
+            '{' => depth += 1,
+            '}' => depth -= 1,
+            _ => {}
+        }
+        c.bump(ch.len_utf8());
+    }
+    Ok(())
+}
+
+/// Consume a `(...)` block, balancing inner parens. Cursor must sit at
+/// `(`; on success it sits past the matching `)`. Tracks string
+/// literals so parens inside strings don't count.
+fn consume_balanced_parens(c: &mut Cursor) -> PResult<()> {
+    if !c.starts_with_char('(') {
+        return Err(ParseErr::at(here(c), "expected `(`"));
+    }
+    let block_start = c.pos;
+    c.bump(1);
+    let mut depth: u32 = 1;
+    while depth > 0 {
+        let Some(ch) = c.peek_char() else {
+            return Err(ParseErr::at(
+                Span::new(block_start, c.pos),
+                "unexpected end of input inside `(...)`".to_string(),
+            ));
+        };
+        if c.starts_with("//") {
+            while let Some(cc) = c.peek_char() {
+                if cc == '\n' {
+                    break;
+                }
+                c.bump(cc.len_utf8());
+            }
+            continue;
+        }
+        if ch == '"' {
+            c.bump(1);
+            while let Some(qc) = c.peek_char() {
+                if qc == '\\' {
+                    c.bump(1);
+                    if let Some(esc) = c.peek_char() {
+                        c.bump(esc.len_utf8());
+                    }
+                    continue;
+                }
+                if qc == '"' {
+                    c.bump(1);
+                    break;
+                }
+                c.bump(qc.len_utf8());
+            }
+            continue;
+        }
+        match ch {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            _ => {}
+        }
+        c.bump(ch.len_utf8());
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Wave 1.4 — `morph { effects } into <Other>` body block
+// ---------------------------------------------------------------------------
+
+/// Parse a `morph` body block. Cursor sits at the `morph` keyword;
+/// on success it sits past the trailing `into <Other>` ident.
+///
+/// Grammar:
+/// ```text
+/// morph_block := "morph" "{" effect_stmt* "}" "into" IDENT
+/// ```
+///
+/// Inner `effect_stmt*` re-uses `parse_nested_block` so the full Wave
+/// 1.5 modifier grammar is available.
+///
+/// `into` is mandatory per the spec sketch; we error cleanly if it's
+/// missing.
+fn parse_morph_block(c: &mut Cursor) -> PResult<MorphBlock> {
+    let start = c.pos;
+    expect_keyword(c, "morph")
+        .map_err(|e| e.with_context("parsing `morph` body block"))?;
+    c.skip_ws();
+    let effects = parse_nested_block(c)
+        .map_err(|e| e.with_context("parsing `morph { … }` body"))?;
+    c.skip_ws();
+    expect_keyword(c, "into").map_err(|e| {
+        e.with_context("parsing `morph { … } into <Other>` (expected `into`)")
+    })?;
+    c.skip_ws();
+    let into = ident(c)
+        .map_err(|e| e.with_context("parsing morphed-into ability name after `into`"))?;
+    Ok(MorphBlock {
+        effects,
+        into,
+        span: Span::new(start, c.pos),
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Headers
 // ---------------------------------------------------------------------------
 
@@ -385,16 +705,78 @@ fn parse_header(c: &mut Cursor) -> PResult<AbilityHeader> {
                 .map_err(|e| e.with_context("parsing `recharge:` value"))?;
             AbilityHeader::Recharge(d)
         }
+        "recast" => {
+            // Spec §4.2: `recast: int / dur`. Both forms are valid; the
+            // corpus uses bare ints (`recast: 1`, `recast: 3`). We
+            // dispatch by suffix: if the value carries `s` / `ms`
+            // (duration unit) capture as Duration, otherwise as Count.
+            // Bare ints with no unit are Count (NOT silently
+            // interpreted as ms — that would conflict with the `int`
+            // form in the spec).
+            let v = parse_recast_value(c)
+                .map_err(|e| e.with_context("parsing `recast:` value"))?;
+            AbilityHeader::Recast(v)
+        }
+        "recast_window" => {
+            let d = parse_duration(c)
+                .map_err(|e| e.with_context("parsing `recast_window:` value"))?;
+            AbilityHeader::RecastWindow(d)
+        }
         other => {
             return Err(ParseErr::at(
                 Span::new(key_start, key_start + other.len()),
                 format!(
-                    "unsupported header `{other}` — Wave 1.1 supports `target`, `range`, `cooldown`, `cast`, `hint`, `cost`, `charges`, `recharge`, `toggle`"
+                    "unsupported header `{other}` — Wave 1.4 supports `target`, `range`, `cooldown`, `cast`, `hint`, `cost`, `charges`, `recharge`, `toggle`, `recast`, `recast_window`"
                 ),
             ));
         }
     };
     Ok(header)
+}
+
+/// Parse a `recast:` header value. Spec §4.2 lists `recast: int / dur`.
+/// We dispatch on the unit suffix:
+///  - bare integer literal -> `RecastValue::Count(N)` (e.g. `recast: 3`)
+///  - integer / float with `s` / `ms` suffix -> `RecastValue::Duration`
+///
+/// The dispatch is intentional: a bare `recast: 5` MUST mean "5 recasts
+/// allowed" not "5 ms". The parser only walks digits for the int form
+/// to avoid misclassifying `5.0` as `Count(5)`.
+fn parse_recast_value(c: &mut Cursor) -> PResult<RecastValue> {
+    c.skip_ws();
+    let start = c.pos;
+    let (val, is_float) = number_literal(c)?;
+    if c.starts_with("ms") {
+        c.bump(2);
+        let millis = (val.round() as i64).max(0) as u32;
+        return Ok(RecastValue::Duration(Duration { millis }));
+    }
+    if c.starts_with_char('s') {
+        // Same trailing-ident guard as parse_duration.
+        let next = c.src[c.pos + 1..].chars().next();
+        let is_unit = next.map_or(true, |ch| !is_ident_cont(ch));
+        if is_unit {
+            c.bump(1);
+            let millis = (val * 1000.0).round().max(0.0) as u32;
+            return Ok(RecastValue::Duration(Duration { millis }));
+        }
+    }
+    // No duration suffix; treat as a non-negative integer count. Reject
+    // floats/negatives so `recast: 1.5` or `recast: -1` don't silently
+    // truncate.
+    if is_float || val < 0.0 || val.fract() != 0.0 {
+        return Err(ParseErr::at(
+            Span::new(start, c.pos),
+            format!("`recast:` count must be a non-negative integer or a duration; got {val}"),
+        ));
+    }
+    if val > u32::MAX as f64 {
+        return Err(ParseErr::at(
+            Span::new(start, c.pos),
+            format!("`recast:` count {val} overflows u32"),
+        ));
+    }
+    Ok(RecastValue::Count(val as u32))
 }
 
 fn check_duplicate_header(headers: &[AbilityHeader], new: &AbilityHeader) -> PResult<()> {
@@ -410,6 +792,8 @@ fn check_duplicate_header(headers: &[AbilityHeader], new: &AbilityHeader) -> PRe
                 | (AbilityHeader::Charges(_), AbilityHeader::Charges(_))
                 | (AbilityHeader::Recharge(_), AbilityHeader::Recharge(_))
                 | (AbilityHeader::Toggle, AbilityHeader::Toggle)
+                | (AbilityHeader::Recast(_), AbilityHeader::Recast(_))
+                | (AbilityHeader::RecastWindow(_), AbilityHeader::RecastWindow(_))
         )
     };
     if headers.iter().any(|h| same_kind(h, new)) {
@@ -426,6 +810,8 @@ fn check_duplicate_header(headers: &[AbilityHeader], new: &AbilityHeader) -> PRe
             AbilityHeader::Charges(_) => "charges:",
             AbilityHeader::Recharge(_) => "recharge:",
             AbilityHeader::Toggle => "toggle",
+            AbilityHeader::Recast(_) => "recast:",
+            AbilityHeader::RecastWindow(_) => "recast_window:",
         };
         return Err(ParseErr::at(
             Span::new(0, 0),

@@ -505,14 +505,12 @@ fn lol_corpus_alistar_parses_cleanly() {
 
 #[test]
 fn lol_corpus_aatrox_parses_cleanly() {
-    // Brief's named canary. Aatrox.ability uses Wave 1.4 surfaces
-    // (`recast:` header, `deliver { ... }` body) that this slice does
-    // not yet implement; per the brief we still attempt the parse —
-    // when Wave 1.4 lands and Aatrox parses cleanly, this assertion
-    // flips from `is_err` (deferred to Wave 1.4) to `is_ok` (full
-    // surface parses). For Wave 1.5 we document the current state by
-    // asserting the parse FAILS on a non-modifier surface, NOT on
-    // anything in spec §6.1.
+    // Brief's named canary. Wave 1.5 introduced this test as a
+    // deferred-success guard ("when Wave 1.4 lands and Aatrox parses
+    // cleanly, this assertion flips from `is_err` to `is_ok`"). Wave
+    // 1.4 has now landed (recast header + deliver block + the
+    // `periodic(N)` trigger arg form). The assertion is now an
+    // unconditional `is_ok()`.
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("..")
@@ -521,21 +519,5 @@ fn lol_corpus_aatrox_parses_cleanly() {
         .join("lol_heroes")
         .join("Aatrox.ability");
     let src = std::fs::read_to_string(&path).expect("Aatrox.ability readable");
-    let res = parse_ability_file(&src);
-    if let Err(e) = &res {
-        let msg = e.to_string();
-        // The failure must be on a Wave 1.4 surface (`recast:` header
-        // or `deliver` block), NOT on any Wave 1.5 modifier slot.
-        assert!(
-            msg.contains("recast")
-                || msg.contains("deliver")
-                || msg.contains("morph")
-                || msg.contains("template")
-                || msg.contains("structure")
-                || msg.contains("unsupported header"),
-            "Aatrox failure must be on a Wave 1.4 surface, not a Wave 1.5 modifier slot. Got: {msg}"
-        );
-    }
-    // If Wave 1.4 has landed and Aatrox parses, that's also fine — the
-    // assertion is "no Wave 1.5 modifier regression".
+    parse_ability_file(&src).expect("Aatrox.ability parses cleanly post-Wave-1.4");
 }
