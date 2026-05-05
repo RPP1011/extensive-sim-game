@@ -102,6 +102,11 @@ quest_probe_runtime = { path = "../quest_probe_runtime" }
 # PerPair tick preamble, Bool LHS rewrite). See
 # `docs/superpowers/notes/2026-05-04-duel_1v1.md`.
 duel_1v1_runtime = { path = "../duel_1v1_runtime" }
+# Dungeon crawl — 20th real sim. First fixture with multi-encounter
+# sequencing (rooms cleared in series). DSL is the duel_1v1 verb
+# cascade applied to a 35-slot SoA; CPU-side encounter pacing in the
+# runtime spawns each room's enemies when the previous room is cleared.
+dungeon_crawl_runtime = { path = "../dungeon_crawl_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -186,3 +191,7 @@ path = "src/quest_probe_app.rs"
 [[bin]]
 name = "duel_1v1_app"
 path = "src/duel_1v1_app.rs"
+
+[[bin]]
+name = "dungeon_crawl_app"
+path = "src/dungeon_crawl_app.rs"
