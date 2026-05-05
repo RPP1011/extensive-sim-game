@@ -286,6 +286,80 @@ fn lowers_self_damage() {
 }
 
 // ---------------------------------------------------------------------------
+// Wave 2 piece 4 — buff verbs (lifesteal / damage_modify).
+// Both mirror `slow`'s shape: `<f32 magnitude> <duration>` →
+// `EffectOp::* { duration_ticks, <field>_q8 }`. q8 packing is
+// `magnitude * 256` clamped to `i16::MIN..=i16::MAX`. Apply-handler
+// stacking is documented on the SoA fields (single per-agent slot,
+// max-with-duration-tiebreak); the apply handlers themselves land in a
+// follow-up Wave 2 piece.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lowers_lifesteal() {
+    // 0.5 * 256 = 128. 4s @ 100ms/tick = 40 ticks.
+    let src = "ability VampStrike { target: self cooldown: 1s lifesteal 0.5 4s }";
+    let file = parse_ability_file(src).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+    assert_eq!(prog.effects.len(), 1);
+    match prog.effects[0] {
+        EffectOp::LifeSteal { duration_ticks, fraction_q8 } => {
+            assert_eq!(duration_ticks, 40, "4s @ 100ms = 40 ticks");
+            assert_eq!(fraction_q8, 128, "0.5 * 256 = 128");
+        }
+        ref other => panic!("expected LifeSteal; got {other:?}"),
+    }
+}
+
+#[test]
+fn lowers_lifesteal_full_fraction_rounds_to_256() {
+    // Edge: 1.0 → 256 (canonical "heal-for-full-damage" buff).
+    let src = "ability FullVamp { target: self cooldown: 1s lifesteal 1.0 2s }";
+    let file = parse_ability_file(src).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+    assert_eq!(prog.effects.len(), 1);
+    match prog.effects[0] {
+        EffectOp::LifeSteal { duration_ticks, fraction_q8 } => {
+            assert_eq!(duration_ticks, 20, "2s @ 100ms = 20 ticks");
+            assert_eq!(fraction_q8, 256, "1.0 * 256 = 256");
+        }
+        ref other => panic!("expected LifeSteal; got {other:?}"),
+    }
+}
+
+#[test]
+fn lowers_damage_modify() {
+    // 1.5 * 256 = 384. 3s @ 100ms/tick = 30 ticks.
+    let src = "ability Vulnerable { target: enemy range: 5 cooldown: 1s damage_modify 1.5 3s }";
+    let file = parse_ability_file(src).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+    assert_eq!(prog.effects.len(), 1);
+    match prog.effects[0] {
+        EffectOp::DamageModify { duration_ticks, multiplier_q8 } => {
+            assert_eq!(duration_ticks, 30, "3s @ 100ms = 30 ticks");
+            assert_eq!(multiplier_q8, 384, "1.5 * 256 = 384");
+        }
+        ref other => panic!("expected DamageModify; got {other:?}"),
+    }
+}
+
+#[test]
+fn lowers_damage_modify_half_multiplier() {
+    // 0.5 * 256 = 128 ("take half damage" — canonical defensive buff).
+    let src = "ability Steeled { target: self cooldown: 1s damage_modify 0.5 1500ms }";
+    let file = parse_ability_file(src).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+    assert_eq!(prog.effects.len(), 1);
+    match prog.effects[0] {
+        EffectOp::DamageModify { duration_ticks, multiplier_q8 } => {
+            assert_eq!(duration_ticks, 15, "1500ms @ 100ms = 15 ticks");
+            assert_eq!(multiplier_q8, 128, "0.5 * 256 = 128");
+        }
+        ref other => panic!("expected DamageModify; got {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Error paths
 // ---------------------------------------------------------------------------
 

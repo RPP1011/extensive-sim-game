@@ -211,6 +211,32 @@ pub enum EffectOp {
     /// Damaged{source: caster, target: caster, amount} event the existing
     /// ApplyDamage chronicle then drains.
     SelfDamage { amount: f32 } = 17,
+
+    // --- Buff verbs (Wave 2 piece 4) ---
+    // Two duration-bearing buff variants that each mirror `Slow`'s payload
+    // shape exactly: `{ duration_ticks: u32, <factor>_q8: i16 }` (4 + 2 = 6B
+    // payload + 1B tag, well under the 16B EffectOp ceiling). Each variant
+    // owns a per-agent SoA slot (`hot_lifesteal_*` / `hot_damage_taken_*`)
+    // that the apply handler will populate with the project's
+    // max-with-duration-tiebreak rule (see
+    // `~/.claude/projects/-home-ricky-Projects-game/memory/project_buff_stacking_rule.md`):
+    // single per-agent slot — incoming wins iff strictly greater magnitude
+    // OR equal-magnitude with longer-remaining duration. Apply handlers
+    // are per-fixture work in a follow-up Wave 2 piece; this slice ships
+    // the IR variants + payload packing + DSL lowering only.
+    /// `lifesteal <fraction> <duration>` — caster heals for `fraction` of
+    /// damage dealt over the next `duration` window. `fraction` is lowered
+    /// to q8 fixed-point (`1.0 == 256`). Apply-handler stacking semantics:
+    /// max-with-duration-tiebreak per project_buff_stacking_rule memo
+    /// (single per-agent SoA slot — incoming wins iff strictly greater
+    /// fraction OR equal-fraction with longer remaining).
+    LifeSteal    { duration_ticks: u32, fraction_q8: i16 } = 18,
+
+    /// `damage_modify <multiplier> <duration>` — multiplier applied to
+    /// damage TAKEN by the target over `duration`. q8 fixed-point: `1.0
+    /// == 256`, `0.5` (take half damage) `== 128`, `1.5` (take 50% extra)
+    /// `== 384`. Same max-with-tiebreak stacking as `LifeSteal`.
+    DamageModify { duration_ticks: u32, multiplier_q8: i16 } = 19,
 }
 
 /// Coarse ability-category hint, per `.ability` DSL `hint:` field.

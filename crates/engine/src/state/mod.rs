@@ -108,6 +108,34 @@ pub struct SimState {
     hot_silence_expires_at_tick:  Vec<u32>,
     hot_fear_expires_at_tick:     Vec<u32>,
     hot_taunt_expires_at_tick:    Vec<u32>,
+    // Wave 2 piece 4 — buff slots for `lifesteal` / `damage_modify`.
+    // Each pair is one duration mirror + one q8 magnitude column,
+    // mirroring `hot_slow_expires_at_tick` + `hot_slow_factor_q8`.
+    // Apply-handler stacking semantics (single slot per agent, incoming
+    // wins iff strictly greater magnitude OR equal magnitude with longer
+    // remaining duration) come from the project buff-stacking rule —
+    // see `project_buff_stacking_rule.md` in the agent memory store.
+    // Per-fixture apply handlers land in a follow-up Wave 2 piece; this
+    // slice only stands the storage up so .ability authoring sites can
+    // target the verbs.
+    /// q8 fraction of damage healed — `0` means "no lifesteal active";
+    /// `256` is `1.0×` (full heal-for-damage). Combined with
+    /// `hot_lifesteal_expires_at_tick` via the `state.tick < expires_at`
+    /// gate.
+    hot_lifesteal_frac_q8:                 Vec<i16>,
+    hot_lifesteal_expires_at_tick:         Vec<u32>,
+    /// q8 incoming-damage multiplier — `256 == 1.0×`, the identity
+    /// multiplier (no modifier). `128 == 0.5×` (take half damage),
+    /// `384 == 1.5×` (take 50% extra). Per-fixture `ApplyDamage` that
+    /// wants to honor this should multiply the bleed-through amount by
+    /// `frac_q8 / 256` while `state.tick <
+    /// hot_damage_taken_mult_expires_at_tick`, OR ignore the field
+    /// once the expiry tick has passed (default `256 == 1.0×` is the
+    /// no-op identity, so a handler that forgot to gate on the expiry
+    /// would still apply `1.0×` post-expiry once a re-init landed —
+    /// callers should still gate on the tick to keep the read sharp).
+    hot_damage_taken_mult_q8:              Vec<i16>,
+    hot_damage_taken_mult_expires_at_tick: Vec<u32>,
 
     // --- Cold SoA — read rarely (spawn, chronicle, debug, narrative) ---
     cold_creature_type: Vec<Option<CreatureType>>,
@@ -284,6 +312,15 @@ impl SimState {
             hot_silence_expires_at_tick:  vec![0; cap],
             hot_fear_expires_at_tick:     vec![0; cap],
             hot_taunt_expires_at_tick:    vec![0; cap],
+            // Wave 2 piece 4 — buff slot init. Lifesteal defaults to `0`
+            // (no lifesteal). Damage-taken multiplier defaults to `256`
+            // (q8 `1.0×`, the identity multiplier) so a handler that
+            // unconditionally multiplies bleed-through by `frac_q8 / 256`
+            // is a no-op until a real `damage_modify` lands.
+            hot_lifesteal_frac_q8:                 vec![0; cap],
+            hot_lifesteal_expires_at_tick:         vec![0; cap],
+            hot_damage_taken_mult_q8:              vec![256; cap],
+            hot_damage_taken_mult_expires_at_tick: vec![0; cap],
             cold_creature_type:  vec![None; cap],
             cold_channels:       (0..cap).map(|_| None).collect(),
             cold_spawn_tick:     vec![None; cap],
@@ -386,6 +423,14 @@ impl SimState {
         self.hot_silence_expires_at_tick[slot]  = 0;
         self.hot_fear_expires_at_tick[slot]     = 0;
         self.hot_taunt_expires_at_tick[slot]    = 0;
+        // Wave 2 piece 4 — buff slot recycle. Lifesteal back to 0 (no
+        // active lifesteal); damage_taken multiplier back to 256 (q8
+        // `1.0×` identity), so a recycled slot doesn't carry stale
+        // amplification or mitigation from the prior occupant.
+        self.hot_lifesteal_frac_q8[slot]                 = 0;
+        self.hot_lifesteal_expires_at_tick[slot]         = 0;
+        self.hot_damage_taken_mult_q8[slot]              = 256;
+        self.hot_damage_taken_mult_expires_at_tick[slot] = 0;
         let caps = Capabilities::for_creature(spec.creature_type);
         self.cold_creature_type[slot]  = Some(spec.creature_type);
         self.cold_channels[slot]       = Some(caps.channels);
@@ -760,6 +805,64 @@ impl SimState {
     pub fn set_agent_taunt_expires_at(&mut self, id: AgentId, v: u32) {
         if let Some(s) = self
             .hot_taunt_expires_at_tick
+            .get_mut(AgentSlotPool::slot_of_agent(id))
+        {
+            *s = v;
+        }
+    }
+
+    // Wave 2 piece 4 — buff accessor pairs. Lifesteal: q8 fraction +
+    // absolute expiry tick. Damage-taken multiplier: q8 multiplier +
+    // absolute expiry tick. The `agent_lifestealing` / `agent_damage_modified`
+    // predicates land alongside the apply-handler kernels in the
+    // follow-up Wave 2 piece.
+    pub fn agent_lifesteal_frac_q8(&self, id: AgentId) -> Option<i16> {
+        self.hot_lifesteal_frac_q8
+            .get(AgentSlotPool::slot_of_agent(id))
+            .copied()
+    }
+    pub fn set_agent_lifesteal_frac_q8(&mut self, id: AgentId, v: i16) {
+        if let Some(s) = self
+            .hot_lifesteal_frac_q8
+            .get_mut(AgentSlotPool::slot_of_agent(id))
+        {
+            *s = v;
+        }
+    }
+    pub fn agent_lifesteal_expires_at(&self, id: AgentId) -> Option<u32> {
+        self.hot_lifesteal_expires_at_tick
+            .get(AgentSlotPool::slot_of_agent(id))
+            .copied()
+    }
+    pub fn set_agent_lifesteal_expires_at(&mut self, id: AgentId, v: u32) {
+        if let Some(s) = self
+            .hot_lifesteal_expires_at_tick
+            .get_mut(AgentSlotPool::slot_of_agent(id))
+        {
+            *s = v;
+        }
+    }
+    pub fn agent_damage_taken_mult_q8(&self, id: AgentId) -> Option<i16> {
+        self.hot_damage_taken_mult_q8
+            .get(AgentSlotPool::slot_of_agent(id))
+            .copied()
+    }
+    pub fn set_agent_damage_taken_mult_q8(&mut self, id: AgentId, v: i16) {
+        if let Some(s) = self
+            .hot_damage_taken_mult_q8
+            .get_mut(AgentSlotPool::slot_of_agent(id))
+        {
+            *s = v;
+        }
+    }
+    pub fn agent_damage_taken_mult_expires_at(&self, id: AgentId) -> Option<u32> {
+        self.hot_damage_taken_mult_expires_at_tick
+            .get(AgentSlotPool::slot_of_agent(id))
+            .copied()
+    }
+    pub fn set_agent_damage_taken_mult_expires_at(&mut self, id: AgentId, v: u32) {
+        if let Some(s) = self
+            .hot_damage_taken_mult_expires_at_tick
             .get_mut(AgentSlotPool::slot_of_agent(id))
         {
             *s = v;
@@ -1167,6 +1270,10 @@ impl SimState {
     #[doc(hidden)] pub fn hot_silence_expires_at_tick_mut_slice(&mut self) -> &mut [u32] { &mut self.hot_silence_expires_at_tick }
     #[doc(hidden)] pub fn hot_fear_expires_at_tick_mut_slice(&mut self) -> &mut [u32] { &mut self.hot_fear_expires_at_tick }
     #[doc(hidden)] pub fn hot_taunt_expires_at_tick_mut_slice(&mut self) -> &mut [u32] { &mut self.hot_taunt_expires_at_tick }
+    #[doc(hidden)] pub fn hot_lifesteal_frac_q8_mut_slice(&mut self) -> &mut [i16] { &mut self.hot_lifesteal_frac_q8 }
+    #[doc(hidden)] pub fn hot_lifesteal_expires_at_tick_mut_slice(&mut self) -> &mut [u32] { &mut self.hot_lifesteal_expires_at_tick }
+    #[doc(hidden)] pub fn hot_damage_taken_mult_q8_mut_slice(&mut self) -> &mut [i16] { &mut self.hot_damage_taken_mult_q8 }
+    #[doc(hidden)] pub fn hot_damage_taken_mult_expires_at_tick_mut_slice(&mut self) -> &mut [u32] { &mut self.hot_damage_taken_mult_expires_at_tick }
 
     #[doc(hidden)] pub fn cold_creature_type_mut_slice(&mut self) -> &mut [Option<CreatureType>] { &mut self.cold_creature_type }
     #[doc(hidden)] pub fn cold_spawn_tick_mut_slice(&mut self) -> &mut [Option<u32>] { &mut self.cold_spawn_tick }
@@ -1394,5 +1501,21 @@ impl SimState {
     }
     pub fn hot_taunt_expires_at_tick(&self) -> &[u32] {
         &self.hot_taunt_expires_at_tick
+    }
+    // Wave 2 piece 4 — bulk-slice readers for the buff SoA pairs
+    // (lifesteal + damage-taken multiplier). Snapshot writer uses these
+    // to round-trip the columns; mirror shape of `hot_slow_factor_q8` /
+    // `hot_slow_expires_at_tick`.
+    pub fn hot_lifesteal_frac_q8(&self) -> &[i16] {
+        &self.hot_lifesteal_frac_q8
+    }
+    pub fn hot_lifesteal_expires_at_tick(&self) -> &[u32] {
+        &self.hot_lifesteal_expires_at_tick
+    }
+    pub fn hot_damage_taken_mult_q8(&self) -> &[i16] {
+        &self.hot_damage_taken_mult_q8
+    }
+    pub fn hot_damage_taken_mult_expires_at_tick(&self) -> &[u32] {
+        &self.hot_damage_taken_mult_expires_at_tick
     }
 }

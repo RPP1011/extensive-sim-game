@@ -529,6 +529,22 @@ fn write_state(w: &mut W, state: &SimState) {
     for &v in state.hot_taunt_expires_at_tick() {
         w.u32(v);
     }
+    // Wave 2 piece 4 — buff SoA pairs (lifesteal + damage-taken
+    // multiplier). Each pair is one i16 magnitude column + one u32
+    // expiry column. Same encoding as `hot_slow_factor_q8` /
+    // `hot_slow_expires_at_tick`.
+    for &v in state.hot_lifesteal_frac_q8() {
+        w.i16(v);
+    }
+    for &v in state.hot_lifesteal_expires_at_tick() {
+        w.u32(v);
+    }
+    for &v in state.hot_damage_taken_mult_q8() {
+        w.i16(v);
+    }
+    for &v in state.hot_damage_taken_mult_expires_at_tick() {
+        w.u32(v);
+    }
 
     // Cold scalars (cap-length, one tuple per slot).
     for slot in 0..cap_usize {
@@ -671,6 +687,17 @@ fn read_state(
     read_u32_slice(r, cap_usize, "hot_silence_expires", state.hot_silence_expires_at_tick_mut_slice())?;
     read_u32_slice(r, cap_usize, "hot_fear_expires", state.hot_fear_expires_at_tick_mut_slice())?;
     read_u32_slice(r, cap_usize, "hot_taunt_expires", state.hot_taunt_expires_at_tick_mut_slice())?;
+    // Wave 2 piece 4 — buff SoA pairs. Read order matches the writer
+    // exactly: lifesteal_frac_q8 (i16) → lifesteal_expires (u32) →
+    // damage_taken_mult_q8 (i16) → damage_taken_mult_expires (u32).
+    for slot in 0..cap_usize {
+        state.hot_lifesteal_frac_q8_mut_slice()[slot] = r.i16("hot_lifesteal_frac_q8")?;
+    }
+    read_u32_slice(r, cap_usize, "hot_lifesteal_expires", state.hot_lifesteal_expires_at_tick_mut_slice())?;
+    for slot in 0..cap_usize {
+        state.hot_damage_taken_mult_q8_mut_slice()[slot] = r.i16("hot_damage_taken_mult_q8")?;
+    }
+    read_u32_slice(r, cap_usize, "hot_damage_taken_mult_expires", state.hot_damage_taken_mult_expires_at_tick_mut_slice())?;
 
     // Cold scalars.
     for slot in 0..cap_usize {
