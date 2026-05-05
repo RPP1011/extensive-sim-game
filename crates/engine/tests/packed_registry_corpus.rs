@@ -4,8 +4,8 @@
 //! (`engine::ability::PackedAbilityRegistry::pack`).
 //!
 //! The corpus lives at `assets/ability_test/duel_abilities/{Strike,
-//! ShieldUp, Mend, Bleed, Reap, Vampirize, Fortify}.ability` and
-//! exercises the seven header / effect shapes Wave 1+2 ships:
+//! ShieldUp, Mend, Bleed, Reap, Vampirize, Fortify, Daze}.ability` and
+//! exercises the eight header / effect shapes Wave 1+2 ships:
 //!   * `Strike`    -> enemy-target + range + cooldown + damage hint
 //!   * `ShieldUp`  -> self-target + cooldown + defense hint + shield effect
 //!   * `Mend`      -> self-target + cooldown + heal hint + heal effect
@@ -19,6 +19,9 @@
 //!   * `Fortify`   -> self-target + cooldown + damage_modify (Wave 2 piece N
 //!                    DamageModify E2E demo, EffectOp::DamageModify
 //!                    discriminant 19)
+//!   * `Daze`      -> enemy-target + range + cooldown + crowd_control hint +
+//!                    stun (Wave 2 piece N Stun E2E demo + FIRST verb-status
+//!                    cast-gate, EffectOp::Stun discriminant 3)
 //!
 //! This test guards the boundary between the DSL pipeline and the GPU-
 //! facing layout: any drift in slot ordering, payload encoding, or
@@ -58,7 +61,7 @@ fn load(name: &str) -> (String, dsl_ast::AbilityFile) {
 
 #[test]
 fn pack_duel_corpus_end_to_end() {
-    // Load the seven corpus files; preserve the canonical input order so
+    // Load the eight corpus files; preserve the canonical input order so
     // the resulting `AbilityId` slots are deterministic.
     let strike = load("Strike");
     let shield_up = load("ShieldUp");
@@ -67,12 +70,13 @@ fn pack_duel_corpus_end_to_end() {
     let reap = load("Reap");
     let vampirize = load("Vampirize");
     let fortify = load("Fortify");
+    let daze = load("Daze");
 
-    let files = vec![strike, shield_up, mend, bleed, reap, vampirize, fortify];
+    let files = vec![strike, shield_up, mend, bleed, reap, vampirize, fortify, daze];
     let built = build_registry(&files).expect("registry build must succeed");
 
-    // Seven abilities; name table covers all seven.
-    assert_eq!(built.registry.len(), 7);
+    // Eight abilities; name table covers all eight.
+    assert_eq!(built.registry.len(), 8);
     assert!(built.names.contains_key("Strike"));
     assert!(built.names.contains_key("ShieldUp"));
     assert!(built.names.contains_key("Mend"));
@@ -80,6 +84,7 @@ fn pack_duel_corpus_end_to_end() {
     assert!(built.names.contains_key("Reap"));
     assert!(built.names.contains_key("Vampirize"));
     assert!(built.names.contains_key("Fortify"));
+    assert!(built.names.contains_key("Daze"));
 
     let strike_slot = built.names["Strike"].slot();
     let shield_slot = built.names["ShieldUp"].slot();
@@ -88,10 +93,11 @@ fn pack_duel_corpus_end_to_end() {
     let reap_slot = built.names["Reap"].slot();
     let vampirize_slot = built.names["Vampirize"].slot();
     let fortify_slot = built.names["Fortify"].slot();
+    let daze_slot = built.names["Daze"].slot();
 
     let packed = PackedAbilityRegistry::pack(&built.registry);
 
-    assert_eq!(packed.n_abilities, 7);
+    assert_eq!(packed.n_abilities, 8);
 
     // -- Strike: range 5.0, cooldown 1s == 10 ticks, hostile_only set. --
     // Damage value is 30.0 since the #85 retune (re-enabled shield_hp
@@ -202,8 +208,26 @@ fn pack_duel_corpus_end_to_end() {
     assert_eq!(packed.effect_payload_b[fortify_eff_base], 128_u32,
         "Fortify DamageModify payload_b = multiplier_q8 (128 = 0.5 q8)");
 
-    // Delivery is Instant (=0) for all seven — no other variant exists.
-    for slot in [strike_slot, shield_slot, mend_slot, bleed_slot, reap_slot, vampirize_slot, fortify_slot] {
+    // -- Daze: cooldown 4s == 40 ticks, range 5.0; enemy-target Stun. --
+    //   Wave 2 piece N Stun E2E demo + FIRST verb-status cast-gate.
+    //   Discriminant 3 per `engine::ability::packed::pack_effect_op` —
+    //   payload_a = duration_ticks (10), payload_b = 0. The
+    //   `Daze.ability` source is `stun 1s`, so 1s == 10 ticks. The
+    //   .sim verb writes hot_stun_expires_at_tick = world.tick + 10;
+    //   every offensive verb's `when` clause now reads that field via
+    //   `agents.stun_expires_at_tick(self) <= world.tick`.
+    assert_eq!(packed.cooldown_ticks[daze_slot], 40);
+    assert_eq!(packed.range[daze_slot], 5.0);
+    assert_eq!(packed.gate_flags[daze_slot], 0b01,
+        "Daze has target: enemy -> hostile_only bit set");
+    let daze_eff_base = daze_slot * MAX_EFFECTS_PER_PROGRAM;
+    assert_eq!(packed.effect_kinds[daze_eff_base], 3,
+        "Daze effect 0 is Stun (discriminant 3)");
+    assert_eq!(packed.effect_payload_a[daze_eff_base], 10_u32,
+        "Daze Stun payload_a = duration_ticks (10)");
+
+    // Delivery is Instant (=0) for all eight — no other variant exists.
+    for slot in [strike_slot, shield_slot, mend_slot, bleed_slot, reap_slot, vampirize_slot, fortify_slot, daze_slot] {
         assert_eq!(packed.delivery_kind[slot], 0);
     }
 }

@@ -101,6 +101,17 @@ event SetDamageMod {
   expires_at:   u32,
 }
 
+// Wave 2 piece N: Stun E2E demo + FIRST cast-gate. Daze emits Stunned
+// as a state-set event; the new ApplyStun chronicle drains it into the
+// per-agent hot_stun_expires_at_tick SoA field. Every offensive verb's
+// `when` clause now reads `agents.stun_expires_at_tick(self) <=
+// world.tick` — agents whose stun window is active skip the verb.
+@replayable @gpu_amenable
+event Stunned {
+  target_agent: AgentId,
+  expires_at:   u32,
+}
+
 entity Combatant : Agent {
   pos: vec3,
   vel: vec3,
@@ -131,6 +142,15 @@ config combat {
   fortify_dur:       u32 = 50,    // Fortify.ability: damage_modify duration 5s = 50 ticks
   cooldown_fortify:  u32 = 80,    // Fortify.ability: cooldown 8s
   hp_fortify_floor:  f32 = 70.0,  // pre-emptive: Fortify when hurt-not-low (above hp_vampire_floor)
+  // Wave 2 piece N — Stun E2E demo + first cast-gate. Daze writes
+  // target.hot_stun_expires_at_tick = world.tick + daze_dur; every
+  // offensive verb's `when` clause gates on
+  // `agents.stun_expires_at_tick(self) <= world.tick`, so a stunned
+  // agent cannot cast Strike/Bleed/Reap/Vampirize/Fortify/ShieldUp/Mend
+  // (or even Daze) for the window.
+  daze_dur:          u32 = 10,    // Daze.ability: stun 1s = 10 ticks
+  cooldown_daze:     u32 = 40,    // Daze.ability: cooldown 4s
+  hp_daze_floor:     f32 = 80.0,  // cast Daze pre-emptively when target healthy
 }
 
 // Strike — cooldown 10 ticks, range gate (range field stays declared but
@@ -148,6 +168,12 @@ config combat {
 verb Strike(self, target: Agent) =
   action StrikeAction
   when (self.alive
+        // Wave 2 cast-gate (FIRST verb-status gate in the codebase):
+        // a stunned agent cannot cast Strike. `agents.stun_expires_at_tick`
+        // is the per-agent SoA field written by ApplyStun; the default
+        // 0 means "never stunned" so the gate is a no-op until Daze
+        // fires. See Daze verb + ApplyStun physics block below.
+        && agents.stun_expires_at_tick(self) <= world.tick
         && target.alive
         && target != self
         && (world.tick % 10 == 0))
@@ -161,6 +187,9 @@ verb Strike(self, target: Agent) =
 verb ShieldUp(self, target: Agent) =
   action ShieldUpAction
   when (self.alive
+        // Wave 2 cast-gate: stunned agents cannot cast — uniform across
+        // every verb so a Daze prevents ALL action this window.
+        && agents.stun_expires_at_tick(self) <= world.tick
         && target == self
         && (world.tick % 40 == 0)
         && self.hp < 90.0)
@@ -173,6 +202,8 @@ verb ShieldUp(self, target: Agent) =
 verb Mend(self, target: Agent) =
   action MendAction
   when (self.alive
+        // Wave 2 cast-gate: stunned agents cannot cast.
+        && agents.stun_expires_at_tick(self) <= world.tick
         && target == self
         && (world.tick % 30 == 0)
         && self.hp < config.combat.hp_low_threshold)
@@ -190,6 +221,8 @@ verb Mend(self, target: Agent) =
 verb Bleed(self, target: Agent) =
   action BleedAction
   when (self.alive
+        // Wave 2 cast-gate: stunned agents cannot cast.
+        && agents.stun_expires_at_tick(self) <= world.tick
         && target == self
         && (world.tick % 50 == 0)
         && self.hp > config.combat.hp_bleed_floor)
@@ -212,6 +245,8 @@ verb Bleed(self, target: Agent) =
 verb Reap(self, target: Agent) =
   action ReapAction
   when (self.alive
+        // Wave 2 cast-gate: stunned agents cannot cast.
+        && agents.stun_expires_at_tick(self) <= world.tick
         && target.alive
         && target != self
         && target.hp < config.combat.reap_threshold
@@ -232,6 +267,8 @@ verb Reap(self, target: Agent) =
 verb Vampirize(self, target: Agent) =
   action VampirizeAction
   when (self.alive
+        // Wave 2 cast-gate: stunned agents cannot cast.
+        && agents.stun_expires_at_tick(self) <= world.tick
         && target == self
         && (world.tick % config.combat.cooldown_vampirize == 0)
         && self.hp < config.combat.hp_vampire_floor)
@@ -252,12 +289,45 @@ verb Vampirize(self, target: Agent) =
 verb Fortify(self, target: Agent) =
   action FortifyAction
   when (self.alive
+        // Wave 2 cast-gate: stunned agents cannot cast.
+        && agents.stun_expires_at_tick(self) <= world.tick
         && target == self
         && (world.tick % config.combat.cooldown_fortify == 0)
         && self.hp < config.combat.hp_fortify_floor)
   emit SetDamageMod { target_agent: self, mult_q8: config.combat.fortify_mult_q8,
                       expires_at: world.tick + config.combat.fortify_dur }
   score 275.0
+
+// Daze — Wave 2 piece N: Stun E2E demo + FIRST verb-status cast-gate.
+// Enemy-target, cooldown 40 ticks (4s). Emits Stunned to write the
+// target's hot_stun_expires_at_tick SoA field (= world.tick + 10 = 1s
+// stun window). Gated on `target.hp > hp_daze_floor` so it's a
+// pre-emptive crowd-control verb fired against healthy enemies (rather
+// than wasted on a finisher candidate).
+//
+// Score formula: pair-field (200 - target.hp) so the scoring kernel
+// iterates per_pair_candidate and binds best_target. Sits in the same
+// 100..200 band as Strike — Strike (cooldown 10) and Daze (cooldown
+// 40) won't both be eligible at every tick, so they don't directly
+// contend; when they DO compete (every 40-tick boundary, target hp
+// > 80), they tie at score=120 and the per-verb mask ordering decides.
+//
+// Cast-gate: Daze itself ALSO gates on
+// `agents.stun_expires_at_tick(self) <= world.tick` — a stunned agent
+// shouldn't be able to stun back, otherwise two Dazes would lock both
+// agents indefinitely.
+verb Daze(self, target: Agent) =
+  action DazeAction
+  when (self.alive
+        // Cast-gate: stunned caster cannot cast Daze either (no
+        // stun-back loop).
+        && agents.stun_expires_at_tick(self) <= world.tick
+        && target.alive
+        && target != self
+        && (world.tick % config.combat.cooldown_daze == 0)
+        && target.hp > config.combat.hp_daze_floor)
+  emit Stunned { target_agent: target, expires_at: world.tick + config.combat.daze_dur }
+  score (180.0 - target.hp)
 
 // Apply damage with shield_hp absorption.
 //
@@ -364,6 +434,19 @@ physics ApplyDamageModActivation {
   on SetDamageMod { target_agent: t, mult_q8: m, expires_at: e } {
     agents.set_damage_taken_mult_q8(t, m);
     agents.set_damage_taken_mult_expires_at_tick(t, e);
+  }
+}
+
+// Apply stun activation — drains Stunned events emitted by Daze and
+// writes the per-agent hot_stun_expires_at_tick SoA field. Every
+// offensive verb's `when` clause reads this field via
+// `agents.stun_expires_at_tick(self)` and skips casting when the stun
+// window is active. This is the FIRST cast-gate driven by a per-agent
+// status SoA field in the codebase.
+@phase(post)
+physics ApplyStun {
+  on Stunned { target_agent: t, expires_at: e } {
+    agents.set_stun_expires_at_tick(t, e);
   }
 }
 

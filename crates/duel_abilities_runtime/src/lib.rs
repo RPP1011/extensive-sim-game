@@ -130,9 +130,19 @@ pub struct DuelAbilitiesState {
     /// even though the default mult_q8 is 256 (1.0×). Written by
     /// ApplyDamageModActivation alongside mult_q8.
     agent_damage_taken_mult_expires_at_tick_buf: wgpu::Buffer,
+    /// Per-agent stun expiry tick. Wave 2 piece N — first cast-gating
+    /// status SoA in this fixture. Written by ApplyStun (Stunned event
+    /// handler emitted by Daze); read by EVERY offensive verb's mask
+    /// kernel via `agents.stun_expires_at_tick(self) <= world.tick`.
+    /// Initialised to 0 (= "never stunned"), so the gate is a no-op
+    /// until Daze fires. Buffer is bound by both the fused mask kernel
+    /// (read-side) and the fused PerEvent kernel (write-side via the
+    /// ApplyStun arm).
+    agent_stun_expires_at_tick_buf: wgpu::Buffer,
 
     // -- Mask bitmaps (one per verb in source order: Strike=0,
-    //    ShieldUp=1, Mend=2, Bleed=3, Reap=4, Vampirize=5, Fortify=6) --
+    //    ShieldUp=1, Mend=2, Bleed=3, Reap=4, Vampirize=5, Fortify=6,
+    //    Daze=7) --
     mask_0_bitmap_buf: wgpu::Buffer, // Strike
     mask_1_bitmap_buf: wgpu::Buffer, // ShieldUp
     mask_2_bitmap_buf: wgpu::Buffer, // Mend
@@ -140,6 +150,7 @@ pub struct DuelAbilitiesState {
     mask_4_bitmap_buf: wgpu::Buffer, // Reap  (Wave 2 Execute demo)
     mask_5_bitmap_buf: wgpu::Buffer, // Vampirize (Wave 2 LifeSteal demo)
     mask_6_bitmap_buf: wgpu::Buffer, // Fortify   (Wave 2 DamageModify demo)
+    mask_7_bitmap_buf: wgpu::Buffer, // Daze      (Wave 2 Stun E2E demo + cast-gate)
     mask_bitmap_zero_buf: wgpu::Buffer,
     mask_bitmap_words: u32,
 
@@ -173,6 +184,10 @@ pub struct DuelAbilitiesState {
     chronicle_reap_cfg_buf: wgpu::Buffer,
     chronicle_vampirize_cfg_buf: wgpu::Buffer,
     chronicle_fortify_cfg_buf: wgpu::Buffer,
+    /// Cfg uniform for the Daze chronicle — Wave 2 piece N Stun E2E
+    /// demo. Standalone PerAgent kernel: emits Stunned events drained
+    /// by the ApplyStun arm of the fused PerEvent kernel below.
+    chronicle_daze_cfg_buf: wgpu::Buffer,
     /// Cfg uniform for the standalone `physics_ApplyDamage` kernel —
     /// split out of the previous PerEvent fusion because ApplyDamage
     /// now emits Healed events for source-side lifesteal and that
@@ -267,8 +282,19 @@ impl DuelAbilitiesState {
             contents: bytemuck::cast_slice(&damage_taken_mult_expires_init),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
+        // Stun-expiry SoA — Wave 2 piece N Stun E2E demo + first
+        // cast-gate. u32 per agent, init 0 (= "never stunned"). Read by
+        // every offensive verb's mask kernel via
+        // `agents.stun_expires_at_tick(self) <= world.tick`; written by
+        // the ApplyStun arm of the fused PerEvent kernel.
+        let stun_expires_init: Vec<u32> = vec![0_u32; agent_count as usize];
+        let agent_stun_expires_at_tick_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_abilities_runtime::agent_stun_expires_at_tick"),
+            contents: bytemuck::cast_slice(&stun_expires_init),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+        });
 
-        // Seven mask bitmaps — one per verb. Cleared each tick.
+        // Eight mask bitmaps — one per verb. Cleared each tick.
         let mask_bitmap_words = (agent_count + 31) / 32;
         let mask_bitmap_bytes = (mask_bitmap_words as u64) * 4;
         let mk_mask = |label: &str| -> wgpu::Buffer {
@@ -286,6 +312,7 @@ impl DuelAbilitiesState {
         let mask_4_bitmap_buf = mk_mask("duel_abilities_runtime::mask_4_bitmap");
         let mask_5_bitmap_buf = mk_mask("duel_abilities_runtime::mask_5_bitmap");
         let mask_6_bitmap_buf = mk_mask("duel_abilities_runtime::mask_6_bitmap");
+        let mask_7_bitmap_buf = mk_mask("duel_abilities_runtime::mask_7_bitmap");
         let zero_words: Vec<u32> = vec![0u32; mask_bitmap_words.max(4) as usize];
         let mask_bitmap_zero_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_abilities_runtime::mask_bitmap_zero"),
@@ -351,19 +378,19 @@ impl DuelAbilitiesState {
             contents: bytemuck::bytes_of(&scoring_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        // Wave 2 piece N DamageModify demo grew the fused-PerEvent
-        // kernel one MORE time: ApplyDamageModActivation joined the
-        // existing fusion group (ApplyHeal/ApplyShield/ApplyDefeat/
-        // ApplyLifestealActivation/verb_chronicle_Strike). The cfg
-        // type now lives at
+        // Wave 2 piece N Stun E2E + cast-gate demo grew the fused-PerEvent
+        // kernel ONCE MORE: ApplyStun joined the existing fusion group
+        // (ApplyHeal/ApplyShield/ApplyDefeat/ApplyLifestealActivation/
+        // ApplyDamageModActivation/verb_chronicle_Strike). The cfg type
+        // now lives at
         // `physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_
         // ApplyLifestealActivation_and_ApplyDamageModActivation_and_
-        // verb_chronicle_Strike`. Field name
+        // ApplyStun_and_verb_chronicle_Strike`. Field name
         // `chronicle_strike_cfg_buf` retained for continuity — Strike's
         // chronicle still needs an event_count uniform and this is
         // the kernel that runs it.
         let chronicle_strike_cfg_init =
-            physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_ApplyDamageModActivation_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndApplyDamageModActivationAndVerbChronicleStrikeCfg {
+            physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_ApplyDamageModActivation_and_ApplyStun_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndApplyDamageModActivationAndApplyStunAndVerbChronicleStrikeCfg {
                 event_count: 0, tick: 0, seed: 0, _pad0: 0,
             };
         let chronicle_strike_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -436,6 +463,19 @@ impl DuelAbilitiesState {
             contents: bytemuck::bytes_of(&chronicle_fortify_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        // Daze chronicle — Wave 2 piece N Stun E2E demo. Same standalone
+        // PerAgent shape as the other verb chronicles: produces Stunned
+        // events drained by the ApplyStun arm of the fused PerEvent
+        // kernel.
+        let chronicle_daze_cfg_init =
+            physics_verb_chronicle_Daze::PhysicsVerbChronicleDazeCfg {
+                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            };
+        let chronicle_daze_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_abilities_runtime::chronicle_daze_cfg"),
+            contents: bytemuck::bytes_of(&chronicle_daze_cfg_init),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         // Wave 2 piece N: `ApplyDamage` is now a STANDALONE kernel
         // (not the fused PerEvent group it used to be) because the
         // block now emits Healed events for source-side lifesteal
@@ -489,6 +529,7 @@ impl DuelAbilitiesState {
             agent_lifesteal_expires_at_tick_buf,
             agent_damage_taken_mult_q8_buf,
             agent_damage_taken_mult_expires_at_tick_buf,
+            agent_stun_expires_at_tick_buf,
             mask_0_bitmap_buf,
             mask_1_bitmap_buf,
             mask_2_bitmap_buf,
@@ -496,6 +537,7 @@ impl DuelAbilitiesState {
             mask_4_bitmap_buf,
             mask_5_bitmap_buf,
             mask_6_bitmap_buf,
+            mask_7_bitmap_buf,
             mask_bitmap_zero_buf,
             mask_bitmap_words,
             scoring_output_buf,
@@ -514,6 +556,7 @@ impl DuelAbilitiesState {
             chronicle_reap_cfg_buf,
             chronicle_vampirize_cfg_buf,
             chronicle_fortify_cfg_buf,
+            chronicle_daze_cfg_buf,
             apply_damage_cfg_buf,
             seed_cfg_buf,
             cache: dispatch::KernelCache::default(),
@@ -572,6 +615,13 @@ impl DuelAbilitiesState {
     /// Per-agent damage_taken_mult window expiry tick (in world ticks).
     pub fn read_damage_taken_mult_expires_at_tick(&self) -> Vec<u32> {
         self.read_u32(&self.agent_damage_taken_mult_expires_at_tick_buf, "damage_taken_mult_expires_at_tick")
+    }
+    /// Per-agent stun-window expiry tick (in world ticks). 0 means
+    /// "never stunned"; the cast-gate `agents.stun_expires_at_tick(self)
+    /// <= world.tick` evaluates to TRUE for that default, so an init=0
+    /// agent can act normally.
+    pub fn read_stun_expires_at_tick(&self) -> Vec<u32> {
+        self.read_u32(&self.agent_stun_expires_at_tick_buf, "stun_expires_at_tick")
     }
 
     fn read_f32(&self, buf: &wgpu::Buffer, label: &str) -> Vec<f32> {
@@ -652,6 +702,29 @@ impl DuelAbilitiesState {
         // No submit needed — the queue serialises writes ahead of the
         // next encoder.submit on `step()`.
     }
+
+    /// Test-only stun-expiry override. Writes the supplied per-agent
+    /// `expires_at_tick` values directly to the
+    /// `agent_stun_expires_at_tick` SoA so a test can preconfigure a
+    /// stun window without having to engineer a Daze cast onto the
+    /// target. Length must equal `agent_count`. Panics on mismatch.
+    ///
+    /// Used by `stunned_agent_skips_strike` to verify that ANY
+    /// offensive verb's `when` clause skips when
+    /// `agents.stun_expires_at_tick(self) > world.tick`.
+    #[doc(hidden)]
+    pub fn override_stun_for_test(&self, expires_at: &[u32]) {
+        assert_eq!(
+            expires_at.len(),
+            self.agent_count as usize,
+            "override_stun_for_test: length must match agent_count",
+        );
+        self.gpu.queue.write_buffer(
+            &self.agent_stun_expires_at_tick_buf,
+            0,
+            bytemuck::cast_slice(expires_at),
+        );
+    }
 }
 
 impl CompiledSim for DuelAbilitiesState {
@@ -662,11 +735,12 @@ impl CompiledSim for DuelAbilitiesState {
 
         // (1) Per-tick clears.
         self.event_ring.clear_tail_in(&mut encoder);
-        // 7 verbs in source order; +1 for ApplyDamage's source-side
+        // 8 verbs in source order; +1 for ApplyDamage's source-side
         // Healed emit (lifesteal); +1 for SetLifesteal each Vampirize
-        // cast emits; +1 for SetDamageMod each Fortify cast emits.
-        // 10 slots per agent per tick caps the worst case.
-        let max_slots_per_tick = self.agent_count * 10;
+        // cast emits; +1 for SetDamageMod each Fortify cast emits;
+        // +1 for Stunned each Daze cast emits. 12 slots per agent per
+        // tick caps the worst case.
+        let max_slots_per_tick = self.agent_count * 12;
         self.event_ring.clear_ring_headers_in(
             &self.gpu, &mut encoder, max_slots_per_tick,
         );
@@ -679,6 +753,7 @@ impl CompiledSim for DuelAbilitiesState {
             &self.mask_4_bitmap_buf,
             &self.mask_5_bitmap_buf,
             &self.mask_6_bitmap_buf,
+            &self.mask_7_bitmap_buf,
         ] {
             encoder.copy_buffer_to_buffer(
                 &self.mask_bitmap_zero_buf, 0, buf, 0, mask_bytes.max(4),
@@ -703,9 +778,16 @@ impl CompiledSim for DuelAbilitiesState {
         // omit agent_mana (compiler emits only what's read). Mana SoA
         // stays in this fixture for parity with duel_1v1's interface
         // but isn't bound to any kernel.
+        //
+        // Wave 2 piece N — `agent_stun_expires_at_tick` is now bound
+        // because EVERY verb's `when` clause reads it for the cast-gate
+        // `agents.stun_expires_at_tick(self) <= world.tick`. This is
+        // the FIRST status-SoA field bound to the mask kernel — the
+        // previous fixture had only purely-functional reads (hp, alive).
         let mask_bindings = fused_mask_verb_Strike::FusedMaskVerbStrikeBindings {
             agent_hp: &self.agent_hp_buf,
             agent_alive: &self.agent_alive_buf,
+            agent_stun_expires_at_tick: &self.agent_stun_expires_at_tick_buf,
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             mask_1_bitmap: &self.mask_1_bitmap_buf,
             mask_2_bitmap: &self.mask_2_bitmap_buf,
@@ -713,6 +795,7 @@ impl CompiledSim for DuelAbilitiesState {
             mask_4_bitmap: &self.mask_4_bitmap_buf,
             mask_5_bitmap: &self.mask_5_bitmap_buf,
             mask_6_bitmap: &self.mask_6_bitmap_buf,
+            mask_7_bitmap: &self.mask_7_bitmap_buf,
             cfg: &self.mask_cfg_buf,
         };
         dispatch::dispatch_fused_mask_verb_strike(
@@ -746,6 +829,7 @@ impl CompiledSim for DuelAbilitiesState {
             mask_4_bitmap: &self.mask_4_bitmap_buf,
             mask_5_bitmap: &self.mask_5_bitmap_buf,
             mask_6_bitmap: &self.mask_6_bitmap_buf,
+            mask_7_bitmap: &self.mask_7_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
             cfg: &self.scoring_cfg_buf,
         };
@@ -884,45 +968,75 @@ impl CompiledSim for DuelAbilitiesState {
             self.agent_count,
         );
 
+        // (7e) Daze chronicle — Wave 2 piece N Stun E2E demo + first
+        // verb-status cast-gate. Gates on action_id==7u and emits
+        // Stunned{target_agent=target, expires_at=tick+daze_dur}.
+        // Drained by the ApplyStun arm of the fused kernel below — sets
+        // the target's stun_expires_at_tick SoA slot so EVERY offensive
+        // verb's mask kernel reads `stun_expires_at_tick > world.tick`
+        // and skips casting for the duration of the window.
+        let daze_cfg = physics_verb_chronicle_Daze::PhysicsVerbChronicleDazeCfg {
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.chronicle_daze_cfg_buf, 0, bytemuck::bytes_of(&daze_cfg),
+        );
+        let daze_bindings = physics_verb_chronicle_Daze::PhysicsVerbChronicleDazeBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            cfg: &self.chronicle_daze_cfg_buf,
+        };
+        dispatch::dispatch_physics_verb_chronicle_daze(
+            &mut self.cache, &daze_bindings, &self.gpu.device, &mut encoder,
+            self.agent_count,
+        );
+
         // (8a) Fused ApplyHeal + ApplyShield + ApplyDefeat +
         // ApplyLifestealActivation + ApplyDamageModActivation +
-        // verb_chronicle_Strike. The compiler re-fused these because
-        // Strike's chronicle is now the lone producer feeding the
-        // Healed/Shielded/Defeated/SetLifesteal/SetDamageMod consumers.
-        // **Runs BEFORE ApplyDamage** so Strike's emitted Damaged events
-        // are visible to ApplyDamage at step (8b); ShieldUp/Mend/Bleed/
-        // Reap/Vampirize/Fortify chronicles already emitted earlier
-        // (steps 5-7d), and their consumer arms (ApplyHeal/ApplyShield/
-        // ApplyDefeat/ApplyLifestealActivation/ApplyDamageModActivation)
-        // drain those here.
+        // ApplyStun + verb_chronicle_Strike. The compiler re-fused these
+        // because Strike's chronicle is the lone producer feeding the
+        // Healed/Shielded/Defeated/SetLifesteal/SetDamageMod/Stunned
+        // consumers. **Runs BEFORE ApplyDamage** so Strike's emitted
+        // Damaged events are visible to ApplyDamage at step (8b);
+        // ShieldUp/Mend/Bleed/Reap/Vampirize/Fortify/Daze chronicles
+        // already emitted earlier (steps 5-7e), and their consumer arms
+        // (ApplyHeal/ApplyShield/ApplyDefeat/ApplyLifestealActivation/
+        // ApplyDamageModActivation/ApplyStun) drain those here.
         //
-        // The bind-group binds BOTH the lifesteal AND the damage_taken_
-        // mult SoA fields write-side (ApplyLifestealActivation +
-        // ApplyDamageModActivation each write their own pair). The
-        // compiler-emitted SCHEDULE places ApplyDamage first; we
-        // transpose because the Strike→ApplyDamage chain MUST happen
+        // The bind-group binds the stun SoA write-side (ApplyStun
+        // writes hot_stun_expires_at_tick), alongside the lifesteal +
+        // damage_taken_mult SoA write-side (their own ApplyXActivation
+        // arms). The compiler-emitted SCHEDULE places ApplyDamage first;
+        // we transpose because the Strike→ApplyDamage chain MUST happen
         // within a single tick.
-        let event_count_estimate = self.agent_count * 10;
-        let apply_heal_cfg = physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_ApplyDamageModActivation_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndApplyDamageModActivationAndVerbChronicleStrikeCfg {
+        //
+        // Wave 2 piece N — fusion topology shift: ApplyStun joined the
+        // existing fusion group, growing the kernel name by one
+        // `_and_ApplyStun_` segment and adding agent_stun_expires_at_tick
+        // to the bind group. No new pass introduced; same single
+        // dispatch per tick.
+        let event_count_estimate = self.agent_count * 12;
+        let apply_heal_cfg = physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_ApplyDamageModActivation_and_ApplyStun_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndApplyDamageModActivationAndApplyStunAndVerbChronicleStrikeCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
             seed: 0, _pad0: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_strike_cfg_buf, 0, bytemuck::bytes_of(&apply_heal_cfg),
         );
-        let apply_heal_bindings = physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_ApplyDamageModActivation_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndApplyDamageModActivationAndVerbChronicleStrikeBindings {
+        let apply_heal_bindings = physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_ApplyDamageModActivation_and_ApplyStun_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndApplyDamageModActivationAndApplyStunAndVerbChronicleStrikeBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
             agent_hp: &self.agent_hp_buf,
             agent_alive: &self.agent_alive_buf,
             agent_shield_hp: &self.agent_shield_hp_buf,
+            agent_stun_expires_at_tick: &self.agent_stun_expires_at_tick_buf,
             agent_lifesteal_frac_q8: &self.agent_lifesteal_frac_q8_buf,
             agent_lifesteal_expires_at_tick: &self.agent_lifesteal_expires_at_tick_buf,
             agent_damage_taken_mult_q8: &self.agent_damage_taken_mult_q8_buf,
             agent_damage_taken_mult_expires_at_tick: &self.agent_damage_taken_mult_expires_at_tick_buf,
             cfg: &self.chronicle_strike_cfg_buf,
         };
-        dispatch::dispatch_physics_applyheal_and_applyshield_and_applydefeat_and_applylifestealactivation_and_applydamagemodactivation_and_verb_chronicle_strike(
+        dispatch::dispatch_physics_applyheal_and_applyshield_and_applydefeat_and_applylifestealactivation_and_applydamagemodactivation_and_applystun_and_verb_chronicle_strike(
             &mut self.cache, &apply_heal_bindings, &self.gpu.device, &mut encoder,
             event_count_estimate,
         );
@@ -1519,6 +1633,105 @@ mod tests {
              Strike-kill leaves hp<=0 from the inline ApplyDamage path; \
              got alive=[{}, {}], hp=[{:.2}, {:.2}]",
             alive[0], alive[1], hp[0], hp[1],
+        );
+    }
+
+    /// Wave 2 piece N — Stun E2E demo + FIRST verb-status cast-gate.
+    /// This test is the *acceptance* of the cast-gate: a stunned agent
+    /// must NOT cast any offensive verb during the stun window. We
+    /// verify that by:
+    ///
+    ///   1. Constructing a 2-agent fixture (both alive, hp=100).
+    ///   2. Overriding agent 0's `hot_stun_expires_at_tick` to 50
+    ///      BEFORE any `step()` runs. The mask kernel reads
+    ///      `agents.stun_expires_at_tick(self) <= world.tick` and
+    ///      gates EVERY offensive verb (Strike/ShieldUp/Mend/Bleed/
+    ///      Reap/Vampirize/Fortify/Daze) on `expires <= tick`. With
+    ///      expires=50 the gate FAILS for ticks 0..49.
+    ///   3. Ticking 50 times. Agent 0's mask kernel sees
+    ///      stun_expires=50 > tick∈[0,49] → no verb is selected;
+    ///      Strike never emits a Damaged event with target=agent 1.
+    ///   4. Asserting agent 1's hp is *exactly* 100.0 after 50 ticks.
+    ///      Any drift means the cast-gate didn't suppress agent 0's
+    ///      Strike — i.e. the new `agents.stun_expires_at_tick(self)`
+    ///      read in the verb's `when` clause failed to lower or wasn't
+    ///      bound to the mask kernel.
+    ///
+    /// Agent 1 is NOT stunned and would normally Strike agent 0 every
+    /// 10 ticks, dropping agent 0's hp by 30 per cycle. We don't
+    /// assert on agent 0's hp because that path is unrelated to the
+    /// cast-gate (and would noise up the test). The single load-bearing
+    /// signal is `agent 1's hp == 100.0`: only agent 0's Strike could
+    /// have damaged agent 1, and that Strike is the thing the gate
+    /// suppresses.
+    ///
+    /// Why expires=50 (not 49 or 51): the gate is `<=`, so
+    /// `expires <= tick` is TRUE when tick==50. Setting expires=50
+    /// means ticks 0..49 fail the gate (expires=50 > tick∈[0,49]) and
+    /// tick 50 onward passes. We tick 50 times (ticks 0..49 are
+    /// processed; the post-tick counter advances to 50 but no further
+    /// step occurs), so the entire window is gate-failed. Strike
+    /// would land at tick 0 if not gated (cooldown 10, tick%10==0).
+    #[test]
+    fn stunned_agent_skips_strike() {
+        let mut state = DuelAbilitiesState::new(0xCAFE_F00D, 2);
+        // Agent 0 stunned until tick 50; agent 1 never stunned.
+        // Agents start at hp=100, alive=1 by construction.
+        state.override_stun_for_test(&[50_u32, 0_u32]);
+        // Sanity: confirm the override landed on the right slot.
+        let pre_stun = state.read_stun_expires_at_tick();
+        assert_eq!(
+            pre_stun, vec![50_u32, 0_u32],
+            "stun override didn't land — expected [50, 0], saw {:?}. \
+             override_stun_for_test must write the agent_stun_expires_at_tick \
+             buffer; if this fails the test below means nothing.",
+            pre_stun,
+        );
+        // Tick 50 times — agent 0's gate fails for tick∈[0,49] because
+        // stun_expires=50 > tick. Agent 1's stun is 0, so its mask
+        // kernel passes its own gate (0 <= tick) — but since it would
+        // only Strike agent 0, agent 1's HP is unaffected by its own
+        // actions. The load-bearing assertion is on agent 1's HP: any
+        // Strike from agent 0 onto agent 1 would drop agent 1's HP by
+        // 30 per cooldown cycle (5 strikes possible in the 50-tick
+        // window).
+        for _ in 0..50 {
+            state.step();
+        }
+        let hp = state.read_hp();
+        let alive = state.read_alive();
+        let stun = state.read_stun_expires_at_tick();
+        // Agent 1's hp must be exactly 100.0 — the cast-gate prevented
+        // every one of agent 0's would-be Strikes.
+        assert_eq!(
+            hp[1], 100.0,
+            "stun cast-gate FAILED — agent 1's hp dropped from 100 to {} \
+             over 50 ticks while agent 0 was stunned. Expected exactly \
+             100.0 (no Strike from agent 0 lands during the stun window). \
+             Saw hp={:?}, alive={:?}, stun_expires={:?}.",
+            hp[1], hp, alive, stun,
+        );
+        // Defence-in-depth: agent 1 must still be alive (5 strikes at
+        // 30 dmg each = 150 dmg, would have killed it from hp=100).
+        assert_eq!(
+            alive[1], 1,
+            "stun cast-gate FAILED — agent 1 died during the stun window. \
+             Expected alive=1 (no damage taken). Saw hp={:?}, alive={:?}.",
+            hp, alive,
+        );
+        // Sanity: the stun field wasn't accidentally overwritten by an
+        // ApplyStun emit (no Daze fires in this fixture — the .ability
+        // exists but the verb gate `target.hp > 80` only fires at the
+        // 40-tick boundary, where target.hp is still 100; what matters
+        // is that agent 0's preconfigured stun is still 50, not that
+        // agent 1's stun stays 0).
+        assert_eq!(
+            stun[0], 50_u32,
+            "agent 0's stun_expires_at_tick must remain at the preconfigured \
+             50 throughout the test — saw {:?}. If this changed, ApplyStun \
+             ran (a Daze landed) and the test isn't actually exercising the \
+             preconfigured-stun path.",
+            stun,
         );
     }
 }
