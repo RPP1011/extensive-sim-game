@@ -30,6 +30,12 @@ pub mod cg;
 // `EffectOp` variants and the 5 Wave-1 header keys are wired today).
 pub mod ability_lower;
 
+// Wave 1.7 — assemble lowered `AbilityProgram`s into a frozen
+// `AbilityRegistry` and resolve `cast <Name>` references across files.
+// Owns duplicate-name + unresolved-cast + cast-cycle diagnostics. See
+// `ability_registry.rs` for the scope statement.
+pub mod ability_registry;
+
 // Shared kernel-emit infrastructure (reused by `cg::emit::*`).
 pub mod kernel_binding_ir;
 pub mod kernel_lowerings;
