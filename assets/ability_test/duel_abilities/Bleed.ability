@@ -1,15 +1,23 @@
-// Wave 2 piece N: SelfDamage E2E demo. Caster takes 5 damage on cast.
-// Lowers to AbilityProgram { gate: { cooldown_ticks: 50 }, effects: [EffectOp::SelfDamage { amount: 5.0 }] }
+// Wave 2 piece N: SelfDamage E2E demo. Caster takes 5 + 5%·MaxHp
+// damage on cast (= 10 at MaxHp=100 in the duel_abilities fixture).
 //
-// Bleeds self once every 5 seconds — a self-cost ability. The runtime
-// emits Damaged { source: self, target: self, amount: 5 } via the
-// chronicle, and the existing ApplyDamage (with shield absorption)
-// drains caster.hp accordingly. No new physics block needed —
-// SelfDamage's contract is "Damaged event with target=caster".
+// Lowers to AbilityProgram {
+//   gate: { cooldown_ticks: 50 },
+//   effects: [EffectOp::SelfDamage { amount: 5.0 }],
+//   scalings_per_effect: [[EffectScaling { stat_ref: MaxHp, percent: 0.05 }]],
+// }
+//
+// `+ 5% max_hp` exercises Wave 1.5#4 scaling-modifier lowering — the
+// fraction (0.05) lands in program.scalings_per_effect and the .sim
+// verb hand-mirrors the scaled magnitude as `bleed_amount = 10` (the
+// fixture pins MaxHp = 100 so the scaled total is constant).
+// Registry-driven scaling dispatch (per-effect kernel reads
+// program.scalings_per_effect and multiplies by the agent's stat) is
+// later infrastructure; this verb hand-mirror is the binding analogue.
 
 ability Bleed {
     target: self
     cooldown: 5s
 
-    self_damage 5
+    self_damage 5 + 5% max_hp
 }

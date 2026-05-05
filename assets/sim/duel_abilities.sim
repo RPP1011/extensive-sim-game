@@ -128,7 +128,7 @@ config combat {
   cooldown_shieldup: u32 = 40,    // ShieldUp.ability: cooldown 4s == 40 ticks
   cooldown_mend:    u32 = 30,     // Mend.ability: cooldown 3s == 30 ticks
   cooldown_bleed:   u32 = 50,     // Bleed.ability: cooldown 5s == 50 ticks
-  bleed_amount:     f32 = 5.0,    // Bleed.ability: self_damage 5
+  bleed_amount:     f32 = 10.0,   // Bleed.ability: self_damage 5 + 5%·MaxHp; fixture MaxHp=100 → 5 + 5 = 10 (Wave 1.5#4 scaling, hand-mirrored)
   reap_threshold:   f32 = 20.0,   // Reap.ability: execute 20
   cooldown_reap:    u32 = 20,     // Reap.ability: cooldown 2s == 20 ticks
   strike_range:     f32 = 5.0,    // Strike.ability: range 5.0

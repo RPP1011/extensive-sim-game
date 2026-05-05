@@ -1360,8 +1360,9 @@ mod tests {
         let alive = state.read_alive();
         assert_eq!(hp.len(), 1);
         assert!(
-            hp[0] <= 95.0,
-            "expected hp to drop by AT LEAST 5 (Bleed self_damage 5), \
+            hp[0] <= 90.0,
+            "expected hp to drop by AT LEAST 10 (Bleed \
+             `self_damage 5 + 5% max_hp` at MaxHp=100 → 10), \
              got hp={:.2}, shield={:.2}, alive={}",
             hp[0], shield[0], alive[0],
         );

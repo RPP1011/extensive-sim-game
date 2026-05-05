@@ -24,7 +24,7 @@
 use std::path::PathBuf;
 
 use engine::ability::{
-    program::{Area, EffectOp},
+    program::{Area, EffectOp, EffectScaling, ScalingStatRef},
     PackedAbilityRegistry,
 };
 
@@ -223,13 +223,38 @@ pub fn assert_ability_registry_matches_sim_constants() {
     match &bleed.effects[0] {
         EffectOp::SelfDamage { amount } => assert_eq!(
             *amount, 5.0,
-            "Bleed self_damage must be 5.0 — .ability `self_damage 5`, \
-             .sim config.combat.bleed_amount",
+            "Bleed self_damage base must be 5.0 — .ability \
+             `self_damage 5 + 5% max_hp`; the base lands in EffectOp, \
+             the +5% lives in scalings_per_effect[0]",
         ),
         other => panic!(
             "Bleed effect[0]: expected SelfDamage(5.0), got {other:?}",
         ),
     }
+    // Wave 1.5#4 scaling modifier — Bleed.ability declares
+    // `+ 5% max_hp`, lowered to scalings_per_effect[0] = [
+    // EffectScaling { stat_ref: MaxHp, percent: 0.05 }]. The .sim
+    // verb hand-mirrors the scaled total via config.combat.bleed_amount
+    // = 10 (fixture pins MaxHp = 100, so 5 + 0.05·100 = 10). Registry-
+    // driven scaling dispatch (per-effect kernel reads the scalings and
+    // multiplies by the agent's stat field) is later infrastructure;
+    // this binding check proves the lowering captures the modifier.
+    assert_eq!(
+        bleed.scalings_per_effect.len(), 1,
+        "Bleed must have one scaling slot (parallel to one effect)",
+    );
+    assert_eq!(
+        bleed.scalings_per_effect[0].len(), 1,
+        "Bleed effect[0] must have exactly one scaling entry — \
+         .ability declares `+ 5% max_hp` once",
+    );
+    assert_eq!(
+        bleed.scalings_per_effect[0][0],
+        EffectScaling { stat_ref: ScalingStatRef::MaxHp, percent: 0.05 },
+        "Bleed scaling must be (MaxHp, 0.05) — .ability \
+         `+ 5% max_hp`; lowering converts N% → N/100 for direct \
+         multiplication by the agent's stat field",
+    );
 
     // ---- Reap: cooldown 20 ticks, range 5.0, hostile_only, execute 20.0 ----
     //   Wave 2 piece N: Execute E2E demo. Lowers via
