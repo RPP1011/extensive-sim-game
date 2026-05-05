@@ -55,6 +55,8 @@ pub fn assert_ability_registry_matches_sim_constants() {
         .expect("read Reap.ability");
     let vampirize_src = std::fs::read_to_string(corpus.join("Vampirize.ability"))
         .expect("read Vampirize.ability");
+    let fortify_src = std::fs::read_to_string(corpus.join("Fortify.ability"))
+        .expect("read Fortify.ability");
 
     let files = vec![
         (
@@ -86,6 +88,11 @@ pub fn assert_ability_registry_matches_sim_constants() {
             "Vampirize.ability".to_string(),
             dsl_ast::parse_ability_file(&vampirize_src)
                 .expect("parse Vampirize.ability"),
+        ),
+        (
+            "Fortify.ability".to_string(),
+            dsl_ast::parse_ability_file(&fortify_src)
+                .expect("parse Fortify.ability"),
         ),
     ];
     let built = dsl_compiler::ability_registry::build_registry(&files)
@@ -300,17 +307,63 @@ pub fn assert_ability_registry_matches_sim_constants() {
         ),
     }
 
+    // ---- Fortify: cooldown 80 ticks, self-target, damage_modify 0.5 5s ----
+    //   Wave 2 piece N: DamageModify E2E demo. Lowers via
+    //   `dsl_compiler::ability_lower::lower_effect_stmt` ("damage_modify"
+    //   match arm) to `EffectOp::DamageModify { duration_ticks: 50,
+    //   multiplier_q8: 128 }` — 0.5 * 256 == 128 q8, 5s == 50 ticks.
+    //   The .sim verb's own `when` clause gates emission on
+    //   `self.hp < hp_fortify_floor`, and the new
+    //   ApplyDamageModActivation chronicle drains SetDamageMod events
+    //   into the per-agent damage_taken_mult SoA fields. ApplyDamage
+    //   reads them target-side to scale incoming bleed by `mult/256`.
+    let fortify_id = *built.names.get("Fortify")
+        .expect("Fortify registered in name table");
+    let fortify = built.registry.get(fortify_id)
+        .expect("Fortify resolves to a program");
+    assert_eq!(
+        fortify.gate.cooldown_ticks, 80,
+        "Fortify cooldown must be 80 ticks (8s) — .sim verb gate \
+         (world.tick % 80 == 0) and .ability `cooldown: 8s` must agree",
+    );
+    assert!(
+        !fortify.gate.hostile_only,
+        "Fortify must NOT be hostile_only — .ability `target: self`",
+    );
+    assert_eq!(
+        fortify.effects.len(), 1,
+        "Fortify must have exactly one effect (damage_modify 0.5 5s)",
+    );
+    match &fortify.effects[0] {
+        EffectOp::DamageModify { duration_ticks, multiplier_q8 } => {
+            assert_eq!(
+                *duration_ticks, 50,
+                "Fortify damage_modify duration must be 50 ticks (5s) — \
+                 .ability `damage_modify 0.5 5s`, .sim config.combat.fortify_dur",
+            );
+            assert_eq!(
+                *multiplier_q8, 128,
+                "Fortify damage_modify multiplier must be 128 (0.5 in q8) — \
+                 .ability `damage_modify 0.5 5s`, .sim config.combat.fortify_mult_q8",
+            );
+        }
+        other => panic!(
+            "Fortify effect[0]: expected DamageModify(50, 128), got {other:?}",
+        ),
+    }
+
     // ---- Smoke-pack: prove the GPU SoA layout works on this corpus ----
     // PackedAbilityRegistry::pack runs its own per-program packing
     // walk; if the registry contains anything pack can't encode this
     // panics. Confirms the lowering output is consumable by the
     // Wave 1.9 GPU buffer producer. Also verifies SelfDamage (op#17),
-    // Execute (op#16), and LifeSteal (op#18) pack cleanly via the Wave 2
-    // piece 3+4 packer arms in `engine::ability::packed::pack_effect_op`.
+    // Execute (op#16), LifeSteal (op#18), and DamageModify (op#19)
+    // pack cleanly via the Wave 2 piece 3+4 packer arms in
+    // `engine::ability::packed::pack_effect_op`.
     let packed = PackedAbilityRegistry::pack(&built.registry);
     assert_eq!(
-        packed.n_abilities, 6,
-        "PackedAbilityRegistry must contain exactly 6 abilities \
-         (Strike, ShieldUp, Mend, Bleed, Reap, Vampirize)",
+        packed.n_abilities, 7,
+        "PackedAbilityRegistry must contain exactly 7 abilities \
+         (Strike, ShieldUp, Mend, Bleed, Reap, Vampirize, Fortify)",
     );
 }

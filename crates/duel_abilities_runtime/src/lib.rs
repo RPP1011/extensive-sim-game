@@ -117,15 +117,29 @@ pub struct DuelAbilitiesState {
     /// `expires_at > world.tick`, so a 0 expiry never grants lifesteal.
     /// Written by ApplyLifestealActivation alongside frac_q8.
     agent_lifesteal_expires_at_tick_buf: wgpu::Buffer,
+    /// Per-agent damage_taken multiplier (q8 fixed-point, 256 == 1.0×).
+    /// Written by ApplyDamageModActivation (SetDamageMod event handler);
+    /// read by ApplyDamage to scale incoming bleed-through damage by
+    /// `mult_q8 / 256`. Initialised to 256 (1.0×) so the buff branch
+    /// is a no-op while inactive — the per-tick `expires_at > world.tick`
+    /// gate keeps an EXPIRED window from applying. Wave 2 piece N
+    /// DamageModify E2E demo.
+    agent_damage_taken_mult_q8_buf: wgpu::Buffer,
+    /// Per-agent damage_taken_mult expiry tick stamp. ApplyDamage gates
+    /// on `expires_at > world.tick`, so a 0 expiry never scales damage
+    /// even though the default mult_q8 is 256 (1.0×). Written by
+    /// ApplyDamageModActivation alongside mult_q8.
+    agent_damage_taken_mult_expires_at_tick_buf: wgpu::Buffer,
 
     // -- Mask bitmaps (one per verb in source order: Strike=0,
-    //    ShieldUp=1, Mend=2, Bleed=3, Reap=4, Vampirize=5) --
+    //    ShieldUp=1, Mend=2, Bleed=3, Reap=4, Vampirize=5, Fortify=6) --
     mask_0_bitmap_buf: wgpu::Buffer, // Strike
     mask_1_bitmap_buf: wgpu::Buffer, // ShieldUp
     mask_2_bitmap_buf: wgpu::Buffer, // Mend
     mask_3_bitmap_buf: wgpu::Buffer, // Bleed (Wave 2 SelfDamage demo)
     mask_4_bitmap_buf: wgpu::Buffer, // Reap  (Wave 2 Execute demo)
     mask_5_bitmap_buf: wgpu::Buffer, // Vampirize (Wave 2 LifeSteal demo)
+    mask_6_bitmap_buf: wgpu::Buffer, // Fortify   (Wave 2 DamageModify demo)
     mask_bitmap_zero_buf: wgpu::Buffer,
     mask_bitmap_words: u32,
 
@@ -144,25 +158,28 @@ pub struct DuelAbilitiesState {
     mask_cfg_buf: wgpu::Buffer,
     scoring_cfg_buf: wgpu::Buffer,
     /// Cfg uniform for the FUSED kernel that drains
-    /// Healed/Shielded/Defeated/SetLifesteal events AND emits Damaged
-    /// from the Strike chronicle. Adding ApplyLifestealActivation +
-    /// ApplyDamage's source-side Healed emit caused the compiler to
-    /// split ApplyDamage into its own pass and fuse the rest with
-    /// Strike's chronicle (because Strike's emit is now the only
-    /// remaining producer the others can ride). Hence the renamed
-    /// kernel `physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_
-    /// ApplyLifestealActivation_and_verb_chronicle_Strike`.
+    /// Healed/Shielded/Defeated/SetLifesteal/SetDamageMod events AND
+    /// emits Damaged from the Strike chronicle. Adding
+    /// ApplyDamageModActivation grew the fusion to:
+    /// `physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_
+    /// ApplyLifestealActivation_and_ApplyDamageModActivation_and_
+    /// verb_chronicle_Strike`. Field name `chronicle_strike_cfg_buf`
+    /// retained for continuity — Strike's chronicle still needs an
+    /// event_count uniform and this is the kernel that runs it.
     chronicle_strike_cfg_buf: wgpu::Buffer,
     chronicle_shieldup_cfg_buf: wgpu::Buffer,
     chronicle_mend_cfg_buf: wgpu::Buffer,
     chronicle_bleed_cfg_buf: wgpu::Buffer,
     chronicle_reap_cfg_buf: wgpu::Buffer,
     chronicle_vampirize_cfg_buf: wgpu::Buffer,
+    chronicle_fortify_cfg_buf: wgpu::Buffer,
     /// Cfg uniform for the standalone `physics_ApplyDamage` kernel —
     /// split out of the previous PerEvent fusion because ApplyDamage
     /// now emits Healed events for source-side lifesteal and that
     /// production conflicts with the consumers in the same fusion
-    /// group.
+    /// group. With the DamageModify demo it now also reads the target's
+    /// `damage_taken_mult_q8` + `damage_taken_mult_expires_at_tick`
+    /// SoA fields (added to its bind group).
     apply_damage_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
 
@@ -229,8 +246,29 @@ impl DuelAbilitiesState {
             contents: bytemuck::cast_slice(&lifesteal_expires_init),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
+        // Damage-taken-mult SoA — Wave 2 piece N DamageModify demo.
+        // Same i16-as-array<i32> emit path as lifesteal_frac_q8 (see
+        // `cg/emit/kernel.rs`'s `AgentFieldTy::I16 => "array<i32>"`),
+        // so the GPU buffer is one i32 per agent. Init to 256 (=1.0×
+        // in q8) so the `bleed * mult_q8 / 256.0` arithmetic is the
+        // identity when the buff is inactive — the per-tick
+        // `expires_at > world.tick` gate in ApplyDamage is the actual
+        // activation switch (an EXPIRED window falls back to the raw
+        // bleed via the if-expr's else branch).
+        let damage_taken_mult_init: Vec<i32> = vec![256_i32; agent_count as usize];
+        let agent_damage_taken_mult_q8_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_abilities_runtime::agent_damage_taken_mult_q8"),
+            contents: bytemuck::cast_slice(&damage_taken_mult_init),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+        });
+        let damage_taken_mult_expires_init: Vec<u32> = vec![0_u32; agent_count as usize];
+        let agent_damage_taken_mult_expires_at_tick_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_abilities_runtime::agent_damage_taken_mult_expires_at_tick"),
+            contents: bytemuck::cast_slice(&damage_taken_mult_expires_init),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+        });
 
-        // Six mask bitmaps — one per verb. Cleared each tick.
+        // Seven mask bitmaps — one per verb. Cleared each tick.
         let mask_bitmap_words = (agent_count + 31) / 32;
         let mask_bitmap_bytes = (mask_bitmap_words as u64) * 4;
         let mk_mask = |label: &str| -> wgpu::Buffer {
@@ -247,6 +285,7 @@ impl DuelAbilitiesState {
         let mask_3_bitmap_buf = mk_mask("duel_abilities_runtime::mask_3_bitmap");
         let mask_4_bitmap_buf = mk_mask("duel_abilities_runtime::mask_4_bitmap");
         let mask_5_bitmap_buf = mk_mask("duel_abilities_runtime::mask_5_bitmap");
+        let mask_6_bitmap_buf = mk_mask("duel_abilities_runtime::mask_6_bitmap");
         let zero_words: Vec<u32> = vec![0u32; mask_bitmap_words.max(4) as usize];
         let mask_bitmap_zero_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_abilities_runtime::mask_bitmap_zero"),
@@ -312,17 +351,19 @@ impl DuelAbilitiesState {
             contents: bytemuck::bytes_of(&scoring_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        // The compiler renamed the fused-PerEvent kernel one more time:
-        // adding ApplyLifestealActivation + ApplyDamage's source-side
-        // Healed emit pushed Strike's chronicle into the fusion group
-        // and split ApplyDamage out alone. The cfg type now lives at
+        // Wave 2 piece N DamageModify demo grew the fused-PerEvent
+        // kernel one MORE time: ApplyDamageModActivation joined the
+        // existing fusion group (ApplyHeal/ApplyShield/ApplyDefeat/
+        // ApplyLifestealActivation/verb_chronicle_Strike). The cfg
+        // type now lives at
         // `physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_
-        // ApplyLifestealActivation_and_verb_chronicle_Strike`. Field
-        // name `chronicle_strike_cfg_buf` retained for continuity —
-        // Strike's chronicle still needs an event_count uniform and
-        // this is the kernel that runs it.
+        // ApplyLifestealActivation_and_ApplyDamageModActivation_and_
+        // verb_chronicle_Strike`. Field name
+        // `chronicle_strike_cfg_buf` retained for continuity — Strike's
+        // chronicle still needs an event_count uniform and this is
+        // the kernel that runs it.
         let chronicle_strike_cfg_init =
-            physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndVerbChronicleStrikeCfg {
+            physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_ApplyDamageModActivation_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndApplyDamageModActivationAndVerbChronicleStrikeCfg {
                 event_count: 0, tick: 0, seed: 0, _pad0: 0,
             };
         let chronicle_strike_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -381,6 +422,20 @@ impl DuelAbilitiesState {
             contents: bytemuck::bytes_of(&chronicle_vampirize_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        // Fortify chronicle — Wave 2 piece N DamageModify demo. Same
+        // standalone-kernel shape as Vampirize: produces SetDamageMod
+        // events consumed by ApplyDamageModActivation (which itself is
+        // fused into the big PerEvent group with ApplyHeal/ApplyShield/
+        // ApplyDefeat/ApplyLifestealActivation/verb_chronicle_Strike).
+        let chronicle_fortify_cfg_init =
+            physics_verb_chronicle_Fortify::PhysicsVerbChronicleFortifyCfg {
+                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            };
+        let chronicle_fortify_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_abilities_runtime::chronicle_fortify_cfg"),
+            contents: bytemuck::bytes_of(&chronicle_fortify_cfg_init),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         // Wave 2 piece N: `ApplyDamage` is now a STANDALONE kernel
         // (not the fused PerEvent group it used to be) because the
         // block now emits Healed events for source-side lifesteal
@@ -432,12 +487,15 @@ impl DuelAbilitiesState {
             agent_shield_hp_buf,
             agent_lifesteal_frac_q8_buf,
             agent_lifesteal_expires_at_tick_buf,
+            agent_damage_taken_mult_q8_buf,
+            agent_damage_taken_mult_expires_at_tick_buf,
             mask_0_bitmap_buf,
             mask_1_bitmap_buf,
             mask_2_bitmap_buf,
             mask_3_bitmap_buf,
             mask_4_bitmap_buf,
             mask_5_bitmap_buf,
+            mask_6_bitmap_buf,
             mask_bitmap_zero_buf,
             mask_bitmap_words,
             scoring_output_buf,
@@ -455,6 +513,7 @@ impl DuelAbilitiesState {
             chronicle_bleed_cfg_buf,
             chronicle_reap_cfg_buf,
             chronicle_vampirize_cfg_buf,
+            chronicle_fortify_cfg_buf,
             apply_damage_cfg_buf,
             seed_cfg_buf,
             cache: dispatch::KernelCache::default(),
@@ -498,6 +557,21 @@ impl DuelAbilitiesState {
     /// Per-agent lifesteal window expiry tick (in world ticks).
     pub fn read_lifesteal_expires_at_tick(&self) -> Vec<u32> {
         self.read_u32(&self.agent_lifesteal_expires_at_tick_buf, "lifesteal_expires_at_tick")
+    }
+    /// Per-agent damage_taken multiplier (q8: 256 == 1.0×, 128 == 0.5×).
+    /// Reads via the shared u32 staging path — the field's storage is
+    /// `array<i32>` per the compiler's WGSL emit (`AgentFieldTy::I16
+    /// => "array<i32>"` in `cg/emit/kernel.rs`), so `read_u32` returns
+    /// the raw bit-pattern that the test reinterprets to `i32`.
+    pub fn read_damage_taken_mult_q8(&self) -> Vec<i32> {
+        self.read_u32(&self.agent_damage_taken_mult_q8_buf, "damage_taken_mult_q8")
+            .into_iter()
+            .map(|u| u as i32)
+            .collect()
+    }
+    /// Per-agent damage_taken_mult window expiry tick (in world ticks).
+    pub fn read_damage_taken_mult_expires_at_tick(&self) -> Vec<u32> {
+        self.read_u32(&self.agent_damage_taken_mult_expires_at_tick_buf, "damage_taken_mult_expires_at_tick")
     }
 
     fn read_f32(&self, buf: &wgpu::Buffer, label: &str) -> Vec<f32> {
@@ -588,11 +662,11 @@ impl CompiledSim for DuelAbilitiesState {
 
         // (1) Per-tick clears.
         self.event_ring.clear_tail_in(&mut encoder);
-        // 6 verbs in source order; +1 for ApplyDamage's source-side
-        // Healed emit (lifesteal) and +1 for the SetLifesteal event
-        // each Vampirize cast emits. 8 slots per agent per tick caps
-        // the worst case.
-        let max_slots_per_tick = self.agent_count * 8;
+        // 7 verbs in source order; +1 for ApplyDamage's source-side
+        // Healed emit (lifesteal); +1 for SetLifesteal each Vampirize
+        // cast emits; +1 for SetDamageMod each Fortify cast emits.
+        // 10 slots per agent per tick caps the worst case.
+        let max_slots_per_tick = self.agent_count * 10;
         self.event_ring.clear_ring_headers_in(
             &self.gpu, &mut encoder, max_slots_per_tick,
         );
@@ -604,6 +678,7 @@ impl CompiledSim for DuelAbilitiesState {
             &self.mask_3_bitmap_buf,
             &self.mask_4_bitmap_buf,
             &self.mask_5_bitmap_buf,
+            &self.mask_6_bitmap_buf,
         ] {
             encoder.copy_buffer_to_buffer(
                 &self.mask_bitmap_zero_buf, 0, buf, 0, mask_bytes.max(4),
@@ -637,6 +712,7 @@ impl CompiledSim for DuelAbilitiesState {
             mask_3_bitmap: &self.mask_3_bitmap_buf,
             mask_4_bitmap: &self.mask_4_bitmap_buf,
             mask_5_bitmap: &self.mask_5_bitmap_buf,
+            mask_6_bitmap: &self.mask_6_bitmap_buf,
             cfg: &self.mask_cfg_buf,
         };
         dispatch::dispatch_fused_mask_verb_strike(
@@ -669,6 +745,7 @@ impl CompiledSim for DuelAbilitiesState {
             mask_3_bitmap: &self.mask_3_bitmap_buf,
             mask_4_bitmap: &self.mask_4_bitmap_buf,
             mask_5_bitmap: &self.mask_5_bitmap_buf,
+            mask_6_bitmap: &self.mask_6_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
             cfg: &self.scoring_cfg_buf,
         };
@@ -784,30 +861,56 @@ impl CompiledSim for DuelAbilitiesState {
             self.agent_count,
         );
 
+        // (7d) Fortify chronicle — Wave 2 DamageModify demo. Gates on
+        // action_id==6u and emits SetDamageMod{target_agent=self,
+        // mult_q8=128, expires_at=tick+50}. Drained by the
+        // ApplyDamageModActivation arm of the fused kernel below — sets
+        // the caster's damage_taken_mult_q8 +
+        // damage_taken_mult_expires_at_tick SoA slots so ApplyDamage's
+        // target lookup scales bleed by mult/256 on subsequent hits.
+        let fortify_cfg = physics_verb_chronicle_Fortify::PhysicsVerbChronicleFortifyCfg {
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.chronicle_fortify_cfg_buf, 0, bytemuck::bytes_of(&fortify_cfg),
+        );
+        let fortify_bindings = physics_verb_chronicle_Fortify::PhysicsVerbChronicleFortifyBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            cfg: &self.chronicle_fortify_cfg_buf,
+        };
+        dispatch::dispatch_physics_verb_chronicle_fortify(
+            &mut self.cache, &fortify_bindings, &self.gpu.device, &mut encoder,
+            self.agent_count,
+        );
+
         // (8a) Fused ApplyHeal + ApplyShield + ApplyDefeat +
-        // ApplyLifestealActivation + verb_chronicle_Strike. The compiler
-        // re-fused these because Strike's chronicle is now the lone
-        // producer feeding the Healed/Shielded/Defeated/SetLifesteal
-        // consumers. **Runs BEFORE ApplyDamage** so Strike's emitted
-        // Damaged events are visible to ApplyDamage at step (8b);
-        // ShieldUp/Mend/Bleed/Reap/Vampirize chronicles already
-        // emitted earlier (steps 5-7c), and their consumer arms
-        // (ApplyHeal/ApplyShield/ApplyDefeat/ApplyLifestealActivation)
+        // ApplyLifestealActivation + ApplyDamageModActivation +
+        // verb_chronicle_Strike. The compiler re-fused these because
+        // Strike's chronicle is now the lone producer feeding the
+        // Healed/Shielded/Defeated/SetLifesteal/SetDamageMod consumers.
+        // **Runs BEFORE ApplyDamage** so Strike's emitted Damaged events
+        // are visible to ApplyDamage at step (8b); ShieldUp/Mend/Bleed/
+        // Reap/Vampirize/Fortify chronicles already emitted earlier
+        // (steps 5-7d), and their consumer arms (ApplyHeal/ApplyShield/
+        // ApplyDefeat/ApplyLifestealActivation/ApplyDamageModActivation)
         // drain those here.
         //
-        // The bind-group binds the lifesteal SoA fields write-side
-        // (ApplyLifestealActivation writes them). The compiler-emitted
-        // SCHEDULE places ApplyDamage first; we transpose because the
-        // Strike→ApplyDamage chain MUST happen within a single tick.
-        let event_count_estimate = self.agent_count * 8;
-        let apply_heal_cfg = physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndVerbChronicleStrikeCfg {
+        // The bind-group binds BOTH the lifesteal AND the damage_taken_
+        // mult SoA fields write-side (ApplyLifestealActivation +
+        // ApplyDamageModActivation each write their own pair). The
+        // compiler-emitted SCHEDULE places ApplyDamage first; we
+        // transpose because the Strike→ApplyDamage chain MUST happen
+        // within a single tick.
+        let event_count_estimate = self.agent_count * 10;
+        let apply_heal_cfg = physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_ApplyDamageModActivation_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndApplyDamageModActivationAndVerbChronicleStrikeCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
             seed: 0, _pad0: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_strike_cfg_buf, 0, bytemuck::bytes_of(&apply_heal_cfg),
         );
-        let apply_heal_bindings = physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndVerbChronicleStrikeBindings {
+        let apply_heal_bindings = physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_ApplyDamageModActivation_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndApplyDamageModActivationAndVerbChronicleStrikeBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
             agent_hp: &self.agent_hp_buf,
@@ -815,9 +918,11 @@ impl CompiledSim for DuelAbilitiesState {
             agent_shield_hp: &self.agent_shield_hp_buf,
             agent_lifesteal_frac_q8: &self.agent_lifesteal_frac_q8_buf,
             agent_lifesteal_expires_at_tick: &self.agent_lifesteal_expires_at_tick_buf,
+            agent_damage_taken_mult_q8: &self.agent_damage_taken_mult_q8_buf,
+            agent_damage_taken_mult_expires_at_tick: &self.agent_damage_taken_mult_expires_at_tick_buf,
             cfg: &self.chronicle_strike_cfg_buf,
         };
-        dispatch::dispatch_physics_applyheal_and_applyshield_and_applydefeat_and_applylifestealactivation_and_verb_chronicle_strike(
+        dispatch::dispatch_physics_applyheal_and_applyshield_and_applydefeat_and_applylifestealactivation_and_applydamagemodactivation_and_verb_chronicle_strike(
             &mut self.cache, &apply_heal_bindings, &self.gpu.device, &mut encoder,
             event_count_estimate,
         );
@@ -854,6 +959,8 @@ impl CompiledSim for DuelAbilitiesState {
             agent_shield_hp: &self.agent_shield_hp_buf,
             agent_lifesteal_frac_q8: &self.agent_lifesteal_frac_q8_buf,
             agent_lifesteal_expires_at_tick: &self.agent_lifesteal_expires_at_tick_buf,
+            agent_damage_taken_mult_q8: &self.agent_damage_taken_mult_q8_buf,
+            agent_damage_taken_mult_expires_at_tick: &self.agent_damage_taken_mult_expires_at_tick_buf,
             cfg: &self.apply_damage_cfg_buf,
         };
         dispatch::dispatch_physics_applydamage(
@@ -1273,6 +1380,119 @@ mod tests {
             "Vampirize is a state-set verb; caster's hp must stay at \
              the post-override value (25.0) — saw {:?}",
             hp,
+        );
+    }
+
+    /// Wave 2 piece N — DamageModify E2E demo. Verifies that the
+    /// `damage_modify 0.5 5s` effect on `Fortify.ability` makes it all
+    /// the way through:
+    ///
+    ///   1. parser → ability_lower → AbilityProgram { effects:
+    ///      [EffectOp::DamageModify { duration_ticks: 50,
+    ///      multiplier_q8: 128 }] } (asserted by the binding-check at
+    ///      construction)
+    ///   2. mirrored .sim verb gate (`world.tick % cooldown_fortify
+    ///      == 0` AND `self.hp < hp_fortify_floor`)
+    ///   3. Fortify chronicle emits SetDamageMod{target_agent, mult_q8=128,
+    ///      expires_at=tick+50}
+    ///   4. ApplyDamageModActivation chronicle (fused with the rest of
+    ///      the PerEvent group) drains SetDamageMod into the per-agent
+    ///      damage_taken_mult SoA fields
+    ///   5. ApplyDamage reads target's damage_taken_mult on each
+    ///      Damaged event and scales bleed by `mult_q8/256`
+    ///
+    /// **Test shape:** 2-agent fixture so Strike can fire from agent 1
+    /// onto agent 0 within the SAME tick that Fortify activates.
+    /// Agent 0 overridden to hp=65 so the Fortify gate
+    /// (`hp < hp_fortify_floor=70`) passes at tick 0; agent 1 stays at
+    /// hp=100 so its Fortify gate fails and it instead lands a Strike
+    /// (cooldown gate tick%10==0 also satisfied at tick 0).
+    ///
+    /// At tick 0 the chain is:
+    ///   * Fortify chronicle emits SetDamageMod{target=0, mult_q8=128,
+    ///     expires_at=50}
+    ///   * Fused kernel drains SetDamageMod (writes mult_q8[0]=128,
+    ///     expires[0]=50) AND emits Strike's Damaged{src=1,target=0,
+    ///     amount=30} via the verb_chronicle_Strike arm
+    ///   * ApplyDamage standalone kernel runs AFTER the fused kernel,
+    ///     reads mult_q8[0]=128 and expires[0]=50 > tick=0 → scales
+    ///     bleed: bleed_raw=30, scaled=30*128/256=15, hp[0]=65-15=50
+    ///
+    /// **Without Fortify** the same Strike would drop hp 65 → 35
+    /// (default mult_q8=256 stays at 1.0×, but expires=0 so the
+    /// if-expr's else branch picks `bleed_raw` directly). **WITH
+    /// Fortify** the assertion is hp[0] ≈ 50, ±a small tolerance for
+    /// the q8 fixed-point rounding.
+    ///
+    /// Agent 1's Fortify gate fails (hp=100 ≥ 70), so it scores Strike
+    /// at `200 - target.hp = 200 - 65 = 135` — wins over Bleed (75)
+    /// for agent 1's argmax. Mend (300) and Vampirize (350) fail their
+    /// hp-low gates at hp=100. So agent 1 strikes and the scenario
+    /// surfaces both branches in the same tick.
+    #[test]
+    fn fortify_halves_incoming_damage() {
+        let mut state = DuelAbilitiesState::new(0xCAFE_F00D, 2);
+        // Agent 0 at hp=65 (Fortify gate hp<70 passes; Vampirize gate
+        // hp<30 fails). Agent 1 at hp=100 (Fortify gate fails so it
+        // strikes instead).
+        state.override_hp_for_test(&[65.0, 100.0]);
+        // SoA must start at default mult_q8=256 (1.0×) AND expires=0.
+        let pre_mult = state.read_damage_taken_mult_q8();
+        let pre_expires = state.read_damage_taken_mult_expires_at_tick();
+        assert_eq!(
+            pre_mult, vec![256_i32, 256_i32],
+            "damage_taken_mult_q8 must initialise to 256 (1.0×) — saw {:?}",
+            pre_mult,
+        );
+        assert_eq!(
+            pre_expires, vec![0_u32, 0_u32],
+            "damage_taken_mult_expires_at_tick must initialise to 0 — \
+             saw {:?}",
+            pre_expires,
+        );
+        // Tick 0: Fortify fires for agent 0; Strike fires from agent 1
+        // onto agent 0 in the same tick. The fused kernel drains
+        // SetDamageMod BEFORE ApplyDamage runs (ApplyDamage is a
+        // SEPARATE compute pass that follows the fused-kernel pass —
+        // the cross-pass barrier guarantees the SoA write is visible).
+        state.step();
+        // SoA write side: agent 0's mult_q8 = 128 (0.5× in q8), expires
+        // at tick 0 + fortify_dur(50) = 50. Agent 1 untouched.
+        let post_mult = state.read_damage_taken_mult_q8();
+        let post_expires = state.read_damage_taken_mult_expires_at_tick();
+        assert_eq!(
+            post_mult, vec![128_i32, 256_i32],
+            "agent 0's damage_taken_mult_q8 must be 128 (0.5×) after \
+             Fortify fires; agent 1 stays at default 256 (1.0×) — \
+             saw {:?}, expires={:?}",
+            post_mult, post_expires,
+        );
+        assert_eq!(
+            post_expires, vec![50_u32, 0_u32],
+            "agent 0's damage_taken_mult_expires must be tick(0) + \
+             fortify_dur(50) = 50; agent 1 stays at 0 — saw {:?}",
+            post_expires,
+        );
+        // Damage-scaling side: agent 0 absorbed Strike (30) scaled by
+        // 0.5× → lost 15 hp → 65 - 15 = 50.0. Without Fortify the same
+        // Strike would have dropped hp 65 → 35. We assert hp[0] is
+        // close to 50, not 35.
+        let hp = state.read_hp();
+        let alive = state.read_alive();
+        let shield = state.read_shield_hp();
+        assert_eq!(alive, vec![1_u32, 1_u32],
+            "both agents must still be alive after one tick — \
+             saw alive={:?}, hp={:?}, shield={:?}",
+            alive, hp, shield);
+        // q8 rounding: 30.0 * 128 / 256.0 = 15.0 exactly (no rounding
+        // since 30 * 128 = 3840 and 3840 / 256 = 15). Tolerance of
+        // 0.001 covers any f32 IEEE-754 quirk.
+        assert!(
+            (hp[0] - 50.0).abs() < 0.001,
+            "agent 0's hp must be ~50.0 (Fortify halved Strike's 30 \
+             damage to 15) — saw hp={:?}, mult_q8={:?}, expires={:?}, \
+             shield={:?}. WITHOUT Fortify hp[0] would have been 35.0.",
+            hp, post_mult, post_expires, shield,
         );
     }
 
