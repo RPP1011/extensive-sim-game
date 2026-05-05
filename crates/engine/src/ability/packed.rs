@@ -39,8 +39,8 @@
 //!   `HashMap` iteration leakage, no time-of-day inputs, no thread state.
 
 use super::program::{
-    Area, Delivery, EffectOp, MAX_EFFECTS_PER_PROGRAM, MAX_TAGS_PER_PROGRAM, StackingMode,
-    TargetSelector,
+    Area, Delivery, EffectOp, LifetimeMode, MAX_EFFECTS_PER_PROGRAM, MAX_TAGS_PER_PROGRAM,
+    StackingMode, TargetSelector,
 };
 use super::{AbilityProgram, AbilityRegistry, AbilityTag};
 
@@ -84,6 +84,18 @@ pub const STACKING_NONE_SENTINEL: u8 = 0xFF;
 /// "always" should omit the modifier — both produce the same runtime
 /// behavior, but the column stays a single-cmp test.
 pub const CHANCE_NONE_SENTINEL: u16 = u16::MAX;
+
+/// Sentinel for the `lifetime_kinds` column when an effect has no
+/// lifetime modifier (`until_caster_dies` / `damageable_hp(N)` /
+/// `break_on_damage`). Distinct from any `LifetimeMode` discriminant
+/// (0..=2 today). Apply handlers should treat this as "effect persists
+/// indefinitely (or for the verb's own duration if the verb has one)";
+/// distinct from discriminant `0` (UntilCasterDies).
+///
+/// Companion `lifetime_payloads` column stores `0.0` at the matching
+/// slot whenever the kind is the sentinel — payload is ONLY meaningful
+/// when `lifetime_kinds[i] == 1` (DamageableHp).
+pub const LIFETIME_KIND_NONE_SENTINEL: u8 = 0xFF;
 
 // Compile-time guard: `MAX_TAGS_PER_PROGRAM` and `NUM_ABILITY_TAGS` must
 // stay aligned. Both are derived from `AbilityTag::COUNT` today; a future
@@ -178,6 +190,30 @@ pub struct PackedAbilityRegistry {
     /// against the slot.
     /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM`.
     pub chances: Vec<u16>,
+
+    // -- Lifetime rows (flat, stride = MAX_EFFECTS_PER_PROGRAM = 4). --
+
+    /// Per-effect lifetime kind discriminant
+    /// (`LifetimeMode::discriminant() as u8`), or
+    /// `LIFETIME_KIND_NONE_SENTINEL` (0xFF) when the source effect did
+    /// not carry one of the three lifetime modifiers. Apply handlers
+    /// should treat the sentinel as "effect persists indefinitely (or
+    /// for the verb's own duration if the verb has one)"; for
+    /// non-sentinel values they switch on `0` (UntilCasterDies) /
+    /// `1` (DamageableHp — read companion payload column) /
+    /// `2` (BreakOnDamage).
+    /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM`.
+    pub lifetime_kinds: Vec<u8>,
+
+    /// Per-effect lifetime payload — only meaningful when
+    /// `lifetime_kinds[i] == 1` (DamageableHp), in which case it holds
+    /// the initial hp value of the damage budget. `0.0` for every other
+    /// slot (sentinel slots, UntilCasterDies, BreakOnDamage). Stored
+    /// alongside `lifetime_kinds` because `LifetimeMode::DamageableHp`
+    /// is the first per-effect SoA modifier with variant data — flat
+    /// `Vec<u8>` couldn't carry the f32 hp pool by itself.
+    /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM`.
+    pub lifetime_payloads: Vec<f32>,
 }
 
 impl PackedAbilityRegistry {
@@ -217,6 +253,14 @@ impl PackedAbilityRegistry {
         let chance_total = n * MAX_EFFECTS_PER_PROGRAM;
         let mut chances = vec![CHANCE_NONE_SENTINEL; chance_total];
 
+        // Lifetimes: pre-fill kinds with the none-sentinel and
+        // payloads with `0.0` so empty effect slots + effects without
+        // a lifetime modifier share a single resting state. Per-effect
+        // overrides land in `pack_program_lifetimes`.
+        let lifetime_total = n * MAX_EFFECTS_PER_PROGRAM;
+        let mut lifetime_kinds = vec![LIFETIME_KIND_NONE_SENTINEL; lifetime_total];
+        let mut lifetime_payloads = vec![0.0_f32; lifetime_total];
+
         for slot in 0..n {
             // `AbilityId` is 1-based; the registry's `get` accepts an id,
             // so reconstruct it from the slot. The registry guarantees
@@ -241,6 +285,12 @@ impl PackedAbilityRegistry {
             pack_program_tags(program, slot, &mut tag_values);
             pack_program_stackings(program, slot, &mut stackings);
             pack_program_chances(program, slot, &mut chances);
+            pack_program_lifetimes(
+                program,
+                slot,
+                &mut lifetime_kinds,
+                &mut lifetime_payloads,
+            );
         }
 
         Self {
@@ -256,6 +306,8 @@ impl PackedAbilityRegistry {
             tag_values,
             stackings,
             chances,
+            lifetime_kinds,
+            lifetime_payloads,
         }
     }
 
@@ -384,6 +436,50 @@ fn pack_program_chances(program: &AbilityProgram, slot: usize, chances: &mut [u1
             // hand-built path.
             let v = if *q16 == CHANCE_NONE_SENTINEL { CHANCE_NONE_SENTINEL - 1 } else { *q16 };
             chances[base + i] = v;
+        }
+    }
+}
+
+/// Splat one program's per-effect lifetime modifiers into the row-major
+/// `lifetime_kinds` + `lifetime_payloads` buffers. Slots already
+/// pre-filled (`LIFETIME_KIND_NONE_SENTINEL` / `0.0`); only
+/// `Some(LifetimeMode)` entries overwrite. `program.lifetimes` is
+/// index-parallel to `program.effects` when populated; an empty
+/// `program.lifetimes` slice means no effect carried a lifetime
+/// modifier (every slot stays at the sentinel + `0.0`).
+///
+/// `LifetimeMode::DamageableHp` is the first per-effect SoA modifier
+/// with variant data — the kind discriminant goes in `lifetime_kinds`,
+/// the f32 hp pool in `lifetime_payloads`. Variants without a payload
+/// (UntilCasterDies / BreakOnDamage) write `0.0` into the payload
+/// column so the column is dense + non-sentinel-bearing.
+fn pack_program_lifetimes(
+    program:           &AbilityProgram,
+    slot:              usize,
+    lifetime_kinds:    &mut [u8],
+    lifetime_payloads: &mut [f32],
+) {
+    let base = slot * MAX_EFFECTS_PER_PROGRAM;
+    for (i, lt) in program.lifetimes.iter().enumerate() {
+        // Defensive bounds parallel to `pack_program_stackings` /
+        // `pack_program_chances` — the lowering pass enforces
+        // `program.lifetimes.len() <= MAX_EFFECTS_PER_PROGRAM`, but a
+        // hand-built program could violate it; clamp instead of
+        // panicking on the startup pack path.
+        if i >= MAX_EFFECTS_PER_PROGRAM {
+            break;
+        }
+        if let Some(mode) = lt {
+            // Bind through the named type so the `LifetimeMode` import
+            // is genuinely used at lib level (without this, method
+            // dispatch alone wouldn't keep the import alive under
+            // `-D unused-imports`). The encoding routes through the
+            // type's pinned helpers — rename or reorder the variants
+            // and the schema-hash test will guard the discriminant
+            // contract.
+            let m: LifetimeMode = *mode;
+            lifetime_kinds[base + i] = m.discriminant();
+            lifetime_payloads[base + i] = m.payload_f32();
         }
     }
 }
@@ -517,6 +613,8 @@ mod tests {
         assert!(p.tag_values.is_empty());
         assert!(p.stackings.is_empty());
         assert!(p.chances.is_empty());
+        assert!(p.lifetime_kinds.is_empty());
+        assert!(p.lifetime_payloads.is_empty());
     }
 
     #[test]
@@ -986,6 +1084,8 @@ mod tests {
         assert_eq!(p1.tag_values, p2.tag_values);
         assert_eq!(p1.stackings, p2.stackings);
         assert_eq!(p1.chances, p2.chances);
+        assert_eq!(p1.lifetime_kinds, p2.lifetime_kinds);
+        assert_eq!(p1.lifetime_payloads, p2.lifetime_payloads);
     }
 
     // -- Wave 1.5#3 — stacking-mode pack tests. The `stackings` column
@@ -1110,6 +1210,140 @@ mod tests {
                 p.chances[i], CHANCE_NONE_SENTINEL,
                 "empty slot {i} must stay at sentinel",
             );
+        }
+    }
+
+    // -- Wave 1.5#8 — lifetime-modifier pack tests. The `lifetime_kinds`
+    // + `lifetime_payloads` pair mirrors `effect_kinds`'s row-major
+    // layout (stride = MAX_EFFECTS_PER_PROGRAM); slots without a
+    // lifetime modifier carry `LIFETIME_KIND_NONE_SENTINEL` (0xFF) and
+    // `0.0`. Apply handlers treat the sentinel as "effect persists
+    // indefinitely (or for the verb's own duration if the verb has
+    // one)". `LifetimeMode::DamageableHp` is the first per-effect SoA
+    // modifier carrying variant data — its hp pool lives in the
+    // companion `lifetime_payloads` column. -----------------
+    #[test]
+    fn pack_lifetimes_default_all_sentinel() {
+        // No effect carries a lifetime modifier; every kind slot must
+        // be the none-sentinel + every payload slot `0.0` — including
+        // the empty effect tail (slots 1..MAX_EFFECTS_PER_PROGRAM). This
+        // guards the pre-fill path so apply handlers don't need to
+        // special-case empty slots.
+        let prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: false, line_of_sight: false },
+            [EffectOp::Damage { amount: 10.0 }],
+        );
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        assert_eq!(p.lifetime_kinds.len(), MAX_EFFECTS_PER_PROGRAM);
+        assert_eq!(p.lifetime_payloads.len(), MAX_EFFECTS_PER_PROGRAM);
+        for (i, k) in p.lifetime_kinds.iter().enumerate() {
+            assert_eq!(
+                *k, LIFETIME_KIND_NONE_SENTINEL,
+                "slot {i} kind must default to LIFETIME_KIND_NONE_SENTINEL",
+            );
+        }
+        for (i, v) in p.lifetime_payloads.iter().enumerate() {
+            assert_eq!(*v, 0.0, "slot {i} payload must default to 0.0");
+        }
+    }
+
+    #[test]
+    fn pack_lifetimes_until_caster_dies() {
+        // Single effect carries `until_caster_dies` (discriminant 0).
+        // Payload is `0.0` (variant has no payload). Empty tail slots
+        // stay at the sentinel + `0.0`.
+        use smallvec::SmallVec;
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: false, line_of_sight: false },
+            [EffectOp::Shield { amount: 50.0 }],
+        );
+        let mut sv: SmallVec<[Option<LifetimeMode>; MAX_EFFECTS_PER_PROGRAM]> = SmallVec::new();
+        sv.push(Some(LifetimeMode::UntilCasterDies));
+        prog.lifetimes = sv;
+
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // UntilCasterDies discriminant == 0.
+        assert_eq!(p.lifetime_kinds[0], 0, "slot 0 kind = UntilCasterDies");
+        assert_eq!(p.lifetime_payloads[0], 0.0, "UntilCasterDies has no payload");
+        for i in 1..MAX_EFFECTS_PER_PROGRAM {
+            assert_eq!(
+                p.lifetime_kinds[i], LIFETIME_KIND_NONE_SENTINEL,
+                "empty slot {i} kind must stay at sentinel",
+            );
+            assert_eq!(
+                p.lifetime_payloads[i], 0.0,
+                "empty slot {i} payload must stay at 0.0",
+            );
+        }
+    }
+
+    #[test]
+    fn pack_lifetimes_damageable_hp_carries_payload() {
+        // Single effect carries `damageable_hp(100.0)` (discriminant 1)
+        // — the FIRST per-effect SoA modifier with variant data, so
+        // both columns must round-trip.
+        use smallvec::SmallVec;
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: false, line_of_sight: false },
+            [EffectOp::Shield { amount: 50.0 }],
+        );
+        let mut sv: SmallVec<[Option<LifetimeMode>; MAX_EFFECTS_PER_PROGRAM]> = SmallVec::new();
+        sv.push(Some(LifetimeMode::DamageableHp(100.0)));
+        prog.lifetimes = sv;
+
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // DamageableHp discriminant == 1.
+        assert_eq!(p.lifetime_kinds[0], 1, "slot 0 kind = DamageableHp");
+        assert_eq!(p.lifetime_payloads[0], 100.0, "DamageableHp payload = 100.0");
+        for i in 1..MAX_EFFECTS_PER_PROGRAM {
+            assert_eq!(p.lifetime_kinds[i], LIFETIME_KIND_NONE_SENTINEL);
+            assert_eq!(p.lifetime_payloads[i], 0.0);
+        }
+    }
+
+    #[test]
+    fn pack_lifetimes_break_on_damage_no_payload() {
+        // Single effect carries `break_on_damage` (discriminant 2)
+        // — payload column stays `0.0`. Two-effect program with the
+        // second effect un-modified guards the per-slot independence
+        // of the kinds + payloads columns.
+        use smallvec::SmallVec;
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: false, line_of_sight: false },
+            [
+                EffectOp::Shield { amount: 50.0 },
+                EffectOp::Damage { amount: 20.0 },
+            ],
+        );
+        let mut sv: SmallVec<[Option<LifetimeMode>; MAX_EFFECTS_PER_PROGRAM]> = SmallVec::new();
+        sv.push(Some(LifetimeMode::BreakOnDamage));
+        sv.push(None);
+        prog.lifetimes = sv;
+
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // BreakOnDamage discriminant == 2.
+        assert_eq!(p.lifetime_kinds[0], 2, "slot 0 kind = BreakOnDamage");
+        assert_eq!(p.lifetime_payloads[0], 0.0, "BreakOnDamage has no payload");
+        assert_eq!(
+            p.lifetime_kinds[1], LIFETIME_KIND_NONE_SENTINEL,
+            "slot 1 has no lifetime modifier",
+        );
+        assert_eq!(p.lifetime_payloads[1], 0.0);
+        for i in 2..MAX_EFFECTS_PER_PROGRAM {
+            assert_eq!(p.lifetime_kinds[i], LIFETIME_KIND_NONE_SENTINEL);
+            assert_eq!(p.lifetime_payloads[i], 0.0);
         }
     }
 }

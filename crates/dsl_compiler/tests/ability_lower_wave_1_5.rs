@@ -323,10 +323,81 @@ fn lowering_scaling_modifier_returns_unimplemented() {
     assert_modifier(err, "scaling");
 }
 
+// ---------------------------------------------------------------------------
+// Wave 1.5#8 — `until_caster_dies` / `damageable_hp(N)` /
+// `break_on_damage` lifetime modifier lowering. Effect-statement
+// lifetime modifiers are captured into `program.lifetimes`, indexed
+// parallel to `program.effects`. `damageable_hp(N)` is the first
+// per-effect SoA modifier with variant data — its f32 hp pool
+// round-trips through `LifetimeMode::DamageableHp(hp)` straight into
+// the SoA `lifetime_payloads` column at pack time. Apply handlers
+// default to "effect persists indefinitely (or for the verb's own
+// duration if the verb has one)" for any effect that didn't carry the
+// modifier.
+// ---------------------------------------------------------------------------
+
 #[test]
-fn lowering_lifetime_modifier_returns_unimplemented() {
-    let err = lower_inline("ability X { target: self cooldown: 1s shield 100 until_caster_dies }");
-    assert_modifier(err, "lifetime");
+fn lowering_lifetime_until_caster_dies() {
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::LifetimeMode;
+    let file = parse_ability_file(
+        "ability X { target: self cooldown: 1s shield 100 until_caster_dies }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0])
+        .expect("until_caster_dies must lower");
+    assert_eq!(prog.effects.len(), 1);
+    assert_eq!(prog.lifetimes.len(), 1, "one effect → one lifetimes slot");
+    assert_eq!(prog.lifetimes[0], Some(LifetimeMode::UntilCasterDies));
+}
+
+#[test]
+fn lowering_lifetime_damageable_hp() {
+    // Variant-with-payload — round-trips the f32 hp pool through the
+    // engine `LifetimeMode::DamageableHp(hp)` shape unchanged.
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::LifetimeMode;
+    let file = parse_ability_file(
+        "ability X { target: self cooldown: 1s shield 50 damageable_hp(100) }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0])
+        .expect("damageable_hp must lower");
+    assert_eq!(prog.lifetimes[0], Some(LifetimeMode::DamageableHp(100.0)));
+}
+
+#[test]
+fn lowering_lifetime_break_on_damage() {
+    // LoL-style stealth idiom (Akali / Elise / MonkeyKing — see
+    // EffectLifetime AST docs).
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::LifetimeMode;
+    let file = parse_ability_file(
+        "ability X { target: self cooldown: 6s shield 30 break_on_damage }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0])
+        .expect("break_on_damage must lower");
+    assert_eq!(prog.lifetimes[0], Some(LifetimeMode::BreakOnDamage));
+}
+
+#[test]
+fn lowering_no_lifetime_is_none() {
+    // Bare effect with no lifetime modifier: the lowering pass leaves
+    // `program.lifetimes` empty (apply handlers treat empty + None
+    // identically as "effect persists indefinitely / for the verb's
+    // own duration"). Keeps Wave 1 corpus output bit-stable.
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("bare damage must lower");
+    assert!(
+        prog.lifetimes.is_empty(),
+        "no lifetime modifier → empty lifetimes smallvec; got {:?}",
+        prog.lifetimes,
+    );
 }
 
 #[test]
