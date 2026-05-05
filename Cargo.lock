@@ -570,6 +570,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "dungeon_crawl_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "ecosystem_runtime"
 version = "0.1.0"
 dependencies = [
@@ -1854,6 +1867,7 @@ dependencies = [
  "diplomacy_probe_runtime",
  "duel_1v1_runtime",
  "duel_25v25_runtime",
+ "dungeon_crawl_runtime",
  "ecosystem_runtime",
  "engine",
  "flocking_skirmish_runtime",

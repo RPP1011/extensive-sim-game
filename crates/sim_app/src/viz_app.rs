@@ -70,6 +70,7 @@ const SIMS: &[(&str, Factory, u32, &str)] = &[
     ("objective_capture_10v10", objective_capture_10v10_runtime::make_sim, 21,  "CTF hold-time race"),
     ("scripted_battle",       scripted_battle_runtime::make_sim,           75,  "3-phase scripted narrative arc"),
     ("multi_zone_world",      multi_zone_world_runtime::make_sim,          35,  "Forest/Town/Dungeon zone migration"),
+    ("dungeon_crawl",         dungeon_crawl_runtime::make_sim,             35,  "5 heroes traverse 3 sequential rooms"),
 ];
 
 fn print_help() {

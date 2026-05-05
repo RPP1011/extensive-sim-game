@@ -1,0 +1,141 @@
+// dungeon_crawl — TWENTIETH real sim. First fixture with MULTI-ENCOUNTER
+// SEQUENCING (rooms cleared in series). Three rooms total:
+//
+//   Room 1: 5 heroes vs 6 weak enemies (HP=50)
+//   Room 2: 5 heroes vs 10 medium enemies (HP=100)
+//   Room 3: 5 heroes vs 1 boss enemy (HP=800, hits harder)
+//
+// All 35 combatant slots share a single Agent SoA. Heroes occupy slots
+// 0-4 (HP=200, alive throughout the run). Enemies occupy slots 5-34;
+// initially only the slots for the active room are `alive=1`. The
+// runtime advances the encounter state CPU-side: when all enemies in
+// the current room are dead, the next room's enemies are written into
+// the GPU buffers (alive=1, hp=room_hp). The DSL stays gameplay-shape:
+// it knows nothing about rooms — it only runs combat between alive
+// combatants.
+//
+// Verb cascade mirrors duel_1v1 (Strike/Spell/Heal). Pair-field scoring
+// picks the lowest-HP target across all alive agents — heroes naturally
+// finish off wounded enemies; enemies pick off wounded heroes; both
+// sides will sometimes friendly-fire the lowest-HP foe regardless of
+// faction. This is acceptable for the smoke-shape; faction-gating is a
+// follow-up that would need creature_type-discriminator lowering
+// (predator_prey_min open issue).
+//
+// Encounter pacing is CPU-side. The DSL runs the same verb chain every
+// tick — what changes per room is only which slot ranges are `alive=1`.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Healed {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Defeated {
+  combatant: AgentId,
+}
+
+entity Combatant : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config combat {
+  strike_damage:    f32 = 15.0,
+  spell_damage:     f32 = 30.0,
+  spell_cost:       f32 = 5.0,
+  heal_amount:      f32 = 80.0,
+  cooldown_strike:  u32 = 2,
+  cooldown_spell:   u32 = 5,
+  cooldown_heal:    u32 = 3,
+  hp_low_threshold: f32 = 150.0,
+}
+
+// Strike — basic damage every other tick. Constant-1.0 score so it
+// loses argmax to Spell/Heal whenever those gates pass.
+verb Strike(self, target: Agent) =
+  action StrikeAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && (world.tick % 2 == 0))
+  emit Damaged { source: self, target: target, amount: config.combat.strike_damage }
+  score 1.0
+
+// Spell — bigger damage on cooldown 5, prefers low-HP targets so it
+// finishes wounded enemies. Score offset is large (10000.0) so it
+// dominates Strike (constant 1.0) even against high-HP targets like
+// the room-3 boss (HP=800). The "lowest HP wins" preference still
+// rises monotonically as targets weaken — what's important is that
+// Spell ALWAYS beats Strike on argmax for any live enemy candidate
+// (including the boss), so heroes don't fall back to no-op Strike.
+verb Spell(self, target: Agent) =
+  action SpellAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && (world.tick % 5 == 0)
+        && self.mana >= config.combat.spell_cost)
+  emit Damaged { source: self, target: target, amount: config.combat.spell_damage }
+  score (10000.0 - target.hp)
+
+// Heal — self-cast when HP drops below threshold. Constant high score
+// so it dominates Strike whenever the gate passes (gate already encodes
+// urgency).
+verb Heal(self, target: Agent) =
+  action HealAction
+  when (self.alive
+        && target == self
+        && (world.tick % 6 == 0)
+        && self.hp < config.combat.hp_low_threshold)
+  emit Healed { source: self, target: self, amount: config.combat.heal_amount }
+  score 100.0
+
+// ApplyDamage — chronicle physics. On Damaged event, reduce target HP.
+// If new HP <= 0, set dead AND emit Defeated.
+@phase(post)
+physics ApplyDamage {
+  on Damaged { source: _, target: t, amount: a } {
+    let new_hp = agents.hp(t) - a;
+    agents.set_hp(t, new_hp);
+    if (new_hp <= 0.0) {
+      agents.set_alive(t, false);
+      emit Defeated { combatant: t }
+    }
+  }
+}
+
+@phase(post)
+physics ApplyHeal {
+  on Healed { source: _, target: t, amount: a } {
+    let new_hp = agents.hp(t) + a;
+    agents.set_hp(t, new_hp);
+  }
+}
+
+// Per-source damage_dealt — observability view.
+@materialized(on_event = [Damaged])
+view damage_dealt(source: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: s, target: _, amount: a } { self += a }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-source healing_done — observability view.
+@materialized(on_event = [Healed])
+view healing_done(source: Agent) -> f32 {
+  initial: 0.0,
+  on Healed { source: s, target: _, amount: a } { self += a }
+  clamp: [0.0, 1000000.0],
+}
