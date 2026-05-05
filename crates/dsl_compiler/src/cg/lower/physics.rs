@@ -759,6 +759,12 @@ fn agents_setter_field(method: &str) -> Option<&'static AgentFieldId> {
         "set_alive" => Some(&AgentFieldId::Alive),
         "set_mana" => Some(&AgentFieldId::Mana),
         "set_shield_hp" => Some(&AgentFieldId::ShieldHp),
+        // Pre-Wave-2 statuses (existed in AgentFieldId since the engine
+        // baseline but never wired as setters until 2026-05-05 — needed
+        // to enable per-fixture ApplyStun / ApplySlow chronicle handlers).
+        "set_stun_expires_at_tick" => Some(&AgentFieldId::StunExpiresAtTick),
+        "set_slow_expires_at_tick" => Some(&AgentFieldId::SlowExpiresAtTick),
+        "set_slow_factor_q8" => Some(&AgentFieldId::SlowFactorQ8),
         // Wave 2 piece 1 control statuses
         "set_root_expires_at_tick" => Some(&AgentFieldId::RootExpiresAtTick),
         "set_silence_expires_at_tick" => Some(&AgentFieldId::SilenceExpiresAtTick),
