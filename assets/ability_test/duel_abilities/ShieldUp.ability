@@ -1,0 +1,11 @@
+// Wave 1 acceptance: self-target shield ability.
+// Lowers to AbilityProgram { gate: { cooldown_ticks: 40, range: 0.0 },
+//                            effects: [EffectOp::Shield { amount: 50.0 }] }
+
+ability ShieldUp {
+    target: self
+    cooldown: 4s
+    hint: defense
+
+    shield 50
+}

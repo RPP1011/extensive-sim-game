@@ -1,0 +1,11 @@
+// Wave 1 acceptance: self-target heal.
+// Lowers to AbilityProgram { gate: { cooldown_ticks: 30, range: 0.0 },
+//                            effects: [EffectOp::Heal { amount: 25.0 }] }
+
+ability Mend {
+    target: self
+    cooldown: 3s
+    hint: heal
+
+    heal 25
+}

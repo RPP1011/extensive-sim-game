@@ -1,0 +1,12 @@
+// Wave 1 acceptance: most basic single-target damage ability.
+// Lowers to AbilityProgram { gate: { cooldown_ticks: 10, range: 5.0 },
+//                            effects: [EffectOp::Damage { amount: 15.0 }] }
+
+ability Strike {
+    target: enemy
+    range: 5.0
+    cooldown: 1s
+    hint: damage
+
+    damage 15
+}
