@@ -1,7 +1,8 @@
 // Wave 1 acceptance: self-target shield ability.
 // Lowers to AbilityProgram { gate: { cooldown_ticks: 40, range: 0.0 },
 //                            effects: [EffectOp::Shield { amount: 50.0 }],
-//                            stackings: [Some(StackingMode::Stack)] }
+//                            stackings: [Some(StackingMode::Stack)],
+//                            lifetimes: [Some(LifetimeMode::DamageableHp(50.0))] }
 //
 // `stacking stack` exercises Wave 1.5#3 stacking-mode lowering — on
 // recast, the .sim's ApplyShield does
@@ -9,11 +10,21 @@
 // which IS stack semantics. Registry-driven stacking dispatch is later
 // infrastructure; the binding-check asserts the lowered slot matches
 // the .sim's natural additive behavior.
+//
+// `damageable_hp(50)` exercises Wave 1.5#8 lifetime-modifier lowering
+// — the buff has 50 hp of absorption capacity that drains as incoming
+// damage hits; when shield_hp reaches 0 the buff is "broken". The
+// .sim's ApplyDamage already drains shield_hp on hit
+// (`absorbed = min(s, d_scaled); s = s - absorbed`) and naturally
+// settles at 0 when the pool empties — that IS DamageableHp(N)
+// semantics. The binding-check asserts the lowered value matches the
+// .sim's natural drain behavior; registry-driven lifetime dispatch
+// is later infrastructure.
 
 ability ShieldUp {
     target: self
     cooldown: 4s
     hint: defense
 
-    shield 50 stacking stack [DEFENSE: 100]
+    shield 50 stacking stack [DEFENSE: 100] damageable_hp(50)
 }

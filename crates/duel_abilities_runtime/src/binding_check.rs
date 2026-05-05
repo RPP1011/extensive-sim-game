@@ -24,7 +24,9 @@
 use std::path::PathBuf;
 
 use engine::ability::{
-    program::{AbilityTag, Area, EffectOp, EffectScaling, ScalingStatRef, StackingMode},
+    program::{
+        AbilityTag, Area, EffectOp, EffectScaling, LifetimeMode, ScalingStatRef, StackingMode,
+    },
     PackedAbilityRegistry,
 };
 
@@ -184,6 +186,24 @@ pub fn assert_ability_registry_matches_sim_constants() {
         shieldup.stackings[0], Some(StackingMode::Stack),
         "ShieldUp stacking must be Stack — .ability `stacking stack`; \
          .sim ApplyShield does additive accumulation",
+    );
+    // Wave 1.5#8 lifetime modifier — ShieldUp.ability declares
+    // `damageable_hp(50)`, lowered to program.lifetimes[0] =
+    // Some(LifetimeMode::DamageableHp(50.0)). The .sim's ApplyDamage
+    // drains shield_hp by `absorbed = min(s, d_scaled); s = s - absorbed`
+    // and the buff is "broken" when shield_hp settles at 0 — that IS
+    // DamageableHp(N) semantics. The binding-check proves the lowering
+    // captures the modifier; registry-driven lifetime dispatch is
+    // later infrastructure.
+    assert_eq!(
+        shieldup.lifetimes.len(), 1,
+        "ShieldUp must have one lifetime slot (parallel to one effect)",
+    );
+    assert_eq!(
+        shieldup.lifetimes[0], Some(LifetimeMode::DamageableHp(50.0)),
+        "ShieldUp lifetime must be DamageableHp(50.0) — .ability \
+         `damageable_hp(50)` mirrors the 50 shield_hp absorption pool; \
+         .sim ApplyDamage drains shield_hp wholesale",
     );
 
     // ---- Mend: cooldown 30 ticks, self-target, heal 25.0 ----
