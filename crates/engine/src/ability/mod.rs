@@ -41,6 +41,7 @@
 mod id;
 pub use id::AbilityId;
 
+pub mod packed;
 pub mod program;
 pub mod registry;
 
@@ -50,3 +51,6 @@ pub use program::{
 pub use program::AbilityProgram;
 pub use program::{AbilityHint, AbilityTag, MAX_TAGS_PER_PROGRAM};
 pub use registry::{AbilityRegistry, AbilityRegistryBuilder};
+pub use packed::{
+    PackedAbilityRegistry, EFFECT_KIND_EMPTY, HINT_NONE_SENTINEL, NUM_ABILITY_TAGS,
+};
