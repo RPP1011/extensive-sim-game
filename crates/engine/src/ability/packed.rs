@@ -39,8 +39,8 @@
 //!   `HashMap` iteration leakage, no time-of-day inputs, no thread state.
 
 use super::program::{
-    Area, Delivery, EffectOp, LifetimeMode, MAX_EFFECTS_PER_PROGRAM, MAX_TAGS_PER_PROGRAM,
-    StackingMode, TargetSelector,
+    Area, Delivery, EffectAreaShape, EffectOp, LifetimeMode, MAX_EFFECTS_PER_PROGRAM,
+    MAX_TAGS_PER_PROGRAM, StackingMode, TargetSelector,
 };
 use super::{AbilityProgram, AbilityRegistry, AbilityTag};
 
@@ -96,6 +96,15 @@ pub const CHANCE_NONE_SENTINEL: u16 = u16::MAX;
 /// slot whenever the kind is the sentinel — payload is ONLY meaningful
 /// when `lifetime_kinds[i] == 1` (DamageableHp).
 pub const LIFETIME_KIND_NONE_SENTINEL: u8 = 0xFF;
+
+/// Sentinel for the `area_kinds` column when an effect has no
+/// `in <shape>(args)` modifier. Distinct from any `ShapeKind`
+/// discriminant (0..=11 today). Apply handlers should treat this slot
+/// as "single-target effect (use program.area)"; companion
+/// `area_args` slot stores `[0.0; 4]` whenever the kind is the
+/// sentinel — args are ONLY meaningful when
+/// `area_kinds[i] != SHAPE_KIND_NONE_SENTINEL`.
+pub const SHAPE_KIND_NONE_SENTINEL: u8 = 0xFF;
 
 // Compile-time guard: `MAX_TAGS_PER_PROGRAM` and `NUM_ABILITY_TAGS` must
 // stay aligned. Both are derived from `AbilityTag::COUNT` today; a future
@@ -214,6 +223,27 @@ pub struct PackedAbilityRegistry {
     /// `Vec<u8>` couldn't carry the f32 hp pool by itself.
     /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM`.
     pub lifetime_payloads: Vec<f32>,
+
+    // -- Area shape rows (flat, stride = MAX_EFFECTS_PER_PROGRAM = 4). --
+
+    /// Per-effect shape kind discriminant
+    /// (`ShapeKind::discriminant() as u8`), or `SHAPE_KIND_NONE_SENTINEL`
+    /// (0xFF) when the source effect did not carry an `in <shape>(args)`
+    /// modifier. Apply handlers should treat the sentinel as "single-
+    /// target effect (use program.area)". Spec §8 catalog: 5 disc-
+    /// family (Circle/Cone/Line/Ring/Spread = 0..=4) + 7 volume-family
+    /// (Box/Sphere/Column/Wall/Cylinder/Dome/Hull = 5..=11).
+    /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM`.
+    pub area_kinds: Vec<u8>,
+
+    /// Per-effect shape args — flat `4 × f32` per effect slot, addressed
+    /// `area_args[(slot * MAX_EFFECTS_PER_PROGRAM + i) * 4 .. + 4]`.
+    /// `[0.0; 4]` for every slot whose kind is the sentinel. Args are
+    /// the source-order positional values of the shape's constructor
+    /// (per spec §8); shapes with fewer than 4 args zero-pad the tail
+    /// — only `Wall` consumes all four (len/h/thick/facing).
+    /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM * 4`.
+    pub area_args: Vec<f32>,
 }
 
 impl PackedAbilityRegistry {
@@ -261,6 +291,17 @@ impl PackedAbilityRegistry {
         let mut lifetime_kinds = vec![LIFETIME_KIND_NONE_SENTINEL; lifetime_total];
         let mut lifetime_payloads = vec![0.0_f32; lifetime_total];
 
+        // Area shapes: pre-fill kinds with the none-sentinel and args
+        // with `0.0` so empty effect slots + effects without an
+        // `in <shape>(args)` modifier share a single resting state.
+        // Per-effect overrides land in `pack_program_areas`. Args are
+        // 4×f32 per slot (Wall consumes all four; other shapes zero-pad
+        // the tail).
+        let area_kinds_total = n * MAX_EFFECTS_PER_PROGRAM;
+        let area_args_total = n * MAX_EFFECTS_PER_PROGRAM * 4;
+        let mut area_kinds = vec![SHAPE_KIND_NONE_SENTINEL; area_kinds_total];
+        let mut area_args = vec![0.0_f32; area_args_total];
+
         for slot in 0..n {
             // `AbilityId` is 1-based; the registry's `get` accepts an id,
             // so reconstruct it from the slot. The registry guarantees
@@ -291,6 +332,7 @@ impl PackedAbilityRegistry {
                 &mut lifetime_kinds,
                 &mut lifetime_payloads,
             );
+            pack_program_areas(program, slot, &mut area_kinds, &mut area_args);
         }
 
         Self {
@@ -308,6 +350,8 @@ impl PackedAbilityRegistry {
             chances,
             lifetime_kinds,
             lifetime_payloads,
+            area_kinds,
+            area_args,
         }
     }
 
@@ -484,6 +528,51 @@ fn pack_program_lifetimes(
     }
 }
 
+/// Splat one program's per-effect area shapes into the row-major
+/// `area_kinds` + `area_args` buffers. Slots already pre-filled
+/// (`SHAPE_KIND_NONE_SENTINEL` / `[0.0; 4]`); only `Some(EffectAreaShape)`
+/// entries overwrite. `program.per_effect_areas` is index-parallel to
+/// `program.effects` when populated; an empty `program.per_effect_areas`
+/// slice means no effect carried an `in <shape>(args)` modifier (every
+/// slot stays at the sentinel + `[0.0; 4]`).
+///
+/// `EffectAreaShape` is the second per-effect SoA modifier with variant
+/// data (mirrors the `LifetimeMode::DamageableHp` shape) — the kind
+/// discriminant goes in `area_kinds`, the 4×f32 args block in
+/// `area_args`. Slots without the modifier write `[0.0; 4]` into the
+/// args column so the column is dense + non-sentinel-bearing.
+fn pack_program_areas(
+    program:    &AbilityProgram,
+    slot:       usize,
+    area_kinds: &mut [u8],
+    area_args:  &mut [f32],
+) {
+    let kind_base = slot * MAX_EFFECTS_PER_PROGRAM;
+    let arg_base = slot * MAX_EFFECTS_PER_PROGRAM * 4;
+    for (i, area) in program.per_effect_areas.iter().enumerate() {
+        // Defensive bounds parallel to the other per-effect packers —
+        // the lowering pass enforces
+        // `program.per_effect_areas.len() <= MAX_EFFECTS_PER_PROGRAM`,
+        // but a hand-built program could violate it; clamp instead of
+        // panicking on the startup pack path.
+        if i >= MAX_EFFECTS_PER_PROGRAM {
+            break;
+        }
+        if let Some(shape) = area {
+            // Bind through the named type so the `EffectAreaShape`
+            // import is genuinely used at lib level (parallel to
+            // `pack_program_lifetimes`'s LifetimeMode bind).
+            let s: EffectAreaShape = *shape;
+            area_kinds[kind_base + i] = s.kind.discriminant();
+            let a = arg_base + i * 4;
+            area_args[a]     = s.args[0];
+            area_args[a + 1] = s.args[1];
+            area_args[a + 2] = s.args[2];
+            area_args[a + 3] = s.args[3];
+        }
+    }
+}
+
 /// Encode a `StackingMode` to its u8 discriminant. Pinned by
 /// `crates/engine/src/schema_hash.rs` (the `StackingMode:` line).
 #[inline]
@@ -615,6 +704,8 @@ mod tests {
         assert!(p.chances.is_empty());
         assert!(p.lifetime_kinds.is_empty());
         assert!(p.lifetime_payloads.is_empty());
+        assert!(p.area_kinds.is_empty());
+        assert!(p.area_args.is_empty());
     }
 
     #[test]
@@ -1086,6 +1177,8 @@ mod tests {
         assert_eq!(p1.chances, p2.chances);
         assert_eq!(p1.lifetime_kinds, p2.lifetime_kinds);
         assert_eq!(p1.lifetime_payloads, p2.lifetime_payloads);
+        assert_eq!(p1.area_kinds, p2.area_kinds);
+        assert_eq!(p1.area_args, p2.area_args);
     }
 
     // -- Wave 1.5#3 — stacking-mode pack tests. The `stackings` column
@@ -1344,6 +1437,191 @@ mod tests {
         for i in 2..MAX_EFFECTS_PER_PROGRAM {
             assert_eq!(p.lifetime_kinds[i], LIFETIME_KIND_NONE_SENTINEL);
             assert_eq!(p.lifetime_payloads[i], 0.0);
+        }
+    }
+
+    // -- Wave 1.5#2 — `in <shape>(args)` modifier pack tests. The
+    // `area_kinds` + `area_args` pair mirrors `effect_kinds`'s
+    // row-major layout (stride = MAX_EFFECTS_PER_PROGRAM for kinds;
+    // stride = MAX_EFFECTS_PER_PROGRAM * 4 for args). Slots without
+    // an `in <shape>` modifier carry `SHAPE_KIND_NONE_SENTINEL`
+    // (0xFF) and `[0.0; 4]`. Apply handlers treat the sentinel as
+    // "single-target effect (use program.area)". `EffectAreaShape` is
+    // the second per-effect SoA modifier with variant data — its
+    // 4×f32 args block lives in the companion `area_args` column.
+    // Spec §8 catalog: 5 disc-family (Circle/Cone/Line/Ring/Spread =
+    // 0..=4) + 7 volume-family (Box/Sphere/Column/Wall/Cylinder/
+    // Dome/Hull = 5..=11). -------------------------------------------
+    #[test]
+    fn pack_areas_default_all_sentinel() {
+        // No effect carries `in <shape>`; every kind slot must be the
+        // none-sentinel + every args slot `0.0` — including the empty
+        // effect tail (slots 1..MAX_EFFECTS_PER_PROGRAM). This guards
+        // the pre-fill path so apply handlers don't need to special-
+        // case empty slots.
+        let prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: false, line_of_sight: false },
+            [EffectOp::Damage { amount: 10.0 }],
+        );
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        assert_eq!(p.area_kinds.len(), MAX_EFFECTS_PER_PROGRAM);
+        assert_eq!(p.area_args.len(), MAX_EFFECTS_PER_PROGRAM * 4);
+        for (i, k) in p.area_kinds.iter().enumerate() {
+            assert_eq!(
+                *k, SHAPE_KIND_NONE_SENTINEL,
+                "slot {i} kind must default to SHAPE_KIND_NONE_SENTINEL",
+            );
+        }
+        for (i, v) in p.area_args.iter().enumerate() {
+            assert_eq!(*v, 0.0, "slot {i} arg must default to 0.0");
+        }
+    }
+
+    #[test]
+    fn pack_areas_circle_one_arg() {
+        // Single effect carries `in circle(2.5)` (discriminant 0).
+        // Args [2.5, 0, 0, 0]. Empty tail slots stay at sentinel +
+        // `[0.0; 4]`.
+        use crate::ability::program::{EffectAreaShape, ShapeKind};
+        use smallvec::SmallVec;
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 50.0 }],
+        );
+        let mut sv: SmallVec<[Option<EffectAreaShape>; MAX_EFFECTS_PER_PROGRAM]> =
+            SmallVec::new();
+        sv.push(Some(EffectAreaShape {
+            kind: ShapeKind::Circle,
+            args: [2.5, 0.0, 0.0, 0.0],
+        }));
+        prog.per_effect_areas = sv;
+
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // Circle discriminant == 0.
+        assert_eq!(p.area_kinds[0], 0, "slot 0 kind = Circle");
+        assert_eq!(p.area_args[0], 2.5, "slot 0 arg 0 = radius");
+        assert_eq!(p.area_args[1], 0.0);
+        assert_eq!(p.area_args[2], 0.0);
+        assert_eq!(p.area_args[3], 0.0);
+        for i in 1..MAX_EFFECTS_PER_PROGRAM {
+            assert_eq!(p.area_kinds[i], SHAPE_KIND_NONE_SENTINEL);
+            for j in 0..4 {
+                assert_eq!(p.area_args[i * 4 + j], 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn pack_areas_cone_two_args() {
+        // `in cone(8.0, 45.0)` (discriminant 1) — args [r, angle, 0, 0].
+        use crate::ability::program::{EffectAreaShape, ShapeKind};
+        use smallvec::SmallVec;
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 50.0 }],
+        );
+        let mut sv: SmallVec<[Option<EffectAreaShape>; MAX_EFFECTS_PER_PROGRAM]> =
+            SmallVec::new();
+        sv.push(Some(EffectAreaShape {
+            kind: ShapeKind::Cone,
+            args: [8.0, 45.0, 0.0, 0.0],
+        }));
+        prog.per_effect_areas = sv;
+
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // Cone discriminant == 1.
+        assert_eq!(p.area_kinds[0], 1, "slot 0 kind = Cone");
+        assert_eq!(p.area_args[0], 8.0, "slot 0 arg 0 = radius");
+        assert_eq!(p.area_args[1], 45.0, "slot 0 arg 1 = angle_deg");
+        assert_eq!(p.area_args[2], 0.0);
+        assert_eq!(p.area_args[3], 0.0);
+    }
+
+    #[test]
+    fn pack_areas_wall_four_args() {
+        // `Wall` is the only shape that consumes ALL four args
+        // (len/h/thick/facing). Round-trip exercises every column slot.
+        use crate::ability::program::{EffectAreaShape, ShapeKind};
+        use smallvec::SmallVec;
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 50.0 }],
+        );
+        let mut sv: SmallVec<[Option<EffectAreaShape>; MAX_EFFECTS_PER_PROGRAM]> =
+            SmallVec::new();
+        sv.push(Some(EffectAreaShape {
+            kind: ShapeKind::Wall,
+            args: [10.0, 3.0, 0.5, 90.0],
+        }));
+        prog.per_effect_areas = sv;
+
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // Wall discriminant == 8.
+        assert_eq!(p.area_kinds[0], 8, "slot 0 kind = Wall");
+        assert_eq!(p.area_args[0], 10.0,  "slot 0 arg 0 = len");
+        assert_eq!(p.area_args[1], 3.0,   "slot 0 arg 1 = h");
+        assert_eq!(p.area_args[2], 0.5,   "slot 0 arg 2 = thick");
+        assert_eq!(p.area_args[3], 90.0,  "slot 0 arg 3 = facing_deg");
+    }
+
+    #[test]
+    fn pack_areas_per_effect_independence() {
+        // Two-effect program: slot 0 has `in sphere(3.0)`, slot 1 has
+        // no shape modifier. Empty slots 2..MAX stay at the sentinel +
+        // `[0.0; 4]`. Guards per-slot independence of the kind +
+        // args columns parallel to `pack_lifetimes_break_on_damage_no_payload`.
+        use crate::ability::program::{EffectAreaShape, ShapeKind};
+        use smallvec::SmallVec;
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: false, line_of_sight: false },
+            [
+                EffectOp::Damage { amount: 30.0 },
+                EffectOp::Heal   { amount: 10.0 },
+            ],
+        );
+        let mut sv: SmallVec<[Option<EffectAreaShape>; MAX_EFFECTS_PER_PROGRAM]> =
+            SmallVec::new();
+        sv.push(Some(EffectAreaShape {
+            kind: ShapeKind::Sphere,
+            args: [3.0, 0.0, 0.0, 0.0],
+        }));
+        sv.push(None);
+        prog.per_effect_areas = sv;
+
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // Sphere discriminant == 6.
+        assert_eq!(p.area_kinds[0], 6, "slot 0 kind = Sphere");
+        assert_eq!(p.area_args[0], 3.0, "slot 0 radius");
+        assert_eq!(p.area_args[1], 0.0);
+        assert_eq!(p.area_args[2], 0.0);
+        assert_eq!(p.area_args[3], 0.0);
+        assert_eq!(
+            p.area_kinds[1], SHAPE_KIND_NONE_SENTINEL,
+            "slot 1 has no shape modifier",
+        );
+        for j in 0..4 {
+            assert_eq!(p.area_args[1 * 4 + j], 0.0);
+        }
+        for i in 2..MAX_EFFECTS_PER_PROGRAM {
+            assert_eq!(p.area_kinds[i], SHAPE_KIND_NONE_SENTINEL);
+            for j in 0..4 {
+                assert_eq!(p.area_args[i * 4 + j], 0.0);
+            }
         }
     }
 }

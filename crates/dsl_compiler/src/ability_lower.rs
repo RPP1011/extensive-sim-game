@@ -88,8 +88,9 @@ use dsl_ast::ast::{
     AbilityDecl, AbilityFile, AbilityHeader, EffectArg, EffectStmt, HintName, Span, TargetMode,
 };
 use engine::ability::program::{
-    AbilityHint, AbilityProgram, AbilityTag, Area, Delivery, EffectOp, Gate, LifetimeMode,
-    MAX_EFFECTS_PER_PROGRAM, MAX_TAGS_PER_PROGRAM, StackingMode, TargetSelector,
+    AbilityHint, AbilityProgram, AbilityTag, Area, Delivery, EffectAreaShape, EffectOp, Gate,
+    LifetimeMode, ShapeKind, StackingMode, TargetSelector, MAX_EFFECTS_PER_PROGRAM,
+    MAX_TAGS_PER_PROGRAM,
 };
 use engine::ability::AbilityId;
 use smallvec::SmallVec;
@@ -142,15 +143,23 @@ pub enum LowerError {
     /// effects.
     ModifierNotImplemented {
         verb:     String,
-        /// Slot identifier — one of "in" / "tags" / "for" / "when" /
+        /// Slot identifier — one of "tags" / "for" / "when" /
         /// "scaling" / "nested". "stacking" was retired in Wave 1.5#3
         /// (now lowered into `program.stackings`). "chance" was retired
         /// in Wave 1.5#5 (now lowered into `program.chances`).
         /// "lifetime" was retired in Wave 1.5#8 (now lowered into
-        /// `program.lifetimes`).
+        /// `program.lifetimes`). "in" was retired in Wave 1.5#2 (now
+        /// lowered into `program.per_effect_areas` — unknown shape
+        /// names surface as `UnknownShape` instead).
         modifier: &'static str,
         span:     Span,
     },
+    /// Wave 1.5#2 (`in <shape>(args)` modifier): the shape name is not
+    /// in the engine's `ShapeKind` vocabulary (12 entries today, spec
+    /// §8 catalog: circle/cone/line/ring/spread/box/sphere/column/wall/
+    /// cylinder/dome/hull). Surfaced so authors don't silently lose AOE
+    /// expansion on a typoed shape name.
+    UnknownShape { shape: String, span: Span },
     /// Wave 1.5 modifier lowering #1 (tag vocabulary): a `[TAG: value]`
     /// modifier named a tag not in the engine's `AbilityTag` vocabulary
     /// (PHYSICAL/MAGICAL/CROWD_CONTROL/HEAL/DEFENSE/UTILITY today).
@@ -282,6 +291,10 @@ impl std::fmt::Display for LowerError {
             LowerError::StructureBlockNotImplemented { name, .. } => write!(
                 f,
                 "`structure {name}` is parsed by Wave 1.3 but lowering is Wave 2+ (voxel rasterization + StructureRegistry per spec §12.2 not yet wired)"
+            ),
+            LowerError::UnknownShape { shape, .. } => write!(
+                f,
+                "unknown AOE shape `in {shape}(…)`; valid shapes (spec §8): circle / cone / line / ring / spread / box / sphere / column / wall / cylinder / dome / hull"
             ),
         }
     }
@@ -532,6 +545,15 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     let mut lifetimes_acc: SmallVec<[Option<LifetimeMode>; MAX_EFFECTS_PER_PROGRAM]> =
         SmallVec::new();
     let mut any_lifetime = false;
+    // Wave 1.5#2: per-effect AOE shape, index parallel to `effects`.
+    // Same "all-`None` → empty smallvec" optimization the other
+    // aggregators use, so Wave 1 corpus output stays bit-stable. The
+    // shape name is validated against `ShapeKind::parse` here — unknown
+    // names surface as `LowerError::UnknownShape` (loud failure rather
+    // than a silently-dropped AOE).
+    let mut per_effect_areas_acc: SmallVec<[Option<EffectAreaShape>; MAX_EFFECTS_PER_PROGRAM]> =
+        SmallVec::new();
+    let mut any_area = false;
     for stmt in &decl.effects {
         // Per-effect tags first — fail fast on unknown tag names so the
         // verb-dispatch error doesn't hide them.
@@ -600,6 +622,32 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
             any_lifetime = true;
         }
         lifetimes_acc.push(lifetime);
+        // Wave 1.5#2: capture the per-effect `in <shape>(args)`
+        // BEFORE the verb dispatch (which would otherwise discard
+        // it). Validate the shape name against the engine's
+        // `ShapeKind` vocabulary; unknown names surface as
+        // `UnknownShape` so a typoed shape doesn't silently degrade
+        // to a single-target hit. Wall consumes 4 args; other shapes
+        // take fewer and zero-pad — `args.iter().take(4)` clips any
+        // overlong author input rather than erroring (spec §8 arity
+        // mismatches are surfaced at parse time when implemented).
+        let area = if let Some(a) = &stmt.area {
+            let kind = ShapeKind::parse(&a.shape).ok_or_else(|| LowerError::UnknownShape {
+                shape: a.shape.clone(),
+                span:  a.span,
+            })?;
+            let mut args = [0.0_f32; 4];
+            for (i, v) in a.args.iter().take(4).enumerate() {
+                args[i] = *v;
+            }
+            Some(EffectAreaShape { kind, args })
+        } else {
+            None
+        };
+        if area.is_some() {
+            any_area = true;
+        }
+        per_effect_areas_acc.push(area);
         let op = lower_effect_stmt(stmt)?;
         effects.push(op);
     }
@@ -617,6 +665,9 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     if !any_lifetime {
         lifetimes_acc.clear();
     }
+    if !any_area {
+        per_effect_areas_acc.clear();
+    }
 
     Ok(AbilityProgram {
         delivery: Delivery::Instant,
@@ -628,6 +679,7 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
         stackings: stackings_acc,
         chances: chances_acc,
         lifetimes: lifetimes_acc,
+        per_effect_areas: per_effect_areas_acc,
     })
 }
 
@@ -647,13 +699,12 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
     // The slot order mirrors spec §6.1's evaluation order so the
     // diagnostic an author sees is the "lowest-numbered" unimplemented
     // slot, not whichever the dispatch happens to trip over.
-    if let Some(area) = &stmt.area {
-        return Err(LowerError::ModifierNotImplemented {
-            verb:     stmt.verb.clone(),
-            modifier: "in",
-            span:     area.span,
-        });
-    }
+    // Wave 1.5#2: `in <shape>(args)` is consumed by the per-ability
+    // aggregator in `lower_ability_decl` (one slot per effect, parallel
+    // to `program.effects`). The verb dispatch below stays oblivious —
+    // apply handlers read `program.per_effect_areas[i]` to expand the
+    // effect to AOE. Unknown shape names surface from the aggregator
+    // as `LowerError::UnknownShape`. No short-circuit here.
     // Tags handled by the per-ability aggregator in `lower_ability_decl`
     // (Wave 1.5 modifier lowering #1) — no short-circuit here.
     // Wave 1.5 modifier #6 (`for <duration>`): for the eight

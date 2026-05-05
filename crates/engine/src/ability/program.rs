@@ -433,6 +433,64 @@ impl LifetimeMode {
     }
 }
 
+/// Per-effect area-of-effect shape — the modifier `in <shape>(args)`.
+/// Spec §8 catalog: 5 disc-family (1-voxel default thickness) + 7
+/// volume-family. Numeric discriminants pinned for PackedAbilityRegistry
+/// packing.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum ShapeKind {
+    // Disc family (spec §8.1)
+    Circle   = 0,   // circle(r)
+    Cone     = 1,   // cone(r, angle_deg)
+    Line     = 2,   // line(len, width)
+    Ring     = 3,   // ring(inner, outer)
+    Spread   = 4,   // spread(r, max_targets)
+    // Volume family (spec §8.2)
+    Box      = 5,   // box(wx, wy, wz)
+    Sphere   = 6,   // sphere(r)
+    Column   = 7,   // column(r, h)
+    Wall     = 8,   // wall(len, h, thick) [facing: deg] — 4 args
+    Cylinder = 9,   // cylinder(r, h)
+    Dome     = 10,  // dome(r)
+    Hull     = 11,  // hull(r)
+}
+
+impl ShapeKind {
+    /// Parse from the source-form name. Returns None for unknown shapes.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "circle"   => Some(ShapeKind::Circle),
+            "cone"     => Some(ShapeKind::Cone),
+            "line"     => Some(ShapeKind::Line),
+            "ring"     => Some(ShapeKind::Ring),
+            "spread"   => Some(ShapeKind::Spread),
+            "box"      => Some(ShapeKind::Box),
+            "sphere"   => Some(ShapeKind::Sphere),
+            "column"   => Some(ShapeKind::Column),
+            "wall"     => Some(ShapeKind::Wall),
+            "cylinder" => Some(ShapeKind::Cylinder),
+            "dome"     => Some(ShapeKind::Dome),
+            "hull"     => Some(ShapeKind::Hull),
+            _ => None,
+        }
+    }
+
+    /// Stable u8 discriminant matching the `#[repr(u8)]` ordinal.
+    #[inline]
+    pub fn discriminant(self) -> u8 { self as u8 }
+}
+
+/// Per-effect AOE shape with up to 4 f32 args. `Wall` takes 4
+/// (len/h/thick/facing); other shapes use fewer and zero-pad. `args`
+/// is parallel to the source-order positional args of the shape's
+/// constructor in spec §8.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct EffectAreaShape {
+    pub kind: ShapeKind,
+    pub args: [f32; 4],
+}
+
 /// Compiled ability — the unit `AbilityRegistry` stores and `CastHandler`
 /// dispatches.
 ///
@@ -487,6 +545,15 @@ pub struct AbilityProgram {
     /// with variant data (an `f32` hp pool), so the SoA packer
     /// requires TWO columns (`lifetime_kinds` + `lifetime_payloads`).
     pub lifetimes: SmallVec<[Option<LifetimeMode>; MAX_EFFECTS_PER_PROGRAM]>,
+    /// Wave 1.5#2: per-effect AOE shape from `in <shape>(args)`. `None`
+    /// = single-target effect (default — uses program.area). Index
+    /// parallel to `effects`; a populated `per_effect_areas` slice is
+    /// either empty (no effect carried the modifier) or has one slot
+    /// per effect (`None` for the unmarked ones). The SoA packer emits
+    /// TWO companion columns (`area_kinds` + `area_args`) — kinds is a
+    /// u8 discriminant column with sentinel `SHAPE_KIND_NONE_SENTINEL`
+    /// (0xFF) for `None` slots; args is a flat `4×f32` per slot.
+    pub per_effect_areas: SmallVec<[Option<EffectAreaShape>; MAX_EFFECTS_PER_PROGRAM]>,
 }
 
 impl AbilityProgram {
@@ -513,6 +580,7 @@ impl AbilityProgram {
             stackings: SmallVec::new(),
             chances:   SmallVec::new(),
             lifetimes: SmallVec::new(),
+            per_effect_areas: SmallVec::new(),
         }
     }
 
