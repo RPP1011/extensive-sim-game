@@ -17,7 +17,7 @@
 //! the runtime mirrors those discriminants when seeding the
 //! `agent_creature_type` SoA.
 
-use engine::sim_trait::CompiledSim;
+use engine::sim_trait::{AgentSnapshot, CompiledSim, VizGlyph};
 use engine::GpuContext;
 use glam::Vec3;
 use wgpu::util::DeviceExt;
@@ -622,8 +622,241 @@ impl CompiledSim for BossFightState {
     fn agent_count(&self) -> u32 { self.agent_count }
     fn tick(&self) -> u64 { self.tick }
     fn positions(&mut self) -> &[Vec3] { &[] }
+
+    /// Snapshot per-agent state for the universal `viz_app` renderer.
+    ///
+    /// `boss_fight.sim` declares `pos: vec3` on both Boss and Hero
+    /// entities, but the runtime never allocates an `agent_pos_buf`
+    /// (combat is purely event-driven HP arithmetic — no kernel reads
+    /// or writes positions). Following `mass_battle_100v100_runtime`'s
+    /// approach for sims without a real position buffer, we SYNTHESISE
+    /// a deterministic 2-D layout: the boss anchors the centre and
+    /// heroes ring around it. This gives the renderer an asymmetric
+    /// arena that visually reflects the 1-vs-N topology.
+    ///
+    /// Layout:
+    /// - Slot 0 (Boss):   origin (0, 0, 0)
+    /// - Slots 1..N (Heroes): evenly-spaced ring at radius 3.0,
+    ///   angle = 2π·(slot-1) / (agent_count-1)
+    ///
+    /// `creature_types` encoding (4 entries, indexed by
+    /// `boss_bit << 1 | dead_bit`):
+    ///
+    /// |  i | role   | state |
+    /// |----|--------|-------|
+    /// |  0 | minion | alive |
+    /// |  1 | minion | dead  |
+    /// |  2 | boss   | alive |
+    /// |  3 | boss   | dead  |
+    ///
+    /// The `boss_bit` is derived from a REAL SoA read of
+    /// `agent_creature_type_buf`: the .sim's entity-declaration order
+    /// pins Boss=0 / Hero=1, so `boss_bit = (creature_type == 0)`.
+    /// The `alive` field is read from `agent_alive_buf`; `agent_count`
+    /// stays constant (no spawn/despawn) so dead slots remain in the
+    /// snapshot at their original ring positions, just rendered with
+    /// the tombstone glyph. HP defence-in-depth zeros the alive bit if
+    /// hp <= 0 even when the alive buffer hasn't been flipped yet
+    /// (mirrors duel_25v25_runtime + tactical_squad_5v5_runtime).
+    ///
+    /// Initial-state safe: GPU buffers are populated by
+    /// `create_buffer_init` at construction, so calling `snapshot()`
+    /// before any `step()` returns `agent_count` alive slots with the
+    /// boss at index 0 and the rest as minions.
+    fn snapshot(&mut self) -> AgentSnapshot {
+        let n = self.agent_count as usize;
+
+        // Synthetic 2-D layout: boss at origin, heroes ringed around.
+        let positions: Vec<Vec3> = (0..n)
+            .map(|i| {
+                if i == 0 {
+                    // Boss anchors the centre.
+                    Vec3::new(0.0, 0.0, 0.0)
+                } else {
+                    // Hero ring at radius 3.0 in the (x,y) plane. The
+                    // renderer projects on x/y; z stays 0.
+                    let ring_n = (n - 1).max(1) as f32;
+                    let theta =
+                        std::f32::consts::TAU * ((i - 1) as f32) / ring_n;
+                    Vec3::new(3.0 * theta.cos(), 3.0 * theta.sin(), 0.0)
+                }
+            })
+            .collect();
+
+        let ctype: Vec<u32> = self.read_creature_type();
+        let alive_raw: Vec<u32> = self.read_alive();
+        let hp: Vec<f32> = self.read_hp();
+        // Defence-in-depth: treat hp<=0 as dead even if the alive bit
+        // hasn't been written yet by ApplyDamage.
+        let alive: Vec<u32> = alive_raw
+            .iter()
+            .zip(hp.iter())
+            .map(|(&a, &h)| if a != 0 && h > 0.0 { 1 } else { 0 })
+            .collect();
+
+        // Encode: Boss (creature_type==0) → boss_bit=1; Hero
+        // (creature_type==1) → boss_bit=0. Encoded value is
+        // `boss_bit << 1 | dead_bit`.
+        let creature_types: Vec<u32> = (0..n)
+            .map(|i| {
+                let boss_bit = if ctype[i] == 0 { 1u32 } else { 0u32 };
+                let dead_bit = if alive[i] == 0 { 1u32 } else { 0u32 };
+                (boss_bit << 1) | dead_bit
+            })
+            .collect();
+
+        AgentSnapshot { positions, creature_types, alive }
+    }
+
+    /// 4 glyphs matching the `snapshot.creature_types` encoding:
+    ///
+    /// - `m` in bright cyan (51) for alive minion (Hero)
+    /// - tombstone × in grey (240) for dead minion
+    /// - `B` in bright red (196) for alive Boss
+    /// - tombstone × in grey (240) for dead Boss
+    fn glyph_table(&self) -> Vec<VizGlyph> {
+        vec![
+            VizGlyph::new('m', 51),         // 0: minion alive (cyan)
+            VizGlyph::new('\u{00D7}', 240), // 1: minion dead (grey ×)
+            VizGlyph::new('B', 196),        // 2: boss alive (red)
+            VizGlyph::new('\u{00D7}', 240), // 3: boss dead (grey ×)
+        ]
+    }
+
+    /// Default viewport tight around the synthetic layout from
+    /// `snapshot()`: boss at origin, heroes ringed at radius 3.0 in
+    /// the (x,y) plane. ±4 keeps the full ring on screen with breathing
+    /// room. Positions are stationary today (no kernel writes a `pos`
+    /// buffer), so this framing stays valid for the full encounter.
+    fn default_viewport(&self) -> Option<(Vec3, Vec3)> {
+        Some((Vec3::new(-4.0, -4.0, 0.0), Vec3::new(4.0, 4.0, 0.0)))
+    }
 }
 
 pub fn make_sim(seed: u64, agent_count: u32) -> Box<dyn CompiledSim> {
     Box::new(BossFightState::new(seed, agent_count))
+}
+
+#[cfg(test)]
+mod viz_tests {
+    use super::*;
+
+    /// Snapshot before any tick must report the asymmetric initial
+    /// state: exactly 1 Boss (slot 0) and N-1 minions, every slot
+    /// alive. Guards the construction-only readback path so `viz_app`
+    /// can render frame 0 with content instead of a blank arena.
+    #[test]
+    fn snapshot_after_construction_returns_initial_state() {
+        const N: u32 = 6;
+        let mut state = BossFightState::new(0xCAFE_F00D, N);
+        let snap = state.snapshot();
+
+        assert_eq!(snap.positions.len(), N as usize, "positions length");
+        assert_eq!(
+            snap.creature_types.len(),
+            N as usize,
+            "creature_types length",
+        );
+        assert_eq!(snap.alive.len(), N as usize, "alive length");
+
+        // Construction state — every slot must be alive.
+        let alive_total: u32 = snap.alive.iter().sum();
+        assert_eq!(
+            alive_total, N,
+            "every slot must be alive at construction; got {}",
+            alive_total,
+        );
+
+        // Asymmetric topology check: exactly 1 boss + N-1 minions.
+        // Encoded value 2 = boss alive, 0 = minion alive.
+        let boss_count = snap
+            .creature_types
+            .iter()
+            .filter(|&&ct| ct == 2)
+            .count();
+        let minion_count = snap
+            .creature_types
+            .iter()
+            .filter(|&&ct| ct == 0)
+            .count();
+        assert_eq!(boss_count, 1, "must have exactly 1 boss; got {boss_count}");
+        assert_eq!(
+            minion_count,
+            (N - 1) as usize,
+            "must have exactly N-1 minions; got {minion_count}",
+        );
+        // Slot 0 must specifically be the boss (creature_type=Boss=0
+        // discriminant pinned by .sim entity-declaration order).
+        assert_eq!(
+            snap.creature_types[0], 2,
+            "slot 0 must be the boss (encoded 2)",
+        );
+
+        // Glyph table must be addressable for every encoded value the
+        // snapshot can produce (4 entries, max index = 3).
+        let glyphs = state.glyph_table();
+        assert_eq!(glyphs.len(), 4, "glyph_table must have 4 entries");
+        for (i, &ct) in snap.creature_types.iter().enumerate() {
+            assert!(
+                (ct as usize) < glyphs.len(),
+                "slot {i}: creature_type {ct} out of glyph_table range",
+            );
+        }
+
+        // Synthetic positions: boss at origin, heroes on ring radius 3.
+        let (vmin, vmax) = state.default_viewport().expect("viewport");
+        assert_eq!(snap.positions[0], Vec3::new(0.0, 0.0, 0.0));
+        for (i, p) in snap.positions.iter().enumerate().skip(1) {
+            let r = (p.x * p.x + p.y * p.y).sqrt();
+            assert!(
+                (r - 3.0).abs() < 0.001,
+                "slot {i} hero must lie on radius-3.0 ring; got {p:?} (r={r})",
+            );
+            assert!(
+                p.x >= vmin.x - 0.001
+                    && p.x <= vmax.x + 0.001
+                    && p.y >= vmin.y - 0.001
+                    && p.y <= vmax.y + 0.001,
+                "slot {i} pos {p:?} outside default viewport [{vmin:?}, {vmax:?}]",
+            );
+        }
+    }
+
+    /// After ticking the simulation forward, either at least one HP
+    /// readback must have moved off its starting value (a Damaged or
+    /// Healed event landing) or the alive count must have dropped (a
+    /// Defeated event firing). Proves the snapshot reflects live GPU
+    /// state rather than cached construction-time values.
+    #[test]
+    fn snapshot_after_tick_reflects_state_change() {
+        const N: u32 = 6;
+        let mut state = BossFightState::new(0xCAFE_F00D, N);
+        let initial_hp = state.read_hp();
+        let initial_alive_total: u32 = state.snapshot().alive.iter().sum();
+
+        // 30 ticks: HeroAttack fires every 3 ticks (so ~10 attacks per
+        // hero against the boss), well above the noise floor.
+        for _ in 0..30 {
+            state.step();
+        }
+
+        let snap = state.snapshot();
+        assert_eq!(snap.positions.len(), N as usize);
+        assert_eq!(snap.alive.len(), N as usize);
+
+        let hp_now = state.read_hp();
+        let any_hp_moved = initial_hp
+            .iter()
+            .zip(hp_now.iter())
+            .any(|(a, b)| (a - b).abs() > 0.01);
+        let alive_total_now: u32 = snap.alive.iter().sum();
+        let alive_changed = alive_total_now != initial_alive_total;
+
+        assert!(
+            any_hp_moved || alive_changed,
+            "after 30 ticks, expected HP movement or kill; saw HP unchanged \
+             and alive_total stable ({})",
+            alive_total_now,
+        );
+    }
 }
