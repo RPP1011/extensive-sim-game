@@ -48,12 +48,12 @@ pub use program::{
 };
 pub use program::AbilityProgram;
 pub use program::{
-    AbilityHint, AbilityTag, EffectAreaShape, LifetimeMode, ShapeKind, StackingMode,
-    MAX_TAGS_PER_PROGRAM,
+    AbilityHint, AbilityTag, EffectAreaShape, EffectScaling, LifetimeMode, ScalingStatRef,
+    ShapeKind, StackingMode, MAX_SCALINGS_PER_EFFECT, MAX_TAGS_PER_PROGRAM,
 };
 pub use registry::{AbilityRegistry, AbilityRegistryBuilder};
 pub use packed::{
     PackedAbilityRegistry, CHANCE_NONE_SENTINEL, EFFECT_KIND_EMPTY, HINT_NONE_SENTINEL,
-    LIFETIME_KIND_NONE_SENTINEL, NUM_ABILITY_TAGS, SHAPE_KIND_NONE_SENTINEL,
-    STACKING_NONE_SENTINEL,
+    LIFETIME_KIND_NONE_SENTINEL, NUM_ABILITY_TAGS, SCALING_STAT_NONE_SENTINEL,
+    SHAPE_KIND_NONE_SENTINEL, STACKING_NONE_SENTINEL,
 };

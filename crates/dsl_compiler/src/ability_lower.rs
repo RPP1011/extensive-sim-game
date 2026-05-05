@@ -88,9 +88,9 @@ use dsl_ast::ast::{
     AbilityDecl, AbilityFile, AbilityHeader, EffectArg, EffectStmt, HintName, Span, TargetMode,
 };
 use engine::ability::program::{
-    AbilityHint, AbilityProgram, AbilityTag, Area, Delivery, EffectAreaShape, EffectOp, Gate,
-    LifetimeMode, ShapeKind, StackingMode, TargetSelector, MAX_EFFECTS_PER_PROGRAM,
-    MAX_TAGS_PER_PROGRAM,
+    AbilityHint, AbilityProgram, AbilityTag, Area, Delivery, EffectAreaShape, EffectOp,
+    EffectScaling, Gate, LifetimeMode, ScalingStatRef, ShapeKind, StackingMode, TargetSelector,
+    MAX_EFFECTS_PER_PROGRAM, MAX_SCALINGS_PER_EFFECT, MAX_TAGS_PER_PROGRAM,
 };
 use engine::ability::AbilityId;
 use smallvec::SmallVec;
@@ -143,14 +143,17 @@ pub enum LowerError {
     /// effects.
     ModifierNotImplemented {
         verb:     String,
-        /// Slot identifier — one of "tags" / "for" / "when" /
-        /// "scaling" / "nested". "stacking" was retired in Wave 1.5#3
-        /// (now lowered into `program.stackings`). "chance" was retired
-        /// in Wave 1.5#5 (now lowered into `program.chances`).
-        /// "lifetime" was retired in Wave 1.5#8 (now lowered into
-        /// `program.lifetimes`). "in" was retired in Wave 1.5#2 (now
-        /// lowered into `program.per_effect_areas` — unknown shape
-        /// names surface as `UnknownShape` instead).
+        /// Slot identifier — one of "tags" / "for" / "when" / "nested".
+        /// "stacking" was retired in Wave 1.5#3 (now lowered into
+        /// `program.stackings`). "chance" was retired in Wave 1.5#5
+        /// (now lowered into `program.chances`). "lifetime" was retired
+        /// in Wave 1.5#8 (now lowered into `program.lifetimes`). "in"
+        /// was retired in Wave 1.5#2 (now lowered into
+        /// `program.per_effect_areas` — unknown shape names surface as
+        /// `UnknownShape` instead). "scaling" was retired in Wave
+        /// 1.5#4 (now lowered into `program.scalings_per_effect`;
+        /// unknown stat-ref names surface as `UnknownStatRef` and
+        /// per-effect overflow surfaces as `ScalingBudgetExceeded`).
         modifier: &'static str,
         span:     Span,
     },
@@ -160,6 +163,22 @@ pub enum LowerError {
     /// cylinder/dome/hull). Surfaced so authors don't silently lose AOE
     /// expansion on a typoed shape name.
     UnknownShape { shape: String, span: Span },
+    /// Wave 1.5#4 (`+ N% stat_ref` modifier): the stat_ref token is not
+    /// in the engine's `ScalingStatRef` vocabulary (8 entries today:
+    /// attack_damage/AD, ability_power/AP, max_hp/MaxHP, hp/HP, armor,
+    /// magic_resist/MR, move_speed, mana). Surfaced so authors don't
+    /// silently lose scaling on a typoed stat name.
+    UnknownStatRef { stat: String, span: Span },
+    /// Wave 1.5#4 (`+ N% stat_ref` modifier): an effect declared more
+    /// scalings than the per-effect budget allows
+    /// (`MAX_SCALINGS_PER_EFFECT == 2` today — fits LoL/MOBA convention
+    /// of one or two scaling stats per effect).
+    ScalingBudgetExceeded {
+        ability: String,
+        count:   usize,
+        max:     usize,
+        span:    Span,
+    },
     /// Wave 1.5 modifier lowering #1 (tag vocabulary): a `[TAG: value]`
     /// modifier named a tag not in the engine's `AbilityTag` vocabulary
     /// (PHYSICAL/MAGICAL/CROWD_CONTROL/HEAL/DEFENSE/UTILITY today).
@@ -295,6 +314,14 @@ impl std::fmt::Display for LowerError {
             LowerError::UnknownShape { shape, .. } => write!(
                 f,
                 "unknown AOE shape `in {shape}(…)`; valid shapes (spec §8): circle / cone / line / ring / spread / box / sphere / column / wall / cylinder / dome / hull"
+            ),
+            LowerError::UnknownStatRef { stat, .. } => write!(
+                f,
+                "unknown scaling stat-ref `+ N% {stat}`; valid stats: attack_damage/AD, ability_power/AP, max_hp/MaxHP, hp/HP, armor, magic_resist/MR, move_speed, mana"
+            ),
+            LowerError::ScalingBudgetExceeded { ability, count, max, .. } => write!(
+                f,
+                "ability `{ability}` declares {count} scalings on a single effect but the per-effect budget is {max} (MAX_SCALINGS_PER_EFFECT)"
             ),
         }
     }
@@ -554,6 +581,19 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     let mut per_effect_areas_acc: SmallVec<[Option<EffectAreaShape>; MAX_EFFECTS_PER_PROGRAM]> =
         SmallVec::new();
     let mut any_area = false;
+    // Wave 1.5#4: per-effect scaling list, OUTER-index parallel to
+    // `effects`. Each inner SmallVec is bounded at
+    // `MAX_SCALINGS_PER_EFFECT`. Same "all-empty → empty outer" optimisation
+    // as the other aggregators so the Wave 1 corpus output stays
+    // bit-stable. Stat-ref tokens are validated against
+    // `ScalingStatRef::parse` here — unknown names surface as
+    // `LowerError::UnknownStatRef` (loud failure rather than a
+    // silently-dropped scaling). Per-effect overflow surfaces as
+    // `LowerError::ScalingBudgetExceeded`.
+    let mut scalings_per_effect_acc: SmallVec<
+        [SmallVec<[EffectScaling; MAX_SCALINGS_PER_EFFECT]>; MAX_EFFECTS_PER_PROGRAM],
+    > = SmallVec::new();
+    let mut any_scaling = false;
     for stmt in &decl.effects {
         // Per-effect tags first — fail fast on unknown tag names so the
         // verb-dispatch error doesn't hide them.
@@ -648,6 +688,40 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
             any_area = true;
         }
         per_effect_areas_acc.push(area);
+        // Wave 1.5#4: capture the per-effect scaling list BEFORE the
+        // verb dispatch (which would otherwise discard it). Validate
+        // each stat_ref token against the engine's `ScalingStatRef`
+        // vocabulary; unknown names surface as `UnknownStatRef`.
+        // Bounded at `MAX_SCALINGS_PER_EFFECT` per effect — overflow
+        // surfaces as `ScalingBudgetExceeded`. The parser stores
+        // `percent` as `N` (e.g. `30` for `+ 30% AP`); the engine
+        // stores it as a fraction (`0.30`) so apply handlers can
+        // multiply directly without an extra `/ 100.0`.
+        let mut inner: SmallVec<[EffectScaling; MAX_SCALINGS_PER_EFFECT]> = SmallVec::new();
+        for sc in &stmt.scalings {
+            let stat_ref = ScalingStatRef::parse(&sc.stat_ref).ok_or_else(|| {
+                LowerError::UnknownStatRef {
+                    stat: sc.stat_ref.clone(),
+                    span: sc.span,
+                }
+            })?;
+            if inner.len() >= MAX_SCALINGS_PER_EFFECT {
+                return Err(LowerError::ScalingBudgetExceeded {
+                    ability: decl.name.clone(),
+                    count:   inner.len() + 1,
+                    max:     MAX_SCALINGS_PER_EFFECT,
+                    span:    sc.span,
+                });
+            }
+            inner.push(EffectScaling {
+                stat_ref,
+                percent: sc.percent / 100.0,
+            });
+        }
+        if !inner.is_empty() {
+            any_scaling = true;
+        }
+        scalings_per_effect_acc.push(inner);
         let op = lower_effect_stmt(stmt)?;
         effects.push(op);
     }
@@ -668,6 +742,9 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     if !any_area {
         per_effect_areas_acc.clear();
     }
+    if !any_scaling {
+        scalings_per_effect_acc.clear();
+    }
 
     Ok(AbilityProgram {
         delivery: Delivery::Instant,
@@ -680,6 +757,7 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
         chances: chances_acc,
         lifetimes: lifetimes_acc,
         per_effect_areas: per_effect_areas_acc,
+        scalings_per_effect: scalings_per_effect_acc,
     })
 }
 
@@ -742,13 +820,15 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
     // to `program.effects`). The verb dispatch below stays oblivious —
     // apply handlers read `program.stackings[i]` to pick a policy. No
     // short-circuit here.
-    if let Some(s) = stmt.scalings.first() {
-        return Err(LowerError::ModifierNotImplemented {
-            verb:     stmt.verb.clone(),
-            modifier: "scaling",
-            span:     s.span,
-        });
-    }
+    // Wave 1.5#4: `+ N% stat_ref` is consumed by the per-ability
+    // aggregator in `lower_ability_decl` (one per-effect SmallVec slot
+    // parallel to `program.effects`, each holding up to
+    // MAX_SCALINGS_PER_EFFECT entries). The verb dispatch below stays
+    // oblivious — apply handlers read `program.scalings_per_effect[i]`
+    // to add `stat * percent` to the effect's flat amount. Unknown
+    // stat-ref names surface from the aggregator as
+    // `LowerError::UnknownStatRef`; per-effect overflow surfaces as
+    // `LowerError::ScalingBudgetExceeded`. No short-circuit here.
     // Wave 1.5#8: `until_caster_dies` / `damageable_hp(N)` /
     // `break_on_damage` are consumed by the per-ability aggregator in
     // `lower_ability_decl` (one slot per effect, parallel to
