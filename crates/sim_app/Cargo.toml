@@ -126,7 +126,7 @@ duel_25v25_runtime = { path = "../duel_25v25_runtime", optional = true }
 # parser → ability_lower → AbilityRegistry → PackedAbilityRegistry pipeline
 # produces values consumable by a real sim. See
 # `docs/spec/ability_dsl_test_sims.md` Wave 1 acceptance.
-duel_abilities_runtime = { path = "../duel_abilities_runtime" }
+duel_abilities_runtime = { path = "../duel_abilities_runtime", optional = true }
 # Foraging-real — first LIFECYCLE fixture. Demonstrates alive=false →
 # true births (CPU-side slot allocation) AND alive=true → false deaths
 # (DSL EnergyDecay) actually flipping during a single run. Surfaces
@@ -306,7 +306,58 @@ bin-objective_capture_10v10_app = ["dep:objective_capture_10v10_runtime"]
 bin-scripted_battle_app = ["dep:scripted_battle_runtime"]
 bin-predator_prey_viz_app = ["dep:predator_prey_real_runtime"]
 bin-flocking_viz_app = ["dep:flocking_skirmish_runtime"]
-bin-viz_app = ["dep:sim_runtime"]
+bin-duel_abilities_app = ["dep:duel_abilities_runtime"]
+# `viz_app` is the universal sim-picker — its SIMS table in
+# src/viz_app.rs references every per-fixture runtime crate
+# unconditionally. To keep the binary build-able we enable all 42
+# optional runtime deps here. Per-runtime gating would require
+# cfg-attributes on every SIMS row; one fat feature is simpler and
+# matches the binary's "any fixture by name" intent (#99 closes
+# the build gap surfaced by predator_prey snapshot work, 2026-05-05).
+bin-viz_app = [
+    "dep:sim_runtime",
+    "dep:abilities_runtime",
+    "dep:auction_runtime",
+    "dep:bartering_runtime",
+    "dep:boss_fight_runtime",
+    "dep:cooldown_probe_runtime",
+    "dep:crafting_diffusion_runtime",
+    "dep:crowd_navigation_runtime",
+    "dep:diplomacy_probe_runtime",
+    "dep:duel_1v1_runtime",
+    "dep:duel_25v25_runtime",
+    "dep:duel_abilities_runtime",
+    "dep:dungeon_crawl_runtime",
+    "dep:ecosystem_runtime",
+    "dep:flocking_skirmish_runtime",
+    "dep:foraging_real_runtime",
+    "dep:foraging_runtime",
+    "dep:mass_battle_100v100_runtime",
+    "dep:megaswarm_1000_runtime",
+    "dep:megaswarm_10000_runtime",
+    "dep:multi_zone_world_runtime",
+    "dep:objective_capture_10v10_runtime",
+    "dep:pair_scoring_probe_runtime",
+    "dep:particle_collision_runtime",
+    "dep:predator_prey_real_runtime",
+    "dep:predator_prey_runtime",
+    "dep:quest_arc_real_runtime",
+    "dep:quest_probe_runtime",
+    "dep:scripted_battle_runtime",
+    "dep:stdlib_math_probe_runtime",
+    "dep:stochastic_probe_runtime",
+    "dep:swarm_storm_runtime",
+    "dep:tactical_horde_500_runtime",
+    "dep:tactical_squad_5v5_runtime",
+    "dep:target_chaser_runtime",
+    "dep:tom_probe_runtime",
+    "dep:tower_defense_runtime",
+    "dep:trade_market_real_runtime",
+    "dep:trade_market_runtime",
+    "dep:trophic_3tier_runtime",
+    "dep:verb_probe_runtime",
+    "dep:village_day_cycle_runtime",
+]
 bin-multi_zone_world_app = ["dep:multi_zone_world_runtime"]
 bin-dungeon_crawl_app = ["dep:dungeon_crawl_runtime"]
 bin-crafting_diffusion_app = ["dep:crafting_diffusion_runtime"]
@@ -424,6 +475,7 @@ required-features = ["bin-duel_25v25_app"]
 [[bin]]
 name = "duel_abilities_app"
 path = "src/duel_abilities_app.rs"
+required-features = ["bin-duel_abilities_app"]
 
 [[bin]]
 name = "foraging_real_app"
