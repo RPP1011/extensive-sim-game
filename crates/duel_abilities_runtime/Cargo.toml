@@ -1,0 +1,34 @@
+[package]
+name = "duel_abilities_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/duel_abilities.sim` — the Wave 1
+# acceptance fixture for the .ability DSL pipeline (parser + lowering +
+# AbilityRegistry + PackedAbilityRegistry).
+#
+# Two Combatants duel with three abilities (Strike, ShieldUp, Mend) — the
+# verbs are hand-mirrored from `assets/ability_test/duel_abilities/*.ability`,
+# and the runtime asserts at startup that the .ability files lower to
+# `AbilityProgram` values whose constants match this .sim's verb constants.
+# That binding check is the heart of the Wave 1 acceptance: it proves the
+# .ability -> AbilityRegistry -> PackedAbilityRegistry pipeline produces
+# values consumable by a real sim.
+#
+# `dsl_ast` is a runtime dep (NOT just build-deps) because the binding
+# check calls `dsl_ast::parse_ability_file` at fixture construction time
+# to re-parse the source-of-truth .ability files in the workspace tree.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

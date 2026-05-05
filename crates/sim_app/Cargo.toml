@@ -109,6 +109,16 @@ duel_1v1_runtime = { path = "../duel_1v1_runtime" }
 # Damaged for cross-team neighbours) → ApplyDamage chronicle.
 # Discovery doc: docs/superpowers/notes/2026-05-04-duel_25v25.md.
 duel_25v25_runtime = { path = "../duel_25v25_runtime" }
+# Duel abilities — Wave 1 acceptance fixture for the .ability DSL pipeline.
+# Mirrors duel_1v1's verb-cascade shape (Strike/ShieldUp/Mend) but the
+# constants are hand-mirrored from `assets/ability_test/duel_abilities/*.ability`
+# and the runtime asserts at startup that the .ability files lower to
+# AbilityProgram values matching the .sim's hand-mirrored verb constants.
+# This binding check is the proof that the
+# parser → ability_lower → AbilityRegistry → PackedAbilityRegistry pipeline
+# produces values consumable by a real sim. See
+# `docs/spec/ability_dsl_test_sims.md` Wave 1 acceptance.
+duel_abilities_runtime = { path = "../duel_abilities_runtime" }
 # Foraging-real — first LIFECYCLE fixture. Demonstrates alive=false →
 # true births (CPU-side slot allocation) AND alive=true → false deaths
 # (DSL EnergyDecay) actually flipping during a single run. Surfaces
@@ -318,6 +328,10 @@ path = "src/duel_1v1_app.rs"
 [[bin]]
 name = "duel_25v25_app"
 path = "src/duel_25v25_app.rs"
+
+[[bin]]
+name = "duel_abilities_app"
+path = "src/duel_abilities_app.rs"
 
 [[bin]]
 name = "foraging_real_app"

@@ -53,6 +53,7 @@ const SIMS: &[(&str, Factory, u32, &str)] = &[
     ("quest_probe",           quest_probe_runtime::make_sim,               16,  "quest probe"),
     ("duel_1v1",              duel_1v1_runtime::make_sim,                  2,   "1v1 combat duel"),
     ("duel_25v25",            duel_25v25_runtime::make_sim,                50,  "25v25 squad combat"),
+    ("duel_abilities",        duel_abilities_runtime::make_sim,            2,   "1v1 driven by .ability files (Wave 1)"),
     ("foraging_real",         foraging_real_runtime::make_sim,             50,  "REAL ant colony lifecycle"),
     ("predator_prey_real",    predator_prey_real_runtime::make_sim,        300, "REAL wolves vs sheep ecology"),
     ("tactical_squad_5v5",    tactical_squad_5v5_runtime::make_sim,        10,  "5v5 with Tank/Healer/DPS roles"),
