@@ -564,12 +564,23 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
     }
     // Tags handled by the per-ability aggregator in `lower_ability_decl`
     // (Wave 1.5 modifier lowering #1) — no short-circuit here.
+    // Wave 1.5 modifier #6 (`for <duration>`): for the eight
+    // duration-bearing verbs (stun/slow/root/silence/fear/taunt/
+    // lifesteal/damage_modify) the modifier acts as a duration source —
+    // their per-verb arms below detect `stmt.duration.is_some()` and
+    // pull the duration from there instead of a positional. For the
+    // other verbs (damage/heal/shield/cast/transfer_gold/modify_standing)
+    // the modifier means DoT/HoT semantics — a NEW EffectOp variant is
+    // needed (DamageOverTime / HealOverTime), so still surface the
+    // ModifierNotImplemented for those.
     if let Some(d) = &stmt.duration {
-        return Err(LowerError::ModifierNotImplemented {
-            verb:     stmt.verb.clone(),
-            modifier: "for",
-            span:     d.span,
-        });
+        if !is_duration_bearing_verb(&stmt.verb) {
+            return Err(LowerError::ModifierNotImplemented {
+                verb:     stmt.verb.clone(),
+                modifier: "for",
+                span:     d.span,
+            });
+        }
     }
     if let Some(cond) = &stmt.condition {
         return Err(LowerError::ModifierNotImplemented {
@@ -635,8 +646,8 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             Ok(EffectOp::Shield { amount })
         }
         "stun" => {
-            let dur = require_duration_arg(stmt, 0)?;
-            require_arity(stmt, 1)?;
+            let (dur, arity) = extract_duration(stmt, 0, 1)?;
+            require_arity(stmt, arity)?;
             Ok(EffectOp::Stun { duration_ticks: duration_to_ticks(dur) })
         }
         // Wave 2 piece 1 — four new control verbs. Each takes a single
@@ -645,23 +656,23 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
         // intent rerouting) lands in later Wave 2 pieces alongside the
         // mask-builder updates.
         "root" => {
-            let dur = require_duration_arg(stmt, 0)?;
-            require_arity(stmt, 1)?;
+            let (dur, arity) = extract_duration(stmt, 0, 1)?;
+            require_arity(stmt, arity)?;
             Ok(EffectOp::Root { duration_ticks: duration_to_ticks(dur) })
         }
         "silence" => {
-            let dur = require_duration_arg(stmt, 0)?;
-            require_arity(stmt, 1)?;
+            let (dur, arity) = extract_duration(stmt, 0, 1)?;
+            require_arity(stmt, arity)?;
             Ok(EffectOp::Silence { duration_ticks: duration_to_ticks(dur) })
         }
         "fear" => {
-            let dur = require_duration_arg(stmt, 0)?;
-            require_arity(stmt, 1)?;
+            let (dur, arity) = extract_duration(stmt, 0, 1)?;
+            require_arity(stmt, arity)?;
             Ok(EffectOp::Fear { duration_ticks: duration_to_ticks(dur) })
         }
         "taunt" => {
-            let dur = require_duration_arg(stmt, 0)?;
-            require_arity(stmt, 1)?;
+            let (dur, arity) = extract_duration(stmt, 0, 1)?;
+            require_arity(stmt, arity)?;
             Ok(EffectOp::Taunt { duration_ticks: duration_to_ticks(dur) })
         }
         // Wave 2 piece 2 — four new movement verbs. Each takes a single
@@ -719,8 +730,8 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
         // buff-stacking rule.
         "lifesteal" => {
             let fraction = require_number_arg(stmt, 0)?;
-            let dur = require_duration_arg(stmt, 1)?;
-            require_arity(stmt, 2)?;
+            let (dur, arity) = extract_duration(stmt, 1, 2)?;
+            require_arity(stmt, arity)?;
             let fraction_q8 = (fraction * 256.0).round().clamp(i16::MIN as f32, i16::MAX as f32) as i16;
             Ok(EffectOp::LifeSteal {
                 duration_ticks: duration_to_ticks(dur),
@@ -729,8 +740,8 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
         }
         "damage_modify" => {
             let mult = require_number_arg(stmt, 0)?;
-            let dur = require_duration_arg(stmt, 1)?;
-            require_arity(stmt, 2)?;
+            let (dur, arity) = extract_duration(stmt, 1, 2)?;
+            require_arity(stmt, arity)?;
             let multiplier_q8 = (mult * 256.0).round().clamp(i16::MIN as f32, i16::MAX as f32) as i16;
             Ok(EffectOp::DamageModify {
                 duration_ticks: duration_to_ticks(dur),
@@ -740,10 +751,11 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
         "slow" => {
             // `slow <factor:f32> <duration>` — two positional args. The
             // engine packs `factor` into a Q8 fixed-point i16 (factor *
-            // 256) so 1.0 == 256.
+            // 256) so 1.0 == 256. Wave 1.5#6: `slow 0.5 for 4s` is also
+            // accepted — duration comes from the `for` modifier instead.
             let factor = require_number_arg(stmt, 0)?;
-            let dur = require_duration_arg(stmt, 1)?;
-            require_arity(stmt, 2)?;
+            let (dur, arity) = extract_duration(stmt, 1, 2)?;
+            require_arity(stmt, arity)?;
             let factor_q8 = (factor * 256.0).round().clamp(i16::MIN as f32, i16::MAX as f32) as i16;
             Ok(EffectOp::Slow {
                 duration_ticks: duration_to_ticks(dur),
@@ -887,6 +899,44 @@ fn require_duration_arg(stmt: &EffectStmt, idx: usize) -> Result<u32, LowerError
             span:     stmt.span,
         }),
     }
+}
+
+/// Wave 1.5#6: extract a duration arg for a stateful verb, preferring
+/// the `for <duration>` modifier if present; fall back to the
+/// `positional_idx`th positional arg. Returns the duration in millis
+/// AND the arity to enforce on the remaining positional args.
+///
+/// `full_arity` is the verb's positional-arg count when no modifier is
+/// present (e.g. 1 for Stun, 2 for Slow). When the modifier IS present
+/// the verb consumes one fewer positional, so arity drops by 1.
+fn extract_duration(
+    stmt:           &EffectStmt,
+    positional_idx: usize,
+    full_arity:     usize,
+) -> Result<(u32, usize), LowerError> {
+    if let Some(d) = &stmt.duration {
+        // Caller's `is_duration_bearing_verb` short-circuit guards
+        // upstream — by the time we land here for one of the 8 verbs,
+        // the modifier IS the duration source. Saturating-sub for
+        // robustness against future zero-arity verbs.
+        Ok((d.duration.millis, full_arity.saturating_sub(1)))
+    } else {
+        let dur = require_duration_arg(stmt, positional_idx)?;
+        Ok((dur, full_arity))
+    }
+}
+
+/// Wave 1.5#6: returns true iff the verb consumes a `for <duration>`
+/// modifier as its duration source instead of erroring with
+/// ModifierNotImplemented{for}. The other verbs (damage/heal/shield/
+/// cast/transfer_gold/modify_standing) get DoT/HoT semantics from
+/// `for` — those need new EffectOp variants and stay errored.
+fn is_duration_bearing_verb(verb: &str) -> bool {
+    matches!(
+        verb,
+        "stun" | "slow" | "root" | "silence" | "fear" | "taunt"
+        | "lifesteal" | "damage_modify"
+    )
 }
 
 fn require_name_arg(stmt: &EffectStmt, idx: usize) -> Result<String, LowerError> {

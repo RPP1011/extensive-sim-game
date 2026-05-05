@@ -91,11 +91,69 @@ fn lowering_tags_aggregate_across_effects() {
 }
 
 #[test]
-fn lowering_for_duration_modifier_returns_unimplemented() {
-    // `slow` takes (factor, duration) positionally + `for X` modifier
-    // slot. The modifier slot fires before the verb dispatch.
+fn lowering_for_duration_on_damage_still_errors() {
+    // Wave 1.5#6: `for <duration>` on instant verbs (damage/heal/shield)
+    // means DoT/HoT semantics — needs a NEW EffectOp variant. Still
+    // surfaces ModifierNotImplemented{for}.
     let err = lower_inline("ability X { target: enemy cooldown: 1s damage 5 for 4s }");
     assert_modifier(err, "for");
+}
+
+#[test]
+fn lowering_for_duration_on_stun_lowers_cleanly() {
+    // Wave 1.5#6: `for <duration>` on stateful verbs ACTS as the
+    // duration source — no positional arg required.
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::EffectOp;
+    let file = parse_ability_file(
+        "ability X { target: enemy range: 5.0 cooldown: 1s stun for 2s }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("stun for-mod must lower");
+    assert_eq!(prog.effects.len(), 1);
+    match &prog.effects[0] {
+        EffectOp::Stun { duration_ticks } => assert_eq!(*duration_ticks, 20, "2s = 20 ticks"),
+        other => panic!("expected Stun(20); got {other:?}"),
+    }
+}
+
+#[test]
+fn lowering_for_duration_on_slow_lowers_cleanly() {
+    // Wave 1.5#6: `slow 0.5 for 4s` — factor positional, duration from
+    // for-modifier. Used by LoL corpus.
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::EffectOp;
+    let file = parse_ability_file(
+        "ability X { target: enemy range: 5.0 cooldown: 1s slow 0.5 for 4s }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("slow for-mod must lower");
+    match &prog.effects[0] {
+        EffectOp::Slow { duration_ticks, factor_q8 } => {
+            assert_eq!(*duration_ticks, 40, "4s = 40 ticks");
+            assert_eq!(*factor_q8, 128, "0.5 q8 = 128");
+        }
+        other => panic!("expected Slow(40, 128); got {other:?}"),
+    }
+}
+
+#[test]
+fn lowering_for_duration_on_lifesteal_lowers_cleanly() {
+    // Wave 1.5#6: lifesteal also accepts for-modifier as duration.
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::EffectOp;
+    let file = parse_ability_file(
+        "ability X { target: self cooldown: 8s lifesteal 0.25 for 5s }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("lifesteal for-mod must lower");
+    match &prog.effects[0] {
+        EffectOp::LifeSteal { duration_ticks, fraction_q8 } => {
+            assert_eq!(*duration_ticks, 50, "5s = 50 ticks");
+            assert_eq!(*fraction_q8, 64, "0.25 q8 = 64");
+        }
+        other => panic!("expected LifeSteal(50, 64); got {other:?}"),
+    }
 }
 
 #[test]
