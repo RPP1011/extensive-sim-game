@@ -491,6 +491,71 @@ pub struct EffectAreaShape {
     pub args: [f32; 4],
 }
 
+/// Per-effect stat-scaling reference for the `+ N% stat_ref` modifier
+/// (spec §6.1 slot 8). 8 common combat stats; an unknown stat_ref token
+/// errors at lowering time (no enum variant for unknown — surface a
+/// LowerError so authors get a typo diagnostic).
+///
+/// Numeric discriminants are pinned so `PackedAbilityRegistry`'s
+/// `scaling_stat_refs` column packs cleanly. Renaming or reordering
+/// bumps the schema hash.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum ScalingStatRef {
+    AttackDamage  = 0,
+    AbilityPower  = 1, // "AP"
+    MaxHp         = 2,
+    Hp            = 3,
+    Armor         = 4,
+    MagicResist   = 5,
+    MoveSpeed     = 6,
+    Mana          = 7,
+}
+
+impl ScalingStatRef {
+    /// Parse from the source-form name. Accepts both spec long-form
+    /// and the LoL/MOBA short-form aliases. Returns `None` for unknown.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "attack_damage" | "AD"     => Some(ScalingStatRef::AttackDamage),
+            "ability_power" | "AP"     => Some(ScalingStatRef::AbilityPower),
+            "max_hp"        | "MaxHP"  => Some(ScalingStatRef::MaxHp),
+            "hp"            | "HP"     => Some(ScalingStatRef::Hp),
+            "armor"                    => Some(ScalingStatRef::Armor),
+            "magic_resist"  | "MR"     => Some(ScalingStatRef::MagicResist),
+            "move_speed"               => Some(ScalingStatRef::MoveSpeed),
+            "mana"                     => Some(ScalingStatRef::Mana),
+            _ => None,
+        }
+    }
+
+    /// Stable u8 discriminant matching the `#[repr(u8)]` ordinal.
+    #[inline]
+    pub fn discriminant(self) -> u8 {
+        self as u8
+    }
+}
+
+/// Per-effect scaling entry — one `+ N% stat_ref` slot. Multiple per
+/// effect allowed (e.g. `damage 50 + 30% AP + 20% AD`); the per-effect
+/// vector is bounded at `MAX_SCALINGS_PER_EFFECT`.
+///
+/// `percent` is stored as a fraction of the stat (e.g. `0.30` for
+/// "+ 30% AP") so apply handlers can multiply directly without an
+/// extra `/ 100.0`. The DSL parser stores `N` (e.g. `30` for `+ 30% AP`);
+/// the lowering pass normalises by dividing by `100.0`.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct EffectScaling {
+    pub stat_ref: ScalingStatRef,
+    pub percent:  f32,
+}
+
+/// Max scalings per effect. 2 fits LoL/MOBA convention (rare to scale
+/// on more than two stats). Bounded so the per-effect inner SmallVec
+/// stays stack-resident; the SoA pack column is sized
+/// `n_abilities * MAX_EFFECTS_PER_PROGRAM * MAX_SCALINGS_PER_EFFECT`.
+pub const MAX_SCALINGS_PER_EFFECT: usize = 2;
+
 /// Compiled ability — the unit `AbilityRegistry` stores and `CastHandler`
 /// dispatches.
 ///
@@ -554,6 +619,24 @@ pub struct AbilityProgram {
     /// u8 discriminant column with sentinel `SHAPE_KIND_NONE_SENTINEL`
     /// (0xFF) for `None` slots; args is a flat `4×f32` per slot.
     pub per_effect_areas: SmallVec<[Option<EffectAreaShape>; MAX_EFFECTS_PER_PROGRAM]>,
+    /// Wave 1.5#4: per-effect scaling modifiers from `+ N% stat_ref`.
+    /// Outer SmallVec is parallel to `effects`; inner SmallVec is the
+    /// per-effect scaling list bounded at `MAX_SCALINGS_PER_EFFECT`
+    /// (2 — fits LoL/MOBA convention of one or two scaling stats per
+    /// effect, e.g. `damage 50 + 30% AP + 20% AD`). An empty inner
+    /// SmallVec means no scaling was authored on that effect; an empty
+    /// outer SmallVec means no effect on the ability carried the
+    /// modifier (Wave 1 corpus shape — keeps output bit-stable).
+    /// Apply handlers should treat empty + per-slot-empty identically
+    /// (the effect's flat amount is the final value with no scaling
+    /// added). The SoA packer emits TWO companion columns
+    /// (`scaling_stat_refs` + `scaling_percents`) at a stride of
+    /// `MAX_EFFECTS_PER_PROGRAM * MAX_SCALINGS_PER_EFFECT` — stat_refs
+    /// is a u8 discriminant column with sentinel
+    /// `SCALING_STAT_NONE_SENTINEL` (0xFF) for unused slots; percents
+    /// is f32 with `0.0` for unused slots.
+    pub scalings_per_effect:
+        SmallVec<[SmallVec<[EffectScaling; MAX_SCALINGS_PER_EFFECT]>; MAX_EFFECTS_PER_PROGRAM]>,
 }
 
 impl AbilityProgram {
@@ -580,7 +663,8 @@ impl AbilityProgram {
             stackings: SmallVec::new(),
             chances:   SmallVec::new(),
             lifetimes: SmallVec::new(),
-            per_effect_areas: SmallVec::new(),
+            per_effect_areas:    SmallVec::new(),
+            scalings_per_effect: SmallVec::new(),
         }
     }
 

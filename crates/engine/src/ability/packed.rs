@@ -39,8 +39,9 @@
 //!   `HashMap` iteration leakage, no time-of-day inputs, no thread state.
 
 use super::program::{
-    Area, Delivery, EffectAreaShape, EffectOp, LifetimeMode, MAX_EFFECTS_PER_PROGRAM,
-    MAX_TAGS_PER_PROGRAM, StackingMode, TargetSelector,
+    Area, Delivery, EffectAreaShape, EffectOp, EffectScaling, LifetimeMode,
+    MAX_EFFECTS_PER_PROGRAM, MAX_SCALINGS_PER_EFFECT, MAX_TAGS_PER_PROGRAM, StackingMode,
+    TargetSelector,
 };
 use super::{AbilityProgram, AbilityRegistry, AbilityTag};
 
@@ -105,6 +106,17 @@ pub const LIFETIME_KIND_NONE_SENTINEL: u8 = 0xFF;
 /// sentinel — args are ONLY meaningful when
 /// `area_kinds[i] != SHAPE_KIND_NONE_SENTINEL`.
 pub const SHAPE_KIND_NONE_SENTINEL: u8 = 0xFF;
+
+/// Sentinel for the `scaling_stat_refs` column when a per-effect
+/// scaling slot is unused (either the effect carried no `+ N% stat_ref`
+/// modifier at all, or the slot index exceeds the number of scalings
+/// authored on that effect). Distinct from any `ScalingStatRef`
+/// discriminant (0..=7 today). Apply handlers should treat this slot
+/// as "no scaling for this slot — flat amount only"; companion
+/// `scaling_percents` slot stores `0.0` whenever the stat-ref is the
+/// sentinel — percents are ONLY meaningful when
+/// `scaling_stat_refs[i] != SCALING_STAT_NONE_SENTINEL`.
+pub const SCALING_STAT_NONE_SENTINEL: u8 = 0xFF;
 
 // Compile-time guard: `MAX_TAGS_PER_PROGRAM` and `NUM_ABILITY_TAGS` must
 // stay aligned. Both are derived from `AbilityTag::COUNT` today; a future
@@ -244,6 +256,34 @@ pub struct PackedAbilityRegistry {
     /// — only `Wall` consumes all four (len/h/thick/facing).
     /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM * 4`.
     pub area_args: Vec<f32>,
+
+    // -- Scaling rows (flat, stride =
+    //    MAX_EFFECTS_PER_PROGRAM * MAX_SCALINGS_PER_EFFECT). ---------
+
+    /// Per-effect-per-scaling stat-ref discriminant
+    /// (`ScalingStatRef::discriminant() as u8`), or
+    /// `SCALING_STAT_NONE_SENTINEL` (0xFF) when the slot is unused
+    /// (either the effect carried no `+ N% stat_ref` modifier, or the
+    /// scaling-slot index exceeds the number of scalings authored on
+    /// that effect). Multiple scalings per effect are allowed (e.g.
+    /// `damage 50 + 30% AP + 20% AD`); the inner stride is
+    /// `MAX_SCALINGS_PER_EFFECT` (2 today). Apply handlers should treat
+    /// the sentinel as "no scaling for this slot"; for non-sentinel
+    /// values they switch on `0..=7`
+    /// (AttackDamage/AbilityPower/MaxHp/Hp/Armor/MagicResist/MoveSpeed/Mana).
+    /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM * MAX_SCALINGS_PER_EFFECT`.
+    pub scaling_stat_refs: Vec<u8>,
+
+    /// Per-effect-per-scaling percent — only meaningful when
+    /// `scaling_stat_refs[i] != SCALING_STAT_NONE_SENTINEL`, in which
+    /// case it holds the fraction of the referenced stat to add to the
+    /// effect's flat amount (e.g. `0.30` for "+ 30% AP"). `0.0` for
+    /// every sentinel slot. Stored alongside `scaling_stat_refs`
+    /// because `EffectScaling` is the third per-effect SoA modifier
+    /// with variant data — flat `Vec<u8>` couldn't carry the f32
+    /// percent by itself.
+    /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM * MAX_SCALINGS_PER_EFFECT`.
+    pub scaling_percents: Vec<f32>,
 }
 
 impl PackedAbilityRegistry {
@@ -302,6 +342,16 @@ impl PackedAbilityRegistry {
         let mut area_kinds = vec![SHAPE_KIND_NONE_SENTINEL; area_kinds_total];
         let mut area_args = vec![0.0_f32; area_args_total];
 
+        // Scalings: pre-fill stat_refs with the none-sentinel and
+        // percents with `0.0` so empty effect slots + effects without a
+        // `+ N% stat_ref` modifier (and unused inner slots when an
+        // effect uses fewer scalings than MAX_SCALINGS_PER_EFFECT) all
+        // share a single resting state. Per-effect-per-scaling
+        // overrides land in `pack_program_scalings`.
+        let scaling_total = n * MAX_EFFECTS_PER_PROGRAM * MAX_SCALINGS_PER_EFFECT;
+        let mut scaling_stat_refs = vec![SCALING_STAT_NONE_SENTINEL; scaling_total];
+        let mut scaling_percents = vec![0.0_f32; scaling_total];
+
         for slot in 0..n {
             // `AbilityId` is 1-based; the registry's `get` accepts an id,
             // so reconstruct it from the slot. The registry guarantees
@@ -333,6 +383,12 @@ impl PackedAbilityRegistry {
                 &mut lifetime_payloads,
             );
             pack_program_areas(program, slot, &mut area_kinds, &mut area_args);
+            pack_program_scalings(
+                program,
+                slot,
+                &mut scaling_stat_refs,
+                &mut scaling_percents,
+            );
         }
 
         Self {
@@ -352,6 +408,8 @@ impl PackedAbilityRegistry {
             lifetime_payloads,
             area_kinds,
             area_args,
+            scaling_stat_refs,
+            scaling_percents,
         }
     }
 
@@ -573,6 +631,54 @@ fn pack_program_areas(
     }
 }
 
+/// Splat one program's per-effect-per-scaling modifiers into the
+/// row-major `scaling_stat_refs` + `scaling_percents` buffers. Slots
+/// already pre-filled (`SCALING_STAT_NONE_SENTINEL` / `0.0`); only
+/// authored entries overwrite. `program.scalings_per_effect` is
+/// outer-index-parallel to `program.effects` when populated; an empty
+/// outer slice means no effect carried a `+ N% stat_ref` modifier
+/// (every slot stays at the sentinel + `0.0`). Inner SmallVec is
+/// bounded at `MAX_SCALINGS_PER_EFFECT` (2 today).
+///
+/// `EffectScaling` is the third per-effect SoA modifier with variant
+/// data — its (stat_ref, percent) pair lives in the kind + payload
+/// columns parallel to `EffectAreaShape`'s pattern. Stride is
+/// `MAX_EFFECTS_PER_PROGRAM * MAX_SCALINGS_PER_EFFECT` so a GPU shader
+/// addresses slot `(ability, effect, scaling)` as
+/// `slot * MAX_EFFECTS_PER_PROGRAM * MAX_SCALINGS_PER_EFFECT
+///  + effect * MAX_SCALINGS_PER_EFFECT + scaling`.
+fn pack_program_scalings(
+    program:           &AbilityProgram,
+    slot:              usize,
+    scaling_stat_refs: &mut [u8],
+    scaling_percents:  &mut [f32],
+) {
+    let base = slot * MAX_EFFECTS_PER_PROGRAM * MAX_SCALINGS_PER_EFFECT;
+    for (eff_i, inner) in program.scalings_per_effect.iter().enumerate() {
+        // Defensive bounds parallel to the other per-effect packers —
+        // the lowering pass enforces
+        // `program.scalings_per_effect.len() <= MAX_EFFECTS_PER_PROGRAM`,
+        // but a hand-built program could violate it; clamp instead of
+        // panicking on the startup pack path.
+        if eff_i >= MAX_EFFECTS_PER_PROGRAM {
+            break;
+        }
+        for (sc_i, sc) in inner.iter().enumerate() {
+            // Same defensive clamp on the inner stride.
+            if sc_i >= MAX_SCALINGS_PER_EFFECT {
+                break;
+            }
+            // Bind through the named type so the `EffectScaling` import
+            // is genuinely used at lib level (parallel to the
+            // `EffectAreaShape` bind in `pack_program_areas`).
+            let entry: EffectScaling = *sc;
+            let off = base + eff_i * MAX_SCALINGS_PER_EFFECT + sc_i;
+            scaling_stat_refs[off] = entry.stat_ref.discriminant();
+            scaling_percents[off]  = entry.percent;
+        }
+    }
+}
+
 /// Encode a `StackingMode` to its u8 discriminant. Pinned by
 /// `crates/engine/src/schema_hash.rs` (the `StackingMode:` line).
 #[inline]
@@ -706,6 +812,8 @@ mod tests {
         assert!(p.lifetime_payloads.is_empty());
         assert!(p.area_kinds.is_empty());
         assert!(p.area_args.is_empty());
+        assert!(p.scaling_stat_refs.is_empty());
+        assert!(p.scaling_percents.is_empty());
     }
 
     #[test]
@@ -1179,6 +1287,8 @@ mod tests {
         assert_eq!(p1.lifetime_payloads, p2.lifetime_payloads);
         assert_eq!(p1.area_kinds, p2.area_kinds);
         assert_eq!(p1.area_args, p2.area_args);
+        assert_eq!(p1.scaling_stat_refs, p2.scaling_stat_refs);
+        assert_eq!(p1.scaling_percents, p2.scaling_percents);
     }
 
     // -- Wave 1.5#3 — stacking-mode pack tests. The `stackings` column
@@ -1623,5 +1733,215 @@ mod tests {
                 assert_eq!(p.area_args[i * 4 + j], 0.0);
             }
         }
+    }
+
+    // -- Wave 1.5#4 — `+ N% stat_ref` modifier pack tests. The
+    // `scaling_stat_refs` + `scaling_percents` pair mirrors
+    // `effect_kinds`'s row-major layout but adds an inner stride of
+    // `MAX_SCALINGS_PER_EFFECT` (2 today) so multiple scalings per
+    // effect can be addressed (e.g. `damage 50 + 30% AP + 20% AD`).
+    // Slots without a scaling carry `SCALING_STAT_NONE_SENTINEL`
+    // (0xFF) and `0.0`. Apply handlers treat the sentinel as "no
+    // scaling for this slot — flat amount only". Stat-ref ordinals:
+    // AttackDamage=0, AbilityPower=1, MaxHp=2, Hp=3, Armor=4,
+    // MagicResist=5, MoveSpeed=6, Mana=7. -----------------------
+    #[test]
+    fn pack_scalings_default_all_sentinel() {
+        // No effect carries `+ N% stat_ref`; every stat-ref slot must
+        // be the none-sentinel + every percent slot `0.0` — including
+        // the empty effect tail (slots 1..MAX_EFFECTS_PER_PROGRAM) and
+        // every inner scaling slot (0..MAX_SCALINGS_PER_EFFECT). This
+        // guards the pre-fill path so apply handlers don't need to
+        // special-case empty slots.
+        let prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: false, line_of_sight: false },
+            [EffectOp::Damage { amount: 10.0 }],
+        );
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        let total = MAX_EFFECTS_PER_PROGRAM * MAX_SCALINGS_PER_EFFECT;
+        assert_eq!(p.scaling_stat_refs.len(), total);
+        assert_eq!(p.scaling_percents.len(), total);
+        for (i, s) in p.scaling_stat_refs.iter().enumerate() {
+            assert_eq!(
+                *s, SCALING_STAT_NONE_SENTINEL,
+                "slot {i} stat-ref must default to SCALING_STAT_NONE_SENTINEL",
+            );
+        }
+        for (i, v) in p.scaling_percents.iter().enumerate() {
+            assert_eq!(*v, 0.0, "slot {i} percent must default to 0.0");
+        }
+    }
+
+    #[test]
+    fn pack_scalings_single_on_first_effect() {
+        // Single effect carries one scaling: `+ 30% AP` →
+        // (AbilityPower=1, 0.30). The first inner slot (effect 0,
+        // scaling 0) must hold the discriminant + percent; every
+        // other slot stays at sentinel + `0.0`.
+        use crate::ability::program::{EffectScaling, ScalingStatRef};
+        use smallvec::SmallVec;
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 50.0 }],
+        );
+        let mut outer: SmallVec<
+            [SmallVec<[EffectScaling; MAX_SCALINGS_PER_EFFECT]>; MAX_EFFECTS_PER_PROGRAM],
+        > = SmallVec::new();
+        let mut inner: SmallVec<[EffectScaling; MAX_SCALINGS_PER_EFFECT]> = SmallVec::new();
+        inner.push(EffectScaling { stat_ref: ScalingStatRef::AbilityPower, percent: 0.30 });
+        outer.push(inner);
+        prog.scalings_per_effect = outer;
+
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // AbilityPower discriminant == 1.
+        assert_eq!(p.scaling_stat_refs[0], 1, "effect 0 scaling 0 = AbilityPower");
+        assert_eq!(p.scaling_percents[0], 0.30, "effect 0 scaling 0 percent");
+        // Inner slot 1 of effect 0 (unused) stays at sentinel + 0.0.
+        assert_eq!(p.scaling_stat_refs[1], SCALING_STAT_NONE_SENTINEL);
+        assert_eq!(p.scaling_percents[1], 0.0);
+        // Effects 1..MAX stay at sentinel + 0.0.
+        for eff_i in 1..MAX_EFFECTS_PER_PROGRAM {
+            for sc_i in 0..MAX_SCALINGS_PER_EFFECT {
+                let off = eff_i * MAX_SCALINGS_PER_EFFECT + sc_i;
+                assert_eq!(
+                    p.scaling_stat_refs[off], SCALING_STAT_NONE_SENTINEL,
+                    "effect {eff_i} scaling {sc_i} stat-ref must stay at sentinel",
+                );
+                assert_eq!(
+                    p.scaling_percents[off], 0.0,
+                    "effect {eff_i} scaling {sc_i} percent must stay at 0.0",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pack_scalings_two_on_first_effect() {
+        // Single effect carries two scalings: `+ 30% AP + 20% AD` →
+        // [(AbilityPower=1, 0.30), (AttackDamage=0, 0.20)]. Both inner
+        // slots of effect 0 must round-trip; slot 0 of effects 1..MAX
+        // and any inner padding stay at sentinel + 0.0.
+        use crate::ability::program::{EffectScaling, ScalingStatRef};
+        use smallvec::SmallVec;
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 50.0 }],
+        );
+        let mut outer: SmallVec<
+            [SmallVec<[EffectScaling; MAX_SCALINGS_PER_EFFECT]>; MAX_EFFECTS_PER_PROGRAM],
+        > = SmallVec::new();
+        let mut inner: SmallVec<[EffectScaling; MAX_SCALINGS_PER_EFFECT]> = SmallVec::new();
+        inner.push(EffectScaling { stat_ref: ScalingStatRef::AbilityPower, percent: 0.30 });
+        inner.push(EffectScaling { stat_ref: ScalingStatRef::AttackDamage, percent: 0.20 });
+        outer.push(inner);
+        prog.scalings_per_effect = outer;
+
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // Inner slot 0: AbilityPower (1) / 0.30.
+        assert_eq!(p.scaling_stat_refs[0], 1);
+        assert_eq!(p.scaling_percents[0], 0.30);
+        // Inner slot 1: AttackDamage (0) / 0.20.
+        assert_eq!(p.scaling_stat_refs[1], 0);
+        assert_eq!(p.scaling_percents[1], 0.20);
+        // Every other effect slot stays at sentinel + 0.0.
+        for eff_i in 1..MAX_EFFECTS_PER_PROGRAM {
+            for sc_i in 0..MAX_SCALINGS_PER_EFFECT {
+                let off = eff_i * MAX_SCALINGS_PER_EFFECT + sc_i;
+                assert_eq!(p.scaling_stat_refs[off], SCALING_STAT_NONE_SENTINEL);
+                assert_eq!(p.scaling_percents[off], 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn pack_scalings_per_effect_independence() {
+        // Two-effect program: effect 0 has `+ 25% AD`, effect 1 has no
+        // scaling. Empty effects 2..MAX stay at sentinel + 0.0. Guards
+        // outer-slot independence parallel to
+        // `pack_areas_per_effect_independence`.
+        use crate::ability::program::{EffectScaling, ScalingStatRef};
+        use smallvec::SmallVec;
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: false, line_of_sight: false },
+            [
+                EffectOp::Damage { amount: 30.0 },
+                EffectOp::Heal   { amount: 10.0 },
+            ],
+        );
+        let mut outer: SmallVec<
+            [SmallVec<[EffectScaling; MAX_SCALINGS_PER_EFFECT]>; MAX_EFFECTS_PER_PROGRAM],
+        > = SmallVec::new();
+        let mut inner0: SmallVec<[EffectScaling; MAX_SCALINGS_PER_EFFECT]> = SmallVec::new();
+        inner0.push(EffectScaling { stat_ref: ScalingStatRef::AttackDamage, percent: 0.25 });
+        outer.push(inner0);
+        // Effect 1 — empty inner SmallVec (no scaling).
+        outer.push(SmallVec::new());
+        prog.scalings_per_effect = outer;
+
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // Effect 0 inner slot 0: AttackDamage (0) / 0.25.
+        assert_eq!(p.scaling_stat_refs[0], 0, "effect 0 scaling 0 = AttackDamage");
+        assert_eq!(p.scaling_percents[0], 0.25);
+        // Effect 0 inner slot 1 (unused): sentinel + 0.0.
+        assert_eq!(p.scaling_stat_refs[1], SCALING_STAT_NONE_SENTINEL);
+        assert_eq!(p.scaling_percents[1], 0.0);
+        // Effect 1 (empty inner): both inner slots sentinel + 0.0.
+        for sc_i in 0..MAX_SCALINGS_PER_EFFECT {
+            let off = 1 * MAX_SCALINGS_PER_EFFECT + sc_i;
+            assert_eq!(
+                p.scaling_stat_refs[off], SCALING_STAT_NONE_SENTINEL,
+                "effect 1 (no scaling) scaling {sc_i} stat-ref must be sentinel",
+            );
+            assert_eq!(p.scaling_percents[off], 0.0);
+        }
+        // Effects 2..MAX (empty effect tail).
+        for eff_i in 2..MAX_EFFECTS_PER_PROGRAM {
+            for sc_i in 0..MAX_SCALINGS_PER_EFFECT {
+                let off = eff_i * MAX_SCALINGS_PER_EFFECT + sc_i;
+                assert_eq!(p.scaling_stat_refs[off], SCALING_STAT_NONE_SENTINEL);
+                assert_eq!(p.scaling_percents[off], 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn pack_scalings_percent_edge_case_above_one() {
+        // Percent > 1.0 (e.g. `+ 150% MaxHP` → 1.5) must round-trip
+        // unchanged — apply handlers will multiply
+        // `target.max_hp * 1.5` and add to the flat amount. Guards
+        // that the f32 percent column does no clamping.
+        use crate::ability::program::{EffectScaling, ScalingStatRef};
+        use smallvec::SmallVec;
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 20.0 }],
+        );
+        let mut outer: SmallVec<
+            [SmallVec<[EffectScaling; MAX_SCALINGS_PER_EFFECT]>; MAX_EFFECTS_PER_PROGRAM],
+        > = SmallVec::new();
+        let mut inner: SmallVec<[EffectScaling; MAX_SCALINGS_PER_EFFECT]> = SmallVec::new();
+        inner.push(EffectScaling { stat_ref: ScalingStatRef::MaxHp, percent: 1.5 });
+        outer.push(inner);
+        prog.scalings_per_effect = outer;
+
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // MaxHp discriminant == 2.
+        assert_eq!(p.scaling_stat_refs[0], 2, "stat-ref = MaxHp");
+        assert_eq!(p.scaling_percents[0], 1.5, "percent must round-trip 1.5");
     }
 }

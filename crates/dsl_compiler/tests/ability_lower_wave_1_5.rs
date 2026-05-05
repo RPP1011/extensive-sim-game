@@ -401,10 +401,114 @@ fn lowering_stacking_with_chance_lowers_both_modifiers() {
     assert_eq!(prog.stackings[0], Some(StackingMode::Refresh));
 }
 
+// ---------------------------------------------------------------------------
+// Wave 1.5#4 — `+ N% stat_ref` modifier lowering. Effect-statement
+// scalings are captured into `program.scalings_per_effect`, OUTER-index
+// parallel to `program.effects`. Each inner SmallVec is bounded at
+// `MAX_SCALINGS_PER_EFFECT == 2` (LoL/MOBA convention: one or two
+// scaling stats per effect). Stat-ref tokens are validated against the
+// engine's `ScalingStatRef` vocabulary (8 entries: AD/AP/MaxHP/HP/
+// Armor/MR/MoveSpeed/Mana). Apply handlers default to "no scaling, flat
+// amount only" for any effect that didn't carry the modifier. The DSL
+// parser stores `percent` as `N` (e.g. `30` for `+ 30% AP`); the
+// engine stores it as a fraction (`0.30`) so apply handlers can
+// multiply directly without an extra `/ 100.0`.
+// ---------------------------------------------------------------------------
+
 #[test]
-fn lowering_scaling_modifier_returns_unimplemented() {
-    let err = lower_inline("ability X { target: enemy cooldown: 1s damage 50 + 30% AP }");
-    assert_modifier(err, "scaling");
+fn lowering_scaling_with_ap() {
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::ScalingStatRef;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 + 30% AP }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("scaling AP must lower");
+    assert_eq!(prog.effects.len(), 1);
+    assert_eq!(
+        prog.scalings_per_effect.len(), 1,
+        "one effect → one outer scaling slot",
+    );
+    let inner = &prog.scalings_per_effect[0];
+    assert_eq!(inner.len(), 1, "one scaling on the first effect");
+    assert_eq!(inner[0].stat_ref, ScalingStatRef::AbilityPower);
+    assert!(
+        (inner[0].percent - 0.30).abs() < 1e-6,
+        "30% AP must lower to 0.30; got {}",
+        inner[0].percent,
+    );
+}
+
+#[test]
+fn lowering_scaling_multiple() {
+    // `damage 50 + 30% AP + 20% AD` → two scalings on the first effect.
+    // Validates the inner-SmallVec growth path + that aliases (AP/AD)
+    // resolve to their long-form discriminants.
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::ScalingStatRef;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 + 30% AP + 20% AD }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0])
+        .expect("two scalings must lower");
+    let inner = &prog.scalings_per_effect[0];
+    assert_eq!(inner.len(), 2, "two scalings on the first effect");
+    assert_eq!(inner[0].stat_ref, ScalingStatRef::AbilityPower);
+    assert!((inner[0].percent - 0.30).abs() < 1e-6);
+    assert_eq!(inner[1].stat_ref, ScalingStatRef::AttackDamage);
+    assert!((inner[1].percent - 0.20).abs() < 1e-6);
+}
+
+#[test]
+fn lowering_scaling_unknown_stat_errors() {
+    // `spaghetti` is not in the engine's `ScalingStatRef` vocabulary
+    // (8 entries today). Surfaced loudly so authors don't silently
+    // lose scaling on a typoed stat name.
+    let err = lower_inline(
+        "ability X { target: enemy cooldown: 1s damage 50 + 30% spaghetti }"
+    );
+    match err {
+        LowerError::UnknownStatRef { ref stat, .. } => {
+            assert_eq!(stat, "spaghetti", "stat name should round-trip in error");
+        }
+        other => panic!("expected UnknownStatRef(spaghetti); got {other:?}"),
+    }
+}
+
+#[test]
+fn lowering_scaling_budget_exceeded_errors() {
+    // 3 scalings on a single effect — exceeds `MAX_SCALINGS_PER_EFFECT
+    // == 2`. Surfaced loudly so authors get a budget diagnostic.
+    let err = lower_inline(
+        "ability X { target: enemy cooldown: 1s damage 50 + 30% AP + 20% AD + 10% MaxHP }"
+    );
+    match err {
+        LowerError::ScalingBudgetExceeded { count, max, .. } => {
+            assert_eq!(max, 2, "MAX_SCALINGS_PER_EFFECT == 2");
+            assert!(count >= 3, "overflow should report at least 3 scalings; got {count}");
+        }
+        other => panic!("expected ScalingBudgetExceeded; got {other:?}"),
+    }
+}
+
+#[test]
+fn lowering_no_scaling_is_empty() {
+    // Bare effect with no `+ N% stat_ref` modifier: the lowering pass
+    // leaves `program.scalings_per_effect` empty (apply handlers treat
+    // empty + per-slot-empty identically as "flat amount only").
+    // Keeps Wave 1 corpus output bit-stable.
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("bare damage must lower");
+    assert!(
+        prog.scalings_per_effect.is_empty(),
+        "no scaling modifier → empty scalings_per_effect smallvec; got {:?}",
+        prog.scalings_per_effect,
+    );
 }
 
 // ---------------------------------------------------------------------------
