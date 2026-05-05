@@ -105,6 +105,7 @@ pub fn parse_ability_file(source: &str) -> Result<AbilityFile, ParseError> {
     let mut abilities = Vec::new();
     let mut passives = Vec::new();
     let mut templates = Vec::new();
+    let mut structures = Vec::new();
     while !c.eof() {
         let kw = peek_ident(&c);
         match kw.as_deref() {
@@ -120,23 +121,16 @@ pub fn parse_ability_file(source: &str) -> Result<AbilityFile, ParseError> {
                 Ok(decl) => templates.push(decl),
                 Err(e) => return Err(ParseError::new(source, e.span, e.context, e.message)),
             },
-            Some("structure") => {
-                // Out of scope for Wave 1.2; report a clean parse error so
-                // hero templates that include these blocks fail loudly
-                // rather than silently producing a partial AST.
-                return Err(ParseError::new(
-                    source,
-                    here(&c),
-                    vec!["parsing top-level `.ability` decl".to_string()],
-                    "`structure` blocks are not supported in this parser slice (Wave 1.2); only `ability`, `passive`, and `template` blocks are recognised".to_string(),
-                ));
-            }
+            Some("structure") => match parse_structure_decl(&mut c) {
+                Ok(decl) => structures.push(decl),
+                Err(e) => return Err(ParseError::new(source, e.span, e.context, e.message)),
+            },
             Some(other) => {
                 return Err(ParseError::new(
                     source,
                     here(&c),
                     Vec::new(),
-                    format!("expected `ability`, `passive`, or `template` (top-level); got `{other}`"),
+                    format!("expected `ability`, `passive`, `template`, or `structure` (top-level); got `{other}`"),
                 ));
             }
             None => {
@@ -144,13 +138,13 @@ pub fn parse_ability_file(source: &str) -> Result<AbilityFile, ParseError> {
                     source,
                     here(&c),
                     Vec::new(),
-                    "expected `ability`, `passive`, or `template` (top-level)".to_string(),
+                    "expected `ability`, `passive`, `template`, or `structure` (top-level)".to_string(),
                 ));
             }
         }
         c.skip_ws();
     }
-    Ok(AbilityFile { abilities, passives, templates })
+    Ok(AbilityFile { abilities, passives, templates, structures })
 }
 
 // ---------------------------------------------------------------------------
@@ -703,6 +697,118 @@ fn parse_template_arg(c: &mut Cursor) -> PResult<TemplateArg> {
             peek_word_for_error(c)
         ),
     ))
+}
+
+// ---------------------------------------------------------------------------
+// Wave 1.3 — `structure <Name>(<params>) { <body> }` top-level (spec §12)
+// ---------------------------------------------------------------------------
+
+/// Parse a `structure <Name>(<params>) { <body> }` top-level block per
+/// spec §12. Cursor sits at the `structure` keyword; on success it
+/// sits past the closing body brace.
+///
+/// Grammar:
+/// ```text
+/// structure_decl := "structure" IDENT [ "(" [ template_param ("," template_param)* [","] ] ")" ]
+///                   "{" body_raw "}"
+/// ```
+///
+/// * `IDENT` is the structure name.
+/// * The parameter list reuses `parse_template_param` verbatim — same
+///   typed grammar (int / float / bool / Material / Structure) as
+///   Wave 1.2 templates.
+/// * The body is captured OPAQUELY between the outer `{` and `}` —
+///   `body_raw` excludes the braces themselves. Per-statement parsing
+///   of the 5 body kinds (place / harvest / transform / include / if)
+///   plus the optional headers (bounds / origin / rotatable /
+///   symmetry) is deferred to a later wave when voxel storage +
+///   rasterization (spec §12.2) exists.
+///
+/// The parameter list is OPTIONAL — `structure Wall { … }` with no
+/// parens is accepted as shorthand for `structure Wall() { … }`. Spec
+/// §12 doesn't explicitly forbid it; this avoids surprising authors
+/// of zero-param structures.
+fn parse_structure_decl(c: &mut Cursor) -> PResult<StructureDecl> {
+    let start = c.pos;
+    expect_keyword(c, "structure")
+        .map_err(|e| e.with_context("parsing `structure` declaration"))?;
+    let name = ident(c).map_err(|e| e.with_context("parsing structure name"))?;
+    c.skip_ws();
+    // Optional `(<params>)`. Absent paren list = empty params (shorthand).
+    let params: Vec<TemplateParam> = if c.starts_with_char('(') {
+        c.bump(1);
+        let mut ps: Vec<TemplateParam> = Vec::new();
+        loop {
+            c.skip_ws();
+            if c.starts_with_char(')') {
+                c.bump(1);
+                break;
+            }
+            if c.eof() {
+                return Err(ParseErr::at(
+                    here(c),
+                    format!("unexpected end of input inside structure `{name}` parameter list"),
+                ));
+            }
+            let p = parse_template_param(c).map_err(|e| {
+                e.with_context(format!("parsing parameter in structure `{name}`"))
+            })?;
+            // Reject duplicate param names — same surface as duplicate
+            // template params.
+            if ps.iter().any(|q| q.name == p.name) {
+                return Err(ParseErr::at(
+                    p.span,
+                    format!(
+                        "duplicate parameter `{}` in structure `{name}`",
+                        p.name
+                    ),
+                ));
+            }
+            ps.push(p);
+            c.skip_ws();
+            if c.starts_with_char(',') {
+                c.bump(1);
+                continue;
+            }
+            if c.starts_with_char(')') {
+                c.bump(1);
+                break;
+            }
+            return Err(ParseErr::at(
+                here(c),
+                format!(
+                    "expected `,` or `)` in structure `{name}` parameter list; got `{}`",
+                    peek_word_for_error(c)
+                ),
+            ));
+        }
+        ps
+    } else {
+        Vec::new()
+    };
+    c.skip_ws();
+    if !c.starts_with_char('{') {
+        return Err(ParseErr::at(
+            here(c),
+            format!("expected `{{` to open body of structure `{name}`; got `{}`", peek_word_for_error(c)),
+        ));
+    }
+    // Capture the inner body verbatim — record positions inside the
+    // braces (excluding the braces themselves) before/after the
+    // balanced-brace scan.
+    let body_inner_start = c.pos + 1;
+    consume_balanced_braces(c).map_err(|e| {
+        e.with_context(format!("parsing body of structure `{name}`"))
+    })?;
+    // After consume_balanced_braces, cursor sits past the matching `}`.
+    let body_inner_end = c.pos - 1;
+    let body_raw = c.src[body_inner_start..body_inner_end].to_string();
+    Ok(StructureDecl {
+        name,
+        params,
+        body_raw,
+        span: Span::new(start, c.pos),
+    })
 }
 
 // ---------------------------------------------------------------------------

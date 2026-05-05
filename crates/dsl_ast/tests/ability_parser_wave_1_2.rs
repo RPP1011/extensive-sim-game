@@ -382,14 +382,13 @@ fn duplicate_template_param_is_error() {
     );
 }
 
-// Sanity: structure keyword still rejected at top level (Wave 1.3 work).
+// Wave 1.3 sanity: structure keyword now accepted at top level (the
+// Wave 1.2 era rejection is gone — see `ability_parser_wave_1_3.rs`
+// for the Wave 1.3 surface tests).
 #[test]
-fn structure_keyword_still_rejected() {
+fn structure_keyword_now_accepted_wave_1_3() {
     let src = "structure Castle() { }";
-    let err = parse_ability_file(src).expect_err("must error");
-    let msg = err.to_string();
-    assert!(
-        msg.contains("structure"),
-        "expected structure-not-supported diagnostic; got: {msg}"
-    );
+    let file = parse_ability_file(src).expect("Wave 1.3 parses structures");
+    assert_eq!(file.structures.len(), 1);
+    assert_eq!(file.structures[0].name, "Castle");
 }
