@@ -17,10 +17,6 @@
 //!   surfaced as errors.
 //!
 //! * **Out of scope (deferred to later waves):**
-//!     - Effect modifier slots (`in shape`, `for duration`, `when`,
-//!       `chance`, `[TAGS]`, `stacking`, `+ N% stat`) — Wave 1.5.
-//!       The Wave 1.0 parser already drops these on the floor; the
-//!       lowering pass therefore sees only the leading positional args.
 //!     - `deliver` / `recast` / `morph` body blocks — Wave 1.4.
 //!     - `template` / `structure` top-level blocks — Waves 1.2 / 1.3.
 //!     - Other target modes (ally/self_aoe/ground/direction/vector/global)
@@ -30,6 +26,22 @@
 //!       SummonAlly, etc.) — Waves 2-5.
 //!     - Two-phase split validator + ability-name resolution for
 //!       `cast <Name>` — Wave 1.7 (registry wiring).
+//!
+//! Wave 1.5 surfaces (parser-only — lowering deferred):
+//! The `.ability` parser now lifts the nine effect-statement modifier
+//! slots from spec §6.1 (`in <shape>`, `[TAG: value]`, `for <dur>`,
+//! `when <cond>`, `chance N%`, `stacking <mode>`, `+ N% stat_ref`,
+//! `until_caster_dies` / `damageable_hp(N)`, nested `{ … }` blocks)
+//! into typed `EffectStmt` fields. None of these lower yet — engine
+//! schema work for area expansion, status durations, conditional gates,
+//! RNG gates, stack tracking, scaling stat references, voxel
+//! lifetimes, and nested-effect dispatch all sit downstream of this
+//! parser surface. Until then `lower_effect_stmt` surfaces
+//! `LowerError::ModifierNotImplemented` for each populated modifier
+//! slot — a deliberate "errors not silent drop" choice so authors don't
+//! run with `damage 50 in circle(5)` quietly degrading to a single-
+//! target hit. The Wave 1 corpus (Strike / ShieldUp / Mend) uses no
+//! modifiers and continues to lower cleanly.
 //!
 //! Wave 1.1 surfaces (parser-only — lowering deferred):
 //! The `.ability` parser now accepts four additional `ability`-block
@@ -98,6 +110,21 @@ pub enum LowerError {
     /// Wave 1.1 parser accepted a top-level `passive` block; lowering
     /// requires PerEvent dispatch + trigger catalog wiring (Wave 2+).
     PassiveBlockNotImplemented { name: String, span: Span },
+    /// Wave 1.5 parser captured one of the nine effect-statement
+    /// modifier slots (spec §6.1) into a typed AST field. Lowering of
+    /// each slot requires distinct engine work (area expansion, status
+    /// durations, conditional gates, RNG gates, stack tracking,
+    /// scaling stat refs, voxel lifetimes, nested dispatch) — all
+    /// downstream of this parser surface. The error is surfaced rather
+    /// than swallowed so authors don't run with silently-degraded
+    /// effects.
+    ModifierNotImplemented {
+        verb:     String,
+        /// Slot identifier — one of "in" / "tags" / "for" / "when" /
+        /// "chance" / "stacking" / "scaling" / "lifetime" / "nested".
+        modifier: &'static str,
+        span:     Span,
+    },
 }
 
 impl std::fmt::Display for LowerError {
@@ -140,6 +167,10 @@ impl std::fmt::Display for LowerError {
             LowerError::PassiveBlockNotImplemented { name, .. } => write!(
                 f,
                 "`passive {name}` is parsed but lowering is Wave 2+ (PerEvent dispatch + trigger catalog not yet wired)"
+            ),
+            LowerError::ModifierNotImplemented { verb, modifier, .. } => write!(
+                f,
+                "effect verb `{verb}` carries a `{modifier}` modifier slot that is parsed but lowering is Wave 2+"
             ),
         }
     }
@@ -303,8 +334,85 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
 /// hand-rolled because the cast-to-`EffectOp` shape varies per verb
 /// (different arity, different argument types).
 ///
+/// Wave 1.5 modifier slots: any populated modifier slot (spec §6.1)
+/// produces `LowerError::ModifierNotImplemented` BEFORE the verb
+/// dispatch fires, so authors get the same surface diagnostic
+/// regardless of verb. Slot-check order matches the spec §6.1 list so
+/// the error message is stable.
+///
 /// Unknown verbs and verb/arity mismatches surface via `LowerError`.
 fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
+    // Wave 1.5: short-circuit on the first populated modifier slot.
+    // The slot order mirrors spec §6.1's evaluation order so the
+    // diagnostic an author sees is the "lowest-numbered" unimplemented
+    // slot, not whichever the dispatch happens to trip over.
+    if let Some(area) = &stmt.area {
+        return Err(LowerError::ModifierNotImplemented {
+            verb:     stmt.verb.clone(),
+            modifier: "in",
+            span:     area.span,
+        });
+    }
+    if let Some(tag) = stmt.tags.first() {
+        return Err(LowerError::ModifierNotImplemented {
+            verb:     stmt.verb.clone(),
+            modifier: "tags",
+            span:     tag.span,
+        });
+    }
+    if let Some(d) = &stmt.duration {
+        return Err(LowerError::ModifierNotImplemented {
+            verb:     stmt.verb.clone(),
+            modifier: "for",
+            span:     d.span,
+        });
+    }
+    if let Some(cond) = &stmt.condition {
+        return Err(LowerError::ModifierNotImplemented {
+            verb:     stmt.verb.clone(),
+            modifier: "when",
+            span:     cond.span,
+        });
+    }
+    if let Some(ch) = &stmt.chance {
+        return Err(LowerError::ModifierNotImplemented {
+            verb:     stmt.verb.clone(),
+            modifier: "chance",
+            span:     ch.span,
+        });
+    }
+    if stmt.stacking.is_some() {
+        return Err(LowerError::ModifierNotImplemented {
+            verb:     stmt.verb.clone(),
+            modifier: "stacking",
+            span:     stmt.span,
+        });
+    }
+    if let Some(s) = stmt.scalings.first() {
+        return Err(LowerError::ModifierNotImplemented {
+            verb:     stmt.verb.clone(),
+            modifier: "scaling",
+            span:     s.span,
+        });
+    }
+    if let Some(lt) = &stmt.lifetime {
+        let span = match lt {
+            dsl_ast::ast::EffectLifetime::UntilCasterDies { span } => *span,
+            dsl_ast::ast::EffectLifetime::DamageableHp { span, .. } => *span,
+        };
+        return Err(LowerError::ModifierNotImplemented {
+            verb:     stmt.verb.clone(),
+            modifier: "lifetime",
+            span,
+        });
+    }
+    if !stmt.nested.is_empty() {
+        return Err(LowerError::ModifierNotImplemented {
+            verb:     stmt.verb.clone(),
+            modifier: "nested",
+            span:     stmt.nested[0].span,
+        });
+    }
     match stmt.verb.as_str() {
         "damage" => {
             let amount = require_number_arg(stmt, 0)?;

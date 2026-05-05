@@ -11,24 +11,32 @@
 //!   their own header set (`trigger`, `cooldown`, `range`, `hint` per
 //!   spec §5).
 //!
-//! Effect statements are parsed as `verb arg* <ignored-modifier-tail>`:
-//! the verb name is preserved verbatim (validation against the verb
-//! catalog lives in lowering, Wave 1.6) and the first run of simple
-//! positional arguments (numbers / durations / percents / strings /
-//! idents) is collected. When the parser sees a modifier keyword (`in`,
-//! `for`, `when`, `chance`, `stacking`, `+`), a bracketed power-tag list
-//! (`[FIRE: 60]`), or a nested-effects block (`{ ... }`), it stops
-//! collecting args and skips to the next newline (balancing `()` /
-//! `[]` / `{}` along the way).
+//! Effect statements are parsed as `verb arg* modifier*`: the verb name
+//! is preserved verbatim (validation against the verb catalog lives in
+//! lowering, Wave 1.6) and the first run of simple positional arguments
+//! (numbers / durations / percents / strings / idents) is collected.
+//!
+//! Wave 1.5 lifts the nine modifier slots in spec §6.1 into typed
+//! `EffectStmt` fields (`area`, `tags`, `duration`, `condition`,
+//! `chance`, `stacking`, `scalings`, `lifetime`, `nested`). Modifiers
+//! may appear in any order after the positional args; each maps to a
+//! distinct slot; duplicates on a single-value slot are a parse error.
+//! The condition body inside `when ... [else ...]` is captured as an
+//! opaque source slice (the ~80-atom condition grammar in spec §10
+//! lands in a later wave).
 //!
 //! Out of scope for this slice (handled in later Waves):
 //! - `template` / `structure` top-level blocks (Waves 1.2 / 1.3)
 //! - `deliver` / `recast` / `morph` body blocks (Wave 1.4)
-//! - Modifier slot capture into the `EffectStmt` AST (Wave 1.5)
-//! - Lowering of the new headers / `passive` blocks
+//! - The condition grammar inside `when … [else …]` — Wave 2.
+//! - Shape vocabulary validation (12 primitives in spec §8) — Wave 2.
+//! - Tag-name vocabulary lookup against `AbilityTag` — Wave 2.
+//! - `cast_on <selector>` modifier (separate from these 9) — Wave 2.
+//! - Lowering of the new headers / `passive` blocks / modifier slots
 //!   (`crates/dsl_compiler/src/ability_lower.rs` errors with
-//!   `HeaderNotImplemented` / `PassiveBlockNotImplemented` for them
-//!   pending Wave 2+ engine schema changes).
+//!   `HeaderNotImplemented` / `PassiveBlockNotImplemented` /
+//!   `ModifierNotImplemented` for them pending Wave 2+ engine schema
+//!   changes).
 //!
 //! The parser shares the lexer infrastructure (`Cursor`, `is_ident_start`,
 //! `is_ident_cont`) with the `.sim` parser at `parser.rs`.
@@ -635,6 +643,19 @@ fn parse_effect(c: &mut Cursor) -> PResult<EffectStmt> {
     let start = c.pos;
     let verb = ident(c).map_err(|e| e.with_context("parsing effect verb"))?;
     let mut args: Vec<EffectArg> = Vec::new();
+    // Wave 1.5 modifier slots — collected into the EffectStmt below.
+    let mut area: Option<EffectArea> = None;
+    let mut tags: Vec<EffectTag> = Vec::new();
+    let mut duration: Option<EffectDuration> = None;
+    let mut condition: Option<EffectCondition> = None;
+    let mut chance: Option<EffectChance> = None;
+    let mut stacking: Option<StackingMode> = None;
+    let mut scalings: Vec<EffectScaling> = Vec::new();
+    let mut lifetime: Option<EffectLifetime> = None;
+    let mut nested: Vec<EffectStmt> = Vec::new();
+
+    // Phase 1: collect leading positional args (numbers / durations /
+    // percents / strings / idents). Stops at the first modifier token.
     loop {
         // Skip ONLY inline whitespace — a newline ends the statement.
         skip_inline_ws_only(c);
@@ -643,30 +664,10 @@ fn parse_effect(c: &mut Cursor) -> PResult<EffectStmt> {
         }
         // Comments terminate the line.
         if c.starts_with("//") || c.starts_with_char('#') {
-            // Consume to end of line.
-            while let Some(ch) = c.peek_char() {
-                if ch == '\n' {
-                    break;
-                }
-                c.bump(ch.len_utf8());
-            }
+            consume_to_eol(c);
             break;
         }
-        // Modifier-tail tokens — Wave 1.0 stops collecting args and
-        // skips them. Power tags `[…]`, scoped fan-out `in <shape>`,
-        // duration `for <dur>`, conditional `when <cond>`, probability
-        // `chance <p>`, stacking, scaling `+ N% stat`, nested
-        // `{ … }` — all deferred.
-        if c.starts_with_char('[')
-            || c.starts_with_char('{')
-            || c.starts_with_char('+')
-            || starts_with_keyword(c, "in")
-            || starts_with_keyword(c, "for")
-            || starts_with_keyword(c, "when")
-            || starts_with_keyword(c, "chance")
-            || starts_with_keyword(c, "stacking")
-        {
-            skip_modifier_tail(c);
+        if is_modifier_start(c) {
             break;
         }
         // Trailing `,` is unusual on effect lines but we accept it as
@@ -678,7 +679,584 @@ fn parse_effect(c: &mut Cursor) -> PResult<EffectStmt> {
         let arg = parse_effect_arg(c)?;
         args.push(arg);
     }
-    Ok(EffectStmt { verb, args, span: Span::new(start, c.pos) })
+
+    // Phase 2: dispatch modifiers. Modifiers may appear in any order;
+    // every keyword maps to a distinct slot; duplicates on single-value
+    // slots are a parse error.
+    loop {
+        // Modifiers may span lines: `damage 50` then on the next line
+        // `+ 30% AP`. We do NOT cross a blank line however — a blank
+        // line ends the statement. The skip_inline_ws_only + newline
+        // probe below mirrors the phase-1 termination rule but allows
+        // wrapping if the next non-ws char IS a modifier start.
+        skip_inline_ws_only(c);
+        if c.eof() || c.starts_with_char('}') {
+            break;
+        }
+        if c.starts_with("//") || c.starts_with_char('#') {
+            consume_to_eol(c);
+            break;
+        }
+        if c.starts_with_char('\n') {
+            // Look ahead past the newline + leading whitespace to see
+            // if the next token continues this statement (only `+`,
+            // `[`, `{`, or one of the modifier keywords). Otherwise
+            // the statement ends.
+            if !modifier_continues_after_newline(c) {
+                break;
+            }
+            // Consume the newline + any inline whitespace; the next
+            // iteration parses the modifier.
+            while let Some(ch) = c.peek_char() {
+                if ch.is_whitespace() {
+                    c.bump(ch.len_utf8());
+                } else {
+                    break;
+                }
+            }
+            continue;
+        }
+        if !is_modifier_start(c) {
+            // Anything else here is junk after the positional args
+            // that wasn't a recognised modifier — error loudly so the
+            // author sees the offending token.
+            return Err(ParseErr::at(
+                here(c),
+                format!(
+                    "unknown modifier or trailing token `{}` in effect `{verb}`; expected one of: in / [TAG: …] / for / when / chance / stacking / + N% stat / until_caster_dies / damageable_hp / {{ nested }}",
+                    peek_word_for_error(c)
+                ),
+            ));
+        }
+        let mod_start = c.pos;
+        if c.starts_with_char('[') {
+            let tag = parse_tag(c)?;
+            tags.push(tag);
+            continue;
+        }
+        if c.starts_with_char('{') {
+            let block = parse_nested_block(c)?;
+            // Spec §6.1 doesn't constrain the count of nested-block
+            // modifiers per effect; accept any number, append in order.
+            nested.extend(block);
+            continue;
+        }
+        if c.starts_with_char('+') {
+            let s = parse_scaling(c)?;
+            scalings.push(s);
+            continue;
+        }
+        if starts_with_keyword(c, "in") {
+            if area.is_some() {
+                return Err(ParseErr::at(
+                    Span::new(mod_start, c.pos),
+                    format!("duplicate `in <shape>` modifier on effect `{verb}` — at most one allowed"),
+                ));
+            }
+            area = Some(parse_area(c)?);
+            continue;
+        }
+        if starts_with_keyword(c, "for") {
+            if duration.is_some() {
+                return Err(ParseErr::at(
+                    Span::new(mod_start, c.pos),
+                    format!("duplicate `for <duration>` modifier on effect `{verb}` — at most one allowed"),
+                ));
+            }
+            duration = Some(parse_for_duration(c)?);
+            continue;
+        }
+        if starts_with_keyword(c, "when") {
+            if condition.is_some() {
+                return Err(ParseErr::at(
+                    Span::new(mod_start, c.pos),
+                    format!("duplicate `when <cond>` modifier on effect `{verb}` — at most one allowed"),
+                ));
+            }
+            condition = Some(parse_condition(c)?);
+            continue;
+        }
+        if starts_with_keyword(c, "chance") {
+            if chance.is_some() {
+                return Err(ParseErr::at(
+                    Span::new(mod_start, c.pos),
+                    format!("duplicate `chance` modifier on effect `{verb}` — at most one allowed"),
+                ));
+            }
+            chance = Some(parse_chance(c)?);
+            continue;
+        }
+        if starts_with_keyword(c, "stacking") {
+            if stacking.is_some() {
+                return Err(ParseErr::at(
+                    Span::new(mod_start, c.pos),
+                    format!("duplicate `stacking` modifier on effect `{verb}` — at most one allowed"),
+                ));
+            }
+            stacking = Some(parse_stacking(c)?);
+            continue;
+        }
+        if starts_with_keyword(c, "until_caster_dies") {
+            if lifetime.is_some() {
+                return Err(ParseErr::at(
+                    Span::new(mod_start, c.pos),
+                    format!("duplicate lifetime modifier on effect `{verb}` — at most one of `until_caster_dies` / `damageable_hp` allowed"),
+                ));
+            }
+            let s = c.pos;
+            c.bump("until_caster_dies".len());
+            lifetime = Some(EffectLifetime::UntilCasterDies { span: Span::new(s, c.pos) });
+            continue;
+        }
+        if starts_with_keyword(c, "damageable_hp") {
+            if lifetime.is_some() {
+                return Err(ParseErr::at(
+                    Span::new(mod_start, c.pos),
+                    format!("duplicate lifetime modifier on effect `{verb}` — at most one of `until_caster_dies` / `damageable_hp` allowed"),
+                ));
+            }
+            lifetime = Some(parse_damageable_hp(c)?);
+            continue;
+        }
+        // Defensive: shouldn't be reachable because is_modifier_start
+        // above returned true. Belt + braces.
+        return Err(ParseErr::at(
+            here(c),
+            format!(
+                "unknown modifier `{}` in effect `{verb}`",
+                peek_word_for_error(c)
+            ),
+        ));
+    }
+
+    Ok(EffectStmt {
+        verb,
+        args,
+        span: Span::new(start, c.pos),
+        area,
+        tags,
+        duration,
+        condition,
+        chance,
+        stacking,
+        scalings,
+        lifetime,
+        nested,
+    })
+}
+
+/// Return `true` iff the cursor sits at the start of a known modifier
+/// token. Used by `parse_effect` to decide between "another positional
+/// arg" and "first modifier slot". The set of triggers is the disjoint
+/// union of:
+///  * `[`            — `[TAG: value]`
+///  * `{`            — nested block
+///  * `+`            — `+ N% stat_ref`
+///  * `in` / `for` / `when` / `chance` / `stacking`
+///  * `until_caster_dies` / `damageable_hp` (lifetime keywords)
+fn is_modifier_start(c: &Cursor) -> bool {
+    if c.starts_with_char('[') || c.starts_with_char('{') || c.starts_with_char('+') {
+        return true;
+    }
+    starts_with_keyword(c, "in")
+        || starts_with_keyword(c, "for")
+        || starts_with_keyword(c, "when")
+        || starts_with_keyword(c, "chance")
+        || starts_with_keyword(c, "stacking")
+        || starts_with_keyword(c, "until_caster_dies")
+        || starts_with_keyword(c, "damageable_hp")
+}
+
+/// After hitting a `\n` inside an effect statement, peek past the
+/// whitespace and decide whether the next non-blank line continues the
+/// modifier list. Returns `true` only when the next token is a clear
+/// modifier start AND it isn't a header line for the next effect /
+/// ability body.
+///
+/// We deliberately do NOT continue across newlines for `in` / `for` /
+/// `when` / `chance` / `stacking` / `until_caster_dies` /
+/// `damageable_hp` because those keywords could be the start of an
+/// effect verb on the next line in a malformed program (e.g. an author
+/// who omitted a verb). Continuation is only safe for the purely
+/// punctuation-led modifier syntaxes: `+`, `[`, `{`. Any keyword-led
+/// modifier on a continuation line should be on the same line as the
+/// effect verb.
+fn modifier_continues_after_newline(c: &Cursor) -> bool {
+    let mut probe = Cursor { src: c.src, pos: c.pos };
+    while let Some(ch) = probe.peek_char() {
+        if ch.is_whitespace() {
+            probe.bump(ch.len_utf8());
+        } else {
+            break;
+        }
+    }
+    if probe.eof() {
+        return false;
+    }
+    probe.starts_with_char('+') || probe.starts_with_char('[') || probe.starts_with_char('{')
+}
+
+fn consume_to_eol(c: &mut Cursor) {
+    while let Some(ch) = c.peek_char() {
+        if ch == '\n' {
+            break;
+        }
+        c.bump(ch.len_utf8());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Wave 1.5 — per-modifier sub-parsers
+// ---------------------------------------------------------------------------
+
+/// Parse `in <shape>(args…)`. The cursor starts at `in`; on success it
+/// sits past the closing `)`.
+///
+/// Per spec §8 there are 12 shape primitives plus CSG composition. Wave
+/// 1.5 stores the shape name verbatim and a flat `Vec<f32>` of args;
+/// the lowering pass validates the name + arity. CSG composition
+/// (`union` / `diff` / `intersect`) is NOT recognised here — the corpus
+/// post-Wave-1.5 sticks to a single shape per effect (Aatrox-style
+/// `in circle(2.5)`); CSG-bearing effects will need a follow-up parse
+/// pass when they show up in real source.
+fn parse_area(c: &mut Cursor) -> PResult<EffectArea> {
+    let start = c.pos;
+    expect_keyword(c, "in").map_err(|e| e.with_context("parsing `in <shape>` modifier"))?;
+    skip_inline_ws_only(c);
+    let shape = ident(c).map_err(|e| e.with_context("parsing shape name after `in`"))?;
+    skip_inline_ws_only(c);
+    expect_char(c, '(').map_err(|e| {
+        e.with_context(format!("parsing shape `{shape}(…)` arg list (expected `(`)"))
+    })?;
+    let mut args: Vec<f32> = Vec::new();
+    loop {
+        skip_inline_ws_only(c);
+        if c.starts_with_char(')') {
+            c.bump(1);
+            break;
+        }
+        if c.eof() {
+            return Err(ParseErr::at(here(c), format!("unexpected end of input inside `{shape}(…)`")));
+        }
+        let (val, _is_float) = number_literal(c)
+            .map_err(|e| e.with_context(format!("parsing arg in `{shape}(…)`")))?;
+        // Shapes accept `5deg` for cone angles per spec §8 (`cone(r,
+        // angle_deg)` — the corpus uses bare numbers but `45deg` is a
+        // documented form). Accept the suffix and store the bare
+        // number (degrees) — Wave 1.5 stores opaquely; lowering owns
+        // unit normalisation.
+        if c.starts_with("deg") {
+            // Match only on a bare unit token (not part of a longer
+            // ident).
+            let after = c.pos + 3;
+            let next = c.src[after..].chars().next();
+            if next.map_or(true, |ch| !is_ident_cont(ch)) {
+                c.bump(3);
+            }
+        }
+        args.push(val as f32);
+        skip_inline_ws_only(c);
+        if c.starts_with_char(',') {
+            c.bump(1);
+            continue;
+        }
+        if c.starts_with_char(')') {
+            c.bump(1);
+            break;
+        }
+        return Err(ParseErr::at(
+            here(c),
+            format!("expected `,` or `)` inside `{shape}(…)`; got `{}`", peek_word_for_error(c)),
+        ));
+    }
+    Ok(EffectArea { shape, args, span: Span::new(start, c.pos) })
+}
+
+/// Parse one `[TAG: value]` power tag. The cursor sits at `[`; on
+/// success it sits past the matching `]`.
+fn parse_tag(c: &mut Cursor) -> PResult<EffectTag> {
+    let start = c.pos;
+    expect_char(c, '[').map_err(|e| e.with_context("parsing `[TAG: value]` modifier"))?;
+    skip_inline_ws_only(c);
+    let name = ident(c).map_err(|e| e.with_context("parsing tag name inside `[…]`"))?;
+    skip_inline_ws_only(c);
+    expect_char(c, ':').map_err(|e| {
+        e.with_context(format!("parsing tag `[{name}: …]` (expected `:`)"))
+    })?;
+    skip_inline_ws_only(c);
+    let (val, _is_float) = number_literal(c)
+        .map_err(|e| e.with_context(format!("parsing value of tag `[{name}: …]`")))?;
+    skip_inline_ws_only(c);
+    expect_char(c, ']').map_err(|e| {
+        e.with_context(format!("parsing tag `[{name}: …]` (expected `]`)"))
+    })?;
+    Ok(EffectTag { name, value: val as f32, span: Span::new(start, c.pos) })
+}
+
+/// Parse `for <duration>`. Cursor starts at `for`.
+fn parse_for_duration(c: &mut Cursor) -> PResult<EffectDuration> {
+    let start = c.pos;
+    expect_keyword(c, "for").map_err(|e| e.with_context("parsing `for <duration>` modifier"))?;
+    let d = parse_duration(c).map_err(|e| e.with_context("parsing `for <duration>` value"))?;
+    Ok(EffectDuration { duration: d, span: Span::new(start, c.pos) })
+}
+
+/// Parse `when <cond> [else <cond>]`. The condition language (~80
+/// atoms in spec §10) is owned by the expression parser; Wave 1.5
+/// captures opaque source slices terminated by the next modifier
+/// keyword / EOL / `}`. Inside parens / brackets / braces we follow
+/// nesting so `when (a or b)` doesn't terminate at the inner `)`.
+fn parse_condition(c: &mut Cursor) -> PResult<EffectCondition> {
+    let start = c.pos;
+    expect_keyword(c, "when").map_err(|e| e.with_context("parsing `when <cond>` modifier"))?;
+    let when_cond = capture_cond_text(c, /* stop_on_else = */ true)?;
+    if when_cond.is_empty() {
+        return Err(ParseErr::at(
+            here(c),
+            "empty condition body after `when`".to_string(),
+        ));
+    }
+    let else_cond = if starts_with_keyword(c, "else") {
+        c.bump("else".len());
+        let body = capture_cond_text(c, /* stop_on_else = */ false)?;
+        if body.is_empty() {
+            return Err(ParseErr::at(
+                here(c),
+                "empty condition body after `else`".to_string(),
+            ));
+        }
+        Some(body)
+    } else {
+        None
+    };
+    Ok(EffectCondition {
+        when_cond,
+        else_cond,
+        span: Span::new(start, c.pos),
+    })
+}
+
+/// Capture the verbatim source slice of a `when` / `else` condition
+/// body. Stops at:
+///  - end of statement (`\n`, `;`, EOF, `}`)
+///  - any other modifier keyword (`in`/`for`/`chance`/`stacking`/
+///    `until_caster_dies`/`damageable_hp`)
+///  - a `[…]` power tag start (`[`) or nested block (`{`) at top level
+///  - if `stop_on_else` is true: the `else` keyword (so the caller can
+///    consume it and recurse for the alternative branch)
+///
+/// Balances `()` so `when (a or b)` doesn't terminate at `)`.
+fn capture_cond_text(c: &mut Cursor, stop_on_else: bool) -> PResult<String> {
+    skip_inline_ws_only(c);
+    let start = c.pos;
+    let mut paren_depth = 0i32;
+    let mut bracket_depth = 0i32;
+    let mut brace_depth = 0i32;
+    while let Some(ch) = c.peek_char() {
+        // Termination conditions only apply at outer nesting depth.
+        if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
+            if ch == '\n' || ch == ';' || ch == '}' {
+                break;
+            }
+            // Comment ends the condition.
+            if c.starts_with("//") || c.starts_with_char('#') {
+                break;
+            }
+            if stop_on_else && starts_with_keyword(c, "else") {
+                break;
+            }
+            // Power tag / nested block / scaling all end the condition
+            // body (the caller's modifier loop will pick them up).
+            if ch == '[' || ch == '{' || ch == '+' {
+                break;
+            }
+            if starts_with_keyword(c, "in")
+                || starts_with_keyword(c, "for")
+                || starts_with_keyword(c, "chance")
+                || starts_with_keyword(c, "stacking")
+                || starts_with_keyword(c, "until_caster_dies")
+                || starts_with_keyword(c, "damageable_hp")
+            {
+                break;
+            }
+            // Top-level `when` after a `when` body terminates that
+            // body — the caller's modifier loop then sees the second
+            // `when` and produces a duplicate-slot error. Inside an
+            // `else` body (stop_on_else=false), `when` is allowed: the
+            // brief's example `... when X else when Y` reads "else
+            // when Y" as the alternative branch's body, not a fresh
+            // outer-level `when` modifier.
+            if stop_on_else && starts_with_keyword(c, "when") {
+                break;
+            }
+        }
+        match ch {
+            '(' => paren_depth += 1,
+            ')' => paren_depth = (paren_depth - 1).max(0),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = (bracket_depth - 1).max(0),
+            '{' => brace_depth += 1,
+            '}' => brace_depth -= 1,
+            '"' => {
+                // Skip past the matching quote (cheap escape handling).
+                c.bump(1);
+                while let Some(qc) = c.peek_char() {
+                    if qc == '\\' {
+                        c.bump(1);
+                        if let Some(esc) = c.peek_char() {
+                            c.bump(esc.len_utf8());
+                        }
+                        continue;
+                    }
+                    if qc == '"' {
+                        c.bump(1);
+                        break;
+                    }
+                    c.bump(qc.len_utf8());
+                }
+                continue;
+            }
+            _ => {}
+        }
+        c.bump(ch.len_utf8());
+    }
+    Ok(c.src[start..c.pos].trim().to_string())
+}
+
+/// Parse `chance N%`. The trailing `%` is mandatory per the brief
+/// (`chance 30%` -> `EffectChance { p: 0.30 }`). A bare number form
+/// (`chance 0.30`) is rejected so authors don't accidentally type
+/// `chance 30` and silently get a 30x amplification.
+fn parse_chance(c: &mut Cursor) -> PResult<EffectChance> {
+    let start = c.pos;
+    expect_keyword(c, "chance").map_err(|e| e.with_context("parsing `chance N%` modifier"))?;
+    skip_inline_ws_only(c);
+    let val_start = c.pos;
+    let (val, _is_float) = number_literal(c)
+        .map_err(|e| e.with_context("parsing `chance` value"))?;
+    if !c.starts_with_char('%') {
+        return Err(ParseErr::at(
+            Span::new(val_start, c.pos),
+            "`chance` value must carry a `%` suffix (e.g. `chance 25%`)".to_string(),
+        ));
+    }
+    c.bump(1);
+    let p = (val as f32) / 100.0;
+    if !p.is_finite() || p < 0.0 || p > 1.0 {
+        return Err(ParseErr::at(
+            Span::new(val_start, c.pos),
+            format!("`chance {val}%` is out of range; expected 0%..=100%"),
+        ));
+    }
+    Ok(EffectChance { p, span: Span::new(start, c.pos) })
+}
+
+/// Parse `stacking refresh|stack|extend`.
+fn parse_stacking(c: &mut Cursor) -> PResult<StackingMode> {
+    expect_keyword(c, "stacking").map_err(|e| e.with_context("parsing `stacking <mode>` modifier"))?;
+    skip_inline_ws_only(c);
+    let mode_start = c.pos;
+    let name = ident(c).map_err(|e| e.with_context("parsing stacking mode"))?;
+    match name.as_str() {
+        "refresh" => Ok(StackingMode::Refresh),
+        "stack" => Ok(StackingMode::Stack),
+        "extend" => Ok(StackingMode::Extend),
+        other => Err(ParseErr::at(
+            Span::new(mode_start, mode_start + other.len()),
+            format!(
+                "unknown stacking mode `{other}` — expected one of: refresh, stack, extend"
+            ),
+        )),
+    }
+}
+
+/// Parse `+ N% stat_ref`. The cursor starts at `+`. `stat_ref` is the
+/// next ident-like token; we accept `AP`, `AD`, `self.hp` and similar
+/// dotted refs (the dot-segment is captured verbatim — lowering owns
+/// resolution).
+fn parse_scaling(c: &mut Cursor) -> PResult<EffectScaling> {
+    let start = c.pos;
+    expect_char(c, '+').map_err(|e| e.with_context("parsing `+ N% stat_ref` modifier"))?;
+    skip_inline_ws_only(c);
+    let val_start = c.pos;
+    let (val, _is_float) = number_literal(c)
+        .map_err(|e| e.with_context("parsing scaling percent"))?;
+    if !c.starts_with_char('%') {
+        return Err(ParseErr::at(
+            Span::new(val_start, c.pos),
+            "scaling value must carry a `%` suffix (e.g. `+ 30% AP`)".to_string(),
+        ));
+    }
+    c.bump(1);
+    skip_inline_ws_only(c);
+    let stat_ref = parse_stat_ref(c).map_err(|e| e.with_context("parsing `+ N% stat_ref` stat reference"))?;
+    Ok(EffectScaling {
+        percent: val as f32,
+        stat_ref,
+        span: Span::new(start, c.pos),
+    })
+}
+
+/// Parse a stat reference: an ident followed by zero or more
+/// `.segment` continuations. Examples: `AP`, `AD`, `self.hp`,
+/// `target.max_hp`. Stops at the first non-ident / non-dot char.
+fn parse_stat_ref(c: &mut Cursor) -> PResult<String> {
+    let start = c.pos;
+    let _first = ident(c)?;
+    loop {
+        if !c.starts_with_char('.') {
+            break;
+        }
+        c.bump(1);
+        // Tolerate a missing segment (`AP.`) by erroring.
+        let next = c.peek_char();
+        if next.map_or(true, |ch| !is_ident_start(ch)) {
+            return Err(ParseErr::at(
+                here(c),
+                "expected identifier after `.` in stat reference".to_string(),
+            ));
+        }
+        let _seg = ident(c)?;
+    }
+    Ok(c.src[start..c.pos].to_string())
+}
+
+/// Parse `damageable_hp(N)`. Cursor starts at `damageable_hp`.
+fn parse_damageable_hp(c: &mut Cursor) -> PResult<EffectLifetime> {
+    let start = c.pos;
+    expect_keyword(c, "damageable_hp").map_err(|e| e.with_context("parsing `damageable_hp(N)` modifier"))?;
+    skip_inline_ws_only(c);
+    expect_char(c, '(').map_err(|e| e.with_context("parsing `damageable_hp(N)` (expected `(`)"))?;
+    skip_inline_ws_only(c);
+    let (val, _is_float) = number_literal(c)
+        .map_err(|e| e.with_context("parsing `damageable_hp(N)` HP value"))?;
+    skip_inline_ws_only(c);
+    expect_char(c, ')').map_err(|e| e.with_context("parsing `damageable_hp(N)` (expected `)`)"))?;
+    Ok(EffectLifetime::DamageableHp { hp: val as f32, span: Span::new(start, c.pos) })
+}
+
+/// Parse a nested `{ … }` block of effect statements. The cursor sits
+/// at `{`; on success it sits past the matching `}`. Returns the
+/// flattened list of inner `EffectStmt`s in source order. Inner
+/// effects parse with the full Wave 1.5 modifier surface (recursion is
+/// allowed — `heal 50 { stun 1s when target.alive }` works).
+fn parse_nested_block(c: &mut Cursor) -> PResult<Vec<EffectStmt>> {
+    expect_char(c, '{').map_err(|e| e.with_context("parsing nested `{ … }` block modifier"))?;
+    let mut out: Vec<EffectStmt> = Vec::new();
+    loop {
+        c.skip_ws();
+        if c.starts_with_char('}') {
+            c.bump(1);
+            break;
+        }
+        if c.eof() {
+            return Err(ParseErr::at(here(c), "unexpected end of input inside nested `{ … }`".to_string()));
+        }
+        let stmt = parse_effect(c)
+            .map_err(|e| e.with_context("parsing effect inside nested `{ … }` block"))?;
+        out.push(stmt);
+    }
+    Ok(out)
 }
 
 fn parse_effect_arg(c: &mut Cursor) -> PResult<EffectArg> {
@@ -723,74 +1301,6 @@ fn parse_effect_arg(c: &mut Cursor) -> PResult<EffectArg> {
         here(c),
         format!("expected effect argument; got `{}`", peek_word_for_error(c)),
     ))
-}
-
-/// Skip the trailing modifier portion of an effect statement to the next
-/// newline (or to the closing `}` of the ability body), balancing `()`
-/// / `[]` / `{}` along the way. Wave 1.5 will replace this with a real
-/// modifier parser.
-fn skip_modifier_tail(c: &mut Cursor) {
-    let mut paren_depth = 0i32;
-    let mut bracket_depth = 0i32;
-    let mut brace_depth = 0i32;
-    while let Some(ch) = c.peek_char() {
-        match ch {
-            '\n' if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => break,
-            '}' if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
-                // Ability body closer; do NOT consume.
-                break;
-            }
-            '(' => {
-                paren_depth += 1;
-                c.bump(1);
-            }
-            ')' => {
-                paren_depth = (paren_depth - 1).max(0);
-                c.bump(1);
-            }
-            '[' => {
-                bracket_depth += 1;
-                c.bump(1);
-            }
-            ']' => {
-                bracket_depth = (bracket_depth - 1).max(0);
-                c.bump(1);
-            }
-            '{' => {
-                brace_depth += 1;
-                c.bump(1);
-            }
-            '}' => {
-                brace_depth -= 1;
-                c.bump(1);
-                if brace_depth <= 0 {
-                    brace_depth = 0;
-                }
-            }
-            '"' => {
-                // Skip string literal (don't try to parse, just advance
-                // past matching quote, honouring backslash escape).
-                c.bump(1);
-                while let Some(ch) = c.peek_char() {
-                    if ch == '\\' {
-                        c.bump(1);
-                        if let Some(esc) = c.peek_char() {
-                            c.bump(esc.len_utf8());
-                        }
-                        continue;
-                    }
-                    if ch == '"' {
-                        c.bump(1);
-                        break;
-                    }
-                    c.bump(ch.len_utf8());
-                }
-            }
-            _ => {
-                c.bump(ch.len_utf8());
-            }
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
