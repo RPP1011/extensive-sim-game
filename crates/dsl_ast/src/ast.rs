@@ -843,15 +843,89 @@ pub struct AbilityFile {
 ///
 /// `headers` is the list of header properties in source order. Duplicate
 /// header keys are rejected at parse time. `effects` is the list of bare
-/// effect statements in source order. The Wave 1.0 parser does NOT support
-/// `deliver` / `recast` / `morph` blocks — those are parse errors today
-/// (deferred to Wave 1.4).
+/// effect statements in source order.
+///
+/// Wave 1.4 added two optional body-block fields:
+/// * `deliver` — a `deliver <method> { params } { body }` block; captured
+///   opaquely (verbatim source slice) because the inner delivery-method
+///   params + on_hit/on_arrival/on_tick hooks belong to spec §9 and are
+///   wave-2+ work. Storing it here lets lowering surface a clean
+///   "deliver block not implemented" error and lets downstream tooling
+///   round-trip the source.
+/// * `morph` — a `morph { effects } into <Other>` block.
+///
+/// Spec §4.4 / §23.1 says deliver and bare `effects` are mutually
+/// exclusive, but a portion of the LoL corpus (e.g. Ahri.SpiritRush)
+/// pairs `deliver projectile { … } { on_hit { … } }` with a trailing
+/// `dash to_target`. To maximise the corpus parse rate Wave 1.4 admits
+/// both at parse time; the lowering layer (`dsl_compiler`) is the one
+/// that enforces the mutual-exclusion via `LowerError::MixedBody`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct AbilityDecl {
     pub name: String,
     pub headers: Vec<AbilityHeader>,
     pub effects: Vec<EffectStmt>,
+    /// Wave 1.4: optional `deliver <method> { params } { body }` block.
+    /// `None` for ability bodies that use only bare effects (the Wave 1
+    /// corpus). See `DeliverBlock` for the opaque-capture rationale.
+    pub deliver: Option<DeliverBlock>,
+    /// Wave 1.4: optional `morph { effects } into <Other>` block. `None`
+    /// for the LoL corpus (no morph usage); ships for spec coverage.
+    pub morph:   Option<MorphBlock>,
     pub span: Span,
+}
+
+/// `deliver <method> { params } { body }` — projectile / channel / zone /
+/// chain / tether / trap delivery wrapper (spec §9, six methods).
+///
+/// Wave 1.4 captures the entire deliver invocation as a verbatim source
+/// slice (`raw`) — the inner `{ key: val, … }` params block and the
+/// `{ on_hit { … } | on_arrival { … } | on_tick { … } | … }` body
+/// block both belong to spec §9 hook grammar (Wave 2+). Storing the
+/// opaque slice lets:
+///   1. The parser succeed on the 110+ LoL files that use `deliver`.
+///   2. Lowering surface a clean
+///      `LowerError::DeliverBlockNotImplemented` instead of a parse
+///      error.
+///   3. Downstream tooling (formatter, schema-hash, IR diff) recover
+///      the original text without re-traversing the source.
+///
+/// `method` is the delivery-method ident immediately following
+/// `deliver` (`projectile`, `channel`, `zone`, `chain`, `tether`,
+/// `trap`). It's pulled out of the slice so callers can reason about
+/// the delivery shape without re-parsing `raw`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DeliverBlock {
+    /// Delivery method ident (`projectile`, `channel`, `zone`, `chain`,
+    /// `tether`, `trap`). Verbatim source spelling; spec validation is
+    /// lowering's job.
+    pub method: String,
+    /// Verbatim source slice from the `deliver` keyword to (and
+    /// including) the closing `}` of the body block. Multi-line; trims
+    /// no whitespace.
+    pub raw:    String,
+    pub span:   Span,
+}
+
+/// `morph { effects } into <Other>` — temporary form-swap (spec §4.4
+/// reserved keyword + §6.4.4 body-item grammar).
+///
+/// Inner `effects` re-uses the regular `EffectStmt` grammar (parser
+/// recursion is allowed). `into` carries the name of the morphed-into
+/// ability — semantic resolution against the `AbilityRegistry` is
+/// lowering's job.
+///
+/// Wave 1.4 ships this surface even though the LoL corpus has no
+/// `morph` usage today: the spec calls it out as one of the three
+/// body-block forms, and shipping it now keeps the AST forward-stable
+/// when authors begin using it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct MorphBlock {
+    pub effects: Vec<EffectStmt>,
+    /// Ident of the ability to morph into (e.g. `Heatseeker`). Resolution
+    /// against the registry happens in lowering.
+    pub into:    String,
+    pub span:    Span,
 }
 
 /// One header property line inside an `ability` block. Wave 1.0 covered
@@ -885,6 +959,30 @@ pub enum AbilityHeader {
     /// per-tick drain semantics need engine-side accounting we don't
     /// have yet).
     Toggle,
+    /// Wave 1.4: `recast: <int|dur>` — multi-stage cast state (spec
+    /// §4.2: "recast / recast_window | int / dur | multi-stage cast
+    /// state"). The corpus uses bare ints (`recast: 1`, `recast: 3`)
+    /// to mean "max consecutive recasts", and durations (`recast: 4s`)
+    /// to mean "recast cooldown". Both forms are accepted; lowering
+    /// (Wave 2+) interprets per the full spec semantics.
+    Recast(RecastValue),
+    /// Wave 1.4: `recast_window: <duration>` — how long after the
+    /// initial cast the recast window stays open before the recast
+    /// state is dropped. Spec §4.2 fixes the type to duration only.
+    RecastWindow(Duration),
+}
+
+/// `recast:` value — int (count of allowed recasts) or duration
+/// (recast cooldown). Spec §4.2 lists `recast: int / dur`. The corpus
+/// has both forms — `recast: 1` (int) on Aatrox.TheDarkinBlade and
+/// `recast: 4s` would be a valid duration form. Wave 1.4 stores the
+/// shape parsed; lowering (Wave 2+) owns the semantic distinction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum RecastValue {
+    /// `recast: N` — integer count.
+    Count(u32),
+    /// `recast: <duration>` — recast cooldown.
+    Duration(Duration),
 }
 
 /// Resource cost expression for the `cost:` header.

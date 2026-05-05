@@ -16,10 +16,10 @@ pub mod eval;
 
 pub use ability_parser::parse_ability_file;
 pub use ast::{
-    AbilityDecl, AbilityFile, AbilityHeader, CostAmount, CostResource, CostSpec, Decl, Duration,
-    EffectArea, EffectArg, EffectChance, EffectCondition, EffectDuration, EffectLifetime,
-    EffectScaling, EffectStmt, EffectTag, HintName, PassiveDecl, PassiveHeader, Program, Span,
-    Spanned, StackingMode, TargetMode,
+    AbilityDecl, AbilityFile, AbilityHeader, CostAmount, CostResource, CostSpec, Decl,
+    DeliverBlock, Duration, EffectArea, EffectArg, EffectChance, EffectCondition, EffectDuration,
+    EffectLifetime, EffectScaling, EffectStmt, EffectTag, HintName, MorphBlock, PassiveDecl,
+    PassiveHeader, Program, RecastValue, Span, Spanned, StackingMode, TargetMode,
 };
 pub use error::ParseError;
 pub use ir::Compilation;

@@ -17,7 +17,6 @@
 //!   surfaced as errors.
 //!
 //! * **Out of scope (deferred to later waves):**
-//!     - `deliver` / `recast` / `morph` body blocks — Wave 1.4.
 //!     - `template` / `structure` top-level blocks — Waves 1.2 / 1.3.
 //!     - Other target modes (ally/self_aoe/ground/direction/vector/global)
 //!       and `economic` hint — error today, wired by their respective
@@ -26,6 +25,25 @@
 //!       SummonAlly, etc.) — Waves 2-5.
 //!     - Two-phase split validator + ability-name resolution for
 //!       `cast <Name>` — Wave 1.7 (registry wiring).
+//!
+//! Wave 1.4 surfaces (parser-only — lowering deferred):
+//! The parser now accepts:
+//!   * `recast: <int|dur>` and `recast_window: <duration>` ability
+//!     headers.
+//!   * `deliver <method> { params } { body }` body blocks (captured
+//!     opaquely as a verbatim source slice — spec §9 hooks are Wave
+//!     2+).
+//!   * `morph { effects } into <Other>` body blocks.
+//! Lowering of all five surfaces requires engine-side schema work
+//! (multi-stage cast state, delivery-method SoA + on_*/on_arrival hook
+//! dispatch, form-swap state machinery). Until then this module surfaces
+//! `LowerError::HeaderNotImplemented { header: "recast" | "recast_window" }`,
+//! `LowerError::DeliverBlockNotImplemented`, and
+//! `LowerError::MorphBlockNotImplemented` respectively. Spec §4.4
+//! states deliver and bare effects are mutually exclusive; the parser
+//! deliberately admits coexistence to maximise corpus parse rate, and
+//! this module enforces the spec rule via `LowerError::MixedBody`
+//! BEFORE the deliver-block error fires.
 //!
 //! Wave 1.5 surfaces (parser-only — lowering deferred):
 //! The `.ability` parser now lifts the nine effect-statement modifier
@@ -125,6 +143,24 @@ pub enum LowerError {
         modifier: &'static str,
         span:     Span,
     },
+    /// Wave 1.4 parser accepted a `deliver <method> { params } { body }`
+    /// body block. Lowering requires delivery-method SoA buffers +
+    /// on_hit / on_arrival / on_tick hook dispatch (spec §9), all Wave
+    /// 2+ work. Surfaced loudly so authors don't run with silently
+    /// dropped delivery semantics.
+    DeliverBlockNotImplemented {
+        ability: String,
+        method:  String,
+        span:    Span,
+    },
+    /// Wave 1.4 parser accepted a `morph { effects } into <Other>`
+    /// body block. Lowering requires form-swap state + cross-decl
+    /// resolution (Wave 2+).
+    MorphBlockNotImplemented {
+        ability: String,
+        into:    String,
+        span:    Span,
+    },
 }
 
 impl std::fmt::Display for LowerError {
@@ -171,6 +207,14 @@ impl std::fmt::Display for LowerError {
             LowerError::ModifierNotImplemented { verb, modifier, .. } => write!(
                 f,
                 "effect verb `{verb}` carries a `{modifier}` modifier slot that is parsed but lowering is Wave 2+"
+            ),
+            LowerError::DeliverBlockNotImplemented { ability, method, .. } => write!(
+                f,
+                "ability `{ability}` uses `deliver {method} {{…}}` — parsed by Wave 1.4 but lowering is Wave 2+ (delivery-method SoA + on_hit/on_arrival/on_tick hook dispatch not yet wired)"
+            ),
+            LowerError::MorphBlockNotImplemented { ability, into, .. } => write!(
+                f,
+                "ability `{ability}` morphs into `{into}` — parsed by Wave 1.4 but lowering is Wave 2+ (form-swap state machinery not yet wired)"
             ),
         }
     }
@@ -301,7 +345,49 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
                     span:   decl.span,
                 });
             }
+            // Wave 1.4: parser surfaces — lowering is Wave 2+.
+            AbilityHeader::Recast(_) => {
+                return Err(LowerError::HeaderNotImplemented {
+                    header: "recast",
+                    span:   decl.span,
+                });
+            }
+            AbilityHeader::RecastWindow(_) => {
+                return Err(LowerError::HeaderNotImplemented {
+                    header: "recast_window",
+                    span:   decl.span,
+                });
+            }
         }
+    }
+
+    // -- Body-block guard: Wave 1.4 surfaces. Per spec §4.4 / §23.1
+    // deliver and bare effects are mutually exclusive — the parser
+    // deliberately admits coexistence, lowering enforces. The order
+    // here matters:
+    //   1. MixedBody (loudest signal — author confused two body
+    //      shapes; flag before either deliver or morph errors).
+    //   2. DeliverBlockNotImplemented.
+    //   3. MorphBlockNotImplemented.
+    if decl.deliver.is_some() && !decl.effects.is_empty() {
+        return Err(LowerError::MixedBody {
+            ability: decl.name.clone(),
+            span:    decl.span,
+        });
+    }
+    if let Some(block) = &decl.deliver {
+        return Err(LowerError::DeliverBlockNotImplemented {
+            ability: decl.name.clone(),
+            method:  block.method.clone(),
+            span:    block.span,
+        });
+    }
+    if let Some(block) = &decl.morph {
+        return Err(LowerError::MorphBlockNotImplemented {
+            ability: decl.name.clone(),
+            into:    block.into.clone(),
+            span:    block.span,
+        });
     }
 
     // -- Effect pass.
