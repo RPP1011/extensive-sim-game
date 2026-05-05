@@ -799,6 +799,6 @@ impl CompiledSim for TowerDefenseState {
     fn positions(&mut self) -> &[Vec3] { &[] }
 }
 
-pub fn make_sim(seed: u64) -> Box<dyn CompiledSim> {
+pub fn make_sim(seed: u64, _agent_count: u32) -> Box<dyn CompiledSim> {
     Box::new(TowerDefenseState::new(seed))
 }

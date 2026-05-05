@@ -381,5 +381,9 @@ name = "flocking_viz_app"
 path = "src/flocking_viz_app.rs"
 
 [[bin]]
+name = "viz_app"
+path = "src/viz_app.rs"
+
+[[bin]]
 name = "multi_zone_world_app"
 path = "src/multi_zone_world_app.rs"
