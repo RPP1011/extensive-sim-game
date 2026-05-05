@@ -552,10 +552,12 @@ name = "dsl_compiler"
 version = "0.1.0"
 dependencies = [
  "dsl_ast",
+ "engine",
  "naga",
  "serde",
  "serde_json",
  "sha2",
+ "smallvec",
  "tempfile",
  "thiserror 1.0.69",
  "winnow 0.7.14",

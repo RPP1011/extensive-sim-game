@@ -5,6 +5,13 @@ edition = "2021"
 
 [dependencies]
 dsl_ast = { path = "../dsl_ast" }
+# `engine` provides the `AbilityProgram` / `EffectOp` / `Gate` / `Area` /
+# `AbilityHint` runtime types that `ability_lower` targets (Wave 1.6 of
+# the unified `.ability` DSL — `docs/spec/ability_dsl_unified.md`).
+# Direction: `dsl_compiler -> engine` only; `engine` does not depend on
+# `dsl_compiler`, so no cycle.
+engine = { path = "../engine" }
+smallvec = "1.13"
 winnow = "0.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
