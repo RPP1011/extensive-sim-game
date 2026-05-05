@@ -18,7 +18,7 @@ pub fn schema_hash() -> [u8; 32] {
     h.update(b"hot_hunger=f32,hot_thirst=f32,hot_rest_timer=f32,");
     h.update(b"hot_safety=f32,hot_shelter=f32,hot_social=f32,hot_purpose=f32,hot_esteem=f32,");
     h.update(b"hot_risk_tolerance=f32,hot_social_drive=f32,hot_ambition=f32,hot_altruism=f32,hot_curiosity=f32,");
-    h.update(b"hot_engaged_with=OptionAgentId,hot_stun_expires_at_tick=u32,hot_slow_expires_at_tick=u32,hot_slow_factor_q8=i16,hot_cooldown_next_ready_tick=u32");
+    h.update(b"hot_engaged_with=OptionAgentId,hot_stun_expires_at_tick=u32,hot_slow_expires_at_tick=u32,hot_slow_factor_q8=i16,hot_cooldown_next_ready_tick=u32,hot_root_expires_at_tick=u32,hot_silence_expires_at_tick=u32,hot_fear_expires_at_tick=u32,hot_taunt_expires_at_tick=u32");
     h.update(b"};cold{");
     h.update(b"creature_type=u8,channels=smallvec4,spawn_tick=u32,");
     h.update(b"grid_id=Option<u32>,local_pos=Option<vec3>,move_target=Option<vec3>,");
@@ -50,7 +50,7 @@ pub fn schema_hash() -> [u8; 32] {
     h.update(b"EventKindId:AgentMoved=0,AgentAttacked=1,AgentDied=2,AgentFled=3,AgentAte=4,AgentDrank=5,AgentRested=6,AgentCast=7,AgentUsedItem=8,AgentHarvested=9,AgentPlacedTile=10,AgentPlacedVoxel=11,AgentHarvestedVoxel=12,AgentConversed=13,AgentSharedStory=14,AgentCommunicated=15,InformationRequested=16,AgentRemembered=17,QuestPosted=18,QuestAccepted=19,BidPlaced=20,AnnounceEmitted=21,RecordMemory=22,OpportunityAttackTriggered=25,EffectDamageApplied=26,EffectHealApplied=27,EffectShieldApplied=28,EffectStunApplied=29,EffectSlowApplied=30,EffectGoldTransfer=31,EffectStandingDelta=32,CastDepthExceeded=33,ChronicleEntry=128");
     h.update(b"AbilityId=NonZeroU32;MAX_EFFECTS_PER_PROGRAM=4");
     h.update(b"Delivery:Instant=0;Area:SingleTarget{range=f32};Gate{cooldown_ticks=u32,hostile_only=bool,line_of_sight=bool};TargetSelector:Target=0,Caster=1");
-    h.update(b"EffectOp:Damage=0{amount=f32},Heal=1{amount=f32},Shield=2{amount=f32},Stun=3{duration_ticks=u32},Slow=4{duration_ticks=u32,factor_q8=i16},TransferGold=5{amount=i32},ModifyStanding=6{delta=i16},CastAbility=7{ability=AbilityId,selector=TargetSelector}");
+    h.update(b"EffectOp:Damage=0{amount=f32},Heal=1{amount=f32},Shield=2{amount=f32},Stun=3{duration_ticks=u32},Slow=4{duration_ticks=u32,factor_q8=i16},TransferGold=5{amount=i32},ModifyStanding=6{delta=i16},CastAbility=7{ability=AbilityId,selector=TargetSelector},Root=8{duration_ticks=u32},Silence=9{duration_ticks=u32},Fear=10{duration_ticks=u32},Taunt=11{duration_ticks=u32}");
     h.update(b"PackedAbilityRegistry:SoA{hints=Vec<u32>,cooldown_ticks=Vec<u32>,range=Vec<f32>,gate_flags=Vec<u32>{bit0=hostile_only,bit1=los},delivery_kind=Vec<u32>,effect_kinds=Vec<u32>{stride=MAX_EFFECTS_PER_PROGRAM,empty=0xFF},effect_payload_a=Vec<u32>,effect_payload_b=Vec<u32>,tag_values=Vec<f32>{stride=NUM_ABILITY_TAGS=6}};HINT_NONE_SENTINEL=0xFFFFFFFF;EFFECT_KIND_EMPTY=0xFF");
     h.update(b"MicroTarget:None,Agent,Position,ItemSlot,AbilityIdx,Ability{id=AbilityId,target=AgentId},Query,Opaque");
     h.update(b"EventPacking:QuestPosted:resolution_tag+min_parties_byte,BidPlaced:amount_f32bits,AnnounceEmitted:audience_tag_u8+fact_payload_u64le,RecordMemory:confidence_f32bits,AgentCast:depth_u8");

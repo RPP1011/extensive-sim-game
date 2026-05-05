@@ -98,6 +98,16 @@ pub struct SimState {
     hot_slow_expires_at_tick:     Vec<u32>,
     hot_slow_factor_q8:           Vec<i16>,
     hot_cooldown_next_ready_tick: Vec<u32>,
+    // Wave 2 piece 1 — control-verb expiry mirrors. Same encoding as
+    // `hot_stun_expires_at_tick`: absolute expiry tick, `0` means
+    // "never applied / already elapsed". Mask / scoring kernels that
+    // read these as cast-gate / movement-gate inputs land in later Wave
+    // 2 pieces; this slice just stands the storage up so .ability
+    // authoring sites can target them.
+    hot_root_expires_at_tick:     Vec<u32>,
+    hot_silence_expires_at_tick:  Vec<u32>,
+    hot_fear_expires_at_tick:     Vec<u32>,
+    hot_taunt_expires_at_tick:    Vec<u32>,
 
     // --- Cold SoA — read rarely (spawn, chronicle, debug, narrative) ---
     cold_creature_type: Vec<Option<CreatureType>>,
@@ -270,6 +280,10 @@ impl SimState {
             hot_slow_expires_at_tick:     vec![0; cap],
             hot_slow_factor_q8:           vec![0; cap],
             hot_cooldown_next_ready_tick: vec![0; cap],
+            hot_root_expires_at_tick:     vec![0; cap],
+            hot_silence_expires_at_tick:  vec![0; cap],
+            hot_fear_expires_at_tick:     vec![0; cap],
+            hot_taunt_expires_at_tick:    vec![0; cap],
             cold_creature_type:  vec![None; cap],
             cold_channels:       (0..cap).map(|_| None).collect(),
             cold_spawn_tick:     vec![None; cap],
@@ -368,6 +382,10 @@ impl SimState {
         self.hot_slow_expires_at_tick[slot]     = 0;
         self.hot_slow_factor_q8[slot]           = 0;
         self.hot_cooldown_next_ready_tick[slot] = 0;
+        self.hot_root_expires_at_tick[slot]     = 0;
+        self.hot_silence_expires_at_tick[slot]  = 0;
+        self.hot_fear_expires_at_tick[slot]     = 0;
+        self.hot_taunt_expires_at_tick[slot]    = 0;
         let caps = Capabilities::for_creature(spec.creature_type);
         self.cold_creature_type[slot]  = Some(spec.creature_type);
         self.cold_channels[slot]       = Some(caps.channels);
@@ -685,6 +703,63 @@ impl SimState {
     pub fn set_agent_cooldown_next_ready(&mut self, id: AgentId, v: u32) {
         if let Some(s) = self
             .hot_cooldown_next_ready_tick
+            .get_mut(AgentSlotPool::slot_of_agent(id))
+        {
+            *s = v;
+        }
+    }
+
+    // Wave 2 piece 1 — control verb expiry mirrors. Same shape as the
+    // stun accessor pair: absolute expiry tick; `0` means never applied.
+    // The `agent_<verb>ed` predicates land alongside the kernels that
+    // consume them in later Wave 2 pieces (cast / move gates).
+    pub fn agent_root_expires_at(&self, id: AgentId) -> Option<u32> {
+        self.hot_root_expires_at_tick
+            .get(AgentSlotPool::slot_of_agent(id))
+            .copied()
+    }
+    pub fn set_agent_root_expires_at(&mut self, id: AgentId, v: u32) {
+        if let Some(s) = self
+            .hot_root_expires_at_tick
+            .get_mut(AgentSlotPool::slot_of_agent(id))
+        {
+            *s = v;
+        }
+    }
+    pub fn agent_silence_expires_at(&self, id: AgentId) -> Option<u32> {
+        self.hot_silence_expires_at_tick
+            .get(AgentSlotPool::slot_of_agent(id))
+            .copied()
+    }
+    pub fn set_agent_silence_expires_at(&mut self, id: AgentId, v: u32) {
+        if let Some(s) = self
+            .hot_silence_expires_at_tick
+            .get_mut(AgentSlotPool::slot_of_agent(id))
+        {
+            *s = v;
+        }
+    }
+    pub fn agent_fear_expires_at(&self, id: AgentId) -> Option<u32> {
+        self.hot_fear_expires_at_tick
+            .get(AgentSlotPool::slot_of_agent(id))
+            .copied()
+    }
+    pub fn set_agent_fear_expires_at(&mut self, id: AgentId, v: u32) {
+        if let Some(s) = self
+            .hot_fear_expires_at_tick
+            .get_mut(AgentSlotPool::slot_of_agent(id))
+        {
+            *s = v;
+        }
+    }
+    pub fn agent_taunt_expires_at(&self, id: AgentId) -> Option<u32> {
+        self.hot_taunt_expires_at_tick
+            .get(AgentSlotPool::slot_of_agent(id))
+            .copied()
+    }
+    pub fn set_agent_taunt_expires_at(&mut self, id: AgentId, v: u32) {
+        if let Some(s) = self
+            .hot_taunt_expires_at_tick
             .get_mut(AgentSlotPool::slot_of_agent(id))
         {
             *s = v;
@@ -1088,6 +1163,10 @@ impl SimState {
     #[doc(hidden)] pub fn hot_slow_expires_at_tick_mut_slice(&mut self) -> &mut [u32] { &mut self.hot_slow_expires_at_tick }
     #[doc(hidden)] pub fn hot_slow_factor_q8_mut_slice(&mut self) -> &mut [i16] { &mut self.hot_slow_factor_q8 }
     #[doc(hidden)] pub fn hot_cooldown_next_ready_tick_mut_slice(&mut self) -> &mut [u32] { &mut self.hot_cooldown_next_ready_tick }
+    #[doc(hidden)] pub fn hot_root_expires_at_tick_mut_slice(&mut self) -> &mut [u32] { &mut self.hot_root_expires_at_tick }
+    #[doc(hidden)] pub fn hot_silence_expires_at_tick_mut_slice(&mut self) -> &mut [u32] { &mut self.hot_silence_expires_at_tick }
+    #[doc(hidden)] pub fn hot_fear_expires_at_tick_mut_slice(&mut self) -> &mut [u32] { &mut self.hot_fear_expires_at_tick }
+    #[doc(hidden)] pub fn hot_taunt_expires_at_tick_mut_slice(&mut self) -> &mut [u32] { &mut self.hot_taunt_expires_at_tick }
 
     #[doc(hidden)] pub fn cold_creature_type_mut_slice(&mut self) -> &mut [Option<CreatureType>] { &mut self.cold_creature_type }
     #[doc(hidden)] pub fn cold_spawn_tick_mut_slice(&mut self) -> &mut [Option<u32>] { &mut self.cold_spawn_tick }
@@ -1301,5 +1380,19 @@ impl SimState {
     }
     pub fn hot_cooldown_next_ready_tick(&self) -> &[u32] {
         &self.hot_cooldown_next_ready_tick
+    }
+    // Wave 2 piece 1 — bulk-slice readers for the four control-verb
+    // expiry mirrors. Mirrors `hot_stun_expires_at_tick`'s shape.
+    pub fn hot_root_expires_at_tick(&self) -> &[u32] {
+        &self.hot_root_expires_at_tick
+    }
+    pub fn hot_silence_expires_at_tick(&self) -> &[u32] {
+        &self.hot_silence_expires_at_tick
+    }
+    pub fn hot_fear_expires_at_tick(&self) -> &[u32] {
+        &self.hot_fear_expires_at_tick
+    }
+    pub fn hot_taunt_expires_at_tick(&self) -> &[u32] {
+        &self.hot_taunt_expires_at_tick
     }
 }
