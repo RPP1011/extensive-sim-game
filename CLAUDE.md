@@ -43,8 +43,8 @@ cargo run --bin xtask -- scenario generate dataset/scenarios/
 - The constitution states each principle once. Other docs do not paraphrase or redirect.
 - Every new plan needs an AIS preamble (P8). Skipping it is a process violation.
 - Historical content (executed plans, resolved audits, design rationale) lives in **git history**, not active docs.
-- Critic skills (`.claude/skills/critic-*/SKILL.md`) gate engine extensions. Use `bash .claude/scripts/dispatch-critics.sh --target WORKING-TREE --all` to dispatch automatically; `.githooks/pre-commit` is the hard block at commit time. Manual invocation guide: see `.claude/skills/dispatch-critics/SKILL.md`.
-- **One-time setup after clone:** `git config core.hooksPath .githooks` enables the pre-commit critic-verdict block. Without it, the hard block doesn't engage.
+- Engine extensions are gated by `.githooks/pre-commit` (cargo check, `// GENERATED` header rule, `compile-dsl --check` on DSL changes) and the in-tree `crates/engine/tests/schema_hash.rs` test. The Claude-driven critic skills were retired 2026-05-04 — they burned tokens with low signal.
+- **One-time setup after clone:** `git config core.hooksPath .githooks` enables the pre-commit hard block. Without it, the hooks don't engage.
 
 ## Tooling caveats
 
