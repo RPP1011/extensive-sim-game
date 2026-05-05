@@ -1,0 +1,15 @@
+// Wave 2 piece N: SelfDamage E2E demo. Caster takes 5 damage on cast.
+// Lowers to AbilityProgram { gate: { cooldown_ticks: 50 }, effects: [EffectOp::SelfDamage { amount: 5.0 }] }
+//
+// Bleeds self once every 5 seconds — a self-cost ability. The runtime
+// emits Damaged { source: self, target: self, amount: 5 } via the
+// chronicle, and the existing ApplyDamage (with shield absorption)
+// drains caster.hp accordingly. No new physics block needed —
+// SelfDamage's contract is "Damaged event with target=caster".
+
+ability Bleed {
+    target: self
+    cooldown: 5s
+
+    self_damage 5
+}
