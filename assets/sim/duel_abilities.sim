@@ -12,6 +12,10 @@
 //   Strike   : cooldown 10 ticks (1s), range 5.0, damage 15.0, target enemy
 //   ShieldUp : cooldown 40 ticks (4s), self-target, shield 50.0
 //   Mend     : cooldown 30 ticks (3s), self-target, heal 25.0
+//   Bleed    : cooldown 50 ticks (5s), self-target, self_damage 5.0
+//             (Wave 2 piece N — first SelfDamage E2E demo. The verb
+//              emits a Damaged event with target=self, reusing the
+//              existing ApplyDamage chronicle with shield absorption.)
 //
 // SHIELD MODELLING: `hot_shield_hp: Vec<f32>` lives in the agent SoA
 // (`crates/engine/src/state/mod.rs`); the dsl_compiler exposes
@@ -25,15 +29,16 @@
 //
 // The runtime tick chain is the same shape as duel_1v1's:
 //   1. clears
-//   2. fused_mask_verb_Strike (PerPair, writes mask_0/1/2 for the 3 verbs)
-//   3. scoring (PerAgent argmax over 3 rows -> ActionSelected)
+//   2. fused_mask_verb_Strike (PerPair, writes mask_0/1/2/3 for the 4 verbs)
+//   3. scoring (PerAgent argmax over 4 rows -> ActionSelected)
 //   4. physics_verb_chronicle_Strike   (gates action_id==0u, emits Damaged)
 //   5. physics_verb_chronicle_ShieldUp (gates action_id==1u, emits Shielded)
 //   6. physics_verb_chronicle_Mend     (gates action_id==2u, emits Healed)
-//   7. physics_ApplyDamage_and_ApplyHeal_and_ApplyShield (fused PerEvent)
-//   8. seed_indirect_0
-//   9. fold_damage_dealt
-//  10. fold_healing_done
+//   7. physics_verb_chronicle_Bleed    (gates action_id==3u, emits Damaged self)
+//   8. physics_ApplyDamage_and_ApplyHeal_and_ApplyShield (fused PerEvent)
+//   9. seed_indirect_0
+//  10. fold_damage_dealt
+//  11. fold_healing_done
 
 event Tick { }
 
@@ -78,8 +83,11 @@ config combat {
   cooldown_strike:  u32 = 10,     // Strike.ability: cooldown 1s == 10 ticks
   cooldown_shieldup: u32 = 40,    // ShieldUp.ability: cooldown 4s == 40 ticks
   cooldown_mend:    u32 = 30,     // Mend.ability: cooldown 3s == 30 ticks
+  cooldown_bleed:   u32 = 50,     // Bleed.ability: cooldown 5s == 50 ticks
+  bleed_amount:     f32 = 5.0,    // Bleed.ability: self_damage 5
   strike_range:     f32 = 5.0,    // Strike.ability: range 5.0
   hp_low_threshold: f32 = 50.0,   // gate Mend on self-hp drop
+  hp_bleed_floor:   f32 = 50.0,   // only Bleed when healthy enough to afford it
 }
 
 // Strike — cooldown 10 ticks, range gate (range field stays declared but
@@ -127,6 +135,23 @@ verb Mend(self, target: Agent) =
         && self.hp < config.combat.hp_low_threshold)
   emit Healed { source: self, target: self, amount: config.combat.mend_amount }
   score 300.0
+
+// Bleed — Wave 2 piece N: first SelfDamage E2E demo. Self-cast,
+// cooldown 50 ticks. Emits Damaged with target=self, drained by the
+// existing ApplyDamage chronicle (shield absorption included). Only
+// fires when HP is comfortably above the bleed amount so we don't
+// accidentally suicide. Score is intentionally low (75.0) so Strike's
+// pair-field score (200..100), ShieldUp (250.0), and Mend (300.0) all
+// dominate when their gates pass — Bleed is the "nothing better to do
+// with my action" floor.
+verb Bleed(self, target: Agent) =
+  action BleedAction
+  when (self.alive
+        && target == self
+        && (world.tick % 50 == 0)
+        && self.hp > config.combat.hp_bleed_floor)
+  emit Damaged { source: self, target: self, amount: config.combat.bleed_amount }
+  score 75.0
 
 // Apply damage with shield_hp absorption.
 //

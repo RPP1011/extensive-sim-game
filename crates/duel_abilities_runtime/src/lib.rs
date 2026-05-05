@@ -29,24 +29,31 @@
 //!
 //! ## Tick chain (mirror of duel_1v1)
 //!
-//! Two `Combatant : Agent` entities (Hero A vs Hero B) with three
-//! abilities (Strike, ShieldUp, Mend). Per-tick:
+//! Two `Combatant : Agent` entities (Hero A vs Hero B) with four
+//! abilities (Strike, ShieldUp, Mend, Bleed). Per-tick:
 //!
-//!   1. clear_tail + clear 3 mask bitmaps + zero scoring_output
+//!   1. clear_tail + clear 4 mask bitmaps + zero scoring_output
 //!   2. fused_mask_verb_Strike — PerPair, writes mask_0 (Strike,
 //!      cooldown=10), mask_1 (ShieldUp, cooldown=40 + self.hp<90),
-//!      mask_2 (Mend, cooldown=30 + self HP < 50)
-//!   3. scoring — PerAgent argmax over the 3 competing rows
+//!      mask_2 (Mend, cooldown=30 + self HP < 50), mask_3 (Bleed,
+//!      cooldown=50 + self.hp > 50). Kernel name stays
+//!      `fused_mask_verb_Strike` — the compiler names fused mask
+//!      kernels after the first verb in source order, not all verbs.
+//!   3. scoring — PerAgent argmax over the 4 competing rows
 //!   4. physics_verb_chronicle_Strike   — gates action_id==0u, emits Damaged
 //!   5. physics_verb_chronicle_ShieldUp — gates action_id==1u, emits Shielded
 //!   6. physics_verb_chronicle_Mend     — gates action_id==2u, emits Healed
-//!   7. physics_ApplyDamage_and_ApplyHeal_and_ApplyShield — fused PerEvent
+//!   7. physics_verb_chronicle_Bleed    — gates action_id==3u, emits
+//!      Damaged{source=self,target=self,amount=5}. Reuses the existing
+//!      ApplyDamage chronicle (no new physics block); shield_hp
+//!      absorbs first, then bleed-through hits hp.
+//!   8. physics_ApplyDamage_and_ApplyHeal_and_ApplyShield — fused PerEvent
 //!      kernel that reads Damaged/Healed/Shielded events and writes
 //!      per-target HP via `agents.set_hp`. On HP<=0 also sets alive=0
 //!      and emits Defeated.
-//!   8. seed_indirect_0
-//!   9. fold_damage_dealt
-//!  10. fold_healing_done
+//!   9. seed_indirect_0
+//!  10. fold_damage_dealt
+//!  11. fold_healing_done
 //!
 //! ## Shield modelling note
 //!
@@ -93,10 +100,11 @@ pub struct DuelAbilitiesState {
     agent_shield_hp_buf: wgpu::Buffer,
 
     // -- Mask bitmaps (one per verb in source order: Strike=0,
-    //    ShieldUp=1, Mend=2) --
+    //    ShieldUp=1, Mend=2, Bleed=3) --
     mask_0_bitmap_buf: wgpu::Buffer, // Strike
     mask_1_bitmap_buf: wgpu::Buffer, // ShieldUp
     mask_2_bitmap_buf: wgpu::Buffer, // Mend
+    mask_3_bitmap_buf: wgpu::Buffer, // Bleed (Wave 2 SelfDamage demo)
     mask_bitmap_zero_buf: wgpu::Buffer,
     mask_bitmap_words: u32,
 
@@ -117,6 +125,7 @@ pub struct DuelAbilitiesState {
     chronicle_strike_cfg_buf: wgpu::Buffer,
     chronicle_shieldup_cfg_buf: wgpu::Buffer,
     chronicle_mend_cfg_buf: wgpu::Buffer,
+    chronicle_bleed_cfg_buf: wgpu::Buffer,
     apply_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
 
@@ -179,6 +188,7 @@ impl DuelAbilitiesState {
         let mask_0_bitmap_buf = mk_mask("duel_abilities_runtime::mask_0_bitmap");
         let mask_1_bitmap_buf = mk_mask("duel_abilities_runtime::mask_1_bitmap");
         let mask_2_bitmap_buf = mk_mask("duel_abilities_runtime::mask_2_bitmap");
+        let mask_3_bitmap_buf = mk_mask("duel_abilities_runtime::mask_3_bitmap");
         let zero_words: Vec<u32> = vec![0u32; mask_bitmap_words.max(4) as usize];
         let mask_bitmap_zero_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_abilities_runtime::mask_bitmap_zero"),
@@ -271,6 +281,15 @@ impl DuelAbilitiesState {
             contents: bytemuck::bytes_of(&chronicle_mend_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        let chronicle_bleed_cfg_init =
+            physics_verb_chronicle_Bleed::PhysicsVerbChronicleBleedCfg {
+                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            };
+        let chronicle_bleed_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_abilities_runtime::chronicle_bleed_cfg"),
+            contents: bytemuck::bytes_of(&chronicle_bleed_cfg_init),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let apply_cfg_init =
             physics_ApplyDamage_and_ApplyHeal_and_ApplyShield::PhysicsApplyDamageAndApplyHealAndApplyShieldCfg {
                 event_count: 0, tick: 0, seed: 0, _pad0: 0,
@@ -315,6 +334,7 @@ impl DuelAbilitiesState {
             mask_0_bitmap_buf,
             mask_1_bitmap_buf,
             mask_2_bitmap_buf,
+            mask_3_bitmap_buf,
             mask_bitmap_zero_buf,
             mask_bitmap_words,
             scoring_output_buf,
@@ -329,6 +349,7 @@ impl DuelAbilitiesState {
             chronicle_strike_cfg_buf,
             chronicle_shieldup_cfg_buf,
             chronicle_mend_cfg_buf,
+            chronicle_bleed_cfg_buf,
             apply_cfg_buf,
             seed_cfg_buf,
             cache: dispatch::KernelCache::default(),
@@ -427,7 +448,12 @@ impl CompiledSim for DuelAbilitiesState {
             &self.gpu, &mut encoder, max_slots_per_tick,
         );
         let mask_bytes = (self.mask_bitmap_words as u64) * 4;
-        for buf in [&self.mask_0_bitmap_buf, &self.mask_1_bitmap_buf, &self.mask_2_bitmap_buf] {
+        for buf in [
+            &self.mask_0_bitmap_buf,
+            &self.mask_1_bitmap_buf,
+            &self.mask_2_bitmap_buf,
+            &self.mask_3_bitmap_buf,
+        ] {
             encoder.copy_buffer_to_buffer(
                 &self.mask_bitmap_zero_buf, 0, buf, 0, mask_bytes.max(4),
             );
@@ -457,6 +483,7 @@ impl CompiledSim for DuelAbilitiesState {
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             mask_1_bitmap: &self.mask_1_bitmap_buf,
             mask_2_bitmap: &self.mask_2_bitmap_buf,
+            mask_3_bitmap: &self.mask_3_bitmap_buf,
             cfg: &self.mask_cfg_buf,
         };
         dispatch::dispatch_fused_mask_verb_strike(
@@ -486,6 +513,7 @@ impl CompiledSim for DuelAbilitiesState {
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             mask_1_bitmap: &self.mask_1_bitmap_buf,
             mask_2_bitmap: &self.mask_2_bitmap_buf,
+            mask_3_bitmap: &self.mask_3_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
             cfg: &self.scoring_cfg_buf,
         };
@@ -545,7 +573,28 @@ impl CompiledSim for DuelAbilitiesState {
             self.agent_count,
         );
 
-        // (7) ApplyDamage + ApplyHeal + ApplyShield — fused PerEvent kernel.
+        // (7) Bleed chronicle — Wave 2 SelfDamage demo. Gates on
+        // action_id==3u and emits Damaged{source=self,target=self,
+        // amount=5}. The existing ApplyDamage chronicle drains shield
+        // first then hp, so the caster's hp drops by min(5, max(0,
+        // 5 - shield)) per cast.
+        let bleed_cfg = physics_verb_chronicle_Bleed::PhysicsVerbChronicleBleedCfg {
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.chronicle_bleed_cfg_buf, 0, bytemuck::bytes_of(&bleed_cfg),
+        );
+        let bleed_bindings = physics_verb_chronicle_Bleed::PhysicsVerbChronicleBleedBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            cfg: &self.chronicle_bleed_cfg_buf,
+        };
+        dispatch::dispatch_physics_verb_chronicle_bleed(
+            &mut self.cache, &bleed_bindings, &self.gpu.device, &mut encoder,
+            self.agent_count,
+        );
+
+        // (8) ApplyDamage + ApplyHeal + ApplyShield — fused PerEvent kernel.
         let event_count_estimate = self.agent_count * 4;
         let apply_cfg = physics_ApplyDamage_and_ApplyHeal_and_ApplyShield::PhysicsApplyDamageAndApplyHealAndApplyShieldCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
@@ -808,6 +857,56 @@ mod tests {
             (hp[0] - 100.0).abs() > 0.01 || (hp[1] - 100.0).abs() > 0.01,
             "expected HP movement after 50 ticks, got hp=[{:.2}, {:.2}]",
             hp[0], hp[1],
+        );
+    }
+
+    /// Wave 2 SelfDamage E2E demo. Constructs a 1-agent fixture so
+    /// Strike (which requires `target != self`) cannot fire — leaving
+    /// Bleed as the only verb whose gates pass at tick 0 (hp=100.0,
+    /// so Mend's `hp < 50` fails and ShieldUp's `hp < 90` fails;
+    /// Bleed's `hp > 50` is the only self-target gate that holds).
+    ///
+    /// Trace expectations:
+    ///   - tick 0: Bleed mask wins argmax (sole eligible verb), the
+    ///     Bleed chronicle emits Damaged{source=0,target=0,amount=5},
+    ///     ApplyDamage drains shield (0) then hp (-5). Result: hp=95.
+    ///   - ticks 1..49: no gates fire; hp stays 95.
+    ///   - tick 50: Bleed fires again; hp=90.
+    ///
+    /// After 51 step() calls (tick advancing from 0 → 50 inclusive),
+    /// hp must have dropped by AT LEAST 5 (the bleed amount). Concrete
+    /// expected value: 90.0 (two Bleed cycles, no shield absorption).
+    /// We assert the floor (`<= 95.0`) rather than exact equality so
+    /// the test stays robust to per-cycle ordering tweaks while still
+    /// proving the SelfDamage flow .ability → AbilityRegistry →
+    /// chronicle Damaged → ApplyDamage chain is wired end-to-end.
+    #[test]
+    fn bleed_drains_caster_hp_when_selected() {
+        // 1-agent fixture: Strike's `target != self` gate always
+        // fails, so Bleed is the only verb that can win argmax at
+        // tick 0 (Mend/ShieldUp's hp-low gates also fail at hp=100).
+        let mut state = DuelAbilitiesState::new(0xCAFE_F00D, 1);
+        for _ in 0..51 {
+            state.step();
+        }
+        let hp = state.read_hp();
+        let shield = state.read_shield_hp();
+        let alive = state.read_alive();
+        assert_eq!(hp.len(), 1);
+        assert!(
+            hp[0] <= 95.0,
+            "expected hp to drop by AT LEAST 5 (Bleed self_damage 5), \
+             got hp={:.2}, shield={:.2}, alive={}",
+            hp[0], shield[0], alive[0],
+        );
+        // Sanity: the agent must still be alive; Bleed is supposed
+        // to be a self-cost, not a suicide.
+        assert_eq!(
+            alive[0], 1,
+            "Bleed must not kill the caster — alive=0 after 51 ticks \
+             means Bleed fired far too many times or shield_hp is \
+             negative; got hp={:.2}, shield={:.2}",
+            hp[0], shield[0],
         );
     }
 }

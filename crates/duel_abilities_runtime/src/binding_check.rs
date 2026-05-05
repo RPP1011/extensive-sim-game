@@ -49,6 +49,8 @@ pub fn assert_ability_registry_matches_sim_constants() {
         .expect("read ShieldUp.ability");
     let mend_src = std::fs::read_to_string(corpus.join("Mend.ability"))
         .expect("read Mend.ability");
+    let bleed_src = std::fs::read_to_string(corpus.join("Bleed.ability"))
+        .expect("read Bleed.ability");
 
     let files = vec![
         (
@@ -65,6 +67,11 @@ pub fn assert_ability_registry_matches_sim_constants() {
             "Mend.ability".to_string(),
             dsl_ast::parse_ability_file(&mend_src)
                 .expect("parse Mend.ability"),
+        ),
+        (
+            "Bleed.ability".to_string(),
+            dsl_ast::parse_ability_file(&bleed_src)
+                .expect("parse Bleed.ability"),
         ),
     ];
     let built = dsl_compiler::ability_registry::build_registry(&files)
@@ -164,14 +171,49 @@ pub fn assert_ability_registry_matches_sim_constants() {
         ),
     }
 
+    // ---- Bleed: cooldown 50 ticks, self-target, self_damage 5.0 ----
+    //   Wave 2 piece N: first SelfDamage E2E demo. Lowers via
+    //   `dsl_compiler::ability_lower::lower_effect_stmt` ("self_damage"
+    //   match arm) to `EffectOp::SelfDamage { amount: 5.0 }`.
+    let bleed_id = *built.names.get("Bleed")
+        .expect("Bleed registered in name table");
+    let bleed = built.registry.get(bleed_id)
+        .expect("Bleed resolves to a program");
+    assert_eq!(
+        bleed.gate.cooldown_ticks, 50,
+        "Bleed cooldown must be 50 ticks (5s) — .sim verb gate \
+         (world.tick % 50 == 0) and .ability `cooldown: 5s` must agree",
+    );
+    assert!(
+        !bleed.gate.hostile_only,
+        "Bleed must NOT be hostile_only — .ability `target: self`",
+    );
+    assert_eq!(
+        bleed.effects.len(), 1,
+        "Bleed must have exactly one effect (self_damage 5)",
+    );
+    match &bleed.effects[0] {
+        EffectOp::SelfDamage { amount } => assert_eq!(
+            *amount, 5.0,
+            "Bleed self_damage must be 5.0 — .ability `self_damage 5`, \
+             .sim config.combat.bleed_amount",
+        ),
+        other => panic!(
+            "Bleed effect[0]: expected SelfDamage(5.0), got {other:?}",
+        ),
+    }
+
     // ---- Smoke-pack: prove the GPU SoA layout works on this corpus ----
     // PackedAbilityRegistry::pack runs its own per-program packing
     // walk; if the registry contains anything pack can't encode this
     // panics. Confirms the lowering output is consumable by the
-    // Wave 1.9 GPU buffer producer.
+    // Wave 1.9 GPU buffer producer. Also verifies SelfDamage (op#17)
+    // packs cleanly via the Wave 2 piece 3 packer arm in
+    // `engine::ability::packed::pack_effect_op`.
     let packed = PackedAbilityRegistry::pack(&built.registry);
     assert_eq!(
-        packed.n_abilities, 3,
-        "PackedAbilityRegistry must contain exactly 3 abilities",
+        packed.n_abilities, 4,
+        "PackedAbilityRegistry must contain exactly 4 abilities \
+         (Strike, ShieldUp, Mend, Bleed)",
     );
 }

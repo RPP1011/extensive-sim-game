@@ -4,11 +4,13 @@
 //! (`engine::ability::PackedAbilityRegistry::pack`).
 //!
 //! The corpus lives at `assets/ability_test/duel_abilities/{Strike,
-//! ShieldUp, Mend}.ability` and exercises the three header / effect
-//! shapes Wave 1 ships:
+//! ShieldUp, Mend, Bleed}.ability` and exercises the four header / effect
+//! shapes Wave 1+2 ships:
 //!   * `Strike`   -> enemy-target + range + cooldown + damage hint
 //!   * `ShieldUp` -> self-target + cooldown + defense hint + shield effect
 //!   * `Mend`     -> self-target + cooldown + heal hint + heal effect
+//!   * `Bleed`    -> self-target + cooldown + self_damage (Wave 2 piece N
+//!                   SelfDamage E2E demo, EffectOp::SelfDamage discriminant 17)
 //!
 //! This test guards the boundary between the DSL pipeline and the GPU-
 //! facing layout: any drift in slot ordering, payload encoding, or
@@ -48,42 +50,47 @@ fn load(name: &str) -> (String, dsl_ast::AbilityFile) {
 
 #[test]
 fn pack_duel_corpus_end_to_end() {
-    // Load the three corpus files; preserve the canonical input order so
+    // Load the four corpus files; preserve the canonical input order so
     // the resulting `AbilityId` slots are deterministic.
     let strike = load("Strike");
     let shield_up = load("ShieldUp");
     let mend = load("Mend");
+    let bleed = load("Bleed");
 
-    let files = vec![strike, shield_up, mend];
+    let files = vec![strike, shield_up, mend, bleed];
     let built = build_registry(&files).expect("registry build must succeed");
 
-    // Three abilities; name table covers all three.
-    assert_eq!(built.registry.len(), 3);
+    // Four abilities; name table covers all four.
+    assert_eq!(built.registry.len(), 4);
     assert!(built.names.contains_key("Strike"));
     assert!(built.names.contains_key("ShieldUp"));
     assert!(built.names.contains_key("Mend"));
+    assert!(built.names.contains_key("Bleed"));
 
     let strike_slot = built.names["Strike"].slot();
     let shield_slot = built.names["ShieldUp"].slot();
     let mend_slot = built.names["Mend"].slot();
+    let bleed_slot = built.names["Bleed"].slot();
 
     let packed = PackedAbilityRegistry::pack(&built.registry);
 
-    assert_eq!(packed.n_abilities, 3);
+    assert_eq!(packed.n_abilities, 4);
 
     // -- Strike: range 5.0, cooldown 1s == 10 ticks, hostile_only set. --
+    // Damage value is 30.0 since the #85 retune (re-enabled shield_hp
+    // absorption with rebalanced damage so combat still resolves).
     assert_eq!(packed.cooldown_ticks[strike_slot], 10);
     assert_eq!(packed.range[strike_slot], 5.0);
     assert_eq!(packed.gate_flags[strike_slot], 0b01,
         "Strike has target: enemy -> hostile_only bit set");
-    // Effect[0] is Damage(15.0); other slots are empty.
+    // Effect[0] is Damage(30.0); other slots are empty.
     let strike_eff_base = strike_slot * MAX_EFFECTS_PER_PROGRAM;
     assert_eq!(packed.effect_kinds[strike_eff_base], 0,
         "Strike effect 0 is Damage (discriminant 0)");
     assert_eq!(
         packed.effect_payload_a[strike_eff_base],
-        15.0_f32.to_bits(),
-        "Strike Damage amount packs to f32::to_bits(15.0)",
+        30.0_f32.to_bits(),
+        "Strike Damage amount packs to f32::to_bits(30.0)",
     );
     for i in 1..MAX_EFFECTS_PER_PROGRAM {
         assert_eq!(
@@ -112,8 +119,22 @@ fn pack_duel_corpus_end_to_end() {
         "Mend effect 0 is Heal (discriminant 1)");
     assert_eq!(packed.effect_payload_a[mend_eff_base], 25.0_f32.to_bits());
 
-    // Delivery is Instant (=0) for all three — no other variant exists.
-    for slot in [strike_slot, shield_slot, mend_slot] {
+    // -- Bleed: cooldown 5s == 50 ticks; self-target SelfDamage. --
+    //   Wave 2 piece N first SelfDamage E2E demo. Discriminant 17 per
+    //   `engine::ability::packed::pack_effect_op` (matches the schema
+    //   hash entry `SelfDamage=17{amount=f32}`).
+    assert_eq!(packed.cooldown_ticks[bleed_slot], 50);
+    assert_eq!(packed.range[bleed_slot], 0.0,
+        "Bleed has no range header -> Wave 1.6 default 0.0");
+    assert_eq!(packed.gate_flags[bleed_slot], 0,
+        "Bleed is target: self -> no gate flag bits");
+    let bleed_eff_base = bleed_slot * MAX_EFFECTS_PER_PROGRAM;
+    assert_eq!(packed.effect_kinds[bleed_eff_base], 17,
+        "Bleed effect 0 is SelfDamage (discriminant 17)");
+    assert_eq!(packed.effect_payload_a[bleed_eff_base], 5.0_f32.to_bits());
+
+    // Delivery is Instant (=0) for all four — no other variant exists.
+    for slot in [strike_slot, shield_slot, mend_slot, bleed_slot] {
         assert_eq!(packed.delivery_kind[slot], 0);
     }
 }
