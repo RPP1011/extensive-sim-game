@@ -1,0 +1,19 @@
+[package]
+name = "disease_spread_runtime"
+version = "0.1.0"
+edition = "2021"
+
+# Per-fixture runtime crate for the disease_spread sim — 22nd REAL
+# fixture and FIRST sim with SIR-style epidemic dynamics.
+#
+# Sibling to crafting_diffusion (information spread) but with
+# MORTALITY: agents progress through Susceptible → Infected →
+# {Recovered, Dead} states, with spatial transmission and lifecycle.
+# All logic is CPU-side (no DSL/WGSL), mirroring the "get it working
+# first" spirit. State is encoded in `mana` u32:
+#   0 = Susceptible, 1 = Infected, 2 = Recovered, 3 = Dead.
+# `alive` flips to 0 on death.
+
+[dependencies]
+engine = { path = "../engine" }
+glam = "0.29"
