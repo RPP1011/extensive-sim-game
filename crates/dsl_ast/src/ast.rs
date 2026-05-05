@@ -826,8 +826,10 @@ pub enum FoldKind {
 // ---------------------------------------------------------------------------
 
 /// A single `.ability` source file. Wave 1.0 only held `ability` decls;
-/// Wave 1.1 added `passive` blocks. Wave 1.2 adds `template` blocks.
-/// `structure` top-level blocks are still deferred (Wave 1.3).
+/// Wave 1.1 added `passive` blocks; Wave 1.2 added `template` blocks;
+/// Wave 1.3 adds `structure` blocks (body captured opaquely — per
+/// spec §12 the body holds 5 statement kinds whose GPU rasterization
+/// + StructureRegistry wiring (§12.2) is Wave 2+ work).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct AbilityFile {
     pub abilities: Vec<AbilityDecl>,
@@ -844,7 +846,17 @@ pub struct AbilityFile {
     /// `LowerError::TemplateBlockNotImplemented` so authors don't run
     /// with silently-dropped template definitions.
     pub templates: Vec<TemplateDecl>,
-    // Future (Wave 1.3): structures.
+    /// Wave 1.3: top-level `structure <Name>(<params>) { ... }` blocks
+    /// per spec §12. Parser populates in source order. The body is
+    /// captured OPAQUELY (verbatim source slice) — per-statement
+    /// parsing of the 5 body kinds (`place` / `harvest` / `transform`
+    /// / `include` / `if`) plus the optional headers (`bounds:` /
+    /// `origin:` / `rotatable` / `symmetry:`) lands when voxel
+    /// storage + rasterization (spec §12.2 GPU work) exists. Lowering
+    /// of a non-empty `structures` vec surfaces
+    /// `LowerError::StructureBlockNotImplemented` so authors don't run
+    /// with silently-dropped structure definitions.
+    pub structures: Vec<StructureDecl>,
 }
 
 /// A parsed `ability <Name> { headers... effects... }` block.
@@ -1370,4 +1382,39 @@ pub struct TemplateInstantiation {
     /// Positional args; arity / type checking lives at expansion time.
     pub args: Vec<TemplateArg>,
     pub span: Span,
+}
+
+// ---------------------------------------------------------------------------
+// Wave 1.3: structure top-level form (spec §12) — voxel blueprint.
+// ---------------------------------------------------------------------------
+
+/// `structure <Name>(<params>) { <body> }` — voxel-template top-level
+/// per spec §12. Body holds 5 statement types (place / harvest /
+/// transform / include / if) plus optional headers (bounds: / origin:
+/// / rotatable / symmetry:). Wave 1.3 captures the body OPAQUELY as a
+/// verbatim source slice — per-statement parsing is later work
+/// (lowering needs voxel storage + rasterization, all spec §12.2 GPU
+/// work). Parameters reuse `TemplateParam` exactly (same int / float
+/// / bool / Material / Structure typed grammar from Wave 1.2).
+///
+/// The opaque-capture pattern mirrors Wave 1.4's `DeliverBlock` — it
+/// lets the parser succeed on every well-formed structure definition
+/// in author-written `.ability` files while reserving a clean
+/// diagnostic (`LowerError::StructureBlockNotImplemented`) for the
+/// lowering layer.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct StructureDecl {
+    pub name:     String,
+    /// Parameter list. Reuses `TemplateParam` exactly — same int /
+    /// float / bool / Material / Structure typed grammar from Wave
+    /// 1.2. Empty for `structure Empty() { … }` and for
+    /// `structure Wall { … }` (parens omitted entirely — accepted as
+    /// shorthand for `()`).
+    pub params:   Vec<TemplateParam>,
+    /// Verbatim text between the outer `{` and the matching `}` of
+    /// the structure body. Excludes the braces themselves. Multi-line;
+    /// no whitespace trimming. Per-statement parsing is deferred to
+    /// Wave 2+ — until then this slice is opaque to all consumers.
+    pub body_raw: String,
+    pub span:     Span,
 }

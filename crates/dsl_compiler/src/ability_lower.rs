@@ -195,6 +195,15 @@ pub enum LowerError {
         template: String,
         span:     Span,
     },
+    /// Wave 1.3 parser accepted a top-level `structure <Name>(<params>) { ... }`
+    /// block. Lowering requires voxel storage + rasterization +
+    /// `StructureRegistry` (spec §12.2 GPU work) — all Wave 2+ work.
+    /// Surfaced loudly so authors don't run with a silently-dropped
+    /// structure definition.
+    StructureBlockNotImplemented {
+        name: String,
+        span: Span,
+    },
 }
 
 impl std::fmt::Display for LowerError {
@@ -266,6 +275,10 @@ impl std::fmt::Display for LowerError {
                 f,
                 "ability `{ability}` instantiates `{template}(…)` — parsed by Wave 1.2 but lowering is Wave 2+ (template expansion engine not yet wired)"
             ),
+            LowerError::StructureBlockNotImplemented { name, .. } => write!(
+                f,
+                "`structure {name}` is parsed by Wave 1.3 but lowering is Wave 2+ (voxel rasterization + StructureRegistry per spec §12.2 not yet wired)"
+            ),
         }
     }
 }
@@ -298,6 +311,16 @@ pub fn lower_ability_file(file: &AbilityFile) -> Result<Vec<AbilityProgram>, Low
         return Err(LowerError::TemplateBlockNotImplemented {
             name: template.name.clone(),
             span: template.span,
+        });
+    }
+    // Wave 1.3: top-level `structure` blocks parse but voxel
+    // rasterization + StructureRegistry (spec §12.2) lives at Wave 2+.
+    // Surface the first one so a silently-dropped structure never
+    // reaches the registry.
+    if let Some(structure) = file.structures.first() {
+        return Err(LowerError::StructureBlockNotImplemented {
+            name: structure.name.clone(),
+            span: structure.span,
         });
     }
     let mut out = Vec::with_capacity(file.abilities.len());
