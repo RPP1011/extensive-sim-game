@@ -4,6 +4,7 @@
 //! interpreter can share one parse + resolve pipeline. See
 //! `docs/superpowers/specs/2026-04-22-dsl-authoring-engine-design.md` §4.1.
 
+pub mod ability_parser;
 pub mod ast;
 pub mod tokens;
 pub mod error;
@@ -13,7 +14,11 @@ pub mod parser;
 pub mod resolve;
 pub mod eval;
 
-pub use ast::{Decl, Program, Span, Spanned};
+pub use ability_parser::parse_ability_file;
+pub use ast::{
+    AbilityDecl, AbilityFile, AbilityHeader, Decl, Duration, EffectArg, EffectStmt, HintName,
+    Program, Span, Spanned, TargetMode,
+};
 pub use error::ParseError;
 pub use ir::Compilation;
 pub use resolve_error::ResolveError;
