@@ -10,21 +10,22 @@
 //!   then ignored), `hint` (damage/defense/crowd_control/utility/heal —
 //!   `economic` is reserved per §4.2).
 //!
-//! * **Effect verbs covered (16 of the 27 catalog entries):** `damage`,
+//! * **Effect verbs covered (18 of the 27 catalog entries):** `damage`,
 //!   `heal`, `shield`, `stun`, `slow`, `transfer_gold`,
 //!   `modify_standing`, `cast`, the Wave 2 piece 1 control verbs
-//!   `root`, `silence`, `fear`, `taunt`, plus the Wave 2 piece 2
-//!   movement verbs `dash`, `blink`, `knockback`, `pull`. These match
-//!   the 16 `EffectOp` variants on the engine side. Unknown verbs /
-//!   arity mismatches are surfaced as errors.
+//!   `root`, `silence`, `fear`, `taunt`, the Wave 2 piece 2
+//!   movement verbs `dash`, `blink`, `knockback`, `pull`, plus the
+//!   Wave 2 piece 3 advanced verbs `execute`, `self_damage`. These
+//!   match the 18 `EffectOp` variants on the engine side. Unknown
+//!   verbs / arity mismatches are surfaced as errors.
 //!
 //! * **Out of scope (deferred to later waves):**
 //!     - `template` / `structure` top-level blocks — Waves 1.2 / 1.3.
 //!     - Other target modes (ally/self_aoe/ground/direction/vector/global)
 //!       and `economic` hint — error today, wired by their respective
 //!       waves.
-//!     - The remaining 11 EffectOp variants (Teleport, ApplyStatus,
-//!       SummonAlly, etc.) — Waves 2-5.
+//!     - The remaining 9 EffectOp variants (Teleport, ApplyStatus,
+//!       SummonAlly, LifeSteal, DamageModify, etc.) — Waves 2-5.
 //!     - Two-phase split validator + ability-name resolution for
 //!       `cast <Name>` — Wave 1.7 (registry wiring).
 //!
@@ -179,7 +180,7 @@ impl std::fmt::Display for LowerError {
             LowerError::UnknownEffectVerb { verb, suggestion, .. } => {
                 write!(
                     f,
-                    "unknown effect verb '{verb}'; valid verbs at this stage: damage / heal / shield / stun / slow / transfer_gold / modify_standing / cast / root / silence / fear / taunt / dash / blink / knockback / pull"
+                    "unknown effect verb '{verb}'; valid verbs at this stage: damage / heal / shield / stun / slow / transfer_gold / modify_standing / cast / root / silence / fear / taunt / dash / blink / knockback / pull / execute / self_damage"
                 )?;
                 if let Some(s) = suggestion {
                     write!(f, " (did you mean '{s}'?)")?;
@@ -572,6 +573,26 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             let dist = require_number_arg(stmt, 0)?;
             require_arity(stmt, 1)?;
             Ok(EffectOp::Pull { distance: dist })
+        }
+        // Wave 2 piece 3 — two new advanced verbs. Each takes a single
+        // `<f32>` arg (mirrors `damage`'s shape exactly). NEITHER adds
+        // SoA fields:
+        //   * `execute <hp_threshold>` reads existing `hot_hp` and
+        //     emits a Defeated/AgentDied event when target.hp <
+        //     hp_threshold. Apply handler is per-fixture work — Wave 2
+        //     piece N.
+        //   * `self_damage <amount>` re-emits a Damaged{source: caster,
+        //     target: caster, amount} event the existing ApplyDamage
+        //     chronicle already drains. No new state.
+        "execute" => {
+            let threshold = require_number_arg(stmt, 0)?;
+            require_arity(stmt, 1)?;
+            Ok(EffectOp::Execute { hp_threshold: threshold })
+        }
+        "self_damage" => {
+            let amount = require_number_arg(stmt, 0)?;
+            require_arity(stmt, 1)?;
+            Ok(EffectOp::SelfDamage { amount })
         }
         "slow" => {
             // `slow <factor:f32> <duration>` — two positional args. The

@@ -116,6 +116,12 @@ fn engine_to_dsl_effect_op(op: &EngineEffectOp) -> DslEffectOp {
         EngineEffectOp::Blink     { distance } => DslEffectOp::Blink     { distance: *distance },
         EngineEffectOp::Knockback { distance } => DslEffectOp::Knockback { distance: *distance },
         EngineEffectOp::Pull      { distance } => DslEffectOp::Pull      { distance: *distance },
+        // Wave 2 piece 3 — advanced verbs. Per-fixture apply handlers
+        // (Execute → emit Defeated when target.hp < hp_threshold;
+        // SelfDamage → emit Damaged{source=target=caster, amount}) are
+        // Wave 2 piece N work.
+        EngineEffectOp::Execute    { hp_threshold } => DslEffectOp::Execute    { hp_threshold: *hp_threshold },
+        EngineEffectOp::SelfDamage { amount }       => DslEffectOp::SelfDamage { amount: *amount },
     }
 }
 

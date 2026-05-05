@@ -187,6 +187,30 @@ pub enum EffectOp {
     /// must guard against zero-length vectors when caster and target
     /// occupy the same cell.
     Pull      { distance: f32 } = 15,
+
+    // --- Advanced verbs (Wave 2 piece 3) ---
+    // Two simple "advanced" verbs from spec §6 / §6.5 that each carry a
+    // single 4B payload (4B + 1B tag, well under the 16B EffectOp size
+    // budget). NEITHER variant adds new SoA fields:
+    //   * `Execute` reads the existing `hot_hp` / `hot_max_hp` columns and
+    //     compares against `hp_threshold`; the apply handler emits a
+    //     Defeated/AgentDied event when the predicate trips. No new
+    //     per-agent state.
+    //   * `SelfDamage` translates 1:1 into a `Damaged{source: caster,
+    //     target: caster, amount}` event the existing `ApplyDamage`
+    //     chronicle already drains. No new per-agent state.
+    // Per-fixture apply handlers are Wave 2 piece N (runtime use); this
+    // slice only ships the IR variants + payload packing + DSL lowering.
+    /// `execute <hp_threshold>` — instantly kill target if `target.hp <
+    /// hp_threshold`. Spec §6.5 "advanced verbs". Apply-handler logic
+    /// (compare and emit Defeated) is per-fixture work — Wave 2 piece N.
+    Execute    { hp_threshold: f32 } = 16,
+
+    /// `self_damage <amount>` — caster takes `amount` damage. The lowering
+    /// emits this verb verbatim; per-fixture handlers translate it to a
+    /// Damaged{source: caster, target: caster, amount} event the existing
+    /// ApplyDamage chronicle then drains.
+    SelfDamage { amount: f32 } = 17,
 }
 
 /// Coarse ability-category hint, per `.ability` DSL `hint:` field.

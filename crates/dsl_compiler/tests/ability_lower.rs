@@ -250,6 +250,42 @@ fn lowers_pull() {
 }
 
 // ---------------------------------------------------------------------------
+// Wave 2 piece 3 — advanced verbs (execute / self_damage).
+// Both mirror `damage`'s shape: one `<f32>` positional arg →
+// `EffectOp::* { ... }`. NEITHER adds new SoA fields; per-fixture apply
+// handlers (Execute → emit Defeated when hp < threshold; SelfDamage →
+// emit Damaged{source=target=caster, amount}) land in Wave 2 piece N.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lowers_execute() {
+    let src = "ability Finisher { target: enemy range: 4 cooldown: 1s execute 25 }";
+    let file = parse_ability_file(src).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+    assert_eq!(prog.effects.len(), 1);
+    match prog.effects[0] {
+        EffectOp::Execute { hp_threshold } => {
+            assert!((hp_threshold - 25.0).abs() < 1e-6, "execute hp_threshold")
+        }
+        ref other => panic!("expected Execute; got {other:?}"),
+    }
+}
+
+#[test]
+fn lowers_self_damage() {
+    let src = "ability BloodPact { target: self cooldown: 1s self_damage 7.5 }";
+    let file = parse_ability_file(src).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+    assert_eq!(prog.effects.len(), 1);
+    match prog.effects[0] {
+        EffectOp::SelfDamage { amount } => {
+            assert!((amount - 7.5).abs() < 1e-6, "self_damage amount")
+        }
+        ref other => panic!("expected SelfDamage; got {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Error paths
 // ---------------------------------------------------------------------------
 

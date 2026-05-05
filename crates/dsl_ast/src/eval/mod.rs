@@ -161,6 +161,12 @@ pub enum EffectOp {
     Blink     { distance: f32 },
     Knockback { distance: f32 },
     Pull      { distance: f32 },
+    // Wave 2 piece 3 — advanced verbs (mirror of
+    // `engine::ability::program::EffectOp::{Execute,SelfDamage}`). Each
+    // carries a single `f32` payload (same shape as `Damage`).
+    // Discriminants 16..=17 pinned by the engine schema_hash.
+    Execute    { hp_threshold: f32 },
+    SelfDamage { amount: f32 },
 }
 
 /// Target selection for `CastAbility` effects.  Mirrors
