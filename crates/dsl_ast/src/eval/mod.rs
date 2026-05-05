@@ -153,6 +153,14 @@ pub enum EffectOp {
     Silence { duration_ticks: u32 },
     Fear { duration_ticks: u32 },
     Taunt { duration_ticks: u32 },
+    // Wave 2 piece 2 — movement verbs (mirror of
+    // `engine::ability::program::EffectOp::{Dash,Blink,Knockback,Pull}`).
+    // Each carries a single `distance: f32` payload (same shape as
+    // `Damage`). Discriminants 12..=15 pinned by the engine schema_hash.
+    Dash      { distance: f32 },
+    Blink     { distance: f32 },
+    Knockback { distance: f32 },
+    Pull      { distance: f32 },
 }
 
 /// Target selection for `CastAbility` effects.  Mirrors

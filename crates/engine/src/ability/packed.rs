@@ -54,9 +54,10 @@ pub const NUM_ABILITY_TAGS: usize = AbilityTag::COUNT;
 
 /// Effect-op kind tag for an empty slot (program had fewer than
 /// `MAX_EFFECTS_PER_PROGRAM` effects). Distinct from any `EffectOp`
-/// discriminant (0..=11 today, including the Wave 2 piece 1 control
-/// verbs Root/Silence/Fear/Taunt). GPU dispatch loops break early on
-/// this sentinel.
+/// discriminant (0..=15 today, including the Wave 2 piece 1 control
+/// verbs Root/Silence/Fear/Taunt and the Wave 2 piece 2 movement verbs
+/// Dash/Blink/Knockback/Pull). GPU dispatch loops break early on this
+/// sentinel.
 pub const EFFECT_KIND_EMPTY: u32 = 0xFF;
 
 // Compile-time guard: `MAX_TAGS_PER_PROGRAM` and `NUM_ABILITY_TAGS` must
@@ -292,6 +293,8 @@ fn pack_delivery(d: Delivery) -> u32 {
 /// * `CastAbility`                 -> `(disc, ability.raw(), selector as u32)`
 /// * `Root` / `Silence` / `Fear` / `Taunt`
 ///                                 -> `(disc, duration_ticks, 0)`  (Wave 2 piece 1; same shape as `Stun`)
+/// * `Dash` / `Blink` / `Knockback` / `Pull`
+///                                 -> `(disc, f32::to_bits(distance), 0)`  (Wave 2 piece 2; same shape as `Damage`)
 ///
 /// Sign-bearing payloads use sign-preserving bitcasts (`as i16 as u32`)
 /// so a GPU shader doing `bitcast<i32>(payload_a)` recovers the signed
@@ -318,6 +321,13 @@ fn pack_effect(op: EffectOp) -> (u32, u32, u32) {
         EffectOp::Silence { duration_ticks } => (9, duration_ticks, 0),
         EffectOp::Fear { duration_ticks } => (10, duration_ticks, 0),
         EffectOp::Taunt { duration_ticks } => (11, duration_ticks, 0),
+        // Wave 2 piece 2 — movement verbs share `Damage`'s shape exactly.
+        // `distance` is bit-cast to u32 via `f32::to_bits` so a GPU shader
+        // doing `bitcast<f32>(payload_a)` recovers the value losslessly.
+        EffectOp::Dash      { distance } => (12, distance.to_bits(), 0),
+        EffectOp::Blink     { distance } => (13, distance.to_bits(), 0),
+        EffectOp::Knockback { distance } => (14, distance.to_bits(), 0),
+        EffectOp::Pull      { distance } => (15, distance.to_bits(), 0),
     }
 }
 
@@ -609,6 +619,73 @@ mod tests {
         // Taunt discriminant == 11.
         assert_eq!(p.effect_kinds[0], 11);
         assert_eq!(p.effect_payload_a[0], 40);
+        assert_eq!(p.effect_payload_b[0], 0);
+    }
+
+    // -- Wave 2 piece 2 — movement verb pack tests. Each mirrors the
+    // Damage shape exactly: discriminant + `f32::to_bits(distance)` in
+    // `payload_a`, `payload_b` zero. ---------------------------------------
+    #[test]
+    fn pack_dash_payload() {
+        let prog = AbilityProgram::new_single_target(
+            0.0,
+            Gate { cooldown_ticks: 0, hostile_only: false, line_of_sight: false },
+            [EffectOp::Dash { distance: 4.5 }],
+        );
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // Dash discriminant == 12.
+        assert_eq!(p.effect_kinds[0], 12);
+        assert_eq!(p.effect_payload_a[0], 4.5_f32.to_bits());
+        assert_eq!(p.effect_payload_b[0], 0);
+    }
+
+    #[test]
+    fn pack_blink_payload() {
+        let prog = AbilityProgram::new_single_target(
+            6.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Blink { distance: 6.0 }],
+        );
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // Blink discriminant == 13.
+        assert_eq!(p.effect_kinds[0], 13);
+        assert_eq!(p.effect_payload_a[0], 6.0_f32.to_bits());
+        assert_eq!(p.effect_payload_b[0], 0);
+    }
+
+    #[test]
+    fn pack_knockback_payload() {
+        let prog = AbilityProgram::new_single_target(
+            2.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Knockback { distance: 3.0 }],
+        );
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // Knockback discriminant == 14.
+        assert_eq!(p.effect_kinds[0], 14);
+        assert_eq!(p.effect_payload_a[0], 3.0_f32.to_bits());
+        assert_eq!(p.effect_payload_b[0], 0);
+    }
+
+    #[test]
+    fn pack_pull_payload() {
+        let prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Pull { distance: 2.5 }],
+        );
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // Pull discriminant == 15.
+        assert_eq!(p.effect_kinds[0], 15);
+        assert_eq!(p.effect_payload_a[0], 2.5_f32.to_bits());
         assert_eq!(p.effect_payload_b[0], 0);
     }
 

@@ -109,6 +109,13 @@ fn engine_to_dsl_effect_op(op: &EngineEffectOp) -> DslEffectOp {
         EngineEffectOp::Silence { duration_ticks } => DslEffectOp::Silence { duration_ticks: *duration_ticks },
         EngineEffectOp::Fear    { duration_ticks } => DslEffectOp::Fear    { duration_ticks: *duration_ticks },
         EngineEffectOp::Taunt   { duration_ticks } => DslEffectOp::Taunt   { duration_ticks: *duration_ticks },
+        // Wave 2 piece 2 — movement verbs. Same mirror surface; runtime
+        // apply handlers (compute facing / away / toward vectors and
+        // update `hot_pos`) land in a follow-up Wave 2 piece.
+        EngineEffectOp::Dash      { distance } => DslEffectOp::Dash      { distance: *distance },
+        EngineEffectOp::Blink     { distance } => DslEffectOp::Blink     { distance: *distance },
+        EngineEffectOp::Knockback { distance } => DslEffectOp::Knockback { distance: *distance },
+        EngineEffectOp::Pull      { distance } => DslEffectOp::Pull      { distance: *distance },
     }
 }
 
