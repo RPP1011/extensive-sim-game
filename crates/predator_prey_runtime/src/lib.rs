@@ -25,7 +25,7 @@
 
 use engine::ids::AgentId;
 use engine::rng::per_agent_u32;
-use engine::sim_trait::CompiledSim;
+use engine::sim_trait::{AgentSnapshot, CompiledSim, VizGlyph};
 use engine::GpuContext;
 use glam::Vec3;
 use wgpu::util::DeviceExt;
@@ -210,7 +210,13 @@ impl PredatorPreyState {
             gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("predator_prey_runtime::creature_type"),
                 contents: bytemuck::cast_slice(&creature_init),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                // COPY_SRC so `snapshot()` can stage the per-slot
+                // discriminant back to host. Pos already has COPY_SRC
+                // for `read_positions`; vel doesn't need it (no host
+                // consumer).
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
             });
         let cfg = physics_MoveHare::PhysicsMoveHareCfg {
             agent_cap: agent_count,
@@ -441,6 +447,45 @@ impl PredatorPreyState {
         }
         &self.pos_cache
     }
+
+    /// One-shot GPU readback of the per-slot creature_type discriminant
+    /// (Hare = 0, Wolf = 1 — matches the `EntityRef` declaration order
+    /// in `predator_prey_min.sim`). Mirrors duel_abilities_runtime's
+    /// `read_u32` shape: ad-hoc staging buffer + map_async + poll/wait.
+    /// Allocates a fresh staging buffer per call — `snapshot()` only
+    /// fires at viz cadence (~10 Hz) so the cost is acceptable; if a
+    /// hot-path consumer ever appears, fold this into a long-lived
+    /// staging buffer like `pos_staging`.
+    fn read_creature_types(&self) -> Vec<u32> {
+        let bytes = (self.agent_count as u64) * 4;
+        let staging = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("predator_prey_runtime::creature_type_staging"),
+            size: bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self.gpu.device.create_command_encoder(
+            &wgpu::CommandEncoderDescriptor {
+                label: Some("predator_prey_runtime::creature_type::copy"),
+            },
+        );
+        encoder.copy_buffer_to_buffer(
+            &self.creature_type_buf, 0, &staging, 0, bytes,
+        );
+        self.gpu.queue.submit(Some(encoder.finish()));
+        let slice = staging.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = sender.send(r);
+        });
+        self.gpu.device.poll(wgpu::PollType::Wait).expect("poll");
+        let _ = receiver.recv().expect("map_async result");
+        let mapped = slice.get_mapped_range();
+        let v: Vec<u32> = bytemuck::cast_slice(&mapped).to_vec();
+        drop(mapped);
+        staging.unmap();
+        v
+    }
 }
 
 impl CompiledSim for PredatorPreyState {
@@ -668,6 +713,70 @@ impl CompiledSim for PredatorPreyState {
     fn positions(&mut self) -> &[Vec3] {
         self.read_positions()
     }
+
+    /// Snapshot per-agent positions + species + alive bit for the
+    /// `viz_app` ASCII renderer. Encoding (matches `glyph_table`):
+    ///
+    /// - `positions`: read directly from `agent_pos_buf` via the
+    ///   existing `read_positions` path (no transform).
+    /// - `creature_types`: 4-entry table indexed by
+    ///   `species_bit | (dead_bit << 1)`:
+    ///     - 0 = alive prey  (Hare, creature_type discriminant 0)
+    ///     - 1 = alive predator (Wolf, creature_type discriminant 1)
+    ///     - 2 = dead prey
+    ///     - 3 = dead predator
+    /// - `alive`: Stage 0 has no Killed → SoA writeback path yet —
+    ///   `kill_count` accumulates events but no field flips an
+    ///   `agent_alive` bit, so every slot is reported alive (1). When
+    ///   PP Stage 1 wires the per-event ApplyDefeat handler, this gets
+    ///   replaced with a `read_alive()` GPU readback (and the dead
+    ///   variants 2/3 in the encoding above will start firing).
+    ///
+    /// Initial-state safe: positions come from the `create_buffer_init`
+    /// upload at construction, so calling `snapshot()` before any
+    /// `step()` returns the deterministic spawn cube.
+    fn snapshot(&mut self) -> AgentSnapshot {
+        // Position readback first — drives `dirty` flush via the
+        // existing pos_staging path.
+        let positions: Vec<Vec3> = self.read_positions().to_vec();
+        let species: Vec<u32> = self.read_creature_types();
+        let n = self.agent_count as usize;
+        // Stage 0: agents never die. When ApplyDefeat lands, swap this
+        // for a `read_alive()` of an `agent_alive_buf`.
+        let alive: Vec<u32> = vec![1u32; n];
+        let creature_types: Vec<u32> = (0..n)
+            .map(|i| {
+                let species_bit = species[i] & 1; // 0 = prey, 1 = predator
+                let dead_bit = if alive[i] == 0 { 1 } else { 0 };
+                species_bit | (dead_bit << 1)
+            })
+            .collect();
+        AgentSnapshot { positions, creature_types, alive }
+    }
+
+    /// 4 entries matching the `snapshot.creature_types` encoding:
+    /// `[alive_prey, alive_predator, dead_prey, dead_predator]`.
+    /// Predator gets the upper-case `P` glyph in red so it pops; prey
+    /// get the low-key `.` in green. Dead variants share a grey ×.
+    fn glyph_table(&self) -> Vec<VizGlyph> {
+        vec![
+            VizGlyph::new('.', 46),         // alive prey: bright green
+            VizGlyph::new('P', 196),        // alive predator: bright red
+            VizGlyph::new('\u{00D7}', 240), // dead prey: grey ×
+            VizGlyph::new('\u{00D7}', 240), // dead predator: grey ×
+        ]
+    }
+
+    /// Default zoom around the deterministic spawn cube. `new()` derives
+    /// per-axis spreads from `cbrt(agent_count)` (so a 64-agent fixture
+    /// spans roughly `[-4, 4]` per axis); ±5 keeps every spawn on screen
+    /// with breathing room for the trivial integrator's drift. The
+    /// renderer auto-scales if positions wander outside, so this is
+    /// just an opening framing.
+    fn default_viewport(&self) -> Option<(Vec3, Vec3)> {
+        let span = (self.agent_count as f32).cbrt().max(1.0) + 1.0;
+        Some((Vec3::new(-span, -span, 0.0), Vec3::new(span, span, 0.0)))
+    }
 }
 
 /// Build a boxed `CompiledSim` so the `sim_app` runner can switch
@@ -675,4 +784,95 @@ impl CompiledSim for PredatorPreyState {
 /// `boids_runtime::make_sim`.
 pub fn make_sim(seed: u64, agent_count: u32) -> Box<dyn CompiledSim> {
     Box::new(PredatorPreyState::new(seed, agent_count))
+}
+
+#[cfg(test)]
+mod viz_tests {
+    use super::*;
+
+    /// Snapshot before any tick must report initial state: every agent
+    /// alive, deterministic creature_type assignment from the 50/50
+    /// split, and positions inside the spawn cube derived from the
+    /// `cbrt(agent_count)` spread. Guards the construction-only
+    /// readback path so `viz_app` can render frame 0 with content
+    /// instead of a blank grid.
+    #[test]
+    fn snapshot_after_construction_returns_initial_state() {
+        let agent_count = 16u32;
+        let mut state = PredatorPreyState::new(0xCAFE_F00D, agent_count);
+        let snap = state.snapshot();
+
+        assert_eq!(snap.positions.len(), agent_count as usize, "positions length");
+        assert_eq!(snap.creature_types.len(), agent_count as usize, "creature_types length");
+        assert_eq!(snap.alive.len(), agent_count as usize, "alive length");
+
+        // Stage 0: no kill path — every slot reports alive.
+        let alive_total: u32 = snap.alive.iter().sum();
+        assert_eq!(
+            alive_total, agent_count,
+            "every slot must be alive at construction (Stage 0 has no Killed→SoA path); got alive={:?}",
+            snap.alive,
+        );
+
+        // 50/50 species split per `new()` — even slots are prey (0),
+        // odd slots are predator (1).
+        for (i, &ct) in snap.creature_types.iter().enumerate() {
+            let expected = (i & 1) as u32;
+            assert_eq!(
+                ct, expected,
+                "slot {i}: species_bit must match init 50/50 split (even=prey=0, odd=predator=1); got {ct}",
+            );
+        }
+
+        // Positions must lie inside the deterministic spawn cube.
+        // `new()` uses `spread = cbrt(agent_count).max(1)` and samples
+        // each axis from `normalise(...) * spread` ∈ `[-spread, spread)`.
+        let spread = (agent_count as f32).cbrt().max(1.0);
+        for (i, p) in snap.positions.iter().enumerate() {
+            assert!(
+                p.x.abs() <= spread + 0.001
+                    && p.y.abs() <= spread + 0.001
+                    && p.z.abs() <= spread + 0.001,
+                "slot {i} position {p:?} outside spawn cube ±{spread}",
+            );
+        }
+
+        // glyph_table indexes line up with the 4-entry encoding the
+        // snapshot promises.
+        let glyphs = state.glyph_table();
+        assert_eq!(glyphs.len(), 4, "glyph_table must have 4 entries");
+    }
+
+    /// After ticking the simulation forward, the trivial integrator in
+    /// `predator_prey_min.sim` advances every agent by its velocity
+    /// each step — so at least one slot's position must have changed
+    /// from the initial spawn. Proves the snapshot reflects live GPU
+    /// state, not a cached construction-time copy.
+    #[test]
+    fn snapshot_after_tick_reflects_state_change() {
+        let agent_count = 16u32;
+        let mut state = PredatorPreyState::new(0xCAFE_F00D, agent_count);
+        let initial = state.snapshot().positions.clone();
+
+        for _ in 0..50 {
+            state.step();
+        }
+
+        let snap = state.snapshot();
+        assert_eq!(snap.positions.len(), agent_count as usize);
+
+        // At least one slot's position must have shifted (or alive
+        // count must have changed — neither is allowed to be a no-op
+        // 50 ticks in).
+        let any_moved = initial.iter().zip(snap.positions.iter()).any(|(a, b)| {
+            (a.x - b.x).abs() > 1e-6
+                || (a.y - b.y).abs() > 1e-6
+                || (a.z - b.z).abs() > 1e-6
+        });
+        let alive_changed = snap.alive.iter().sum::<u32>() != agent_count;
+        assert!(
+            any_moved || alive_changed,
+            "after 50 ticks, expected position drift or kill; saw all positions identical and all slots still alive",
+        );
+    }
 }
