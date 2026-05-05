@@ -24,7 +24,7 @@
 use std::path::PathBuf;
 
 use engine::ability::{
-    program::{Area, EffectOp, EffectScaling, ScalingStatRef},
+    program::{Area, EffectOp, EffectScaling, ScalingStatRef, StackingMode},
     PackedAbilityRegistry,
 };
 
@@ -169,6 +169,22 @@ pub fn assert_ability_registry_matches_sim_constants() {
             "ShieldUp effect[0]: expected Shield(50.0), got {other:?}",
         ),
     }
+    // Wave 1.5#3 stacking modifier — ShieldUp.ability declares
+    // `stacking stack`, lowered to program.stackings[0] =
+    // Some(StackingMode::Stack). The .sim's ApplyShield does
+    // `new_shield = agents.shield_hp(t) + a` (additive accumulation),
+    // which IS stack semantics. The binding check proves the lowering
+    // captures the modifier; registry-driven stacking dispatch is
+    // later infrastructure.
+    assert_eq!(
+        shieldup.stackings.len(), 1,
+        "ShieldUp must have one stacking slot (parallel to one effect)",
+    );
+    assert_eq!(
+        shieldup.stackings[0], Some(StackingMode::Stack),
+        "ShieldUp stacking must be Stack — .ability `stacking stack`; \
+         .sim ApplyShield does additive accumulation",
+    );
 
     // ---- Mend: cooldown 30 ticks, self-target, heal 25.0 ----
     let mend_id = *built.names.get("Mend")
@@ -383,6 +399,22 @@ pub fn assert_ability_registry_matches_sim_constants() {
             "Fortify effect[0]: expected DamageModify(50, 128), got {other:?}",
         ),
     }
+    // Wave 1.5#3 stacking modifier — Fortify.ability declares
+    // `stacking refresh`, lowered to program.stackings[0] =
+    // Some(StackingMode::Refresh). The .sim's ApplyDamageModActivation
+    // overwrites damage_taken_mult_expires_at_tick wholesale (no
+    // max-with-existing), which IS refresh semantics. The binding
+    // check proves the lowering captures the modifier; registry-
+    // driven stacking dispatch is later infrastructure.
+    assert_eq!(
+        fortify.stackings.len(), 1,
+        "Fortify must have one stacking slot (parallel to one effect)",
+    );
+    assert_eq!(
+        fortify.stackings[0], Some(StackingMode::Refresh),
+        "Fortify stacking must be Refresh — .ability `stacking refresh`; \
+         .sim ApplyDamageModActivation overwrites expires_at wholesale",
+    );
 
     // ---- Daze: cooldown 40 ticks, range 5.0, hostile_only, stun 10 ticks ----
     //   Wave 2 piece N: Stun E2E demo + FIRST verb-status cast-gate.

@@ -1,14 +1,22 @@
 // Wave 2 piece N: DamageModify E2E demo. Caster gains a 5-second
 // window during which incoming damage is scaled to 50%. Lowers to
 // AbilityProgram { effects: [EffectOp::DamageModify{duration_ticks: 50,
-// multiplier_q8: 128}] }. The .sim verb writes damage_taken_mult_q8 +
+// multiplier_q8: 128}], stackings: [Some(StackingMode::Refresh)] }.
+// The .sim verb writes damage_taken_mult_q8 +
 // damage_taken_mult_expires_at_tick; ApplyDamage reads target's
 // damage_taken_mult and scales bleed by mult_q8 / 256.0 before
 // subtracting from hp.
+//
+// `stacking refresh` exercises Wave 1.5#3 stacking-mode lowering — on
+// recast, the .sim's ApplyDamageModActivation overwrites
+// damage_taken_mult_expires_at_tick wholesale (no max-with-existing),
+// which IS refresh semantics. Registry-driven stacking dispatch is
+// later infrastructure; the binding-check asserts the lowered slot
+// matches the .sim's natural overwrite behavior.
 
 ability Fortify {
     target: self
     cooldown: 8s
 
-    damage_modify 0.5 5s
+    damage_modify 0.5 5s stacking refresh
 }
