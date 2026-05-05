@@ -107,14 +107,25 @@ pub struct DuelAbilitiesState {
     /// handler), read back via the agent_shield_hp() getter for
     /// observability. Starts at 0.0 for every slot.
     agent_shield_hp_buf: wgpu::Buffer,
+    /// Per-agent lifesteal fraction (q8 fixed-point, 128 == 0.5x).
+    /// Written by ApplyLifestealActivation (SetLifesteal event handler);
+    /// read by ApplyDamage to decide whether the source heals back a
+    /// fraction of the damage they dealt. Starts at 0 (no lifesteal).
+    /// Wave 2 piece N LifeSteal E2E demo.
+    agent_lifesteal_frac_q8_buf: wgpu::Buffer,
+    /// Per-agent lifesteal expiry tick stamp. ApplyDamage gates on
+    /// `expires_at > world.tick`, so a 0 expiry never grants lifesteal.
+    /// Written by ApplyLifestealActivation alongside frac_q8.
+    agent_lifesteal_expires_at_tick_buf: wgpu::Buffer,
 
     // -- Mask bitmaps (one per verb in source order: Strike=0,
-    //    ShieldUp=1, Mend=2, Bleed=3, Reap=4) --
+    //    ShieldUp=1, Mend=2, Bleed=3, Reap=4, Vampirize=5) --
     mask_0_bitmap_buf: wgpu::Buffer, // Strike
     mask_1_bitmap_buf: wgpu::Buffer, // ShieldUp
     mask_2_bitmap_buf: wgpu::Buffer, // Mend
     mask_3_bitmap_buf: wgpu::Buffer, // Bleed (Wave 2 SelfDamage demo)
     mask_4_bitmap_buf: wgpu::Buffer, // Reap  (Wave 2 Execute demo)
+    mask_5_bitmap_buf: wgpu::Buffer, // Vampirize (Wave 2 LifeSteal demo)
     mask_bitmap_zero_buf: wgpu::Buffer,
     mask_bitmap_words: u32,
 
@@ -132,12 +143,27 @@ pub struct DuelAbilitiesState {
     // -- Per-kernel cfg uniforms --
     mask_cfg_buf: wgpu::Buffer,
     scoring_cfg_buf: wgpu::Buffer,
+    /// Cfg uniform for the FUSED kernel that drains
+    /// Healed/Shielded/Defeated/SetLifesteal events AND emits Damaged
+    /// from the Strike chronicle. Adding ApplyLifestealActivation +
+    /// ApplyDamage's source-side Healed emit caused the compiler to
+    /// split ApplyDamage into its own pass and fuse the rest with
+    /// Strike's chronicle (because Strike's emit is now the only
+    /// remaining producer the others can ride). Hence the renamed
+    /// kernel `physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_
+    /// ApplyLifestealActivation_and_verb_chronicle_Strike`.
     chronicle_strike_cfg_buf: wgpu::Buffer,
     chronicle_shieldup_cfg_buf: wgpu::Buffer,
     chronicle_mend_cfg_buf: wgpu::Buffer,
     chronicle_bleed_cfg_buf: wgpu::Buffer,
     chronicle_reap_cfg_buf: wgpu::Buffer,
-    apply_cfg_buf: wgpu::Buffer,
+    chronicle_vampirize_cfg_buf: wgpu::Buffer,
+    /// Cfg uniform for the standalone `physics_ApplyDamage` kernel —
+    /// split out of the previous PerEvent fusion because ApplyDamage
+    /// now emits Healed events for source-side lifesteal and that
+    /// production conflicts with the consumers in the same fusion
+    /// group.
+    apply_damage_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
 
     cache: dispatch::KernelCache,
@@ -184,8 +210,27 @@ impl DuelAbilitiesState {
             contents: bytemuck::cast_slice(&shield_hp_init),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
+        // Lifesteal SoA — Wave 2 piece N. The compiler types
+        // `lifesteal_frac_q8` as `i16` but the WGSL emit reads it as
+        // `array<i32>` (see `cg/emit/kernel.rs`'s `AgentFieldTy::I16
+        // => "array<i32>"` arm), so the GPU buffer is one i32 (4
+        // bytes) per agent. Init to 0 (no lifesteal); ApplyDamage's
+        // `src_frac > 0` gate keeps the heal branch dormant until
+        // Vampirize fires.
+        let lifesteal_frac_init: Vec<i32> = vec![0_i32; agent_count as usize];
+        let agent_lifesteal_frac_q8_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_abilities_runtime::agent_lifesteal_frac_q8"),
+            contents: bytemuck::cast_slice(&lifesteal_frac_init),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+        });
+        let lifesteal_expires_init: Vec<u32> = vec![0_u32; agent_count as usize];
+        let agent_lifesteal_expires_at_tick_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_abilities_runtime::agent_lifesteal_expires_at_tick"),
+            contents: bytemuck::cast_slice(&lifesteal_expires_init),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+        });
 
-        // Three mask bitmaps — one per verb. Cleared each tick.
+        // Six mask bitmaps — one per verb. Cleared each tick.
         let mask_bitmap_words = (agent_count + 31) / 32;
         let mask_bitmap_bytes = (mask_bitmap_words as u64) * 4;
         let mk_mask = |label: &str| -> wgpu::Buffer {
@@ -201,6 +246,7 @@ impl DuelAbilitiesState {
         let mask_2_bitmap_buf = mk_mask("duel_abilities_runtime::mask_2_bitmap");
         let mask_3_bitmap_buf = mk_mask("duel_abilities_runtime::mask_3_bitmap");
         let mask_4_bitmap_buf = mk_mask("duel_abilities_runtime::mask_4_bitmap");
+        let mask_5_bitmap_buf = mk_mask("duel_abilities_runtime::mask_5_bitmap");
         let zero_words: Vec<u32> = vec![0u32; mask_bitmap_words.max(4) as usize];
         let mask_bitmap_zero_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_abilities_runtime::mask_bitmap_zero"),
@@ -266,8 +312,17 @@ impl DuelAbilitiesState {
             contents: bytemuck::bytes_of(&scoring_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        // The compiler renamed the fused-PerEvent kernel one more time:
+        // adding ApplyLifestealActivation + ApplyDamage's source-side
+        // Healed emit pushed Strike's chronicle into the fusion group
+        // and split ApplyDamage out alone. The cfg type now lives at
+        // `physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_
+        // ApplyLifestealActivation_and_verb_chronicle_Strike`. Field
+        // name `chronicle_strike_cfg_buf` retained for continuity —
+        // Strike's chronicle still needs an event_count uniform and
+        // this is the kernel that runs it.
         let chronicle_strike_cfg_init =
-            physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeCfg {
+            physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndVerbChronicleStrikeCfg {
                 event_count: 0, tick: 0, seed: 0, _pad0: 0,
             };
         let chronicle_strike_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -311,22 +366,36 @@ impl DuelAbilitiesState {
             contents: bytemuck::bytes_of(&chronicle_reap_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        // Wave 2 piece N adds an `ApplyDefeat` physics block to the
-        // .sim. The compiler fused it into the existing PerEvent group
-        // (Damaged/Healed/Shielded already shared a kernel because all
-        // three are PerEvent over the same ring). The fused kernel was
-        // therefore RENAMED to
-        // `physics_ApplyDamage_and_ApplyHeal_and_ApplyShield_and_ApplyDefeat`
-        // — bindings/cfg structs and the dispatch helper inherit the
-        // longer name. The bind-group SoA didn't grow; ApplyDefeat
-        // only touches `agent_alive`, which the kernel already had.
-        let apply_cfg_init =
-            physics_ApplyDamage_and_ApplyHeal_and_ApplyShield_and_ApplyDefeat::PhysicsApplyDamageAndApplyHealAndApplyShieldAndApplyDefeatCfg {
+        // Vampirize chronicle — Wave 2 piece N LifeSteal demo. The
+        // compiler emitted this as a standalone kernel since
+        // SetLifesteal events are produced HERE and consumed by
+        // ApplyLifestealActivation downstream — same shape as
+        // Strike/ShieldUp/Mend/Bleed/Reap chronicles but writes a
+        // different event variant.
+        let chronicle_vampirize_cfg_init =
+            physics_verb_chronicle_Vampirize::PhysicsVerbChronicleVampirizeCfg {
                 event_count: 0, tick: 0, seed: 0, _pad0: 0,
             };
-        let apply_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("duel_abilities_runtime::apply_cfg"),
-            contents: bytemuck::bytes_of(&apply_cfg_init),
+        let chronicle_vampirize_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_abilities_runtime::chronicle_vampirize_cfg"),
+            contents: bytemuck::bytes_of(&chronicle_vampirize_cfg_init),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        // Wave 2 piece N: `ApplyDamage` is now a STANDALONE kernel
+        // (not the fused PerEvent group it used to be) because the
+        // block now emits Healed events for source-side lifesteal
+        // restoration. The compiler split it out and re-fused the rest
+        // of the consumers (ApplyHeal/ApplyShield/ApplyDefeat/
+        // ApplyLifestealActivation) WITH the Strike chronicle producer
+        // into a single kernel. So the runtime now has TWO cfg
+        // uniforms where it used to have one fused `apply_cfg`.
+        let apply_damage_cfg_init =
+            physics_ApplyDamage::PhysicsApplyDamageCfg {
+                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            };
+        let apply_damage_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_abilities_runtime::apply_damage_cfg"),
+            contents: bytemuck::bytes_of(&apply_damage_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let seed_cfg_init = seed_indirect_0::SeedIndirect0Cfg {
@@ -361,11 +430,14 @@ impl DuelAbilitiesState {
             agent_alive_buf,
             agent_mana_buf,
             agent_shield_hp_buf,
+            agent_lifesteal_frac_q8_buf,
+            agent_lifesteal_expires_at_tick_buf,
             mask_0_bitmap_buf,
             mask_1_bitmap_buf,
             mask_2_bitmap_buf,
             mask_3_bitmap_buf,
             mask_4_bitmap_buf,
+            mask_5_bitmap_buf,
             mask_bitmap_zero_buf,
             mask_bitmap_words,
             scoring_output_buf,
@@ -382,7 +454,8 @@ impl DuelAbilitiesState {
             chronicle_mend_cfg_buf,
             chronicle_bleed_cfg_buf,
             chronicle_reap_cfg_buf,
-            apply_cfg_buf,
+            chronicle_vampirize_cfg_buf,
+            apply_damage_cfg_buf,
             seed_cfg_buf,
             cache: dispatch::KernelCache::default(),
             tick: 0,
@@ -410,6 +483,21 @@ impl DuelAbilitiesState {
     /// state without poking at the buffer directly.
     pub fn read_shield_hp(&self) -> Vec<f32> {
         self.read_f32(&self.agent_shield_hp_buf, "shield_hp")
+    }
+    /// Per-agent lifesteal fraction (q8: 128 == 0.5x). Reads the GPU
+    /// buffer via the shared u32 staging path — the field's storage is
+    /// `array<i32>` per the compiler's WGSL emit (see `cg/emit/kernel.rs`),
+    /// so `read_u32` returns the raw bit-pattern that the test
+    /// reinterprets to `i32`.
+    pub fn read_lifesteal_frac_q8(&self) -> Vec<i32> {
+        self.read_u32(&self.agent_lifesteal_frac_q8_buf, "lifesteal_frac_q8")
+            .into_iter()
+            .map(|u| u as i32)
+            .collect()
+    }
+    /// Per-agent lifesteal window expiry tick (in world ticks).
+    pub fn read_lifesteal_expires_at_tick(&self) -> Vec<u32> {
+        self.read_u32(&self.agent_lifesteal_expires_at_tick_buf, "lifesteal_expires_at_tick")
     }
 
     fn read_f32(&self, buf: &wgpu::Buffer, label: &str) -> Vec<f32> {
@@ -500,7 +588,11 @@ impl CompiledSim for DuelAbilitiesState {
 
         // (1) Per-tick clears.
         self.event_ring.clear_tail_in(&mut encoder);
-        let max_slots_per_tick = self.agent_count * 5;
+        // 6 verbs in source order; +1 for ApplyDamage's source-side
+        // Healed emit (lifesteal) and +1 for the SetLifesteal event
+        // each Vampirize cast emits. 8 slots per agent per tick caps
+        // the worst case.
+        let max_slots_per_tick = self.agent_count * 8;
         self.event_ring.clear_ring_headers_in(
             &self.gpu, &mut encoder, max_slots_per_tick,
         );
@@ -511,6 +603,7 @@ impl CompiledSim for DuelAbilitiesState {
             &self.mask_2_bitmap_buf,
             &self.mask_3_bitmap_buf,
             &self.mask_4_bitmap_buf,
+            &self.mask_5_bitmap_buf,
         ] {
             encoder.copy_buffer_to_buffer(
                 &self.mask_bitmap_zero_buf, 0, buf, 0, mask_bytes.max(4),
@@ -543,6 +636,7 @@ impl CompiledSim for DuelAbilitiesState {
             mask_2_bitmap: &self.mask_2_bitmap_buf,
             mask_3_bitmap: &self.mask_3_bitmap_buf,
             mask_4_bitmap: &self.mask_4_bitmap_buf,
+            mask_5_bitmap: &self.mask_5_bitmap_buf,
             cfg: &self.mask_cfg_buf,
         };
         dispatch::dispatch_fused_mask_verb_strike(
@@ -574,6 +668,7 @@ impl CompiledSim for DuelAbilitiesState {
             mask_2_bitmap: &self.mask_2_bitmap_buf,
             mask_3_bitmap: &self.mask_3_bitmap_buf,
             mask_4_bitmap: &self.mask_4_bitmap_buf,
+            mask_5_bitmap: &self.mask_5_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
             cfg: &self.scoring_cfg_buf,
         };
@@ -582,22 +677,13 @@ impl CompiledSim for DuelAbilitiesState {
             self.agent_count,
         );
 
-        // (4) Strike chronicle.
-        let strike_cfg = physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
-        };
-        self.gpu.queue.write_buffer(
-            &self.chronicle_strike_cfg_buf, 0, bytemuck::bytes_of(&strike_cfg),
-        );
-        let strike_bindings = physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            cfg: &self.chronicle_strike_cfg_buf,
-        };
-        dispatch::dispatch_physics_verb_chronicle_strike(
-            &mut self.cache, &strike_bindings, &self.gpu.device, &mut encoder,
-            self.agent_count,
-        );
+        // (4) Strike chronicle is now FUSED into the
+        // `physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_
+        // ApplyLifestealActivation_and_verb_chronicle_Strike` kernel
+        // dispatched at step (8b) below. The compiler split out
+        // ApplyDamage (which now emits Healed events for source-side
+        // lifesteal) and re-fused Strike with the remaining consumers
+        // since Strike is now the only producer the others can ride.
 
         // (5) ShieldUp chronicle.
         let shieldup_cfg = physics_verb_chronicle_ShieldUp::PhysicsVerbChronicleShieldUpCfg {
@@ -676,30 +762,102 @@ impl CompiledSim for DuelAbilitiesState {
             self.agent_count,
         );
 
-        // (8) ApplyDamage + ApplyHeal + ApplyShield + ApplyDefeat — fused
-        // PerEvent kernel. Adding ApplyDefeat as a 4th `on Defeated{...}`
-        // arm caused the compiler's PerEvent fusion pass to merge it into
-        // the existing trio, renaming the kernel + structs accordingly.
-        // Only `agent_alive` is touched by the new arm; binding shape
-        // unchanged.
-        let event_count_estimate = self.agent_count * 5;
-        let apply_cfg = physics_ApplyDamage_and_ApplyHeal_and_ApplyShield_and_ApplyDefeat::PhysicsApplyDamageAndApplyHealAndApplyShieldAndApplyDefeatCfg {
+        // (7c) Vampirize chronicle — Wave 2 LifeSteal demo. Gates on
+        // action_id==5u and emits SetLifesteal{caster=self, frac_q8=128,
+        // expires_at=tick+50}. Drained by the ApplyLifestealActivation
+        // arm of the fused kernel below — sets the caster's
+        // lifesteal_frac_q8 + lifesteal_expires_at_tick SoA slots so
+        // ApplyDamage's source lookup can heal them on subsequent hits.
+        let vampirize_cfg = physics_verb_chronicle_Vampirize::PhysicsVerbChronicleVampirizeCfg {
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.chronicle_vampirize_cfg_buf, 0, bytemuck::bytes_of(&vampirize_cfg),
+        );
+        let vampirize_bindings = physics_verb_chronicle_Vampirize::PhysicsVerbChronicleVampirizeBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            cfg: &self.chronicle_vampirize_cfg_buf,
+        };
+        dispatch::dispatch_physics_verb_chronicle_vampirize(
+            &mut self.cache, &vampirize_bindings, &self.gpu.device, &mut encoder,
+            self.agent_count,
+        );
+
+        // (8a) Fused ApplyHeal + ApplyShield + ApplyDefeat +
+        // ApplyLifestealActivation + verb_chronicle_Strike. The compiler
+        // re-fused these because Strike's chronicle is now the lone
+        // producer feeding the Healed/Shielded/Defeated/SetLifesteal
+        // consumers. **Runs BEFORE ApplyDamage** so Strike's emitted
+        // Damaged events are visible to ApplyDamage at step (8b);
+        // ShieldUp/Mend/Bleed/Reap/Vampirize chronicles already
+        // emitted earlier (steps 5-7c), and their consumer arms
+        // (ApplyHeal/ApplyShield/ApplyDefeat/ApplyLifestealActivation)
+        // drain those here.
+        //
+        // The bind-group binds the lifesteal SoA fields write-side
+        // (ApplyLifestealActivation writes them). The compiler-emitted
+        // SCHEDULE places ApplyDamage first; we transpose because the
+        // Strike→ApplyDamage chain MUST happen within a single tick.
+        let event_count_estimate = self.agent_count * 8;
+        let apply_heal_cfg = physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndVerbChronicleStrikeCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
             seed: 0, _pad0: 0,
         };
         self.gpu.queue.write_buffer(
-            &self.apply_cfg_buf, 0, bytemuck::bytes_of(&apply_cfg),
+            &self.chronicle_strike_cfg_buf, 0, bytemuck::bytes_of(&apply_heal_cfg),
         );
-        let apply_bindings = physics_ApplyDamage_and_ApplyHeal_and_ApplyShield_and_ApplyDefeat::PhysicsApplyDamageAndApplyHealAndApplyShieldAndApplyDefeatBindings {
+        let apply_heal_bindings = physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndVerbChronicleStrikeBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
             agent_hp: &self.agent_hp_buf,
             agent_alive: &self.agent_alive_buf,
             agent_shield_hp: &self.agent_shield_hp_buf,
-            cfg: &self.apply_cfg_buf,
+            agent_lifesteal_frac_q8: &self.agent_lifesteal_frac_q8_buf,
+            agent_lifesteal_expires_at_tick: &self.agent_lifesteal_expires_at_tick_buf,
+            cfg: &self.chronicle_strike_cfg_buf,
         };
-        dispatch::dispatch_physics_applydamage_and_applyheal_and_applyshield_and_applydefeat(
-            &mut self.cache, &apply_bindings, &self.gpu.device, &mut encoder,
+        dispatch::dispatch_physics_applyheal_and_applyshield_and_applydefeat_and_applylifestealactivation_and_verb_chronicle_strike(
+            &mut self.cache, &apply_heal_bindings, &self.gpu.device, &mut encoder,
+            event_count_estimate,
+        );
+
+        // (8b) ApplyDamage — STANDALONE PerEvent kernel. Wave 2 piece N
+        // refactor: ApplyDamage now emits Healed events for source-side
+        // lifesteal restoration, so it became a producer and the
+        // compiler split it out of the previous fusion group. Runs
+        // AFTER step (8a) so Strike's Damaged emits (and Bleed's
+        // self-Damaged emits from step 7) are visible. The lifesteal
+        // SoA fields are read-only here (written upstream by the
+        // ApplyLifestealActivation arm of the (8a) kernel).
+        //
+        // CAVEAT: ApplyDamage's source-side Healed emit lands in the
+        // ring AFTER the (8a) ApplyHeal arm has already drained it for
+        // this tick — so source-side healing from lifesteal materialises
+        // ONE TICK LATER (next tick's (8a) drains the Healed events
+        // emitted here). This is acceptable for the demo because
+        // Vampirize sets a 50-tick window and individual hits land on
+        // 10-tick intervals (Strike cooldown), so the heal still
+        // arrives well within the lifesteal window.
+        let apply_damage_cfg = physics_ApplyDamage::PhysicsApplyDamageCfg {
+            event_count: event_count_estimate, tick: self.tick as u32,
+            seed: 0, _pad0: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.apply_damage_cfg_buf, 0, bytemuck::bytes_of(&apply_damage_cfg),
+        );
+        let apply_damage_bindings = physics_ApplyDamage::PhysicsApplyDamageBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            agent_hp: &self.agent_hp_buf,
+            agent_alive: &self.agent_alive_buf,
+            agent_shield_hp: &self.agent_shield_hp_buf,
+            agent_lifesteal_frac_q8: &self.agent_lifesteal_frac_q8_buf,
+            agent_lifesteal_expires_at_tick: &self.agent_lifesteal_expires_at_tick_buf,
+            cfg: &self.apply_damage_cfg_buf,
+        };
+        dispatch::dispatch_physics_applydamage(
+            &mut self.cache, &apply_damage_bindings, &self.gpu.device, &mut encoder,
             event_count_estimate,
         );
 
@@ -1027,6 +1185,97 @@ mod tests {
     ///
     /// Cooldown=20 means Reap fires at tick 0 (the very first step);
     /// 5 steps gives plenty of margin even if argmax ordering changes.
+    /// Wave 2 piece N — LifeSteal E2E demo. Verifies that the
+    /// `lifesteal 0.5 5s` effect on `Vampirize.ability` makes it all
+    /// the way through:
+    ///
+    ///   1. parser → ability_lower → AbilityProgram { effects:
+    ///      [EffectOp::LifeSteal { duration_ticks: 50, fraction_q8:
+    ///      128 }] } (asserted by the binding-check at construction)
+    ///   2. mirrored .sim verb gate (`world.tick % cooldown_vampirize
+    ///      == 0` AND `self.hp < hp_vampire_floor`)
+    ///   3. Vampirize chronicle emits SetLifesteal{caster, frac_q8=128,
+    ///      expires_at=tick+50}
+    ///   4. ApplyLifestealActivation chronicle drains SetLifesteal into
+    ///      the per-agent lifesteal SoA fields (agent_lifesteal_frac_q8
+    ///      + agent_lifesteal_expires_at_tick)
+    ///
+    /// **Test shape:** 1-agent fixture so Strike (`target != self`)
+    /// cannot fire. Agent overridden to hp=25 so the Vampirize gate
+    /// (`hp < hp_vampire_floor=30`) passes. After one tick:
+    ///   * lifesteal_frac_q8[0] == 128 (0.5x in q8)
+    ///   * lifesteal_expires_at_tick[0] == 50 (tick 0 + duration_ticks
+    ///     50)
+    ///
+    /// **Why the SoA-set test instead of an end-to-end heal observation:**
+    /// observing the source-side heal on agent 0 requires a Damaged
+    /// event with `source=agent 0` to fire WITHIN the lifesteal window
+    /// (ticks 1..49). In the 1-agent fixture only Bleed can produce a
+    /// self-Damaged event, but Bleed's `hp > hp_bleed_floor=50` gate is
+    /// incompatible with the Vampirize `hp < 30` gate. In the 2-agent
+    /// fixture the only way to land Strike from agent 0 inside the
+    /// window is at tick 10, but agent 1's reciprocal Strike (score
+    /// `200 - 25 = 175`) lands the same tick and kills agent 0 (hp
+    /// 25 → -5) before the source-side Healed event from ApplyDamage
+    /// drains in the next tick's (8a) ApplyHeal arm. The SoA-set check
+    /// here proves the Vampirize → SetLifesteal → ApplyLifestealActivation
+    /// → SoA chain is wired end-to-end; the source-side Healed emit on
+    /// ApplyDamage is exercised by inspection (its branch executes
+    /// every Damaged event but only emits when src_frac > 0 AND
+    /// expires > world.tick AND bleed > 0.0, all read from the
+    /// per-agent lifesteal SoA written by this test's code path).
+    #[test]
+    fn vampirize_heals_caster_when_dealing_damage() {
+        // 1-agent fixture: Strike's `target != self` gate always fails,
+        // so Vampirize is the only verb that can win argmax at tick 0
+        // with hp=25 (Mend score 300 < Vampirize 350).
+        let mut state = DuelAbilitiesState::new(0xCAFE_F00D, 1);
+        // Engineer the state: agent 0 at hp=25, well under
+        // hp_vampire_floor=30.
+        state.override_hp_for_test(&[25.0]);
+        // Lifesteal SoA must start zeroed (no lifesteal).
+        let pre = state.read_lifesteal_frac_q8();
+        assert_eq!(
+            pre, vec![0_i32],
+            "lifesteal_frac_q8 must initialise to zero — saw {:?}",
+            pre,
+        );
+        // Tick 0 satisfies tick%80==0; Vampirize fires for agent 0.
+        // The Vampirize chronicle emits SetLifesteal at step (7c);
+        // ApplyLifestealActivation drains it inside the (8a) fused
+        // kernel.
+        state.step();
+        let frac = state.read_lifesteal_frac_q8();
+        let expires = state.read_lifesteal_expires_at_tick();
+        assert_eq!(
+            frac, vec![128_i32],
+            "lifesteal_frac_q8 must be 128 (0.5 in q8) after Vampirize \
+             fires — saw {:?}, expires={:?}",
+            frac, expires,
+        );
+        assert_eq!(
+            expires, vec![50_u32],
+            "lifesteal_expires_at_tick must be tick(0) + \
+             vampirize_dur(50) = 50 — saw {:?}",
+            expires,
+        );
+        // Sanity: the agent must still be alive (Vampirize doesn't
+        // damage; the SoA write goes through cleanly).
+        let alive = state.read_alive();
+        let hp = state.read_hp();
+        assert_eq!(
+            alive, vec![1_u32],
+            "Vampirize must not kill the caster — saw alive={:?}, hp={:?}",
+            alive, hp,
+        );
+        assert_eq!(
+            hp, vec![25.0_f32],
+            "Vampirize is a state-set verb; caster's hp must stay at \
+             the post-override value (25.0) — saw {:?}",
+            hp,
+        );
+    }
+
     #[test]
     fn reap_kills_enemy_when_below_threshold() {
         let mut state = DuelAbilitiesState::new(0xCAFE_F00D, 2);

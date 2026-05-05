@@ -53,6 +53,8 @@ pub fn assert_ability_registry_matches_sim_constants() {
         .expect("read Bleed.ability");
     let reap_src = std::fs::read_to_string(corpus.join("Reap.ability"))
         .expect("read Reap.ability");
+    let vampirize_src = std::fs::read_to_string(corpus.join("Vampirize.ability"))
+        .expect("read Vampirize.ability");
 
     let files = vec![
         (
@@ -79,6 +81,11 @@ pub fn assert_ability_registry_matches_sim_constants() {
             "Reap.ability".to_string(),
             dsl_ast::parse_ability_file(&reap_src)
                 .expect("parse Reap.ability"),
+        ),
+        (
+            "Vampirize.ability".to_string(),
+            dsl_ast::parse_ability_file(&vampirize_src)
+                .expect("parse Vampirize.ability"),
         ),
     ];
     let built = dsl_compiler::ability_registry::build_registry(&files)
@@ -249,17 +256,61 @@ pub fn assert_ability_registry_matches_sim_constants() {
         ),
     }
 
+    // ---- Vampirize: cooldown 80 ticks, self-target, lifesteal 0.5 5s ----
+    //   Wave 2 piece N: LifeSteal E2E demo. Lowers via
+    //   `dsl_compiler::ability_lower::lower_effect_stmt` ("lifesteal"
+    //   match arm) to `EffectOp::LifeSteal { duration_ticks: 50,
+    //   fraction_q8: 128 }` — 0.5 * 256 == 128 q8, 5s == 50 ticks.
+    //   The .sim verb's own `when` clause gates emission on
+    //   `self.hp < hp_vampire_floor`, and the new
+    //   ApplyLifestealActivation chronicle drains SetLifesteal events
+    //   into the per-agent lifesteal SoA fields.
+    let vampirize_id = *built.names.get("Vampirize")
+        .expect("Vampirize registered in name table");
+    let vampirize = built.registry.get(vampirize_id)
+        .expect("Vampirize resolves to a program");
+    assert_eq!(
+        vampirize.gate.cooldown_ticks, 80,
+        "Vampirize cooldown must be 80 ticks (8s) — .sim verb gate \
+         (world.tick % 80 == 0) and .ability `cooldown: 8s` must agree",
+    );
+    assert!(
+        !vampirize.gate.hostile_only,
+        "Vampirize must NOT be hostile_only — .ability `target: self`",
+    );
+    assert_eq!(
+        vampirize.effects.len(), 1,
+        "Vampirize must have exactly one effect (lifesteal 0.5 5s)",
+    );
+    match &vampirize.effects[0] {
+        EffectOp::LifeSteal { duration_ticks, fraction_q8 } => {
+            assert_eq!(
+                *duration_ticks, 50,
+                "Vampirize lifesteal duration must be 50 ticks (5s) — \
+                 .ability `lifesteal 0.5 5s`, .sim config.combat.vampirize_dur",
+            );
+            assert_eq!(
+                *fraction_q8, 128,
+                "Vampirize lifesteal fraction must be 128 (0.5 in q8) — \
+                 .ability `lifesteal 0.5 5s`, .sim config.combat.vampirize_frac_q8",
+            );
+        }
+        other => panic!(
+            "Vampirize effect[0]: expected LifeSteal(50, 128), got {other:?}",
+        ),
+    }
+
     // ---- Smoke-pack: prove the GPU SoA layout works on this corpus ----
     // PackedAbilityRegistry::pack runs its own per-program packing
     // walk; if the registry contains anything pack can't encode this
     // panics. Confirms the lowering output is consumable by the
-    // Wave 1.9 GPU buffer producer. Also verifies SelfDamage (op#17)
-    // and Execute (op#16) pack cleanly via the Wave 2 piece 3 packer
-    // arms in `engine::ability::packed::pack_effect_op`.
+    // Wave 1.9 GPU buffer producer. Also verifies SelfDamage (op#17),
+    // Execute (op#16), and LifeSteal (op#18) pack cleanly via the Wave 2
+    // piece 3+4 packer arms in `engine::ability::packed::pack_effect_op`.
     let packed = PackedAbilityRegistry::pack(&built.registry);
     assert_eq!(
-        packed.n_abilities, 5,
-        "PackedAbilityRegistry must contain exactly 5 abilities \
-         (Strike, ShieldUp, Mend, Bleed, Reap)",
+        packed.n_abilities, 6,
+        "PackedAbilityRegistry must contain exactly 6 abilities \
+         (Strike, ShieldUp, Mend, Bleed, Reap, Vampirize)",
     );
 }

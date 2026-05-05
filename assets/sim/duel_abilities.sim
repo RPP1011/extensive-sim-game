@@ -76,6 +76,18 @@ event Defeated {
   combatant: AgentId,
 }
 
+// Wave 2 piece N: LifeSteal E2E demo. Vampirize emits SetLifesteal as
+// a state-set event; the new ApplyLifestealActivation chronicle drains
+// it into the per-agent lifesteal_frac_q8 + lifesteal_expires_at_tick
+// SoA fields. Once active, ApplyDamage's source lookup heals the source
+// for `frac_q8/256 * bleed-through-damage` per Damaged event.
+@replayable @gpu_amenable
+event SetLifesteal {
+  caster:     AgentId,
+  frac_q8:    i16,
+  expires_at: u32,
+}
+
 entity Combatant : Agent {
   pos: vec3,
   vel: vec3,
@@ -98,6 +110,10 @@ config combat {
   strike_range:     f32 = 5.0,    // Strike.ability: range 5.0
   hp_low_threshold: f32 = 50.0,   // gate Mend on self-hp drop
   hp_bleed_floor:   f32 = 50.0,   // only Bleed when healthy enough to afford it
+  vampirize_frac_q8: i16 = 128,   // Vampirize.ability: lifesteal 0.5 → q8 = 128
+  vampirize_dur:     u32 = 50,    // Vampirize.ability: lifesteal duration 5s = 50 ticks
+  cooldown_vampirize: u32 = 80,   // Vampirize.ability: cooldown 8s
+  hp_vampire_floor:  f32 = 30.0,  // only Vampirize when hurt enough to want it
 }
 
 // Strike — cooldown 10 ticks, range gate (range field stays declared but
@@ -186,6 +202,26 @@ verb Reap(self, target: Agent) =
   emit Defeated { combatant: target }
   score (1000.0 - target.hp)
 
+// Vampirize — Wave 2 piece N: LifeSteal E2E demo. Self-cast, cooldown
+// 80 ticks (8s). Emits SetLifesteal to write the lifesteal SoA fields
+// (frac_q8 = 128 = 0.5x, expires_at = world.tick + 50). Gated on
+// `self.hp < hp_vampire_floor` so it only fires as a "panic drain" —
+// when the caster is hurt enough that Mend alone won't save them.
+//
+// Score 350 sits ABOVE Mend (300) so when both Mend and Vampirize are
+// eligible (self.hp ∈ (0, hp_low_threshold) ∩ (0, hp_vampire_floor)),
+// Vampirize preempts Mend on the cooldown boundary. Strike's pair-field
+// score (200..100) and ShieldUp (250) stay below.
+verb Vampirize(self, target: Agent) =
+  action VampirizeAction
+  when (self.alive
+        && target == self
+        && (world.tick % config.combat.cooldown_vampirize == 0)
+        && self.hp < config.combat.hp_vampire_floor)
+  emit SetLifesteal { caster: self, frac_q8: config.combat.vampirize_frac_q8,
+                      expires_at: world.tick + config.combat.vampirize_dur }
+  score 350.0
+
 // Apply damage with shield_hp absorption.
 //
 // Real shield semantics: incoming damage drains shield_hp before any
@@ -196,7 +232,7 @@ verb Reap(self, target: Agent) =
 // resolved via the math-stdlib prelude wired in #84.
 @phase(post)
 physics ApplyDamage {
-  on Damaged { source: _, target: t, amount: a } {
+  on Damaged { source: src, target: t, amount: a } {
     let s = agents.shield_hp(t);
     let absorbed = min(s, a);
     let bleed = a - absorbed;
@@ -206,6 +242,16 @@ physics ApplyDamage {
     if (new_hp <= 0.0) {
       agents.set_alive(t, false);
       emit Defeated { combatant: t }
+    }
+    // Wave 2 piece N — LifeSteal demo. Read source's lifesteal window
+    // and, if active, heal the source for `frac/256 * bleed`. The DSL
+    // auto-promotes the i16-backed `lifesteal_frac_q8` (read as i32)
+    // to f32 in mixed arithmetic via promote_int_to_f32 (cg/lower/expr).
+    let src_frac = agents.lifesteal_frac_q8(src);
+    let src_expires = agents.lifesteal_expires_at_tick(src);
+    if (src_frac > 0 && src_expires > world.tick && bleed > 0.0) {
+      let heal = bleed * src_frac / 256.0;
+      emit Healed { source: src, target: src, amount: heal }
     }
   }
 }
@@ -243,6 +289,18 @@ physics ApplyShield {
 physics ApplyDefeat {
   on Defeated { combatant: c } {
     agents.set_alive(c, false);
+  }
+}
+
+// Apply lifesteal activation — drains SetLifesteal events emitted by
+// Vampirize and writes the per-agent lifesteal SoA (frac_q8 + expires
+// timestamp). ApplyDamage reads these on each Damaged event to decide
+// whether the source heals back a fraction of the damage they dealt.
+@phase(post)
+physics ApplyLifestealActivation {
+  on SetLifesteal { caster: c, frac_q8: f, expires_at: e } {
+    agents.set_lifesteal_frac_q8(c, f);
+    agents.set_lifesteal_expires_at_tick(c, e);
   }
 }
 

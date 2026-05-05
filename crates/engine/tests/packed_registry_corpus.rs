@@ -4,16 +4,18 @@
 //! (`engine::ability::PackedAbilityRegistry::pack`).
 //!
 //! The corpus lives at `assets/ability_test/duel_abilities/{Strike,
-//! ShieldUp, Mend, Bleed, Reap}.ability` and exercises the five header /
-//! effect shapes Wave 1+2 ships:
-//!   * `Strike`   -> enemy-target + range + cooldown + damage hint
-//!   * `ShieldUp` -> self-target + cooldown + defense hint + shield effect
-//!   * `Mend`     -> self-target + cooldown + heal hint + heal effect
-//!   * `Bleed`    -> self-target + cooldown + self_damage (Wave 2 piece N
-//!                   SelfDamage E2E demo, EffectOp::SelfDamage discriminant 17)
-//!   * `Reap`     -> enemy-target + range + cooldown + execute (Wave 2
-//!                   piece N Execute E2E demo, EffectOp::Execute
-//!                   discriminant 16)
+//! ShieldUp, Mend, Bleed, Reap, Vampirize}.ability` and exercises the
+//! six header / effect shapes Wave 1+2 ships:
+//!   * `Strike`    -> enemy-target + range + cooldown + damage hint
+//!   * `ShieldUp`  -> self-target + cooldown + defense hint + shield effect
+//!   * `Mend`      -> self-target + cooldown + heal hint + heal effect
+//!   * `Bleed`     -> self-target + cooldown + self_damage (Wave 2 piece N
+//!                    SelfDamage E2E demo, EffectOp::SelfDamage discriminant 17)
+//!   * `Reap`      -> enemy-target + range + cooldown + execute (Wave 2
+//!                    piece N Execute E2E demo, EffectOp::Execute
+//!                    discriminant 16)
+//!   * `Vampirize` -> self-target + cooldown + lifesteal (Wave 2 piece N
+//!                    LifeSteal E2E demo, EffectOp::LifeSteal discriminant 18)
 //!
 //! This test guards the boundary between the DSL pipeline and the GPU-
 //! facing layout: any drift in slot ordering, payload encoding, or
@@ -53,34 +55,37 @@ fn load(name: &str) -> (String, dsl_ast::AbilityFile) {
 
 #[test]
 fn pack_duel_corpus_end_to_end() {
-    // Load the five corpus files; preserve the canonical input order so
+    // Load the six corpus files; preserve the canonical input order so
     // the resulting `AbilityId` slots are deterministic.
     let strike = load("Strike");
     let shield_up = load("ShieldUp");
     let mend = load("Mend");
     let bleed = load("Bleed");
     let reap = load("Reap");
+    let vampirize = load("Vampirize");
 
-    let files = vec![strike, shield_up, mend, bleed, reap];
+    let files = vec![strike, shield_up, mend, bleed, reap, vampirize];
     let built = build_registry(&files).expect("registry build must succeed");
 
-    // Five abilities; name table covers all five.
-    assert_eq!(built.registry.len(), 5);
+    // Six abilities; name table covers all six.
+    assert_eq!(built.registry.len(), 6);
     assert!(built.names.contains_key("Strike"));
     assert!(built.names.contains_key("ShieldUp"));
     assert!(built.names.contains_key("Mend"));
     assert!(built.names.contains_key("Bleed"));
     assert!(built.names.contains_key("Reap"));
+    assert!(built.names.contains_key("Vampirize"));
 
     let strike_slot = built.names["Strike"].slot();
     let shield_slot = built.names["ShieldUp"].slot();
     let mend_slot = built.names["Mend"].slot();
     let bleed_slot = built.names["Bleed"].slot();
     let reap_slot = built.names["Reap"].slot();
+    let vampirize_slot = built.names["Vampirize"].slot();
 
     let packed = PackedAbilityRegistry::pack(&built.registry);
 
-    assert_eq!(packed.n_abilities, 5);
+    assert_eq!(packed.n_abilities, 6);
 
     // -- Strike: range 5.0, cooldown 1s == 10 ticks, hostile_only set. --
     // Damage value is 30.0 since the #85 retune (re-enabled shield_hp
@@ -152,8 +157,27 @@ fn pack_duel_corpus_end_to_end() {
         "Reap effect 0 is Execute (discriminant 16)");
     assert_eq!(packed.effect_payload_a[reap_eff_base], 20.0_f32.to_bits());
 
-    // Delivery is Instant (=0) for all five — no other variant exists.
-    for slot in [strike_slot, shield_slot, mend_slot, bleed_slot, reap_slot] {
+    // -- Vampirize: cooldown 8s == 80 ticks; self-target LifeSteal. --
+    //   Wave 2 piece N LifeSteal E2E demo. Discriminant 18 per
+    //   `engine::ability::packed::pack_effect_op` — same shape as Slow:
+    //   payload_a = duration_ticks (50), payload_b = fraction_q8 cast to
+    //   `i16 as u32` (128). The `Vampirize.ability` source is
+    //   `lifesteal 0.5 5s`, so 0.5 * 256 == 128 q8 and 5s == 50 ticks.
+    assert_eq!(packed.cooldown_ticks[vampirize_slot], 80);
+    assert_eq!(packed.range[vampirize_slot], 0.0,
+        "Vampirize has no range header -> Wave 1.6 default 0.0");
+    assert_eq!(packed.gate_flags[vampirize_slot], 0,
+        "Vampirize is target: self -> no gate flag bits");
+    let vampirize_eff_base = vampirize_slot * MAX_EFFECTS_PER_PROGRAM;
+    assert_eq!(packed.effect_kinds[vampirize_eff_base], 18,
+        "Vampirize effect 0 is LifeSteal (discriminant 18)");
+    assert_eq!(packed.effect_payload_a[vampirize_eff_base], 50_u32,
+        "Vampirize LifeSteal payload_a = duration_ticks (50)");
+    assert_eq!(packed.effect_payload_b[vampirize_eff_base], 128_u32,
+        "Vampirize LifeSteal payload_b = fraction_q8 (128 = 0.5 q8)");
+
+    // Delivery is Instant (=0) for all six — no other variant exists.
+    for slot in [strike_slot, shield_slot, mend_slot, bleed_slot, reap_slot, vampirize_slot] {
         assert_eq!(packed.delivery_kind[slot], 0);
     }
 }

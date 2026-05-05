@@ -1,0 +1,15 @@
+// Wave 2 piece N: LifeSteal E2E demo. Caster gains a 5-second window
+// during which 50% of damage they deal heals them back. Lowers to
+// AbilityProgram { effects: [EffectOp::LifeSteal{duration_ticks: 50,
+// fraction_q8: 128}] }. The .sim verb writes the lifesteal SoA fields
+// (frac_q8 = 128 for 50%, expires_at = world.tick + 50); ApplyDamage
+// reads source's lifesteal state per Damaged event and emits Healed
+// for the source if the window is active. ApplyHeal drains the
+// resulting Healed event into source.hp.
+
+ability Vampirize {
+    target: self
+    cooldown: 8s
+
+    lifesteal 0.5 5s
+}
