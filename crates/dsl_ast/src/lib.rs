@@ -16,8 +16,8 @@ pub mod eval;
 
 pub use ability_parser::parse_ability_file;
 pub use ast::{
-    AbilityDecl, AbilityFile, AbilityHeader, Decl, Duration, EffectArg, EffectStmt, HintName,
-    Program, Span, Spanned, TargetMode,
+    AbilityDecl, AbilityFile, AbilityHeader, CostAmount, CostResource, CostSpec, Decl, Duration,
+    EffectArg, EffectStmt, HintName, PassiveDecl, PassiveHeader, Program, Span, Spanned, TargetMode,
 };
 pub use error::ParseError;
 pub use ir::Compilation;

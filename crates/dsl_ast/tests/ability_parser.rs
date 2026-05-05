@@ -230,23 +230,21 @@ ability HeroicCharge {
 }
 
 #[test]
-fn passive_block_unsupported_in_wave_1_0() {
-    // The warrior file ends with `passive IronSkin { … }` blocks. Wave
-    // 1.0 explicitly rejects them so authors get a clean error rather
-    // than a silently-truncated AST.
+fn template_block_unsupported_in_wave_1_1() {
+    // `passive` blocks now parse (Wave 1.1); `template` and `structure`
+    // remain deferred (Waves 1.2 / 1.3). This test asserts the deferred
+    // surfaces still fail loudly.
     let src = r#"
-passive IronSkin {
-    trigger: on_damage_taken
-    cooldown: 5s
-
-    shield 20 for 3s
+template SomeTpl {
+    target: enemy
+    damage 10
 }
 "#;
-    let err = parse_ability_file(src).expect_err("passive must fail in Wave 1.0");
+    let err = parse_ability_file(src).expect_err("template must fail in Wave 1.1");
     let msg = err.to_string();
     assert!(
-        msg.contains("passive"),
-        "expected passive-not-supported diagnostic; got: {msg}"
+        msg.contains("template"),
+        "expected template-not-supported diagnostic; got: {msg}"
     );
 }
 

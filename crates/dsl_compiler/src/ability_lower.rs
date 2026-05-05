@@ -22,8 +22,7 @@
 //!       The Wave 1.0 parser already drops these on the floor; the
 //!       lowering pass therefore sees only the leading positional args.
 //!     - `deliver` / `recast` / `morph` body blocks — Wave 1.4.
-//!     - `passive` / `template` / `structure` top-level blocks —
-//!       Waves 1.1-1.3.
+//!     - `template` / `structure` top-level blocks — Waves 1.2 / 1.3.
 //!     - Other target modes (ally/self_aoe/ground/direction/vector/global)
 //!       and `economic` hint — error today, wired by their respective
 //!       waves.
@@ -31,6 +30,19 @@
 //!       SummonAlly, etc.) — Waves 2-5.
 //!     - Two-phase split validator + ability-name resolution for
 //!       `cast <Name>` — Wave 1.7 (registry wiring).
+//!
+//! Wave 1.1 surfaces (parser-only — lowering deferred):
+//! The `.ability` parser now accepts four additional `ability`-block
+//! headers (`cost`, `charges`, `recharge`, `toggle`) plus top-level
+//! `passive` blocks (spec §4.2 / §5). Lowering of all five surfaces
+//! requires engine-side schema changes (cost gates, per-agent charge
+//! SoA fields, toggle state, PerEvent dispatch keyed on trigger
+//! kinds) and is the work of Wave 2+. Until then this module surfaces
+//! `LowerError::HeaderNotImplemented` / `PassiveBlockNotImplemented`
+//! when it encounters those parsed surfaces — a deliberate choice
+//! over silent acceptance so callers don't quietly miss header
+//! semantics. Hero templates that use Wave 1.1 surfaces fail loudly
+//! at the lowering boundary rather than running with degraded gates.
 //!
 //! Constitution touch-points:
 //! * P1 (compiler-first): this module IS the compiler step that takes
@@ -77,6 +89,15 @@ pub enum LowerError {
     /// parser rejects `deliver` blocks outright (Wave 1.4 work), so this
     /// is a defensive check kept in place to land alongside that wave.
     MixedBody { ability: String, span: Span },
+    /// Wave 1.1 parser accepted a header (`cost`, `charges`, `recharge`,
+    /// or `toggle`) whose lowering requires engine-side schema changes
+    /// not yet landed. `header` is the literal source key. The error is
+    /// surfaced rather than swallowed so authors don't run with silently
+    /// degraded gates.
+    HeaderNotImplemented { header: &'static str, span: Span },
+    /// Wave 1.1 parser accepted a top-level `passive` block; lowering
+    /// requires PerEvent dispatch + trigger catalog wiring (Wave 2+).
+    PassiveBlockNotImplemented { name: String, span: Span },
 }
 
 impl std::fmt::Display for LowerError {
@@ -112,6 +133,14 @@ impl std::fmt::Display for LowerError {
                 f,
                 "ability '{ability}' mixes bare effect statements with a deliver block; pick one body shape"
             ),
+            LowerError::HeaderNotImplemented { header, .. } => write!(
+                f,
+                "`{header}:` header is parsed but lowering is Wave 2+ (engine schema does not yet carry the field)"
+            ),
+            LowerError::PassiveBlockNotImplemented { name, .. } => write!(
+                f,
+                "`passive {name}` is parsed but lowering is Wave 2+ (PerEvent dispatch + trigger catalog not yet wired)"
+            ),
         }
     }
 }
@@ -124,7 +153,19 @@ impl std::error::Error for LowerError {}
 ///
 /// Errors short-circuit on the first failure — call `lower_ability_decl`
 /// directly if you need per-decl error accumulation.
+///
+/// Wave 1.1: if `file.passives` is non-empty, the first passive is
+/// surfaced as `LowerError::PassiveBlockNotImplemented`. Lowering of
+/// passives requires PerEvent dispatch wiring (Wave 2+); silent skip
+/// would mean an author's `passive Riposte { … }` block compiled away to
+/// nothing, which is a worse outcome than a loud error.
 pub fn lower_ability_file(file: &AbilityFile) -> Result<Vec<AbilityProgram>, LowerError> {
+    if let Some(passive) = file.passives.first() {
+        return Err(LowerError::PassiveBlockNotImplemented {
+            name: passive.name.clone(),
+            span: passive.span,
+        });
+    }
     let mut out = Vec::with_capacity(file.abilities.len());
     for decl in &file.abilities {
         out.push(lower_ability_decl(decl)?);
@@ -201,6 +242,33 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
             }
             AbilityHeader::Hint(h) => {
                 hint = Some(map_hint(h, decl)?);
+            }
+            // Wave 1.1: parser surfaces — lowering is Wave 2+. Each
+            // arm carries its own span (where available) so the
+            // diagnostic points at the offending source line.
+            AbilityHeader::Cost(spec) => {
+                return Err(LowerError::HeaderNotImplemented {
+                    header: "cost",
+                    span:   spec.span,
+                });
+            }
+            AbilityHeader::Charges(_) => {
+                return Err(LowerError::HeaderNotImplemented {
+                    header: "charges",
+                    span:   decl.span,
+                });
+            }
+            AbilityHeader::Recharge(_) => {
+                return Err(LowerError::HeaderNotImplemented {
+                    header: "recharge",
+                    span:   decl.span,
+                });
+            }
+            AbilityHeader::Toggle => {
+                return Err(LowerError::HeaderNotImplemented {
+                    header: "toggle",
+                    span:   decl.span,
+                });
             }
         }
     }
