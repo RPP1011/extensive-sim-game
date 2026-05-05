@@ -924,24 +924,149 @@ pub enum CostAmount {
     PercentOfMax(f32),
 }
 
-/// One effect statement: a verb name plus zero-or-more positional args.
+/// One effect statement: a verb name plus zero-or-more positional args
+/// plus the nine optional modifier slots described in spec §6.1.
 ///
-/// Wave 1.0 captures only the leading positional args (numbers / durations
-/// / percents / strings / idents). When the parser encounters a modifier
-/// keyword (`in`, `for`, `when`, `chance`, `stacking`, `+`) or a
-/// bracketed power-tag list (`[FIRE: 60]`) or a nested-effects block
-/// (`{ ... }`), it stops collecting args and skips to the end of the
-/// statement. Modifier capture lands in Wave 1.5. `args` therefore
-/// reflects only the verb's required scalar arguments — sufficient for
-/// the five combat-core verbs (damage / heal / shield / stun / slow)
-/// plus the simple control verbs.
+/// Wave 1.0 captured only the leading positional args. Wave 1.5 (this
+/// version) lifts the nine modifier slots into typed AST fields:
+///
+/// 1. `area`      — `in <shape>(args…)`         (spec §8 shape vocab)
+/// 2. `tags`      — `[TAG: value]` (multiple)   (spec §6.1)
+/// 3. `duration`  — `for <duration>`            (spec §6.1)
+/// 4. `condition` — `when <cond> [else <cond>]` (spec §10, opaque)
+/// 5. `chance`    — `chance N%`                 (spec §6.1)
+/// 6. `stacking`  — `stacking refresh|stack|extend`
+/// 7. `scalings`  — `+ N% stat_ref` (multiple)
+/// 8. `lifetime`  — `until_caster_dies` / `damageable_hp(N)` (voxel)
+/// 9. `nested`    — `{ … }` block of follow-up effects
+///
+/// All slots are optional so terse verbs (`damage 50`) stay terse. The
+/// modifier order on the source line is NOT semantically meaningful at
+/// parse time — every keyword maps to a distinct slot. Lowering (Wave
+/// 2+) is responsible for actually consuming each slot; until then
+/// `dsl_compiler::ability_lower::lower_effect_stmt` returns
+/// `LowerError::ModifierNotImplemented` for each populated slot.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct EffectStmt {
     pub verb: String,
     pub args: Vec<EffectArg>,
     pub span: Span,
-    // Future (Wave 1.5): modifier slots (in / for / when / chance /
-    // tags / stacking / scaling / lifetime / nested).
+    /// `in <shape>(args)` — area expansion (spec §6.1 slot 2).
+    pub area: Option<EffectArea>,
+    /// `[TAG: value]` power tags. Multiple allowed; the LoL corpus uses
+    /// entries like `[FIRE: 60]`, `[CROWD_CONTROL: 30]`.
+    pub tags: Vec<EffectTag>,
+    /// `for <duration>` — how long the effect persists.
+    pub duration: Option<EffectDuration>,
+    /// `when <cond> [else <otherwise>]` — conditional gate. The
+    /// condition language (spec §10, ~80 atoms) is owned by the
+    /// expression parser; Wave 1.5 stores opaque source slices.
+    pub condition: Option<EffectCondition>,
+    /// `chance N%` — Bernoulli gate. Stored as 0.0..=1.0.
+    pub chance: Option<EffectChance>,
+    /// `stacking refresh|stack|extend` — repeat-application policy.
+    pub stacking: Option<StackingMode>,
+    /// `+ N% stat_ref` — additive scaling terms. Multiple allowed
+    /// (e.g. damage scales with both AP and AD).
+    pub scalings: Vec<EffectScaling>,
+    /// `until_caster_dies` / `damageable_hp(N)` — alternative to
+    /// `for <duration>` for effects bound to caster state or a damage
+    /// budget.
+    pub lifetime: Option<EffectLifetime>,
+    /// `{ … }` — nested follow-up effects (verb opts in).
+    pub nested: Vec<EffectStmt>,
+}
+
+/// `in <shape>` modifier — area expansion. The shape vocabulary is the
+/// 12 primitives listed in spec §8 (circle, sphere, cone, line, etc.)
+/// — Wave 1.5 stores them as a flat (name, args) tuple; the lowering
+/// pass will validate the shape name + arity later.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct EffectArea {
+    /// Shape primitive name verbatim from source (e.g. "circle",
+    /// "cone", "sphere"). Lowering (later wave) validates against the
+    /// 12-shape vocab in spec §8.
+    pub shape: String,
+    /// Shape parameters in source order (radius, angle, length…).
+    /// Arity is shape-specific; lowering enforces it.
+    pub args: Vec<f32>,
+    pub span: Span,
+}
+
+/// `[TAG: value]` power tag. Multiple tags allowed per effect.
+/// `value` is `f32` per spec §6.1 (corpus has both int and float forms).
+/// Tag-name vocabulary lookup against `AbilityTag` is lowering's job
+/// (Wave 2); Wave 1.5 stores the verbatim source spelling.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct EffectTag {
+    /// Verbatim source spelling — UPPERCASE by convention.
+    pub name: String,
+    pub value: f32,
+    pub span: Span,
+}
+
+/// `for <duration>` — how long the effect persists.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct EffectDuration {
+    pub duration: Duration,
+    pub span: Span,
+}
+
+/// `when <cond> [else <otherwise>]` — conditional effect application.
+/// Wave 1.5 stores condition expressions as opaque source slices; the
+/// condition language itself (spec §10, ~80 atoms) is owned by the
+/// expression parser, not this slot. Lowering re-parses against the
+/// condition grammar in a later wave.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct EffectCondition {
+    /// Verbatim source slice for the `when` clause (whitespace-trimmed).
+    pub when_cond: String,
+    /// Verbatim source slice for the optional `else` clause.
+    pub else_cond: Option<String>,
+    pub span: Span,
+}
+
+/// `chance N%` — Bernoulli gate. `25%` source becomes
+/// `EffectChance { p: 0.25 }`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct EffectChance {
+    /// Probability in `0.0..=1.0`.
+    pub p: f32,
+    pub span: Span,
+}
+
+/// `stacking <mode>` — repeat-application policy (spec §6.1 slot 7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum StackingMode {
+    /// `stacking refresh` — re-application resets duration to full.
+    Refresh,
+    /// `stacking stack` — each application increments a counter.
+    Stack,
+    /// `stacking extend` — new duration = remaining + new.
+    Extend,
+}
+
+/// `+ N% stat_ref` — additive scaling (spec §6.1 slot 8). Multiple
+/// allowed (e.g. `damage 50 + 30% AP + 20% AD`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct EffectScaling {
+    /// 50.0 means +50%.
+    pub percent: f32,
+    /// Verbatim source token, e.g. "AP", "AD", "self.hp". Stat-ref
+    /// resolution is lowering's job in a later wave.
+    pub stat_ref: String,
+    pub span: Span,
+}
+
+/// Effect lifetime modifier (spec §6.1 slot 9) — alternative to `for
+/// <duration>` for effects bound to caster state or a damage budget.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub enum EffectLifetime {
+    /// `until_caster_dies` — effect persists until the caster dies.
+    UntilCasterDies { span: Span },
+    /// `damageable_hp(N)` — voxel-style damage budget; effect dies
+    /// when this HP pool is depleted.
+    DamageableHp { hp: f32, span: Span },
 }
 
 /// One positional argument in an effect statement. The Wave 1.0 parser
