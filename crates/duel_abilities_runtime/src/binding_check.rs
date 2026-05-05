@@ -405,6 +405,24 @@ pub fn assert_ability_registry_matches_sim_constants() {
             "Daze effect[0]: expected Stun(10), got {other:?}",
         ),
     }
+    // Wave 1.5#5 chance modifier — Daze.ability declares `chance 50%`,
+    // lowered to program.chances[0] = Some(32768) (q16 fixed-point;
+    // (0.5 * 65535).round() = 32768 because 32767.5 rounds half-up).
+    // The .sim verb's `when` clause hand-mirrors this as
+    // `(rng.action() % 65536) < 32768`, matching the runtime gate's
+    // `(per_agent_u32(...) & 0xFFFF) < q16` shape. Registry-driven
+    // chance dispatch is later infrastructure; for now the binding
+    // check proves the lowering produces the expected q16 value.
+    assert_eq!(
+        daze.chances.len(), 1,
+        "Daze must have one chance entry (parallel to one effect)",
+    );
+    assert_eq!(
+        daze.chances[0], Some(32768),
+        "Daze chance must be Some(32768) — .ability `chance 50%`, \
+         q16 = (0.5 * 65535).round() = 32768, clamped below the \
+         CHANCE_NONE_SENTINEL=0xFFFF reservation",
+    );
 
     // ---- Smoke-pack: prove the GPU SoA layout works on this corpus ----
     // PackedAbilityRegistry::pack runs its own per-program packing

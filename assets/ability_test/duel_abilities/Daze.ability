@@ -1,8 +1,11 @@
 // Wave 2 piece N: Stun E2E demo. Caster stuns target for 1s.
-// Lowers to AbilityProgram { effects: [EffectOp::Stun{duration_ticks:10}] }.
-// The .sim verb writes target's hot_stun_expires_at_tick; offensive
-// verbs gate on `agents.stun_expires_at_tick(self) <= world.tick`,
-// so a stunned target can't cast Strike/Bleed/Reap/Vampirize/etc.
+// Lowers to AbilityProgram { effects: [EffectOp::Stun{duration_ticks:10}],
+//                            chances: [Some(32768)] }.
+// `chance 50%` exercises Wave 1.5#5 chance-modifier lowering — the
+// q16 fixed-point chance value lands in program.chances and the .sim
+// verb's `when` clause hand-mirrors it as an RNG gate (registry-driven
+// chance dispatch is later infrastructure). 32768 = (0.5 * 65535).round()
+// — half-up rounding, clamped under CHANCE_NONE_SENTINEL=0xFFFF.
 
 ability Daze {
     target: enemy
@@ -10,5 +13,5 @@ ability Daze {
     cooldown: 4s
     hint: crowd_control
 
-    stun 1s
+    stun 1s chance 50%
 }

@@ -325,7 +325,15 @@ verb Daze(self, target: Agent) =
         && target.alive
         && target != self
         && (world.tick % config.combat.cooldown_daze == 0)
-        && target.hp > config.combat.hp_daze_floor)
+        && target.hp > config.combat.hp_daze_floor
+        // Wave 1.5#5 chance modifier — Daze.ability declares
+        // `chance 50%`, lowered to program.chances[0] = Some(32768)
+        // ((0.5 * 65535).round() rounds half-up). Hand-mirrored here
+        // as `(rng.action() % 65536) < 32768`, which matches the
+        // runtime gate shape `(per_agent_u32(...) & 0xFFFF) < q16`.
+        // Registry-driven chance dispatch is later infrastructure;
+        // this verb gate is the binding-test analogue.
+        && (rng.action() % 65536) < 32768)
   emit Stunned { target_agent: target, expires_at: world.tick + config.combat.daze_dur }
   score (180.0 - target.hp)
 
