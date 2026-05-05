@@ -48,7 +48,7 @@
 //!     `self.hp` to `agent_hp[target_expr_<N>]` (binder shadowing
 //!     in pair-field scoring)
 
-use engine::sim_trait::CompiledSim;
+use engine::sim_trait::{AgentSnapshot, CompiledSim, VizGlyph};
 use engine::GpuContext;
 use glam::Vec3;
 use wgpu::util::DeviceExt;
@@ -660,6 +660,63 @@ impl CompiledSim for Duel1v1State {
     fn agent_count(&self) -> u32 { self.agent_count }
     fn tick(&self) -> u64 { self.tick }
     fn positions(&mut self) -> &[Vec3] { &[] }
+
+    /// Snapshot per-agent state for the universal `viz_app` renderer.
+    /// Pattern lifted from `duel_abilities_runtime` (commit 77e9a243):
+    /// stationary 1-D grid + HP-banded glyph discriminants. duel_1v1
+    /// has the same shape (2 stationary heroes, HP-driven combat) so
+    /// the implementation is verbatim except for glyph letters and
+    /// (eventually) the agent label set.
+    fn snapshot(&mut self) -> AgentSnapshot {
+        let hp = self.read_hp();
+        let alive_raw = self.read_alive();
+        let alive: Vec<u32> = alive_raw
+            .iter()
+            .zip(hp.iter())
+            .map(|(&a, &h)| if a != 0 && h > 0.0 { 1 } else { 0 })
+            .collect();
+        let positions: Vec<Vec3> = (0..self.agent_count as usize)
+            .map(|i| Vec3::new(i as f32 * 5.0, 0.0, 0.0))
+            .collect();
+        let creature_types: Vec<u32> = (0..self.agent_count as usize)
+            .map(|i| {
+                let hero_id = (i & 1) as u32;
+                let bucket = if alive[i] == 0 {
+                    3
+                } else if hp[i] < 33.0 {
+                    2
+                } else if hp[i] < 75.0 {
+                    1
+                } else {
+                    0
+                };
+                bucket * 2 + hero_id
+            })
+            .collect();
+        AgentSnapshot {
+            positions,
+            creature_types,
+            alive,
+        }
+    }
+
+    /// 4 HP buckets × 2 hero ids = 8 entries.
+    fn glyph_table(&self) -> Vec<VizGlyph> {
+        vec![
+            VizGlyph::new('A', 51),
+            VizGlyph::new('B', 196),
+            VizGlyph::new('a', 39),
+            VizGlyph::new('b', 160),
+            VizGlyph::new('a', 27),
+            VizGlyph::new('b', 88),
+            VizGlyph::new('\u{00D7}', 240),
+            VizGlyph::new('\u{00D7}', 240),
+        ]
+    }
+
+    fn default_viewport(&self) -> Option<(Vec3, Vec3)> {
+        Some((Vec3::new(-1.5, -1.5, 0.0), Vec3::new(6.5, 1.5, 0.0)))
+    }
 }
 
 pub fn make_sim(seed: u64, agent_count: u32) -> Box<dyn CompiledSim> {
