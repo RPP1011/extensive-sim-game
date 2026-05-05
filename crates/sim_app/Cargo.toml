@@ -102,6 +102,15 @@ quest_probe_runtime = { path = "../quest_probe_runtime" }
 # PerPair tick preamble, Bool LHS rewrite). See
 # `docs/superpowers/notes/2026-05-04-duel_1v1.md`.
 duel_1v1_runtime = { path = "../duel_1v1_runtime" }
+# Disease spread — 22nd REAL fixture (CPU-only) and FIRST sim with
+# SIR-style epidemic dynamics. 200 agents (199 Susceptible + 1
+# Infected patient zero) propagate infection by spatial proximity,
+# with per-tick mortality and a fixed recovery duration. Sibling
+# concept to crafting_diffusion (state-via-interaction) but with
+# mortality (alive=false on death) and a true SIR shape:
+# the Infected curve rises then falls as Susceptibles deplete and
+# agents recover or die. See `crates/disease_spread_runtime/`.
+disease_spread_runtime = { path = "../disease_spread_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -186,3 +195,7 @@ path = "src/quest_probe_app.rs"
 [[bin]]
 name = "duel_1v1_app"
 path = "src/duel_1v1_app.rs"
+
+[[bin]]
+name = "disease_spread_app"
+path = "src/disease_spread_app.rs"

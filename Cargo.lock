@@ -501,6 +501,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "disease_spread_runtime"
+version = "0.1.0"
+dependencies = [
+ "engine",
+ "glam",
+]
+
+[[package]]
 name = "document-features"
 version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1695,6 +1703,7 @@ dependencies = [
  "cooldown_probe_runtime",
  "crowd_navigation_runtime",
  "diplomacy_probe_runtime",
+ "disease_spread_runtime",
  "duel_1v1_runtime",
  "ecosystem_runtime",
  "engine",
