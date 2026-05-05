@@ -194,6 +194,62 @@ fn lowers_taunt() {
 }
 
 // ---------------------------------------------------------------------------
+// Wave 2 piece 2 — movement verbs (dash / blink / knockback / pull).
+// All four mirror `damage`'s shape: one `<distance:f32>` positional arg
+// → `EffectOp::* { distance }`. The runtime apply handlers (compute
+// facing / away / toward vectors and update `hot_pos`) land in a
+// follow-up Wave 2 piece.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lowers_dash() {
+    let src = "ability Lunge { target: self cooldown: 1s dash 4.5 }";
+    let file = parse_ability_file(src).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+    assert_eq!(prog.effects.len(), 1);
+    match prog.effects[0] {
+        EffectOp::Dash { distance } => assert!((distance - 4.5).abs() < 1e-6, "dash distance"),
+        ref other => panic!("expected Dash; got {other:?}"),
+    }
+}
+
+#[test]
+fn lowers_blink() {
+    let src = "ability Flash { target: enemy range: 6 cooldown: 1s blink 6 }";
+    let file = parse_ability_file(src).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+    assert_eq!(prog.effects.len(), 1);
+    match prog.effects[0] {
+        EffectOp::Blink { distance } => assert!((distance - 6.0).abs() < 1e-6, "blink distance"),
+        ref other => panic!("expected Blink; got {other:?}"),
+    }
+}
+
+#[test]
+fn lowers_knockback() {
+    let src = "ability Shove { target: enemy range: 2 cooldown: 1s knockback 3 }";
+    let file = parse_ability_file(src).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+    assert_eq!(prog.effects.len(), 1);
+    match prog.effects[0] {
+        EffectOp::Knockback { distance } => assert!((distance - 3.0).abs() < 1e-6, "knockback distance"),
+        ref other => panic!("expected Knockback; got {other:?}"),
+    }
+}
+
+#[test]
+fn lowers_pull() {
+    let src = "ability Yank { target: enemy range: 5 cooldown: 1s pull 2.5 }";
+    let file = parse_ability_file(src).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+    assert_eq!(prog.effects.len(), 1);
+    match prog.effects[0] {
+        EffectOp::Pull { distance } => assert!((distance - 2.5).abs() < 1e-6, "pull distance"),
+        ref other => panic!("expected Pull; got {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Error paths
 // ---------------------------------------------------------------------------
 

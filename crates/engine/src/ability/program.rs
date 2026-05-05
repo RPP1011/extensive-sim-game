@@ -152,6 +152,41 @@ pub enum EffectOp {
     /// per-agent `taunt_source: Option<AgentId>` field once the runtime
     /// gate lands.
     Taunt   { duration_ticks: u32 } = 11,
+
+    // --- Movement verbs (Wave 2 piece 2) ---
+    // These four variants share a uniform `{ distance: f32 }` payload —
+    // 4B + 1B tag, identical encoding to `Damage`/`Heal`/`Shield`. Apply
+    // handlers (compute facing direction / away-from-caster / toward-caster
+    // vectors and call `set_pos` on the existing `hot_pos` SoA column)
+    // land in a follow-up Wave 2 piece. This slice only wires the
+    // discriminants + payload packing + DSL lowering arms so authoring
+    // sites can compile against the new verbs.
+    //
+    // No new SoA fields: position is already carried by `hot_pos`; the
+    // movement verbs read / write that column via the same `set_pos`
+    // setter the existing `dsl_compiler::cg::lower::physics` paths use.
+    /// Caster moves up to `distance` along their current facing.
+    /// Self-target verb: the cast slot supplies the caster id and the
+    /// runtime resolves a unit-vector along the caster's facing then
+    /// updates `hot_pos` accordingly.
+    Dash      { distance: f32 } = 12,
+
+    /// Caster instantly teleports up to `distance` toward the target.
+    /// Targeted verb: clamp at the target's position when
+    /// `dist(caster, target) < distance`.
+    Blink     { distance: f32 } = 13,
+
+    /// Target is pushed `distance` away from the caster (away vector =
+    /// `normalize(target_pos - caster_pos)`). Targeted verb. Runtime
+    /// must guard against zero-length vectors when caster and target
+    /// occupy the same cell.
+    Knockback { distance: f32 } = 14,
+
+    /// Target is pulled `distance` toward the caster (toward vector =
+    /// `normalize(caster_pos - target_pos)`). Targeted verb. Runtime
+    /// must guard against zero-length vectors when caster and target
+    /// occupy the same cell.
+    Pull      { distance: f32 } = 15,
 }
 
 /// Coarse ability-category hint, per `.ability` DSL `hint:` field.
