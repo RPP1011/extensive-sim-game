@@ -364,15 +364,19 @@ fn lowers_damage_modify_half_multiplier() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn target_ground_is_reserved() {
-    // Parser accepts `ground`; lowering rejects it as planned/reserved.
+fn target_ground_lowers_to_target_mode_kind_ground() {
+    use engine::ability::program::TargetModeKind;
+    // Wave 2 follow-on (#127): all eight target modes lower into
+    // TargetModeKind. Apply dispatch for position-targeted modes
+    // wires later via registry-driven infrastructure (#125).
     let src = "ability Boulder { target: ground cooldown: 5s damage 10 }";
     let file = parse_ability_file(src).expect("parser");
-    let err = lower_ability_decl(&file.abilities[0]).expect_err("must reject ground");
-    match err {
-        LowerError::TargetModeReserved { mode, .. } => assert_eq!(mode, "ground"),
-        other => panic!("expected TargetModeReserved(ground); got {other:?}"),
-    }
+    let prog = lower_ability_decl(&file.abilities[0])
+        .expect("ground target mode must lower (was: TargetModeReserved)");
+    assert_eq!(prog.target_mode, TargetModeKind::Ground);
+    // hostile_only defaults to false for non-pair-targeted modes —
+    // there's no "the other guy" to friendly-fire-check.
+    assert!(!prog.gate.hostile_only);
 }
 
 #[test]

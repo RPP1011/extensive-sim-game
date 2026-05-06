@@ -88,7 +88,7 @@ use dsl_ast::ast::{
     AbilityDecl, AbilityFile, AbilityHeader, EffectArg, EffectStmt, HintName, Span, TargetMode,
 };
 use engine::ability::program::{
-    AbilityCost, AbilityHint, AbilityProgram, AbilityTag, Area, CostAmount, CostResource, Delivery, EffectAreaShape, EffectOp, EffectWhenCondition, MAX_NESTED_PER_EFFECT,
+    AbilityCost, AbilityHint, AbilityProgram, AbilityTag, Area, CostAmount, CostResource, Delivery, EffectAreaShape, EffectOp, EffectWhenCondition, MAX_NESTED_PER_EFFECT, TargetModeKind,
     EffectScaling, Gate, LifetimeMode, ScalingStatRef, ShapeKind, StackingMode, TargetSelector,
     MAX_EFFECTS_PER_PROGRAM, MAX_SCALINGS_PER_EFFECT, MAX_TAGS_PER_PROGRAM,
 };
@@ -104,9 +104,6 @@ use smallvec::SmallVec;
 /// API churn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LowerError {
-    /// `target: <mode>` named a mode the lowering pass does not yet
-    /// implement (anything other than `enemy` or `self`).
-    TargetModeReserved { mode: String, span: Span },
     /// `hint: <name>` named a category the lowering pass does not yet
     /// implement (today: only `economic` triggers this — the other five
     /// hints map onto `AbilityHint` variants).
@@ -251,10 +248,6 @@ pub enum LowerError {
 impl std::fmt::Display for LowerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LowerError::TargetModeReserved { mode, .. } => write!(
-                f,
-                "target mode '{mode}' is planned/reserved; not yet supported by lowering"
-            ),
             LowerError::HintReserved { hint, .. } => write!(
                 f,
                 "hint '{hint}' is planned/reserved; not yet supported by lowering"
@@ -444,22 +437,36 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     let mut lowered_charges: Option<u32> = None;
     let mut lowered_recharge_ticks: Option<u32> = None;
     let mut lowered_is_toggle: bool = false;
+    // `target: <mode>` defaults to Enemy when no header declares it
+    // (matches the gate.hostile_only default + Wave 1 corpus shape).
+    let mut lowered_target_mode: TargetModeKind = TargetModeKind::Enemy;
 
     for header in &decl.headers {
         match header {
             AbilityHeader::Target(mode) => {
-                let (hostile, mode_str) = match mode {
-                    TargetMode::Enemy => (true, "enemy"),
-                    TargetMode::Self_ => (false, "self"),
-                    TargetMode::Ally => return Err(target_reserved("ally", decl)),
-                    TargetMode::SelfAoe => return Err(target_reserved("self_aoe", decl)),
-                    TargetMode::Ground => return Err(target_reserved("ground", decl)),
-                    TargetMode::Direction => return Err(target_reserved("direction", decl)),
-                    TargetMode::Vector => return Err(target_reserved("vector", decl)),
-                    TargetMode::Global => return Err(target_reserved("global", decl)),
+                // All eight target modes per spec §4.3 now lower into
+                // engine IR (#127, post Wave 1.1 headers ea3af642+).
+                // `gate.hostile_only` only encodes the historical
+                // Enemy/Self/Ally distinction — apply handlers read
+                // `program.target_mode` for the richer routing
+                // (position/directional/global) which today doesn't
+                // dispatch (deferred — registry-driven apply, #125).
+                let (kind, hostile) = match mode {
+                    TargetMode::Enemy     => (TargetModeKind::Enemy,     true),
+                    TargetMode::Self_     => (TargetModeKind::SelfCast,  false),
+                    TargetMode::Ally      => (TargetModeKind::Ally,      false),
+                    TargetMode::SelfAoe   => (TargetModeKind::SelfAoe,   false),
+                    // Position / directional / global modes have no
+                    // single-agent target; `hostile_only` defaults to
+                    // false (no friendly-fire check) — apply handlers
+                    // wire the spatial/vector resolution later.
+                    TargetMode::Ground    => (TargetModeKind::Ground,    false),
+                    TargetMode::Direction => (TargetModeKind::Direction, false),
+                    TargetMode::Vector    => (TargetModeKind::Vector,    false),
+                    TargetMode::Global    => (TargetModeKind::Global,    false),
                 };
+                lowered_target_mode = kind;
                 gate.hostile_only = hostile;
-                let _ = mode_str; // kept for future error surfacing.
             }
             AbilityHeader::Range(r) => {
                 // Preserve the (currently-only) Area shape and overwrite
@@ -870,6 +877,7 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
         charges: lowered_charges,
         recharge_ticks: lowered_recharge_ticks,
         is_toggle: lowered_is_toggle,
+        target_mode: lowered_target_mode,
     })
 }
 
@@ -1176,10 +1184,6 @@ fn map_hint(h: &HintName, decl: &AbilityDecl) -> Result<AbilityHint, LowerError>
             span: decl.span,
         }),
     }
-}
-
-fn target_reserved(mode: &str, decl: &AbilityDecl) -> LowerError {
-    LowerError::TargetModeReserved { mode: mode.to_string(), span: decl.span }
 }
 
 /// Wave 1.5#3: map the parser AST `StackingMode` (Refresh / Stack /

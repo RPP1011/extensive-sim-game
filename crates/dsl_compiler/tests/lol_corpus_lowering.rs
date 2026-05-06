@@ -110,13 +110,14 @@ fn lol_corpus_lowering_baseline() {
         eprintln!("    {c:>3}  {e}");
     }
 
-    // Baseline assertion — frozen at the post-Wave-1.1-headers number.
+    // Baseline assertion — frozen at the post-TargetMode-lift number.
     // If a later commit lowers MORE files, bump this floor; if fewer,
-    // investigate the regression. Cost/charges/recharge/toggle now
-    // lower (was 65/8/-/- blockers); the surfaced downstream errors
-    // (TargetModeReserved direction/ground, ModifierNotImplemented:for)
-    // are the next-biggest unblock targets.
-    let baseline = 2usize;
+    // investigate the regression. With TargetMode direction/ground/etc.
+    // now lowering (#127), the next biggest unblocks are
+    // EffectArgMismatch:dash (32 files), HeaderNotImplemented:recast
+    // (34 files — Wave 1.4 deferred multi-stage cast state), and
+    // MixedBody (parser-permitted spec violations).
+    let baseline = 11usize;
     assert!(
         ok >= baseline,
         "LoL lowering regression: ok={ok} fell below baseline={baseline}",

@@ -550,6 +550,30 @@ pub struct EffectAreaShape {
     pub args: [f32; 4],
 }
 
+/// `target: <mode>` header (spec §4.3). The eight modes the spec
+/// table lists, captured here so apply handlers know how to bind the
+/// cast's target arity (single agent, ground point, direction vector,
+/// global no-target, etc.). Mirrors `dsl_ast::ast::TargetMode` 1:1.
+///
+/// Today's apply path only reads `Enemy`/`Self_`/`Ally` (the
+/// per-pair-targeted modes); the position/directional/global modes
+/// are captured at the IR boundary so the corpus lowers, with apply
+/// dispatch arriving alongside registry-driven dispatch (#125).
+///
+/// Numeric discriminants are pinned for future SoA packing.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum TargetModeKind {
+    Enemy     = 0,
+    SelfCast  = 1,  // `Self_` in the AST; `self` is a Rust keyword
+    Ally      = 2,
+    SelfAoe   = 3,
+    Ground    = 4,
+    Direction = 5,
+    Vector    = 6,
+    Global    = 7,
+}
+
 /// Top-level `cost: <amount> <resource>` header (spec §4.2). Captured
 /// here so apply handlers can debit the resource at cast-decide time
 /// (deferred infrastructure today). The resource vocabulary is fixed:
@@ -809,6 +833,15 @@ pub struct AbilityProgram {
     /// `false` for one-shot abilities. Apply handlers wire toggle
     /// state SoA + per-tick drain accounting (deferred).
     pub is_toggle: bool,
+    /// `target: <mode>` header — captured from the eight modes per
+    /// spec §4.3. Apply handlers only read Enemy/Self/Ally today
+    /// (the per-pair-targeted modes); the position/directional/global
+    /// modes (Ground, Direction, Vector, Global, SelfAoe) are
+    /// captured here so the corpus lowers, with apply dispatch
+    /// arriving via registry-driven infrastructure (#125). Default
+    /// is `Enemy` to match historical `Area::SingleTarget` +
+    /// `gate.hostile_only=true` shape.
+    pub target_mode: TargetModeKind,
 }
 
 impl AbilityProgram {
@@ -843,6 +876,9 @@ impl AbilityProgram {
             charges:             None,
             recharge_ticks:      None,
             is_toggle:           false,
+            // Default Enemy keeps historical convenience-constructor shape
+            // (single-target, hostile_only=true on the gate).
+            target_mode:         TargetModeKind::Enemy,
         }
     }
 
