@@ -458,6 +458,20 @@ pub enum EffectOp {
     /// voxel constructions compose multiple `place_voxel` ops or wire a
     /// future area modifier).
     PlaceVoxel { kind_hash: u32 } = 26,
+
+    /// `stealth for <duration> [break_on_damage]` — self-cast invisibility
+    /// for `duration_ticks`. The LoL corpus shape is uniformly
+    /// `stealth for 3s break_on_damage` (25 hero files: Akali, Diana,
+    /// Khazix, MonkeyKing, Rengar, Talon, Vayne, Akshan, Aurora, …). No
+    /// magnitude argument — stealth is a binary state. The
+    /// `break_on_damage` lifetime modifier rides the existing per-effect
+    /// lifetime SoA (LifetimeMode::BreakOnDamage); apply handlers tie
+    /// the stealth flag to the lifetime expiry the same way TimedShield
+    /// does. Payload is 4 bytes + 1 tag = 5 bytes; well under the P4
+    /// ≤16-byte ceiling. Apply handler is deferred — stealth flag SoA
+    /// + targeting-mask exclusion arrives with the registry-driven
+    /// dispatch (#125 family).
+    Stealth { duration_ticks: u32 } = 27,
 }
 
 /// Stat targeted by `buff`. Vocabulary is small today (just the two

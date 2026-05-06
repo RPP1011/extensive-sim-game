@@ -96,6 +96,14 @@ pub enum ApplyEvent {
     /// AgentPlacedVoxel and write the voxel into world state; deferred
     /// infrastructure today (no runtime sim consumes the event yet).
     PlaceVoxel     { source: AgentId, kind_hash: u32 },
+    /// `stealth for <duration>` — self-cast invisibility for
+    /// `duration_ticks`. The LoL idiom is `stealth for 3s
+    /// break_on_damage` — the lifetime modifier rides the per-effect
+    /// lifetime SoA and isn't reflected here. Apply handlers will
+    /// gate target selection by the caster's stealth flag. No runtime
+    /// sim consumes the event today (deferred — same fall-through as
+    /// Summon / Harvest / PlaceVoxel).
+    Stealth        { source: AgentId, duration_ticks: u32 },
 }
 
 /// Inline budget — most abilities have ≤4 effects (P4 says
@@ -207,6 +215,10 @@ pub fn apply_program(
                 out.push(ApplyEvent::Harvest    { source: caster, kind_hash, amount }),
             EffectOp::PlaceVoxel { kind_hash } =>
                 out.push(ApplyEvent::PlaceVoxel { source: caster, kind_hash }),
+            // Wave 2 piece 7: stealth is self-cast (apply handler
+            // gates target selection by caster's stealth flag).
+            EffectOp::Stealth    { duration_ticks } =>
+                out.push(ApplyEvent::Stealth { source: caster, duration_ticks }),
             // CastAbility / TransferGold / ModifyStanding fall outside
             // this slice — the first is recursive (needs cascade
             // handling); the latter two need world-state context not

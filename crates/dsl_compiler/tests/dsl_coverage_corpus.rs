@@ -308,6 +308,7 @@ fn effect_op_label(op: &EffectOp) -> &'static str {
         EffectOp::Summon          { .. } => "Summon",
         EffectOp::Harvest         { .. } => "Harvest",
         EffectOp::PlaceVoxel      { .. } => "PlaceVoxel",
+        EffectOp::Stealth         { .. } => "Stealth",
     }
 }
 

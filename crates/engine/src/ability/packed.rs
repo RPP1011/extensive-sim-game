@@ -819,6 +819,10 @@ fn pack_effect(op: EffectOp) -> (u32, u32, u32) {
         // location; payload_b stays 0.
         EffectOp::Harvest    { kind_hash, amount }    => (25, kind_hash, amount as u32),
         EffectOp::PlaceVoxel { kind_hash }            => (26, kind_hash, 0),
+        // Wave 2 piece 7 — `stealth for <duration>`. Duration in
+        // payload_a; payload_b unused. Apply handlers tie the per-
+        // agent stealth flag to a tick-stamp the same way Stun does.
+        EffectOp::Stealth    { duration_ticks }       => (27, duration_ticks, 0),
     }
 }
 

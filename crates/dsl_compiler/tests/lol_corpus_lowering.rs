@@ -138,7 +138,14 @@ fn lol_corpus_lowering_baseline() {
     // timer SoA) still arrive with the registry-driven dispatch.
     // The 61 prior `HeaderNotImplemented:recast` errors collapsed
     // to 0; +50 files (and +73 decls) lower cleanly.
-    let baseline = 135usize;
+    //
+    // 135 → 159 when `EffectOp::Stealth` landed (Wave 2 piece 7) —
+    // `stealth for <duration>` is the LoL stealth-on-damage idiom
+    // (Akali, Diana, Khazix, MonkeyKing, Rengar, Talon, Vayne, …).
+    // 25 of 26 prior `ModifierNotImplemented:for` errors collapsed
+    // (the remaining one is `reflect for <dur>`, a single corpus
+    // hero — likely Kayle).
+    let baseline = 159usize;
     assert!(
         ok >= baseline,
         "LoL lowering regression: ok={ok} fell below baseline={baseline}",

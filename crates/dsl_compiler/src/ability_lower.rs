@@ -1234,6 +1234,23 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             require_arity(stmt, arity)?;
             Ok(EffectOp::Taunt { duration_ticks: duration_to_ticks(dur) })
         }
+        // Wave 2 piece 7 — `stealth for <duration> [break_on_damage]`.
+        // The 25 LoL hero files share the exact shape `stealth for 3s
+        // break_on_damage`. No magnitude — stealth is binary. The
+        // duration MUST come from `for`; the explicit positional
+        // form `stealth <duration>` is rejected (no corpus uses it).
+        // The `break_on_damage` modifier rides the existing per-effect
+        // lifetime SoA — it doesn't need a stealth-specific arm here.
+        "stealth" => {
+            // Positional duration is meaningless for stealth — the only
+            // valid shape is `stealth for <dur>`. extract_duration's
+            // `positional_idx` is unused if `stmt.duration` is Some
+            // (the upstream `is_duration_bearing_verb` guard ensures
+            // we only land here when the modifier IS present).
+            let (dur, arity) = extract_duration(stmt, 0, 0)?;
+            require_arity(stmt, arity)?;
+            Ok(EffectOp::Stealth { duration_ticks: duration_to_ticks(dur) })
+        }
         // Wave 2 piece 2 — four new movement verbs. Each takes a single
         // `<distance:f32>` arg (mirrors `damage`'s shape, NOT the
         // duration shape of the control verbs) and lowers to the
@@ -1638,6 +1655,10 @@ fn is_duration_bearing_verb(verb: &str) -> bool {
         verb,
         "stun" | "slow" | "root" | "silence" | "fear" | "taunt"
         | "lifesteal" | "damage_modify" | "buff"
+        // Wave 2 piece 7 — `stealth for <duration>`. Same shape as the
+        // control verbs (no magnitude arg, duration via `for`), but
+        // self-cast (apply handlers will gate on caster, not target).
+        | "stealth"
     )
 }
 
