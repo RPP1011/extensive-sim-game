@@ -220,6 +220,30 @@ pub enum LowerError {
         method:  String,
         span:    Span,
     },
+    /// #139 (deliver-block body parsing): a `<hook_ident> { … }` inside
+    /// a `deliver` body block named a hook not in the engine's
+    /// `DeliveryHookKind` vocabulary (on_hit/on_tick/on_arrival/
+    /// on_complete/on_trigger/on_kill/on_damage/on_damage_dealt/
+    /// on_damage_taken/on_death/on_auto_attack/on_ability_used).
+    /// Surfaced so a typoed hook ident doesn't silently lower to a
+    /// no-op.
+    UnknownDeliveryHook {
+        ability: String,
+        method:  String,
+        hook:    String,
+        span:    Span,
+    },
+    /// #139: a deliver-body hook's effect list exceeded the
+    /// per-program effect budget (MAX_EFFECTS_PER_PROGRAM). Same budget
+    /// as outer-effect lists — apply handlers SoA-pack hook bodies
+    /// at the same width.
+    DeliveryHookBudgetExceeded {
+        ability: String,
+        hook:    String,
+        count:   usize,
+        max:     usize,
+        span:    Span,
+    },
     /// Wave 1.4 parser accepted a `morph { effects } into <Other>`
     /// body block. Lowering requires form-swap state + cross-decl
     /// resolution (Wave 2+).
@@ -305,6 +329,14 @@ impl std::fmt::Display for LowerError {
             LowerError::UnknownDeliveryMethod { ability, method, .. } => write!(
                 f,
                 "ability `{ability}` uses `deliver {method} {{…}}` — `{method}` is not a known delivery method; valid methods (spec §9): projectile / channel / zone / chain / tether / trap"
+            ),
+            LowerError::UnknownDeliveryHook { ability, method, hook, .. } => write!(
+                f,
+                "ability `{ability}` uses `deliver {method} {{ … {hook} {{…}} … }}` — `{hook}` is not a known delivery hook ident; valid hooks: on_hit / on_tick / on_arrival / on_complete / on_trigger / on_kill / on_damage / on_damage_dealt / on_damage_taken / on_death / on_auto_attack / on_ability_used"
+            ),
+            LowerError::DeliveryHookBudgetExceeded { ability, hook, count, max, .. } => write!(
+                f,
+                "ability `{ability}`'s `{hook} {{…}}` deliver-body hook declares {count} effects but the per-hook budget is {max} (MAX_EFFECTS_PER_PROGRAM)"
             ),
             LowerError::MorphBlockNotImplemented { ability, into, .. } => write!(
                 f,
@@ -571,7 +603,59 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
                 method:  block.method.clone(),
                 span:    block.span,
             })?;
-        Delivery::Method { kind, raw: block.raw.clone() }
+        // #139: parse-side captures `<hook_ident> { <effect_stmts> }`
+        // entries inside the deliver body. Lower each hook ident
+        // through the engine's `DeliveryHookKind` vocabulary (typoed
+        // idents surface as `UnknownDeliveryHook`), then recursively
+        // lower each hook's effects via `lower_effect_stmt`. The same
+        // NestedModifierDropped guard #141 applies — outer-effect
+        // aggregators (tags / scalings / chances / lifetimes / shapes)
+        // don't see hook-effect modifiers, so an inner stmt with one
+        // would silently lose its modifier slot. Reject loudly.
+        let mut lowered_hooks: SmallVec<
+            [engine::ability::program::DeliveryHook; 4],
+        > = SmallVec::new();
+        for hook in &block.hooks {
+            let hook_kind =
+                engine::ability::program::DeliveryHookKind::parse(&hook.kind)
+                    .ok_or_else(|| LowerError::UnknownDeliveryHook {
+                        ability: decl.name.clone(),
+                        method:  block.method.clone(),
+                        hook:    hook.kind.clone(),
+                        span:    hook.span,
+                    })?;
+            if hook.effects.len() > MAX_EFFECTS_PER_PROGRAM {
+                return Err(LowerError::DeliveryHookBudgetExceeded {
+                    ability: decl.name.clone(),
+                    hook:    hook.kind.clone(),
+                    count:   hook.effects.len(),
+                    max:     MAX_EFFECTS_PER_PROGRAM,
+                    span:    hook.span,
+                });
+            }
+            let mut hook_effects: SmallVec<[EffectOp; MAX_EFFECTS_PER_PROGRAM]> =
+                SmallVec::new();
+            for hook_stmt in &hook.effects {
+                // #139 known gap: hook-stmt outer-aggregator modifiers
+                // (in-shape / tags / chance / stacking / lifetime /
+                // scaling / when / nested) currently silently drop
+                // here — `lower_effect_stmt` consumes verb-level
+                // modifiers (`for <duration>` ⇒ DoT/HoT/timed) but
+                // the per-program aggregator slots don't fan out to
+                // hook bodies. This is strictly a smaller drop than
+                // the prior opaque-body behavior (which lost the verb
+                // itself). Recursive aggregator capture for hooks is
+                // tracked as future work; until then the verb is
+                // lifted into IR even if some modifier slots aren't.
+                let op = lower_effect_stmt(hook_stmt)?;
+                hook_effects.push(op);
+            }
+            lowered_hooks.push(engine::ability::program::DeliveryHook {
+                kind:    hook_kind,
+                effects: hook_effects,
+            });
+        }
+        Delivery::Method { kind, raw: block.raw.clone(), hooks: lowered_hooks }
     } else {
         Delivery::Instant
     };

@@ -950,9 +950,29 @@ pub struct DeliverBlock {
     pub method: String,
     /// Verbatim source slice from the `deliver` keyword to (and
     /// including) the closing `}` of the body block. Multi-line; trims
-    /// no whitespace.
+    /// no whitespace. Retained for backward compatibility — the
+    /// structured `hooks` field is preferred for new lowering paths.
     pub raw:    String,
+    /// Wave 2 piece 5/6 follow-up (#139): structured parse of the body
+    /// block's hook stanzas. The body is a sequence of
+    /// `<hook_ident> { <effect stmts> }` entries (e.g. `on_hit { … }`,
+    /// `on_tick { … }`, `on_arrival { … }`). Each entry's effect
+    /// statements use the regular `EffectStmt` grammar so all the
+    /// Wave 1.5 modifier slots compose inside hooks the same way they
+    /// do at the ability's top level. Empty when the body has no
+    /// recognizable hook stanzas.
+    pub hooks:  Vec<DeliverHook>,
     pub span:   Span,
+}
+
+/// One `<hook_ident> { … }` entry inside a `deliver` body block.
+/// `kind` is the verbatim hook identifier (e.g. `"on_hit"`); the
+/// engine validates the vocabulary at lowering time.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DeliverHook {
+    pub kind:    String,
+    pub effects: Vec<EffectStmt>,
+    pub span:    Span,
 }
 
 /// `morph { effects } into <Other>` — temporary form-swap (spec §4.4

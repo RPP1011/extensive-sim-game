@@ -862,8 +862,11 @@ fn parse_deliver_block(c: &mut Cursor) -> PResult<DeliverBlock> {
     consume_balanced_braces(c).map_err(|e| {
         e.with_context(format!("parsing params block of `deliver {method} {{ … }}`"))
     })?;
-    // Body block — `{ on_hit { … } | on_arrival { … } | … }`. Same
-    // opaque-balanced capture.
+    // Body block — `{ <hook_ident> { <effects> } [ <hook_ident> { … } ]* }`.
+    // Wave 1.4 captured this as opaque source text; #139 lifts it into
+    // structured `Vec<DeliverHook>` so the inner effect statements
+    // reach the engine IR (without this, ~27% of LoL ability decls
+    // silently lower to no-op programs — see lol_corpus_lowering audit).
     skip_ws_no_newline_terminator(c);
     if !c.starts_with_char('{') {
         return Err(ParseErr::at(
@@ -874,12 +877,70 @@ fn parse_deliver_block(c: &mut Cursor) -> PResult<DeliverBlock> {
             ),
         ));
     }
-    consume_balanced_braces(c).map_err(|e| {
-        e.with_context(format!("parsing body block of `deliver {method} {{ … }}`"))
-    })?;
+    let body_start = c.pos;
+    c.bump(1); // consume opening '{'
+    let mut hooks: Vec<DeliverHook> = Vec::new();
+    loop {
+        c.skip_ws();
+        if c.starts_with_char('}') {
+            c.bump(1);
+            break;
+        }
+        if c.eof() {
+            return Err(ParseErr::at(
+                Span::new(body_start, c.pos),
+                format!("unterminated body block of `deliver {method} {{ … }}`"),
+            ));
+        }
+        let hook_start = c.pos;
+        let hook_kind = ident(c).map_err(|e| {
+            e.with_context(format!(
+                "parsing hook ident inside `deliver {method} {{ … }} {{ … }}` body \
+                 (expected `on_hit` / `on_tick` / `on_arrival` / etc.)"
+            ))
+        })?;
+        c.skip_ws();
+        if !c.starts_with_char('{') {
+            return Err(ParseErr::at(
+                here(c),
+                format!(
+                    "expected `{{` to open body of hook `{hook_kind}` inside \
+                     `deliver {method}`; got `{}`",
+                    peek_word_for_error(c)
+                ),
+            ));
+        }
+        c.bump(1); // opening '{' of the hook body
+        let mut hook_effects: Vec<EffectStmt> = Vec::new();
+        loop {
+            c.skip_ws();
+            if c.starts_with_char('}') {
+                c.bump(1);
+                break;
+            }
+            if c.eof() {
+                return Err(ParseErr::at(
+                    Span::new(hook_start, c.pos),
+                    format!("unterminated body of hook `{hook_kind}` inside `deliver {method}`"),
+                ));
+            }
+            let effect = parse_effect(c).map_err(|e| {
+                e.with_context(format!(
+                    "parsing effect inside hook `{hook_kind}` of `deliver {method}`"
+                ))
+            })?;
+            hook_effects.push(effect);
+        }
+        hooks.push(DeliverHook {
+            kind:    hook_kind,
+            effects: hook_effects,
+            span:    Span::new(hook_start, c.pos),
+        });
+    }
     Ok(DeliverBlock {
         method,
         raw:  c.src[start..c.pos].to_string(),
+        hooks,
         span: Span::new(start, c.pos),
     })
 }

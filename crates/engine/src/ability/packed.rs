@@ -704,7 +704,7 @@ fn pack_stacking(m: StackingMode) -> u8 {
 fn pack_delivery(d: &Delivery) -> u32 {
     match d {
         Delivery::Instant => 0,
-        Delivery::Method { kind, raw: _ } => 1 | ((*kind as u32) << 8),
+        Delivery::Method { kind, raw: _, hooks: _ } => 1 | ((*kind as u32) << 8),
     }
 }
 

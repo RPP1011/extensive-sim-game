@@ -247,7 +247,9 @@ fn deliver_with_unbalanced_braces_errors_cleanly() {
     }";
     let err = parse_ability_file(src).expect_err("unbalanced inner brace must error");
     assert!(
-        err.to_string().contains("end of input") || err.to_string().contains("unexpected"),
+        err.to_string().contains("end of input")
+            || err.to_string().contains("unexpected")
+            || err.to_string().contains("unterminated"),
         "diagnostic must call out the unterminated block; got: {err}"
     );
 }

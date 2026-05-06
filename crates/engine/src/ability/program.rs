@@ -64,10 +64,80 @@ pub enum Delivery {
     Method {
         kind: DeliveryMethodKind,
         /// Verbatim source slice from `deliver` keyword through the
-        /// closing `}` of the body block. Engine code does not parse
-        /// this; downstream apply handlers re-parse when wiring runtime.
+        /// closing `}` of the body block. Retained for backward
+        /// compatibility — the structured `hooks` field below is the
+        /// preferred read for new apply paths.
         raw:  String,
+        /// Wave 2 piece 5/6 follow-up (#139): structured per-hook
+        /// effect lists. Each entry corresponds to one
+        /// `<hook_ident> { … }` stanza in the deliver body
+        /// (`on_hit`, `on_tick`, `on_arrival`, `on_complete`,
+        /// `on_kill`, etc.). Apply handlers fire each hook's
+        /// effects when the corresponding state-machine signal
+        /// resolves (projectile hits, channel ticks, etc.).
+        ///
+        /// Inner-effect modifiers (chance/stacking/scaling/etc.) on
+        /// hook stmts are silently dropped at lowering today, the
+        /// same gotcha as `program.nested_per_effect` — the per-hook
+        /// aggregator is a future architectural lift. Authors who
+        /// need rich hook-stmt modifiers should pull the effect to
+        /// the ability's top level until then.
+        hooks: SmallVec<[DeliveryHook; 4]>,
     },
+}
+
+/// One `<hook_ident> { … }` entry inside a `deliver` body. `kind` is
+/// the engine's enumerated hook vocabulary; `effects` is the lowered
+/// effect list for that hook.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeliveryHook {
+    pub kind:    DeliveryHookKind,
+    pub effects: SmallVec<[EffectOp; MAX_EFFECTS_PER_PROGRAM]>,
+}
+
+/// Enumerated hook vocabulary. Matches the LoL-corpus survey of all
+/// hook idents found inside deliver bodies. Unknown hook idents
+/// surface as `LowerError::UnknownDeliveryHook` at lowering time.
+///
+/// Numeric discriminants are pinned for future SoA packing; renaming
+/// or reordering bumps the schema hash.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum DeliveryHookKind {
+    OnHit          = 0,  // projectile / chain / tether impact
+    OnTick         = 1,  // channel / zone per-tick body
+    OnArrival      = 2,  // projectile reaches max range
+    OnComplete     = 3,  // channel finishes uninterrupted
+    OnTrigger      = 4,  // trap activation
+    OnKill         = 5,  // damage step kills the target
+    OnDamage       = 6,  // generic on-damage observer
+    OnDamageDealt  = 7,  // self deals damage
+    OnDamageTaken  = 8,  // self takes damage
+    OnDeath        = 9,  // self dies
+    OnAutoAttack   = 10, // proc-on-basic-attack passive
+    OnAbilityUsed  = 11, // proc-on-ability-cast passive
+}
+
+impl DeliveryHookKind {
+    /// Parse the hook ident from the .ability surface. Returns `None`
+    /// for unknown idents so upstream surfaces UnknownDeliveryHook.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "on_hit"          => Some(Self::OnHit),
+            "on_tick"         => Some(Self::OnTick),
+            "on_arrival"      => Some(Self::OnArrival),
+            "on_complete"     => Some(Self::OnComplete),
+            "on_trigger"      => Some(Self::OnTrigger),
+            "on_kill"         => Some(Self::OnKill),
+            "on_damage"       => Some(Self::OnDamage),
+            "on_damage_dealt" => Some(Self::OnDamageDealt),
+            "on_damage_taken" => Some(Self::OnDamageTaken),
+            "on_death"        => Some(Self::OnDeath),
+            "on_auto_attack"  => Some(Self::OnAutoAttack),
+            "on_ability_used" => Some(Self::OnAbilityUsed),
+            _ => None,
+        }
+    }
 }
 
 /// Spec §9 enumerates six delivery methods. The vocabulary lives in

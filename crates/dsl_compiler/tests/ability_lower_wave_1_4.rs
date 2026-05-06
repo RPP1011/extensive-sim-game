@@ -104,10 +104,19 @@ fn lowering_deliver_projectile_captures_method_and_raw() {
     let prog = lower_ability_decl(&file.abilities[0])
         .expect("deliver projectile must lower");
     match &prog.delivery {
-        Delivery::Method { kind, raw } => {
+        Delivery::Method { kind, raw, hooks } => {
             assert_eq!(*kind, DeliveryMethodKind::Projectile);
             assert!(raw.contains("projectile"), "raw must include method ident: {raw}");
             assert!(raw.contains("on_hit"),     "raw must include body block: {raw}");
+            // #139: deliver-body hooks now lower into structured IR.
+            // The on_hit { damage 10 } block extracts to a single
+            // DeliveryHook with one Damage(10) effect.
+            assert_eq!(hooks.len(), 1, "expected one hook (on_hit), got {}", hooks.len());
+            assert_eq!(
+                hooks[0].kind,
+                engine::ability::program::DeliveryHookKind::OnHit,
+            );
+            assert_eq!(hooks[0].effects.len(), 1, "on_hit damage 10 => 1 effect");
         }
         other => panic!("expected Delivery::Method(Projectile); got {other:?}"),
     }
@@ -165,10 +174,16 @@ fn lowering_deliver_unknown_method_diagnostic() {
 fn mixed_deliver_and_bare_effects_lowers_into_both_slots() {
     use dsl_compiler::ability_lower::lower_ability_decl;
     use engine::ability::program::{Delivery, DeliveryMethodKind, EffectOp};
+    // #139: hook-body inner stmts can't carry outer-aggregator
+    // modifiers (in-shape / tags / chance / stacking / lifetime / scaling /
+    // when / nested) — those slots only exist on top-level effects, so
+    // a hook stmt with one would silently lose it. Recursive aggregator
+    // capture is a future lift; #139 errors loudly via
+    // NestedModifierDropped. Use a bare verb here.
     let src = "ability X {
         target: enemy range: 5.0 cooldown: 25s
         deliver projectile { speed: 12.0 } {
-            on_hit { damage 15 in circle(6.0) [MAGIC: 50] }
+            on_hit { damage 15 }
         }
         damage 5
     }";
