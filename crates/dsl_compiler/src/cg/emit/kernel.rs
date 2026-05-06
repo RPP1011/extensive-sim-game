@@ -2112,6 +2112,13 @@ fn stmt_list_has_emit(list_id: crate::cg::stmt::CgStmtListId, prog: &CgProgram) 
             | CgStmt::Let { .. }
             | CgStmt::ForEachAgent { .. }
             | CgStmt::ForEachNeighbor { .. } => false,
+            // ApplyAbility writes to the chronicle ring per emitted
+            // ApplyEvent at runtime — semantically a chronicle write,
+            // not an Emit through the canonical emit kernel. Treat
+            // as false here so the emit-list scan doesn't miscount;
+            // the dispatcher kernel binds the chronicle ring on its
+            // own once #136's emit-side companion lands.
+            CgStmt::ApplyAbility { .. } => false,
         };
         if hit {
             return true;

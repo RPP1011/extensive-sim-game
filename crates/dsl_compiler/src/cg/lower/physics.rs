@@ -564,14 +564,28 @@ fn lower_stmt(
             ast_label: "BeliefObserve",
             span: *span,
         }),
-        IrStmt::ApplyAbility { span, .. } => Err(LoweringError::UnsupportedPhysicsStmt {
-            // #132A: AST + parser + IR landed; CgStmt + WGSL emit deferred
-            // to #132C (the coupled change avoids a 16-site blast radius
-            // for an intermediate stub variant).
-            rule: rule_id,
-            ast_label: "ApplyAbility",
-            span: *span,
-        }),
+        IrStmt::ApplyAbility { ability, span } => {
+            // #136 first slice: lower the ability expression and emit
+            // CgStmt::ApplyAbility. The expression must evaluate to an
+            // AbilityId (NonZeroU32) at runtime — type-checking that
+            // is the well-formed pass's job; this site just lowers
+            // the operand and packages it.
+            //
+            // The actual WGSL emit shape (per-effect-slot dispatch
+            // loop reading from PackedAbilityRegistry) lands later
+            // in #136's emit-side companion + #137's full-vocabulary
+            // expansion. Until then any sim that uses `apply_ability`
+            // surfaces the gap at WGSL-emit time, NOT at CG lowering
+            // time — a strictly cleaner failure surface than the
+            // prior `UnsupportedPhysicsStmt` (which masked even the
+            // intent of the rule).
+            let ability_id = lower_expr(ability, ctx)?;
+            push_stmt(
+                CgStmt::ApplyAbility { ability: ability_id },
+                *span,
+                ctx,
+            )
+        }
     }
 }
 
@@ -1246,12 +1260,15 @@ fn is_tile_eligible_body(
             | CgStmt::ForEachNeighborBody { .. }
             | CgStmt::If { .. }
             | CgStmt::Match { .. }
-            | CgStmt::Emit { .. } => {
+            | CgStmt::Emit { .. }
+            | CgStmt::ApplyAbility { .. } => {
                 // ForEachNeighborBody carries an emit-bearing body —
                 // not a pure fold over fields. The tiled-MoveBoid
                 // optimisation only applies to fold-shaped bodies; a
                 // body-form spatial walk falls back to the
-                // PerAgent global-memory cell-walk emit.
+                // PerAgent global-memory cell-walk emit. ApplyAbility
+                // (#136) similarly emits to the chronicle ring per
+                // effect — fall back to PerAgent.
                 return false;
             }
         }
@@ -2250,7 +2267,8 @@ mod tests {
                 | CgStmt::Let { .. }
                 | CgStmt::ForEachAgent { .. }
                 | CgStmt::ForEachNeighbor { .. }
-                | CgStmt::ForEachNeighborBody { .. } => {
+                | CgStmt::ForEachNeighborBody { .. }
+                | CgStmt::ApplyAbility { .. } => {
                     // Other body shapes — not produced by this fixture.
                 }
             }

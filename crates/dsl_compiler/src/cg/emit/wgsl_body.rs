@@ -1558,6 +1558,21 @@ fn lower_cg_stmt_body_to_wgsl(
             );
             Ok(body)
         }
+        CgStmt::ApplyAbility { ability: _ } => {
+            // #136 first slice: structural variant landed in CgStmt
+            // and physics lowering populates it, but the WGSL emit
+            // shape — per-effect-slot dispatch loop reading from the
+            // PackedAbilityRegistry SoA columns + branch on
+            // effect_kinds[i] to the matching apply path — is the
+            // companion follow-up. Emit a single comment placeholder
+            // so the kernel parses; runtime behavior is dead until
+            // the dispatcher lands. The current sim corpus has zero
+            // `apply_ability` uses (verified via `grep -r
+            // "apply_ability " assets/sim/`), so the placeholder is
+            // never executed at runtime; it's strictly here to keep
+            // the structural emit honest.
+            Ok("// #136: apply_ability dispatch (TODO emit-side companion)".to_string())
+        }
     }
 }
 

@@ -1013,6 +1013,9 @@ fn walk_body_expr_subtrees(
                     );
                 }
             }
+            CgStmt::ApplyAbility { ability } => {
+                validate_expr_subtree(arena, *ability, op_id, expr_arena_len, errors);
+            }
         }
     }
 }
@@ -1053,14 +1056,16 @@ fn walk_list_id_ranges(
             | CgStmt::Emit { .. }
             | CgStmt::Let { .. }
             | CgStmt::ForEachAgent { .. }
-            | CgStmt::ForEachNeighbor { .. } => {
+            | CgStmt::ForEachNeighbor { .. }
+            | CgStmt::ApplyAbility { .. } => {
                 // Nothing to range-check at the list-walk level —
                 // these statements only embed expr-ids and (for
                 // Assign) a target handle, all of which are validated
                 // elsewhere. `Let` / `ForEachAgent` / `ForEachNeighbor`
                 // carry expr-id payloads plus typed (LocalId, CgTy)
                 // data; the expr-ids are caught by the expr-subtree
-                // walk.
+                // walk. ApplyAbility carries a single expr-id payload
+                // (the AbilityId expression) — same shape.
             }
             CgStmt::If { then, else_, .. } => {
                 if then.0 >= list_arena_len {
@@ -1600,6 +1605,16 @@ fn type_check_list(
                 // `walk_body_expr_subtrees` pass which descends into
                 // each nested stmt list's expressions.
             }
+            CgStmt::ApplyAbility { ability } => {
+                // The ability expression must evaluate to an
+                // AbilityId (encoded as `CgTy::U32` since AbilityId
+                // wraps NonZeroU32). Type-check the operand here;
+                // the actual NonZero invariant is enforced at
+                // runtime by `AbilityId::new`.
+                if let Some(expr) = prog.exprs.get(ability.0 as usize) {
+                    let _ = type_check(expr, *ability, ctx);
+                }
+            }
         }
     }
 }
@@ -1717,6 +1732,11 @@ fn p6_walk_list(
                 for arm in arms {
                     p6_walk_list(arm.body, op_id, kind_label, prog, errors);
                 }
+            }
+            CgStmt::ApplyAbility { .. } => {
+                // ApplyAbility writes to the chronicle ring per
+                // emitted ApplyEvent — the P6 mutation channel. No
+                // direct AgentField write surface to police.
             }
         }
     }
@@ -1847,6 +1867,16 @@ fn event_field_scope_walk_list(
                     );
                 }
             }
+            CgStmt::ApplyAbility { ability } => {
+                event_field_scope_walk_expr(
+                    *ability,
+                    op_id,
+                    kind_label,
+                    shape_label,
+                    prog,
+                    errors,
+                );
+            }
         }
     }
 }
@@ -1960,7 +1990,8 @@ fn match_uniqueness_walk_list(
             | CgStmt::Emit { .. }
             | CgStmt::Let { .. }
             | CgStmt::ForEachAgent { .. }
-            | CgStmt::ForEachNeighbor { .. } => {
+            | CgStmt::ForEachNeighbor { .. }
+            | CgStmt::ApplyAbility { .. } => {
                 // Leaves — no nested bodies to descend into.
             }
             CgStmt::ForEachNeighborBody { body, .. } => {

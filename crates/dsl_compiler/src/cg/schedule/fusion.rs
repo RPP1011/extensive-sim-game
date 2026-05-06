@@ -969,7 +969,12 @@ fn collect_emits_in_list(
             CgStmt::Assign { .. }
             | CgStmt::Let { .. }
             | CgStmt::ForEachAgent { .. }
-            | CgStmt::ForEachNeighbor { .. } => {}
+            | CgStmt::ForEachNeighbor { .. }
+            | CgStmt::ApplyAbility { .. } => {
+                // Mirrors the driver's collect_emits_in_list arm —
+                // ApplyAbility's per-variant event surface is
+                // routed by the emit-side companion, not this walk.
+            }
         }
     }
 }

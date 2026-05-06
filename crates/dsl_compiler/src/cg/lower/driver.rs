@@ -2258,7 +2258,17 @@ fn collect_emits_in_list(list_id: CgStmtListId, prog: &CgProgram, out: &mut Vec<
             CgStmt::Assign { .. }
             | CgStmt::Let { .. }
             | CgStmt::ForEachAgent { .. }
-            | CgStmt::ForEachNeighbor { .. } => {}
+            | CgStmt::ForEachNeighbor { .. }
+            | CgStmt::ApplyAbility { .. } => {
+                // ApplyAbility writes to the chronicle ring per
+                // emitted ApplyEvent at runtime; the event-kind set
+                // it can emit is the union of every variant's
+                // ApplyEvent translation. The emit-side companion
+                // (#136 follow-up) will surface those event kinds
+                // through a dedicated dispatcher binding rather than
+                // through this collect-emits walk; for now no
+                // EventKindId contribution.
+            }
         }
     }
 }

@@ -394,6 +394,38 @@ pub enum CgStmt {
         body: CgStmtListId,
         radius_cells: u32,
     },
+
+    /// Registry-driven ability dispatch (#125 / #136). Lowered from
+    /// `IrStmt::ApplyAbility { ability: <expr> }`. The expression
+    /// evaluates to an `AbilityId` (`NonZeroU32`) at runtime; the
+    /// emit layer expands this into a per-effect-slot dispatch loop
+    /// that reads from `PackedAbilityRegistry`'s SoA columns
+    /// (`hints` / `effect_kinds` / `effect_payload_a` / etc.) keyed
+    /// by the slot index `id - 1`.
+    ///
+    /// # Operational shape
+    ///
+    /// At apply time the dispatcher:
+    ///   1. reads the ability slot from the resolved expression,
+    ///   2. iterates the `MAX_EFFECTS_PER_PROGRAM` per-effect columns,
+    ///      skipping slots whose `effect_kinds[i] == EFFECT_KIND_EMPTY`,
+    ///   3. branches on `effect_kinds[i]` to the matching apply path
+    ///      (mirrors `apply.rs`'s CPU oracle dispatch one-to-one
+    ///      under P3 — cross-backend parity).
+    ///
+    /// # Caster / target conventions
+    ///
+    /// Caster defaults to `self`, target to the verb's `target` binder
+    /// — same convention the bare-effect rules already use, so the
+    /// emit layer doesn't need new binder plumbing.
+    ///
+    /// # WGSL emit
+    ///
+    /// Lands in #136 (initial: 4 EffectOp variants — Damage, Heal,
+    /// Stun, Slow), then #137 expands to the full vocabulary.
+    ApplyAbility {
+        ability: CgExprId,
+    },
 }
 
 impl fmt::Display for CgStmt {
@@ -465,6 +497,9 @@ impl fmt::Display for CgStmt {
                     "for_each_neighbor_body(binder={}, body=stmts#{}, r={})",
                     binder, body.0, radius_cells
                 )
+            }
+            CgStmt::ApplyAbility { ability } => {
+                write!(f, "apply_ability(expr#{})", ability.0)
             }
         }
     }
@@ -802,6 +837,18 @@ pub fn collect_stmt_dependencies(
                 field: super::data_handle::AgentFieldId::Pos,
                 target: super::data_handle::AgentRef::Self_,
             });
+        }
+        CgStmt::ApplyAbility { ability } => {
+            // #136: the ability expression's reads contribute (the
+            // operand may reference `self.<field>` or a config slot).
+            // The dispatcher kernel itself reads from the
+            // PackedAbilityRegistry SoA columns and writes to the
+            // chronicle ring per-effect, but those are bound by the
+            // emit-side companion (#136 emit, follow-up). Surfacing
+            // them here would couple the BGL composer to a
+            // PackedAbilityRegistry-shaped DataHandle that doesn't
+            // exist yet; deferred until the WGSL emit lands.
+            collect_expr_reads(*ability, exprs, reads);
         }
     }
 }
