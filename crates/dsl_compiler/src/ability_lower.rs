@@ -1251,6 +1251,37 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             require_arity(stmt, arity)?;
             Ok(EffectOp::Stealth { duration_ticks: duration_to_ticks(dur) })
         }
+        // Wave 2 piece 8 — remaining LoL CC vocabulary. charm/grounded/
+        // suppress all share the Stun shape (one positional duration);
+        // reflect shares the LifeSteal shape (fraction + duration with
+        // q8 magnitude packing).
+        "charm" => {
+            let (dur, arity) = extract_duration(stmt, 0, 1)?;
+            require_arity(stmt, arity)?;
+            Ok(EffectOp::Charm { duration_ticks: duration_to_ticks(dur) })
+        }
+        "grounded" => {
+            let (dur, arity) = extract_duration(stmt, 0, 1)?;
+            require_arity(stmt, arity)?;
+            Ok(EffectOp::Grounded { duration_ticks: duration_to_ticks(dur) })
+        }
+        "suppress" => {
+            let (dur, arity) = extract_duration(stmt, 0, 1)?;
+            require_arity(stmt, arity)?;
+            Ok(EffectOp::Suppress { duration_ticks: duration_to_ticks(dur) })
+        }
+        "reflect" => {
+            let fraction = require_number_arg(stmt, 0)?;
+            let (dur, arity) = extract_duration(stmt, 1, 2)?;
+            require_arity(stmt, arity)?;
+            let fraction_q8 = (fraction * 256.0)
+                .round()
+                .clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+            Ok(EffectOp::Reflect {
+                duration_ticks: duration_to_ticks(dur),
+                fraction_q8,
+            })
+        }
         // Wave 2 piece 2 — four new movement verbs. Each takes a single
         // `<distance:f32>` arg (mirrors `damage`'s shape, NOT the
         // duration shape of the control verbs) and lowers to the
@@ -1659,6 +1690,10 @@ fn is_duration_bearing_verb(verb: &str) -> bool {
         // control verbs (no magnitude arg, duration via `for`), but
         // self-cast (apply handlers will gate on caster, not target).
         | "stealth"
+        // Wave 2 piece 8 — remaining CC vocabulary from the LoL corpus.
+        // charm/grounded/suppress have stun-shape (positional duration);
+        // reflect has lifesteal-shape (fraction + duration).
+        | "charm" | "grounded" | "suppress" | "reflect"
     )
 }
 

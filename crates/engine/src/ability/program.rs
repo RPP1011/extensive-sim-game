@@ -472,6 +472,35 @@ pub enum EffectOp {
     /// + targeting-mask exclusion arrives with the registry-driven
     /// dispatch (#125 family).
     Stealth { duration_ticks: u32 } = 27,
+
+    // ---- Wave 2 piece 8 — remaining LoL-corpus CC vocabulary. ----
+    // Same single-`<duration>` shape as the Wave 2 piece 1 control
+    // verbs (root/silence/fear/taunt). All target-cast; apply
+    // handlers wire per-agent expiry tick-stamps the same way Stun
+    // does. Payloads are 4 bytes + 1 tag = 5 bytes.
+    /// `charm <duration>` — Ahri-style "target moves toward caster"
+    /// CC. Combines movement-control + brief flee-suppression in
+    /// LoL; for the engine a single duration field is enough — apply
+    /// handlers later layer the move-toward semantics. 1 LoL file.
+    Charm    { duration_ticks: u32 } = 28,
+    /// `grounded <duration>` — Singed/Cassiopeia/Caitlyn AOE that
+    /// disables dashes/blinks for the duration. Distinct from
+    /// `Root` (which immobilizes against ALL movement); target keeps
+    /// walk speed. 6 LoL files.
+    Grounded { duration_ticks: u32 } = 29,
+    /// `suppress <duration>` — Warwick/Malzahar/Skarner/Sett/Ambessa
+    /// hard-CC that disables ALL actions and ignores tenacity. Apply
+    /// handlers may treat as a stronger Stun (no tenacity diminish).
+    /// 5 LoL files.
+    Suppress { duration_ticks: u32 } = 30,
+    /// `reflect <fraction> for <duration>` — Mel-style damage-bounce
+    /// passive: incoming damage scales by `(1 - fraction)` and
+    /// `fraction` is mirrored back to the source. `fraction_q8` is
+    /// q8 fixed-point matching the Slow/DamageModify convention
+    /// (0.3 → 76; 1.0 → 256). Mirrors `DamageModify`'s payload
+    /// shape; apply handlers can layer on top of the existing
+    /// `DamageModify` infrastructure. 1 LoL file (Mel).
+    Reflect  { duration_ticks: u32, fraction_q8: i16 } = 31,
 }
 
 /// Stat targeted by `buff`. Vocabulary is small today (just the two

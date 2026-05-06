@@ -145,7 +145,15 @@ fn lol_corpus_lowering_baseline() {
     // 25 of 26 prior `ModifierNotImplemented:for` errors collapsed
     // (the remaining one is `reflect for <dur>`, a single corpus
     // hero — likely Kayle).
-    let baseline = 159usize;
+    //
+    // 159 → 172 when Wave 2 piece 8 landed — added the remaining
+    // CC vocabulary (`charm` / `grounded` / `suppress` / `reflect`).
+    // ALL 13 prior `UnknownEffectVerb` errors collapsed and the
+    // last `ModifierNotImplemented:for` (reflect/Mel) cleared. The
+    // entire 172-file LoL corpus now lowers without errors —
+    // canary saturated. Apply semantics for the new CC verbs are
+    // deferred (registry-driven dispatch, #125 family).
+    let baseline = 172usize;
     assert!(
         ok >= baseline,
         "LoL lowering regression: ok={ok} fell below baseline={baseline}",

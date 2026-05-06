@@ -104,6 +104,15 @@ pub enum ApplyEvent {
     /// sim consumes the event today (deferred — same fall-through as
     /// Summon / Harvest / PlaceVoxel).
     Stealth        { source: AgentId, duration_ticks: u32 },
+    /// Wave 2 piece 8 CC verbs. Same shape as Stun (target + duration);
+    /// apply handlers wire per-agent expiry tick-stamps. No runtime
+    /// sim consumes them today.
+    Charm          { target: AgentId, duration_ticks: u32 },
+    Grounded       { target: AgentId, duration_ticks: u32 },
+    Suppress       { target: AgentId, duration_ticks: u32 },
+    /// `reflect <fraction> for <duration>` — fraction-of-damage
+    /// bounce. Mirrors DamageModify's payload shape.
+    Reflect        { target: AgentId, duration_ticks: u32, fraction_q8: i16 },
 }
 
 /// Inline budget — most abilities have ≤4 effects (P4 says
@@ -219,6 +228,15 @@ pub fn apply_program(
             // gates target selection by caster's stealth flag).
             EffectOp::Stealth    { duration_ticks } =>
                 out.push(ApplyEvent::Stealth { source: caster, duration_ticks }),
+            // Wave 2 piece 8 CC verbs — target-cast, single duration.
+            EffectOp::Charm      { duration_ticks } =>
+                out.push(ApplyEvent::Charm    { target, duration_ticks }),
+            EffectOp::Grounded   { duration_ticks } =>
+                out.push(ApplyEvent::Grounded { target, duration_ticks }),
+            EffectOp::Suppress   { duration_ticks } =>
+                out.push(ApplyEvent::Suppress { target, duration_ticks }),
+            EffectOp::Reflect    { duration_ticks, fraction_q8 } =>
+                out.push(ApplyEvent::Reflect  { target, duration_ticks, fraction_q8 }),
             // CastAbility / TransferGold / ModifyStanding fall outside
             // this slice — the first is recursive (needs cascade
             // handling); the latter two need world-state context not

@@ -823,6 +823,16 @@ fn pack_effect(op: EffectOp) -> (u32, u32, u32) {
         // payload_a; payload_b unused. Apply handlers tie the per-
         // agent stealth flag to a tick-stamp the same way Stun does.
         EffectOp::Stealth    { duration_ticks }       => (27, duration_ticks, 0),
+        // Wave 2 piece 8 — remaining CC verbs. Same shape as Stun:
+        // duration in payload_a, payload_b unused.
+        EffectOp::Charm      { duration_ticks }       => (28, duration_ticks, 0),
+        EffectOp::Grounded   { duration_ticks }       => (29, duration_ticks, 0),
+        EffectOp::Suppress   { duration_ticks }       => (30, duration_ticks, 0),
+        // Reflect packs duration in payload_a and the fraction (q8,
+        // bit-cast through u16 then zero-extended) in payload_b
+        // — same convention as `LifeSteal` / `DamageModify`.
+        EffectOp::Reflect    { duration_ticks, fraction_q8 } =>
+            (31, duration_ticks, (fraction_q8 as u16) as u32),
     }
 }
 
