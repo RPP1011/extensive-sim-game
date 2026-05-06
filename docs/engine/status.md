@@ -27,7 +27,7 @@ files in `docs/superpowers/specs/` and the active plans in `docs/superpowers/pla
 | GPU megakernel | `docs/superpowers/plans/gpu_megakernel_plan.md` | ⚠️ in flight (Phase 8 perf-sweep done; perf optimization continuing) |
 | GPU cold-state replay umbrella (Subsystem 2) | `docs/superpowers/plans/2026-04-22-gpu-cold-state-replay.md` | ⚠️ Phase 1 done; Phases 2–4 are explicit future work |
 | Plan 4 — debug & trace runtime | _(to be written)_ | ❌ not yet written |
-| Ability DSL implementation | _(to be planned from `docs/spec/ability.md`)_ | ❌ not yet planned |
+| Ability DSL implementation | _(execution log in git history; LoL canary saturated 2026-05-06)_ | ✅ lowering 100% (172/172 LoL files) — apply handlers + GPU dispatch (`#125` family) in flight |
 | Economic depth implementation | _(to be planned from `docs/spec/economy.md`)_ | ❌ not yet planned |
 
 Deferred subsystems (factions, items, buildings, settlements, regions, personality
