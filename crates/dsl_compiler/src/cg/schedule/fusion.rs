@@ -805,6 +805,7 @@ fn same_view_view_fold_accumulator(
         | CycleEdgeKey::Other(DataHandle::AgentScratch { .. })
         | CycleEdgeKey::Other(DataHandle::SimCfgBuffer)
         | CycleEdgeKey::Other(DataHandle::SnapshotKick)
+        | CycleEdgeKey::Other(DataHandle::AbilityRegistryColumn { .. })
         | CycleEdgeKey::Other(DataHandle::EventRing { .. })
         | CycleEdgeKey::Ring(_) => false,
     }
@@ -1027,6 +1028,7 @@ fn first_view_storage_write(op: &ComputeOp) -> Option<DataHandle> {
         | DataHandle::AgentScratch { .. }
         | DataHandle::SimCfgBuffer
         | DataHandle::SnapshotKick
+        | DataHandle::AbilityRegistryColumn { .. }
         | DataHandle::EventRing { .. } => None,
     })
 }
@@ -1051,7 +1053,8 @@ fn first_event_ring_append(op: &ComputeOp) -> Option<DataHandle> {
         | DataHandle::IndirectArgs { .. }
         | DataHandle::AgentScratch { .. }
         | DataHandle::SimCfgBuffer
-        | DataHandle::SnapshotKick => None,
+        | DataHandle::SnapshotKick
+        | DataHandle::AbilityRegistryColumn { .. } => None,
     })
 }
 

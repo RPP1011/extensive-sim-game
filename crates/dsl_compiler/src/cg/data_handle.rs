@@ -1015,6 +1015,75 @@ pub enum DataHandle {
     /// signal the runtime that the snapshot ring should advance.
     /// Single global resource, no id field.
     SnapshotKick,
+
+    /// One column of the `PackedAbilityRegistry` SoA, exposed as a
+    /// distinct buffer binding so the BGL composer binds only the
+    /// columns each kernel actually reads. Reads from these buffers
+    /// surface in WGSL as `ability_registry_<column>[i]` (the
+    /// identifier scheme is owned by the WGSL emit layer, not by
+    /// this enum).
+    ///
+    /// The dispatcher kernel emitted from
+    /// [`crate::cg::stmt::CgStmt::ApplyAbility`] (#136 emit-side
+    /// companion) reads `effect_kinds` + `effect_payload_a/b` to
+    /// drive the per-effect-slot dispatch loop; cooldown / range /
+    /// hint live on a separate cast-decide kernel that runs
+    /// upstream of the dispatcher and uses different columns.
+    /// Splitting the columns at the DataHandle level lets the
+    /// schedule synthesizer keep each kernel's BGL minimal.
+    AbilityRegistryColumn { column: AbilityRegistryColumn },
+}
+
+/// One SoA column of the `engine::ability::PackedAbilityRegistry`.
+/// Mirrors the field set 1:1 (see
+/// `crates/engine/src/ability/registry_gpu.rs`'s
+/// `PackedAbilityRegistryGpu`).
+///
+/// Numeric discriminants are pinned for stable WGSL identifier emit
+/// + BGL binding-slot assignment; renaming or reordering does not
+/// change schema-hash (the column LIST + element types are already
+/// captured in the schema-hash string for `PackedAbilityRegistry`),
+/// but does change kernel WGSL output and so any pre-existing
+/// goldens.
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum AbilityRegistryColumn {
+    /// Per-ability `AbilityHint` discriminants (sentinel `0xFFFF_FFFF`
+    /// when the ability declared no hint).
+    Hints           = 0,
+    /// Per-ability cooldown in ticks (0 means no gate).
+    CooldownTicks   = 1,
+    /// Per-ability cast range in metres (0.0 for self-cast).
+    Range           = 2,
+    /// Per-ability gate flag bitfield (bit 0 = hostile_only,
+    /// bit 1 = line_of_sight).
+    GateFlags       = 3,
+    /// Per-ability `Delivery` discriminant (Instant / Method...).
+    DeliveryKind    = 4,
+    /// Per-effect EffectOp discriminant; stride = MAX_EFFECTS_PER_PROGRAM.
+    /// `EFFECT_KIND_EMPTY` (0xFF) marks unused slots.
+    EffectKinds     = 5,
+    /// Per-effect first payload word; stride = MAX_EFFECTS_PER_PROGRAM.
+    EffectPayloadA  = 6,
+    /// Per-effect second payload word; stride = MAX_EFFECTS_PER_PROGRAM.
+    EffectPayloadB  = 7,
+    /// Per-tag aggregated weight; stride = NUM_ABILITY_TAGS.
+    TagValues       = 8,
+    /// Per-effect StackingMode (sentinel `0xFF`); stride =
+    /// MAX_EFFECTS_PER_PROGRAM.
+    Stackings       = 9,
+    /// Per-effect chance Q16 (sentinel `0xFFFF`); stride =
+    /// MAX_EFFECTS_PER_PROGRAM.
+    Chances         = 10,
+    /// Per-effect LifetimeMode discriminants + payloads.
+    LifetimeKinds    = 11,
+    LifetimePayloads = 12,
+    /// Per-effect AOE shape kind discriminants + 4-arg payloads.
+    AreaKinds        = 13,
+    AreaArgs         = 14,
+    /// Per-(effect, scaling-slot) stat refs + percent magnitudes;
+    /// stride = MAX_EFFECTS_PER_PROGRAM × MAX_SCALINGS_PER_EFFECT.
+    ScalingStatRefs  = 15,
+    ScalingPercents  = 16,
 }
 
 /// Kind tag for an interned id surfaced by [`DataHandle::fmt_with`].
@@ -1124,6 +1193,9 @@ impl DataHandle {
             DataHandle::AgentScratch { kind } => write!(f, "agent_scratch.{}", kind),
             DataHandle::SimCfgBuffer => f.write_str("sim_cfg_buffer"),
             DataHandle::SnapshotKick => f.write_str("snapshot_kick"),
+            DataHandle::AbilityRegistryColumn { column } => {
+                write!(f, "ability_registry.{:?}", column)
+            }
         }
     }
 }
@@ -1217,7 +1289,8 @@ impl DataHandle {
             | DataHandle::IndirectArgs { .. }
             | DataHandle::AgentScratch { .. }
             | DataHandle::SimCfgBuffer
-            | DataHandle::SnapshotKick => CycleEdgeKey::Other(self.clone()),
+            | DataHandle::SnapshotKick
+            | DataHandle::AbilityRegistryColumn { .. } => CycleEdgeKey::Other(self.clone()),
         }
     }
 }

@@ -1211,7 +1211,8 @@ fn check_data_handle_consistency(
         | DataHandle::IndirectArgs { .. }
         | DataHandle::AgentScratch { .. }
         | DataHandle::SimCfgBuffer
-        | DataHandle::SnapshotKick => None,
+        | DataHandle::SnapshotKick
+        | DataHandle::AbilityRegistryColumn { .. } => None,
     }
 }
 

@@ -297,6 +297,41 @@ fn structural_handle_name(h: &DataHandle) -> String {
         }
         DataHandle::SimCfgBuffer => "sim_cfg_buffer".to_string(),
         DataHandle::SnapshotKick => "snapshot_kick".to_string(),
+        DataHandle::AbilityRegistryColumn { column } => {
+            // The dispatcher kernel reads via `ability_registry_<column>[i]`.
+            // Stable per-column WGSL identifier so the BGL composer's
+            // structural binding-name pass (in `cg/emit/kernel.rs`) lines
+            // up against the same string the body references.
+            format!("ability_registry_{}", ability_registry_column_token(*column))
+        }
+    }
+}
+
+/// Stable snake_case token for a [`DataHandle::AbilityRegistryColumn`] —
+/// used by both the WGSL body emit (indexed access) and the BGL
+/// composer (binding-name composition). Naming MUST stay in sync with
+/// the `PackedAbilityRegistryGpu` field names in
+/// `crates/engine/src/ability/registry_gpu.rs`.
+fn ability_registry_column_token(column: super::super::data_handle::AbilityRegistryColumn) -> &'static str {
+    use super::super::data_handle::AbilityRegistryColumn::*;
+    match column {
+        Hints           => "hints",
+        CooldownTicks   => "cooldown_ticks",
+        Range           => "range",
+        GateFlags       => "gate_flags",
+        DeliveryKind    => "delivery_kind",
+        EffectKinds     => "effect_kinds",
+        EffectPayloadA  => "effect_payload_a",
+        EffectPayloadB  => "effect_payload_b",
+        TagValues       => "tag_values",
+        Stackings       => "stackings",
+        Chances         => "chances",
+        LifetimeKinds   => "lifetime_kinds",
+        LifetimePayloads => "lifetime_payloads",
+        AreaKinds       => "area_kinds",
+        AreaArgs        => "area_args",
+        ScalingStatRefs => "scaling_stat_refs",
+        ScalingPercents => "scaling_percents",
     }
 }
 

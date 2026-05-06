@@ -1032,6 +1032,15 @@ fn handle_to_binding_metadata(h: &DataHandle, prog: &CgProgram) -> Option<Bindin
             base_access: AccessMode::AtomicStorage,
             wgsl_ty: "u32".into(),
         }),
+        DataHandle::AbilityRegistryColumn { column: _ } => {
+            // #136 slice α: structural variant landed; the BGL
+            // composer's binding-table assignment for these columns
+            // arrives in slice β alongside the WGSL emit. Returning
+            // None keeps the binding off the BGL until then — safe
+            // because no current sim references ApplyAbility (corpus
+            // grep is empty), so this arm is dead at HEAD.
+            None
+        }
     }
 }
 
@@ -1285,6 +1294,32 @@ fn structural_binding_name(h: &DataHandle, prog: Option<&CgProgram>) -> String {
         },
         DataHandle::SimCfgBuffer => "sim_cfg".into(),
         DataHandle::SnapshotKick => "snapshot_kick".into(),
+        DataHandle::AbilityRegistryColumn { column } => {
+            // Mirrors `ability_registry_column_token` in
+            // `cg/emit/wgsl_body.rs` — keep these in sync (PackedAbilityRegistryGpu
+            // field names are the source of truth).
+            use crate::cg::data_handle::AbilityRegistryColumn::*;
+            let s = match column {
+                Hints           => "hints",
+                CooldownTicks   => "cooldown_ticks",
+                Range           => "range",
+                GateFlags       => "gate_flags",
+                DeliveryKind    => "delivery_kind",
+                EffectKinds     => "effect_kinds",
+                EffectPayloadA  => "effect_payload_a",
+                EffectPayloadB  => "effect_payload_b",
+                TagValues       => "tag_values",
+                Stackings       => "stackings",
+                Chances         => "chances",
+                LifetimeKinds   => "lifetime_kinds",
+                LifetimePayloads => "lifetime_payloads",
+                AreaKinds       => "area_kinds",
+                AreaArgs        => "area_args",
+                ScalingStatRefs => "scaling_stat_refs",
+                ScalingPercents => "scaling_percents",
+            };
+            format!("ability_registry_{s}")
+        }
     }
 }
 

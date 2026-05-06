@@ -893,6 +893,23 @@ pub fn data_handle_ty(h: &DataHandle) -> CgTy {
             "plumbing handle 'SnapshotKick' is not expression-readable; \
              data_handle_ty should never see this in practice"
         ),
+        // Ability registry columns: every column is a u32-typed buffer
+        // at the GPU layer (widened from the source u8/u16 in
+        // PackedAbilityRegistryGpu's upload), with the exception of
+        // `Range` (f32), `TagValues` (f32), `LifetimePayloads` (f32),
+        // `AreaArgs` (f32), and `ScalingPercents` (f32). Reads from
+        // these columns happen inside the ApplyAbility dispatcher
+        // kernel, not via DSL surface — the IR-level type is what
+        // the dispatcher's WGSL emit layer uses to pick `i32(...)`
+        // vs `bitcast<f32>(...)` projections. Adding a DSL surface
+        // for direct registry reads is out of scope for #136.
+        H::AbilityRegistryColumn { column } => {
+            use crate::cg::data_handle::AbilityRegistryColumn::*;
+            match column {
+                Range | TagValues | LifetimePayloads | AreaArgs | ScalingPercents => CgTy::F32,
+                _ => CgTy::U32,
+            }
+        }
     }
 }
 
