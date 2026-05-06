@@ -117,10 +117,6 @@ pub enum LowerError {
     EffectArgMismatch { verb: String, expected: usize, got: usize, span: Span },
     /// Body holds more than `MAX_EFFECTS_PER_PROGRAM` effects.
     BudgetExceeded { ability: String, count: usize, max: usize, span: Span },
-    /// Body mixes bare effects with a `deliver { … }` block. Today the
-    /// parser rejects `deliver` blocks outright (Wave 1.4 work), so this
-    /// is a defensive check kept in place to land alongside that wave.
-    MixedBody { ability: String, span: Span },
     /// Wave 1.1 parser accepted a header (`cost`, `charges`, `recharge`,
     /// or `toggle`) whose lowering requires engine-side schema changes
     /// not yet landed. `header` is the literal source key. The error is
@@ -269,10 +265,6 @@ impl std::fmt::Display for LowerError {
             LowerError::BudgetExceeded { ability, count, max, .. } => write!(
                 f,
                 "ability '{ability}' has {count} effects but the per-program budget is {max} (MAX_EFFECTS_PER_PROGRAM)"
-            ),
-            LowerError::MixedBody { ability, .. } => write!(
-                f,
-                "ability '{ability}' mixes bare effect statements with a deliver block; pick one body shape"
             ),
             LowerError::HeaderNotImplemented { header, .. } => write!(
                 f,
@@ -532,20 +524,19 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
         }
     }
 
-    // -- Body-block guard: Wave 1.4 surfaces. Per spec §4.4 / §23.1
-    // deliver and bare effects are mutually exclusive — the parser
-    // deliberately admits coexistence, lowering enforces. The order
-    // here matters:
-    //   1. MixedBody (loudest signal — author confused two body
-    //      shapes; flag before either deliver or morph errors).
-    //   2. DeliverBlockNotImplemented.
-    //   3. MorphBlockNotImplemented.
-    if decl.deliver.is_some() && !decl.effects.is_empty() {
-        return Err(LowerError::MixedBody {
-            ability: decl.name.clone(),
-            span:    decl.span,
-        });
-    }
+    // -- Body-block guard: Wave 1.4 surfaces. Spec §4.4 / §23.1 said
+    // deliver and bare effects were mutually exclusive, but the LoL
+    // hero corpus uses the composite pattern heavily (e.g.
+    // ArcaneShift = `deliver projectile {…} + dash to_target` — the
+    // projectile fires on impact AND the caster simultaneously dashes
+    // to the target point). With Delivery::Method capturing the
+    // payload separately from program.effects, both can coexist:
+    // trailing bare effects fire on the caster at cast-decide time,
+    // delivery payload fires on projectile resolution.
+    //
+    // MixedBody check relaxed (#128, post 49bbeee2). The MorphBlock
+    // check below stays — morph still defers entirely to Wave 2+
+    // (form-swap state machinery not wired).
     // Wave 2 piece 5/6: capture the deliver block as
     // Delivery::Method { kind, raw } — the `kind` discriminant lives
     // in engine, the `raw` payload stays opaque. Apply handlers

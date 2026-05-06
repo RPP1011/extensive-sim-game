@@ -154,13 +154,17 @@ fn lowering_deliver_unknown_method_diagnostic() {
 //    (the parser admits this; lowering is the enforcer)
 // ---------------------------------------------------------------------------
 
+// MixedBody check relaxed (#128, post 49bbeee2). The LoL hero corpus
+// uses the composite shape heavily — e.g. ArcaneShift =
+// `deliver projectile {…} + dash to_target` (projectile fires on
+// impact AND caster simultaneously dashes to the target point). With
+// Delivery::Method capturing the payload separately from program.effects,
+// both can coexist: trailing bare effects fire on the caster at
+// cast-decide time, delivery payload fires on projectile resolution.
 #[test]
-fn mixed_deliver_and_bare_effects_returns_mixed_body() {
-    // Mirrors Ahri.SpiritRush's shape (deliver projectile + a trailing
-    // bare effect). Uses target: enemy because Wave 1.6 lowering only
-    // implements enemy/self targets — `ground` would short-circuit on
-    // TargetModeReserved before the body check, hiding what we want
-    // to assert here.
+fn mixed_deliver_and_bare_effects_lowers_into_both_slots() {
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::{Delivery, DeliveryMethodKind, EffectOp};
     let src = "ability X {
         target: enemy range: 5.0 cooldown: 25s
         deliver projectile { speed: 12.0 } {
@@ -168,26 +172,19 @@ fn mixed_deliver_and_bare_effects_returns_mixed_body() {
         }
         damage 5
     }";
-    let err = lower_inline(src);
-    match err {
-        LowerError::MixedBody { ability, span } => {
-            assert_eq!(ability, "X");
-            assert!(span.start < span.end);
+    let file = parse_ability_file(src).expect("must parse");
+    let prog = lower_ability_decl(&file.abilities[0])
+        .expect("composite deliver+bare lowers (was: MixedBody error)");
+    // Delivery captures the projectile method + raw payload.
+    match &prog.delivery {
+        Delivery::Method { kind, .. } => {
+            assert_eq!(*kind, DeliveryMethodKind::Projectile);
         }
-        other => panic!("expected MixedBody; got {other:?}"),
+        other => panic!("expected Delivery::Method(Projectile); got {other:?}"),
     }
-}
-
-#[test]
-fn mixed_body_diagnostic_mentions_both_shapes() {
-    let src = "ability X {
-        target: enemy range: 5.0 cooldown: 1s
-        deliver projectile { speed: 16.0 } { on_hit { damage 10 } }
-        damage 5
-    }";
-    let msg = lower_inline(src).to_string();
-    assert!(msg.contains("deliver"), "diagnostic must name deliver; got: {msg}");
-    assert!(msg.contains("effect") || msg.contains("body"), "diagnostic must name effects; got: {msg}");
+    // Trailing bare effects land in program.effects.
+    assert_eq!(prog.effects.len(), 1, "the trailing `damage 5` lands in effects");
+    assert!(matches!(prog.effects[0], EffectOp::Damage { amount } if (amount - 5.0).abs() < 1e-6));
 }
 
 // ---------------------------------------------------------------------------

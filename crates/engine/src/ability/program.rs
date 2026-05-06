@@ -387,7 +387,13 @@ impl AbilityTag {
     /// for unknown tags so upstream can surface the original token.
     pub fn parse(s: &str) -> Option<Self> {
         match s {
-            "PHYSICAL" => Some(Self::Physical),
+            // PHYSICAL covers physical damage. TRUE is LoL's
+            // "true damage" — bypasses armor/MR. Closest engine bucket
+            // is Physical (both go through the damage scoring path);
+            // a dedicated `True` variant would need a new tag column,
+            // which apply handlers don't yet differentiate. Alias keeps
+            // the LoL corpus parsing without a schema-hash bump.
+            "PHYSICAL" | "TRUE" => Some(Self::Physical),
             // MAGIC is an authoring-time alias for the canonical
             // MAGICAL spelling. The LoL corpus uses both; accept
             // either so authors don't need to remember which.
