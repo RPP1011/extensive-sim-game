@@ -94,3 +94,109 @@ fn trailing_junk_after_predicate_is_caught() {
         "expected WhenConditionParseError, got {err:?}"
     );
 }
+
+// ---------------------------------------------------------------------
+// #143 follow-up: field-name validation against AgentFieldId vocabulary
+// ---------------------------------------------------------------------
+
+#[test]
+fn typoed_field_in_when_is_caught_against_agent_vocabulary() {
+    // `target.htp` (typo of `hp`) parses cleanly as an expression,
+    // so the syntax check passes. The follow-up walks the parsed
+    // tree and surfaces this as `WhenConditionUnknownField`.
+    let src = "ability A {
+        target: enemy range: 5.0 cooldown: 1s
+        damage 10 when target.htp < 30
+    }";
+    let err = lower_first(src).expect_err("typo'd field must error");
+    match err {
+        LowerError::WhenConditionUnknownField { clause, binder, field, .. } => {
+            assert_eq!(clause, "when");
+            assert_eq!(binder, "target");
+            assert_eq!(field, "htp");
+        }
+        other => panic!("expected WhenConditionUnknownField; got {other:?}"),
+    }
+}
+
+#[test]
+fn typoed_field_on_self_is_also_caught() {
+    let src = "ability A {
+        target: enemy range: 5.0 cooldown: 1s
+        damage 10 when self.aliv
+    }";
+    let err = lower_first(src).expect_err("typo'd self.aliv must error");
+    match err {
+        LowerError::WhenConditionUnknownField { binder, field, .. } => {
+            assert_eq!(binder, "self");
+            assert_eq!(field, "aliv");
+        }
+        other => panic!("expected WhenConditionUnknownField; got {other:?}"),
+    }
+}
+
+#[test]
+fn typoed_field_in_else_is_attributed_to_else_clause() {
+    let src = "ability A {
+        target: enemy range: 5.0 cooldown: 1s
+        damage 10 when target.hp < 30 else target.bogus_field == 0
+    }";
+    let err = lower_first(src).expect_err("typo'd else field must error");
+    match err {
+        LowerError::WhenConditionUnknownField { clause, binder, field, .. } => {
+            assert_eq!(clause, "else", "the bad field is on the else branch");
+            assert_eq!(binder, "target");
+            assert_eq!(field, "bogus_field");
+        }
+        other => panic!("expected WhenConditionUnknownField; got {other:?}"),
+    }
+}
+
+#[test]
+fn nested_typoed_field_inside_arithmetic_is_caught() {
+    // Validator must recurse into Binary subtrees — the typo'd
+    // `target.htp` is inside a nested arithmetic + comparison
+    // chain, not a top-level Field node.
+    let src = "ability A {
+        target: enemy range: 5.0 cooldown: 1s
+        damage 10 when (target.htp + 5) > 20
+    }";
+    let err = lower_first(src).expect_err("nested typo'd field must error");
+    assert!(
+        matches!(
+            &err,
+            LowerError::WhenConditionUnknownField { field, .. } if field == "htp"
+        ),
+        "expected WhenConditionUnknownField(htp); got {err:?}"
+    );
+}
+
+#[test]
+fn world_and_config_accessors_are_not_validated_as_agent_fields() {
+    // `world.tick`, `config.foo` use binders the agent-field
+    // validator deliberately skips — those have their own
+    // resolution paths and aren't expected to round-trip through
+    // AgentFieldId. This must lower without error.
+    let src = "ability A {
+        target: enemy range: 5.0 cooldown: 1s
+        damage 10 when world.tick > 100
+    }";
+    lower_first(src).expect("world.tick must NOT trip the agent-field validator");
+}
+
+#[test]
+fn valid_agent_fields_used_by_lol_corpus_lower_clean() {
+    // Every field reference the LoL corpus uses on `target` /
+    // `self` (hp / alive / shield_hp) lives in AgentFieldId. None
+    // should false-positive. This test pins the canary's coverage
+    // so an accidental rename of an AgentFieldId variant would
+    // surface here as a test failure.
+    for predicate in &["target.hp < 30", "target.alive", "target.shield_hp == 0"] {
+        let src = format!(
+            "ability A {{ target: enemy range: 5.0 cooldown: 1s damage 10 when {predicate} }}"
+        );
+        lower_first(&src).unwrap_or_else(|e| {
+            panic!("LoL-corpus-style predicate `{predicate}` must lower clean; got {e:?}")
+        });
+    }
+}

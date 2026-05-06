@@ -228,13 +228,28 @@ pub enum LowerError {
     /// operator (`target.hp ~ 30`) or unbalanced sub-expression
     /// silently ships through. Catching it here surfaces the bug
     /// at the `.ability` author's screen instead of as a malformed
-    /// runtime predicate. Field-name validation against the agent
-    /// schema is a follow-up — this slice only catches syntax bugs.
+    /// runtime predicate.
     WhenConditionParseError {
         ability:   String,
         clause:    &'static str, // "when" or "else"
         predicate: String,
         reason:    String,
+        span:      Span,
+    },
+    /// #143 follow-up: a `when <cond>` (or `else <cond>`) predicate
+    /// references a field on `self` or `target` that isn't in the
+    /// engine's agent-field vocabulary (`AgentFieldId`). Common cause
+    /// is a typo (`target.htp` for `target.hp`), or referencing a
+    /// sim-specific extension field that isn't part of the canonical
+    /// agent SoA — the latter is a false positive at the `.ability`
+    /// layer (the field IS valid in the consuming sim) and can be
+    /// silenced by extending the agent vocabulary or updating the
+    /// allowlist. Pre-#143-followup the typo silently shipped through.
+    WhenConditionUnknownField {
+        ability:   String,
+        clause:    &'static str, // "when" or "else"
+        binder:    String, // "self" / "target" / etc.
+        field:     String,
         span:      Span,
     },
     /// #139 (deliver-block body parsing): a `<hook_ident> { … }` inside
@@ -350,6 +365,10 @@ impl std::fmt::Display for LowerError {
             LowerError::WhenConditionParseError { ability, clause, predicate, reason, .. } => write!(
                 f,
                 "ability `{ability}`'s `{clause} {predicate}` clause does not re-parse as an expression: {reason}"
+            ),
+            LowerError::WhenConditionUnknownField { ability, clause, binder, field, .. } => write!(
+                f,
+                "ability `{ability}`'s `{clause}` clause references `{binder}.{field}` — `{field}` is not in the engine's agent-field vocabulary; valid fields include hp / max_hp / alive / mana / shield_hp / armor / move_speed (see AgentFieldId for the full list). If this is a sim-specific extension field, extend the vocabulary or silence this check."
             ),
             LowerError::UnknownDeliveryHook { ability, method, hook, .. } => write!(
                 f,
@@ -890,27 +909,56 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
         // modifier keyword / EOL / `}` — that lets a typo'd operator
         // (`target.hp ~ 30`) or unbalanced sub-expression silently
         // ship through. Re-parsing here surfaces the bug with the
-        // ability name + clause + reason. Field-name validation
-        // against the agent schema is a follow-up; this slice
-        // only catches syntax bugs.
+        // ability name + clause + reason.
+        //
+        // #143 follow-up: walk the parsed expression for
+        // `<binder>.<field>` accessors where binder is `self` or
+        // `target`, and validate `field` against the engine's
+        // `AgentFieldId` vocabulary. Catches the typo'd-field case
+        // (`target.htp` for `target.hp`) that the syntax check
+        // alone misses.
         let when = if let Some(c) = stmt.condition.as_ref() {
-            if let Err(e) = dsl_ast::parser::parse_expression(&c.when_cond) {
-                return Err(LowerError::WhenConditionParseError {
-                    ability:   decl.name.clone(),
-                    clause:    "when",
-                    predicate: c.when_cond.clone(),
-                    reason:    e.message.clone(),
-                    span:      c.span,
+            let when_expr = match dsl_ast::parser::parse_expression(&c.when_cond) {
+                Ok(e) => e,
+                Err(e) => {
+                    return Err(LowerError::WhenConditionParseError {
+                        ability:   decl.name.clone(),
+                        clause:    "when",
+                        predicate: c.when_cond.clone(),
+                        reason:    e.message.clone(),
+                        span:      c.span,
+                    });
+                }
+            };
+            if let Some((binder, field)) = first_unknown_agent_field(&when_expr) {
+                return Err(LowerError::WhenConditionUnknownField {
+                    ability: decl.name.clone(),
+                    clause:  "when",
+                    binder,
+                    field,
+                    span:    c.span,
                 });
             }
             if let Some(else_text) = c.else_cond.as_ref() {
-                if let Err(e) = dsl_ast::parser::parse_expression(else_text) {
-                    return Err(LowerError::WhenConditionParseError {
-                        ability:   decl.name.clone(),
-                        clause:    "else",
-                        predicate: else_text.clone(),
-                        reason:    e.message.clone(),
-                        span:      c.span,
+                let else_expr = match dsl_ast::parser::parse_expression(else_text) {
+                    Ok(e) => e,
+                    Err(e) => {
+                        return Err(LowerError::WhenConditionParseError {
+                            ability:   decl.name.clone(),
+                            clause:    "else",
+                            predicate: else_text.clone(),
+                            reason:    e.message.clone(),
+                            span:      c.span,
+                        });
+                    }
+                };
+                if let Some((binder, field)) = first_unknown_agent_field(&else_expr) {
+                    return Err(LowerError::WhenConditionUnknownField {
+                        ability: decl.name.clone(),
+                        clause:  "else",
+                        binder,
+                        field,
+                        span:    c.span,
                     });
                 }
             }
@@ -1749,4 +1797,98 @@ fn summon_template_hash(template: &str) -> u32 {
     // mixes bits well; this is a pure compaction step.
     let full = h.finish();
     ((full >> 32) as u32) ^ (full as u32)
+}
+
+/// #143 follow-up: walk a parsed when-condition expression looking for
+/// `<binder>.<field>` patterns where binder is `self` or `target` (the
+/// two binders the `.ability` surface conventionally uses for cast-time
+/// agent reads). Return the first one whose field name is NOT in the
+/// engine's `AgentFieldId` vocabulary.
+///
+/// Returns `Some((binder, field))` for the first unknown access, or
+/// `None` when every agent-binder access references a known field.
+/// Non-agent binders (`world.tick`, `config.foo`, `ability::hint`,
+/// builtins like `count`/`sum`/`forall`) are skipped — they have their
+/// own validation paths and aren't expected to round-trip through the
+/// AgentFieldId table.
+///
+/// The walk handles all `ExprKind` shapes recursively, not just the
+/// flat `Field(Ident, _)` pattern, so nested expressions like
+/// `(target.htp + 5) * 2` still surface the typo.
+fn first_unknown_agent_field(expr: &dsl_ast::ast::Expr) -> Option<(String, String)> {
+    use dsl_ast::ast::ExprKind;
+    use crate::cg::data_handle::AgentFieldId;
+    match &expr.kind {
+        ExprKind::Field(base, field_name) => {
+            // Recurse into the base first — `(a.b).c` should validate
+            // `a.b` then `<base>.c`.
+            if let Some(found) = first_unknown_agent_field(base) {
+                return Some(found);
+            }
+            // Only validate accesses where the base is a bare
+            // `self` / `target` ident. Other shapes (function calls,
+            // index expressions, nested fields like `target.belief.x`)
+            // aren't routed through AgentFieldId today.
+            if let ExprKind::Ident(binder) = &base.kind {
+                if (binder == "self" || binder == "target")
+                    && AgentFieldId::from_snake(field_name).is_none()
+                {
+                    return Some((binder.clone(), field_name.clone()));
+                }
+            }
+            None
+        }
+        ExprKind::Binary { lhs, rhs, .. } => {
+            first_unknown_agent_field(lhs).or_else(|| first_unknown_agent_field(rhs))
+        }
+        ExprKind::Unary { rhs, .. } => first_unknown_agent_field(rhs),
+        ExprKind::In { item, set } | ExprKind::Contains { set, item } => {
+            first_unknown_agent_field(item).or_else(|| first_unknown_agent_field(set))
+        }
+        ExprKind::Call(callee, args) => {
+            if let Some(f) = first_unknown_agent_field(callee) {
+                return Some(f);
+            }
+            args.iter().find_map(|a| first_unknown_agent_field(&a.value))
+        }
+        ExprKind::Index(base, idx) => {
+            first_unknown_agent_field(base).or_else(|| first_unknown_agent_field(idx))
+        }
+        ExprKind::If { cond, then_expr, else_expr } => {
+            first_unknown_agent_field(cond)
+                .or_else(|| first_unknown_agent_field(then_expr))
+                .or_else(|| else_expr.as_deref().and_then(first_unknown_agent_field))
+        }
+        ExprKind::Quantifier { iter, body, .. } => {
+            first_unknown_agent_field(iter).or_else(|| first_unknown_agent_field(body))
+        }
+        ExprKind::Fold { iter, body, .. } => {
+            iter.as_deref().and_then(first_unknown_agent_field)
+                .or_else(|| first_unknown_agent_field(body))
+        }
+        ExprKind::List(items) | ExprKind::Tuple(items) => {
+            items.iter().find_map(first_unknown_agent_field)
+        }
+        ExprKind::Struct { fields, .. } => {
+            fields.iter().find_map(|f| first_unknown_agent_field(&f.value))
+        }
+        ExprKind::Ctor { args, .. } => {
+            args.iter().find_map(first_unknown_agent_field)
+        }
+        ExprKind::Match { scrutinee, arms } => {
+            first_unknown_agent_field(scrutinee)
+                .or_else(|| arms.iter().find_map(|a| first_unknown_agent_field(&a.body)))
+        }
+        ExprKind::PerUnit { expr, delta } => {
+            first_unknown_agent_field(expr).or_else(|| first_unknown_agent_field(delta))
+        }
+        ExprKind::BeliefsAccessor { observer, target, .. }
+        | ExprKind::BeliefsConfidence { observer, target } => {
+            first_unknown_agent_field(observer).or_else(|| first_unknown_agent_field(target))
+        }
+        ExprKind::BeliefsView { observer, .. } => first_unknown_agent_field(observer),
+        // Leaves: literals + bare idents have no nested fields to check.
+        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_)
+        | ExprKind::String(_) | ExprKind::Ident(_) => None,
+    }
 }
