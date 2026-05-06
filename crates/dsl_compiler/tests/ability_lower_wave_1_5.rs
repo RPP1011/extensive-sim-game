@@ -240,10 +240,39 @@ fn lowering_for_duration_on_lifesteal_lowers_cleanly() {
     }
 }
 
+// Wave 1.5#7 — `when <cond> [else <cond>]` lowering. The predicate is
+// captured into `program.when_per_effect[i]` as verbatim source text
+// (the AST stores it as `EffectCondition::when_cond: String`); engine
+// code does not parse it. Apply handlers wire the parse + evaluate
+// later. Slot `None` = no gate, "always fires" semantics.
 #[test]
-fn lowering_when_modifier_returns_unimplemented() {
-    let err = lower_inline("ability X { target: enemy cooldown: 1s damage 50 when target.hp < 30 }");
-    assert_modifier(err, "when");
+fn lowering_when_simple() {
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 when target.hp < 30 }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("when modifier must lower");
+    assert_eq!(prog.effects.len(), 1);
+    assert_eq!(prog.when_per_effect.len(), 1, "one effect → one when slot");
+    let cond = prog.when_per_effect[0].as_ref().expect("slot populated");
+    assert_eq!(cond.when_cond, "target.hp < 30");
+    assert!(cond.else_cond.is_none(), "no else clause");
+}
+
+#[test]
+fn lowering_when_no_modifier_is_empty() {
+    // Bare effect with no when modifier: the lowering pass leaves
+    // `program.when_per_effect` empty (apply handlers treat empty +
+    // None identically as "no gate, always fires"). Keeps Wave 1
+    // corpus output bit-stable.
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("must lower");
+    assert!(prog.when_per_effect.is_empty(), "no when modifier → empty slice");
 }
 
 // ---------------------------------------------------------------------------

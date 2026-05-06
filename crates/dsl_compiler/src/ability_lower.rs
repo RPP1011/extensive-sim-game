@@ -88,7 +88,7 @@ use dsl_ast::ast::{
     AbilityDecl, AbilityFile, AbilityHeader, EffectArg, EffectStmt, HintName, Span, TargetMode,
 };
 use engine::ability::program::{
-    AbilityHint, AbilityProgram, AbilityTag, Area, Delivery, EffectAreaShape, EffectOp,
+    AbilityHint, AbilityProgram, AbilityTag, Area, Delivery, EffectAreaShape, EffectOp, EffectWhenCondition,
     EffectScaling, Gate, LifetimeMode, ScalingStatRef, ShapeKind, StackingMode, TargetSelector,
     MAX_EFFECTS_PER_PROGRAM, MAX_SCALINGS_PER_EFFECT, MAX_TAGS_PER_PROGRAM,
 };
@@ -590,6 +590,18 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     // `LowerError::UnknownStatRef` (loud failure rather than a
     // silently-dropped scaling). Per-effect overflow surfaces as
     // `LowerError::ScalingBudgetExceeded`.
+    // Wave 1.5#7: per-effect when-condition modifier, index parallel to
+    // `effects`. Same "all-`None` → empty smallvec" optimization the
+    // other aggregators use, so Wave 1 corpus output stays bit-stable.
+    // Predicate body is captured as verbatim source text (the AST
+    // already stores it that way via `EffectCondition::when_cond:
+    // String`); engine code does not parse it here. Apply handlers
+    // wire the parse + evaluate later — for now the slot proves the
+    // lowering captures the modifier without erroring.
+    let mut when_per_effect_acc: SmallVec<
+        [Option<EffectWhenCondition>; MAX_EFFECTS_PER_PROGRAM],
+    > = SmallVec::new();
+    let mut any_when = false;
     let mut scalings_per_effect_acc: SmallVec<
         [SmallVec<[EffectScaling; MAX_SCALINGS_PER_EFFECT]>; MAX_EFFECTS_PER_PROGRAM],
     > = SmallVec::new();
@@ -662,6 +674,20 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
             any_lifetime = true;
         }
         lifetimes_acc.push(lifetime);
+        // Wave 1.5#7: capture the per-effect `when <cond>` BEFORE the
+        // verb dispatch (which would otherwise reject it via the
+        // `ModifierNotImplemented{when}` arm — now removed). Clone
+        // both source-text predicates onto the engine slot; engine
+        // code does not parse them. Apply handlers wire the parse +
+        // evaluate later (deferred infrastructure).
+        let when = stmt.condition.as_ref().map(|c| EffectWhenCondition {
+            when_cond: c.when_cond.clone(),
+            else_cond: c.else_cond.clone(),
+        });
+        if when.is_some() {
+            any_when = true;
+        }
+        when_per_effect_acc.push(when);
         // Wave 1.5#2: capture the per-effect `in <shape>(args)`
         // BEFORE the verb dispatch (which would otherwise discard
         // it). Validate the shape name against the engine's
@@ -745,6 +771,9 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     if !any_scaling {
         scalings_per_effect_acc.clear();
     }
+    if !any_when {
+        when_per_effect_acc.clear();
+    }
 
     Ok(AbilityProgram {
         delivery: Delivery::Instant,
@@ -758,6 +787,7 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
         lifetimes: lifetimes_acc,
         per_effect_areas: per_effect_areas_acc,
         scalings_per_effect: scalings_per_effect_acc,
+        when_per_effect: when_per_effect_acc,
     })
 }
 
@@ -803,13 +833,12 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             });
         }
     }
-    if let Some(cond) = &stmt.condition {
-        return Err(LowerError::ModifierNotImplemented {
-            verb:     stmt.verb.clone(),
-            modifier: "when",
-            span:     cond.span,
-        });
-    }
+    // Wave 1.5#7: `when <cond> [else <cond>]` is consumed by the
+    // per-ability aggregator in `lower_ability_decl` (one slot per
+    // effect, parallel to `program.effects`). The verb dispatch
+    // below stays oblivious — apply handlers later parse + evaluate
+    // `program.when_per_effect[i]` as a runtime predicate. No
+    // short-circuit here.
     // Wave 1.5#5: `chance N%` is consumed by the per-ability
     // aggregator in `lower_ability_decl` (one slot per effect, parallel
     // to `program.effects`). The verb dispatch below stays oblivious —

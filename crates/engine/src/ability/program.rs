@@ -491,6 +491,24 @@ pub struct EffectAreaShape {
     pub args: [f32; 4],
 }
 
+/// Per-effect conditional gate from the `when <cond> [else <cond>]`
+/// modifier (spec §6.1 slot 7). The predicate body is captured as
+/// verbatim source text — engine code does not parse or evaluate it
+/// here; downstream apply handlers wire that up later (see
+/// `docs/spec/ability_dsl_unified.md` §6.1.7 for the deferred dispatch
+/// plan). Stored as `String` rather than a typed AST to keep the engine
+/// crate dependency-free of `dsl_ast`.
+///
+/// `when_cond` is the always-required positive predicate. `else_cond` is
+/// the optional fallback predicate that fires the effect when `when_cond`
+/// evaluates false (used for `when target.alive else target.silver > 0`
+/// style guards). Both strings are whitespace-trimmed at parse time.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct EffectWhenCondition {
+    pub when_cond: String,
+    pub else_cond: Option<String>,
+}
+
 /// Per-effect stat-scaling reference for the `+ N% stat_ref` modifier
 /// (spec §6.1 slot 8). 8 common combat stats; an unknown stat_ref token
 /// errors at lowering time (no enum variant for unknown — surface a
@@ -637,6 +655,18 @@ pub struct AbilityProgram {
     /// is f32 with `0.0` for unused slots.
     pub scalings_per_effect:
         SmallVec<[SmallVec<[EffectScaling; MAX_SCALINGS_PER_EFFECT]>; MAX_EFFECTS_PER_PROGRAM]>,
+    /// Wave 1.5#7: per-effect conditional gate from `when <cond>
+    /// [else <cond>]`. `None` for effects that didn't carry the
+    /// modifier — apply handlers should treat the slot as "no gate"
+    /// (the effect always passes the conditional check). The predicate
+    /// body is stored as verbatim source text; downstream apply
+    /// handlers parse + evaluate it (deferred infrastructure). Index
+    /// parallel to `effects`; a populated `when_per_effect` slice is
+    /// either empty (no effect carried the modifier) or has one slot
+    /// per effect (`None` for the unmarked ones). Not GPU-packed —
+    /// `String` payload is CPU-only metadata for now; the SoA packer
+    /// in `PackedAbilityRegistry` skips this column.
+    pub when_per_effect: SmallVec<[Option<EffectWhenCondition>; MAX_EFFECTS_PER_PROGRAM]>,
 }
 
 impl AbilityProgram {
@@ -665,6 +695,7 @@ impl AbilityProgram {
             lifetimes: SmallVec::new(),
             per_effect_areas:    SmallVec::new(),
             scalings_per_effect: SmallVec::new(),
+            when_per_effect:     SmallVec::new(),
         }
     }
 

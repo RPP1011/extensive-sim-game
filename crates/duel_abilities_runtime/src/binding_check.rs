@@ -25,8 +25,8 @@ use std::path::PathBuf;
 
 use engine::ability::{
     program::{
-        AbilityTag, Area, EffectAreaShape, EffectOp, EffectScaling, LifetimeMode, ScalingStatRef,
-        ShapeKind, StackingMode,
+        AbilityTag, Area, EffectAreaShape, EffectOp, EffectScaling, EffectWhenCondition,
+        LifetimeMode, ScalingStatRef, ShapeKind, StackingMode,
     },
     PackedAbilityRegistry,
 };
@@ -369,6 +369,30 @@ pub fn assert_ability_registry_matches_sim_constants() {
         Some(EffectAreaShape { kind: ShapeKind::Cone, args: [45.0, 5.0, 0.0, 0.0] }),
         "Reap area must be Cone(45deg, 5.0) — .ability \
          `in cone(45deg, 5.0)`; spec §8.1 cone(angle_deg, radius)",
+    );
+    // Wave 1.5#7 when-condition modifier — Reap.ability declares
+    // `when target.hp < 20`, lowered to program.when_per_effect[0] =
+    // Some(EffectWhenCondition { when_cond: "target.hp < 20",
+    // else_cond: None }). Predicate body is captured as verbatim
+    // source text; engine code does not parse it. The .sim verb
+    // already gates emit on the same predicate via its own `when`
+    // clause (`target.hp < config.combat.reap_threshold`), so this
+    // is the canonical executor pattern: the .ability declares
+    // intent, the .sim hand-mirrors the gate. Apply handlers wire
+    // registry-driven predicate evaluation later.
+    assert_eq!(
+        reap.when_per_effect.len(), 1,
+        "Reap must have one when slot (parallel to one effect)",
+    );
+    assert_eq!(
+        reap.when_per_effect[0],
+        Some(EffectWhenCondition {
+            when_cond: "target.hp < 20".to_string(),
+            else_cond: None,
+        }),
+        "Reap when must be `target.hp < 20` — .ability \
+         `when target.hp < 20`; .sim Reap verb gates on \
+         `target.hp < config.combat.reap_threshold`",
     );
 
     // ---- Vampirize: cooldown 80 ticks, self-target, lifesteal 0.5 5s ----
