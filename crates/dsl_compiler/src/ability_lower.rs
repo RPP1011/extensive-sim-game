@@ -1381,18 +1381,13 @@ fn map_hint(h: &HintName, decl: &AbilityDecl) -> Result<AbilityHint, LowerError>
         HintName::Defense => Ok(AbilityHint::Defense),
         HintName::CrowdControl => Ok(AbilityHint::CrowdControl),
         HintName::Utility => Ok(AbilityHint::Utility),
-        // The engine `AbilityHint` does not carry a `Heal` variant today;
-        // the closest scoring bucket is `Defense` per `docs/spec/ability_dsl_unified.md §4.2`.
-        // Routing `heal` -> `Defense` keeps scoring rows that read the
-        // hint deterministic; if/when the engine grows a `Heal` variant
-        // (schema-hash bump) update both arms.
-        HintName::Heal => Ok(AbilityHint::Defense),
-        // The engine `AbilityHint` does not carry a `Buff` variant today;
-        // route to `Utility` per `docs/spec/ability_dsl_unified.md §4.2`
-        // (buffs and other ally-empowering effects share the utility
-        // scoring bucket). If/when the engine grows a dedicated `Buff`
-        // variant (schema-hash bump) update both arms.
-        HintName::Buff => Ok(AbilityHint::Utility),
+        // #142: distinct Heal/Buff variants now live in engine — routing
+        // heal→Defense and buff→Utility was a real scoring bug. AI
+        // evaluators that bucket on hint were miscategorizing heals as
+        // defenses (different urgency curves) and buffs as utility
+        // (different target-selection shape).
+        HintName::Heal => Ok(AbilityHint::Heal),
+        HintName::Buff => Ok(AbilityHint::Buff),
         HintName::Economic => Err(LowerError::HintReserved {
             hint: "economic".to_string(),
             span: decl.span,

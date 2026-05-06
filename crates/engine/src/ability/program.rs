@@ -430,19 +430,32 @@ pub enum AbilityHint {
     Defense = 1,
     CrowdControl = 2,
     Utility = 3,
+    /// Heal-shaped abilities (Mend / Lifeweaver heals / etc.). Distinct
+    /// from Defense because scoring weights for heals (target ally with
+    /// missing hp) and defenses (self-protect with shields) diverge —
+    /// AI evaluators that bucket on hint were silently miscategorizing
+    /// heals as defenses prior to #142.
+    Heal = 4,
+    /// Stat-buff abilities (move_speed / attack_speed / damage_modify
+    /// boosts). Distinct from Utility because buffs are duration-bound
+    /// stat boosts on a chosen target while Utility is a catchall for
+    /// teleport / vision / cleanse / dispel — different scoring axes.
+    Buff = 5,
 }
 
 impl AbilityHint {
     /// Parse the coarse category from its DSL token form (`damage`,
-    /// `defense`, `crowd_control`, `utility`). Returns `None` for an
-    /// unknown spelling so upstream can surface the original token in
-    /// its error.
+    /// `defense`, `crowd_control`, `utility`, `heal`, `buff`). Returns
+    /// `None` for an unknown spelling so upstream can surface the
+    /// original token in its error.
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "damage" => Some(Self::Damage),
             "defense" => Some(Self::Defense),
             "crowd_control" => Some(Self::CrowdControl),
             "utility" => Some(Self::Utility),
+            "heal" => Some(Self::Heal),
+            "buff" => Some(Self::Buff),
             _ => None,
         }
     }

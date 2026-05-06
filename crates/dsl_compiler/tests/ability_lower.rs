@@ -68,10 +68,9 @@ fn lower_minimal_mend_inline() {
 
     assert_eq!(prog.gate.cooldown_ticks, 30);
     assert!(!prog.gate.hostile_only);
-    // `heal` hint maps to `Defense` today — see `map_hint` in
-    // `ability_lower.rs` for rationale (engine `AbilityHint` lacks a
-    // `Heal` variant in this slice).
-    assert_eq!(prog.hint, Some(AbilityHint::Defense));
+    // #142: `heal` hint maps to `AbilityHint::Heal` (was `Defense`
+    // before the variant landed). Distinct scoring bucket from defense.
+    assert_eq!(prog.hint, Some(AbilityHint::Heal));
     assert_eq!(prog.effects.len(), 1);
     match prog.effects[0] {
         EffectOp::Heal { amount } => assert!((amount - 25.0).abs() < 1e-6),
