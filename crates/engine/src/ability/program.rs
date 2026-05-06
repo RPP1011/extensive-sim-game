@@ -641,6 +641,26 @@ pub enum StackingMode {
     Extend = 2,
 }
 
+/// #129 / Wave 1.4 `recast: <int|dur>` payload. Two shapes per spec
+/// §4.2:
+///   * `Count(n)` — `recast: N` integer form, capping the number of
+///     consecutive recasts allowed within the `recast_window_ticks`.
+///     Most LoL `.ability` files use this form (Aatrox `recast: 1`,
+///     Ahri `recast: 3`, Janna/Darius `recast: 1`).
+///   * `CooldownTicks(t)` — `recast: <duration>` form, the
+///     ticks-between-recasts cooldown. Rare in the corpus, captured
+///     here for completeness with the spec.
+///
+/// Numeric discriminants are pinned so a future SoA packing column
+/// reads cleanly. Renaming or reordering bumps the schema hash.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum RecastKind {
+    /// `recast: N` — max consecutive recasts inside the window.
+    Count(u32),
+    /// `recast: <duration>` — recast cooldown in ticks (100 ms).
+    CooldownTicks(u32),
+}
+
 /// Per-effect lifetime modifier — when does this effect end?
 ///
 /// `UntilCasterDies` ties the effect to the caster's `hot_alive` flag;
@@ -1079,6 +1099,21 @@ pub struct AbilityProgram {
     /// `false` for one-shot abilities. Apply handlers wire toggle
     /// state SoA + per-tick drain accounting (deferred).
     pub is_toggle: bool,
+    /// #129 / Wave 1.4 `recast: <int|dur>` header — multi-stage cast
+    /// state. Two shapes per spec §4.2:
+    ///   * `Some(RecastKind::Count(n))` — up to `n` consecutive
+    ///     recasts within the recast window (e.g. Aatrox `recast: 1`,
+    ///     Ahri `recast: 3`).
+    ///   * `Some(RecastKind::CooldownTicks(t))` — `recast: 4s` form,
+    ///     ticks-between-recasts cooldown (rare in the corpus today).
+    /// `None` for plain abilities. Apply handlers wire the per-agent
+    /// recast counter / window timer SoA (deferred — #125 family).
+    pub recast: Option<RecastKind>,
+    /// #129 / Wave 1.4 `recast_window: <duration>` — how long after
+    /// the initial cast the recast state stays open before being
+    /// dropped. Stored as ticks (100ms each). Meaningless without
+    /// `recast`; `None` if not declared.
+    pub recast_window_ticks: Option<u32>,
     /// `target: <mode>` header — captured from the eight modes per
     /// spec §4.3. Apply handlers only read Enemy/Self/Ally today
     /// (the per-pair-targeted modes); the position/directional/global
@@ -1122,6 +1157,8 @@ impl AbilityProgram {
             charges:             None,
             recharge_ticks:      None,
             is_toggle:           false,
+            recast:              None,
+            recast_window_ticks: None,
             // Default Enemy keeps historical convenience-constructor shape
             // (single-target, hostile_only=true on the gate).
             target_mode:         TargetModeKind::Enemy,

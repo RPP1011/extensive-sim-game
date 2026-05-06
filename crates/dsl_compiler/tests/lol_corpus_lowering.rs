@@ -130,7 +130,15 @@ fn lol_corpus_lowering_baseline() {
     // honesty audit below now counts hook-bearing programs as
     // actionable, which is a strict gain over the old "deliver-only
     // is empty" shape.
-    let baseline = 85usize;
+    //
+    // 85 → 135 when #129 landed — `recast: <int|dur>` and
+    // `recast_window: <duration>` headers now flow into
+    // `AbilityProgram.{recast, recast_window_ticks}` instead of
+    // erroring out. Apply semantics (per-agent counter / window
+    // timer SoA) still arrive with the registry-driven dispatch.
+    // The 61 prior `HeaderNotImplemented:recast` errors collapsed
+    // to 0; +50 files (and +73 decls) lower cleanly.
+    let baseline = 135usize;
     assert!(
         ok >= baseline,
         "LoL lowering regression: ok={ok} fell below baseline={baseline}",

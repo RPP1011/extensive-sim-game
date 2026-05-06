@@ -32,54 +32,51 @@ fn lower_inline(src: &str) -> LowerError {
 }
 
 // ---------------------------------------------------------------------------
-// 1. `recast:` and `recast_window:` headers
+// 1. `recast:` and `recast_window:` headers — #129 captures into program
 // ---------------------------------------------------------------------------
+//
+// Pre-#129: lowering erroed with `HeaderNotImplemented`, blocking the 39
+// LoL files that declare `recast:` / `recast_window:`. Post-#129: the
+// header value flows into `AbilityProgram.recast` (`RecastKind::Count`
+// or `RecastKind::CooldownTicks`) and `AbilityProgram.recast_window_ticks`.
+// Apply semantics (per-agent counter / window timer SoA) still arrive
+// alongside the registry-driven dispatch (#125 family); this slice
+// only unblocks the lowering.
 
-#[test]
-fn lowering_recast_header_returns_unimplemented() {
-    let err = lower_inline("ability X { target: enemy cooldown: 1s recast: 3 damage 10 }");
-    match err {
-        LowerError::HeaderNotImplemented { header, span } => {
-            assert_eq!(header, "recast");
-            assert!(span.start < span.end, "span must be non-empty");
-        }
-        other => panic!("expected HeaderNotImplemented(recast); got {other:?}"),
-    }
+use engine::ability::program::RecastKind;
+
+fn lower_ok(src: &str) -> engine::ability::program::AbilityProgram {
+    let file = parse_ability_file(src).expect("parser");
+    lower_ability_decl(&file.abilities[0]).expect("lowering must succeed")
 }
 
 #[test]
-fn lowering_recast_header_duration_form_returns_unimplemented() {
-    // The duration form (`recast: 4s`) is the same parser surface;
-    // lowering treats both the same way.
-    let err = lower_inline("ability X { target: enemy cooldown: 1s recast: 4s damage 10 }");
-    match err {
-        LowerError::HeaderNotImplemented { header, .. } => assert_eq!(header, "recast"),
-        other => panic!("expected HeaderNotImplemented(recast); got {other:?}"),
-    }
+fn lowering_recast_count_form_captures_count_into_program() {
+    let prog = lower_ok("ability X { target: enemy cooldown: 1s recast: 3 damage 10 }");
+    assert_eq!(prog.recast, Some(RecastKind::Count(3)));
+    assert_eq!(prog.recast_window_ticks, None);
 }
 
 #[test]
-fn lowering_recast_window_header_returns_unimplemented() {
-    let err = lower_inline(
+fn lowering_recast_duration_form_captures_cooldown_ticks() {
+    // `recast: 4s` -> RecastKind::CooldownTicks(40) at 100ms-per-tick.
+    let prog = lower_ok("ability X { target: enemy cooldown: 1s recast: 4s damage 10 }");
+    assert_eq!(prog.recast, Some(RecastKind::CooldownTicks(40)));
+}
+
+#[test]
+fn lowering_recast_window_captures_ticks() {
+    let prog = lower_ok(
         "ability X { target: enemy cooldown: 1s recast_window: 10s damage 10 }",
     );
-    match err {
-        LowerError::HeaderNotImplemented { header, span } => {
-            assert_eq!(header, "recast_window");
-            assert!(span.start < span.end);
-        }
-        other => panic!("expected HeaderNotImplemented(recast_window); got {other:?}"),
-    }
+    assert_eq!(prog.recast_window_ticks, Some(100)); // 10s @ 100ms/tick
 }
 
 #[test]
-fn lowering_recast_diagnostic_message_mentions_the_header_key() {
-    let err = lower_inline("ability X { target: enemy cooldown: 1s recast: 3 damage 10 }");
-    let msg = err.to_string();
-    assert!(
-        msg.contains("recast"),
-        "diagnostic must name the recast header; got: {msg}"
-    );
+fn lowering_no_recast_keeps_program_fields_none() {
+    let prog = lower_ok("ability X { target: enemy cooldown: 1s damage 10 }");
+    assert!(prog.recast.is_none());
+    assert!(prog.recast_window_ticks.is_none());
 }
 
 // ---------------------------------------------------------------------------

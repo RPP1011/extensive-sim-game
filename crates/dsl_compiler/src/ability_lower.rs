@@ -502,6 +502,13 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     let mut lowered_charges: Option<u32> = None;
     let mut lowered_recharge_ticks: Option<u32> = None;
     let mut lowered_is_toggle: bool = false;
+    // #129: capture recast / recast_window so the 39 LoL files that
+    // declare them stop tripping `HeaderNotImplemented`. Apply
+    // semantics (per-agent recast counter + window timer) lands later
+    // alongside the registry-driven dispatch (#125 family); the
+    // captured payload sits on the program ready for that wiring.
+    let mut lowered_recast: Option<engine::ability::program::RecastKind> = None;
+    let mut lowered_recast_window_ticks: Option<u32> = None;
     // `target: <mode>` defaults to Enemy when no header declares it
     // (matches the gate.hostile_only default + Wave 1 corpus shape).
     let mut lowered_target_mode: TargetModeKind = TargetModeKind::Enemy;
@@ -581,18 +588,22 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
             AbilityHeader::Toggle => {
                 lowered_is_toggle = true;
             }
-            // Wave 1.4: parser surfaces — lowering is Wave 2+.
-            AbilityHeader::Recast(_) => {
-                return Err(LowerError::HeaderNotImplemented {
-                    header: "recast",
-                    span:   decl.span,
+            // #129: capture `recast: <int|dur>` into the program.
+            // Apply semantics (per-agent counter / window timer SoA)
+            // arrive with registry-driven dispatch; until then the
+            // recast header is recorded but doesn't influence cast
+            // gating. 39 LoL files declare it.
+            AbilityHeader::Recast(v) => {
+                use dsl_ast::ast::RecastValue;
+                lowered_recast = Some(match v {
+                    RecastValue::Count(n)    => engine::ability::program::RecastKind::Count(*n),
+                    RecastValue::Duration(d) => engine::ability::program::RecastKind::CooldownTicks(
+                        duration_to_ticks(d.millis),
+                    ),
                 });
             }
-            AbilityHeader::RecastWindow(_) => {
-                return Err(LowerError::HeaderNotImplemented {
-                    header: "recast_window",
-                    span:   decl.span,
-                });
+            AbilityHeader::RecastWindow(d) => {
+                lowered_recast_window_ticks = Some(duration_to_ticks(d.millis));
             }
         }
     }
@@ -1055,6 +1066,8 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
         charges: lowered_charges,
         recharge_ticks: lowered_recharge_ticks,
         is_toggle: lowered_is_toggle,
+        recast: lowered_recast,
+        recast_window_ticks: lowered_recast_window_ticks,
         target_mode: lowered_target_mode,
     })
 }
