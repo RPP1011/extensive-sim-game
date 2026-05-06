@@ -81,14 +81,14 @@ config battle {
 // chronicle emits `Healed { target: self, ... }` so ApplyHeal writes
 // the actor's own HP slot.
 //
-// Note on the missing `target == self` gate: today the PerPair mask
-// kernel hardcodes `mask_k = 1u` (verb-mask K placeholder, TODO
-// task-5.7 in dsl_compiler). That means only `per_pair_candidate = 0`
-// is iterated per actor, so any `target == self` predicate would only
-// fire for actor 0 (the single slot matching candidate 0). The
-// duel_1v1 Heal verb hits the same K=1 ceiling at 2-agent scale
-// (agent 0 always heals; agent 1 never heals — see duel_1v1_runtime
-// comments on the mask K placeholder). Workaround: drop the
+// Note on the missing `target == self` gate: HISTORICAL — the
+// PerPair mask kernel previously hardcoded `mask_k = 1u`,
+// collapsing per_pair_candidate to 0 and breaking `target == self`
+// for actor != 0. FIXED in cg/emit/kernel.rs:3356 (mask_k now uses
+// cfg.agent_cap). The verbs below stay without the explicit
+// `target == self` check because the score expression already
+// resolves the right slot; the workaround is no longer required.
+// Below: drop the
 // `target == self` gate so the mask predicate is candidate-
 // independent; the chronicle's `target: self` emit field still
 // routes correctly so Healed events name the actor as their target.

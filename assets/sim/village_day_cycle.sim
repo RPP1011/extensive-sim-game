@@ -38,13 +38,14 @@
 //
 // ## Why no `target` predicate?
 //
-// Same constraint as quest_arc_real: the mask kernel today
-// hardcodes mask_k=1 (TODO task-5.7 in
-// crates/dsl_compiler/src/cg/lower/kernel.rs), so any
-// `target == self` predicate only ever passes for agent_id==0.
-// All four phase verbs are self-only with `self` resolved to the
-// actor slot in the chronicle. The target slot in the
-// ActionSelected output is unused.
+// HISTORICAL: the mask kernel previously hardcoded `mask_k=1u`,
+// so `target == self` only fired for agent_id==0. FIXED in
+// cg/emit/kernel.rs:3356 — `mask_k = cfg.agent_cap` now visits
+// every (actor, candidate) pair. The four phase verbs are still
+// authored as self-only with `self` resolved to the actor slot
+// in the chronicle; the target slot in the ActionSelected output
+// is unused (and continues to work correctly). New authors may
+// freely use `target == self` predicates.
 
 event Tick { }
 

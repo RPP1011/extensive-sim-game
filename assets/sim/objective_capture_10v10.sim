@@ -59,12 +59,11 @@ config combat {
 // IMPLEMENTATION GAPS (worked around, not closed inline — too large
 // for this fixture's slice):
 //
-// 1. mask_k=1 hardcoded (compiler task-5.7). The PerPair mask kernel
-//    only evaluates pair (agent, cand=0) per actor, so a per-team
-//    enemy filter `target.mana != self.mana` in the WHEN clause
-//    would silently exclude one team from ever firing. Workaround:
-//    omit the team filter from the WHEN clause; the DSL combat will
-//    fire on ANY alive target, and the host-side authoritative
+// 1. mask_k=1 (compiler task-5.7) — FIXED in cg/emit/kernel.rs:3356,
+//    `mask_k = cfg.agent_cap` now visits every (actor, candidate)
+//    pair. The historical workaround stays in the WHEN clauses below
+//    (no team filter — DSL combat fires on any alive target;
+//    host-side authoritative
 //    combat layer (see runtime lib.rs §"host_combat") owns the
 //    real team-filtered targeting.
 //

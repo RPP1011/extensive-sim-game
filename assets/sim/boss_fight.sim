@@ -31,12 +31,15 @@
 //                  through self in PerPair binder shadowing) —
 //                  workaround: target == self, score constant.)
 //
-// Per duel_1v1 docs the per-pair mask hardcodes mask_k=1u
-// (TODO task-5.7) so verb `when` clauses MUST NOT reference the
-// `target` binder — otherwise the mask predicate evaluates only
-// candidate=0 (the Boss), breaking heroes/boss alike. All `when`
-// clauses here are pure self-checks. Target validity is enforced
-// by score expressions that read `target.creature_type` and
+// HISTORICAL: per-pair mask previously hardcoded mask_k=1u
+// (task-5.7), forcing `when` clauses to avoid the `target`
+// binder. FIXED in cg/emit/kernel.rs:3356 — mask_k now uses
+// cfg.agent_cap and `target` references in `when` clauses
+// evaluate every candidate. Below the `when` clauses stay
+// self-only by design (target validity is in the score
+// expressions), but new authors may freely use `target.<field>`
+// in `when` clauses. Target validity is enforced by score
+// expressions that read `target.creature_type` and
 // `target.alive` (the scoring kernel iterates EVERY candidate
 // per actor and argmaxes — see kernel.rs:2790-2820).
 //
@@ -137,8 +140,10 @@ verb BossStrike(self, target: Agent) =
 // large constant so SelfHeal beats BossStrike on the heal tick when
 // the HP gate fires.
 //
-// HP gate is in `when` (self-only — keeps mask predicate PerAgent-
-// equivalent under the mask_k=1u hardcoding).
+// HP gate is in `when` (self-only — historically the mask
+// kernel's mask_k=1u hardcoding required this; FIXED, but
+// keeping the self-only `when` clause anyway since target
+// validity is in the score expression).
 verb BossSelfHeal(self, target: Agent) =
   action BossSelfHealAction
   when (self.alive

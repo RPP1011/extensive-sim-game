@@ -2,9 +2,11 @@
 // scuffle. Natural escalation from `duel_1v1.sim` (commit ff1aa387).
 //
 // Where 1v1 used per-pair scoring (verb cascade), 25v25 uses SPATIAL
-// body-form physics for "find nearby enemies" — sidesteps Gap W
-// (PerPair `mask_k=1u` placeholder) by doing target-finding via the
-// spatial-grid hash inside a chronicle physics rule.
+// body-form physics for "find nearby enemies". (Historical note:
+// the PerPair `mask_k=1u` placeholder previously made per-pair
+// scoring impractical at this scale; FIXED in cg/emit/kernel.rs:3356.
+// Spatial body-form is still the right shape for crowd-density
+// targeting — pair scoring would be O(N²) where spatial is O(neighbourhood).)
 //
 // Pattern matches `particle_collision_min.sim` (commit 134c5df8) for
 // the body-form spatial walk: `for other in spatial.<query>(self) {

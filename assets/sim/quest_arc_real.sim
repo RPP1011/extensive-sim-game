@@ -73,18 +73,18 @@ config quest {
   stage_complete:  f32 = 4.0,
 }
 
-// IMPORTANT: each verb deliberately omits a `target == self` (or
-// `target != self`) predicate. The mask kernel today (TODO task-5.7
-// in `crates/dsl_compiler/src/cg/lower/kernel.rs`'s
-// `mask_predicate_per_pair_body_with_prefix` and the WGSL emitter
-// at `crates/dsl_compiler/src/cg/emit/mask_kernel.rs`) hardcodes
-// `mask_k = 1u`, so `per_pair_candidate = pair % 1 = 0` for ALL
-// agents. With `target == self` the mask gate becomes
-// `per_pair_candidate (==0) == agent_id`, which only ever passes
-// for `agent_id == 0` — duel_1v1 has the inverse asymmetry on
-// `target != self` (only Hero B attacks Hero A). For a 30-agent
-// per-agent state machine we need EVERY agent to fire its own
-// quest cycle, so we drop the target-vs-self predicate. The
+// HISTORICAL: each verb deliberately omitted a `target == self`
+// (or `target != self`) predicate because the mask kernel
+// previously hardcoded `mask_k = 1u`, collapsing every
+// `per_pair_candidate` to 0 and breaking pair-vs-self gates for
+// agent_id != 0. FIXED in cg/emit/kernel.rs:3356 — `mask_k =
+// cfg.agent_cap` now visits every (actor, candidate) pair, so
+// `target == self` predicates work correctly across the agent
+// population. The verbs below stay target-predicate-free
+// because the per-agent state machine still wants every agent
+// to fire its own quest cycle (the predicate was never the
+// limiting factor at runtime; the workaround is just no longer
+// necessary). The
 // emitted `StageAdvanced { agent: self }` resolves `self` to the
 // actor slot in the chronicle (`local_2 = event_ring[idx*10+2]`),
 // which is what we want — the target field carried in

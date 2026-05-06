@@ -60,8 +60,10 @@ event TradeMade {
 event DungeonAttacked {
   // Adventurer in Dungeon swung this tick. Tracker-only on the GPU
   // side; combat resolution happens CPU-side in
-  // `cpu_migration_step()` (sidestep — pair-field scoring across
-  // many slots is blocked by the mask emitter's `mask_k=1u`).
+  // `cpu_migration_step()`. (Historical workaround: pair-field
+  // scoring was blocked by mask_k=1u; FIXED in cg/emit/kernel.rs:3356.
+  // CPU-side resolution stays for this fixture's other reasons —
+  // migration/zone routing — not the mask limitation.)
   attacker: AgentId,
   amount:   f32,
 }
@@ -132,10 +134,11 @@ verb TradeWoodForGold(self) =
 // (level==2). Emits a `DungeonStrike` tracker event into the chronicle
 // (consumed CPU-side via the damage_dealt view-fold below). Combat
 // resolution + monster death + adventurer retreat happen on the CPU
-// migration pass — see lib.rs `cpu_migration_step()`. Sidestep:
-// pair-field scoring against MONSTER slots is blocked by the mask
-// emitter's hardcoded `mask_k=1u` (TODO task-5.7 in fused_mask_verb_*
-// codegen), so Damaged-against-target is resolved on the CPU.
+// migration pass — see lib.rs `cpu_migration_step()`. (Historical
+// note: pair-field scoring against MONSTER slots was previously
+// blocked by mask_k=1u; FIXED in cg/emit/kernel.rs:3356. The
+// CPU-side migration pass stays for zone-routing reasons that are
+// independent of the mask limitation.)
 // ---------------------------------------------------------------------
 verb DungeonStrike(self) =
   action StrikeAction
