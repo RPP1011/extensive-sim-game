@@ -811,6 +811,14 @@ fn pack_effect(op: EffectOp) -> (u32, u32, u32) {
             let pb = ((count as u32) << 24) | lifetime;
             (24, template_hash, pb)
         }
+        // Non-combat verbs phase 1 — harvest / place_voxel.
+        // payload_a is the FxHash of the resource / voxel ident;
+        // payload_b is the harvest amount (widened from u16 to u32 for
+        // the SoA column, zero-extended). PlaceVoxel has no second
+        // payload — the cast's target position carries the placement
+        // location; payload_b stays 0.
+        EffectOp::Harvest    { kind_hash, amount }    => (25, kind_hash, amount as u32),
+        EffectOp::PlaceVoxel { kind_hash }            => (26, kind_hash, 0),
     }
 }
 

@@ -81,6 +81,21 @@ pub enum ApplyEvent {
     /// no runtime sim consumes it today (deferred infra mirroring the
     /// CastAbility/TransferGold/ModifyStanding fall-through pattern).
     Summon         { source: AgentId, template_hash: u32, count: u8, lifetime_ticks: u32 },
+    /// `harvest "<kind>" [<amount>]` — caster gathers `amount` units of
+    /// the named resource. `kind_hash` is the FxHash of the resource
+    /// ident from the .ability source (deferred resolution — apply
+    /// handlers map the hash to a concrete resource via a registry
+    /// follow-up). Apply handlers route to AgentHarvested for organic /
+    /// surface resources or AgentHarvestedVoxel for voxel-backed
+    /// resources, distinguished by the registry lookup. No runtime sim
+    /// consumes it today (deferred infra mirroring the Summon
+    /// fall-through pattern).
+    Harvest        { source: AgentId, kind_hash: u32, amount: u16 },
+    /// `place_voxel "<kind>"` — caster places one voxel of `kind_hash`
+    /// at the cast target's position. Apply handlers emit
+    /// AgentPlacedVoxel and write the voxel into world state; deferred
+    /// infrastructure today (no runtime sim consumes the event yet).
+    PlaceVoxel     { source: AgentId, kind_hash: u32 },
 }
 
 /// Inline budget — most abilities have ≤4 effects (P4 says
@@ -185,6 +200,13 @@ pub fn apply_program(
                 out.push(ApplyEvent::Buff { target, stat, magnitude_q8, duration_ticks }),
             EffectOp::Summon { template_hash, count, lifetime_ticks } =>
                 out.push(ApplyEvent::Summon { source: caster, template_hash, count, lifetime_ticks }),
+            // Non-combat verbs phase 1 — world primitives. No scaling
+            // applies (these aren't amount-bearing in the combat sense
+            // — `amount` is a resource quantity, not an HP delta).
+            EffectOp::Harvest    { kind_hash, amount } =>
+                out.push(ApplyEvent::Harvest    { source: caster, kind_hash, amount }),
+            EffectOp::PlaceVoxel { kind_hash } =>
+                out.push(ApplyEvent::PlaceVoxel { source: caster, kind_hash }),
             // CastAbility / TransferGold / ModifyStanding fall outside
             // this slice — the first is recursive (needs cascade
             // handling); the latter two need world-state context not

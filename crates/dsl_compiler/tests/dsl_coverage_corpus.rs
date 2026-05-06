@@ -13,7 +13,7 @@
 //! Either way the test fails noisily so the regression / authoring
 //! mistake surfaces immediately.
 //!
-//! Coverage shape (16 abilities × 4 hero kits):
+//! Coverage shape (20 abilities × 5 hero kits):
 //!   * BladeStorm    — physical melee striker (projectile + cone/line + DoT
 //!                     + chance + stacking stack/extend + AD/MaxHP scaling
 //!                     + dash/knockback/pull/modify_standing).
@@ -29,6 +29,8 @@
 //!                     + transfer_gold/modify_standing/execute/self_damage
 //!                     + lifesteal/damage_modify + Gold cost + nested block
 //!                     + wall/cylinder/dome/hull/spread/box/column shapes).
+//!   * Forager       — survivor / colonist (non-combat verbs phase 1:
+//!                     harvest / mine / place_voxel).
 //!
 //! The test prints a per-feature coverage report (which EffectOp /
 //! header / modifier / shape / tag each file used) so future maintainers
@@ -152,7 +154,7 @@ fn dsl_coverage_corpus_lowers_clean() {
     // either (a) restore coverage or (b) consciously bump the floor.
     //
     // Counts come from the canonical engine catalog:
-    //   EffectOp        — 24 variants (program.rs)
+    //   EffectOp        — 26 variants (program.rs)
     //   TargetMode      — 8  variants
     //   Delivery        — Instant + 6 method kinds = 7 distinct labels
     //   ShapeKind       — 12 variants
@@ -164,7 +166,7 @@ fn dsl_coverage_corpus_lowers_clean() {
     //   CostAmount      — 2  variants (Flat / PercentOfMax)
     //   Headers         — cooldown / range / cast / hint / cost /
     //                     charges / recharge / toggle = 8 (target excluded — counted separately)
-    assert_eq!(effect_ops.len(),    24, "EffectOp coverage shrank: {effect_ops:?}");
+    assert_eq!(effect_ops.len(),    26, "EffectOp coverage shrank: {effect_ops:?}");
     assert_eq!(target_modes.len(),  8,  "TargetMode coverage shrank: {target_modes:?}");
     assert_eq!(deliveries.len(),    7,  "Delivery coverage shrank: {deliveries:?}");
     assert_eq!(shapes.len(),        12, "ShapeKind coverage shrank: {shapes:?}");
@@ -304,6 +306,8 @@ fn effect_op_label(op: &EffectOp) -> &'static str {
         EffectOp::TimedShield     { .. } => "TimedShield",
         EffectOp::Buff            { .. } => "Buff",
         EffectOp::Summon          { .. } => "Summon",
+        EffectOp::Harvest         { .. } => "Harvest",
+        EffectOp::PlaceVoxel      { .. } => "PlaceVoxel",
     }
 }
 

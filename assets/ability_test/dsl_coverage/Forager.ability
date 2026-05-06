@@ -1,0 +1,60 @@
+// DSL coverage corpus — Hero 5 of 5 (Forager).
+//
+// Theme: a survivor / colonist whose kit is non-combat-primary. They
+// gather food off the land, mine ore from voxel deposits, and raise
+// wooden palisades to fortify their position. Only one ability touches
+// combat (Quarry Strike pairs mining with an AOE damage burst against
+// adjacent enemies); the rest are pure resource / construction work.
+//
+// This file's job in the DSL coverage corpus is to exercise the two
+// non-combat verbs that landed in the world-primitive phase 1 slice:
+//   * `harvest "<kind>" [<amount>]` — organic / surface gather.
+//   * `mine "<kind>" [<amount>]`    — alias for harvest, ore-flavored.
+//   * `place_voxel "<kind>"`        — voxel placement (construction).
+// All three lower to two engine EffectOp variants (Harvest, PlaceVoxel);
+// the kind_hash in the payload distinguishes the resource at the
+// runtime registry layer.
+//
+// Each ability stays under MAX_EFFECTS_PER_PROGRAM (=6) and uses only
+// surfaces the lowering already supports — no recast, no morph, no
+// passives.
+
+ability ForageBerries {
+    target: self
+    cooldown: 4s
+    hint: utility
+
+    harvest "berries" 3
+}
+
+ability QuarryStrike {
+    target: enemy
+    range: 2.0
+    cooldown: 8s
+    cast: 200ms
+    hint: damage
+
+    mine "iron" 1
+    damage 12 [PHYSICAL: 40]
+}
+
+ability RaisePalisade {
+    target: ground
+    range: 3.0
+    cooldown: 6s
+    cost: 10 stamina
+    hint: defense
+
+    place_voxel "wooden_palisade"
+}
+
+ability StockpileRun {
+    target: self
+    cooldown: 12s
+    cast: 500ms
+    hint: utility
+
+    harvest "berries" 5
+    mine "stone" 2
+    place_voxel "storage_crate"
+}

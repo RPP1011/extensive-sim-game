@@ -337,6 +337,57 @@ pub enum EffectOp {
     /// EffectOp size budget. No apply handler in this slice — the LoL
     /// corpus needs the verb to lower so the per-hero programs build.
     Summon { template_hash: u32, count: u8, lifetime_ticks: u32 } = 24,
+
+    // --- Non-combat verbs phase 1 (world primitives) ---
+    // Two world-primitive verbs that finally cross the engine's existing
+    // event boundary into the non-combat catalog (`AgentHarvested = 9`,
+    // `AgentPlacedVoxel = 11`, `AgentHarvestedVoxel = 12`). Both share
+    // the `Summon` shape's deferred-resolution discipline: the resource /
+    // voxel ident from the .ability surface is FxHashed to a u32 so the
+    // engine payload stays compact and authoritative resource resolution
+    // happens on the runtime side via a registry follow-up.
+    //
+    // Payload budgets:
+    //   * Harvest     — `kind_hash: u32 + amount: u16` = 6B + 1B tag = 7B.
+    //   * PlaceVoxel  — `kind_hash: u32`               = 4B + 1B tag = 5B.
+    // Both fit easily under the P4 ≤16-byte EffectOp ceiling.
+    //
+    // The engine ships THREE non-combat events but only TWO new
+    // EffectOps: `Harvest` covers BOTH `AgentHarvested` (organic / surface
+    // resource — berries, hides, fish) AND `AgentHarvestedVoxel` (ore /
+    // stone / wood block). Apply handlers route the dispatch by looking
+    // up `kind_hash` in the resource registry — voxel resources emit
+    // `AgentHarvestedVoxel`, surface resources emit `AgentHarvested`. A
+    // single EffectOp with split apply-side dispatch lets the .ability
+    // surface stay terse (`harvest "berries"` / `mine "iron"`) without
+    // forcing authors to know whether the resource is voxel-backed.
+    //
+    // The DSL surface exposes `mine "<kind>"` as an alias for
+    // `harvest "<kind>"` purely for authoring ergonomics — both lower to
+    // `EffectOp::Harvest`. The kind_hash distinguishes the resource via
+    // the runtime registry side.
+    /// `harvest "<kind>" [<amount>]` — caster gathers `amount` units of
+    /// the named resource. `kind_hash` is the FxHash of the resource
+    /// ident from the .ability source (deferred resolution — apply
+    /// handlers map the hash to a concrete resource via a registry
+    /// follow-up). Same pattern as `Summon::template_hash`. `amount`
+    /// defaults to 1 when omitted in the DSL surface; u16 ceiling is
+    /// 65535 units per cast — well past any sane single-tick gather
+    /// rate. Apply handlers emit `AgentHarvested` for organic / surface
+    /// resources and `AgentHarvestedVoxel` for voxel-backed resources;
+    /// the runtime registry's lookup decides which.
+    Harvest    { kind_hash: u32, amount: u16 } = 25,
+
+    /// `place_voxel "<kind>"` — caster places one voxel of the named
+    /// kind at the cast's target position. `kind_hash` is the FxHash of
+    /// the voxel ident from the .ability source (deferred resolution —
+    /// apply handlers map the hash to a concrete voxel kind via a
+    /// registry follow-up). Same pattern as `Summon::template_hash`.
+    /// Apply handlers emit `AgentPlacedVoxel` and write the voxel into
+    /// world state. No amount — voxel placement is one-per-cast (multi-
+    /// voxel constructions compose multiple `place_voxel` ops or wire a
+    /// future area modifier).
+    PlaceVoxel { kind_hash: u32 } = 26,
 }
 
 /// Stat targeted by `buff`. Vocabulary is small today (just the two

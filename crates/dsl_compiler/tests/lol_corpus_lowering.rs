@@ -128,3 +128,99 @@ fn lol_corpus_lowering_baseline() {
         "LoL lowering regression: ok={ok} fell below baseline={baseline}",
     );
 }
+
+/// Honesty audit for the canary "ok" count. The baseline test above
+/// asserts "lowering returns Ok(_)" but says nothing about whether the
+/// resulting AbilityProgram carries actionable IR. This test breaks the
+/// 89 ok files down by IR shape so we can see how much of "lowered"
+/// is "lowered into something the apply path can do anything with".
+///
+/// Categories:
+///   * `instant_with_effects`     — Delivery::Instant + non-empty effects
+///                                 (the normal shape, real coverage)
+///   * `composite_deliver`        — Delivery::Method + non-empty effects
+///                                 (post-MixedBody-relax shape: projectile
+///                                  + caster self-effect like dash)
+///   * `deliver_only_empty`       — Delivery::Method + EMPTY effects
+///                                 (the gap #139 shape: on_hit content
+///                                  is silently dropped; program looks
+///                                  cosmetically "ok" but does nothing)
+///   * `instant_empty`            — Delivery::Instant + EMPTY effects
+///                                 (shouldn't happen — would mean the
+///                                  ability declared nothing actionable)
+///
+/// Prints the breakdown via --nocapture; asserts only that
+/// `instant_with_effects + composite_deliver` (the genuinely-actionable
+/// shapes) is at least 1 (so a future regression that drops it to 0
+/// surfaces loudly).
+#[test]
+fn lol_corpus_lowering_honesty_audit() {
+    use engine::ability::program::Delivery;
+
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("dataset")
+        .join("abilities")
+        .join("lol_heroes");
+    if !dir.is_dir() {
+        eprintln!("dataset/abilities/lol_heroes not found at {}", dir.display());
+        return;
+    }
+
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().map_or(false, |x| x == "ability"))
+        .collect();
+    files.sort();
+
+    let mut instant_with_effects = 0usize;
+    let mut composite_deliver    = 0usize;
+    let mut deliver_only_empty   = 0usize;
+    let mut instant_empty        = 0usize;
+    // Inventory the on-hit-only files for spot-checking.
+    let mut deliver_only_examples: Vec<String> = Vec::new();
+
+    for path in &files {
+        let src = std::fs::read_to_string(path).expect("read .ability");
+        let file = match parse_ability_file(&src) { Ok(f) => f, Err(_) => continue };
+        for decl in &file.abilities {
+            let prog = match lower_ability_decl(decl) { Ok(p) => p, Err(_) => continue };
+            let has_effects = !prog.effects.is_empty();
+            let is_deliver = matches!(prog.delivery, Delivery::Method { .. });
+            match (is_deliver, has_effects) {
+                (false, true)  => instant_with_effects += 1,
+                (true,  true)  => composite_deliver += 1,
+                (true,  false) => {
+                    deliver_only_empty += 1;
+                    if deliver_only_examples.len() < 6 {
+                        deliver_only_examples.push(decl.name.clone());
+                    }
+                }
+                (false, false) => instant_empty += 1,
+            }
+        }
+    }
+
+    let total = instant_with_effects + composite_deliver + deliver_only_empty + instant_empty;
+    let actionable = instant_with_effects + composite_deliver;
+
+    eprintln!("LoL canary honesty audit ({total} ability decls in {} files):", files.len());
+    eprintln!("  instant_with_effects : {instant_with_effects:>4}   (real coverage)");
+    eprintln!("  composite_deliver    : {composite_deliver:>4}   (deliver+trailing self-effect)");
+    eprintln!("  deliver_only_empty   : {deliver_only_empty:>4}   (gap #139 — on_hit silently dropped)");
+    eprintln!("  instant_empty        : {instant_empty:>4}   (declares nothing actionable)");
+    eprintln!("  ─────────────────────────────");
+    eprintln!("  actionable           : {actionable:>4}   ({:.1}%)", 100.0 * actionable as f32 / total.max(1) as f32);
+    eprintln!("  empty (any shape)    : {:>4}   ({:.1}%)",
+              deliver_only_empty + instant_empty,
+              100.0 * (deliver_only_empty + instant_empty) as f32 / total.max(1) as f32);
+    if !deliver_only_examples.is_empty() {
+        eprintln!("\n  Sample deliver-only-empty decls (first 6):");
+        for name in &deliver_only_examples { eprintln!("    - {name}"); }
+    }
+
+    assert!(actionable >= 1, "canary regression: zero actionable abilities");
+}

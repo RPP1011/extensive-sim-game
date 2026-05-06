@@ -1237,6 +1237,50 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
                 lifetime_ticks,
             })
         }
+        // Non-combat verbs phase 1 — world primitives. Both `harvest`
+        // and `mine` lower to `EffectOp::Harvest`; the kind_hash is the
+        // FxHash of the resource ident (same FxHash family as Summon's
+        // template_hash). `mine` is purely an authoring-ergonomics alias
+        // — apply handlers use the hash to look up resource metadata in
+        // the runtime registry (organic / surface vs voxel-backed)
+        // and dispatch to AgentHarvested vs AgentHarvestedVoxel.
+        // `place_voxel "<kind>"` lowers to `EffectOp::PlaceVoxel` — a
+        // single u32 payload carrying the FxHash of the voxel ident.
+        // The cast target supplies the placement position; apply
+        // handlers emit AgentPlacedVoxel and mutate world state.
+        "harvest" | "mine" => {
+            // `harvest "<kind>" [<amount>]` (or `mine` alias). Kind is
+            // a string-or-ident arg matching the `summon` precedent; the
+            // optional positional `amount` defaults to 1 when omitted.
+            // No `for <duration>` modifier — gathering is instantaneous.
+            let kind = require_name_arg(stmt, 0)?;
+            let kind_hash = summon_template_hash(&kind);
+            let amount: u16 = match stmt.args.get(1) {
+                None => 1,
+                Some(EffectArg::Number(n)) => {
+                    n.round().clamp(0.0, u16::MAX as f32) as u16
+                }
+                Some(_) => {
+                    return Err(LowerError::EffectArgMismatch {
+                        verb:     stmt.verb.clone(),
+                        expected: 1,
+                        got:      stmt.args.len(),
+                        span:     stmt.span,
+                    });
+                }
+            };
+            let expected_arity = if stmt.args.len() == 1 { 1 } else { 2 };
+            require_arity(stmt, expected_arity)?;
+            Ok(EffectOp::Harvest { kind_hash, amount })
+        }
+        "place_voxel" => {
+            // `place_voxel "<kind>"` — one u32 payload (FxHash of kind
+            // ident). String + Ident accepted via `require_name_arg`.
+            let kind = require_name_arg(stmt, 0)?;
+            let kind_hash = summon_template_hash(&kind);
+            require_arity(stmt, 1)?;
+            Ok(EffectOp::PlaceVoxel { kind_hash })
+        }
         "cast" => {
             // `cast <ability_name>` — the inner ability is resolved at
             // registry-wiring time (Wave 1.7). We accept either a bare
@@ -1417,10 +1461,12 @@ fn require_name_arg(stmt: &EffectStmt, idx: usize) -> Result<String, LowerError>
     }
 }
 
-/// Stable 32-bit hash of a `summon` template ident. Used to project
-/// the .ability source's `summon "<template>"` arg into `EffectOp::Summon
-/// { template_hash }` (deferred resolution — apply handlers map the
-/// hash to a concrete spawner via a registry follow-up).
+/// Stable 32-bit hash of a deferred-resolution ident. Used to project
+/// .ability source string args into `EffectOp::Summon { template_hash }`,
+/// `EffectOp::Harvest { kind_hash }`, and `EffectOp::PlaceVoxel
+/// { kind_hash }` payloads (deferred resolution — apply handlers map
+/// the hash to a concrete spawner / resource / voxel via a registry
+/// follow-up).
 ///
 /// Uses `rustc_hash::FxHasher` (FxHash) — fixed-seed, deterministic,
 /// no per-process salt. Cross-platform stable; replay equivalence
