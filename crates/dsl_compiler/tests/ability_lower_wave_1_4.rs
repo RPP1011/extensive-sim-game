@@ -4,14 +4,18 @@
 //! (Strike / ShieldUp / Mend) still lowers without regression.
 //!
 //! Per `crates/dsl_compiler/src/ability_lower.rs` Wave 1.4 module-level
-//! docs, lowering of `recast` / `recast_window` headers,
-//! `deliver { ... }` body blocks, and `morph { ... } into <Other>`
-//! body blocks all require engine-side schema work (multi-stage cast
-//! state, delivery-method SoA + on_*/on_arrival/on_tick hook dispatch,
-//! form-swap state). Until those land, lowering surfaces:
+//! docs, lowering of `recast` / `recast_window` headers and
+//! `morph { ... } into <Other>` body blocks still requires engine-side
+//! schema work (multi-stage cast state, form-swap state). Until those
+//! land, lowering surfaces:
 //!   * `LowerError::HeaderNotImplemented { header: "recast" | "recast_window" }`
-//!   * `LowerError::DeliverBlockNotImplemented { ability, method, span }`
 //!   * `LowerError::MorphBlockNotImplemented { ability, into, span }`
+//!
+//! Wave 2 piece 5/6 lifted `deliver { ... }` into engine IR — the
+//! block now lowers into `Delivery::Method { kind, raw }` with
+//! `kind: DeliveryMethodKind` validated against the engine's
+//! 6-method vocabulary (projectile/channel/zone/chain/tether/trap).
+//! Unknown method idents surface as `LowerError::UnknownDeliveryMethod`.
 //!
 //! The tests also exercise the spec §4.4 mutual-exclusion rule
 //! (deliver + bare effects → `MixedBody`). The parser admits this
@@ -82,46 +86,67 @@ fn lowering_recast_diagnostic_message_mentions_the_header_key() {
 // 2. `deliver { ... }` body block
 // ---------------------------------------------------------------------------
 
+// Wave 2 piece 5/6 — the deliver block now lowers cleanly into
+// `Delivery::Method { kind, raw }` instead of erroring with
+// DeliverBlockNotImplemented. The `raw` capture preserves the verbatim
+// source slice (params + body) for downstream apply handlers. Apply-
+// handler dispatch (projectile travel, channel hold-over-time, etc.)
+// is later infrastructure (#125 registry-driven dispatch).
 #[test]
-fn lowering_deliver_block_returns_unimplemented() {
+fn lowering_deliver_projectile_captures_method_and_raw() {
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::{Delivery, DeliveryMethodKind};
     let src = "ability X {
         target: enemy range: 5.0 cooldown: 1s
         deliver projectile { speed: 16.0 } { on_hit { damage 10 } }
     }";
-    let err = lower_inline(src);
-    match err {
-        LowerError::DeliverBlockNotImplemented { ability, method, span } => {
-            assert_eq!(ability, "X");
-            assert_eq!(method, "projectile");
-            assert!(span.start < span.end);
+    let file = parse_ability_file(src).expect("must parse");
+    let prog = lower_ability_decl(&file.abilities[0])
+        .expect("deliver projectile must lower");
+    match &prog.delivery {
+        Delivery::Method { kind, raw } => {
+            assert_eq!(*kind, DeliveryMethodKind::Projectile);
+            assert!(raw.contains("projectile"), "raw must include method ident: {raw}");
+            assert!(raw.contains("on_hit"),     "raw must include body block: {raw}");
         }
-        other => panic!("expected DeliverBlockNotImplemented; got {other:?}"),
+        other => panic!("expected Delivery::Method(Projectile); got {other:?}"),
     }
 }
 
 #[test]
-fn lowering_deliver_channel_block_carries_method() {
+fn lowering_deliver_channel_captures_method_and_raw() {
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::{Delivery, DeliveryMethodKind};
     let src = "ability X {
         target: enemy range: 5.0 cooldown: 1s
         deliver channel { duration: 2s, tick: 500ms } { on_tick { damage 7 } }
     }";
-    let err = lower_inline(src);
-    match err {
-        LowerError::DeliverBlockNotImplemented { method, .. } => {
-            assert_eq!(method, "channel");
+    let file = parse_ability_file(src).expect("must parse");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("deliver channel must lower");
+    match &prog.delivery {
+        Delivery::Method { kind, .. } => {
+            assert_eq!(*kind, DeliveryMethodKind::Channel);
         }
-        other => panic!("expected DeliverBlockNotImplemented(channel); got {other:?}"),
+        other => panic!("expected Delivery::Method(Channel); got {other:?}"),
     }
 }
 
 #[test]
-fn lowering_deliver_diagnostic_mentions_method() {
+fn lowering_deliver_unknown_method_diagnostic() {
     let src = "ability X {
         target: enemy range: 5.0 cooldown: 1s
-        deliver projectile { speed: 16.0 } { on_hit { damage 10 } }
+        deliver bouncepad { speed: 16.0 } { on_hit { damage 10 } }
     }";
+    let err = lower_inline(src);
+    match err {
+        LowerError::UnknownDeliveryMethod { method, .. } => {
+            assert_eq!(method, "bouncepad");
+        }
+        other => panic!("expected UnknownDeliveryMethod(bouncepad); got {other:?}"),
+    }
     let msg = lower_inline(src).to_string();
-    assert!(msg.contains("deliver projectile"), "diagnostic must mention the method; got: {msg}");
+    assert!(msg.contains("bouncepad"), "diagnostic must mention the offending method; got: {msg}");
+    assert!(msg.contains("projectile"), "diagnostic must list valid methods; got: {msg}");
 }
 
 // ---------------------------------------------------------------------------

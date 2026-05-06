@@ -41,12 +41,68 @@ pub const MAX_ABILITIES: usize = 8;
 /// How a cast is delivered to its target.
 ///
 /// MVP ships `Instant` only — the effect applies on the tick the cast resolves.
-/// Plan-2 ability work adds `Projectile` (travel-time) and `Zone` (persistent
-/// AoE); those variants land alongside their resolver code.
+/// Wave 2 piece 5/6 lands `Method { kind, raw }` capturing the
+/// .ability surface's `deliver <method> { params } { body }` block;
+/// runtime semantics (multi-tick travel for projectile, persistent
+/// zone tick, etc.) wire later via registry-driven dispatch (#125).
+///
+/// Note: dropped `Copy`/`Eq`/`Hash` derives when `Method` landed —
+/// the `raw: String` payload precludes them. `Clone + Debug +
+/// PartialEq` still hold.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Delivery {
+    /// Effects resolve in the same tick the cast was decided. Default
+    /// for the Wave 1 corpus (Strike, Bleed, etc.) and for any
+    /// `.ability` that does not declare a `deliver` block.
+    Instant,
+    /// `deliver <method> { params } { body }` block from the .ability
+    /// surface. Wave 1.4 parser captures the raw source verbatim;
+    /// this variant just promotes that capture into engine IR. Apply
+    /// handlers (multi-tick travel for projectile, hold-over-time for
+    /// beam, persistent zone tick for zone, etc.) wire the runtime
+    /// semantics later (deferred infrastructure — task #124 + #125).
+    Method {
+        kind: DeliveryMethodKind,
+        /// Verbatim source slice from `deliver` keyword through the
+        /// closing `}` of the body block. Engine code does not parse
+        /// this; downstream apply handlers re-parse when wiring runtime.
+        raw:  String,
+    },
+}
+
+/// Spec §9 enumerates six delivery methods. The vocabulary lives in
+/// engine so unknown method idents from the .ability surface surface
+/// loudly at lowering time rather than being silently dropped.
+///
+/// Numeric discriminants are pinned so future packing work reads the
+/// kind off `PackedAbilityRegistry` cleanly. Renaming or reordering
+/// bumps the schema hash.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]
-pub enum Delivery {
-    Instant = 0,
+pub enum DeliveryMethodKind {
+    Projectile = 0,
+    Channel    = 1,
+    Zone       = 2,
+    Chain      = 3,
+    Tether     = 4,
+    Trap       = 5,
+}
+
+impl DeliveryMethodKind {
+    /// Parse the method ident from the `deliver <method> { … }`
+    /// surface. Returns `None` for unknown idents so upstream can
+    /// surface the original token in a typo diagnostic.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "projectile" => Some(Self::Projectile),
+            "channel"    => Some(Self::Channel),
+            "zone"       => Some(Self::Zone),
+            "chain"      => Some(Self::Chain),
+            "tether"     => Some(Self::Tether),
+            "trap"       => Some(Self::Trap),
+            _ => None,
+        }
+    }
 }
 
 /// Where the effect lands relative to the cast's target.

@@ -202,12 +202,11 @@ pub enum LowerError {
     /// tag names — but that path lands as a duplicate at the per-effect
     /// site instead. Future-proof for a wider tag vocabulary.
     TagBudgetExceeded { ability: String, count: usize, max: usize, span: Span },
-    /// Wave 1.4 parser accepted a `deliver <method> { params } { body }`
-    /// body block. Lowering requires delivery-method SoA buffers +
-    /// on_hit / on_arrival / on_tick hook dispatch (spec §9), all Wave
-    /// 2+ work. Surfaced loudly so authors don't run with silently
-    /// dropped delivery semantics.
-    DeliverBlockNotImplemented {
+    /// Wave 2 piece 5/6 (`deliver <method> { … }` block): the method
+    /// ident is not in the engine's `DeliveryMethodKind` vocabulary
+    /// (projectile/channel/zone/chain/tether/trap today). Surfaced
+    /// so a typoed method name doesn't silently lower to a no-op.
+    UnknownDeliveryMethod {
         ability: String,
         method:  String,
         span:    Span,
@@ -302,9 +301,9 @@ impl std::fmt::Display for LowerError {
                 f,
                 "ability `{ability}` declares {count} distinct power tags but the per-program budget is {max}"
             ),
-            LowerError::DeliverBlockNotImplemented { ability, method, .. } => write!(
+            LowerError::UnknownDeliveryMethod { ability, method, .. } => write!(
                 f,
-                "ability `{ability}` uses `deliver {method} {{…}}` — parsed by Wave 1.4 but lowering is Wave 2+ (delivery-method SoA + on_hit/on_arrival/on_tick hook dispatch not yet wired)"
+                "ability `{ability}` uses `deliver {method} {{…}}` — `{method}` is not a known delivery method; valid methods (spec §9): projectile / channel / zone / chain / tether / trap"
             ),
             LowerError::MorphBlockNotImplemented { ability, into, .. } => write!(
                 f,
@@ -531,13 +530,24 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
             span:    decl.span,
         });
     }
-    if let Some(block) = &decl.deliver {
-        return Err(LowerError::DeliverBlockNotImplemented {
-            ability: decl.name.clone(),
-            method:  block.method.clone(),
-            span:    block.span,
-        });
-    }
+    // Wave 2 piece 5/6: capture the deliver block as
+    // Delivery::Method { kind, raw } — the `kind` discriminant lives
+    // in engine, the `raw` payload stays opaque. Apply handlers
+    // (projectile travel, channel hold-over-time, persistent zone
+    // tick) wire later via registry-driven dispatch (#125). Unknown
+    // method idents surface as `UnknownDeliveryMethod` so typos
+    // don't silently lower to a no-op.
+    let lowered_delivery = if let Some(block) = &decl.deliver {
+        let kind = engine::ability::program::DeliveryMethodKind::parse(&block.method)
+            .ok_or_else(|| LowerError::UnknownDeliveryMethod {
+                ability: decl.name.clone(),
+                method:  block.method.clone(),
+                span:    block.span,
+            })?;
+        Delivery::Method { kind, raw: block.raw.clone() }
+    } else {
+        Delivery::Instant
+    };
     if let Some(block) = &decl.morph {
         return Err(LowerError::MorphBlockNotImplemented {
             ability: decl.name.clone(),
@@ -834,7 +844,7 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     }
 
     Ok(AbilityProgram {
-        delivery: Delivery::Instant,
+        delivery: lowered_delivery,
         area,
         gate,
         effects,

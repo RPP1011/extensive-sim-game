@@ -469,7 +469,7 @@ fn pack_program_columns(
     range.push(r);
 
     // -- Delivery column. --
-    delivery_kind.push(pack_delivery(program.delivery));
+    delivery_kind.push(pack_delivery(&program.delivery));
 
     // -- Effect rows (stride = MAX_EFFECTS_PER_PROGRAM). --
     for i in 0..MAX_EFFECTS_PER_PROGRAM {
@@ -690,12 +690,21 @@ fn pack_stacking(m: StackingMode) -> u8 {
     }
 }
 
-/// Encode a `Delivery` to its u32 discriminant. Today only `Instant=0`
-/// exists; new variants land with their resolver and bump the hash.
+/// Encode a `Delivery` to its u32 discriminant.
+///
+/// `Instant`             → 0 (no payload)
+/// `Method { kind, raw }` → 1 + (kind ordinal << 8)
+///                          (low byte signals "method delivery"; next
+///                          byte carries the DeliveryMethodKind ordinal,
+///                          stable per the enum's `#[repr(u8)]`).
+///
+/// `raw` is CPU-only metadata and does not pack — apply handlers
+/// re-fetch from `AbilityProgram.delivery` (CPU-side) when needed.
 #[inline]
-fn pack_delivery(d: Delivery) -> u32 {
+fn pack_delivery(d: &Delivery) -> u32 {
     match d {
         Delivery::Instant => 0,
+        Delivery::Method { kind, raw: _ } => 1 | ((*kind as u32) << 8),
     }
 }
 
