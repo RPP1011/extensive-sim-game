@@ -702,6 +702,42 @@ fn lowering_nested_budget_exceeded() {
     }
 }
 
+#[test]
+fn lowering_nested_modifier_dropped_chance() {
+    // #141: a nested stmt carrying a modifier (here, `chance 50%`)
+    // would silently disappear at lowering — the per-ability
+    // aggregator only captures outer-stmt modifiers. Surface loudly
+    // with the offending slot named.
+    use dsl_compiler::ability_lower::LowerError;
+    let err = lower_inline(
+        "ability X { target: enemy cooldown: 1s damage 50 { stun 1s chance 50% } }"
+    );
+    match err {
+        LowerError::NestedModifierDropped { ability, verb, modifier, .. } => {
+            assert_eq!(ability, "X");
+            assert_eq!(verb, "stun");
+            assert_eq!(modifier, "chance");
+        }
+        other => panic!("expected NestedModifierDropped(chance); got {other:?}"),
+    }
+}
+
+#[test]
+fn lowering_nested_modifier_dropped_in_shape() {
+    // Same shape, different slot — `in circle(2.0)` on a nested stmt.
+    use dsl_compiler::ability_lower::LowerError;
+    let err = lower_inline(
+        "ability X { target: enemy cooldown: 1s damage 50 { damage 10 in circle(2.0) } }"
+    );
+    match err {
+        LowerError::NestedModifierDropped { modifier, verb, .. } => {
+            assert_eq!(verb, "damage");
+            assert_eq!(modifier, "in-shape");
+        }
+        other => panic!("expected NestedModifierDropped(in-shape); got {other:?}"),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 2. Wave 1 corpus regression: no modifiers, lowers cleanly
 // ---------------------------------------------------------------------------

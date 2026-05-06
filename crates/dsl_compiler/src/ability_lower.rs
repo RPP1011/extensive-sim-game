@@ -185,6 +185,20 @@ pub enum LowerError {
         max:     usize,
         span:    Span,
     },
+    /// Wave 1.5#9 follow-up (#141): an outer effect's nested stmt
+    /// carries its OWN modifier (chance/stacking/lifetime/scaling/
+    /// in-shape/tags/for-duration/when/recursive-nested). Today the
+    /// per-ability aggregator only captures outer-stmt modifiers, so
+    /// inner-stmt modifiers would silently disappear — a real
+    /// authoring footgun. Recursive aggregator capture is a future
+    /// architectural lift; until then we error loudly with the
+    /// offending modifier slot named.
+    NestedModifierDropped {
+        ability:  String,
+        verb:     String,
+        modifier: &'static str,
+        span:     Span,
+    },
     /// Wave 1.5 modifier lowering #1 (tag vocabulary): a `[TAG: value]`
     /// modifier named a tag not in the engine's `AbilityTag` vocabulary
     /// (PHYSICAL/MAGICAL/CROWD_CONTROL/HEAL/DEFENSE/UTILITY today).
@@ -323,6 +337,10 @@ impl std::fmt::Display for LowerError {
             LowerError::NestedBudgetExceeded { ability, count, max, .. } => write!(
                 f,
                 "ability `{ability}` declares {count} nested effects on a single outer effect but the per-effect budget is {max} (MAX_NESTED_PER_EFFECT)"
+            ),
+            LowerError::NestedModifierDropped { ability, verb, modifier, .. } => write!(
+                f,
+                "ability `{ability}`'s nested `{verb}` carries a `{modifier}` modifier that the lowering would silently drop today (recursive aggregator capture is a future lift); rewrite the inner verb to avoid the modifier or pull the effect to the outer level"
             ),
         }
     }
@@ -753,6 +771,35 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
                     count:   inner_nested.len() + 1,
                     max:     MAX_NESTED_PER_EFFECT,
                     span:    nested_stmt.span,
+                });
+            }
+            // #141: error loudly if the nested stmt carries any modifier
+            // captured by the OUTER per-ability aggregators (those
+            // aggregators only see outer stmts; inner-stmt modifiers
+            // would silently disappear at lowering). Recursive
+            // aggregator capture is a future architectural lift.
+            //
+            // Note: `for-duration` is NOT included here — duration is
+            // consumed by `lower_effect_stmt`'s verb dispatch directly
+            // (slow/stun/etc. fold it into the EffectOp's duration_ticks
+            // field; damage/heal/shield promote into DoT/HoT/TimedShield
+            // variants). It never reaches the outer aggregator and so
+            // is never silently dropped.
+            let modifier = if nested_stmt.area.is_some()       { Some("in-shape") }
+                else if !nested_stmt.tags.is_empty()           { Some("[TAG: …]") }
+                else if nested_stmt.chance.is_some()           { Some("chance") }
+                else if nested_stmt.stacking.is_some()         { Some("stacking") }
+                else if !nested_stmt.scalings.is_empty()       { Some("+ N% stat_ref") }
+                else if nested_stmt.lifetime.is_some()         { Some("lifetime") }
+                else if nested_stmt.condition.is_some()        { Some("when") }
+                else if !nested_stmt.nested.is_empty()         { Some("nested {…}") }
+                else                                           { None };
+            if let Some(m) = modifier {
+                return Err(LowerError::NestedModifierDropped {
+                    ability:  decl.name.clone(),
+                    verb:     nested_stmt.verb.clone(),
+                    modifier: m,
+                    span:     nested_stmt.span,
                 });
             }
             let nested_op = lower_effect_stmt(nested_stmt)?;
