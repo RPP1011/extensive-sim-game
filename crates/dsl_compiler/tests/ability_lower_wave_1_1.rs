@@ -1,77 +1,83 @@
-//! Wave 1.1 lowering tests — verify the new parser surfaces
-//! (`cost`/`charges`/`recharge`/`toggle` headers + top-level `passive`
-//! blocks) error cleanly at the lowering boundary, and that the legacy
-//! Wave 1 corpus still lowers without regression.
+//! Wave 1.1 lowering tests — verify the new parser surfaces lower
+//! into the engine's IR slots (cost/charges/recharge/toggle), and that
+//! `passive` top-level blocks still defer to Wave 2+ via
+//! `PassiveBlockNotImplemented`. The Wave 1 corpus regression also
+//! lives here.
 //!
-//! Per `crates/dsl_compiler/src/ability_lower.rs` Wave 1.1 module-level
-//! docs: lowering of these surfaces requires engine-side schema changes
-//! (cost gates, per-agent charge SoA, toggle state, PerEvent dispatch
-//! keyed on trigger kinds) and is the work of Wave 2+. Until then we
-//! surface explicit `HeaderNotImplemented` / `PassiveBlockNotImplemented`
-//! errors rather than silently dropping the new fields.
+//! Wave 2 follow-on (post Delivery::Method, ea3af642+) promoted the
+//! header surfaces from `HeaderNotImplemented` errors into:
+//!   * `AbilityProgram.cost: Option<AbilityCost>`
+//!   * `AbilityProgram.charges: Option<u32>`
+//!   * `AbilityProgram.recharge_ticks: Option<u32>`
+//!   * `AbilityProgram.is_toggle: bool`
+//! Apply handlers debit / refill / toggle later (deferred — resource
+//! SoA fields like stamina + per-agent charge state still missing).
 
 use dsl_ast::parse_ability_file;
 use dsl_compiler::ability_lower::{lower_ability_decl, lower_ability_file, LowerError};
 
 // ---------------------------------------------------------------------------
-// 1. Each Wave 1.1 ability-block header surfaces HeaderNotImplemented
+// 1. Each Wave 1.1 ability-block header lowers into its IR slot
 // ---------------------------------------------------------------------------
 
 #[test]
-fn lowering_cost_header_returns_unimplemented_error() {
+fn lowering_cost_header_captures_resource_and_amount() {
+    use engine::ability::program::{CostAmount, CostResource};
     let src = "ability Bolt { target: enemy range: 5.0 cost: 30 mana cooldown: 1s damage 15 }";
     let file = parse_ability_file(src).expect("parser");
-    let err = lower_ability_decl(&file.abilities[0])
-        .expect_err("cost header must defer to Wave 2+");
-    match err {
-        LowerError::HeaderNotImplemented { header, span } => {
-            assert_eq!(header, "cost");
-            assert!(span.start < span.end, "span must be non-empty");
-        }
-        other => panic!("expected HeaderNotImplemented {{ header: \"cost\" }}; got {other:?}"),
-    }
+    let prog = lower_ability_decl(&file.abilities[0]).expect("cost header must lower");
+    let cost = prog.cost.expect("cost slot populated");
+    assert_eq!(cost.resource, CostResource::Mana);
+    assert_eq!(cost.amount, CostAmount::Flat(30.0));
 }
 
 #[test]
-fn lowering_charges_header_returns_unimplemented_error() {
+fn lowering_cost_percent_form_captures_percent() {
+    use engine::ability::program::{CostAmount, CostResource};
+    let src = "ability Drain { target: enemy cost: 10% hp cooldown: 1s damage 5 }";
+    let file = parse_ability_file(src).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("percent cost must lower");
+    let cost = prog.cost.expect("cost slot populated");
+    assert_eq!(cost.resource, CostResource::Hp);
+    assert_eq!(cost.amount, CostAmount::PercentOfMax(10.0));
+}
+
+#[test]
+fn lowering_charges_header_captures_max() {
     let src = "ability Volley { target: enemy charges: 3 cooldown: 1s damage 5 }";
     let file = parse_ability_file(src).expect("parser");
-    let err = lower_ability_decl(&file.abilities[0])
-        .expect_err("charges header must defer to Wave 2+");
-    match err {
-        LowerError::HeaderNotImplemented { header, .. } => {
-            assert_eq!(header, "charges");
-        }
-        other => panic!("expected HeaderNotImplemented {{ header: \"charges\" }}; got {other:?}"),
-    }
+    let prog = lower_ability_decl(&file.abilities[0]).expect("charges must lower");
+    assert_eq!(prog.charges, Some(3));
 }
 
 #[test]
-fn lowering_recharge_header_returns_unimplemented_error() {
+fn lowering_recharge_header_captures_ticks() {
     let src = "ability Volley { target: enemy recharge: 8s cooldown: 0 damage 5 }";
     let file = parse_ability_file(src).expect("parser");
-    let err = lower_ability_decl(&file.abilities[0])
-        .expect_err("recharge header must defer to Wave 2+");
-    match err {
-        LowerError::HeaderNotImplemented { header, .. } => {
-            assert_eq!(header, "recharge");
-        }
-        other => panic!("expected HeaderNotImplemented {{ header: \"recharge\" }}; got {other:?}"),
-    }
+    let prog = lower_ability_decl(&file.abilities[0]).expect("recharge must lower");
+    // 8s = 80 ticks at the fixed 100ms cadence.
+    assert_eq!(prog.recharge_ticks, Some(80));
 }
 
 #[test]
-fn lowering_toggle_header_returns_unimplemented_error() {
+fn lowering_toggle_marker_sets_is_toggle() {
     let src = "ability Stance { target: self toggle cooldown: 1s shield 20 }";
     let file = parse_ability_file(src).expect("parser");
-    let err = lower_ability_decl(&file.abilities[0])
-        .expect_err("toggle marker must defer to Wave 2+");
-    match err {
-        LowerError::HeaderNotImplemented { header, .. } => {
-            assert_eq!(header, "toggle");
-        }
-        other => panic!("expected HeaderNotImplemented {{ header: \"toggle\" }}; got {other:?}"),
-    }
+    let prog = lower_ability_decl(&file.abilities[0]).expect("toggle must lower");
+    assert!(prog.is_toggle, "is_toggle must be true after `toggle` marker");
+}
+
+#[test]
+fn lowering_no_wave_1_1_headers_keeps_defaults() {
+    // Wave 1 corpus shape — no cost/charges/recharge/toggle declared.
+    // Defaults stay None/false so existing programs are bit-stable.
+    let src = "ability Plain { target: enemy range: 5.0 cooldown: 1s damage 5 }";
+    let file = parse_ability_file(src).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("must lower");
+    assert!(prog.cost.is_none());
+    assert!(prog.charges.is_none());
+    assert!(prog.recharge_ticks.is_none());
+    assert!(!prog.is_toggle);
 }
 
 // ---------------------------------------------------------------------------
@@ -164,17 +170,8 @@ ability Mend {
     assert_eq!(progs.len(), 3);
 }
 
-#[test]
-fn lowering_diagnostic_message_mentions_wave_2() {
-    // Render-quality smoke test: the LowerError Display impl should be
-    // explicit about WHY the header is unimplemented so authors don't
-    // file bugs against a known-deferred feature.
-    let src = "ability X { target: self cost: 30 mana cooldown: 1s heal 1 }";
-    let file = parse_ability_file(src).expect("parser");
-    let err = lower_ability_decl(&file.abilities[0]).expect_err("must error");
-    let msg = err.to_string();
-    assert!(
-        msg.contains("cost") && (msg.contains("Wave 2") || msg.contains("Wave 2+")),
-        "diagnostic should mention `cost` and `Wave 2`; got: {msg}"
-    );
-}
+// Diagnostic test retired: cost/charges/recharge/toggle now lower into
+// AbilityProgram fields rather than erroring. The lowering tests above
+// pin the captured values; render-quality is covered by the
+// PassiveBlockNotImplemented diagnostic test for the surfaces that
+// still defer.

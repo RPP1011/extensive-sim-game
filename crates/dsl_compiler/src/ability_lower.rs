@@ -88,7 +88,7 @@ use dsl_ast::ast::{
     AbilityDecl, AbilityFile, AbilityHeader, EffectArg, EffectStmt, HintName, Span, TargetMode,
 };
 use engine::ability::program::{
-    AbilityHint, AbilityProgram, AbilityTag, Area, Delivery, EffectAreaShape, EffectOp, EffectWhenCondition, MAX_NESTED_PER_EFFECT,
+    AbilityCost, AbilityHint, AbilityProgram, AbilityTag, Area, CostAmount, CostResource, Delivery, EffectAreaShape, EffectOp, EffectWhenCondition, MAX_NESTED_PER_EFFECT,
     EffectScaling, Gate, LifetimeMode, ScalingStatRef, ShapeKind, StackingMode, TargetSelector,
     MAX_EFFECTS_PER_PROGRAM, MAX_SCALINGS_PER_EFFECT, MAX_TAGS_PER_PROGRAM,
 };
@@ -438,6 +438,12 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     // proximity check.
     let mut area = Area::SingleTarget { range: 0.0 };
     let mut hint: Option<AbilityHint> = None;
+    // Wave 1.1 cost header — captured into program.cost. None when
+    // the .ability declared no cost header.
+    let mut lowered_cost: Option<AbilityCost> = None;
+    let mut lowered_charges: Option<u32> = None;
+    let mut lowered_recharge_ticks: Option<u32> = None;
+    let mut lowered_is_toggle: bool = false;
 
     for header in &decl.headers {
         match header {
@@ -477,28 +483,31 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
             // arm carries its own span (where available) so the
             // diagnostic points at the offending source line.
             AbilityHeader::Cost(spec) => {
-                return Err(LowerError::HeaderNotImplemented {
-                    header: "cost",
-                    span:   spec.span,
+                // Wave 1.1 cost header (#74 / Wave 2 follow-on): map
+                // the AST CostSpec into the engine's AbilityCost slot.
+                // Apply handlers debit at cast-decide later (deferred —
+                // resource SoA fields like stamina not all wired yet).
+                lowered_cost = Some(AbilityCost {
+                    resource: match spec.resource {
+                        dsl_ast::ast::CostResource::Mana    => CostResource::Mana,
+                        dsl_ast::ast::CostResource::Stamina => CostResource::Stamina,
+                        dsl_ast::ast::CostResource::Hp      => CostResource::Hp,
+                        dsl_ast::ast::CostResource::Gold    => CostResource::Gold,
+                    },
+                    amount: match spec.amount {
+                        dsl_ast::ast::CostAmount::Flat(v)         => CostAmount::Flat(v),
+                        dsl_ast::ast::CostAmount::PercentOfMax(v) => CostAmount::PercentOfMax(v),
+                    },
                 });
             }
-            AbilityHeader::Charges(_) => {
-                return Err(LowerError::HeaderNotImplemented {
-                    header: "charges",
-                    span:   decl.span,
-                });
+            AbilityHeader::Charges(n) => {
+                lowered_charges = Some(*n);
             }
-            AbilityHeader::Recharge(_) => {
-                return Err(LowerError::HeaderNotImplemented {
-                    header: "recharge",
-                    span:   decl.span,
-                });
+            AbilityHeader::Recharge(d) => {
+                lowered_recharge_ticks = Some(duration_to_ticks(d.millis));
             }
             AbilityHeader::Toggle => {
-                return Err(LowerError::HeaderNotImplemented {
-                    header: "toggle",
-                    span:   decl.span,
-                });
+                lowered_is_toggle = true;
             }
             // Wave 1.4: parser surfaces — lowering is Wave 2+.
             AbilityHeader::Recast(_) => {
@@ -857,6 +866,10 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
         scalings_per_effect: scalings_per_effect_acc,
         when_per_effect: when_per_effect_acc,
         nested_per_effect: nested_per_effect_acc,
+        cost: lowered_cost,
+        charges: lowered_charges,
+        recharge_ticks: lowered_recharge_ticks,
+        is_toggle: lowered_is_toggle,
     })
 }
 

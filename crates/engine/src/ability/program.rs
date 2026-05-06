@@ -388,7 +388,10 @@ impl AbilityTag {
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "PHYSICAL" => Some(Self::Physical),
-            "MAGICAL" => Some(Self::Magical),
+            // MAGIC is an authoring-time alias for the canonical
+            // MAGICAL spelling. The LoL corpus uses both; accept
+            // either so authors don't need to remember which.
+            "MAGICAL" | "MAGIC" => Some(Self::Magical),
             "CROWD_CONTROL" => Some(Self::CrowdControl),
             "HEAL" => Some(Self::Heal),
             "DEFENSE" => Some(Self::Defense),
@@ -545,6 +548,43 @@ impl ShapeKind {
 pub struct EffectAreaShape {
     pub kind: ShapeKind,
     pub args: [f32; 4],
+}
+
+/// Top-level `cost: <amount> <resource>` header (spec §4.2). Captured
+/// here so apply handlers can debit the resource at cast-decide time
+/// (deferred infrastructure today). The resource vocabulary is fixed:
+/// mana / stamina / hp / gold.
+///
+/// Stored on `AbilityProgram.cost`; `None` means the .ability did not
+/// declare a cost header. Wave 1 corpus shape (Strike / ShieldUp /
+/// Mend / etc.) leaves it `None` — keeps existing program output
+/// bit-stable.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct AbilityCost {
+    pub resource: CostResource,
+    pub amount:   CostAmount,
+}
+
+/// Resource a `cost:` header debits from. Mirrors `dsl_ast::ast::CostResource`
+/// but lives in engine so apply handlers don't pull a dsl_ast dep.
+/// Numeric discriminants pinned for future packing.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum CostResource {
+    Mana    = 0,
+    Stamina = 1,
+    Hp      = 2,
+    Gold    = 3,
+}
+
+/// Magnitude of a `cost:` header — flat scalar or percent of the
+/// resource's max. Mirrors `dsl_ast::ast::CostAmount`. The percent
+/// scalar uses the Wave 1 convention (`25% mana` stores `25.0`, NOT
+/// `0.25`).
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum CostAmount {
+    Flat(f32),
+    PercentOfMax(f32),
 }
 
 /// Per-effect conditional gate from the `when <cond> [else <cond>]`
@@ -749,6 +789,26 @@ pub struct AbilityProgram {
     /// should compose multiple outer effects instead.
     pub nested_per_effect:
         SmallVec<[SmallVec<[EffectOp; MAX_NESTED_PER_EFFECT]>; MAX_EFFECTS_PER_PROGRAM]>,
+    /// Wave 1.1 `cost: <amount> <resource>` header. `None` for
+    /// abilities that declare no cost header (Wave 1 corpus +
+    /// abilities that gate purely on cooldown). Apply handlers
+    /// debit the resource at cast-decide time (deferred —
+    /// resource SoA fields not all wired yet, e.g. stamina).
+    pub cost: Option<AbilityCost>,
+    /// Wave 1.1 `charges: <int>` header — maximum stored charges
+    /// for charge-based recast abilities. `None` = no charge pool
+    /// (every cast goes straight to cooldown). Apply handlers wire
+    /// the per-agent charge SoA and recharge timer (deferred).
+    pub charges: Option<u32>,
+    /// Wave 1.1 `recharge: <duration>` header — time per charge to
+    /// regenerate when the pool is below max. Stored as ticks (100ms
+    /// each). Meaningless without `charges`; `None` if not declared.
+    pub recharge_ticks: Option<u32>,
+    /// Wave 1.1 `toggle` marker — declares this ability as a toggle
+    /// (cast to enable, recast to disable, optional per-tick drain).
+    /// `false` for one-shot abilities. Apply handlers wire toggle
+    /// state SoA + per-tick drain accounting (deferred).
+    pub is_toggle: bool,
 }
 
 impl AbilityProgram {
@@ -779,6 +839,10 @@ impl AbilityProgram {
             scalings_per_effect: SmallVec::new(),
             when_per_effect:     SmallVec::new(),
             nested_per_effect:   SmallVec::new(),
+            cost:                None,
+            charges:             None,
+            recharge_ticks:      None,
+            is_toggle:           false,
         }
     }
 

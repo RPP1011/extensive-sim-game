@@ -110,10 +110,13 @@ fn lol_corpus_lowering_baseline() {
         eprintln!("    {c:>3}  {e}");
     }
 
-    // Baseline assertion — frozen at the post-Wave-2-piece-5/6 number.
+    // Baseline assertion — frozen at the post-Wave-1.1-headers number.
     // If a later commit lowers MORE files, bump this floor; if fewer,
-    // investigate the regression.
-    let baseline = 0usize; // populated after first run prints actual count
+    // investigate the regression. Cost/charges/recharge/toggle now
+    // lower (was 65/8/-/- blockers); the surfaced downstream errors
+    // (TargetModeReserved direction/ground, ModifierNotImplemented:for)
+    // are the next-biggest unblock targets.
+    let baseline = 2usize;
     assert!(
         ok >= baseline,
         "LoL lowering regression: ok={ok} fell below baseline={baseline}",
