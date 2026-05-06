@@ -39,6 +39,7 @@
 mod id;
 pub use id::AbilityId;
 
+pub mod apply;
 pub mod packed;
 pub mod program;
 pub mod registry;
