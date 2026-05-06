@@ -25,7 +25,7 @@ use smallvec::SmallVec;
 /// the effects smallvec stays stack-resident and cast-dispatch touches a
 /// fixed-size window per cast. Pinned by the size-budget test. Changing this
 /// is a schema-hash bump.
-pub const MAX_EFFECTS_PER_PROGRAM: usize = 4;
+pub const MAX_EFFECTS_PER_PROGRAM: usize = 6;
 
 /// Maximum number of ability slots per agent. Governs the inner
 /// dimension of `SimState::ability_cooldowns`, which carries a

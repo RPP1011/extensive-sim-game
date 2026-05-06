@@ -906,7 +906,12 @@ mod tests {
         let reg = build(vec![prog]);
         let p = PackedAbilityRegistry::pack(&reg);
 
-        assert_eq!(p.effect_kinds, vec![0, 1, 2, 3]);
+        // MAX_EFFECTS_PER_PROGRAM=6 (#131-followup), so the 4-effect
+        // program packs to a 6-stride row with two trailing empties.
+        assert_eq!(
+            p.effect_kinds,
+            vec![0, 1, 2, 3, EFFECT_KIND_EMPTY as u32, EFFECT_KIND_EMPTY as u32],
+        );
         assert_eq!(
             p.effect_payload_a,
             vec![
@@ -914,6 +919,8 @@ mod tests {
                 5.0_f32.to_bits(),
                 7.5_f32.to_bits(),
                 20,
+                0,
+                0,
             ],
         );
         for v in &p.effect_payload_b {

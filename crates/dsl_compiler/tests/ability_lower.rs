@@ -397,6 +397,9 @@ fn budget_exceeded_when_more_than_four_effects() {
     // Five bare effects -> per-program budget breach. Effects must live
     // on their own lines because the parser only ends an effect statement
     // at a newline or `}` (see `parse_effect` in `ability_parser.rs`).
+    // MAX_EFFECTS_PER_PROGRAM bumped 4 → 6 (#131-followup) to fit
+    // LoL hero ultimates (5–6 effects each). Test now needs 7 to
+    // overrun the budget.
     let src = r#"
 ability TooMany {
     target: enemy
@@ -406,14 +409,16 @@ ability TooMany {
     damage 1
     damage 1
     damage 1
+    damage 1
+    damage 1
 }
 "#;
     let file = parse_ability_file(src).expect("parser");
-    let err = lower_ability_decl(&file.abilities[0]).expect_err("must reject 5 effects");
+    let err = lower_ability_decl(&file.abilities[0]).expect_err("must reject 7 effects");
     match err {
         LowerError::BudgetExceeded { count, max, ability, .. } => {
-            assert_eq!(count, 5);
-            assert_eq!(max, 4);
+            assert_eq!(count, 7);
+            assert_eq!(max, 6);
             assert_eq!(ability, "TooMany");
         }
         other => panic!("expected BudgetExceeded; got {other:?}"),

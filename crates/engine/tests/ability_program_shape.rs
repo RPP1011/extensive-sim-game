@@ -21,9 +21,10 @@ fn effect_op_size_under_16_bytes() {
 
 #[test]
 fn max_effects_per_program_bounded() {
-    // The smallvec inline budget is 4 effects; growing this changes the
-    // schema hash and the cast-dispatch hot-path footprint.
-    assert_eq!(MAX_EFFECTS_PER_PROGRAM, 4);
+    // Bumped 4 → 6 (#131-followup) to fit LoL hero ultimates (5–6
+    // effects each). Growing this further changes the schema hash and
+    // the cast-dispatch hot-path footprint.
+    assert_eq!(MAX_EFFECTS_PER_PROGRAM, 6);
 }
 
 #[test]
