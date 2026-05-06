@@ -1,0 +1,63 @@
+// DSL coverage corpus — Hero 1 of 4 (BladeStorm).
+//
+// Theme: a melee striker who chains physical damage. This file's job is
+// to exercise the parser/lowering surface around projectile/chain
+// delivery, physical AOE shapes (cone + line + circle), DoT, chance,
+// stacking modes (stack + extend), AD/MaxHP scaling, dash, knockback,
+// pull, modify_standing, charges + recharge, and the Mana/Hp cost
+// resources.
+//
+// All four abilities lower to AbilityProgram values and together cover
+// the BladeStorm slice of `dsl_coverage_corpus.rs`'s feature matrix.
+
+ability Cleave {
+    target: enemy
+    range: 4.0
+    cooldown: 6s
+    cast: 200ms
+    hint: damage
+
+    damage 35 in cone(60deg, 4.0) [PHYSICAL: 80] + 60% AD
+    knockback 1.5
+}
+
+ability BleedingStrike {
+    target: enemy
+    range: 5.0
+    cooldown: 4s
+    hint: damage
+
+    damage 8 for 3s stacking stack chance 80% [PHYSICAL: 50] + 5% max_hp {
+        slow 0.4 for 2s
+        modify_standing -25
+    }
+}
+
+ability Charge {
+    target: direction
+    range: 8.0
+    cooldown: 12s
+    cast: 350ms
+    hint: utility
+
+    deliver projectile { speed: 22.0 } {
+        on_hit {
+            damage 25 in line(8.0, 1.5) [PHYSICAL: 60]
+            stun 1s stacking extend
+        }
+    }
+    dash to_target
+}
+
+ability VolleyVolley {
+    target: enemy
+    range: 9.0
+    cost: 25 mana
+    charges: 3
+    recharge: 9s
+    cooldown: 0
+    hint: damage
+
+    damage 18 [PHYSICAL: 40] + 25% AD
+    pull 2.0
+}

@@ -1,0 +1,80 @@
+// DSL coverage corpus — Hero 3 of 4 (ShadowSummoner).
+//
+// Theme: a magical caster/CC specialist who relies on costly delivery
+// methods. This file's job is to exercise the channel/chain/tether/trap
+// delivery surfaces, all four cost resources we haven't already used
+// (Stamina + flat Mana + Gold), the four spec target modes that aren't
+// agent-paired (ground / direction / vector / global resolution lives
+// per-mode), the four Wave 2 piece 1 control verbs (root/silence/fear/
+// taunt), blink, the when/else condition modifier, the chance gate at a
+// non-trivial probability, the break_on_damage lifetime, the recursive
+// cast verb, MR + mana scalings, and stacking refresh.
+//
+// Wave 1.4 capture rule: `deliver <method> { params } { body }` blocks
+// are captured opaquely (verbatim source slice). Their inner `on_hit`/
+// `on_tick`/`on_trigger` bodies are NOT lowered into program.effects —
+// only the bare effect statements at the ability's top level are. So
+// each ability here also carries the "real" CC verb after the deliver
+// block, both as a form of pre-impact telegraph (silence telegraph
+// before the projectile lands; root field at the trap's spawn point;
+// etc.) and so the lowered IR exercises the verb dispatch arm.
+
+ability ShadowBolt {
+    target: enemy
+    range: 9.0
+    cooldown: 3s
+    cast: 500ms
+    cost: 8 mana
+    hint: damage
+
+    deliver projectile { speed: 18.0 } {
+        on_hit { damage 28 + 35% AP }
+    }
+    silence 1500ms stacking refresh in circle(1.0) [MAGICAL: 80] + 10% AP
+}
+
+ability WardingTrap {
+    target: ground
+    range: 5.0
+    cooldown: 14s
+    cost: 15 stamina
+    charges: 2
+    recharge: 18s
+    hint: crowd_control
+
+    deliver trap { arm_delay: 500ms, lifetime: 30s } {
+        on_trigger { damage 18 [MAGICAL: 40] }
+    }
+    root 2s in line(5.0, 1.0) [CROWD_CONTROL: 100] + 5% MR
+    fear 1s in sphere(2.0) [CROWD_CONTROL: 50]
+}
+
+ability SoulChain {
+    target: vector
+    range: 7.0
+    cooldown: 16s
+    cast: 700ms
+    cost: 30 mana
+    hint: crowd_control
+
+    deliver chain { jumps: 3, falloff: 0.7 } {
+        on_hit { damage 22 [MAGICAL: 60] + 25% AP }
+    }
+    taunt 1500ms when target.alive else target.shield_hp == 0 [CROWD_CONTROL: 70] + 15% mana
+    stun 750ms chance 60% [CROWD_CONTROL: 30]
+}
+
+ability DimensionShift {
+    target: ground
+    range: 6.0
+    cooldown: 20s
+    cast: 100ms
+    cost: 50 stamina
+    hint: utility
+
+    deliver tether { range: 6.0, break_on_distance: 8.0 } {
+        on_hit { damage 12 [MAGICAL: 30] }
+    }
+    blink 6.0
+    cast WardingTrap chance 50% break_on_damage
+}

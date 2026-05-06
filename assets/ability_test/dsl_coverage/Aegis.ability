@@ -1,0 +1,67 @@
+// DSL coverage corpus — Hero 4 of 4 (Aegis).
+//
+// Theme: a tank/disruptor whose kit lights up the remaining DSL surface
+// (toggle marker, self_aoe + global target modes, transfer_gold,
+// modify_standing, lifesteal/damage_modify with stacking, execute,
+// self_damage, gold-cost, the 5 shape primitives no other hero touched
+// — wall/cylinder/dome/hull/spread + box + column — plus the channel
+// delivery method).
+//
+// Each ability deliberately stays under MAX_EFFECTS_PER_PROGRAM (=6)
+// and MAX_NESTED_PER_EFFECT (=2). Tag and scaling totals likewise stay
+// under their per-program / per-effect budgets.
+
+ability IronStance {
+    target: self
+    toggle
+    cooldown: 1s
+    cost: 5 mana
+    hint: defense
+
+    damage_modify 0.6 8s stacking refresh break_on_damage [DEFENSE: 100] + 15% armor
+    buff attack_speed 0.2 for 8s [UTILITY: 25]
+}
+
+ability Bulwark {
+    target: self_aoe
+    range: 4.0
+    cooldown: 12s
+    cast: 250ms
+    hint: crowd_control
+
+    taunt 2s in ring(2.0, 4.0) [CROWD_CONTROL: 100] + 25% armor
+    shield 40 for 6s in cylinder(4.0, 2.0) [DEFENSE: 50] + 20% MR
+}
+
+ability WorldShatter {
+    target: global
+    cooldown: 60s
+    cast: 1500ms
+    hint: damage
+
+    deliver channel { duration: 2s, tick: 250ms } {
+        on_tick { damage 6 [MAGICAL: 30] }
+    }
+    damage 12 in dome(8.0) [MAGICAL: 40] + 10% AP
+    execute 25 in spread(8.0, 5) when target.hp < 30 [PHYSICAL: 100]
+    damage 15 in hull(7.0) [MAGICAL: 60]
+    damage 10 in wall(6.0, 3.0, 0.5, 90) [PHYSICAL: 25] + 5% AP
+    slow 0.5 for 2s in column(3.0, 4.0) [CROWD_CONTROL: 25] + 10% armor
+}
+
+ability BloodPact {
+    target: ally
+    range: 5.0
+    cooldown: 25s
+    cost: 100 gold
+    hint: utility
+
+    transfer_gold -50 when target.alive
+    modify_standing 75
+    lifesteal 0.4 6s stacking extend [HEAL: 50] {
+        self_damage 10
+        heal 5 for 2s
+    }
+    heal 25 in box(2.0, 2.0, 2.0) [HEAL: 60] + 20% hp
+    cast Bulwark
+}

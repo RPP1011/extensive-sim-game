@@ -1,0 +1,55 @@
+// DSL coverage corpus — Hero 2 of 4 (Lifeweaver).
+//
+// Theme: an ally-empowering healer/support. This file's job is to
+// exercise the heal/HoT/shield/TimedShield/buff verbs together with
+// `target: ally`, MAGICAL/HEAL/UTILITY tags, AP/MR/move_speed scalings,
+// the until_caster_dies + damageable_hp lifetime modifiers, ring +
+// sphere shapes, and the `for <duration>` modifier promoting
+// damage→DoT / heal→HoT / shield→TimedShield.
+
+ability MendingTouch {
+    target: ally
+    range: 6.0
+    cooldown: 5s
+    cast: 250ms
+    hint: heal
+
+    heal 30 [HEAL: 100] + 40% AP
+    heal 5 for 4s [HEAL: 25] + 10% AP
+}
+
+ability BlessingShield {
+    target: ally
+    range: 5.0
+    cooldown: 8s
+    hint: defense
+
+    shield 60 damageable_hp(60) [DEFENSE: 80] + 20% AP
+    buff move_speed 0.3 for 5s [UTILITY: 30]
+}
+
+ability RejuvenatingZone {
+    target: ground
+    range: 7.0
+    cooldown: 18s
+    cast: 500ms
+    hint: utility
+
+    deliver zone { duration: 4s, tick: 500ms } {
+        on_tick {
+            heal 12 in sphere(3.5) [HEAL: 60]
+            buff attack_speed 0.25 for 1s [UTILITY: 25]
+        }
+    }
+}
+
+ability LastResort {
+    target: self
+    cost: 25% hp
+    cooldown: 30s
+    hint: buff
+
+    shield 100 until_caster_dies [DEFENSE: 100] + 25% max_hp
+    heal 50 in ring(2.0, 4.0) [HEAL: 75] + 30% AP
+    buff move_speed 0.5 for 6s [UTILITY: 40] + 10% move_speed
+}
