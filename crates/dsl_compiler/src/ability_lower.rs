@@ -220,6 +220,23 @@ pub enum LowerError {
         method:  String,
         span:    Span,
     },
+    /// #143: a `when <cond>` (or `else <cond>`) modifier captured a
+    /// raw source slice that fails to re-parse as a standalone
+    /// expression at lower time. Today the parser captures the
+    /// predicate text verbatim (terminating at the next modifier
+    /// keyword / EOL / `}`); without re-validation, a typo'd
+    /// operator (`target.hp ~ 30`) or unbalanced sub-expression
+    /// silently ships through. Catching it here surfaces the bug
+    /// at the `.ability` author's screen instead of as a malformed
+    /// runtime predicate. Field-name validation against the agent
+    /// schema is a follow-up — this slice only catches syntax bugs.
+    WhenConditionParseError {
+        ability:   String,
+        clause:    &'static str, // "when" or "else"
+        predicate: String,
+        reason:    String,
+        span:      Span,
+    },
     /// #139 (deliver-block body parsing): a `<hook_ident> { … }` inside
     /// a `deliver` body block named a hook not in the engine's
     /// `DeliveryHookKind` vocabulary (on_hit/on_tick/on_arrival/
@@ -329,6 +346,10 @@ impl std::fmt::Display for LowerError {
             LowerError::UnknownDeliveryMethod { ability, method, .. } => write!(
                 f,
                 "ability `{ability}` uses `deliver {method} {{…}}` — `{method}` is not a known delivery method; valid methods (spec §9): projectile / channel / zone / chain / tether / trap"
+            ),
+            LowerError::WhenConditionParseError { ability, clause, predicate, reason, .. } => write!(
+                f,
+                "ability `{ability}`'s `{clause} {predicate}` clause does not re-parse as an expression: {reason}"
             ),
             LowerError::UnknownDeliveryHook { ability, method, hook, .. } => write!(
                 f,
@@ -831,10 +852,43 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
         // both source-text predicates onto the engine slot; engine
         // code does not parse them. Apply handlers wire the parse +
         // evaluate later (deferred infrastructure).
-        let when = stmt.condition.as_ref().map(|c| EffectWhenCondition {
-            when_cond: c.when_cond.clone(),
-            else_cond: c.else_cond.clone(),
-        });
+        // #143: re-parse the captured `when` (and optional `else`)
+        // predicate text as an expression. The Wave 1.5 parser
+        // captured it as opaque source text terminated by the next
+        // modifier keyword / EOL / `}` — that lets a typo'd operator
+        // (`target.hp ~ 30`) or unbalanced sub-expression silently
+        // ship through. Re-parsing here surfaces the bug with the
+        // ability name + clause + reason. Field-name validation
+        // against the agent schema is a follow-up; this slice
+        // only catches syntax bugs.
+        let when = if let Some(c) = stmt.condition.as_ref() {
+            if let Err(e) = dsl_ast::parser::parse_expression(&c.when_cond) {
+                return Err(LowerError::WhenConditionParseError {
+                    ability:   decl.name.clone(),
+                    clause:    "when",
+                    predicate: c.when_cond.clone(),
+                    reason:    e.message.clone(),
+                    span:      c.span,
+                });
+            }
+            if let Some(else_text) = c.else_cond.as_ref() {
+                if let Err(e) = dsl_ast::parser::parse_expression(else_text) {
+                    return Err(LowerError::WhenConditionParseError {
+                        ability:   decl.name.clone(),
+                        clause:    "else",
+                        predicate: else_text.clone(),
+                        reason:    e.message.clone(),
+                        span:      c.span,
+                    });
+                }
+            }
+            Some(EffectWhenCondition {
+                when_cond: c.when_cond.clone(),
+                else_cond: c.else_cond.clone(),
+            })
+        } else {
+            None
+        };
         if when.is_some() {
             any_when = true;
         }

@@ -58,6 +58,35 @@ pub fn parse_program(source: &str) -> Result<Program, ParseError> {
     Ok(Program { decls })
 }
 
+/// Parse a single expression from a free-floating source string. Used
+/// by downstream validators (e.g. dsl_compiler's when-condition
+/// re-parse #143) that captured an expression as raw text and need to
+/// turn it back into an `Expr` for syntactic / semantic checking.
+///
+/// The expression must consume the entire input — trailing junk is
+/// rejected with a ParseError so a half-consumed predicate like
+/// `target.hp < 30 then` doesn't silently lower as just
+/// `target.hp < 30`.
+pub fn parse_expression(source: &str) -> Result<Expr, ParseError> {
+    let mut c = Cursor::new(source);
+    c.skip_ws();
+    let expr = match parse_expr(&mut c) {
+        Ok(e) => e,
+        Err(e) => return Err(ParseError::new(source, e.span, e.context, e.message)),
+    };
+    c.skip_ws();
+    if !c.eof() {
+        let here = c.pos;
+        return Err(ParseError::new(
+            source,
+            crate::ast::Span::new(here, source.len()),
+            vec!["parsing standalone expression".to_string()],
+            "trailing input after expression".to_string(),
+        ));
+    }
+    Ok(expr)
+}
+
 /// Gather `@annotation`s that follow a just-parsed decl. Trailing annotations
 /// must sit on the same source line as the decl's closing token; an `@` that
 /// only appears after a newline is treated as the *next* decl's leading
