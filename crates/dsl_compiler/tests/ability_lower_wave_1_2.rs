@@ -29,8 +29,13 @@ template ElementalBolt(element: Material, radius: float = 3.0) {
 }
 "#;
     let file = parse_ability_file(src).expect("parser");
-    let err = lower_ability_file(&file).expect_err("lowering must error");
-    match err {
+    // #140: template defs surface as a `LowerOutcome::skipped` entry,
+    // not a hard `Err`. The file has no `ability` decls, so
+    // `programs` is empty.
+    let outcome = lower_ability_file(&file).expect("file must lower");
+    assert!(outcome.programs.is_empty(), "no abilities, no programs");
+    assert_eq!(outcome.skipped.len(), 1);
+    match &outcome.skipped[0] {
         LowerError::TemplateBlockNotImplemented { name, span } => {
             assert_eq!(name, "ElementalBolt");
             assert!(span.start < span.end, "non-empty span");
@@ -44,8 +49,9 @@ template ElementalBolt(element: Material, radius: float = 3.0) {
 fn lowering_template_block_diagnostic_names_the_template() {
     let src = "template Empty() { damage 1 }";
     let file = parse_ability_file(src).expect("parser");
-    let err = lower_ability_file(&file).expect_err("lowering must error");
-    let msg = err.to_string();
+    let outcome = lower_ability_file(&file).expect("file must lower");
+    assert_eq!(outcome.skipped.len(), 1);
+    let msg = outcome.skipped[0].to_string();
     assert!(
         msg.contains("Empty"),
         "diagnostic must name the template; got: {msg}"
@@ -57,21 +63,35 @@ fn lowering_template_block_diagnostic_names_the_template() {
 }
 
 #[test]
-fn lowering_first_template_short_circuits() {
-    // Multiple templates — the first one in source order should be the
-    // surfaced diagnostic so authors get a stable error location.
+fn lowering_collects_every_template_into_skipped_list_in_source_order() {
+    // #140: pre-#140 the first template short-circuited and the
+    // second was invisible. Now both surface as `skipped` entries in
+    // source order so authors see a complete list of decls that
+    // didn't lower.
     let src = r#"
 template FirstOne() { damage 1 }
 template SecondOne() { heal 1 }
 "#;
     let file = parse_ability_file(src).expect("parser");
-    let err = lower_ability_file(&file).expect_err("lowering must error");
-    match err {
-        LowerError::TemplateBlockNotImplemented { name, .. } => {
-            assert_eq!(name, "FirstOne", "first template wins");
-        }
-        other => panic!("expected TemplateBlockNotImplemented; got {other:?}"),
-    }
+    let outcome = lower_ability_file(&file).expect("file must lower");
+    assert!(outcome.programs.is_empty(), "no abilities");
+    assert_eq!(outcome.skipped.len(), 2, "both templates must be skipped");
+    assert!(
+        matches!(
+            &outcome.skipped[0],
+            LowerError::TemplateBlockNotImplemented { name, .. } if name == "FirstOne"
+        ),
+        "first skipped entry must be FirstOne; got {:?}",
+        outcome.skipped[0]
+    );
+    assert!(
+        matches!(
+            &outcome.skipped[1],
+            LowerError::TemplateBlockNotImplemented { name, .. } if name == "SecondOne"
+        ),
+        "second skipped entry must be SecondOne; got {:?}",
+        outcome.skipped[1]
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -134,7 +154,11 @@ ability Fireball : ElementalBolt(fire, 4.0) {
 }
 "#;
     let file = parse_ability_file(src).expect("parser");
-    let err = lower_ability_file(&file).expect_err("lowering must error");
+    // Per-decl errors (instantiation hits an unimplemented path) DO
+    // still propagate as `Err` — they're genuine bugs in the source,
+    // not deferred-feature gaps. Only top-level passive/template/
+    // structure DEFINITIONS land in `outcome.skipped`.
+    let err = lower_ability_file(&file).expect_err("instantiating ability must error");
     match err {
         LowerError::TemplateInstantiationNotImplemented { ability, template, .. } => {
             assert_eq!(ability, "Fireball");

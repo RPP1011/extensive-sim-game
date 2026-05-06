@@ -94,9 +94,14 @@ passive Vigilance {
 }
 "#;
     let file = parse_ability_file(src).expect("parser");
-    let err = lower_ability_file(&file)
-        .expect_err("passive block must defer to Wave 2+");
-    match err {
+    // #140: passive blocks no longer abort the file — they're collected
+    // into `LowerOutcome::skipped` so any abilities alongside still
+    // lower. This file has zero abilities + one passive, so the
+    // outcome's `programs` is empty and `skipped` carries the passive.
+    let outcome = lower_ability_file(&file).expect("file must lower");
+    assert!(outcome.programs.is_empty(), "no abilities, so no programs");
+    assert_eq!(outcome.skipped.len(), 1, "the lone passive is skipped");
+    match &outcome.skipped[0] {
         LowerError::PassiveBlockNotImplemented { name, span } => {
             assert_eq!(name, "Vigilance");
             assert!(span.start < span.end, "span must be non-empty");
@@ -106,10 +111,12 @@ passive Vigilance {
 }
 
 #[test]
-fn lowering_file_with_ability_then_passive_still_errors_on_passive() {
-    // Even when an `ability` precedes the `passive`, lowering must
-    // surface the unimplemented passive — silently dropping it would
-    // mean the author's combat reaction logic compiled away to nothing.
+fn lowering_file_with_ability_then_passive_lowers_ability_skips_passive() {
+    // #140: when an `ability` precedes the `passive`, the ability
+    // lowers cleanly into `outcome.programs` AND the passive surfaces
+    // in `outcome.skipped` (so callers can warn about it without
+    // losing the abilities). Pre-#140 the passive aborted the whole
+    // file with `Err(_)` and the ability never reached the registry.
     let src = r#"
 ability Strike {
     target: enemy
@@ -125,10 +132,16 @@ passive ThornArmor {
 }
 "#;
     let file = parse_ability_file(src).expect("parser");
-    let err = lower_ability_file(&file).expect_err("passive must error");
+    let outcome = lower_ability_file(&file).expect("composite file must lower");
+    assert_eq!(outcome.programs.len(), 1, "Strike must lower");
+    assert_eq!(outcome.skipped.len(), 1, "ThornArmor must be skipped");
     assert!(
-        matches!(err, LowerError::PassiveBlockNotImplemented { ref name, .. } if name == "ThornArmor"),
-        "expected PassiveBlockNotImplemented(ThornArmor); got {err:?}"
+        matches!(
+            &outcome.skipped[0],
+            LowerError::PassiveBlockNotImplemented { name, .. } if name == "ThornArmor"
+        ),
+        "expected PassiveBlockNotImplemented(ThornArmor); got {:?}",
+        outcome.skipped[0]
     );
 }
 
@@ -166,8 +179,9 @@ ability Mend {
 }
 "#;
     let file = parse_ability_file(src).expect("parser");
-    let progs = lower_ability_file(&file).expect("legacy corpus must lower");
-    assert_eq!(progs.len(), 3);
+    let outcome = lower_ability_file(&file).expect("legacy corpus must lower");
+    assert_eq!(outcome.programs.len(), 3);
+    assert!(outcome.skipped.is_empty(), "no top-level skips on Wave 1 corpus");
 }
 
 // Diagnostic test retired: cost/charges/recharge/toggle now lower into
@@ -175,3 +189,56 @@ ability Mend {
 // pin the captured values; render-quality is covered by the
 // PassiveBlockNotImplemented diagnostic test for the surfaces that
 // still defer.
+
+// ---------------------------------------------------------------------------
+// 4. #140: composite file mixing all three skip categories — passive +
+//    ability + template + structure — yields 1 program + 3 skipped
+//    in source order, with the ability still reaching the registry.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lowering_composite_file_yields_programs_and_skipped_in_source_order() {
+    let src = r#"
+passive Riposte {
+    trigger: on_damage_taken
+    cooldown: 2s
+    damage 5
+}
+
+ability Strike {
+    target: enemy
+    range: 5.0
+    cooldown: 1s
+    damage 15
+}
+
+template Bolt(element: Material) {
+    damage 50
+}
+
+structure Hut(wall_mat: Material = stone) {
+    bounds: box(4, 3, 4)
+}
+"#;
+    let file = parse_ability_file(src).expect("parser");
+    let outcome = lower_ability_file(&file).expect("composite file must lower");
+
+    assert_eq!(outcome.programs.len(), 1, "Strike must lower despite the three skipped decls");
+    assert_eq!(outcome.skipped.len(), 3, "all three top-level decls land in skipped");
+
+    // The skip order is passives → templates → structures (the
+    // collection order in `lower_ability_file`). Authors get a stable
+    // ordering even if the source mixes them.
+    assert!(matches!(
+        &outcome.skipped[0],
+        LowerError::PassiveBlockNotImplemented { name, .. } if name == "Riposte"
+    ));
+    assert!(matches!(
+        &outcome.skipped[1],
+        LowerError::TemplateBlockNotImplemented { name, .. } if name == "Bolt"
+    ));
+    assert!(matches!(
+        &outcome.skipped[2],
+        LowerError::StructureBlockNotImplemented { name, .. } if name == "Hut"
+    ));
+}

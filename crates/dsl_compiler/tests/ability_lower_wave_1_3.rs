@@ -27,8 +27,11 @@ structure Castle(wall_mat: Material = stone, height: int = 8) {
 }
 "#;
     let file = parse_ability_file(src).expect("parser");
-    let err = lower_ability_file(&file).expect_err("lowering must error");
-    match err {
+    // #140: structure defs surface as `LowerOutcome::skipped` entries.
+    let outcome = lower_ability_file(&file).expect("file must lower");
+    assert!(outcome.programs.is_empty(), "no abilities, no programs");
+    assert_eq!(outcome.skipped.len(), 1);
+    match &outcome.skipped[0] {
         LowerError::StructureBlockNotImplemented { name, span } => {
             assert_eq!(name, "Castle");
             assert!(span.start < span.end, "non-empty span");
@@ -42,8 +45,9 @@ structure Castle(wall_mat: Material = stone, height: int = 8) {
 fn lowering_structure_block_diagnostic_names_the_structure() {
     let src = "structure Empty() { }";
     let file = parse_ability_file(src).expect("parser");
-    let err = lower_ability_file(&file).expect_err("lowering must error");
-    let msg = err.to_string();
+    let outcome = lower_ability_file(&file).expect("file must lower");
+    assert_eq!(outcome.skipped.len(), 1);
+    let msg = outcome.skipped[0].to_string();
     assert!(
         msg.contains("Empty"),
         "diagnostic must name the structure; got: {msg}"
@@ -55,21 +59,25 @@ fn lowering_structure_block_diagnostic_names_the_structure() {
 }
 
 #[test]
-fn lowering_first_structure_short_circuits() {
-    // Multiple structures — the first one in source order should be the
-    // surfaced diagnostic so authors get a stable error location.
+fn lowering_collects_every_structure_into_skipped_list_in_source_order() {
+    // #140: pre-#140 the first structure short-circuited and the
+    // second was invisible. Now both surface as `skipped` entries
+    // in source order.
     let src = r#"
 structure FirstOne() { }
 structure SecondOne() { place stone in box(1, 1, 1) }
 "#;
     let file = parse_ability_file(src).expect("parser");
-    let err = lower_ability_file(&file).expect_err("lowering must error");
-    match err {
-        LowerError::StructureBlockNotImplemented { name, .. } => {
-            assert_eq!(name, "FirstOne", "first structure wins");
-        }
-        other => panic!("expected StructureBlockNotImplemented; got {other:?}"),
-    }
+    let outcome = lower_ability_file(&file).expect("file must lower");
+    assert_eq!(outcome.skipped.len(), 2);
+    assert!(matches!(
+        &outcome.skipped[0],
+        LowerError::StructureBlockNotImplemented { name, .. } if name == "FirstOne"
+    ));
+    assert!(matches!(
+        &outcome.skipped[1],
+        LowerError::StructureBlockNotImplemented { name, .. } if name == "SecondOne"
+    ));
 }
 
 // ---------------------------------------------------------------------------

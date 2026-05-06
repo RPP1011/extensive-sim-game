@@ -100,9 +100,10 @@ fn lower_wave1_corpus_strike() {
     let path = corpus_path("Strike.ability");
     let src = std::fs::read_to_string(&path).expect("Strike.ability missing");
     let file = parse_ability_file(&src).expect("parser");
-    let progs = lower_ability_file(&file).expect("lowering");
-    assert_eq!(progs.len(), 1);
-    let p = &progs[0];
+    let outcome = lower_ability_file(&file).expect("lowering");
+    assert!(outcome.skipped.is_empty(), "no top-level skips on Wave 1 corpus");
+    assert_eq!(outcome.programs.len(), 1);
+    let p = &outcome.programs[0];
     match p.area {
         Area::SingleTarget { range } => assert!((range - 5.0).abs() < 1e-6),
     }
@@ -117,9 +118,10 @@ fn lower_wave1_corpus_shield_up() {
     let path = corpus_path("ShieldUp.ability");
     let src = std::fs::read_to_string(&path).expect("ShieldUp.ability missing");
     let file = parse_ability_file(&src).expect("parser");
-    let progs = lower_ability_file(&file).expect("lowering");
-    assert_eq!(progs.len(), 1);
-    let p = &progs[0];
+    let outcome = lower_ability_file(&file).expect("lowering");
+    assert!(outcome.skipped.is_empty(), "no top-level skips on Wave 1 corpus");
+    assert_eq!(outcome.programs.len(), 1);
+    let p = &outcome.programs[0];
     assert_eq!(p.gate.cooldown_ticks, 40);
     assert!(!p.gate.hostile_only);
     assert!(matches!(p.effects[0], EffectOp::Shield { .. }));
@@ -130,9 +132,10 @@ fn lower_wave1_corpus_mend() {
     let path = corpus_path("Mend.ability");
     let src = std::fs::read_to_string(&path).expect("Mend.ability missing");
     let file = parse_ability_file(&src).expect("parser");
-    let progs = lower_ability_file(&file).expect("lowering");
-    assert_eq!(progs.len(), 1);
-    let p = &progs[0];
+    let outcome = lower_ability_file(&file).expect("lowering");
+    assert!(outcome.skipped.is_empty(), "no top-level skips on Wave 1 corpus");
+    assert_eq!(outcome.programs.len(), 1);
+    let p = &outcome.programs[0];
     assert_eq!(p.gate.cooldown_ticks, 30);
     assert!(!p.gate.hostile_only);
     assert!(matches!(p.effects[0], EffectOp::Heal { .. }));

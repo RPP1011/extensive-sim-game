@@ -401,47 +401,68 @@ impl std::fmt::Display for LowerError {
 
 impl std::error::Error for LowerError {}
 
-/// Lower every `ability` decl inside an `AbilityFile`. The output preserves
-/// declaration order so callers wiring a registry slot table see the same
-/// indexing as the source file.
+/// Outcome of lowering one `AbilityFile`. The split lets callers see
+/// which abilities lowered cleanly AND which top-level decls were
+/// skipped because their semantics aren't wired yet (passive blocks,
+/// template definitions, structure definitions). Pre-#140 the first
+/// such decl was a hard `Err(_)`, which short-circuited the entire
+/// file even when valid `ability` decls followed it. That broke the
+/// composite-file shape the LoL corpus uses (a passive-and-three-
+/// abilities `.ability` would fail rather than yield three programs +
+/// one warning).
 ///
-/// Errors short-circuit on the first failure — call `lower_ability_decl`
-/// directly if you need per-decl error accumulation.
+/// `programs` holds the cleanly-lowered abilities in declaration
+/// order; `skipped` collects one entry per top-level decl that's
+/// parsed but not yet lowered (passives / templates / structures).
+/// Per-ability lowering errors still abort with `Err(_)` — those are
+/// genuine bugs in the source, not "feature-not-yet-wired" gaps.
+#[derive(Debug, Default)]
+pub struct LowerOutcome {
+    pub programs: Vec<AbilityProgram>,
+    pub skipped:  Vec<LowerError>,
+}
+
+/// Lower every `ability` decl inside an `AbilityFile`. The output
+/// preserves declaration order so callers wiring a registry slot table
+/// see the same indexing as the source file.
 ///
-/// Wave 1.1: if `file.passives` is non-empty, the first passive is
-/// surfaced as `LowerError::PassiveBlockNotImplemented`. Lowering of
-/// passives requires PerEvent dispatch wiring (Wave 2+); silent skip
-/// would mean an author's `passive Riposte { … }` block compiled away to
-/// nothing, which is a worse outcome than a loud error.
-pub fn lower_ability_file(file: &AbilityFile) -> Result<Vec<AbilityProgram>, LowerError> {
-    if let Some(passive) = file.passives.first() {
-        return Err(LowerError::PassiveBlockNotImplemented {
+/// Per-ability lowering errors (UnknownEffectVerb / EffectArgMismatch
+/// / typed-program contract violations) still propagate as `Err(_)`.
+///
+/// Wave 1.1 / 1.2 / 1.3 top-level decls (`passive` / `template` /
+/// `structure`) parse cleanly but aren't lowered yet — passives need
+/// PerEvent dispatch (Wave 2+), templates need expansion / parameter
+/// substitution (Wave 2+), structures need voxel rasterization +
+/// StructureRegistry (Wave 2+). Pre-#140, the first such decl
+/// short-circuited the WHOLE file with `Err(_)`. Post-#140, each is
+/// recorded as a `LowerOutcome::skipped` entry and the abilities
+/// alongside continue to lower. Authors who want the loud error
+/// per-decl can iterate `outcome.skipped` and pick the first.
+pub fn lower_ability_file(file: &AbilityFile) -> Result<LowerOutcome, LowerError> {
+    let mut out = LowerOutcome {
+        programs: Vec::with_capacity(file.abilities.len()),
+        skipped:  Vec::new(),
+    };
+    for passive in &file.passives {
+        out.skipped.push(LowerError::PassiveBlockNotImplemented {
             name: passive.name.clone(),
             span: passive.span,
         });
     }
-    // Wave 1.2: top-level `template` blocks parse but expansion lives
-    // at Wave 2+. Surface the first one so a silently-dropped template
-    // never reaches the registry.
-    if let Some(template) = file.templates.first() {
-        return Err(LowerError::TemplateBlockNotImplemented {
+    for template in &file.templates {
+        out.skipped.push(LowerError::TemplateBlockNotImplemented {
             name: template.name.clone(),
             span: template.span,
         });
     }
-    // Wave 1.3: top-level `structure` blocks parse but voxel
-    // rasterization + StructureRegistry (spec §12.2) lives at Wave 2+.
-    // Surface the first one so a silently-dropped structure never
-    // reaches the registry.
-    if let Some(structure) = file.structures.first() {
-        return Err(LowerError::StructureBlockNotImplemented {
+    for structure in &file.structures {
+        out.skipped.push(LowerError::StructureBlockNotImplemented {
             name: structure.name.clone(),
             span: structure.span,
         });
     }
-    let mut out = Vec::with_capacity(file.abilities.len());
     for decl in &file.abilities {
-        out.push(lower_ability_decl(decl)?);
+        out.programs.push(lower_ability_decl(decl)?);
     }
     Ok(out)
 }
