@@ -550,6 +550,22 @@ fn eval_binary<C: ReadContext>(
             "dsl_ast::eval::scoring: BinOp::{op:?} is not in the wolves+humans scoring survey — \
              see docs/superpowers/notes/2026-04-22-wolves-humans-interp-coverage.md §2"
         ),
+        // #159: bitwise ops (u32-only). Scoring expressions are
+        // arithmetic — bitset operations don't appear in the
+        // wolves+humans scoring survey, but we implement them so a
+        // future score expression like `(skills & WOODCUTTING) * 0.5`
+        // doesn't fall off the dispatcher.
+        BinOp::BitOr | BinOp::BitXor | BinOp::BitAnd => {
+            let l = eval_expr(lhs, ctx, agent, locals, views) as u32;
+            let r = eval_expr(rhs, ctx, agent, locals, views) as u32;
+            let out = match op {
+                BinOp::BitOr  => l | r,
+                BinOp::BitXor => l ^ r,
+                BinOp::BitAnd => l & r,
+                _ => unreachable!(),
+            };
+            out as f32
+        }
     }
 }
 

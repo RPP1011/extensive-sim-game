@@ -371,6 +371,19 @@ fn eval_binary<C: ReadContext>(
     // builtins helper so Tasks 4 and 5 can reuse the same logic.
     let l = eval_expr(lhs, ctx, agent, locals).as_f32();
     let r = eval_expr(rhs, ctx, agent, locals).as_f32();
+    // #159: bitwise ops on u32 (round-tripped through f32). See
+    // physics evaluator for the rationale + caveats.
+    if matches!(op, BinOp::BitOr | BinOp::BitXor | BinOp::BitAnd) {
+        let lu = l as u32;
+        let ru = r as u32;
+        let out = match op {
+            BinOp::BitOr  => lu | ru,
+            BinOp::BitXor => lu ^ ru,
+            BinOp::BitAnd => lu & ru,
+            _ => unreachable!(),
+        };
+        return Val::Float(out as f32);
+    }
     match op {
         BinOp::Lt => Val::Bool(l < r),
         BinOp::LtEq => Val::Bool(l <= r),
@@ -382,6 +395,7 @@ fn eval_binary<C: ReadContext>(
         BinOp::And | BinOp::Or | BinOp::Eq | BinOp::NotEq => {
             unreachable!("handled above")
         }
+        BinOp::BitOr | BinOp::BitXor | BinOp::BitAnd => unreachable!("handled above"),
     }
 }
 

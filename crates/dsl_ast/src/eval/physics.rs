@@ -754,6 +754,24 @@ fn eval_binary<C: CascadeContext>(
         };
     }
 
+    // #159: bitwise ops (`|`, `^`, `&`) operate on u32 values. The
+    // physics CPU evaluator stores numerics as f32, so the operands
+    // round-trip through f32→u32. This is faithful only when the
+    // operands really are non-negative integers — which they are
+    // for the intended use case (recipe / skill bitsets). Float
+    // operands silently truncate.
+    if matches!(op, BinOp::BitOr | BinOp::BitXor | BinOp::BitAnd) {
+        let lu = eval_expr(lhs, ctx, locals).as_f32() as u32;
+        let ru = eval_expr(rhs, ctx, locals).as_f32() as u32;
+        let out = match op {
+            BinOp::BitOr  => lu | ru,
+            BinOp::BitXor => lu ^ ru,
+            BinOp::BitAnd => lu & ru,
+            _ => unreachable!(),
+        };
+        return PVal::Float(out as f32);
+    }
+
     // Numeric ops.
     let l = eval_expr(lhs, ctx, locals).as_f32();
     let r = eval_expr(rhs, ctx, locals).as_f32();
@@ -766,6 +784,7 @@ fn eval_binary<C: CascadeContext>(
             PVal::Float(crate::eval::builtins::eval_arithmetic_binop(op, l, r))
         }
         BinOp::And | BinOp::Or | BinOp::Eq | BinOp::NotEq => unreachable!("handled above"),
+        BinOp::BitOr | BinOp::BitXor | BinOp::BitAnd => unreachable!("handled above"),
     }
 }
 

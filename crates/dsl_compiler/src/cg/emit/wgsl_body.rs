@@ -620,6 +620,9 @@ fn binary_op_to_wgsl(op: BinaryOp) -> &'static str {
         NeBool | NeU32 | NeI32 | NeF32 | NeAgentId => "!=",
         And => "&&",
         Or => "||",
+        BitOrU32 => "|",
+        BitXorU32 => "^",
+        BitAndU32 => "&",
     }
 }
 

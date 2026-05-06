@@ -235,6 +235,17 @@ pub enum BinaryOp {
     // --- Logical ---
     And,
     Or,
+
+    // --- Bitwise (#159) ---
+    //
+    // Unsigned-int only at the CG layer. Used for ability-state
+    // bitset merges (`recipes_known | RECIPE_BREAD`) and membership
+    // tests (`(skills & WOODCUTTING) != 0u`). Intentionally not
+    // emitted for I32 / Bool today — add per-type variants when a
+    // fixture requires them.
+    BitOrU32,
+    BitXorU32,
+    BitAndU32,
 }
 
 impl BinaryOp {
@@ -245,7 +256,7 @@ impl BinaryOp {
             AddF32 | SubF32 | MulF32 | DivF32 | ModF32 | LtF32 | LeF32 | GtF32 | GeF32 | EqF32
             | NeF32 => CgTy::F32,
             AddU32 | SubU32 | MulU32 | DivU32 | ModU32 | LtU32 | LeU32 | GtU32 | GeU32 | EqU32
-            | NeU32 => CgTy::U32,
+            | NeU32 | BitOrU32 | BitXorU32 | BitAndU32 => CgTy::U32,
             AddI32 | SubI32 | MulI32 | DivI32 | ModI32 | LtI32 | LeI32 | GtI32 | GeI32 | EqI32
             | NeI32 => CgTy::I32,
             AddVec3 | SubVec3 | MulVec3ByF32 | DivVec3ByF32 => CgTy::Vec3F32,
@@ -276,7 +287,7 @@ impl BinaryOp {
         use BinaryOp::*;
         match self {
             AddF32 | SubF32 | MulF32 | DivF32 | ModF32 => CgTy::F32,
-            AddU32 | SubU32 | MulU32 | DivU32 | ModU32 => CgTy::U32,
+            AddU32 | SubU32 | MulU32 | DivU32 | ModU32 | BitOrU32 | BitXorU32 | BitAndU32 => CgTy::U32,
             AddI32 | SubI32 | MulI32 | DivI32 | ModI32 => CgTy::I32,
             AddVec3 | SubVec3 | MulVec3ByF32 | DivVec3ByF32 => CgTy::Vec3F32,
             // Every comparison and logical op produces `Bool`.
@@ -335,6 +346,9 @@ impl BinaryOp {
             NeAgentId => "ne.agent_id",
             And => "and",
             Or => "or",
+            BitOrU32 => "bit_or.u32",
+            BitXorU32 => "bit_xor.u32",
+            BitAndU32 => "bit_and.u32",
         }
     }
 }

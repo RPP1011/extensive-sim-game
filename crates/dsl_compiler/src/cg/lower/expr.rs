@@ -1680,6 +1680,22 @@ fn pick_binary_op(op: BinOp, ty: CgTy, span: Span) -> Result<BinaryOp, LoweringE
             got: ty,
             span,
         }),
+
+        // #159: bitwise ops are u32-only at the CG layer (the
+        // archetypal use case is per-agent skill / recipe bitsets,
+        // which the SoA stores as u32). Adding I32/U64 variants is
+        // straightforward when a fixture demands it. F32/Bool/Vec3
+        // operands are rejected as ill-typed.
+        (BinOp::BitOr, CgTy::U32)  => Ok(BinaryOp::BitOrU32),
+        (BinOp::BitXor, CgTy::U32) => Ok(BinaryOp::BitXorU32),
+        (BinOp::BitAnd, CgTy::U32) => Ok(BinaryOp::BitAndU32),
+        (BinOp::BitOr | BinOp::BitXor | BinOp::BitAnd, _) => {
+            Err(LoweringError::IllTypedExpression {
+                expected: CgTy::U32,
+                got: ty,
+                span,
+            })
+        }
     }
 }
 

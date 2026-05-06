@@ -799,6 +799,15 @@ pub struct CallArg {
 pub enum BinOp {
     And,
     Or,
+    /// Bitwise OR (`|`). Unsigned-int only at the CG layer; the type
+    /// checker rejects f32/i32/bool/Vec3 operands. Used for bitset
+    /// merges (e.g. `recipes_known | RECIPE_BREAD`).
+    BitOr,
+    /// Bitwise XOR (`^`).
+    BitXor,
+    /// Bitwise AND (`&`). Used for bitset membership tests
+    /// (e.g. `(recipes_known & RECIPE_BREAD) != 0`).
+    BitAnd,
     Eq,
     NotEq,
     Lt,

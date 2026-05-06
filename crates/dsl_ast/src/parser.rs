@@ -2318,6 +2318,8 @@ fn parse_binary(c: &mut Cursor, min_prec: u8, stop: &dyn Fn(&Cursor) -> bool) ->
             }
         }
         // Try ASCII two-char or one-char ops, plus keyword ops.
+        // `&&`/`||` MUST be checked before single-char `&`/`|` so the
+        // bitwise-op #159 lookups don't shadow the logical ops.
         let ascii_op = if c.starts_with("&&") { Some("&&") }
             else if c.starts_with("||") { Some("||") }
             else if c.starts_with("==") { Some("==") }
@@ -2331,6 +2333,9 @@ fn parse_binary(c: &mut Cursor, min_prec: u8, stop: &dyn Fn(&Cursor) -> bool) ->
             else if c.starts_with_char('*') { Some("*") }
             else if c.starts_with_char('/') && !c.starts_with("//") { Some("/") }
             else if c.starts_with_char('%') { Some("%") }
+            else if c.starts_with_char('|') { Some("|") }
+            else if c.starts_with_char('&') { Some("&") }
+            else if c.starts_with_char('^') { Some("^") }
             else { None };
         if let Some(ascii) = ascii_op {
             if let Some(info) = bin_op_info(ascii) {
@@ -2347,7 +2352,10 @@ fn parse_binary(c: &mut Cursor, min_prec: u8, stop: &dyn Fn(&Cursor) -> bool) ->
         }
         // Keyword ops: `in`, `contains`.
         if starts_with_keyword(c, "in") {
-            // Treat `in` with the same precedence as comparison.
+            // Treat `in` with the same precedence as comparison
+            // (`<`/`<=`/`>`/`>=` — prec 4). #159 left this number
+            // unchanged: bitwise ops were slotted between comparison
+            // and arithmetic, not between logical and equality.
             const IN_PREC: u8 = 4;
             if IN_PREC < min_prec { break; }
             c.bump("in".len());
@@ -2358,6 +2366,7 @@ fn parse_binary(c: &mut Cursor, min_prec: u8, stop: &dyn Fn(&Cursor) -> bool) ->
             continue;
         }
         if starts_with_keyword(c, "contains") {
+            // Comparison precedence; matches `in` (prec 4).
             const C_PREC: u8 = 4;
             if C_PREC < min_prec { break; }
             c.bump("contains".len());
@@ -2852,20 +2861,32 @@ struct BinOpInfo {
 }
 
 fn bin_op_info(s: &str) -> Option<BinOpInfo> {
+    // Precedence ladder (low → high binding). Mirrors Rust's
+    // operator-precedence table — bitwise ops slot BETWEEN comparison
+    // (`==`/`<` etc., looser) and arithmetic (`+`/`*`, tighter), with
+    // `&` tighter than `^` tighter than `|`. So:
+    //   `a & MASK != 0`   parses as  `(a & MASK) != 0`
+    //   `a & b && c`      parses as  `(a & b) && c`
+    //   `a + b & MASK`    parses as  `(a + b) & MASK`
+    // No need for parens around the bitset membership test, matching
+    // the Rust convention. (#159)
     Some(match s {
-        "||" => BinOpInfo { op: BinOp::Or, prec: 1 },
-        "&&" => BinOpInfo { op: BinOp::And, prec: 2 },
-        "==" => BinOpInfo { op: BinOp::Eq, prec: 3 },
+        "||" => BinOpInfo { op: BinOp::Or,    prec: 1 },
+        "&&" => BinOpInfo { op: BinOp::And,   prec: 2 },
+        "==" => BinOpInfo { op: BinOp::Eq,    prec: 3 },
         "!=" => BinOpInfo { op: BinOp::NotEq, prec: 3 },
-        "<" => BinOpInfo { op: BinOp::Lt, prec: 4 },
-        "<=" => BinOpInfo { op: BinOp::LtEq, prec: 4 },
-        ">" => BinOpInfo { op: BinOp::Gt, prec: 4 },
-        ">=" => BinOpInfo { op: BinOp::GtEq, prec: 4 },
-        "+" => BinOpInfo { op: BinOp::Add, prec: 5 },
-        "-" => BinOpInfo { op: BinOp::Sub, prec: 5 },
-        "*" => BinOpInfo { op: BinOp::Mul, prec: 6 },
-        "/" => BinOpInfo { op: BinOp::Div, prec: 6 },
-        "%" => BinOpInfo { op: BinOp::Mod, prec: 6 },
+        "<"  => BinOpInfo { op: BinOp::Lt,    prec: 4 },
+        "<=" => BinOpInfo { op: BinOp::LtEq,  prec: 4 },
+        ">"  => BinOpInfo { op: BinOp::Gt,    prec: 4 },
+        ">=" => BinOpInfo { op: BinOp::GtEq,  prec: 4 },
+        "|"  => BinOpInfo { op: BinOp::BitOr,  prec: 5 },
+        "^"  => BinOpInfo { op: BinOp::BitXor, prec: 6 },
+        "&"  => BinOpInfo { op: BinOp::BitAnd, prec: 7 },
+        "+"  => BinOpInfo { op: BinOp::Add,   prec: 8 },
+        "-"  => BinOpInfo { op: BinOp::Sub,   prec: 8 },
+        "*"  => BinOpInfo { op: BinOp::Mul,   prec: 9 },
+        "/"  => BinOpInfo { op: BinOp::Div,   prec: 9 },
+        "%"  => BinOpInfo { op: BinOp::Mod,   prec: 9 },
         _ => return None,
     })
 }
