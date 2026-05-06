@@ -117,7 +117,12 @@ fn lol_corpus_lowering_baseline() {
     // EffectArgMismatch:dash (32 files), HeaderNotImplemented:recast
     // (34 files — Wave 1.4 deferred multi-stage cast state), and
     // MixedBody (parser-permitted spec violations).
-    let baseline = 81usize;
+    //
+    // Bumped 81 → 89 when EffectOp::Summon landed — 8 LoL .ability
+    // files (Annie, Azir, Janna, Jhin, Malzahar, Swain, Yorick, Zyra
+    // and a handful more) used the previously-unrecognised `summon`
+    // verb that now lowers cleanly.
+    let baseline = 89usize;
     assert!(
         ok >= baseline,
         "LoL lowering regression: ok={ok} fell below baseline={baseline}",

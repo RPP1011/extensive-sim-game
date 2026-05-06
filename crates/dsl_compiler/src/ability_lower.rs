@@ -10,15 +10,17 @@
 //!   then ignored), `hint` (damage/defense/crowd_control/utility/heal —
 //!   `economic` is reserved per §4.2).
 //!
-//! * **Effect verbs covered (20 of the 27 catalog entries):** `damage`,
+//! * **Effect verbs covered (21 of the 27 catalog entries):** `damage`,
 //!   `heal`, `shield`, `stun`, `slow`, `transfer_gold`,
 //!   `modify_standing`, `cast`, the Wave 2 piece 1 control verbs
 //!   `root`, `silence`, `fear`, `taunt`, the Wave 2 piece 2
 //!   movement verbs `dash`, `blink`, `knockback`, `pull`, the
-//!   Wave 2 piece 3 advanced verbs `execute`, `self_damage`, plus the
-//!   Wave 2 piece 4 buff verbs `lifesteal`, `damage_modify`. These
-//!   match the 20 `EffectOp` variants on the engine side. Unknown
-//!   verbs / arity mismatches are surfaced as errors.
+//!   Wave 2 piece 3 advanced verbs `execute`, `self_damage`, the
+//!   Wave 2 piece 4 buff verbs `lifesteal`, `damage_modify`, plus the
+//!   LoL-corpus `summon "<template>"` verb. These match the 21
+//!   amount-bearing / status / movement / summon EffectOp variants on
+//!   the engine side. Unknown verbs / arity mismatches are surfaced
+//!   as errors.
 //!
 //! * **Out of scope (deferred to later waves):**
 //!     - `template` / `structure` top-level blocks — Waves 1.2 / 1.3.
@@ -251,7 +253,7 @@ impl std::fmt::Display for LowerError {
             LowerError::UnknownEffectVerb { verb, suggestion, .. } => {
                 write!(
                     f,
-                    "unknown effect verb '{verb}'; valid verbs at this stage: damage / heal / shield / stun / slow / transfer_gold / modify_standing / cast / root / silence / fear / taunt / dash / blink / knockback / pull / execute / self_damage / lifesteal / damage_modify"
+                    "unknown effect verb '{verb}'; valid verbs at this stage: damage / heal / shield / stun / slow / transfer_gold / modify_standing / cast / root / silence / fear / taunt / dash / blink / knockback / pull / execute / self_damage / lifesteal / damage_modify / summon"
                 )?;
                 if let Some(s) = suggestion {
                     write!(f, " (did you mean '{s}'?)")?;
@@ -914,6 +916,7 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             && stmt.verb != "damage"
             && stmt.verb != "heal"
             && stmt.verb != "shield"
+            && stmt.verb != "summon"
         {
             return Err(LowerError::ModifierNotImplemented {
                 verb:     stmt.verb.clone(),
@@ -1184,6 +1187,56 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             let clamped = delta.round().clamp(i16::MIN as f32, i16::MAX as f32) as i16;
             Ok(EffectOp::ModifyStanding { delta: clamped })
         }
+        "summon" => {
+            // `summon "<template>" [<count:int>] [for <duration>]` —
+            // LoL corpus form. All 17 .ability sites in the LoL hero
+            // corpus use the bare `summon "<template>"` shape (no
+            // count, no duration); the optional positional count and
+            // `for <duration>` are accepted for forward compatibility
+            // with the spec's full surface.
+            //
+            // Template ident becomes a 32-bit FxHash so the engine
+            // payload stays a single u32 (deferred resolution — apply
+            // handlers map the hash to a concrete spawner via a
+            // registry follow-up). String + Ident accepted via
+            // require_name_arg so authors aren't forced to remember
+            // the quoting convention.
+            let template = require_name_arg(stmt, 0)?;
+            let template_hash = summon_template_hash(&template);
+            // Optional positional arg 1: count. Default 0 (apply
+            // handler treats as 1).
+            let count: u8 = match stmt.args.get(1) {
+                None => 0,
+                Some(EffectArg::Number(n)) => {
+                    n.round().clamp(0.0, u8::MAX as f32) as u8
+                }
+                Some(_) => {
+                    return Err(LowerError::EffectArgMismatch {
+                        verb:     "summon".to_string(),
+                        expected: 1,
+                        got:      stmt.args.len(),
+                        span:     stmt.span,
+                    });
+                }
+            };
+            // Optional `for <duration>` modifier. Default 0 (apply
+            // handler picks a sensible default — e.g. permanent until
+            // owner dies). The is_duration_bearing_verb short-circuit
+            // does NOT cover summon (we treat duration as truly
+            // optional rather than required), so we read it here.
+            let lifetime_ticks = stmt
+                .duration
+                .as_ref()
+                .map(|d| duration_to_ticks(d.duration.millis))
+                .unwrap_or(0);
+            let expected_arity = if count == 0 { 1 } else { 2 };
+            require_arity(stmt, expected_arity)?;
+            Ok(EffectOp::Summon {
+                template_hash,
+                count,
+                lifetime_ticks,
+            })
+        }
         "cast" => {
             // `cast <ability_name>` — the inner ability is resolved at
             // registry-wiring time (Wave 1.7). We accept either a bare
@@ -1362,4 +1415,22 @@ fn require_name_arg(stmt: &EffectStmt, idx: usize) -> Result<String, LowerError>
             span:     stmt.span,
         }),
     }
+}
+
+/// Stable 32-bit hash of a `summon` template ident. Used to project
+/// the .ability source's `summon "<template>"` arg into `EffectOp::Summon
+/// { template_hash }` (deferred resolution — apply handlers map the
+/// hash to a concrete spawner via a registry follow-up).
+///
+/// Uses `rustc_hash::FxHasher` (FxHash) — fixed-seed, deterministic,
+/// no per-process salt. Cross-platform stable; replay equivalence
+/// holds across CPU/GPU and across machine reboots.
+fn summon_template_hash(template: &str) -> u32 {
+    use std::hash::Hasher;
+    let mut h = rustc_hash::FxHasher::default();
+    h.write(template.as_bytes());
+    // Fold 64 → 32: xor halves so both ends contribute. FxHash already
+    // mixes bits well; this is a pure compaction step.
+    let full = h.finish();
+    ((full >> 32) as u32) ^ (full as u32)
 }

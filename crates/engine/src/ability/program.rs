@@ -324,6 +324,19 @@ pub enum EffectOp {
     /// `cast_tick + duration_ticks` (deferred — buff scheduler not
     /// wired). 12 bytes with tag, well under the P4 ≤16-byte budget.
     Buff { stat: BuffStat, magnitude_q8: i16, duration_ticks: u32 } = 23,
+
+    /// `summon "<template>" [N] [for <duration>]` — spawn `count` minions
+    /// of the named template for `lifetime_ticks`. The template ident is
+    /// stored as a 32-bit FxHash (deferred resolution — engine doesn't
+    /// need to know template names; runtime side resolves the hash to a
+    /// spawner via a registry follow-up). `count == 0` means the parser
+    /// did not specify one (apply handlers default to 1);
+    /// `lifetime_ticks == 0` means no duration was authored (handlers
+    /// pick a sensible default, e.g. permanent until owner dies). Payload
+    /// is 4 + 1 + 4 = 9 bytes + tag = 10 bytes; well under the P4 ≤16B
+    /// EffectOp size budget. No apply handler in this slice — the LoL
+    /// corpus needs the verb to lower so the per-hero programs build.
+    Summon { template_hash: u32, count: u8, lifetime_ticks: u32 } = 24,
 }
 
 /// Stat targeted by `buff`. Vocabulary is small today (just the two
@@ -730,6 +743,46 @@ impl ScalingStatRef {
     #[inline]
     pub fn discriminant(self) -> u8 {
         self as u8
+    }
+}
+
+/// Caster's stat snapshot at cast-decide time. Threaded into
+/// [`crate::ability::apply::apply_program`] so per-effect
+/// `scalings_per_effect` slots can compute `base + Σ percent * stat`.
+///
+/// Eight fields parallel `ScalingStatRef`'s vocabulary (one per
+/// variant). `Default::default()` is all-zeros — call sites that don't
+/// care about scaling (e.g. legacy unit tests) pass `&CasterStats::default()`
+/// to keep behavior bit-identical to the pre-scaling apply path
+/// (effect amounts pass through unchanged when every stat is zero).
+#[derive(Copy, Clone, Debug, PartialEq, Default)]
+pub struct CasterStats {
+    pub attack_damage: f32,
+    pub ability_power: f32,
+    pub max_hp:        f32,
+    pub hp:            f32,
+    pub armor:         f32,
+    pub magic_resist:  f32,
+    pub move_speed:    f32,
+    pub mana:          f32,
+}
+
+impl CasterStats {
+    /// Look up a stat by `ScalingStatRef`. Apply handlers use this to
+    /// project a scaling slot's `stat_ref` to its scalar value before
+    /// multiplying by `percent`.
+    #[inline]
+    pub fn get(&self, stat: ScalingStatRef) -> f32 {
+        match stat {
+            ScalingStatRef::AttackDamage => self.attack_damage,
+            ScalingStatRef::AbilityPower => self.ability_power,
+            ScalingStatRef::MaxHp        => self.max_hp,
+            ScalingStatRef::Hp           => self.hp,
+            ScalingStatRef::Armor        => self.armor,
+            ScalingStatRef::MagicResist  => self.magic_resist,
+            ScalingStatRef::MoveSpeed    => self.move_speed,
+            ScalingStatRef::Mana         => self.mana,
+        }
     }
 }
 

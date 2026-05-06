@@ -303,6 +303,7 @@ fn effect_op_label(op: &EffectOp) -> &'static str {
         EffectOp::HealOverTime    { .. } => "HealOverTime",
         EffectOp::TimedShield     { .. } => "TimedShield",
         EffectOp::Buff            { .. } => "Buff",
+        EffectOp::Summon          { .. } => "Summon",
     }
 }
 

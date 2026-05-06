@@ -35,7 +35,7 @@
 //! to one generic dispatcher; adding a new ability becomes a pure
 //! .ability-file change.
 
-use crate::ability::program::{AbilityProgram, BuffStat, EffectOp};
+use crate::ability::program::{AbilityProgram, BuffStat, CasterStats, EffectOp};
 use crate::ids::AgentId;
 use crate::rng::per_agent_u32;
 use smallvec::SmallVec;
@@ -72,6 +72,15 @@ pub enum ApplyEvent {
     HealOverTime   { source: AgentId, target: AgentId, amount: f32, duration_ticks: u32 },
     TimedShield    { source: AgentId, target: AgentId, amount: f32, duration_ticks: u32 },
     Buff           { target: AgentId, stat: BuffStat, magnitude_q8: i16, duration_ticks: u32 },
+    /// `summon "<template>" [N] [for <duration>]` — caster spawns
+    /// `count` minions of `template_hash` for `lifetime_ticks`. The
+    /// template hash is the FxHash of the template ident from the
+    /// .ability source (deferred resolution — apply handlers map the
+    /// hash to a spawner via a registry follow-up). Captured here so
+    /// downstream sims can drain the event when the spawner wires up;
+    /// no runtime sim consumes it today (deferred infra mirroring the
+    /// CastAbility/TransferGold/ModifyStanding fall-through pattern).
+    Summon         { source: AgentId, template_hash: u32, count: u8, lifetime_ticks: u32 },
 }
 
 /// Inline budget — most abilities have ≤4 effects (P4 says
@@ -80,11 +89,23 @@ pub enum ApplyEvent {
 const APPLY_INLINE: usize = 4;
 
 /// Translate one cast of `program` (caster → target at `tick`) into a
-/// stream of ApplyEvents. Honors the per-effect chance gate.
+/// stream of ApplyEvents. Honors the per-effect chance gate AND the
+/// per-effect `scalings_per_effect` modifier (`+ N% stat_ref`).
 ///
 /// `world_seed` and `tick` together with `caster` derive the RNG
 /// stream per P5 — replay equivalence holds because the same cast at
 /// the same tick produces the same gate decisions.
+///
+/// `caster_stats` is the caster's stat snapshot at cast-decide time.
+/// For each amount-bearing variant (Damage / Heal / Shield / SelfDamage
+/// / DamageOverTime / HealOverTime / TimedShield), the dispatcher
+/// computes `scaled = base + Σ percent * stat` from
+/// `program.scalings_per_effect[i]` before emitting the event. Pass
+/// `&CasterStats::default()` for legacy / non-scaling call sites —
+/// all-zero stats project to a `0.0` contribution per scaling slot, so
+/// the output is byte-identical to the pre-scaling apply path when the
+/// program carries no scalings (or when the caster has no relevant
+/// stats).
 ///
 /// `Some(amount) = 0xFFFF` chance slot fires deterministically (max
 /// q16 value — apply handlers treat as "always"); `None` slot also
@@ -93,11 +114,12 @@ const APPLY_INLINE: usize = 4;
 /// (canonical "100%") this is true 65534/65536 ≈ 99.997% of draws
 /// (indistinguishable from "always" at 16-bit RNG resolution).
 pub fn apply_program(
-    program: &AbilityProgram,
-    caster:  AgentId,
-    target:  AgentId,
-    tick:    u64,
-    world_seed: u64,
+    program:      &AbilityProgram,
+    caster:       AgentId,
+    target:       AgentId,
+    tick:         u64,
+    world_seed:   u64,
+    caster_stats: &CasterStats,
 ) -> SmallVec<[ApplyEvent; APPLY_INLINE]> {
     let mut out: SmallVec<[ApplyEvent; APPLY_INLINE]> = SmallVec::new();
 
@@ -116,13 +138,26 @@ pub fn apply_program(
                 continue; // gate fails — skip this effect
             }
         }
+        // -- Wave 1.5#4 scaling — compute additive `Σ percent * stat`
+        // bonus from `scalings_per_effect[i]`. Empty/missing slot ⇒ 0.0
+        // (output bit-identical to pre-scaling behavior). Apply only to
+        // amount-bearing variants in the dispatch arms below.
+        let scale_bonus: f32 = program
+            .scalings_per_effect
+            .get(i)
+            .map(|inner| {
+                inner
+                    .iter()
+                    .map(|s| s.percent * caster_stats.get(s.stat_ref))
+                    .sum::<f32>()
+            })
+            .unwrap_or(0.0);
         // -- Per-EffectOp dispatch. Mirrors pack_effect's variant
-        // walk. Future scaling/in-shape/nested handling threads into
-        // here.
+        // walk. Future in-shape / nested handling threads into here.
         match *op {
-            EffectOp::Damage    { amount } => out.push(ApplyEvent::Damage { source: caster, target, amount }),
-            EffectOp::Heal      { amount } => out.push(ApplyEvent::Heal   { source: caster, target, amount }),
-            EffectOp::Shield    { amount } => out.push(ApplyEvent::Shield { source: caster, target, amount }),
+            EffectOp::Damage    { amount } => out.push(ApplyEvent::Damage { source: caster, target, amount: amount + scale_bonus }),
+            EffectOp::Heal      { amount } => out.push(ApplyEvent::Heal   { source: caster, target, amount: amount + scale_bonus }),
+            EffectOp::Shield    { amount } => out.push(ApplyEvent::Shield { source: caster, target, amount: amount + scale_bonus }),
             EffectOp::Stun      { duration_ticks } => out.push(ApplyEvent::Stun    { target, duration_ticks }),
             EffectOp::Slow      { duration_ticks, factor_q8 } =>
                 out.push(ApplyEvent::Slow { target, duration_ticks, factor_q8 }),
@@ -135,19 +170,21 @@ pub fn apply_program(
             EffectOp::Knockback { distance } => out.push(ApplyEvent::Knockback { source: caster, target, distance }),
             EffectOp::Pull      { distance } => out.push(ApplyEvent::Pull      { source: caster, target, distance }),
             EffectOp::Execute   { hp_threshold } => out.push(ApplyEvent::Execute { target, hp_threshold }),
-            EffectOp::SelfDamage{ amount } => out.push(ApplyEvent::SelfDamage { source: caster, amount }),
+            EffectOp::SelfDamage{ amount } => out.push(ApplyEvent::SelfDamage { source: caster, amount: amount + scale_bonus }),
             EffectOp::LifeSteal { duration_ticks, fraction_q8 } =>
                 out.push(ApplyEvent::LifeSteal { target: caster, duration_ticks, fraction_q8 }),
             EffectOp::DamageModify { duration_ticks, multiplier_q8 } =>
                 out.push(ApplyEvent::DamageModify { target, duration_ticks, multiplier_q8 }),
             EffectOp::DamageOverTime { amount, duration_ticks } =>
-                out.push(ApplyEvent::DamageOverTime { source: caster, target, amount, duration_ticks }),
+                out.push(ApplyEvent::DamageOverTime { source: caster, target, amount: amount + scale_bonus, duration_ticks }),
             EffectOp::HealOverTime   { amount, duration_ticks } =>
-                out.push(ApplyEvent::HealOverTime   { source: caster, target, amount, duration_ticks }),
+                out.push(ApplyEvent::HealOverTime   { source: caster, target, amount: amount + scale_bonus, duration_ticks }),
             EffectOp::TimedShield    { amount, duration_ticks } =>
-                out.push(ApplyEvent::TimedShield    { source: caster, target, amount, duration_ticks }),
+                out.push(ApplyEvent::TimedShield    { source: caster, target, amount: amount + scale_bonus, duration_ticks }),
             EffectOp::Buff { stat, magnitude_q8, duration_ticks } =>
                 out.push(ApplyEvent::Buff { target, stat, magnitude_q8, duration_ticks }),
+            EffectOp::Summon { template_hash, count, lifetime_ticks } =>
+                out.push(ApplyEvent::Summon { source: caster, template_hash, count, lifetime_ticks }),
             // CastAbility / TransferGold / ModifyStanding fall outside
             // this slice — the first is recursive (needs cascade
             // handling); the latter two need world-state context not
@@ -163,8 +200,9 @@ pub fn apply_program(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ability::program::Gate;
+    use crate::ability::program::{EffectScaling, Gate, ScalingStatRef};
     use crate::ability::AbilityId;
+    use smallvec::smallvec;
 
     fn caster() -> AgentId { AgentId::new(1).unwrap() }
     fn target() -> AgentId { AgentId::new(2).unwrap() }
@@ -176,7 +214,7 @@ mod tests {
             Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
             [EffectOp::Damage { amount: 30.0 }],
         );
-        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE);
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
         assert_eq!(events.len(), 1);
         assert!(matches!(
             events[0],
@@ -195,7 +233,7 @@ mod tests {
                 EffectOp::Stun   { duration_ticks: 10 },
             ],
         );
-        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE);
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
         assert_eq!(events.len(), 2);
         assert!(matches!(events[0], ApplyEvent::Damage { .. }));
         assert!(matches!(events[1], ApplyEvent::Stun { .. }));
@@ -210,7 +248,7 @@ mod tests {
         );
         // q16 = 0 → no draw can be < 0; effect never fires.
         prog.chances.push(Some(0));
-        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE);
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
         assert_eq!(events.len(), 0, "chance=0 must gate the effect out");
     }
 
@@ -226,7 +264,7 @@ mod tests {
         // but 1/65536 of draws. Try a fixed seed/tick combination to
         // verify the expected fire (deterministic).
         prog.chances.push(Some(0xFFFE));
-        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE);
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
         assert_eq!(events.len(), 1, "chance=0xFFFE must fire deterministically at this seed/tick");
     }
 
@@ -240,8 +278,8 @@ mod tests {
             [EffectOp::Stun { duration_ticks: 10 }],
         );
         prog.chances.push(Some(32768)); // 50%
-        let a = apply_program(&prog, caster(), target(), 42, 0xCAFE);
-        let b = apply_program(&prog, caster(), target(), 42, 0xCAFE);
+        let a = apply_program(&prog, caster(), target(), 42, 0xCAFE, &CasterStats::default());
+        let b = apply_program(&prog, caster(), target(), 42, 0xCAFE, &CasterStats::default());
         assert_eq!(a.len(), b.len(), "same inputs → same gate decisions");
     }
 
@@ -257,7 +295,101 @@ mod tests {
                 selector: crate::ability::program::TargetSelector::Target,
             }],
         );
-        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE);
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
         assert_eq!(events.len(), 0, "CastAbility falls through (deferred)");
+    }
+
+    // -- Caster-stat scaling --------------------------------------------------
+
+    #[test]
+    fn apply_strike_with_attack_damage_scaling_adds_to_amount() {
+        // Damage 30 + 50% AD; caster has 100 AD ⇒ emit 30 + 50 = 80.
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 30.0 }],
+        );
+        prog.scalings_per_effect.push(smallvec![EffectScaling {
+            stat_ref: ScalingStatRef::AttackDamage,
+            percent:  0.50,
+        }]);
+        let stats = CasterStats { attack_damage: 100.0, ..Default::default() };
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &stats);
+        assert_eq!(events.len(), 1);
+        match events[0] {
+            ApplyEvent::Damage { amount, .. } => {
+                assert!((amount - 80.0).abs() < 1e-5, "expected 80.0, got {amount}");
+            }
+            other => panic!("expected Damage, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn apply_skipped_effect_doesnt_scale() {
+        // chance=0 gates the effect out — no event emitted, scaling math
+        // must not run (and certainly must not produce a side-effect).
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 30.0 }],
+        );
+        prog.chances.push(Some(0));
+        prog.scalings_per_effect.push(smallvec![EffectScaling {
+            stat_ref: ScalingStatRef::AttackDamage,
+            percent:  10.0, // would be huge if it ran
+        }]);
+        let stats = CasterStats { attack_damage: 1000.0, ..Default::default() };
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &stats);
+        assert_eq!(events.len(), 0, "chance=0 must gate the effect out before scaling");
+    }
+
+    #[test]
+    fn apply_no_scaling_is_bit_stable() {
+        // Empty `scalings_per_effect` ⇒ output identical to the
+        // pre-scaling apply path (regression guard for the B slice).
+        let prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [
+                EffectOp::Damage { amount: 30.0 },
+                EffectOp::Heal   { amount: 12.5 },
+                EffectOp::Shield { amount:  7.0 },
+            ],
+        );
+        // Even with massive caster stats, an empty scalings vec must
+        // contribute zero — output is bit-identical to default-stats.
+        let stats = CasterStats {
+            attack_damage: 9999.0,
+            ability_power: 9999.0,
+            ..Default::default()
+        };
+        let with    = apply_program(&prog, caster(), target(), 0, 0xCAFE, &stats);
+        let without = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+        assert_eq!(with.len(), without.len());
+        for (a, b) in with.iter().zip(without.iter()) {
+            assert_eq!(a, b, "with-stats vs default-stats diverged with no scalings");
+        }
+        // Spot-check the absolute values.
+        assert!(matches!(with[0], ApplyEvent::Damage { amount, .. } if amount == 30.0));
+        assert!(matches!(with[1], ApplyEvent::Heal   { amount, .. } if amount == 12.5));
+        assert!(matches!(with[2], ApplyEvent::Shield { amount, .. } if amount == 7.0));
+    }
+
+    #[test]
+    fn apply_summon_emits_summon_event() {
+        // Verify the new EffectOp::Summon arm produces an ApplyEvent::Summon
+        // with the template_hash threaded through.
+        let prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
+            [EffectOp::Summon { template_hash: 0xDEADBEEF, count: 3, lifetime_ticks: 80 }],
+        );
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            events[0],
+            ApplyEvent::Summon { source, template_hash, count, lifetime_ticks }
+            if source == caster() && template_hash == 0xDEADBEEF && count == 3 && lifetime_ticks == 80
+        ));
     }
 }

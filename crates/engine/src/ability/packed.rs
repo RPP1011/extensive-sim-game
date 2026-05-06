@@ -796,6 +796,21 @@ fn pack_effect(op: EffectOp) -> (u32, u32, u32) {
             let pa = (stat as u32) | ((magnitude_q8 as i32 as u32) << 8);
             (23, pa, duration_ticks)
         }
+        // Summon — payload_a is the template_hash (FxHash of the
+        // template ident from `summon "<template>"`). payload_b packs
+        // count in the high byte and lifetime_ticks in the low 24 bits
+        // (24 bits of ticks ≈ 4.97 years at 10 Hz — well past any
+        // sane minion lifetime). A GPU shader recovers via:
+        //   count          = (payload_b >> 24) & 0xFF;
+        //   lifetime_ticks = payload_b & 0x00FF_FFFF;
+        // Apply handler not wired in this slice (see `EffectOp::Summon`
+        // doc) — payload format is fixed now so the GPU pack column
+        // does not bump again when the runtime arrives.
+        EffectOp::Summon { template_hash, count, lifetime_ticks } => {
+            let lifetime = lifetime_ticks & 0x00FF_FFFF;
+            let pb = ((count as u32) << 24) | lifetime;
+            (24, template_hash, pb)
+        }
     }
 }
 
