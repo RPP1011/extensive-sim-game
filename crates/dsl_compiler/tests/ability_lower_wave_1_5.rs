@@ -24,6 +24,7 @@ fn lower_inline(src: &str) -> LowerError {
 
 /// Helper: assert the error is `ModifierNotImplemented` with the given
 /// modifier slot name. Returns the carried span for further checks.
+#[allow(dead_code)]
 fn assert_modifier(err: LowerError, expected: &'static str) -> dsl_ast::ast::Span {
     match err {
         LowerError::ModifierNotImplemented { ref modifier, span, .. } => {
@@ -175,12 +176,24 @@ fn lowering_tags_aggregate_across_effects() {
 }
 
 #[test]
-fn lowering_for_duration_on_damage_still_errors() {
-    // Wave 1.5#6: `for <duration>` on instant verbs (damage/heal/shield)
-    // means DoT/HoT semantics — needs a NEW EffectOp variant. Still
-    // surfaces ModifierNotImplemented{for}.
-    let err = lower_inline("ability X { target: enemy cooldown: 1s damage 5 for 4s }");
-    assert_modifier(err, "for");
+fn lowering_for_duration_on_damage_lowers_to_dot() {
+    // Wave 1.5#6 follow-on (#130): `damage X for Ts` lowers to
+    // EffectOp::DamageOverTime{amount, duration_ticks}. Mirrors heal
+    // (HealOverTime) and shield (TimedShield).
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::EffectOp;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 5 for 4s }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("DoT must lower");
+    match &prog.effects[0] {
+        EffectOp::DamageOverTime { amount, duration_ticks } => {
+            assert_eq!(*amount, 5.0);
+            assert_eq!(*duration_ticks, 40, "4s = 40 ticks");
+        }
+        other => panic!("expected DamageOverTime; got {other:?}"),
+    }
 }
 
 #[test]
@@ -714,18 +727,24 @@ fn lowering_wave_1_corpus_still_works() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn slot_order_in_lowers_alongside_for_error_on_damage() {
-    // Wave 1.5#2 retired the `in` short-circuit. With both `in` and
-    // `for` populated on a non-duration-bearing verb (damage), the
-    // `in` aggregator runs to completion (storing the shape in
-    // `program.per_effect_areas`) and THEN the `for` slot trips with
-    // ModifierNotImplemented{for} — DoT semantics need a new EffectOp
-    // variant that hasn't landed yet. Stable diagnostic for authors:
-    // the offending slot is named, not "in".
-    let err = lower_inline(
+fn slot_order_in_and_for_compose_on_damage() {
+    // Wave 1.5#2 retired the `in` short-circuit; #130 retired the `for`
+    // rejection on damage. Both modifiers now lower together: `in`
+    // captures the AOE shape, `for` upgrades the verb to DamageOverTime.
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::{EffectAreaShape, EffectOp, ShapeKind};
+    let file = parse_ability_file(
         "ability X { target: enemy cooldown: 1s damage 50 in circle(2.0) for 3s }",
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("compose must lower");
+    assert!(matches!(prog.effects[0],
+        EffectOp::DamageOverTime { amount, duration_ticks }
+        if amount == 50.0 && duration_ticks == 30));
+    assert_eq!(
+        prog.per_effect_areas[0],
+        Some(EffectAreaShape { kind: ShapeKind::Circle, args: [2.0, 0.0, 0.0, 0.0] }),
     );
-    assert_modifier(err, "for");
 }
 
 #[test]

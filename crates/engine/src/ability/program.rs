@@ -293,6 +293,29 @@ pub enum EffectOp {
     /// == 256`, `0.5` (take half damage) `== 128`, `1.5` (take 50% extra)
     /// `== 384`. Same max-with-tiebreak stacking as `LifeSteal`.
     DamageModify { duration_ticks: u32, multiplier_q8: i16 } = 19,
+
+    /// `damage <amount> for <duration>` — DoT (damage-over-time).
+    /// Applies `amount` to the target every tick for `duration_ticks`
+    /// total. The total damage delivered is `amount * duration_ticks`,
+    /// allowing authors to think in instantaneous-rate terms (e.g.
+    /// `damage 5 for 2s` = 5 dmg/tick × 20 ticks = 100 dmg total).
+    /// Apply handlers fire one Damaged event per tick over the window
+    /// (deferred — DoT scheduler not wired).
+    DamageOverTime { amount: f32, duration_ticks: u32 } = 20,
+
+    /// `heal <amount> for <duration>` — HoT (heal-over-time). Mirror
+    /// of `DamageOverTime` but for healing. Per-tick `amount` applied
+    /// to the target's HP for `duration_ticks` (deferred apply
+    /// handler — HoT scheduler not wired).
+    HealOverTime { amount: f32, duration_ticks: u32 } = 21,
+
+    /// `shield <amount> for <duration>` — timed shield. Same as
+    /// `Shield` but the absorption pool auto-expires after
+    /// `duration_ticks`. Apply handlers schedule a shield-clear
+    /// chronicle at `cast_tick + duration_ticks` (deferred — shield
+    /// expiry scheduler not wired). Distinct from `Shield` which is
+    /// permanent until consumed.
+    TimedShield { amount: f32, duration_ticks: u32 } = 22,
 }
 
 /// Coarse ability-category hint, per `.ability` DSL `hint:` field.

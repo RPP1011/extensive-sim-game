@@ -774,6 +774,20 @@ fn pack_effect(op: EffectOp) -> (u32, u32, u32) {
         EffectOp::DamageModify { duration_ticks, multiplier_q8 } => {
             (19, duration_ticks, multiplier_q8 as i32 as u32)
         }
+        // DoT/HoT — payload_a is amount-per-tick (f32 bits), payload_b
+        // is duration_ticks. Apply handlers iterate `duration_ticks`
+        // tick-events emitting Damaged/Healed each one. Same shape as
+        // SelfDamage but two columns.
+        EffectOp::DamageOverTime { amount, duration_ticks } => {
+            (20, amount.to_bits(), duration_ticks)
+        }
+        EffectOp::HealOverTime { amount, duration_ticks } => {
+            (21, amount.to_bits(), duration_ticks)
+        }
+        // TimedShield — same shape as DoT/HoT (amount + duration).
+        EffectOp::TimedShield { amount, duration_ticks } => {
+            (22, amount.to_bits(), duration_ticks)
+        }
     }
 }
 

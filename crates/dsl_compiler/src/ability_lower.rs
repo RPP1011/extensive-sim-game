@@ -900,13 +900,21 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
     // duration-bearing verbs (stun/slow/root/silence/fear/taunt/
     // lifesteal/damage_modify) the modifier acts as a duration source —
     // their per-verb arms below detect `stmt.duration.is_some()` and
-    // pull the duration from there instead of a positional. For the
-    // other verbs (damage/heal/shield/cast/transfer_gold/modify_standing)
-    // the modifier means DoT/HoT semantics — a NEW EffectOp variant is
-    // needed (DamageOverTime / HealOverTime), so still surface the
-    // ModifierNotImplemented for those.
+    // pull the duration from there instead of a positional.
+    //
+    // damage/heal also accept `for <duration>` — the per-verb arms
+    // below branch into DamageOverTime / HealOverTime EffectOps when
+    // the duration is present.
+    //
+    // The remaining verbs (shield/cast/transfer_gold/modify_standing)
+    // have no over-time semantics — for-modifier on those still
+    // surfaces ModifierNotImplemented.
     if let Some(d) = &stmt.duration {
-        if !is_duration_bearing_verb(&stmt.verb) {
+        if !is_duration_bearing_verb(&stmt.verb)
+            && stmt.verb != "damage"
+            && stmt.verb != "heal"
+            && stmt.verb != "shield"
+        {
             return Err(LowerError::ModifierNotImplemented {
                 verb:     stmt.verb.clone(),
                 modifier: "for",
@@ -956,17 +964,44 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
         "damage" => {
             let amount = require_number_arg(stmt, 0)?;
             require_arity(stmt, 1)?;
-            Ok(EffectOp::Damage { amount })
+            // `damage X for Ts` → DoT (130). The for-duration is stored
+            // separately on the EffectStmt; if present, return
+            // DamageOverTime so apply handlers iterate per-tick.
+            if let Some(d) = &stmt.duration {
+                Ok(EffectOp::DamageOverTime {
+                    amount,
+                    duration_ticks: duration_to_ticks(d.duration.millis),
+                })
+            } else {
+                Ok(EffectOp::Damage { amount })
+            }
         }
         "heal" => {
             let amount = require_number_arg(stmt, 0)?;
             require_arity(stmt, 1)?;
-            Ok(EffectOp::Heal { amount })
+            // `heal X for Ts` → HoT (130). Mirror of DoT.
+            if let Some(d) = &stmt.duration {
+                Ok(EffectOp::HealOverTime {
+                    amount,
+                    duration_ticks: duration_to_ticks(d.duration.millis),
+                })
+            } else {
+                Ok(EffectOp::Heal { amount })
+            }
         }
         "shield" => {
             let amount = require_number_arg(stmt, 0)?;
             require_arity(stmt, 1)?;
-            Ok(EffectOp::Shield { amount })
+            // `shield X for Ts` → TimedShield (130 follow-on). Same
+            // branching pattern as damage→DoT and heal→HoT.
+            if let Some(d) = &stmt.duration {
+                Ok(EffectOp::TimedShield {
+                    amount,
+                    duration_ticks: duration_to_ticks(d.duration.millis),
+                })
+            } else {
+                Ok(EffectOp::Shield { amount })
+            }
         }
         "stun" => {
             let (dur, arity) = extract_duration(stmt, 0, 1)?;
