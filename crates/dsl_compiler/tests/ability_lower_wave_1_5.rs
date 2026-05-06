@@ -617,10 +617,76 @@ fn lowering_no_lifetime_is_none() {
     );
 }
 
+// Wave 1.5#9 — `<outer> <args> { <inner_stmt>; ... }` lowering.
+// Each nested EffectStmt is recursively lowered to a bare EffectOp
+// and pushed into program.nested_per_effect[i] (parallel to
+// program.effects). Bounded at MAX_NESTED_PER_EFFECT (2). Inner
+// modifiers (the nested EffectStmt's own tags/chance/etc.) are
+// SILENTLY DROPPED today — recursive aggregator capture is later
+// infrastructure; authors who need rich nested modifiers should
+// compose multiple outer effects instead.
 #[test]
-fn lowering_nested_modifier_returns_unimplemented() {
-    let err = lower_inline("ability X { target: enemy cooldown: 1s heal 50 { stun 1s } }");
-    assert_modifier(err, "nested");
+fn lowering_nested_single_inner() {
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::EffectOp;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 { stun 1s } }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("nested must lower");
+    assert_eq!(prog.effects.len(), 1, "one outer effect");
+    assert_eq!(prog.nested_per_effect.len(), 1, "one outer → one nested slot");
+    assert_eq!(prog.nested_per_effect[0].len(), 1, "one nested op");
+    match &prog.nested_per_effect[0][0] {
+        EffectOp::Stun { duration_ticks } => {
+            assert_eq!(*duration_ticks, 10, "1s = 10 ticks");
+        }
+        other => panic!("expected nested Stun(10); got {other:?}"),
+    }
+}
+
+#[test]
+fn lowering_nested_two_inner() {
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::EffectOp;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 { stun 1s\n damage 10\n} }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("two-nested must lower");
+    assert_eq!(prog.nested_per_effect[0].len(), 2);
+    assert!(matches!(prog.nested_per_effect[0][0], EffectOp::Stun { .. }));
+    assert!(matches!(prog.nested_per_effect[0][1], EffectOp::Damage { .. }));
+}
+
+#[test]
+fn lowering_nested_no_modifier_is_empty() {
+    // Bare effect with no nested block: aggregator stays empty so
+    // Wave 1 corpus output stays bit-stable.
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("must lower");
+    assert!(prog.nested_per_effect.is_empty(), "no nested → empty slice");
+}
+
+#[test]
+fn lowering_nested_budget_exceeded() {
+    // Three nested ops on one outer effect overruns
+    // MAX_NESTED_PER_EFFECT=2. Surfaces NestedBudgetExceeded loudly.
+    use dsl_compiler::ability_lower::LowerError;
+    let err = lower_inline(
+        "ability X { target: enemy cooldown: 1s damage 50 { stun 1s\n damage 10\n damage 5\n} }"
+    );
+    match err {
+        LowerError::NestedBudgetExceeded { count, max, .. } => {
+            assert_eq!(count, 3);
+            assert_eq!(max, 2);
+        }
+        other => panic!("expected NestedBudgetExceeded; got {other:?}"),
+    }
 }
 
 // ---------------------------------------------------------------------------

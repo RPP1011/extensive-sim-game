@@ -574,6 +574,14 @@ pub struct EffectScaling {
 /// `n_abilities * MAX_EFFECTS_PER_PROGRAM * MAX_SCALINGS_PER_EFFECT`.
 pub const MAX_SCALINGS_PER_EFFECT: usize = 2;
 
+/// Max nested follow-up effects per outer effect (Wave 1.5#9).
+/// Bounded so each `nested_per_effect` slot stays stack-resident in
+/// the SmallVec inline buffer. 2 is enough for typical "damage + stun
+/// + slow" combo abilities; richer cascades should compose multiple
+/// outer effects instead. Overflow panics at lowering time today; a
+/// future `LowerError::NestedBudgetExceeded` can soften that.
+pub const MAX_NESTED_PER_EFFECT: usize = 2;
+
 /// Compiled ability — the unit `AbilityRegistry` stores and `CastHandler`
 /// dispatches.
 ///
@@ -667,6 +675,24 @@ pub struct AbilityProgram {
     /// `String` payload is CPU-only metadata for now; the SoA packer
     /// in `PackedAbilityRegistry` skips this column.
     pub when_per_effect: SmallVec<[Option<EffectWhenCondition>; MAX_EFFECTS_PER_PROGRAM]>,
+    /// Wave 1.5#9: per-effect nested follow-up effects from
+    /// `<outer_verb> <args> { <inner_stmt>; <inner_stmt>; ... }`.
+    /// Outer SmallVec is parallel to `effects`; inner SmallVec is
+    /// the per-outer-effect nested list bounded at
+    /// `MAX_NESTED_PER_EFFECT`. Each inner entry is a fully-lowered
+    /// `EffectOp` — the outer cast resolves first, then apply
+    /// handlers fire each nested op (deferred infrastructure;
+    /// today's lowering only captures the IR, no apply dispatch).
+    /// An empty inner SmallVec means no nested op was authored on
+    /// that effect; an empty outer SmallVec means no effect on the
+    /// ability carried the modifier (Wave 1 corpus shape — keeps
+    /// output bit-stable). Inner-effect modifiers (the nested
+    /// EffectStmt's own tags/chance/stacking/etc.) are SILENTLY
+    /// DROPPED at lowering today — recursive aggregator capture is
+    /// later infrastructure; authors who need rich nested modifiers
+    /// should compose multiple outer effects instead.
+    pub nested_per_effect:
+        SmallVec<[SmallVec<[EffectOp; MAX_NESTED_PER_EFFECT]>; MAX_EFFECTS_PER_PROGRAM]>,
 }
 
 impl AbilityProgram {
@@ -696,6 +722,7 @@ impl AbilityProgram {
             per_effect_areas:    SmallVec::new(),
             scalings_per_effect: SmallVec::new(),
             when_per_effect:     SmallVec::new(),
+            nested_per_effect:   SmallVec::new(),
         }
     }
 

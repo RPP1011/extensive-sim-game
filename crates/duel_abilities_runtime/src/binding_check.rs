@@ -394,6 +394,34 @@ pub fn assert_ability_registry_matches_sim_constants() {
          `when target.hp < 20`; .sim Reap verb gates on \
          `target.hp < config.combat.reap_threshold`",
     );
+    // Wave 1.5#9 nested-effect modifier — Reap.ability declares
+    // `{ stun 1s }`, lowered to program.nested_per_effect[0] =
+    // [EffectOp::Stun{duration_ticks: 10}]. Lowering recursively
+    // calls lower_effect_stmt on each inner stmt; inner-stmt
+    // modifiers (e.g. `chance 50%`) are silently dropped today —
+    // recursive aggregator capture is later infrastructure. The
+    // .sim verb's existing emit fires Defeated only (no Stunned)
+    // — apply-handler dispatch for the nested op is deferred. The
+    // binding check pins the lowered IR so corpus drift surfaces.
+    assert_eq!(
+        reap.nested_per_effect.len(), 1,
+        "Reap must have one nested slot (parallel to one effect)",
+    );
+    assert_eq!(
+        reap.nested_per_effect[0].len(), 1,
+        "Reap effect[0] must have exactly one nested op — \
+         .ability declares `{{ stun 1s }}` once",
+    );
+    match &reap.nested_per_effect[0][0] {
+        EffectOp::Stun { duration_ticks } => assert_eq!(
+            *duration_ticks, 10,
+            "Reap nested stun must be 10 ticks (1s) — .ability \
+             `{{ stun 1s }}`",
+        ),
+        other => panic!(
+            "Reap nested[0]: expected Stun(10), got {other:?}",
+        ),
+    }
 
     // ---- Vampirize: cooldown 80 ticks, self-target, lifesteal 0.5 5s ----
     //   Wave 2 piece N: LifeSteal E2E demo. Lowers via

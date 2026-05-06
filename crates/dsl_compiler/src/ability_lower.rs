@@ -88,7 +88,7 @@ use dsl_ast::ast::{
     AbilityDecl, AbilityFile, AbilityHeader, EffectArg, EffectStmt, HintName, Span, TargetMode,
 };
 use engine::ability::program::{
-    AbilityHint, AbilityProgram, AbilityTag, Area, Delivery, EffectAreaShape, EffectOp, EffectWhenCondition,
+    AbilityHint, AbilityProgram, AbilityTag, Area, Delivery, EffectAreaShape, EffectOp, EffectWhenCondition, MAX_NESTED_PER_EFFECT,
     EffectScaling, Gate, LifetimeMode, ScalingStatRef, ShapeKind, StackingMode, TargetSelector,
     MAX_EFFECTS_PER_PROGRAM, MAX_SCALINGS_PER_EFFECT, MAX_TAGS_PER_PROGRAM,
 };
@@ -174,6 +174,17 @@ pub enum LowerError {
     /// (`MAX_SCALINGS_PER_EFFECT == 2` today — fits LoL/MOBA convention
     /// of one or two scaling stats per effect).
     ScalingBudgetExceeded {
+        ability: String,
+        count:   usize,
+        max:     usize,
+        span:    Span,
+    },
+    /// Wave 1.5#9 (nested-effect modifier): an outer effect declared
+    /// more nested follow-up effects than the per-effect budget allows
+    /// (`MAX_NESTED_PER_EFFECT == 2` today — typical "damage + stun"
+    /// combos fit; richer cascades should compose multiple outer
+    /// effects instead). Surfaced loudly rather than silently truncating.
+    NestedBudgetExceeded {
         ability: String,
         count:   usize,
         max:     usize,
@@ -322,6 +333,10 @@ impl std::fmt::Display for LowerError {
             LowerError::ScalingBudgetExceeded { ability, count, max, .. } => write!(
                 f,
                 "ability `{ability}` declares {count} scalings on a single effect but the per-effect budget is {max} (MAX_SCALINGS_PER_EFFECT)"
+            ),
+            LowerError::NestedBudgetExceeded { ability, count, max, .. } => write!(
+                f,
+                "ability `{ability}` declares {count} nested effects on a single outer effect but the per-effect budget is {max} (MAX_NESTED_PER_EFFECT)"
             ),
         }
     }
@@ -602,6 +617,21 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
         [Option<EffectWhenCondition>; MAX_EFFECTS_PER_PROGRAM],
     > = SmallVec::new();
     let mut any_when = false;
+    // Wave 1.5#9: per-effect nested follow-up effects, OUTER index
+    // parallel to `effects`. Each inner SmallVec is bounded at
+    // `MAX_NESTED_PER_EFFECT`. Same "all-empty → empty outer"
+    // optimisation as scalings, so Wave 1 corpus output stays
+    // bit-stable. Each nested EffectStmt is recursively lowered to a
+    // bare EffectOp via lower_effect_stmt — its own modifiers
+    // (tags/chance/stacking/etc.) are SILENTLY DROPPED today because
+    // the per-ability aggregators only capture outer-stmt modifiers.
+    // Apply handlers wire the deferred dispatch later (outer resolves
+    // first, then nested ops fire); recursive aggregator capture is
+    // separate later infrastructure.
+    let mut nested_per_effect_acc: SmallVec<
+        [SmallVec<[EffectOp; MAX_NESTED_PER_EFFECT]>; MAX_EFFECTS_PER_PROGRAM],
+    > = SmallVec::new();
+    let mut any_nested = false;
     let mut scalings_per_effect_acc: SmallVec<
         [SmallVec<[EffectScaling; MAX_SCALINGS_PER_EFFECT]>; MAX_EFFECTS_PER_PROGRAM],
     > = SmallVec::new();
@@ -688,6 +718,31 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
             any_when = true;
         }
         when_per_effect_acc.push(when);
+        // Wave 1.5#9: capture the per-effect nested block BEFORE the
+        // verb dispatch (which would otherwise reject it via the
+        // `ModifierNotImplemented{nested}` arm — now removed).
+        // Recursively call lower_effect_stmt on each nested stmt to
+        // get its bare EffectOp; inner modifiers silently drop today
+        // (see field doc on `nested_per_effect`). Bounded at
+        // MAX_NESTED_PER_EFFECT — overflow surfaces as
+        // `LowerError::NestedBudgetExceeded`.
+        let mut inner_nested: SmallVec<[EffectOp; MAX_NESTED_PER_EFFECT]> = SmallVec::new();
+        for nested_stmt in &stmt.nested {
+            if inner_nested.len() >= MAX_NESTED_PER_EFFECT {
+                return Err(LowerError::NestedBudgetExceeded {
+                    ability: decl.name.clone(),
+                    count:   inner_nested.len() + 1,
+                    max:     MAX_NESTED_PER_EFFECT,
+                    span:    nested_stmt.span,
+                });
+            }
+            let nested_op = lower_effect_stmt(nested_stmt)?;
+            inner_nested.push(nested_op);
+        }
+        if !inner_nested.is_empty() {
+            any_nested = true;
+        }
+        nested_per_effect_acc.push(inner_nested);
         // Wave 1.5#2: capture the per-effect `in <shape>(args)`
         // BEFORE the verb dispatch (which would otherwise discard
         // it). Validate the shape name against the engine's
@@ -774,6 +829,9 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     if !any_when {
         when_per_effect_acc.clear();
     }
+    if !any_nested {
+        nested_per_effect_acc.clear();
+    }
 
     Ok(AbilityProgram {
         delivery: Delivery::Instant,
@@ -788,6 +846,7 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
         per_effect_areas: per_effect_areas_acc,
         scalings_per_effect: scalings_per_effect_acc,
         when_per_effect: when_per_effect_acc,
+        nested_per_effect: nested_per_effect_acc,
     })
 }
 
@@ -864,13 +923,13 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
     // `program.effects`). The verb dispatch below stays oblivious —
     // apply handlers read `program.lifetimes[i]` to pick the lifetime
     // semantic. No short-circuit here.
-    if !stmt.nested.is_empty() {
-        return Err(LowerError::ModifierNotImplemented {
-            verb:     stmt.verb.clone(),
-            modifier: "nested",
-            span:     stmt.nested[0].span,
-        });
-    }
+    // Wave 1.5#9: `{ <inner_stmt>; ... }` nested follow-up effects
+    // are consumed by the per-ability aggregator in
+    // `lower_ability_decl` (one inner SmallVec per outer effect,
+    // parallel to `program.effects`). The verb dispatch below stays
+    // oblivious — apply handlers later read
+    // `program.nested_per_effect[i]` and fire each inner op after
+    // the outer one resolves. No short-circuit here.
     match stmt.verb.as_str() {
         "damage" => {
             let amount = require_number_arg(stmt, 0)?;

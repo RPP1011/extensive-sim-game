@@ -15,6 +15,12 @@
 //
 // `in cone(45deg, 5.0)` exercises Wave 1.5#2 in-shape lowering with
 // the canonical 2-arg shape — radius matches the .sim's range gate.
+//
+// `{ stun 1s }` exercises Wave 1.5#9 nested-effect lowering — the
+// inner stmt is recursively lowered to EffectOp::Stun{duration_ticks:
+// 10} and pushed into program.nested_per_effect[0]. The .sim's
+// existing emit fires Defeated only; apply-handler dispatch for the
+// nested op (fire-after-outer-resolves) is deferred infrastructure.
 
 ability Reap {
     target: enemy
@@ -22,5 +28,5 @@ ability Reap {
     cooldown: 2s
     hint: damage
 
-    execute 20 in cone(45deg, 5.0) when target.hp < 20 [PHYSICAL: 100]
+    execute 20 in cone(45deg, 5.0) when target.hp < 20 [PHYSICAL: 100] { stun 1s }
 }
