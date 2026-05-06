@@ -582,6 +582,10 @@ fn hash_stmt(h: &mut Sha256, s: &IrStmt) {
                 hash_expr(h, &f.value);
             }
         }
+        IrStmt::ApplyAbility { ability, .. } => {
+            h.update([0x18u8]);
+            hash_expr(h, ability);
+        }
     }
 }
 

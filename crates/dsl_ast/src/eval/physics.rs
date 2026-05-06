@@ -371,6 +371,14 @@ fn exec_stmt<C: CascadeContext>(stmt: &IrStmt, ctx: &mut C, locals: &mut Locals)
             // engine; the interpreter skips belief-observe silently so that
             // non-ToM rules continue to function correctly.
         }
+
+        IrStmt::ApplyAbility { .. } => {
+            // Registry-driven dispatch (#132) is GPU-only by design — the
+            // WGSL emitter expands `apply_ability` into a per-effect-slot
+            // dispatch loop. The wolves+humans interpreter has no
+            // PackedAbilityRegistry context so we silently skip; sims
+            // using apply_ability run via the GPU backend exclusively.
+        }
     }
 }
 

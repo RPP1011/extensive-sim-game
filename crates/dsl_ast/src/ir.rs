@@ -479,6 +479,16 @@ pub enum IrStmt {
         fields: Vec<IrFieldInit>,
         span: Span,
     },
+    /// `apply_ability <ability_expr>` — registry-driven dispatch (#132).
+    /// Resolved sibling of `Stmt::ApplyAbility`; the WGSL emitter expands
+    /// this into a per-effect-slot dispatch loop reading from
+    /// `PackedAbilityRegistry` SoA columns. Apply handler reads
+    /// `ability_id` from the resolved expression at runtime; caster
+    /// defaults to `self`, target to the verb's `target` binder.
+    ApplyAbility {
+        ability: IrExprNode,
+        span:    Span,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

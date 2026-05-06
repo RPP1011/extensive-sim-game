@@ -662,6 +662,26 @@ pub enum Stmt {
     /// mutation primitive (Plan ToM Task 4). Mutates a single `BeliefState`
     /// cell in `SimState::cold_beliefs` for the observer/target pair.
     BeliefObserve(BeliefObserveStmt),
+    /// `apply_ability <ability_expr>` — registry-driven dispatch (#125 /
+    /// #132). Replaces hand-mirrored `emit Damaged{...}` / `emit Healed{...}`
+    /// patterns with a single statement that the WGSL emitter expands into
+    /// a per-effect-slot dispatch loop reading from `PackedAbilityRegistry`
+    /// SoA columns. The ability_expr resolves at runtime to an `AbilityId`
+    /// (typically `self.action_ability`); the dispatcher honors per-effect
+    /// chance gates and emits the matching chronicle event for each
+    /// non-empty effect slot. `caster` defaults to `self`, `target` to
+    /// the verb's `target` binder. Lowering: `IrStmt::ApplyAbility` →
+    /// `CgStmt::ApplyAbility` → WGSL dispatcher (#132C+).
+    ApplyAbility(ApplyAbilityStmt),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ApplyAbilityStmt {
+    /// Expression resolving to the ability_id at runtime. Most call sites
+    /// pass `self.action_ability` — the AbilityId field already living on
+    /// agent SoA, written by the action-selection scoring kernel.
+    pub ability: Expr,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

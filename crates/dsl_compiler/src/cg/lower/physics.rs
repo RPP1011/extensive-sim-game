@@ -564,6 +564,14 @@ fn lower_stmt(
             ast_label: "BeliefObserve",
             span: *span,
         }),
+        IrStmt::ApplyAbility { span, .. } => Err(LoweringError::UnsupportedPhysicsStmt {
+            // #132A: AST + parser + IR landed; CgStmt + WGSL emit deferred
+            // to #132C (the coupled change avoids a 16-site blast radius
+            // for an intermediate stub variant).
+            rule: rule_id,
+            ast_label: "ApplyAbility",
+            span: *span,
+        }),
     }
 }
 

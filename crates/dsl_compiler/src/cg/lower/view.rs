@@ -636,6 +636,12 @@ fn lower_stmt(
             ast_label: "BeliefObserve",
             span: *span,
         }),
+        IrStmt::ApplyAbility { span, .. } => Err(LoweringError::UnsupportedViewFoldStmt {
+            // #132A: registry-driven dispatch is physics-only.
+            view: view_id,
+            ast_label: "ApplyAbility",
+            span: *span,
+        }),
     }
 }
 

@@ -1789,6 +1789,13 @@ fn resolve_stmt(
             Ok(IrStmt::Let { name: name.clone(), local, value: v, span: *span })
         }
         Stmt::Emit(e) => Ok(IrStmt::Emit(resolve_emit(e, scope, symbols)?)),
+        Stmt::ApplyAbility(a) => {
+            // #132A: opaque ability_expr resolution. The expression
+            // typically resolves to AbilityId (e.g. `self.action_ability`);
+            // codegen reads it as u32 at the dispatch boundary.
+            let ability = resolve_expr(&a.ability, scope, symbols)?;
+            Ok(IrStmt::ApplyAbility { ability, span: a.span })
+        }
         Stmt::For { binder, iter, filter, body, span } => {
             let iter_ir = resolve_expr(iter, scope, symbols)?;
             scope.push();
@@ -3278,6 +3285,13 @@ fn validate_fold_stmt(view_name: &str, s: &IrStmt) -> Result<(), ResolveError> {
                 .into(),
             span: *span,
         }),
+        IrStmt::ApplyAbility { span, .. } => Err(ResolveError::UdfInViewFoldBody {
+            view_name: view_name.to_string(),
+            offending_construct:
+                "`apply_ability` inside fold body (registry dispatch only valid in physics)"
+                    .into(),
+            span: *span,
+        }),
         IrStmt::BeliefObserve { span, .. } => Err(ResolveError::UdfInViewFoldBody {
             view_name: view_name.to_string(),
             offending_construct:
@@ -3657,6 +3671,7 @@ fn validate_physics_stmt(physics_name: &str, s: &IrStmt) -> Result<(), ResolveEr
         }
         IrStmt::SelfUpdate { value, .. } => validate_physics_expr(physics_name, value),
         IrStmt::Expr(e) => validate_physics_expr(physics_name, e),
+        IrStmt::ApplyAbility { ability, .. } => validate_physics_expr(physics_name, ability),
         IrStmt::BeliefObserve { observer, target, fields, .. } => {
             validate_physics_expr(physics_name, observer)?;
             validate_physics_expr(physics_name, target)?;
@@ -3990,7 +4005,8 @@ fn collect_emitted_events(body: &[IrStmt], out: &mut Vec<String>) {
             IrStmt::Let { .. }
             | IrStmt::SelfUpdate { .. }
             | IrStmt::Expr(_)
-            | IrStmt::BeliefObserve { .. } => {}
+            | IrStmt::BeliefObserve { .. }
+            | IrStmt::ApplyAbility { .. } => {}
         }
     }
 }
@@ -4135,6 +4151,7 @@ fn stmt_references_cascade_ceiling(s: &IrStmt) -> bool {
                 || expr_references_cascade_ceiling(target)
                 || fields.iter().any(|f| expr_references_cascade_ceiling(&f.value))
         }
+        IrStmt::ApplyAbility { ability, .. } => expr_references_cascade_ceiling(ability),
     }
 }
 

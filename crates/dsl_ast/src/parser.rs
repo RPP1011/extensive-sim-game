@@ -1825,6 +1825,29 @@ fn parse_stmt(c: &mut Cursor) -> PResult<Stmt> {
     if c.starts_with("emit ") || c.starts_with("emit\t") || c.starts_with("emit\n") {
         return Ok(Stmt::Emit(parse_emit_stmt(c)?));
     }
+    // `apply_ability <expr>` — registry-driven dispatch (#132). The
+    // expression resolves at runtime to an AbilityId; the WGSL emitter
+    // expands this into a per-effect-slot dispatch loop reading from
+    // PackedAbilityRegistry SoA columns.
+    if c.starts_with("apply_ability ")
+        || c.starts_with("apply_ability\t")
+        || c.starts_with("apply_ability\n")
+    {
+        let start = c.pos;
+        c.bump("apply_ability".len());
+        c.skip_ws();
+        let ability = parse_expr_bounded(c, |ck| {
+            ck.starts_with_char(';') || ck.starts_with_char('}') || ck.starts_with_char('\n')
+        })?;
+        c.skip_ws();
+        if c.starts_with_char(';') {
+            c.bump(1);
+        }
+        return Ok(Stmt::ApplyAbility(crate::ast::ApplyAbilityStmt {
+            ability,
+            span: Span::new(start, c.pos),
+        }));
+    }
     if c.starts_with("for ") {
         c.bump("for".len());
         c.skip_ws();
