@@ -1014,7 +1014,26 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
         // facing direction / away-from-caster / toward-caster vectors
         // and update `hot_pos`) land in a follow-up Wave 2 piece.
         "dash" => {
-            let dist = require_number_arg(stmt, 0)?;
+            // Two LoL/MOBA forms accepted:
+            //   1. `dash <distance:f32>` — fixed travel distance.
+            //   2. `dash to_target` — directive: travel until the
+            //      cast's target is reached. Encoded as the sentinel
+            //      `distance = f32::INFINITY` so the `EffectOp::Dash`
+            //      shape stays a single f32 (P4: ≤16-byte budget).
+            //      Apply handlers check `distance.is_infinite()` to
+            //      branch into target-tracking travel.
+            let dist = match stmt.args.first() {
+                Some(EffectArg::Number(v)) => *v,
+                Some(EffectArg::Ident(n)) if n == "to_target" => f32::INFINITY,
+                _ => {
+                    return Err(LowerError::EffectArgMismatch {
+                        verb:     "dash".to_string(),
+                        expected: 1,
+                        got:      stmt.args.len(),
+                        span:     stmt.span,
+                    });
+                }
+            };
             require_arity(stmt, 1)?;
             Ok(EffectOp::Dash { distance: dist })
         }
