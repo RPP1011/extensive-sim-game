@@ -117,7 +117,7 @@ fn lol_corpus_lowering_baseline() {
     // EffectArgMismatch:dash (32 files), HeaderNotImplemented:recast
     // (34 files — Wave 1.4 deferred multi-stage cast state), and
     // MixedBody (parser-permitted spec violations).
-    let baseline = 34usize;
+    let baseline = 76usize;
     assert!(
         ok >= baseline,
         "LoL lowering regression: ok={ok} fell below baseline={baseline}",

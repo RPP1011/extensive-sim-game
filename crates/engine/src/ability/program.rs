@@ -316,6 +316,36 @@ pub enum EffectOp {
     /// expiry scheduler not wired). Distinct from `Shield` which is
     /// permanent until consumed.
     TimedShield { amount: f32, duration_ticks: u32 } = 22,
+
+    /// `buff <stat> <magnitude> for <duration>` — temporary stat boost.
+    /// `magnitude_q8` is q8 fixed-point matching the Slow/DamageModify
+    /// convention (1.0 → 256; `+ 30%` → 76; `+ 100%` → 256). Apply
+    /// handlers schedule a stat-clear chronicle at
+    /// `cast_tick + duration_ticks` (deferred — buff scheduler not
+    /// wired). 12 bytes with tag, well under the P4 ≤16-byte budget.
+    Buff { stat: BuffStat, magnitude_q8: i16, duration_ticks: u32 } = 23,
+}
+
+/// Stat targeted by `buff`. Vocabulary is small today (just the two
+/// LoL-corpus uses); extend as more apply paths land. Stable repr(u8)
+/// for future SoA packing.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum BuffStat {
+    MoveSpeed   = 0,
+    AttackSpeed = 1,
+}
+
+impl BuffStat {
+    /// Parse the stat ident from the .ability surface. Unknown idents
+    /// return None; lowering surfaces them as UnknownStatRef.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "move_speed"   => Some(Self::MoveSpeed),
+            "attack_speed" => Some(Self::AttackSpeed),
+            _ => None,
+        }
+    }
 }
 
 /// Coarse ability-category hint, per `.ability` DSL `hint:` field.

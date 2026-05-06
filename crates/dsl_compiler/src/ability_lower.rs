@@ -1139,6 +1139,31 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
                 factor_q8,
             })
         }
+        "buff" => {
+            // `buff <stat:ident> <magnitude:f32> for <duration>` — LoL
+            // corpus form (#131). Stat vocabulary: move_speed,
+            // attack_speed (BuffStat::parse). Magnitude packs to q8
+            // matching Slow/DamageModify (`+ 30%` → 76; `+ 100%` → 256).
+            // Duration comes from the for-modifier (positional duration
+            // form would also work via extract_duration).
+            let stat_name = require_name_arg(stmt, 0)?;
+            let stat = engine::ability::program::BuffStat::parse(&stat_name)
+                .ok_or_else(|| LowerError::UnknownStatRef {
+                    stat: stat_name.clone(),
+                    span: stmt.span,
+                })?;
+            let magnitude = require_number_arg(stmt, 1)?;
+            let (dur, arity) = extract_duration(stmt, 2, 3)?;
+            require_arity(stmt, arity)?;
+            let magnitude_q8 = (magnitude * 256.0)
+                .round()
+                .clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+            Ok(EffectOp::Buff {
+                stat,
+                magnitude_q8,
+                duration_ticks: duration_to_ticks(dur),
+            })
+        }
         "transfer_gold" => {
             let amt = require_number_arg(stmt, 0)?;
             require_arity(stmt, 1)?;
@@ -1322,7 +1347,7 @@ fn is_duration_bearing_verb(verb: &str) -> bool {
     matches!(
         verb,
         "stun" | "slow" | "root" | "silence" | "fear" | "taunt"
-        | "lifesteal" | "damage_modify"
+        | "lifesteal" | "damage_modify" | "buff"
     )
 }
 

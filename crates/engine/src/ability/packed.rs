@@ -788,6 +788,14 @@ fn pack_effect(op: EffectOp) -> (u32, u32, u32) {
         EffectOp::TimedShield { amount, duration_ticks } => {
             (22, amount.to_bits(), duration_ticks)
         }
+        // Buff — payload_a packs (stat ordinal in low byte | magnitude
+        // q8 in high 16 bits, sign-preserved); payload_b is duration.
+        // Same compact pattern as Slow's payload, but with an added
+        // u8 stat selector. Kind=23.
+        EffectOp::Buff { stat, magnitude_q8, duration_ticks } => {
+            let pa = (stat as u32) | ((magnitude_q8 as i32 as u32) << 8);
+            (23, pa, duration_ticks)
+        }
     }
 }
 
