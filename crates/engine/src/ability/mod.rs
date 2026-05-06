@@ -43,6 +43,7 @@ pub mod apply;
 pub mod packed;
 pub mod program;
 pub mod registry;
+pub mod registry_gpu;
 
 pub use program::{
     Area, Delivery, EffectOp, Gate, TargetSelector, MAX_ABILITIES, MAX_EFFECTS_PER_PROGRAM,
