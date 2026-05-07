@@ -1593,20 +1593,69 @@ fn lower_cg_stmt_body_to_wgsl(
             );
             Ok(body)
         }
-        CgStmt::ApplyAbility { ability: _ } => {
-            // #136 first slice: structural variant landed in CgStmt
-            // and physics lowering populates it, but the WGSL emit
-            // shape — per-effect-slot dispatch loop reading from the
-            // PackedAbilityRegistry SoA columns + branch on
-            // effect_kinds[i] to the matching apply path — is the
-            // companion follow-up. Emit a single comment placeholder
-            // so the kernel parses; runtime behavior is dead until
-            // the dispatcher lands. The current sim corpus has zero
-            // `apply_ability` uses (verified via `grep -r
-            // "apply_ability " assets/sim/`), so the placeholder is
-            // never executed at runtime; it's strictly here to keep
-            // the structural emit honest.
-            Ok("// #136: apply_ability dispatch (TODO emit-side companion)".to_string())
+        CgStmt::ApplyAbility { ability } => {
+            // #136 slice β step 2: per-effect-slot dispatch loop.
+            // Reads `ability_id` from the operand expression, walks
+            // every effect slot in the PackedAbilityRegistry SoA,
+            // and branches on `effect_kinds[i]` to the matching
+            // apply path. Slot iteration count is the engine
+            // constant `MAX_EFFECTS_PER_PROGRAM = 6` (pinned in the
+            // schema hash); `EFFECT_KIND_EMPTY = 0xFFu` skips unused
+            // slots.
+            //
+            // The apply paths themselves (Damage/Heal/Stun/Slow are
+            // the slice β coverage; rest land in slice δ / #137)
+            // emit chronicle-ring records via `chronicle_append_*`
+            // helper functions that the runtime crate exposes. Until
+            // those helpers exist (slice γ wires the first one),
+            // each apply arm is a `// TODO` comment so the kernel
+            // parses; only the loop scaffolding is exercised.
+            //
+            // This whole arm is dead at HEAD — no current sim
+            // references `apply_ability` (corpus grep is empty).
+            // Lights up the moment slice γ wires one duel_abilities
+            // verb.
+            let ability_wgsl = lower_cg_expr_to_wgsl(*ability, ctx)?;
+            // Engine pins MAX_EFFECTS_PER_PROGRAM = 6 + EFFECT_KIND_EMPTY = 0xFFu
+            // (see crates/engine/src/ability/program.rs:28 +
+            // crates/engine/src/ability/packed.rs). Inlining the
+            // constants keeps the kernel self-contained without
+            // pulling in a shared `consts.wgsl` preamble.
+            let body = format!(
+                "// #136 apply_ability dispatcher (slice β step 2)\n\
+                 {{\n\
+                 \x20\x20\x20\x20let ability_id__u32: u32 = u32({ability_wgsl});\n\
+                 \x20\x20\x20\x20// AbilityId is 1-based (NonZeroU32); slot index is id - 1.\n\
+                 \x20\x20\x20\x20let ability_slot: u32 = ability_id__u32 - 1u;\n\
+                 \x20\x20\x20\x20let effect_base: u32 = ability_slot * 6u; // MAX_EFFECTS_PER_PROGRAM\n\
+                 \x20\x20\x20\x20for (var i: u32 = 0u; i < 6u; i = i + 1u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20let kind: u32 = ability_registry_effect_kinds[effect_base + i];\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20if (kind == 0xFFu) {{ continue; }} // EFFECT_KIND_EMPTY\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20let payload_a: u32 = ability_registry_effect_payload_a[effect_base + i];\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20let payload_b: u32 = ability_registry_effect_payload_b[effect_base + i];\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// Damage = 0\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20if (kind == 0u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let amount: f32 = bitcast<f32>(payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_damage(caster, target, amount);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 1u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Heal\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let amount: f32 = bitcast<f32>(payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_heal(caster, target, amount);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 3u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Stun: payload_a = duration_ticks (u32)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_stun(target, payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 4u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Slow: payload_a = duration_ticks (u32),\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b's low 16 bits = factor_q8 (i16)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_slow(target, payload_a, i32(payload_b));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// Other EffectOp variants (5..31): unhandled in slice β;\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// the silent-skip is documented + intentional. Slice δ\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// (#137) expands to the full vocabulary.\n\
+                 \x20\x20\x20\x20}}\n\
+                 }}"
+            );
+            Ok(body)
         }
     }
 }
@@ -4161,5 +4210,74 @@ mod tests {
             !wgsl.contains("_ = ("),
             "phony discard from the old placeholder must not appear; got:\n{wgsl}"
         );
+    }
+
+    // ---- #136 slice β step 2: apply_ability dispatcher emit ----
+
+    #[test]
+    fn apply_ability_emits_dispatcher_loop_with_branch_arms() {
+        // Build a minimal program with one ApplyAbility stmt that
+        // reads a literal AbilityId(1) — the simplest possible
+        // operand. Emit should produce the slot/base/loop scaffold,
+        // the EFFECT_KIND_EMPTY skip, the four implemented arms
+        // (Damage=0, Heal=1, Stun=3, Slow=4), and the chronicle-
+        // append TODO markers.
+        let mut prog = empty_prog();
+        let ability_lit = push_expr(
+            &mut prog,
+            CgExpr::Lit(LitValue::U32(1)),
+        );
+        let stmt_id = push_stmt(
+            &mut prog,
+            CgStmt::ApplyAbility { ability: ability_lit },
+        );
+        let ctx = EmitCtx::structural(&prog);
+        let wgsl = lower_cg_stmt_to_wgsl(stmt_id, &ctx).expect("lower");
+
+        // Operand expression — read the lit and coerce to u32.
+        assert!(wgsl.contains("ability_id__u32: u32 = u32(1u)"),
+            "operand should be u32-coerced from the lit;\n{wgsl}");
+
+        // Slot/base computation.
+        assert!(wgsl.contains("ability_slot: u32 = ability_id__u32 - 1u"),
+            "AbilityId is 1-based; slot index is id - 1;\n{wgsl}");
+        assert!(wgsl.contains("ability_slot * 6u"),
+            "stride MAX_EFFECTS_PER_PROGRAM = 6 must be inlined;\n{wgsl}");
+
+        // Loop bound + sentinel skip.
+        assert!(wgsl.contains("for (var i: u32 = 0u; i < 6u"),
+            "loop walks every slot;\n{wgsl}");
+        assert!(wgsl.contains("if (kind == 0xFFu) { continue; }"),
+            "EFFECT_KIND_EMPTY must early-out via continue;\n{wgsl}");
+
+        // SoA reads via the new BindingMetadata.
+        assert!(wgsl.contains("ability_registry_effect_kinds[effect_base + i]"),
+            "kind read must hit the new column binding;\n{wgsl}");
+        assert!(wgsl.contains("ability_registry_effect_payload_a[effect_base + i]"),
+            "payload_a read must hit the new column binding;\n{wgsl}");
+        assert!(wgsl.contains("ability_registry_effect_payload_b[effect_base + i]"),
+            "payload_b read must hit the new column binding;\n{wgsl}");
+
+        // Four implemented variant arms.
+        assert!(wgsl.contains("if (kind == 0u)"),
+            "Damage arm (discriminant 0);\n{wgsl}");
+        assert!(wgsl.contains("else if (kind == 1u)"),
+            "Heal arm (discriminant 1);\n{wgsl}");
+        assert!(wgsl.contains("else if (kind == 3u)"),
+            "Stun arm (discriminant 3);\n{wgsl}");
+        assert!(wgsl.contains("else if (kind == 4u)"),
+            "Slow arm (discriminant 4);\n{wgsl}");
+
+        // Damage / Heal use bitcast<f32> on payload_a (q8 amount-bearing).
+        assert!(wgsl.matches("bitcast<f32>(payload_a)").count() >= 2,
+            "Damage + Heal both bitcast payload_a to f32;\n{wgsl}");
+
+        // chronicle_append TODO markers — the runtime helper hookup
+        // is slice γ; locked here so a future regression can't
+        // accidentally claim the dispatcher writes events.
+        assert!(wgsl.contains("TODO slice γ: chronicle_append_damage"),
+            "Damage arm must keep the TODO marker;\n{wgsl}");
+        assert!(wgsl.contains("TODO slice γ: chronicle_append_slow"),
+            "Slow arm must keep the TODO marker;\n{wgsl}");
     }
 }
