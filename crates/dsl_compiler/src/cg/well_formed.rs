@@ -1621,20 +1621,55 @@ fn type_check_list(
                 // the actual NonZero invariant is enforced at
                 // runtime by `AbilityId::new`.
                 //
-                // Slice ε: type-check caster + target operands too.
-                // Both must lower to u32 (AgentId raw representation).
-                // Without this walk, a malformed caster/target subtree
-                // wouldn't surface a TypeMismatch diagnostic — the
-                // dispatcher's `u32(caster_wgsl)` coercion would mask
-                // the type error until a later WGSL-validation stage.
+                // Slice ε: caster + target operands must lower to a
+                // u32 representation (`CgTy::AgentId` — the typed
+                // wrapper — or `CgTy::U32` — a raw SoA-field read
+                // semantically carrying an agent id, e.g. a future
+                // `agents.attacker_id(self)` field). Anything else
+                // (F32 literal, Vec3, Bool) silently truncated through
+                // the dispatcher's `u32(...)` coercion in the emit
+                // format string, producing garbage agent ids in the
+                // chronicle records.
                 if let Some(expr) = prog.exprs.get(ability.0 as usize) {
-                    let _ = type_check(expr, *ability, ctx);
+                    match type_check(expr, *ability, ctx) {
+                        Ok(ty) if matches!(ty, CgTy::U32 | CgTy::AgentId) => {}
+                        Ok(ty) => errors.push(CgError::TypeMismatch {
+                            op: op_id,
+                            error: TypeError::ClaimedResultMismatch {
+                                node: *ability,
+                                expected: CgTy::U32,
+                                got: ty,
+                            },
+                        }),
+                        Err(err) => errors.push(CgError::TypeMismatch {
+                            op: op_id,
+                            error: err,
+                        }),
+                    }
                 }
-                if let Some(expr) = prog.exprs.get(caster.0 as usize) {
-                    let _ = type_check(expr, *caster, ctx);
-                }
-                if let Some(expr) = prog.exprs.get(target.0 as usize) {
-                    let _ = type_check(expr, *target, ctx);
+                for (slot_label, slot_id) in
+                    [("caster", *caster), ("target", *target)]
+                {
+                    let _ = slot_label; // diagnostic label reserved for future
+                                        // per-operand error variant; today
+                                        // both slots collapse to TypeMismatch.
+                    if let Some(expr) = prog.exprs.get(slot_id.0 as usize) {
+                        match type_check(expr, slot_id, ctx) {
+                            Ok(ty) if matches!(ty, CgTy::U32 | CgTy::AgentId) => {}
+                            Ok(ty) => errors.push(CgError::TypeMismatch {
+                                op: op_id,
+                                error: TypeError::ClaimedResultMismatch {
+                                    node: slot_id,
+                                    expected: CgTy::AgentId,
+                                    got: ty,
+                                },
+                            }),
+                            Err(err) => errors.push(CgError::TypeMismatch {
+                                op: op_id,
+                                error: err,
+                            }),
+                        }
+                    }
                 }
             }
         }

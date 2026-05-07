@@ -1009,6 +1009,70 @@ fn per_agent_apply_ability_with_soa_field_target_validates() {
     );
 }
 
+/// Slice ε type-check (`well_formed.rs` ApplyAbility arm): the
+/// target operand must lower to `CgTy::U32` or `CgTy::AgentId`.
+/// `target 3.14` (an f32 literal) used to silently truncate through
+/// the dispatcher's `u32(...)` coercion in the emit format string,
+/// producing garbage agent ids in chronicle records (`u32(3.14) = 3`
+/// in WGSL — naga accepted it). This pin asserts the well-formed
+/// pass now rejects it at lowering, before emit.
+///
+/// Catches regressions where the type-check return values get
+/// silently discarded again (the original well_formed code had
+/// `let _ = type_check(...)` for this arm).
+#[test]
+fn apply_ability_rejects_f32_target_at_lowering() {
+    let src = "
+        event Tick { }
+        entity Hero : Agent { }
+
+        physics BadTarget @phase(per_agent) {
+          on Tick {} where (self.alive) {
+            apply_ability agents.level(self) by self target 3.14
+          }
+        }
+    ";
+    let program = dsl_compiler::parse(src).expect("parse");
+    let comp = dsl_ast::resolve::resolve(program).expect("resolve");
+    let err = dsl_compiler::cg::lower::lower_compilation_to_cg(&comp)
+        .expect_err(
+            "lowering must reject f32 target — silent acceptance \
+             produces garbage agent ids in chronicle records via \
+             WGSL `u32(3.14)` truncation",
+        );
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("TypeMismatch") || msg.contains("F32"),
+        "expected TypeMismatch / F32 mention in error; got: {msg}"
+    );
+}
+
+/// Same regression pin for the caster operand. Symmetric to the
+/// target check — both operands route through the same `u32(...)`
+/// coercion in emit.
+#[test]
+fn apply_ability_rejects_f32_caster_at_lowering() {
+    let src = "
+        event Tick { }
+        entity Hero : Agent { }
+
+        physics BadCaster @phase(per_agent) {
+          on Tick {} where (self.alive) {
+            apply_ability agents.level(self) by 3.14 target self
+          }
+        }
+    ";
+    let program = dsl_compiler::parse(src).expect("parse");
+    let comp = dsl_ast::resolve::resolve(program).expect("resolve");
+    let err = dsl_compiler::cg::lower::lower_compilation_to_cg(&comp)
+        .expect_err("lowering must reject f32 caster");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("TypeMismatch") || msg.contains("F32"),
+        "expected TypeMismatch / F32 mention in error; got: {msg}"
+    );
+}
+
 /// Pin the BGL composer's wiring of `event_ring` + `event_tail` into
 /// the dispatcher kernel. Without these bindings, the chronicle writes
 /// emitted by the dispatcher arms would reference undeclared identifiers
