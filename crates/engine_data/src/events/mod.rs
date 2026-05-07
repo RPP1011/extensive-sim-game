@@ -23,6 +23,7 @@ pub mod bid_placed;
 pub mod cast_depth_exceeded;
 pub mod chronicle_entry;
 pub mod effect_blink_applied;
+pub mod effect_buff_applied;
 pub mod effect_charm_applied;
 pub mod effect_damage_applied;
 pub mod effect_damage_modify_applied;
@@ -32,11 +33,14 @@ pub mod effect_execute_applied;
 pub mod effect_fear_applied;
 pub mod effect_gold_transfer;
 pub mod effect_grounded_applied;
+pub mod effect_harvest_applied;
 pub mod effect_heal_applied;
 pub mod effect_heal_over_time_applied;
 pub mod effect_knockback_applied;
 pub mod effect_life_steal_applied;
+pub mod effect_place_voxel_applied;
 pub mod effect_pull_applied;
+pub mod effect_reflect_applied;
 pub mod effect_root_applied;
 pub mod effect_self_damage_applied;
 pub mod effect_shield_applied;
@@ -81,6 +85,7 @@ pub use bid_placed::BidPlaced;
 pub use cast_depth_exceeded::CastDepthExceeded;
 pub use chronicle_entry::ChronicleEntry;
 pub use effect_blink_applied::EffectBlinkApplied;
+pub use effect_buff_applied::EffectBuffApplied;
 pub use effect_charm_applied::EffectCharmApplied;
 pub use effect_damage_applied::EffectDamageApplied;
 pub use effect_damage_modify_applied::EffectDamageModifyApplied;
@@ -90,11 +95,14 @@ pub use effect_execute_applied::EffectExecuteApplied;
 pub use effect_fear_applied::EffectFearApplied;
 pub use effect_gold_transfer::EffectGoldTransfer;
 pub use effect_grounded_applied::EffectGroundedApplied;
+pub use effect_harvest_applied::EffectHarvestApplied;
 pub use effect_heal_applied::EffectHealApplied;
 pub use effect_heal_over_time_applied::EffectHealOverTimeApplied;
 pub use effect_knockback_applied::EffectKnockbackApplied;
 pub use effect_life_steal_applied::EffectLifeStealApplied;
+pub use effect_place_voxel_applied::EffectPlaceVoxelApplied;
 pub use effect_pull_applied::EffectPullApplied;
+pub use effect_reflect_applied::EffectReflectApplied;
 pub use effect_root_applied::EffectRootApplied;
 pub use effect_self_damage_applied::EffectSelfDamageApplied;
 pub use effect_shield_applied::EffectShieldApplied;
@@ -398,6 +406,32 @@ pub enum Event {
         duration_ticks: u32,
         tick: u32,
     },
+    EffectBuffApplied {
+        actor: AgentId,
+        target: AgentId,
+        stat_ordinal: u8,
+        magnitude_q8: i16,
+        duration_ticks: u32,
+        tick: u32,
+    },
+    EffectHarvestApplied {
+        actor: AgentId,
+        kind_hash: u32,
+        amount: u32,
+        tick: u32,
+    },
+    EffectPlaceVoxelApplied {
+        actor: AgentId,
+        kind_hash: u32,
+        tick: u32,
+    },
+    EffectReflectApplied {
+        actor: AgentId,
+        target: AgentId,
+        duration_ticks: u32,
+        fraction_q8: i16,
+        tick: u32,
+    },
     EngagementBroken {
         actor: AgentId,
         former_target: AgentId,
@@ -506,6 +540,10 @@ impl Event {
             Event::EffectCharmApplied { tick, .. } => *tick,
             Event::EffectGroundedApplied { tick, .. } => *tick,
             Event::EffectSuppressApplied { tick, .. } => *tick,
+            Event::EffectBuffApplied { tick, .. } => *tick,
+            Event::EffectHarvestApplied { tick, .. } => *tick,
+            Event::EffectPlaceVoxelApplied { tick, .. } => *tick,
+            Event::EffectReflectApplied { tick, .. } => *tick,
             Event::EngagementBroken { tick, .. } => *tick,
             Event::EngagementCommitted { tick, .. } => *tick,
             Event::FearSpread { tick, .. } => *tick,
@@ -567,6 +605,10 @@ impl Event {
             Event::EffectCharmApplied { .. } => true,
             Event::EffectGroundedApplied { .. } => true,
             Event::EffectSuppressApplied { .. } => true,
+            Event::EffectBuffApplied { .. } => true,
+            Event::EffectHarvestApplied { .. } => true,
+            Event::EffectPlaceVoxelApplied { .. } => true,
+            Event::EffectReflectApplied { .. } => true,
             Event::EngagementBroken { .. } => true,
             Event::EngagementCommitted { .. } => true,
             Event::FearSpread { .. } => true,

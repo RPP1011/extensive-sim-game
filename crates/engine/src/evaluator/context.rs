@@ -885,6 +885,32 @@ fn fields_to_event(
             let duration_ticks = field_u32(fields, "duration_ticks").unwrap_or(0);
             Some(Event::EffectSuppressApplied { actor, target, duration_ticks, tick })
         }
+        "EffectBuffApplied" => {
+            let actor          = field_agent(fields, "actor")?;
+            let target         = field_agent(fields, "target")?;
+            let stat_ordinal   = field_u32(fields, "stat_ordinal").unwrap_or(0) as u8;
+            let magnitude_q8   = field_i16(fields, "magnitude_q8").unwrap_or(0);
+            let duration_ticks = field_u32(fields, "duration_ticks").unwrap_or(0);
+            Some(Event::EffectBuffApplied { actor, target, stat_ordinal, magnitude_q8, duration_ticks, tick })
+        }
+        "EffectHarvestApplied" => {
+            let actor     = field_agent(fields, "actor")?;
+            let kind_hash = field_u32(fields, "kind_hash").unwrap_or(0);
+            let amount    = field_u32(fields, "amount").unwrap_or(0);
+            Some(Event::EffectHarvestApplied { actor, kind_hash, amount, tick })
+        }
+        "EffectPlaceVoxelApplied" => {
+            let actor     = field_agent(fields, "actor")?;
+            let kind_hash = field_u32(fields, "kind_hash").unwrap_or(0);
+            Some(Event::EffectPlaceVoxelApplied { actor, kind_hash, tick })
+        }
+        "EffectReflectApplied" => {
+            let actor          = field_agent(fields, "actor")?;
+            let target         = field_agent(fields, "target")?;
+            let duration_ticks = field_u32(fields, "duration_ticks").unwrap_or(0);
+            let fraction_q8    = field_i16(fields, "fraction_q8").unwrap_or(0);
+            Some(Event::EffectReflectApplied { actor, target, duration_ticks, fraction_q8, tick })
+        }
         "EffectSlowApplied" => {
             let actor           = field_agent(fields, "actor")?;
             let target          = field_agent(fields, "target")?;

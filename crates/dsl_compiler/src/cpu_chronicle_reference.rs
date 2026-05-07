@@ -275,6 +275,89 @@ pub fn apply_event_to_chronicle_record(
             rec[4] = duration_ticks;
             Some(rec)
         }
+        // --- Buff = 23 → EventKindId::EffectBuffApplied = 58.
+        // Slice γ tail — target-cast with packed payload. The GPU
+        // dispatcher writes:
+        //   slot 2 = caster_slot
+        //   slot 3 = target_slot
+        //   slot 4 = raw payload_a (= stat_ordinal in low byte |
+        //            magnitude_q8 in bits 8..; consumer sign-extends)
+        //   slot 5 = raw payload_b (= duration_ticks)
+        // The CPU reference reconstructs the same packed payload from
+        // the typed `ApplyEvent::Buff` fields so the bytes round-trip
+        // (stat ordinal in low byte, magnitude_q8 sign-cast i16 → i32
+        // → u32 then shifted left by 8, masked with stat). Mirrors
+        // `pack_effect`'s Buff arm in
+        // `crates/engine/src/ability/packed.rs`.
+        ApplyEvent::Buff { target: _, stat, magnitude_q8, duration_ticks } => {
+            rec[0] = 58;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            // Reconstruct the dispatcher's payload_a packing: low byte =
+            // stat ordinal (u8), bits 8.. = magnitude_q8 (i16 sign-cast
+            // i32 → u32 then shifted left 8). The OR-mask isolates each
+            // half — magnitude_q8's low 8 bits are positioned bits 8..15,
+            // and the stat fits in 0..7.
+            let pa = (stat as u32) | ((magnitude_q8 as i32 as u32) << 8);
+            rec[4] = pa;
+            rec[5] = duration_ticks;
+            Some(rec)
+        }
+        // --- Harvest = 25 → EventKindId::EffectHarvestApplied = 59.
+        // Slice γ tail — caster-self resource gather. The GPU dispatcher
+        // writes:
+        //   slot 2 = caster_slot
+        //   slot 3 = kind_hash (u32 FxHash of resource ident)
+        //   slot 4 = amount (u32, widened from u16 EffectOp side)
+        // No target field on the engine event.
+        ApplyEvent::Harvest { source: _, kind_hash, amount } => {
+            rec[0] = 59;
+            rec[2] = caster_id;
+            rec[3] = kind_hash;
+            rec[4] = amount as u32;
+            Some(rec)
+        }
+        // --- PlaceVoxel = 26 → EventKindId::EffectPlaceVoxelApplied = 60.
+        // Slice γ tail — caster-self voxel placement. The GPU dispatcher
+        // writes:
+        //   slot 2 = caster_slot
+        //   slot 3 = kind_hash (u32 FxHash of voxel kind ident)
+        // Position is implicit from the cast's target world position
+        // (not stored in the chronicle record). No target field on the
+        // engine event.
+        ApplyEvent::PlaceVoxel { source: _, kind_hash } => {
+            rec[0] = 60;
+            rec[2] = caster_id;
+            rec[3] = kind_hash;
+            Some(rec)
+        }
+        // --- Reflect = 31 → EventKindId::EffectReflectApplied = 61.
+        // Slice γ tail — target-cast fraction-of-damage bounce. The GPU
+        // dispatcher writes:
+        //   slot 2 = caster_slot
+        //   slot 3 = target_slot
+        //   slot 4 = duration_ticks (raw u32 = payload_a)
+        //   slot 5 = fraction_q8 packed in payload_b's low 16 bits;
+        //            consumer sign-extends. The CPU reference mirrors
+        //            `pack_effect`'s Reflect arm: zero-extend i16 → u16
+        //            then to u32 so the byte layout matches the GPU
+        //            packing exactly.
+        // Same payload-shape family as Slow/LifeSteal/DamageModify (all
+        // carry duration + signed q8). Distinct in that we store raw
+        // `duration_ticks` (not `expires_at_tick`), consistent with the
+        // multi-tick effect family (DoT/HoT/TimedShield, kinds 51..53).
+        ApplyEvent::Reflect { target: _, duration_ticks, fraction_q8 } => {
+            rec[0] = 61;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            rec[4] = duration_ticks;
+            // Mirror `pack_effect`: `(fraction_q8 as u16) as u32`. The
+            // u16 cast wraps negatives via two's complement; the u32
+            // widen zero-extends. The dispatcher writes payload_b raw,
+            // so the chronicle record carries the same low-16-bit form.
+            rec[5] = (fraction_q8 as u16) as u32;
+            Some(rec)
+        }
         // --- Slow = 4 → EventKindId::EffectSlowApplied = 30.
         // 4-field payload: actor, target, expires_at_tick, factor_q8.
         ApplyEvent::Slow { target: _, duration_ticks, factor_q8 } => {
@@ -505,10 +588,11 @@ mod tests {
     #[test]
     fn variants_without_chronicle_counterpart_return_none() {
         // ApplyEvent variants without chronicle counterparts today.
-        // After the extended-status slice (Stealth/Charm/Grounded/
-        // Suppress) the only deferred-infrastructure ApplyEvents left
-        // are Summon/Harvest/PlaceVoxel — emit ApplyEvents but have no
-        // engine `EventKindId` yet.
+        // After the slice γ tail (Buff/Harvest/PlaceVoxel/Reflect),
+        // Summon is the only deferred-infrastructure ApplyEvent left
+        // — its multi-spawn semantics need a new dispatch shape (one
+        // cast → N entity spawns), distinct from the single-record
+        // chronicle arms wired by every other variant.
         //
         // Status effects already wired up:
         // - SelfDamage (Bleed verb swap, Task #138 follow-on,
@@ -524,16 +608,133 @@ mod tests {
         // - Stealth/Charm/Grounded/Suppress (extended-status slice) →
         //   kinds 54..57, see
         //   `extended_status_chronicle_records_use_kinds_54_57`.
+        // - Buff/Harvest/PlaceVoxel/Reflect (slice γ tail) →
+        //   kinds 58..61, see
+        //   `slice_gamma_tail_chronicle_records_use_kinds_58_61`.
         for ev in [
             ApplyEvent::Summon  { source: aid(1), template_hash: 0xDEADBEEF, count: 2, lifetime_ticks: 100 },
-            ApplyEvent::Harvest { source: aid(1), kind_hash: 0xCAFEBABE, amount: 5 },
-            ApplyEvent::PlaceVoxel { source: aid(1), kind_hash: 0xFACEFEED },
         ] {
             assert!(
                 apply_event_to_chronicle_record(ev, 100, 0, 0).is_none(),
                 "variant {ev:?} should have no chronicle counterpart \
-                 (dispatcher arm carries TODO marker)"
+                 (Summon multi-spawn deferred — dispatcher arm carries TODO marker)"
             );
+        }
+    }
+
+    /// Slice γ tail (Buff/Harvest/PlaceVoxel/Reflect). Four distinct
+    /// shapes:
+    ///   - Buff: target-cast with packed payload. 5-payload-word record:
+    ///     actor + target + raw payload_a (stat | mag_q8 << 8) + raw
+    ///     payload_b (= duration). Consumers sign-extend magnitude_q8.
+    ///   - Harvest: caster-self. 4-payload-word record: actor + kind_hash
+    ///     + amount. No target field on the engine event.
+    ///   - PlaceVoxel: caster-self. 3-payload-word record: actor + kind_hash.
+    ///     Position is implicit from cast's target position.
+    ///   - Reflect: target-cast with packed payload. 5-payload-word
+    ///     record: actor + target + raw payload_a (= duration) + raw
+    ///     payload_b (low 16 bits = fraction_q8 i16). Consumers
+    ///     sign-extend the fraction.
+    ///
+    /// Pin per-variant kind tags (58..61) and packed-payload byte layout
+    /// — the signed sub-fields (Buff's magnitude_q8 and Reflect's
+    /// fraction_q8) are exercised with negative values to guarantee the
+    /// sign-cast path round-trips.
+    #[test]
+    fn slice_gamma_tail_chronicle_records_use_kinds_58_61() {
+        use engine::ability::program::BuffStat;
+
+        // Buff — target-cast with packed payload. Negative magnitude_q8
+        // exercises the i16 → i32 → u32 sign-cast path.
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::Buff {
+                target: aid(11),
+                stat: BuffStat::AttackSpeed, // ordinal 1
+                magnitude_q8: -64,           // negative — sign extends
+                duration_ticks: 50,
+            },
+            /*tick*/ 100,
+            /*caster_id*/ 7,
+            /*target_id*/ 11,
+        )
+        .expect("Buff has chronicle counterpart");
+        assert_eq!(rec[0], 58, "Buff: kind tag — EffectBuffApplied");
+        assert_eq!(rec[1], 100, "Buff: tick");
+        assert_eq!(rec[2], 7,   "Buff: actor slot — caster_id");
+        assert_eq!(rec[3], 11,  "Buff: target slot — target_id");
+        // Reconstruct the expected packed payload_a:
+        //   low byte = stat ordinal (1 = AttackSpeed)
+        //   bits 8..  = magnitude_q8 sign-cast i16 → i32 → u32 then << 8
+        let expected_pa = 1u32 | ((-64_i32 as u32) << 8);
+        assert_eq!(
+            rec[4], expected_pa,
+            "Buff: payload_a packs stat (low byte) + magnitude_q8 (bits 8..); \
+             negative magnitude must sign-extend i16 → i32 before shift"
+        );
+        assert_eq!(rec[5], 50, "Buff: payload_b = duration_ticks (raw u32)");
+        for i in 6..CHRONICLE_RECORD_STRIDE_U32 {
+            assert_eq!(rec[i], 0, "Buff: tail word {i} should be zero");
+        }
+
+        // Harvest — caster-self, 4-payload-word record.
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::Harvest { source: aid(7), kind_hash: 0xCAFEBABE, amount: 5 },
+            /*tick*/ 200,
+            /*caster_id*/ 7,
+            /*target_id*/ 7,
+        )
+        .expect("Harvest has chronicle counterpart");
+        assert_eq!(rec[0], 59, "Harvest: kind tag — EffectHarvestApplied");
+        assert_eq!(rec[1], 200, "Harvest: tick");
+        assert_eq!(rec[2], 7, "Harvest: actor slot — caster_id");
+        assert_eq!(rec[3], 0xCAFEBABE, "Harvest: kind_hash at payload word 1");
+        assert_eq!(rec[4], 5, "Harvest: amount at payload word 2 (u16 widened to u32)");
+        for i in 5..CHRONICLE_RECORD_STRIDE_U32 {
+            assert_eq!(rec[i], 0, "Harvest: tail word {i} should be zero");
+        }
+
+        // PlaceVoxel — caster-self, 3-payload-word record.
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::PlaceVoxel { source: aid(7), kind_hash: 0xFACEFEED },
+            /*tick*/ 300,
+            /*caster_id*/ 7,
+            /*target_id*/ 7,
+        )
+        .expect("PlaceVoxel has chronicle counterpart");
+        assert_eq!(rec[0], 60, "PlaceVoxel: kind tag — EffectPlaceVoxelApplied");
+        assert_eq!(rec[1], 300, "PlaceVoxel: tick");
+        assert_eq!(rec[2], 7, "PlaceVoxel: actor slot — caster_id");
+        assert_eq!(rec[3], 0xFACEFEED, "PlaceVoxel: kind_hash at payload word 1");
+        for i in 4..CHRONICLE_RECORD_STRIDE_U32 {
+            assert_eq!(rec[i], 0, "PlaceVoxel: tail word {i} should be zero");
+        }
+
+        // Reflect — target-cast, packed payload_b. Negative fraction_q8
+        // exercises the i16 → u16 zero-extend path: `(fraction_q8 as u16)
+        // as u32` should produce 0x0000_FFC0 for fraction_q8 = -64.
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::Reflect { target: aid(11), duration_ticks: 50, fraction_q8: -64 },
+            /*tick*/ 400,
+            /*caster_id*/ 7,
+            /*target_id*/ 11,
+        )
+        .expect("Reflect has chronicle counterpart");
+        assert_eq!(rec[0], 61, "Reflect: kind tag — EffectReflectApplied");
+        assert_eq!(rec[1], 400, "Reflect: tick");
+        assert_eq!(rec[2], 7, "Reflect: actor slot — caster_id");
+        assert_eq!(rec[3], 11, "Reflect: target slot — target_id");
+        assert_eq!(rec[4], 50, "Reflect: payload_a = duration_ticks (raw u32)");
+        // Match `pack_effect`'s Reflect arm: `(fraction_q8 as u16) as u32`.
+        // For -64_i16: u16 wraps to 0xFFC0; u32 zero-extend → 0x0000_FFC0.
+        let expected_pb = (-64_i16 as u16) as u32;
+        assert_eq!(expected_pb, 0x0000_FFC0, "sanity: -64 → 0xFFC0 in low 16 bits");
+        assert_eq!(
+            rec[5], expected_pb,
+            "Reflect: payload_b's low 16 bits carry fraction_q8 (i16 → u16 → u32, \
+             zero-extend); consumer sign-extends low 16 to recover negative value"
+        );
+        for i in 6..CHRONICLE_RECORD_STRIDE_U32 {
+            assert_eq!(rec[i], 0, "Reflect: tail word {i} should be zero");
         }
     }
 
@@ -1002,6 +1203,15 @@ mod tests {
                 28 => ApplyEvent::Charm          { target: aid(2), duration_ticks: 50 },
                 29 => ApplyEvent::Grounded       { target: aid(2), duration_ticks: 50 },
                 30 => ApplyEvent::Suppress       { target: aid(2), duration_ticks: 50 },
+                23 => ApplyEvent::Buff           {
+                    target: aid(2),
+                    stat: engine::ability::program::BuffStat::MoveSpeed,
+                    magnitude_q8: 64,
+                    duration_ticks: 50,
+                },
+                25 => ApplyEvent::Harvest        { source: aid(1), kind_hash: 0xCAFEBABE, amount: 5 },
+                26 => ApplyEvent::PlaceVoxel     { source: aid(1), kind_hash: 0xFACEFEED },
+                31 => ApplyEvent::Reflect        { target: aid(2), duration_ticks: 50, fraction_q8: 64 },
                 _ => panic!("unexpected effect_kind in table"),
             }
         };

@@ -205,7 +205,48 @@ pub enum EventKindId {
     EffectCharmApplied      = 55,
     EffectGroundedApplied   = 56,
     EffectSuppressApplied   = 57,
-    // Slots 58-127 reserved for replayable event variants added in later tasks.
+    // Slice γ tail — Buff/Harvest/PlaceVoxel/Reflect. Each closes one of
+    // the remaining `// TODO slice γ` placeholders in the apply_ability
+    // dispatcher's WGSL arm chain. Four distinct shapes:
+    //   - Buff (kind 23 → ID 58): target-cast with packed payload.
+    //     5-payload-word chronicle record (actor + target + raw payload_a
+    //     + raw payload_b). The dispatcher writes payload_a (which packs
+    //     `stat_ordinal` in the low byte and `magnitude_q8` in bits 8..)
+    //     and payload_b (= duration_ticks) verbatim — consumer rules
+    //     decode the packed bits.
+    //   - Harvest (kind 25 → ID 59): caster-self resource gather.
+    //     4-payload-word chronicle record (actor + kind_hash + amount).
+    //     No target field on the engine event; the dispatcher writes
+    //     payload_a (= kind_hash u32) and payload_b (= amount u32) at
+    //     ring slots 3 and 4.
+    //   - PlaceVoxel (kind 26 → ID 60): caster-self voxel placement.
+    //     3-payload-word chronicle record (actor + kind_hash). Position
+    //     is implicit from the cast's target world position; the engine
+    //     event today carries only kind_hash (no position field) per
+    //     ApplyEvent::PlaceVoxel's payload shape — apply handlers
+    //     reconstruct placement location from the cast's stamped target
+    //     position when the runtime spawner wires up.
+    //   - Reflect (kind 31 → ID 61): target-cast fraction-of-damage
+    //     bounce. 5-payload-word chronicle record (actor + target +
+    //     raw payload_a + raw payload_b). The dispatcher writes
+    //     payload_a (= duration_ticks) and payload_b (= fraction_q8 i16
+    //     packed in low 16 bits) verbatim — consumer rules sign-extend
+    //     the fraction. Same convention as Buff: the packed payload
+    //     stores raw u32 words for the consumer to decode.
+    //
+    // SHAPE NOTE: Buff and Reflect carry signed packed payloads
+    // (`magnitude_q8 i16` and `fraction_q8 i16`) — the chronicle ring
+    // stores the raw u32 from the dispatcher's effect_payload_a /
+    // effect_payload_b columns; consumers downcast/sign-extend on read.
+    // Harvest and PlaceVoxel store unsigned u32 hashes / counts.
+    // Summon (kind 24) is the only remaining `// TODO slice γ` arm —
+    // its multi-spawn semantics need a new dispatch shape (one cast →
+    // N entity spawns) and is deferred.
+    EffectBuffApplied        = 58,
+    EffectHarvestApplied     = 59,
+    EffectPlaceVoxelApplied  = 60,
+    EffectReflectApplied     = 61,
+    // Slots 62-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 
