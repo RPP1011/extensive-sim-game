@@ -74,9 +74,11 @@ verb Cast(self) =
 
 // PerEvent: chronicle consumer. Reads EffectDamageApplied records
 // the dispatcher wrote into event_ring, decrements target hp by
-// the chronicle's amount field. Trips P6 (PerEvent + agents.set_hp);
-// build.rs-tolerated like duel_abilities.sim::ApplyDamage and
-// apply_ability_chronicle_consumer.sim::ApplyChronicleDamage.
+// the chronicle's amount field. `@phase(post)` is the spec'd
+// chronicle / telemetry channel — Gap X (2026-05-04) extended the
+// P6 check to recognize the annotation; the diagnostic the original
+// fixture was tolerating no longer fires.
+@phase(post)
 physics ApplyChronicleDamage {
   on EffectDamageApplied { actor: c, target: t, amount: a } {
     agents.set_hp(t, agents.hp(t) - a);

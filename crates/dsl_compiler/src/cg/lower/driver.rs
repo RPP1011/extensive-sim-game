@@ -1782,6 +1782,13 @@ fn lower_all_physics(
             }
         };
         let replayable = physics_replayability(rule);
+        // Record `@phase(post)` rules into the program-level side-table
+        // for the well-formed P6 check. The replayability flag stays
+        // `Replayable` (see [`physics_replayability`] doc) so the
+        // schedule's fusion partitioning is unchanged.
+        if is_post_phase_authored(&rule.annotations) {
+            ctx.builder.mark_post_phase_physics_rule(rule_id);
+        }
         if let Err(e) = lower_physics(rule_id, replayable, rule, &resolutions, ctx) {
             diagnostics.push(e);
         }
@@ -1791,8 +1798,41 @@ fn lower_all_physics(
 /// Today every physics rule is treated as replayable. The plan
 /// defers `@phase(post)` parsing to a follow-up; see the
 /// module-level "Limitations" note.
+///
+/// The P6 check separately consults the rule's `@phase(post)`
+/// annotation (via [`is_post_phase_authored`]) so authored chronicle
+/// physics rules don't trip P6 false positives even though the
+/// replayability flag still reads `Replayable` here. Wiring
+/// `@phase(post)` through to fusion / emit ring routing is a
+/// downstream change that must coordinate with each production
+/// runtime crate's hardcoded fused kernel names; that work is out
+/// of scope for the Gap X fix (2026-05-04 duel_1v1 discovery note).
 fn physics_replayability(_rule: &PhysicsIR) -> ReplayabilityFlag {
     ReplayabilityFlag::Replayable
+}
+
+/// Is this rule annotated `@phase(post)`? Mirrors the bare-positional-
+/// ident form recognised by [`super::physics::is_per_agent_phase`];
+/// the args list must be exactly `[Ident("post")]`. Used by the well-
+/// formed P6 check to exempt authored chronicle physics rules from
+/// the "agent-field write outside ViewFold" diagnostic — agent
+/// mutation IS the spec'd channel for `@phase(post)` (damage
+/// application, status updates, ground-snap, …).
+///
+/// Verb-cascade-synthesised physics rules carry empty annotations
+/// (`PhysicsIR::annotations: Vec::new()` per
+/// [`super::verb_expand::synthesize_cascade_physics`]) — they don't
+/// match here and still flow through the strict P6 check.
+pub(crate) fn is_post_phase_authored(annotations: &[dsl_ast::ast::Annotation]) -> bool {
+    use dsl_ast::ast::{AnnotationArg, AnnotationValue};
+    annotations.iter().any(|a| {
+        a.name == "phase"
+            && matches!(
+                a.args.as_slice(),
+                [AnnotationArg { key: None, value: AnnotationValue::Ident(s), .. }]
+                    if s == "post"
+            )
+    })
 }
 
 fn build_physics_handler_resolutions(

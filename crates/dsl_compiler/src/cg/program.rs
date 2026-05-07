@@ -971,6 +971,31 @@ pub struct CgProgram {
     /// `populate_entity_field_catalog`. Empty for fixtures that
     /// declare no Item / Group entities.
     pub entity_field_catalog: EntityFieldCatalog,
+    /// Physics rules carrying an authored `@phase(post)` annotation.
+    /// Populated by the lowering driver from each `PhysicsIR`'s
+    /// annotation list (see `super::lower::driver::is_post_phase_authored`).
+    /// Consulted by the well-formed P6 check
+    /// (`super::well_formed::p6_check_op`) — `@phase(post)` rules ARE
+    /// the spec'd channel for chronicle / telemetry agent mutation
+    /// (damage application, status updates, ground-snap, …) so they
+    /// MUST be exempt from the "physics_rule writes agent field"
+    /// diagnostic.
+    ///
+    /// Verb-cascade-synthesised physics rules carry empty annotations
+    /// (`PhysicsIR::annotations: Vec::new()` per
+    /// `super::lower::verb_expand::synthesize_cascade_physics`) — they
+    /// don't appear in this set and continue to flow through the
+    /// strict P6 check.
+    ///
+    /// This is a side-table rather than a flag on
+    /// [`super::op::ComputeOpKind::PhysicsRule`] because flipping the
+    /// op-level [`super::op::ReplayabilityFlag`] would change the
+    /// schedule's fusion partitioning (cross-replayability splits in
+    /// `super::schedule::fusion::join_decision`). Each `*_runtime`
+    /// crate hardcodes the resulting fused-kernel names; the side-
+    /// table is a zero-cost surface for the P6 check that doesn't
+    /// touch the fusion / emit pipeline.
+    pub post_phase_physics_rules: std::collections::BTreeSet<u32>,
 }
 
 impl CgProgram {
@@ -988,6 +1013,12 @@ impl CgProgram {
     /// (named form) simultaneously.
     pub fn display_with_names(&self, handle: &DataHandle) -> String {
         format!("{}", DataHandleWithNames(handle, &self.interner))
+    }
+    /// Does physics rule `id` carry an authored `@phase(post)`
+    /// annotation? See [`CgProgram::post_phase_physics_rules`] for the
+    /// rationale.
+    pub fn is_post_phase_physics_rule(&self, id: PhysicsRuleId) -> bool {
+        self.post_phase_physics_rules.contains(&id.0)
     }
 }
 
@@ -1185,6 +1216,15 @@ impl CgProgramBuilder {
             id.0,
             name.into(),
         )
+    }
+    /// Record that physics rule `id` carries an authored `@phase(post)`
+    /// annotation. Idempotent; entries already present stay. Consulted
+    /// by the well-formed P6 check via
+    /// [`CgProgram::is_post_phase_physics_rule`]. See the module-level
+    /// docs on [`CgProgram::post_phase_physics_rules`] for the
+    /// rationale (side-table vs op-level flag).
+    pub fn mark_post_phase_physics_rule(&mut self, id: PhysicsRuleId) {
+        self.inner.post_phase_physics_rules.insert(id.0);
     }
     pub fn intern_event_kind_name(
         &mut self,

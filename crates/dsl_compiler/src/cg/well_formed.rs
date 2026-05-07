@@ -1687,6 +1687,21 @@ fn type_check_list(
 /// Mask predicates / scoring argmax / physics rules / spatial queries
 /// must use `Emit` to write through events.
 fn p6_check_op(op: &ComputeOp, op_id: OpId, prog: &CgProgram, errors: &mut Vec<CgError>) {
+    // Authored `@phase(post)` chronicle physics rules — the spec'd
+    // channel for damage application, status updates, ground-snap,
+    // etc. They run after the deterministic ring fold and write the
+    // resulting agent mutations (hp/alive/mana/…) directly. Recorded
+    // in the program-level [`CgProgram::post_phase_physics_rules`]
+    // side-table at lowering time. The verb expander's synthesised
+    // cascade rules carry empty annotations and emit through `Emit`
+    // (no direct AgentField write surface to police), so they don't
+    // appear in the side-table — the strict P6 check still catches a
+    // synthesised body that smuggled a direct AgentField write.
+    let is_authored_post_phase = matches!(
+        op.kind,
+        ComputeOpKind::PhysicsRule { rule, .. }
+            if prog.is_post_phase_physics_rule(rule)
+    );
     let allow_agent_field_writes = matches!(op.kind, ComputeOpKind::ViewFold { .. })
         // Per-agent physics rules (`on_event = None`, e.g. Movement,
         // Boids' MoveBoid, future cooldown-tick / stun-expiry / regen
@@ -1699,7 +1714,8 @@ fn p6_check_op(op: &ComputeOp, op_id: OpId, prog: &CgProgram, errors: &mut Vec<C
         || matches!(
             op.kind,
             ComputeOpKind::PhysicsRule { on_event: None, .. }
-        );
+        )
+        || is_authored_post_phase;
     if allow_agent_field_writes {
         return;
     }
@@ -3300,6 +3316,106 @@ mod tests {
             Span::dummy(),
         )
         .unwrap();
+        let prog = b.finish();
+
+        let errs = check_well_formed(&prog).expect_err("P6 violation expected");
+        let agent_field_handle = DataHandle::AgentField {
+            field: AgentFieldId::Hp,
+            target: AgentRef::Self_,
+        };
+        assert!(
+            errs.contains(&CgError::P6Violation {
+                op: OpId(0),
+                kind_label: "physics_rule",
+                write: agent_field_handle,
+            }),
+            "missing P6Violation(physics_rule) in {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn post_phase_physics_rule_may_write_agent_field() {
+        // Authored `@phase(post)` chronicle physics rules ARE the
+        // spec'd channel for damage application / status updates /
+        // ground-snap / etc. P6 must exempt them — Gap X fix
+        // (2026-05-04 duel_1v1 discovery note). The lowering driver
+        // records `@phase(post)` rules into the program's
+        // `post_phase_physics_rules` side-table; the P6 check
+        // consults it. Verb-cascade-synthesised rules don't appear
+        // in the side-table (they carry empty annotations) so the
+        // strict P6 check still catches direct AgentField writes
+        // from verb-internal physics — see
+        // [`replayable_physics_rule_writing_agent_field_still_reports_p6`].
+        let mut b = CgProgramBuilder::new();
+        let new_hp = b.add_expr(lit_f32(0.0)).unwrap();
+        let assign = b
+            .add_stmt(CgStmt::Assign {
+                target: DataHandle::AgentField {
+                    field: AgentFieldId::Hp,
+                    target: AgentRef::Self_,
+                },
+                value: new_hp,
+            })
+            .unwrap();
+        let body = b.add_stmt_list(CgStmtList::new(vec![assign])).unwrap();
+        b.add_op(
+            ComputeOpKind::PhysicsRule {
+                rule: PhysicsRuleId(0),
+                on_event: Some(EventKindId(0)),
+                body,
+                replayable: ReplayabilityFlag::Replayable,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+        )
+        .unwrap();
+        // Mark rule 0 as `@phase(post)` — same hand-off the lowering
+        // driver makes for fixtures whose physics carry the
+        // annotation in source.
+        b.mark_post_phase_physics_rule(PhysicsRuleId(0));
+        let prog = b.finish();
+        assert_eq!(check_well_formed(&prog), Ok(()));
+    }
+
+    #[test]
+    fn non_post_phase_physics_rule_writing_agent_field_still_reports_p6() {
+        // Counterpart to the `@phase(post)` exemption: a physics
+        // rule NOT recorded in the `post_phase_physics_rules` side-
+        // table (the verb-expander's synthesised cascade shape, for
+        // instance) writing AgentField directly still trips P6. The
+        // synthesised cascade body uses `Emit` in production — this
+        // guards the regression case where a synthesised body
+        // smuggles a direct AgentField write (would skip the
+        // deterministic ring fold's mutation channel).
+        let mut b = CgProgramBuilder::new();
+        let new_hp = b.add_expr(lit_f32(0.0)).unwrap();
+        let assign = b
+            .add_stmt(CgStmt::Assign {
+                target: DataHandle::AgentField {
+                    field: AgentFieldId::Hp,
+                    target: AgentRef::Self_,
+                },
+                value: new_hp,
+            })
+            .unwrap();
+        let body = b.add_stmt_list(CgStmtList::new(vec![assign])).unwrap();
+        b.add_op(
+            ComputeOpKind::PhysicsRule {
+                rule: PhysicsRuleId(0),
+                on_event: Some(EventKindId(0)),
+                body,
+                replayable: ReplayabilityFlag::Replayable,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+        )
+        .unwrap();
+        // NOT marked as `@phase(post)` — strict P6 check applies.
         let prog = b.finish();
 
         let errs = check_well_formed(&prog).expect_err("P6 violation expected");
