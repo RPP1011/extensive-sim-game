@@ -27,11 +27,24 @@
 // re-emit as the existing `Shielded` / `Healed` events so the rest of
 // the cascade (ApplyShield / ApplyHeal SoA writes) keeps working
 // unchanged. Slot ids pinned at startup via SHIELDUP_EXPECTED_ABILITY_ID
-// = 2 and MEND_EXPECTED_ABILITY_ID = 3 in binding_check.rs. The
-// remaining verbs (Bleed/Reap/Vampirize/Fortify/Daze) still use direct
+// = 2 and MEND_EXPECTED_ABILITY_ID = 3 in binding_check.rs.
+//
+// Task #138 follow-on (Daze, 2026-05-07) — Daze extends the pattern
+// to a chance-gated, enemy-target verb: `apply_ability 8 by self
+// target target`. The dispatcher writes EffectStunApplied (kind=29)
+// records that the new ApplyStunFromChronicle physics rule re-emits
+// as the existing `Stunned` events (ApplyStun's per-agent
+// set_stun_expires_at_tick handler unchanged). The chance gate stays
+// in the verb's `when` clause — the GPU dispatcher does not consult
+// program.chances at the apply_ability arm today (registry-driven
+// chance dispatch is later infrastructure). Slot id pinned at startup
+// via DAZE_EXPECTED_ABILITY_ID = 8 in binding_check.rs.
+//
+// The remaining verbs (Bleed/Reap/Vampirize/Fortify) still use direct
 // emit chronicles; expanding the apply_ability swap to them is followup
-// (each has more complex effects — caster scaling, multi-effect,
-// when-conditions, chance gates).
+// — they need new engine EventKindId variants (SelfDamageApplied,
+// ExecuteApplied, LifeStealApplied, DamageModifyApplied) that don't
+// exist yet.
 //
 // CONSTANT TABLE (matches the .ability files exactly):
 //   Strike   : cooldown 10 ticks (1s), range 5.0, damage 15.0, target enemy
@@ -136,6 +149,33 @@ event EffectShieldApplied {
   actor: AgentId,
   target: AgentId,
   amount: f32,
+}
+
+// Engine-side chronicle event written by the apply_ability dispatcher
+// at hardcoded EventKindId 29 (see
+// `dsl_ast::engine_events::engine_event_kind_id_for_name`).
+//
+// Task #138 follow-on (Daze) — Daze's verb body is now `apply_ability
+// 8 by self target target`, which writes EffectStunApplied records
+// into the event ring. The new ApplyStunFromChronicle physics rule
+// (declared below near the rest of the consumers) translates these
+// records back into the existing `Stunned` event so the existing
+// ApplyStun cascade (per-agent set_stun_expires_at_tick) keeps working
+// unchanged.
+//
+// SHAPE NOTE: unlike the Damage/Heal/Shield triplet, the Stun
+// chronicle's third payload word is `expires_at_tick` (= dispatcher's
+// `tick + duration_ticks`), NOT `duration_ticks` and NOT `amount`.
+// See `cg/emit/wgsl_body.rs` (Stun = 3 → kind 29 dispatcher arm) and
+// `cpu_chronicle_reference.rs::apply_event_to_chronicle_record`. The
+// existing `Stunned` event already carries `expires_at: u32`, so the
+// re-emit physics rule can ferry the value verbatim — no
+// duration↔expires conversion required.
+@replayable @gpu_amenable
+event EffectStunApplied {
+  actor: AgentId,
+  target: AgentId,
+  expires_at_tick: u32,
 }
 
 @replayable @gpu_amenable
@@ -457,10 +497,37 @@ verb Daze(self, target: Agent) =
         // ((0.5 * 65535).round() rounds half-up). Hand-mirrored here
         // as `(rng.action() % 65536) < 32768`, which matches the
         // runtime gate shape `(per_agent_u32(...) & 0xFFFF) < q16`.
-        // Registry-driven chance dispatch is later infrastructure;
-        // this verb gate is the binding-test analogue.
+        //
+        // Task #138 follow-on (Daze): the GPU apply_ability dispatcher
+        // (cg/emit/wgsl_body.rs) writes one chronicle record per
+        // non-empty effect slot UNCONDITIONALLY — it does NOT consult
+        // program.chances[i] at the dispatcher arm. So the verb's
+        // hand-mirrored chance gate stays load-bearing: it gates whether
+        // the apply_ability emits at all this tick. Registry-driven
+        // chance dispatch would push this into the dispatcher and let
+        // the verb drop the gate; for now, the verb gate is the gate.
         && (rng.action() % 65536) < 32768)
-  emit Stunned { target_agent: target, expires_at: world.tick + config.combat.daze_dur }
+  // Task #138 follow-on (Daze) — verb-body apply_ability dispatcher
+  // swap. Daze was `emit Stunned { target_agent: target, expires_at:
+  // world.tick + config.combat.daze_dur }`. The literal `8` is Daze's
+  // AbilityId in the duel_abilities AbilityRegistry built from the
+  // alphabetised .ability filenames in
+  // `binding_check.rs::build_duel_abilities_registry` (alphabetised
+  // file order: Bleed=4, Daze=8, Fortify=7, Mend=3, Reap=5, ShieldUp=2,
+  // Strike=1, Vampirize=6 — but the runtime asserts pin Strike=1,
+  // ShieldUp=2, Mend=3 and now Daze=8 explicitly, so any drift surfaces
+  // as a startup panic).
+  //
+  // `target target` matches the verb's existing `target.alive &&
+  // target != self` gate — Daze is enemy-target so the dispatcher
+  // routes the EffectStunApplied chronicle's actor to self and target
+  // to the verb's target. The runtime extends the binding check to
+  // assert `built.names.get("Daze") == AbilityId(8)`. See
+  // ApplyStunFromChronicle below for the chronicle re-emit that
+  // funnels EffectStunApplied(kind=29) records back into the existing
+  // `Stunned` cascade so ApplyStun's set_stun_expires_at_tick keeps
+  // working unchanged.
+  apply_ability 8 by self target target
   score (180.0 - target.hp)
 
 // Task #138 — Strike's verb body now uses `apply_ability 1 by self
@@ -511,6 +578,32 @@ physics ApplyShieldFromChronicle {
 physics ApplyHealFromChronicle {
   on EffectHealApplied { actor: c, target: t, amount: a } {
     emit Healed { source: c, target: t, amount: a }
+  }
+}
+
+// Task #138 follow-on (Daze) — Daze's verb body now uses
+// `apply_ability 8 by self target target` (see the Daze verb above).
+// The dispatcher writes EffectStunApplied chronicle records
+// (engine-aliased to kind=29) instead of the source-declared Stunned
+// event. This rule consumes those records and re-emits Stunned so
+// the rest of the cascade (ApplyStun with per-agent
+// set_stun_expires_at_tick) keeps working unchanged.
+//
+// PAYLOAD NOTE: the chronicle's expires_at_tick word IS what the
+// existing ApplyStun's `Stunned.expires_at` already speaks (the
+// dispatcher pre-computes `tick + duration_ticks`), so the re-emit
+// can ferry the value verbatim — no duration↔expires conversion.
+// The Damage/Heal/Shield triplet's third payload is `amount: f32`,
+// which is also a verbatim ferry. Stun is the first chronicle event
+// in this fixture whose third payload is a TICK-DOMAIN u32 rather
+// than an amount, but the re-emit shape is identical.
+//
+// P6 caveat: this rule is PerEvent + emit-only (no AgentField writes)
+// — does NOT trip P6.
+@phase(post)
+physics ApplyStunFromChronicle {
+  on EffectStunApplied { actor: _, target: t, expires_at_tick: e } {
+    emit Stunned { target_agent: t, expires_at: e }
   }
 }
 

@@ -219,6 +219,15 @@ pub struct DuelAbilitiesState {
     /// kernel) back into `Healed` events so the existing ApplyHeal
     /// cascade keeps working unchanged.
     apply_heal_from_chronicle_cfg_buf: wgpu::Buffer,
+    /// Task #138 follow-on (Daze) — Cfg uniform for the new
+    /// `physics_ApplyStunFromChronicle` kernel that translates
+    /// `EffectStunApplied` records (kind=29, written by the
+    /// apply_ability dispatcher in the standalone Daze chronicle
+    /// kernel) back into `Stunned` events so the existing ApplyStun
+    /// cascade keeps working unchanged. Same shape as
+    /// ApplyDamageFromChronicle / ApplyShieldFromChronicle: PerEvent
+    /// + emit-only kernel, no AgentField writes (so no P6 trip).
+    apply_stun_from_chronicle_cfg_buf: wgpu::Buffer,
     /// Task #138 — Packed AbilityRegistry uploaded to the GPU. The
     /// fused kernel binds `effect_kinds` / `effect_payload_a` /
     /// `effect_payload_b` for the apply_ability dispatcher arm
@@ -577,6 +586,19 @@ impl DuelAbilitiesState {
             contents: bytemuck::bytes_of(&apply_heal_from_chronicle_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        // Task #138 follow-on (Daze) — Cfg uniform for the new
+        // ApplyStunFromChronicle kernel that translates EffectStunApplied
+        // (kind=29) records emitted by the apply_ability dispatcher into
+        // Stunned events the existing ApplyStun cascade consumes.
+        let apply_stun_from_chronicle_cfg_init =
+            physics_ApplyStunFromChronicle::PhysicsApplyStunFromChronicleCfg {
+                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            };
+        let apply_stun_from_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_abilities_runtime::apply_stun_from_chronicle_cfg"),
+            contents: bytemuck::bytes_of(&apply_stun_from_chronicle_cfg_init),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let seed_cfg_init = seed_indirect_0::SeedIndirect0Cfg {
             agent_cap: agent_count, tick: 0, seed: 0, _pad: 0,
         };
@@ -645,6 +667,7 @@ impl DuelAbilitiesState {
             apply_damage_from_chronicle_cfg_buf,
             apply_shield_from_chronicle_cfg_buf,
             apply_heal_from_chronicle_cfg_buf,
+            apply_stun_from_chronicle_cfg_buf,
             registry_gpu,
             seed_cfg_buf,
             cache: dispatch::KernelCache::default(),
@@ -835,11 +858,16 @@ impl CompiledSim for DuelAbilitiesState {
         // and Mend (kind=27 EffectHealApplied + Healed re-emit) — but
         // the verbs are mutually exclusive per tick (scoring picks
         // one), so the worst case is +2 records per agent (whichever
-        // verb fires + its re-emit). Bump the upper bound to 20 slots
-        // per agent to keep clear_ring_headers from leaving stale
-        // slots between ticks. (16 + 2 = 18; rounded to 20 for a small
-        // safety margin against future swaps.)
-        let max_slots_per_tick = self.agent_count * 20;
+        // verb fires + its re-emit). Task #138 follow-on (Daze) adds
+        // a fourth swap (kind=29 EffectStunApplied + Stunned re-emit)
+        // — same +2 per-agent overhead when the chance gate fires,
+        // and same mutual-exclusivity argument with the other verbs.
+        // Bump the upper bound to 22 slots per agent to keep
+        // clear_ring_headers from leaving stale slots between ticks.
+        // (20 + 2 = 22; the per-tick sum stays in the same
+        // verb-mutually-exclusive band but the bump gives every
+        // chronicle re-emit its own headroom.)
+        let max_slots_per_tick = self.agent_count * 22;
         self.event_ring.clear_ring_headers_in(
             &self.gpu, &mut encoder, max_slots_per_tick,
         );
@@ -1082,12 +1110,16 @@ impl CompiledSim for DuelAbilitiesState {
         );
 
         // (7e) Daze chronicle — Wave 2 piece N Stun E2E demo + first
-        // verb-status cast-gate. Gates on action_id==7u and emits
-        // Stunned{target_agent=target, expires_at=tick+daze_dur}.
-        // Drained by the ApplyStun arm of the fused kernel below — sets
-        // the target's stun_expires_at_tick SoA slot so EVERY offensive
-        // verb's mask kernel reads `stun_expires_at_tick > world.tick`
-        // and skips casting for the duration of the window.
+        // verb-status cast-gate. Task #138 follow-on (Daze) — verb
+        // body is now `apply_ability 8 by self target target`, so this
+        // kernel walks the AbilityRegistry's effect SoA columns to
+        // expand the dispatch into chronicle EffectStunApplied writes
+        // (kind=29). Re-emitted as Stunned by ApplyStunFromChronicle
+        // below; ApplyStun (fused kernel) drains those Stunned events
+        // and writes the target's stun_expires_at_tick SoA slot so
+        // EVERY offensive verb's mask kernel reads
+        // `stun_expires_at_tick > world.tick` and skips casting for
+        // the duration of the window.
         let daze_cfg = physics_verb_chronicle_Daze::PhysicsVerbChronicleDazeCfg {
             event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
         };
@@ -1097,6 +1129,9 @@ impl CompiledSim for DuelAbilitiesState {
         let daze_bindings = physics_verb_chronicle_Daze::PhysicsVerbChronicleDazeBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
+            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
             cfg: &self.chronicle_daze_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_daze(
@@ -1161,6 +1196,39 @@ impl CompiledSim for DuelAbilitiesState {
             &self.gpu.device, &mut encoder, max_slots_per_tick,
         );
 
+        // (7h) Task #138 follow-on (Daze) — ApplyStunFromChronicle.
+        // The Daze chronicle (step 7e) just wrote EffectStunApplied
+        // records (kind=29) into the event ring via the apply_ability
+        // dispatcher arm — when the verb's `chance 50%` `when` gate
+        // fires (the dispatcher itself does NOT consult program.chances
+        // today, so the verb gate is the only chance gate). This kernel
+        // filters those records and re-emits them as `Stunned` events
+        // so the ApplyStun arm of the fused kernel below can drain
+        // them with per-agent set_stun_expires_at_tick intact.
+        //
+        // PerEvent shape: scans every event_ring slot up to event_count
+        // and skips slots whose kind != 29. The chronicle's third
+        // payload word is `expires_at_tick` (= dispatcher's `tick +
+        // duration_ticks`), which the existing `Stunned` event already
+        // speaks — re-emit ferries verbatim, no conversion required.
+        let apply_stun_from_chronicle_cfg = physics_ApplyStunFromChronicle::PhysicsApplyStunFromChronicleCfg {
+            event_count: max_slots_per_tick, tick: self.tick as u32,
+            seed: 0, _pad0: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.apply_stun_from_chronicle_cfg_buf, 0,
+            bytemuck::bytes_of(&apply_stun_from_chronicle_cfg),
+        );
+        let apply_stun_from_chronicle_bindings = physics_ApplyStunFromChronicle::PhysicsApplyStunFromChronicleBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            cfg: &self.apply_stun_from_chronicle_cfg_buf,
+        };
+        dispatch::dispatch_physics_applystunfromchronicle(
+            &mut self.cache, &apply_stun_from_chronicle_bindings,
+            &self.gpu.device, &mut encoder, max_slots_per_tick,
+        );
+
         // (8a) Fused ApplyHeal + ApplyShield + ApplyDefeat +
         // ApplyLifestealActivation + ApplyDamageModActivation +
         // ApplyStun + verb_chronicle_Strike. The compiler re-fused these
@@ -1185,7 +1253,7 @@ impl CompiledSim for DuelAbilitiesState {
         // `_and_ApplyStun_` segment and adding agent_stun_expires_at_tick
         // to the bind group. No new pass introduced; same single
         // dispatch per tick.
-        let event_count_estimate = self.agent_count * 20;
+        let event_count_estimate = self.agent_count * 22;
         let apply_heal_cfg = physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_ApplyDamageModActivation_and_ApplyStun_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndApplyDamageModActivationAndApplyStunAndVerbChronicleStrikeCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
             seed: 0, _pad0: 0,

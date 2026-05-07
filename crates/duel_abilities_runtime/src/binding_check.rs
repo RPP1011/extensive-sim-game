@@ -55,6 +55,20 @@ pub const SHIELDUP_EXPECTED_ABILITY_ID: u32 = 2;
 /// Mend=3 in alphabetised order).
 pub const MEND_EXPECTED_ABILITY_ID: u32 = 3;
 
+/// Task #138 follow-on (Daze) — Daze's verb body in
+/// `assets/sim/duel_abilities.sim` dispatches via
+/// `apply_ability 8 by self target target`. The literal `8` is Daze's
+/// expected `AbilityId` slot in the registry. The
+/// `build_duel_abilities_registry()` ordering is the source-order
+/// `names` array literal in this file:
+///   1: Strike, 2: ShieldUp, 3: Mend, 4: Bleed,
+///   5: Reap,   6: Vampirize, 7: Fortify, 8: Daze.
+/// (Earlier comments referred to "alphabetised" — that's actually
+/// the SOURCE-order convention of the names literal, which is roughly
+/// "main combat moves → utility → CC". The runtime assertion below
+/// pins the slot regardless of how you read the ordering.)
+pub const DAZE_EXPECTED_ABILITY_ID: u32 = 8;
+
 /// Read + parse + build the AbilityRegistry over every .ability file
 /// under `assets/ability_test/duel_abilities/`. Shared by the binding
 /// check (assert_ability_registry_matches_sim_constants) AND the
@@ -583,6 +597,24 @@ pub fn assert_ability_registry_matches_sim_constants() {
     //   casting while the window is active.
     let daze_id = *built.names.get("Daze")
         .expect("Daze registered in name table");
+    // Task #138 follow-on (Daze) — Daze's verb body in
+    // duel_abilities.sim hardcodes the literal `apply_ability 8 by
+    // self target target`. Pin the registry slot at startup so any
+    // drift in the build_registry ordering surfaces here, not as
+    // silent wrong-ability dispatch (e.g. the verb fires a different
+    // verb's effects against the target). The chance gate is
+    // hand-mirrored in the verb's `when` clause; the dispatcher
+    // doesn't gate on program.chances today, so the slot pin is the
+    // only guard against a wrong-ability dispatch when the gate fires.
+    assert_eq!(
+        daze_id,
+        AbilityId::new(DAZE_EXPECTED_ABILITY_ID).expect("non-zero AbilityId"),
+        "Daze's AbilityId drifted from the expected slot {} — \
+         duel_abilities.sim's `apply_ability 8` literal will dispatch \
+         the wrong program. Re-check the alphabetised file order in \
+         `build_duel_abilities_registry()`.",
+        DAZE_EXPECTED_ABILITY_ID,
+    );
     let daze = built.registry.get(daze_id)
         .expect("Daze resolves to a program");
     assert_eq!(
