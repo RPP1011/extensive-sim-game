@@ -713,6 +713,59 @@ fn apply_ability_smoke_kernel_passes_naga_validator() {
     );
 }
 
+/// Slice ε pin for PerEvent + `by w` + no `target`: lowering
+/// defaults target to caster (slice-γ self-cast), so the
+/// dispatcher emits both `let caster_slot` and `let target_slot`
+/// from the same source expression. Confirms the implicit-target
+/// default works in PerEvent shape, not just PerAgent.
+///
+/// Without this test, a regression that fixed the implicit-target
+/// default for PerAgent only (broke PerEvent — which previously
+/// errored at lowering rather than reaching emit) would slip
+/// through to silently broken WGSL when the user later adds
+/// PerEvent rules.
+#[test]
+fn per_event_by_caster_without_explicit_target_emits_both_slots() {
+    let src = "
+        event Tick { }
+        event Triggered { who: AgentId, ability_id: u32 }
+
+        entity Hero : Agent { }
+
+        physics DispatchOnTrigger {
+          on Triggered { who: w, ability_id: a } {
+            apply_ability a by w
+          }
+        }
+    ";
+    let program = dsl_compiler::parse(src).expect("parse");
+    let comp = dsl_ast::resolve::resolve(program).expect("resolve");
+    let cg = dsl_compiler::cg::lower::lower_compilation_to_cg(&comp)
+        .expect("PerEvent ApplyAbility with `by w` lowers");
+    let schedule_result = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&schedule_result.schedule, &cg)
+        .expect("emit");
+
+    let body = kernel_body_containing(&art, "DispatchOnTrigger")
+        .or_else(|| kernel_body_containing(&art, "physics"))
+        .expect("physics kernel emitted");
+
+    // Both let-bindings present (implicit target = caster).
+    assert!(
+        body.contains("let caster_slot: u32"),
+        "PerEvent + `by w` must emit `let caster_slot` from the by-operand;\n{body}"
+    );
+    assert!(
+        body.contains("let target_slot: u32"),
+        "PerEvent + `by w` (no explicit target) must still emit `let \
+         target_slot` — implicit default target = caster (slice-γ \
+         self-cast preserved);\n{body}"
+    );
+}
+
 /// Slice ε regression pin: even when the source omits `target
 /// <expr>`, lowering must still populate the target operand
 /// (defaulting to caster) so the dispatcher emit produces BOTH
