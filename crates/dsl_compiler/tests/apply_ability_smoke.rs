@@ -514,6 +514,54 @@ fn apply_ability_smoke_emits_dispatcher_loop_in_kernel_body() {
     );
 }
 
+/// Wave 1.5#7 GPU eval pin: dispatcher emits a when-predicate evaluator
+/// guarded by `if (when_passes)`. Sentinel binder == 0xFFu skips
+/// evaluation; otherwise the predicate compares
+/// `agent_<stat>[caster_or_target_slot] <op> literal`.
+#[test]
+fn dispatcher_emits_when_predicate_eval_block() {
+    let path = workspace_path("assets/sim/apply_ability_smoke.sim");
+    let art = compile_sim(&path).expect("apply_ability_smoke compiles");
+    let body = kernel_body_containing(&art, "DispatchAbility")
+        .expect("dispatcher kernel must exist");
+    // Read the binder column at the slot offset.
+    assert!(
+        body.contains("ability_registry_when_pred_binder[effect_base + i]"),
+        "expected dispatcher to read when_pred_binder at slot offset; \
+         got body:\n{body}"
+    );
+    // Sentinel skip: binder == 0xFFu means no predicate.
+    assert!(
+        body.contains("if (pred_binder != 0xFFu)"),
+        "expected dispatcher to skip predicate eval when binder is the \
+         sentinel (0xFFu); got body:\n{body}"
+    );
+    // Per-op switch shape — at least one of the comparison arms.
+    assert!(
+        body.contains("when_passes = pred_lhs <  pred_literal"),
+        "expected when_passes assignment for Lt op (case 0u in switch); \
+         got body:\n{body}"
+    );
+    assert!(
+        body.contains("when_passes = pred_lhs == pred_literal"),
+        "expected when_passes assignment for Eq op (case 4u); got body:\n{body}"
+    );
+    // Wraps the chronicle arm chain in `if (when_passes)`.
+    assert!(
+        body.contains("if (when_passes)"),
+        "expected the chronicle arm chain to be wrapped in \
+         `if (when_passes) {{ ... }}`; got body:\n{body}"
+    );
+    // Predicate uses the same agent SoA bindings as the scale_bonus
+    // computation — pin agent_hp[pred_agent] so the load-bearing
+    // `target.hp` Reap path stays wired.
+    assert!(
+        body.contains("agent_hp[pred_agent]"),
+        "expected predicate switch to read agent_hp at pred_agent slot \
+         (Reap-shape `when target.hp < 20`); got body:\n{body}"
+    );
+}
+
 /// Naga-validate the dispatcher's emitted WGSL. Format-string
 /// assertions catch missing arms / wrong constants, but they DON'T
 /// catch syntax errors the WGSL frontend rejects (mismatched braces,

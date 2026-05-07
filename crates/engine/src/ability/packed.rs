@@ -39,7 +39,7 @@
 //!   `HashMap` iteration leakage, no time-of-day inputs, no thread state.
 
 use super::program::{
-    Area, Delivery, EffectAreaShape, EffectOp, EffectScaling, LifetimeMode,
+    Area, Delivery, EffectAreaShape, EffectOp, EffectPredicate, EffectScaling, LifetimeMode,
     MAX_EFFECTS_PER_PROGRAM, MAX_NESTED_PER_EFFECT, MAX_SCALINGS_PER_EFFECT,
     MAX_TAGS_PER_PROGRAM, StackingMode, TargetSelector,
 };
@@ -117,6 +117,15 @@ pub const SHAPE_KIND_NONE_SENTINEL: u8 = 0xFF;
 /// sentinel — percents are ONLY meaningful when
 /// `scaling_stat_refs[i] != SCALING_STAT_NONE_SENTINEL`.
 pub const SCALING_STAT_NONE_SENTINEL: u8 = 0xFF;
+
+/// Sentinel for the `when_pred_binder` column when a per-effect
+/// when-predicate slot is unused (the effect carried no `when <cond>`
+/// modifier, OR the modifier failed to compile). Distinct from any
+/// `EffectPredicateBinder` discriminant (0 = self, 1 = target).
+/// Companion `when_pred_field`, `when_pred_op`, `when_pred_literal`
+/// slots store zero whenever the binder is the sentinel — they are
+/// ONLY meaningful when `when_pred_binder[i] != WHEN_PRED_NONE_SENTINEL`.
+pub const WHEN_PRED_NONE_SENTINEL: u8 = 0xFF;
 
 // Compile-time guard: `MAX_TAGS_PER_PROGRAM` and `NUM_ABILITY_TAGS` must
 // stay aligned. Both are derived from `AbilityTag::COUNT` today; a future
@@ -321,6 +330,47 @@ pub struct PackedAbilityRegistry {
     /// `effect_payload_b`). `0` for sentinel slots. Length matches
     /// `nested_effect_kinds`.
     pub nested_effect_payload_b: Vec<u32>,
+
+    // -- When-predicate rows (flat, stride = MAX_EFFECTS_PER_PROGRAM = 6).
+    //
+    // Wave 1.5#7 GPU eval: per-effect `when <binder>.<field> <op>
+    // <literal>` predicate. The dispatcher reads the four columns at
+    // each slot, evaluates the predicate against the appropriate
+    // agent SoA stat, and gates the chronicle write (primary AND
+    // nested) on the result. The sentinel `WHEN_PRED_NONE_SENTINEL`
+    // (0xFF) on `when_pred_binder` marks slots without a predicate;
+    // the dispatcher skips evaluation and fires the effect
+    // unconditionally for sentinel slots.
+
+    /// Per-effect predicate binder discriminant
+    /// (`EffectPredicateBinder as u8`: 0 = self, 1 = target), or
+    /// `WHEN_PRED_NONE_SENTINEL` (0xFF) when the source effect has no
+    /// `when <cond>` modifier. Apply handlers should treat the sentinel
+    /// as "no predicate — fire unconditionally".
+    /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM`.
+    pub when_pred_binder: Vec<u8>,
+
+    /// Per-effect predicate field discriminant — `ScalingStatRef as u8`
+    /// (0..=7 maps to AttackDamage / AbilityPower / MaxHp / Hp / Armor
+    /// / MagicResist / MoveSpeed / Mana). Only meaningful when
+    /// `when_pred_binder[i] != WHEN_PRED_NONE_SENTINEL`; `0` for sentinel
+    /// slots so the column is dense.
+    /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM`.
+    pub when_pred_field: Vec<u8>,
+
+    /// Per-effect predicate comparison op discriminant
+    /// (`EffectPredicateOp as u8`: 0=Lt, 1=Le, 2=Gt, 3=Ge, 4=Eq, 5=Ne).
+    /// Only meaningful when `when_pred_binder[i] != WHEN_PRED_NONE_SENTINEL`;
+    /// `0` for sentinel slots.
+    /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM`.
+    pub when_pred_op: Vec<u8>,
+
+    /// Per-effect predicate literal RHS — f32 value the LHS stat is
+    /// compared against. Only meaningful when
+    /// `when_pred_binder[i] != WHEN_PRED_NONE_SENTINEL`; `0.0` for
+    /// sentinel slots.
+    /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM`.
+    pub when_pred_literal: Vec<f32>,
 }
 
 impl PackedAbilityRegistry {
@@ -399,6 +449,20 @@ impl PackedAbilityRegistry {
         let mut nested_effect_payload_a = vec![0_u32; nested_total];
         let mut nested_effect_payload_b = vec![0_u32; nested_total];
 
+        // When-predicates (Wave 1.5#7 GPU eval): pre-fill binder with
+        // `WHEN_PRED_NONE_SENTINEL` so empty effect slots + effects
+        // without a `when <cond>` modifier all share a single resting
+        // state (sentinel = no predicate; dispatcher fires
+        // unconditionally). Field/op/literal stay at zero for sentinel
+        // slots — the dispatcher only reads them when binder is not
+        // the sentinel. Per-effect overrides land in
+        // `pack_program_when_predicates`.
+        let when_pred_total = n * MAX_EFFECTS_PER_PROGRAM;
+        let mut when_pred_binder  = vec![WHEN_PRED_NONE_SENTINEL; when_pred_total];
+        let mut when_pred_field   = vec![0_u8;  when_pred_total];
+        let mut when_pred_op      = vec![0_u8;  when_pred_total];
+        let mut when_pred_literal = vec![0.0_f32; when_pred_total];
+
         for slot in 0..n {
             // `AbilityId` is 1-based; the registry's `get` accepts an id,
             // so reconstruct it from the slot. The registry guarantees
@@ -443,6 +507,14 @@ impl PackedAbilityRegistry {
                 &mut nested_effect_payload_a,
                 &mut nested_effect_payload_b,
             );
+            pack_program_when_predicates(
+                program,
+                slot,
+                &mut when_pred_binder,
+                &mut when_pred_field,
+                &mut when_pred_op,
+                &mut when_pred_literal,
+            );
         }
 
         Self {
@@ -467,6 +539,10 @@ impl PackedAbilityRegistry {
             nested_effect_kinds,
             nested_effect_payload_a,
             nested_effect_payload_b,
+            when_pred_binder,
+            when_pred_field,
+            when_pred_op,
+            when_pred_literal,
         }
     }
 
@@ -780,6 +856,45 @@ fn pack_program_nested(
             nested_effect_kinds[off]     = kind;
             nested_effect_payload_a[off] = a;
             nested_effect_payload_b[off] = b;
+        }
+    }
+}
+
+/// Wave 1.5#7 GPU eval: splat one program's per-effect when-predicates
+/// into the row-major `when_pred_*` buffers. Slots already pre-filled
+/// (binder=`WHEN_PRED_NONE_SENTINEL`, field/op=0, literal=0.0); only
+/// effects with a compiled predicate (`when_compiled = Some(_)`)
+/// overwrite. `program.when_per_effect` is index-parallel to
+/// `program.effects` when populated; an empty `when_per_effect` slice
+/// (or per-slot `None`) means no predicate authored — every slot stays
+/// at the sentinel. Slots whose `when_compiled` is `None` (predicate
+/// failed to compile — shouldn't happen for `.ability`-sourced
+/// programs, but defensive for hand-built) also stay at the sentinel.
+fn pack_program_when_predicates(
+    program:           &AbilityProgram,
+    slot:              usize,
+    when_pred_binder:  &mut [u8],
+    when_pred_field:   &mut [u8],
+    when_pred_op:      &mut [u8],
+    when_pred_literal: &mut [f32],
+) {
+    let base = slot * MAX_EFFECTS_PER_PROGRAM;
+    for (i, when) in program.when_per_effect.iter().enumerate() {
+        // Defensive bounds parallel to the other per-effect packers.
+        if i >= MAX_EFFECTS_PER_PROGRAM {
+            break;
+        }
+        if let Some(w) = when {
+            if let Some(pred) = w.when_compiled.as_ref() {
+                // Bind through the named type so `EffectPredicate`
+                // import is genuinely used at lib level (parallel to
+                // the other pack_program_* helpers' typed binds).
+                let p: EffectPredicate = *pred;
+                when_pred_binder[base + i]  = p.binder as u8;
+                when_pred_field[base + i]   = p.field;
+                when_pred_op[base + i]      = p.op as u8;
+                when_pred_literal[base + i] = p.literal;
+            }
         }
     }
 }

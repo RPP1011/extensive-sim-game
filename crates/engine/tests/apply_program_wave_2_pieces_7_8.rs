@@ -39,7 +39,7 @@ fn single(effect: EffectOp) -> AbilityProgram {
 #[test]
 fn stealth_dispatches_to_apply_event_with_caster_as_source() {
     let prog = single(EffectOp::Stealth { duration_ticks: 30 });
-    let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+    let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default(), &CasterStats::default());
     assert_eq!(events.len(), 1, "stealth produces exactly one event");
     match events[0] {
         ApplyEvent::Stealth { source, duration_ticks } => {
@@ -55,7 +55,7 @@ fn stealth_dispatches_to_apply_event_with_caster_as_source() {
 #[test]
 fn charm_dispatches_to_apply_event_with_target() {
     let prog = single(EffectOp::Charm { duration_ticks: 12 });
-    let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+    let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default(), &CasterStats::default());
     assert_eq!(events.len(), 1);
     match events[0] {
         ApplyEvent::Charm { target: t, duration_ticks } => {
@@ -69,7 +69,7 @@ fn charm_dispatches_to_apply_event_with_target() {
 #[test]
 fn grounded_dispatches_to_apply_event_with_target() {
     let prog = single(EffectOp::Grounded { duration_ticks: 20 });
-    let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+    let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default(), &CasterStats::default());
     assert_eq!(events.len(), 1);
     match events[0] {
         ApplyEvent::Grounded { target: t, duration_ticks } => {
@@ -83,7 +83,7 @@ fn grounded_dispatches_to_apply_event_with_target() {
 #[test]
 fn suppress_dispatches_to_apply_event_with_target() {
     let prog = single(EffectOp::Suppress { duration_ticks: 15 });
-    let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+    let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default(), &CasterStats::default());
     assert_eq!(events.len(), 1);
     match events[0] {
         ApplyEvent::Suppress { target: t, duration_ticks } => {
@@ -102,7 +102,7 @@ fn reflect_dispatches_with_q8_fraction_intact() {
     // DamageModify q8 convention).
     let frac_q8: i16 = (0.3_f32 * 256.0).round() as i16;
     let prog = single(EffectOp::Reflect { duration_ticks: 30, fraction_q8: frac_q8 });
-    let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+    let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default(), &CasterStats::default());
     assert_eq!(events.len(), 1);
     match events[0] {
         ApplyEvent::Reflect { target: t, duration_ticks, fraction_q8 } => {
@@ -132,7 +132,7 @@ fn multi_cc_program_emits_every_event_in_source_order() {
             EffectOp::Charm    { duration_ticks: 8 },
         ],
     );
-    let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+    let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default(), &CasterStats::default());
     assert_eq!(events.len(), 4, "all 4 effects must dispatch");
     assert!(matches!(events[0], ApplyEvent::Damage   { .. }));
     assert!(matches!(events[1], ApplyEvent::Suppress { .. }));
@@ -153,7 +153,7 @@ fn recast_header_lives_on_program_fields_not_apply_events() {
     // The damage event still fires; recast doesn't add or remove
     // events at apply time — it'll be the cast-state tracker's job
     // to count recasts and issue the next program invocation.
-    let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+    let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default(), &CasterStats::default());
     assert_eq!(events.len(), 1, "recast headers don't affect apply-time event count");
     assert!(matches!(events[0], ApplyEvent::Damage { .. }));
 

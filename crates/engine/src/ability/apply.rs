@@ -46,7 +46,10 @@
 //! to one generic dispatcher; adding a new ability becomes a pure
 //! .ability-file change.
 
-use crate::ability::program::{AbilityProgram, BuffStat, CasterStats, EffectOp};
+use crate::ability::program::{
+    AbilityProgram, BuffStat, CasterStats, EffectOp, EffectPredicate,
+    EffectPredicateBinder, EffectPredicateOp,
+};
 use crate::ids::AgentId;
 use crate::rng::per_agent_u32;
 use smallvec::SmallVec;
@@ -163,6 +166,13 @@ const APPLY_INLINE: usize = 4;
 /// program carries no scalings (or when the caster has no relevant
 /// stats).
 ///
+/// `target_stats` is the target's stat snapshot at cast-decide time.
+/// Threaded so the per-effect when-predicate evaluator (Wave 1.5#7
+/// — this slice) can read `target.<field>` for predicates like
+/// `when target.hp < 20`. Pass `&CasterStats::default()` for call
+/// sites that don't carry when-predicates — when no slot fires the
+/// predicate eval, the column is dead and the snapshot is unread.
+///
 /// `Some(amount) = 0xFFFF` chance slot fires deterministically (max
 /// q16 value — apply handlers treat as "always"); `None` slot also
 /// fires deterministically (no gate authored). The runtime gate
@@ -176,6 +186,7 @@ pub fn apply_program(
     tick:         u64,
     world_seed:   u64,
     caster_stats: &CasterStats,
+    target_stats: &CasterStats,
 ) -> SmallVec<[ApplyEvent; APPLY_INLINE]> {
     let mut out: SmallVec<[ApplyEvent; APPLY_INLINE]> = SmallVec::new();
 
@@ -192,6 +203,28 @@ pub fn apply_program(
             let draw = per_agent_u32(world_seed, caster, tick, &purpose) & 0xFFFF;
             if (draw as u16) >= q16 {
                 continue; // gate fails — skip this effect
+            }
+        }
+        // -- Wave 1.5#7 when-predicate gate (this slice). --
+        // Per-effect `when <binder>.<field> <op> <literal>` predicate.
+        // Empty `when_per_effect` slice = no slot carried the modifier.
+        // `Some(EffectWhenCondition { when_compiled: Some(p), .. })`
+        // evaluates the structured predicate against the appropriate
+        // stat snapshot (caster vs target). When the predicate fails,
+        // skip BOTH the primary AND any nested ops on this slot —
+        // matches the chance-gate semantic (auxiliary effects ride on
+        // the primary's success).
+        //
+        // `when_compiled = None` (or out-of-vocab field at runtime)
+        // evaluates as false defensively, so a malformed slot does not
+        // silently fire — the lower path errors loudly when the
+        // predicate fails to compile, so this branch is unreachable in
+        // practice for `.ability`-sourced programs.
+        if let Some(Some(when)) = program.when_per_effect.get(i) {
+            if let Some(pred) = when.when_compiled.as_ref() {
+                if !evaluate_predicate(pred, caster_stats, target_stats) {
+                    continue; // predicate fails — skip primary + nested
+                }
             }
         }
         // -- Wave 1.5#4 scaling — compute additive `Σ percent * stat`
@@ -325,10 +358,47 @@ fn push_effect_event(
     }
 }
 
+/// Wave 1.5#7: evaluate one structured `EffectPredicate` against the
+/// caster + target stat snapshots. The binder picks which snapshot the
+/// LHS reads from; the field discriminant resolves to a f32 stat value
+/// via [`CasterStats::get_by_field_id`]; the op + literal complete the
+/// comparison.
+///
+/// Returns `false` defensively when the field discriminant is
+/// out-of-range (no `ScalingStatRef` slot maps to it). The lowering
+/// pass guards the in-vocab subset, so this branch is unreachable for
+/// `.ability`-sourced programs.
+#[inline]
+pub(crate) fn evaluate_predicate(
+    pred:   &EffectPredicate,
+    caster: &CasterStats,
+    target: &CasterStats,
+) -> bool {
+    let stats = match pred.binder {
+        EffectPredicateBinder::SelfBinder => caster,
+        EffectPredicateBinder::Target     => target,
+    };
+    let lhs = match stats.get_by_field_id(pred.field) {
+        Some(v) => v,
+        None    => return false,
+    };
+    let rhs = pred.literal;
+    match pred.op {
+        EffectPredicateOp::Lt => lhs <  rhs,
+        EffectPredicateOp::Le => lhs <= rhs,
+        EffectPredicateOp::Gt => lhs >  rhs,
+        EffectPredicateOp::Ge => lhs >= rhs,
+        EffectPredicateOp::Eq => lhs == rhs,
+        EffectPredicateOp::Ne => lhs != rhs,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ability::program::{EffectScaling, Gate, ScalingStatRef};
+    use crate::ability::program::{
+        EffectScaling, EffectWhenCondition, Gate, ScalingStatRef,
+    };
     use crate::ability::AbilityId;
     use smallvec::smallvec;
 
@@ -342,7 +412,7 @@ mod tests {
             Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
             [EffectOp::Damage { amount: 30.0 }],
         );
-        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default(), &CasterStats::default());
         assert_eq!(events.len(), 1);
         assert!(matches!(
             events[0],
@@ -361,7 +431,7 @@ mod tests {
                 EffectOp::Stun   { duration_ticks: 10 },
             ],
         );
-        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default(), &CasterStats::default());
         assert_eq!(events.len(), 2);
         assert!(matches!(events[0], ApplyEvent::Damage { .. }));
         assert!(matches!(events[1], ApplyEvent::Stun { .. }));
@@ -376,7 +446,7 @@ mod tests {
         );
         // q16 = 0 → no draw can be < 0; effect never fires.
         prog.chances.push(Some(0));
-        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default(), &CasterStats::default());
         assert_eq!(events.len(), 0, "chance=0 must gate the effect out");
     }
 
@@ -392,7 +462,7 @@ mod tests {
         // but 1/65536 of draws. Try a fixed seed/tick combination to
         // verify the expected fire (deterministic).
         prog.chances.push(Some(0xFFFE));
-        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default(), &CasterStats::default());
         assert_eq!(events.len(), 1, "chance=0xFFFE must fire deterministically at this seed/tick");
     }
 
@@ -406,8 +476,8 @@ mod tests {
             [EffectOp::Stun { duration_ticks: 10 }],
         );
         prog.chances.push(Some(32768)); // 50%
-        let a = apply_program(&prog, caster(), target(), 42, 0xCAFE, &CasterStats::default());
-        let b = apply_program(&prog, caster(), target(), 42, 0xCAFE, &CasterStats::default());
+        let a = apply_program(&prog, caster(), target(), 42, 0xCAFE, &CasterStats::default(), &CasterStats::default());
+        let b = apply_program(&prog, caster(), target(), 42, 0xCAFE, &CasterStats::default(), &CasterStats::default());
         assert_eq!(a.len(), b.len(), "same inputs → same gate decisions");
     }
 
@@ -423,7 +493,7 @@ mod tests {
                 selector: crate::ability::program::TargetSelector::Target,
             }],
         );
-        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default(), &CasterStats::default());
         assert_eq!(events.len(), 0, "CastAbility falls through (deferred)");
     }
 
@@ -437,7 +507,7 @@ mod tests {
             Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
             [EffectOp::TransferGold { amount: 42 }],
         );
-        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default(), &CasterStats::default());
         assert_eq!(events.len(), 1, "TransferGold emits exactly one ApplyEvent");
         match events[0] {
             ApplyEvent::TransferGold { source, target: t, amount } => {
@@ -456,7 +526,7 @@ mod tests {
             Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
             [EffectOp::TransferGold { amount: -7 }],
         );
-        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default(), &CasterStats::default());
         match events[0] {
             ApplyEvent::TransferGold { amount, .. } =>
                 assert_eq!(amount, -7, "negative amount preserved (sign isn't lost)"),
@@ -471,7 +541,7 @@ mod tests {
             Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
             [EffectOp::ModifyStanding { delta: -25 }],
         );
-        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default(), &CasterStats::default());
         assert_eq!(events.len(), 1, "ModifyStanding emits exactly one ApplyEvent");
         match events[0] {
             ApplyEvent::ModifyStanding { source, target: t, delta } => {
@@ -498,7 +568,7 @@ mod tests {
             percent:  0.50,
         }]);
         let stats = CasterStats { attack_damage: 100.0, ..Default::default() };
-        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &stats);
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &stats, &CasterStats::default());
         assert_eq!(events.len(), 1);
         match events[0] {
             ApplyEvent::Damage { amount, .. } => {
@@ -523,7 +593,7 @@ mod tests {
             percent:  10.0, // would be huge if it ran
         }]);
         let stats = CasterStats { attack_damage: 1000.0, ..Default::default() };
-        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &stats);
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &stats, &CasterStats::default());
         assert_eq!(events.len(), 0, "chance=0 must gate the effect out before scaling");
     }
 
@@ -547,8 +617,8 @@ mod tests {
             ability_power: 9999.0,
             ..Default::default()
         };
-        let with    = apply_program(&prog, caster(), target(), 0, 0xCAFE, &stats);
-        let without = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+        let with    = apply_program(&prog, caster(), target(), 0, 0xCAFE, &stats, &CasterStats::default());
+        let without = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default(), &CasterStats::default());
         assert_eq!(with.len(), without.len());
         for (a, b) in with.iter().zip(without.iter()) {
             assert_eq!(a, b, "with-stats vs default-stats diverged with no scalings");
@@ -568,7 +638,7 @@ mod tests {
             Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
             [EffectOp::Summon { template_hash: 0xDEADBEEF, count: 3, lifetime_ticks: 80 }],
         );
-        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default(), &CasterStats::default());
         assert_eq!(events.len(), 1);
         assert!(matches!(
             events[0],
@@ -591,7 +661,7 @@ mod tests {
             [EffectOp::Damage { amount: 20.0 }],
         );
         prog.nested_per_effect.push(smallvec![EffectOp::Stun { duration_ticks: 10 }]);
-        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default(), &CasterStats::default());
         assert_eq!(events.len(), 2, "primary + nested → 2 ApplyEvents");
         assert!(
             matches!(events[0], ApplyEvent::Damage { source, target: t, amount }
@@ -618,7 +688,7 @@ mod tests {
             EffectOp::Stun { duration_ticks: 5 },
             EffectOp::Slow { duration_ticks: 20, factor_q8: -64 },
         ]);
-        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default(), &CasterStats::default());
         assert_eq!(events.len(), 3, "primary + 2 nested → 3 ApplyEvents");
         assert!(matches!(events[0], ApplyEvent::Damage { .. }));
         assert!(matches!(events[1], ApplyEvent::Stun { duration_ticks: 5, .. }));
@@ -636,7 +706,7 @@ mod tests {
             [EffectOp::Damage { amount: 10.0 }],
         );
         prog.nested_per_effect.push(smallvec![]); // empty inner — no nested op
-        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default(), &CasterStats::default());
         assert_eq!(events.len(), 1, "empty nested slot → only primary fires");
         assert!(matches!(events[0], ApplyEvent::Damage { .. }));
     }
@@ -654,7 +724,7 @@ mod tests {
         );
         prog.chances.push(Some(0)); // gate-out the primary
         prog.nested_per_effect.push(smallvec![EffectOp::Stun { duration_ticks: 10 }]);
-        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default(), &CasterStats::default());
         assert_eq!(events.len(), 0, "chance=0 must skip both primary and nested");
     }
 
@@ -677,7 +747,7 @@ mod tests {
         // Nested Damage 5 — should emit with amount=5.0, NOT 5.0+50=55.
         prog.nested_per_effect.push(smallvec![EffectOp::Damage { amount: 5.0 }]);
         let stats = CasterStats { attack_damage: 100.0, ..Default::default() };
-        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &stats);
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &stats, &CasterStats::default());
         assert_eq!(events.len(), 2);
         // Primary scaled.
         assert!(matches!(events[0], ApplyEvent::Damage { amount, .. } if (amount - 80.0).abs() < 1e-5),
@@ -685,5 +755,135 @@ mod tests {
         // Nested NOT scaled.
         assert!(matches!(events[1], ApplyEvent::Damage { amount, .. } if (amount - 5.0).abs() < 1e-5),
             "nested amount must NOT carry the slot's scaling bonus (5.0 expected), got {events:?}");
+    }
+
+    // -- Wave 1.5#7 when-predicate gate ------------------------------------
+
+    /// Helper: build a one-effect program with a when-predicate.
+    fn prog_with_when(op: EffectOp, pred: EffectPredicate) -> AbilityProgram {
+        let mut p = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [op],
+        );
+        p.when_per_effect.push(Some(EffectWhenCondition {
+            when_cond:     "<test>".to_string(),
+            else_cond:     None,
+            when_compiled: Some(pred),
+        }));
+        p
+    }
+
+    #[test]
+    fn apply_program_with_when_predicate_true_fires_effect() {
+        // when target.hp < 20 ; target.hp = 5 → fires
+        let pred = EffectPredicate {
+            binder:  EffectPredicateBinder::Target,
+            field:   ScalingStatRef::Hp.discriminant(),
+            op:      EffectPredicateOp::Lt,
+            literal: 20.0,
+        };
+        let prog = prog_with_when(EffectOp::Damage { amount: 50.0 }, pred);
+        let target_stats = CasterStats { hp: 5.0, ..Default::default() };
+        let events = apply_program(
+            &prog, caster(), target(), 0, 0xCAFE,
+            &CasterStats::default(), &target_stats,
+        );
+        assert_eq!(events.len(), 1, "predicate true must fire effect");
+        assert!(matches!(events[0], ApplyEvent::Damage { amount, .. } if amount == 50.0));
+    }
+
+    #[test]
+    fn apply_program_with_when_predicate_false_skips_effect() {
+        // when target.hp < 20 ; target.hp = 50 → skip
+        let pred = EffectPredicate {
+            binder:  EffectPredicateBinder::Target,
+            field:   ScalingStatRef::Hp.discriminant(),
+            op:      EffectPredicateOp::Lt,
+            literal: 20.0,
+        };
+        let prog = prog_with_when(EffectOp::Damage { amount: 50.0 }, pred);
+        let target_stats = CasterStats { hp: 50.0, ..Default::default() };
+        let events = apply_program(
+            &prog, caster(), target(), 0, 0xCAFE,
+            &CasterStats::default(), &target_stats,
+        );
+        assert_eq!(events.len(), 0, "predicate false must skip effect");
+    }
+
+    #[test]
+    fn apply_program_when_target_hp_lt_20_executes_correctly() {
+        // Reap-shape: when target.hp < 20, execute(20). Verifies the
+        // semantic that drives the duel_abilities Reap registry-driven
+        // gate (the .sim verb's redundant gate is dropped in this slice).
+        let pred = EffectPredicate {
+            binder:  EffectPredicateBinder::Target,
+            field:   ScalingStatRef::Hp.discriminant(),
+            op:      EffectPredicateOp::Lt,
+            literal: 20.0,
+        };
+        let prog = prog_with_when(
+            EffectOp::Execute { hp_threshold: 20.0 },
+            pred,
+        );
+        // Below threshold → Execute fires.
+        let low = CasterStats { hp: 10.0, ..Default::default() };
+        let evs_low = apply_program(
+            &prog, caster(), target(), 0, 0xCAFE,
+            &CasterStats::default(), &low,
+        );
+        assert_eq!(evs_low.len(), 1, "hp=10 < 20 → Execute fires");
+        assert!(matches!(evs_low[0], ApplyEvent::Execute { .. }));
+
+        // At threshold (Lt is strict) → Execute skipped.
+        let at = CasterStats { hp: 20.0, ..Default::default() };
+        let evs_at = apply_program(
+            &prog, caster(), target(), 0, 0xCAFE,
+            &CasterStats::default(), &at,
+        );
+        assert_eq!(evs_at.len(), 0, "hp=20 NOT < 20 → Execute skipped");
+    }
+
+    #[test]
+    fn apply_program_when_predicate_false_skips_nested_too() {
+        // When the primary's predicate fails, BOTH primary and nested
+        // ops are skipped — auxiliary nested effects ride on the
+        // primary's success (mirrors the chance-gate semantic).
+        let pred = EffectPredicate {
+            binder:  EffectPredicateBinder::Target,
+            field:   ScalingStatRef::Hp.discriminant(),
+            op:      EffectPredicateOp::Lt,
+            literal: 20.0,
+        };
+        let mut prog = prog_with_when(EffectOp::Damage { amount: 50.0 }, pred);
+        prog.nested_per_effect.push(smallvec![EffectOp::Stun { duration_ticks: 10 }]);
+        let target_stats = CasterStats { hp: 50.0, ..Default::default() };
+        let events = apply_program(
+            &prog, caster(), target(), 0, 0xCAFE,
+            &CasterStats::default(), &target_stats,
+        );
+        assert_eq!(events.len(), 0, "predicate false must skip primary AND nested");
+    }
+
+    #[test]
+    fn apply_program_when_self_binder_reads_caster_stats() {
+        // when self.hp < 50 ; caster.hp = 30 → fires; caster.hp = 60 → skipped.
+        let pred = EffectPredicate {
+            binder:  EffectPredicateBinder::SelfBinder,
+            field:   ScalingStatRef::Hp.discriminant(),
+            op:      EffectPredicateOp::Lt,
+            literal: 50.0,
+        };
+        let prog = prog_with_when(EffectOp::Heal { amount: 25.0 }, pred);
+        let low = CasterStats { hp: 30.0, ..Default::default() };
+        let evs_low = apply_program(
+            &prog, caster(), target(), 0, 0xCAFE, &low, &CasterStats::default(),
+        );
+        assert_eq!(evs_low.len(), 1, "self.hp=30 < 50 → fires");
+        let high = CasterStats { hp: 60.0, ..Default::default() };
+        let evs_high = apply_program(
+            &prog, caster(), target(), 0, 0xCAFE, &high, &CasterStats::default(),
+        );
+        assert_eq!(evs_high.len(), 0, "self.hp=60 NOT < 50 → skipped");
     }
 }

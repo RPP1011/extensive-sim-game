@@ -881,22 +881,77 @@ pub enum CostAmount {
 }
 
 /// Per-effect conditional gate from the `when <cond> [else <cond>]`
-/// modifier (spec §6.1 slot 7). The predicate body is captured as
-/// verbatim source text — engine code does not parse or evaluate it
-/// here; downstream apply handlers wire that up later (see
-/// `docs/spec/ability_dsl_unified.md` §6.1.7 for the deferred dispatch
-/// plan). Stored as `String` rather than a typed AST to keep the engine
-/// crate dependency-free of `dsl_ast`.
+/// modifier (spec §6.1 slot 7). The verbatim `when_cond` source text is
+/// retained for diagnostics; `when_compiled` carries the structured
+/// predicate apply / GPU dispatch evaluates at runtime.
 ///
-/// `when_cond` is the always-required positive predicate. `else_cond` is
-/// the optional fallback predicate that fires the effect when `when_cond`
-/// evaluates false (used for `when target.alive else target.silver > 0`
-/// style guards). Both strings are whitespace-trimmed at parse time.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+/// `when_cond` is the always-required positive predicate (verbatim source).
+/// `else_cond` is the optional fallback — REJECTED at lower time today
+/// (deferred — open task #163-followup). `when_compiled` is the lowered
+/// structured form, populated when the predicate matches the restricted
+/// vocab in [`EffectPredicate`]; `None` indicates lower-time rejection
+/// fell back to a "no compiled predicate" state.
+#[derive(Clone, Debug, PartialEq)]
 pub struct EffectWhenCondition {
     pub when_cond: String,
     pub else_cond: Option<String>,
+    pub when_compiled: Option<EffectPredicate>,
 }
+
+/// Predicate binder — `self` or `target` from the source-form
+/// `<binder>.<field> <op> <literal>`. Numeric discriminants pinned for
+/// SoA packing (`when_pred_binder` column); 0 = self, 1 = target.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum EffectPredicateBinder {
+    SelfBinder = 0,
+    Target     = 1,
+}
+
+/// Predicate comparison operator — one of `< <= > >= == !=`. Numeric
+/// discriminants pinned for SoA packing (`when_pred_op` column).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum EffectPredicateOp {
+    Lt = 0,
+    Le = 1,
+    Gt = 2,
+    Ge = 3,
+    Eq = 4,
+    Ne = 5,
+}
+
+/// Structured per-effect when-predicate. Restricted vocab:
+///   * Form: `<binder>.<field> <op> <literal>`
+///   * binder ∈ {self, target}
+///   * field: discriminant of [`ScalingStatRef`] (the 8 f32 stat fields
+///     already exposed for scaling). The lowering pass maps the source
+///     field name through `AgentFieldId::from_snake` for vocabulary
+///     validation, then narrows to the ScalingStatRef-shaped subset
+///     (CasterStats's get-by-discriminant codomain).
+///   * op ∈ {Lt, Le, Gt, Ge, Eq, Ne}
+///   * literal: f32 (parser produces LitFloat or LitInt; int promotes).
+///
+/// `else <cond>`, compound predicates (`&&`/`||`/`!`), and field-vs-field
+/// comparisons are REJECTED at lower time (open task #163-followup).
+///
+/// Doesn't impl `Eq`/`Hash` because of the `f32` literal — that's fine,
+/// hashing is at higher granularity.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct EffectPredicate {
+    pub binder:  EffectPredicateBinder,
+    /// Discriminant of [`ScalingStatRef`] — 0..=7 maps to AttackDamage /
+    /// AbilityPower / MaxHp / Hp / Armor / MagicResist / MoveSpeed /
+    /// Mana. Pinned by the schema hash.
+    pub field:   u8,
+    pub op:      EffectPredicateOp,
+    pub literal: f32,
+}
+
+// Pin the predicate at ≤8 bytes (1 + 1 + 1 + 1pad + 4 = 8). Any future
+// growth (e.g. promoting field to u16 or adding a binder operand) bumps
+// the schema hash + this guard.
+const _: () = assert!(std::mem::size_of::<EffectPredicate>() <= 8);
 
 /// Per-effect stat-scaling reference for the `+ N% stat_ref` modifier
 /// (spec §6.1 slot 8). 8 common combat stats; an unknown stat_ref token
@@ -980,6 +1035,26 @@ impl CasterStats {
             ScalingStatRef::MoveSpeed    => self.move_speed,
             ScalingStatRef::Mana         => self.mana,
         }
+    }
+
+    /// Look up a stat by `ScalingStatRef` discriminant (0..=7). Used
+    /// by the per-effect when-predicate evaluator
+    /// (`EffectPredicate::field` is a u8 discriminant). Out-of-range
+    /// discriminants return `None` (predicate evaluator treats as
+    /// false — defensive).
+    #[inline]
+    pub fn get_by_field_id(&self, discriminant: u8) -> Option<f32> {
+        Some(match discriminant {
+            0 => self.attack_damage, // AttackDamage
+            1 => self.ability_power, // AbilityPower
+            2 => self.max_hp,        // MaxHp
+            3 => self.hp,            // Hp
+            4 => self.armor,         // Armor
+            5 => self.magic_resist,  // MagicResist
+            6 => self.move_speed,    // MoveSpeed
+            7 => self.mana,          // Mana
+            _ => return None,
+        })
     }
 }
 

@@ -2060,6 +2060,11 @@ fn wire_ability_registry_column_reads(prog: &CgProgram, ops: &mut [ComputeOp]) {
         AbilityRegistryColumn::NestedEffectPayloadB,
         AbilityRegistryColumn::ScalingStatRefs,
         AbilityRegistryColumn::ScalingPercents,
+        // Wave 1.5#7 GPU eval — per-effect when-predicate columns.
+        AbilityRegistryColumn::WhenPredBinder,
+        AbilityRegistryColumn::WhenPredField,
+        AbilityRegistryColumn::WhenPredOp,
+        AbilityRegistryColumn::WhenPredLiteral,
     ];
 
     // Agent SoA stat columns the dispatcher's `agent_stat()` switch

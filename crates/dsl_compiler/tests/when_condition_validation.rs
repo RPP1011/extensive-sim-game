@@ -28,13 +28,22 @@ fn well_formed_when_lowers_clean() {
 }
 
 #[test]
-fn well_formed_when_else_lowers_clean() {
-    // Both branches re-parse; ShadowSummoner-style two-branch shape.
+fn well_formed_when_else_errors_at_lower() {
+    // Wave 1.5#7 GPU eval (2026-05-07): `else` clause is now rejected
+    // at lower time (deferred — open task #163-followup). Apply
+    // dispatch (CPU + GPU) only consults the `when` branch; accepting
+    // an else silently would misrepresent the gate's semantics.
     let src = "ability A {
         target: enemy range: 5.0 cooldown: 1s
-        taunt 1500ms when target.alive else target.shield_hp == 0
+        taunt 1500ms when target.hp < 50 else target.armor == 0
     }";
-    lower_first(src).expect("well-formed when/else must lower");
+    let err = lower_first(src).expect_err("else clause must error at lower");
+    match err {
+        LowerError::WhenConditionUnsupported { clause, .. } => {
+            assert_eq!(clause, "else");
+        }
+        other => panic!("expected WhenConditionUnsupported{{else}}; got {other:?}"),
+    }
 }
 
 #[test]
@@ -59,21 +68,21 @@ fn typoed_operator_in_when_is_caught() {
 }
 
 #[test]
-fn malformed_else_clause_is_caught_and_attributed_to_else() {
-    // The when branch is fine; the else branch has a stray operator.
+fn malformed_else_clause_errors_as_unsupported_else() {
+    // Wave 1.5#7 GPU eval (2026-05-07): the else clause is now
+    // rejected wholesale at lower time (open task #163-followup), so
+    // any malformed else-text is short-circuited by the
+    // WhenConditionUnsupported{else} arm before the parser sees it.
     let src = "ability A {
         target: enemy range: 5.0 cooldown: 1s
         damage 10 when target.hp < 30 else target.hp ~ 50
     }";
-    let err = lower_first(src).expect_err("typo'd else must error");
+    let err = lower_first(src).expect_err("else must error at lower");
     match err {
-        LowerError::WhenConditionParseError { clause, .. } => {
-            assert_eq!(
-                clause, "else",
-                "the bad text is on the else branch, error must attribute it there"
-            );
+        LowerError::WhenConditionUnsupported { clause, .. } => {
+            assert_eq!(clause, "else");
         }
-        other => panic!("expected WhenConditionParseError; got {other:?}"),
+        other => panic!("expected WhenConditionUnsupported{{else}}; got {other:?}"),
     }
 }
 
@@ -136,19 +145,19 @@ fn typoed_field_on_self_is_also_caught() {
 }
 
 #[test]
-fn typoed_field_in_else_is_attributed_to_else_clause() {
+fn typoed_field_in_else_short_circuits_to_unsupported_else() {
+    // Wave 1.5#7 GPU eval (2026-05-07): else clauses are gated wholesale
+    // at lower time. Field-validation in the else branch never runs.
     let src = "ability A {
         target: enemy range: 5.0 cooldown: 1s
         damage 10 when target.hp < 30 else target.bogus_field == 0
     }";
     let err = lower_first(src).expect_err("typo'd else field must error");
     match err {
-        LowerError::WhenConditionUnknownField { clause, binder, field, .. } => {
-            assert_eq!(clause, "else", "the bad field is on the else branch");
-            assert_eq!(binder, "target");
-            assert_eq!(field, "bogus_field");
+        LowerError::WhenConditionUnsupported { clause, .. } => {
+            assert_eq!(clause, "else");
         }
-        other => panic!("expected WhenConditionUnknownField; got {other:?}"),
+        other => panic!("expected WhenConditionUnsupported{{else}}; got {other:?}"),
     }
 }
 
@@ -172,26 +181,36 @@ fn nested_typoed_field_inside_arithmetic_is_caught() {
 }
 
 #[test]
-fn world_and_config_accessors_are_not_validated_as_agent_fields() {
-    // `world.tick`, `config.foo` use binders the agent-field
-    // validator deliberately skips — those have their own
-    // resolution paths and aren't expected to round-trip through
-    // AgentFieldId. This must lower without error.
+fn world_and_config_accessors_error_at_lower() {
+    // Wave 1.5#7 GPU eval (2026-05-07): the restricted predicate vocab
+    // requires `<binder>.<field>` with binder ∈ {self, target}. The
+    // `world.tick`, `config.foo` accessors are outside this vocab and
+    // surface as WhenConditionUnsupported (they have their own
+    // resolution paths but the apply_program predicate evaluator does
+    // not honour them).
     let src = "ability A {
         target: enemy range: 5.0 cooldown: 1s
         damage 10 when world.tick > 100
     }";
-    lower_first(src).expect("world.tick must NOT trip the agent-field validator");
+    let err = lower_first(src).expect_err("world.tick must error at lower");
+    match err {
+        LowerError::WhenConditionUnsupported { clause, .. } => {
+            assert_eq!(clause, "when");
+        }
+        other => panic!("expected WhenConditionUnsupported; got {other:?}"),
+    }
 }
 
 #[test]
 fn valid_agent_fields_used_by_lol_corpus_lower_clean() {
-    // Every field reference the LoL corpus uses on `target` /
-    // `self` (hp / alive / shield_hp) lives in AgentFieldId. None
-    // should false-positive. This test pins the canary's coverage
-    // so an accidental rename of an AgentFieldId variant would
-    // surface here as a test failure.
-    for predicate in &["target.hp < 30", "target.alive", "target.shield_hp == 0"] {
+    // Wave 1.5#7 GPU eval (2026-05-07): the restricted predicate vocab
+    // requires `<binder>.<field> <op> <literal>` with field in the
+    // 8-field ScalingStatRef-shaped subset (attack_damage / ability_power
+    // / max_hp / hp / armor / magic_resist / move_speed / mana). Bool
+    // fields (target.alive) and non-ScalingStatRef fields (shield_hp)
+    // now error at lower (deferred — open task #163-followup). The
+    // surviving forms exercise the supported f32-stat subset.
+    for predicate in &["target.hp < 30", "self.attack_damage >= 50", "target.armor < 10"] {
         let src = format!(
             "ability A {{ target: enemy range: 5.0 cooldown: 1s damage 10 when {predicate} }}"
         );

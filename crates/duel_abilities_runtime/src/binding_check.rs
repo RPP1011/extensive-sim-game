@@ -25,8 +25,9 @@ use std::path::PathBuf;
 
 use engine::ability::{
     program::{
-        AbilityTag, Area, EffectAreaShape, EffectOp, EffectScaling, EffectWhenCondition,
-        LifetimeMode, ScalingStatRef, ShapeKind, StackingMode,
+        AbilityTag, Area, EffectAreaShape, EffectOp, EffectPredicate, EffectPredicateBinder,
+        EffectPredicateOp, EffectScaling, EffectWhenCondition, LifetimeMode, ScalingStatRef,
+        ShapeKind, StackingMode,
     },
     AbilityId, PackedAbilityRegistry,
 };
@@ -513,12 +514,16 @@ pub fn assert_ability_registry_matches_sim_constants() {
     assert_eq!(
         reap.when_per_effect[0],
         Some(EffectWhenCondition {
-            when_cond: "target.hp < 20".to_string(),
-            else_cond: None,
+            when_cond:     "target.hp < 20".to_string(),
+            else_cond:     None,
+            when_compiled: Some(EffectPredicate {
+                binder:  EffectPredicateBinder::Target,
+                field:   ScalingStatRef::Hp.discriminant(),
+                op:      EffectPredicateOp::Lt,
+                literal: 20.0,
+            }),
         }),
-        "Reap when must be `target.hp < 20` — .ability \
-         `when target.hp < 20`; .sim Reap verb gates on \
-         `target.hp < config.combat.reap_threshold`",
+        "Reap when must be `target.hp < 20` — Wave 1.5#7 GPU eval",
     );
     // Wave 1.5#9 nested-effect modifier — Reap.ability declares
     // `{ stun 1s }`, lowered to program.nested_per_effect[0] =

@@ -1161,6 +1161,10 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
             ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
             ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
+            ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             agent_attack_damage: &self.agent_attack_damage_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_hp:            &self.agent_hp_buf,
@@ -1197,6 +1201,10 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
             ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
             ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
+            ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             agent_attack_damage: &self.agent_attack_damage_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_hp:            &self.agent_hp_buf,
@@ -1237,6 +1245,10 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
             ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
             ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
+            ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             agent_attack_damage: &self.agent_attack_damage_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_hp:            &self.agent_hp_buf,
@@ -1277,6 +1289,10 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
             ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
             ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
+            ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             agent_attack_damage: &self.agent_attack_damage_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_hp:            &self.agent_hp_buf,
@@ -1319,6 +1335,10 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
             ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
             ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
+            ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             agent_attack_damage: &self.agent_attack_damage_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_hp:            &self.agent_hp_buf,
@@ -1361,6 +1381,10 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
             ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
             ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
+            ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             agent_attack_damage: &self.agent_attack_damage_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_hp:            &self.agent_hp_buf,
@@ -1403,6 +1427,10 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
             ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
             ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
+            ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             agent_attack_damage: &self.agent_attack_damage_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_hp:            &self.agent_hp_buf,
@@ -1710,6 +1738,10 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
             ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
             ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
+            ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             agent_attack_damage: &self.agent_attack_damage_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_armor:         &self.agent_armor_buf,
@@ -2021,6 +2053,7 @@ mod tests {
         let target = AgentId::new(2).expect("AgentId::new");
         let events = apply_program(
             strike, caster, target, 0, 0xCAFE_F00D, &CasterStats::default(),
+            &CasterStats::default(),
         );
 
         assert_eq!(events.len(), 1, "Strike has one Damage effect");
@@ -2050,6 +2083,7 @@ mod tests {
         let caster = AgentId::new(1).expect("AgentId::new");
         let events = apply_program(
             shieldup, caster, caster, 0, 0xCAFE_F00D, &CasterStats::default(),
+            &CasterStats::default(),
         );
 
         assert_eq!(events.len(), 1, "ShieldUp has one Shield effect");
@@ -2076,6 +2110,7 @@ mod tests {
         let caster = AgentId::new(1).expect("AgentId::new");
         let events = apply_program(
             mend, caster, caster, 0, 0xCAFE_F00D, &CasterStats::default(),
+            &CasterStats::default(),
         );
 
         assert_eq!(events.len(), 1, "Mend has one Heal effect");
@@ -2110,6 +2145,7 @@ mod tests {
         let caster = AgentId::new(1).expect("AgentId::new");
         let events = apply_program(
             fortify, caster, caster, 0, 0xCAFE_F00D, &CasterStats::default(),
+            &CasterStats::default(),
         );
 
         assert_eq!(events.len(), 1, "Fortify has one DamageModify effect");
@@ -2143,6 +2179,7 @@ mod tests {
         let caster = AgentId::new(1).expect("AgentId::new");
         let events = apply_program(
             vampirize, caster, caster, 0, 0xCAFE_F00D, &CasterStats::default(),
+            &CasterStats::default(),
         );
 
         assert_eq!(events.len(), 1, "Vampirize has one LifeSteal effect");
@@ -2206,10 +2243,12 @@ mod tests {
                 let run1 = apply_program(
                     daze, caster, target, tick as u64, world_seed,
                     &CasterStats::default(),
+            &CasterStats::default(),
                 );
                 let run2 = apply_program(
                     daze, caster, target, tick as u64, world_seed,
                     &CasterStats::default(),
+            &CasterStats::default(),
                 );
                 assert_eq!(
                     run1.len(), run2.len(),

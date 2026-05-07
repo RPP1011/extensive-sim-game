@@ -81,6 +81,17 @@ pub struct PackedAbilityRegistryGpu {
     pub nested_effect_kinds:     wgpu::Buffer,
     pub nested_effect_payload_a: wgpu::Buffer,
     pub nested_effect_payload_b: wgpu::Buffer,
+
+    // -- When-predicate rows (stride = MAX_EFFECTS_PER_PROGRAM).
+    //    Wave 1.5#7 GPU eval — see `PackedAbilityRegistry`.
+    /// u8 widened to u32. Sentinel `WHEN_PRED_NONE_SENTINEL` (0xFF) →
+    /// no predicate; dispatcher fires unconditionally.
+    pub when_pred_binder:  wgpu::Buffer,
+    /// u8 widened to u32 (`ScalingStatRef` discriminant 0..=7).
+    pub when_pred_field:   wgpu::Buffer,
+    /// u8 widened to u32 (`EffectPredicateOp` discriminant 0..=5).
+    pub when_pred_op:      wgpu::Buffer,
+    pub when_pred_literal: wgpu::Buffer,
 }
 
 impl PackedAbilityRegistryGpu {
@@ -146,6 +157,11 @@ impl PackedAbilityRegistryGpu {
             nested_effect_kinds:     mk_u32("nested_effect_kinds",     &packed.nested_effect_kinds),
             nested_effect_payload_a: mk_u32("nested_effect_payload_a", &packed.nested_effect_payload_a),
             nested_effect_payload_b: mk_u32("nested_effect_payload_b", &packed.nested_effect_payload_b),
+
+            when_pred_binder:  mk_u32("when_pred_binder",  &widen_u8(&packed.when_pred_binder)),
+            when_pred_field:   mk_u32("when_pred_field",   &widen_u8(&packed.when_pred_field)),
+            when_pred_op:      mk_u32("when_pred_op",      &widen_u8(&packed.when_pred_op)),
+            when_pred_literal: mk_f32("when_pred_literal", &packed.when_pred_literal),
         }
     }
 }
@@ -200,6 +216,8 @@ mod tests {
             &gpu.scaling_percents,
             &gpu.nested_effect_kinds, &gpu.nested_effect_payload_a,
             &gpu.nested_effect_payload_b,
+            &gpu.when_pred_binder, &gpu.when_pred_field,
+            &gpu.when_pred_op, &gpu.when_pred_literal,
         );
     }
 }

@@ -104,13 +104,17 @@ impl GpuContext {
         // Use the adapter's reported limits as the floor (defaults
         // to 8 storage buffers per stage; multi-verb fixtures like
         // tactical_horde_500 bind 11 storage buffers and boss_fight
-        // binds 9). Adapters exposing higher limits see them
-        // honoured; adapters that don't are still fed the default
-        // downlevel set.
+        // binds 9; Wave 1.5#7 GPU eval bumped the apply_ability
+        // dispatcher to 22 storage buffers). Adapters exposing higher
+        // limits see them honoured; adapters that don't are still fed
+        // the default downlevel set.
         let mut required_limits = adapter.limits();
         required_limits.max_storage_buffers_per_shader_stage = required_limits
             .max_storage_buffers_per_shader_stage
-            .max(12);
+            .max(32);
+        required_limits.max_bindings_per_bind_group = required_limits
+            .max_bindings_per_bind_group
+            .max(40);
         required_limits.max_bind_groups = required_limits.max_bind_groups.max(4);
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
