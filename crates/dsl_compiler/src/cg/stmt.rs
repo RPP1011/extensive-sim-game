@@ -515,8 +515,16 @@ impl fmt::Display for CgStmt {
                     binder, body.0, radius_cells
                 )
             }
-            CgStmt::ApplyAbility { ability, caster: _, target: _ } => {
-                write!(f, "apply_ability(expr#{})", ability.0)
+            CgStmt::ApplyAbility { ability, caster, target } => {
+                // Slice ε: include caster + target operand ids in the
+                // Display so debug-prints / cycle-detector traces show
+                // the distinct operands (was previously info-lossy —
+                // dropped both fields).
+                write!(
+                    f,
+                    "apply_ability(expr#{}, caster=expr#{}, target=expr#{})",
+                    ability.0, caster.0, target.0
+                )
             }
         }
     }
@@ -855,17 +863,20 @@ pub fn collect_stmt_dependencies(
                 target: super::data_handle::AgentRef::Self_,
             });
         }
-        CgStmt::ApplyAbility { ability, caster: _, target: _ } => {
-            // #136: the ability expression's reads contribute (the
-            // operand may reference `self.<field>` or a config slot).
-            // The dispatcher kernel itself reads from the
-            // PackedAbilityRegistry SoA columns and writes to the
-            // chronicle ring per-effect, but those are bound by the
-            // emit-side companion (#136 emit, follow-up). Surfacing
-            // them here would couple the BGL composer to a
-            // PackedAbilityRegistry-shaped DataHandle that doesn't
-            // exist yet; deferred until the WGSL emit lands.
+        CgStmt::ApplyAbility { ability, caster, target } => {
+            // #136 + slice ε: all three operand expressions
+            // contribute reads. The ability operand resolves to the
+            // AbilityId; caster/target may be non-trivial
+            // expressions (e.g. `by self.engaged_with` or `target
+            // query.nearest_hostile_to(self, range)`). Without
+            // walking the caster/target reads, the BGL composer
+            // would miss any AgentField reads they reference,
+            // producing naga-rejected WGSL with undeclared
+            // identifiers. Symmetric to the `wire_ability_registry_
+            // column_reads` walk in `cg::lower::driver`.
             collect_expr_reads(*ability, exprs, reads);
+            collect_expr_reads(*caster, exprs, reads);
+            collect_expr_reads(*target, exprs, reads);
         }
     }
 }
