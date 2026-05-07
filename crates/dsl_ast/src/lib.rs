@@ -6,6 +6,7 @@
 
 pub mod ability_parser;
 pub mod ast;
+pub mod engine_events;
 pub mod tokens;
 pub mod error;
 pub mod resolve_error;

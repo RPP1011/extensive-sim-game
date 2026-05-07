@@ -18,31 +18,25 @@
 //! 3. `physics_ApplyChronicleDamage` — PerEvent consumer reads the
 //!    records and decrements `agent_hp[target]` via `agents.set_hp`.
 //!
-//! ## Architectural friction: dispatcher kind id vs. consumer kind id
+//! ## Closed-loop kind tag (engine-aliased; no post-processing)
 //!
 //! The dispatcher writes `EffectDamageApplied` records with the engine's
 //! hardcoded `EventKindId::EffectDamageApplied = 26` in the header word
 //! (see `crates/dsl_compiler/src/cg/emit/wgsl_body.rs`'s
 //! `event_kind_id_for_effect_kind`).
 //!
-//! The consumer's PerEvent kernel filters records by the .sim-level
-//! event id (the index of the `event` declaration in the .sim file —
-//! `EffectDamageApplied` is event #1 in `apply_ability_chronicle_consumer.sim`
-//! after `Tick` at #0). So the consumer's `if (kind == 1u)` filter
-//! never matches the dispatcher's `kind = 26u` records. The fixture
-//! compiles cleanly (after tolerating the P6 warning), but the closed
-//! loop is silently broken at the kind-tag layer.
+//! The compiler aliases known engine event names to their hardcoded
+//! discriminants — see
+//! `dsl_ast::engine_events::engine_event_kind_id_for_name`. The
+//! resolver populates `EventIR::engine_kind_id` and both
+//! `populate_event_kinds` (driver) and `resolve_event_ref` (driver)
+//! mirror that assignment, so the consumer's PerEvent kernel emits
+//! `if (kind == 26u)` directly — matching the dispatcher's hardcoded
+//! write tag. Pre-fix this crate's `build.rs` had to sed-rewrite
+//! `== 1u` to `== 26u` to close the loop; that workaround is gone.
 //!
-//! **Adaptation.** This crate's `build.rs` post-processes the emitted
-//! `physics_ApplyChronicleDamage.wgsl` to rewrite the consumer's
-//! `== 1u)` filter to `== 26u)`. The fix-up is a single sed-like swap
-//! and is loud (`cargo:warning=` line); the proper fix is in the
-//! compiler (resolve well-known engine-event names to their hardcoded
-//! `EventKindId` instead of declaration-index ids), but that's a
-//! compiler-refactor scope beyond this runtime-wiring task.
-//!
-//! With the patch, `agent_hp[i]` decrements by the chronicle's amount
-//! per tick, demonstrating the closed loop on real GPU hardware.
+//! `agent_hp[i]` decrements by the chronicle's amount per tick,
+//! demonstrating the closed loop on real GPU hardware.
 //!
 //! ## GPU adapter availability
 //!

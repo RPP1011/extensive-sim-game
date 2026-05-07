@@ -164,6 +164,67 @@ fn apply_ability_chronicle_consumer_compiles_with_tolerated_p6() {
     );
 }
 
+/// Regression pin for the engine-event kind aliasing fix
+/// (2026-05-06). Pre-fix, the consumer kernel filtered records via
+/// `if (kind == 1u)` because `EffectDamageApplied` was the second
+/// `event` decl in the .sim source order (after `Tick`). The
+/// dispatcher writes records with the engine's hardcoded
+/// `EventKindId::EffectDamageApplied = 26`, so the consumer's filter
+/// never matched. The runtime
+/// `apply_ability_chronicle_consumer_runtime/build.rs` used to
+/// sed-rewrite `== 1u` to `== 26u` to close the loop.
+///
+/// Post-fix, `dsl_ast::engine_events::engine_event_kind_id_for_name`
+/// aliases `EffectDamageApplied` to discriminant 26 at resolve time,
+/// and both `populate_event_kinds` (driver) and `resolve_event_ref`
+/// (driver) mirror that assignment. The consumer kernel emits
+/// `if (kind == 26u)` directly. This test asserts the post-fix shape
+/// — if it ever regresses to `== 1u`, the closed loop in
+/// `apply_ability_chronicle_consumer_runtime` silently breaks again.
+#[test]
+fn chronicle_consumer_filter_uses_engine_discriminant() {
+    let path = workspace_path("assets/sim/apply_ability_chronicle_consumer.sim");
+    let (art, _diags) = compile_sim_tolerating_diagnostics(&path).unwrap_or_else(|e| {
+        panic!("apply_ability_chronicle_consumer.sim hard-failed at: {e}");
+    });
+
+    let consumer = art
+        .wgsl_files
+        .iter()
+        .find(|(name, _)| name.contains("ApplyChronicleDamage"))
+        .map(|(_, b)| b.as_str())
+        .expect("ApplyChronicleDamage kernel missing");
+
+    // Engine discriminant for EffectDamageApplied is 26 — see
+    // `EventKindId` in `crates/engine/src/cascade/handler.rs` and the
+    // mirroring `EFFECT_KIND_TO_EVENT_KIND_ID` table in
+    // `cg/emit/wgsl_body.rs`. The consumer kernel must filter on 26u
+    // for the closed loop to fire.
+    assert!(
+        consumer.contains("== 26u)"),
+        "consumer kernel must filter on engine discriminant=26 for \
+         EffectDamageApplied; raw filter constants should NOT be the \
+         .sim declaration-index (=1 for this fixture). Pre-fix this \
+         test would fail with `== 1u)` and the runtime crate had to \
+         sed-rewrite the WGSL. Post-fix, the compiler aliases known \
+         engine event names to their hardcoded EventKindId at \
+         resolve time. Kernel:\n{consumer}"
+    );
+
+    // Belt-and-braces pin against the pre-fix shape: the .sim-local
+    // declaration-index for EffectDamageApplied is 1 (after `Tick` at
+    // 0). If the kernel ever emits `== 1u)` again the regression has
+    // returned. Whitelist the inner agent loop's `i < 1u` (it doesn't
+    // exist today; this is a future-proof guard against a pattern
+    // that COULD include `1u` for unrelated reasons — adjust if a
+    // legitimate `1u)` literal lands in the consumer body).
+    assert!(
+        !consumer.contains("== 1u)"),
+        "consumer kernel still emits the .sim-local index `== 1u)` — \
+         engine-event aliasing did not take effect. Kernel:\n{consumer}"
+    );
+}
+
 /// Corpus-level pin for the verb-body apply_ability surface. The
 /// inline-source tests (`verb_body_with_apply_ability_lowers_cleanly`)
 /// already prove parse → resolve → emit; this one pins the same path

@@ -516,7 +516,15 @@ fn populate_event_kinds(
 
     let mut ring_ids = Vec::with_capacity(comp.events.len());
     for (i, event) in comp.events.iter().enumerate() {
-        let kind_id = EventKindId(i as u32);
+        // Engine-aliased events (e.g. `EffectDamageApplied = 26`) use
+        // their hardcoded discriminant so the kernel filter constant
+        // matches what the dispatcher writes. User events keep the
+        // sequential `EventKindId(i)` allocation. The `engine_kind_id`
+        // field is populated by `dsl_ast::resolve` from
+        // `engine_events::engine_event_kind_id_for_name`. See
+        // `assets/sim/apply_ability_chronicle_consumer.sim` for the
+        // motivating fixture.
+        let kind_id = EventKindId(event.engine_kind_id.unwrap_or(i as u32));
         ring_ids.push(shared_ring);
 
         ctx.register_event_kind(event.name.clone(), kind_id);
@@ -1550,7 +1558,7 @@ fn lower_all_views(
 ) {
     for (i, view) in comp.views.iter().enumerate() {
         let view_id = ViewId(i as u32);
-        let resolutions = match build_view_handler_resolutions(view, event_rings) {
+        let resolutions = match build_view_handler_resolutions(view, &comp.events, event_rings) {
             Ok(r) => r,
             Err(e) => {
                 diagnostics.push(e);
@@ -1569,13 +1577,14 @@ fn lower_all_views(
 /// handler list is empty by construction).
 fn build_view_handler_resolutions(
     view: &ViewIR,
+    events: &[dsl_ast::ir::EventIR],
     event_rings: &[EventRingId],
 ) -> Result<Vec<HandlerResolution>, LoweringError> {
     match (&view.kind, &view.body) {
         (ViewKind::Lazy, ViewBodyIR::Expr(_)) => Ok(Vec::new()),
         (ViewKind::Materialized(_), ViewBodyIR::Fold { handlers, .. }) => handlers
             .iter()
-            .map(|h| build_fold_handler_resolution(view, h, event_rings))
+            .map(|h| build_fold_handler_resolution(view, h, events, event_rings))
             .collect(),
         // Kind/body mismatch is the view pass's concern — return an
         // empty resolution list so it can surface its own typed
@@ -1588,6 +1597,7 @@ fn build_view_handler_resolutions(
 fn build_fold_handler_resolution(
     _view: &ViewIR,
     handler: &FoldHandlerIR,
+    events: &[dsl_ast::ir::EventIR],
     event_rings: &[EventRingId],
 ) -> Result<HandlerResolution, LoweringError> {
     let event_ref = handler
@@ -1597,8 +1607,13 @@ fn build_fold_handler_resolution(
             event_name: handler.pattern.name.clone(),
             span: handler.pattern.span,
         })?;
-    let (kind, ring) =
-        resolve_event_ref(event_ref, &handler.pattern.name, handler.pattern.span, event_rings)?;
+    let (kind, ring) = resolve_event_ref(
+        event_ref,
+        &handler.pattern.name,
+        handler.pattern.span,
+        events,
+        event_rings,
+    )?;
     Ok(HandlerResolution {
         event_kind: kind,
         source_ring: ring,
@@ -1631,7 +1646,7 @@ fn lower_all_physics(
         if rule.cpu_only {
             continue;
         }
-        let resolutions = match build_physics_handler_resolutions(rule, event_rings) {
+        let resolutions = match build_physics_handler_resolutions(rule, &comp.events, event_rings) {
             Ok(r) => r,
             Err(e) => {
                 diagnostics.push(e);
@@ -1654,16 +1669,18 @@ fn physics_replayability(_rule: &PhysicsIR) -> ReplayabilityFlag {
 
 fn build_physics_handler_resolutions(
     rule: &PhysicsIR,
+    events: &[dsl_ast::ir::EventIR],
     event_rings: &[EventRingId],
 ) -> Result<Vec<HandlerResolution>, LoweringError> {
     rule.handlers
         .iter()
-        .map(|handler| build_physics_handler_resolution(handler, event_rings))
+        .map(|handler| build_physics_handler_resolution(handler, events, event_rings))
         .collect()
 }
 
 fn build_physics_handler_resolution(
     handler: &dsl_ast::ir::PhysicsHandlerIR,
+    events: &[dsl_ast::ir::EventIR],
     event_rings: &[EventRingId],
 ) -> Result<HandlerResolution, LoweringError> {
     use dsl_ast::ir::IrPhysicsPattern;
@@ -1673,7 +1690,8 @@ fn build_physics_handler_resolution(
                 event_name: p.name.clone(),
                 span: p.span,
             })?;
-            let (kind, ring) = resolve_event_ref(event_ref, &p.name, p.span, event_rings)?;
+            let (kind, ring) =
+                resolve_event_ref(event_ref, &p.name, p.span, events, event_rings)?;
             Ok(HandlerResolution {
                 event_kind: kind,
                 source_ring: ring,
@@ -1698,14 +1716,23 @@ fn build_physics_handler_resolution(
 }
 
 /// Resolve an [`EventRef`] (an index into `comp.events`) to its
-/// allocated `(EventKindId, EventRingId)` pair. The driver's
-/// allocation rule pairs each event by source order — the i-th
-/// event has kind id `i` and ring id `event_rings[i]`. A ref
-/// pointing past the table surfaces as a typed diagnostic.
+/// allocated `(EventKindId, EventRingId)` pair. The mapping mirrors
+/// `populate_event_kinds`:
+///
+/// - Engine-aliased events (e.g. `EffectDamageApplied = 26`) read
+///   their hardcoded discriminant from the IR's `engine_kind_id`
+///   field. This makes the kernel filter constant agree with the
+///   dispatcher's hardcoded write tag (closed loop for the chronicle
+///   pipeline).
+/// - User-declared events fall back to the source-order index
+///   (`EventKindId(event_ref.0)`).
+///
+/// A ref pointing past the table surfaces as a typed diagnostic.
 fn resolve_event_ref(
     event_ref: EventRef,
     name: &str,
     span: dsl_ast::ast::Span,
+    events: &[dsl_ast::ir::EventIR],
     event_rings: &[EventRingId],
 ) -> Result<(EventKindId, EventRingId), LoweringError> {
     let i = event_ref.0 as usize;
@@ -1715,7 +1742,11 @@ fn resolve_event_ref(
             span,
         }
     })?;
-    Ok((EventKindId(i as u32), ring))
+    let kind_id = events
+        .get(i)
+        .and_then(|e| e.engine_kind_id)
+        .unwrap_or(i as u32);
+    Ok((EventKindId(kind_id), ring))
 }
 
 /// Lower every [`ScoringIR`] in source order. Each decl becomes

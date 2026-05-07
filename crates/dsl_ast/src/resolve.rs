@@ -799,12 +799,14 @@ fn collect(
                         non_tag_anns.push(ann.clone());
                     }
                 }
+                let engine_kind_id = crate::engine_events::engine_event_kind_id_for_name(&d.name);
                 comp.events.push(EventIR {
                     name: d.name.clone(),
                     fields: Vec::new(),
                     tags: tag_refs,
                     annotations: non_tag_anns,
                     span: d.span,
+                    engine_kind_id,
                 });
             }
             Decl::EventTag(_) | Decl::Enum(_) => {

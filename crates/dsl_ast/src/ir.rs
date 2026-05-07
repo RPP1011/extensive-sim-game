@@ -531,6 +531,20 @@ pub struct EventIR {
     pub tags: Vec<EventTagRef>,
     pub annotations: Vec<Annotation>,
     pub span: Span,
+    /// Engine-aliased `EventKindId` discriminant for events whose name
+    /// matches a hardcoded engine event (`EffectDamageApplied = 26`,
+    /// etc.). `None` for user-declared events — the lowering driver
+    /// then falls back to sequential allocation (`EventKindId(i)` where
+    /// `i` is the position in `Compilation::events`).
+    ///
+    /// Populated by `dsl_ast::resolve` from
+    /// `crate::engine_events::engine_event_kind_id_for_name`. The
+    /// lowering driver's `populate_event_kinds` mirrors this assignment
+    /// so the kernel's filter constant matches the dispatcher's
+    /// hardcoded write tag (closed loop for the chronicle pipeline).
+    /// See `assets/sim/apply_ability_chronicle_consumer.sim` for the
+    /// motivating fixture.
+    pub engine_kind_id: Option<u32>,
 }
 
 /// `event_tag <Name>` declaration. The listed fields are the contract every

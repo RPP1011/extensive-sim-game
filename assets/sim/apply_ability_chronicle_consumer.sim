@@ -12,27 +12,18 @@
 //   apply_ability → EffectDamageApplied (chronicle record)
 //   on EffectDamageApplied → agents.set_hp(target, hp - amount)
 //
-// **Kind-tag mismatch caveat (runtime workaround).** The fixture
-// trips a real compiler bug: the dispatcher writes records with the
-// engine's hardcoded `EventKindId::EffectDamageApplied = 26` but the
-// consumer's `if (kind == N)` filter is built from the .sim's
-// declaration-index (=1 in this fixture's source order). Until the
-// compiler bug is fixed, the runtime
-// `apply_ability_chronicle_consumer_runtime`'s build.rs sed-rewrites
-// the consumer kernel's filter constant from `1u` to `26u` —
-// see that crate's lib.rs preamble.
-//
-// Probe finding (2026-05-06): a one-site fix in
-// `cg/lower/driver.rs::populate_event_kinds` to alias known engine
-// names to their hardcoded discriminants compiles, but breaks the
-// downstream pipeline — the resolver elsewhere still uses
-// declaration-index lookups, producing "physics#N dispatches
-// event#K which has no payload layout" diagnostics on every
-// engine-named event. The proper fix needs to centralize event-id
-// assignment so resolver + driver agree on the discriminant, OR
-// alias at resolve-time before any downstream consumer reads the
-// position. Reverted; this comment exists so the next attempt has
-// the failure mode pre-identified.
+// **Closed-loop kind tag (engine-aliased; fixed 2026-05-06).** The
+// dispatcher writes records with the engine's hardcoded
+// `EventKindId::EffectDamageApplied = 26`. Engine event names are now
+// aliased to their hardcoded discriminants at resolve time — see
+// `dsl_ast::engine_events::engine_event_kind_id_for_name`. The
+// resolver populates `EventIR::engine_kind_id`; the lowering driver's
+// `populate_event_kinds` and `resolve_event_ref` both mirror that
+// assignment, so the consumer's PerEvent kernel emits
+// `if (kind == 26u)` directly. Pre-fix the runtime
+// `apply_ability_chronicle_consumer_runtime`'s build.rs had to
+// sed-rewrite the consumer's filter from `1u` to `26u`; that
+// workaround is gone.
 //
 // **P6 caveat (warning, not error).** This fixture trips the same
 // well_formed P6 check that `duel_abilities.sim::ApplyDamage` trips:

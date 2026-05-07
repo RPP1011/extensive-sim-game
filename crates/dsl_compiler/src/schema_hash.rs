@@ -1091,6 +1091,7 @@ mod tests {
             tags: vec![],
             annotations: vec![],
             span: Span::dummy(),
+            engine_kind_id: None,
         }
     }
 
