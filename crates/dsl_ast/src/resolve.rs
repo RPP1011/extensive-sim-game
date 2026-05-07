@@ -3684,7 +3684,21 @@ fn validate_physics_stmt(physics_name: &str, s: &IrStmt) -> Result<(), ResolveEr
         }
         IrStmt::SelfUpdate { value, .. } => validate_physics_expr(physics_name, value),
         IrStmt::Expr(e) => validate_physics_expr(physics_name, e),
-        IrStmt::ApplyAbility { ability, .. } => validate_physics_expr(physics_name, ability),
+        IrStmt::ApplyAbility { ability, caster, target, .. } => {
+            // Slice ε: validate the new optional caster/target operands
+            // alongside the ability. A typo'd `apply_ability a by xx`
+            // where `xx` references an unknown name would otherwise
+            // ship through the resolver and surface as a confusing
+            // CG-level error far from the source.
+            validate_physics_expr(physics_name, ability)?;
+            if let Some(c) = caster {
+                validate_physics_expr(physics_name, c)?;
+            }
+            if let Some(t) = target {
+                validate_physics_expr(physics_name, t)?;
+            }
+            Ok(())
+        }
         IrStmt::BeliefObserve { observer, target, fields, .. } => {
             validate_physics_expr(physics_name, observer)?;
             validate_physics_expr(physics_name, target)?;
@@ -4164,7 +4178,16 @@ fn stmt_references_cascade_ceiling(s: &IrStmt) -> bool {
                 || expr_references_cascade_ceiling(target)
                 || fields.iter().any(|f| expr_references_cascade_ceiling(&f.value))
         }
-        IrStmt::ApplyAbility { ability, .. } => expr_references_cascade_ceiling(ability),
+        IrStmt::ApplyAbility { ability, caster, target, .. } => {
+            // Slice ε: cascade-ceiling check considers all three
+            // operands. A `cascade_depth` reference inside the
+            // caster/target operand should also surface (otherwise
+            // the cascade-ceiling guard could miss legitimate
+            // recursion-control patterns).
+            expr_references_cascade_ceiling(ability)
+                || caster.as_ref().is_some_and(expr_references_cascade_ceiling)
+                || target.as_ref().is_some_and(expr_references_cascade_ceiling)
+        }
     }
 }
 
