@@ -27,9 +27,26 @@ fn main() {
         .unwrap_or_else(|e| panic!("read {}: {e}", sim_path.display()));
     let program = dsl_compiler::parse(&src).expect("parse apply_ability_smoke.sim");
     let comp = dsl_ast::resolve::resolve(program).expect("resolve apply_ability_smoke.sim");
-    // Tolerate lower diagnostics — surface what's emitted even if some
-    // downstream rules failed to lower (mirrors cooldown_probe's pattern).
-    let cg = match dsl_compiler::cg::lower::lower_compilation_to_cg(&comp) {
+    // #121 follow-on (2026-05-07): opt the smoke runtime into AOE
+    // Path B dispatch. The flag flips every `apply_ability` lowered
+    // under this Compilation to `with_aoe_dispatch: true`, which
+    // (a) emits the 27-cell spatial walk + per-target chronicle write
+    // in the WGSL dispatcher arm, (b) surfaces `agent_pos` +
+    // `spatial_grid_cells` + `spatial_grid_starts` + `area_kinds` +
+    // `area_args` reads on the dispatcher op via
+    // `wire_apply_ability_aoe_reads`. The smoke runtime allocates the
+    // matching buffers (see `src/lib.rs::try_new_with_registry`); the
+    // parity sweep + the AOE chronicle pin (`aoe_chronicle_pin.rs`)
+    // exercise the new path on real GPU.
+    //
+    // Production runtimes (duel_abilities, tactical_squad_5v5,
+    // boss_fight, mass_battle_100v100, …) keep `aoe_dispatch: false`
+    // (the default) — their dispatchers stay binding-clean and the
+    // spatial-build phases don't fire.
+    let cg = match dsl_compiler::cg::lower::lower_compilation_to_cg_with_opts(
+        &comp,
+        dsl_compiler::cg::lower::LowerOpts { aoe_dispatch: true },
+    ) {
         Ok(p) => p,
         Err(o) => {
             for d in &o.diagnostics {

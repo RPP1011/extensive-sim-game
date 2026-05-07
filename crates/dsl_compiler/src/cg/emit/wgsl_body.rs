@@ -1600,7 +1600,7 @@ fn lower_cg_stmt_body_to_wgsl(
             );
             Ok(body)
         }
-        CgStmt::ApplyAbility { ability, caster, target, with_aoe_dispatch: _with_aoe_dispatch } => {
+        CgStmt::ApplyAbility { ability, caster, target, with_aoe_dispatch } => {
             // #136 slice β step 2: per-effect-slot dispatch loop.
             // Reads `ability_id` from the operand expression, walks
             // every effect slot in the PackedAbilityRegistry SoA,
@@ -1646,66 +1646,53 @@ fn lower_cg_stmt_body_to_wgsl(
             // duel_abilities with apply_ability) lights it up at
             // sim-level.
             //
-            // **Path B (GPU AOE multi-target) — BGL opt-in landed
-            // 2026-05-07; emit-side TODO remains.** The
-            // `with_aoe_dispatch` flag on `CgStmt::ApplyAbility` is
-            // now plumbed through lowering — every fixture's flag
-            // value is read here as `_with_aoe_dispatch`. When the
-            // flag is `true`, the WGSL emit will gate the spatial
-            // walk + multi-target chronicle write on
-            // `area_kinds[i] == 0u` (Circle); when `false`, it
-            // emits the existing single-target chain. **The walk
-            // itself is not yet wired** — every fixture today
-            // (smoke + production runtimes alike) has the flag at
-            // its default `false`, so the dispatcher unconditionally
-            // emits the single-target chain. Wiring the AOE walk +
-            // surfacing the spatial reads via
-            // `wire_apply_ability_aoe_reads` is the next slice
-            // (Path B emit). The CPU oracle (`apply_program_aoe`)
-            // expands Circle slots via `state.spatial().within_radius`
-            // and emits one ApplyEvent per in-circle target. The
-            // analogous GPU shape is to wrap the `if (when_passes)
-            // {…}` block below in a per-target loop:
-            //   1. Read `area_kinds[effect_base + i]`. If sentinel
-            //      (0xFFu) or non-zero → fall through to single-target
-            //      (existing chain executes with the cast's
-            //      `target_slot`).
-            //   2. If 0u (Circle): read `area_args[(effect_base+i)*4]`
-            //      as radius. Compute `aoe_center = agent_pos[target_slot]`.
-            //      Walk the 27-cell neighborhood: for each cell,
-            //      iterate `_start..end = spatial_grid_starts[cell..+1]`,
-            //      bind `let candidate = spatial_grid_cells[_i];`,
-            //      compute `let _d = agent_pos[candidate] - aoe_center;`,
-            //      gate on `dot(_d, _d) <= radius*radius`, then run the
-            //      arm chain inside a `{ let target_slot = candidate; … }`
-            //      block to shadow the outer `target_slot` for the
-            //      chronicle writes.
-            //   3. P11 sort: GPU's atomicAdd ring claim does NOT
-            //      preserve AgentId order. The CPU oracle sorts by
-            //      AgentId ascending; the parity comparison sorts both
-            //      sides post-readback (already done in
-            //      `parity_apply_program_sweep::canonicalize`).
-            // The shape is straightforward; the blocker is the
-            // **BGL composer + scheduler ripple**. Adding `agent_pos`
-            // + `spatial_grid_starts/_cells/_offsets` + `area_kinds`
-            // + `area_args` reads to this op auto-fires the five
-            // build-hash phases (see
-            // `collect_required_spatial_kinds` in driver.rs) in EVERY
-            // `apply_ability`-using fixture. Three production runtimes
-            // (`boss_fight_runtime`, `duel_abilities_runtime`,
-            // `tactical_squad_5v5_runtime`) currently bind NO spatial
-            // buffers; force-firing the build phases would require
-            // them to (a) allocate ~1.4 MB of spatial buffers per
-            // fixture, (b) uphold an `agent_pos` SoA contract many
-            // don't keep populated for `caster_slot` indexing today.
-            // The slice's brief calls a "STOP and document" outcome
-            // for fundamental dispatcher refactoring; that's where
-            // we landed for this iteration. Next slice should gate
-            // the AOE emit on a per-fixture build-time `AoeOpts`
-            // flag so opt-in fixtures (smoke runtime first) ship the
-            // walk + bindings while production runtimes preserve
-            // their zero-spatial-overhead BGL until they're ready
-            // to opt in.
+            // **Path B (GPU AOE multi-target) — emit landed
+            // 2026-05-07 (#121 follow-on).** The `with_aoe_dispatch`
+            // flag on `CgStmt::ApplyAbility` (per-fixture build-time
+            // opt-in via `LowerOpts::aoe_dispatch`) gates the AOE walk:
+            //
+            //   - `false` (every production runtime today — duel,
+            //     tactical_squad_5v5, boss_fight, mass_battle, …):
+            //     emit ONLY the single-target chain. No spatial
+            //     reads, no `agent_pos[]` reads, no AreaKinds/AreaArgs
+            //     SoA reads. BGL composer surfaces zero spatial
+            //     bindings on the dispatcher — production runtimes
+            //     keep their zero-spatial-overhead BGL.
+            //
+            //   - `true` (`apply_ability_smoke_runtime` today): wrap
+            //     the `if (when_passes && chance_passes) {…}` body in
+            //     a runtime branch on `area_kinds[effect_base + i]`:
+            //       * 0u (Circle): walk the 27-cell spatial
+            //         neighborhood around `aoe_center =
+            //         agent_pos[target_slot]`; for each candidate
+            //         within `dot(d, d) <= radius²`, run the
+            //         chronicle arm chain + nested loop inside a
+            //         block that shadows `target_slot = candidate`.
+            //       * else (sentinel 0xFFu or unrecognised shape):
+            //         fall through to the single-target chain
+            //         (existing chain executes with the cast's
+            //         explicit `target_slot`).
+            //     P11 sort: GPU's atomicAdd ring claim does NOT
+            //     preserve AgentId order. The CPU oracle
+            //     (`apply_program_aoe`) sorts by AgentId ascending; the
+            //     parity comparison sorts both sides post-readback
+            //     (`parity_apply_program_sweep::canonicalize`).
+            //
+            // The when-predicate (`when_passes`) evaluates against
+            // the EXPLICIT cast target — NOT per-AOE-target. Same
+            // semantic as the CPU oracle's slot-keyed gate (`apply.rs:
+            // apply_program_aoe`): when the slot's gate fires, every
+            // in-circle target receives the chronicle record; when
+            // the gate fails, none do.
+            //
+            // BGL ripple: when `with_aoe_dispatch=true`, the
+            // dispatcher's body references `agent_pos`,
+            // `spatial_grid_cells`, `spatial_grid_starts`, plus the
+            // `ability_registry_area_kinds` / `area_args` SoA columns.
+            // The driver's `wire_apply_ability_aoe_reads` (sibling to
+            // `wire_ability_registry_column_reads`) records those
+            // reads on flag-on dispatcher ops only — opt-out fixtures
+            // never see them.
             let ability_wgsl = lower_cg_expr_to_wgsl(*ability, ctx)?;
             // Slice δ (#161): caster operand is now an explicit
             // CgExpr lowered through the same path as any other
@@ -1750,8 +1737,20 @@ fn lower_cg_stmt_body_to_wgsl(
             // (computed from `scaling_stat_refs`/`scaling_percents` SoA
             // + per-stat agent SoA reads at `caster_slot` above the
             // chain).
-            let primary_arm_chain = emit_chronicle_arm_chain("        ", "scale_bonus");
-            let nested_arm_chain = emit_chronicle_arm_chain("            ", "nested_scale_bonus");
+            // Path B emit: for AOE dispatch the arm chains run inside
+            // a per-target spatial walk that shadows `target_slot` to
+            // the in-circle candidate, so the inner-most indent picks
+            // up an extra 4 spaces (12 → 16 for primary, 16 → 20 for
+            // nested) when the flag is on. The arm-chain helper is
+            // pure-string and indent-parametric; flipping the indent
+            // is the only emit-time difference between the two paths.
+            let (primary_indent, nested_indent) = if *with_aoe_dispatch {
+                ("            ",     "                ")
+            } else {
+                ("        ",         "            ")
+            };
+            let primary_arm_chain = emit_chronicle_arm_chain(primary_indent, "scale_bonus");
+            let nested_arm_chain  = emit_chronicle_arm_chain(nested_indent,  "nested_scale_bonus");
             // Engine pins MAX_EFFECTS_PER_PROGRAM = 6 + EFFECT_KIND_EMPTY = 0xFFu
             // (see crates/engine/src/ability/program.rs:28 +
             // crates/engine/src/ability/packed.rs). Inlining the
@@ -1876,37 +1875,208 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20if (when_passes && chance_passes) {{\n\
-                 {primary_arm_chain}\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// Variant 7 (CastAbility) — recursive dispatch. The\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// nested ability_id lives in payload_a; recursing\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// requires either a depth-bounded re-entry into this\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// loop or a separate work queue. Deferred to slice δ.\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// Wave 1.5#9 nested-effect walk. After the primary's\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// chronicle write resolves, walk up to\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// MAX_NESTED_PER_EFFECT (=2) nested ops on this slot\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// and write a chronicle record per chronicle-bearing\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// kind. Block-scoped so the inner `kind` / `payload_a`\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// / `payload_b` locals don't shadow the primary walk's.\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// Nested ops carry no scaling slot in the registry today\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// (mirrors `apply.rs`'s `push_effect_event(..., 0.0)` for\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// nested), so `nested_scale_bonus` is forced to 0.0.\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// Wave 1.5#7: nested loop INSIDE the `if (when_passes)` block.\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20let nested_slot_base: u32 = nested_base + i * 2u;\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20for (var j: u32 = 0u; j < 2u; j = j + 1u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let kind: u32 = ability_registry_nested_effect_kinds[nested_slot_base + j];\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (kind == 0xFFu) {{ continue; }} // EFFECT_KIND_EMPTY\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let payload_a: u32 = ability_registry_nested_effect_payload_a[nested_slot_base + j];\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let payload_b: u32 = ability_registry_nested_effect_payload_b[nested_slot_base + j];\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let nested_scale_bonus: f32 = 0.0;\n\
-                 {nested_arm_chain}\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}}\n\
+                 {per_target_body}\
                  \x20\x20\x20\x20\x20\x20\x20\x20}} // end if (when_passes && chance_passes)\n\
                  \x20\x20\x20\x20}}\n\
-                 }}"
+                 }}",
+                per_target_body = build_apply_ability_per_target_body(
+                    *with_aoe_dispatch,
+                    &primary_arm_chain,
+                    &nested_arm_chain,
+                ),
             );
             Ok(body)
         }
     }
+}
+
+/// Render the per-target body of the apply_ability dispatcher's
+/// `if (when_passes && chance_passes) { … }` block. Used by the
+/// `CgStmt::ApplyAbility` arm above; factored out so the AOE Path B
+/// branching shape stays readable (the underlying single-target +
+/// nested-loop emit is identical between flag values, just wrapped in
+/// a 27-cell spatial walk when AOE is on).
+///
+/// The two arm chains (`primary_arm_chain` for the per-effect-slot
+/// chronicle write, `nested_arm_chain` for the inner Wave 1.5#9
+/// nested-effect walk) are pre-rendered at the appropriate indent
+/// (single-target indents = 8/12 spaces; AOE indents = 12/16 spaces,
+/// shifted by the extra 4 spaces of the outer per-target loop) so this
+/// function purely composes them into the right outer scaffolding.
+///
+/// **Single-target shape (`with_aoe_dispatch == false`)**: emits the
+/// existing primary-arm-chain + nested-loop sequence verbatim. No
+/// spatial reads, no `agent_pos`/`area_kinds`/`area_args` references.
+/// BGL composer surfaces zero spatial bindings on the dispatcher —
+/// production runtimes preserve their zero-spatial-overhead BGL.
+///
+/// **AOE shape (`with_aoe_dispatch == true`)**: branches on
+/// `area_kinds[effect_base + i]`:
+///   - `0u` (Circle): walk the 27-cell spatial neighborhood around
+///     `aoe_center = agent_pos[target_slot]`; for each candidate within
+///     `dot(d, d) <= radius²`, run the chronicle arm chain + nested
+///     loop in a `{ let target_slot = candidate; … }` block that
+///     shadows the outer `target_slot` for chronicle writes. P11 sort
+///     handles atomicAdd-induced order non-determinism on readback.
+///   - else (sentinel `0xFFu` = no area, or non-Circle shape): fall
+///     through to the single-target chain with the explicit cast
+///     `target_slot`. Non-Circle shapes (Cone/Capsule/Aabb) are
+///     deferred — their additional geometry kernels would extend this
+///     branch.
+///
+/// Why the spatial-walk lives at this layer (rather than in the
+/// per-cast caller): the chronicle arm chain consumes `target_slot`
+/// at every chronicle-bearing variant (`atomicStore(...&event_ring[_slot
+/// * 10u + 3u], (target_slot))`), so the per-target shadow has to
+/// surround the entire arm chain (primary + nested). Hoisting the
+/// spatial walk out would require lifting target_slot into a parameter
+/// of `emit_chronicle_arm_chain` — strictly more code, and the chain
+/// helper stays usefully indent-parametric without the additional
+/// hook.
+fn build_apply_ability_per_target_body(
+    with_aoe_dispatch: bool,
+    primary_arm_chain: &str,
+    nested_arm_chain:  &str,
+) -> String {
+    if !with_aoe_dispatch {
+        // Single-target path: emit existing primary chain + nested loop
+        // at indent depth 8/12 spaces. No spatial bindings touched.
+        let mut s = String::new();
+        s.push_str(primary_arm_chain);
+        s.push_str(
+            "        // Variant 7 (CastAbility) — recursive dispatch. The\n\
+             \x20       // nested ability_id lives in payload_a; recursing\n\
+             \x20       // requires either a depth-bounded re-entry into this\n\
+             \x20       // loop or a separate work queue. Deferred to slice δ.\n\
+             \x20       // Wave 1.5#9 nested-effect walk. After the primary's\n\
+             \x20       // chronicle write resolves, walk up to\n\
+             \x20       // MAX_NESTED_PER_EFFECT (=2) nested ops on this slot\n\
+             \x20       // and write a chronicle record per chronicle-bearing\n\
+             \x20       // kind. Block-scoped so the inner `kind` / `payload_a`\n\
+             \x20       // / `payload_b` locals don't shadow the primary walk's.\n\
+             \x20       // Nested ops carry no scaling slot in the registry today\n\
+             \x20       // (mirrors `apply.rs`'s `push_effect_event(..., 0.0)` for\n\
+             \x20       // nested), so `nested_scale_bonus` is forced to 0.0.\n\
+             \x20       // Wave 1.5#7: nested loop INSIDE the `if (when_passes)` block.\n\
+             \x20       let nested_slot_base: u32 = nested_base + i * 2u;\n\
+             \x20       for (var j: u32 = 0u; j < 2u; j = j + 1u) {\n\
+             \x20           let kind: u32 = ability_registry_nested_effect_kinds[nested_slot_base + j];\n\
+             \x20           if (kind == 0xFFu) { continue; } // EFFECT_KIND_EMPTY\n\
+             \x20           let payload_a: u32 = ability_registry_nested_effect_payload_a[nested_slot_base + j];\n\
+             \x20           let payload_b: u32 = ability_registry_nested_effect_payload_b[nested_slot_base + j];\n\
+             \x20           let nested_scale_bonus: f32 = 0.0;\n",
+        );
+        s.push_str(nested_arm_chain);
+        s.push_str("            }\n");
+        return s;
+    }
+
+    // AOE Path B: branch on `area_kinds[effect_base + i]`. The arm
+    // chains were pre-rendered with extra indent (12/16 spaces) so
+    // the inner `{ let target_slot = candidate; … }` block reads
+    // cleanly nested inside the cell-walk loop. Path B today only
+    // expands `Circle` (kind == 0u); other kinds fall through to the
+    // single-target chain (the `else` arm of the area_kind branch).
+    //
+    // Spatial walk shape mirrors the cell-walk path of
+    // `emit_for_each_neighbor_body` (cell_index helper bound by the
+    // spatial prelude). Center = `agent_pos[target_slot]` (the
+    // explicit cast target's world position — same convention as
+    // `apply_program_aoe`'s `state.spatial().within_radius(state,
+    // primary_target_pos, radius)` site).
+    //
+    // P11 ordering: GPU's atomicAdd ring claim does NOT preserve
+    // AgentId order. The CPU oracle (`apply_program_aoe`) emits
+    // chronicle records in `aoe_targets` order (sorted ascending by
+    // AgentId). Cross-backend parity therefore requires the test
+    // harness to sort both sides post-readback (already done by
+    // `parity_apply_program_sweep::canonicalize`).
+    let mut s = String::new();
+    s.push_str(
+        "        // #121 AOE Path B: per-effect-slot AOE expansion. Flag is on\n\
+         \x20       // → branch on `area_kinds[effect_base + i]`. Circle (0u)\n\
+         \x20       // walks the 27-cell spatial neighborhood around\n\
+         \x20       // `agent_pos[target_slot]` and runs the chronicle arm chain\n\
+         \x20       // once per in-radius candidate (shadowing target_slot).\n\
+         \x20       // Sentinel 0xFFu / unrecognised shape → single-target\n\
+         \x20       // fallback at the same indent the non-AOE path uses.\n\
+         \x20       let area_kind: u32 = ability_registry_area_kinds[effect_base + i];\n\
+         \x20       if (area_kind == 0u) {\n\
+         \x20           // Circle. area_args layout: [radius, _, _, _] (4 f32 per slot).\n\
+         \x20           let area_args_base: u32 = (effect_base + i) * 4u;\n\
+         \x20           let radius: f32 = ability_registry_area_args[area_args_base + 0u];\n\
+         \x20           let radius_sq: f32 = radius * radius;\n\
+         \x20           let aoe_center: vec3<f32> = agent_pos[target_slot];\n\
+         \x20           // 27-cell neighborhood walk (mirrors the cell-walk path\n\
+         \x20           // of `emit_for_each_neighbor_body` — same `cell_index`\n\
+         \x20           // helper from the spatial prelude, same\n\
+         \x20           // `spatial_grid_starts[cell..+1]` slot iteration).\n\
+         \x20           let _self_cell_f = (aoe_center + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
+         \x20           let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
+         \x20           let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
+         \x20           let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
+         \x20           let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
+         \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
+         \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
+         \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
+         \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
+         \x20                       let _start = spatial_grid_starts[_cell];\n\
+         \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
+         \x20                       for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {\n\
+         \x20                           let _candidate: u32 = spatial_grid_cells[_i];\n\
+         \x20                           let _cand_pos: vec3<f32> = agent_pos[_candidate];\n\
+         \x20                           let _dvec: vec3<f32> = _cand_pos - aoe_center;\n\
+         \x20                           if (dot(_dvec, _dvec) <= radius_sq) {\n\
+         \x20                               // Shadow target_slot for the arm chain's chronicle writes.\n\
+         \x20                               let target_slot: u32 = _candidate;\n",
+    );
+    s.push_str(primary_arm_chain);
+    s.push_str(
+        "                            // Wave 1.5#9 nested loop runs per-target inside the\n\
+         \x20                           // AOE walk — each in-circle target receives the\n\
+         \x20                           // primary chronicle record AND each chronicle-\n\
+         \x20                           // bearing nested op (mirrors `apply_program_aoe`'s\n\
+         \x20                           // `for nested_op in nested { push_effect_event(...) }`\n\
+         \x20                           // inside the per-target loop).\n\
+         \x20                               let nested_slot_base: u32 = nested_base + i * 2u;\n\
+         \x20                               for (var j: u32 = 0u; j < 2u; j = j + 1u) {\n\
+         \x20                                   let kind: u32 = ability_registry_nested_effect_kinds[nested_slot_base + j];\n\
+         \x20                                   if (kind == 0xFFu) { continue; } // EFFECT_KIND_EMPTY\n\
+         \x20                                   let payload_a: u32 = ability_registry_nested_effect_payload_a[nested_slot_base + j];\n\
+         \x20                                   let payload_b: u32 = ability_registry_nested_effect_payload_b[nested_slot_base + j];\n\
+         \x20                                   let nested_scale_bonus: f32 = 0.0;\n",
+    );
+    s.push_str(nested_arm_chain);
+    s.push_str(
+        "                                }\n\
+         \x20                           } // end if (in radius)\n\
+         \x20                       } // end for _i\n\
+         \x20                   } // end for dx\n\
+         \x20               } // end for dy\n\
+         \x20           } // end for dz\n\
+         \x20       } else {\n\
+         \x20           // Non-Circle (sentinel 0xFFu = no area, or unrecognised\n\
+         \x20           // shape). Single-target fallback — same chain shape as\n\
+         \x20           // the with_aoe_dispatch==false path, just at the deeper\n\
+         \x20           // indent (12/16 spaces) the AOE arm-chain helper rendered\n\
+         \x20           // for the in-radius branch.\n",
+    );
+    s.push_str(primary_arm_chain);
+    s.push_str(
+        "                let nested_slot_base: u32 = nested_base + i * 2u;\n\
+         \x20               for (var j: u32 = 0u; j < 2u; j = j + 1u) {\n\
+         \x20                   let kind: u32 = ability_registry_nested_effect_kinds[nested_slot_base + j];\n\
+         \x20                   if (kind == 0xFFu) { continue; } // EFFECT_KIND_EMPTY\n\
+         \x20                   let payload_a: u32 = ability_registry_nested_effect_payload_a[nested_slot_base + j];\n\
+         \x20                   let payload_b: u32 = ability_registry_nested_effect_payload_b[nested_slot_base + j];\n\
+         \x20                   let nested_scale_bonus: f32 = 0.0;\n",
+    );
+    s.push_str(nested_arm_chain);
+    s.push_str(
+        "                }\n\
+         \x20       } // end if (area_kind == 0u) … else\n",
+    );
+    s
 }
 
 /// Lower a [`CgStmt::Emit`] body. **B1 no-op fallback**: the prior shape

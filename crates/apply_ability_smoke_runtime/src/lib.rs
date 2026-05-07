@@ -81,6 +81,39 @@ pub const CHRONICLE_STRIDE_U32: u32 = 10;
 /// generous (and far below the 65 536 the production helper allocates).
 const RING_SLOTS: u32 = 256;
 
+// Spatial-grid sizing constants. Mirror
+// `dsl_compiler::cg::emit::spatial::{CELL_SIZE, WORLD_HALF_EXTENT,
+// num_cells}` — the WGSL prelude bakes these into `SPATIAL_*` consts;
+// the runtime allocations below have to match in size and grid
+// topology or the dispatcher's `cell_index` returns out-of-bounds
+// indices and reads garbage. Today the smoke runtime uses CPU-side
+// pre-population (not a real BuildHash dispatch), so the only
+// constraints are:
+//   - `spatial_grid_starts.len() == num_cells + 1`
+//   - `spatial_grid_cells.len() >= n_agents`
+// Both buffers are populated per-construct from caller-supplied
+// agent positions (or default `(0,0,0)` for every agent — every slot
+// lands in the world-origin cell, see `try_new_with_registry`).
+const SPATIAL_CELL_SIZE_F: f32 = 6.0;
+const SPATIAL_WORLD_HALF_EXTENT_F: f32 = 64.0;
+const SPATIAL_NUM_CELLS_PER_AXIS: u32 = 22; // ceil(128 / 6)
+const SPATIAL_NUM_CELLS: u32 =
+    SPATIAL_NUM_CELLS_PER_AXIS * SPATIAL_NUM_CELLS_PER_AXIS * SPATIAL_NUM_CELLS_PER_AXIS;
+
+/// Mirror of the WGSL `pos_to_cell(p: vec3<f32>) -> u32` helper from
+/// `cg::emit::spatial::compose_spatial_prelude`. Same clamp semantics
+/// (out-of-extent positions snap to the boundary cell).
+fn host_pos_to_cell(x: f32, y: f32, z: f32) -> u32 {
+    let max_idx = (SPATIAL_NUM_CELLS_PER_AXIS - 1) as i32;
+    let cx = ((x + SPATIAL_WORLD_HALF_EXTENT_F) / SPATIAL_CELL_SIZE_F).max(0.0) as i32;
+    let cy = ((y + SPATIAL_WORLD_HALF_EXTENT_F) / SPATIAL_CELL_SIZE_F).max(0.0) as i32;
+    let cz = ((z + SPATIAL_WORLD_HALF_EXTENT_F) / SPATIAL_CELL_SIZE_F).max(0.0) as i32;
+    let cx = cx.clamp(0, max_idx) as u32;
+    let cy = cy.clamp(0, max_idx) as u32;
+    let cz = cz.clamp(0, max_idx) as u32;
+    (cz * SPATIAL_NUM_CELLS_PER_AXIS + cy) * SPATIAL_NUM_CELLS_PER_AXIS + cx
+}
+
 /// Per-fixture state for the apply_ability dispatcher smoke test.
 /// Owns:
 ///   - The wgpu context.
@@ -100,6 +133,12 @@ pub struct ApplyAbilitySmokeState {
     // -- Agent SoA --
     agent_alive_buf: wgpu::Buffer,
     agent_level_buf: wgpu::Buffer,
+    // #121 AOE Path B: agent position SoA. Read by the dispatcher's
+    // AOE walk at both `target_slot` (cast center) and per spatial-
+    // grid candidate. `vec3<f32>` per slot — 12 bytes (WGSL pads the
+    // type to 16 bytes via the storage-buffer alignment rules, so the
+    // host buffer is sized 16 bytes per slot).
+    agent_pos_buf: wgpu::Buffer,
     // Wave 1.5#4 GPU wire-up: per-stat agent SoA columns the dispatcher
     // reads at `caster_slot` for the `scale_bonus = Σ percent * stat`
     // computation. Initialized to zero — the smoke fixture's program
@@ -112,6 +151,18 @@ pub struct ApplyAbilitySmokeState {
     agent_magic_resist_buf: wgpu::Buffer,
     agent_move_speed_buf: wgpu::Buffer,
     agent_mana_buf: wgpu::Buffer,
+
+    // #121 AOE Path B: spatial-grid state read by the dispatcher's
+    // 27-cell walk. The smoke runtime pre-populates these on the host
+    // (no real BuildHash kernel runs in this fixture's schedule); the
+    // default layout puts every alive agent in cell 0 (caller can
+    // override via `set_agent_positions_in_cell_0`). `grid_starts`
+    // holds the inclusive prefix-sum offsets used by the WGSL walk:
+    //   spatial_grid_starts[c]   = first slot index in `grid_cells`
+    //                              that holds an agent in cell `c`
+    //   spatial_grid_starts[c+1] = one past the last slot
+    spatial_grid_cells_buf: wgpu::Buffer,
+    spatial_grid_starts_buf: wgpu::Buffer,
 
     // -- Packed AbilityRegistry on GPU (only the 3 columns the
     // dispatcher binds are read; the upload helper allocates all
@@ -229,6 +280,68 @@ impl ApplyAbilitySmokeState {
                 contents: bytemuck::cast_slice(per_agent_levels),
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             });
+        // #121 AOE: agent_pos SoA. WGSL-side `array<vec3<f32>>` reads
+        // through 16-byte-stride alignment (vec3 in storage buffers
+        // pads to vec4); allocate `n_agents * 16` bytes and zero-init.
+        // Default position (0,0,0) lands every agent in cell 0 of the
+        // spatial grid, matching the default `spatial_grid_*` layout
+        // below. Callers wanting non-zero positions overwrite via
+        // `set_agent_positions(&[Vec3])`.
+        let agent_pos_init = vec![0u32; (n_agents as usize) * 4];
+        let agent_pos_buf =
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("apply_ability_smoke_runtime::agent_pos"),
+                contents: bytemuck::cast_slice(&agent_pos_init),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            });
+        // #121 AOE: spatial-grid state. The smoke fixture pre-populates
+        // these on the host instead of running a real BuildHash kernel
+        // (the dispatcher's needs are bounded — 27-cell walk around the
+        // cast center — so a hand-rolled layout suffices for testing).
+        //
+        // Default agent positions are all `(0,0,0)`, which maps to one
+        // specific cell via the WGSL `pos_to_cell` helper (mirrored on
+        // the host as `host_pos_to_cell`). Initialise the grid with
+        // every alive slot landing in that cell:
+        //   grid_cells = [0, 1, 2, …, n_agents - 1] in slots 0..n_agents
+        //   grid_starts[c] = 0           for c <= origin_cell
+        //   grid_starts[c] = n_agents    for c >  origin_cell
+        // (inclusive-prefix layout — `grid_starts[c+1] - grid_starts[c]`
+        // gives the count in cell `c`).
+        //
+        // Callers that override positions via `set_agent_positions`
+        // also rebuild the grid via `set_spatial_grid_for_positions`
+        // — without that, the spatial walk reads stale offsets.
+        let origin_cell = host_pos_to_cell(0.0, 0.0, 0.0);
+        let mut grid_cells_init: Vec<u32> = (0..n_agents).collect();
+        // Pad to at least 1 entry so wgpu accepts the zero-size buffer
+        // case (n_agents == 0 isn't supported but defensive).
+        if grid_cells_init.is_empty() {
+            grid_cells_init.push(0);
+        }
+        let spatial_grid_cells_buf =
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("apply_ability_smoke_runtime::spatial_grid_cells"),
+                contents: bytemuck::cast_slice(&grid_cells_init),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            });
+        // grid_starts has `num_cells + 1` entries (inclusive prefix
+        // counts). With every alive agent sitting in `origin_cell`:
+        //   grid_starts[c]   = 0          for c <= origin_cell
+        //   grid_starts[c]   = n_agents   for c >  origin_cell
+        // Cell `origin_cell` has `n_agents` entries (slots 0..n_agents
+        // in `grid_cells`); every other cell is empty.
+        let mut grid_starts_init: Vec<u32> =
+            Vec::with_capacity((SPATIAL_NUM_CELLS as usize) + 1);
+        for c in 0..=SPATIAL_NUM_CELLS {
+            grid_starts_init.push(if c <= origin_cell { 0 } else { n_agents });
+        }
+        let spatial_grid_starts_buf =
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("apply_ability_smoke_runtime::spatial_grid_starts"),
+                contents: bytemuck::cast_slice(&grid_starts_init),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            });
         // Wave 1.5#4 GPU scaling: per-stat columns for the dispatcher's
         // `agent_stat()` switch. The parity sweep seeds these from
         // `per_agent_stats[i].<field>` so the GPU and the CPU oracle
@@ -331,6 +444,7 @@ impl ApplyAbilitySmokeState {
             gpu,
             agent_alive_buf,
             agent_level_buf,
+            agent_pos_buf,
             agent_attack_damage_buf,
             agent_max_hp_buf,
             agent_hp_buf,
@@ -338,6 +452,8 @@ impl ApplyAbilitySmokeState {
             agent_magic_resist_buf,
             agent_move_speed_buf,
             agent_mana_buf,
+            spatial_grid_cells_buf,
+            spatial_grid_starts_buf,
             registry_gpu,
             event_ring_buf,
             event_tail_buf,
@@ -348,6 +464,123 @@ impl ApplyAbilitySmokeState {
             cache: dispatch::KernelCache::default(),
             n_agents,
         })
+    }
+
+    /// Overwrite per-agent alive flags. Used by the AOE parity sweep
+    /// to dispatch from a single caster while keeping the other agents
+    /// in the SoA as quiescent AOE targets (their `agent_alive == 0`
+    /// gates them out of the per-agent dispatch loop's `where
+    /// (self.alive)` clause but they still appear in the spatial grid
+    /// for the caster's AOE walk).
+    pub fn set_agent_alive(&self, alive: &[u32]) {
+        assert_eq!(
+            alive.len(),
+            self.n_agents as usize,
+            "alive slice must have one entry per agent (got {} for {} agents)",
+            alive.len(),
+            self.n_agents,
+        );
+        self.gpu.queue.write_buffer(
+            &self.agent_alive_buf,
+            0,
+            bytemuck::cast_slice(alive),
+        );
+    }
+
+    /// Overwrite per-agent world positions in the `agent_pos` SoA AND
+    /// rebuild the spatial grid (`grid_cells` + `grid_starts`) to
+    /// match. The dispatcher's AOE walk reads `grid_starts[cell..+1]`
+    /// for each cell in the 27-neighborhood; without rebuilding, the
+    /// walk reads stale offsets from the constructor's "all in
+    /// origin cell" layout and the in-circle set is wrong.
+    ///
+    /// Used by the AOE behavioral pin (`tests/aoe_chronicle_pin.rs`)
+    /// and the AOE parity sweep (`parity_apply_program_sweep.rs`) to
+    /// set up a row of agents at known (x, 0, 0) coordinates so the
+    /// dispatcher's spatial walk produces the expected per-target
+    /// chronicle records. Each entry writes 16 bytes to the agent_pos
+    /// buffer (vec3 padded to vec4 for storage-buffer alignment) at
+    /// byte offset `i * 16`.
+    pub fn set_agent_positions(&self, positions: &[[f32; 3]]) {
+        assert_eq!(
+            positions.len(),
+            self.n_agents as usize,
+            "positions slice must have one entry per agent (got {} for {} agents)",
+            positions.len(),
+            self.n_agents,
+        );
+        // Pack into vec4-padded layout (storage-buffer alignment for
+        // `array<vec3<f32>>`).
+        let mut padded: Vec<f32> = Vec::with_capacity(positions.len() * 4);
+        for &[x, y, z] in positions {
+            padded.push(x);
+            padded.push(y);
+            padded.push(z);
+            padded.push(0.0);
+        }
+        self.gpu.queue.write_buffer(
+            &self.agent_pos_buf,
+            0,
+            bytemuck::cast_slice(&padded),
+        );
+
+        // Rebuild the spatial grid so each agent lands in the cell its
+        // new position maps to. Bucket agents by cell, then write a
+        // counting-sort layout:
+        //   grid_cells[grid_starts[c] + k] = AgentId of the k-th agent
+        //                                    in cell c (0-based)
+        //   grid_starts[c]   = inclusive start of cell c
+        //   grid_starts[c+1] = inclusive end of cell c
+        //
+        // Agents within a cell are stored in AgentId-ascending order
+        // (the host loop iterates in slot order and pushes monotonically
+        // into the bucket vec) — matches `state.spatial().within_radius`'s
+        // sort-ascending contract on the CPU oracle side.
+        let mut buckets: std::collections::BTreeMap<u32, Vec<u32>> =
+            std::collections::BTreeMap::new();
+        for (slot, &[x, y, z]) in positions.iter().enumerate() {
+            let cell = host_pos_to_cell(x, y, z);
+            buckets.entry(cell).or_default().push(slot as u32);
+        }
+        // Bucket counts (per cell, 0 elsewhere). BTreeMap → walk in
+        // ascending cell order to flatten into grid_cells.
+        let mut grid_cells: Vec<u32> = Vec::with_capacity(self.n_agents as usize);
+        for (_cell, ids) in &buckets {
+            grid_cells.extend(ids.iter().copied());
+        }
+        let total = grid_cells.len() as u32;
+        // Pad grid_cells to at least 1 entry (defensive — wgpu rejects zero-size).
+        if grid_cells.is_empty() {
+            grid_cells.push(0);
+        }
+        // grid_starts[c] = inclusive prefix sum = number of agents in
+        // cells [0..c). The dispatcher's walk reads `grid_starts[cell]`
+        // and `grid_starts[cell + 1]` to bracket cell `cell`'s agent
+        // slots in `grid_cells`.
+        let mut counts: Vec<u32> = vec![0u32; SPATIAL_NUM_CELLS as usize];
+        for (&cell, ids) in &buckets {
+            counts[cell as usize] = ids.len() as u32;
+        }
+        let mut grid_starts: Vec<u32> =
+            Vec::with_capacity((SPATIAL_NUM_CELLS as usize) + 1);
+        let mut running: u32 = 0;
+        grid_starts.push(0);
+        for &c in &counts {
+            running += c;
+            grid_starts.push(running);
+        }
+        debug_assert_eq!(running, total);
+
+        self.gpu.queue.write_buffer(
+            &self.spatial_grid_cells_buf,
+            0,
+            bytemuck::cast_slice(&grid_cells),
+        );
+        self.gpu.queue.write_buffer(
+            &self.spatial_grid_starts_buf,
+            0,
+            bytemuck::cast_slice(&grid_starts),
+        );
     }
 
     /// Encode + dispatch one tick of `physics_DispatchAbility`.
@@ -390,6 +623,7 @@ impl ApplyAbilitySmokeState {
             event_tail: &self.event_tail_buf,
             agent_alive: &self.agent_alive_buf,
             agent_level: &self.agent_level_buf,
+            agent_pos:           &self.agent_pos_buf,
             ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
             ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
             ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
@@ -403,6 +637,10 @@ impl ApplyAbilitySmokeState {
             ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             ability_registry_chances:           &self.registry_gpu.chances,
+            ability_registry_area_kinds:        &self.registry_gpu.area_kinds,
+            ability_registry_area_args:         &self.registry_gpu.area_args,
+            spatial_grid_cells:  &self.spatial_grid_cells_buf,
+            spatial_grid_starts: &self.spatial_grid_starts_buf,
             agent_attack_damage: &self.agent_attack_damage_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_hp:            &self.agent_hp_buf,
