@@ -78,6 +78,8 @@
 //! still asserts the .ability lowered to `EffectOp::Shield(50.0)`;
 //! only the .sim's runtime *behaviour* is shield-as-buffer-hp.
 
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
 use engine::sim_trait::{AgentSnapshot, CompiledSim, VizGlyph};
 use engine::GpuContext;
 use glam::Vec3;
@@ -196,6 +198,20 @@ pub struct DuelAbilitiesState {
     /// `damage_taken_mult_q8` + `damage_taken_mult_expires_at_tick`
     /// SoA fields (added to its bind group).
     apply_damage_cfg_buf: wgpu::Buffer,
+    /// Task #138 — Cfg uniform for the new
+    /// `physics_ApplyDamageFromChronicle` kernel that translates
+    /// `EffectDamageApplied` records (kind=26, written by the
+    /// apply_ability dispatcher in the fused kernel) back into
+    /// `Damaged` events (kind=1) so the existing ApplyDamage cascade
+    /// keeps working unchanged.
+    apply_damage_from_chronicle_cfg_buf: wgpu::Buffer,
+    /// Task #138 — Packed AbilityRegistry uploaded to the GPU. The
+    /// fused kernel binds `effect_kinds` / `effect_payload_a` /
+    /// `effect_payload_b` for the apply_ability dispatcher arm
+    /// (verb_chronicle_Strike). Built once at construction from the
+    /// `.ability` corpus via `binding_check::build_duel_abilities_registry`,
+    /// then uploaded to GPU storage buffers.
+    registry_gpu: PackedAbilityRegistryGpu,
     seed_cfg_buf: wgpu::Buffer,
 
     cache: dispatch::KernelCache,
@@ -213,9 +229,27 @@ impl DuelAbilitiesState {
         // lowers to constants that match this fixture's hand-mirrored
         // .sim verb constants. If any assertion fails, the panic
         // points at the .sim/.ability divergence.
+        //
+        // Task #138 — also asserts Strike's AbilityId matches the
+        // literal `apply_ability 1` in duel_abilities.sim so any drift
+        // in the registry build order surfaces immediately.
         binding_check::assert_ability_registry_matches_sim_constants();
 
         let gpu = GpuContext::new_blocking().expect("init wgpu adapter + device");
+
+        // Task #138 — build the AbilityRegistry from the .ability
+        // corpus and upload it to GPU storage buffers. The fused kernel
+        // binds the effect_kinds + payload columns for the
+        // apply_ability dispatcher arm (verb_chronicle_Strike). Built
+        // once here; the GPU buffers live for the rest of the run.
+        // Constructing the registry repeats the binding-check's parse
+        // pass (cheap — 8 small text files) but keeps the registry
+        // build colocated with its consumer.
+        let built_registry = binding_check::build_duel_abilities_registry();
+        let packed = PackedAbilityRegistry::pack(&built_registry.registry);
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &packed, &gpu, "duel_abilities_runtime",
+        );
 
         // Agent SoA — HP=100.0, alive=1, mana=100.0 for every slot.
         let hp_init: Vec<f32> = vec![100.0_f32; agent_count as usize];
@@ -493,6 +527,19 @@ impl DuelAbilitiesState {
             contents: bytemuck::bytes_of(&apply_damage_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        // Task #138 — Cfg uniform for the new ApplyDamageFromChronicle
+        // kernel that translates EffectDamageApplied (kind=26) records
+        // emitted by the apply_ability dispatcher into Damaged (kind=1)
+        // events the existing ApplyDamage cascade consumes.
+        let apply_damage_from_chronicle_cfg_init =
+            physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleCfg {
+                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            };
+        let apply_damage_from_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_abilities_runtime::apply_damage_from_chronicle_cfg"),
+            contents: bytemuck::bytes_of(&apply_damage_from_chronicle_cfg_init),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let seed_cfg_init = seed_indirect_0::SeedIndirect0Cfg {
             agent_cap: agent_count, tick: 0, seed: 0, _pad: 0,
         };
@@ -558,6 +605,8 @@ impl DuelAbilitiesState {
             chronicle_fortify_cfg_buf,
             chronicle_daze_cfg_buf,
             apply_damage_cfg_buf,
+            apply_damage_from_chronicle_cfg_buf,
+            registry_gpu,
             seed_cfg_buf,
             cache: dispatch::KernelCache::default(),
             tick: 0,
@@ -738,9 +787,14 @@ impl CompiledSim for DuelAbilitiesState {
         // 8 verbs in source order; +1 for ApplyDamage's source-side
         // Healed emit (lifesteal); +1 for SetLifesteal each Vampirize
         // cast emits; +1 for SetDamageMod each Fortify cast emits;
-        // +1 for Stunned each Daze cast emits. 12 slots per agent per
-        // tick caps the worst case.
-        let max_slots_per_tick = self.agent_count * 12;
+        // +1 for Stunned each Daze cast emits. Task #138 grew the
+        // worst-case by two more records per agent: Strike's
+        // apply_ability now emits one EffectDamageApplied (kind=26)
+        // per cast, and ApplyDamageFromChronicle re-emits each into
+        // a Damaged event. Bump the upper bound to 16 slots per agent
+        // to keep clear_ring_headers from leaving stale slots between
+        // ticks.
+        let max_slots_per_tick = self.agent_count * 16;
         self.event_ring.clear_ring_headers_in(
             &self.gpu, &mut encoder, max_slots_per_tick,
         );
@@ -1015,7 +1069,7 @@ impl CompiledSim for DuelAbilitiesState {
         // `_and_ApplyStun_` segment and adding agent_stun_expires_at_tick
         // to the bind group. No new pass introduced; same single
         // dispatch per tick.
-        let event_count_estimate = self.agent_count * 12;
+        let event_count_estimate = self.agent_count * 16;
         let apply_heal_cfg = physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_ApplyDamageModActivation_and_ApplyStun_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndApplyDamageModActivationAndApplyStunAndVerbChronicleStrikeCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
             seed: 0, _pad0: 0,
@@ -1023,6 +1077,11 @@ impl CompiledSim for DuelAbilitiesState {
         self.gpu.queue.write_buffer(
             &self.chronicle_strike_cfg_buf, 0, bytemuck::bytes_of(&apply_heal_cfg),
         );
+        // Task #138 — the fused kernel now binds the
+        // PackedAbilityRegistry's effect SoA columns because the
+        // apply_ability dispatcher arm (verb_chronicle_Strike) walks
+        // the registry to expand `apply_ability 1 by self target target`
+        // into chronicle EffectDamageApplied writes.
         let apply_heal_bindings = physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_ApplyDamageModActivation_and_ApplyStun_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndApplyDamageModActivationAndApplyStunAndVerbChronicleStrikeBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
@@ -1034,11 +1093,44 @@ impl CompiledSim for DuelAbilitiesState {
             agent_lifesteal_expires_at_tick: &self.agent_lifesteal_expires_at_tick_buf,
             agent_damage_taken_mult_q8: &self.agent_damage_taken_mult_q8_buf,
             agent_damage_taken_mult_expires_at_tick: &self.agent_damage_taken_mult_expires_at_tick_buf,
+            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
             cfg: &self.chronicle_strike_cfg_buf,
         };
         dispatch::dispatch_physics_applyheal_and_applyshield_and_applydefeat_and_applylifestealactivation_and_applydamagemodactivation_and_applystun_and_verb_chronicle_strike(
             &mut self.cache, &apply_heal_bindings, &self.gpu.device, &mut encoder,
             event_count_estimate,
+        );
+
+        // (8a.5) Task #138 — ApplyDamageFromChronicle.
+        // The fused kernel above just wrote EffectDamageApplied records
+        // (kind=26) into the event ring via the apply_ability dispatcher
+        // arm (one record per cast). This kernel filters those records
+        // and re-emits them as `Damaged` (kind=1) events so the existing
+        // ApplyDamage standalone kernel below can drain them with
+        // shield/lifesteal/damage-modify processing intact.
+        //
+        // PerEvent shape: scans every event_ring slot up to event_count
+        // and skips slots whose kind != 26. Setting event_count to the
+        // generous estimate is safe because cleared slots read kind=0
+        // (skipped) and non-EffectDamageApplied records also skipped.
+        let apply_damage_from_chronicle_cfg = physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleCfg {
+            event_count: event_count_estimate, tick: self.tick as u32,
+            seed: 0, _pad0: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.apply_damage_from_chronicle_cfg_buf, 0,
+            bytemuck::bytes_of(&apply_damage_from_chronicle_cfg),
+        );
+        let apply_damage_from_chronicle_bindings = physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            cfg: &self.apply_damage_from_chronicle_cfg_buf,
+        };
+        dispatch::dispatch_physics_applydamagefromchronicle(
+            &mut self.cache, &apply_damage_from_chronicle_bindings,
+            &self.gpu.device, &mut encoder, event_count_estimate,
         );
 
         // (8b) ApplyDamage — STANDALONE PerEvent kernel. Wave 2 piece N
