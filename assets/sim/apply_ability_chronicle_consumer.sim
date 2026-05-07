@@ -1,0 +1,58 @@
+// apply_ability_chronicle_consumer — closed-loop fixture proving
+// the chronicle records emitted by `apply_ability` can drive state
+// mutation via a downstream consumer physics rule.
+//
+// The two existing apply_ability fixtures
+// (apply_ability_smoke.sim + apply_ability_verb_smoke.sim) prove the
+// dispatcher emits the right chronicle records into event_ring. This
+// fixture closes the loop: a PerEvent physics rule reads
+// `EffectDamageApplied` and decrements target hp via
+// `agents.set_hp(...)`. The pipeline becomes:
+//
+//   apply_ability → EffectDamageApplied (chronicle record)
+//   on EffectDamageApplied → agents.set_hp(target, hp - amount)
+//
+// **P6 caveat (warning, not error).** This fixture trips the same
+// well_formed P6 check that `duel_abilities.sim::ApplyDamage` trips:
+// PerEvent rules with `agents.set_hp` are flagged because P6's
+// strict reading is "events are the mutation channel, PerEvent rules
+// should emit events not write fields directly". `duel_abilities`
+// tolerates the diagnostic at build.rs (returns `o.program` from the
+// `DriverOutcome::Err` path, kernels emit anyway). The
+// `apply_ability_chronicle_consumer_compiles_with_tolerated_p6` test
+// uses the same pattern: lower may produce a P6 diagnostic, but the
+// program is still emit-able.
+//
+// **Dead at runtime today** — no runtime crate references this
+// fixture. Drives the dsl_compiler pipeline (parse → resolve → lower
+// → schedule → emit) to prove the closed loop COMPILES and emits
+// kernels for both halves. A runtime would need to dispatch:
+//   1. physics_DispatchAbility (apply_ability writes records)
+//   2. physics_ApplyChronicleDamage (consumer decrements hp)
+// in that order per tick.
+
+event Tick { }
+
+// Engine-side chronicle event written by the apply_ability dispatcher
+// (kind=26 in cascade::handler::EventKindId). Declared here so the
+// PerEvent rule below can pattern-match it.
+event EffectDamageApplied { actor: AgentId, target: AgentId, amount: f32 }
+
+entity Hero : Agent { }
+
+// PerAgent: every alive agent dispatches its current AbilityId.
+physics DispatchAbility @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    apply_ability agents.level(self) by self target self
+  }
+}
+
+// PerEvent: chronicle consumer. Reads EffectDamageApplied records
+// the dispatcher wrote into event_ring, decrements target hp by
+// the chronicle's amount field. Trips P6 (PerEvent + agents.set_hp);
+// build.rs-tolerated like duel_abilities.sim::ApplyDamage.
+physics ApplyChronicleDamage {
+  on EffectDamageApplied { actor: c, target: t, amount: a } {
+    agents.set_hp(t, agents.hp(t) - a);
+  }
+}

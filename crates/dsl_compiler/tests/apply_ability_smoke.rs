@@ -74,6 +74,96 @@ fn apply_ability_smoke_compiles() {
     );
 }
 
+/// Like `compile_sim` but tolerates well_formed diagnostics — mirrors
+/// duel_abilities_runtime's build.rs (which extracts `o.program` from
+/// the `DriverOutcome::Err` path on P6 violations and emits anyway).
+/// Returns the artifacts even when lower reports diagnostics.
+fn compile_sim_tolerating_diagnostics(
+    path: &std::path::Path,
+) -> Result<(EmittedArtifacts, Vec<String>), String> {
+    let src = std::fs::read_to_string(path)
+        .map_err(|e| format!("read {}: {e}", path.display()))?;
+    let program = dsl_compiler::parse(&src).map_err(|e| format!("parse: {e:?}"))?;
+    let comp = dsl_ast::resolve::resolve(program).map_err(|e| format!("resolve: {e:?}"))?;
+    let (cg, diags) = match dsl_compiler::cg::lower::lower_compilation_to_cg(&comp) {
+        Ok(p) => (p, Vec::new()),
+        Err(o) => {
+            let diags: Vec<String> = o.diagnostics.iter().map(|d| format!("{d:?}")).collect();
+            (o.program, diags)
+        }
+    };
+    let schedule_result = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&schedule_result.schedule, &cg)
+        .map_err(|e| format!("emit: {e:?}"))?;
+    Ok((art, diags))
+}
+
+/// Closed-loop pin: apply_ability writes EffectDamageApplied chronicle
+/// records → a PerEvent physics rule reads them and decrements target
+/// hp. Proves the chronicle records can drive sim state mutation —
+/// the missing link between dispatcher writes and game state for #138.
+///
+/// Trips the same P6 well_formed diagnostic that
+/// duel_abilities.sim::ApplyDamage trips (PerEvent + agents.set_hp).
+/// duel_abilities's build.rs tolerates this via the
+/// `DriverOutcome::Err → o.program` pattern; this test uses
+/// `compile_sim_tolerating_diagnostics` to mirror that.
+#[test]
+fn apply_ability_chronicle_consumer_compiles_with_tolerated_p6() {
+    let path = workspace_path("assets/sim/apply_ability_chronicle_consumer.sim");
+    let (art, diags) = compile_sim_tolerating_diagnostics(&path).unwrap_or_else(|e| {
+        panic!("apply_ability_chronicle_consumer.sim hard-failed at: {e}");
+    });
+
+    // Pin: the only diagnostic is the expected P6 violation on the
+    // consumer rule (matches the duel_abilities.sim::ApplyDamage
+    // pattern). Any OTHER diagnostic is a real failure.
+    let unexpected: Vec<&String> = diags
+        .iter()
+        .filter(|d| !d.contains("P6Violation"))
+        .collect();
+    assert!(
+        unexpected.is_empty(),
+        "unexpected non-P6 diagnostics from chronicle consumer:\n{:?}",
+        unexpected,
+    );
+    // The diagnostic carries OpId(1) (not the rule name string),
+    // and `field: Hp` (the consumer rule's set_hp target).
+    assert!(
+        diags.iter().any(|d| d.contains("P6Violation")
+            && d.contains("Hp")),
+        "expected P6Violation on agent_hp write; got: {:?}",
+        diags,
+    );
+
+    // Half A: dispatcher kernel emits.
+    let dispatch = art
+        .wgsl_files
+        .iter()
+        .find(|(name, _)| name.contains("DispatchAbility"))
+        .map(|(_, b)| b.as_str())
+        .expect("DispatchAbility kernel missing");
+    assert!(
+        dispatch.contains("for (var i: u32 = 0u; i < 6u;"),
+        "DispatchAbility kernel must carry the dispatcher loop;\n{dispatch}"
+    );
+
+    // Half B: consumer kernel emits and writes agent_hp.
+    let consumer = art
+        .wgsl_files
+        .iter()
+        .find(|(name, _)| name.contains("ApplyChronicleDamage"))
+        .map(|(_, b)| b.as_str())
+        .expect("ApplyChronicleDamage kernel missing");
+    assert!(
+        consumer.contains("agent_hp"),
+        "ApplyChronicleDamage must touch agent_hp;\n{consumer}"
+    );
+}
+
 /// Corpus-level pin for the verb-body apply_ability surface. The
 /// inline-source tests (`verb_body_with_apply_ability_lowers_cleanly`)
 /// already prove parse → resolve → emit; this one pins the same path
