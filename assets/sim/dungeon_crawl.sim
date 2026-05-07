@@ -69,7 +69,7 @@ verb Strike(self, target: Agent) =
   when (self.alive
         && target.alive
         && target != self
-        && (world.tick % 2 == 0))
+        && (world.tick % config.combat.cooldown_strike == 0))
   emit Damaged { source: self, target: target, amount: config.combat.strike_damage }
   score 1.0
 
@@ -85,7 +85,7 @@ verb Spell(self, target: Agent) =
   when (self.alive
         && target.alive
         && target != self
-        && (world.tick % 5 == 0)
+        && (world.tick % config.combat.cooldown_spell == 0)
         && self.mana >= config.combat.spell_cost)
   emit Damaged { source: self, target: target, amount: config.combat.spell_damage }
   score (10000.0 - target.hp)

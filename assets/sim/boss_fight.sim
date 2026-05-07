@@ -173,10 +173,13 @@ config combat {
   // 2333 dmg vs +400 boss heal per 50 ticks ≈ net -1933 per cycle).
   hero_attack_damage: f32 = 35.0,
   hero_heal_amount:   f32 = 60.0,
-  // Cooldown literals — kept for reference; today the .sim hardcodes
-  // numeric ticks in the `when` clauses because `world.tick % config...`
-  // would resolve `config.combat.<u32>` to f32 at lowering (per
-  // diplomacy_probe Gap #3).
+  // Cooldown gates expressed as `world.tick % config.combat.cooldown_<v>
+  // == 0` mod arms; the typed-Mod arm consults `config_const_values`
+  // at lower time so each rhs resolves as `u32` per the source
+  // declaration. cooldown_hero_heal stays declared even though no
+  // verb references it (HeroHeal currently shares HeroStun's 7-tick
+  // cadence — the dedicated hero-heal cooldown is reserved for a
+  // future tuning pass).
   cooldown_boss_strike: u32 = 10,
   cooldown_boss_heal:   u32 = 50,
   cooldown_hero_attack: u32 = 3,
@@ -215,7 +218,7 @@ verb BossStrike(self, target: Agent) =
   action BossStrikeAction
   when (self.alive
         && self.creature_type == Boss
-        && (world.tick % 10 == 0))
+        && (world.tick % config.combat.cooldown_boss_strike == 0))
   apply_ability 1 by self target target
   score (if (target.alive && target.creature_type == Hero) { 1.0 } else { -1000.0 })
 
@@ -234,7 +237,7 @@ verb BossSelfHeal(self, target: Agent) =
   action BossSelfHealAction
   when (self.alive
         && self.creature_type == Boss
-        && (world.tick % 50 == 0)
+        && (world.tick % config.combat.cooldown_boss_heal == 0)
         && self.hp < config.combat.boss_heal_threshold)
   emit Healed { source: self, target: self, amount: config.combat.boss_heal_amount }
   score 100.0
@@ -261,7 +264,7 @@ verb HeroAttack(self, target: Agent) =
   action HeroAttackAction
   when (self.alive
         && self.creature_type == Hero
-        && (world.tick % 3 == 0))
+        && (world.tick % config.combat.cooldown_hero_attack == 0))
   apply_ability 2 by self target target
   score (if (target.alive && target.creature_type == Boss) { 1.0 } else { -1000.0 })
 

@@ -1466,13 +1466,17 @@ fn diplomacy_probe_compile_gate() {
     assert_eq!(viewfold_count, 3, "expected 3 ViewFold ops (trust + alliances_proposed + betrayals_committed); got {viewfold_count}");
     assert_eq!(scoring_rows, 2, "expected 2 scoring rows (ProposeAlliance + Betray competing); got {scoring_rows}");
 
-    // Mask kernel must reference `tick % 3u` — locks the verb-`when`
-    // Mod-predicate lowering path that dropped pre-Mod-landing.
+    // Mask kernel must reference `tick % config_<id>` — locks the
+    // verb-`when` Mod-predicate lowering path AND the Gap #3 typed-
+    // routing fix (the rhs is `config.diplomacy.observation_tick_mod`,
+    // declared `u32 = 3`, which lowers as `u32` per
+    // `ExprArena::config_const_ty`).
     let mask_body = kernel_body_containing(&art, "mask")
         .unwrap_or_else(|| panic!("no mask kernel emitted: {:?}", art.kernel_index));
     assert!(
-        mask_body.contains("(tick % 3u)"),
-        "mask kernel must lower `world.tick % 3` to `(tick % 3u)`; got body:\n{mask_body}",
+        mask_body.contains("(tick % config_"),
+        "mask kernel must lower `world.tick % config.diplomacy.observation_tick_mod` to \
+         `(tick % config_<id>)`; got body:\n{mask_body}",
     );
 
     // The `trust` fold body must use `atomicOr` — pair_map u32 storage

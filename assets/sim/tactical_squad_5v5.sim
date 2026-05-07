@@ -150,10 +150,13 @@ config combat {
   tank_damage:    f32 = 10.0,
   dps_damage:     f32 = 22.0,
   heal_amount:    f32 = 18.0,
-  // Cooldown gates expressed as `world.tick % N == 0` mod arms
-  // (literals inlined per the diplomacy_probe Gap #3 precedent —
-  // config.combat.<u32_field> still resolves as f32 at the
-  // expression layer, so the mod arms inline the integer literal).
+  // Cooldown gates expressed as `world.tick % N == 0` mod arms with
+  // integer literals — per-verb cadences are co-located with the verb
+  // bodies below for readability rather than centralised here as
+  // `cooldown_*: u32` config fields. (Gap #3 of diplomacy_probe is
+  // closed, so the canonical `world.tick % config.combat.cooldown_<v>`
+  // shape lowers cleanly; a future tuning pass can lift the cadences
+  // into the config block without compiler help.)
   // Tank fires every 3rd tick, DPS every 4th, Healer every 3rd.
 }
 
