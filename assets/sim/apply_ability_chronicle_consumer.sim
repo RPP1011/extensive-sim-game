@@ -12,6 +12,28 @@
 //   apply_ability → EffectDamageApplied (chronicle record)
 //   on EffectDamageApplied → agents.set_hp(target, hp - amount)
 //
+// **Kind-tag mismatch caveat (runtime workaround).** The fixture
+// trips a real compiler bug: the dispatcher writes records with the
+// engine's hardcoded `EventKindId::EffectDamageApplied = 26` but the
+// consumer's `if (kind == N)` filter is built from the .sim's
+// declaration-index (=1 in this fixture's source order). Until the
+// compiler bug is fixed, the runtime
+// `apply_ability_chronicle_consumer_runtime`'s build.rs sed-rewrites
+// the consumer kernel's filter constant from `1u` to `26u` —
+// see that crate's lib.rs preamble.
+//
+// Probe finding (2026-05-06): a one-site fix in
+// `cg/lower/driver.rs::populate_event_kinds` to alias known engine
+// names to their hardcoded discriminants compiles, but breaks the
+// downstream pipeline — the resolver elsewhere still uses
+// declaration-index lookups, producing "physics#N dispatches
+// event#K which has no payload layout" diagnostics on every
+// engine-named event. The proper fix needs to centralize event-id
+// assignment so resolver + driver agree on the discriminant, OR
+// alias at resolve-time before any downstream consumer reads the
+// position. Reverted; this comment exists so the next attempt has
+// the failure mode pre-identified.
+//
 // **P6 caveat (warning, not error).** This fixture trips the same
 // well_formed P6 check that `duel_abilities.sim::ApplyDamage` trips:
 // PerEvent rules with `agents.set_hp` are flagged because P6's
