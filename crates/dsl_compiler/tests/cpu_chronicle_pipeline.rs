@@ -244,6 +244,45 @@ fn distinct_caster_and_target_pipeline_writes_both_slots() {
     assert_eq!(r[4], 30.0_f32.to_bits(), "amount");
 }
 
+/// Slice ε pipeline pin for Stun — distinct caster/target case +
+/// the multi-payload-field shape (Stun's payload[0] is
+/// expires_at_tick, distinct from Damage's payload[0] = amount).
+/// Confirms slot 2 + slot 3 routing is independent of how
+/// payload words 4+ are computed.
+#[test]
+fn distinct_caster_and_target_pipeline_handles_stun_payload_shape() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+        [EffectOp::Stun { duration_ticks: 25 }],
+    );
+    let caster = aid(3);
+    let target = aid(17);
+    let tick: u32 = 200;
+
+    let events = apply_program(
+        &program,
+        caster,
+        target,
+        tick as u64,
+        0xCAFE_F00D,
+        &CasterStats::default(),
+    );
+    let records: Vec<_> = events
+        .into_iter()
+        .filter_map(|e| {
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw())
+        })
+        .collect();
+
+    assert_eq!(records.len(), 1, "Stun produces one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 29, "EffectStunApplied");
+    assert_eq!(r[2], 3, "actor slot — caster_id");
+    assert_eq!(r[3], 17, "target slot — distinct from caster");
+    assert_eq!(r[4], 225, "expires_at_tick = tick(200) + duration(25)");
+}
+
 /// P5 — Determinism via Keyed PCG. The CPU pipeline runs through
 /// `per_agent_u32(world_seed, caster, tick, purpose)` for each chance
 /// gate, which is a pure function of inputs. Two runs with identical
