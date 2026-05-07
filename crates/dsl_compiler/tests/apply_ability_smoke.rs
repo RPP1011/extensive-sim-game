@@ -184,6 +184,82 @@ fn apply_ability_smoke_kernel_parses_through_naga() {
     );
 }
 
+/// Variant: `apply_ability` nested inside an `if` body. Exercises
+/// `list_contains_apply_ability`'s recursion through `CgStmt::If` —
+/// the helper that drives `wire_ability_registry_column_reads` must
+/// descend into both `then` and `else_` arms; if it stops at the
+/// top-level statement list, the BGL composer never wires the
+/// `ability_registry_*` bindings and naga rejects the kernel
+/// (same shape of bug as commit `f447d3eb`).
+///
+/// Source-string-compiled rather than file-loaded: a transient
+/// fixture variant doesn't justify a new `.sim` file in the corpus.
+#[test]
+fn apply_ability_nested_in_if_body_passes_naga_validator() {
+    use naga::valid::{Capabilities, ValidationFlags, Validator};
+    let src = "
+        event Tick { }
+
+        entity Hero : Agent { }
+
+        physics ConditionalDispatch @phase(per_agent) {
+          on Tick {} where (self.alive) {
+            if (agents.level(self) > 0) {
+              apply_ability agents.level(self)
+            }
+          }
+        }
+    ";
+    let program = dsl_compiler::parse(src).expect("parse");
+    let comp = dsl_ast::resolve::resolve(program).expect("resolve");
+    let cg = dsl_compiler::cg::lower::lower_compilation_to_cg(&comp)
+        .expect("lower");
+    let schedule_result = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&schedule_result.schedule, &cg)
+        .expect("emit");
+
+    let body = kernel_body_containing(&art, "ConditionalDispatch")
+        .or_else(|| kernel_body_containing(&art, "physics"))
+        .expect("physics kernel emitted");
+    // Sanity: dispatcher loop reached the if-arm.
+    assert!(
+        body.contains("for (var i: u32 = 0u; i < 6u;"),
+        "dispatcher loop must land in nested if arm;\n{body}"
+    );
+    // Sanity: ability_registry bindings declared (proves
+    // wire_ability_registry_column_reads recursed into the if).
+    assert!(
+        body.contains("ability_registry_effect_kinds"),
+        "BGL composer must wire ability_registry_effect_kinds even \
+         when ApplyAbility is nested in an if body;\n{body}"
+    );
+
+    // Naga validator over every emitted kernel.
+    let mut errs = Vec::new();
+    for (name, body) in &art.wgsl_files {
+        let module = match naga::front::wgsl::parse_str(body) {
+            Ok(m) => m,
+            Err(e) => {
+                errs.push(format!("  {name}: parse failed: {e}"));
+                continue;
+            }
+        };
+        let mut validator = Validator::new(ValidationFlags::all(), Capabilities::all());
+        if let Err(e) = validator.validate(&module) {
+            errs.push(format!("  {name}: validate failed: {e:?}"));
+        }
+    }
+    assert!(
+        errs.is_empty(),
+        "nested-if variant emitted {} kernels naga rejects:\n{}",
+        errs.len(),
+        errs.join("\n"),
+    );
+}
+
 /// Stronger gate than `..._parses_through_naga` — runs naga's full
 /// validator over the parsed module. Catches type errors, missing
 /// `@binding(N) @group(0)` annotations, atomic-handle misuse,
