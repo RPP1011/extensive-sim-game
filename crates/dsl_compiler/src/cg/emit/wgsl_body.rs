@@ -1641,6 +1641,10 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Heal\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let amount: f32 = bitcast<f32>(payload_a);\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_heal(caster, target, amount);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 2u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Shield: payload_a = amount (f32)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let amount: f32 = bitcast<f32>(payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_shield(caster, target, amount);\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 3u) {{\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Stun: payload_a = duration_ticks (u32)\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_stun(target, payload_a);\n\
@@ -1648,10 +1652,26 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Slow: payload_a = duration_ticks (u32),\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b's low 16 bits = factor_q8 (i16)\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_slow(target, payload_a, i32(payload_b));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 8u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Root: payload_a = duration_ticks (u32)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_root(target, payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 9u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Silence: payload_a = duration_ticks (u32)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_silence(target, payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 10u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Fear: payload_a = duration_ticks (u32)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_fear(target, payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 11u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Taunt: payload_a = duration_ticks (u32)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_taunt(target, payload_a);\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// Other EffectOp variants (5..31): unhandled in slice β;\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// the silent-skip is documented + intentional. Slice δ\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// (#137) expands to the full vocabulary.\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// Variants 5–7, 12–31 (TransferGold, ModifyStanding,\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// CastAbility, movement, Execute, SelfDamage, LifeSteal,\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// DamageModify, DoT/HoT/TimedShield, Buff, Summon,\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// Harvest/PlaceVoxel, Stealth/Charm/Grounded/Suppress/\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// Reflect): unhandled in slice β. Silent-skip is\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// documented + intentional; slice δ (#137) expands to\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// the full vocabulary.\n\
                  \x20\x20\x20\x20}}\n\
                  }}"
             );
@@ -4258,26 +4278,50 @@ mod tests {
         assert!(wgsl.contains("ability_registry_effect_payload_b[effect_base + i]"),
             "payload_b read must hit the new column binding;\n{wgsl}");
 
-        // Four implemented variant arms.
+        // Nine implemented variant arms (Wave 1 + Wave 2 piece 1).
         assert!(wgsl.contains("if (kind == 0u)"),
             "Damage arm (discriminant 0);\n{wgsl}");
         assert!(wgsl.contains("else if (kind == 1u)"),
             "Heal arm (discriminant 1);\n{wgsl}");
+        assert!(wgsl.contains("else if (kind == 2u)"),
+            "Shield arm (discriminant 2);\n{wgsl}");
         assert!(wgsl.contains("else if (kind == 3u)"),
             "Stun arm (discriminant 3);\n{wgsl}");
         assert!(wgsl.contains("else if (kind == 4u)"),
             "Slow arm (discriminant 4);\n{wgsl}");
+        assert!(wgsl.contains("else if (kind == 8u)"),
+            "Root arm (discriminant 8);\n{wgsl}");
+        assert!(wgsl.contains("else if (kind == 9u)"),
+            "Silence arm (discriminant 9);\n{wgsl}");
+        assert!(wgsl.contains("else if (kind == 10u)"),
+            "Fear arm (discriminant 10);\n{wgsl}");
+        assert!(wgsl.contains("else if (kind == 11u)"),
+            "Taunt arm (discriminant 11);\n{wgsl}");
 
-        // Damage / Heal use bitcast<f32> on payload_a (q8 amount-bearing).
-        assert!(wgsl.matches("bitcast<f32>(payload_a)").count() >= 2,
-            "Damage + Heal both bitcast payload_a to f32;\n{wgsl}");
+        // Damage / Heal / Shield use bitcast<f32> on payload_a
+        // (amount-bearing variants).
+        assert!(wgsl.matches("bitcast<f32>(payload_a)").count() >= 3,
+            "Damage + Heal + Shield each bitcast payload_a to f32;\n{wgsl}");
 
         // chronicle_append TODO markers — the runtime helper hookup
         // is slice γ; locked here so a future regression can't
-        // accidentally claim the dispatcher writes events.
-        assert!(wgsl.contains("TODO slice γ: chronicle_append_damage"),
-            "Damage arm must keep the TODO marker;\n{wgsl}");
-        assert!(wgsl.contains("TODO slice γ: chronicle_append_slow"),
-            "Slow arm must keep the TODO marker;\n{wgsl}");
+        // accidentally claim the dispatcher writes events. One
+        // marker per implemented arm.
+        for marker in &[
+            "chronicle_append_damage",
+            "chronicle_append_heal",
+            "chronicle_append_shield",
+            "chronicle_append_stun",
+            "chronicle_append_slow",
+            "chronicle_append_root",
+            "chronicle_append_silence",
+            "chronicle_append_fear",
+            "chronicle_append_taunt",
+        ] {
+            assert!(
+                wgsl.contains(&format!("TODO slice γ: {marker}")),
+                "{marker} arm must keep the TODO marker;\n{wgsl}"
+            );
+        }
     }
 }

@@ -82,6 +82,51 @@ fn slow_packs_to_discriminant_four_matching_wgsl_dispatcher() {
 }
 
 #[test]
+fn shield_packs_to_discriminant_two_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Shield { amount: 50.0 }),
+        2,
+        "Shield discriminant — WGSL dispatcher arm `kind == 2u` depends on this"
+    );
+}
+
+#[test]
+fn root_packs_to_discriminant_eight_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Root { duration_ticks: 10 }),
+        8,
+        "Root discriminant — WGSL dispatcher arm `kind == 8u` depends on this"
+    );
+}
+
+#[test]
+fn silence_packs_to_discriminant_nine_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Silence { duration_ticks: 10 }),
+        9,
+        "Silence discriminant — WGSL dispatcher arm `kind == 9u` depends on this"
+    );
+}
+
+#[test]
+fn fear_packs_to_discriminant_ten_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Fear { duration_ticks: 10 }),
+        10,
+        "Fear discriminant — WGSL dispatcher arm `kind == 10u` depends on this"
+    );
+}
+
+#[test]
+fn taunt_packs_to_discriminant_eleven_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Taunt { duration_ticks: 10 }),
+        11,
+        "Taunt discriminant — WGSL dispatcher arm `kind == 11u` depends on this"
+    );
+}
+
+#[test]
 fn empty_sentinel_byte_matches_wgsl_dispatcher() {
     // The dispatcher loop's `if (kind == 0xFFu) { continue; }` early-out
     // depends on the sentinel value. Pin it so a renaming of
