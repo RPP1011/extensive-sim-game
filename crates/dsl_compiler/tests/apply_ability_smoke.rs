@@ -417,9 +417,10 @@ fn apply_ability_smoke_emits_dispatcher_loop_in_kernel_body() {
     // Slice γ — every chronicle-bearing arm emits a kind-tag header
     // store against `event_ring`. The dispatcher's `let _slot: u32 =
     // atomicAdd(&event_tail[0], 1u);` slot acquisition appears once
-    // per chronicle-bearing arm, so the body should carry exactly 8
-    // copies after the binding composer wraps it (Bleed verb swap,
-    // Task #138 follow-on, 2026-05-06 added SelfDamage=39).
+    // per chronicle-bearing arm, so the body should carry exactly 9
+    // copies after the binding composer wraps it (Bleed verb swap
+    // added SelfDamage=39 (2026-05-06); Vampirize verb swap added
+    // LifeSteal=40, mirror of Bleed).
     for (variant_label, expected_kind_tag) in &[
         ("Damage",          26u32),
         ("Heal",            27u32),
@@ -429,6 +430,7 @@ fn apply_ability_smoke_emits_dispatcher_loop_in_kernel_body() {
         ("TransferGold",    31u32),
         ("ModifyStanding",  32u32),
         ("SelfDamage",      39u32),
+        ("LifeSteal",       40u32),
     ] {
         let needle = format!(
             "atomicStore(&event_ring[_slot * 10u + 0u], {expected_kind_tag}u);"
@@ -441,16 +443,16 @@ fn apply_ability_smoke_emits_dispatcher_loop_in_kernel_body() {
         );
     }
 
-    // Slot acquisition appears at least 8 times — once per chronicle-
-    // bearing arm. Use `>= 8` rather than `== 8` because future arms
+    // Slot acquisition appears at least 9 times — once per chronicle-
+    // bearing arm. Use `>= 9` rather than `== 9` because future arms
     // may grow chronicle counterparts (the test stays correct as long
-    // as the eight slice-γ wirings remain).
+    // as the nine slice-γ wirings remain).
     let slot_acquisitions = body
         .matches("let _slot: u32 = atomicAdd(&event_tail[0], 1u);")
         .count();
     assert!(
-        slot_acquisitions >= 8,
-        "expected ≥8 chronicle slot acquisitions (one per slice-γ arm); \
+        slot_acquisitions >= 9,
+        "expected ≥9 chronicle slot acquisitions (one per slice-γ arm); \
          got {slot_acquisitions};\n\
          body:\n{body}"
     );
@@ -1141,14 +1143,15 @@ fn smoke_fixture_explicit_rule_kernel_has_full_dispatcher() {
             );
         });
 
-    // Full 8-arm chronicle dispatch in the explicit-clause kernel.
-    // (Was 7 pre-Bleed-swap; SelfDamage=39 added 2026-05-06.)
+    // Full 9-arm chronicle dispatch in the explicit-clause kernel.
+    // (Was 7 pre-Bleed-swap; SelfDamage=39 added 2026-05-06; LifeSteal=40
+    // added by Vampirize verb swap, mirror of Bleed.)
     let slot_acquisitions = explicit_body
         .matches("let _slot: u32 = atomicAdd(&event_tail[0], 1u);")
         .count();
     assert_eq!(
-        slot_acquisitions, 8,
-        "DispatchAbilityExplicit kernel must carry all 8 chronicle slot \
+        slot_acquisitions, 9,
+        "DispatchAbilityExplicit kernel must carry all 9 chronicle slot \
          acquisitions (one per chronicle-bearing EffectOp variant); got \
          {slot_acquisitions}\nbody:\n{explicit_body}"
     );
@@ -1217,13 +1220,13 @@ fn back_to_back_apply_ability_in_one_rule_emits_two_dispatcher_blocks() {
          halving chronicle throughput;\nbody:\n{body}"
     );
 
-    // 16 slot acquisitions (8 per dispatcher × 2).
+    // 18 slot acquisitions (9 per dispatcher × 2).
     let slot_acquisitions = body
         .matches("let _slot: u32 = atomicAdd(&event_tail[0], 1u);")
         .count();
     assert_eq!(
-        slot_acquisitions, 16,
-        "expected 16 slot acquisitions (8 chronicle arms × 2 statements); \
+        slot_acquisitions, 18,
+        "expected 18 slot acquisitions (9 chronicle arms × 2 statements); \
          got {slot_acquisitions}\nbody:\n{body}"
     );
 
@@ -1276,7 +1279,7 @@ fn back_to_back_apply_ability_with_distinct_operands_each_emit() {
         .or_else(|| kernel_body_containing(&art, "physics"))
         .expect("physics kernel emitted");
 
-    // 2 dispatcher loops + 14 slot acquisitions (same totals as the
+    // 2 dispatcher loops + 18 slot acquisitions (same totals as the
     // identical-operand case — the structural shape is identical).
     let dispatcher_loops = body.matches("for (var i: u32 = 0u; i < 6u;").count();
     assert_eq!(
@@ -1288,7 +1291,7 @@ fn back_to_back_apply_ability_with_distinct_operands_each_emit() {
     let slot_acquisitions = body
         .matches("let _slot: u32 = atomicAdd(&event_tail[0], 1u);")
         .count();
-    assert_eq!(slot_acquisitions, 16);
+    assert_eq!(slot_acquisitions, 18);
 
     // Naga validates — different target_slot expressions in the two
     // dispatch blocks shouldn't introduce binding conflicts.

@@ -79,6 +79,16 @@ pub const DAZE_EXPECTED_ABILITY_ID: u32 = 8;
 /// silent wrong-ability dispatch.
 pub const BLEED_EXPECTED_ABILITY_ID: u32 = 4;
 
+/// Task #138 follow-on (Vampirize, mirror of Bleed at `486eb08f`) —
+/// Vampirize's verb body in `assets/sim/duel_abilities.sim` dispatches
+/// via `apply_ability 6 by self target self`. The literal `6` is
+/// Vampirize's expected `AbilityId` slot in the registry — source-order
+/// `names` literal in `build_duel_abilities_registry()` puts Vampirize
+/// sixth (Strike=1, ShieldUp=2, Mend=3, Bleed=4, Reap=5, Vampirize=6,
+/// Fortify=7, Daze=8). Drift surfaces as a startup panic, not as a
+/// silent wrong-ability dispatch.
+pub const VAMPIRIZE_EXPECTED_ABILITY_ID: u32 = 6;
+
 /// Read + parse + build the AbilityRegistry over every .ability file
 /// under `assets/ability_test/duel_abilities/`. Shared by the binding
 /// check (assert_ability_registry_matches_sim_constants) AND the
@@ -513,6 +523,21 @@ pub fn assert_ability_registry_matches_sim_constants() {
     //   into the per-agent lifesteal SoA fields.
     let vampirize_id = *built.names.get("Vampirize")
         .expect("Vampirize registered in name table");
+    // Task #138 follow-on (Vampirize, mirror of Bleed at `486eb08f`) —
+    // Vampirize's verb body in duel_abilities.sim hardcodes the literal
+    // `apply_ability 6 by self target self`. Pin the registry slot at
+    // startup so any drift in the build_registry ordering surfaces
+    // here, not as silent wrong-ability dispatch (e.g. the verb fires
+    // Reap's effects against self).
+    assert_eq!(
+        vampirize_id,
+        AbilityId::new(VAMPIRIZE_EXPECTED_ABILITY_ID).expect("non-zero AbilityId"),
+        "Vampirize's AbilityId drifted from the expected slot {} — \
+         duel_abilities.sim's `apply_ability 6` literal will dispatch \
+         the wrong program. Re-check the source-order names literal in \
+         `build_duel_abilities_registry()`.",
+        VAMPIRIZE_EXPECTED_ABILITY_ID,
+    );
     let vampirize = built.registry.get(vampirize_id)
         .expect("Vampirize resolves to a program");
     assert_eq!(

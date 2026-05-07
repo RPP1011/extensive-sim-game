@@ -756,6 +756,14 @@ fn fields_to_event(
             let amount = field_f32(fields, "amount").unwrap_or(0.0);
             Some(Event::EffectSelfDamageApplied { actor, target, amount, tick })
         }
+        "EffectLifeStealApplied" => {
+            let actor           = field_agent(fields, "actor")?;
+            let target          = field_agent(fields, "target")?;
+            let expires_at_tick = field_u32(fields, "expires_at_tick")
+                .unwrap_or_else(|| field_u32(fields, "duration_ticks").unwrap_or(0));
+            let fraction_q8     = field_i16(fields, "fraction_q8").unwrap_or(0);
+            Some(Event::EffectLifeStealApplied { actor, target, expires_at_tick, fraction_q8, tick })
+        }
         "EffectShieldApplied" => {
             let actor  = field_agent(fields, "actor")?;
             let target = field_agent(fields, "target")?;

@@ -159,6 +159,25 @@ pub fn apply_event_to_chronicle_record(
             rec[4] = amount.to_bits();
             Some(rec)
         }
+        // --- LifeSteal = 18 → EventKindId::EffectLifeStealApplied = 40.
+        // Vampirize verb swap (Task #138 follow-on, mirror of Bleed at
+        // `486eb08f`). 4-field payload: actor, target, expires_at_tick,
+        // fraction_q8. Same shape as Slow (kind=30). Self-cast LifeSteal
+        // targets the caster — `apply_program` already returns
+        // `ApplyEvent::LifeSteal { target: caster, ... }`, but we
+        // explicitly preserve the caller's `caster_id` and `target_id`
+        // so the record byte-layout matches the GPU dispatcher (which
+        // writes whatever `caster_slot` / `target_slot` the lowering
+        // supplied).
+        ApplyEvent::LifeSteal { target: _, duration_ticks, fraction_q8 } => {
+            rec[0] = 40;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            rec[4] = tick + duration_ticks;
+            // Sign-widen i16 → i32 → bitcast to u32.
+            rec[5] = (fraction_q8 as i32) as u32;
+            Some(rec)
+        }
         _ => None,
     }
 }
@@ -330,6 +349,47 @@ mod tests {
         }
     }
 
+    /// Vampirize verb swap (Task #138 follow-on, mirror of Bleed):
+    /// LifeSteal produces kind=40 records with the same 4-payload-word
+    /// shape as Slow — actor, target, expires_at_tick (=tick+duration),
+    /// fraction_q8 (sign-widened i16 → i32 → u32).
+    #[test]
+    fn life_steal_chronicle_record_uses_kind_40() {
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::LifeSteal {
+                target: aid(7),
+                duration_ticks: 50,
+                fraction_q8: 128,
+            },
+            /*tick*/ 100,
+            /*caster_id*/ 7, /*target_id*/ 7,
+        )
+        .expect("LifeSteal has chronicle counterpart");
+        assert_eq!(rec[0], 40, "kind tag — EffectLifeStealApplied");
+        assert_eq!(rec[1], 100, "tick");
+        assert_eq!(rec[2], 7, "actor slot — caster_id");
+        assert_eq!(rec[3], 7, "target slot — target_id (self-cast: ==caster)");
+        assert_eq!(rec[4], 150, "expires_at_tick = tick(100) + duration(50)");
+        assert_eq!(rec[5], 128, "fraction_q8 = 128 (= 0.5×) sign-widened");
+        // Tail words zeroed.
+        for i in 6..CHRONICLE_RECORD_STRIDE_U32 {
+            assert_eq!(rec[i], 0, "tail word {i} should be zero");
+        }
+
+        // Sign preservation: negative fraction_q8 sign-extends i16 → i32 → u32.
+        let rec_neg = apply_event_to_chronicle_record(
+            ApplyEvent::LifeSteal {
+                target: aid(3),
+                duration_ticks: 10,
+                fraction_q8: -64,
+            },
+            50, 3, 3,
+        ).unwrap();
+        assert_eq!(rec_neg[0], 40);
+        assert_eq!(rec_neg[4], 60, "expires_at_tick = 50 + 10");
+        assert_eq!(rec_neg[5], (-64_i32) as u32, "negative fraction_q8 sign-widens correctly");
+    }
+
     /// Cross-check: every `(effect_kind, event_kind_id)` entry in the
     /// dispatcher's pinned table must correspond to a CPU-reference
     /// arm that produces the matching kind tag. If a future entry
@@ -339,9 +399,11 @@ mod tests {
     fn cpu_reference_covers_all_dispatcher_chronicle_arms() {
         // Every chronicle-bearing effect-kind entry must have a
         // matching CPU-reference arm. After wiring TransferGold +
-        // ModifyStanding ApplyEvents (engine/src/ability/apply.rs)
-        // and SelfDamage (Bleed verb swap, Task #138 follow-on,
-        // 2026-05-06), all 8 entries are covered — no None fall-throughs.
+        // ModifyStanding ApplyEvents (engine/src/ability/apply.rs),
+        // SelfDamage (Bleed verb swap, Task #138 follow-on,
+        // 2026-05-06), and LifeSteal (Vampirize verb swap, Task #138
+        // follow-on, mirror of Bleed), all 9 entries are covered — no
+        // None fall-throughs.
         let ev_for_kind = |effect_kind: u32| -> ApplyEvent {
             match effect_kind {
                 0  => ApplyEvent::Damage         { source: aid(1), target: aid(2), amount: 1.0 },
@@ -352,6 +414,7 @@ mod tests {
                 5  => ApplyEvent::TransferGold   { source: aid(1), target: aid(2), amount: 7 },
                 6  => ApplyEvent::ModifyStanding { source: aid(1), target: aid(2), delta: 3 },
                 17 => ApplyEvent::SelfDamage     { source: aid(1), amount: 1.0 },
+                18 => ApplyEvent::LifeSteal      { target: aid(1), duration_ticks: 5, fraction_q8: 128 },
                 _ => panic!("unexpected effect_kind in table"),
             }
         };
