@@ -1401,7 +1401,7 @@ impl CgProgramBuilder {
                 // primitive payload.
                 self.check_list_id(*body)
             }
-            CgStmt::ApplyAbility { ability } => {
+            CgStmt::ApplyAbility { ability, caster: _ } => {
                 // The ability expression's id must already exist in
                 // the arena. No nested stmt-list to range-check.
                 self.check_expr_id(*ability)

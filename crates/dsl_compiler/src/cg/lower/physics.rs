@@ -138,6 +138,7 @@ use dsl_ast::ir::{
 
 use crate::cg::data_handle::{AgentFieldId, AgentRef, DataHandle};
 use crate::cg::dispatch::DispatchShape;
+use crate::cg::expr::CgExpr;
 use crate::cg::op::{ComputeOpKind, OpId, PhysicsRuleId};
 use crate::cg::stmt::{CgMatchArm, CgStmt, CgStmtId, CgStmtList, MatchArmBinding};
 
@@ -565,23 +566,31 @@ fn lower_stmt(
             span: *span,
         }),
         IrStmt::ApplyAbility { ability, span } => {
-            // #136 first slice: lower the ability expression and emit
-            // CgStmt::ApplyAbility. The expression must evaluate to an
-            // AbilityId (NonZeroU32) at runtime — type-checking that
-            // is the well-formed pass's job; this site just lowers
-            // the operand and packages it.
+            // #136 / slice δ (#161): lower both the ability operand
+            // AND an explicit caster expression. Caster defaults to
+            // `AgentSelfId` — the per-thread agent in PerAgent kernel
+            // shape. PerEvent rules need a different binding (event
+            // payload's `actor` field) which lands as a follow-up; the
+            // current emit gates that case off via the `agent_id`
+            // identifier referenced at WGSL emit time.
             //
-            // The actual WGSL emit shape (per-effect-slot dispatch
-            // loop reading from PackedAbilityRegistry) lands later
-            // in #136's emit-side companion + #137's full-vocabulary
-            // expansion. Until then any sim that uses `apply_ability`
-            // surfaces the gap at WGSL-emit time, NOT at CG lowering
-            // time — a strictly cleaner failure surface than the
-            // prior `UnsupportedPhysicsStmt` (which masked even the
-            // intent of the rule).
+            // The dispatcher reads `caster` to compose chronicle records
+            // — slice γ writes it into both actor + target slots
+            // (self-cast convention) until an explicit target operand
+            // grows here too.
             let ability_id = lower_expr(ability, ctx)?;
+            let caster_id = ctx
+                .builder
+                .add_expr(CgExpr::AgentSelfId)
+                .map_err(|e| LoweringError::BuilderRejected {
+                    error: e,
+                    span: *span,
+                })?;
             push_stmt(
-                CgStmt::ApplyAbility { ability: ability_id },
+                CgStmt::ApplyAbility {
+                    ability: ability_id,
+                    caster: caster_id,
+                },
                 *span,
                 ctx,
             )

@@ -369,31 +369,33 @@ fn apply_ability_in_fused_kernel_with_plain_rule_passes_naga_validator() {
 ///
 /// **Known-failing — captured here as documentation, not a CI gate.**
 ///
-/// The dispatcher's chronicle writes hardcode `agent_id` as the
-/// caster slot identifier (slice-γ self-cast convention), but
-/// PerEvent kernels don't bind `agent_id` in their preamble — each
-/// thread is `event_idx`, and the per-event actor lives in the event
-/// payload (which `CgStmt::ApplyAbility` doesn't reference today
-/// because it carries only the ability operand).
+/// **Structural plumbing landed (#161 part 1)**: `CgStmt::ApplyAbility`
+/// now carries an explicit `caster` operand, and the dispatcher emit
+/// reads `caster` instead of the prior hardcoded `agent_id`. This
+/// fixes the PerAgent path cleanly (caster lowers to `AgentSelfId` →
+/// `agent_id`) — see the surrounding tests in this file.
 ///
-/// The honest fix is the slice-δ design we deferred earlier:
-/// extend `CgStmt::ApplyAbility { ability }` to
-/// `CgStmt::ApplyAbility { ability, caster, target }` and have
-/// lowering populate the operands from the surrounding context
-/// (`AgentRef::Self_` / `AgentRef::Actor` / etc.). Until that lands,
-/// PerEvent ApplyAbility produces broken WGSL — naga rejects the
-/// kernel with `no definition in scope for identifier: 'agent_id'`.
+/// **PerEvent path still broken**: lowering today
+/// (`cg/lower/physics.rs:567`) populates caster from
+/// `CgExpr::AgentSelfId` REGARDLESS of dispatch shape. PerEvent
+/// kernels still resolve `agent_id` to the same undeclared
+/// identifier — the structural change unblocks the next step but
+/// doesn't solve PerEvent on its own.
 ///
-/// This test stays in the file as a discovery breadcrumb: removing
-/// the `#[ignore]` is the right reproducer when the slice-δ caster
-/// operand work begins. Without the breadcrumb, the gap surfaces
-/// only when a runtime crate finally drives a PerEvent
-/// apply_ability rule and gets the same naga error far from the
-/// design context.
+/// **Next slice (#161 part 2)**: thread `DispatchShape` through
+/// `lower_physics_stmt` and synthesize the caster from the event
+/// payload's actor field when the surrounding rule is PerEvent.
+/// Without an actor convention on every event, this also needs a
+/// design decision (e.g., gate apply_ability to events with an
+/// `actor: AgentId` field).
+///
+/// Removing the `#[ignore]` is the natural reproducer when the
+/// PerEvent lowering branch lands.
 #[test]
-#[ignore = "slice δ — needs explicit caster/target operands on \
-            CgStmt::ApplyAbility before PerEvent shape can produce \
-            valid WGSL; see test docstring for the deferral context"]
+#[ignore = "slice δ part 2 — needs PerEvent-aware caster lowering \
+            from event payload's actor field; structural plumbing \
+            (CgStmt::ApplyAbility.caster) is in but lowering still \
+            populates AgentSelfId for both shapes"]
 fn apply_ability_in_per_event_rule_passes_naga_validator() {
     use naga::valid::{Capabilities, ValidationFlags, Validator};
     let src = "

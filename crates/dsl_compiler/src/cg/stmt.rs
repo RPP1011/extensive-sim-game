@@ -415,9 +415,17 @@ pub enum CgStmt {
     ///
     /// # Caster / target conventions
     ///
-    /// Caster defaults to `self`, target to the verb's `target` binder
-    /// — same convention the bare-effect rules already use, so the
-    /// emit layer doesn't need new binder plumbing.
+    /// `caster` is an explicit u32 expression (typically lowering to
+    /// `Read(AgentField{Self_, ...})` for PerAgent rules; future
+    /// PerEvent support reads the actor from the event payload).
+    /// The dispatcher uses it both as the chronicle record's actor
+    /// AND target slot — slice-γ self-cast convention. A future
+    /// extension adds an explicit target operand for non-self-cast
+    /// abilities.
+    ///
+    /// Lowering populates `caster` so the WGSL emit doesn't need
+    /// kernel-shape detection (the prior `agent_id`-hardcoded
+    /// dispatcher broke on PerEvent shape — task #161).
     ///
     /// # WGSL emit
     ///
@@ -425,6 +433,9 @@ pub enum CgStmt {
     /// Stun, Slow), then #137 expands to the full vocabulary.
     ApplyAbility {
         ability: CgExprId,
+        /// Caster slot — u32-typed expression. Slice-γ writes this
+        /// into both actor and target chronicle slots.
+        caster: CgExprId,
     },
 }
 
@@ -498,7 +509,7 @@ impl fmt::Display for CgStmt {
                     binder, body.0, radius_cells
                 )
             }
-            CgStmt::ApplyAbility { ability } => {
+            CgStmt::ApplyAbility { ability, caster: _ } => {
                 write!(f, "apply_ability(expr#{})", ability.0)
             }
         }
@@ -838,7 +849,7 @@ pub fn collect_stmt_dependencies(
                 target: super::data_handle::AgentRef::Self_,
             });
         }
-        CgStmt::ApplyAbility { ability } => {
+        CgStmt::ApplyAbility { ability, caster: _ } => {
             // #136: the ability expression's reads contribute (the
             // operand may reference `self.<field>` or a config slot).
             // The dispatcher kernel itself reads from the
