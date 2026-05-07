@@ -29,7 +29,9 @@
 //! extend that sweep (would require GPU-side spatial expansion).
 
 use engine::ability::apply::{
-    apply_program_aoe, apply_program_aoe_box_filter, apply_program_aoe_cone_filter, ApplyEvent,
+    apply_program_aoe, apply_program_aoe_box_filter, apply_program_aoe_cone_filter,
+    apply_program_aoe_line_filter, apply_program_aoe_ring_filter,
+    apply_program_aoe_sphere_filter, ApplyEvent,
 };
 use engine::ability::program::{
     AbilityProgram, CasterStats, EffectAreaShape, EffectOp, Gate, ShapeKind,
@@ -477,6 +479,232 @@ fn aoe_box_filter_zero_extent_collapses_to_axis_equality() {
         "wz=0 collapses z-axis to equality with center.z=0; only z==0 \
          candidates remain in-box; got {hits:?}"
     );
+}
+
+// ---------------------------------------------------------------- //
+// AOE Path B Sphere/Ring/Line behavioral E2E (#180)
+// ---------------------------------------------------------------- //
+
+#[test]
+fn aoe_sphere_hits_two_in_row_three_agent_fixture() {
+    // Sphere is mathematically equivalent to Circle (3D dist² ≤
+    // radius²) — this test mirrors `aoe_circle_hits_two_in_row_*` but
+    // through the Sphere shape kind (kind=6, dispatcher uses the
+    // dedicated Sphere branch in WGSL emit / the dedicated CPU filter
+    // for clarity, even though math is the same).
+    //
+    // 3 agents in a row at x = 0, 1, 2. Caster at ids[0]; sphere
+    // radius=1.5 centered at ids[0] hits ids[0] (d=0) and ids[1] (d=1)
+    // but NOT ids[2] (d=2). Expect 2 chronicle records.
+    let mut state = SimState::new(8, 0xCAFE);
+    let ids = spawn_row(&mut state, 3);
+    assert_eq!(ids.len(), 3);
+
+    let mut prog = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
+        [EffectOp::Damage { amount: 18.0 }],
+    );
+    prog.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Sphere,
+        args: [1.5, 0.0, 0.0, 0.0],
+    }));
+
+    let center = state.agent_pos(ids[0]).expect("ids[0] alive");
+    let candidates: Vec<(AgentId, glam::Vec3)> = state
+        .spatial()
+        .within_radius(&state, center, 1.5)
+        .into_iter()
+        .map(|id| (id, state.agent_pos(id).expect("alive")))
+        .collect();
+    let aoe_targets = apply_program_aoe_sphere_filter(center, 1.5, &candidates);
+    assert_eq!(
+        aoe_targets,
+        vec![ids[0], ids[1]],
+        "sphere(1.5) at ids[0] must hit ids[0] and ids[1] only"
+    );
+
+    let events = apply_program_aoe(
+        &prog,
+        ids[0],
+        ids[0],
+        &aoe_targets,
+        0,
+        0xCAFE,
+        &CasterStats::default(),
+        &CasterStats::default(),
+    );
+    assert_eq!(events.len(), 2, "sphere AOE → 2 chronicle records");
+    for (i, expected_target) in [ids[0], ids[1]].iter().enumerate() {
+        match &events[i] {
+            ApplyEvent::Damage { source, target, amount } => {
+                assert_eq!(*source, ids[0], "event[{i}] source");
+                assert_eq!(*target, *expected_target, "event[{i}] target");
+                assert_eq!(*amount, 18.0, "event[{i}] amount must be 18.0");
+            }
+            other => panic!("expected Damage, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn aoe_ring_excludes_inner_radius_six_agent_fixture() {
+    // Annulus shape: inner=0.5, outer=2.0. Six agents in a row at
+    // x = 0, 0.5, 1.0, 2.0, 2.5, 3.5; cast center = ids[0] (origin).
+    // Distances: 0, 0.5 (inner wall, in), 1.0 (in), 2.0 (outer wall,
+    // in), 2.5 (out), 3.5 (out). Expected in-ring: ids[1], ids[2],
+    // ids[3] — three records.
+    let mut state = SimState::new(8, 0xCAFE);
+    let positions = [
+        glam::Vec3::new(0.0, 0.0, 0.0),
+        glam::Vec3::new(0.5, 0.0, 0.0),
+        glam::Vec3::new(1.0, 0.0, 0.0),
+        glam::Vec3::new(2.0, 0.0, 0.0),
+        glam::Vec3::new(2.5, 0.0, 0.0),
+        glam::Vec3::new(3.5, 0.0, 0.0),
+    ];
+    let ids: Vec<AgentId> = positions
+        .iter()
+        .map(|&pos| {
+            state
+                .spawn_agent(AgentSpawn { pos, ..Default::default() })
+                .expect("agent_cap large enough for 6 agents")
+        })
+        .collect();
+    assert_eq!(ids.len(), 6);
+
+    let mut prog = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
+        [EffectOp::Damage { amount: 14.0 }],
+    );
+    prog.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Ring,
+        args: [0.5, 2.0, 0.0, 0.0],
+    }));
+
+    let center = state.agent_pos(ids[0]).expect("ids[0] alive");
+    let candidates: Vec<(AgentId, glam::Vec3)> = state
+        .spatial()
+        .within_radius(&state, center, 2.5)
+        .into_iter()
+        .map(|id| (id, state.agent_pos(id).expect("alive")))
+        .collect();
+    let aoe_targets = apply_program_aoe_ring_filter(center, 0.5, 2.0, &candidates);
+    assert_eq!(
+        aoe_targets,
+        vec![ids[1], ids[2], ids[3]],
+        "ring(0.5, 2.0) at origin must exclude ids[0] (inner-excluded), \
+         hit ids[1..=3] (all within annulus), and exclude ids[4..=5] \
+         (outside outer); got {aoe_targets:?}"
+    );
+
+    let events = apply_program_aoe(
+        &prog,
+        ids[0],
+        ids[0],
+        &aoe_targets,
+        0,
+        0xCAFE,
+        &CasterStats::default(),
+        &CasterStats::default(),
+    );
+    assert_eq!(events.len(), 3, "ring AOE → 3 chronicle records (ids[1..=3])");
+    for (i, expected_target) in [ids[1], ids[2], ids[3]].iter().enumerate() {
+        match &events[i] {
+            ApplyEvent::Damage { source, target, amount } => {
+                assert_eq!(*source, ids[0], "event[{i}] source");
+                assert_eq!(*target, *expected_target, "event[{i}] target");
+                assert_eq!(*amount, 14.0, "event[{i}] amount must be 14.0");
+            }
+            other => panic!("expected Damage, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn aoe_line_hits_along_corridor_six_agent_fixture() {
+    // Line(length=5, width=1) cast from ids[0] (origin) toward ids[2]
+    // (4, 0, 0). The line is a forward-facing rectangle:
+    //   along ∈ [0, length=5], perp ≤ half_width=0.5.
+    //
+    // Agents:
+    //   ids[0] at (0, 0, 0)        along=0,   perp=0   → IN
+    //   ids[1] at (1, 0, 0)        along=1,   perp=0   → IN
+    //   ids[2] at (4, 0, 0)        along=4,   perp=0   → IN (target)
+    //   ids[3] at (2, 0.6, 0)      along=2,   perp=0.6 → OUT (lateral)
+    //   ids[4] at (-1, 0, 0)       along=-1            → OUT (behind)
+    //   ids[5] at (6, 0, 0)        along=6 > length=5  → OUT (past)
+    //
+    // Expected in-line: ids[0], ids[1], ids[2] — three records.
+    let mut state = SimState::new(8, 0xCAFE);
+    let positions = [
+        glam::Vec3::new(0.0, 0.0, 0.0),
+        glam::Vec3::new(1.0, 0.0, 0.0),
+        glam::Vec3::new(4.0, 0.0, 0.0),
+        glam::Vec3::new(2.0, 0.6, 0.0),
+        glam::Vec3::new(-1.0, 0.0, 0.0),
+        glam::Vec3::new(6.0, 0.0, 0.0),
+    ];
+    let ids: Vec<AgentId> = positions
+        .iter()
+        .map(|&pos| {
+            state
+                .spawn_agent(AgentSpawn { pos, ..Default::default() })
+                .expect("agent_cap large enough for 6 agents")
+        })
+        .collect();
+    assert_eq!(ids.len(), 6);
+
+    let mut prog = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
+        [EffectOp::Damage { amount: 22.0 }],
+    );
+    prog.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Line,
+        args: [5.0, 1.0, 0.0, 0.0],
+    }));
+
+    let apex = state.agent_pos(ids[0]).expect("ids[0] alive");
+    let target_pos = state.agent_pos(ids[2]).expect("ids[2] alive");
+    let candidates: Vec<(AgentId, glam::Vec3)> = state
+        .spatial()
+        .within_radius(&state, apex, 7.0)
+        .into_iter()
+        .map(|id| (id, state.agent_pos(id).expect("alive")))
+        .collect();
+    let aoe_targets = apply_program_aoe_line_filter(
+        apex, target_pos, /*length*/ 5.0, /*width*/ 1.0, &candidates,
+    );
+    assert_eq!(
+        aoe_targets,
+        vec![ids[0], ids[1], ids[2]],
+        "line(5, 1) facing +X must hit ids[0..=2] only (lateral 3 wide, \
+         behind 4, past 5 out); got {aoe_targets:?}"
+    );
+
+    let events = apply_program_aoe(
+        &prog,
+        ids[0],
+        ids[2],
+        &aoe_targets,
+        0,
+        0xCAFE,
+        &CasterStats::default(),
+        &CasterStats::default(),
+    );
+    assert_eq!(events.len(), 3, "line AOE → 3 chronicle records");
+    for (i, expected_target) in [ids[0], ids[1], ids[2]].iter().enumerate() {
+        match &events[i] {
+            ApplyEvent::Damage { source, target, amount } => {
+                assert_eq!(*source, ids[0], "event[{i}] source");
+                assert_eq!(*target, *expected_target, "event[{i}] target");
+                assert_eq!(*amount, 22.0, "event[{i}] amount must be 22.0");
+            }
+            other => panic!("expected Damage, got {other:?}"),
+        }
+    }
 }
 
 #[test]

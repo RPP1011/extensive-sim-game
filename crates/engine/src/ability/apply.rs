@@ -449,23 +449,29 @@ pub(crate) fn evaluate_predicate(
 ///
 /// Per-effect slot dispatch:
 ///   * If `program.per_effect_areas[i]` is `Some(EffectAreaShape{
-///     kind: Circle, .. })`, `Some(EffectAreaShape{ kind: Cone, .. })`,
-///     or `Some(EffectAreaShape{ kind: Box, .. })`, the slot fires once
-///     per `aoe_targets` entry — one ApplyEvent per target. The caller
-///     is responsible for performing the spatial + geometric filter
-///     (Circle: `state.spatial().within_radius(state, target_pos,
-///     args[0])`; Cone: range² gate ∧ angular gate, see
-///     `apply_program_aoe_cone_filter` for the canonical CPU filter
-///     that mirrors the GPU kernel's WGSL math; Box: per-axis
-///     `|d.<axis>| <= w<axis>` AABB containment, see
-///     `apply_program_aoe_box_filter`) and passing the result here.
+///     kind: Circle | Cone | Box | Sphere | Ring | Line, .. })`, the
+///     slot fires once per `aoe_targets` entry — one ApplyEvent per
+///     target. The caller is responsible for performing the spatial +
+///     geometric filter:
+///     - Circle / Sphere: `state.spatial().within_radius(state,
+///       target_pos, args[0])` — see `apply_program_aoe_sphere_filter`
+///       (Sphere is mathematically equivalent to Circle; see #180);
+///     - Cone: range² gate ∧ angular gate (#178), see
+///       `apply_program_aoe_cone_filter`;
+///     - Box: per-axis `|d.<axis>| <= w<axis>` AABB containment (#179),
+///       see `apply_program_aoe_box_filter`;
+///     - Ring (#180): annulus gate `inner² <= dist² <= outer²`, see
+///       `apply_program_aoe_ring_filter`;
+///     - Line (#180): forward rectangle along `normalize(target -
+///       caster)`, see `apply_program_aoe_line_filter`.
 ///     The slice MUST be sorted ascending by raw `AgentId` (P11 —
-///     `SpatialHash::within_radius` does this by construction; the
-///     cone and box helpers sort as their final step).
-///   * Any other `Some(...)` shape (Line, Sphere, etc.) — deferred.
-///     The slot falls back to single-target dispatch on
-///     `primary_target`. The other shapes need additional geometry
-///     kernels (capsule, etc.) which Path A defers.
+///     `SpatialHash::within_radius` does this by construction; every
+///     filter helper sorts as its final step).
+///   * Any other `Some(...)` shape (Spread/Column/Wall/Cylinder/Dome/
+///     Hull) — deferred. The slot falls back to single-target dispatch
+///     on `primary_target`. The remaining shapes need additional
+///     geometry kernels (capsule, vertical column, etc.) which Path B
+///     defers.
 ///   * `None` slot (single-target, default) — fires once on
 ///     `primary_target`, identical to `apply_program`'s behavior.
 ///
@@ -544,17 +550,22 @@ pub fn apply_program_aoe(
             })
             .unwrap_or(0.0);
 
-        // Choose target list for this slot. Circle, Cone, and Box
-        // expand across aoe_targets (caller pre-filters for all three —
-        // Circle by `within_radius`, Cone by
+        // Choose target list for this slot. Circle, Cone, Box, Sphere,
+        // Ring, and Line expand across aoe_targets (caller pre-filters
+        // — Circle/Sphere by `within_radius`, Cone by
         // `apply_program_aoe_cone_filter`, Box by
-        // `apply_program_aoe_box_filter`); everything else (None, or
+        // `apply_program_aoe_box_filter`, Ring by
+        // `apply_program_aoe_ring_filter`, Line by
+        // `apply_program_aoe_line_filter`); everything else (None, or
         // unrecognised shape) is single-target on primary_target.
         let is_aoe_shape = matches!(
             program.per_effect_areas.get(i).copied().flatten(),
             Some(shape) if shape.kind == ShapeKind::Circle
                         || shape.kind == ShapeKind::Cone
                         || shape.kind == ShapeKind::Box
+                        || shape.kind == ShapeKind::Sphere
+                        || shape.kind == ShapeKind::Ring
+                        || shape.kind == ShapeKind::Line
         );
         let targets_for_slot: &[AgentId] = if is_aoe_shape {
             aoe_targets
@@ -719,6 +730,171 @@ pub fn apply_program_aoe_box_filter(
     // P11 reduction-determinism: sort ascending by raw AgentId so the
     // CPU oracle and GPU dispatcher (after canonicalize) agree on
     // emit order.
+    hits.sort_by_key(|id| id.raw());
+    hits
+}
+
+/// CPU-side sphere-filter oracle for AOE Path B Sphere (mirrors the GPU
+/// kernel's WGSL math bit-for-bit). Sphere is mathematically equivalent
+/// to Circle today (3D distance check, `dot(d, d) <= radius²`); the
+/// separate filter exists for code clarity + so callers can pass the
+/// shape's args slot without a Circle/Sphere alias mapping.
+///
+/// Inputs:
+///   * `center` — explicit cast target's position (same convention as
+///     Circle: `aoe_center = agent_pos[target_slot]`).
+///   * `radius` — `args[0]` from the `EffectAreaShape` (sphere radius).
+///   * `candidates` — slice of `(AgentId, position)` pairs the caller
+///     pre-collected from the spatial grid.
+///
+/// Output: in-sphere `AgentId`s sorted ascending by raw id (P11).
+///
+/// **Equivalence with Circle.** The Circle/Sphere split is a contract
+/// on the shape kind only — both compute `dist² <= radius²` over a 3D
+/// position. A future divergence (e.g. a flat-disk Circle vs a true 3D
+/// Sphere) would update both filters; today they share semantics. The
+/// GPU branch comment documents the equivalence the same way.
+pub fn apply_program_aoe_sphere_filter(
+    center:     glam::Vec3,
+    radius:     f32,
+    candidates: &[(AgentId, glam::Vec3)],
+) -> Vec<AgentId> {
+    let radius_sq = radius * radius;
+    let mut hits: Vec<AgentId> = Vec::with_capacity(candidates.len());
+    for &(id, cand_pos) in candidates {
+        let dvec = cand_pos - center;
+        if dvec.dot(dvec) <= radius_sq {
+            hits.push(id);
+        }
+    }
+    // P11 reduction-determinism: sort ascending by raw AgentId.
+    hits.sort_by_key(|id| id.raw());
+    hits
+}
+
+/// CPU-side ring-filter oracle for AOE Path B Ring (mirrors the GPU
+/// kernel's WGSL math bit-for-bit so callers feeding `apply_program_aoe`
+/// produce a chronicle record set byte-equal to the GPU dispatcher).
+///
+/// Inputs:
+///   * `center` — explicit cast target's position (same convention as
+///     Circle).
+///   * `inner_radius` — `args[0]` (inner edge of the annulus).
+///   * `outer_radius` — `args[1]` (outer edge of the annulus).
+///   * `candidates` — slice of `(AgentId, position)` pairs the caller
+///     pre-collected from the spatial grid.
+///
+/// Output: in-ring `AgentId`s sorted ascending by raw id (P11).
+///
+/// In-ring predicate (per candidate, identical to the WGSL kernel):
+///   `inner² <= dist² <= outer²` where `dist² = dot(cand-center,
+///   cand-center)`. Closed on both edges (≤ semantic on both bounds —
+///   candidates exactly at either wall are in-ring).
+///
+/// **Edge case: `inner_radius > outer_radius`.** The bounds invert, so
+/// the predicate `inner² <= dist² <= outer²` can never be satisfied
+/// (lhs > rhs). Result: empty in-ring set. Both backends agree.
+///
+/// **Spatial walk limitation.** The GPU dispatcher walks 27 cells
+/// around the center; if `outer_radius > SPATIAL_CELL_SIZE`, candidates
+/// beyond the 27-cell ring are missed. Same caveat as Circle/Sphere/
+/// Box (#179) — fixtures must keep the outer radius ≤ cell size to
+/// stay byte-equal across backends.
+pub fn apply_program_aoe_ring_filter(
+    center:       glam::Vec3,
+    inner_radius: f32,
+    outer_radius: f32,
+    candidates:   &[(AgentId, glam::Vec3)],
+) -> Vec<AgentId> {
+    let inner_sq = inner_radius * inner_radius;
+    let outer_sq = outer_radius * outer_radius;
+    let mut hits: Vec<AgentId> = Vec::with_capacity(candidates.len());
+    for &(id, cand_pos) in candidates {
+        let dvec = cand_pos - center;
+        let dist_sq = dvec.dot(dvec);
+        if dist_sq >= inner_sq && dist_sq <= outer_sq {
+            hits.push(id);
+        }
+    }
+    // P11 reduction-determinism.
+    hits.sort_by_key(|id| id.raw());
+    hits
+}
+
+/// CPU-side line-filter oracle for AOE Path B Line (mirrors the GPU
+/// kernel's WGSL math bit-for-bit so callers feeding `apply_program_aoe`
+/// produce a chronicle record set byte-equal to the GPU dispatcher).
+///
+/// Inputs:
+///   * `apex` — caster's position (line origin; the rectangle starts
+///     here and extends `length` along `direction`).
+///   * `target_pos` — explicit cast target's position. The line faces
+///     `direction = normalize(target_pos - apex)`.
+///   * `length` — `args[0]` (rectangle length along the direction).
+///   * `width` — `args[1]` (rectangle full width perpendicular to the
+///     direction; the gate uses half-width = width/2).
+///   * `candidates` — slice of `(AgentId, position)` pairs the caller
+///     pre-collected from the spatial grid.
+///
+/// Output: in-line `AgentId`s sorted ascending by raw id (P11).
+///
+/// In-line predicate (per candidate, identical to the WGSL kernel):
+///   1. Let `to_cand = cand_pos - apex`,
+///      `along = dot(to_cand, direction)` (signed distance along axis).
+///   2. `along >= 0` (in front of caster).
+///   3. `along <= length` (within length).
+///   4. `perp_sq = dot(to_cand, to_cand) - along*along <= (width/2)²`
+///      (within half-width perpendicular). Pythagoras avoids a 3D
+///      cross-product, matching the GPU kernel.
+///
+/// Edge case: if `target_pos == apex` (caster targets self), the
+/// line's direction is degenerate (zero-vector). Both backends MUST
+/// return an empty set (the line is undefined; emitting any subset
+/// would create CPU↔GPU drift). The CPU short-circuits here; the
+/// GPU's `dir_len_sq < 1e-6` branch matches.
+///
+/// **Spatial walk limitation.** The GPU dispatcher walks 27 cells
+/// around the apex; if `length > SPATIAL_CELL_SIZE` or the line
+/// extends past the 27-cell ring, candidates beyond are missed. Same
+/// caveat as Cone (#178) — fixtures must keep `length ≤ cell size` to
+/// stay byte-equal.
+///
+/// **P11.** Both backends evaluate the predicate with identical f32
+/// op order (subtract, dot, inverseSqrt, dot, sub, compare). The final
+/// sort makes the post-filter set deterministic.
+pub fn apply_program_aoe_line_filter(
+    apex:       glam::Vec3,
+    target_pos: glam::Vec3,
+    length:     f32,
+    width:      f32,
+    candidates: &[(AgentId, glam::Vec3)],
+) -> Vec<AgentId> {
+    // Degenerate line — caster targets self. Direction is undefined;
+    // emit no targets to match the GPU kernel.
+    let direction_raw = target_pos - apex;
+    let dir_len_sq = direction_raw.dot(direction_raw);
+    if dir_len_sq < 1e-6 {
+        return Vec::new();
+    }
+    let direction = direction_raw * dir_len_sq.recip().sqrt();
+    let half_width = width * 0.5;
+    let half_width_sq = half_width * half_width;
+
+    let mut hits: Vec<AgentId> = Vec::with_capacity(candidates.len());
+    for &(id, cand_pos) in candidates {
+        let to_cand = cand_pos - apex;
+        let along = to_cand.dot(direction);
+        if along < 0.0 || along > length {
+            continue;
+        }
+        let dist_sq = to_cand.dot(to_cand);
+        let perp_sq = dist_sq - along * along;
+        if perp_sq > half_width_sq {
+            continue;
+        }
+        hits.push(id);
+    }
+    // P11 reduction-determinism.
     hits.sort_by_key(|id| id.raw());
     hits
 }
@@ -1302,20 +1478,21 @@ mod tests {
 
     #[test]
     fn aoe_non_expandable_shape_falls_back_to_single_target() {
-        // Line (and every shape other than Circle/Cone) is deferred —
-        // the slot fires once on `primary_target` even when
-        // `aoe_targets` is populated. Pin this so the deferral is
-        // explicit (regression guard for future shape additions).
+        // Spread (and every shape other than Circle/Cone/Box/Sphere/
+        // Ring/Line) is deferred — the slot fires once on
+        // `primary_target` even when `aoe_targets` is populated. Pin
+        // this so the deferral is explicit (regression guard for
+        // future shape additions).
         let mut prog = AbilityProgram::new_single_target(
             5.0,
             Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
             [EffectOp::Damage { amount: 50.0 }],
         );
         prog.per_effect_areas.push(Some(EffectAreaShape {
-            kind: ShapeKind::Line,
+            kind: ShapeKind::Spread,
             args: [5.0, 1.0, 0.0, 0.0],
         }));
-        // aoe_targets is non-empty, but Line isn't expanded yet.
+        // aoe_targets is non-empty, but Spread isn't expanded yet.
         let aoe_targets = [agent_n(2), agent_n(3), agent_n(4)];
         let events = apply_program_aoe(
             &prog,
@@ -1326,7 +1503,7 @@ mod tests {
             &CasterStats::default(),
             &CasterStats::default(),
         );
-        assert_eq!(events.len(), 1, "Line shape → single-target fallback (Path A defers)");
+        assert_eq!(events.len(), 1, "Spread shape → single-target fallback (Path B defers)");
         assert!(matches!(
             events[0],
             ApplyEvent::Damage { target: t, .. } if t == agent_n(2)
@@ -1548,6 +1725,211 @@ mod tests {
         assert!(
             hits.is_empty(),
             "all candidates outside extents → empty in-box set; got {hits:?}"
+        );
+    }
+
+    // -- AOE Path B Sphere (#180) -----------------------------------
+
+    #[test]
+    fn aoe_sphere_expands_across_pre_filtered_targets() {
+        // Sphere shape: same expansion contract as Circle/Cone/Box —
+        // dispatcher emits one ApplyEvent per pre-filtered target.
+        // Trivial mirror of the Circle dispatch test.
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 18.0 }],
+        );
+        prog.per_effect_areas.push(Some(EffectAreaShape {
+            kind: ShapeKind::Sphere,
+            args: [2.0, 0.0, 0.0, 0.0],
+        }));
+        let aoe_targets = [agent_n(2), agent_n(3)];
+        let events = apply_program_aoe(
+            &prog,
+            agent_n(1),
+            agent_n(2),
+            &aoe_targets,
+            0, 0xCAFE,
+            &CasterStats::default(),
+            &CasterStats::default(),
+        );
+        assert_eq!(events.len(), 2, "Sphere AOE → one event per pre-filtered target");
+        assert!(matches!(
+            events[0],
+            ApplyEvent::Damage { target: t, .. } if t == agent_n(2)
+        ));
+        assert!(matches!(
+            events[1],
+            ApplyEvent::Damage { target: t, .. } if t == agent_n(3)
+        ));
+    }
+
+    #[test]
+    fn aoe_sphere_filter_3d_distance_check() {
+        // Sphere is mathematically equivalent to Circle today (3D
+        // dist² ≤ radius²). Pin the equivalence here so a future
+        // divergence (e.g. flat-disk Circle vs true 3D Sphere) is
+        // visible.
+        let center = glam::Vec3::new(0.0, 0.0, 0.0);
+        let candidates = vec![
+            (agent_n(1), glam::Vec3::new(0.0, 0.0, 0.0)),    // d=0   in
+            (agent_n(2), glam::Vec3::new(1.5, 0.0, 0.0)),    // d=1.5 in
+            (agent_n(3), glam::Vec3::new(0.0, 2.0, 0.0)),    // d=2.0 wall, in (≤)
+            (agent_n(4), glam::Vec3::new(0.0, 0.0, 2.001)),  // d>2.0 out
+        ];
+        let hits = apply_program_aoe_sphere_filter(center, 2.0, &candidates);
+        assert_eq!(
+            hits,
+            vec![agent_n(1), agent_n(2), agent_n(3)],
+            "sphere(2.0) at origin must hit 1/2/3 (3rd at wall ≤ semantic); got {hits:?}"
+        );
+    }
+
+    // -- AOE Path B Ring (#180) -------------------------------------
+
+    #[test]
+    fn aoe_ring_expands_across_pre_filtered_targets() {
+        // Ring shape: dispatcher contract is identical to Circle/Box.
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 14.0 }],
+        );
+        prog.per_effect_areas.push(Some(EffectAreaShape {
+            kind: ShapeKind::Ring,
+            args: [0.5, 2.0, 0.0, 0.0],
+        }));
+        let aoe_targets = [agent_n(2), agent_n(3)];
+        let events = apply_program_aoe(
+            &prog,
+            agent_n(1),
+            agent_n(2),
+            &aoe_targets,
+            0, 0xCAFE,
+            &CasterStats::default(),
+            &CasterStats::default(),
+        );
+        assert_eq!(events.len(), 2, "Ring AOE → one event per pre-filtered target");
+    }
+
+    #[test]
+    fn aoe_ring_filter_excludes_inner_radius() {
+        // Annulus: inner=0.5, outer=2.0. Agents at d=0 and d=0.4 are
+        // INSIDE the inner radius and are excluded; agents at d=0.5
+        // (inner wall, in), d=1.5 (in), d=2.0 (outer wall, in), d=2.1
+        // (out).
+        let center = glam::Vec3::new(0.0, 0.0, 0.0);
+        let candidates = vec![
+            (agent_n(1), glam::Vec3::new(0.0, 0.0, 0.0)),    // d=0   inner-excluded
+            (agent_n(2), glam::Vec3::new(0.4, 0.0, 0.0)),    // d=0.4 inner-excluded
+            (agent_n(3), glam::Vec3::new(0.5, 0.0, 0.0)),    // d=0.5 inner wall — in (≤)
+            (agent_n(4), glam::Vec3::new(1.5, 0.0, 0.0)),    // d=1.5 in
+            (agent_n(5), glam::Vec3::new(2.0, 0.0, 0.0)),    // d=2.0 outer wall — in (≤)
+            (agent_n(6), glam::Vec3::new(2.1, 0.0, 0.0)),    // d=2.1 out
+        ];
+        let hits = apply_program_aoe_ring_filter(center, 0.5, 2.0, &candidates);
+        assert_eq!(
+            hits,
+            vec![agent_n(3), agent_n(4), agent_n(5)],
+            "ring(0.5, 2.0) excludes d<inner; both walls are inclusive; got {hits:?}"
+        );
+    }
+
+    #[test]
+    fn aoe_ring_filter_inverted_bounds_returns_empty() {
+        // inner > outer ⇒ predicate `inner² ≤ d² ≤ outer²` is
+        // unsatisfiable. Empty in-ring set on both backends.
+        let center = glam::Vec3::new(0.0, 0.0, 0.0);
+        let candidates = vec![
+            (agent_n(1), glam::Vec3::new(1.0, 0.0, 0.0)),
+            (agent_n(2), glam::Vec3::new(0.5, 0.0, 0.0)),
+        ];
+        let hits = apply_program_aoe_ring_filter(center, 5.0, 2.0, &candidates);
+        assert!(
+            hits.is_empty(),
+            "inner > outer must yield empty in-ring set; got {hits:?}"
+        );
+    }
+
+    // -- AOE Path B Line (#180) -------------------------------------
+
+    #[test]
+    fn aoe_line_expands_across_pre_filtered_targets() {
+        // Line shape: dispatcher contract is identical to Circle/Cone/
+        // Box/Sphere/Ring.
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 22.0 }],
+        );
+        prog.per_effect_areas.push(Some(EffectAreaShape {
+            kind: ShapeKind::Line,
+            args: [5.0, 1.0, 0.0, 0.0],
+        }));
+        let aoe_targets = [agent_n(2), agent_n(3)];
+        let events = apply_program_aoe(
+            &prog,
+            agent_n(1),
+            agent_n(2),
+            &aoe_targets,
+            0, 0xCAFE,
+            &CasterStats::default(),
+            &CasterStats::default(),
+        );
+        assert_eq!(events.len(), 2, "Line AOE → one event per pre-filtered target");
+    }
+
+    #[test]
+    fn aoe_line_filter_degenerate_self_target_returns_empty() {
+        // Caster targets self ⇒ direction = (0,0,0) is degenerate.
+        // Must return empty set on both backends (matches the cone's
+        // degenerate semantic).
+        let apex = glam::Vec3::new(2.0, 3.0, 4.0);
+        let target_pos = apex;
+        let candidates = vec![
+            (agent_n(2), glam::Vec3::new(3.0, 3.0, 4.0)),
+            (agent_n(3), glam::Vec3::new(2.0, 4.0, 4.0)),
+        ];
+        let hits = apply_program_aoe_line_filter(
+            apex, target_pos, 5.0, 1.0, &candidates,
+        );
+        assert!(
+            hits.is_empty(),
+            "degenerate line (caster targets self) → empty set; got {hits:?}"
+        );
+    }
+
+    #[test]
+    fn aoe_line_filter_lateral_outside_width_excluded() {
+        // Apex at origin facing +X; length=5, width=1 ⇒ half_width=0.5.
+        // Candidates:
+        //   ( 1.0,  0.0, 0.0): along=1, perp=0           → in
+        //   ( 2.0,  0.5, 0.0): along=2, perp=0.5 (=hw)    → in (≤)
+        //   ( 3.0, -0.4, 0.0): along=3, perp=0.4         → in
+        //   ( 1.0,  0.6, 0.0): along=1, perp=0.6 (>hw)    → out (lateral)
+        //   ( 5.0,  0.0, 0.0): along=5 (=length)         → in (≤)
+        //   ( 6.0,  0.0, 0.0): along=6 (>length)         → out
+        //   (-1.0,  0.0, 0.0): along=-1 (behind apex)    → out
+        let apex = glam::Vec3::new(0.0, 0.0, 0.0);
+        let target_pos = glam::Vec3::new(5.0, 0.0, 0.0);
+        let candidates = vec![
+            (agent_n(1), glam::Vec3::new(1.0, 0.0, 0.0)),
+            (agent_n(2), glam::Vec3::new(2.0, 0.5, 0.0)),
+            (agent_n(3), glam::Vec3::new(3.0, -0.4, 0.0)),
+            (agent_n(4), glam::Vec3::new(1.0, 0.6, 0.0)),
+            (agent_n(5), glam::Vec3::new(5.0, 0.0, 0.0)),
+            (agent_n(6), glam::Vec3::new(6.0, 0.0, 0.0)),
+            (agent_n(7), glam::Vec3::new(-1.0, 0.0, 0.0)),
+        ];
+        let hits = apply_program_aoe_line_filter(
+            apex, target_pos, /*length*/ 5.0, /*width*/ 1.0, &candidates,
+        );
+        assert_eq!(
+            hits,
+            vec![agent_n(1), agent_n(2), agent_n(3), agent_n(5)],
+            "line(5, 1) facing +X must include along∈[0,length] ∧ perp ≤ \
+             half_width only; got {hits:?}"
         );
     }
 

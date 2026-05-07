@@ -49,6 +49,9 @@
 //!  31. `Damage(30) in circle(2.0)`                  — Cleave-shape (#121 AOE Path B Circle, 4-agent row)
 //!  32. `Damage(25) in cone(60°, 4)`                 — Slash-shape (#178 AOE Path B Cone, 5-agent fan, degenerate self-cast)
 //!  33. `Damage(20) in box(1.5, 1.5, 1.5)`           — Pulverize-shape (#179 AOE Path B Box, 4-agent row, wall-inclusive)
+//!  34. `Damage(18) in sphere(2.0)`                  — BlastSphere-shape (#180 AOE Path B Sphere, 4-agent row, alias of Circle)
+//!  35. `Damage(14) in ring(0.5, 2.0)`               — ShockwaveRing-shape (#180 AOE Path B Ring, 4-agent row, inner-excludes slot 0)
+//!  36. `Damage(22) in line(5.0, 1.0)`               — PiercingLine-shape (#180 AOE Path B Line, 4-agent row, degenerate self-cast)
 //!
 //! M = 1 caster×target permutation in this fixture: `(c=0, t=0)`
 //! self-cast. The smoke fixture's `apply_ability` source uses the
@@ -708,6 +711,79 @@ fn build_sweep() -> Vec<(&'static str, AbilityProgram, CasterStats)> {
         CasterStats::default(),
     ));
 
+    // 34. BlastSphere-shape — `Damage(18) in sphere(2.0)` (#180 AOE
+    //     Path B Sphere). Sphere is mathematically equivalent to
+    //     Circle today (3D dist² ≤ radius²), but routes through the
+    //     dispatcher's dedicated Sphere branch (`area_kind == 6u`).
+    //     Same 4-agent row fixture as Cleave; in-radius set under the
+    //     smoke fixture's self-cast = {slot 0 (d=0), slot 1 (d=1.5)}
+    //     under radius=2.0. Both backends emit 2 chronicle records.
+    let mut blast_sphere = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 18.0 }],
+    );
+    blast_sphere.per_effect_areas.push(Some(engine::ability::program::EffectAreaShape {
+        kind: engine::ability::program::ShapeKind::Sphere,
+        args: [2.0, 0.0, 0.0, 0.0],
+    }));
+    out.push((
+        "BlastSphere",
+        blast_sphere,
+        CasterStats::default(),
+    ));
+
+    // 35. ShockwaveRing-shape — `Damage(14) in ring(0.5, 2.0)` (#180
+    //     AOE Path B Ring). Annulus gate excludes the inner radius:
+    //     under the 4-agent row (x = 0, 1.5, 3.0, 4.5) with caster at
+    //     slot 0, distances are 0, 1.5, 3.0, 4.5. Inner=0.5 excludes
+    //     slot 0 (d=0 < 0.5); outer=2.0 admits slot 1 (d=1.5 ≤ 2.0)
+    //     and excludes slots 2/3 (d > 2.0). Expected hit set = {slot
+    //     1} — one chronicle record. Validates the inner-radius-
+    //     exclusion semantic byte-equal across CPU/GPU.
+    let mut shockwave_ring = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 14.0 }],
+    );
+    shockwave_ring.per_effect_areas.push(Some(engine::ability::program::EffectAreaShape {
+        kind: engine::ability::program::ShapeKind::Ring,
+        args: [0.5, 2.0, 0.0, 0.0],
+    }));
+    out.push((
+        "ShockwaveRing",
+        shockwave_ring,
+        CasterStats::default(),
+    ));
+
+    // 36. PiercingLine-shape — `Damage(22) in line(5.0, 1.0)` (#180 AOE
+    //     Path B Line). Smoke-fixture self-cast invariant: `caster_slot
+    //     == target_slot`, so `apex == target_pos == agent_pos[0]`.
+    //     Direction = target - apex = (0,0,0) is degenerate; the WGSL
+    //     kernel's `dir_len_sq < 1e-6 → no-op` branch skips the spatial
+    //     walk, the CPU oracle's `apply_program_aoe_line_filter`
+    //     returns empty in the same condition. Both backends emit 0
+    //     chronicle records — byte-equal at the trivial-zero level
+    //     (mirrors Slash's degenerate-cone semantic in entry 32).
+    //
+    //     Non-degenerate line math is exercised on CPU via
+    //     `engine::tests::aoe_multi_agent_e2e::aoe_line_hits_along_corridor_*`
+    //     and the unit tests in `engine::ability::apply::tests`.
+    let mut piercing_line = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 22.0 }],
+    );
+    piercing_line.per_effect_areas.push(Some(engine::ability::program::EffectAreaShape {
+        kind: engine::ability::program::ShapeKind::Line,
+        args: [5.0, 1.0, 0.0, 0.0],
+    }));
+    out.push((
+        "PiercingLine",
+        piercing_line,
+        CasterStats::default(),
+    ));
+
     out
 }
 
@@ -840,12 +916,70 @@ fn pulverize_cpu_records_for_cast(
     aoe_cpu_records_for_cast(program, caster_slot, aoe_target_slots, tick, caster_stats)
 }
 
-/// Shared CPU oracle for AOE Path B entries (Circle Cleave + Cone
-/// Slash). Calls `apply_program_aoe` with the caller-supplied
-/// pre-filtered target slot list, then maps each emitted ApplyEvent
-/// to a chronicle record. The caller does the geometric filtering
-/// (Circle: spatial walk; Cone: `apply_program_aoe_cone_filter`); the
-/// helper just dispatches and packs.
+/// CPU oracle for the AOE BlastSphere entry (#180 Sphere). Same
+/// dispatch shape as Cleave (Sphere is mathematically equivalent to
+/// Circle today; both route through `apply_program_aoe` and emit per-
+/// target chronicle records). Under the smoke fixture's 4-agent row
+/// (x=0, 1.5, 3.0, 4.5) with caster at slot 0 (self-cast convention),
+/// the sphere is centered at the caster; with radius=2.0, in-sphere =
+/// {slot 0 (d=0), slot 1 (d=1.5)}. The alias name pins the "BlastSphere
+/// routes through the sphere CPU oracle path" semantic in the test
+/// runner.
+fn blast_sphere_cpu_records_for_cast(
+    program:           &AbilityProgram,
+    caster_slot:       u32,
+    aoe_target_slots:  &[u32],
+    tick:              u32,
+    caster_stats:      &CasterStats,
+) -> Vec<[u32; CHRONICLE_STRIDE_U32 as usize]> {
+    aoe_cpu_records_for_cast(program, caster_slot, aoe_target_slots, tick, caster_stats)
+}
+
+/// CPU oracle for the AOE ShockwaveRing entry (#180 Ring). Same
+/// dispatch shape as Cleave/BlastSphere (all route through
+/// `apply_program_aoe`). Under the smoke fixture's 4-agent row (x=0,
+/// 1.5, 3.0, 4.5) with caster at slot 0 (self-cast), the ring is
+/// centered at the caster; with inner=0.5 / outer=2.0, distances 0,
+/// 1.5, 3.0, 4.5 yield in-ring = {slot 1 (d=1.5 ∈ [0.5, 2.0])} only —
+/// slot 0 is inner-excluded, slots 2/3 outer-excluded.
+fn shockwave_ring_cpu_records_for_cast(
+    program:           &AbilityProgram,
+    caster_slot:       u32,
+    aoe_target_slots:  &[u32],
+    tick:              u32,
+    caster_stats:      &CasterStats,
+) -> Vec<[u32; CHRONICLE_STRIDE_U32 as usize]> {
+    aoe_cpu_records_for_cast(program, caster_slot, aoe_target_slots, tick, caster_stats)
+}
+
+/// CPU oracle for the AOE PiercingLine entry (#180 Line). The smoke
+/// fixture's implicit-target rule means `caster_slot == target_slot ==
+/// agent_id`; the line's `direction = target_pos - apex = (0,0,0)` is
+/// structurally degenerate. The CPU helper passes an empty
+/// `aoe_target_slots` to mirror the GPU kernel's `dir_len_sq < 1e-6 →
+/// no-op` branch — both backends emit 0 chronicle records under this
+/// fixture topology (same shape as Slash for the cone's degenerate
+/// case).
+fn piercing_line_cpu_records_for_cast(
+    program:           &AbilityProgram,
+    caster_slot:       u32,
+    aoe_target_slots:  &[u32],
+    tick:              u32,
+    caster_stats:      &CasterStats,
+) -> Vec<[u32; CHRONICLE_STRIDE_U32 as usize]> {
+    aoe_cpu_records_for_cast(program, caster_slot, aoe_target_slots, tick, caster_stats)
+}
+
+/// Shared CPU oracle for AOE Path B entries (Circle Cleave / Cone
+/// Slash / Box Pulverize / Sphere BlastSphere / Ring ShockwaveRing /
+/// Line PiercingLine). Calls `apply_program_aoe` with the caller-
+/// supplied pre-filtered target slot list, then maps each emitted
+/// ApplyEvent to a chronicle record. The caller does the geometric
+/// filtering (Circle/Sphere: spatial walk; Cone:
+/// `apply_program_aoe_cone_filter`; Box: `apply_program_aoe_box_filter`;
+/// Ring: `apply_program_aoe_ring_filter`; Line:
+/// `apply_program_aoe_line_filter`); the helper just dispatches and
+/// packs.
 fn aoe_cpu_records_for_cast(
     program:           &AbilityProgram,
     caster_slot:       u32,
@@ -952,10 +1086,13 @@ fn cpu_gpu_apply_program_byte_equal_across_modifier_matrix() {
         // rule degenerates the cone direction (see Slash's entry
         // doc-comment for the byte-equal-at-zero contract).
         let n_agents_for_ability = match *name {
-            "Cleave"    => 4,
-            "Slash"     => 5,
-            "Pulverize" => 4,
-            _           => N_AGENTS,
+            "Cleave"        => 4,
+            "Slash"         => 5,
+            "Pulverize"     => 4,
+            "BlastSphere"   => 4,
+            "ShockwaveRing" => 4,
+            "PiercingLine"  => 4,
+            _               => N_AGENTS,
         };
 
         // GPU side seeds slot 0 with this ability's per-agent stats.
@@ -1041,6 +1178,58 @@ fn cpu_gpu_apply_program_byte_equal_across_modifier_matrix() {
                 [1.0, 5.0, 0.0],
             ]);
         }
+        if *name == "BlastSphere" {
+            // 4-agent fixture for the sphere AOE: same row layout as
+            // Cleave (x=0, 1.5, 3.0, 4.5). Sphere is mathematically
+            // equivalent to Circle today (3D dist² ≤ radius²); with
+            // radius=2.0 centered at caster slot 0, in-sphere = {slot
+            // 0 (d=0), slot 1 (d=1.5)}. Both backends emit 2 chronicle
+            // records — same byte-set as Cleave but routed through the
+            // dedicated Sphere branch (`area_kind == 6u`).
+            state.set_agent_alive(&[1, 0, 0, 0]);
+            state.set_agent_positions(&[
+                [0.0, 0.0, 0.0],
+                [1.5, 0.0, 0.0],
+                [3.0, 0.0, 0.0],
+                [4.5, 0.0, 0.0],
+            ]);
+        }
+        if *name == "ShockwaveRing" {
+            // 4-agent fixture for the ring AOE: same row layout (x=0,
+            // 1.5, 3.0, 4.5). Ring(0.5, 2.0) centered at caster slot 0:
+            //   - slot 0 (d=0):   d² < inner² ⇒ inner-excluded
+            //   - slot 1 (d=1.5): inner² ≤ d² ≤ outer² ⇒ in
+            //   - slot 2 (d=3.0): d² > outer² ⇒ outer-excluded
+            //   - slot 3 (d=4.5): d² > outer² ⇒ outer-excluded
+            // Expected hit set = {slot 1} → 1 chronicle record. The
+            // inner-radius exclusion is the distinguishing feature
+            // vs. Cleave/BlastSphere — both backends agree byte-equal.
+            state.set_agent_alive(&[1, 0, 0, 0]);
+            state.set_agent_positions(&[
+                [0.0, 0.0, 0.0],
+                [1.5, 0.0, 0.0],
+                [3.0, 0.0, 0.0],
+                [4.5, 0.0, 0.0],
+            ]);
+        }
+        if *name == "PiercingLine" {
+            // 4-agent fixture for the line AOE: same row layout. Under
+            // the smoke fixture's self-cast rule (caster_slot ==
+            // target_slot), apex == target_pos == (0,0,0) ⇒
+            // direction_raw = (0,0,0) ⇒ degenerate. The WGSL kernel's
+            // `dir_len_sq < 1e-6` branch skips the spatial walk; the
+            // CPU oracle's `apply_program_aoe_line_filter` returns
+            // empty in the same condition. Both backends emit 0
+            // chronicle records — byte-equal at zero (mirrors Slash's
+            // degenerate-cone semantic).
+            state.set_agent_alive(&[1, 0, 0, 0]);
+            state.set_agent_positions(&[
+                [0.0, 0.0, 0.0],
+                [1.5, 0.0, 0.0],
+                [3.0, 0.0, 0.0],
+                [4.5, 0.0, 0.0],
+            ]);
+        }
 
         for &tick in TICKS {
             // -- CPU oracle.
@@ -1063,6 +1252,27 @@ fn cpu_gpu_apply_program_byte_equal_across_modifier_matrix() {
                     program,
                     /*caster_slot*/ 0,
                     /*aoe_target_slots*/ &[0, 1],
+                    tick,
+                    caster_stats,
+                ),
+                "BlastSphere" => blast_sphere_cpu_records_for_cast(
+                    program,
+                    /*caster_slot*/ 0,
+                    /*aoe_target_slots*/ &[0, 1],
+                    tick,
+                    caster_stats,
+                ),
+                "ShockwaveRing" => shockwave_ring_cpu_records_for_cast(
+                    program,
+                    /*caster_slot*/ 0,
+                    /*aoe_target_slots*/ &[1],
+                    tick,
+                    caster_stats,
+                ),
+                "PiercingLine" => piercing_line_cpu_records_for_cast(
+                    program,
+                    /*caster_slot*/ 0,
+                    /*aoe_target_slots*/ &[],
                     tick,
                     caster_stats,
                 ),

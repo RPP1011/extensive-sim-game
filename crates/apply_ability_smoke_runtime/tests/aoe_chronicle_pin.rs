@@ -377,3 +377,235 @@ fn aoe_box_hits_within_aabb_extents() {
         );
     }
 }
+
+// ---------------------------------------------------------------- //
+// AOE Path B Sphere/Ring/Line GPU pins (#180)
+// ---------------------------------------------------------------- //
+
+#[test]
+fn aoe_sphere_hits_two_in_row() {
+    // #180 AOE Path B Sphere — GPU pin. Sphere is mathematically
+    // equivalent to Circle today (3D dist² ≤ radius²), routed through
+    // the dispatcher's dedicated Sphere branch (`area_kind == 6u`).
+    //
+    // Mirror of the Circle pin: 4-agent row at (0, 1.5, 3.0, 4.5),
+    // sphere(2.0) cast from caster slot 0; in-sphere = {slot 0 (d=0),
+    // slot 1 (d=1.5)}. Expected 2 chronicle records.
+    let mut blast_sphere = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 18.0 }],
+    );
+    blast_sphere.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Sphere,
+        args: [2.0, 0.0, 0.0, 0.0],
+    }));
+
+    let mut builder = AbilityRegistryBuilder::new();
+    let blast_sphere_id = builder.register(blast_sphere);
+    let registry = builder.build();
+
+    const N_AGENTS: u32 = 4;
+    let levels: Vec<u32> = vec![blast_sphere_id.raw(); N_AGENTS as usize];
+    let stats: Vec<PerAgentStats> = vec![PerAgentStats::default(); N_AGENTS as usize];
+
+    let state = match ApplyAbilitySmokeState::try_new_with_registry(
+        N_AGENTS,
+        &registry,
+        &levels,
+        &stats,
+    ) {
+        Some(s) => s,
+        None => {
+            eprintln!(
+                "[aoe_chronicle_pin] skipping sphere test: no wgpu adapter available."
+            );
+            return;
+        }
+    };
+    let mut state = state;
+
+    state.set_agent_alive(&[1, 0, 0, 0]);
+    state.set_agent_positions(&[
+        [0.0, 0.0, 0.0],
+        [1.5, 0.0, 0.0],
+        [3.0, 0.0, 0.0],
+        [4.5, 0.0, 0.0],
+    ]);
+
+    state.step(0);
+
+    let tail = state.read_event_tail();
+    assert_eq!(
+        tail, 2,
+        "AOE BlastSphere (sphere(2.0)) at center (0,0,0) over row of 4 \
+         agents must emit exactly 2 chronicle records (slots 0 + 1, both \
+         within radius — Sphere is equivalent to Circle today). Got tail={tail}",
+    );
+
+    let mut records = state.read_event_ring(tail);
+    records.sort_by_key(|r| (r[3], r[0]));
+
+    let damage_kind: u32 = 26;
+    let amount_bits: u32 = 18.0_f32.to_bits();
+    for (i, expected_target) in [0u32, 1u32].iter().enumerate() {
+        let r = records[i];
+        assert_eq!(r[0], damage_kind, "record {i} kind");
+        assert_eq!(r[1], 0, "record {i} tick");
+        assert_eq!(r[2], 0, "record {i} actor");
+        assert_eq!(r[3], *expected_target, "record {i} target");
+        assert_eq!(r[4], amount_bits, "record {i} payload_a (18.0)");
+    }
+}
+
+#[test]
+fn aoe_ring_excludes_inner_radius() {
+    // #180 AOE Path B Ring — GPU pin for the annulus gate.
+    //
+    // Fixture: 4-agent row at (0, 1.5, 3.0, 4.5). Ring(0.5, 2.0) cast
+    // from caster slot 0:
+    //   - slot 0 (d=0):   d² < inner² ⇒ INNER-EXCLUDED
+    //   - slot 1 (d=1.5): inner² ≤ d² ≤ outer² ⇒ in
+    //   - slot 2 (d=3.0): d² > outer² ⇒ OUT
+    //   - slot 3 (d=4.5): d² > outer² ⇒ OUT
+    //
+    // Expected: 1 chronicle record (kind=26, actor=0, target=1,
+    // payload_a=bitcast<u32>(14.0)=0x41600000). The inner-radius
+    // exclusion is the distinguishing feature vs Circle/Sphere — pin
+    // explicitly so a regression on the inner gate (e.g. `>=` flipped
+    // to `>`) surfaces as a count or target mismatch here.
+    let mut shockwave_ring = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 14.0 }],
+    );
+    shockwave_ring.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Ring,
+        args: [0.5, 2.0, 0.0, 0.0],
+    }));
+
+    let mut builder = AbilityRegistryBuilder::new();
+    let shockwave_ring_id = builder.register(shockwave_ring);
+    let registry = builder.build();
+
+    const N_AGENTS: u32 = 4;
+    let levels: Vec<u32> = vec![shockwave_ring_id.raw(); N_AGENTS as usize];
+    let stats: Vec<PerAgentStats> = vec![PerAgentStats::default(); N_AGENTS as usize];
+
+    let state = match ApplyAbilitySmokeState::try_new_with_registry(
+        N_AGENTS,
+        &registry,
+        &levels,
+        &stats,
+    ) {
+        Some(s) => s,
+        None => {
+            eprintln!(
+                "[aoe_chronicle_pin] skipping ring test: no wgpu adapter available."
+            );
+            return;
+        }
+    };
+    let mut state = state;
+
+    state.set_agent_alive(&[1, 0, 0, 0]);
+    state.set_agent_positions(&[
+        [0.0, 0.0, 0.0],
+        [1.5, 0.0, 0.0],
+        [3.0, 0.0, 0.0],
+        [4.5, 0.0, 0.0],
+    ]);
+
+    state.step(0);
+
+    let tail = state.read_event_tail();
+    assert_eq!(
+        tail, 1,
+        "AOE ShockwaveRing (ring(0.5, 2.0)) at center (0,0,0) over row \
+         of 4 agents must emit exactly 1 chronicle record (slot 1 only — \
+         slot 0 inner-excluded at d=0, slots 2+3 outer-excluded). Got tail={tail}",
+    );
+
+    let records = state.read_event_ring(tail);
+    let r = records[0];
+    let damage_kind: u32 = 26;
+    let amount_bits: u32 = 14.0_f32.to_bits();
+    assert_eq!(r[0], damage_kind, "ring record kind");
+    assert_eq!(r[1], 0, "ring record tick");
+    assert_eq!(r[2], 0, "ring record actor must be caster slot 0");
+    assert_eq!(r[3], 1, "ring record target must be slot 1 (only in-ring agent)");
+    assert_eq!(r[4], amount_bits, "ring record payload_a (14.0)");
+}
+
+#[test]
+fn aoe_line_degenerate_under_self_cast_emits_no_records() {
+    // #180 AOE Path B Line — GPU pin for the degenerate-line branch.
+    //
+    // Smoke-fixture self-cast invariant: `caster_slot == target_slot`,
+    // so `apex == target_pos == agent_pos[0]`. The line's `direction =
+    // target_pos - apex = (0,0,0)` is degenerate; the WGSL kernel's
+    // `dir_len_sq < 1e-6 → no-op` branch skips the spatial walk and
+    // emits zero records. Mirrors the cone degenerate pin shape (#178).
+    //
+    // Fixture (4 agents): caster at origin, three candidates that a
+    // non-degenerate line(5.0, 1.0) facing +X WOULD hit (slots 1, 2 in
+    // front of caster within the corridor, slot 3 outside the corridor).
+    // With this fixture the line WOULD hit them; under self-cast it
+    // doesn't, because the direction is undefined.
+    let mut piercing_line = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 22.0 }],
+    );
+    piercing_line.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Line,
+        args: [5.0, 1.0, 0.0, 0.0],
+    }));
+
+    let mut builder = AbilityRegistryBuilder::new();
+    let piercing_line_id = builder.register(piercing_line);
+    let registry = builder.build();
+
+    const N_AGENTS: u32 = 4;
+    let levels: Vec<u32> = vec![piercing_line_id.raw(); N_AGENTS as usize];
+    let stats: Vec<PerAgentStats> = vec![PerAgentStats::default(); N_AGENTS as usize];
+
+    let state = match ApplyAbilitySmokeState::try_new_with_registry(
+        N_AGENTS,
+        &registry,
+        &levels,
+        &stats,
+    ) {
+        Some(s) => s,
+        None => {
+            eprintln!(
+                "[aoe_chronicle_pin] skipping line test: no wgpu adapter available."
+            );
+            return;
+        }
+    };
+    let mut state = state;
+
+    // Only caster (slot 0) alive; spatial grid still holds positions
+    // for slots 1..3 so the walk would find them as candidates if
+    // the direction were non-degenerate.
+    state.set_agent_alive(&[1, 0, 0, 0]);
+    state.set_agent_positions(&[
+        [0.0, 0.0, 0.0],   // caster apex
+        [1.0, 0.0, 0.0],   // would-be in-line (along=1, perp=0)
+        [3.0, 0.0, 0.0],   // would-be in-line (along=3, perp=0)
+        [2.0, 0.6, 0.0],   // would-be out-of-line (perp=0.6 > 0.5)
+    ]);
+
+    state.step(0);
+
+    let tail = state.read_event_tail();
+    assert_eq!(
+        tail, 0,
+        "Self-cast line (caster_slot == target_slot ⇒ direction \
+         degenerate) must emit zero chronicle records. The line WGSL's \
+         `dir_len_sq < 1e-6` branch skips the spatial walk; CPU oracle's \
+         `apply_program_aoe_line_filter` matches by returning an empty \
+         in-line set. Got tail={tail}",
+    );
+}
