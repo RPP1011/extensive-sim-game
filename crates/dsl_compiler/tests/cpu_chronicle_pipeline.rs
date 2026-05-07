@@ -322,6 +322,84 @@ fn distinct_caster_and_target_pipeline_handles_friendly_heal() {
     assert_eq!(r[4], 12.5_f32.to_bits(), "amount as bitcast<u32>");
 }
 
+/// Slice ε pipeline pin for TransferGold — the chronicle variant
+/// where caster≠target is the *canonical* shape (gold flows from
+/// source to recipient; self-transfer is a degenerate case). Confirms
+/// the i32→u32 sign-widening payload coexists with explicit slot 2/3
+/// routing.
+#[test]
+fn distinct_caster_and_target_pipeline_handles_transfer_gold() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
+        [EffectOp::TransferGold { amount: 250 }],
+    );
+    let caster = aid(15);
+    let target = aid(22);
+    let tick: u32 = 500;
+
+    let events = apply_program(
+        &program,
+        caster,
+        target,
+        tick as u64,
+        0xABBA_C0DE,
+        &CasterStats::default(),
+    );
+    let records: Vec<_> = events
+        .into_iter()
+        .filter_map(|e| {
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw())
+        })
+        .collect();
+
+    assert_eq!(records.len(), 1, "TransferGold produces one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 31, "EffectGoldTransfer");
+    assert_eq!(r[1], 500, "tick");
+    assert_eq!(r[2], 15, "actor slot — caster_id (the sender)");
+    assert_eq!(r[3], 22, "target slot — distinct target_id (the recipient)");
+    assert_eq!(r[4], 250, "amount round-trips through pipeline");
+}
+
+/// Slice ε pipeline pin for negative TransferGold — exercises the
+/// i32→u32 sign-widening on the caster≠target path. (Negative amounts
+/// model gold being taxed/seized — source field is still the agent
+/// initiating the transfer, regardless of direction.)
+#[test]
+fn distinct_caster_and_target_pipeline_transfer_gold_negative_amount() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
+        [EffectOp::TransferGold { amount: -75 }],
+    );
+    let caster = aid(9);
+    let target = aid(14);
+    let tick: u32 = 600;
+
+    let events = apply_program(
+        &program,
+        caster,
+        target,
+        tick as u64,
+        0xDEAD_C0DE,
+        &CasterStats::default(),
+    );
+    let records: Vec<_> = events
+        .into_iter()
+        .filter_map(|e| {
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw())
+        })
+        .collect();
+
+    assert_eq!(records.len(), 1);
+    let r = records[0];
+    assert_eq!(r[0], 31, "EffectGoldTransfer");
+    assert_eq!(r[2], 9, "caster_id");
+    assert_eq!(r[3], 14, "target_id distinct from caster");
+    assert_eq!(r[4], (-75_i32) as u32, "negative amount sign-widened i32→u32");
+}
+
 /// Slice ε pipeline pin for Shield — the third amount-only chronicle
 /// variant (alongside Damage + Heal) but with its own EventKindId
 /// (28). Confirms slot 2/3 routing is event-kind-tag independent
