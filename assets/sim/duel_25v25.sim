@@ -67,6 +67,33 @@ event EffectDamageApplied {
   amount: f32,
 }
 
+// Multi-effect AOE Cleave+Stun (ConcussiveCleave Path B production
+// proof, 2026-05-07) — engine-side chronicle event written by the
+// apply_ability dispatcher at hardcoded EventKindId 29 (see
+// `dsl_ast::engine_events::engine_event_kind_id_for_name`).
+//
+// ConcussiveCleave's AbilityProgram declares TWO effects in
+// per_effect_areas[0..1]: Damage(3.0) AND Stun(15 ticks), both in the
+// same Circle(1.0) area. The dispatcher's per-effect-slot loop walks
+// effects[0] (Damage) then effects[1] (Stun); for AOE-equipped slots
+// each in-radius candidate gets ONE chronicle record per slot. So a
+// single ConcussiveCleave cast emits TWO records per AOE target — one
+// kind=26 EffectDamageApplied (drained by ApplyDamageFromChronicle into
+// Damaged → ApplyDamage → hp/alive) AND one kind=29 EffectStunApplied
+// (drained by ApplyStunFromChronicle below into the per-agent
+// stun_expires_at_tick SoA field).
+//
+// SHAPE NOTE: the chronicle's third payload word is `expires_at_tick`
+// (= dispatcher's `tick + duration_ticks` from EffectOp::Stun{
+// duration_ticks }), distinct from EffectDamageApplied's `amount: f32`.
+// See `cg/emit/wgsl_body.rs` (Stun = 3 → kind 29 dispatcher arm).
+@replayable @gpu_amenable
+event EffectStunApplied {
+  actor: AgentId,
+  target: AgentId,
+  expires_at_tick: u32,
+}
+
 @replayable @gpu_amenable
 event Defeated {
   combatant: AgentId,
@@ -207,6 +234,33 @@ physics ScanAndCleave @phase(per_agent) {
   }
 }
 
+// Multi-effect AOE Cleave+Stun (ConcussiveCleave Path B production
+// proof, 2026-05-07) — third physics rule dispatching AbilityId(3) on
+// a different cadence (every 7 ticks; coprime with Strike's % 2 and
+// Cleave's % 5 so all three rules' ticks interleave). ConcussiveCleave
+// registers as a TWO-effect program with BOTH effects sharing
+// Circle(1.0): effects[0]=Damage(3.0), effects[1]=Stun(15 ticks). The
+// dispatcher's effect-slot loop walks both slots, and the AOE branch
+// (area_kinds[i] = Circle = 0u) walks the 27-cell neighborhood around
+// the cross-team target's position and emits ONE chronicle record per
+// in-radius candidate per slot — so each AOE target gets BOTH a
+// kind=26 EffectDamageApplied and a kind=29 EffectStunApplied record.
+//
+// Cadence picked so 0, 14, 28, ... overlap Cleave (% 5 == 0 at
+// 0, 5, 10, ...) and Strike (% 2 == 0) sparsely — gives a clean
+// "stun pulse" once a second-ish without spamming control.
+physics ScanAndConcussiveCleave @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && (world.tick % 7 == 0)) {
+    for other in spatial.nearby_enemies(self) {
+      if (other.creature_type != self.creature_type
+          && other.alive) {
+        apply_ability 3 by self target other
+      }
+    }
+  }
+}
+
 // Task #138 follow-on (duel_25v25 port, 2026-05-07) — ScanAndStrike's
 // body now uses `apply_ability 1 by self target other`. The dispatcher
 // writes EffectDamageApplied chronicle records (engine-aliased to
@@ -228,6 +282,37 @@ physics ScanAndCleave @phase(per_agent) {
 physics ApplyDamageFromChronicle {
   on EffectDamageApplied { actor: a, target: t, amount: amt } {
     emit Damaged { source: a, target: t, amount: amt }
+  }
+}
+
+// Multi-effect AOE Cleave+Stun (ConcussiveCleave Path B production
+// proof, 2026-05-07) — chronicle consumer for the kind=29
+// EffectStunApplied records ConcussiveCleave's effects[1] writes per
+// AOE target. The dispatcher pre-computes
+// `expires_at_tick = world.tick + duration_ticks` at chronicle-write
+// time (see Stun arm in `cg/emit/wgsl_body.rs`), so this rule ferries
+// the absolute tick verbatim into the per-agent
+// `stun_expires_at_tick` SoA slot.
+//
+// Direct-SoA-write shape (vs duel_abilities which re-emits Stunned
+// then has a separate ApplyStun): duel_25v25 has no Stunned event
+// today and no other chronicle producer needs the same SoA write, so
+// fusing into one rule keeps the pass count down. The
+// `agents.set_stun_expires_at_tick` call mirrors duel_abilities's
+// ApplyStun handler shape (commit `2334ce2c` ancestry).
+//
+// P6 caveat: this rule is PerEvent + writes an AgentField — TRIPS P6
+// in the well_formed checker. The duel_25v25 build.rs already
+// tolerates lower diagnostics (matches lower_compilation_to_cg_with_opts
+// on DriverOutcome::Err and falls through with the partial program),
+// so the rule lowers regardless. Same tolerance pattern duel_abilities
+// uses for ApplyDamage's hp/alive writes. This is the FIRST status-SoA
+// write in the duel_25v25 fixture, but the build.rs treatment is
+// existing infrastructure.
+@phase(post)
+physics ApplyStunFromChronicle {
+  on EffectStunApplied { actor: _, target: t, expires_at_tick: e } {
+    agents.set_stun_expires_at_tick(t, e);
   }
 }
 
