@@ -1645,6 +1645,53 @@ fn lower_cg_stmt_body_to_wgsl(
             // wider runtime wire-up (#138 — replace inline emit in
             // duel_abilities with apply_ability) lights it up at
             // sim-level.
+            //
+            // **Path B (GPU AOE multi-target) — scoping note,
+            // 2026-05-07.** The CPU oracle (`apply_program_aoe`)
+            // expands Circle slots via `state.spatial().within_radius`
+            // and emits one ApplyEvent per in-circle target. The
+            // analogous GPU shape is to wrap the `if (when_passes)
+            // {…}` block below in a per-target loop:
+            //   1. Read `area_kinds[effect_base + i]`. If sentinel
+            //      (0xFFu) or non-zero → fall through to single-target
+            //      (existing chain executes with the cast's
+            //      `target_slot`).
+            //   2. If 0u (Circle): read `area_args[(effect_base+i)*4]`
+            //      as radius. Compute `aoe_center = agent_pos[target_slot]`.
+            //      Walk the 27-cell neighborhood: for each cell,
+            //      iterate `_start..end = spatial_grid_starts[cell..+1]`,
+            //      bind `let candidate = spatial_grid_cells[_i];`,
+            //      compute `let _d = agent_pos[candidate] - aoe_center;`,
+            //      gate on `dot(_d, _d) <= radius*radius`, then run the
+            //      arm chain inside a `{ let target_slot = candidate; … }`
+            //      block to shadow the outer `target_slot` for the
+            //      chronicle writes.
+            //   3. P11 sort: GPU's atomicAdd ring claim does NOT
+            //      preserve AgentId order. The CPU oracle sorts by
+            //      AgentId ascending; the parity comparison sorts both
+            //      sides post-readback (already done in
+            //      `parity_apply_program_sweep::canonicalize`).
+            // The shape is straightforward; the blocker is the
+            // **BGL composer + scheduler ripple**. Adding `agent_pos`
+            // + `spatial_grid_starts/_cells/_offsets` + `area_kinds`
+            // + `area_args` reads to this op auto-fires the five
+            // build-hash phases (see
+            // `collect_required_spatial_kinds` in driver.rs) in EVERY
+            // `apply_ability`-using fixture. Three production runtimes
+            // (`boss_fight_runtime`, `duel_abilities_runtime`,
+            // `tactical_squad_5v5_runtime`) currently bind NO spatial
+            // buffers; force-firing the build phases would require
+            // them to (a) allocate ~1.4 MB of spatial buffers per
+            // fixture, (b) uphold an `agent_pos` SoA contract many
+            // don't keep populated for `caster_slot` indexing today.
+            // The slice's brief calls a "STOP and document" outcome
+            // for fundamental dispatcher refactoring; that's where
+            // we landed for this iteration. Next slice should gate
+            // the AOE emit on a per-fixture build-time `AoeOpts`
+            // flag so opt-in fixtures (smoke runtime first) ship the
+            // walk + bindings while production runtimes preserve
+            // their zero-spatial-overhead BGL until they're ready
+            // to opt in.
             let ability_wgsl = lower_cg_expr_to_wgsl(*ability, ctx)?;
             // Slice δ (#161): caster operand is now an explicit
             // CgExpr lowered through the same path as any other
