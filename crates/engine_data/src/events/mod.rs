@@ -23,6 +23,7 @@ pub mod bid_placed;
 pub mod cast_depth_exceeded;
 pub mod chronicle_entry;
 pub mod effect_blink_applied;
+pub mod effect_charm_applied;
 pub mod effect_damage_applied;
 pub mod effect_damage_modify_applied;
 pub mod effect_damage_over_time_applied;
@@ -30,6 +31,7 @@ pub mod effect_dash_applied;
 pub mod effect_execute_applied;
 pub mod effect_fear_applied;
 pub mod effect_gold_transfer;
+pub mod effect_grounded_applied;
 pub mod effect_heal_applied;
 pub mod effect_heal_over_time_applied;
 pub mod effect_knockback_applied;
@@ -41,7 +43,9 @@ pub mod effect_shield_applied;
 pub mod effect_silence_applied;
 pub mod effect_slow_applied;
 pub mod effect_standing_delta;
+pub mod effect_stealth_applied;
 pub mod effect_stun_applied;
+pub mod effect_suppress_applied;
 pub mod effect_taunt_applied;
 pub mod effect_timed_shield_applied;
 pub mod engagement_broken;
@@ -77,6 +81,7 @@ pub use bid_placed::BidPlaced;
 pub use cast_depth_exceeded::CastDepthExceeded;
 pub use chronicle_entry::ChronicleEntry;
 pub use effect_blink_applied::EffectBlinkApplied;
+pub use effect_charm_applied::EffectCharmApplied;
 pub use effect_damage_applied::EffectDamageApplied;
 pub use effect_damage_modify_applied::EffectDamageModifyApplied;
 pub use effect_damage_over_time_applied::EffectDamageOverTimeApplied;
@@ -84,6 +89,7 @@ pub use effect_dash_applied::EffectDashApplied;
 pub use effect_execute_applied::EffectExecuteApplied;
 pub use effect_fear_applied::EffectFearApplied;
 pub use effect_gold_transfer::EffectGoldTransfer;
+pub use effect_grounded_applied::EffectGroundedApplied;
 pub use effect_heal_applied::EffectHealApplied;
 pub use effect_heal_over_time_applied::EffectHealOverTimeApplied;
 pub use effect_knockback_applied::EffectKnockbackApplied;
@@ -95,7 +101,9 @@ pub use effect_shield_applied::EffectShieldApplied;
 pub use effect_silence_applied::EffectSilenceApplied;
 pub use effect_slow_applied::EffectSlowApplied;
 pub use effect_standing_delta::EffectStandingDelta;
+pub use effect_stealth_applied::EffectStealthApplied;
 pub use effect_stun_applied::EffectStunApplied;
+pub use effect_suppress_applied::EffectSuppressApplied;
 pub use effect_taunt_applied::EffectTauntApplied;
 pub use effect_timed_shield_applied::EffectTimedShieldApplied;
 pub use engagement_broken::EngagementBroken;
@@ -367,6 +375,29 @@ pub enum Event {
         duration_ticks: u32,
         tick: u32,
     },
+    EffectStealthApplied {
+        actor: AgentId,
+        duration_ticks: u32,
+        tick: u32,
+    },
+    EffectCharmApplied {
+        actor: AgentId,
+        target: AgentId,
+        duration_ticks: u32,
+        tick: u32,
+    },
+    EffectGroundedApplied {
+        actor: AgentId,
+        target: AgentId,
+        duration_ticks: u32,
+        tick: u32,
+    },
+    EffectSuppressApplied {
+        actor: AgentId,
+        target: AgentId,
+        duration_ticks: u32,
+        tick: u32,
+    },
     EngagementBroken {
         actor: AgentId,
         former_target: AgentId,
@@ -471,6 +502,10 @@ impl Event {
             Event::EffectDamageOverTimeApplied { tick, .. } => *tick,
             Event::EffectHealOverTimeApplied { tick, .. } => *tick,
             Event::EffectTimedShieldApplied { tick, .. } => *tick,
+            Event::EffectStealthApplied { tick, .. } => *tick,
+            Event::EffectCharmApplied { tick, .. } => *tick,
+            Event::EffectGroundedApplied { tick, .. } => *tick,
+            Event::EffectSuppressApplied { tick, .. } => *tick,
             Event::EngagementBroken { tick, .. } => *tick,
             Event::EngagementCommitted { tick, .. } => *tick,
             Event::FearSpread { tick, .. } => *tick,
@@ -528,6 +563,10 @@ impl Event {
             Event::EffectDamageOverTimeApplied { .. } => true,
             Event::EffectHealOverTimeApplied { .. } => true,
             Event::EffectTimedShieldApplied { .. } => true,
+            Event::EffectStealthApplied { .. } => true,
+            Event::EffectCharmApplied { .. } => true,
+            Event::EffectGroundedApplied { .. } => true,
+            Event::EffectSuppressApplied { .. } => true,
             Event::EngagementBroken { .. } => true,
             Event::EngagementCommitted { .. } => true,
             Event::FearSpread { .. } => true,

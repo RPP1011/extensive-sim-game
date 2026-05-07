@@ -37,6 +37,10 @@
 //!  19. `DamageOverTime(6, 30)`                     — Burn-shape (Wave 1.5+)
 //!  20. `HealOverTime(4, 50)`                       — Regen-shape (Wave 1.5+)
 //!  21. `TimedShield(25, 100)`                      — Aegis-shape (Wave 1.5+)
+//!  22. `Stealth(50)`                               — Vanish-shape (extended status)
+//!  23. `Charm(30)`                                 — Allure-shape (extended status)
+//!  24. `Grounded(25)`                              — Tether-shape (extended status)
+//!  25. `Suppress(40)`                              — Hush-shape (extended status)
 //!
 //! M = 1 caster×target permutation in this fixture: `(c=0, t=0)`
 //! self-cast. The smoke fixture's `apply_ability` source uses the
@@ -48,7 +52,7 @@
 //! T = 5 ticks (0, 17, 100, 1000, 65500) — varied across the u32 range
 //! to surface any wraparound bug in expires_at_tick computations.
 //!
-//! K = 21 × 1 × 5 = **105 casts**, producing 110 chronicle records (105
+//! K = 25 × 1 × 5 = **125 casts**, producing 130 chronicle records (125
 //! primary + 5 nested-Stun follow-ups from the Reap+Stun-shape arm).
 //!
 //! ## What's deferred
@@ -444,6 +448,60 @@ fn build_sweep() -> Vec<(&'static str, AbilityProgram, CasterStats)> {
             5.0,
             Gate { cooldown_ticks: 60, hostile_only: false, line_of_sight: false },
             [EffectOp::TimedShield { amount: 25.0, duration_ticks: 100 }],
+        ),
+        CasterStats::default(),
+    ));
+
+    // Extended-corpus statuses (Stealth/Charm/Grounded/Suppress). Two
+    // distinct shapes:
+    //   - Stealth: caster-self status. Engine event has no target field;
+    //     the chronicle record stores duration_ticks at payload word 1
+    //     (= ring slot offset 3). Same family as Dash/Blink.
+    //   - Charm/Grounded/Suppress: target-cast statuses. 3-payload-word
+    //     record: actor + target + duration_ticks at ring slot offset 4.
+    // Adding all four extends the sweep matrix to 25 abilities so the
+    // four new GPU dispatcher arms get parity-pinned.
+
+    // 22. Vanish-shape — Stealth (caster-self status).
+    out.push((
+        "Vanish",
+        AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 60, hostile_only: false, line_of_sight: false },
+            [EffectOp::Stealth { duration_ticks: 50 }],
+        ),
+        CasterStats::default(),
+    ));
+
+    // 23. Allure-shape — Charm (target-cast status).
+    out.push((
+        "Allure",
+        AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 60, hostile_only: true, line_of_sight: false },
+            [EffectOp::Charm { duration_ticks: 30 }],
+        ),
+        CasterStats::default(),
+    ));
+
+    // 24. Tether-shape — Grounded (target-cast status).
+    out.push((
+        "Tether",
+        AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 60, hostile_only: true, line_of_sight: false },
+            [EffectOp::Grounded { duration_ticks: 25 }],
+        ),
+        CasterStats::default(),
+    ));
+
+    // 25. Hush-shape — Suppress (target-cast status).
+    out.push((
+        "Hush",
+        AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 60, hostile_only: true, line_of_sight: false },
+            [EffectOp::Suppress { duration_ticks: 40 }],
         ),
         CasterStats::default(),
     ));

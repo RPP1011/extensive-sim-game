@@ -88,6 +88,10 @@ pub mod interp {
             Event::EffectDamageOverTimeApplied { .. } => "EffectDamageOverTimeApplied",
             Event::EffectHealOverTimeApplied   { .. } => "EffectHealOverTimeApplied",
             Event::EffectTimedShieldApplied    { .. } => "EffectTimedShieldApplied",
+            Event::EffectStealthApplied  { .. } => "EffectStealthApplied",
+            Event::EffectCharmApplied    { .. } => "EffectCharmApplied",
+            Event::EffectGroundedApplied { .. } => "EffectGroundedApplied",
+            Event::EffectSuppressApplied { .. } => "EffectSuppressApplied",
             Event::EffectSlowApplied     { .. } => "EffectSlowApplied",
             Event::EffectGoldTransfer    { .. } => "EffectGoldTransfer",
             Event::EffectStandingDelta   { .. } => "EffectStandingDelta",
@@ -375,6 +379,53 @@ pub mod interp {
                 ("a",                EvalValue::F32(*amount)),
                 ("d",                EvalValue::U32(*duration_ticks)),
                 ("tick",             EvalValue::U32(*tick)),
+            ],
+            // ---- EffectStealthApplied ------------------------------------
+            // Extended-corpus status — caster-self stealth, no target field.
+            // 2-payload-word chronicle record (actor + duration_ticks).
+            // The dispatcher writes raw `duration_ticks` (not
+            // expires_at_tick) — same convention as DoT/HoT/TimedShield.
+            Event::EffectStealthApplied { actor, duration_ticks, tick } => vec![
+                ("actor",          EvalValue::Agent(dsl_agent(*actor))),
+                ("duration_ticks", EvalValue::U32(*duration_ticks)),
+                ("c",              EvalValue::Agent(dsl_agent(*actor))),
+                ("d",              EvalValue::U32(*duration_ticks)),
+                ("tick",           EvalValue::U32(*tick)),
+            ],
+            // ---- EffectCharmApplied --------------------------------------
+            // Extended-corpus status — target-cast (actor + target +
+            // duration_ticks). Same payload-shape family as Stun/Root/etc.
+            // but stores raw `duration_ticks` rather than expires_at_tick.
+            Event::EffectCharmApplied { actor, target, duration_ticks, tick } => vec![
+                ("actor",          EvalValue::Agent(dsl_agent(*actor))),
+                ("target",         EvalValue::Agent(dsl_agent(*target))),
+                ("duration_ticks", EvalValue::U32(*duration_ticks)),
+                ("c",              EvalValue::Agent(dsl_agent(*actor))),
+                ("t",              EvalValue::Agent(dsl_agent(*target))),
+                ("d",              EvalValue::U32(*duration_ticks)),
+                ("tick",           EvalValue::U32(*tick)),
+            ],
+            // ---- EffectGroundedApplied -----------------------------------
+            // Extended-corpus status — same shape as Charm.
+            Event::EffectGroundedApplied { actor, target, duration_ticks, tick } => vec![
+                ("actor",          EvalValue::Agent(dsl_agent(*actor))),
+                ("target",         EvalValue::Agent(dsl_agent(*target))),
+                ("duration_ticks", EvalValue::U32(*duration_ticks)),
+                ("c",              EvalValue::Agent(dsl_agent(*actor))),
+                ("t",              EvalValue::Agent(dsl_agent(*target))),
+                ("d",              EvalValue::U32(*duration_ticks)),
+                ("tick",           EvalValue::U32(*tick)),
+            ],
+            // ---- EffectSuppressApplied -----------------------------------
+            // Extended-corpus status — same shape as Charm/Grounded.
+            Event::EffectSuppressApplied { actor, target, duration_ticks, tick } => vec![
+                ("actor",          EvalValue::Agent(dsl_agent(*actor))),
+                ("target",         EvalValue::Agent(dsl_agent(*target))),
+                ("duration_ticks", EvalValue::U32(*duration_ticks)),
+                ("c",              EvalValue::Agent(dsl_agent(*actor))),
+                ("t",              EvalValue::Agent(dsl_agent(*target))),
+                ("d",              EvalValue::U32(*duration_ticks)),
+                ("tick",           EvalValue::U32(*tick)),
             ],
             // ---- EffectSlowApplied ----------------------------------------
             Event::EffectSlowApplied { actor, target, expires_at_tick, factor_q8, tick } => vec![

@@ -54,6 +54,10 @@ impl crate::event::EventLike for Event {
             Event::EffectDamageOverTimeApplied { .. } => EventKindId::EffectDamageOverTimeApplied,
             Event::EffectHealOverTimeApplied { .. } => EventKindId::EffectHealOverTimeApplied,
             Event::EffectTimedShieldApplied { .. } => EventKindId::EffectTimedShieldApplied,
+            Event::EffectStealthApplied { .. } => EventKindId::EffectStealthApplied,
+            Event::EffectCharmApplied { .. } => EventKindId::EffectCharmApplied,
+            Event::EffectGroundedApplied { .. } => EventKindId::EffectGroundedApplied,
+            Event::EffectSuppressApplied { .. } => EventKindId::EffectSuppressApplied,
             Event::EngagementBroken { .. } => EventKindId::EngagementBroken,
             Event::EngagementCommitted { .. } => EventKindId::EngagementCommitted,
             Event::FearSpread { .. } => EventKindId::FearSpread,
@@ -572,6 +576,52 @@ impl crate::event::EventLike for Event {
                 h.update(actor.raw().to_le_bytes());
                 h.update(target.raw().to_le_bytes());
                 h.update(amount.to_bits().to_le_bytes());
+                h.update(duration_ticks.to_le_bytes());
+                h.update(tick.to_le_bytes());
+            }
+            Event::EffectStealthApplied {
+                actor,
+                duration_ticks,
+                tick,
+            } => {
+                h.update([EventKindId::EffectStealthApplied as u8]);
+                h.update(actor.raw().to_le_bytes());
+                h.update(duration_ticks.to_le_bytes());
+                h.update(tick.to_le_bytes());
+            }
+            Event::EffectCharmApplied {
+                actor,
+                target,
+                duration_ticks,
+                tick,
+            } => {
+                h.update([EventKindId::EffectCharmApplied as u8]);
+                h.update(actor.raw().to_le_bytes());
+                h.update(target.raw().to_le_bytes());
+                h.update(duration_ticks.to_le_bytes());
+                h.update(tick.to_le_bytes());
+            }
+            Event::EffectGroundedApplied {
+                actor,
+                target,
+                duration_ticks,
+                tick,
+            } => {
+                h.update([EventKindId::EffectGroundedApplied as u8]);
+                h.update(actor.raw().to_le_bytes());
+                h.update(target.raw().to_le_bytes());
+                h.update(duration_ticks.to_le_bytes());
+                h.update(tick.to_le_bytes());
+            }
+            Event::EffectSuppressApplied {
+                actor,
+                target,
+                duration_ticks,
+                tick,
+            } => {
+                h.update([EventKindId::EffectSuppressApplied as u8]);
+                h.update(actor.raw().to_le_bytes());
+                h.update(target.raw().to_le_bytes());
                 h.update(duration_ticks.to_le_bytes());
                 h.update(tick.to_le_bytes());
             }

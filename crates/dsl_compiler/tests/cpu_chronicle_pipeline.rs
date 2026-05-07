@@ -115,23 +115,26 @@ fn multi_effect_ability_produces_record_per_chronicle_arm() {
 #[test]
 fn ability_with_only_non_chronicle_effects_produces_no_records() {
     // Deferred-infrastructure variants (Summon/Harvest/PlaceVoxel/
-    // Stealth/Charm/Grounded/Suppress/Reflect/Buff) still have no
-    // chronicle counterparts today — the dispatcher's WGSL would still
-    // emit TODO-marker arms for these on GPU, but no chronicle write.
+    // Reflect/Buff) still have no chronicle counterparts today — the
+    // dispatcher's WGSL would still emit TODO-marker arms for these on
+    // GPU, but no chronicle write.
     //
     // Already wired up:
     // - Root/Silence/Fear/Taunt (Wave 2 piece 1) → kinds 43..46.
     // - Dash/Blink/Knockback/Pull (Wave 2 piece 2) → kinds 47..50.
-    // - DoT/HoT/TimedShield (Wave 1.5+, this slice) → kinds 51..53,
-    //   see `damage_over_time_pipeline_emits_kind_51_record` below.
+    // - DoT/HoT/TimedShield (Wave 1.5+) → kinds 51..53.
+    // - Stealth/Charm/Grounded/Suppress (extended-status slice) →
+    //   kinds 54..57, see the `*_pipeline_emits_kind_54..57_record`
+    //   tests below.
     //
-    // Pick Charm (kind 28) + Grounded (kind 29) — both still TODO.
+    // Pick Buff (kind 23) + Reflect (kind 31) — both still TODO.
+    use engine::ability::program::BuffStat;
     let program = AbilityProgram::new_single_target(
         5.0,
         Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
         [
-            EffectOp::Charm    { duration_ticks: 50 },
-            EffectOp::Grounded { duration_ticks: 30 },
+            EffectOp::Buff    { stat: BuffStat::AttackSpeed, magnitude_q8: 64, duration_ticks: 30 },
+            EffectOp::Reflect { duration_ticks: 50, fraction_q8: 128 },
         ],
     );
     let records = run_pipeline(&program, aid(1), aid(2), 100);
@@ -376,6 +379,96 @@ fn timed_shield_pipeline_emits_kind_53_record() {
     assert_eq!(r[5], 100, "duration_ticks at payload word 3 (raw u32)");
     for i in 6..10 {
         assert_eq!(r[i], 0, "TimedShield: tail word {i} should be zero");
+    }
+}
+
+/// Extended-corpus statuses (Stealth/Charm/Grounded/Suppress). Two
+/// distinct shapes flow through `apply_program` (which emits
+/// `ApplyEvent::Stealth { source, duration_ticks }` for the caster-self
+/// shape, and `ApplyEvent::Charm/Grounded/Suppress { target,
+/// duration_ticks }` for the target-cast shape) and the CPU reference
+/// (which writes a kind=54..57 record). Stealth: caster-self status,
+/// duration at payload word 1 (= ring slot offset 3), no target field.
+/// Charm/Grounded/Suppress: target-cast statuses, 3-payload-word record
+/// with duration at payload word 2 (= ring slot offset 4). Mirrors the
+/// GPU dispatcher's per-status arm shapes.
+#[test]
+fn stealth_pipeline_emits_kind_54_record() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 60, hostile_only: false, line_of_sight: false },
+        [EffectOp::Stealth { duration_ticks: 50 }],
+    );
+    let records = run_pipeline(&program, aid(7), aid(7), 100);
+    assert_eq!(records.len(), 1, "one Stealth effect → one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 54, "EventKindId::EffectStealthApplied = 54");
+    assert_eq!(r[1], 100, "tick");
+    assert_eq!(r[2], 7, "actor slot — caster_id");
+    assert_eq!(r[3], 50, "duration_ticks at payload word 1 (no target field)");
+    // No payload word 2 — engine event has no target field.
+    for i in 4..10 {
+        assert_eq!(r[i], 0, "Stealth: tail word {i} should be zero");
+    }
+}
+
+#[test]
+fn charm_pipeline_emits_kind_55_record() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 60, hostile_only: true, line_of_sight: false },
+        [EffectOp::Charm { duration_ticks: 30 }],
+    );
+    let records = run_pipeline(&program, aid(7), aid(7), 100);
+    assert_eq!(records.len(), 1, "one Charm effect → one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 55, "EventKindId::EffectCharmApplied = 55");
+    assert_eq!(r[1], 100, "tick");
+    assert_eq!(r[2], 7, "actor slot — caster_id");
+    assert_eq!(r[3], 7, "target slot — target_id (self-cast: ==caster)");
+    assert_eq!(r[4], 30, "duration_ticks at payload word 2 (target-cast shape)");
+    for i in 5..10 {
+        assert_eq!(r[i], 0, "Charm: tail word {i} should be zero");
+    }
+}
+
+#[test]
+fn grounded_pipeline_emits_kind_56_record() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 60, hostile_only: true, line_of_sight: false },
+        [EffectOp::Grounded { duration_ticks: 25 }],
+    );
+    let records = run_pipeline(&program, aid(7), aid(7), 100);
+    assert_eq!(records.len(), 1, "one Grounded effect → one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 56, "EventKindId::EffectGroundedApplied = 56");
+    assert_eq!(r[1], 100, "tick");
+    assert_eq!(r[2], 7, "actor slot — caster_id");
+    assert_eq!(r[3], 7, "target slot — target_id (self-cast: ==caster)");
+    assert_eq!(r[4], 25, "duration_ticks at payload word 2 (target-cast shape)");
+    for i in 5..10 {
+        assert_eq!(r[i], 0, "Grounded: tail word {i} should be zero");
+    }
+}
+
+#[test]
+fn suppress_pipeline_emits_kind_57_record() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 60, hostile_only: true, line_of_sight: false },
+        [EffectOp::Suppress { duration_ticks: 40 }],
+    );
+    let records = run_pipeline(&program, aid(7), aid(7), 100);
+    assert_eq!(records.len(), 1, "one Suppress effect → one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 57, "EventKindId::EffectSuppressApplied = 57");
+    assert_eq!(r[1], 100, "tick");
+    assert_eq!(r[2], 7, "actor slot — caster_id");
+    assert_eq!(r[3], 7, "target slot — target_id (self-cast: ==caster)");
+    assert_eq!(r[4], 40, "duration_ticks at payload word 2 (target-cast shape)");
+    for i in 5..10 {
+        assert_eq!(r[i], 0, "Suppress: tail word {i} should be zero");
     }
 }
 
