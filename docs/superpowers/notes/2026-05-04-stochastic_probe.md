@@ -45,7 +45,25 @@ stochastic_probe_app: OUTCOME = (b) WGSL VALIDATION FAILED
 The harness wraps the GPU path in `catch_unwind` so the panic
 becomes a clean OUTCOME (b) report instead of a raw process abort.
 
-## Gap punch list
+## Gap punch list — ALL RESOLVED
+
+> **Audit update (2026-05-07).** All four gaps in this note are CLOSED:
+>   - **Gaps #1 + #2 + #3** (seed binding, `per_agent_u32` prelude,
+>     string-literal purpose): RESOLVED in `23f2937f`
+>     (`fix(dsl_compiler): close stochastic_probe Gaps #1-#3`). cfg
+>     uniform now carries `seed: u32`; kernel preamble binds
+>     `let seed = cfg.seed`; `RNG_WGSL_PRELUDE` defines
+>     `fn per_agent_u32(...)`; purpose passed as numeric `RngPurpose::wgsl_id()`.
+>   - **Gap #4** (rng.* surface drift — uniform/gauss/coin/uniform_int):
+>     RESOLVED in `3d7b7fbf` + later commits `eed53986` (uniform_int /
+>     uniform / gauss) and `8d7c2673` (coin). All four typed RNG
+>     surfaces now lower + emit + naga-validate end-to-end (see
+>     `stdlib_math_probe_compile_gate`).
+>
+> Regression tests: `stochastic_probe_compile_gate` +
+> `stdlib_math_probe_compile_gate` in
+> `crates/dsl_compiler/tests/stress_fixtures_compile.rs`.
+> Historical text below is preserved for archaeology.
 
 The first naga error stops at the string-literal `"action"` (Gap
 #3); the kernel has TWO MORE undeclared symbols (Gaps #1 + #2)

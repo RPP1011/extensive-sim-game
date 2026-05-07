@@ -121,7 +121,28 @@ The scheduler emitted **7 kernels** (no fusion — single physics rule
 agent_alive, cfg). The cfg uniform carries `agent_cap` + `tick` +
 `seed` per the Gap #1 close from stochastic_probe.
 
-## Gap punch list
+## Gap punch list — ALL RESOLVED
+
+> **Audit update (2026-05-07).** All five gaps (#A-#E) are CLOSED.
+> Closing commits:
+>   - **Gaps #A + #B + #D** (log10 native; planar_distance/z_separation
+>     prelude; rng.coin bool=u32): RESOLVED in `8d7c2673`
+>     (`fix(dsl_compiler): close stdlib_math_probe Gaps #A + #B + #D`).
+>     `log10(x)` rewrites inline to `(log2(x) / log2(10.0))` at the
+>     Builtin emit site; spatial-builtin prelude injected by
+>     `compose_spatial_prelude` in `cg/emit/program.rs:512`;
+>     `rng.coin()` emits `((per_agent_u32(...) & 1u) == 0u)` for bool.
+>   - **Gaps #C + #E** (rng.uniform_int unreachable; rng.uniform/gauss
+>     u32-in-f32): RESOLVED in `eed53986`. `RngPurpose::UniformInt`
+>     surface flipped from `(i32, i32) -> i32` to `(u32, u32) -> u32`;
+>     per-purpose conversion at `CgExpr::Rng` emit site for Uniform
+>     (`f32(per_agent_u32(...)) / f32(4294967295u)`) + Gauss
+>     (Box-Muller pair-draw using `RngPurpose::Gauss` + `GaussB`).
+>
+> Regression tests: `stdlib_math_probe_compile_gate` in
+> `crates/dsl_compiler/tests/stress_fixtures_compile.rs` pins every
+> closed-gap fingerprint (math identity rewrite, prelude, bool
+> bit-extract, Box-Muller). Historical text below is preserved.
 
 ### Gap #A — `log10(x)` lowers but no WGSL native (HIGH)
 

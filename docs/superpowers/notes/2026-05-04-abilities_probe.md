@@ -106,7 +106,25 @@ the shader at parse time:
   no definition in scope for identifier: `view_storage_primary`
 ```
 
-## Gap punch list (4 surfaced)
+## Gap punch list (4 surfaced) — ALL RESOLVED
+
+> **Audit update (2026-05-07).** All four gaps documented in this note are
+> CLOSED. Closing commits:
+>   - **Gap #1** (fused-kernel rename): RESOLVED in `cd007370` — Rule 5
+>     in `cg/schedule/fusion.rs::cross_domain_split_decision` blocks
+>     ViewFold⇄PhysicsRule fusion regardless of write/event overlap.
+>   - **Gap #2** (chronicle-pair cycle false positive) + **Gap #3**
+>     (Modulo `%` lowering): RESOLVED in `7208912f`. `BinaryOp::Mod`
+>     arms exist in `cg/lower/expr.rs` for U32/I32/F32; cycle detector
+>     ignores per-tag chronicle pairs.
+>   - **Gap #4** (per-agent cooldown SoA wired but unused): RESOLVED in
+>     `5d16c205` (`cooldown_probe` lights up `agents.cooldown_next_ready_tick`
+>     end-to-end with `world.tick >= ready_at` gate).
+>
+> Regression tests: `abilities_probe_compile_gate` +
+> `abilities_probe_naga_clean` +
+> `cooldown_probe_compile_gate` in `crates/dsl_compiler/tests/stress_fixtures_compile.rs`.
+> The historical text below is preserved verbatim for archaeology.
 
 ### Gap #1 — Fused-kernel binding rename gap (CRITICAL)
 

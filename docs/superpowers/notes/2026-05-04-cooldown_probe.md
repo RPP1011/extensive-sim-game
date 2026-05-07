@@ -25,6 +25,10 @@ The runtime initializes the SoA to a STAGGERED pattern (`ready_at[N]
 `activations[N] = max(0, TICKS - N)`. Slot 0 fires every tick (ready
 since 0), slot 31 fires only `100 - 31 = 69` times.
 
+> **Audit confirmation (2026-05-07).** No gaps documented in this note;
+> probe is OUTCOME (a) FULL FIRE. Regression test
+> `cooldown_probe_compile_gate` is green.
+
 ## Outcome
 
 **OUTCOME (a) FULL FIRE.** The probe ran cleanly end-to-end — both
