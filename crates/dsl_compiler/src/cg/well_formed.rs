@@ -1013,8 +1013,16 @@ fn walk_body_expr_subtrees(
                     );
                 }
             }
-            CgStmt::ApplyAbility { ability, caster: _, target: _ } => {
+            CgStmt::ApplyAbility { ability, caster, target } => {
+                // Slice ε: validate all three operands' expr-id
+                // subtrees. A malformed caster/target operand
+                // (e.g. references an out-of-range CgExprId)
+                // wouldn't surface without walking them — same
+                // shape of layered gap as the resolver fix in
+                // commit `c500eba7`.
                 validate_expr_subtree(arena, *ability, op_id, expr_arena_len, errors);
+                validate_expr_subtree(arena, *caster, op_id, expr_arena_len, errors);
+                validate_expr_subtree(arena, *target, op_id, expr_arena_len, errors);
             }
         }
     }
@@ -1606,14 +1614,27 @@ fn type_check_list(
                 // `walk_body_expr_subtrees` pass which descends into
                 // each nested stmt list's expressions.
             }
-            CgStmt::ApplyAbility { ability, caster: _, target: _ } => {
+            CgStmt::ApplyAbility { ability, caster, target } => {
                 // The ability expression must evaluate to an
                 // AbilityId (encoded as `CgTy::U32` since AbilityId
                 // wraps NonZeroU32). Type-check the operand here;
                 // the actual NonZero invariant is enforced at
                 // runtime by `AbilityId::new`.
+                //
+                // Slice ε: type-check caster + target operands too.
+                // Both must lower to u32 (AgentId raw representation).
+                // Without this walk, a malformed caster/target subtree
+                // wouldn't surface a TypeMismatch diagnostic — the
+                // dispatcher's `u32(caster_wgsl)` coercion would mask
+                // the type error until a later WGSL-validation stage.
                 if let Some(expr) = prog.exprs.get(ability.0 as usize) {
                     let _ = type_check(expr, *ability, ctx);
+                }
+                if let Some(expr) = prog.exprs.get(caster.0 as usize) {
+                    let _ = type_check(expr, *caster, ctx);
+                }
+                if let Some(expr) = prog.exprs.get(target.0 as usize) {
+                    let _ = type_check(expr, *target, ctx);
                 }
             }
         }
@@ -1868,7 +1889,28 @@ fn event_field_scope_walk_list(
                     );
                 }
             }
-            CgStmt::ApplyAbility { ability, caster: _, target: _ } => {
+            CgStmt::ApplyAbility { ability, caster, target } => {
+                // Slice ε: scope-walk all three operands. PerEvent
+                // rules can reference event-payload bindings via
+                // `by <e.field>`; the scope walker must visit those
+                // expressions to validate the field references are
+                // in scope for the surrounding event handler.
+                event_field_scope_walk_expr(
+                    *caster,
+                    op_id,
+                    kind_label,
+                    shape_label,
+                    prog,
+                    errors,
+                );
+                event_field_scope_walk_expr(
+                    *target,
+                    op_id,
+                    kind_label,
+                    shape_label,
+                    prog,
+                    errors,
+                );
                 event_field_scope_walk_expr(
                     *ability,
                     op_id,
