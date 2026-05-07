@@ -96,6 +96,30 @@ event EffectDamageApplied {
   amount: f32,
 }
 
+// HeroStun control-status proof (boss_fight, 2026-05-07) — engine-side
+// chronicle event written by the apply_ability dispatcher at hardcoded
+// EventKindId 29 (see
+// `dsl_ast::engine_events::engine_event_kind_id_for_name`).
+//
+// The new `verb HeroStun` (added below near HeroAttack) is now
+// `apply_ability 3 by self target target`, which the dispatcher
+// translates to a kind=29 EffectStunApplied record with
+// `expires_at_tick = world.tick + 15` (the dispatcher pre-computes the
+// absolute tick from EffectOp::Stun{duration_ticks=15}). The new
+// `physics ApplyStunFromChronicle @phase(post)` rule below drains
+// these records straight into the per-agent `stun_expires_at_tick` SoA
+// via `agents.set_stun_expires_at_tick(t, e)`. First non-Damage
+// EffectOp in this fixture — proves control-status dispatch lands in
+// the asymmetric 1-vs-N RPG combat shape (heroes ganging up to lock
+// the boss). Mirrors duel_25v25's ConcussiveCleave shape, single-target
+// rather than AOE.
+@replayable @gpu_amenable
+event EffectStunApplied {
+  actor: AgentId,
+  target: AgentId,
+  expires_at_tick: u32,
+}
+
 @replayable @gpu_amenable
 event Defeated {
   combatant: AgentId,
@@ -218,6 +242,46 @@ verb HeroAttack(self, target: Agent) =
   apply_ability 2 by self target target
   score (if (target.alive && target.creature_type == Boss) { 1.0 } else { -1000.0 })
 
+// HeroStun — every 7 ticks each Hero stuns the Boss. HeroStun control-
+// status proof (boss_fight, 2026-05-07) — first non-Damage offensive
+// verb in this fixture. Hero-only (`self.creature_type == Hero` mask
+// gate, same as HeroAttack). The verb's score expression mirrors
+// HeroAttack's `target.creature_type == Boss` argmax — every alive
+// Hero on its eligible cycle picks the Boss as its argmax target. The
+// 7-tick cadence overlaps with HeroAttack's 3-tick cadence at ticks
+// 0 and 21 (LCM(3,7) = 21); on those overlap ticks the scoring argmax
+// picks HeroStun over HeroAttack because score base 2.0 > HeroAttack's
+// 1.0. On pure-HeroStun ticks (% 7 == 0 with % 3 != 0, e.g. tick 7,
+// 14), only HeroStun is eligible for heroes and lands as their argmax
+// pick.
+//
+// Body: `apply_ability 3 by self target target`. AbilityId(3) is
+// HeroStun's slot in the boss_fight AbilityRegistry built by
+// `crates/boss_fight_runtime/src/binding_check.rs::
+// build_boss_fight_registry` (BossStrike=1, HeroAttack=2, HeroStun=3
+// in registration order). The dispatcher writes EffectStunApplied
+// chronicle records (engine kind=29) carrying `expires_at_tick =
+// world.tick + 15`; the new ApplyStunFromChronicle physics rule below
+// (auto-fused with ApplyDamageFromChronicle by the lower pass) consumes
+// them straight into the per-agent stun_expires_at_tick SoA via
+// `agents.set_stun_expires_at_tick(t, e)`.
+//
+// COOLDOWN NOTE: same as BossStrike + HeroAttack — the registry-resident
+// HeroStun program declares `cooldown_ticks: 0`; the per-tick gate
+// stays in the verb-style `world.tick % 7 == 0` clause below since the
+// GPU dispatcher does not consult program.cooldown_ticks at the
+// apply_ability arm today.
+verb HeroStun(self, target: Agent) =
+  action HeroStunAction
+  when (self.alive
+        && self.creature_type == Hero
+        && (world.tick % 7 == 0))
+  apply_ability 3 by self target target
+  // Score base 2.0 sits above HeroAttack's 1.0 so on overlap ticks
+  // (every 21 ticks) the argmax picks HeroStun and the
+  // EffectStunApplied chronicle fires.
+  score (if (target.alive && target.creature_type == Boss) { 2.0 } else { -1000.0 })
+
 // HeroHeal — every 20 ticks each Hero self-heals (60 HP). Picking
 // lowest-HP-percentage ally would hit Gap E (binder shadowing on
 // `target.hp` in PerPair scoring) — workaround: self-cast, constant
@@ -251,6 +315,37 @@ verb HeroHeal(self, target: Agent) =
 physics ApplyDamageFromChronicle {
   on EffectDamageApplied { actor: a, target: t, amount: amt } {
     emit Damaged { source: a, target: t, amount: amt }
+  }
+}
+
+// HeroStun control-status proof (boss_fight, 2026-05-07) — chronicle
+// consumer for the kind=29 EffectStunApplied records the new HeroStun
+// verb writes. The dispatcher pre-computes `expires_at_tick =
+// world.tick + duration_ticks` at chronicle-write time (see Stun arm in
+// `cg/emit/wgsl_body.rs`), so this rule ferries the absolute tick
+// verbatim into the per-agent `stun_expires_at_tick` SoA slot via
+// `agents.set_stun_expires_at_tick(t, e)`. Mirror of duel_25v25's
+// ApplyStunFromChronicle and mass_battle_100v100's same-name rule —
+// fourth site of this single-rule shape (no Stunned re-emit since this
+// fixture has no other Stunned consumer).
+//
+// AUTO-FUSION: this rule and ApplyDamageFromChronicle both run
+// @phase(post) over the same event ring with non-overlapping kind tags
+// (26 vs 29), so the lower pass folds them into ONE kernel
+// (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`) —
+// same fusion duel_25v25 + mass_battle_100v100 surfaced.
+//
+// P6 caveat: this rule is PerEvent + writes an AgentField — TRIPS P6
+// in the well_formed checker. boss_fight's build.rs already tolerates
+// lower diagnostics (matches `lower_compilation_to_cg` on
+// `DriverOutcome::Err` and falls through with the partial program), so
+// the rule lowers regardless. Same tolerance pattern duel_abilities +
+// duel_25v25 + mass_battle_100v100 use for their AgentField writes
+// from chronicle physics.
+@phase(post)
+physics ApplyStunFromChronicle {
+  on EffectStunApplied { actor: _, target: t, expires_at_tick: e } {
+    agents.set_stun_expires_at_tick(t, e);
   }
 }
 
