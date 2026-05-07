@@ -346,24 +346,21 @@ verb HeroHeal(self, target: Agent) =
         && self.creature_type == Hero
         && (world.tick % 7 == 0))
   apply_ability 4 by self target target
-  // Lowest-hp friendly hero (only healthy heroes excluded; self can
-  // self-heal — the lowest-hp hero will be the actor's own target if
-  // it's the wounded one, since `target.hp < 100.0` qualifies it the
-  // same way as any other below-threshold ally). The 1000.0 base keeps
-  // the score safely above HeroStun's 2.0 / HeroAttack's 1.0 when a
-  // wounded ally exists; sentinel -1000.0 cedes the argmax to those
-  // rows when no ally needs healing.
+  // Lowest-hp friendly OTHER hero. The 1000.0 base keeps the score
+  // safely above HeroStun's 2.0 / HeroAttack's 1.0 when a wounded ally
+  // exists; sentinel -1000.0 cedes the argmax to those rows when no
+  // ally needs healing.
   //
-  // GAP NOTE: `target != self` originally filtered self-pair scoring
-  // but trips the verb-expander binder shadowing — `self` lowers to
-  // an undefined `local_3` in the scoring WGSL (same Gap E reported
-  // in duel_1v1's Heal verb and mass_battle's Strike score). Working
-  // around by allowing self-target: the lowest-hp hero is the
-  // optimal heal target regardless of whether the caster IS that
-  // hero, so dropping the filter is observationally equivalent for
-  // this test (the wounded slot becomes the universal argmax pick
-  // for every alive hero, including itself).
-  score (if (target.alive
+  // `target != self` filters out the caster's self-pair (the caster
+  // heals OTHER heroes, not itself; otherwise a wounded hero would
+  // win its own self-heal pair and the row would self-cast). Cleared
+  // 2026-05-07 fix: the `self` LocalRef shadowing in
+  // `cg::lower::scoring::lower_standard_row` ensures bare `self` here
+  // resolves to `AgentSelfId` (the per-agent dispatch row) rather
+  // than the cascade-physics let-bound local — see
+  // `crates/dsl_compiler/src/cg/lower/scoring.rs::shadow_self_binders`.
+  score (if (target != self
+             && target.alive
              && target.creature_type == Hero
              && target.hp < 100.0) { 1000.0 - target.hp } else { -1000.0 })
 

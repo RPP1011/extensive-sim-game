@@ -121,12 +121,16 @@
 //!   Phase 1 amendment to the [`ScoringRowOp`] shape.
 
 use dsl_ast::ast::Span;
-use dsl_ast::ir::{IrActionHeadShape, IrExprNode, IrType, PerAbilityRowIR, ScoringEntryIR, ScoringIR};
+use dsl_ast::ir::{
+    IrActionHeadShape, IrExpr, IrExprNode, IrType, LocalRef, PerAbilityRowIR, ScoringEntryIR,
+    ScoringIR,
+};
 
 use crate::cg::data_handle::CgExprId;
 use crate::cg::dispatch::DispatchShape;
 use crate::cg::expr::{type_check, CgTy, TypeCheckCtx, TypeError};
 use crate::cg::op::{ActionId, ComputeOpKind, OpId, ScoringId, ScoringRowOp};
+use crate::cg::stmt::LocalId;
 
 use super::error::{LoweringError, ScoringRowSubject};
 use super::expr::{lower_expr, LoweringCtx};
@@ -365,7 +369,27 @@ fn lower_standard_row(
     if positional_target_binder.is_some() {
         ctx.target_local = true;
     }
+    // Shadow any `self` binders the score expression references. The
+    // verb expander's cascade-physics lowering registers the verb's
+    // `self` LocalRef → some LocalId in `ctx.local_ids` so the verb
+    // body's `self.<field>` reads resolve to that event-payload actor.
+    // In scoring context, the same `self` LocalRef appearing in the
+    // score expression must instead resolve to `AgentSelfId` (the
+    // per-agent dispatch row). Without shadowing, `lower_bare_local`'s
+    // Step 1 (let-bound local) wins over Step 2 (`name == "self"`
+    // structural arm) and the score body emits a `local_<N>` reference
+    // pointing at a let-binding that exists in the cascade-physics
+    // kernel, NOT the scoring kernel — producing an undefined
+    // identifier in the scoring WGSL output.
+    //
+    // The walker below collects every `IrExpr::Local(_, "self")` in
+    // the score expression and removes its `local_ids` entry for the
+    // duration of the body lowering. Restored after so adjacent rows
+    // (and downstream lowering passes) see the prior bindings intact.
+    // Mirrors the `target` shadowing protocol above.
+    let prev_self_ids = shadow_self_binders(&entry.expr, ctx);
     let utility_result = lower_expr(&entry.expr, ctx);
+    restore_self_binders(prev_self_ids, ctx);
     ctx.target_local = prev_target_local;
     if let Some((binder_local, prior_id)) = prev_local_id {
         ctx.local_ids.insert(binder_local, prior_id);
@@ -382,6 +406,19 @@ fn lower_standard_row(
 }
 
 /// Lower a `row <name> per_ability { guard, score, target }` row.
+///
+/// Per-ability rows do NOT today carry a `Positional(target)` binder
+/// in their head — the per-ability candidate side is implicit (the
+/// scoring kernel iterates the agent's own ability slots). But the
+/// row's `score` / `target` / `guard` expressions can still reference
+/// `self` (the caster), and the verb expander's cascade-physics
+/// lowering may have registered the verb's `self` LocalRef in
+/// `ctx.local_ids` ahead of the scoring pass. Each sub-expression's
+/// lowering is therefore wrapped in the [`shadow_self_binders`] /
+/// [`restore_self_binders`] pair so a bare `self` reference in the
+/// per-ability row body resolves to `AgentSelfId` rather than the
+/// stale event-payload local. Same rationale as
+/// [`lower_standard_row`]'s self-shadow protocol.
 fn lower_per_ability_row(
     scoring_id: ScoringId,
     row: &PerAbilityRowIR,
@@ -390,18 +427,31 @@ fn lower_per_ability_row(
     let action = resolve_action_id(scoring_id, &row.name, row.span, ctx)?;
 
     // Score (utility) — required, must be F32.
-    let utility = lower_expr(&row.score, ctx)?;
+    let prev_self = shadow_self_binders(&row.score, ctx);
+    let score_result = lower_expr(&row.score, ctx);
+    restore_self_binders(prev_self, ctx);
+    let utility = score_result?;
     check_utility_f32(scoring_id, action, utility, row.score.span, ctx)?;
 
     // Target — optional, must be AgentId when Some.
     let target = match &row.target {
-        Some(target_node) => Some(lower_target(scoring_id, action, target_node, ctx)?),
+        Some(target_node) => {
+            let prev_self = shadow_self_binders(target_node, ctx);
+            let target_result = lower_target(scoring_id, action, target_node, ctx);
+            restore_self_binders(prev_self, ctx);
+            Some(target_result?)
+        }
         None => None,
     };
 
     // Guard — optional, must be Bool when Some.
     let guard = match &row.guard {
-        Some(guard_node) => Some(lower_guard(scoring_id, action, guard_node, ctx)?),
+        Some(guard_node) => {
+            let prev_self = shadow_self_binders(guard_node, ctx);
+            let guard_result = lower_guard(scoring_id, action, guard_node, ctx);
+            restore_self_binders(prev_self, ctx);
+            Some(guard_result?)
+        }
         None => None,
     };
 
@@ -569,6 +619,168 @@ fn node_ty(
             span,
         }
     })
+}
+
+// ---------------------------------------------------------------------------
+// `self` shadowing for scoring expression bodies
+// ---------------------------------------------------------------------------
+
+/// Walk `expr` and remove every `local_ids` entry whose `LocalRef`
+/// appears as the binder of an `IrExpr::Local(local_ref, "self")`
+/// reference. Returns the saved `(LocalRef, LocalId)` pairs so
+/// [`restore_self_binders`] can put them back after the body lowers.
+///
+/// # Why this exists
+///
+/// In a scoring score / target / guard expression, `self` MUST resolve
+/// to the per-agent dispatch row (`AgentSelfId`) — the agent doing the
+/// scoring. The `lower_bare_local`'s Step 2 handles that for any
+/// `Local(_, "self")` that has no `local_ids` entry.
+///
+/// However, an upstream pass — specifically the verb expander's
+/// cascade-physics synthesis (`cg::lower::verb_expand::
+/// synthesize_cascade_physics`) — registers the verb's `self` LocalRef
+/// → some `LocalId` in `ctx.local_ids` so the verb body's
+/// `self.<field>` reads inside the `on ActionSelected { actor: self,
+/// … }` handler resolve to the event-payload actor (a let-binding the
+/// physics kernel emits). When scoring then lowers the verb's score
+/// expression — which references the SAME `self` LocalRef — Step 1
+/// (let-bound local) wins over Step 2's structural-name match, and the
+/// score body emits a `local_<N>` reference pointing at a binding that
+/// exists ONLY in the cascade-physics kernel, not the scoring kernel.
+/// The result is undefined-identifier WGSL in the scoring output (the
+/// "local_3" gap reported on `assets/sim/boss_fight.sim`'s HeroHeal
+/// verb, 2026-05-07).
+///
+/// Shadowing the `local_ids` entry for the duration of the body
+/// lowering keeps Step 1 from firing, so the structural-name arm
+/// produces `AgentSelfId` as intended. Restored afterward so adjacent
+/// rows / downstream lowering observe the prior bindings intact.
+///
+/// # Walk shape
+///
+/// Recursive over `IrExprNode`. Cheap: scoring expressions are tens of
+/// nodes at most. Exhaustive over `IrExpr` so a future variant forces
+/// an explicit decision (matches the precedent set by
+/// `expr::expr_contains_wildcard`).
+fn shadow_self_binders(
+    expr: &IrExprNode,
+    ctx: &mut LoweringCtx<'_>,
+) -> Vec<(LocalRef, LocalId)> {
+    let mut refs = Vec::new();
+    collect_self_local_refs(expr, &mut refs);
+    let mut saved = Vec::with_capacity(refs.len());
+    for local_ref in refs {
+        if let Some(prior) = ctx.local_ids.remove(&local_ref) {
+            saved.push((local_ref, prior));
+        }
+    }
+    saved
+}
+
+/// Restore the `local_ids` entries removed by [`shadow_self_binders`].
+fn restore_self_binders(saved: Vec<(LocalRef, LocalId)>, ctx: &mut LoweringCtx<'_>) {
+    for (local_ref, prior) in saved {
+        ctx.local_ids.insert(local_ref, prior);
+    }
+}
+
+/// Recursive walker collecting every `LocalRef` whose name is `"self"`
+/// (i.e., the source-level `self` keyword) inside `expr`. The collected
+/// refs are de-duplicated by [`shadow_self_binders`] via the
+/// `local_ids.remove` call (a missing entry is a no-op).
+fn collect_self_local_refs(expr: &IrExprNode, out: &mut Vec<LocalRef>) {
+    match &expr.kind {
+        IrExpr::Local(local_ref, name) if name == "self" => {
+            out.push(*local_ref);
+        }
+        IrExpr::LitBool(_)
+        | IrExpr::LitInt(_)
+        | IrExpr::LitFloat(_)
+        | IrExpr::LitString(_)
+        | IrExpr::Local(_, _)
+        | IrExpr::Event(_)
+        | IrExpr::Entity(_)
+        | IrExpr::View(_)
+        | IrExpr::Verb(_)
+        | IrExpr::Namespace(_)
+        | IrExpr::NamespaceField { .. }
+        | IrExpr::EnumVariant { .. }
+        | IrExpr::AbilityTag { .. }
+        | IrExpr::AbilityHint
+        | IrExpr::AbilityHintLit { .. }
+        | IrExpr::AbilityRange => {}
+        IrExpr::Unary(_, e) => collect_self_local_refs(e, out),
+        IrExpr::Binary(_, lhs, rhs)
+        | IrExpr::In(lhs, rhs)
+        | IrExpr::Contains(lhs, rhs)
+        | IrExpr::Index(lhs, rhs) => {
+            collect_self_local_refs(lhs, out);
+            collect_self_local_refs(rhs, out);
+        }
+        IrExpr::PerUnit { expr, delta } => {
+            collect_self_local_refs(expr, out);
+            collect_self_local_refs(delta, out);
+        }
+        IrExpr::Field { base, .. } => collect_self_local_refs(base, out),
+        IrExpr::ViewCall(_, args)
+        | IrExpr::VerbCall(_, args)
+        | IrExpr::BuiltinCall(_, args)
+        | IrExpr::UnresolvedCall(_, args)
+        | IrExpr::NamespaceCall { args, .. } => {
+            for a in args {
+                collect_self_local_refs(&a.value, out);
+            }
+        }
+        IrExpr::If {
+            cond,
+            then_expr,
+            else_expr,
+        } => {
+            collect_self_local_refs(cond, out);
+            collect_self_local_refs(then_expr, out);
+            if let Some(e) = else_expr {
+                collect_self_local_refs(e, out);
+            }
+        }
+        IrExpr::Quantifier { iter, body, .. } => {
+            collect_self_local_refs(iter, out);
+            collect_self_local_refs(body, out);
+        }
+        IrExpr::Fold { iter, body, .. } => {
+            if let Some(i) = iter {
+                collect_self_local_refs(i, out);
+            }
+            collect_self_local_refs(body, out);
+        }
+        IrExpr::Match { scrutinee, arms } => {
+            collect_self_local_refs(scrutinee, out);
+            for arm in arms {
+                collect_self_local_refs(&arm.body, out);
+            }
+        }
+        IrExpr::List(items) | IrExpr::Tuple(items) => {
+            for it in items {
+                collect_self_local_refs(it, out);
+            }
+        }
+        IrExpr::StructLit { fields, .. } => {
+            for f in fields {
+                collect_self_local_refs(&f.value, out);
+            }
+        }
+        IrExpr::Ctor { args, .. } => {
+            for a in args {
+                collect_self_local_refs(a, out);
+            }
+        }
+        // Catch-all for leaf variants without IrExprNode children
+        // (AbilityOnCooldown payload-bearing variants, Raw, etc.). If a
+        // future variant adds children, the match arm needs an explicit
+        // case — Rust's exhaustiveness check forces the update because
+        // we already enumerated every leaf above by name.
+        _ => {}
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1523,5 +1735,235 @@ mod tests {
             }
             other => panic!("unexpected kind: {other:?}"),
         }
+    }
+
+    // ---- 15. `self` shadowing in scoring score expression ---------------
+
+    /// Regression: a `self` LocalRef pre-registered in `ctx.local_ids`
+    /// (as the verb expander's cascade-physics lowering does for the
+    /// verb's `self` param) MUST be shadowed for the duration of the
+    /// score body lowering so a bare `self` reference resolves to the
+    /// structural `AgentSelfId` (the per-agent dispatch row), NOT the
+    /// stale `ReadLocal { local: <chronicle-local> }` that points at a
+    /// let-binding the scoring kernel never emits.
+    ///
+    /// Without the fix, `target != self` in a scoring score expression
+    /// emits `(... != local_<N>)` where `local_<N>` is undefined in the
+    /// scoring WGSL output — the "local_3" gap reported on
+    /// `assets/sim/boss_fight.sim`'s HeroHeal verb (2026-05-07).
+    ///
+    /// The fix: `lower_standard_row`'s body lowering walks the score
+    /// expression for `IrExpr::Local(_, "self")` references, removes
+    /// matching `local_ids` entries before lowering, restores them
+    /// after.
+    #[test]
+    fn self_in_score_expr_shadows_pre_registered_local_id() {
+        use crate::cg::expr::CgExpr;
+        use dsl_ast::ast::BinOp;
+        use dsl_ast::ir::LocalRef;
+
+        // scoring entry: `Attack(target) = (target != self)` cast to
+        // f32 via `if (target != self) { 1.0 } else { 0.0 }`.
+        // (`target != self` is Bool, so a direct utility-as-Bool
+        // constructed entry would fail F32 typecheck; wrap in `if` so
+        // the utility lowers as F32.)
+        let target_neq_self = node(IrExpr::Binary(
+            BinOp::NotEq,
+            Box::new(node(IrExpr::Local(LocalRef(2), "target".to_string()))),
+            Box::new(node(IrExpr::Local(LocalRef(1), "self".to_string()))),
+        ));
+        let utility = node(IrExpr::If {
+            cond: Box::new(target_neq_self),
+            then_expr: Box::new(lit_f32(1.0)),
+            else_expr: Some(Box::new(lit_f32(0.0))),
+        });
+
+        let ir = scoring_with(
+            vec![ScoringEntryIR {
+                head: IrActionHead {
+                    name: "Attack".to_string(),
+                    shape: IrActionHeadShape::Positional(vec![(
+                        "target".to_string(),
+                        LocalRef(2),
+                        dsl_ast::ir::IrType::AgentId,
+                    )]),
+                    span: span(0, 14),
+                },
+                expr: utility,
+                span: span(0, 0),
+            }],
+            vec![],
+        );
+
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        ctx.register_action("Attack", ActionId(9));
+
+        // Pre-register `self` LocalRef → some LocalId, mirroring what
+        // `synthesize_pattern_binding_lets` would do during cascade
+        // physics lowering for the verb's `on ActionSelected { actor:
+        // self, ... }` handler. Without the fix, scoring's
+        // `lower_bare_local` Step 1 would route `self` through this
+        // entry as `ReadLocal { local: LocalId(99) }`.
+        let pre_registered_self = LocalId(99);
+        ctx.register_local(LocalRef(1), pre_registered_self);
+        ctx.record_local_ty(pre_registered_self, CgTy::AgentId);
+
+        let op_id = lower_scoring(ScoringId(0), &ir, &mut ctx).expect("lowers cleanly");
+        // Snapshot post-condition state before consuming the builder.
+        let restored = ctx.local_ids.get(&LocalRef(1)).copied();
+        let prog = builder.finish();
+
+        // Walk the score row's CgExpr graph and assert NO `ReadLocal`
+        // references the pre-registered `self` LocalId. Every `self`
+        // reference must resolve to `AgentSelfId` instead.
+        match &prog.ops[op_id.0 as usize].kind {
+            ComputeOpKind::ScoringArgmax { rows, .. } => {
+                let utility_id = rows[0].utility;
+                let mut saw_agent_self_id = false;
+                let mut visited = vec![false; prog.exprs.len()];
+                let mut stack = vec![utility_id];
+                while let Some(id) = stack.pop() {
+                    if visited[id.0 as usize] {
+                        continue;
+                    }
+                    visited[id.0 as usize] = true;
+                    let n = &prog.exprs[id.0 as usize];
+                    match n {
+                        CgExpr::ReadLocal { local, .. } => {
+                            assert_ne!(
+                                *local, pre_registered_self,
+                                "`self` in score expr leaked through to ReadLocal {{ local#{} }}; \
+                                 expected AgentSelfId. The verb expander's cascade-physics \
+                                 lowering pre-registered this local; scoring must shadow it.",
+                                local.0
+                            );
+                        }
+                        CgExpr::AgentSelfId => saw_agent_self_id = true,
+                        CgExpr::Binary { lhs, rhs, .. } => {
+                            stack.push(*lhs);
+                            stack.push(*rhs);
+                        }
+                        CgExpr::Select { cond, then, else_, .. } => {
+                            stack.push(*cond);
+                            stack.push(*then);
+                            stack.push(*else_);
+                        }
+                        _ => {}
+                    }
+                }
+                assert!(
+                    saw_agent_self_id,
+                    "expected `self` reference to lower to AgentSelfId; \
+                     none observed in the score expr's CgExpr graph"
+                );
+            }
+            other => panic!("unexpected kind: {other:?}"),
+        }
+
+        // Post-condition: the pre-registered `self` LocalRef → LocalId
+        // mapping is restored after the body lowers. Adjacent
+        // downstream passes (or the next row) must observe the prior
+        // binding intact.
+        assert_eq!(
+            restored,
+            Some(pre_registered_self),
+            "shadowed `self` LocalRef must restore to its prior LocalId after the row lowers"
+        );
+    }
+
+    /// Per-ability-row variant of the same regression: `self` shadowing
+    /// applies to the row's `score` / `target` / `guard` sub-expressions
+    /// independently. Without the fix, a per-ability row whose `score`
+    /// references `self` (e.g., `if (target != self) { ... } else { ... }`)
+    /// emits the same undefined `local_<N>` gap.
+    #[test]
+    fn self_in_per_ability_row_score_shadows_pre_registered_local_id() {
+        use crate::cg::expr::CgExpr;
+        use dsl_ast::ast::BinOp;
+        use dsl_ast::ir::LocalRef;
+
+        let target_neq_self = node(IrExpr::Binary(
+            BinOp::NotEq,
+            Box::new(node(IrExpr::Local(LocalRef(2), "target".to_string()))),
+            Box::new(node(IrExpr::Local(LocalRef(1), "self".to_string()))),
+        ));
+        // Per-ability rows don't have a Positional(target) head today,
+        // so `target` does not lower against per-pair candidate. Wrap
+        // the `target != self` expression so only the `self` half
+        // exercises the shadowing path; use a simpler shape.
+        let score_expr = node(IrExpr::If {
+            cond: Box::new(node(IrExpr::Binary(
+                BinOp::Eq,
+                Box::new(node(IrExpr::Local(LocalRef(1), "self".to_string()))),
+                Box::new(node(IrExpr::Local(LocalRef(1), "self".to_string()))),
+            ))),
+            then_expr: Box::new(lit_f32(1.0)),
+            else_expr: Some(Box::new(lit_f32(0.0))),
+        });
+        let _ = target_neq_self; // future use if/when per-ability row gets target-binding semantics
+
+        let row = PerAbilityRowIR {
+            name: "Cast0".to_string(),
+            guard: None,
+            score: score_expr,
+            target: None,
+            span: span(0, 0),
+        };
+        let ir = scoring_with(vec![], vec![row]);
+
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        ctx.register_action("Cast0", ActionId(7));
+
+        // Pre-register `self` as a let-bound local, same shape as
+        // cascade physics lowering does.
+        let pre_registered_self = LocalId(42);
+        ctx.register_local(LocalRef(1), pre_registered_self);
+        ctx.record_local_ty(pre_registered_self, CgTy::AgentId);
+
+        let op_id =
+            lower_scoring(ScoringId(0), &ir, &mut ctx).expect("per-ability row lowers cleanly");
+        let restored = ctx.local_ids.get(&LocalRef(1)).copied();
+        let prog = builder.finish();
+
+        match &prog.ops[op_id.0 as usize].kind {
+            ComputeOpKind::ScoringArgmax { rows, .. } => {
+                let utility_id = rows[0].utility;
+                let mut visited = vec![false; prog.exprs.len()];
+                let mut stack = vec![utility_id];
+                while let Some(id) = stack.pop() {
+                    if visited[id.0 as usize] {
+                        continue;
+                    }
+                    visited[id.0 as usize] = true;
+                    let n = &prog.exprs[id.0 as usize];
+                    if let CgExpr::ReadLocal { local, .. } = n {
+                        assert_ne!(
+                            *local, pre_registered_self,
+                            "per-ability row score: `self` leaked through to \
+                             ReadLocal {{ local#{} }}",
+                            local.0
+                        );
+                    }
+                    match n {
+                        CgExpr::Binary { lhs, rhs, .. } => {
+                            stack.push(*lhs);
+                            stack.push(*rhs);
+                        }
+                        CgExpr::Select { cond, then, else_, .. } => {
+                            stack.push(*cond);
+                            stack.push(*then);
+                            stack.push(*else_);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            other => panic!("unexpected kind: {other:?}"),
+        }
+
+        // Post-condition: restored.
+        assert_eq!(restored, Some(pre_registered_self));
     }
 }
