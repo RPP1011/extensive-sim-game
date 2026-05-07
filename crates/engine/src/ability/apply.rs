@@ -113,6 +113,19 @@ pub enum ApplyEvent {
     /// `reflect <fraction> for <duration>` — fraction-of-damage
     /// bounce. Mirrors DamageModify's payload shape.
     Reflect        { target: AgentId, duration_ticks: u32, fraction_q8: i16 },
+    /// `transfer_gold <amount>` — caster moves `amount` gold to
+    /// target. The world-state effect (debiting caster's purse,
+    /// crediting target's purse) is downstream of apply_program;
+    /// this variant signals **the cast occurred** for chronicle /
+    /// reaction-handler consumers. Pairs with
+    /// `EventKindId::EffectGoldTransfer = 31` on the chronicle side.
+    TransferGold   { source: AgentId, target: AgentId, amount: i32 },
+    /// `modify_standing <delta>` — caster changes their standing
+    /// with target by `delta` (i16 signed delta in standing's
+    /// internal units). Same world-state-deferred shape as
+    /// TransferGold. Pairs with `EventKindId::EffectStandingDelta =
+    /// 32` on the chronicle side.
+    ModifyStanding { source: AgentId, target: AgentId, delta: i16 },
 }
 
 /// Inline budget — most abilities have ≤4 effects (P4 says
@@ -237,13 +250,22 @@ pub fn apply_program(
                 out.push(ApplyEvent::Suppress { target, duration_ticks }),
             EffectOp::Reflect    { duration_ticks, fraction_q8 } =>
                 out.push(ApplyEvent::Reflect  { target, duration_ticks, fraction_q8 }),
-            // CastAbility / TransferGold / ModifyStanding fall outside
-            // this slice — the first is recursive (needs cascade
-            // handling); the latter two need world-state context not
-            // threaded through here. Skip for now.
-            EffectOp::CastAbility { .. }
-            | EffectOp::TransferGold { .. }
-            | EffectOp::ModifyStanding { .. } => {}
+            // TransferGold / ModifyStanding emit chronicle-bearing
+            // ApplyEvents that signal "the cast happened". The
+            // world-state effects (debiting/crediting purses, mutating
+            // standing tables) are downstream of apply_program — kept
+            // intentionally separate so the chronicle stream stays a
+            // pure function of the cast inputs (P5/P11) regardless of
+            // when the world-state side-effects land. Pairs with
+            // `EventKindId::EffectGoldTransfer = 31` and
+            // `EffectStandingDelta = 32` respectively.
+            EffectOp::TransferGold { amount } =>
+                out.push(ApplyEvent::TransferGold { source: caster, target, amount }),
+            EffectOp::ModifyStanding { delta } =>
+                out.push(ApplyEvent::ModifyStanding { source: caster, target, delta }),
+            // CastAbility is recursive (needs cascade-style
+            // re-dispatch); deferred to slice δ. Skip for now.
+            EffectOp::CastAbility { .. } => {}
         }
     }
     out
@@ -349,6 +371,62 @@ mod tests {
         );
         let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
         assert_eq!(events.len(), 0, "CastAbility falls through (deferred)");
+    }
+
+    #[test]
+    fn transfer_gold_emits_apply_event_with_amount() {
+        // EffectOp::TransferGold packs source=caster, target=target,
+        // amount=raw i32. World-state effects (purse debit/credit)
+        // are downstream of apply_program.
+        let prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
+            [EffectOp::TransferGold { amount: 42 }],
+        );
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+        assert_eq!(events.len(), 1, "TransferGold emits exactly one ApplyEvent");
+        match events[0] {
+            ApplyEvent::TransferGold { source, target: t, amount } => {
+                assert_eq!(source, caster());
+                assert_eq!(t, target());
+                assert_eq!(amount, 42, "amount round-trips from EffectOp");
+            }
+            other => panic!("expected TransferGold, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn transfer_gold_preserves_negative_amount() {
+        let prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
+            [EffectOp::TransferGold { amount: -7 }],
+        );
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+        match events[0] {
+            ApplyEvent::TransferGold { amount, .. } =>
+                assert_eq!(amount, -7, "negative amount preserved (sign isn't lost)"),
+            other => panic!("expected TransferGold, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn modify_standing_emits_apply_event_with_delta() {
+        let prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
+            [EffectOp::ModifyStanding { delta: -25 }],
+        );
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+        assert_eq!(events.len(), 1, "ModifyStanding emits exactly one ApplyEvent");
+        match events[0] {
+            ApplyEvent::ModifyStanding { source, target: t, delta } => {
+                assert_eq!(source, caster());
+                assert_eq!(t, target());
+                assert_eq!(delta, -25, "delta round-trips from EffectOp (sign preserved)");
+            }
+            other => panic!("expected ModifyStanding, got {other:?}"),
+        }
     }
 
     // -- Caster-stat scaling --------------------------------------------------

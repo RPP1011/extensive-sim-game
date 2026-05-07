@@ -110,19 +110,28 @@ pub fn apply_event_to_chronicle_record(
             Some(rec)
         }
         // --- TransferGold = 5 → EventKindId::EffectGoldTransfer = 31.
-        // Engine's ApplyEvent doesn't carry a gold amount in its
-        // variant (the EffectOp's `amount: i32` is the source); the
-        // dispatcher reads payload_a from the packed registry. Until
-        // an i64 chronicle field lands, we sign-extend the variant's
-        // own caster/target convention.
-        // NOTE: the engine ApplyEvent enum doesn't currently spell
-        // `TransferGold` (the apply path defers it — see
-        // `engine/src/ability/apply.rs` fall-through). Returning None
-        // is the honest "no apply-event here yet" result; when the
-        // engine wires `ApplyEvent::TransferGold`, this arm grows.
+        // Engine event carries amount as i64 (host widens for ledger
+        // arithmetic); the GPU dispatcher writes the EffectOp's i32
+        // amount sign-widened to u32. Cascade chronicle decode reads
+        // u32 + sign-extends to i64.
+        ApplyEvent::TransferGold { source: _, target: _, amount } => {
+            rec[0] = 31;
+            rec[2] = caster_id;
+            rec[3] = caster_id; // slice γ self-cast
+            rec[4] = (amount as i32) as u32;
+            Some(rec)
+        }
         // --- ModifyStanding = 6 → EventKindId::EffectStandingDelta = 32.
-        // Same fall-through note — no `ApplyEvent::ModifyStanding`
-        // variant on the engine side today.
+        // delta is i16 on EffectOp side, i32 on chronicle side. GPU
+        // dispatcher sign-widens i16 → i32 → bitcast<u32> in the
+        // ModifyStanding arm; this CPU reference mirrors the same.
+        ApplyEvent::ModifyStanding { source: _, target: _, delta } => {
+            rec[0] = 32;
+            rec[2] = caster_id;
+            rec[3] = caster_id;
+            rec[4] = (delta as i32) as u32;
+            Some(rec)
+        }
         _ => None,
     }
 }
@@ -249,28 +258,25 @@ mod tests {
     /// test catches the gap.
     #[test]
     fn cpu_reference_covers_all_dispatcher_chronicle_arms() {
-        // The four chronicle-bearing variants the engine actually
-        // exposes via ApplyEvent today. The remaining entries in
-        // EFFECT_KIND_TO_EVENT_KIND_ID (TransferGold=5,
-        // ModifyStanding=6) have no ApplyEvent variant yet; they
-        // surface in the GPU dispatcher's chronicle output but the
-        // CPU pipeline doesn't produce ApplyEvents for them.
-        let ev_for_kind = |effect_kind: u32| -> Option<ApplyEvent> {
+        // Every chronicle-bearing effect-kind entry must have a
+        // matching CPU-reference arm. After wiring TransferGold +
+        // ModifyStanding ApplyEvents (engine/src/ability/apply.rs),
+        // all 7 entries are covered — no None fall-throughs.
+        let ev_for_kind = |effect_kind: u32| -> ApplyEvent {
             match effect_kind {
-                0 => Some(ApplyEvent::Damage    { source: aid(1), target: aid(2), amount: 1.0 }),
-                1 => Some(ApplyEvent::Heal      { source: aid(1), target: aid(2), amount: 1.0 }),
-                2 => Some(ApplyEvent::Shield    { source: aid(1), target: aid(2), amount: 1.0 }),
-                3 => Some(ApplyEvent::Stun      { target: aid(2), duration_ticks: 5 }),
-                4 => Some(ApplyEvent::Slow      { target: aid(2), duration_ticks: 5, factor_q8: 128 }),
-                5 | 6 => None, // see comment above
+                0 => ApplyEvent::Damage         { source: aid(1), target: aid(2), amount: 1.0 },
+                1 => ApplyEvent::Heal           { source: aid(1), target: aid(2), amount: 1.0 },
+                2 => ApplyEvent::Shield         { source: aid(1), target: aid(2), amount: 1.0 },
+                3 => ApplyEvent::Stun           { target: aid(2), duration_ticks: 5 },
+                4 => ApplyEvent::Slow           { target: aid(2), duration_ticks: 5, factor_q8: 128 },
+                5 => ApplyEvent::TransferGold   { source: aid(1), target: aid(2), amount: 7 },
+                6 => ApplyEvent::ModifyStanding { source: aid(1), target: aid(2), delta: 3 },
                 _ => panic!("unexpected effect_kind in table"),
             }
         };
 
         for &(effect_kind, expected_event_kind_id) in EFFECT_KIND_TO_EVENT_KIND_ID {
-            let Some(ev) = ev_for_kind(effect_kind) else {
-                continue;
-            };
+            let ev = ev_for_kind(effect_kind);
             let rec = apply_event_to_chronicle_record(ev, 0, 0)
                 .unwrap_or_else(|| {
                     panic!(
@@ -284,5 +290,42 @@ mod tests {
                  kind tag {expected_event_kind_id} (matching the dispatcher table)"
             );
         }
+    }
+
+    #[test]
+    fn transfer_gold_chronicle_record_uses_kind_31() {
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::TransferGold { source: aid(1), target: aid(2), amount: 42 },
+            /*tick*/ 100,
+            /*caster_id*/ 9,
+        )
+        .expect("TransferGold has chronicle counterpart");
+        assert_eq!(rec[0], 31, "EffectGoldTransfer kind tag");
+        assert_eq!(rec[2], 9, "caster slot — slice γ self-cast");
+        assert_eq!(rec[3], 9);
+        assert_eq!(rec[4], 42, "amount as i32 → u32 (positive value preserves bits)");
+
+        // Sign preservation: negative amount sign-extends through the
+        // bitcast — the dispatcher's `bitcast<i32>` recovers the
+        // negative value.
+        let rec_neg = apply_event_to_chronicle_record(
+            ApplyEvent::TransferGold { source: aid(1), target: aid(2), amount: -7 },
+            100, 9,
+        ).unwrap();
+        assert_eq!(rec_neg[4], (-7_i32) as u32, "negative amount sign-widens correctly");
+    }
+
+    #[test]
+    fn modify_standing_chronicle_record_uses_kind_32() {
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::ModifyStanding { source: aid(1), target: aid(2), delta: -25 },
+            /*tick*/ 100,
+            /*caster_id*/ 4,
+        )
+        .expect("ModifyStanding has chronicle counterpart");
+        assert_eq!(rec[0], 32, "EffectStandingDelta kind tag");
+        assert_eq!(rec[2], 4);
+        assert_eq!(rec[3], 4);
+        assert_eq!(rec[4], (-25_i32) as u32, "delta sign-widens i16 → i32 → u32");
     }
 }
