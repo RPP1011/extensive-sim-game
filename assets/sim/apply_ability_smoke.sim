@@ -17,6 +17,21 @@
 // the apply_ability codepath surfaces as a CI failure rather than as a
 // silent breakage of the dispatcher arms once a runtime wires it up.
 //
+// **Closed-loop probe finding (2026-05-06):** an attempt to add a
+// `apply_ability_chronicle_consumer.sim` fixture demonstrating
+// apply_ability → EffectDamageApplied → PerEvent rule → set_hp hit
+// `P6Violation { kind_label: "physics_rule" }` at well_formed. The
+// well_formed.rs `p6_check_op` allowlist permits AgentField writes
+// only for ViewFold + per-agent PhysicsRule (`on_event = None`); a
+// PerEvent rule consuming the chronicle event was rejected. This is
+// puzzling because `duel_abilities.sim::ApplyDamage` IS a PerEvent
+// rule that calls `agents.set_hp(...)` and DOES compile — the
+// distinction (event-class allowlist? setter-call escape hatch?
+// resolve-side rewrite into something other than CgStmt::Assign?)
+// needs investigation before the closed-loop pattern is reproducible
+// from a fresh fixture. The probe was reverted; this comment exists
+// so the next agent doesn't repeat the same investigation cold.
+//
 // **#138 entry point.** The next substantive slice — wiring one
 // `duel_abilities.sim` verb (e.g. Strike) through apply_ability instead
 // of the verb→emit→ApplyDamage cascade pattern — picks up here:
