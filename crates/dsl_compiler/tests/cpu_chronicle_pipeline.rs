@@ -322,6 +322,71 @@ fn distinct_caster_and_target_pipeline_handles_friendly_heal() {
     assert_eq!(r[4], 12.5_f32.to_bits(), "amount as bitcast<u32>");
 }
 
+/// Slice ε pipeline pin for multi-effect programs with distinct
+/// caster/target. The existing `multi_effect_ability_produces_record_
+/// per_chronicle_arm` test exercises self-cast routing; this
+/// variant confirms that when one program emits multiple chronicle
+/// records, EVERY record carries the same explicit caster + target
+/// slot pair (not just the first).
+///
+/// A regression where slice-ε routing was applied per-record but lost
+/// state between iterations would manifest as some records having
+/// caster=target while others had distinct values.
+#[test]
+fn distinct_caster_and_target_pipeline_preserves_routing_across_multi_effect() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+        [
+            EffectOp::Damage { amount: 30.0 },
+            EffectOp::Heal   { amount: 5.0 },
+            EffectOp::Stun   { duration_ticks: 12 },
+        ],
+    );
+    let caster = aid(11);
+    let target = aid(23);
+    let tick: u32 = 800;
+
+    let events = apply_program(
+        &program,
+        caster,
+        target,
+        tick as u64,
+        0xBADD_CAFE,
+        &CasterStats::default(),
+    );
+    let records: Vec<_> = events
+        .into_iter()
+        .filter_map(|e| {
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw())
+        })
+        .collect();
+
+    assert_eq!(records.len(), 3, "Damage + Heal + Stun → 3 chronicle records");
+
+    // Every record carries the same distinct caster + target pair.
+    for (idx, r) in records.iter().enumerate() {
+        assert_eq!(
+            r[2], 11,
+            "record {idx} actor slot must be caster_id=11 \
+             (slice-ε routing must be stable across multi-effect \
+             record emission); got {}", r[2]
+        );
+        assert_eq!(
+            r[3], 23,
+            "record {idx} target slot must be target_id=23 \
+             (distinct from caster); got {}", r[3]
+        );
+        assert_eq!(r[1], 800, "record {idx} tick");
+    }
+
+    // Kind tags appear in the order apply_program emits them
+    // (effect-slot order: Damage=26, Heal=27, Stun=29).
+    assert_eq!(records[0][0], 26, "record 0 — EffectDamageApplied");
+    assert_eq!(records[1][0], 27, "record 1 — EffectHealApplied");
+    assert_eq!(records[2][0], 29, "record 2 — EffectStunApplied");
+}
+
 /// Slice ε pipeline pin for ModifyStanding — closes per-variant
 /// pipeline coverage. Standing deltas naturally bind caster (the
 /// observer/initiator whose opinion is being recorded) to target
