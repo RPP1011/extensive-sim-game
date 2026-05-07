@@ -249,6 +249,16 @@ pub struct DuelAbilitiesState {
     /// PerEvent + emit-only kernel, no AgentField writes (so no P6
     /// trip).
     apply_lifesteal_from_chronicle_cfg_buf: wgpu::Buffer,
+    /// Task #138 follow-on (Fortify, mirror of Vampirize at `60115f64`)
+    /// — Cfg uniform for the new `physics_ApplyDamageModFromChronicle`
+    /// kernel that translates `EffectDamageModifyApplied` records
+    /// (kind=41, written by the apply_ability dispatcher in the
+    /// standalone Fortify chronicle kernel) back into `SetDamageMod`
+    /// events so the existing ApplyDamageModActivation cascade (which
+    /// writes the per-agent damage_taken_mult SoA fields) keeps working
+    /// unchanged. Same shape as ApplyLifestealFromChronicle: PerEvent
+    /// + emit-only kernel, no AgentField writes (so no P6 trip).
+    apply_damagemod_from_chronicle_cfg_buf: wgpu::Buffer,
     /// Task #138 — Packed AbilityRegistry uploaded to the GPU. The
     /// fused kernel binds `effect_kinds` / `effect_payload_a` /
     /// `effect_payload_b` for the apply_ability dispatcher arm
@@ -649,6 +659,21 @@ impl DuelAbilitiesState {
             contents: bytemuck::bytes_of(&apply_lifesteal_from_chronicle_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        // Task #138 follow-on (Fortify, mirror of Vampirize at `60115f64`)
+        // — Cfg uniform for the new ApplyDamageModFromChronicle kernel
+        // that translates EffectDamageModifyApplied (kind=41) records
+        // emitted by the apply_ability dispatcher into SetDamageMod
+        // events the existing ApplyDamageModActivation cascade
+        // consumes (writing per-agent damage_taken_mult SoA fields).
+        let apply_damagemod_from_chronicle_cfg_init =
+            physics_ApplyDamageModFromChronicle::PhysicsApplyDamageModFromChronicleCfg {
+                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            };
+        let apply_damagemod_from_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_abilities_runtime::apply_damagemod_from_chronicle_cfg"),
+            contents: bytemuck::bytes_of(&apply_damagemod_from_chronicle_cfg_init),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let seed_cfg_init = seed_indirect_0::SeedIndirect0Cfg {
             agent_cap: agent_count, tick: 0, seed: 0, _pad: 0,
         };
@@ -720,6 +745,7 @@ impl DuelAbilitiesState {
             apply_stun_from_chronicle_cfg_buf,
             apply_damage_from_self_damage_chronicle_cfg_buf,
             apply_lifesteal_from_chronicle_cfg_buf,
+            apply_damagemod_from_chronicle_cfg_buf,
             registry_gpu,
             seed_cfg_buf,
             cache: dispatch::KernelCache::default(),
@@ -922,12 +948,16 @@ impl CompiledSim for DuelAbilitiesState {
         // swap to Vampirize (kind=40 EffectLifeStealApplied +
         // SetLifesteal re-emit) — again +2 per-agent overhead, again
         // mutually exclusive with the other verbs.
-        // Bump the upper bound to 26 slots per agent to keep
+        // Task #138 follow-on (Fortify, mirror of Vampirize) extended the
+        // swap to Fortify (kind=41 EffectDamageModifyApplied +
+        // SetDamageMod re-emit) — again +2 per-agent overhead, again
+        // mutually exclusive with the other verbs.
+        // Bump the upper bound to 28 slots per agent to keep
         // clear_ring_headers from leaving stale slots between ticks.
-        // (24 + 2 = 26; the per-tick sum stays in the same
+        // (26 + 2 = 28; the per-tick sum stays in the same
         // verb-mutually-exclusive band but the bump gives every
         // chronicle re-emit its own headroom.)
-        let max_slots_per_tick = self.agent_count * 26;
+        let max_slots_per_tick = self.agent_count * 28;
         self.event_ring.clear_ring_headers_in(
             &self.gpu, &mut encoder, max_slots_per_tick,
         );
@@ -1161,11 +1191,15 @@ impl CompiledSim for DuelAbilitiesState {
             self.agent_count,
         );
 
-        // (7d) Fortify chronicle — Wave 2 DamageModify demo. Gates on
-        // action_id==6u and emits SetDamageMod{target_agent=self,
-        // mult_q8=128, expires_at=tick+50}. Drained by the
-        // ApplyDamageModActivation arm of the fused kernel below — sets
-        // the caster's damage_taken_mult_q8 +
+        // (7d) Fortify chronicle — Wave 2 DamageModify demo. Task #138
+        // follow-on (Fortify, mirror of Vampirize at `60115f64`) — verb
+        // body is now `apply_ability 7 by self target self`, so this
+        // kernel walks the AbilityRegistry's effect SoA columns to
+        // expand the dispatch into chronicle EffectDamageModifyApplied
+        // writes (kind=41). Re-emitted as SetDamageMod by
+        // ApplyDamageModFromChronicle below; the existing
+        // ApplyDamageModActivation cascade drains SetDamageMod into
+        // the per-agent damage_taken_mult_q8 +
         // damage_taken_mult_expires_at_tick SoA slots so ApplyDamage's
         // target lookup scales bleed by mult/256 on subsequent hits.
         let fortify_cfg = physics_verb_chronicle_Fortify::PhysicsVerbChronicleFortifyCfg {
@@ -1177,6 +1211,9 @@ impl CompiledSim for DuelAbilitiesState {
         let fortify_bindings = physics_verb_chronicle_Fortify::PhysicsVerbChronicleFortifyBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
+            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
             cfg: &self.chronicle_fortify_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_fortify(
@@ -1374,6 +1411,42 @@ impl CompiledSim for DuelAbilitiesState {
             &self.gpu.device, &mut encoder, max_slots_per_tick,
         );
 
+        // (7k) Task #138 follow-on (Fortify, mirror of Vampirize at
+        // `60115f64`) — ApplyDamageModFromChronicle. The Fortify
+        // chronicle (step 7d) just wrote EffectDamageModifyApplied
+        // records (kind=41) into the event ring via the apply_ability
+        // dispatcher arm. This kernel filters those records and
+        // re-emits them as `SetDamageMod` events so the fused
+        // ApplyDamageModActivation kernel below (step 8a) can drain
+        // them and write the per-agent damage_taken_mult_q8 +
+        // damage_taken_mult_expires_at_tick SoA fields.
+        //
+        // PerEvent shape: scans every event_ring slot up to event_count
+        // and skips slots whose kind != 41. Same pattern as
+        // ApplyLifestealFromChronicle (kind=40), just with the
+        // EffectDamageModifyApplied discriminant + the 4-payload-word
+        // shape (actor + target + expires_at_tick + multiplier_q8). The
+        // dispatcher writes caster_slot into BOTH actor (slot 2) and
+        // target (slot 3) for the DamageModify arm (self-cast), so the
+        // re-emit's `actor: c` reads the caster id directly.
+        let apply_damagemod_from_chronicle_cfg = physics_ApplyDamageModFromChronicle::PhysicsApplyDamageModFromChronicleCfg {
+            event_count: max_slots_per_tick, tick: self.tick as u32,
+            seed: 0, _pad0: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.apply_damagemod_from_chronicle_cfg_buf, 0,
+            bytemuck::bytes_of(&apply_damagemod_from_chronicle_cfg),
+        );
+        let apply_damagemod_from_chronicle_bindings = physics_ApplyDamageModFromChronicle::PhysicsApplyDamageModFromChronicleBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            cfg: &self.apply_damagemod_from_chronicle_cfg_buf,
+        };
+        dispatch::dispatch_physics_applydamagemodfromchronicle(
+            &mut self.cache, &apply_damagemod_from_chronicle_bindings,
+            &self.gpu.device, &mut encoder, max_slots_per_tick,
+        );
+
         // (8a) Fused ApplyHeal + ApplyShield + ApplyDefeat +
         // ApplyLifestealActivation + ApplyDamageModActivation +
         // ApplyStun + verb_chronicle_Strike. The compiler re-fused these
@@ -1398,7 +1471,7 @@ impl CompiledSim for DuelAbilitiesState {
         // `_and_ApplyStun_` segment and adding agent_stun_expires_at_tick
         // to the bind group. No new pass introduced; same single
         // dispatch per tick.
-        let event_count_estimate = self.agent_count * 26;
+        let event_count_estimate = self.agent_count * 28;
         let apply_heal_cfg = physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_ApplyDamageModActivation_and_ApplyStun_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndApplyDamageModActivationAndApplyStunAndVerbChronicleStrikeCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
             seed: 0, _pad0: 0,

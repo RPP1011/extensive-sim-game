@@ -1694,6 +1694,17 @@ fn lower_cg_stmt_body_to_wgsl(
             // per-agent lifesteal SoA fields) keeps working unchanged.
             let life_steal_event_id = event_kind_id_for_effect_kind(18)
                 .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain LifeSteal=18");
+            // Fortify verb swap (Task #138 follow-on, mirror of Vampirize
+            // at `60115f64`) — DamageModify chronicle arm (kind=19 →
+            // EventKindId::EffectDamageModifyApplied=41). The dispatcher
+            // writes one record per non-empty DamageModify slot; the
+            // runtime's ApplyDamageModFromChronicle re-emit physics rule
+            // translates the records back into `SetDamageMod` so the
+            // existing ApplyDamageModActivation cascade (writing the
+            // per-agent damage_taken_mult_q8 + damage_taken_mult_expires_at_tick
+            // SoA fields) keeps working unchanged.
+            let damage_modify_event_id = event_kind_id_for_effect_kind(19)
+                .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain DamageModify=19");
             // Engine pins MAX_EFFECTS_PER_PROGRAM = 6 + EFFECT_KIND_EMPTY = 0xFFu
             // (see crates/engine/src/ability/program.rs:28 +
             // crates/engine/src/ability/packed.rs). Inlining the
@@ -1911,10 +1922,25 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 19u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// DamageModify: payload_a = duration_ticks,\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b's low 16 bits = multiplier_q8 (i16)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// DamageModify = 19 → EventKindId::EffectDamageModifyApplied = 41\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_a = duration_ticks (u32); expires = tick + duration\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b sign-widened i16 → multiplier_q8 (i32 via bitcast)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Same shape as Slow (kind == 4u) / LifeSteal (kind == 18u):\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// 4 payload words — actor, target, expires_at_tick, multiplier_q8.\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let expires_at_tick: u32 = tick + payload_a;\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let multiplier_q8: i32 = bitcast<i32>(payload_b);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_damage_modify(target, payload_a, multiplier_q8);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// chronicle: emit EffectDamageModifyApplied (caster_slot + target_slot)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20{{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (_slot < 65536u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 0u], {damage_modify_event_id}u);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 1u], tick);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 4u], (expires_at_tick));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 5u], bitcast<u32>(multiplier_q8));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 20u) {{\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// DamageOverTime: payload_a = amount-per-tick (f32),\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b = duration_ticks (u32)\n\
@@ -2218,6 +2244,9 @@ pub(crate) const EFFECT_KIND_TO_EVENT_KIND_ID: &[(u32, u32)] = &[
     // EffectOp::LifeSteal       → EventKindId::EffectLifeStealApplied
     // (Vampirize verb swap, Task #138 follow-on, mirror of Bleed).
     (18, 40),
+    // EffectOp::DamageModify    → EventKindId::EffectDamageModifyApplied
+    // (Fortify verb swap, Task #138 follow-on, mirror of Vampirize).
+    (19, 41),
 ];
 
 /// Look up the runtime `EventKindId` for an `EffectOp` discriminant.
@@ -4757,6 +4786,8 @@ mod tests {
         //                                        (Bleed verb swap, Task #138 follow-on)
         //   - chronicle_append_life_steal      → EffectLifeStealApplied
         //                                        (Vampirize verb swap, Task #138 follow-on)
+        //   - chronicle_append_damage_modify   → EffectDamageModifyApplied
+        //                                        (Fortify verb swap, Task #138 follow-on)
         // Below-list arms keep their TODO markers because the runtime
         // has no 1:1 chronicle counterpart (Root / Silence / Fear /
         // Taunt / movement verbs / etc.) — slice δ scope or a future
@@ -4771,7 +4802,6 @@ mod tests {
             "chronicle_append_knockback",
             "chronicle_append_pull",
             "chronicle_append_execute",
-            "chronicle_append_damage_modify",
             "chronicle_append_damage_over_time",
             "chronicle_append_heal_over_time",
             "chronicle_append_timed_shield",
@@ -4798,8 +4828,10 @@ mod tests {
         // header + payload atomicStores against the SAME `event_ring`
         // buffer the runtime cascade reads from.
         // Tight pattern — `chronicle_append_damage(` excludes the
-        // (still-TODO) `chronicle_append_damage_over_time(` and
-        // `chronicle_append_damage_modify(` arms which share a prefix.
+        // (still-TODO) `chronicle_append_damage_over_time(` arm which
+        // shares a prefix. (`chronicle_append_damage_modify(` is no
+        // longer TODO — wired by the Fortify verb swap, Task #138
+        // follow-on, mirror of Vampirize.)
         assert!(
             !wgsl.contains("TODO slice γ: chronicle_append_damage("),
             "Damage arm should no longer carry the TODO marker;\n{wgsl}"
@@ -4864,6 +4896,9 @@ mod tests {
             // Vampirize verb swap (Task #138 follow-on, mirror of Bleed):
             // LifeSteal = 18 → EventKindId::EffectLifeStealApplied = 40.
             ("LifeSteal",       40u32),
+            // Fortify verb swap (Task #138 follow-on, mirror of Vampirize):
+            // DamageModify = 19 → EventKindId::EffectDamageModifyApplied = 41.
+            ("DamageModify",    41u32),
         ] {
             let needle = format!(
                 "atomicStore(&event_ring[_slot * 10u + 0u], {expected_kind_tag}u);"
@@ -4887,14 +4922,23 @@ mod tests {
             wgsl.contains("atomicStore(&event_ring[_slot * 10u + 5u], bitcast<u32>(fraction_q8));"),
             "LifeSteal arm must store fraction_q8 at payload word 3 (ring offset 5);\n{wgsl}"
         );
+        // DamageModify's 4-field payload — multiplier_q8 lives at
+        // payload word 3 (= ring slot offset 5), same shape as Slow /
+        // LifeSteal. (Fortify verb swap, Task #138 follow-on, mirror
+        // of Vampirize.)
+        assert!(
+            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 5u], bitcast<u32>(multiplier_q8));"),
+            "DamageModify arm must store multiplier_q8 at payload word 3 (ring offset 5);\n{wgsl}"
+        );
 
-        // Stun, Slow, and LifeSteal each compute expires_at_tick = tick + duration.
-        // Three arms × one statement → exactly three occurrences.
+        // Stun, Slow, LifeSteal, and DamageModify each compute
+        // expires_at_tick = tick + duration. Four arms × one statement
+        // → exactly four occurrences.
         assert_eq!(
             wgsl.matches("let expires_at_tick: u32 = tick + payload_a;").count(),
-            3,
-            "Stun + Slow + LifeSteal arms each compute expires_at_tick; \
-             expected 3 occurrences across the dispatcher;\n{wgsl}"
+            4,
+            "Stun + Slow + LifeSteal + DamageModify arms each compute expires_at_tick; \
+             expected 4 occurrences across the dispatcher;\n{wgsl}"
         );
     }
 
@@ -4993,7 +5037,8 @@ mod tests {
                 6  => EffectOp::ModifyStanding { delta: 3 },
                 17 => EffectOp::SelfDamage { amount: 5.0 },
                 18 => EffectOp::LifeSteal { duration_ticks: 50, fraction_q8: 128 },
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 17 + 18"),
+                19 => EffectOp::DamageModify { duration_ticks: 50, multiplier_q8: 128 },
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 17 + 18 + 19"),
             }
         };
 
@@ -5010,7 +5055,8 @@ mod tests {
                 6  => EngineEventKindId::EffectStandingDelta as u32,
                 17 => EngineEventKindId::EffectSelfDamageApplied as u32,
                 18 => EngineEventKindId::EffectLifeStealApplied as u32,
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 17 + 18"),
+                19 => EngineEventKindId::EffectDamageModifyApplied as u32,
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 17 + 18 + 19"),
             }
         };
 
@@ -5053,18 +5099,19 @@ mod tests {
 
     #[test]
     fn effect_kind_to_event_kind_map_covers_chronicle_bearing_variants_only() {
-        // 9 chronicle-bearing variants today — Damage/Heal/Shield/Stun/
+        // 10 chronicle-bearing variants today — Damage/Heal/Shield/Stun/
         // Slow/TransferGold/ModifyStanding + SelfDamage (Bleed verb
         // swap, Task #138 follow-on, 2026-05-06) + LifeSteal (Vampirize
-        // verb swap, Task #138 follow-on, mirror of Bleed). If this
-        // number changes, either the engine grew a new `EffectXxxApplied`
-        // event (in which case the map gets a new entry) or a variant
-        // lost its chronicle counterpart (in which case the map drops
-        // an entry). Pin the count so the gap between source-of-truths
-        // is loud.
+        // verb swap, Task #138 follow-on, mirror of Bleed) + DamageModify
+        // (Fortify verb swap, Task #138 follow-on, mirror of Vampirize).
+        // If this number changes, either the engine grew a new
+        // `EffectXxxApplied` event (in which case the map gets a new
+        // entry) or a variant lost its chronicle counterpart (in which
+        // case the map drops an entry). Pin the count so the gap between
+        // source-of-truths is loud.
         assert_eq!(
-            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 9,
-            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 9 \
+            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 10,
+            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 10 \
              chronicle-bearing variants today; if you added or removed an \
              entry, update this assertion (and the slice γ wire-up that \
              consumes the new entry)"

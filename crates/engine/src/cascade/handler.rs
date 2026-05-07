@@ -99,7 +99,21 @@ pub enum EventKindId {
     // (actor + target + expires_at_tick + fraction_q8 + tick) — for
     // self-cast LifeSteal actor == target == caster by convention.
     EffectLifeStealApplied = 40,
-    // Slots 41-127 reserved for replayable event variants added in later tasks.
+    // Fortify verb swap (Task #138 follow-on, mirror of Vampirize at
+    // `60115f64`) — chronicle event for DamageModify EffectOp (op#19).
+    // Written by the apply_ability dispatcher when an
+    // `EffectOp::DamageModify` slot fires; the runtime
+    // `ApplyDamageModFromChronicle` re-emit physics rule translates
+    // these records back into the existing `SetDamageMod` event so
+    // the rest of the cascade (ApplyDamageModActivation writing the
+    // per-agent damage_taken_mult_q8 + damage_taken_mult_expires_at_tick
+    // SoA fields, then ApplyDamage scaling incoming damage by
+    // `mult_q8/256` while the buff is active) keeps working unchanged.
+    // Same shape as `EffectSlowApplied` / `EffectLifeStealApplied`
+    // (actor + target + expires_at_tick + multiplier_q8 + tick) — for
+    // self-cast DamageModify actor == target == caster by convention.
+    EffectDamageModifyApplied = 41,
+    // Slots 42-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 
