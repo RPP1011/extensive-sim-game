@@ -23,7 +23,10 @@
 //   - the BGL composer's recording of `EventRing(Append)` writes on
 //     ApplyAbility-bearing ops (added in commit `1779b0e6`),
 //   - the dispatcher's full integration with the surrounding kernel
-//     (binding-set composition, cfg uniform, `agent_id` preamble).
+//     (binding-set composition, cfg uniform, `agent_id` preamble),
+//   - **slice ε** (#161 + d0bc37fd): the explicit `by <caster>` and
+//     `target <target>` clauses — the second rule below pins the
+//     surface in the .sim corpus (not just inline-source tests).
 //
 // Mirror sim file shape: `target_chaser.sim` — minimum viable
 // (event Tick + entity Agent + one PerAgent physics rule).
@@ -35,5 +38,24 @@ entity Hero : Agent { }
 physics DispatchAbility @phase(per_agent) {
   on Tick {} where (self.alive) {
     apply_ability agents.level(self)
+  }
+}
+
+// Slice ε surface pin: same shape as DispatchAbility but with the
+// explicit `by self target self` clauses. Lowering populates the
+// caster + target operands from the resolved expressions; the
+// dispatcher's chronicle writes route through `caster_slot` and
+// `target_slot` (both lower to `agent_id` here — equivalent to the
+// implicit defaults but proves the parser/lowering/emit path for
+// the explicit-operand surface).
+//
+// When the DSL grows custom-target syntax (e.g. `target
+// query.nearest_hostile_to(self, range)`), this rule is the natural
+// place to upgrade — the inline-source tests in
+// `tests/apply_ability_smoke.rs` exercise corner cases; this is the
+// "boring real sim that uses the production-shape syntax" pin.
+physics DispatchAbilityExplicit @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    apply_ability agents.level(self) by self target self
   }
 }
