@@ -23,6 +23,7 @@ pub mod bid_placed;
 pub mod cast_depth_exceeded;
 pub mod chronicle_entry;
 pub mod effect_damage_applied;
+pub mod effect_damage_modify_applied;
 pub mod effect_gold_transfer;
 pub mod effect_heal_applied;
 pub mod effect_life_steal_applied;
@@ -64,6 +65,7 @@ pub use bid_placed::BidPlaced;
 pub use cast_depth_exceeded::CastDepthExceeded;
 pub use chronicle_entry::ChronicleEntry;
 pub use effect_damage_applied::EffectDamageApplied;
+pub use effect_damage_modify_applied::EffectDamageModifyApplied;
 pub use effect_gold_transfer::EffectGoldTransfer;
 pub use effect_heal_applied::EffectHealApplied;
 pub use effect_life_steal_applied::EffectLifeStealApplied;
@@ -236,6 +238,13 @@ pub enum Event {
         fraction_q8: i16,
         tick: u32,
     },
+    EffectDamageModifyApplied {
+        actor: AgentId,
+        target: AgentId,
+        expires_at_tick: u32,
+        multiplier_q8: i16,
+        tick: u32,
+    },
     EffectShieldApplied {
         actor: AgentId,
         target: AgentId,
@@ -348,6 +357,7 @@ impl Event {
             Event::EffectHealApplied { tick, .. } => *tick,
             Event::EffectSelfDamageApplied { tick, .. } => *tick,
             Event::EffectLifeStealApplied { tick, .. } => *tick,
+            Event::EffectDamageModifyApplied { tick, .. } => *tick,
             Event::EffectShieldApplied { tick, .. } => *tick,
             Event::EffectSlowApplied { tick, .. } => *tick,
             Event::EffectStandingDelta { tick, .. } => *tick,
@@ -392,6 +402,7 @@ impl Event {
             Event::EffectHealApplied { .. } => true,
             Event::EffectSelfDamageApplied { .. } => true,
             Event::EffectLifeStealApplied { .. } => true,
+            Event::EffectDamageModifyApplied { .. } => true,
             Event::EffectShieldApplied { .. } => true,
             Event::EffectSlowApplied { .. } => true,
             Event::EffectStandingDelta { .. } => true,

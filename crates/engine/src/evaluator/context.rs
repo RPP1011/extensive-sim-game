@@ -764,6 +764,14 @@ fn fields_to_event(
             let fraction_q8     = field_i16(fields, "fraction_q8").unwrap_or(0);
             Some(Event::EffectLifeStealApplied { actor, target, expires_at_tick, fraction_q8, tick })
         }
+        "EffectDamageModifyApplied" => {
+            let actor           = field_agent(fields, "actor")?;
+            let target          = field_agent(fields, "target")?;
+            let expires_at_tick = field_u32(fields, "expires_at_tick")
+                .unwrap_or_else(|| field_u32(fields, "duration_ticks").unwrap_or(0));
+            let multiplier_q8   = field_i16(fields, "multiplier_q8").unwrap_or(0);
+            Some(Event::EffectDamageModifyApplied { actor, target, expires_at_tick, multiplier_q8, tick })
+        }
         "EffectShieldApplied" => {
             let actor  = field_agent(fields, "actor")?;
             let target = field_agent(fields, "target")?;

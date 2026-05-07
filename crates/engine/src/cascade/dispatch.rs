@@ -73,6 +73,7 @@ pub mod interp {
             Event::EffectHealApplied     { .. } => "EffectHealApplied",
             Event::EffectSelfDamageApplied { .. } => "EffectSelfDamageApplied",
             Event::EffectLifeStealApplied { .. } => "EffectLifeStealApplied",
+            Event::EffectDamageModifyApplied { .. } => "EffectDamageModifyApplied",
             Event::EffectShieldApplied   { .. } => "EffectShieldApplied",
             Event::EffectStunApplied     { .. } => "EffectStunApplied",
             Event::EffectSlowApplied     { .. } => "EffectSlowApplied",
@@ -180,6 +181,22 @@ pub mod interp {
                 ("t",               EvalValue::Agent(dsl_agent(*target))),
                 ("e",               EvalValue::U32(*expires_at_tick)),
                 ("f",               EvalValue::I32(*fraction_q8 as i32)),
+                ("tick",            EvalValue::U32(*tick)),
+            ],
+            // ---- EffectDamageModifyApplied --------------------------------
+            // Same shape as EffectSlowApplied / EffectLifeStealApplied:
+            // actor + target + expires_at_tick + multiplier_q8. Fortify
+            // verb swap (Task #138 follow-on, mirror of Vampirize at
+            // `60115f64`).
+            Event::EffectDamageModifyApplied { actor, target, expires_at_tick, multiplier_q8, tick } => vec![
+                ("actor",           EvalValue::Agent(dsl_agent(*actor))),
+                ("target",          EvalValue::Agent(dsl_agent(*target))),
+                ("expires_at_tick", EvalValue::U32(*expires_at_tick)),
+                ("multiplier_q8",   EvalValue::I32(*multiplier_q8 as i32)),
+                ("c",               EvalValue::Agent(dsl_agent(*actor))),
+                ("t",               EvalValue::Agent(dsl_agent(*target))),
+                ("e",               EvalValue::U32(*expires_at_tick)),
+                ("m",               EvalValue::I32(*multiplier_q8 as i32)),
                 ("tick",            EvalValue::U32(*tick)),
             ],
             // ---- EffectShieldApplied --------------------------------------

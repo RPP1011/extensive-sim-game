@@ -236,6 +236,38 @@ event EffectLifeStealApplied {
   fraction_q8: i16,
 }
 
+// Engine-side chronicle event written by the apply_ability dispatcher
+// at hardcoded EventKindId 41 (see
+// `dsl_ast::engine_events::engine_event_kind_id_for_name`).
+//
+// Task #138 follow-on (Fortify, mirror of Vampirize at `60115f64`) —
+// Fortify's verb body is now `apply_ability 7 by self target self`,
+// which writes EffectDamageModifyApplied records into the event ring.
+// The new ApplyDamageModFromChronicle physics rule (declared below
+// near the rest of the consumers) translates these records back into
+// the existing `SetDamageMod` event so the existing
+// ApplyDamageModActivation cascade (which writes the per-agent
+// damage_taken_mult_q8 + damage_taken_mult_expires_at_tick SoA fields,
+// then ApplyDamage scales incoming damage by `mult_q8/256` while the
+// buff is active) keeps working unchanged.
+//
+// SHAPE NOTE: same payload shape as EffectSlowApplied / EffectLifeStealApplied
+// — actor + target + expires_at_tick + multiplier_q8. The dispatcher
+// computes `expires_at_tick = tick + duration_ticks` so the engine
+// event carries an absolute tick (matching what the original Fortify
+// verb body produced via `world.tick + config.combat.fortify_dur`).
+// For self-cast DamageModify actor==target==caster by convention; the
+// dispatcher writes caster_slot into BOTH actor (slot 2) and target
+// (slot 3) so the re-emit physics rule can ferry both ids verbatim
+// into the SetDamageMod event's `target_agent` field.
+@replayable @gpu_amenable
+event EffectDamageModifyApplied {
+  actor: AgentId,
+  target: AgentId,
+  expires_at_tick: u32,
+  multiplier_q8: i16,
+}
+
 @replayable @gpu_amenable
 event Healed {
   source: AgentId,
@@ -571,8 +603,31 @@ verb Fortify(self, target: Agent) =
         && target == self
         && (world.tick % config.combat.cooldown_fortify == 0)
         && self.hp < config.combat.hp_fortify_floor)
-  emit SetDamageMod { target_agent: self, mult_q8: config.combat.fortify_mult_q8,
-                      expires_at: world.tick + config.combat.fortify_dur }
+  // Task #138 follow-on (Fortify, mirror of Vampirize at `60115f64`) —
+  // verb-body apply_ability dispatcher swap. Fortify was
+  // `emit SetDamageMod { target_agent: self, mult_q8: config.combat.fortify_mult_q8,
+  //                      expires_at: world.tick + config.combat.fortify_dur }`.
+  // The literal `7` is Fortify's AbilityId in the duel_abilities
+  // AbilityRegistry built from the source-order `names` list in
+  // `binding_check.rs::build_duel_abilities_registry` (Strike=1,
+  // ShieldUp=2, Mend=3, Bleed=4, Reap=5, Vampirize=6, Fortify=7,
+  // Daze=8).
+  //
+  // `target self` matches the verb's existing `target == self` gate —
+  // Fortify is self-cast. The runtime extends the binding check to
+  // assert `built.names.get("Fortify") == AbilityId(7)` so any drift
+  // surfaces as a startup panic. The dispatcher writes
+  // EffectDamageModifyApplied records (engine-aliased to kind=41)
+  // which the new ApplyDamageModFromChronicle physics rule re-emits
+  // as SetDamageMod so the existing ApplyDamageModActivation cascade
+  // keeps working unchanged.
+  //
+  // SCALING NOTE: Fortify's `damage_modify 0.5 5s` has no explicit
+  // scaling, so the chronicle write semantics are identical to the
+  // hand-mirrored .sim emit — mult_q8=128, duration_ticks=50.
+  // expires_at_tick = tick + 50 lands the same value as the original
+  // `world.tick + config.combat.fortify_dur`.
+  apply_ability 7 by self target self
   score 275.0
 
 // Daze — Wave 2 piece N: Stun E2E demo + FIRST verb-status cast-gate.
@@ -770,6 +825,38 @@ physics ApplyDamageFromSelfDamageChronicle {
 physics ApplyLifestealFromChronicle {
   on EffectLifeStealApplied { actor: c, target: _, expires_at_tick: e, fraction_q8: f } {
     emit SetLifesteal { caster: c, frac_q8: f, expires_at: e }
+  }
+}
+
+// Task #138 follow-on (Fortify, mirror of Vampirize at `60115f64`) —
+// Fortify's verb body now uses `apply_ability 7 by self target self`
+// (see the Fortify verb above). The dispatcher writes
+// EffectDamageModifyApplied chronicle records (engine-aliased to
+// kind=41) instead of the source-declared SetDamageMod event. This
+// rule consumes those records and re-emits SetDamageMod so the rest
+// of the cascade (ApplyDamageModActivation writing the per-agent SoA
+// fields, then ApplyDamage scaling incoming bleed-through damage by
+// `mult_q8/256` while the buff window is active) keeps working
+// unchanged — same shape as ApplyLifestealFromChronicle but consuming
+// kind=41 records.
+//
+// PAYLOAD NOTE: same shape as EffectSlowApplied / EffectLifeStealApplied
+// (actor + target + expires_at_tick + multiplier_q8). The dispatcher
+// writes caster_slot into BOTH actor (slot 2) and target (slot 3) for
+// the DamageModify arm (self-cast), so this rule's pattern reads
+// `actor: c` and binds the caster id directly into the SetDamageMod
+// `target_agent` field. The `expires_at_tick` field is already absolute
+// (= tick + duration at chronicle-write time), so the re-emit ferries
+// it verbatim into the `expires_at` field — no `world.tick + d`
+// recomputation is needed (and recomputing would compound the offset
+// since `world.tick` == the chronicle-record's tick at re-emit time).
+//
+// P6 caveat: this rule is PerEvent + emit-only (no AgentField writes)
+// — does NOT trip P6.
+@phase(post)
+physics ApplyDamageModFromChronicle {
+  on EffectDamageModifyApplied { actor: c, target: _, expires_at_tick: e, multiplier_q8: m } {
+    emit SetDamageMod { target_agent: c, mult_q8: m, expires_at: e }
   }
 }
 
