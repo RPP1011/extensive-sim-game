@@ -115,12 +115,34 @@ pub struct TacticalSquad5v5State {
     agent_move_speed_buf: wgpu::Buffer,
 
     // -- Mask bitmaps (one per verb in source order: Strike=0,
-    //    Snipe=1, Heal=2) --
+    //    Snipe=1, ConcussiveBlow=2, Heal=3) --
+    //
+    // ConcussiveBlow control-status proof (5v5 scale, 2026-05-07): the
+    // verb is declared between Snipe and Heal in the .sim, so source-
+    // order action_id assignment lands ConcussiveBlow at index 2 and
+    // shifts Heal to index 3. The fused mask kernel writes all four
+    // bitmaps; the scoring argmax reads all four rows.
     mask_0_bitmap_buf: wgpu::Buffer, // Strike
     mask_1_bitmap_buf: wgpu::Buffer, // Snipe
-    mask_2_bitmap_buf: wgpu::Buffer, // Heal
+    mask_2_bitmap_buf: wgpu::Buffer, // ConcussiveBlow
+    mask_3_bitmap_buf: wgpu::Buffer, // Heal
     mask_bitmap_zero_buf: wgpu::Buffer,
     mask_bitmap_words: u32,
+
+    /// ConcussiveBlow control-status proof (5v5 scale, 2026-05-07) —
+    /// per-agent `stun_expires_at_tick` SoA column. Written by the
+    /// fused
+    /// `physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`
+    /// kernel from kind=29 EffectStunApplied chronicle records produced
+    /// by ConcussiveBlow's verb chronicle dispatcher (kind=29 records
+    /// carry `expires_at_tick = world.tick + 20` precomputed by the
+    /// dispatcher). Init to 0 (= "never stunned" — agents whose
+    /// `stun_expires_at_tick > world.tick` are stunned). The verb
+    /// `where`-clauses in this fixture don't read it today, but the
+    /// new `concussive_blow_stuns_targets` test asserts the SoA column
+    /// lands the expected expires_at_tick after ConcussiveBlow cast
+    /// cycles.
+    agent_stun_expires_at_tick_buf: wgpu::Buffer,
 
     // -- Scoring output (4 × u32 per agent) --
     scoring_output_buf: wgpu::Buffer,
@@ -138,26 +160,41 @@ pub struct TacticalSquad5v5State {
     scoring_cfg_buf: wgpu::Buffer,
     chronicle_strike_cfg_buf: wgpu::Buffer,
     chronicle_snipe_cfg_buf: wgpu::Buffer,
+    /// ConcussiveBlow control-status proof (5v5 scale, 2026-05-07) —
+    /// fourth per-agent verb chronicle cfg. Same shape as the Strike +
+    /// Snipe cfgs; the ConcussiveBlow chronicle kernel filters
+    /// `action_id == 2u` (source-order index — ConcussiveBlow is the
+    /// third verb declared after Strike and Snipe) and dispatches the
+    /// AbilityId(3) program through the apply_ability arm, writing
+    /// kind=29 EffectStunApplied records.
+    chronicle_concussive_blow_cfg_buf: wgpu::Buffer,
     chronicle_heal_cfg_buf: wgpu::Buffer,
-    /// Task #138 follow-on (tactical_squad_5v5 port, 2026-05-07) —
-    /// cfg uniform for the new ApplyDamageFromChronicle physics rule.
-    /// Reads EffectDamageApplied(kind=26) records from the event ring
-    /// (written by Strike + Snipe's apply_ability dispatcher arms) and
-    /// re-emits them as Damaged events the existing
-    /// ApplyDamage_and_ApplyHeal cascade drains.
+    /// Task #138 follow-on (tactical_squad_5v5 port, 2026-05-07) +
+    /// ConcussiveBlow control-status proof (5v5 scale, 2026-05-07) —
+    /// cfg uniform for the FUSED chronicle-consumer kernel. The lower
+    /// pass folded ApplyDamageFromChronicle (drains kind=26 → emit
+    /// Damaged) and ApplyStunFromChronicle (drains kind=29 → write
+    /// `agents.set_stun_expires_at_tick`) into ONE kernel
+    /// (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`)
+    /// because both consume from the same event ring at @phase(post)
+    /// with non-overlapping kind tags. Single cfg + single dispatch
+    /// per tick. Mirrors mass_battle_100v100 + duel_25v25 fusion (third
+    /// site of this pattern).
     apply_chronicle_cfg_buf: wgpu::Buffer,
     apply_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
 
-    /// Task #138 follow-on (tactical_squad_5v5 port, 2026-05-07) —
+    /// Task #138 follow-on (tactical_squad_5v5 port, 2026-05-07) +
+    /// ConcussiveBlow control-status proof (5v5 scale, 2026-05-07) —
     /// Packed AbilityRegistry uploaded to the GPU. The Strike + Snipe
-    /// verb-chronicle kernels bind `effect_kinds` /
+    /// + ConcussiveBlow verb-chronicle kernels bind `effect_kinds` /
     /// `effect_payload_a` / `effect_payload_b` (and the modifier
     /// columns) for the apply_ability dispatcher arm. Built once at
     /// construction by `binding_check::build_tactical_squad_5v5_registry`
-    /// (TankAttack at AbilityId(1), DpsAttack at AbilityId(2)) and
-    /// uploaded via `PackedAbilityRegistryGpu::upload`. The buffers
-    /// live for the rest of the run.
+    /// (TankAttack at AbilityId(1), DpsAttack at AbilityId(2),
+    /// ConcussiveBlow at AbilityId(3)) and uploaded via
+    /// `PackedAbilityRegistryGpu::upload`. The buffers live for the
+    /// rest of the run.
     registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
@@ -312,7 +349,29 @@ impl TacticalSquad5v5State {
         let agent_move_speed_buf =
             mk_zero_stat("tactical_squad_5v5_runtime::agent_move_speed");
 
-        // Three mask bitmaps — one per verb. Cleared each tick.
+        // ConcussiveBlow control-status proof (5v5 scale, 2026-05-07) —
+        // per-agent `stun_expires_at_tick` SoA column. Init to 0 = "never
+        // stunned" (the convention established by duel_abilities). The
+        // fused ApplyDamageFromChronicle_and_ApplyStunFromChronicle
+        // kernel writes this slot from kind=29 EffectStunApplied
+        // chronicle records (one record per ConcussiveBlow cast).
+        // COPY_SRC is on so the test can read it back via `read_u32`.
+        let stun_expires_init: Vec<u32> = vec![0_u32; n];
+        let agent_stun_expires_at_tick_buf =
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("tactical_squad_5v5_runtime::agent_stun_expires_at_tick"),
+                contents: bytemuck::cast_slice(&stun_expires_init),
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
+            });
+
+        // Four mask bitmaps — one per verb. Cleared each tick.
+        // ConcussiveBlow control-status proof (5v5 scale, 2026-05-07):
+        // mask_3 is the new bitmap added for Heal (which shifted from
+        // index 2 to index 3 because ConcussiveBlow was inserted at
+        // source position 2). The fused mask kernel writes all four
+        // bitmaps; the scoring argmax reads all four rows.
         let mask_bitmap_words = (agent_count + 31) / 32;
         let mask_bitmap_bytes = (mask_bitmap_words as u64) * 4;
         let mk_mask = |label: &str| -> wgpu::Buffer {
@@ -326,6 +385,7 @@ impl TacticalSquad5v5State {
         let mask_0_bitmap_buf = mk_mask("tactical_squad_5v5_runtime::mask_0_bitmap");
         let mask_1_bitmap_buf = mk_mask("tactical_squad_5v5_runtime::mask_1_bitmap");
         let mask_2_bitmap_buf = mk_mask("tactical_squad_5v5_runtime::mask_2_bitmap");
+        let mask_3_bitmap_buf = mk_mask("tactical_squad_5v5_runtime::mask_3_bitmap");
         let zero_words: Vec<u32> = vec![0u32; mask_bitmap_words.max(4) as usize];
         let mask_bitmap_zero_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("tactical_squad_5v5_runtime::mask_bitmap_zero"),
@@ -403,6 +463,19 @@ impl TacticalSquad5v5State {
             contents: bytemuck::bytes_of(&chronicle_snipe_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        // ConcussiveBlow control-status proof (5v5 scale, 2026-05-07) —
+        // cfg uniform for the new verb chronicle kernel. Same shape as
+        // Strike + Snipe; the kernel filters action_id == 2u and
+        // dispatches AbilityId(3) through the apply_ability arm.
+        let chronicle_concussive_blow_cfg_init =
+            physics_verb_chronicle_ConcussiveBlow::PhysicsVerbChronicleConcussiveBlowCfg {
+                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            };
+        let chronicle_concussive_blow_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("tactical_squad_5v5_runtime::chronicle_concussive_blow_cfg"),
+            contents: bytemuck::bytes_of(&chronicle_concussive_blow_cfg_init),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let chronicle_heal_cfg_init =
             physics_verb_chronicle_Heal::PhysicsVerbChronicleHealCfg {
                 event_count: 0, tick: 0, seed: 0, _pad0: 0,
@@ -421,14 +494,18 @@ impl TacticalSquad5v5State {
             contents: bytemuck::bytes_of(&apply_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        // Task #138 follow-on (tactical_squad_5v5 port, 2026-05-07) —
-        // Cfg uniform for the new ApplyDamageFromChronicle physics rule
-        // that translates EffectDamageApplied(kind=26) records emitted
-        // by the apply_ability dispatcher (Strike + Snipe) into Damaged
-        // events the existing ApplyDamage_and_ApplyHeal cascade
-        // consumes (with HP drain + Defeated emit + damage_dealt fold).
+        // Task #138 follow-on (tactical_squad_5v5 port, 2026-05-07) +
+        // ConcussiveBlow control-status proof (5v5 scale, 2026-05-07) —
+        // cfg uniform for the FUSED chronicle-consumer kernel. The
+        // lower pass folded ApplyDamageFromChronicle (kind=26 → emit
+        // Damaged) and ApplyStunFromChronicle (kind=29 → write
+        // `agents.set_stun_expires_at_tick`) into one kernel
+        // (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`)
+        // because both consume from the same event ring at @phase(post)
+        // with non-overlapping kind tags. Single cfg + single dispatch
+        // per tick.
         let apply_chronicle_cfg_init =
-            physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleCfg {
+            physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleCfg {
                 event_count: 0, tick: 0, seed: 0, _pad0: 0,
             };
         let apply_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -477,8 +554,10 @@ impl TacticalSquad5v5State {
             mask_0_bitmap_buf,
             mask_1_bitmap_buf,
             mask_2_bitmap_buf,
+            mask_3_bitmap_buf,
             mask_bitmap_zero_buf,
             mask_bitmap_words,
+            agent_stun_expires_at_tick_buf,
             scoring_output_buf,
             scoring_output_zero_buf,
             event_ring,
@@ -490,6 +569,7 @@ impl TacticalSquad5v5State {
             scoring_cfg_buf,
             chronicle_strike_cfg_buf,
             chronicle_snipe_cfg_buf,
+            chronicle_concussive_blow_cfg_buf,
             chronicle_heal_cfg_buf,
             apply_chronicle_cfg_buf,
             apply_cfg_buf,
@@ -520,6 +600,17 @@ impl TacticalSquad5v5State {
     /// Per-agent alive readback (1 = alive, 0 = dead).
     pub fn read_alive(&self) -> Vec<u32> {
         self.read_u32(&self.agent_alive_buf, "alive")
+    }
+
+    /// Per-agent `stun_expires_at_tick` readback (u32 absolute tick at
+    /// which the stun expires; 0 = "never stunned"). ConcussiveBlow
+    /// control-status proof (5v5 scale, 2026-05-07) — written by the
+    /// fused
+    /// `physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`
+    /// kernel from kind=29 EffectStunApplied chronicle records emitted
+    /// by ConcussiveBlow's verb chronicle dispatcher.
+    pub fn read_stun_expires_at_tick(&self) -> Vec<u32> {
+        self.read_u32(&self.agent_stun_expires_at_tick_buf, "stun_expires_at_tick")
     }
 
     /// Per-agent scoring output (4 × u32 per agent: best_action,
@@ -624,7 +715,17 @@ impl CompiledSim for TacticalSquad5v5State {
             &self.gpu, &mut encoder, max_slots_per_tick,
         );
         let mask_bytes = (self.mask_bitmap_words as u64) * 4;
-        for buf in [&self.mask_0_bitmap_buf, &self.mask_1_bitmap_buf, &self.mask_2_bitmap_buf] {
+        // ConcussiveBlow control-status proof (5v5 scale, 2026-05-07):
+        // mask_3 is the new bitmap added because ConcussiveBlow shifted
+        // Heal from index 2 to index 3. Cleared every tick alongside
+        // the other three (one bitmap per verb in source order:
+        // Strike=0, Snipe=1, ConcussiveBlow=2, Heal=3).
+        for buf in [
+            &self.mask_0_bitmap_buf,
+            &self.mask_1_bitmap_buf,
+            &self.mask_2_bitmap_buf,
+            &self.mask_3_bitmap_buf,
+        ] {
             encoder.copy_buffer_to_buffer(
                 &self.mask_bitmap_zero_buf, 0, buf, 0, mask_bytes.max(4),
             );
@@ -662,6 +763,10 @@ impl CompiledSim for TacticalSquad5v5State {
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             mask_1_bitmap: &self.mask_1_bitmap_buf,
             mask_2_bitmap: &self.mask_2_bitmap_buf,
+            // ConcussiveBlow control-status proof (5v5 scale,
+            // 2026-05-07): fourth verb mask (Heal at source index 3,
+            // shifted from 2 because ConcussiveBlow took index 2).
+            mask_3_bitmap: &self.mask_3_bitmap_buf,
             cfg: &self.mask_cfg_buf,
         };
         // PAIR DISPATCH: agent_count * agent_count = 100 threads (10 × 10).
@@ -700,6 +805,9 @@ impl CompiledSim for TacticalSquad5v5State {
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             mask_1_bitmap: &self.mask_1_bitmap_buf,
             mask_2_bitmap: &self.mask_2_bitmap_buf,
+            // ConcussiveBlow control-status proof (5v5 scale,
+            // 2026-05-07): scoring's argmax now reads four mask rows.
+            mask_3_bitmap: &self.mask_3_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
             cfg: &self.scoring_cfg_buf,
             // Wave 1.5#7 follow-on (predicate-aware scoring,
@@ -807,7 +915,62 @@ impl CompiledSim for TacticalSquad5v5State {
             event_count_estimate,
         );
 
-        // (6) Heal chronicle — gates on action_id==2, emits Healed.
+        // (5b) ConcussiveBlow chronicle — ConcussiveBlow control-status
+        // proof (5v5 scale, 2026-05-07). Gates action_id==2u
+        // (ConcussiveBlow is the third verb in source order, so its
+        // action_id is 2 — shifting Heal's action_id from 2 to 3).
+        // Same chronicle re-emit pattern as Strike + Snipe except the
+        // AbilityProgram at slot 3 declares EffectOp::Stun{
+        // duration_ticks=20} instead of Damage, so the apply_ability
+        // dispatcher writes kind=29 EffectStunApplied records (with
+        // `expires_at_tick = world.tick + 20` precomputed) instead of
+        // kind=26 EffectDamageApplied. The fused
+        // ApplyDamageFromChronicle_and_ApplyStunFromChronicle kernel
+        // below drains both kind tags into the right SoA target
+        // (Damaged → ApplyDamage HP cascade for kind=26, direct
+        // `agents.set_stun_expires_at_tick` for kind=29).
+        let concussive_blow_cfg = physics_verb_chronicle_ConcussiveBlow::PhysicsVerbChronicleConcussiveBlowCfg {
+            event_count: event_count_estimate, tick: self.tick as u32, seed: 0, _pad0: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.chronicle_concussive_blow_cfg_buf, 0, bytemuck::bytes_of(&concussive_blow_cfg),
+        );
+        let concussive_blow_bindings = physics_verb_chronicle_ConcussiveBlow::PhysicsVerbChronicleConcussiveBlowBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            agent_hp:            &self.agent_hp_buf,
+            agent_max_hp:        &self.agent_max_hp_buf,
+            agent_move_speed:    &self.agent_move_speed_buf,
+            agent_armor:         &self.agent_armor_buf,
+            agent_magic_resist:  &self.agent_magic_resist_buf,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_mana:          &self.agent_mana_buf,
+            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
+            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
+            ability_registry_chances:           &self.registry_gpu.chances,
+            cfg: &self.chronicle_concussive_blow_cfg_buf,
+        };
+        dispatch::dispatch_physics_verb_chronicle_concussiveblow(
+            &mut self.cache, &concussive_blow_bindings, &self.gpu.device, &mut encoder,
+            event_count_estimate,
+        );
+
+        // (6) Heal chronicle — gates on action_id==3u. ConcussiveBlow
+        // control-status proof (5v5 scale, 2026-05-07): Heal's action_id
+        // shifted from 2 to 3 because ConcussiveBlow was inserted at
+        // source position 2. The kernel name + binding shape are
+        // unchanged — the action_id literal in the generated kernel is
+        // the only detail that moved.
         let heal_cfg = physics_verb_chronicle_Heal::PhysicsVerbChronicleHealCfg {
             event_count: event_count_estimate, tick: self.tick as u32, seed: 0, _pad0: 0,
         };
@@ -824,15 +987,18 @@ impl CompiledSim for TacticalSquad5v5State {
             event_count_estimate,
         );
 
-        // (6b) ApplyDamageFromChronicle — chronicle re-emit. Task #138
-        // follow-on (tactical_squad_5v5 port, 2026-05-07): consumes
-        // EffectDamageApplied(kind=26) records the apply_ability
-        // dispatcher writes from Strike + Snipe and re-emits them as
-        // Damaged events. The existing ApplyDamage_and_ApplyHeal
-        // kernel below drains Damaged unchanged.
-        //
-        // PerEvent + emit-only kernel — does NOT trip P6.
-        let apply_chronicle_cfg = physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleCfg {
+        // (6b) Fused ApplyDamageFromChronicle + ApplyStunFromChronicle
+        // — chronicle consumers fused into ONE kernel by the lower pass
+        // (both run @phase(post) over the same event ring with
+        // non-overlapping kind tags). ConcussiveBlow control-status
+        // proof (5v5 scale, 2026-05-07). Drains:
+        //   - kind=26 EffectDamageApplied → emit `Damaged` (re-emit;
+        //     the standalone ApplyDamage_and_ApplyHeal kernel below
+        //     decrements HP)
+        //   - kind=29 EffectStunApplied → write
+        //     `agents.set_stun_expires_at_tick(t, expires_at_tick)`
+        //     directly into the per-agent SoA slot.
+        let apply_chronicle_cfg = physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
             seed: 0, _pad0: 0,
         };
@@ -841,12 +1007,13 @@ impl CompiledSim for TacticalSquad5v5State {
             bytemuck::bytes_of(&apply_chronicle_cfg),
         );
         let apply_chronicle_bindings =
-            physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleBindings {
+            physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleBindings {
                 event_ring: self.event_ring.ring(),
                 event_tail: self.event_ring.tail(),
+                agent_stun_expires_at_tick: &self.agent_stun_expires_at_tick_buf,
                 cfg: &self.apply_chronicle_cfg_buf,
             };
-        dispatch::dispatch_physics_applydamagefromchronicle(
+        dispatch::dispatch_physics_applydamagefromchronicle_and_applystunfromchronicle(
             &mut self.cache, &apply_chronicle_bindings,
             &self.gpu.device, &mut encoder, event_count_estimate,
         );
@@ -1165,5 +1332,102 @@ mod viz_tests {
              (initial={:?}, now={:?}) and alive_total stable ({})",
             initial_hp, hp_now, alive_total_now,
         );
+    }
+
+    /// ConcussiveBlow control-status proof (5v5 scale, 2026-05-07) —
+    /// proves the apply_ability dispatcher emits kind=29
+    /// EffectStunApplied chronicle records at 5v5 scale (10 agents
+    /// through pair-field scoring) AND the fused
+    /// `physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`
+    /// kernel ferries the per-record `expires_at_tick` into the
+    /// `agent_stun_expires_at_tick` SoA via
+    /// `agents.set_stun_expires_at_tick(t, e)`.
+    ///
+    /// CADENCE AT THE SEAM: ConcussiveBlow fires at
+    /// `world.tick % 7 == 0`, so steps 0..=13 (= ticks 0..=13) drive
+    /// cast cycles at tick 0 and tick 7 — two cast cycles before tick
+    /// 14 dispatches. Each DPS Red actor (3 per team at slots 2..5 /
+    /// 7..10) on its eligible cycle picks an enemy DPS via the scoring
+    /// argmax (ConcussiveBlow's `300 - target.hp` outscores Snipe's
+    /// `200 - target.hp` when both are eligible — but at ticks 0 and
+    /// 7 only ConcussiveBlow is on for those actors at the 7-cadence
+    /// at tick 7; tick 0 has both Snipe (% 4) and ConcussiveBlow (% 7)
+    /// firing for DPS, ConcussiveBlow wins by score).
+    ///
+    /// `expires_at_tick` for a tick-0 cast = `world.tick + 20 = 20`;
+    /// for a tick-7 cast = `7 + 20 = 27`. After 14 steps the second
+    /// cast cycle has just finished, so any agent whose
+    /// `stun_expires_at_tick > 0` was hit by either cycle and the
+    /// value lands in {20, 27} (race-tolerant range: [20, 28]). The
+    /// test pins that range.
+    ///
+    /// HOW THE TEST PROVES CONCUSSIVE-BLOW FIRED:
+    ///   1. After 14 steps at least one agent has a non-zero
+    ///      stun_expires_at_tick (proves the chronicle path emitted
+    ///      kind=29 records AND the fused consumer wrote the SoA).
+    ///   2. Every stunned agent's expiry tick is in [20, 28] (matches
+    ///      `tick + 20` for tick∈{0, 7}).
+    #[test]
+    fn concussive_blow_stuns_targets() {
+        let mut state = TacticalSquad5v5State::new(0xCAFE_F00D, 10);
+
+        // Pre-tick baseline — every agent's stun_expires_at_tick is 0.
+        let initial_stun = state.read_stun_expires_at_tick();
+        assert_eq!(
+            initial_stun.len(),
+            10,
+            "stun_expires_at_tick readback must cover all 10 agents",
+        );
+        for (i, &e) in initial_stun.iter().enumerate() {
+            assert_eq!(
+                e, 0,
+                "initial stun_expires_at_tick[{i}] must be 0 (= never \
+                 stunned); got {e}",
+            );
+        }
+
+        // Run 14 ticks. ConcussiveBlow fires at tick 0 and tick 7
+        // (two cast cycles); the next firing tick is 14 (we run steps
+        // 0..=13 inclusive, ending BEFORE tick 14 dispatches).
+        for _ in 0..14 {
+            state.step();
+        }
+
+        let stun = state.read_stun_expires_at_tick();
+
+        // Pin 1: at least 1 agent has a non-zero stun expiry — proves
+        // ConcussiveBlow's apply_ability dispatch emitted kind=29
+        // EffectStunApplied records AND the fused chronicle consumer
+        // wrote the SoA. With 3 DPS per team firing on a 7-cadence and
+        // pair-field argmax piling casters onto the lowest-HP target,
+        // typically 1+ DPS targets get stunned, but the load-bearing
+        // pin is "≥ 1" so the test is robust against scheduling
+        // variation.
+        let stunned_count: usize = stun.iter().filter(|&&e| e > 0).count();
+        assert!(
+            stunned_count >= 1,
+            "after 14 ticks at least 1 agent must have a non-zero \
+             stun_expires_at_tick (control-status chronicle proof); \
+             saw {} stunned out of 10. Per-slot stun: {:?}",
+            stunned_count,
+            stun,
+        );
+
+        // Pin 2: every stunned agent's expiry tick is in [20, 28] —
+        // the dispatcher pre-computes `expires_at_tick = world.tick +
+        // duration_ticks(20)` at chronicle-write time. Tick 0 cast →
+        // expires at 20; tick 7 cast → expires at 27. Race-tolerant
+        // bound is [20, 28] (allows for one extra tick of advance from
+        // the apply pass running after the chronicle write).
+        for (i, &e) in stun.iter().enumerate() {
+            if e > 0 {
+                assert!(
+                    (20..=28).contains(&e),
+                    "agent {i}: stun_expires_at_tick={e} outside \
+                     expected range [20, 28] (tick-0 cast → expires at \
+                     20, tick-7 cast → expires at 27)",
+                );
+            }
+        }
     }
 }

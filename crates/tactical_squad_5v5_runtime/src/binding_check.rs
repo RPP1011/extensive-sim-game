@@ -1,20 +1,21 @@
 //! tactical_squad_5v5 apply_ability binding check.
 //!
-//! Builds the runtime's two-program AbilityRegistry (TankAttack +
-//! DpsAttack) and asserts that the registered slot IDs match the
-//! `apply_ability 1` / `apply_ability 2` literals hardcoded in
-//! `assets/sim/tactical_squad_5v5.sim`'s Strike (Tank) and Snipe (DPS)
-//! verb bodies. If a registered slot drifts (e.g. someone later
-//! reorders the registration calls or inserts a placeholder ahead of
-//! TankAttack), the panic here surfaces at fixture-construction time
-//! rather than as silent wrong-ability dispatch.
+//! Builds the runtime's three-program AbilityRegistry (TankAttack +
+//! DpsAttack + ConcussiveBlow) and asserts that the registered slot
+//! IDs match the `apply_ability 1` / `apply_ability 2` /
+//! `apply_ability 3` literals hardcoded in
+//! `assets/sim/tactical_squad_5v5.sim`'s Strike (Tank), Snipe (DPS),
+//! and ConcussiveBlow (DPS) verb bodies. If a registered slot drifts
+//! (e.g. someone later reorders the registration calls or inserts a
+//! placeholder ahead of TankAttack), the panic here surfaces at
+//! fixture-construction time rather than as silent wrong-ability
+//! dispatch.
 //!
-//! Mirrors `crates/duel_25v25_runtime/src/binding_check.rs` — both
-//! fixtures hand-build their programs (no `.ability` files involved)
-//! and pin slot IDs via constants. tactical_squad_5v5 is a small step
-//! up: TWO abilities (rather than one), demonstrating that the
-//! AbilityRegistryBuilder's slot-assignment ordering survives multiple
-//! registrations.
+//! Mirrors `crates/duel_25v25_runtime/src/binding_check.rs` and
+//! `crates/mass_battle_100v100_runtime/src/binding_check.rs` — same
+//! one-program-per-ability hand-built shape, three programs (TankAttack,
+//! DpsAttack, ConcussiveBlow). No `.ability` files involved; the source
+//! of truth is this file's program builders.
 //!
 //! CONFIG → REGISTRY BRIDGE: the .sim's `config.combat.tank_damage =
 //! 10.0` and `config.combat.dps_damage = 22.0` are mirrored as
@@ -35,6 +36,17 @@ pub const TANK_ATTACK_EXPECTED_ABILITY_ID: u32 = 1;
 /// `apply_ability 2` literal in
 /// `assets/sim/tactical_squad_5v5.sim::Snipe` pins this slot.
 pub const DPS_ATTACK_EXPECTED_ABILITY_ID: u32 = 2;
+
+/// ConcussiveBlow control-status proof (5v5 scale, 2026-05-07) —
+/// registered third so it lands at AbilityId(3). The `apply_ability 3`
+/// literal in `assets/sim/tactical_squad_5v5.sim::ConcussiveBlow` pins
+/// this slot. First control-status (Stun) ability in
+/// tactical_squad_5v5; proves the apply_ability dispatcher's per-
+/// effect-slot loop emits kind=29 EffectStunApplied chronicle records
+/// at 5v5 scale (10 agents × pair-field scoring). Mirrors
+/// mass_battle_100v100's StunBolt third-site pattern (commit
+/// 67b61aa2).
+pub const CONCUSSIVE_BLOW_EXPECTED_ABILITY_ID: u32 = 3;
 
 /// Hand-mirrored Tank base damage — matches `config.combat.tank_damage
 /// = 10.0` in `assets/sim/tactical_squad_5v5.sim`. The .sim's verb
@@ -83,10 +95,40 @@ fn build_dps_attack_program() -> AbilityProgram {
     )
 }
 
+/// tactical_squad_5v5's ConcussiveBlow registry-resident program
+/// (control-status proof at 5v5 scale, 2026-05-07).
+///
+/// Single-target Stun(20 ticks). The first non-Damage EffectOp in this
+/// fixture — proves the apply_ability dispatcher emits kind=29
+/// EffectStunApplied chronicle records (drained by
+/// `ApplyStunFromChronicle` straight into the per-agent
+/// `stun_expires_at_tick` SoA). 20 ticks (= 2s at 100ms tick) gives the
+/// stun a long enough window that several `world.tick % 7 == 0` cast
+/// cycles can land before any single stun expires, so the test sees a
+/// non-zero stun_expires_at_tick after one or two cast pulses. Mirrors
+/// mass_battle_100v100's StunBolt program (commit 67b61aa2) — same
+/// EffectOp::Stun{duration_ticks=20} shape.
+///
+/// `cooldown_ticks: 0` keeps the per-tick gate in the .sim verb's
+/// `world.tick % 7 == 0` clause (the GPU dispatcher does not consult
+/// program.cooldown_ticks at the apply_ability arm today).
+/// `hostile_only: true` matches the .sim's `target.level != self.level`
+/// enemy predicate (DPS Red→Blue, DPS Blue→Red — same role-team gate
+/// Snipe uses, just at a different cadence). `range: 0.0` matches
+/// Strike + Snipe (no spatial filter — verb-gated by creature_type
+/// + level instead).
+fn build_concussive_blow_program() -> AbilityProgram {
+    AbilityProgram::new_single_target(
+        /*range*/ 0.0,
+        Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+        [EffectOp::Stun { duration_ticks: 20 }],
+    )
+}
+
 /// Build the tactical_squad_5v5 AbilityRegistry — TankAttack at
-/// AbilityId(1), DpsAttack at AbilityId(2). Returns the frozen
-/// registry; callers pack + upload via `PackedAbilityRegistry::pack`
-/// + `PackedAbilityRegistryGpu::upload`.
+/// AbilityId(1), DpsAttack at AbilityId(2), ConcussiveBlow at
+/// AbilityId(3). Returns the frozen registry; callers pack + upload
+/// via `PackedAbilityRegistry::pack` + `PackedAbilityRegistryGpu::upload`.
 pub fn build_tactical_squad_5v5_registry() -> AbilityRegistry {
     let mut builder = AbilityRegistryBuilder::new();
     let tank_id = builder.register(build_tank_attack_program());
@@ -100,6 +142,12 @@ pub fn build_tactical_squad_5v5_registry() -> AbilityRegistry {
         dps_id,
         AbilityId::new(DPS_ATTACK_EXPECTED_ABILITY_ID).expect("non-zero AbilityId"),
         "DpsAttack must register second → AbilityId(2)",
+    );
+    let concussive_blow_id = builder.register(build_concussive_blow_program());
+    debug_assert_eq!(
+        concussive_blow_id,
+        AbilityId::new(CONCUSSIVE_BLOW_EXPECTED_ABILITY_ID).expect("non-zero AbilityId"),
+        "ConcussiveBlow must register third → AbilityId(3)",
     );
     builder.build()
 }
@@ -115,9 +163,9 @@ pub fn assert_ability_registry_matches_sim_constants() {
     let registry = build_tactical_squad_5v5_registry();
     assert_eq!(
         registry.len(),
-        2,
-        "tactical_squad_5v5 registry must contain exactly two programs \
-         (TankAttack, DpsAttack); got {}",
+        3,
+        "tactical_squad_5v5 registry must contain exactly three programs \
+         (TankAttack, DpsAttack, ConcussiveBlow); got {}",
         registry.len(),
     );
 
@@ -206,18 +254,60 @@ pub fn assert_ability_registry_matches_sim_constants() {
             DPS_DAMAGE,
         ),
     }
+
+    // ---- ConcussiveBlow at AbilityId(3) (control-status proof at 5v5
+    //      scale — first non-Damage EffectOp in this fixture) ----
+    let concussive_blow_id = AbilityId::new(CONCUSSIVE_BLOW_EXPECTED_ABILITY_ID)
+        .expect("non-zero AbilityId");
+    let concussive_blow = registry
+        .get(concussive_blow_id)
+        .expect("ConcussiveBlow resolves to a program at AbilityId(3)");
+    assert_eq!(
+        concussive_blow.gate.cooldown_ticks, 0,
+        "ConcussiveBlow cooldown_ticks must be 0 (cadence is in the .sim verb \
+         gate `world.tick % 7 == 0`)",
+    );
+    assert!(
+        concussive_blow.gate.hostile_only,
+        "ConcussiveBlow must be hostile_only — DPS-vs-enemy gate, same as Snipe",
+    );
+    match concussive_blow.area {
+        Area::SingleTarget { range } => assert_eq!(
+            range, 0.0,
+            "ConcussiveBlow range must be 0.0 — no spatial filter in \
+             tactical_squad_5v5.sim (verb-gated, not spatial — same as \
+             Strike + Snipe)",
+        ),
+    }
+    assert_eq!(
+        concussive_blow.effects.len(), 1,
+        "ConcussiveBlow must have exactly one effect (Stun 20 ticks)",
+    );
+    match &concussive_blow.effects[0] {
+        EffectOp::Stun { duration_ticks } => assert_eq!(
+            *duration_ticks, 20,
+            "ConcussiveBlow stun duration_ticks must be 20 (= 2s at 100ms \
+             tick); .sim verb hand-mirrors via the apply_ability \
+             dispatcher's `expires_at_tick = world.tick + 20` chronicle \
+             write",
+        ),
+        other => panic!(
+            "ConcussiveBlow effect[0]: expected Stun(duration_ticks=20), got {other:?}",
+        ),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Pins the registry build pattern: two abilities, TankAttack at
-    /// slot 1 (Damage 10.0) and DpsAttack at slot 2 (Damage 22.0) at
-    /// the expected gates/areas. Catches drift before construction-time
-    /// panics surface in viz_tests / behavioural tests.
+    /// Pins the registry build pattern: three abilities, TankAttack at
+    /// slot 1 (Damage 10.0), DpsAttack at slot 2 (Damage 22.0), and
+    /// ConcussiveBlow at slot 3 (Stun 20 ticks) at the expected
+    /// gates/areas. Catches drift before construction-time panics
+    /// surface in viz_tests / behavioural tests.
     #[test]
-    fn registry_contains_tank_and_dps_at_expected_slots() {
+    fn registry_contains_tank_dps_concussive_blow_at_expected_slots() {
         assert_ability_registry_matches_sim_constants();
     }
 }

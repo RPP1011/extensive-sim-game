@@ -76,6 +76,30 @@ event EffectDamageApplied {
   amount: f32,
 }
 
+// ConcussiveBlow control-status proof (5v5 scale, 2026-05-07) —
+// engine-side chronicle event written by the apply_ability dispatcher
+// at hardcoded EventKindId 29 (see
+// `dsl_ast::engine_events::engine_event_kind_id_for_name`).
+//
+// The new `verb ConcussiveBlow` (added below near Snipe) is now
+// `apply_ability 3 by self target target`, which the dispatcher
+// translates to a kind=29 EffectStunApplied record with
+// `expires_at_tick = world.tick + 20` (the dispatcher pre-computes
+// the absolute tick from EffectOp::Stun{duration_ticks=20}). The new
+// `physics ApplyStunFromChronicle @phase(post)` rule below drains
+// these records straight into the per-agent `stun_expires_at_tick`
+// SoA via `agents.set_stun_expires_at_tick(t, e)`. First non-Damage
+// EffectOp in this fixture — proves control-status dispatch works at
+// the same 5v5 pair-field scale Strike + Snipe operate at. Mirrors
+// mass_battle_100v100's StunBolt third-site pattern (commit
+// 67b61aa2).
+@replayable @gpu_amenable
+event EffectStunApplied {
+  actor: AgentId,
+  target: AgentId,
+  expires_at_tick: u32,
+}
+
 @replayable @gpu_amenable
 event Healed {
   source: AgentId,
@@ -196,6 +220,57 @@ verb Snipe(self, target: Agent) =
   score (if target.alive { 200.0 - target.hp } else { -1000000.0 })
 
 // -------------------------------------------------------------------
+// ConcussiveBlow — DPS picks an enemy and stuns them for 20 ticks.
+// FIRST non-Damage offensive verb in this fixture (control-status
+// proof at 5v5 scale, 2026-05-07). Same role gate as Snipe (DPS,
+// enemy-team) but at a slower cadence (`world.tick % 7 == 0` vs
+// Snipe's `% 4 == 0`) so the two verbs interleave: on ticks where
+// both gates pass (every 28 ticks), the scoring kernel's argmax picks
+// ConcussiveBlow because its score base (300.0 - target.hp) sits
+// above Snipe's (200.0 - target.hp) baseline. On non-overlapping
+// ticks Snipe still fires (% 4 == 0 with % 7 != 0). On pure
+// ConcussiveBlow ticks (% 7 == 0 with % 4 != 0, e.g. tick 7), only
+// ConcussiveBlow is eligible for DPS actors and lands as their
+// argmax pick uncontested.
+//
+// Body: `apply_ability 3 by self target target`. The literal `3` is
+// ConcussiveBlow's AbilityId in the tactical_squad_5v5
+// AbilityRegistry built by
+// `crates/tactical_squad_5v5_runtime/src/binding_check.rs::
+// build_tactical_squad_5v5_registry` (TankAttack=1, DpsAttack=2,
+// ConcussiveBlow=3 in registration order). The dispatcher writes
+// EffectStunApplied chronicle records (engine kind=29) carrying
+// `expires_at_tick = world.tick + 20`; the new ApplyStunFromChronicle
+// physics rule below (auto-fused with ApplyDamageFromChronicle by the
+// lower pass) consumes them straight into the per-agent
+// stun_expires_at_tick SoA via `agents.set_stun_expires_at_tick(t,
+// e)`.
+//
+// COOLDOWN NOTE: same as Strike + Snipe — the registry-resident
+// ConcussiveBlow program declares `cooldown_ticks: 0`; the per-tick
+// gate stays in the verb-style `world.tick % 7 == 0` clause below
+// since the GPU dispatcher does not consult program.cooldown_ticks
+// at the apply_ability arm today.
+// -------------------------------------------------------------------
+verb ConcussiveBlow(self, target: Agent) =
+  action ConcussiveBlowAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && self.creature_type == Dps
+        && target.level != self.level
+        && (world.tick % 7 == 0))
+  apply_ability 3 by self target target
+  // Score base 300.0 sits above Snipe (200.0) so when ConcussiveBlow's
+  // % 7 cadence overlaps with Snipe's % 4 cadence on shared DPS
+  // actors (every 28 ticks), the argmax picks ConcussiveBlow and the
+  // EffectStunApplied chronicle fires. Same dead-target filter as
+  // Snipe — without `target.alive` in the score expression,
+  // post-mortem `target.hp` driven negative by continued targeting
+  // would dominate the argmax forever.
+  score (if target.alive { 300.0 - target.hp } else { -1000000.0 })
+
+// -------------------------------------------------------------------
 // Heal — Healer picks the LOWEST-HP ally. Same pair-field score
 // shape as Snipe but inverted target predicate (`target.level ==
 // self.level` — same team). Targeting `self` is permitted so a
@@ -236,6 +311,37 @@ verb Heal(self, target: Agent) =
 physics ApplyDamageFromChronicle {
   on EffectDamageApplied { actor: a, target: t, amount: amt } {
     emit Damaged { source: a, target: t, amount: amt }
+  }
+}
+
+// ConcussiveBlow control-status proof (5v5 scale, 2026-05-07) —
+// chronicle consumer for the kind=29 EffectStunApplied records the
+// new ConcussiveBlow verb writes. The dispatcher pre-computes
+// `expires_at_tick = world.tick + duration_ticks` at chronicle-write
+// time (see Stun arm in `cg/emit/wgsl_body.rs`), so this rule ferries
+// the absolute tick verbatim into the per-agent
+// `stun_expires_at_tick` SoA slot via
+// `agents.set_stun_expires_at_tick(t, e)`. Mirror of duel_25v25 +
+// mass_battle_100v100 ApplyStunFromChronicle (commits 7a0a6ace,
+// 67b61aa2 — third site of this pattern).
+//
+// AUTO-FUSION: this rule and ApplyDamageFromChronicle both run
+// @phase(post) over the same event ring with non-overlapping kind
+// tags (26 vs 29), so the lower pass folds them into ONE kernel
+// (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`) —
+// same fusion duel_25v25 + mass_battle_100v100 surfaced.
+//
+// P6 caveat: this rule is PerEvent + writes an AgentField — TRIPS P6
+// in the well_formed checker. tactical_squad_5v5's build.rs already
+// tolerates lower diagnostics (matches `lower_compilation_to_cg` on
+// `DriverOutcome::Err` and falls through with the partial program),
+// so the rule lowers regardless. Same tolerance pattern duel_abilities
+// + duel_25v25 + mass_battle_100v100 use for their AgentField writes
+// from chronicle physics.
+@phase(post)
+physics ApplyStunFromChronicle {
+  on EffectStunApplied { actor: _, target: t, expires_at_tick: e } {
+    agents.set_stun_expires_at_tick(t, e);
   }
 }
 
