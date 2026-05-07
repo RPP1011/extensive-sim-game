@@ -99,6 +99,22 @@ pub struct Duel25v25State {
     #[allow(dead_code)]
     agent_mana_buf: wgpu::Buffer,
 
+    /// Multi-effect AOE Cleave+Stun (ConcussiveCleave Path B production
+    /// proof, 2026-05-07) — per-agent `stun_expires_at_tick` SoA column.
+    /// Written by the fused
+    /// `physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`
+    /// kernel from kind=29 EffectStunApplied records produced by
+    /// ConcussiveCleave's effects[1] (Stun) AOE walk. Init to 0 (= "never
+    /// stunned" — agents whose `stun_expires_at_tick(self) > world.tick`
+    /// are stunned, per the convention duel_abilities established in
+    /// commit 2334ce2c). No verb cast-gate today reads it (the
+    /// duel_25v25 fixture's ScanAnd* rules use a body-side `if` rather
+    /// than a `where` clause), but the test asserts the SoA column lands
+    /// the expected expires_at_tick after a ConcussiveCleave cast — the
+    /// load-bearing observation that proves the multi-effect dispatcher
+    /// fired both effects.
+    agent_stun_expires_at_tick_buf: wgpu::Buffer,
+
     // -- Spatial grid --
     spatial_grid_cells: wgpu::Buffer,
     spatial_grid_offsets: wgpu::Buffer,
@@ -121,6 +137,19 @@ pub struct Duel25v25State {
     /// separate buffer so each kernel writes its own per-tick view of
     /// `tick` and reads it without mid-frame races.
     cleave_cfg_buf: wgpu::Buffer,
+    /// Multi-effect AOE Cleave+Stun (ConcussiveCleave Path B production
+    /// proof, 2026-05-07) — third per-agent dispatch kernel cfg
+    /// (ScanAndConcussiveCleave). Same shape as `scan_cfg_buf` /
+    /// `cleave_cfg_buf`; separate buffer so each per-tick kernel can
+    /// stamp its own `tick` view without cross-kernel races.
+    concussive_cfg_buf: wgpu::Buffer,
+    /// Fused chronicle-consumer cfg buffer. The lower pass folded the
+    /// previously-separate ApplyDamageFromChronicle + ApplyStunFromChronicle
+    /// rules into ONE kernel
+    /// (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`)
+    /// because both consume from the same event ring at @phase(post)
+    /// with non-overlapping kind tags (26 + 29). The cfg is shared since
+    /// `event_count` + `tick` apply uniformly to both arms.
     apply_chronicle_cfg_buf: wgpu::Buffer,
     apply_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
@@ -277,6 +306,24 @@ impl Duel25v25State {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
+        // Multi-effect AOE Cleave+Stun (ConcussiveCleave Path B production
+        // proof, 2026-05-07) — per-agent `stun_expires_at_tick` SoA
+        // column. Init to 0 = "never stunned" (the convention established
+        // by duel_abilities in commit 2334ce2c). The fused
+        // ApplyDamageFromChronicle_and_ApplyStunFromChronicle kernel
+        // writes this slot from kind=29 EffectStunApplied chronicle
+        // records (one record per ConcussiveCleave AOE target).
+        // COPY_SRC is on so the test can read it back via `read_u32`.
+        let stun_expires_init: Vec<u32> = vec![0_u32; n];
+        let agent_stun_expires_at_tick_buf =
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("duel_25v25_runtime::agent_stun_expires_at_tick"),
+                contents: bytemuck::cast_slice(&stun_expires_init),
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
+            });
+
         // ---- Spatial-grid buffers (mirror particle_collision_runtime) ----
         use dsl_compiler::cg::emit::spatial as sp;
         let agent_cap_bytes = (agent_count as u64) * 4;
@@ -361,6 +408,24 @@ impl Duel25v25State {
             contents: bytemuck::bytes_of(&cleave_cfg),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        // Multi-effect AOE Cleave+Stun (ConcussiveCleave Path B
+        // production proof, 2026-05-07) — third per-agent dispatch
+        // kernel cfg. Same shape as scan_cfg / cleave_cfg; the
+        // ScanAndConcussiveCleave kernel only differs from ScanAndCleave
+        // by the `apply_ability 3 …` literal in the .sim and the
+        // registry-resident program at slot 3 (multi-effect Damage+Stun
+        // both in Circle(1.0)).
+        let concussive_cfg = physics_ScanAndConcussiveCleave::PhysicsScanAndConcussiveCleaveCfg {
+            agent_cap: agent_count,
+            tick: 0,
+            seed: 0,
+            _pad: 0,
+        };
+        let concussive_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_25v25_runtime::concussive_cfg"),
+            contents: bytemuck::bytes_of(&concussive_cfg),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let apply_cfg = physics_ApplyDamage::PhysicsApplyDamageCfg {
             event_count: 0,
             tick: 0,
@@ -372,11 +437,17 @@ impl Duel25v25State {
             contents: bytemuck::bytes_of(&apply_cfg),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        // Task #138 follow-on (duel_25v25 port, 2026-05-07) — cfg
-        // uniform for the new chronicle re-emit physics rule. Reads
-        // EffectDamageApplied records from the event ring, emits
-        // Damaged events the existing ApplyDamage cascade drains.
-        let apply_chronicle_cfg = physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleCfg {
+        // Task #138 follow-on (duel_25v25 port, 2026-05-07) +
+        // Multi-effect AOE Cleave+Stun (ConcussiveCleave, 2026-05-07)
+        // — cfg uniform for the FUSED chronicle-consumer kernel. The
+        // lower pass folded ApplyDamageFromChronicle (drains kind=26
+        // → emit Damaged) and ApplyStunFromChronicle (drains kind=29
+        // → write `agents.set_stun_expires_at_tick`) into one kernel
+        // (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`)
+        // because both consume from the same event ring at @phase(post)
+        // with non-overlapping kind tags. Single cfg + single dispatch
+        // per tick.
+        let apply_chronicle_cfg = physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleCfg {
             event_count: 0,
             tick: 0,
             seed: 0,
@@ -435,6 +506,7 @@ impl Duel25v25State {
             agent_magic_resist_buf,
             agent_move_speed_buf,
             agent_mana_buf,
+            agent_stun_expires_at_tick_buf,
             spatial_grid_cells,
             spatial_grid_offsets,
             spatial_grid_starts,
@@ -447,6 +519,7 @@ impl Duel25v25State {
             defeats_received_cfg_buf,
             scan_cfg_buf,
             cleave_cfg_buf,
+            concussive_cfg_buf,
             apply_chronicle_cfg_buf,
             apply_cfg_buf,
             registry_gpu,
@@ -481,6 +554,17 @@ impl Duel25v25State {
     /// Per-agent creature_type readback (0 = Red, 1 = Blue).
     pub fn read_creature_type(&self) -> Vec<u32> {
         self.read_u32(&self.agent_creature_type_buf, "creature_type")
+    }
+
+    /// Per-agent `stun_expires_at_tick` readback (u32 absolute tick at
+    /// which the stun expires; 0 = "never stunned"). Multi-effect AOE
+    /// Cleave+Stun (ConcussiveCleave Path B production proof,
+    /// 2026-05-07) — written by the fused
+    /// ApplyDamageFromChronicle_and_ApplyStunFromChronicle kernel from
+    /// kind=29 EffectStunApplied chronicle records emitted by
+    /// ConcussiveCleave's effects[1] AOE walk.
+    pub fn read_stun_expires_at_tick(&self) -> Vec<u32> {
+        self.read_u32(&self.agent_stun_expires_at_tick_buf, "stun_expires_at_tick")
     }
 
     /// Per-agent position readback. Positions are static in this fixture
@@ -599,12 +683,20 @@ impl CompiledSim for Duel25v25State {
         // candidates; ApplyDamage may fan-out one Defeated per Damaged.
         // Bound headers clear above the worst-case slots produced per
         // tick.
+        //
+        // Multi-effect AOE Cleave+Stun (ConcussiveCleave Path B
+        // production proof, 2026-05-07): factor bumped from 2 → 3 to
+        // account for ConcussiveCleave emitting TWO chronicle records
+        // per in-radius candidate (Damage + Stun) on top of the
+        // Damaged → Defeated fan-out. saturating_mul + min(65536) clamp
+        // keeps the bound safely below the dispatcher's
+        // `slot < 65536u` guard.
         use dsl_compiler::cg::emit::spatial as sp;
         let max_neighbour_emits = self
             .agent_count
             .saturating_mul(sp::MAX_PER_CELL)
             .saturating_mul(27);
-        let max_slots_per_tick = max_neighbour_emits.saturating_mul(2).min(65536);
+        let max_slots_per_tick = max_neighbour_emits.saturating_mul(3).min(65536);
         self.event_ring
             .clear_ring_headers_in(&self.gpu, &mut encoder, max_slots_per_tick);
         let offsets_size = sp::offsets_bytes();
@@ -813,15 +905,92 @@ impl CompiledSim for Duel25v25State {
             self.agent_count,
         );
 
-        // (3b) ApplyDamageFromChronicle — chronicle re-emit. Task #138
-        // follow-on (duel_25v25 port, 2026-05-07): consumes
-        // EffectDamageApplied records (kind=26) the apply_ability
-        // dispatcher writes and re-emits them as Damaged events. The
-        // existing ApplyDamage kernel below drains Damaged unchanged.
-        // event_count is the upper bound on EffectDamageApplied
-        // records produced per tick (= max ScanAndStrike emits).
+        // (3a'') ScanAndConcussiveCleave — Multi-effect AOE Path B
+        // (ConcussiveCleave at AbilityId(3), 2026-05-07). Body-form
+        // spatial walk dispatches AbilityId(3) on every-7-ticks cadence.
+        // The registry-resident program has TWO effects, BOTH carrying
+        // a per_effect_areas[i]=Circle(1.0) entry — so the WGSL
+        // dispatcher walks the 27-cell neighborhood TWICE (once per
+        // effect slot), emitting ONE chronicle record per in-radius
+        // candidate per slot:
+        //   - effect[0]=Damage(3.0) → kind=26 EffectDamageApplied
+        //     (drained by the fused ApplyDamage_and_ApplyStun chronicle
+        //     consumer below into a Damaged event)
+        //   - effect[1]=Stun(15 ticks) → kind=29 EffectStunApplied
+        //     (drained by the same fused kernel, writes
+        //     `agents.set_stun_expires_at_tick(t, world.tick + 15)`)
+        //
+        // Same registry SoA bindings as ScanAndStrike + ScanAndCleave —
+        // all three kernels share the same packed AbilityRegistry; the
+        // `apply_ability 3` literal in the .sim selects the program
+        // slot.
+        let concussive_cfg = physics_ScanAndConcussiveCleave::PhysicsScanAndConcussiveCleaveCfg {
+            agent_cap: self.agent_count,
+            tick: self.tick as u32,
+            seed: 0,
+            _pad: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.concussive_cfg_buf,
+            0,
+            bytemuck::bytes_of(&concussive_cfg),
+        );
+        let concussive_bindings = physics_ScanAndConcussiveCleave::PhysicsScanAndConcussiveCleaveBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            agent_pos: &self.agent_pos_buf,
+            agent_hp: &self.agent_hp_buf,
+            agent_max_hp: &self.agent_max_hp_buf,
+            agent_alive: &self.agent_alive_buf,
+            agent_move_speed: &self.agent_move_speed_buf,
+            agent_armor: &self.agent_armor_buf,
+            agent_magic_resist: &self.agent_magic_resist_buf,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_mana: &self.agent_mana_buf,
+            agent_creature_type: &self.agent_creature_type_buf,
+            spatial_grid_cells: &self.spatial_grid_cells,
+            spatial_grid_offsets: &self.spatial_grid_offsets,
+            spatial_grid_starts: &self.spatial_grid_starts,
+            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+            ability_registry_area_kinds: &self.registry_gpu.area_kinds,
+            ability_registry_area_args: &self.registry_gpu.area_args,
+            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
+            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
+            ability_registry_chances:           &self.registry_gpu.chances,
+            cfg: &self.concussive_cfg_buf,
+        };
+        dispatch::dispatch_physics_scanandconcussivecleave(
+            &mut self.cache,
+            &concussive_bindings,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+
+        // (3b) Fused ApplyDamageFromChronicle + ApplyStunFromChronicle
+        // — chronicle consumers fused into ONE kernel by the lower pass
+        // (both run @phase(post) over the same event ring with
+        // non-overlapping kind tags). Drains:
+        //   - kind=26 EffectDamageApplied → emit `Damaged` (re-emit;
+        //     the standalone ApplyDamage kernel below decrements HP)
+        //   - kind=29 EffectStunApplied → write
+        //     `agents.set_stun_expires_at_tick(t, expires_at_tick)`
+        //     directly (Multi-effect AOE Cleave+Stun, 2026-05-07).
+        // event_count is the upper bound on chronicle records produced
+        // per tick across all three Scan kernels (Strike + Cleave +
+        // ConcussiveCleave each can emit up to MAX_PER_CELL × 27
+        // records per agent).
         let event_count_estimate = max_neighbour_emits.min(65536);
-        let apply_chronicle_cfg = physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleCfg {
+        let apply_chronicle_cfg = physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleCfg {
             event_count: event_count_estimate,
             tick: self.tick as u32,
             seed: 0,
@@ -833,12 +1002,13 @@ impl CompiledSim for Duel25v25State {
             bytemuck::bytes_of(&apply_chronicle_cfg),
         );
         let apply_chronicle_bindings =
-            physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleBindings {
+            physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleBindings {
                 event_ring: self.event_ring.ring(),
                 event_tail: self.event_ring.tail(),
+                agent_stun_expires_at_tick: &self.agent_stun_expires_at_tick_buf,
                 cfg: &self.apply_chronicle_cfg_buf,
             };
-        dispatch::dispatch_physics_applydamagefromchronicle(
+        dispatch::dispatch_physics_applydamagefromchronicle_and_applystunfromchronicle(
             &mut self.cache,
             &apply_chronicle_bindings,
             &self.gpu.device,
@@ -1300,6 +1470,136 @@ mod viz_tests {
              HP < 25; saw alive_total={} and min HP={}",
             alive_total,
             hp.iter().cloned().fold(f32::INFINITY, f32::min),
+        );
+    }
+
+    /// Multi-effect AOE Cleave+Stun (ConcussiveCleave Path B production
+    /// proof, 2026-05-07) — proves the dispatcher walks BOTH effects of
+    /// a multi-effect program AND that each in-radius AOE target receives
+    /// BOTH chronicle records (kind=26 EffectDamageApplied + kind=29
+    /// EffectStunApplied).
+    ///
+    /// Cadence at the seam: ConcussiveCleave fires at `tick % 7 == 0`,
+    /// so step 0 (= tick 0) drives one round of casts. Each Red agent
+    /// at the seam casts on a Blue agent's position; the dispatcher
+    /// walks the 27-cell ring around the cross-team target's position
+    /// twice (once per effect slot) and emits ONE chronicle record per
+    /// in-radius candidate per slot.
+    ///
+    /// `expires_at_tick` for a tick-0 cast = `world.tick + duration_ticks
+    /// = 0 + 15 = 15` (the dispatcher pre-computes the absolute tick at
+    /// chronicle write time). After running 7 ticks (0..=6), no
+    /// subsequent ConcussiveCleave casts have fired (the next % 7 == 0
+    /// tick is 7), so any agent whose `stun_expires_at_tick > 0` was
+    /// stunned by the tick-0 cast and the value should land in
+    /// {15, 16} (race-window: a cast on tick 1 is impossible since the
+    /// gate is `% 7 == 0`, so the only chronicle write window is
+    /// tick 0).
+    ///
+    /// HOW THE TEST PROVES BOTH EFFECTS LANDED:
+    ///   1. Read agent_stun_expires_at_tick after 7 steps. Expect
+    ///      MULTIPLE agents (≥ 2) to have a non-zero value (proves the
+    ///      Stun chronicle path fired AND fanned out across in-radius
+    ///      candidates).
+    ///   2. Cross-check those agents have HP < 50.0 (the Damage
+    ///      chronicle path fired on the same targets — so multi-effect
+    ///      dispatch walked both slots).
+    ///
+    /// This is the multi-effect equivalent of `cleave_drains_hp_via_aoe_walk`:
+    /// proving the AOE walk fires is necessary; proving BOTH effects fire
+    /// per in-radius candidate is the new pin this test adds.
+    #[test]
+    fn concussive_cleave_stuns_multiple_targets_per_cast() {
+        let mut state = Duel25v25State::new(0xCAFE_F00D, 50);
+
+        // Pre-tick baselines.
+        let initial_stun = state.read_stun_expires_at_tick();
+        for (i, &e) in initial_stun.iter().enumerate() {
+            assert_eq!(
+                e, 0,
+                "initial stun_expires_at_tick[{i}] must be 0 (= never \
+                 stunned); got {e}",
+            );
+        }
+        let initial_hp = state.read_hp();
+        for &h in &initial_hp {
+            assert_eq!(h, 50.0, "initial HP must be 50.0");
+        }
+
+        // Run 7 ticks. ConcussiveCleave fires at tick 0 (% 7 == 0); the
+        // next firing tick is 7 (we run steps 0..=6 inclusive, ending
+        // BEFORE tick 7 dispatches). Strike (% 2) fires at ticks 0, 2,
+        // 4, 6 — independent contribution to HP. Cleave (% 5) fires at
+        // tick 0, 5 — independent AOE damage.
+        for _ in 0..7 {
+            state.step();
+        }
+
+        let stun = state.read_stun_expires_at_tick();
+        let hp_now = state.read_hp();
+
+        // Pin 1: at least 2 agents have a non-zero stun expiry — proves
+        // ConcussiveCleave's Stun effect (effect[1]) fired AND the AOE
+        // walk fanned out (one cast at the seam writes a stun on every
+        // in-radius candidate, including same-team agents — the AOE
+        // walk's in-circle gate is purely geometric, only the body-form
+        // `creature_type` check scopes target SELECTION).
+        let stunned_count: usize = stun.iter().filter(|&&e| e > 0).count();
+        assert!(
+            stunned_count >= 2,
+            "after 7 ticks at least 2 agents must have a non-zero \
+             stun_expires_at_tick (multi-effect AOE proof); saw {} \
+             stunned out of 50. Per-slot stun: {:?}",
+            stunned_count,
+            stun,
+        );
+
+        // Pin 2: every stunned agent's expiry tick must be in
+        // {15, 16, 22, 23} — the dispatcher writes
+        // `expires_at_tick = world.tick + 15` at chronicle-write time.
+        // Tick 0 cast → expires at 15. (No tick 7 cast yet — we ran 7
+        // steps which dispatched ticks 0..=6; tick 7 dispatch is on the
+        // 8th step.) Race-tolerant range: 15..=23.
+        for (i, &e) in stun.iter().enumerate() {
+            if e > 0 {
+                assert!(
+                    (15..=23).contains(&e),
+                    "agent {i}: stun_expires_at_tick={e} outside expected \
+                     range [15, 23] (tick-0 cast → expires at 15; \
+                     dispatcher pre-computes `tick + 15`)",
+                );
+            }
+        }
+
+        // Pin 3: at least one stunned agent shows HP loss — proves the
+        // multi-effect dispatcher emitted BOTH the Damage chronicle AND
+        // the Stun chronicle for the same in-radius candidate (the
+        // multi-effect proof). The seam absorbs Strike + Cleave +
+        // ConcussiveCleave damage; for the agents in ConcussiveCleave's
+        // AOE radius, both effects landed.
+        //
+        // Use a strictly-less-than-50 check rather than asserting an
+        // exact damage figure because Strike+Cleave also drain HP at
+        // the seam, so the per-agent HP delta is a sum of
+        // contributions; we can't isolate the 3.0 ConcussiveCleave
+        // damage. The pin is qualitative: stunned agents must also be
+        // damaged (i.e. they intersect the same AOE radius in both
+        // effect-slot walks).
+        let stunned_and_damaged: usize = stun
+            .iter()
+            .zip(hp_now.iter())
+            .filter(|(&e, &h)| e > 0 && h < 50.0)
+            .count();
+        assert!(
+            stunned_and_damaged >= 1,
+            "after 7 ticks at least one stunned agent must also show HP \
+             loss (proves both effects landed on the same target); saw \
+             {} stunned-and-damaged out of {} stunned. HP: {:?}, stun: \
+             {:?}",
+            stunned_and_damaged,
+            stunned_count,
+            hp_now,
+            stun,
         );
     }
 

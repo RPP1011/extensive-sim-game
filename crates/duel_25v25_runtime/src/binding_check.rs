@@ -1,12 +1,13 @@
 //! duel_25v25 apply_ability binding check.
 //!
-//! Builds the runtime's two-program AbilityRegistry (Strike at slot 1,
-//! Cleave at slot 2) and asserts that the registered slot IDs match
-//! the `apply_ability 1` and `apply_ability 2` literals hardcoded in
-//! `assets/sim/duel_25v25.sim`'s ScanAndStrike + ScanAndCleave bodies.
-//! If either slot drifts (e.g. someone reorders registration), the
-//! panic here surfaces at fixture-construction time rather than as
-//! silent wrong-ability dispatch.
+//! Builds the runtime's three-program AbilityRegistry (Strike at slot 1,
+//! Cleave at slot 2, ConcussiveCleave at slot 3) and asserts that the
+//! registered slot IDs match the `apply_ability 1`, `apply_ability 2`,
+//! and `apply_ability 3` literals hardcoded in `assets/sim/duel_25v25.sim`'s
+//! ScanAndStrike + ScanAndCleave + ScanAndConcussiveCleave bodies. If any
+//! slot drifts (e.g. someone reorders registration), the panic here
+//! surfaces at fixture-construction time rather than as silent
+//! wrong-ability dispatch.
 //!
 //! Mirrors `crates/duel_abilities_runtime/src/binding_check.rs` but is
 //! still smaller — duel_25v25 only registers TWO abilities and the
@@ -27,6 +28,12 @@ pub const STRIKE_EXPECTED_ABILITY_ID: u32 = 1;
 /// `apply_ability 2` literal in `assets/sim/duel_25v25.sim::ScanAndCleave`
 /// pins this slot. AOE Cleave (Path B production proof, 2026-05-07).
 pub const CLEAVE_EXPECTED_ABILITY_ID: u32 = 2;
+
+/// ConcussiveCleave is registered third — so it lands at AbilityId(3).
+/// The `apply_ability 3` literal in
+/// `assets/sim/duel_25v25.sim::ScanAndConcussiveCleave` pins this slot.
+/// Multi-effect AOE Cleave+Stun (Path B production proof, 2026-05-07).
+pub const CONCUSSIVE_CLEAVE_EXPECTED_ABILITY_ID: u32 = 3;
 
 /// duel_25v25's Strike registry-resident program.
 ///
@@ -99,10 +106,68 @@ fn build_cleave_program() -> AbilityProgram {
     cleave
 }
 
-/// Build the duel_25v25 AbilityRegistry — Strike at AbilityId(1) and
-/// Cleave at AbilityId(2). Returns the frozen registry; callers pack +
-/// upload via `PackedAbilityRegistry::pack` +
-/// `PackedAbilityRegistryGpu::upload`.
+/// duel_25v25's ConcussiveCleave registry-resident program (multi-effect
+/// AOE Path B production proof, 2026-05-07).
+///
+/// Shape: TWO-effect program with BOTH effects sharing Circle(1.0) — the
+/// dispatcher's per-effect-slot loop walks effects[0]=Damage(3.0) and
+/// effects[1]=Stun(15 ticks) in order. For each AOE-equipped slot the
+/// 27-cell walk emits ONE chronicle record per in-radius candidate, so
+/// each ConcussiveCleave cast on a target produces:
+///   - kind=26 EffectDamageApplied per in-radius agent (Damage slot)
+///   - kind=29 EffectStunApplied per in-radius agent (Stun slot)
+///
+/// duel_25v25's `ApplyDamageFromChronicle` rule already drains kind=26
+/// records into `Damaged → ApplyDamage`. The new `ApplyStunFromChronicle`
+/// rule (added alongside this slice) drains kind=29 records straight into
+/// the per-agent `stun_expires_at_tick` SoA via
+/// `agents.set_stun_expires_at_tick(t, e)`.
+///
+/// Damage 3.0 is a midpoint between Strike's 5.0 and Cleave's 2.0 —
+/// each ConcussiveCleave cast hits multiple in-radius targets (like
+/// Cleave) AND stuns each, so the per-cast effective output is hefty;
+/// keeping per-target damage at 3.0 prevents the seam from collapsing.
+///
+/// Stun duration_ticks=15 (= 1.5s at 100ms tick) gives the engine a
+/// long enough window that the cast-gate observably suppresses
+/// subsequent verb dispatches BEFORE the stun expires (a tighter 5-tick
+/// duration would race with the % 7 cadence). The dispatcher
+/// pre-computes `expires_at_tick = world.tick + duration_ticks` at
+/// chronicle-write time.
+///
+/// Cadence is gated in the .sim by `world.tick % 7 == 0` (coprime with
+/// Strike's % 2 and Cleave's % 5 so all three cadences interleave).
+fn build_concussive_cleave_program() -> AbilityProgram {
+    let mut concussive = AbilityProgram::new_single_target(
+        /*range*/ 3.0,
+        Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+        [
+            EffectOp::Damage { amount: 3.0 },
+            EffectOp::Stun { duration_ticks: 15 },
+        ],
+    );
+    // Effect 0 (Damage): Circle(1.0). Each AOE target receives one
+    // EffectDamageApplied chronicle record.
+    concussive.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Circle,
+        args: [1.0, 0.0, 0.0, 0.0],
+    }));
+    // Effect 1 (Stun): Circle(1.0) — SAME shape as effect 0 so each
+    // in-radius target receives BOTH the damage AND the stun. The
+    // per-effect-slot loop in the dispatcher walks both slots
+    // independently; when both share Circle(1.0), the same set of
+    // candidates lands in each slot's chronicle write pass.
+    concussive.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Circle,
+        args: [1.0, 0.0, 0.0, 0.0],
+    }));
+    concussive
+}
+
+/// Build the duel_25v25 AbilityRegistry — Strike at AbilityId(1),
+/// Cleave at AbilityId(2), ConcussiveCleave at AbilityId(3). Returns
+/// the frozen registry; callers pack + upload via
+/// `PackedAbilityRegistry::pack` + `PackedAbilityRegistryGpu::upload`.
 pub fn build_duel_25v25_registry() -> AbilityRegistry {
     let mut builder = AbilityRegistryBuilder::new();
     let strike_id = builder.register(build_strike_program());
@@ -117,23 +182,29 @@ pub fn build_duel_25v25_registry() -> AbilityRegistry {
         AbilityId::new(CLEAVE_EXPECTED_ABILITY_ID).expect("non-zero AbilityId"),
         "second registered program must land at AbilityId(2)",
     );
+    let concussive_id = builder.register(build_concussive_cleave_program());
+    debug_assert_eq!(
+        concussive_id,
+        AbilityId::new(CONCUSSIVE_CLEAVE_EXPECTED_ABILITY_ID).expect("non-zero AbilityId"),
+        "third registered program must land at AbilityId(3)",
+    );
     builder.build()
 }
 
 /// Single binding-check entry point. Called once from
 /// `Duel25v25State::new` at fixture-construction time.
 ///
-/// Asserts the registry contains exactly two programs (Strike +
-/// Cleave) at the expected slots, with the gate / area / effect shape
-/// each rule's body in the .sim mirrors. If anything diverges the
-/// panic message points at the exact divergence.
+/// Asserts the registry contains exactly three programs (Strike +
+/// Cleave + ConcussiveCleave) at the expected slots, with the gate /
+/// area / effect shape each rule's body in the .sim mirrors. If
+/// anything diverges the panic message points at the exact divergence.
 pub fn assert_ability_registry_matches_sim_constants() {
     let registry = build_duel_25v25_registry();
     assert_eq!(
         registry.len(),
-        2,
-        "duel_25v25 registry must contain exactly two programs (Strike + \
-         Cleave); got {}",
+        3,
+        "duel_25v25 registry must contain exactly three programs \
+         (Strike + Cleave + ConcussiveCleave); got {}",
         registry.len(),
     );
 
@@ -244,18 +315,103 @@ pub fn assert_ability_registry_matches_sim_constants() {
          circle); got {}",
         area.args[0],
     );
+
+    // ---- ConcussiveCleave at AbilityId(3) (Multi-effect AOE Path B
+    //      production proof — Damage + Stun in same Circle(1.0)) ----
+    let concussive_id = AbilityId::new(CONCUSSIVE_CLEAVE_EXPECTED_ABILITY_ID)
+        .expect("non-zero AbilityId");
+    let concussive = registry
+        .get(concussive_id)
+        .expect("ConcussiveCleave resolves to a program at AbilityId(3)");
+
+    assert_eq!(
+        concussive.gate.cooldown_ticks, 0,
+        "ConcussiveCleave cooldown_ticks must be 0 (cadence is in the \
+         .sim verb gate `world.tick % 7 == 0`; dispatcher doesn't \
+         consult cooldown_ticks today)",
+    );
+    assert!(
+        concussive.gate.hostile_only,
+        "ConcussiveCleave must be hostile_only — same body-side team \
+         check as Strike + Cleave",
+    );
+    match concussive.area {
+        Area::SingleTarget { range } => assert_eq!(
+            range, 3.0,
+            "ConcussiveCleave range must be 3.0 — single-target metadata; \
+             both AOE walks read radius from per_effect_areas[i].args[0], \
+             not Area::range",
+        ),
+    }
+    assert_eq!(
+        concussive.effects.len(), 2,
+        "ConcussiveCleave must have exactly two effects (Damage 3.0 + \
+         Stun 15 ticks); got {}",
+        concussive.effects.len(),
+    );
+    match &concussive.effects[0] {
+        EffectOp::Damage { amount } => assert_eq!(
+            *amount, 3.0,
+            "ConcussiveCleave effect[0] (Damage) amount must be 3.0",
+        ),
+        other => panic!(
+            "ConcussiveCleave effect[0]: expected Damage(3.0), got {other:?}",
+        ),
+    }
+    match &concussive.effects[1] {
+        EffectOp::Stun { duration_ticks } => assert_eq!(
+            *duration_ticks, 15,
+            "ConcussiveCleave effect[1] (Stun) duration_ticks must be \
+             15 (= 1.5s at 100ms tick); got {}",
+            duration_ticks,
+        ),
+        other => panic!(
+            "ConcussiveCleave effect[1]: expected Stun(duration_ticks=15), \
+             got {other:?}",
+        ),
+    }
+    assert_eq!(
+        concussive.per_effect_areas.len(), 2,
+        "ConcussiveCleave must have exactly two per-effect area entries \
+         (Circle(1.0) at slots 0 and 1, so both Damage and Stun expand \
+         across the same in-radius candidates); got {} entries",
+        concussive.per_effect_areas.len(),
+    );
+    for (i, slot_label) in [(0usize, "Damage"), (1usize, "Stun")] {
+        let area_i = concussive.per_effect_areas[i]
+            .as_ref()
+            .unwrap_or_else(|| panic!(
+                "ConcussiveCleave per_effect_areas[{i}] ({slot_label} \
+                 slot) must be Some(EffectAreaShape) — the dispatcher's \
+                 multi-effect AOE walk requires per-slot shape entries \
+                 for both effects",
+            ));
+        assert!(
+            matches!(area_i.kind, ShapeKind::Circle),
+            "ConcussiveCleave per_effect_areas[{i}] ({slot_label}) kind \
+             must be Circle; got {:?}",
+            area_i.kind,
+        );
+        assert_eq!(
+            area_i.args[0], 1.0,
+            "ConcussiveCleave per_effect_areas[{i}] ({slot_label}) \
+             radius must be 1.0 (matches Cleave's slot 0); got {}",
+            area_i.args[0],
+        );
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Pins the registry build pattern: two abilities at slots 1 + 2,
-    /// Strike Damage 5.0 single-target, Cleave Damage 2.0 in Circle(1.0).
+    /// Pins the registry build pattern: three abilities at slots 1, 2, 3:
+    /// Strike Damage 5.0 single-target, Cleave Damage 2.0 in Circle(1.0),
+    /// ConcussiveCleave [Damage 3.0, Stun 15 ticks] both in Circle(1.0).
     /// Catches drift before construction-time panics surface in
     /// viz_tests / behavioural tests.
     #[test]
-    fn registry_contains_strike_and_cleave_at_slots_one_and_two() {
+    fn registry_contains_strike_cleave_concussive_at_slots_one_two_three() {
         assert_ability_registry_matches_sim_constants();
     }
 }
