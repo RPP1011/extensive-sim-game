@@ -113,7 +113,31 @@ pub enum EventKindId {
     // (actor + target + expires_at_tick + multiplier_q8 + tick) — for
     // self-cast DamageModify actor == target == caster by convention.
     EffectDamageModifyApplied = 41,
-    // Slots 42-127 reserved for replayable event variants added in later tasks.
+    // Reap verb swap (Task #138 follow-on, mirror of Fortify at
+    // `001ae9a6`) — chronicle event for Execute EffectOp (op#16).
+    // Written by the apply_ability dispatcher when an
+    // `EffectOp::Execute` slot fires; the runtime
+    // `ApplyExecuteFromChronicle` re-emit physics rule translates
+    // these records back into the existing `Executed` event (which the
+    // duel_abilities runtime drains via ApplyDefeat / inline ApplyDamage
+    // hp<=0 path, depending on the host sim) so the rest of the cascade
+    // keeps working unchanged. Closes the slice across all 8
+    // duel_abilities verbs.
+    //
+    // SHAPE NOTE: 3-payload-word event (actor + target + hp_threshold).
+    // Same shape family as `EffectDamageApplied` (actor + target + amount)
+    // — the dispatcher writes caster_slot into actor (slot 2) and target
+    // into slot 3, with payload word 4 carrying hp_threshold as a bitcast
+    // f32. The when-condition `target.hp < hp_threshold` is NOT evaluated
+    // by the GPU dispatcher (apply_program doesn't consult
+    // when_per_effect today — registry-driven predicate dispatch is
+    // later infrastructure). The duel_abilities Reap verb's outer `when`
+    // clause already gates emission on `target.hp <
+    // config.combat.reap_threshold`, so the unconditional dispatcher
+    // write is gated upstream and the consumer rule can ferry the record
+    // directly into Defeated.
+    EffectExecuteApplied = 42,
+    // Slots 43-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 

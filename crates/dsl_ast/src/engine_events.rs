@@ -61,6 +61,11 @@ pub const ENGINE_EVENT_KIND_IDS: &[(&str, u32)] = &[
     // `60115f64`): DamageModify = 19 → EventKindId::EffectDamageModifyApplied
     // = 41 (slot 41, after EffectLifeStealApplied=40).
     ("EffectDamageModifyApplied", 41),
+    // Reap verb swap (Task #138 follow-on, mirror of Fortify at
+    // `001ae9a6`): Execute = 16 → EventKindId::EffectExecuteApplied = 42
+    // (slot 42, after EffectDamageModifyApplied=41). Closes the slice
+    // across all 8 duel_abilities verbs.
+    ("EffectExecuteApplied", 42),
 ];
 
 /// Look up the engine-defined `EventKindId` discriminant for an
@@ -92,6 +97,7 @@ mod tests {
         assert_eq!(engine_event_kind_id_for_name("EffectSelfDamageApplied"), Some(39));
         assert_eq!(engine_event_kind_id_for_name("EffectLifeStealApplied"), Some(40));
         assert_eq!(engine_event_kind_id_for_name("EffectDamageModifyApplied"), Some(41));
+        assert_eq!(engine_event_kind_id_for_name("EffectExecuteApplied"), Some(42));
     }
 
     #[test]

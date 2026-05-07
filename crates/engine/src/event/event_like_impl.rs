@@ -38,6 +38,7 @@ impl crate::event::EventLike for Event {
             Event::EffectSelfDamageApplied { .. } => EventKindId::EffectSelfDamageApplied,
             Event::EffectLifeStealApplied { .. } => EventKindId::EffectLifeStealApplied,
             Event::EffectDamageModifyApplied { .. } => EventKindId::EffectDamageModifyApplied,
+            Event::EffectExecuteApplied { .. } => EventKindId::EffectExecuteApplied,
             Event::EffectShieldApplied { .. } => EventKindId::EffectShieldApplied,
             Event::EffectSlowApplied { .. } => EventKindId::EffectSlowApplied,
             Event::EffectStandingDelta { .. } => EventKindId::EffectStandingDelta,
@@ -370,6 +371,18 @@ impl crate::event::EventLike for Event {
                 h.update(target.raw().to_le_bytes());
                 h.update(expires_at_tick.to_le_bytes());
                 h.update(multiplier_q8.to_le_bytes());
+                h.update(tick.to_le_bytes());
+            }
+            Event::EffectExecuteApplied {
+                actor,
+                target,
+                hp_threshold,
+                tick,
+            } => {
+                h.update([EventKindId::EffectExecuteApplied as u8]);
+                h.update(actor.raw().to_le_bytes());
+                h.update(target.raw().to_le_bytes());
+                h.update(hp_threshold.to_bits().to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
             Event::EffectShieldApplied {
