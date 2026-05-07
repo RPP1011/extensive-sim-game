@@ -1631,8 +1631,14 @@ fn type_check_list(
                 // format string, producing garbage agent ids in the
                 // chronicle records.
                 if let Some(expr) = prog.exprs.get(ability.0 as usize) {
+                    // Ability is AbilityId (NonZeroU32 wrapper), NOT
+                    // AgentId. Tighter than caster/target — passing an
+                    // agent slot as the ability id is a semantic
+                    // typo (e.g., `apply_ability self`) that would
+                    // mechanically lower fine but produce nonsense
+                    // (treating an agent slot as a registry index).
                     match type_check(expr, *ability, ctx) {
-                        Ok(ty) if matches!(ty, CgTy::U32 | CgTy::AgentId) => {}
+                        Ok(CgTy::U32) => {}
                         Ok(ty) => errors.push(CgError::TypeMismatch {
                             op: op_id,
                             error: TypeError::ClaimedResultMismatch {

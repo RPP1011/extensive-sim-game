@@ -1047,6 +1047,38 @@ fn apply_ability_rejects_f32_target_at_lowering() {
     );
 }
 
+/// Slice ε type-check: ability operand is AbilityId (NonZeroU32
+/// wrapper), NOT AgentId. Mechanically both types fit in 32 bits and
+/// the dispatcher's `u32(...)` coercion would happily accept either,
+/// but semantically passing an agent slot as the ability id is a
+/// typo (`apply_ability self` would treat the caster's slot index
+/// as a registry slot, looking up effects from a wrong/garbage row).
+///
+/// Tighter than caster/target's check (which accepts both U32 and
+/// AgentId, since u32 SoA fields can semantically carry agent ids).
+#[test]
+fn apply_ability_rejects_agentid_as_ability_operand() {
+    let src = "
+        event Tick { }
+        entity Hero : Agent { }
+
+        physics WeirdAbility @phase(per_agent) {
+          on Tick {} where (self.alive) {
+            apply_ability self by self target self
+          }
+        }
+    ";
+    let program = dsl_compiler::parse(src).expect("parse");
+    let comp = dsl_ast::resolve::resolve(program).expect("resolve");
+    let err = dsl_compiler::cg::lower::lower_compilation_to_cg(&comp)
+        .expect_err("lowering must reject AgentId as ability operand");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("TypeMismatch") || msg.contains("AgentId"),
+        "expected TypeMismatch / AgentId mention; got: {msg}"
+    );
+}
+
 /// Bool target (e.g., a typo where the user wrote `target self.alive`
 /// instead of `target self`). Without the type-check fix, this would
 /// also silently coerce through `u32(bool)` in emit. Asserts the
