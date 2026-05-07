@@ -205,6 +205,20 @@ pub struct DuelAbilitiesState {
     /// `Damaged` events (kind=1) so the existing ApplyDamage cascade
     /// keeps working unchanged.
     apply_damage_from_chronicle_cfg_buf: wgpu::Buffer,
+    /// Task #138 follow-on — Cfg uniform for the new
+    /// `physics_ApplyShieldFromChronicle` kernel that translates
+    /// `EffectShieldApplied` records (kind=28, written by the
+    /// apply_ability dispatcher in the standalone ShieldUp chronicle
+    /// kernel) back into `Shielded` events so the existing ApplyShield
+    /// cascade keeps working unchanged.
+    apply_shield_from_chronicle_cfg_buf: wgpu::Buffer,
+    /// Task #138 follow-on — Cfg uniform for the new
+    /// `physics_ApplyHealFromChronicle` kernel that translates
+    /// `EffectHealApplied` records (kind=27, written by the
+    /// apply_ability dispatcher in the standalone Mend chronicle
+    /// kernel) back into `Healed` events so the existing ApplyHeal
+    /// cascade keeps working unchanged.
+    apply_heal_from_chronicle_cfg_buf: wgpu::Buffer,
     /// Task #138 — Packed AbilityRegistry uploaded to the GPU. The
     /// fused kernel binds `effect_kinds` / `effect_payload_a` /
     /// `effect_payload_b` for the apply_ability dispatcher arm
@@ -540,6 +554,29 @@ impl DuelAbilitiesState {
             contents: bytemuck::bytes_of(&apply_damage_from_chronicle_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        // Task #138 follow-on — Cfg uniform for ApplyShieldFromChronicle
+        // (kind=28 → Shielded) and ApplyHealFromChronicle (kind=27 →
+        // Healed). Same shape as ApplyDamageFromChronicle: PerEvent +
+        // emit-only kernels with no AgentField writes (so they don't
+        // trip P6).
+        let apply_shield_from_chronicle_cfg_init =
+            physics_ApplyShieldFromChronicle::PhysicsApplyShieldFromChronicleCfg {
+                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            };
+        let apply_shield_from_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_abilities_runtime::apply_shield_from_chronicle_cfg"),
+            contents: bytemuck::bytes_of(&apply_shield_from_chronicle_cfg_init),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let apply_heal_from_chronicle_cfg_init =
+            physics_ApplyHealFromChronicle::PhysicsApplyHealFromChronicleCfg {
+                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            };
+        let apply_heal_from_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_abilities_runtime::apply_heal_from_chronicle_cfg"),
+            contents: bytemuck::bytes_of(&apply_heal_from_chronicle_cfg_init),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let seed_cfg_init = seed_indirect_0::SeedIndirect0Cfg {
             agent_cap: agent_count, tick: 0, seed: 0, _pad: 0,
         };
@@ -606,6 +643,8 @@ impl DuelAbilitiesState {
             chronicle_daze_cfg_buf,
             apply_damage_cfg_buf,
             apply_damage_from_chronicle_cfg_buf,
+            apply_shield_from_chronicle_cfg_buf,
+            apply_heal_from_chronicle_cfg_buf,
             registry_gpu,
             seed_cfg_buf,
             cache: dispatch::KernelCache::default(),
@@ -791,10 +830,16 @@ impl CompiledSim for DuelAbilitiesState {
         // worst-case by two more records per agent: Strike's
         // apply_ability now emits one EffectDamageApplied (kind=26)
         // per cast, and ApplyDamageFromChronicle re-emits each into
-        // a Damaged event. Bump the upper bound to 16 slots per agent
-        // to keep clear_ring_headers from leaving stale slots between
-        // ticks.
-        let max_slots_per_tick = self.agent_count * 16;
+        // a Damaged event. The Task #138 follow-on extended the swap
+        // to ShieldUp (kind=28 EffectShieldApplied + Shielded re-emit)
+        // and Mend (kind=27 EffectHealApplied + Healed re-emit) — but
+        // the verbs are mutually exclusive per tick (scoring picks
+        // one), so the worst case is +2 records per agent (whichever
+        // verb fires + its re-emit). Bump the upper bound to 20 slots
+        // per agent to keep clear_ring_headers from leaving stale
+        // slots between ticks. (16 + 2 = 18; rounded to 20 for a small
+        // safety margin against future swaps.)
+        let max_slots_per_tick = self.agent_count * 20;
         self.event_ring.clear_ring_headers_in(
             &self.gpu, &mut encoder, max_slots_per_tick,
         );
@@ -900,7 +945,11 @@ impl CompiledSim for DuelAbilitiesState {
         // lifesteal) and re-fused Strike with the remaining consumers
         // since Strike is now the only producer the others can ride.
 
-        // (5) ShieldUp chronicle.
+        // (5) ShieldUp chronicle. Task #138 follow-on — verb body is
+        // now `apply_ability 2 by self target self`, so this kernel
+        // walks the AbilityRegistry's effect SoA columns to expand the
+        // dispatch into chronicle EffectShieldApplied writes (kind=28).
+        // Re-emitted as Shielded by ApplyShieldFromChronicle below.
         let shieldup_cfg = physics_verb_chronicle_ShieldUp::PhysicsVerbChronicleShieldUpCfg {
             event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
         };
@@ -910,6 +959,9 @@ impl CompiledSim for DuelAbilitiesState {
         let shieldup_bindings = physics_verb_chronicle_ShieldUp::PhysicsVerbChronicleShieldUpBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
+            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
             cfg: &self.chronicle_shieldup_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_shieldup(
@@ -917,7 +969,11 @@ impl CompiledSim for DuelAbilitiesState {
             self.agent_count,
         );
 
-        // (6) Mend chronicle.
+        // (6) Mend chronicle. Task #138 follow-on — verb body is now
+        // `apply_ability 3 by self target self`, so this kernel walks
+        // the AbilityRegistry's effect SoA columns to expand the
+        // dispatch into chronicle EffectHealApplied writes (kind=27).
+        // Re-emitted as Healed by ApplyHealFromChronicle below.
         let mend_cfg = physics_verb_chronicle_Mend::PhysicsVerbChronicleMendCfg {
             event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
         };
@@ -927,6 +983,9 @@ impl CompiledSim for DuelAbilitiesState {
         let mend_bindings = physics_verb_chronicle_Mend::PhysicsVerbChronicleMendBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
+            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
             cfg: &self.chronicle_mend_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_mend(
@@ -1045,6 +1104,63 @@ impl CompiledSim for DuelAbilitiesState {
             self.agent_count,
         );
 
+        // (7f) Task #138 follow-on — ApplyShieldFromChronicle.
+        // The ShieldUp chronicle (step 5) just wrote EffectShieldApplied
+        // records (kind=28) into the event ring via the apply_ability
+        // dispatcher arm. This kernel filters those records and re-emits
+        // them as `Shielded` (kind=2.x source-declared) events so the
+        // ApplyShield arm of the fused kernel below can drain them with
+        // the existing per-agent set_shield_hp accumulation intact.
+        //
+        // PerEvent shape: scans every event_ring slot up to event_count
+        // and skips slots whose kind != 28. Setting event_count to the
+        // generous estimate is safe because cleared slots read kind=0
+        // (skipped) and non-EffectShieldApplied records also skipped.
+        // Reuses the per-tick max_slots_per_tick (= agent_count * 20)
+        // computed at the top of step() for clear_ring_headers.
+        let apply_shield_from_chronicle_cfg = physics_ApplyShieldFromChronicle::PhysicsApplyShieldFromChronicleCfg {
+            event_count: max_slots_per_tick, tick: self.tick as u32,
+            seed: 0, _pad0: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.apply_shield_from_chronicle_cfg_buf, 0,
+            bytemuck::bytes_of(&apply_shield_from_chronicle_cfg),
+        );
+        let apply_shield_from_chronicle_bindings = physics_ApplyShieldFromChronicle::PhysicsApplyShieldFromChronicleBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            cfg: &self.apply_shield_from_chronicle_cfg_buf,
+        };
+        dispatch::dispatch_physics_applyshieldfromchronicle(
+            &mut self.cache, &apply_shield_from_chronicle_bindings,
+            &self.gpu.device, &mut encoder, max_slots_per_tick,
+        );
+
+        // (7g) Task #138 follow-on — ApplyHealFromChronicle.
+        // The Mend chronicle (step 6) just wrote EffectHealApplied
+        // records (kind=27) into the event ring via the apply_ability
+        // dispatcher arm. This kernel filters those records and
+        // re-emits them as `Healed` events so the ApplyHeal arm of the
+        // fused kernel below can drain them with per-agent set_hp
+        // intact.
+        let apply_heal_from_chronicle_cfg = physics_ApplyHealFromChronicle::PhysicsApplyHealFromChronicleCfg {
+            event_count: max_slots_per_tick, tick: self.tick as u32,
+            seed: 0, _pad0: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.apply_heal_from_chronicle_cfg_buf, 0,
+            bytemuck::bytes_of(&apply_heal_from_chronicle_cfg),
+        );
+        let apply_heal_from_chronicle_bindings = physics_ApplyHealFromChronicle::PhysicsApplyHealFromChronicleBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            cfg: &self.apply_heal_from_chronicle_cfg_buf,
+        };
+        dispatch::dispatch_physics_applyhealfromchronicle(
+            &mut self.cache, &apply_heal_from_chronicle_bindings,
+            &self.gpu.device, &mut encoder, max_slots_per_tick,
+        );
+
         // (8a) Fused ApplyHeal + ApplyShield + ApplyDefeat +
         // ApplyLifestealActivation + ApplyDamageModActivation +
         // ApplyStun + verb_chronicle_Strike. The compiler re-fused these
@@ -1069,7 +1185,7 @@ impl CompiledSim for DuelAbilitiesState {
         // `_and_ApplyStun_` segment and adding agent_stun_expires_at_tick
         // to the bind group. No new pass introduced; same single
         // dispatch per tick.
-        let event_count_estimate = self.agent_count * 16;
+        let event_count_estimate = self.agent_count * 20;
         let apply_heal_cfg = physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_ApplyDamageModActivation_and_ApplyStun_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndApplyDamageModActivationAndApplyStunAndVerbChronicleStrikeCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
             seed: 0, _pad0: 0,
