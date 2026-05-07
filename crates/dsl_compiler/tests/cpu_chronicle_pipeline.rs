@@ -283,6 +283,44 @@ fn distinct_caster_and_target_pipeline_handles_stun_payload_shape() {
     assert_eq!(r[4], 225, "expires_at_tick = tick(200) + duration(25)");
 }
 
+/// Slice ε pipeline pin for Slow — the only chronicle-bearing
+/// variant with 4 payload words (others have 3). Confirms slot 2/3
+/// routing is independent even when the payload extends to slot 5.
+#[test]
+fn distinct_caster_and_target_pipeline_handles_slow_4_field_payload() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+        [EffectOp::Slow { duration_ticks: 50, factor_q8: -32 }],
+    );
+    let caster = aid(2);
+    let target = aid(9);
+    let tick: u32 = 1000;
+
+    let events = apply_program(
+        &program,
+        caster,
+        target,
+        tick as u64,
+        0xBEEF,
+        &CasterStats::default(),
+    );
+    let records: Vec<_> = events
+        .into_iter()
+        .filter_map(|e| {
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw())
+        })
+        .collect();
+
+    assert_eq!(records.len(), 1, "Slow produces one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 30, "EffectSlowApplied");
+    assert_eq!(r[2], 2, "actor slot — caster_id");
+    assert_eq!(r[3], 9, "target slot — distinct from caster");
+    assert_eq!(r[4], 1050, "expires_at_tick = tick(1000) + duration(50)");
+    assert_eq!(r[5], (-32_i32) as u32, "factor_q8 sign-widened i16→i32→u32");
+}
+
 /// P5 — Determinism via Keyed PCG. The CPU pipeline runs through
 /// `per_agent_u32(world_seed, caster, tick, purpose)` for each chance
 /// gate, which is a pure function of inputs. Two runs with identical
