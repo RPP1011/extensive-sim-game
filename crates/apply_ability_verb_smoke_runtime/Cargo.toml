@@ -1,0 +1,42 @@
+[package]
+name = "apply_ability_verb_smoke_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/apply_ability_verb_smoke.sim` —
+# verb-body counterpart to `crates/apply_ability_smoke_runtime` (which
+# pins the physics-scope `apply_ability` surface). Hosts the verb
+# fixture's compiler-emitted dispatcher kernel
+# (`verb_chronicle_Cast` — synthesised by the verb expander, wraps the
+# verb body into a physics handler that the apply_ability lowering
+# carries through to a chronicle-emitting kernel) and a small wgpu
+# device test that:
+#
+#   1. uploads a single-program AbilityRegistry (one Damage(30.0) op,
+#      registered as AbilityId(1)) via PackedAbilityRegistry::pack +
+#      PackedAbilityRegistryGpu::upload,
+#   2. seeds N=2 agents with `agent_alive[*] = 1` + `agent_level[*] = 1`,
+#      and pre-writes `agent_action_id[*] = 0` to bypass the scoring
+#      kernel (the verb_chronicle handler dispatches on `action_id`,
+#      which the scoring argmax would normally populate),
+#   3. dispatches one tick of the kernel,
+#   4. reads back the event_ring + event_tail and compares records
+#      byte-for-byte against the CPU oracle in
+#      `dsl_compiler::cpu_chronicle_reference::apply_event_to_chronicle_record`.
+#
+# Mirror runtime crate: `crates/apply_ability_smoke_runtime` — same
+# build.rs / src/lib.rs shape, different fixture + a different dispatcher
+# kernel name.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }
