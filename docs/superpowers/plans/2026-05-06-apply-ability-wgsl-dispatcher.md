@@ -97,7 +97,7 @@ today).
 4. Workspace tests stay green; ApplyAbility WGSL emit still
    returns the existing comment placeholder.
 
-**Closes:** `<commit-sha>` (slice α).
+**Closes:** `0d2a20ca` (slice α — DataHandle scaffolding).
 
 ## Slice β — BGL composer + WGSL emit shape
 
@@ -123,7 +123,9 @@ WGSL code that:
 5. WGSL-emit golden-file test that pins the dispatcher kernel
    string for a fixture that uses `apply_ability` (no runtime).
 
-**Closes:** `<commit-sha>` (slice β).
+**Closes:** `04a71d94` (slice β step 2 — real WGSL dispatcher loop+switch),
+expanded by `0b09317b` / `a7159689` / `940efc30` (variant coverage to
+31/32 — only `CastAbility`=7 deferred to slice δ).
 
 ## Slice γ — duel_abilities wire-up + parity gate
 
@@ -140,7 +142,46 @@ sim on both `SerialBackend` and `GpuBackend` and assert the
 4. Bump LoL canary baseline if any decl now lowers differently.
 5. CPU↔GPU byte-equality assertion (P3).
 
-**Closes:** `<commit-sha>` (slice γ).
+**Status (2026-05-06):** dispatcher + CPU pipeline scaffolding shipped
+ahead of the actual sim wire-up — the original "1-verb edit + parity
+gate" task list compressed into ~10 commits because each step
+(EFFECT_KIND_TO_EVENT_KIND_ID pin → 7 chronicle arms wired → smoke
+fixture → CPU reference → composition tests → P5 determinism pin →
+ApplyEvent variants for TransferGold/ModifyStanding) needed its own
+commit to keep the slice green.
+
+**Shipped (in landed order):**
+- `1779b0e6` — record EventRing(Append) write on ApplyAbility-bearing ops.
+- `440a4073` — pin `EFFECT_KIND_TO_EVENT_KIND_ID` against engine
+  `EventKindId` enum (7 chronicle-bearing variants: 0→26..6→32).
+- `49345a59` — wire Damage arm to real chronicle_append.
+- `31aba175` — wire 6 more chronicle-bearing arms (Heal/Shield/Stun/
+  Slow/TransferGold/ModifyStanding).
+- `8484ecde` — `assets/sim/apply_ability_smoke.sim` + pipeline smoke test.
+- `4c91ae5f` — pin BGL composer wiring of event_ring + event_tail.
+- `b15f6845` — `cpu_chronicle_reference` module (CPU ↔ GPU contract).
+- `91267f01` — apply_program → CPU reference composition tests.
+- `4b299211` — P5 determinism pin via 50-combo chance-gate sweep.
+- `f881bed1` — wire `ApplyEvent::TransferGold` + `ModifyStanding`
+  variants in engine; close the CPU reference's last `None`
+  fall-throughs.
+- `2876ecd0` — pipeline integration tests for the new ApplyEvent
+  variants.
+
+**Still pending in original scope:**
+- Task 1 (sim edit) — behavior-changing; needs deliberate decision
+  on which verb to swap and whether existing chronicle handlers
+  remain correct in parallel.
+- Task 3 (runtime parity gate) — needs a wgpu device-driving test;
+  substantial scaffolding ahead of CI gating.
+- Task 5 (CPU ↔ GPU byte-equality) — depends on task 3.
+
+The CPU side of the parity equation is now a complete reference; the
+GPU side needs a runtime crate to drive the dispatcher kernel before
+the byte-equality assertion can run.
+
+**Closes:** sequence above (no single commit closes the slice — the
+behavior-changing piece blocks on the sim wire-up decision).
 
 ## Slice δ — full-vocabulary expansion (#137)
 
