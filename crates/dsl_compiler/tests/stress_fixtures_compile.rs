@@ -2575,10 +2575,16 @@ fn duel_1v1_compile_gate() {
         "PerPair mask kernel must bind `tick`; got body:\n{mask_body}",
     );
 
-    // ApplyDamage_and_ApplyHeal kernel must emit a select(...) for
-    // the bool agent_alive write (post-duel_1v1 LHS-coercion fix). The
-    // RHS coerces bool→u32 via `select(0u, 1u, value)` since
-    // agent_alive storage is array<u32>.
+    // ApplyDamage_and_ApplyHeal kernel must emit the atomicCAS guard
+    // for `set_alive(t, false)` (Gap N fix —
+    // `docs/superpowers/notes/2026-05-04-duel_25v25.md`). The
+    // pre-Gap-N shape `agent_alive[t] = select(0u, 1u, false);`
+    // (post-duel_1v1 Bool LHS rewrite) is now superseded: the kill-
+    // transition write lowers to
+    // `let _alive_cas_<N> = atomicCompareExchangeWeak(...)` so only
+    // the thread that flips alive 1→0 fires the guarded
+    // `emit Defeated`. The agent_alive binding is also upgraded to
+    // `array<atomic<u32>>` (locked separately below).
     let apply_body = kernel_body_containing(&art, "ApplyDamage")
         .unwrap_or_else(|| panic!("no ApplyDamage kernel emitted: {:?}", art.kernel_index));
     assert!(
@@ -2586,9 +2592,20 @@ fn duel_1v1_compile_gate() {
         "ApplyDamage must write agent_alive (set_alive); got body:\n{apply_body}",
     );
     assert!(
-        apply_body.contains("select(0u, 1u,"),
-        "ApplyDamage must coerce bool RHS via select(0u, 1u, ...) when writing \
-         agent_alive (post-duel_1v1 Bool LHS rewrite); got body:\n{apply_body}",
+        apply_body.contains("atomicCompareExchangeWeak(&agent_alive["),
+        "ApplyDamage must lower `set_alive(t, false)` as atomicCAS \
+         (Gap N atomicCAS guard); got body:\n{apply_body}",
+    );
+    assert!(
+        apply_body.contains(".exchanged"),
+        "ApplyDamage must gate the post-set_alive emit on \
+         `_alive_cas_<N>.exchanged` (Gap N atomicCAS guard); got \
+         body:\n{apply_body}",
+    );
+    assert!(
+        apply_body.contains("array<atomic<u32>>") && apply_body.contains("agent_alive: array<atomic<u32>>"),
+        "ApplyDamage must declare agent_alive as array<atomic<u32>> \
+         under the Gap N atomicCAS guard; got body:\n{apply_body}",
     );
     // The lvalue must NOT be wrapped in the read-form coercion `(x != 0u)` —
     // that would produce an invalid WGSL assignment. Locks the

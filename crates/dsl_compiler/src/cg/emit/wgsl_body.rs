@@ -209,6 +209,22 @@ pub struct EmitCtx<'a> {
     /// declares `event_ring` as plain `array<u32>` (read-only
     /// consumer side, no in-kernel `Emit`).
     pub event_ring_atomic_loads: std::cell::Cell<bool>,
+
+    /// When set, `agent_alive` is declared as `array<atomic<u32>>` in
+    /// the active kernel; `agents.set_alive(t, false)` writes lower to
+    /// `atomicCompareExchangeWeak(&agent_alive[t], 1u, 0u)` and any
+    /// subsequent statements in the SAME stmt-list are wrapped in
+    /// `if (cas.exchanged) { ... }` so the "first kill wins" semantics
+    /// hold under within-tick contention. Gap N fix
+    /// (`docs/superpowers/notes/2026-05-04-duel_25v25.md`): multiple
+    /// Damaged threads landing on one target in one tick all observed
+    /// the same `old_hp > 0.0` and all emitted Defeated; the atomic-
+    /// CAS guard collapses the redundant emits to one.
+    ///
+    /// Set by the kernel emit when the body contains the
+    /// `Assign(AgentField::Alive, _, Lit(Bool(false)))` pattern
+    /// (detected by [`crate::cg::emit::kernel`]), restored on exit.
+    pub alive_atomic_writes: std::cell::Cell<bool>,
 }
 
 impl<'a> EmitCtx<'a> {
@@ -224,6 +240,7 @@ impl<'a> EmitCtx<'a> {
             pending_target_lets: std::cell::RefCell::new(Vec::new()),
             bound_target_exprs: std::cell::RefCell::new(std::collections::HashSet::new()),
             event_ring_atomic_loads: std::cell::Cell::new(false),
+            alive_atomic_writes: std::cell::Cell::new(false),
         }
     }
 
@@ -252,6 +269,79 @@ impl<'a> EmitCtx<'a> {
             HandleNamingStrategy::Structural => structural_handle_name(h),
         }
     }
+}
+
+/// True when `stmt` is `Assign(AgentField::Alive, _, Lit(Bool(false)))` —
+/// the "kill transition" pattern targeted by the atomicCAS guard
+/// (Gap N). The check is structural: the assigned value resolves
+/// through the expression arena to a literal `false`. Used both by
+/// the kernel emit (to upgrade the `agent_alive` binding to
+/// AtomicStorage and set [`EmitCtx::alive_atomic_writes`]) and by
+/// the per-stmt-list emit (to rewrite the assign + wrap subsequent
+/// stmts in `if (cas.exchanged) { ... }`).
+pub(crate) fn stmt_is_set_alive_false(prog: &CgProgram, stmt: &CgStmt) -> bool {
+    let CgStmt::Assign { target, value } = stmt else {
+        return false;
+    };
+    let DataHandle::AgentField {
+        field: AgentFieldId::Alive,
+        ..
+    } = target
+    else {
+        return false;
+    };
+    matches!(
+        <CgProgram as ExprArena>::get(prog, *value),
+        Some(CgExpr::Lit(LitValue::Bool(false)))
+    )
+}
+
+/// Recursively scan a stmt-list (and any nested If/Match/ForEachNeighborBody
+/// bodies) for the alive-CAS pattern. Returns `true` if at least one
+/// `Assign(AgentField::Alive, _, Lit(Bool(false)))` is reachable.
+/// Called once per kernel by the kernel emitter to decide whether the
+/// `agent_alive` binding needs the AtomicStorage upgrade.
+pub(crate) fn stmt_list_contains_set_alive_false(
+    prog: &CgProgram,
+    list_id: CgStmtListId,
+) -> bool {
+    let Some(list) = <CgProgram as StmtListArena>::get(prog, list_id) else {
+        return false;
+    };
+    for stmt_id in &list.stmts {
+        let Some(stmt) = <CgProgram as StmtArena>::get(prog, *stmt_id) else {
+            continue;
+        };
+        if stmt_is_set_alive_false(prog, stmt) {
+            return true;
+        }
+        match stmt {
+            CgStmt::If { then, else_, .. } => {
+                if stmt_list_contains_set_alive_false(prog, *then) {
+                    return true;
+                }
+                if let Some(e) = else_ {
+                    if stmt_list_contains_set_alive_false(prog, *e) {
+                        return true;
+                    }
+                }
+            }
+            CgStmt::Match { arms, .. } => {
+                for arm in arms {
+                    if stmt_list_contains_set_alive_false(prog, arm.body) {
+                        return true;
+                    }
+                }
+            }
+            CgStmt::ForEachNeighborBody { body, .. } => {
+                if stmt_list_contains_set_alive_false(prog, *body) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 // ---------------------------------------------------------------------------
@@ -1456,6 +1546,28 @@ fn lower_cg_stmt_body_to_wgsl(
             // `agent_<field>[target_expr_<N>] = <value>;` with the
             // target index hoisted to a stmt-prefix `let`.
             if let DataHandle::AgentField { field, target: agent_ref } = target {
+                // Gap N atomicCAS guard: when the kernel has been
+                // marked as needing atomic alive-writes (the kernel
+                // emit's body scan found the
+                // `Assign(Alive, _, Lit(Bool(false)))` pattern and
+                // upgraded `agent_alive` to AtomicStorage), every
+                // such pattern in this body lowers to
+                // `atomicCompareExchangeWeak(&agent_alive[t], 1u, 0u)`
+                // captured in a stable per-stmt local
+                // `_alive_cas_<stmt_id>`. The surrounding
+                // `lower_cg_stmt_list_to_wgsl` reads the same flag
+                // and wraps subsequent stmts in
+                // `if (_alive_cas_<stmt_id>.exchanged) { ... }` so
+                // only the thread that won the transition runs the
+                // post-kill side effects (e.g. `emit Defeated`). See
+                // `docs/superpowers/notes/2026-05-04-duel_25v25.md`
+                // Gap N for the within-tick race this collapses.
+                let is_alive_false_cas = ctx.alive_atomic_writes.get()
+                    && matches!(field, AgentFieldId::Alive)
+                    && matches!(
+                        <CgProgram as ExprArena>::get(ctx.prog, *value),
+                        Some(CgExpr::Lit(LitValue::Bool(false)))
+                    );
                 let rhs = lower_cg_expr_to_wgsl(*value, ctx)?;
                 if let AgentRef::Target(target_expr_id) = agent_ref {
                     let already_bound = ctx
@@ -1472,6 +1584,29 @@ fn lower_cg_stmt_body_to_wgsl(
                             .borrow_mut()
                             .insert(*target_expr_id);
                     }
+                }
+                if is_alive_false_cas {
+                    // The lvalue index expression — same as the
+                    // generic write below (e.g. `target_expr_<N>` for
+                    // AgentRef::Target, `agent_id` for Self_, etc.).
+                    let idx = match agent_ref {
+                        AgentRef::Self_ => "agent_id".to_string(),
+                        AgentRef::EventTarget => "event_target_id".to_string(),
+                        AgentRef::Actor => "actor_id".to_string(),
+                        AgentRef::PerPairCandidate => "per_pair_candidate".to_string(),
+                        AgentRef::Target(id) => format!("target_expr_{}", id.0),
+                    };
+                    // WGSL forbids user identifiers starting with `__`,
+                    // so we let the type be inferred — the call returns
+                    // `__atomic_compare_exchange_result<T, AS>` and naga
+                    // infers it from the call expression. The
+                    // `.exchanged` field access on the result remains
+                    // valid.
+                    return Ok(format!(
+                        "let _alive_cas_{} = atomicCompareExchangeWeak(\
+                         &agent_alive[{}], 1u, 0u);",
+                        stmt_id.0, idx,
+                    ));
                 }
                 // LHS uses the raw indexed access (no `(x != 0u)`
                 // coercion — that wrapper is not a valid lvalue). For
@@ -4078,9 +4213,56 @@ pub fn lower_cg_stmt_list_to_wgsl(
     // Then the residual stmts (everything not hoisted) in their
     // original order. Each is emitted via the per-stmt path which
     // handles its own (non-fused) ForEachNeighbor singleton case.
+    //
+    // Gap N atomicCAS guard: when the kernel was flagged for atomic
+    // alive-writes (the kernel emit's body scan found
+    // `Assign(Alive, _, Lit(Bool(false)))`), an Assign matching that
+    // pattern at residual index `i` lowers to a CAS let-binding
+    // (handled in `lower_cg_stmt_body_to_wgsl`'s Assign arm). Every
+    // subsequent residual stmt must execute ONLY when the CAS won
+    // the transition (the thread that flipped alive 1→0); we wrap
+    // them in `if (_alive_cas_<stmt_id>.exchanged) { ... }` here.
+    //
+    // The wrap is a structural list-level transformation (the per-
+    // stmt path can't see "siblings after me" in isolation); both
+    // the rewrite-the-Assign and wrap-the-tail steps must agree on
+    // the same flag, hence the shared `EmitCtx::alive_atomic_writes`
+    // gate.
+    let mut wrap_open: Option<u32> = None;
+    let mut wrapped: Vec<String> = Vec::new();
     for idx in residual {
         let stmt_id = list.stmts[idx];
-        parts.push(lower_cg_stmt_to_wgsl(stmt_id, ctx)?);
+        let stmt_node = <CgProgram as StmtArena>::get(ctx.prog, stmt_id).ok_or(
+            EmitError::StmtIdOutOfRange {
+                id: stmt_id,
+                arena_len: ctx.prog.stmts.len() as u32,
+            },
+        )?;
+        let is_alive_cas_site = ctx.alive_atomic_writes.get()
+            && stmt_is_set_alive_false(ctx.prog, stmt_node);
+        let stmt_wgsl = lower_cg_stmt_to_wgsl(stmt_id, ctx)?;
+        if is_alive_cas_site {
+            // The Assign-arm above already emitted the CAS
+            // let-binding under the name `_alive_cas_<stmt_id>`. Push
+            // it as the LAST top-level part, then start collecting
+            // the wrap body.
+            parts.push(stmt_wgsl);
+            wrap_open = Some(stmt_id.0);
+            continue;
+        }
+        if wrap_open.is_some() {
+            wrapped.push(stmt_wgsl);
+        } else {
+            parts.push(stmt_wgsl);
+        }
+    }
+    if let Some(cas_id) = wrap_open {
+        let inner = wrapped.join("\n");
+        parts.push(format!(
+            "if (_alive_cas_{}.exchanged) {{\n{}\n}}",
+            cas_id,
+            indent_block(&inner, 1),
+        ));
     }
     // Restore the outer scope's view-fold target-locals capture so a
     // nested stmt list (e.g. an If branch inside a fold body) can't

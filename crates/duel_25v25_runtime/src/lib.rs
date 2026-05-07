@@ -1816,4 +1816,65 @@ mod viz_tests {
             alive_total_now,
         );
     }
+
+    /// Gap N atomicCAS guard
+    /// (`docs/superpowers/notes/2026-05-04-duel_25v25.md`): when N>1
+    /// Damaged events for the same target land in one tick, each
+    /// per-event ApplyDamage thread previously read the same
+    /// `old_hp` and all emitted Defeated, inflating
+    /// `defeats_received` by ~15× per agent (745 events for ~50 dead
+    /// agents pre-fix). The fix lowers
+    /// `agents.set_alive(t, false); emit Defeated { ... }` as
+    /// `atomicCompareExchangeWeak(&agent_alive[t], 1u, 0u)` +
+    /// `if (cas.exchanged) { emit Defeated }` so only the thread
+    /// that flipped alive 1→0 emits the event.
+    ///
+    /// Pin: total `defeats_received` over the full battle must be
+    /// `<= number_of_agents` (50). Pre-fix this would land in the
+    /// hundreds; post-fix it equals the count of dead agents (each
+    /// gets exactly ONE Defeated event over the whole battle).
+    #[test]
+    fn defeats_received_no_within_tick_inflation() {
+        let mut state = Duel25v25State::new(0xDEADBEEF_CAFE_F00D, 50);
+        for _ in 0..500 {
+            state.step();
+        }
+        let defeats = state.defeats_received().to_vec();
+        let total_defeats: f32 = defeats.iter().sum();
+        let alive = state.read_alive();
+        let alive_total: u32 = alive.iter().sum();
+        let dead_count = 50u32 - alive_total;
+
+        // Each dead agent gets exactly one Defeated event under the
+        // atomicCAS guard. With the pre-fix race, total_defeats ran
+        // ~10-30× higher than dead_count (the 745-vs-50 figure
+        // recorded in the Gap N note).
+        assert!(
+            total_defeats as u32 <= 50,
+            "total defeats {} exceeded agent count 50 — within-tick \
+             race inflation suspected (alive={}, dead={})",
+            total_defeats,
+            alive_total,
+            dead_count,
+        );
+        // First-kill-wins semantics: every dead agent must contribute
+        // exactly one Defeated event, so total_defeats == dead_count
+        // when the fix is engaged.
+        assert_eq!(
+            total_defeats as u32, dead_count,
+            "expected one Defeated event per dead agent (dead={}); \
+             got total_defeats={}",
+            dead_count, total_defeats,
+        );
+        // Per-target: every defeats_received slot must be 0 or 1.
+        for (i, &d) in defeats.iter().enumerate() {
+            assert!(
+                d == 0.0 || d == 1.0,
+                "defeats_received[{}] = {} — must be 0 or 1 under \
+                 atomicCAS guard",
+                i,
+                d,
+            );
+        }
+    }
 }
