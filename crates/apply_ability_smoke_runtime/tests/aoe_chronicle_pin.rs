@@ -609,3 +609,396 @@ fn aoe_line_degenerate_under_self_cast_emits_no_records() {
          in-line set. Got tail={tail}",
     );
 }
+
+// ---------------------------------------------------------------- //
+// AOE Path B remaining shapes GPU pins (#181):
+//   Spread (kind 4 — deferred on GPU, single-target fallback)
+//   Column (kind 7), Wall (kind 8), Cylinder (kind 9),
+//   Dome (kind 10), Hull (kind 11 — Sphere alias)
+// ---------------------------------------------------------------- //
+
+#[test]
+fn aoe_spread_falls_back_to_single_target_on_gpu() {
+    // #181 Spread is deferred on the GPU side — sort + cap in WGSL is
+    // non-trivial under atomicAdd ring writes. The dispatcher's WGSL
+    // `else` branch falls through to the single-target path; the CPU
+    // oracle agrees by emitting a single record on the post-cap slot
+    // list (lowest-AgentId K targets in radius). Pin the alignment so
+    // a future GPU-side Spread implementation surfaces here as a
+    // count change.
+    //
+    // Fixture: 4-agent row (x=0, 1.5, 3.0, 4.5). Spread(r=2, max=1)
+    // from caster slot 0 → CPU oracle pre-caps to [slot 0]. GPU
+    // dispatcher's fallback writes target=caster_slot=0. Both produce
+    // 1 record.
+    let mut pick_few = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 15.0 }],
+    );
+    pick_few.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Spread,
+        args: [2.0, 1.0, 0.0, 0.0],
+    }));
+
+    let mut builder = AbilityRegistryBuilder::new();
+    let pick_few_id = builder.register(pick_few);
+    let registry = builder.build();
+
+    const N_AGENTS: u32 = 4;
+    let levels: Vec<u32> = vec![pick_few_id.raw(); N_AGENTS as usize];
+    let stats: Vec<PerAgentStats> = vec![PerAgentStats::default(); N_AGENTS as usize];
+
+    let state = match ApplyAbilitySmokeState::try_new_with_registry(
+        N_AGENTS,
+        &registry,
+        &levels,
+        &stats,
+    ) {
+        Some(s) => s,
+        None => {
+            eprintln!("[aoe_chronicle_pin] skipping spread test: no wgpu adapter available.");
+            return;
+        }
+    };
+    let mut state = state;
+
+    state.set_agent_alive(&[1, 0, 0, 0]);
+    state.set_agent_positions(&[
+        [0.0, 0.0, 0.0],
+        [1.5, 0.0, 0.0],
+        [3.0, 0.0, 0.0],
+        [4.5, 0.0, 0.0],
+    ]);
+
+    state.step(0);
+
+    let tail = state.read_event_tail();
+    assert_eq!(
+        tail, 1,
+        "Spread on GPU defers (single-target fallback) → 1 chronicle \
+         record with target=caster_slot. Got tail={tail}",
+    );
+    let records = state.read_event_ring(tail);
+    assert_eq!(records[0][3], 0, "Spread fallback target must be caster slot 0");
+    assert_eq!(records[0][4], 15.0_f32.to_bits(), "Spread record payload_a (15.0)");
+}
+
+#[test]
+fn aoe_column_extends_up_only_on_gpu() {
+    // #181 Column — vertical cylinder extending UP from cast center.
+    // Fixture: 4-agent row at y=0 along the x-axis. Column(r=2, h=4)
+    // at caster slot 0: XZ disc covers slot 0 (d=0) and slot 1
+    // (d=1.5); slots 2/3 outside XZ radius. All at y=0 → dy=0 ∈ [0,4].
+    // Expected: 2 chronicle records.
+    let mut tall_stomp = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 13.0 }],
+    );
+    tall_stomp.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Column,
+        args: [2.0, 4.0, 0.0, 0.0],
+    }));
+
+    let mut builder = AbilityRegistryBuilder::new();
+    let tall_stomp_id = builder.register(tall_stomp);
+    let registry = builder.build();
+
+    const N_AGENTS: u32 = 4;
+    let levels: Vec<u32> = vec![tall_stomp_id.raw(); N_AGENTS as usize];
+    let stats: Vec<PerAgentStats> = vec![PerAgentStats::default(); N_AGENTS as usize];
+
+    let state = match ApplyAbilitySmokeState::try_new_with_registry(
+        N_AGENTS,
+        &registry,
+        &levels,
+        &stats,
+    ) {
+        Some(s) => s,
+        None => {
+            eprintln!("[aoe_chronicle_pin] skipping column test: no wgpu adapter available.");
+            return;
+        }
+    };
+    let mut state = state;
+
+    state.set_agent_alive(&[1, 0, 0, 0]);
+    state.set_agent_positions(&[
+        [0.0, 0.0, 0.0],
+        [1.5, 0.0, 0.0],
+        [3.0, 0.0, 0.0],
+        [4.5, 0.0, 0.0],
+    ]);
+
+    state.step(0);
+
+    let tail = state.read_event_tail();
+    assert_eq!(
+        tail, 2,
+        "Column(r=2, h=4) at caster slot 0 over 4-agent row at y=0 must \
+         emit 2 chronicle records (slots 0 + 1 in XZ radius). Got tail={tail}",
+    );
+    let mut records = state.read_event_ring(tail);
+    records.sort_by_key(|r| (r[3], r[0]));
+    let amount_bits: u32 = 13.0_f32.to_bits();
+    for (i, expected_target) in [0u32, 1u32].iter().enumerate() {
+        assert_eq!(records[i][3], *expected_target, "column record {i} target");
+        assert_eq!(records[i][4], amount_bits, "column record {i} payload_a (13.0)");
+    }
+}
+
+#[test]
+fn aoe_wall_facing_plus_x_slab_on_gpu() {
+    // #181 Wall — facing-bearing rectangular slab. Fixture: 4-agent
+    // row at y=0. ShieldWall(len=4, h=2, thick=2, +X): slab covers
+    // x∈[0,2], z∈[-2,2], y∈[0,2]. Slot 0 (origin: forward=0, in) and
+    // slot 1 (forward=1.5 ≤ 2, in); slots 2/3 forward > 2 ⇒ out.
+    // Expected: 2 chronicle records.
+    let mut shield_wall = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 11.0 }],
+    );
+    shield_wall.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Wall,
+        args: [4.0, 2.0, 2.0, 0.0],
+    }));
+
+    let mut builder = AbilityRegistryBuilder::new();
+    let shield_wall_id = builder.register(shield_wall);
+    let registry = builder.build();
+
+    const N_AGENTS: u32 = 4;
+    let levels: Vec<u32> = vec![shield_wall_id.raw(); N_AGENTS as usize];
+    let stats: Vec<PerAgentStats> = vec![PerAgentStats::default(); N_AGENTS as usize];
+
+    let state = match ApplyAbilitySmokeState::try_new_with_registry(
+        N_AGENTS,
+        &registry,
+        &levels,
+        &stats,
+    ) {
+        Some(s) => s,
+        None => {
+            eprintln!("[aoe_chronicle_pin] skipping wall test: no wgpu adapter available.");
+            return;
+        }
+    };
+    let mut state = state;
+
+    state.set_agent_alive(&[1, 0, 0, 0]);
+    state.set_agent_positions(&[
+        [0.0, 0.0, 0.0],
+        [1.5, 0.0, 0.0],
+        [3.0, 0.0, 0.0],
+        [4.5, 0.0, 0.0],
+    ]);
+
+    state.step(0);
+
+    let tail = state.read_event_tail();
+    assert_eq!(
+        tail, 2,
+        "Wall(len=4, h=2, thick=2, +X) covers slots 0 + 1 in 4-agent +X \
+         row. Got tail={tail}",
+    );
+    let mut records = state.read_event_ring(tail);
+    records.sort_by_key(|r| (r[3], r[0]));
+    let amount_bits: u32 = 11.0_f32.to_bits();
+    for (i, expected_target) in [0u32, 1u32].iter().enumerate() {
+        assert_eq!(records[i][3], *expected_target, "wall record {i} target");
+        assert_eq!(records[i][4], amount_bits, "wall record {i} payload_a (11.0)");
+    }
+}
+
+#[test]
+fn aoe_cylinder_symmetric_vertical_on_gpu() {
+    // #181 Cylinder — symmetric vertical (`|dy| ≤ h/2`). Fixture: 4-
+    // agent row at y=0. Cylinder(r=2, h=4) → XZ disc + |dy| ≤ 2. Hits
+    // slot 0 (XZ d=0) + slot 1 (XZ d=1.5); slots 2/3 outside XZ radius.
+    // Expected: 2 chronicle records.
+    let mut dropzone = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 9.0 }],
+    );
+    dropzone.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Cylinder,
+        args: [2.0, 4.0, 0.0, 0.0],
+    }));
+
+    let mut builder = AbilityRegistryBuilder::new();
+    let dropzone_id = builder.register(dropzone);
+    let registry = builder.build();
+
+    const N_AGENTS: u32 = 4;
+    let levels: Vec<u32> = vec![dropzone_id.raw(); N_AGENTS as usize];
+    let stats: Vec<PerAgentStats> = vec![PerAgentStats::default(); N_AGENTS as usize];
+
+    let state = match ApplyAbilitySmokeState::try_new_with_registry(
+        N_AGENTS,
+        &registry,
+        &levels,
+        &stats,
+    ) {
+        Some(s) => s,
+        None => {
+            eprintln!("[aoe_chronicle_pin] skipping cylinder test: no wgpu adapter available.");
+            return;
+        }
+    };
+    let mut state = state;
+
+    state.set_agent_alive(&[1, 0, 0, 0]);
+    state.set_agent_positions(&[
+        [0.0, 0.0, 0.0],
+        [1.5, 0.0, 0.0],
+        [3.0, 0.0, 0.0],
+        [4.5, 0.0, 0.0],
+    ]);
+
+    state.step(0);
+
+    let tail = state.read_event_tail();
+    assert_eq!(
+        tail, 2,
+        "Cylinder(r=2, h=4) symmetric — hits slots 0 + 1. Got tail={tail}",
+    );
+    let mut records = state.read_event_ring(tail);
+    records.sort_by_key(|r| (r[3], r[0]));
+    let amount_bits: u32 = 9.0_f32.to_bits();
+    for (i, expected_target) in [0u32, 1u32].iter().enumerate() {
+        assert_eq!(records[i][3], *expected_target, "cylinder record {i} target");
+        assert_eq!(records[i][4], amount_bits, "cylinder record {i} payload_a (9.0)");
+    }
+}
+
+#[test]
+fn aoe_dome_includes_y_zero_plane_on_gpu() {
+    // #181 Dome — half-sphere with `dy ≥ 0` plane gate (inclusive at
+    // y=center.y boundary). Fixture: 4-agent row at y=0. Dome(r=2):
+    // sphere gate hits slots 0 (d=0) and 1 (d=1.5); both at dy=0
+    // boundary, in via inclusive plane gate. Slots 2/3 outside sphere.
+    // Expected: 2 chronicle records. Pins the y-plane inclusivity (`>=`
+    // not `>`) — a future change to strict above-plane would silently
+    // drop the boundary candidates.
+    let mut aegis = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 7.0 }],
+    );
+    aegis.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Dome,
+        args: [2.0, 0.0, 0.0, 0.0],
+    }));
+
+    let mut builder = AbilityRegistryBuilder::new();
+    let aegis_id = builder.register(aegis);
+    let registry = builder.build();
+
+    const N_AGENTS: u32 = 4;
+    let levels: Vec<u32> = vec![aegis_id.raw(); N_AGENTS as usize];
+    let stats: Vec<PerAgentStats> = vec![PerAgentStats::default(); N_AGENTS as usize];
+
+    let state = match ApplyAbilitySmokeState::try_new_with_registry(
+        N_AGENTS,
+        &registry,
+        &levels,
+        &stats,
+    ) {
+        Some(s) => s,
+        None => {
+            eprintln!("[aoe_chronicle_pin] skipping dome test: no wgpu adapter available.");
+            return;
+        }
+    };
+    let mut state = state;
+
+    state.set_agent_alive(&[1, 0, 0, 0]);
+    state.set_agent_positions(&[
+        [0.0, 0.0, 0.0],
+        [1.5, 0.0, 0.0],
+        [3.0, 0.0, 0.0],
+        [4.5, 0.0, 0.0],
+    ]);
+
+    state.step(0);
+
+    let tail = state.read_event_tail();
+    assert_eq!(
+        tail, 2,
+        "Dome(r=2) y=0 plane is inclusive — hits slots 0 + 1. \
+         Got tail={tail}",
+    );
+    let mut records = state.read_event_ring(tail);
+    records.sort_by_key(|r| (r[3], r[0]));
+    let amount_bits: u32 = 7.0_f32.to_bits();
+    for (i, expected_target) in [0u32, 1u32].iter().enumerate() {
+        assert_eq!(records[i][3], *expected_target, "dome record {i} target");
+        assert_eq!(records[i][4], amount_bits, "dome record {i} payload_a (7.0)");
+    }
+}
+
+#[test]
+fn aoe_hull_aliases_sphere_on_gpu() {
+    // #181 Hull — Sphere alias today (no spec semantics; see
+    // `apply_program_aoe_hull_filter` doc-comment NOTE). Fixture: 4-
+    // agent row. Hull(r=2): same gate as Sphere (3D dist² ≤ radius²).
+    // Hits slot 0 + slot 1. Expected: 2 chronicle records. Pin the
+    // alias so a future spec change surfaces here.
+    let mut bulwark = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 5.0 }],
+    );
+    bulwark.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Hull,
+        args: [2.0, 0.0, 0.0, 0.0],
+    }));
+
+    let mut builder = AbilityRegistryBuilder::new();
+    let bulwark_id = builder.register(bulwark);
+    let registry = builder.build();
+
+    const N_AGENTS: u32 = 4;
+    let levels: Vec<u32> = vec![bulwark_id.raw(); N_AGENTS as usize];
+    let stats: Vec<PerAgentStats> = vec![PerAgentStats::default(); N_AGENTS as usize];
+
+    let state = match ApplyAbilitySmokeState::try_new_with_registry(
+        N_AGENTS,
+        &registry,
+        &levels,
+        &stats,
+    ) {
+        Some(s) => s,
+        None => {
+            eprintln!("[aoe_chronicle_pin] skipping hull test: no wgpu adapter available.");
+            return;
+        }
+    };
+    let mut state = state;
+
+    state.set_agent_alive(&[1, 0, 0, 0]);
+    state.set_agent_positions(&[
+        [0.0, 0.0, 0.0],
+        [1.5, 0.0, 0.0],
+        [3.0, 0.0, 0.0],
+        [4.5, 0.0, 0.0],
+    ]);
+
+    state.step(0);
+
+    let tail = state.read_event_tail();
+    assert_eq!(
+        tail, 2,
+        "Hull(r=2) aliases Sphere — hits slots 0 + 1. Got tail={tail}",
+    );
+    let mut records = state.read_event_ring(tail);
+    records.sort_by_key(|r| (r[3], r[0]));
+    let amount_bits: u32 = 5.0_f32.to_bits();
+    for (i, expected_target) in [0u32, 1u32].iter().enumerate() {
+        assert_eq!(records[i][3], *expected_target, "hull record {i} target");
+        assert_eq!(records[i][4], amount_bits, "hull record {i} payload_a (5.0)");
+    }
+}
