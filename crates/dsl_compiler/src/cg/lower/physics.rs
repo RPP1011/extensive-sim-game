@@ -574,35 +574,38 @@ fn lower_stmt(
             ast_label: "BeliefObserve",
             span: *span,
         }),
-        IrStmt::ApplyAbility { ability, span } => {
-            // Slice δ part 2 (#161): gate on dispatch shape. PerAgent
-            // rules lower caster to `AgentSelfId` (→ `agent_id` in
-            // WGSL); PerEvent rules need the actor read from the
-            // event payload, which the current shape of
-            // `CgStmt::ApplyAbility` doesn't yet support — surface a
-            // typed error so the user sees the gap clearly instead
-            // of broken WGSL (the prior silent-hardcoded-`agent_id`
-            // path produced "no definition in scope" naga errors
-            // far from the design context).
+        IrStmt::ApplyAbility { ability, caster, span } => {
+            // Slice δ part 3 (#161): if the source carried explicit
+            // `by <caster>`, lower that expression. Otherwise default:
+            //   - PerAgent  → `AgentSelfId` (per-thread agent — works)
+            //   - PerEvent  → typed error (no implicit caster context)
             //
-            // When PerEvent caster synthesis lands, this branch
-            // returns a `Read(EventField{actor})` expression instead
-            // of erroring.
-            if !ctx.current_per_agent_rule {
-                return Err(LoweringError::UnsupportedPhysicsStmt {
-                    rule: rule_id,
-                    ast_label: "ApplyAbility/PerEvent",
-                    span: *span,
-                });
-            }
+            // The explicit-caster path UNBLOCKS PerEvent — a rule like
+            //   on Triggered { who: w, ability_id: a } {
+            //     apply_ability a by w
+            //   }
+            // gets `caster = w` (a local read of the event-pattern
+            // binding), which lowers cleanly through the same
+            // expression path as any other operand.
             let ability_id = lower_expr(ability, ctx)?;
-            let caster_id = ctx
-                .builder
-                .add_expr(CgExpr::AgentSelfId)
-                .map_err(|e| LoweringError::BuilderRejected {
-                    error: e,
-                    span: *span,
-                })?;
+            let caster_id = match caster {
+                Some(caster_expr) => lower_expr(caster_expr, ctx)?,
+                None => {
+                    if !ctx.current_per_agent_rule {
+                        return Err(LoweringError::UnsupportedPhysicsStmt {
+                            rule: rule_id,
+                            ast_label: "ApplyAbility/PerEvent/no-caster",
+                            span: *span,
+                        });
+                    }
+                    ctx.builder
+                        .add_expr(CgExpr::AgentSelfId)
+                        .map_err(|e| LoweringError::BuilderRejected {
+                            error: e,
+                            span: *span,
+                        })?
+                }
+            };
             push_stmt(
                 CgStmt::ApplyAbility {
                     ability: ability_id,

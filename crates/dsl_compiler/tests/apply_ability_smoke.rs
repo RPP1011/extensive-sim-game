@@ -417,8 +417,71 @@ fn apply_ability_in_per_event_rule_errors_at_lowering() {
         "expected UnsupportedPhysicsStmt diagnostic, got: {diags}"
     );
     assert!(
-        diags.contains("ApplyAbility/PerEvent"),
-        "expected ast_label=\"ApplyAbility/PerEvent\", got: {diags}"
+        diags.contains("ApplyAbility/PerEvent/no-caster"),
+        "expected ast_label=\"ApplyAbility/PerEvent/no-caster\", got: {diags}"
+    );
+}
+
+/// Slice δ part 3 (#161): explicit `by <caster>` syntax unblocks
+/// PerEvent ApplyAbility. The same rule that errored above (no
+/// caster context for PerEvent kernel) now lowers cleanly when the
+/// source supplies an explicit caster from the event-pattern
+/// destructuring (`who: w` → caster = `w`).
+///
+/// Pinned by:
+///   - lowering reaches emit (no UnsupportedPhysicsStmt error),
+///   - emitted WGSL passes naga's full validator (the caster local
+///     read lowers through the same expression path as any other
+///     event-pattern binding, so naga sees a well-formed reference
+///     to the kernel-bound payload field rather than the prior
+///     undeclared `agent_id`).
+#[test]
+fn apply_ability_per_event_with_by_caster_lowers_cleanly() {
+    use naga::valid::{Capabilities, ValidationFlags, Validator};
+    let src = "
+        event Tick { }
+        event Triggered { who: AgentId, ability_id: u32 }
+
+        entity Hero : Agent { }
+
+        physics DispatchOnTrigger {
+          on Triggered { who: w, ability_id: a } {
+            apply_ability a by w
+          }
+        }
+    ";
+    let program = dsl_compiler::parse(src).expect("parse");
+    let comp = dsl_ast::resolve::resolve(program).expect("resolve");
+    let cg = dsl_compiler::cg::lower::lower_compilation_to_cg(&comp)
+        .expect("PerEvent ApplyAbility with `by w` lowers cleanly");
+    let schedule_result = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&schedule_result.schedule, &cg)
+        .expect("emit");
+
+    // Naga validator over every emitted kernel — proves the kernel
+    // is well-formed end-to-end, not just that lowering didn't error.
+    let mut errs = Vec::new();
+    for (name, body) in &art.wgsl_files {
+        let module = match naga::front::wgsl::parse_str(body) {
+            Ok(m) => m,
+            Err(e) => {
+                errs.push(format!("  {name}: parse: {e}"));
+                continue;
+            }
+        };
+        let mut validator = Validator::new(ValidationFlags::all(), Capabilities::all());
+        if let Err(e) = validator.validate(&module) {
+            errs.push(format!("  {name}: validate: {e:?}"));
+        }
+    }
+    assert!(
+        errs.is_empty(),
+        "PerEvent + `by w` variant emitted {} naga-rejected kernels:\n{}",
+        errs.len(),
+        errs.join("\n"),
     );
 }
 

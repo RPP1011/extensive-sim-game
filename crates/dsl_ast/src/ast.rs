@@ -681,6 +681,15 @@ pub struct ApplyAbilityStmt {
     /// pass `self.action_ability` — the AbilityId field already living on
     /// agent SoA, written by the action-selection scoring kernel.
     pub ability: Expr,
+    /// Optional explicit caster expression (`apply_ability <ability> by
+    /// <caster>`). When `None`, lowering defaults to the per-thread
+    /// agent (`self`) for PerAgent rules and surfaces a typed error
+    /// for PerEvent rules where there's no implicit per-thread agent.
+    /// When `Some(expr)`, lowering uses the resolved expression as the
+    /// caster slot — typically `e.actor` for PerEvent rules destructuring
+    /// an event payload's actor field via the `on EventName { actor: e.actor }`
+    /// pattern. Slice δ part 3 (#161).
+    pub caster: Option<Expr>,
     pub span: Span,
 }
 

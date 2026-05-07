@@ -1793,8 +1793,17 @@ fn resolve_stmt(
             // #132A: opaque ability_expr resolution. The expression
             // typically resolves to AbilityId (e.g. `self.action_ability`);
             // codegen reads it as u32 at the dispatch boundary.
+            //
+            // Slice δ part 3 (#161): optional `by <caster>` operand —
+            // resolves to an AgentId expression in the rule's scope.
+            // Typically `e.actor` for PerEvent rules destructuring the
+            // event payload, or `self` for explicit PerAgent self-cast.
             let ability = resolve_expr(&a.ability, scope, symbols)?;
-            Ok(IrStmt::ApplyAbility { ability, span: a.span })
+            let caster = match &a.caster {
+                Some(c) => Some(resolve_expr(c, scope, symbols)?),
+                None => None,
+            };
+            Ok(IrStmt::ApplyAbility { ability, caster, span: a.span })
         }
         Stmt::For { binder, iter, filter, body, span } => {
             let iter_ir = resolve_expr(iter, scope, symbols)?;

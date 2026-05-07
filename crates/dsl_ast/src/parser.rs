@@ -1865,15 +1865,40 @@ fn parse_stmt(c: &mut Cursor) -> PResult<Stmt> {
         let start = c.pos;
         c.bump("apply_ability".len());
         c.skip_ws();
+        // Slice δ part 3 (#161): optional `by <caster_expr>` syntax
+        // for the explicit caster operand. The ability operand parses
+        // up to the first `by` keyword OR statement terminator.
         let ability = parse_expr_bounded(c, |ck| {
-            ck.starts_with_char(';') || ck.starts_with_char('}') || ck.starts_with_char('\n')
+            ck.starts_with_char(';')
+                || ck.starts_with_char('}')
+                || ck.starts_with_char('\n')
+                || ck.starts_with("by ")
+                || ck.starts_with("by\t")
+                || ck.starts_with("by\n")
         })?;
         c.skip_ws();
+        let caster = if c.starts_with("by ")
+            || c.starts_with("by\t")
+            || c.starts_with("by\n")
+        {
+            c.bump("by".len());
+            c.skip_ws();
+            let caster_expr = parse_expr_bounded(c, |ck| {
+                ck.starts_with_char(';')
+                    || ck.starts_with_char('}')
+                    || ck.starts_with_char('\n')
+            })?;
+            c.skip_ws();
+            Some(caster_expr)
+        } else {
+            None
+        };
         if c.starts_with_char(';') {
             c.bump(1);
         }
         return Ok(Stmt::ApplyAbility(crate::ast::ApplyAbilityStmt {
             ability,
+            caster,
             span: Span::new(start, c.pos),
         }));
     }

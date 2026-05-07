@@ -487,6 +487,11 @@ pub enum IrStmt {
     /// defaults to `self`, target to the verb's `target` binder.
     ApplyAbility {
         ability: IrExprNode,
+        /// Optional explicit caster operand from `apply_ability <a> by
+        /// <caster>` source-level syntax (slice δ part 3, #161). When
+        /// `None`, lowering uses the per-thread agent (PerAgent rules)
+        /// or surfaces a typed error (PerEvent rules).
+        caster:  Option<IrExprNode>,
         span:    Span,
     },
 }
