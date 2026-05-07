@@ -116,12 +116,17 @@ When multiple agents share a voxel cell (the engine has no geometric body collis
 
 Stdout HUD prints `tick=N alive=A/T overlays=O fps=F eye=(x,y,z) lookAt=(x,y,z)` every second.
 
-### CLI (xtask — legacy tactical sim)
+### Per-sim runtime binaries
+
+The legacy `xtask` umbrella binary (with its `scenario run/bench/generate`
+subcommands) was retired in the Phase 7 wolf-sim wipe (2026-05-02).
+Each sim now lives in its own `crates/*_runtime` crate that compiles
+to a `*_app` binary:
 
 ```bash
-cargo run --bin xtask -- scenario run scenarios/basic_4v4.toml
-cargo run --bin xtask -- scenario bench scenarios/
-cargo run --bin xtask -- scenario generate dataset/scenarios/
+cargo run -p boids_runtime --bin boids_app
+cargo run -p duel_abilities_runtime --bin duel_abilities_app
+# (cargo lists every available `*_app` if you give it an unknown name)
 ```
 
 ### Engine spec + status
