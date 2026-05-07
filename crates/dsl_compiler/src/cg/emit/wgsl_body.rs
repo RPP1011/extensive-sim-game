@@ -1968,6 +1968,55 @@ pub(crate) fn default_event_ring_cap_slots() -> u32 {
     DEFAULT_EVENT_RING_CAP_SLOTS
 }
 
+/// `(EffectOp discriminant, runtime EventKindId)` pairs for the
+/// chronicle-bearing variants the `apply_ability` dispatcher emits
+/// records for. Sourced from:
+///   - left  — `pack_effect` in `crates/engine/src/ability/packed.rs`
+///     (the schema-pinned `#[repr(u8)]` ordinal each `EffectOp` packs to)
+///   - right — `EventKindId` in `crates/engine/src/cascade/handler.rs`
+///     (the runtime's chronicle-ring kind tag)
+///
+/// Only the variants whose runtime apply path produces a 1:1
+/// `Event::EffectXxxApplied` chronicle record appear here. Variants
+/// whose apply path produces a different shape (e.g. `Dash` writes to
+/// position SoA + an `AgentMoved` event; `Buff` writes to per-agent
+/// buff SoA without a dedicated chronicle kind today) are absent —
+/// slice γ's first wire-up will only thread the entries that have a
+/// 1:1 mapping here. Adding new entries means: (a) the runtime grows
+/// a new `Event::Effect*Applied` kind, (b) `pack_effect`'s discriminant
+/// for that variant is unchanged, (c) the dispatcher arm for that
+/// variant calls `chronicle_append` against the new kind.
+///
+/// Pinned by `effect_kind_to_event_kind_map_matches_engine` (see
+/// the test module below) so a divergence between this table and
+/// either source-of-truth surfaces as a CI failure rather than a
+/// silent run-time mismatch.
+///
+/// `#[allow(dead_code)]`: dead at HEAD because the dispatcher arms
+/// still emit `// TODO slice γ: chronicle_append_*` placeholders
+/// rather than indexing this map. The pin keeps the table on file
+/// (and the cross-crate test enforcing it active) so the slice γ
+/// wire-up has a vetted starting point — the moment the first arm
+/// replaces its TODO with a real `emit_chronicle_append_skeleton`
+/// call sourcing `event_id` from this table, the lint clears.
+#[allow(dead_code)]
+pub(crate) const EFFECT_KIND_TO_EVENT_KIND_ID: &[(u32, u32)] = &[
+    // EffectOp::Damage          → EventKindId::EffectDamageApplied
+    (0,  26),
+    // EffectOp::Heal            → EventKindId::EffectHealApplied
+    (1,  27),
+    // EffectOp::Shield          → EventKindId::EffectShieldApplied
+    (2,  28),
+    // EffectOp::Stun            → EventKindId::EffectStunApplied
+    (3,  29),
+    // EffectOp::Slow            → EventKindId::EffectSlowApplied
+    (4,  30),
+    // EffectOp::TransferGold    → EventKindId::EffectGoldTransfer
+    (5,  31),
+    // EffectOp::ModifyStanding  → EventKindId::EffectStandingDelta
+    (6,  32),
+];
+
 /// Lower a [`CgStmt::Match`] as a scrutinee-bound `if`-chain. WGSL's
 /// `switch` would be a future-tense option; today the chain is the
 /// honest placeholder.
@@ -4559,5 +4608,96 @@ mod tests {
         assert!(wgsl.contains("atomicAdd(&event_tail[0], 1u);"));
         assert!(wgsl.contains("atomicStore(&ring[slot * 2u + 0u], 2u);"));
         assert!(wgsl.contains("atomicStore(&ring[slot * 2u + 1u], tick);"));
+    }
+
+    // ---- EFFECT_KIND_TO_EVENT_KIND_ID — slice γ pre-fact pin.
+    //      Asserts each entry agrees with both source-of-truths:
+    //        - LEFT  : `pack_effect`'s discriminant (engine pack table)
+    //        - RIGHT : engine `EventKindId` enum
+
+    #[test]
+    fn effect_kind_to_event_kind_map_matches_engine() {
+        use engine::ability::{
+            AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate,
+            PackedAbilityRegistry,
+        };
+        use engine::cascade::handler::EventKindId as EngineEventKindId;
+
+        let pack_one = |op: EffectOp| -> u32 {
+            let prog = AbilityProgram::new_single_target(
+                5.0,
+                Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+                [op],
+            );
+            let mut b = AbilityRegistryBuilder::new();
+            b.register(prog);
+            let reg = b.build();
+            PackedAbilityRegistry::pack(&reg).effect_kinds[0] as u32
+        };
+
+        // LEFT side: each entry's effect-kind discriminant matches the
+        // pack table's output for a representative `EffectOp` value.
+        let representative_for = |kind: u32| -> EffectOp {
+            match kind {
+                0 => EffectOp::Damage    { amount: 10.0 },
+                1 => EffectOp::Heal      { amount: 5.0 },
+                2 => EffectOp::Shield    { amount: 25.0 },
+                3 => EffectOp::Stun      { duration_ticks: 10 },
+                4 => EffectOp::Slow      { duration_ticks: 10, factor_q8: 128 },
+                5 => EffectOp::TransferGold   { amount: 7 },
+                6 => EffectOp::ModifyStanding { delta: 3 },
+                _ => panic!("test only covers chronicle-bearing variants 0..=6"),
+            }
+        };
+
+        // RIGHT side: each entry's event-kind id matches the engine
+        // enum's `as u32`.
+        let event_kind_id_for = |effect_kind: u32| -> u32 {
+            match effect_kind {
+                0 => EngineEventKindId::EffectDamageApplied as u32,
+                1 => EngineEventKindId::EffectHealApplied   as u32,
+                2 => EngineEventKindId::EffectShieldApplied as u32,
+                3 => EngineEventKindId::EffectStunApplied   as u32,
+                4 => EngineEventKindId::EffectSlowApplied   as u32,
+                5 => EngineEventKindId::EffectGoldTransfer  as u32,
+                6 => EngineEventKindId::EffectStandingDelta as u32,
+                _ => panic!("test only covers chronicle-bearing variants 0..=6"),
+            }
+        };
+
+        for &(effect_kind, event_kind_id) in EFFECT_KIND_TO_EVENT_KIND_ID {
+            let packed = pack_one(representative_for(effect_kind));
+            assert_eq!(
+                packed, effect_kind,
+                "EFFECT_KIND_TO_EVENT_KIND_ID left ({effect_kind}) drifted from \
+                 pack_effect (got {packed}); a renumbering of EffectOp \
+                 silently rewrites this table"
+            );
+            let expected_event = event_kind_id_for(effect_kind);
+            assert_eq!(
+                event_kind_id, expected_event,
+                "EFFECT_KIND_TO_EVENT_KIND_ID right ({event_kind_id}) for effect \
+                 discriminant {effect_kind} drifted from EngineEventKindId \
+                 (got {expected_event}); chronicle records will route to the \
+                 wrong cascade handler"
+            );
+        }
+    }
+
+    #[test]
+    fn effect_kind_to_event_kind_map_covers_chronicle_bearing_variants_only() {
+        // 7 chronicle-bearing variants today — Damage/Heal/Shield/Stun/
+        // Slow/TransferGold/ModifyStanding. If this number changes,
+        // either the engine grew a new `EffectXxxApplied` event (in
+        // which case the map gets a new entry) or a variant lost its
+        // chronicle counterpart (in which case the map drops an entry).
+        // Pin the count so the gap between source-of-truths is loud.
+        assert_eq!(
+            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 7,
+            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 7 \
+             chronicle-bearing variants today; if you added or removed an \
+             entry, update this assertion (and the slice γ wire-up that \
+             consumes the new entry)"
+        );
     }
 }
