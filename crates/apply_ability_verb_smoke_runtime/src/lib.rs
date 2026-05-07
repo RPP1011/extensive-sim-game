@@ -380,6 +380,7 @@ impl ApplyAbilityVerbSmokeState {
             ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
             ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
+            ability_registry_chances:           &self.registry_gpu.chances,
             agent_attack_damage: &self.agent_attack_damage_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_hp:            &self.agent_hp_buf,

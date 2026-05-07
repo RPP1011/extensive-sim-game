@@ -354,10 +354,21 @@ impl ApplyAbilitySmokeState {
     /// The encoder also clears `event_tail` to zero before the
     /// dispatch (so producers atomicAdd from 0).
     pub fn step(&mut self, tick: u32) {
+        self.step_with_seed(tick, 0);
+    }
+
+    /// Encode + dispatch one tick with an explicit `seed` low-32-bit
+    /// value. Mirrors the cfg uniform's `seed: u32` field — feeds
+    /// the chance gate's `per_agent_u32_with_extra` draw inside the
+    /// dispatcher kernel, so callers can pin the host's
+    /// `world_seed as u32` and the GPU's `cfg.seed` to identical
+    /// values for cross-backend parity (P11). Used by the
+    /// `parity_apply_program_sweep` test.
+    pub fn step_with_seed(&mut self, tick: u32, seed: u32) {
         let cfg = physics_DispatchAbility::PhysicsDispatchAbilityCfg {
             agent_cap: self.n_agents,
             tick,
-            seed: 0,
+            seed,
             _pad: 0,
         };
         self.gpu
@@ -391,6 +402,7 @@ impl ApplyAbilitySmokeState {
             ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
             ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
+            ability_registry_chances:           &self.registry_gpu.chances,
             agent_attack_damage: &self.agent_attack_damage_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_hp:            &self.agent_hp_buf,

@@ -759,6 +759,7 @@ impl CompiledSim for TacticalSquad5v5State {
             ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
             ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
+            ability_registry_chances:           &self.registry_gpu.chances,
             cfg: &self.chronicle_strike_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_strike(
@@ -798,6 +799,7 @@ impl CompiledSim for TacticalSquad5v5State {
             ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
             ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
+            ability_registry_chances:           &self.registry_gpu.chances,
             cfg: &self.chronicle_snipe_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_snipe(

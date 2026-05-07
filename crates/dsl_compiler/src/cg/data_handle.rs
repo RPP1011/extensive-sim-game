@@ -807,6 +807,20 @@ pub enum RngPurpose {
     /// [`Self::Gauss`]); never appears as a `CgExpr::Rng` purpose
     /// in the IR — only at emit time.
     GaussB,
+    /// `b"chance"` — per-effect chance gate inside the
+    /// `apply_ability` dispatcher. Returns `u32`. Internal — never
+    /// surfaces through a `.sim` author-facing `rng.*` call; the
+    /// chance modifier on an `.ability` effect lowers to a chance
+    /// SoA slot, which both backends gate on independently. The
+    /// CPU oracle (`engine::ability::apply::apply_program`) uses
+    /// `per_agent_u32_pcg` keyed on this purpose; the WGSL
+    /// dispatcher in `cg::emit::wgsl_body` calls
+    /// `per_agent_u32(seed, agent_id, tick, 10u)` with the same id.
+    /// Slot index is mixed in via the `extra` parameter on
+    /// `per_agent_u32_pcg_with_extra` (host) and the WGSL helper
+    /// `per_agent_u32_with_extra` (GPU) so multi-effect abilities
+    /// don't share a draw across slots.
+    Chance,
 }
 
 impl RngPurpose {
@@ -822,6 +836,7 @@ impl RngPurpose {
             RngPurpose::Coin => b"coin",
             RngPurpose::UniformInt => b"uniform_int",
             RngPurpose::GaussB => b"gauss_b",
+            RngPurpose::Chance => b"chance",
         }
     }
 
@@ -837,6 +852,7 @@ impl RngPurpose {
             RngPurpose::Coin => "coin",
             RngPurpose::UniformInt => "uniform_int",
             RngPurpose::GaussB => "gauss_b",
+            RngPurpose::Chance => "chance",
         }
     }
 
@@ -862,6 +878,11 @@ impl RngPurpose {
             // (which the DSL has none — no literal suffix, no cast). See
             // gap report `2026-05-04-stdlib_math_probe.md` §Gap #C.
             RngPurpose::UniformInt => CgTy::U32,
+            // Internal — chance gate's draw is a raw u32; the
+            // dispatcher gates on the low 16 bits against a q16
+            // threshold (mirrors `apply_program`'s `(draw as u16) <
+            // q16` test).
+            RngPurpose::Chance => CgTy::U32,
         }
     }
 
@@ -890,6 +911,12 @@ impl RngPurpose {
             // independent draws; `Gauss` (id 6) is u1 and `GaussB`
             // (id 9) is u2. Stable id — fixed forever.
             RngPurpose::GaussB => 9,
+            // P5: per-effect chance gate inside the apply_ability
+            // dispatcher. Stable id — fixed forever (any change
+            // requires bumping the engine schema hash AND updating
+            // both `engine::rng::per_agent_u32_pcg_with_extra` and
+            // `RNG_WGSL_PRELUDE` in lockstep).
+            RngPurpose::Chance => 10,
         }
     }
 }

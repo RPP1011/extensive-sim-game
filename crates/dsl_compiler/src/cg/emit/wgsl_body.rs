@@ -1788,6 +1788,18 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20for (var i: u32 = 0u; i < 6u; i = i + 1u) {{\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20let kind: u32 = ability_registry_effect_kinds[effect_base + i];\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20if (kind == 0xFFu) {{ continue; }} // EFFECT_KIND_EMPTY\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// P11 chance gate (Wave 1.5#5 GPU wire-up). Mirrors CPU\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// `apply_program`'s `(per_agent_u32_pcg_with_extra(seed,\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// caster_slot, tick, RngPurpose::Chance=10, slot_idx) &\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// 0xFFFF) < q16` test. Sentinel `chances[i] == 0xFFFFu`\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// (CHANCE_NONE_SENTINEL) → no gate authored, fire\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// unconditionally.\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20var chance_passes: bool = true;\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20let chance_q16: u32 = ability_registry_chances[effect_base + i];\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20if (chance_q16 != 0xFFFFu) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let chance_draw: u32 = per_agent_u32_with_extra(seed, caster_slot, tick, 10u, i) & 0xFFFFu;\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20chance_passes = chance_draw < chance_q16;\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20let payload_a: u32 = ability_registry_effect_payload_a[effect_base + i];\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20let payload_b: u32 = ability_registry_effect_payload_b[effect_base + i];\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20// Wave 1.5#4: compute scale_bonus from the slot's two\n\
@@ -1849,7 +1861,7 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20default: {{ when_passes = false; }}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20if (when_passes) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20if (when_passes && chance_passes) {{\n\
                  {primary_arm_chain}\
                  \x20\x20\x20\x20\x20\x20\x20\x20// Variant 7 (CastAbility) — recursive dispatch. The\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20// nested ability_id lives in payload_a; recursing\n\
@@ -1874,7 +1886,7 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let nested_scale_bonus: f32 = 0.0;\n\
                  {nested_arm_chain}\
                  \x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} // end if (when_passes)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} // end if (when_passes && chance_passes)\n\
                  \x20\x20\x20\x20}}\n\
                  }}"
             );

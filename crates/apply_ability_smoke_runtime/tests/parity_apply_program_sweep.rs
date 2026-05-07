@@ -21,7 +21,7 @@
 //!   3. `Shield(50)`                                — ShieldUp-shape
 //!   4. `SelfDamage(5) + 5% MaxHp`                  — Bleed-shape (scaling on MaxHp)
 //!   5. `Execute(20) when target.hp < 20`           — Reap-shape (when-predicate gate)
-//!   6. `Damage(10) chance=0xFFFE (always-fires)`   — Daze-shape, deterministic
+//!   6. `Damage(10) chance=0xFFFE (always-fires)`   — Daze-shape, near-deterministic (1/65536 miss)
 //!   7. `Damage(40) { stun 1s }`                    — Reap+nested-stun shape
 //!   8. `Heal(8) + 50% AbilityPower`                — AP scaling (=0.0 on both backends)
 //!   9. `LifeSteal(0.5, 5s)`                        — Vampirize-shape (q8 fraction)
@@ -45,6 +45,7 @@
 //!  27. `Reflect(50, -64)`                          — Mirror-shape (slice γ tail, packed signed fraction)
 //!  28. `Harvest(0xCAFEBABE, 5)`                    — Reap_Ore-shape (slice γ tail, caster-self)
 //!  29. `PlaceVoxel(0xFACEFEED)`                    — Drop_Stone-shape (slice γ tail, caster-self)
+//!  30. `Damage(10) chance=0x4000 (~25%)`           — DazeMid-shape, P11 chance-gate parity (intermediate q16)
 //!
 //! M = 1 caster×target permutation in this fixture: `(c=0, t=0)`
 //! self-cast. The smoke fixture's `apply_ability` source uses the
@@ -56,21 +57,23 @@
 //! T = 5 ticks (0, 17, 100, 1000, 65500) — varied across the u32 range
 //! to surface any wraparound bug in expires_at_tick computations.
 //!
-//! K = 29 × 1 × 5 = **145 casts**, producing 150 chronicle records (145
-//! primary + 5 nested-Stun follow-ups from the Reap+Stun-shape arm).
+//! K = 30 × 1 × 5 = **150 casts**, producing ≈ 150 chronicle records
+//! (145 primary always-fire + 5 nested-Stun follow-ups from the
+//! Reap+Stun-shape arm + ~1.25 expected DazeMid fires under chance ≈ 25%
+//! across 5 ticks, draws determined by the PCG mixer).
+//!
+//! ## P11 chance gate parity (slice ζ, 2026-05-07)
+//!
+//! Both backends now key the chance gate's draw on the same PCG mixer
+//! (`per_agent_u32_pcg_with_extra` host / `per_agent_u32_with_extra`
+//! WGSL prelude — bit-equal under shared inputs). The CPU oracle and
+//! GPU dispatcher therefore agree on EVERY (seed, caster_slot, tick,
+//! slot_idx) tuple's gate decision, so the sweep can pin intermediate
+//! q16 thresholds. The DazeMid arm above (q16 = 0x4000) exercises the
+//! divergent-fires branch — some draws fire and some don't across the
+//! 5 sweep ticks; both backends must produce identical record sets.
 //!
 //! ## What's deferred
-//!
-//! - **Intermediate chance values (0 < q16 < 0xFFFE).** The CPU's chance
-//!   gate uses `per_agent_u32` (ahash-based, P5 contract). The GPU
-//!   dispatcher today does NOT gate on the chance modifier at all (it
-//!   honors the `when` predicate but not `chances[i]` — scoping decision
-//!   in the slice that landed). Until P11 wires chance-gating onto the
-//!   GPU side, intermediate q16 values would diverge: CPU gates per
-//!   PCG draw, GPU fires unconditionally. We sidestep with chance =
-//!   0xFFFE (CPU "always fires" — and GPU also fires unconditionally,
-//!   so both produce the same record). Add an intermediate-chance arm
-//!   when GPU chance-gate-on-GPU lands.
 //!
 //! - **Distinct caster≠target casts.** This fixture's source uses the
 //!   implicit-target rule (`apply_ability AID by self`), so the
@@ -230,17 +233,13 @@ fn build_sweep() -> Vec<(&'static str, AbilityProgram, CasterStats)> {
         CasterStats { hp: 5.0, ..Default::default() },
     ));
 
-    // 6. Daze-shape — chance=0xFFFE deterministic. Damage(10) gated
-    //    on always-fires q16. CPU's per_agent_u32 derivation produces
-    //    a draw `& 0xFFFF` < 0xFFFE for every (seed, caster, tick)
-    //    other than the 1/65536 case where the draw is exactly 0xFFFE
-    //    or 0xFFFF — for our pinned seed/tick set we verify offline
-    //    that the gate fires for every entry. The GPU dispatcher
-    //    doesn't gate on `chances[i]` today, so it fires unconditionally
-    //    — both backends produce the same record IF the CPU draw also
-    //    fires. (If we hit the 1-in-65k miss for a specific tick, the
-    //    test would fail loudly with a count mismatch — that's the
-    //    documented deferral above.)
+    // 6. Daze-shape — chance=0xFFFE near-deterministic. Damage(10)
+    //    gated on always-fires q16. Both backends use the same PCG
+    //    mixer (`per_agent_u32_pcg_with_extra` / WGSL prelude) keyed
+    //    on `(seed, caster_slot, tick, RngPurpose::Chance=10,
+    //    slot_idx=0)`, so draw values match bit-for-bit. The 1/65536
+    //    miss case (draw == 0xFFFE or 0xFFFF) is identical on both
+    //    sides — the count would still match (both miss together).
     let mut daze = AbilityProgram::new_single_target(
         5.0,
         Gate { cooldown_ticks: 40, hostile_only: true, line_of_sight: false },
@@ -575,6 +574,28 @@ fn build_sweep() -> Vec<(&'static str, AbilityProgram, CasterStats)> {
         CasterStats::default(),
     ));
 
+    // 30. DazeMid-shape — Damage(10) chance=0x4000 (~25%). P11
+    //     intermediate-chance arm: the CPU oracle's
+    //     `per_agent_u32_pcg_with_extra` draw and the GPU
+    //     dispatcher's `per_agent_u32_with_extra` draw must agree
+    //     bit-for-bit on whether the chronicle record fires for
+    //     each (seed, caster_slot, tick, slot_idx=0) tuple. With
+    //     5 sweep ticks under uniform draws, expected fires ≈ 1.25
+    //     and the count for our pinned WORLD_SEED is exactly the
+    //     count both backends reach (any divergence surfaces as a
+    //     count mismatch panic from the byte-equal check).
+    let mut daze_mid = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 40, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 10.0 }],
+    );
+    daze_mid.chances.push(Some(0x4000));
+    out.push((
+        "DazeMid",
+        daze_mid,
+        CasterStats::default(),
+    ));
+
     out
 }
 
@@ -718,8 +739,10 @@ fn cpu_gpu_apply_program_byte_equal_across_modifier_matrix() {
             );
             canonicalize(&mut cpu);
 
-            // -- GPU dispatch.
-            state.step(tick);
+            // -- GPU dispatch. Pin the GPU's cfg.seed to the same
+            //    `world_seed as u32` the CPU oracle keys on, so the
+            //    chance-gate PCG draws agree bit-for-bit (P11).
+            state.step_with_seed(tick, WORLD_SEED as u32);
             let tail = state.read_event_tail();
             let mut gpu = state.read_event_ring(tail);
             canonicalize(&mut gpu);
