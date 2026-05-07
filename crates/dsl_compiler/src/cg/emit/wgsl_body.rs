@@ -1603,19 +1603,44 @@ fn lower_cg_stmt_body_to_wgsl(
             // schema hash); `EFFECT_KIND_EMPTY = 0xFFu` skips unused
             // slots.
             //
-            // The apply paths themselves (Damage/Heal/Stun/Slow are
-            // the slice β coverage; rest land in slice δ / #137)
-            // emit chronicle-ring records via `chronicle_append_*`
-            // helper functions that the runtime crate exposes. Until
-            // those helpers exist (slice γ wires the first one),
-            // each apply arm is a `// TODO` comment so the kernel
-            // parses; only the loop scaffolding is exercised.
+            // The apply paths themselves emit chronicle-ring records
+            // via inline `atomicAdd(&event_tail[0], 1u)` slot
+            // acquisition + `atomicStore` writes (the same shape
+            // `lower_emit_to_wgsl` produces for declared events). The
+            // event-kind tag for each variant is sourced from
+            // `EFFECT_KIND_TO_EVENT_KIND_ID` above — that table is
+            // pinned against the engine's `EventKindId` enum so a
+            // discriminant rename surfaces at build time.
+            //
+            // Slice γ wires the chronicle write for the four 1:1
+            // variants the runtime currently has chronicle kinds for
+            // (Damage / Heal / Shield / TransferGold / ModifyStanding /
+            // Stun / Slow). Other variants keep their `// TODO slice δ`
+            // markers until the runtime grows matching event kinds.
+            //
+            // **Caster/target convention.** `CgStmt::ApplyAbility`
+            // carries only the ability-id operand today — no explicit
+            // caster/target. Slice γ uses the conventional WGSL
+            // identifier `agent_id` (= `AgentRef::Self_`) for both,
+            // i.e. self-cast. This is correct for self-cast verbs
+            // (Bleed / SelfDamage / Stealth) but coarsens the chronicle
+            // for verbs whose true target is the per-pair candidate or
+            // event-target. Plumbing explicit caster/target through
+            // `CgStmt::ApplyAbility` is the next CG IR change after
+            // slice γ proves the dispatcher path end-to-end.
             //
             // This whole arm is dead at HEAD — no current sim
             // references `apply_ability` (corpus grep is empty).
             // Lights up the moment slice γ wires one duel_abilities
             // verb.
             let ability_wgsl = lower_cg_expr_to_wgsl(*ability, ctx)?;
+            // Resolve the runtime EventKindId for each chronicle-bearing
+            // arm via the pinned table. `expect` is sound: the table is
+            // pinned by `effect_kind_to_event_kind_map_matches_engine`
+            // and any future divergence surfaces as a build-time test
+            // failure rather than a panic at this site.
+            let damage_event_id = event_kind_id_for_effect_kind(0)
+                .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Damage=0");
             // Engine pins MAX_EFFECTS_PER_PROGRAM = 6 + EFFECT_KIND_EMPTY = 0xFFu
             // (see crates/engine/src/ability/program.rs:28 +
             // crates/engine/src/ability/packed.rs). Inlining the
@@ -1633,10 +1658,20 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20\x20\x20\x20\x20if (kind == 0xFFu) {{ continue; }} // EFFECT_KIND_EMPTY\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20let payload_a: u32 = ability_registry_effect_payload_a[effect_base + i];\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20let payload_b: u32 = ability_registry_effect_payload_b[effect_base + i];\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// Damage = 0\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// Damage = 0 → EventKindId::EffectDamageApplied = 26\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20if (kind == 0u) {{\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let amount: f32 = bitcast<f32>(payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_damage(caster, target, amount);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// chronicle: emit EffectDamageApplied (slice γ self-cast)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20{{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (_slot < 65536u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 0u], {damage_event_id}u);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 1u], tick);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 2u], (agent_id));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 3u], (agent_id));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 1u) {{\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Heal\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let amount: f32 = bitcast<f32>(payload_a);\n\
@@ -2016,6 +2051,21 @@ pub(crate) const EFFECT_KIND_TO_EVENT_KIND_ID: &[(u32, u32)] = &[
     // EffectOp::ModifyStanding  → EventKindId::EffectStandingDelta
     (6,  32),
 ];
+
+/// Look up the runtime `EventKindId` for an `EffectOp` discriminant.
+/// Returns `None` for variants that have no 1:1 chronicle counterpart
+/// today (the dispatcher arms for those keep their `// TODO slice γ`
+/// markers until a future runtime change adds the kind).
+///
+/// Used by the dispatcher arms to render the `event_id` constant in
+/// the chronicle_append skeleton without re-stating the mapping each
+/// time.
+pub(crate) fn event_kind_id_for_effect_kind(effect_kind: u32) -> Option<u32> {
+    EFFECT_KIND_TO_EVENT_KIND_ID
+        .iter()
+        .find(|(ek, _)| *ek == effect_kind)
+        .map(|(_, vk)| *vk)
+}
 
 /// Lower a [`CgStmt::Match`] as a scrutinee-bound `if`-chain. WGSL's
 /// `switch` would be a future-tense option; today the chain is the
@@ -4512,9 +4562,13 @@ mod tests {
         assert!(wgsl.contains("payload_b & 0x00FFFFFFu"),
             "Summon lifetime extracted from payload_b low 24 bits;\n{wgsl}");
 
-        // chronicle_append TODO markers — one per implemented arm.
+        // chronicle_append TODO markers — one per implemented arm
+        // that hasn't yet been wired to a real chronicle write.
+        // **Removed when wired**:
+        //   - "chronicle_append_damage" — slice γ first wire-up
+        //     (writes EffectDamageApplied with self-cast caster=target=
+        //     agent_id; assertion below pins the actual emit shape).
         for marker in &[
-            "chronicle_append_damage",
             "chronicle_append_heal",
             "chronicle_append_shield",
             "chronicle_append_stun",
@@ -4551,6 +4605,56 @@ mod tests {
                 "{marker} arm must keep the TODO marker;\n{wgsl}"
             );
         }
+
+        // Slice γ — Damage arm wiring assertions.
+        // The Damage arm replaced its TODO marker with a real chronicle
+        // write that mirrors `lower_emit_to_wgsl`'s shape: atomicAdd
+        // for slot acquisition, bounds-check against ring cap, then
+        // header + payload atomicStores against the SAME `event_ring`
+        // buffer the runtime cascade reads from.
+        // Tight pattern — `chronicle_append_damage(` excludes the
+        // (still-TODO) `chronicle_append_damage_over_time(` and
+        // `chronicle_append_damage_modify(` arms which share a prefix.
+        assert!(
+            !wgsl.contains("TODO slice γ: chronicle_append_damage("),
+            "Damage arm should no longer carry the TODO marker;\n{wgsl}"
+        );
+        // Header tag — EventKindId::EffectDamageApplied = 26.
+        assert!(
+            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 0u], 26u);"),
+            "Damage arm must store kind=26 (EffectDamageApplied);\n{wgsl}"
+        );
+        // Header tick.
+        assert!(
+            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 1u], tick);"),
+            "Damage arm must store tick at header word 1;\n{wgsl}"
+        );
+        // Self-cast caster + target (slice γ uses agent_id for both;
+        // explicit caster/target arrives when CgStmt::ApplyAbility
+        // grows those fields).
+        assert!(
+            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 2u], (agent_id));"),
+            "Damage arm must store caster=agent_id at payload word 0;\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 3u], (agent_id));"),
+            "Damage arm must store target=agent_id at payload word 1 (slice γ self-cast);\n{wgsl}"
+        );
+        // Amount payload — bitcast f32 → u32.
+        assert!(
+            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));"),
+            "Damage arm must store amount as bitcast<u32>(f32);\n{wgsl}"
+        );
+        // Bounds check against DEFAULT_EVENT_RING_CAP_SLOTS.
+        assert!(
+            wgsl.contains("if (_slot < 65536u) {"),
+            "Damage arm must bounds-check _slot;\n{wgsl}"
+        );
+        // Slot acquisition via atomicAdd on event_tail.
+        assert!(
+            wgsl.contains("let _slot: u32 = atomicAdd(&event_tail[0], 1u);"),
+            "Damage arm must acquire slot via atomicAdd on event_tail;\n{wgsl}"
+        );
     }
 
     // ---- emit_chronicle_append_skeleton — shared by lower_emit_to_wgsl
@@ -4682,6 +4786,24 @@ mod tests {
                  wrong cascade handler"
             );
         }
+    }
+
+    #[test]
+    fn event_kind_id_for_effect_kind_lookup_matches_table() {
+        // Spot-check the helper against the table itself plus the
+        // negative case (an effect-kind absent from the map returns
+        // None — these arms keep their TODO marker until a runtime
+        // change adds a chronicle counterpart).
+        assert_eq!(event_kind_id_for_effect_kind(0), Some(26),
+            "Damage → EffectDamageApplied");
+        assert_eq!(event_kind_id_for_effect_kind(1), Some(27),
+            "Heal → EffectHealApplied");
+        assert_eq!(event_kind_id_for_effect_kind(6), Some(32),
+            "ModifyStanding → EffectStandingDelta");
+        assert_eq!(event_kind_id_for_effect_kind(8), None,
+            "Root has no chronicle counterpart today");
+        assert_eq!(event_kind_id_for_effect_kind(7), None,
+            "CastAbility (recursive dispatch) has no chronicle kind");
     }
 
     #[test]
