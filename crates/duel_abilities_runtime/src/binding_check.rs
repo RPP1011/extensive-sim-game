@@ -99,6 +99,17 @@ pub const VAMPIRIZE_EXPECTED_ABILITY_ID: u32 = 6;
 /// silent wrong-ability dispatch.
 pub const FORTIFY_EXPECTED_ABILITY_ID: u32 = 7;
 
+/// Task #138 follow-on (Reap, mirror of Fortify at `001ae9a6`) — Reap's
+/// verb body in `assets/sim/duel_abilities.sim` dispatches via
+/// `apply_ability 5 by self target target`. The literal `5` is Reap's
+/// expected `AbilityId` slot in the registry — source-order `names`
+/// literal in `build_duel_abilities_registry()` puts Reap fifth
+/// (Strike=1, ShieldUp=2, Mend=3, Bleed=4, Reap=5, Vampirize=6,
+/// Fortify=7, Daze=8). Closes the slice across all 8 duel_abilities
+/// verbs. Drift surfaces as a startup panic, not as a silent
+/// wrong-ability dispatch.
+pub const REAP_EXPECTED_ABILITY_ID: u32 = 5;
+
 /// Read + parse + build the AbilityRegistry over every .ability file
 /// under `assets/ability_test/duel_abilities/`. Shared by the binding
 /// check (assert_ability_registry_matches_sim_constants) AND the
@@ -421,6 +432,22 @@ pub fn assert_ability_registry_matches_sim_constants() {
     //   chronicle only fires Defeated when the finisher condition holds.
     let reap_id = *built.names.get("Reap")
         .expect("Reap registered in name table");
+    // Task #138 follow-on (Reap, mirror of Fortify at `001ae9a6`) —
+    // Reap's verb body in duel_abilities.sim hardcodes the literal
+    // `apply_ability 5 by self target target`. Pin the registry slot
+    // at startup so any drift in the build_registry ordering surfaces
+    // here, not as silent wrong-ability dispatch (e.g. the verb fires
+    // Bleed's effects against the target). Closes the slice across all
+    // 8 duel_abilities verbs.
+    assert_eq!(
+        reap_id,
+        AbilityId::new(REAP_EXPECTED_ABILITY_ID).expect("non-zero AbilityId"),
+        "Reap's AbilityId drifted from the expected slot {} — \
+         duel_abilities.sim's `apply_ability 5` literal will dispatch \
+         the wrong program. Re-check the source-order names literal in \
+         `build_duel_abilities_registry()`.",
+        REAP_EXPECTED_ABILITY_ID,
+    );
     let reap = built.registry.get(reap_id).expect("Reap resolves to a program");
     assert_eq!(
         reap.gate.cooldown_ticks, 20,

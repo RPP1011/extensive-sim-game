@@ -259,6 +259,16 @@ pub struct DuelAbilitiesState {
     /// unchanged. Same shape as ApplyLifestealFromChronicle: PerEvent
     /// + emit-only kernel, no AgentField writes (so no P6 trip).
     apply_damagemod_from_chronicle_cfg_buf: wgpu::Buffer,
+    /// Task #138 follow-on (Reap, mirror of Fortify at `001ae9a6`) —
+    /// Cfg uniform for the new `physics_ApplyExecuteFromChronicle`
+    /// kernel that translates `EffectExecuteApplied` records (kind=42,
+    /// written by the apply_ability dispatcher in the standalone Reap
+    /// chronicle kernel) back into `Defeated` events so the existing
+    /// ApplyDefeat cascade (per-agent `set_alive`) keeps working
+    /// unchanged. Same shape as ApplyDamageFromChronicle: PerEvent +
+    /// emit-only kernel, no AgentField writes (so no P6 trip). Closes
+    /// the slice across all 8 duel_abilities verbs.
+    apply_execute_from_chronicle_cfg_buf: wgpu::Buffer,
     /// Task #138 — Packed AbilityRegistry uploaded to the GPU. The
     /// fused kernel binds `effect_kinds` / `effect_payload_a` /
     /// `effect_payload_b` for the apply_ability dispatcher arm
@@ -674,6 +684,21 @@ impl DuelAbilitiesState {
             contents: bytemuck::bytes_of(&apply_damagemod_from_chronicle_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        // Task #138 follow-on (Reap, mirror of Fortify at `001ae9a6`) —
+        // Cfg uniform for the new ApplyExecuteFromChronicle kernel that
+        // translates EffectExecuteApplied (kind=42) records emitted by
+        // the apply_ability dispatcher into Defeated events the existing
+        // ApplyDefeat cascade consumes (per-agent set_alive). Closes the
+        // slice across all 8 duel_abilities verbs.
+        let apply_execute_from_chronicle_cfg_init =
+            physics_ApplyExecuteFromChronicle::PhysicsApplyExecuteFromChronicleCfg {
+                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            };
+        let apply_execute_from_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_abilities_runtime::apply_execute_from_chronicle_cfg"),
+            contents: bytemuck::bytes_of(&apply_execute_from_chronicle_cfg_init),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let seed_cfg_init = seed_indirect_0::SeedIndirect0Cfg {
             agent_cap: agent_count, tick: 0, seed: 0, _pad: 0,
         };
@@ -746,6 +771,7 @@ impl DuelAbilitiesState {
             apply_damage_from_self_damage_chronicle_cfg_buf,
             apply_lifesteal_from_chronicle_cfg_buf,
             apply_damagemod_from_chronicle_cfg_buf,
+            apply_execute_from_chronicle_cfg_buf,
             registry_gpu,
             seed_cfg_buf,
             cache: dispatch::KernelCache::default(),
@@ -952,12 +978,19 @@ impl CompiledSim for DuelAbilitiesState {
         // swap to Fortify (kind=41 EffectDamageModifyApplied +
         // SetDamageMod re-emit) — again +2 per-agent overhead, again
         // mutually exclusive with the other verbs.
-        // Bump the upper bound to 28 slots per agent to keep
+        // Task #138 follow-on (Reap, mirror of Fortify) extended the
+        // swap to Reap (kind=42 EffectExecuteApplied + Defeated
+        // re-emit) — again +2 per-agent overhead, again mutually
+        // exclusive with the other verbs (Reap is the verb that fires
+        // when target.hp < threshold, so it competes with Strike at the
+        // 20-tick boundary). Closes the slice across all 8
+        // duel_abilities verbs.
+        // Bump the upper bound to 30 slots per agent to keep
         // clear_ring_headers from leaving stale slots between ticks.
-        // (26 + 2 = 28; the per-tick sum stays in the same
+        // (28 + 2 = 30; the per-tick sum stays in the same
         // verb-mutually-exclusive band but the bump gives every
         // chronicle re-emit its own headroom.)
-        let max_slots_per_tick = self.agent_count * 28;
+        let max_slots_per_tick = self.agent_count * 30;
         self.event_ring.clear_ring_headers_in(
             &self.gpu, &mut encoder, max_slots_per_tick,
         );
@@ -1139,12 +1172,15 @@ impl CompiledSim for DuelAbilitiesState {
             self.agent_count,
         );
 
-        // (7b) Reap chronicle — Wave 2 Execute demo. Gates on
-        // action_id==4u and emits Defeated{combatant=target}. The verb's
-        // own `when` clause already gated on `target.hp < threshold`, so
-        // the chronicle fires only when the finisher condition holds. The
-        // ApplyDefeat handler (fused into the PerEvent kernel below)
-        // drains the Defeated event via `agents.set_alive(t, false)`.
+        // (7b) Reap chronicle — Wave 2 Execute demo. Task #138 follow-on
+        // (Reap, mirror of Fortify at `001ae9a6`) — verb body is now
+        // `apply_ability 5 by self target target`, so this kernel walks
+        // the AbilityRegistry's effect SoA columns to expand the
+        // dispatch into chronicle EffectExecuteApplied writes (kind=42).
+        // Re-emitted as Defeated by ApplyExecuteFromChronicle below;
+        // the existing ApplyDefeat cascade drains Defeated into per-agent
+        // `set_alive(t, false)`. Closes the slice across all 8
+        // duel_abilities verbs.
         let reap_cfg = physics_verb_chronicle_Reap::PhysicsVerbChronicleReapCfg {
             event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
         };
@@ -1154,6 +1190,9 @@ impl CompiledSim for DuelAbilitiesState {
         let reap_bindings = physics_verb_chronicle_Reap::PhysicsVerbChronicleReapBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
+            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
             cfg: &self.chronicle_reap_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_reap(
@@ -1447,6 +1486,47 @@ impl CompiledSim for DuelAbilitiesState {
             &self.gpu.device, &mut encoder, max_slots_per_tick,
         );
 
+        // (7l) Task #138 follow-on (Reap, mirror of Fortify at
+        // `001ae9a6`) — ApplyExecuteFromChronicle. The Reap chronicle
+        // (step 7b) just wrote EffectExecuteApplied records (kind=42)
+        // into the event ring via the apply_ability dispatcher arm.
+        // This kernel filters those records and re-emits them as
+        // `Defeated` events so the fused ApplyDefeat kernel below
+        // (step 8a) can drain them and write per-agent
+        // `set_alive(t, false)`. Closes the slice across all 8
+        // duel_abilities verbs.
+        //
+        // PerEvent shape: scans every event_ring slot up to event_count
+        // and skips slots whose kind != 42. Same pattern as
+        // ApplyDamageFromChronicle (kind=26) — 3-payload-word shape
+        // (actor + target + hp_threshold), with the re-emit pulling
+        // `target: t` directly into Defeated's `combatant` field. The
+        // hp_threshold payload is decorative because:
+        //   1. apply_program doesn't evaluate `when_per_effect[i]`
+        //      today, so the dispatcher writes the record
+        //      unconditionally once the verb mask passes.
+        //   2. Reap's verb gate already enforces
+        //      `target.hp < config.combat.reap_threshold` upstream.
+        // Together those mean the re-emit can ferry the record into
+        // Defeated without re-checking hp.
+        let apply_execute_from_chronicle_cfg = physics_ApplyExecuteFromChronicle::PhysicsApplyExecuteFromChronicleCfg {
+            event_count: max_slots_per_tick, tick: self.tick as u32,
+            seed: 0, _pad0: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.apply_execute_from_chronicle_cfg_buf, 0,
+            bytemuck::bytes_of(&apply_execute_from_chronicle_cfg),
+        );
+        let apply_execute_from_chronicle_bindings = physics_ApplyExecuteFromChronicle::PhysicsApplyExecuteFromChronicleBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            cfg: &self.apply_execute_from_chronicle_cfg_buf,
+        };
+        dispatch::dispatch_physics_applyexecutefromchronicle(
+            &mut self.cache, &apply_execute_from_chronicle_bindings,
+            &self.gpu.device, &mut encoder, max_slots_per_tick,
+        );
+
         // (8a) Fused ApplyHeal + ApplyShield + ApplyDefeat +
         // ApplyLifestealActivation + ApplyDamageModActivation +
         // ApplyStun + verb_chronicle_Strike. The compiler re-fused these
@@ -1471,7 +1551,7 @@ impl CompiledSim for DuelAbilitiesState {
         // `_and_ApplyStun_` segment and adding agent_stun_expires_at_tick
         // to the bind group. No new pass introduced; same single
         // dispatch per tick.
-        let event_count_estimate = self.agent_count * 28;
+        let event_count_estimate = self.agent_count * 30;
         let apply_heal_cfg = physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_ApplyDamageModActivation_and_ApplyStun_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndApplyDamageModActivationAndApplyStunAndVerbChronicleStrikeCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
             seed: 0, _pad0: 0,

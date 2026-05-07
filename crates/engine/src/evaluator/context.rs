@@ -772,6 +772,12 @@ fn fields_to_event(
             let multiplier_q8   = field_i16(fields, "multiplier_q8").unwrap_or(0);
             Some(Event::EffectDamageModifyApplied { actor, target, expires_at_tick, multiplier_q8, tick })
         }
+        "EffectExecuteApplied" => {
+            let actor        = field_agent(fields, "actor")?;
+            let target       = field_agent(fields, "target")?;
+            let hp_threshold = field_f32(fields, "hp_threshold").unwrap_or(0.0);
+            Some(Event::EffectExecuteApplied { actor, target, hp_threshold, tick })
+        }
         "EffectShieldApplied" => {
             let actor  = field_agent(fields, "actor")?;
             let target = field_agent(fields, "target")?;

@@ -198,6 +198,29 @@ pub fn apply_event_to_chronicle_record(
             rec[5] = (multiplier_q8 as i32) as u32;
             Some(rec)
         }
+        // --- Execute = 16 → EventKindId::EffectExecuteApplied = 42.
+        // Reap verb swap (Task #138 follow-on, mirror of Fortify at
+        // `001ae9a6`). 3-field payload: actor, target, hp_threshold (f32).
+        // Same shape family as Damage (kind=26) / Heal (kind=27) — third
+        // payload word is bitcast f32. The when-condition `target.hp <
+        // hp_threshold` is NOT evaluated by apply_program (the
+        // `when_per_effect[i]` field stays unconsulted today), so the
+        // record fires unconditionally; downstream consumers (e.g. the
+        // duel_abilities ApplyExecuteFromChronicle re-emit) ferry the
+        // record into the host sim's defeat path. Reap's outer verb
+        // gate provides the threshold check upstream.
+        //
+        // `ApplyEvent::Execute` carries only `{ target, hp_threshold }`
+        // — no source field — so caster_id is supplied by the caller
+        // (mirroring `ApplyEvent::Stun`'s pattern). Slot 2 = caster_id,
+        // slot 3 = target_id, exactly like the dispatcher's WGSL arm.
+        ApplyEvent::Execute { target: _, hp_threshold } => {
+            rec[0] = 42;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            rec[4] = hp_threshold.to_bits();
+            Some(rec)
+        }
         _ => None,
     }
 }
@@ -325,6 +348,9 @@ mod tests {
         // follow-on, 2026-05-06) and now produces kind=39 records, so
         // it's no longer in this list — see
         // `self_damage_chronicle_record_uses_kind_39` below.
+        // Execute was wired up by the Reap verb swap (Task #138
+        // follow-on, mirror of Fortify) and now produces kind=42
+        // records — see `execute_chronicle_record_uses_kind_42` below.
         for ev in [
             ApplyEvent::Root    { target: aid(1), duration_ticks: 5 },
             ApplyEvent::Silence { target: aid(1), duration_ticks: 5 },
@@ -334,7 +360,6 @@ mod tests {
             ApplyEvent::Blink   { source: aid(1), distance: 10.0 },
             ApplyEvent::Knockback { source: aid(1), target: aid(2), distance: 5.0 },
             ApplyEvent::Pull      { source: aid(1), target: aid(2), distance: 5.0 },
-            ApplyEvent::Execute   { target: aid(1), hp_threshold: 50.0 },
         ] {
             assert!(
                 apply_event_to_chronicle_record(ev, 100, 0, 0).is_none(),
@@ -410,6 +435,51 @@ mod tests {
         assert_eq!(rec_neg[5], (-64_i32) as u32, "negative fraction_q8 sign-widens correctly");
     }
 
+    /// Reap verb swap (Task #138 follow-on, mirror of Fortify at
+    /// `001ae9a6`): Execute produces kind=42 records with a 3-payload-word
+    /// shape — actor, target, hp_threshold (bitcast f32). The
+    /// when-condition `target.hp < hp_threshold` is NOT evaluated here
+    /// (apply_program doesn't consult `when_per_effect[i]` today); the
+    /// record fires unconditionally and the duel_abilities Reap verb's
+    /// outer `when` clause provides the threshold gate upstream.
+    /// `ApplyEvent::Execute` carries only `{ target, hp_threshold }`,
+    /// so the caller-supplied caster_id lands in slot 2 and target_id
+    /// in slot 3 — same convention as Stun/Slow/LifeSteal/DamageModify.
+    #[test]
+    fn execute_chronicle_record_uses_kind_42() {
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::Execute {
+                target: aid(11),
+                hp_threshold: 20.0,
+            },
+            /*tick*/ 100,
+            /*caster_id*/ 7,
+            /*target_id*/ 11,
+        )
+        .expect("Execute has chronicle counterpart");
+        assert_eq!(rec[0], 42, "kind tag — EffectExecuteApplied");
+        assert_eq!(rec[1], 100, "tick");
+        assert_eq!(rec[2], 7, "actor slot — caster_id");
+        assert_eq!(rec[3], 11, "target slot — target_id");
+        assert_eq!(rec[4], 20.0_f32.to_bits(), "hp_threshold as bitcast<u32>");
+        // Tail words zeroed.
+        for i in 5..CHRONICLE_RECORD_STRIDE_U32 {
+            assert_eq!(rec[i], 0, "tail word {i} should be zero");
+        }
+
+        // Self-cast collapse: caster==target sets both slots equal.
+        let rec_self = apply_event_to_chronicle_record(
+            ApplyEvent::Execute {
+                target: aid(7),
+                hp_threshold: 50.0,
+            },
+            50, 7, 7,
+        ).unwrap();
+        assert_eq!(rec_self[0], 42);
+        assert_eq!(rec_self[2], rec_self[3], "self-cast collapses both slots");
+        assert_eq!(rec_self[4], 50.0_f32.to_bits(), "different threshold round-trips correctly");
+    }
+
     /// Fortify verb swap (Task #138 follow-on, mirror of Vampirize):
     /// DamageModify produces kind=41 records with the same 4-payload-word
     /// shape as Slow / LifeSteal — actor, target, expires_at_tick
@@ -463,9 +533,11 @@ mod tests {
         // ModifyStanding ApplyEvents (engine/src/ability/apply.rs),
         // SelfDamage (Bleed verb swap, Task #138 follow-on,
         // 2026-05-06), LifeSteal (Vampirize verb swap, Task #138
-        // follow-on, mirror of Bleed), and DamageModify (Fortify verb
-        // swap, Task #138 follow-on, mirror of Vampirize), all 10
-        // entries are covered — no None fall-throughs.
+        // follow-on, mirror of Bleed), DamageModify (Fortify verb swap,
+        // Task #138 follow-on, mirror of Vampirize), and Execute (Reap
+        // verb swap, Task #138 follow-on, mirror of Fortify — closes
+        // all 8 duel_abilities verbs), all 11 entries are covered —
+        // no None fall-throughs.
         let ev_for_kind = |effect_kind: u32| -> ApplyEvent {
             match effect_kind {
                 0  => ApplyEvent::Damage         { source: aid(1), target: aid(2), amount: 1.0 },
@@ -475,6 +547,7 @@ mod tests {
                 4  => ApplyEvent::Slow           { target: aid(2), duration_ticks: 5, factor_q8: 128 },
                 5  => ApplyEvent::TransferGold   { source: aid(1), target: aid(2), amount: 7 },
                 6  => ApplyEvent::ModifyStanding { source: aid(1), target: aid(2), delta: 3 },
+                16 => ApplyEvent::Execute        { target: aid(2), hp_threshold: 20.0 },
                 17 => ApplyEvent::SelfDamage     { source: aid(1), amount: 1.0 },
                 18 => ApplyEvent::LifeSteal      { target: aid(1), duration_ticks: 5, fraction_q8: 128 },
                 19 => ApplyEvent::DamageModify   { target: aid(1), duration_ticks: 5, multiplier_q8: 128 },

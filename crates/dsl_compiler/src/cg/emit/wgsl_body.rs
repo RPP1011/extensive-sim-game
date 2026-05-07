@@ -1705,6 +1705,27 @@ fn lower_cg_stmt_body_to_wgsl(
             // SoA fields) keeps working unchanged.
             let damage_modify_event_id = event_kind_id_for_effect_kind(19)
                 .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain DamageModify=19");
+            // Reap verb swap (Task #138 follow-on, mirror of Fortify at
+            // `001ae9a6`) — Execute chronicle arm (kind=16 →
+            // EventKindId::EffectExecuteApplied=42). The dispatcher
+            // writes one record per non-empty Execute slot; the runtime's
+            // ApplyExecuteFromChronicle re-emit physics rule translates
+            // the records back into `Executed` so the existing ApplyDefeat
+            // cascade (or whatever defeat path the host sim wires)
+            // keeps working unchanged. 3-payload-word shape (actor +
+            // target + hp_threshold).
+            //
+            // SEMANTICS NOTE: the when-condition `target.hp <
+            // hp_threshold` is NOT evaluated by apply_program /
+            // dispatcher — that's the .ability's
+            // `when_per_effect[i].when_cond` field, registry-driven
+            // predicate dispatch is later infrastructure. The
+            // duel_abilities Reap verb's outer `when` clause already
+            // gates emission on `target.hp <
+            // config.combat.reap_threshold`, so the unconditional
+            // dispatcher write is gated upstream.
+            let execute_event_id = event_kind_id_for_effect_kind(16)
+                .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Execute=16");
             // Engine pins MAX_EFFECTS_PER_PROGRAM = 6 + EFFECT_KIND_EMPTY = 0xFFu
             // (see crates/engine/src/ability/program.rs:28 +
             // crates/engine/src/ability/packed.rs). Inlining the
@@ -1880,9 +1901,26 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 16u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Execute: payload_a = hp_threshold (f32 via bitcast)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Execute = 16 → EventKindId::EffectExecuteApplied = 42\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_a = hp_threshold (f32 via bitcast). The when-\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// condition `target.hp < hp_threshold` is NOT evaluated\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// here — that's the .ability's `when_per_effect[i]` and\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// stays unconsulted by apply_program today. Duel_abilities\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Reap's outer verb gate already enforces the threshold.\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Same shape family as EffectDamageApplied — 3 payload\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// words (actor, target, hp_threshold).\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let hp_threshold: f32 = bitcast<f32>(payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_execute(target, hp_threshold);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// chronicle: emit EffectExecuteApplied (caster_slot + target_slot)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20{{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (_slot < 65536u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 0u], {execute_event_id}u);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 1u], tick);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(hp_threshold));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 17u) {{\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// SelfDamage = 17 → EventKindId::EffectSelfDamageApplied = 39\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_a = amount (f32 via bitcast). Self-damage targets\n\
@@ -2247,6 +2285,10 @@ pub(crate) const EFFECT_KIND_TO_EVENT_KIND_ID: &[(u32, u32)] = &[
     // EffectOp::DamageModify    → EventKindId::EffectDamageModifyApplied
     // (Fortify verb swap, Task #138 follow-on, mirror of Vampirize).
     (19, 41),
+    // EffectOp::Execute         → EventKindId::EffectExecuteApplied
+    // (Reap verb swap, Task #138 follow-on, mirror of Fortify). Closes
+    // the slice across all 8 duel_abilities verbs.
+    (16, 42),
 ];
 
 /// Look up the runtime `EventKindId` for an `EffectOp` discriminant.
@@ -4788,6 +4830,8 @@ mod tests {
         //                                        (Vampirize verb swap, Task #138 follow-on)
         //   - chronicle_append_damage_modify   → EffectDamageModifyApplied
         //                                        (Fortify verb swap, Task #138 follow-on)
+        //   - chronicle_append_execute         → EffectExecuteApplied
+        //                                        (Reap verb swap, Task #138 follow-on)
         // Below-list arms keep their TODO markers because the runtime
         // has no 1:1 chronicle counterpart (Root / Silence / Fear /
         // Taunt / movement verbs / etc.) — slice δ scope or a future
@@ -4801,7 +4845,6 @@ mod tests {
             "chronicle_append_blink",
             "chronicle_append_knockback",
             "chronicle_append_pull",
-            "chronicle_append_execute",
             "chronicle_append_damage_over_time",
             "chronicle_append_heal_over_time",
             "chronicle_append_timed_shield",
@@ -4899,6 +4942,9 @@ mod tests {
             // Fortify verb swap (Task #138 follow-on, mirror of Vampirize):
             // DamageModify = 19 → EventKindId::EffectDamageModifyApplied = 41.
             ("DamageModify",    41u32),
+            // Reap verb swap (Task #138 follow-on, mirror of Fortify):
+            // Execute = 16 → EventKindId::EffectExecuteApplied = 42.
+            ("Execute",         42u32),
         ] {
             let needle = format!(
                 "atomicStore(&event_ring[_slot * 10u + 0u], {expected_kind_tag}u);"
@@ -5035,10 +5081,11 @@ mod tests {
                 4  => EffectOp::Slow      { duration_ticks: 10, factor_q8: 128 },
                 5  => EffectOp::TransferGold   { amount: 7 },
                 6  => EffectOp::ModifyStanding { delta: 3 },
+                16 => EffectOp::Execute   { hp_threshold: 20.0 },
                 17 => EffectOp::SelfDamage { amount: 5.0 },
                 18 => EffectOp::LifeSteal { duration_ticks: 50, fraction_q8: 128 },
                 19 => EffectOp::DamageModify { duration_ticks: 50, multiplier_q8: 128 },
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 17 + 18 + 19"),
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 16 + 17 + 18 + 19"),
             }
         };
 
@@ -5053,10 +5100,11 @@ mod tests {
                 4  => EngineEventKindId::EffectSlowApplied   as u32,
                 5  => EngineEventKindId::EffectGoldTransfer  as u32,
                 6  => EngineEventKindId::EffectStandingDelta as u32,
+                16 => EngineEventKindId::EffectExecuteApplied as u32,
                 17 => EngineEventKindId::EffectSelfDamageApplied as u32,
                 18 => EngineEventKindId::EffectLifeStealApplied as u32,
                 19 => EngineEventKindId::EffectDamageModifyApplied as u32,
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 17 + 18 + 19"),
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 16 + 17 + 18 + 19"),
             }
         };
 
@@ -5099,19 +5147,21 @@ mod tests {
 
     #[test]
     fn effect_kind_to_event_kind_map_covers_chronicle_bearing_variants_only() {
-        // 10 chronicle-bearing variants today — Damage/Heal/Shield/Stun/
+        // 11 chronicle-bearing variants today — Damage/Heal/Shield/Stun/
         // Slow/TransferGold/ModifyStanding + SelfDamage (Bleed verb
         // swap, Task #138 follow-on, 2026-05-06) + LifeSteal (Vampirize
         // verb swap, Task #138 follow-on, mirror of Bleed) + DamageModify
-        // (Fortify verb swap, Task #138 follow-on, mirror of Vampirize).
+        // (Fortify verb swap, Task #138 follow-on, mirror of Vampirize)
+        // + Execute (Reap verb swap, Task #138 follow-on, mirror of
+        // Fortify — closes the slice across all 8 duel_abilities verbs).
         // If this number changes, either the engine grew a new
         // `EffectXxxApplied` event (in which case the map gets a new
         // entry) or a variant lost its chronicle counterpart (in which
         // case the map drops an entry). Pin the count so the gap between
         // source-of-truths is loud.
         assert_eq!(
-            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 10,
-            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 10 \
+            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 11,
+            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 11 \
              chronicle-bearing variants today; if you added or removed an \
              entry, update this assertion (and the slice γ wire-up that \
              consumes the new entry)"

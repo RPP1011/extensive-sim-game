@@ -74,6 +74,7 @@ pub mod interp {
             Event::EffectSelfDamageApplied { .. } => "EffectSelfDamageApplied",
             Event::EffectLifeStealApplied { .. } => "EffectLifeStealApplied",
             Event::EffectDamageModifyApplied { .. } => "EffectDamageModifyApplied",
+            Event::EffectExecuteApplied  { .. } => "EffectExecuteApplied",
             Event::EffectShieldApplied   { .. } => "EffectShieldApplied",
             Event::EffectStunApplied     { .. } => "EffectStunApplied",
             Event::EffectSlowApplied     { .. } => "EffectSlowApplied",
@@ -198,6 +199,19 @@ pub mod interp {
                 ("e",               EvalValue::U32(*expires_at_tick)),
                 ("m",               EvalValue::I32(*multiplier_q8 as i32)),
                 ("tick",            EvalValue::U32(*tick)),
+            ],
+            // ---- EffectExecuteApplied -------------------------------------
+            // Same shape family as EffectDamageApplied: actor + target +
+            // hp_threshold (f32). Reap verb swap (Task #138 follow-on,
+            // mirror of Fortify at `001ae9a6`).
+            Event::EffectExecuteApplied { actor, target, hp_threshold, tick } => vec![
+                ("actor",        EvalValue::Agent(dsl_agent(*actor))),
+                ("target",       EvalValue::Agent(dsl_agent(*target))),
+                ("hp_threshold", EvalValue::F32(*hp_threshold)),
+                ("c",            EvalValue::Agent(dsl_agent(*actor))),
+                ("t",            EvalValue::Agent(dsl_agent(*target))),
+                ("thr",          EvalValue::F32(*hp_threshold)),
+                ("tick",         EvalValue::U32(*tick)),
             ],
             // ---- EffectShieldApplied --------------------------------------
             Event::EffectShieldApplied { actor, target, amount, tick } => vec![

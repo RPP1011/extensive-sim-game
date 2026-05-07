@@ -268,6 +268,52 @@ event EffectDamageModifyApplied {
   multiplier_q8: i16,
 }
 
+// Engine-side chronicle event written by the apply_ability dispatcher
+// at hardcoded EventKindId 42 (see
+// `dsl_ast::engine_events::engine_event_kind_id_for_name`).
+//
+// Task #138 follow-on (Reap, mirror of Fortify at `001ae9a6`) — Reap's
+// verb body is now `apply_ability 5 by self target target`, which
+// writes EffectExecuteApplied records into the event ring. The new
+// ApplyExecuteFromChronicle physics rule (declared below near the rest
+// of the consumers) translates these records back into the existing
+// `Defeated` event so the existing ApplyDefeat cascade (per-agent
+// `set_alive(t, false)`) keeps working unchanged. Closes the slice
+// across all 8 duel_abilities verbs.
+//
+// SHAPE NOTE: 3-payload-word event (actor + target + hp_threshold) —
+// same shape family as EffectDamageApplied/EffectHealApplied/
+// EffectShieldApplied/EffectSelfDamageApplied (third payload is an
+// f32). The dispatcher writes caster_slot into actor (slot 2) and
+// target_slot into target (slot 3); for Reap which is enemy-target,
+// these are distinct slots so the chronicle preserves "who killed
+// whom" semantics for downstream chronicle observers.
+//
+// SEMANTICS NOTE: the .ability declares `when target.hp < 20`, lowered
+// to `when_per_effect[0]`. apply_program does NOT consult that field
+// today (registry-driven predicate dispatch is later infrastructure),
+// so the chronicle write fires unconditionally once the verb mask
+// passes. The duel_abilities Reap verb's own outer `when` clause
+// gates emission on `target.hp < config.combat.reap_threshold`, so
+// the threshold check stays load-bearing upstream — the
+// ApplyExecuteFromChronicle re-emit can ferry the record into Defeated
+// unconditionally without re-checking hp.
+//
+// NESTED-EFFECT NOTE: the .ability also declares `{ stun 1s }` as a
+// nested effect, lowered to `nested_per_effect[0]`. apply_program +
+// the GPU dispatcher both ignore nested effects today (deferred
+// infrastructure — see `engine/src/ability/apply.rs:17` and the GPU
+// dispatcher arm in `wgsl_body.rs`). The original Reap verb only
+// emitted Defeated (no Stunned), so dropping the nested Stun on the
+// floor preserves the existing test semantics — Reap kills the target
+// outright; the stun was nominal-only metadata in the .ability source.
+@replayable @gpu_amenable
+event EffectExecuteApplied {
+  actor: AgentId,
+  target: AgentId,
+  hp_threshold: f32,
+}
+
 @replayable @gpu_amenable
 event Healed {
   source: AgentId,
@@ -537,7 +583,43 @@ verb Reap(self, target: Agent) =
         && target != self
         && target.hp < config.combat.reap_threshold
         && (world.tick % config.combat.cooldown_reap == 0))
-  emit Defeated { combatant: target }
+  // Task #138 follow-on (Reap, mirror of Fortify at `001ae9a6`) —
+  // verb-body apply_ability dispatcher swap. Reap was
+  // `emit Defeated { combatant: target }`. The literal `5` is Reap's
+  // AbilityId in the duel_abilities AbilityRegistry built from the
+  // source-order `names` list in
+  // `binding_check.rs::build_duel_abilities_registry` (Strike=1,
+  // ShieldUp=2, Mend=3, Bleed=4, Reap=5, Vampirize=6, Fortify=7,
+  // Daze=8). Closes the slice across all 8 duel_abilities verbs.
+  //
+  // `target target` matches the verb's existing `target.alive &&
+  // target != self` gate — Reap is enemy-target. The runtime extends
+  // the binding check to assert `built.names.get("Reap") ==
+  // AbilityId(5)` so any drift surfaces as a startup panic. The
+  // dispatcher writes EffectExecuteApplied records (engine-aliased to
+  // kind=42) which the new ApplyExecuteFromChronicle physics rule
+  // re-emits as Defeated so the existing ApplyDefeat cascade
+  // (per-agent set_alive) keeps working unchanged.
+  //
+  // WHEN-CONDITION NOTE: the .ability also declares
+  // `when target.hp < 20` as a per-effect predicate, lowered to
+  // `when_per_effect[0]`. apply_program does NOT consult that field
+  // today, so the chronicle would normally fire even when target.hp
+  // >= 20. But the Reap VERB's outer `when` clause already gates on
+  // `target.hp < config.combat.reap_threshold` (= 20), and the verb
+  // mask must pass for apply_ability to dispatch — so the threshold
+  // check is enforced upstream and the chronicle write is correctly
+  // gated. ApplyExecuteFromChronicle can ferry the record into
+  // Defeated unconditionally without re-checking hp.
+  //
+  // NESTED-STUN NOTE: the .ability also declares `{ stun 1s }` as a
+  // nested effect, lowered to `nested_per_effect[0]`. apply_program +
+  // the GPU dispatcher both ignore nested effects today (deferred
+  // infrastructure). The original Reap verb only emitted Defeated
+  // (never Stunned), so the swap preserves observable behavior — the
+  // nested stun was metadata-only in the .ability and stays metadata-
+  // only after the swap.
+  apply_ability 5 by self target target
   score (1000.0 - target.hp)
 
 // Vampirize — Wave 2 piece N: LifeSteal E2E demo. Self-cast, cooldown
@@ -857,6 +939,37 @@ physics ApplyLifestealFromChronicle {
 physics ApplyDamageModFromChronicle {
   on EffectDamageModifyApplied { actor: c, target: _, expires_at_tick: e, multiplier_q8: m } {
     emit SetDamageMod { target_agent: c, mult_q8: m, expires_at: e }
+  }
+}
+
+// Task #138 follow-on (Reap, mirror of Fortify at `001ae9a6`) — Reap's
+// verb body now uses `apply_ability 5 by self target target` (see the
+// Reap verb above). The dispatcher writes EffectExecuteApplied
+// chronicle records (engine-aliased to kind=42) instead of the
+// source-declared Defeated event. This rule consumes those records
+// and re-emits Defeated so the existing ApplyDefeat cascade (per-agent
+// `set_alive(t, false)`) keeps working unchanged. Closes the slice
+// across all 8 duel_abilities verbs.
+//
+// PAYLOAD NOTE: 3-payload-word shape (actor + target + hp_threshold).
+// The dispatcher writes caster_slot into actor (slot 2) and
+// target_slot into target (slot 3) — Reap is enemy-target so these are
+// distinct slots. This rule's pattern binds `target: t` and ferries it
+// directly into the Defeated event's `combatant` field. The
+// `hp_threshold` payload is decorative for this swap — apply_program
+// doesn't evaluate the .ability's `when target.hp < 20` predicate
+// (registry-driven predicate dispatch is later infrastructure), and
+// the duel_abilities Reap verb's outer `when` clause already enforces
+// the threshold upstream. The re-emit ignores the threshold and
+// unconditionally fires Defeated; the verb gate is the load-bearing
+// hp gate.
+//
+// P6 caveat: this rule is PerEvent + emit-only (no AgentField writes)
+// — does NOT trip P6.
+@phase(post)
+physics ApplyExecuteFromChronicle {
+  on EffectExecuteApplied { actor: _, target: t, hp_threshold: _ } {
+    emit Defeated { combatant: t }
   }
 }
 

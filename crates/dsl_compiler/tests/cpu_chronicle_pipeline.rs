@@ -253,6 +253,58 @@ fn life_steal_pipeline_emits_kind_40_record() {
     assert_eq!(r[5], 128, "fraction_q8 = 128 (= 0.5×) sign-widened");
 }
 
+/// Reap verb swap (Task #138 follow-on, mirror of Fortify at
+/// `001ae9a6`): Execute flows through `apply_program` (which emits
+/// `ApplyEvent::Execute{target, hp_threshold}`) and the CPU reference
+/// (which writes a kind=42 record with a 3-payload-word shape — actor,
+/// target, hp_threshold (bitcast f32)). Mirrors the GPU dispatcher's
+/// Execute arm shape. Closes the slice across all 8 duel_abilities
+/// verbs.
+///
+/// SEMANTICS NOTE: the when-condition `target.hp < hp_threshold` is
+/// NOT evaluated by apply_program (the `when_per_effect[i]` field
+/// stays unconsulted today), so the record fires unconditionally — the
+/// duel_abilities Reap verb's outer `when` clause provides the gate
+/// upstream.
+#[test]
+fn execute_pipeline_emits_kind_42_record() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 20, hostile_only: true, line_of_sight: false },
+        [EffectOp::Execute { hp_threshold: 20.0 }],
+    );
+    // Distinct caster + target — Reap targets an enemy, not self.
+    // The pipeline helper uses caster == target by default; this test
+    // inlines its own pipeline so it can route caster/target separately,
+    // mirroring how the duel_abilities Reap verb's
+    // `apply_ability 5 by self target target` lowers to distinct
+    // operands.
+    let caster = aid(7);
+    let target = aid(11);
+    let tick: u32 = 100;
+    let events = apply_program(
+        &program,
+        caster,
+        target,
+        tick as u64,
+        /*world_seed*/ 0xDEAD_BEEF,
+        &CasterStats::default(),
+    );
+    let records: Vec<_> = events
+        .into_iter()
+        .filter_map(|e| {
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw())
+        })
+        .collect();
+    assert_eq!(records.len(), 1, "one Execute effect → one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 42, "EventKindId::EffectExecuteApplied = 42");
+    assert_eq!(r[1], 100, "tick");
+    assert_eq!(r[2], 7, "actor slot — caster_id");
+    assert_eq!(r[3], 11, "target slot — target_id (distinct from caster)");
+    assert_eq!(r[4], 20.0_f32.to_bits(), "hp_threshold = 20.0 as bitcast<u32>");
+}
+
 /// Fortify verb swap (Task #138 follow-on, mirror of Vampirize at
 /// `60115f64`): DamageModify flows through `apply_program` (which
 /// emits `ApplyEvent::DamageModify{target=caster, duration_ticks,
