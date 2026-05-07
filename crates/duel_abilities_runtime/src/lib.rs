@@ -1280,6 +1280,67 @@ mod tests {
         binding_check::assert_ability_registry_matches_sim_constants();
     }
 
+    /// #138 Step 2 pin — Strike's AbilityProgram constant.
+    ///
+    /// The Wave 1 binding check (above) already proves the .ability →
+    /// AbilityRegistry pipeline produces this exact program for the
+    /// `Strike.ability` source file. This test pins the program shape
+    /// at the construction-helper level so #138 work (wiring Strike
+    /// through `apply_ability` instead of `emit Damaged{...}`) can
+    /// reference it as the AbilityProgram to register + dispatch.
+    ///
+    /// Mirrors duel_abilities.sim line 180: `emit Damaged { source:
+    /// self, target: target, amount: config.combat.strike_damage }`
+    /// where strike_damage = 30.0 (assets/config/default.toml).
+    ///
+    /// Going through apply_program here verifies the same chronicle-
+    /// records the existing ApplyDamage physics rule writes will be
+    /// reproduced by the registry-driven path: caster → target →
+    /// amount=30. The actual swap (verb body emit → apply_ability) is
+    /// the substantive piece of #138 — it requires extending the
+    /// .sim verb-body parser to accept apply_ability as an alternative
+    /// to emit, which is a multi-iteration design call.
+    #[test]
+    fn strike_apply_program_produces_expected_damage_event() {
+        use engine::ability::apply::{apply_program, ApplyEvent};
+        use engine::ability::program::{AbilityProgram, CasterStats, EffectOp, Gate};
+        use engine::ids::AgentId;
+
+        // Strike: 30 damage, range matches strike_range_max (4.0,
+        // per duel_abilities.sim's `range: 4` on Strike.ability).
+        // Hostile-only, no LoS. Cooldown=10 ticks (verb gate is
+        // `world.tick % 10 == 0` in duel_abilities.sim).
+        let program = AbilityProgram::new_single_target(
+            /*range*/ 4.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 30.0 }],
+        );
+
+        let caster = AgentId::new(1).expect("AgentId::new");
+        let target = AgentId::new(2).expect("AgentId::new");
+        let events = apply_program(
+            &program,
+            caster,
+            target,
+            /*tick*/ 0,
+            /*world_seed*/ 0xCAFE_F00D,
+            &CasterStats::default(),
+        );
+
+        assert_eq!(events.len(), 1, "single Damage effect → one ApplyEvent");
+        match events[0] {
+            ApplyEvent::Damage { source, target: t, amount } => {
+                assert_eq!(source, caster, "source slot is caster");
+                assert_eq!(t, target, "target slot is target");
+                assert_eq!(
+                    amount, 30.0,
+                    "amount matches strike_damage (config.combat.strike_damage)"
+                );
+            }
+            other => panic!("expected ApplyEvent::Damage, got {:?}", other),
+        }
+    }
+
     /// Snapshot before any tick must report initial state: both heroes
     /// alive at full HP (100.0), shields zero, and the renderer-visible
     /// fields (positions/creature_types/alive) populated for every
