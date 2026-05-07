@@ -108,6 +108,35 @@ event EffectStunApplied {
   expires_at_tick: u32,
 }
 
+// MassHeal recovery-dynamics proof (200-agent scale, 2026-05-07) —
+// engine-side chronicle event written by the apply_ability dispatcher
+// at hardcoded EventKindId 27 (see
+// `dsl_ast::engine_events::engine_event_kind_id_for_name`).
+//
+// The new `verb MassHeal` (added below near Heal) is
+// `apply_ability 4 by self target target`, which the dispatcher
+// translates to a kind=27 EffectHealApplied record carrying
+// `amount = 18.0` (the registry-resident MassHeal program declares
+// `EffectOp::Heal { amount: 18.0 }`). The new `physics
+// ApplyHealFromChronicle @phase(post)` rule below drains these records
+// directly into the per-agent `agent_hp` SoA via
+// `agents.set_hp(t, min(agents.hp(t) + amt, agents.max_hp(t)))`,
+// clamping overflow at the per-agent `max_hp` ceiling. First friendly-
+// targeted apply_ability in this fixture — proves heal-amount
+// chronicle dispatch works at the same 200-agent pair-field scale
+// Strike + Snipe + StunBolt operate at, and that the lower pass folds
+// the new ApplyHealFromChronicle into the existing 2-way fusion (kind
+// 26 + 29) → 3-way fused
+// `physics_ApplyDamageFromChronicle_and_ApplyHealFromChronicle_and_ApplyStunFromChronicle`
+// kernel. Same kind=27 alias HealPulse uses in duel_25v25 (commit
+// 049feb0c) — no engine schema bump.
+@replayable @gpu_amenable
+event EffectHealApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
 @replayable @gpu_amenable
 event Healed {
   source: AgentId,
@@ -268,6 +297,59 @@ verb StunBolt(self, target: Agent) =
   // the EffectStunApplied chronicle fires.
   score (2000.0 - target.hp)
 
+// ---- MassHeal (any-role friendly heal) --------------------------
+//
+// MassHeal recovery-dynamics proof (200-agent scale, 2026-05-07) —
+// the FIRST friendly-targeted apply_ability in this fixture. Unlike
+// Strike/Snipe/StunBolt (all `hostile_only`), MassHeal targets a
+// SAME-TEAM ally: the body-side level-pair check inverts to the
+// "ally" predicate
+// `(self.level <= 3 && target.level <= 3) || (self.level >= 4 && target.level >= 4)`.
+// No role restriction (any role can cast — Tanks heal Tanks, DPS heal
+// DPS, etc.) so the cadence is the only gate beyond same-team.
+// Cadence `world.tick % 11 == 0` interleaves with Strike (% 2),
+// Snipe (% 3), and StunBolt (% 7) — pure-MassHeal ticks happen at
+// 11, 33, 55, ... where none of the other three cadences overlap.
+//
+// Body: `apply_ability 4 by self target target`. The literal `4` is
+// MassHeal's AbilityId in the mass_battle_100v100 AbilityRegistry
+// built by `crates/mass_battle_100v100_runtime/src/binding_check.rs::
+// build_mass_battle_100v100_registry` (Strike=1, Snipe=2, StunBolt=3,
+// MassHeal=4 in registration order). The dispatcher writes
+// EffectHealApplied chronicle records (engine kind=27) carrying
+// `amount = 18.0`; the new ApplyHealFromChronicle physics rule below
+// (auto-fused with ApplyDamageFromChronicle + ApplyStunFromChronicle
+// by the lower pass) consumes them directly into the per-agent
+// `agent_hp` SoA via `agents.set_hp(t, min(hp + amt, max_hp))`,
+// clamping overflow at the per-agent `max_hp` ceiling.
+//
+// COOLDOWN NOTE: same as Strike + Snipe + StunBolt — the registry-
+// resident MassHeal program declares `cooldown_ticks: 0`; the per-
+// tick gate stays in the verb-style `world.tick % 11 == 0` clause
+// below since the GPU dispatcher does not consult
+// program.cooldown_ticks at the apply_ability arm today.
+verb MassHeal(self, target: Agent) =
+  action MassHealAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && (world.tick % 11 == 0)
+        && (((self.level <= 3) && (target.level <= 3))
+            || ((self.level >= 4) && (target.level >= 4))))
+  apply_ability 4 by self target target
+  // Score base 300.0 — lowest-HP same-team friend wins the argmax
+  // (`300 - target.hp`). Magnitude is intentionally small relative to
+  // Strike (5000), Snipe (1000), and StunBolt (2000) because MassHeal
+  // shares no actors with the offensive verbs (the same-team gate is
+  // mutually exclusive with the cross-team gates of Strike/Snipe/
+  // StunBolt at the actor's role-team encoding), so the base value is
+  // never compared against an offensive verb's score in the argmax —
+  // the scoring kernel's inner argmax loop only competes verbs whose
+  // gates pass for the same actor. Using 300.0 keeps the order
+  // strict-monotone in `target.hp` without bumping into Strike's
+  // 5000.0 baseline if a future role gate ever overlaps.
+  score (300.0 - target.hp)
+
 // ---- Heal (Healer) ----------------------------------------------
 //
 // Healer: pick lowest-HP-percentage ally. Score uses the inverse
@@ -331,6 +413,40 @@ physics ApplyDamageFromChronicle {
 physics ApplyStunFromChronicle {
   on EffectStunApplied { actor: _, target: t, expires_at_tick: e } {
     agents.set_stun_expires_at_tick(t, e);
+  }
+}
+
+// MassHeal recovery-dynamics proof (200-agent scale, 2026-05-07) —
+// chronicle consumer for the kind=27 EffectHealApplied records the
+// new MassHeal verb writes. Direct-SoA-write shape (matches
+// ApplyStunFromChronicle above; mirrors duel_25v25's
+// ApplyHealFromChronicle from commit 049feb0c). Clamps overflow with
+// `min(hp + amt, max_hp)` so a tick-N cast on a near-full-HP friend
+// doesn't push HP above the per-agent `max_hp` SoA ceiling.
+//
+// AUTO-FUSION EXPECTATION: this rule, ApplyDamageFromChronicle (kind
+// 26), and ApplyStunFromChronicle (kind 29) all run @phase(post) over
+// the same event ring with non-overlapping kind tags, so the lower
+// pass should fold all three into ONE 3-way `_and_` kernel
+// (`physics_ApplyDamageFromChronicle_and_ApplyHealFromChronicle_and_ApplyStunFromChronicle`
+// — the kernel-namer alphabetises). Same 3-way fusion duel_25v25
+// surfaced when HealPulse was added on top of the existing 2-way
+// Damage+Stun fusion. If fusion does NOT auto-include (e.g. the
+// scheduler's same-arena merge heuristic balks at three-arm event
+// dispatch), this stands as its own kernel — runtime wires it
+// independently.
+//
+// P6 caveat: this rule is PerEvent + writes an AgentField (hp) — TRIPS
+// P6 in the well_formed checker. mass_battle_100v100's build.rs already
+// tolerates lower diagnostics (matches `lower_compilation_to_cg` on
+// `DriverOutcome::Err` and falls through with the partial program), so
+// the rule lowers regardless. Same tolerance pattern duel_abilities +
+// duel_25v25 + the existing ApplyStunFromChronicle here use for their
+// AgentField writes from chronicle physics.
+@phase(post)
+physics ApplyHealFromChronicle {
+  on EffectHealApplied { actor: _, target: t, amount: amt } {
+    agents.set_hp(t, min(agents.hp(t) + amt, agents.max_hp(t)));
   }
 }
 

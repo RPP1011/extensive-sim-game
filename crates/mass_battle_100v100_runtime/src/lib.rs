@@ -122,17 +122,23 @@ pub struct MassBattle100v100State {
     agent_mana_buf: wgpu::Buffer,
 
     // -- Mask bitmaps (one per verb in source order:
-    //    Strike=0, Snipe=1, StunBolt=2, Heal=3) --
+    //    Strike=0, Snipe=1, StunBolt=2, MassHeal=3, Heal=4) --
     //
     // StunBolt control-status proof (200-agent scale, 2026-05-07): the
     // verb is declared between Snipe and Heal in the .sim, so source-
-    // order action_id assignment lands StunBolt at index 2 and shifts
-    // Heal to index 3. The fused mask kernel writes all four bitmaps;
-    // the scoring argmax reads all four rows.
+    // order action_id assignment lands StunBolt at index 2 and shifted
+    // Heal from 2 to 3 at the time.
+    //
+    // MassHeal recovery-dynamics proof (200-agent scale, 2026-05-07):
+    // MassHeal is declared between StunBolt and Heal in the .sim, so
+    // source-order action_id assignment lands MassHeal at index 3 and
+    // shifts Heal from 3 to 4. The fused mask kernel writes all five
+    // bitmaps; the scoring argmax reads all five rows.
     mask_0_bitmap_buf: wgpu::Buffer,
     mask_1_bitmap_buf: wgpu::Buffer,
     mask_2_bitmap_buf: wgpu::Buffer,
     mask_3_bitmap_buf: wgpu::Buffer,
+    mask_4_bitmap_buf: wgpu::Buffer,
     mask_bitmap_zero_buf: wgpu::Buffer,
     mask_bitmap_words: u32,
 
@@ -175,18 +181,31 @@ pub struct MassBattle100v100State {
     /// AbilityId(3) program through the apply_ability arm, writing
     /// kind=29 EffectStunApplied records.
     chronicle_stun_bolt_cfg_buf: wgpu::Buffer,
+    /// MassHeal recovery-dynamics proof (200-agent scale, 2026-05-07)
+    /// — fifth per-agent verb chronicle cfg. Same shape as the Strike
+    /// + Snipe + StunBolt cfgs; the MassHeal chronicle kernel filters
+    /// `action_id == 3u` (source-order index — MassHeal is the fourth
+    /// verb declared after Strike, Snipe, and StunBolt) and dispatches
+    /// the AbilityId(4) program through the apply_ability arm, writing
+    /// kind=27 EffectHealApplied records consumed by the fused
+    /// ApplyDamage+Stun+Heal chronicle kernel.
+    chronicle_mass_heal_cfg_buf: wgpu::Buffer,
     chronicle_heal_cfg_buf: wgpu::Buffer,
     /// Task #138 follow-on (mass_battle_100v100 port, 2026-05-07) +
-    /// StunBolt control-status proof (200-agent scale, 2026-05-07) —
-    /// cfg uniform for the FUSED chronicle-consumer kernel. The lower
-    /// pass folded ApplyDamageFromChronicle (drains kind=26 → emit
-    /// Damaged) and ApplyStunFromChronicle (drains kind=29 → write
-    /// `agents.set_stun_expires_at_tick`) into ONE kernel
-    /// (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`)
-    /// because both consume from the same event ring at @phase(post)
-    /// with non-overlapping kind tags. Single cfg + single dispatch
-    /// per tick. Mirrors the same fusion duel_25v25's lib.rs surfaced
-    /// in commit 7a0a6ace.
+    /// StunBolt control-status proof (200-agent scale, 2026-05-07) +
+    /// MassHeal recovery-dynamics proof (200-agent scale, 2026-05-07)
+    /// — cfg uniform for the FUSED chronicle-consumer kernel. The
+    /// lower pass folded ApplyDamageFromChronicle (drains kind=26 →
+    /// emit Damaged), ApplyStunFromChronicle (drains kind=29 → write
+    /// `agents.set_stun_expires_at_tick`), and ApplyHealFromChronicle
+    /// (drains kind=27 → write
+    /// `agents.set_hp(min(hp+amt, max_hp))`) into ONE kernel
+    /// (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle`)
+    /// because all three consume from the same event ring at
+    /// @phase(post) with non-overlapping kind tags. Single cfg +
+    /// single dispatch per tick. Fusion grew from 2-way to 3-way when
+    /// MassHeal was added, mirroring the same 2→3 transition
+    /// duel_25v25's lib.rs surfaced in commit 049feb0c.
     apply_chronicle_cfg_buf: wgpu::Buffer,
     apply_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
@@ -214,15 +233,15 @@ impl MassBattle100v100State {
         let agent_count = TOTAL_AGENTS;
         let gpu = GpuContext::new_blocking().expect("init wgpu adapter + device");
 
-        // Task #138 follow-on (mass_battle_100v100 port, 2026-05-07) —
-        // runs ONCE at startup before any GPU work. Asserts the
-        // runtime's hand-built Strike + Snipe programs land at
-        // AbilityId(1) and AbilityId(2) so the `apply_ability 1` and
-        // `apply_ability 2` literals in
-        // `assets/sim/mass_battle_100v100.sim` (the Strike + Snipe
-        // verb bodies) dispatch the correct programs. Cheap (two
-        // hand-built programs); panics on any drift before the
-        // expensive GPU init below.
+        // Task #138 follow-on (mass_battle_100v100 port, 2026-05-07) +
+        // StunBolt + MassHeal — runs ONCE at startup before any GPU
+        // work. Asserts the runtime's hand-built Strike + Snipe +
+        // StunBolt + MassHeal programs land at AbilityId(1..=4) so the
+        // `apply_ability 1..=4` literals in
+        // `assets/sim/mass_battle_100v100.sim` (the four verb bodies)
+        // dispatch the correct programs. Cheap (four hand-built
+        // programs); panics on any drift before the expensive GPU init
+        // below.
         binding_check::assert_ability_registry_matches_sim_constants();
 
         // Build per-agent SoA inits. Layout convention:
@@ -352,11 +371,16 @@ impl MassBattle100v100State {
                     | wgpu::BufferUsages::COPY_SRC,
             });
 
-        // Four mask bitmaps — one per verb. Cleared each tick.
+        // Five mask bitmaps — one per verb. Cleared each tick.
         // StunBolt control-status proof (200-agent scale, 2026-05-07):
-        // mask_3 is the new bitmap added for StunBolt's verb. The fused
-        // mask kernel writes all four bitmaps; the scoring argmax reads
-        // all four rows.
+        // mask_3 was the new bitmap added for StunBolt's verb when the
+        // verb count went 3 → 4.
+        // MassHeal recovery-dynamics proof (200-agent scale,
+        // 2026-05-07): mask_4 is the new bitmap added for the Heal
+        // verb's shifted source index (MassHeal lands at index 3,
+        // shifting Heal from index 3 to index 4). The fused mask kernel
+        // writes all five bitmaps; the scoring argmax reads all five
+        // rows.
         let mask_bitmap_words = (agent_count + 31) / 32;
         let mask_bitmap_bytes = (mask_bitmap_words as u64) * 4;
         let mk_mask = |label: &str| -> wgpu::Buffer {
@@ -371,6 +395,7 @@ impl MassBattle100v100State {
         let mask_1_bitmap_buf = mk_mask("mass_battle_100v100::mask_1_bitmap");
         let mask_2_bitmap_buf = mk_mask("mass_battle_100v100::mask_2_bitmap");
         let mask_3_bitmap_buf = mk_mask("mass_battle_100v100::mask_3_bitmap");
+        let mask_4_bitmap_buf = mk_mask("mass_battle_100v100::mask_4_bitmap");
         let zero_words: Vec<u32> = vec![0u32; mask_bitmap_words.max(4) as usize];
         let mask_bitmap_zero_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("mass_battle_100v100::mask_bitmap_zero"),
@@ -458,6 +483,21 @@ impl MassBattle100v100State {
             contents: bytemuck::bytes_of(&chronicle_stun_bolt_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        // MassHeal recovery-dynamics proof (200-agent scale, 2026-05-07)
+        // — cfg uniform for the new MassHeal verb chronicle kernel.
+        // Same shape as Strike + Snipe + StunBolt; the kernel filters
+        // action_id == 3u (MassHeal is the fourth verb declared, source-
+        // order index 3) and dispatches AbilityId(4) through the
+        // apply_ability arm, writing kind=27 EffectHealApplied records.
+        let chronicle_mass_heal_cfg_init =
+            physics_verb_chronicle_MassHeal::PhysicsVerbChronicleMassHealCfg {
+                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            };
+        let chronicle_mass_heal_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("mass_battle_100v100::chronicle_mass_heal_cfg"),
+            contents: bytemuck::bytes_of(&chronicle_mass_heal_cfg_init),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let chronicle_heal_cfg_init =
             physics_verb_chronicle_Heal::PhysicsVerbChronicleHealCfg {
                 event_count: 0, tick: 0, seed: 0, _pad0: 0,
@@ -477,17 +517,21 @@ impl MassBattle100v100State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         // Task #138 follow-on (mass_battle_100v100 port, 2026-05-07) +
-        // StunBolt control-status proof (200-agent scale, 2026-05-07) —
-        // cfg uniform for the FUSED chronicle-consumer kernel. The lower
-        // pass folded ApplyDamageFromChronicle (kind=26 → emit Damaged)
-        // and ApplyStunFromChronicle (kind=29 → write
-        // `agents.set_stun_expires_at_tick`) into one kernel
-        // (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`)
-        // because both consume from the same event ring at @phase(post)
-        // with non-overlapping kind tags. Single cfg + single dispatch
-        // per tick.
+        // StunBolt control-status proof (200-agent scale, 2026-05-07) +
+        // MassHeal recovery-dynamics proof (200-agent scale, 2026-05-07)
+        // — cfg uniform for the FUSED chronicle-consumer kernel. The
+        // lower pass folded ApplyDamageFromChronicle (kind=26 → emit
+        // Damaged), ApplyStunFromChronicle (kind=29 → write
+        // `agents.set_stun_expires_at_tick`), and ApplyHealFromChronicle
+        // (kind=27 → write
+        // `agents.set_hp(min(hp+amt, max_hp))`) into ONE kernel
+        // (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle`)
+        // because all three consume from the same event ring at
+        // @phase(post) with non-overlapping kind tags. Single cfg +
+        // single dispatch per tick. Fusion grew from 2-way to 3-way
+        // when MassHeal was added.
         let apply_chronicle_cfg_init =
-            physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleCfg {
+            physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleAndApplyHealFromChronicleCfg {
                 event_count: 0, tick: 0, seed: 0, _pad0: 0,
             };
         let apply_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -536,6 +580,7 @@ impl MassBattle100v100State {
             mask_1_bitmap_buf,
             mask_2_bitmap_buf,
             mask_3_bitmap_buf,
+            mask_4_bitmap_buf,
             mask_bitmap_zero_buf,
             mask_bitmap_words,
             agent_stun_expires_at_tick_buf,
@@ -551,6 +596,7 @@ impl MassBattle100v100State {
             chronicle_strike_cfg_buf,
             chronicle_snipe_cfg_buf,
             chronicle_stun_bolt_cfg_buf,
+            chronicle_mass_heal_cfg_buf,
             chronicle_heal_cfg_buf,
             apply_chronicle_cfg_buf,
             apply_cfg_buf,
@@ -668,14 +714,20 @@ impl CompiledSim for MassBattle100v100State {
         );
         let mask_bytes = (self.mask_bitmap_words as u64) * 4;
         // StunBolt control-status proof (200-agent scale, 2026-05-07):
-        // mask_3 is the new bitmap added for StunBolt's verb. Cleared
-        // every tick alongside the other three (one bitmap per verb in
-        // source order: Strike=0, Snipe=1, StunBolt=2, Heal=3).
+        // mask_3 was the bitmap added for StunBolt's verb when the
+        // verb count went 3 → 4.
+        // MassHeal recovery-dynamics proof (200-agent scale, 2026-05-07):
+        // mask_4 is the new bitmap added for the Heal verb's shifted
+        // source index (MassHeal lands at index 3, shifting Heal from
+        // index 3 to index 4). Cleared every tick alongside the other
+        // four (one bitmap per verb in source order: Strike=0, Snipe=1,
+        // StunBolt=2, MassHeal=3, Heal=4).
         for buf in [
             &self.mask_0_bitmap_buf,
             &self.mask_1_bitmap_buf,
             &self.mask_2_bitmap_buf,
             &self.mask_3_bitmap_buf,
+            &self.mask_4_bitmap_buf,
         ] {
             encoder.copy_buffer_to_buffer(
                 &self.mask_bitmap_zero_buf, 0, buf, 0, mask_bytes.max(4),
@@ -710,6 +762,10 @@ impl CompiledSim for MassBattle100v100State {
             // StunBolt control-status proof (200-agent scale,
             // 2026-05-07): fourth verb mask (StunBolt at source index 2).
             mask_3_bitmap: &self.mask_3_bitmap_buf,
+            // MassHeal recovery-dynamics proof (200-agent scale,
+            // 2026-05-07): fifth verb mask (MassHeal at source index 3
+            // shifts Heal to source index 4).
+            mask_4_bitmap: &self.mask_4_bitmap_buf,
             cfg: &self.mask_cfg_buf,
         };
         // Dispatch agent_cap × agent_cap threads. The `agent_cap`
@@ -741,6 +797,10 @@ impl CompiledSim for MassBattle100v100State {
             // StunBolt control-status proof (200-agent scale,
             // 2026-05-07): scoring's argmax now reads four mask rows.
             mask_3_bitmap: &self.mask_3_bitmap_buf,
+            // MassHeal recovery-dynamics proof (200-agent scale,
+            // 2026-05-07): scoring's argmax now reads five mask rows
+            // (MassHeal at source index 3 shifts Heal to index 4).
+            mask_4_bitmap: &self.mask_4_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
             cfg: &self.scoring_cfg_buf,
             // Wave 1.5#7 follow-on (predicate-aware scoring,
@@ -898,12 +958,66 @@ impl CompiledSim for MassBattle100v100State {
             self.agent_count,
         );
 
-        // (6) Heal chronicle — gates action_id==3u. StunBolt control-
+        // (5c) MassHeal chronicle — MassHeal recovery-dynamics proof
+        // (200-agent scale, 2026-05-07). Gates action_id==3u (MassHeal
+        // is the fourth verb in source order, so its action_id is 3 —
+        // shifting Heal's action_id from 3 to 4). Same chronicle re-emit
+        // pattern as Strike + Snipe + StunBolt except the AbilityProgram
+        // at slot 4 declares EffectOp::Heal{amount: 18.0} instead of
+        // Damage/Stun, so the apply_ability dispatcher writes kind=27
+        // EffectHealApplied records (with the resolved heal `amount`)
+        // instead of kind=26 EffectDamageApplied or kind=29
+        // EffectStunApplied. The fused
+        // ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle
+        // kernel below drains all three kind tags into the right SoA
+        // target (Damaged → ApplyDamage HP cascade for kind=26, direct
+        // `agents.set_stun_expires_at_tick` for kind=29, direct
+        // `agents.set_hp(min(hp+amt, max_hp))` for kind=27).
+        let mass_heal_cfg = physics_verb_chronicle_MassHeal::PhysicsVerbChronicleMassHealCfg {
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.chronicle_mass_heal_cfg_buf, 0, bytemuck::bytes_of(&mass_heal_cfg),
+        );
+        let mass_heal_bindings = physics_verb_chronicle_MassHeal::PhysicsVerbChronicleMassHealBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            agent_hp: &self.agent_hp_buf,
+            agent_max_hp: &self.agent_max_hp_buf,
+            agent_move_speed: &self.agent_move_speed_buf,
+            agent_armor: &self.agent_armor_buf,
+            agent_magic_resist: &self.agent_magic_resist_buf,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_mana: &self.agent_mana_buf,
+            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
+            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
+            ability_registry_chances:           &self.registry_gpu.chances,
+            cfg: &self.chronicle_mass_heal_cfg_buf,
+        };
+        dispatch::dispatch_physics_verb_chronicle_massheal(
+            &mut self.cache, &mass_heal_bindings, &self.gpu.device, &mut encoder,
+            self.agent_count,
+        );
+
+        // (6) Heal chronicle — gates action_id==4u. StunBolt control-
         // status proof (200-agent scale, 2026-05-07): Heal's action_id
-        // shifted from 2 to 3 because StunBolt was inserted at source
-        // position 2. The kernel name + binding shape are unchanged —
-        // the action_id literal in the generated kernel is the only
-        // detail that moved.
+        // shifted from 2 to 3 when StunBolt was inserted at source
+        // position 2.
+        // MassHeal recovery-dynamics proof (200-agent scale,
+        // 2026-05-07): Heal's action_id shifted again from 3 to 4 when
+        // MassHeal was inserted at source position 3. The kernel name +
+        // binding shape are unchanged — the action_id literal in the
+        // generated kernel is the only detail that moved.
         let heal_cfg = physics_verb_chronicle_Heal::PhysicsVerbChronicleHealCfg {
             event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
         };
@@ -921,23 +1035,29 @@ impl CompiledSim for MassBattle100v100State {
         );
 
         // (6b) Fused ApplyDamageFromChronicle + ApplyStunFromChronicle
-        // — chronicle consumers fused into ONE kernel by the lower pass
-        // (both run @phase(post) over the same event ring with
-        // non-overlapping kind tags). StunBolt control-status proof
-        // (200-agent scale, 2026-05-07). Drains:
+        // + ApplyHealFromChronicle — chronicle consumers fused into ONE
+        // kernel by the lower pass (all three run @phase(post) over the
+        // same event ring with non-overlapping kind tags). MassHeal
+        // recovery-dynamics proof (200-agent scale, 2026-05-07): the
+        // fused kernel grew from 2-way (Damage+Stun) to 3-way
+        // (Damage+Stun+Heal) when MassHeal was added. Drains:
         //   - kind=26 EffectDamageApplied → emit `Damaged` (re-emit;
         //     the standalone ApplyDamage_and_ApplyHeal kernel below
         //     decrements HP)
         //   - kind=29 EffectStunApplied → write
         //     `agents.set_stun_expires_at_tick(t, expires_at_tick)`
         //     directly into the per-agent SoA slot.
+        //   - kind=27 EffectHealApplied → write
+        //     `agents.set_hp(t, min(hp + amt, max_hp))` directly into
+        //     the per-agent SoA slot, clamping at max_hp.
         //
         // event_count is the upper bound on chronicle records produced
-        // per tick across Strike + Snipe + StunBolt (each can emit one
-        // record per actor per tick). agent_count * 8 reuses the same
-        // slot-count headroom estimate the rest of the cascade uses.
+        // per tick across Strike + Snipe + StunBolt + MassHeal (each
+        // can emit one record per actor per tick). agent_count * 8
+        // reuses the same slot-count headroom estimate the rest of the
+        // cascade uses.
         let event_count_estimate = self.agent_count * 8;
-        let apply_chronicle_cfg = physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleCfg {
+        let apply_chronicle_cfg = physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleAndApplyHealFromChronicleCfg {
             event_count: event_count_estimate,
             tick: self.tick as u32,
             seed: 0, _pad0: 0,
@@ -948,13 +1068,15 @@ impl CompiledSim for MassBattle100v100State {
             bytemuck::bytes_of(&apply_chronicle_cfg),
         );
         let apply_chronicle_bindings =
-            physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleBindings {
+            physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleAndApplyHealFromChronicleBindings {
                 event_ring: self.event_ring.ring(),
                 event_tail: self.event_ring.tail(),
+                agent_hp: &self.agent_hp_buf,
+                agent_max_hp: &self.agent_max_hp_buf,
                 agent_stun_expires_at_tick: &self.agent_stun_expires_at_tick_buf,
                 cfg: &self.apply_chronicle_cfg_buf,
             };
-        dispatch::dispatch_physics_applydamagefromchronicle_and_applystunfromchronicle(
+        dispatch::dispatch_physics_applydamagefromchronicle_and_applystunfromchronicle_and_applyhealfromchronicle(
             &mut self.cache,
             &apply_chronicle_bindings,
             &self.gpu.device,
@@ -1370,6 +1492,113 @@ mod viz_tests {
                     "agent {i}: stun_expires_at_tick={e} outside \
                      expected range [20, 28] (tick-0 cast → expires at \
                      20, tick-7 cast → expires at 27)",
+                );
+            }
+        }
+    }
+
+    /// MassHeal recovery-dynamics proof (200-agent scale, 2026-05-07)
+    /// — proves the apply_ability dispatcher emits kind=27
+    /// EffectHealApplied chronicle records at production scale (200
+    /// agents through pair-field scoring) AND the fused
+    /// `physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle`
+    /// kernel ferries the per-record `amount` into the `agent_hp` SoA
+    /// via `agents.set_hp(t, min(hp + amt, max_hp))` (clamped at the
+    /// per-agent `max_hp` ceiling).
+    ///
+    /// PRE-SEED: every agent's hp is overridden to 50.0 (well below
+    /// max_hp=100) before any tick. With everyone tied at 50.0 the
+    /// per-pair argmax for MassHeal picks the lowest-slot same-team
+    /// candidate — but the load-bearing test pin is "≥ 1 agent ends up
+    /// with hp > 50", which is robust against argmax ordering.
+    ///
+    /// CADENCE AT THE SEAM: MassHeal fires at `world.tick % 11 == 0`,
+    /// so steps 0..=10 (= ticks 0..=10) drive exactly ONE cast cycle
+    /// at tick 0 — the next firing tick is 11, beyond the inclusive
+    /// run. Strike (% 2) fires at ticks 0, 2, 4, 6, 8, 10 — pile-up
+    /// damage on the focus-fired enemy. Snipe (% 3) at ticks 0, 3, 6,
+    /// 9. StunBolt (% 7) at tick 7. Heal (% 3) at the same Snipe ticks
+    /// but role-gated to Healers.
+    ///
+    /// HOW THE TEST PROVES MASS-HEAL FIRED:
+    ///   1. Pre-seed every agent's hp to 50.0 via queue.write_buffer.
+    ///   2. Run 11 ticks (one MassHeal cycle at tick 0).
+    ///   3. At least one agent has hp > 50.0 — proves the
+    ///      EffectHealApplied chronicle records were drained AND the
+    ///      ApplyHealFromChronicle arm of the 3-way fused kernel wrote
+    ///      back to `agent_hp`. Even with pile-up damage from Strike +
+    ///      Snipe at the same ticks, the per-team layout means most
+    ///      agents are not on the offensive verbs' argmax target list
+    ///      and only the heal lands on them.
+    ///   4. No agent's hp exceeds max_hp=100 — proves the
+    ///      `min(hp + amt, max_hp)` clamp in ApplyHealFromChronicle is
+    ///      honoured.
+    #[test]
+    fn mass_heal_recovers_friendly_hp_at_200_agent_scale() {
+        let mut state = MassBattle100v100State::new(0xCAFE_F00D);
+
+        // Pre-seed every agent's hp to 50.0. The constructor put each
+        // agent's hp at role_hp(role) (200/80/120), well above the
+        // per-agent max_hp=100.0 SoA ceiling — we want every agent
+        // BELOW max_hp so the heal clamp leaves visible headroom for
+        // the MassHeal cast to land.
+        let seeded_hp: Vec<f32> = vec![50.0_f32; TOTAL_AGENTS as usize];
+        state.gpu.queue.write_buffer(
+            &state.agent_hp_buf,
+            0,
+            bytemuck::cast_slice(&seeded_hp),
+        );
+
+        // Sanity: confirm the override stuck before any tick.
+        let initial_hp = state.read_hp();
+        for (i, &h) in initial_hp.iter().enumerate() {
+            assert_eq!(
+                h, 50.0,
+                "initial hp[{i}] must be 50.0 after the pre-seed \
+                 write_buffer; got {h}",
+            );
+        }
+
+        // Run exactly 11 ticks. MassHeal (% 11 == 0) fires at step 0
+        // (tick 0) ONLY — the next firing tick is 11, beyond the
+        // 0..=10 inclusive run.
+        for _ in 0..11 {
+            state.step();
+        }
+
+        let hp_now = state.read_hp();
+
+        // Pin 1: at least one agent must have hp > 50.0 — proves the
+        // EffectHealApplied chronicle records were drained AND the
+        // ApplyHealFromChronicle arm of the 3-way fused kernel wrote
+        // back to `agent_hp`. With the per-pair argmax distributing
+        // MassHeal casts onto same-team friends and most agents not
+        // being on Strike/Snipe's offensive argmax pile-up list,
+        // many agents end up net positive.
+        let healed_count: usize = hp_now.iter().filter(|&&h| h > 50.0).count();
+        assert!(
+            healed_count >= 1,
+            "after 11 ticks at least one agent must have hp > 50.0 \
+             (MassHeal chronicle arm proof); saw {} healed of {}. \
+             First few HP samples: {:?}",
+            healed_count,
+            TOTAL_AGENTS,
+            &hp_now[..hp_now.len().min(8)],
+        );
+
+        // Pin 2: no live agent's hp exceeds max_hp (100.0) — proves
+        // the `min(hp + amt, max_hp)` clamp in ApplyHealFromChronicle
+        // is honoured. Without the clamp, repeated friend-targeted
+        // heals would push hp past 100. Dead-target sentinel HP (set
+        // to 1e9 by ApplyDamage when a slot dies) is excluded by the
+        // alive filter.
+        let alive = state.read_alive();
+        for (i, (&h, &a)) in hp_now.iter().zip(alive.iter()).enumerate() {
+            if a != 0 {
+                assert!(
+                    h <= 100.0 + 0.001,
+                    "agent {i}: hp={h} exceeds max_hp=100.0; clamp \
+                     in ApplyHealFromChronicle didn't engage",
                 );
             }
         }
