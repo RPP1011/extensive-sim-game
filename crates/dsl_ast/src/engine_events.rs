@@ -42,13 +42,17 @@
 /// `EFFECT_KIND_TO_EVENT_KIND_ID` in
 /// `crates/dsl_compiler/src/cg/emit/wgsl_body.rs`.
 pub const ENGINE_EVENT_KIND_IDS: &[(&str, u32)] = &[
-    ("EffectDamageApplied", 26),
-    ("EffectHealApplied",   27),
-    ("EffectShieldApplied", 28),
-    ("EffectStunApplied",   29),
-    ("EffectSlowApplied",   30),
-    ("EffectGoldTransfer",  31),
-    ("EffectStandingDelta", 32),
+    ("EffectDamageApplied",     26),
+    ("EffectHealApplied",       27),
+    ("EffectShieldApplied",     28),
+    ("EffectStunApplied",       29),
+    ("EffectSlowApplied",       30),
+    ("EffectGoldTransfer",      31),
+    ("EffectStandingDelta",     32),
+    // Bleed verb swap (Task #138 follow-on, 2026-05-06): SelfDamage
+    // = 17 → EventKindId::EffectSelfDamageApplied = 39 (slot 39, after
+    // RallyCall=38 in the engine's `EventKindId` enum).
+    ("EffectSelfDamageApplied", 39),
 ];
 
 /// Look up the engine-defined `EventKindId` discriminant for an
@@ -77,6 +81,7 @@ mod tests {
         assert_eq!(engine_event_kind_id_for_name("EffectSlowApplied"), Some(30));
         assert_eq!(engine_event_kind_id_for_name("EffectGoldTransfer"), Some(31));
         assert_eq!(engine_event_kind_id_for_name("EffectStandingDelta"), Some(32));
+        assert_eq!(engine_event_kind_id_for_name("EffectSelfDamageApplied"), Some(39));
     }
 
     #[test]

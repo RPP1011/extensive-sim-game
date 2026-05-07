@@ -74,7 +74,18 @@ pub enum EventKindId {
     // (alive + hp_pct < 0.5) victim. One emit per nearby same-species
     // kin; folded by `rally_boost` materialized view.
     RallyCall            = 38,
-    // Slots 39-127 reserved for replayable event variants added in later tasks.
+    // Task #138 follow-on (Bleed) — chronicle event for SelfDamage
+    // EffectOp (op#17). Written by the apply_ability dispatcher when
+    // an `EffectOp::SelfDamage` slot fires; the runtime
+    // `ApplyDamageFromSelfDamageChronicle` re-emit physics rule
+    // translates these records back into the existing `Damaged`
+    // event so the rest of the cascade (shield absorption,
+    // lifesteal, damage-modify) keeps working unchanged. Same shape
+    // as `EffectDamageApplied` (actor + target + amount + tick) —
+    // for self-damage, actor == target by convention but the field
+    // is preserved for uniformity with the other Effect* events.
+    EffectSelfDamageApplied = 39,
+    // Slots 40-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 

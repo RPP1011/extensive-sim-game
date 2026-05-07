@@ -228,6 +228,16 @@ pub struct DuelAbilitiesState {
     /// ApplyDamageFromChronicle / ApplyShieldFromChronicle: PerEvent
     /// + emit-only kernel, no AgentField writes (so no P6 trip).
     apply_stun_from_chronicle_cfg_buf: wgpu::Buffer,
+    /// Task #138 follow-on (Bleed, 2026-05-06) — Cfg uniform for the
+    /// new `physics_ApplyDamageFromSelfDamageChronicle` kernel that
+    /// translates `EffectSelfDamageApplied` records (kind=39, written
+    /// by the apply_ability dispatcher in the standalone Bleed
+    /// chronicle kernel) back into `Damaged` events so the existing
+    /// ApplyDamage cascade (shield_hp absorption, lifesteal, damage-
+    /// modify) keeps working unchanged. Same shape as
+    /// ApplyDamageFromChronicle: PerEvent + emit-only kernel, no
+    /// AgentField writes (so no P6 trip).
+    apply_damage_from_self_damage_chronicle_cfg_buf: wgpu::Buffer,
     /// Task #138 — Packed AbilityRegistry uploaded to the GPU. The
     /// fused kernel binds `effect_kinds` / `effect_payload_a` /
     /// `effect_payload_b` for the apply_ability dispatcher arm
@@ -599,6 +609,20 @@ impl DuelAbilitiesState {
             contents: bytemuck::bytes_of(&apply_stun_from_chronicle_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        // Task #138 follow-on (Bleed, 2026-05-06) — Cfg uniform for the
+        // new ApplyDamageFromSelfDamageChronicle kernel that translates
+        // EffectSelfDamageApplied (kind=39) records emitted by the
+        // apply_ability dispatcher into Damaged events the existing
+        // ApplyDamage cascade consumes (with shield_hp absorption etc).
+        let apply_damage_from_self_damage_chronicle_cfg_init =
+            physics_ApplyDamageFromSelfDamageChronicle::PhysicsApplyDamageFromSelfDamageChronicleCfg {
+                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            };
+        let apply_damage_from_self_damage_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_abilities_runtime::apply_damage_from_self_damage_chronicle_cfg"),
+            contents: bytemuck::bytes_of(&apply_damage_from_self_damage_chronicle_cfg_init),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let seed_cfg_init = seed_indirect_0::SeedIndirect0Cfg {
             agent_cap: agent_count, tick: 0, seed: 0, _pad: 0,
         };
@@ -668,6 +692,7 @@ impl DuelAbilitiesState {
             apply_shield_from_chronicle_cfg_buf,
             apply_heal_from_chronicle_cfg_buf,
             apply_stun_from_chronicle_cfg_buf,
+            apply_damage_from_self_damage_chronicle_cfg_buf,
             registry_gpu,
             seed_cfg_buf,
             cache: dispatch::KernelCache::default(),
@@ -862,12 +887,16 @@ impl CompiledSim for DuelAbilitiesState {
         // a fourth swap (kind=29 EffectStunApplied + Stunned re-emit)
         // — same +2 per-agent overhead when the chance gate fires,
         // and same mutual-exclusivity argument with the other verbs.
-        // Bump the upper bound to 22 slots per agent to keep
+        // Task #138 follow-on (Bleed, 2026-05-06) extended the swap to
+        // Bleed (kind=39 EffectSelfDamageApplied + Damaged re-emit) —
+        // again +2 per-agent overhead, again mutually exclusive with
+        // the other verbs.
+        // Bump the upper bound to 24 slots per agent to keep
         // clear_ring_headers from leaving stale slots between ticks.
-        // (20 + 2 = 22; the per-tick sum stays in the same
+        // (22 + 2 = 24; the per-tick sum stays in the same
         // verb-mutually-exclusive band but the bump gives every
         // chronicle re-emit its own headroom.)
-        let max_slots_per_tick = self.agent_count * 22;
+        let max_slots_per_tick = self.agent_count * 24;
         self.event_ring.clear_ring_headers_in(
             &self.gpu, &mut encoder, max_slots_per_tick,
         );
@@ -1021,11 +1050,15 @@ impl CompiledSim for DuelAbilitiesState {
             self.agent_count,
         );
 
-        // (7) Bleed chronicle — Wave 2 SelfDamage demo. Gates on
-        // action_id==3u and emits Damaged{source=self,target=self,
-        // amount=5}. The existing ApplyDamage chronicle drains shield
-        // first then hp, so the caster's hp drops by min(5, max(0,
-        // 5 - shield)) per cast.
+        // (7) Bleed chronicle — Wave 2 SelfDamage demo. Task #138
+        // follow-on (Bleed, 2026-05-06) — verb body is now
+        // `apply_ability 4 by self target self`, so this kernel walks
+        // the AbilityRegistry's effect SoA columns to expand the
+        // dispatch into chronicle EffectSelfDamageApplied writes
+        // (kind=39). Re-emitted as Damaged by
+        // ApplyDamageFromSelfDamageChronicle below; the existing
+        // ApplyDamage cascade drains shield first then hp, so the
+        // caster's hp drops by min(5, max(0, 5 - shield)) per cast.
         let bleed_cfg = physics_verb_chronicle_Bleed::PhysicsVerbChronicleBleedCfg {
             event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
         };
@@ -1035,6 +1068,9 @@ impl CompiledSim for DuelAbilitiesState {
         let bleed_bindings = physics_verb_chronicle_Bleed::PhysicsVerbChronicleBleedBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
+            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
             cfg: &self.chronicle_bleed_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_bleed(
@@ -1229,6 +1265,41 @@ impl CompiledSim for DuelAbilitiesState {
             &self.gpu.device, &mut encoder, max_slots_per_tick,
         );
 
+        // (7i) Task #138 follow-on (Bleed, 2026-05-06) —
+        // ApplyDamageFromSelfDamageChronicle. The Bleed chronicle
+        // (step 7) just wrote EffectSelfDamageApplied records (kind=39)
+        // into the event ring via the apply_ability dispatcher arm.
+        // This kernel filters those records and re-emits them as
+        // `Damaged` events so the existing ApplyDamage standalone
+        // kernel below can drain them with shield/lifesteal/damage-
+        // modify processing intact.
+        //
+        // PerEvent shape: scans every event_ring slot up to event_count
+        // and skips slots whose kind != 39. Same pattern as
+        // ApplyDamageFromChronicle (kind=26), just with the new
+        // EffectSelfDamageApplied discriminant. The dispatcher writes
+        // caster_slot into BOTH actor (slot 2) and target (slot 3) for
+        // the SelfDamage arm, so the re-emit carries source==target
+        // and ApplyDamage routes the bleed-through hp loss to the
+        // caster.
+        let apply_damage_from_self_damage_chronicle_cfg = physics_ApplyDamageFromSelfDamageChronicle::PhysicsApplyDamageFromSelfDamageChronicleCfg {
+            event_count: max_slots_per_tick, tick: self.tick as u32,
+            seed: 0, _pad0: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.apply_damage_from_self_damage_chronicle_cfg_buf, 0,
+            bytemuck::bytes_of(&apply_damage_from_self_damage_chronicle_cfg),
+        );
+        let apply_damage_from_self_damage_chronicle_bindings = physics_ApplyDamageFromSelfDamageChronicle::PhysicsApplyDamageFromSelfDamageChronicleBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            cfg: &self.apply_damage_from_self_damage_chronicle_cfg_buf,
+        };
+        dispatch::dispatch_physics_applydamagefromselfdamagechronicle(
+            &mut self.cache, &apply_damage_from_self_damage_chronicle_bindings,
+            &self.gpu.device, &mut encoder, max_slots_per_tick,
+        );
+
         // (8a) Fused ApplyHeal + ApplyShield + ApplyDefeat +
         // ApplyLifestealActivation + ApplyDamageModActivation +
         // ApplyStun + verb_chronicle_Strike. The compiler re-fused these
@@ -1253,7 +1324,7 @@ impl CompiledSim for DuelAbilitiesState {
         // `_and_ApplyStun_` segment and adding agent_stun_expires_at_tick
         // to the bind group. No new pass introduced; same single
         // dispatch per tick.
-        let event_count_estimate = self.agent_count * 22;
+        let event_count_estimate = self.agent_count * 24;
         let apply_heal_cfg = physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_ApplyDamageModActivation_and_ApplyStun_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndApplyDamageModActivationAndApplyStunAndVerbChronicleStrikeCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
             seed: 0, _pad0: 0,
@@ -1872,6 +1943,17 @@ mod tests {
         // 1-agent fixture: Strike's `target != self` gate always
         // fails, so Bleed is the only verb that can win argmax at
         // tick 0 (Mend/ShieldUp's hp-low gates also fail at hp=100).
+        //
+        // Task #138 follow-on (Bleed, 2026-05-06) — Bleed now flows
+        // .ability → AbilityRegistry → apply_ability dispatcher →
+        // EffectSelfDamageApplied (kind=39) → ApplyDamageFromSelfDamage
+        // Chronicle re-emit → Damaged → ApplyDamage. The dispatcher
+        // does NOT today consult `scalings_per_effect`, so the
+        // chronicle amount is the EffectOp's base (5.0) instead of
+        // the .sim's hand-mirrored 5 + 5%·100 = 10.0. Bleed fires at
+        // tick 0 and tick 50 → hp = 100 - 5 - 5 = 90.0. The
+        // assertion floor is unchanged (`<= 90.0`) but the comment
+        // explains why both halves now agree on 5.0 per fire.
         let mut state = DuelAbilitiesState::new(0xCAFE_F00D, 1);
         for _ in 0..51 {
             state.step();
@@ -1882,9 +1964,11 @@ mod tests {
         assert_eq!(hp.len(), 1);
         assert!(
             hp[0] <= 90.0,
-            "expected hp to drop by AT LEAST 10 (Bleed \
-             `self_damage 5 + 5% max_hp` at MaxHp=100 → 10), \
-             got hp={:.2}, shield={:.2}, alive={}",
+            "expected hp to drop by AT LEAST 10 (Bleed base 5.0 fires \
+             twice at ticks 0 and 50 — registry-driven scaling dispatch \
+             is later infrastructure, so the +5% max_hp scaling does NOT \
+             apply at the apply_ability arm), got hp={:.2}, shield={:.2}, \
+             alive={}",
             hp[0], shield[0], alive[0],
         );
         // Sanity: the agent must still be alive; Bleed is supposed

@@ -69,6 +69,16 @@ pub const MEND_EXPECTED_ABILITY_ID: u32 = 3;
 /// pins the slot regardless of how you read the ordering.)
 pub const DAZE_EXPECTED_ABILITY_ID: u32 = 8;
 
+/// Task #138 follow-on (Bleed, 2026-05-06) — Bleed's verb body in
+/// `assets/sim/duel_abilities.sim` dispatches via
+/// `apply_ability 4 by self target self`. The literal `4` is Bleed's
+/// expected `AbilityId` slot in the registry — the source-order
+/// `names` literal in `build_duel_abilities_registry()` puts Bleed
+/// fourth (Strike=1, ShieldUp=2, Mend=3, Bleed=4, Reap=5, Vampirize=6,
+/// Fortify=7, Daze=8). Drift surfaces as a startup panic, not as a
+/// silent wrong-ability dispatch.
+pub const BLEED_EXPECTED_ABILITY_ID: u32 = 4;
+
 /// Read + parse + build the AbilityRegistry over every .ability file
 /// under `assets/ability_test/duel_abilities/`. Shared by the binding
 /// check (assert_ability_registry_matches_sim_constants) AND the
@@ -317,6 +327,21 @@ pub fn assert_ability_registry_matches_sim_constants() {
     //   match arm) to `EffectOp::SelfDamage { amount: 5.0 }`.
     let bleed_id = *built.names.get("Bleed")
         .expect("Bleed registered in name table");
+    // Task #138 follow-on (Bleed, 2026-05-06) — Bleed's verb body in
+    // duel_abilities.sim hardcodes the literal `apply_ability 4 by self
+    // target self`. Pin the registry slot at startup so any drift in
+    // the build_registry ordering surfaces here, not as silent
+    // wrong-ability dispatch (e.g. the verb fires Mend's effects against
+    // self).
+    assert_eq!(
+        bleed_id,
+        AbilityId::new(BLEED_EXPECTED_ABILITY_ID).expect("non-zero AbilityId"),
+        "Bleed's AbilityId drifted from the expected slot {} — \
+         duel_abilities.sim's `apply_ability 4` literal will dispatch \
+         the wrong program. Re-check the source-order names literal in \
+         `build_duel_abilities_registry()`.",
+        BLEED_EXPECTED_ABILITY_ID,
+    );
     let bleed = built.registry.get(bleed_id)
         .expect("Bleed resolves to a program");
     assert_eq!(

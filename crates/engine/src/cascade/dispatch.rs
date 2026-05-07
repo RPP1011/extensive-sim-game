@@ -71,6 +71,7 @@ pub mod interp {
             Event::OpportunityAttackTriggered { .. } => "OpportunityAttackTriggered",
             Event::EffectDamageApplied   { .. } => "EffectDamageApplied",
             Event::EffectHealApplied     { .. } => "EffectHealApplied",
+            Event::EffectSelfDamageApplied { .. } => "EffectSelfDamageApplied",
             Event::EffectShieldApplied   { .. } => "EffectShieldApplied",
             Event::EffectStunApplied     { .. } => "EffectStunApplied",
             Event::EffectSlowApplied     { .. } => "EffectSlowApplied",
@@ -147,6 +148,16 @@ pub mod interp {
             ],
             // ---- EffectHealApplied ----------------------------------------
             Event::EffectHealApplied { actor, target, amount, tick } => vec![
+                ("actor",  EvalValue::Agent(dsl_agent(*actor))),
+                ("target", EvalValue::Agent(dsl_agent(*target))),
+                ("amount", EvalValue::F32(*amount)),
+                ("c",      EvalValue::Agent(dsl_agent(*actor))),
+                ("t",      EvalValue::Agent(dsl_agent(*target))),
+                ("a",      EvalValue::F32(*amount)),
+                ("tick",   EvalValue::U32(*tick)),
+            ],
+            // ---- EffectSelfDamageApplied ----------------------------------
+            Event::EffectSelfDamageApplied { actor, target, amount, tick } => vec![
                 ("actor",  EvalValue::Agent(dsl_agent(*actor))),
                 ("target", EvalValue::Agent(dsl_agent(*target))),
                 ("amount", EvalValue::F32(*amount)),

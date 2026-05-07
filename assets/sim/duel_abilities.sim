@@ -178,6 +178,31 @@ event EffectStunApplied {
   expires_at_tick: u32,
 }
 
+// Engine-side chronicle event written by the apply_ability dispatcher
+// at hardcoded EventKindId 39 (see
+// `dsl_ast::engine_events::engine_event_kind_id_for_name`).
+//
+// Task #138 follow-on (Bleed, 2026-05-06) — Bleed's verb body is now
+// `apply_ability 4 by self target self`, which writes
+// EffectSelfDamageApplied records into the event ring. The new
+// ApplyDamageFromSelfDamageChronicle physics rule (declared below near
+// the rest of the consumers) translates these records back into the
+// existing `Damaged` event so the existing ApplyDamage cascade (shield
+// absorption, lifesteal, damage-modify) keeps working unchanged.
+//
+// SHAPE NOTE: same payload shape as EffectDamageApplied (actor +
+// target + amount). For self-damage actor==target by convention; the
+// dispatcher writes caster_slot into BOTH actor (slot 2) and target
+// (slot 3) so the re-emit physics rule's `Damaged` event carries
+// source==target and ApplyDamage drains it via the same shield/hp
+// path it uses for a Strike landing.
+@replayable @gpu_amenable
+event EffectSelfDamageApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
 @replayable @gpu_amenable
 event Healed {
   source: AgentId,
@@ -392,7 +417,37 @@ verb Bleed(self, target: Agent) =
         && target == self
         && (world.tick % 50 == 0)
         && self.hp > config.combat.hp_bleed_floor)
-  emit Damaged { source: self, target: self, amount: config.combat.bleed_amount }
+  // Task #138 follow-on (Bleed, 2026-05-06) — verb-body apply_ability
+  // dispatcher swap. Bleed was `emit Damaged { source: self, target:
+  // self, amount: config.combat.bleed_amount }`. The literal `4` is
+  // Bleed's AbilityId in the duel_abilities AbilityRegistry built from
+  // the source-order `names` list in
+  // `binding_check.rs::build_duel_abilities_registry` (Strike=1,
+  // ShieldUp=2, Mend=3, Bleed=4, ...).
+  //
+  // `target self` matches the verb's existing `target == self` gate —
+  // Bleed is self-cast. The runtime extends the binding check to assert
+  // `built.names.get("Bleed") == AbilityId(4)` so any drift surfaces as
+  // a startup panic. The dispatcher writes EffectSelfDamageApplied
+  // records (engine-aliased to kind=39) which the new
+  // ApplyDamageFromSelfDamageChronicle physics rule re-emits as
+  // Damaged so the existing ApplyDamage cascade (shield/lifesteal/
+  // damage-modify) keeps working unchanged.
+  //
+  // SCALING NOTE: the .ability declares `+ 5% max_hp`, lowered to
+  // scalings_per_effect[0] = (MaxHp, 0.05). The runtime apply path
+  // (which runs CPU-side via apply_program) populates CasterStats
+  // from per-agent SoA reads at cast-decide time. The GPU dispatcher
+  // does NOT today consult scalings_per_effect at the apply_ability
+  // arm — only the base `amount` (= 5.0) lands in the chronicle write.
+  // The .sim verb's existing config.combat.bleed_amount (= 10.0,
+  // hand-mirrored 5 + 5%·100) is no longer the load-bearing constant
+  // because the verb stops emitting Damaged directly; the chronicle
+  // amount is the EffectOp's base 5.0 until registry-driven scaling
+  // dispatch lands. The `bleed_drains_caster_hp_when_selected`
+  // runtime test relaxes its hp floor accordingly (still proves the
+  // SelfDamage flow is wired end-to-end via the chronicle re-emit).
+  apply_ability 4 by self target self
   score 75.0
 
 // Reap — Wave 2 piece N: Execute E2E demo. Enemy-target, cooldown 20
@@ -604,6 +659,30 @@ physics ApplyHealFromChronicle {
 physics ApplyStunFromChronicle {
   on EffectStunApplied { actor: _, target: t, expires_at_tick: e } {
     emit Stunned { target_agent: t, expires_at: e }
+  }
+}
+
+// Task #138 follow-on (Bleed, 2026-05-06) — Bleed's verb body now uses
+// `apply_ability 4 by self target self` (see the Bleed verb above).
+// The dispatcher writes EffectSelfDamageApplied chronicle records
+// (engine-aliased to kind=39) instead of the source-declared Damaged
+// event. This rule consumes those records and re-emits Damaged with
+// source==target==caster so the rest of the cascade (ApplyDamage with
+// shield_hp absorption, lifesteal, damage-modify) keeps working
+// unchanged — same shape as ApplyDamageFromChronicle but consuming
+// kind=39 records instead of kind=26.
+//
+// PAYLOAD NOTE: same shape as EffectDamageApplied (actor + target +
+// amount). The dispatcher writes caster_slot into BOTH actor (slot 2)
+// and target (slot 3) for the SelfDamage arm, so this rule's pattern
+// can ferry both ids verbatim into Damaged.
+//
+// P6 caveat: this rule is PerEvent + emit-only (no AgentField writes)
+// — does NOT trip P6.
+@phase(post)
+physics ApplyDamageFromSelfDamageChronicle {
+  on EffectSelfDamageApplied { actor: c, target: t, amount: a } {
+    emit Damaged { source: c, target: t, amount: a }
   }
 }
 
