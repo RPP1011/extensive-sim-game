@@ -17,6 +17,24 @@
 // the apply_ability codepath surfaces as a CI failure rather than as a
 // silent breakage of the dispatcher arms once a runtime wires it up.
 //
+// **#138 entry point.** The next substantive slice — wiring one
+// `duel_abilities.sim` verb (e.g. Strike) through apply_ability instead
+// of the verb→emit→ApplyDamage cascade pattern — picks up here:
+//   1. Choose a duel verb (Strike is simplest: single Damage effect).
+//   2. Define the verb's AbilityProgram in a runtime crate
+//      (`AbilityProgram::new_single_target` with `EffectOp::Damage`).
+//   3. Upload it via PackedAbilityRegistry (#135 already lands the
+//      buffer-upload helper).
+//   4. Replace the verb's `emit Damaged{...}` with `apply_ability <id>
+//      by self target target` — operand types match the slice-ε type
+//      check (caster/target → CgTy::AgentId).
+//   5. Parity assert: chronicle records from the new path equal the
+//      records the existing `ApplyDamage` physics rule writes for the
+//      same (caster, target, tick, world_seed) tuple.
+// The slice-ε type check (well_formed.rs) ensures step 4's operand
+// expressions are u32-compatible at lowering — see
+// apply_ability_rejects_f32_target_at_lowering for the regression pin.
+//
 // What this exercises that the unit tests in `wgsl_body.rs` don't:
 //   - the AST/parser surface (`apply_ability <expr>`),
 //   - lowering (`IrStmt::ApplyAbility` → `CgStmt::ApplyAbility`),
