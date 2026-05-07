@@ -32,7 +32,29 @@ verb_fire_app: expected per-slot value (full cascade): 100.000
 verb_fire_app: OUTCOME = (b) NO FIRE
 ```
 
-## Gaps surfaced
+## Gaps surfaced — ALL RESOLVED
+
+> **Audit update (2026-05-07).** All four gaps in this note are CLOSED:
+>   - **Gap #1** (LocalRef collision in `verb_expand.rs`): RESOLVED in
+>     `822dc0c3` — stateful `fresh_local(&mut next_local)` allocator
+>     guarantees distinct LocalRefs for absent-target fallback +
+>     action_id binders.
+>   - **Gap #2** (fold/chronicle event-ring race / fusion): RESOLVED
+>     in `e0553171` and `cd007370` — fusion now blocks producer +
+>     same-event consumer, and Rule 5 splits all (ViewFold,PhysicsRule)
+>     pairs.
+>   - **Gap #3** (runtime per-event-kind ring): RESOLVED in
+>     `cb24fd69`-era multi-tag per-handler kind tag filter (each fold
+>     body guards on `event_ring[event_idx*10+0] == <tag>u`).
+>   - **Gap #4** (mask emits but scoring doesn't gate): RESOLVED — the
+>     scoring kernel emits `mask_<id>_bitmap[word] & bit` per row in
+>     `lower_scoring_argmax_body` (`cg/emit/kernel.rs`).
+>
+> The verb_probe_runtime now compiles + emits 9 kernels (mask_verb_Pray,
+> physics_verb_chronicle_Pray, fold_faith, scoring, ...). Regression
+> coverage: `pair_scoring_probe_full_fire_compile_gate` exercises the
+> full verb cascade end-to-end with predicate-driven argmax. Historical
+> text below is preserved for archaeology.
 
 ### GAP #1 (CRITICAL — compiler) — verb_expand LocalRef collision
 

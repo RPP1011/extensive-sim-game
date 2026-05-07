@@ -108,7 +108,26 @@ The `+= 1` self-update on a u32 view emits `atomicOr(&storage[_idx],
 `|= 1u`. Operator semantics are silently dropped at the result-type
 branch in `crates/dsl_compiler/src/cg/emit/wgsl_body.rs:1326-1338`.
 
-## Three originally-targeted gaps
+## Three originally-targeted gaps — ALL RESOLVED
+
+> **Audit update (2026-05-07).** All three originally-targeted gaps
+> (A, B, C) are CLOSED in `d0fc9f1d`
+> (`fix(dsl_compiler): close quest_probe Gaps A + B + C`):
+>   - **Gap A** (EntityRoot::Quest reject at parser): RESOLVED — `Quest`
+>     added to `EntityRoot` enum + parser accept set + driver catalog.
+>   - **Gap B** (quests.* namespace registered with zero methods):
+>     RESOLVED — `quests_is_active` B1 stub registered via
+>     `populate_namespace_registry`.
+>   - **Gap C** (`+= 1u` on u32 view → atomicOr silent miscompile):
+>     RESOLVED — emit branches on `(fold_op, result_ty)` so `+=` on
+>     u32 picks `atomicAdd` (commutative + associative); `|=` keeps
+>     `atomicOr`.
+>
+> Regression test: `quest_probe_compile_gate` in
+> `crates/dsl_compiler/tests/stress_fixtures_compile.rs` pins all
+> three closures (Quest entity in catalog, `quests_is_active` WGSL
+> helper, `atomicAdd` not `atomicOr` in fold body).
+> Historical text below is preserved for archaeology.
 
 ### Gap A (HIGH) — `EntityRoot::Quest` not in parser accept set
 

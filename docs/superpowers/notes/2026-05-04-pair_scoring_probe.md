@@ -27,6 +27,14 @@ The score uses `cooldown_next_ready_tick` as a proxy "injury indicator"
 analytical: with `ready_at[N] = N * 10`, slot 0 has the lowest
 cooldown → highest inverted score → every healer picks slot 0.
 
+> **Audit confirmation (2026-05-07).** All four originally-anticipated
+> gaps + the two follow-on gaps (A + B) are CLOSED. Closing commits:
+> `8e03d963` (Gaps #1 + #3), `98a19d2d` (Gap #2), `6efabdf5` (Gap #4),
+> `3f28febb` (Gaps A + B). Regression test
+> `pair_scoring_probe_full_fire_compile_gate` pins the FULL-FIRE
+> shape including per-pair candidate inner loop, `f32(...)` u32→f32
+> promotion, and `agent_<field>[per_pair_candidate]` direct read.
+
 ## Outcome (closure update — 2026-05-04 PM)
 
 **OUTCOME (a) FULL FIRE — pair-field scoring ships end-to-end.**

@@ -21,6 +21,11 @@ through the recent compiler / runtime work:
   - Mixed view-fold storage in one program: u32 (`price_belief`) +
     f32 with `@decay` (`trader_volume`) + f32 no-decay (`hub_volume`)
 
+> **Audit confirmation (2026-05-07).** No gaps documented in this note;
+> probe is OUTCOME (a) FULL FIRE. Regression test
+> `trade_market_probe_combines_landed_surfaces` is green and pins
+> 10-kernel emit topology + per-handler tag filter shape.
+
 **Outcome: (a) FULL FIRE** — every assertion passes on first build,
 across all three views simultaneously, with no compiler diagnostics.
 
