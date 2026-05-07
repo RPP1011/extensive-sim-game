@@ -158,6 +158,39 @@ fn slow_record_writes_4_payload_words_with_signed_factor() {
     assert_eq!(r[5], (-64_i32) as u32, "factor_q8 sign-widened i16→i32→u32");
 }
 
+#[test]
+fn transfer_gold_pipeline_emits_kind_31_record() {
+    // Full pipeline through apply_program (which now emits
+    // ApplyEvent::TransferGold) → CPU reference → kind=31 chronicle
+    // record. Prior to commit f881bed1 this would yield zero records
+    // (apply_program skipped TransferGold and the CPU reference
+    // returned None) — both sides had to land before the integration
+    // worked.
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
+        [EffectOp::TransferGold { amount: 100 }],
+    );
+    let records = run_pipeline(&program, aid(7), aid(11), 200);
+    assert_eq!(records.len(), 1, "TransferGold pipeline produces one record");
+    assert_eq!(records[0][0], 31, "EventKindId::EffectGoldTransfer = 31");
+    assert_eq!(records[0][1], 200, "tick");
+    assert_eq!(records[0][4], 100, "amount round-trips through pipeline");
+}
+
+#[test]
+fn modify_standing_pipeline_emits_kind_32_record() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
+        [EffectOp::ModifyStanding { delta: -50 }],
+    );
+    let records = run_pipeline(&program, aid(3), aid(4), 100);
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0][0], 32, "EventKindId::EffectStandingDelta = 32");
+    assert_eq!(records[0][4], (-50_i32) as u32, "delta sign-widens through pipeline");
+}
+
 /// P5 — Determinism via Keyed PCG. The CPU pipeline runs through
 /// `per_agent_u32(world_seed, caster, tick, purpose)` for each chance
 /// gate, which is a pure function of inputs. Two runs with identical
