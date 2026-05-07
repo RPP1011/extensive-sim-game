@@ -8,6 +8,17 @@
 // same values, proving the .ability -> AbilityRegistry pipeline is correct
 // end-to-end.
 //
+// Task #138 (2026-05-06) — Strike's verb body uses
+// `apply_ability 1 by self target target` instead of the original inline
+// `emit Damaged{...}`. The dispatcher writes EffectDamageApplied (kind=26)
+// records that the new ApplyDamageFromChronicle physics rule re-emits as
+// `Damaged` events, keeping the rest of the cascade (shield absorption,
+// lifesteal, damage-modify, defeat handling) unchanged. The literal `1`
+// is Strike's AbilityId in the registry — pinned at startup by
+// `binding_check::STRIKE_EXPECTED_ABILITY_ID`. The other verbs
+// (ShieldUp/Mend/Bleed/Reap/Vampirize/Fortify/Daze) still use direct
+// emit chronicles; expanding the apply_ability swap to them is followup.
+//
 // CONSTANT TABLE (matches the .ability files exactly):
 //   Strike   : cooldown 10 ticks (1s), range 5.0, damage 15.0, target enemy
 //   ShieldUp : cooldown 40 ticks (4s), self-target, shield 50.0
@@ -33,26 +44,47 @@
 // binding-check still asserts the .ability lowered to
 // `EffectOp::Shield(50.0)`.
 //
-// The runtime tick chain is the same shape as duel_1v1's:
+// The runtime tick chain is the same shape as duel_1v1's, with #138's
+// EffectDamageApplied → Damaged re-emit added between the verb chronicles
+// and ApplyDamage:
 //   1. clears
-//   2. fused_mask_verb_Strike (PerPair, writes mask_0/1/2/3/4 for the 5 verbs)
-//   3. scoring (PerAgent argmax over 5 rows -> ActionSelected)
-//   4. physics_verb_chronicle_Strike   (gates action_id==0u, emits Damaged)
-//   5. physics_verb_chronicle_ShieldUp (gates action_id==1u, emits Shielded)
-//   6. physics_verb_chronicle_Mend     (gates action_id==2u, emits Healed)
-//   7. physics_verb_chronicle_Bleed    (gates action_id==3u, emits Damaged self)
-//   8. physics_verb_chronicle_Reap     (gates action_id==4u, emits Defeated)
-//   9. physics_ApplyDamage_and_ApplyHeal_and_ApplyShield (+ApplyDefeat
-//      if the compiler fuses, otherwise a separate physics_ApplyDefeat)
-//  10. seed_indirect_0
-//  11. fold_damage_dealt
-//  12. fold_healing_done
+//   2. fused_mask_verb_Strike (PerPair, writes mask_0..7 for the 8 verbs)
+//   3. scoring (PerAgent argmax over 8 rows -> ActionSelected)
+//   4. physics_verb_chronicle_ShieldUp/Mend/Bleed/Reap/Vampirize/Fortify/Daze
+//      (each gates on its own action_id and emits its event variant)
+//   5. fused PerEvent: ApplyHeal+ApplyShield+ApplyDefeat+ApplyLifestealActivation+
+//      ApplyDamageModActivation+ApplyStun+verb_chronicle_Strike (the apply_ability
+//      arm reads agent_level/registry effect_kinds and writes
+//      EffectDamageApplied chronicle records)
+//   6. physics_ApplyDamageFromChronicle (#138, reads kind=26, emits Damaged kind=1)
+//   7. physics_ApplyDamage  (drains Damaged with shield/lifesteal/damage-modify)
+//   8. seed_indirect_0
+//   9. fold_damage_dealt
+//  10. fold_healing_done
 
 event Tick { }
 
 @replayable @gpu_amenable
 event Damaged {
   source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Engine-side chronicle event written by the apply_ability dispatcher
+// at hardcoded EventKindId 26 (see
+// `dsl_ast::engine_events::engine_event_kind_id_for_name`).
+//
+// Task #138 — Strike's verb body is now `apply_ability 1 by self
+// target target`, which writes EffectDamageApplied records into the
+// event ring. The new ApplyDamageFromChronicle physics rule (declared
+// below near the rest of the consumers) translates these records back
+// into the existing `Damaged` event so the rest of the cascade
+// (ApplyDamage's shield/lifesteal/damage-modify pipeline) works
+// without modification.
+@replayable @gpu_amenable
+event EffectDamageApplied {
+  actor: AgentId,
   target: AgentId,
   amount: f32,
 }
@@ -177,7 +209,22 @@ verb Strike(self, target: Agent) =
         && target.alive
         && target != self
         && (world.tick % 10 == 0))
-  emit Damaged { source: self, target: target, amount: config.combat.strike_damage }
+  // Task #138 — verb-body apply_ability dispatcher swap. Strike was
+  // `emit Damaged { source: self, target: target, amount:
+  // config.combat.strike_damage }`. The literal `1` is Strike's
+  // AbilityId in the duel_abilities AbilityRegistry built from the
+  // alphabetised .ability filenames in
+  // `binding_check.rs::build_duel_abilities_registry` (Strike is the
+  // first entry, lands at AbilityId(1)).
+  //
+  // The runtime extends the binding check to assert
+  // `built.names.get("Strike") == AbilityId(1)` so any future drift
+  // surfaces as a startup panic rather than silent wrong-ability
+  // dispatch. See ApplyDamageFromChronicle below for the chronicle
+  // re-emit that funnels EffectDamageApplied(kind=26) records back
+  // into the existing `Damaged` cascade so shield_hp/lifesteal/
+  // damage-modify all keep working unchanged.
+  apply_ability 1 by self target target
   score (200.0 - target.hp)
 
 // ShieldUp — self-cast, cooldown 40 ticks. Modelled as +50 HP via the
@@ -336,6 +383,23 @@ verb Daze(self, target: Agent) =
         && (rng.action() % 65536) < 32768)
   emit Stunned { target_agent: target, expires_at: world.tick + config.combat.daze_dur }
   score (180.0 - target.hp)
+
+// Task #138 — Strike's verb body now uses `apply_ability 1 by self
+// target target` (see the Strike verb above). The dispatcher writes
+// EffectDamageApplied chronicle records (engine-aliased to kind=26)
+// instead of the source-declared Damaged event. This rule consumes
+// those records and re-emits Damaged so the rest of the cascade
+// (ApplyDamage with shield/lifesteal/damage-modify) keeps working
+// unchanged.
+//
+// P6 caveat: this rule is PerEvent + emit-only (no AgentField writes)
+// — does NOT trip P6, unlike ApplyDamage et al below.
+@phase(post)
+physics ApplyDamageFromChronicle {
+  on EffectDamageApplied { actor: c, target: t, amount: a } {
+    emit Damaged { source: c, target: t, amount: a }
+  }
+}
 
 // Apply damage with shield_hp absorption.
 //
