@@ -74,6 +74,52 @@ fn apply_ability_smoke_compiles() {
     );
 }
 
+/// Corpus-level pin for the verb-body apply_ability surface. The
+/// inline-source tests (`verb_body_with_apply_ability_lowers_cleanly`)
+/// already prove parse → resolve → emit; this one pins the same path
+/// at the .sim file level — symmetric with apply_ability_smoke.sim
+/// covering the physics-scope surface.
+#[test]
+fn apply_ability_verb_smoke_compiles() {
+    let path = workspace_path("assets/sim/apply_ability_verb_smoke.sim");
+    let art = compile_sim(&path).unwrap_or_else(|e| {
+        panic!("apply_ability_verb_smoke.sim failed at: {e}");
+    });
+    assert!(!art.kernel_index.is_empty(), "no kernels emitted");
+
+    // The verb expander synthesises `verb_chronicle_Cast` from the
+    // verb body; its kernel must contain the dispatcher slot loop +
+    // both operand lets (mirroring the inline-source assertions in
+    // verb_body_with_apply_ability_lowers_cleanly, but at the
+    // corpus-file level).
+    let body = art
+        .wgsl_files
+        .iter()
+        .find(|(name, _)| name.contains("verb_chronicle_Cast"))
+        .map(|(_, b)| b.as_str())
+        .unwrap_or_else(|| {
+            panic!(
+                "no verb_chronicle_Cast kernel in artifacts; available: {:?}",
+                art.wgsl_files.keys().collect::<Vec<_>>(),
+            );
+        });
+    assert!(
+        body.contains("for (var i: u32 = 0u; i < 6u;"),
+        "verb_chronicle_Cast must carry the dispatcher slot loop;\n\
+         body:\n{body}"
+    );
+    assert!(
+        body.contains("let caster_slot: u32"),
+        "verb_chronicle_Cast must emit caster_slot from `by self`;\n\
+         body:\n{body}"
+    );
+    assert!(
+        body.contains("let target_slot: u32"),
+        "verb_chronicle_Cast must emit target_slot from `target self`;\n\
+         body:\n{body}"
+    );
+}
+
 #[test]
 fn apply_ability_smoke_emits_dispatcher_loop_in_kernel_body() {
     let path = workspace_path("assets/sim/apply_ability_smoke.sim");

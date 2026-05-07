@@ -1,0 +1,46 @@
+// apply_ability_verb_smoke — corpus-level pin for verb-body
+// `apply_ability` (companion to apply_ability_smoke.sim, which pins the
+// physics-scope path).
+//
+// Two surfaces are now reachable:
+//
+//   1. **Physics-scope** — `physics X { ... apply_ability ... }`. Pinned
+//      by `assets/sim/apply_ability_smoke.sim`.
+//   2. **Verb-body** — `verb X(self, target: Agent) = ... apply_ability
+//      ...` (this file). Landed by Agent A's parser change (commit
+//      `a20f3f3c`); the verb expander wraps the ApplyAbility into a
+//      synthesised `verb_chronicle_<Name>` physics handler, and the
+//      standard physics-lowering pipeline carries it through to the
+//      dispatcher kernel.
+//
+// What this exercises that the inline-source tests in
+// `crates/dsl_compiler/tests/apply_ability_smoke.rs` don't:
+//   - the .sim corpus surface (file IO + full pipeline against a
+//     real fixture), so any regression in the verb-body path
+//     surfaces in the same place every other corpus test does.
+//   - mirror of how `apply_ability_smoke.sim` pins the physics-scope
+//     path; symmetric coverage.
+//
+// **Dead at runtime today** — no runtime crate references this fixture.
+// Same rationale as apply_ability_smoke.sim: drives the dsl_compiler
+// pipeline (parse → resolve → lower → schedule → emit) so any
+// regression in the verb-body apply_ability codepath surfaces as a
+// CI failure rather than as a silent breakage when a runtime wires
+// it up.
+//
+// The verb's `score 1.0` is constant — argmax over a single verb
+// trivially wins, so the verb fires every tick `self.alive` is true.
+
+event Tick { }
+
+entity Hero : Agent { }
+
+scoring {
+  Cast = 1.0
+}
+
+verb Cast(self) =
+  action Cast
+  when  self.alive
+  apply_ability agents.level(self) by self target self
+  score 1.0
