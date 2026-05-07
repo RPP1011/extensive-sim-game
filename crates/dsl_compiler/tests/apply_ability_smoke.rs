@@ -422,6 +422,40 @@ fn apply_ability_in_per_event_rule_errors_at_lowering() {
     );
 }
 
+/// Slice ε resolver-coverage pin: a non-GPU-emittable expression
+/// inside `by <caster>` (e.g. a `String` literal) must be rejected
+/// at resolve time, not silently passed through to CG lowering
+/// where the failure mode is harder to trace. Pins commit `c500eba7`.
+///
+/// Without that fix, `validate_physics_expr` walked only the
+/// `ability` operand — a typo'd or non-emittable expression in
+/// `caster`/`target` would slip through to the CG layer and
+/// surface as a downstream type error far from the source location.
+#[test]
+fn apply_ability_by_non_emittable_caster_rejected_at_resolve() {
+    let src = r#"
+        event Tick { }
+        entity Hero : Agent { }
+
+        physics Bad @phase(per_agent) {
+          on Tick {} where (self.alive) {
+            apply_ability agents.level(self) by "not-a-real-caster"
+          }
+        }
+    "#;
+    let program = dsl_compiler::parse(src).expect("parse");
+    let outcome = dsl_ast::resolve::resolve(program);
+    let err = outcome.expect_err(
+        "non-GPU-emittable expression in `by <caster>` must surface \
+         as a typed resolve error (slice ε resolver coverage)",
+    );
+    let diags = format!("{err:?}");
+    assert!(
+        diags.contains("NotGpuEmittable") || diags.contains("String"),
+        "expected NotGpuEmittable diagnostic mentioning String literal, got: {diags}"
+    );
+}
+
 /// Slice ε part 1: explicit `target <expr>` syntax. The dispatcher
 /// writes the caster slot into chronicle payload word 2 (actor) and
 /// the target slot into payload word 3 — distinct values when the
