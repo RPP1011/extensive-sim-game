@@ -1612,11 +1612,14 @@ fn lower_cg_stmt_body_to_wgsl(
             // pinned against the engine's `EventKindId` enum so a
             // discriminant rename surfaces at build time.
             //
-            // Slice γ wires the chronicle write for the four 1:1
-            // variants the runtime currently has chronicle kinds for
-            // (Damage / Heal / Shield / TransferGold / ModifyStanding /
-            // Stun / Slow). Other variants keep their `// TODO slice δ`
-            // markers until the runtime grows matching event kinds.
+            // Slice γ wires the chronicle write for the seven variants
+            // the runtime currently has chronicle kinds for (Damage /
+            // Heal / Shield / Stun / Slow / TransferGold /
+            // ModifyStanding — EventKindIds 26–32). Other variants
+            // keep their `// TODO slice γ` markers until the runtime
+            // grows matching `EventKindId` slots (next would be Root /
+            // Silence / Fear / Taunt at slot 39+, sharing Stun's
+            // `expires_at_tick` payload shape).
             //
             // **Caster/target convention.** Slice δ + ε
             // (`92572af8` / `d0bc37fd`) plumbed explicit `caster` and
