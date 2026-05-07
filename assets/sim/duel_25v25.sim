@@ -94,6 +94,24 @@ event EffectStunApplied {
   expires_at_tick: u32,
 }
 
+// HealPulse (single-target ally heal, 2026-05-07) — engine-side
+// chronicle event written by the apply_ability dispatcher at hardcoded
+// EventKindId 27 (see
+// `dsl_ast::engine_events::engine_event_kind_id_for_name`). Same
+// payload shape as EffectDamageApplied (kind=26): [tick, caster_slot,
+// target_slot, amount: f32]. The new ApplyHealFromChronicle physics
+// rule below drains kind=27 records into a direct
+// `agents.set_hp(t, min(agents.hp(t) + amt, agents.max_hp(t)))` write,
+// clamping overflow at the per-agent max_hp SoA column (init 100.0,
+// retired hero-template scaling). Schema-hash invariant: kind=27 was
+// already aliased before this slice, so no schema_hash bump.
+@replayable @gpu_amenable
+event EffectHealApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
 @replayable @gpu_amenable
 event Defeated {
   combatant: AgentId,
@@ -261,6 +279,42 @@ physics ScanAndConcussiveCleave @phase(per_agent) {
   }
 }
 
+// HealPulse (single-target ally heal, 2026-05-07) — fourth physics
+// rule dispatching AbilityId(4) on every-5-tick cadence. Unlike
+// ScanAndStrike/Cleave/ConcussiveCleave (all of which target ENEMIES
+// via `other.creature_type != self.creature_type`), this rule targets
+// SAME-TEAM agents — the body-side check inverts to `==` so the
+// dispatch lands on a friendly. The .sim has no `nearby_friends`
+// spatial query today, but `nearby_enemies` is purely informational at
+// the body-iter site (the inner per-pair-candidate loop visits every
+// candidate slot the spatial grid surfaces; the team check happens
+// body-side via this `if`), so the inverted check reuses the same
+// 27-cell ring without DSL-side surgery.
+//
+// Cadence `world.tick % 5 == 0` matches Cleave's. Heal target
+// selection: any same-team neighbour within 1.5 cells that is still
+// alive AND not self (self-heal would double-write the caster's HP
+// each tick; the `other != self` check filters that). The dispatcher
+// writes EffectHealApplied chronicle records (kind=27); the new
+// ApplyHealFromChronicle rule below drains them with a clamped
+// `agents.set_hp` write.
+physics ScanAndHeal @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && (world.tick % 5 == 0)) {
+    for other in spatial.nearby_enemies(self) {
+      // INVERTED team check — heal targets SAME-team agents only.
+      // `other != self` filters the per-pair-candidate self-emit
+      // (the spatial walk visits self's own grid cell; without the
+      // inequality the caster would double-write its own HP).
+      if (other.creature_type == self.creature_type
+          && other.alive
+          && other != self) {
+        apply_ability 4 by self target other
+      }
+    }
+  }
+}
+
 // Task #138 follow-on (duel_25v25 port, 2026-05-07) — ScanAndStrike's
 // body now uses `apply_ability 1 by self target other`. The dispatcher
 // writes EffectDamageApplied chronicle records (engine-aliased to
@@ -313,6 +367,37 @@ physics ApplyDamageFromChronicle {
 physics ApplyStunFromChronicle {
   on EffectStunApplied { actor: _, target: t, expires_at_tick: e } {
     agents.set_stun_expires_at_tick(t, e);
+  }
+}
+
+// HealPulse (single-target ally heal, 2026-05-07) — chronicle consumer
+// for the kind=27 EffectHealApplied records ScanAndHeal's apply_ability
+// dispatcher writes per cast. Direct-SoA-write shape (matches
+// ApplyStunFromChronicle above; differs from duel_abilities's
+// emit-Healed-then-ApplyHeal two-rule shape). Clamps overflow with
+// `min(hp + amt, max_hp)` so a tick-15 cast on an at-most-half-damaged
+// ally doesn't push HP above the per-agent ceiling.
+//
+// FUSION EXPECTATION (5th @phase(post) PerEvent site): the lower pass
+// already fused ApplyDamageFromChronicle (kind=26) +
+// ApplyStunFromChronicle (kind=29) into a 2-way `_and_` kernel. This
+// rule should auto-include into a 3-way fusion: same @phase(post),
+// PerEvent over the same event_ring, non-overlapping kind tag (27).
+// The resulting kernel is
+// `physics_ApplyDamageFromChronicle_and_ApplyHealFromChronicle_and_ApplyStunFromChronicle`
+// (kernel-namer alphabetises; binding count grows by `agent_hp` +
+// `agent_max_hp` reads). If fusion does NOT auto-include (e.g. the
+// scheduler's same-arena merge heuristic balks at three-arm event
+// dispatch), this stands as its own kernel — runtime wires it
+// independently.
+//
+// P6 caveat: this rule is PerEvent + writes an AgentField (hp) — TRIPS
+// P6 in the well_formed checker. Build.rs already tolerates lower
+// diagnostics; same path ApplyDamage / ApplyStunFromChronicle take.
+@phase(post)
+physics ApplyHealFromChronicle {
+  on EffectHealApplied { actor: _, target: t, amount: amt } {
+    agents.set_hp(t, min(agents.hp(t) + amt, agents.max_hp(t)));
   }
 }
 

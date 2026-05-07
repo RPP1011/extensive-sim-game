@@ -143,13 +143,19 @@ pub struct Duel25v25State {
     /// `cleave_cfg_buf`; separate buffer so each per-tick kernel can
     /// stamp its own `tick` view without cross-kernel races.
     concussive_cfg_buf: wgpu::Buffer,
-    /// Fused chronicle-consumer cfg buffer. The lower pass folded the
-    /// previously-separate ApplyDamageFromChronicle + ApplyStunFromChronicle
-    /// rules into ONE kernel
-    /// (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`)
-    /// because both consume from the same event ring at @phase(post)
-    /// with non-overlapping kind tags (26 + 29). The cfg is shared since
-    /// `event_count` + `tick` apply uniformly to both arms.
+    /// HealPulse (single-target ally heal, 2026-05-07) — fourth per-agent
+    /// dispatch kernel cfg (ScanAndHeal). Same shape as scan/cleave/concussive
+    /// cfgs; separate buffer for race-free per-tick stamping.
+    heal_cfg_buf: wgpu::Buffer,
+    /// Fused chronicle-consumer cfg buffer. The lower pass folded
+    /// ApplyDamageFromChronicle + ApplyStunFromChronicle +
+    /// ApplyHealFromChronicle into ONE kernel
+    /// (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle`)
+    /// because all three consume from the same event ring at
+    /// @phase(post) with non-overlapping kind tags (26 + 29 + 27). The
+    /// cfg is shared since `event_count` + `tick` apply uniformly
+    /// across all three arms. (HealPulse, 2026-05-07: fusion grew from
+    /// 2-way → 3-way.)
     apply_chronicle_cfg_buf: wgpu::Buffer,
     apply_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
@@ -426,6 +432,20 @@ impl Duel25v25State {
             contents: bytemuck::bytes_of(&concussive_cfg),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        // HealPulse (single-target ally heal, 2026-05-07) — fourth
+        // per-agent dispatch kernel cfg. Same shape as scan/cleave/
+        // concussive cfgs.
+        let heal_cfg = physics_ScanAndHeal::PhysicsScanAndHealCfg {
+            agent_cap: agent_count,
+            tick: 0,
+            seed: 0,
+            _pad: 0,
+        };
+        let heal_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_25v25_runtime::heal_cfg"),
+            contents: bytemuck::bytes_of(&heal_cfg),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let apply_cfg = physics_ApplyDamage::PhysicsApplyDamageCfg {
             event_count: 0,
             tick: 0,
@@ -438,16 +458,20 @@ impl Duel25v25State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         // Task #138 follow-on (duel_25v25 port, 2026-05-07) +
-        // Multi-effect AOE Cleave+Stun (ConcussiveCleave, 2026-05-07)
-        // — cfg uniform for the FUSED chronicle-consumer kernel. The
-        // lower pass folded ApplyDamageFromChronicle (drains kind=26
-        // → emit Damaged) and ApplyStunFromChronicle (drains kind=29
-        // → write `agents.set_stun_expires_at_tick`) into one kernel
-        // (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`)
-        // because both consume from the same event ring at @phase(post)
-        // with non-overlapping kind tags. Single cfg + single dispatch
-        // per tick.
-        let apply_chronicle_cfg = physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleCfg {
+        // Multi-effect AOE Cleave+Stun (ConcussiveCleave, 2026-05-07) +
+        // HealPulse (single-target ally heal, 2026-05-07) — cfg uniform
+        // for the FUSED chronicle-consumer kernel. The lower pass folded
+        // ApplyDamageFromChronicle (drains kind=26 → emit Damaged),
+        // ApplyStunFromChronicle (drains kind=29 → write
+        // `agents.set_stun_expires_at_tick`), and ApplyHealFromChronicle
+        // (drains kind=27 → write
+        // `agents.set_hp(min(hp+amt, max_hp))`) into ONE kernel
+        // (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle`)
+        // because all three consume from the same event ring at
+        // @phase(post) with non-overlapping kind tags. Single cfg +
+        // single dispatch per tick. Fusion grew from 2-way to 3-way
+        // when HealPulse was added.
+        let apply_chronicle_cfg = physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleAndApplyHealFromChronicleCfg {
             event_count: 0,
             tick: 0,
             seed: 0,
@@ -520,6 +544,7 @@ impl Duel25v25State {
             scan_cfg_buf,
             cleave_cfg_buf,
             concussive_cfg_buf,
+            heal_cfg_buf,
             apply_chronicle_cfg_buf,
             apply_cfg_buf,
             registry_gpu,
@@ -688,15 +713,17 @@ impl CompiledSim for Duel25v25State {
         // production proof, 2026-05-07): factor bumped from 2 → 3 to
         // account for ConcussiveCleave emitting TWO chronicle records
         // per in-radius candidate (Damage + Stun) on top of the
-        // Damaged → Defeated fan-out. saturating_mul + min(65536) clamp
-        // keeps the bound safely below the dispatcher's
-        // `slot < 65536u` guard.
+        // Damaged → Defeated fan-out. HealPulse (2026-05-07): factor
+        // bumped 3 → 4 to account for ScanAndHeal's per-tick
+        // EffectHealApplied emit (one per same-team neighbour).
+        // saturating_mul + min(65536) clamp keeps the bound safely
+        // below the dispatcher's `slot < 65536u` guard.
         use dsl_compiler::cg::emit::spatial as sp;
         let max_neighbour_emits = self
             .agent_count
             .saturating_mul(sp::MAX_PER_CELL)
             .saturating_mul(27);
-        let max_slots_per_tick = max_neighbour_emits.saturating_mul(3).min(65536);
+        let max_slots_per_tick = max_neighbour_emits.saturating_mul(4).min(65536);
         self.event_ring
             .clear_ring_headers_in(&self.gpu, &mut encoder, max_slots_per_tick);
         let offsets_size = sp::offsets_bytes();
@@ -976,21 +1003,90 @@ impl CompiledSim for Duel25v25State {
             self.agent_count,
         );
 
+        // (3a''') ScanAndHeal — HealPulse single-target ally heal at
+        // AbilityId(4), 2026-05-07. Body-form spatial walk dispatches
+        // AbilityId(4) on every-5-tick cadence (matches Cleave's
+        // cadence so they share fire-ticks). Differs from
+        // Strike/Cleave/Concussive in target SELECTION: the body-side
+        // check inverts (`other.creature_type == self.creature_type
+        // && other != self`) so the dispatch lands on a SAME-TEAM
+        // ally. The dispatcher writes EffectHealApplied chronicle
+        // records (kind=27), drained by the fused
+        // ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle
+        // kernel below into a clamped `agents.set_hp` write.
+        //
+        // Same registry SoA bindings as the other three scan kernels —
+        // all four dispatch through the same packed AbilityRegistry;
+        // the `apply_ability 4` literal in .sim selects the program
+        // slot.
+        let heal_cfg = physics_ScanAndHeal::PhysicsScanAndHealCfg {
+            agent_cap: self.agent_count,
+            tick: self.tick as u32,
+            seed: 0,
+            _pad: 0,
+        };
+        self.gpu
+            .queue
+            .write_buffer(&self.heal_cfg_buf, 0, bytemuck::bytes_of(&heal_cfg));
+        let heal_bindings = physics_ScanAndHeal::PhysicsScanAndHealBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            agent_pos: &self.agent_pos_buf,
+            agent_hp: &self.agent_hp_buf,
+            agent_max_hp: &self.agent_max_hp_buf,
+            agent_alive: &self.agent_alive_buf,
+            agent_move_speed: &self.agent_move_speed_buf,
+            agent_armor: &self.agent_armor_buf,
+            agent_magic_resist: &self.agent_magic_resist_buf,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_mana: &self.agent_mana_buf,
+            agent_creature_type: &self.agent_creature_type_buf,
+            spatial_grid_cells: &self.spatial_grid_cells,
+            spatial_grid_offsets: &self.spatial_grid_offsets,
+            spatial_grid_starts: &self.spatial_grid_starts,
+            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+            ability_registry_area_kinds: &self.registry_gpu.area_kinds,
+            ability_registry_area_args: &self.registry_gpu.area_args,
+            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
+            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
+            ability_registry_chances:           &self.registry_gpu.chances,
+            cfg: &self.heal_cfg_buf,
+        };
+        dispatch::dispatch_physics_scanandheal(
+            &mut self.cache,
+            &heal_bindings,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+
         // (3b) Fused ApplyDamageFromChronicle + ApplyStunFromChronicle
-        // — chronicle consumers fused into ONE kernel by the lower pass
-        // (both run @phase(post) over the same event ring with
-        // non-overlapping kind tags). Drains:
+        // + ApplyHealFromChronicle — chronicle consumers fused into ONE
+        // kernel by the lower pass (all three run @phase(post) over the
+        // same event ring with non-overlapping kind tags). Drains:
         //   - kind=26 EffectDamageApplied → emit `Damaged` (re-emit;
         //     the standalone ApplyDamage kernel below decrements HP)
         //   - kind=29 EffectStunApplied → write
         //     `agents.set_stun_expires_at_tick(t, expires_at_tick)`
         //     directly (Multi-effect AOE Cleave+Stun, 2026-05-07).
+        //   - kind=27 EffectHealApplied → write
+        //     `agents.set_hp(t, min(hp + amt, max_hp))` directly
+        //     (HealPulse, 2026-05-07).
         // event_count is the upper bound on chronicle records produced
-        // per tick across all three Scan kernels (Strike + Cleave +
-        // ConcussiveCleave each can emit up to MAX_PER_CELL × 27
-        // records per agent).
+        // per tick across all four Scan kernels (Strike + Cleave +
+        // ConcussiveCleave + HealPulse each can emit up to MAX_PER_CELL
+        // × 27 records per agent).
         let event_count_estimate = max_neighbour_emits.min(65536);
-        let apply_chronicle_cfg = physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleCfg {
+        let apply_chronicle_cfg = physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleAndApplyHealFromChronicleCfg {
             event_count: event_count_estimate,
             tick: self.tick as u32,
             seed: 0,
@@ -1002,13 +1098,15 @@ impl CompiledSim for Duel25v25State {
             bytemuck::bytes_of(&apply_chronicle_cfg),
         );
         let apply_chronicle_bindings =
-            physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleBindings {
+            physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleAndApplyHealFromChronicleBindings {
                 event_ring: self.event_ring.ring(),
                 event_tail: self.event_ring.tail(),
+                agent_hp: &self.agent_hp_buf,
+                agent_max_hp: &self.agent_max_hp_buf,
                 agent_stun_expires_at_tick: &self.agent_stun_expires_at_tick_buf,
                 cfg: &self.apply_chronicle_cfg_buf,
             };
-        dispatch::dispatch_physics_applydamagefromchronicle_and_applystunfromchronicle(
+        dispatch::dispatch_physics_applydamagefromchronicle_and_applystunfromchronicle_and_applyhealfromchronicle(
             &mut self.cache,
             &apply_chronicle_bindings,
             &self.gpu.device,
@@ -1454,20 +1552,26 @@ mod viz_tests {
             total_damage,
         );
 
-        // Liveness check: alive count must drop OR HP must be
-        // significantly below initial. With both Strike + Cleave firing
-        // for 10 ticks, the seam takes ~5 Strike rounds + 2 Cleave
-        // rounds; at least one agent should be dead OR severely
-        // damaged.
+        // Liveness check: alive count must drop OR HP must be visibly
+        // below initial. With Strike + Cleave + ConcussiveCleave firing
+        // damage AND HealPulse firing recovery (2026-05-07), the seam
+        // dynamics are now bounded: heal at +15/cast every 5 ticks
+        // partially offsets the per-tick damage drain, so the
+        // pre-HealPulse `<25 HP` threshold is no longer guaranteed.
+        // The pin we DO keep: at least one agent must be visibly below
+        // initial 50.0 (i.e. damage path is firing despite heal),
+        // proving the chronicle damage arm is active. Heal-only
+        // sustains net HP > 50 only at the corners; seam agents still
+        // net negative.
         let snap = state.snapshot();
         let alive_total: u32 = snap.alive.iter().sum();
         let hp = state.read_hp();
-        let any_severely_damaged = hp.iter().any(|&h| h < 25.0);
+        let any_below_initial = hp.iter().any(|&h| h < 50.0);
 
         assert!(
-            alive_total < 50 || any_severely_damaged,
+            alive_total < 50 || any_below_initial,
             "after 10 ticks expected alive_total < 50 OR some agent's \
-             HP < 25; saw alive_total={} and min HP={}",
+             HP < 50; saw alive_total={} and min HP={}",
             alive_total,
             hp.iter().cloned().fold(f32::INFINITY, f32::min),
         );
@@ -1601,6 +1705,82 @@ mod viz_tests {
             hp_now,
             stun,
         );
+    }
+
+    /// HealPulse (single-target ally heal, 2026-05-07) — proves
+    /// chronicle-pipeline healing recovers HP for agents in the
+    /// production fixture. At init, every agent's hp is 50.0
+    /// (well below max_hp=100.0) so a 15.0 heal lands cleanly under
+    /// the `min(hp + amt, max_hp)` clamp.
+    ///
+    /// Cadence: ScanAndHeal fires at `tick % 5 == 0`, so step 0
+    /// (= tick 0) drives one round of heal casts. We run exactly 5
+    /// ticks (steps 0..=4 dispatching ticks 0..=4); the next firing
+    /// tick would be 5 which is NOT included, so any HP recovery
+    /// observed comes from the tick-0 cast.
+    ///
+    /// HOW THE TEST PROVES HEAL LANDED:
+    ///   1. Read agent_hp after 5 steps.
+    ///   2. Some agent must have hp > 50.0. Healing is a SAME-team
+    ///      dispatch (`other.creature_type == self.creature_type`),
+    ///      so at the corners of the per-team grid (e.g. Red slot 0
+    ///      at x=-2.0, far from any Blue at x ≥ 0.4) no enemy is
+    ///      within 1.5 cells — Strike/Cleave/Concussive can't drain
+    ///      that agent's HP. The friend-neighbours at the same corner
+    ///      heal it. Net: hp climbs from 50.0 → min(50 + 15·N, 100).
+    ///
+    /// Per-agent max_hp clamp at 100.0 means even with N=4 friend
+    /// neighbours all targeting the corner agent, hp lands at 100.0
+    /// (50+60 clamped). Any value > 50.0 proves the chronicle Heal
+    /// arm fired AND the SoA write landed.
+    #[test]
+    fn heal_pulse_recovers_friendly_hp() {
+        let mut state = Duel25v25State::new(0xCAFE_F00D, 50);
+
+        // Pre-tick HP baseline: every slot at 50.0 (per `new()`).
+        let initial_hp = state.read_hp();
+        for &h in &initial_hp {
+            assert_eq!(h, 50.0, "initial HP must be 50.0");
+        }
+
+        // Run exactly 5 ticks. ScanAndHeal (% 5 == 0) fires at step 0
+        // (tick 0) ONLY — the next firing tick is 5, beyond the
+        // 0..=4 inclusive run. Strike/Cleave/Concussive also fire on
+        // their respective cadences but only damage cross-team
+        // neighbours, so corner agents (no enemy in 1.5 cells) only
+        // see heal.
+        for _ in 0..5 {
+            state.step();
+        }
+
+        let hp_now = state.read_hp();
+
+        // Pin: at least one agent must have hp > 50.0 — proves the
+        // EffectHealApplied chronicle records were drained AND the
+        // ApplyHealFromChronicle arm of the 3-way fused kernel wrote
+        // back to `agent_hp`.
+        let healed_count: usize = hp_now.iter().filter(|&&h| h > 50.0).count();
+        assert!(
+            healed_count >= 1,
+            "after 5 ticks at least one agent must have hp > 50.0 \
+             (HealPulse chronicle arm proof); saw {} healed of 50. \
+             HP: {:?}",
+            healed_count,
+            hp_now,
+        );
+
+        // Pin 2: no agent's hp exceeds max_hp (100.0) — proves the
+        // `min(hp + amt, max_hp)` clamp in ApplyHealFromChronicle is
+        // honoured. Without the clamp, a corner agent receiving 4
+        // friend-targeted heals (15 × 4 = 60) on top of 50 would
+        // climb to 110 and break this invariant.
+        for (i, &h) in hp_now.iter().enumerate() {
+            assert!(
+                h <= 100.0 + 0.001,
+                "agent {i}: hp={h} exceeds max_hp=100.0; clamp \
+                 in ApplyHealFromChronicle didn't engage",
+            );
+        }
     }
 
     /// After ticking the simulation forward, either at least one HP
