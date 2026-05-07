@@ -1391,7 +1391,10 @@ verb Cast(self) =
         ),
     }
 
-    // Lower → schedule → emit must succeed; the verb expander wraps
+    // Lower → schedule → emit must succeed AND the synthesised
+    // verb_chronicle_Cast kernel must carry the dispatcher block —
+    // proves the verb-body ApplyAbility reaches GPU emit, not just
+    // that lowering didn't blow up. The verb expander wraps
     // the ApplyAbility in the synthesised `verb_chronicle_Cast`
     // physics handler and the standard physics-lowering pipeline
     // takes it from there.
@@ -1401,8 +1404,39 @@ verb Cast(self) =
         &cg,
         dsl_compiler::cg::schedule::ScheduleStrategy::Default,
     );
-    let _art = dsl_compiler::cg::emit::emit_cg_program(&schedule_result.schedule, &cg)
+    let art = dsl_compiler::cg::emit::emit_cg_program(&schedule_result.schedule, &cg)
         .expect("emit succeeds for verb-body apply_ability");
+
+    // The verb expander wraps the body into a `verb_chronicle_<Name>`
+    // physics handler. That handler must contain the dispatcher loop
+    // scaffolding — proves the verb-body ApplyAbility actually reached
+    // GPU emit, not just that lowering didn't blow up.
+    let body = art
+        .wgsl_files
+        .iter()
+        .find(|(name, _)| name.contains("verb_chronicle_Cast"))
+        .map(|(_, b)| b.as_str())
+        .unwrap_or_else(|| {
+            panic!(
+                "no verb_chronicle_Cast kernel in artifacts; available: {:?}",
+                art.wgsl_files.keys().collect::<Vec<_>>(),
+            );
+        });
+    assert!(
+        body.contains("for (var i: u32 = 0u; i < 6u;"),
+        "verb_chronicle_Cast must carry the dispatcher slot loop \
+         (MAX_EFFECTS_PER_PROGRAM = 6);\nbody:\n{body}"
+    );
+    assert!(
+        body.contains("let caster_slot: u32"),
+        "verb_chronicle_Cast must emit the caster_slot let from the \
+         `by self` clause;\nbody:\n{body}"
+    );
+    assert!(
+        body.contains("let target_slot: u32"),
+        "verb_chronicle_Cast must emit the target_slot let from the \
+         `target self` clause;\nbody:\n{body}"
+    );
 }
 
 /// Companion to [`verb_body_with_apply_ability_lowers_cleanly`]: the
