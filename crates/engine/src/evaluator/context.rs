@@ -911,6 +911,13 @@ fn fields_to_event(
             let fraction_q8    = field_i16(fields, "fraction_q8").unwrap_or(0);
             Some(Event::EffectReflectApplied { actor, target, duration_ticks, fraction_q8, tick })
         }
+        "EffectSummonApplied" => {
+            let actor          = field_agent(fields, "actor")?;
+            let template_hash  = field_u32(fields, "template_hash").unwrap_or(0);
+            let count          = field_u32(fields, "count").unwrap_or(0) as u8;
+            let lifetime_ticks = field_u32(fields, "lifetime_ticks").unwrap_or(0);
+            Some(Event::EffectSummonApplied { actor, template_hash, count, lifetime_ticks, tick })
+        }
         "EffectSlowApplied" => {
             let actor           = field_agent(fields, "actor")?;
             let target          = field_agent(fields, "target")?;

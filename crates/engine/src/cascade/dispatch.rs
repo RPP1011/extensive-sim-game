@@ -96,6 +96,7 @@ pub mod interp {
             Event::EffectHarvestApplied     { .. } => "EffectHarvestApplied",
             Event::EffectPlaceVoxelApplied  { .. } => "EffectPlaceVoxelApplied",
             Event::EffectReflectApplied     { .. } => "EffectReflectApplied",
+            Event::EffectSummonApplied      { .. } => "EffectSummonApplied",
             Event::EffectSlowApplied     { .. } => "EffectSlowApplied",
             Event::EffectGoldTransfer    { .. } => "EffectGoldTransfer",
             Event::EffectStandingDelta   { .. } => "EffectStandingDelta",
@@ -490,6 +491,24 @@ pub mod interp {
                 ("t",              EvalValue::Agent(dsl_agent(*target))),
                 ("d",              EvalValue::U32(*duration_ticks)),
                 ("f",              EvalValue::I32(*fraction_q8 as i32)),
+                ("tick",           EvalValue::U32(*tick)),
+            ],
+            // ---- EffectSummonApplied -------------------------------------
+            // Slice γ closer — caster-self with packed payload. The
+            // dispatcher writes one chronicle record per cast carrying
+            // template_hash, count (u8 widened to u32) and lifetime_ticks
+            // — downstream N-entity spawning is a separate consumer
+            // concern, not the dispatcher's job. No target field on the
+            // engine event.
+            Event::EffectSummonApplied { actor, template_hash, count, lifetime_ticks, tick } => vec![
+                ("actor",          EvalValue::Agent(dsl_agent(*actor))),
+                ("template_hash",  EvalValue::U32(*template_hash)),
+                ("count",          EvalValue::U32(*count as u32)),
+                ("lifetime_ticks", EvalValue::U32(*lifetime_ticks)),
+                ("c",              EvalValue::Agent(dsl_agent(*actor))),
+                ("h",              EvalValue::U32(*template_hash)),
+                ("n",              EvalValue::U32(*count as u32)),
+                ("l",              EvalValue::U32(*lifetime_ticks)),
                 ("tick",           EvalValue::U32(*tick)),
             ],
             // ---- EffectSlowApplied ----------------------------------------
