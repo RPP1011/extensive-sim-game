@@ -48,6 +48,7 @@
 //!  30. `Damage(10) chance=0x4000 (~25%)`           — DazeMid-shape, P11 chance-gate parity (intermediate q16)
 //!  31. `Damage(30) in circle(2.0)`                  — Cleave-shape (#121 AOE Path B Circle, 4-agent row)
 //!  32. `Damage(25) in cone(60°, 4)`                 — Slash-shape (#178 AOE Path B Cone, 5-agent fan, degenerate self-cast)
+//!  33. `Damage(20) in box(1.5, 1.5, 1.5)`           — Pulverize-shape (#179 AOE Path B Box, 4-agent row, wall-inclusive)
 //!
 //! M = 1 caster×target permutation in this fixture: `(c=0, t=0)`
 //! self-cast. The smoke fixture's `apply_ability` source uses the
@@ -672,6 +673,41 @@ fn build_sweep() -> Vec<(&'static str, AbilityProgram, CasterStats)> {
         CasterStats::default(),
     ));
 
+    // 33. Pulverize-shape — `Damage(20) in box(1.5, 1.5, 1.5)` (#179 AOE
+    //     Path B Box). Exercises the dispatcher's box branch
+    //     (`area_kind == 5u`): 27-cell walk around the center
+    //     (`agent_pos[target_slot]` — same convention as Circle), per-
+    //     candidate AABB containment gate (`|d.<axis>| ≤ w<axis>`),
+    //     shadowed `target_slot = candidate`.
+    //
+    //     Driven by the same 4-agent fixture as Cleave (positions in a
+    //     row at x=0, 1.5, 3.0, 4.5). With caster at slot 0
+    //     (target_slot==caster_slot under the smoke fixture's
+    //     implicit-target rule), the box is centered at (0,0,0) with
+    //     half-extents (1.5, 1.5, 1.5). The closed-AABB semantic (≤,
+    //     not <) means agent 1 at (1.5, 0, 0) is exactly at the +x
+    //     wall and IS in-box; agents 2 (3.0) and 3 (4.5) are out.
+    //
+    //     **Spatial walk constraint.** wx/wy/wz = 1.5 ≤ cell_size = 6.0
+    //     so the 27-cell walk visits every cell that could hold an
+    //     in-box candidate. Larger extents would require additional
+    //     cell rings — kept out of scope for this fixture (see the
+    //     box branch's WGSL doc-comment for the limitation).
+    let mut pulverize = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 20.0 }],
+    );
+    pulverize.per_effect_areas.push(Some(engine::ability::program::EffectAreaShape {
+        kind: engine::ability::program::ShapeKind::Box,
+        args: [1.5, 1.5, 1.5, 0.0],
+    }));
+    out.push((
+        "Pulverize",
+        pulverize,
+        CasterStats::default(),
+    ));
+
     out
 }
 
@@ -774,6 +810,27 @@ fn cleave_cpu_records_for_cast(
 /// empty slot list with the in-cone candidate set computed via
 /// `apply_program_aoe_cone_filter`.
 fn slash_cpu_records_for_cast(
+    program:           &AbilityProgram,
+    caster_slot:       u32,
+    aoe_target_slots:  &[u32],
+    tick:              u32,
+    caster_stats:      &CasterStats,
+) -> Vec<[u32; CHRONICLE_STRIDE_U32 as usize]> {
+    aoe_cpu_records_for_cast(program, caster_slot, aoe_target_slots, tick, caster_stats)
+}
+
+/// CPU oracle for the AOE Pulverize entry (#179 Box). Same dispatch
+/// shape as Cleave/Slash (all three route through `apply_program_aoe`).
+/// The caller pre-filters by AABB containment around
+/// `agent_pos[target_slot]`; this helper just dispatches and packs.
+///
+/// Under the smoke fixture's implicit-target rule
+/// (caster_slot==target_slot), the box is centered at the caster's
+/// position; with the 4-agent row fixture (x=0, 1.5, 3.0, 4.5) and
+/// half-extents (1.5, 1.5, 1.5), in-box = {slot 0 (origin), slot 1
+/// (at +x wall)}. The alias name pins the "Pulverize routes through
+/// the box CPU oracle path" semantic in the test runner.
+fn pulverize_cpu_records_for_cast(
     program:           &AbilityProgram,
     caster_slot:       u32,
     aoe_target_slots:  &[u32],
@@ -895,9 +952,10 @@ fn cpu_gpu_apply_program_byte_equal_across_modifier_matrix() {
         // rule degenerates the cone direction (see Slash's entry
         // doc-comment for the byte-equal-at-zero contract).
         let n_agents_for_ability = match *name {
-            "Cleave" => 4,
-            "Slash"  => 5,
-            _        => N_AGENTS,
+            "Cleave"    => 4,
+            "Slash"     => 5,
+            "Pulverize" => 4,
+            _           => N_AGENTS,
         };
 
         // GPU side seeds slot 0 with this ability's per-agent stats.
@@ -945,6 +1003,22 @@ fn cpu_gpu_apply_program_byte_equal_across_modifier_matrix() {
                 [4.5, 0.0, 0.0],
             ]);
         }
+        if *name == "Pulverize" {
+            // 4-agent fixture for the box AOE: same row layout as Cleave
+            // (x=0, 1.5, 3.0, 4.5). With box(1.5, 1.5, 1.5) centered at
+            // caster slot 0 (under self-cast), in-box = {slot 0 (origin,
+            // |d|=0), slot 1 (+x wall, |d.x|=1.5)}. Slot 2 (|d.x|=3.0)
+            // and slot 3 (|d.x|=4.5) are outside extents. Agent 1 at
+            // exactly the wall validates the closed-AABB (≤) semantic
+            // matches between CPU oracle and GPU dispatcher.
+            state.set_agent_alive(&[1, 0, 0, 0]);
+            state.set_agent_positions(&[
+                [0.0, 0.0, 0.0],
+                [1.5, 0.0, 0.0],
+                [3.0, 0.0, 0.0],
+                [4.5, 0.0, 0.0],
+            ]);
+        }
         if *name == "Slash" {
             // 5-agent fan layout. Caster at slot 0 (origin); other
             // slots sit in an arc the cone WOULD hit if the dispatch
@@ -982,6 +1056,13 @@ fn cpu_gpu_apply_program_byte_equal_across_modifier_matrix() {
                     program,
                     /*caster_slot*/ 0,
                     /*aoe_target_slots*/ &[],
+                    tick,
+                    caster_stats,
+                ),
+                "Pulverize" => pulverize_cpu_records_for_cast(
+                    program,
+                    /*caster_slot*/ 0,
+                    /*aoe_target_slots*/ &[0, 1],
                     tick,
                     caster_stats,
                 ),
