@@ -240,6 +240,8 @@ fn inject_action_selected_event(comp: &mut Compilation) -> EventRef {
         tags: Vec::new(),
         annotations: Vec::new(),
         span,
+        // Verb-cascade synthesised event — not an engine alias.
+        engine_kind_id: None,
     });
     EventRef(idx as u16)
 }

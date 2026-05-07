@@ -12,6 +12,18 @@
 //! `duel_abilities_runtime/build.rs`'s `DriverOutcome::Err → o.program`
 //! pattern: surface the diag as a cargo:warning, but keep the emitted
 //! kernels.
+//!
+//! ## Closed-loop kind tag (no post-processing)
+//!
+//! Pre-fix the consumer's `if (kind == N)` filter was built from the
+//! .sim's source-order index (=1 for `EffectDamageApplied` after
+//! `Tick`), while the dispatcher writes the engine's hardcoded
+//! `EventKindId::EffectDamageApplied = 26`. This build.rs used to
+//! sed-rewrite `== 1u` → `== 26u` to close the loop. The compiler now
+//! aliases engine event names (see
+//! `dsl_ast::engine_events::engine_event_kind_id_for_name`) so the
+//! consumer kernel emits `== 26u` directly — no post-processing
+//! required.
 
 use std::env;
 use std::fs;
@@ -76,41 +88,12 @@ fn main() {
     }
 
     for (name, body) in &artifacts.wgsl_files {
-        // Architectural friction (documented in src/lib.rs preamble):
-        // the consumer kernel filters by the .sim's declaration-index
-        // event id (`EffectDamageApplied` is event #1 in this fixture
-        // after `Tick` at #0). The dispatcher writes the engine's
-        // hardcoded `EventKindId::EffectDamageApplied = 26`. Without a
-        // fixup the closed loop is silently broken at the kind-tag
-        // layer. Rewrite the consumer's filter so the per-tick damage
-        // application actually fires.
-        //
-        // Proper fix: compiler should resolve well-known engine-event
-        // names to their hardcoded EventKindId instead of declaration
-        // index. Tracked alongside task #138 follow-ups.
-        let patched = if name == "physics_ApplyChronicleDamage.wgsl" {
-            let needle = "atomicLoad(&event_ring[event_idx * 10u + 0u]) == 1u";
-            let replacement = "atomicLoad(&event_ring[event_idx * 10u + 0u]) == 26u";
-            if body.contains(needle) {
-                println!(
-                    "cargo:warning=[apply_ability_chronicle_consumer build.rs] \
-                     patching consumer kind filter: '== 1u' -> '== 26u' \
-                     (compiler emits .sim-local id; dispatcher writes engine id 26)"
-                );
-                body.replace(needle, replacement)
-            } else {
-                println!(
-                    "cargo:warning=[apply_ability_chronicle_consumer build.rs] \
-                     consumer kind-filter needle not found in WGSL — emit shape \
-                     may have changed. Loop will be broken until the fixup is \
-                     re-targeted."
-                );
-                body.clone()
-            }
-        } else {
-            body.clone()
-        };
-        fs::write(out_dir.join(name), &patched)
+        // Engine-event kind aliasing (see
+        // `dsl_ast::engine_events::engine_event_kind_id_for_name`)
+        // makes the consumer kernel emit `if (kind == 26u)` directly,
+        // matching the dispatcher's hardcoded write tag. No
+        // post-processing required.
+        fs::write(out_dir.join(name), body)
             .unwrap_or_else(|e| panic!("write {}: {e}", name));
     }
 
