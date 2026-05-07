@@ -115,15 +115,15 @@ fn multi_effect_ability_produces_record_per_chronicle_arm() {
 #[test]
 fn ability_with_only_non_chronicle_effects_produces_no_records() {
     // Deferred-infrastructure variants (Summon/Harvest/PlaceVoxel/
-    // Stealth/Charm/Grounded/Suppress/Reflect/DoT/HoT/TimedShield/Buff)
-    // still have no chronicle counterparts today — the dispatcher's
-    // WGSL would still emit TODO-marker arms for these on GPU, but no
-    // chronicle write.
+    // Stealth/Charm/Grounded/Suppress/Reflect/Buff) still have no
+    // chronicle counterparts today — the dispatcher's WGSL would still
+    // emit TODO-marker arms for these on GPU, but no chronicle write.
     //
     // Already wired up:
     // - Root/Silence/Fear/Taunt (Wave 2 piece 1) → kinds 43..46.
-    // - Dash/Blink/Knockback/Pull (Wave 2 piece 2, this slice) → kinds
-    //   47..50 — see `movement_pipelines_emit_kinds_47_50` below.
+    // - Dash/Blink/Knockback/Pull (Wave 2 piece 2) → kinds 47..50.
+    // - DoT/HoT/TimedShield (Wave 1.5+, this slice) → kinds 51..53,
+    //   see `damage_over_time_pipeline_emits_kind_51_record` below.
     //
     // Pick Charm (kind 28) + Grounded (kind 29) — both still TODO.
     let program = AbilityProgram::new_single_target(
@@ -303,6 +303,79 @@ fn pull_pipeline_emits_kind_50_record() {
     assert_eq!(r[4], 3.5_f32.to_bits(), "distance at payload word 2 (forced-motion shape)");
     for i in 5..10 {
         assert_eq!(r[i], 0, "Pull: tail word {i} should be zero");
+    }
+}
+
+/// Wave 1.5+ — multi-tick effect EffectOps (DamageOverTime/HealOverTime/
+/// TimedShield). All three flow through `apply_program` (which emits
+/// ApplyEvent::DamageOverTime / HealOverTime / TimedShield with
+/// `{ source, target, amount, duration_ticks }` and folds scale_bonus
+/// into amount) and the CPU reference (which writes a kind=51..53
+/// record). All three share the same 5-payload-word shape: actor +
+/// target + amount (bitcast f32 → u32 at slot 4) + duration_ticks
+/// (raw u32 at slot 5). Pin per-variant kind tags + the duration
+/// round-trip — distinct from the q8 / expires_at_tick shapes so a
+/// regression that swaps the layout surfaces here.
+#[test]
+fn damage_over_time_pipeline_emits_kind_51_record() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::DamageOverTime { amount: 6.5, duration_ticks: 30 }],
+    );
+    let records = run_pipeline(&program, aid(7), aid(7), 100);
+    assert_eq!(records.len(), 1, "one DamageOverTime effect → one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 51, "EventKindId::EffectDamageOverTimeApplied = 51");
+    assert_eq!(r[1], 100, "tick");
+    assert_eq!(r[2], 7, "actor slot — caster_id");
+    assert_eq!(r[3], 7, "target slot — target_id (self-cast: ==caster)");
+    assert_eq!(r[4], 6.5_f32.to_bits(), "amount-per-tick at payload word 2 (bitcast f32)");
+    assert_eq!(r[5], 30, "duration_ticks at payload word 3 (raw u32)");
+    for i in 6..10 {
+        assert_eq!(r[i], 0, "DamageOverTime: tail word {i} should be zero");
+    }
+}
+
+#[test]
+fn heal_over_time_pipeline_emits_kind_52_record() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: false, line_of_sight: false },
+        [EffectOp::HealOverTime { amount: 4.0, duration_ticks: 50 }],
+    );
+    let records = run_pipeline(&program, aid(7), aid(7), 100);
+    assert_eq!(records.len(), 1, "one HealOverTime effect → one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 52, "EventKindId::EffectHealOverTimeApplied = 52");
+    assert_eq!(r[1], 100, "tick");
+    assert_eq!(r[2], 7, "actor slot — caster_id");
+    assert_eq!(r[3], 7, "target slot — target_id (self-cast: ==caster)");
+    assert_eq!(r[4], 4.0_f32.to_bits(), "amount-per-tick at payload word 2 (bitcast f32)");
+    assert_eq!(r[5], 50, "duration_ticks at payload word 3 (raw u32)");
+    for i in 6..10 {
+        assert_eq!(r[i], 0, "HealOverTime: tail word {i} should be zero");
+    }
+}
+
+#[test]
+fn timed_shield_pipeline_emits_kind_53_record() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: false, line_of_sight: false },
+        [EffectOp::TimedShield { amount: 25.0, duration_ticks: 100 }],
+    );
+    let records = run_pipeline(&program, aid(7), aid(7), 100);
+    assert_eq!(records.len(), 1, "one TimedShield effect → one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 53, "EventKindId::EffectTimedShieldApplied = 53");
+    assert_eq!(r[1], 100, "tick");
+    assert_eq!(r[2], 7, "actor slot — caster_id");
+    assert_eq!(r[3], 7, "target slot — target_id (self-cast: ==caster)");
+    assert_eq!(r[4], 25.0_f32.to_bits(), "amount at payload word 2 (bitcast f32)");
+    assert_eq!(r[5], 100, "duration_ticks at payload word 3 (raw u32)");
+    for i in 6..10 {
+        assert_eq!(r[i], 0, "TimedShield: tail word {i} should be zero");
     }
 }
 

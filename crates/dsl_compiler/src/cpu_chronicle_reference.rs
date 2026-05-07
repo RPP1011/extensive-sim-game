@@ -188,6 +188,47 @@ pub fn apply_event_to_chronicle_record(
             rec[4] = distance.to_bits();
             Some(rec)
         }
+        // --- DamageOverTime = 20 → EventKindId::EffectDamageOverTimeApplied = 51.
+        // Wave 1.5+ — multi-tick effect. 4-payload-word chronicle record:
+        //   slot 2 = caster_slot
+        //   slot 3 = target_slot
+        //   slot 4 = bitcast<u32>(amount-per-tick) — scale_bonus already
+        //            folded into amount by `apply_program` (see
+        //            crates/engine/src/ability/apply.rs:312-313)
+        //   slot 5 = duration_ticks (raw u32)
+        // The cast records the magnitude + window once; a future
+        // consumer rule will re-emit per-tick damage events.
+        ApplyEvent::DamageOverTime { source: _, target: _, amount, duration_ticks } => {
+            rec[0] = 51;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            rec[4] = amount.to_bits();
+            rec[5] = duration_ticks;
+            Some(rec)
+        }
+        // --- HealOverTime = 21 → EventKindId::EffectHealOverTimeApplied = 52.
+        // Wave 1.5+ — same shape as DamageOverTime (per-tick healing).
+        ApplyEvent::HealOverTime { source: _, target: _, amount, duration_ticks } => {
+            rec[0] = 52;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            rec[4] = amount.to_bits();
+            rec[5] = duration_ticks;
+            Some(rec)
+        }
+        // --- TimedShield = 22 → EventKindId::EffectTimedShieldApplied = 53.
+        // Wave 1.5+ — same payload shape as DoT/HoT but `amount` is the
+        // one-shot shield magnitude (not per-tick), persisting for
+        // `duration_ticks`. scale_bonus is folded into amount by
+        // `apply_program` (see crates/engine/src/ability/apply.rs:316-317).
+        ApplyEvent::TimedShield { source: _, target: _, amount, duration_ticks } => {
+            rec[0] = 53;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            rec[4] = amount.to_bits();
+            rec[5] = duration_ticks;
+            Some(rec)
+        }
         // --- Slow = 4 → EventKindId::EffectSlowApplied = 30.
         // 4-field payload: actor, target, expires_at_tick, factor_q8.
         ApplyEvent::Slow { target: _, duration_ticks, factor_q8 } => {
@@ -418,11 +459,11 @@ mod tests {
     #[test]
     fn variants_without_chronicle_counterpart_return_none() {
         // ApplyEvent variants without chronicle counterparts today.
-        // After Wave 2 piece 2 (movement EffectOps Dash/Blink/Knockback/
-        // Pull), every slice-γ-and-onward chronicle-bearing variant has
-        // a wire-up; the variants below are all deferred-infrastructure
-        // ApplyEvents (Summon/Harvest/PlaceVoxel/Stealth/Charm/etc.)
-        // that emit ApplyEvents but have no engine `EventKindId` yet.
+        // After Wave 1.5+ (DoT/HoT/TimedShield, this slice), every
+        // amount-bearing chronicle ApplyEvent has a wire-up; the
+        // variants below are all deferred-infrastructure ApplyEvents
+        // (Summon/Harvest/PlaceVoxel) that emit ApplyEvents but have
+        // no engine `EventKindId` yet.
         //
         // Status effects already wired up:
         // - SelfDamage (Bleed verb swap, Task #138 follow-on,
@@ -431,8 +472,11 @@ mod tests {
         //   Fortify) → kind=42, see `execute_chronicle_record_uses_kind_42`.
         // - Root/Silence/Fear/Taunt (Wave 2 piece 1) →
         //   kinds 43..46, see `control_status_chronicle_records_use_kinds_43_46`.
-        // - Dash/Blink/Knockback/Pull (Wave 2 piece 2, this slice) →
+        // - Dash/Blink/Knockback/Pull (Wave 2 piece 2) →
         //   kinds 47..50, see `movement_chronicle_records_use_kinds_47_50`.
+        // - DamageOverTime/HealOverTime/TimedShield (Wave 1.5+, this
+        //   slice) → kinds 51..53, see
+        //   `multi_tick_chronicle_records_use_kinds_51_53`.
         for ev in [
             ApplyEvent::Summon  { source: aid(1), template_hash: 0xDEADBEEF, count: 2, lifetime_ticks: 100 },
             ApplyEvent::Harvest { source: aid(1), kind_hash: 0xCAFEBABE, amount: 5 },
@@ -443,6 +487,83 @@ mod tests {
                 "variant {ev:?} should have no chronicle counterpart \
                  (dispatcher arm carries TODO marker)"
             );
+        }
+    }
+
+    /// Wave 1.5+ — multi-tick effects (DamageOverTime/HealOverTime/
+    /// TimedShield). All three share the same 5-payload-word shape:
+    /// actor + target + amount (bitcast f32 → u32 at slot 4) +
+    /// duration_ticks (raw u32 at slot 5). Pin per-variant kind tags
+    /// (51..53) and confirm the duration round-trips correctly.
+    #[test]
+    fn multi_tick_chronicle_records_use_kinds_51_53() {
+        // DamageOverTime — 4-payload-word record.
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::DamageOverTime {
+                source: aid(7),
+                target: aid(11),
+                amount: 6.5,
+                duration_ticks: 30,
+            },
+            /*tick*/ 100,
+            /*caster_id*/ 7,
+            /*target_id*/ 11,
+        )
+        .expect("DamageOverTime has chronicle counterpart");
+        assert_eq!(rec[0], 51, "DamageOverTime: kind tag — EffectDamageOverTimeApplied");
+        assert_eq!(rec[1], 100, "DamageOverTime: tick");
+        assert_eq!(rec[2], 7, "DamageOverTime: actor slot — caster_id");
+        assert_eq!(rec[3], 11, "DamageOverTime: target slot — target_id");
+        assert_eq!(rec[4], 6.5_f32.to_bits(), "DamageOverTime: amount-per-tick at payload word 2");
+        assert_eq!(rec[5], 30, "DamageOverTime: duration_ticks at payload word 3 (raw u32)");
+        for i in 6..CHRONICLE_RECORD_STRIDE_U32 {
+            assert_eq!(rec[i], 0, "DamageOverTime: tail word {i} should be zero");
+        }
+
+        // HealOverTime — same shape as DoT.
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::HealOverTime {
+                source: aid(7),
+                target: aid(11),
+                amount: 4.0,
+                duration_ticks: 50,
+            },
+            /*tick*/ 200,
+            /*caster_id*/ 7,
+            /*target_id*/ 11,
+        )
+        .expect("HealOverTime has chronicle counterpart");
+        assert_eq!(rec[0], 52, "HealOverTime: kind tag — EffectHealOverTimeApplied");
+        assert_eq!(rec[1], 200, "HealOverTime: tick");
+        assert_eq!(rec[2], 7, "HealOverTime: actor slot — caster_id");
+        assert_eq!(rec[3], 11, "HealOverTime: target slot — target_id");
+        assert_eq!(rec[4], 4.0_f32.to_bits(), "HealOverTime: amount-per-tick at payload word 2");
+        assert_eq!(rec[5], 50, "HealOverTime: duration_ticks at payload word 3 (raw u32)");
+        for i in 6..CHRONICLE_RECORD_STRIDE_U32 {
+            assert_eq!(rec[i], 0, "HealOverTime: tail word {i} should be zero");
+        }
+
+        // TimedShield — same payload shape as DoT/HoT.
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::TimedShield {
+                source: aid(7),
+                target: aid(11),
+                amount: 25.0,
+                duration_ticks: 100,
+            },
+            /*tick*/ 300,
+            /*caster_id*/ 7,
+            /*target_id*/ 11,
+        )
+        .expect("TimedShield has chronicle counterpart");
+        assert_eq!(rec[0], 53, "TimedShield: kind tag — EffectTimedShieldApplied");
+        assert_eq!(rec[1], 300, "TimedShield: tick");
+        assert_eq!(rec[2], 7, "TimedShield: actor slot — caster_id");
+        assert_eq!(rec[3], 11, "TimedShield: target slot — target_id");
+        assert_eq!(rec[4], 25.0_f32.to_bits(), "TimedShield: amount at payload word 2");
+        assert_eq!(rec[5], 100, "TimedShield: duration_ticks at payload word 3 (raw u32)");
+        for i in 6..CHRONICLE_RECORD_STRIDE_U32 {
+            assert_eq!(rec[i], 0, "TimedShield: tail word {i} should be zero");
         }
     }
 
@@ -746,6 +867,9 @@ mod tests {
                 17 => ApplyEvent::SelfDamage     { source: aid(1), amount: 1.0 },
                 18 => ApplyEvent::LifeSteal      { target: aid(1), duration_ticks: 5, fraction_q8: 128 },
                 19 => ApplyEvent::DamageModify   { target: aid(1), duration_ticks: 5, multiplier_q8: 128 },
+                20 => ApplyEvent::DamageOverTime { source: aid(1), target: aid(2), amount: 5.0, duration_ticks: 30 },
+                21 => ApplyEvent::HealOverTime   { source: aid(1), target: aid(2), amount: 3.0, duration_ticks: 30 },
+                22 => ApplyEvent::TimedShield    { source: aid(1), target: aid(2), amount: 25.0, duration_ticks: 30 },
                 _ => panic!("unexpected effect_kind in table"),
             }
         };

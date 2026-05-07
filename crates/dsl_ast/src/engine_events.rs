@@ -86,6 +86,17 @@ pub const ENGINE_EVENT_KIND_IDS: &[(&str, u32)] = &[
     ("EffectBlinkApplied",     48),
     ("EffectKnockbackApplied", 49),
     ("EffectPullApplied",      50),
+    // Wave 1.5+ — multi-tick effects (DamageOverTime/HealOverTime/
+    // TimedShield). DoT/HoT carry actor + target + amount-per-tick
+    // (f32) + duration_ticks (u32). TimedShield has the same payload
+    // shape with `amount` as the one-shot shield magnitude. Slots
+    // 51..53 are contiguous with the Wave 2 piece 2 movement EffectOps
+    // (47..50). The cast records the magnitude + duration once; a
+    // future consumer rule will re-emit per-tick damage/heal events
+    // (deferred — no sim re-emits these today).
+    ("EffectDamageOverTimeApplied", 51),
+    ("EffectHealOverTimeApplied",   52),
+    ("EffectTimedShieldApplied",    53),
 ];
 
 /// Look up the engine-defined `EventKindId` discriminant for an
@@ -126,6 +137,9 @@ mod tests {
         assert_eq!(engine_event_kind_id_for_name("EffectBlinkApplied"), Some(48));
         assert_eq!(engine_event_kind_id_for_name("EffectKnockbackApplied"), Some(49));
         assert_eq!(engine_event_kind_id_for_name("EffectPullApplied"), Some(50));
+        assert_eq!(engine_event_kind_id_for_name("EffectDamageOverTimeApplied"), Some(51));
+        assert_eq!(engine_event_kind_id_for_name("EffectHealOverTimeApplied"), Some(52));
+        assert_eq!(engine_event_kind_id_for_name("EffectTimedShieldApplied"), Some(53));
     }
 
     #[test]

@@ -51,6 +51,9 @@ impl crate::event::EventLike for Event {
             Event::EffectBlinkApplied { .. } => EventKindId::EffectBlinkApplied,
             Event::EffectKnockbackApplied { .. } => EventKindId::EffectKnockbackApplied,
             Event::EffectPullApplied { .. } => EventKindId::EffectPullApplied,
+            Event::EffectDamageOverTimeApplied { .. } => EventKindId::EffectDamageOverTimeApplied,
+            Event::EffectHealOverTimeApplied { .. } => EventKindId::EffectHealOverTimeApplied,
+            Event::EffectTimedShieldApplied { .. } => EventKindId::EffectTimedShieldApplied,
             Event::EngagementBroken { .. } => EventKindId::EngagementBroken,
             Event::EngagementCommitted { .. } => EventKindId::EngagementCommitted,
             Event::FearSpread { .. } => EventKindId::FearSpread,
@@ -528,6 +531,48 @@ impl crate::event::EventLike for Event {
                 h.update(actor.raw().to_le_bytes());
                 h.update(target.raw().to_le_bytes());
                 h.update(distance.to_bits().to_le_bytes());
+                h.update(tick.to_le_bytes());
+            }
+            Event::EffectDamageOverTimeApplied {
+                actor,
+                target,
+                amount_per_tick,
+                duration_ticks,
+                tick,
+            } => {
+                h.update([EventKindId::EffectDamageOverTimeApplied as u8]);
+                h.update(actor.raw().to_le_bytes());
+                h.update(target.raw().to_le_bytes());
+                h.update(amount_per_tick.to_bits().to_le_bytes());
+                h.update(duration_ticks.to_le_bytes());
+                h.update(tick.to_le_bytes());
+            }
+            Event::EffectHealOverTimeApplied {
+                actor,
+                target,
+                amount_per_tick,
+                duration_ticks,
+                tick,
+            } => {
+                h.update([EventKindId::EffectHealOverTimeApplied as u8]);
+                h.update(actor.raw().to_le_bytes());
+                h.update(target.raw().to_le_bytes());
+                h.update(amount_per_tick.to_bits().to_le_bytes());
+                h.update(duration_ticks.to_le_bytes());
+                h.update(tick.to_le_bytes());
+            }
+            Event::EffectTimedShieldApplied {
+                actor,
+                target,
+                amount,
+                duration_ticks,
+                tick,
+            } => {
+                h.update([EventKindId::EffectTimedShieldApplied as u8]);
+                h.update(actor.raw().to_le_bytes());
+                h.update(target.raw().to_le_bytes());
+                h.update(amount.to_bits().to_le_bytes());
+                h.update(duration_ticks.to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
             Event::EngagementBroken {

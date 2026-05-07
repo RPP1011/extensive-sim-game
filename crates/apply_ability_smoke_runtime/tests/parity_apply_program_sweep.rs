@@ -34,6 +34,9 @@
 //!  16. `Blink(8)`                                  — Phase-shape (Wave 2 piece 2)
 //!  17. `Knockback(5)`                              — Smash-shape (Wave 2 piece 2)
 //!  18. `Pull(3)`                                   — Hook-shape (Wave 2 piece 2)
+//!  19. `DamageOverTime(6, 30)`                     — Burn-shape (Wave 1.5+)
+//!  20. `HealOverTime(4, 50)`                       — Regen-shape (Wave 1.5+)
+//!  21. `TimedShield(25, 100)`                      — Aegis-shape (Wave 1.5+)
 //!
 //! M = 1 caster×target permutation in this fixture: `(c=0, t=0)`
 //! self-cast. The smoke fixture's `apply_ability` source uses the
@@ -45,7 +48,7 @@
 //! T = 5 ticks (0, 17, 100, 1000, 65500) — varied across the u32 range
 //! to surface any wraparound bug in expires_at_tick computations.
 //!
-//! K = 18 × 1 × 5 = **90 casts**, producing 95 chronicle records (90
+//! K = 21 × 1 × 5 = **105 casts**, producing 110 chronicle records (105
 //! primary + 5 nested-Stun follow-ups from the Reap+Stun-shape arm).
 //!
 //! ## What's deferred
@@ -400,6 +403,47 @@ fn build_sweep() -> Vec<(&'static str, AbilityProgram, CasterStats)> {
             5.0,
             Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
             [EffectOp::Pull { distance: 3.0 }],
+        ),
+        CasterStats::default(),
+    ));
+
+    // Wave 1.5+ — multi-tick effects (DoT/HoT/TimedShield). All three
+    // share the same 5-payload-word chronicle shape: actor + target +
+    // amount (bitcast f32 → u32 at slot 4) + duration_ticks (raw u32
+    // at slot 5). Adding all three extends the sweep matrix to 21
+    // abilities so the three new GPU dispatcher arms get parity-pinned.
+
+    // 19. Burn-shape — DamageOverTime (per-tick damage over a window).
+    out.push((
+        "Burn",
+        AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 60, hostile_only: true, line_of_sight: false },
+            [EffectOp::DamageOverTime { amount: 6.0, duration_ticks: 30 }],
+        ),
+        CasterStats::default(),
+    ));
+
+    // 20. Regen-shape — HealOverTime (per-tick healing over a window).
+    out.push((
+        "Regen",
+        AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 60, hostile_only: false, line_of_sight: false },
+            [EffectOp::HealOverTime { amount: 4.0, duration_ticks: 50 }],
+        ),
+        CasterStats::default(),
+    ));
+
+    // 21. Aegis-shape — TimedShield (one-shot shield amount over a
+    // window). Same payload shape as DoT/HoT but `amount` is the
+    // one-shot magnitude rather than per-tick.
+    out.push((
+        "Aegis",
+        AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 60, hostile_only: false, line_of_sight: false },
+            [EffectOp::TimedShield { amount: 25.0, duration_ticks: 100 }],
         ),
         CasterStats::default(),
     ));

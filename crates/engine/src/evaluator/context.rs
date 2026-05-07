@@ -841,6 +841,27 @@ fn fields_to_event(
             let distance = field_f32(fields, "distance").unwrap_or(0.0);
             Some(Event::EffectPullApplied { actor, target, distance, tick })
         }
+        "EffectDamageOverTimeApplied" => {
+            let actor           = field_agent(fields, "actor")?;
+            let target          = field_agent(fields, "target")?;
+            let amount_per_tick = field_f32(fields, "amount_per_tick").unwrap_or(0.0);
+            let duration_ticks  = field_u32(fields, "duration_ticks").unwrap_or(0);
+            Some(Event::EffectDamageOverTimeApplied { actor, target, amount_per_tick, duration_ticks, tick })
+        }
+        "EffectHealOverTimeApplied" => {
+            let actor           = field_agent(fields, "actor")?;
+            let target          = field_agent(fields, "target")?;
+            let amount_per_tick = field_f32(fields, "amount_per_tick").unwrap_or(0.0);
+            let duration_ticks  = field_u32(fields, "duration_ticks").unwrap_or(0);
+            Some(Event::EffectHealOverTimeApplied { actor, target, amount_per_tick, duration_ticks, tick })
+        }
+        "EffectTimedShieldApplied" => {
+            let actor          = field_agent(fields, "actor")?;
+            let target         = field_agent(fields, "target")?;
+            let amount         = field_f32(fields, "amount").unwrap_or(0.0);
+            let duration_ticks = field_u32(fields, "duration_ticks").unwrap_or(0);
+            Some(Event::EffectTimedShieldApplied { actor, target, amount, duration_ticks, tick })
+        }
         "EffectSlowApplied" => {
             let actor           = field_agent(fields, "actor")?;
             let target          = field_agent(fields, "target")?;
