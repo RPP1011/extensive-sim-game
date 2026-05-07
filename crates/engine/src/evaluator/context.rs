@@ -819,6 +819,28 @@ fn fields_to_event(
                 .unwrap_or_else(|| field_u32(fields, "duration_ticks").unwrap_or(0));
             Some(Event::EffectTauntApplied { actor, target, expires_at_tick, tick })
         }
+        "EffectDashApplied" => {
+            let actor    = field_agent(fields, "actor")?;
+            let distance = field_f32(fields, "distance").unwrap_or(0.0);
+            Some(Event::EffectDashApplied { actor, distance, tick })
+        }
+        "EffectBlinkApplied" => {
+            let actor    = field_agent(fields, "actor")?;
+            let distance = field_f32(fields, "distance").unwrap_or(0.0);
+            Some(Event::EffectBlinkApplied { actor, distance, tick })
+        }
+        "EffectKnockbackApplied" => {
+            let actor    = field_agent(fields, "actor")?;
+            let target   = field_agent(fields, "target")?;
+            let distance = field_f32(fields, "distance").unwrap_or(0.0);
+            Some(Event::EffectKnockbackApplied { actor, target, distance, tick })
+        }
+        "EffectPullApplied" => {
+            let actor    = field_agent(fields, "actor")?;
+            let target   = field_agent(fields, "target")?;
+            let distance = field_f32(fields, "distance").unwrap_or(0.0);
+            Some(Event::EffectPullApplied { actor, target, distance, tick })
+        }
         "EffectSlowApplied" => {
             let actor           = field_agent(fields, "actor")?;
             let target          = field_agent(fields, "target")?;

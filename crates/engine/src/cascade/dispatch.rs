@@ -81,6 +81,10 @@ pub mod interp {
             Event::EffectSilenceApplied  { .. } => "EffectSilenceApplied",
             Event::EffectFearApplied     { .. } => "EffectFearApplied",
             Event::EffectTauntApplied    { .. } => "EffectTauntApplied",
+            Event::EffectDashApplied     { .. } => "EffectDashApplied",
+            Event::EffectBlinkApplied    { .. } => "EffectBlinkApplied",
+            Event::EffectKnockbackApplied { .. } => "EffectKnockbackApplied",
+            Event::EffectPullApplied     { .. } => "EffectPullApplied",
             Event::EffectSlowApplied     { .. } => "EffectSlowApplied",
             Event::EffectGoldTransfer    { .. } => "EffectGoldTransfer",
             Event::EffectStandingDelta   { .. } => "EffectStandingDelta",
@@ -279,6 +283,50 @@ pub mod interp {
                 ("t",               EvalValue::Agent(dsl_agent(*target))),
                 ("e",               EvalValue::U32(*expires_at_tick)),
                 ("tick",            EvalValue::U32(*tick)),
+            ],
+            // ---- EffectDashApplied ---------------------------------------
+            // Wave 2 piece 2 — caster-self motion, no target field.
+            // 2-payload-word chronicle record (actor + distance f32).
+            // No consumer rule in any sim today; the chronicle write
+            // works end-to-end without a fold.
+            Event::EffectDashApplied { actor, distance, tick } => vec![
+                ("actor",    EvalValue::Agent(dsl_agent(*actor))),
+                ("distance", EvalValue::F32(*distance)),
+                ("c",        EvalValue::Agent(dsl_agent(*actor))),
+                ("d",        EvalValue::F32(*distance)),
+                ("tick",     EvalValue::U32(*tick)),
+            ],
+            // ---- EffectBlinkApplied --------------------------------------
+            // Wave 2 piece 2 — same shape as Dash (caster-self motion).
+            Event::EffectBlinkApplied { actor, distance, tick } => vec![
+                ("actor",    EvalValue::Agent(dsl_agent(*actor))),
+                ("distance", EvalValue::F32(*distance)),
+                ("c",        EvalValue::Agent(dsl_agent(*actor))),
+                ("d",        EvalValue::F32(*distance)),
+                ("tick",     EvalValue::U32(*tick)),
+            ],
+            // ---- EffectKnockbackApplied ----------------------------------
+            // Wave 2 piece 2 — forced motion on a target.
+            // 3-payload-word chronicle record (actor + target + distance f32).
+            Event::EffectKnockbackApplied { actor, target, distance, tick } => vec![
+                ("actor",    EvalValue::Agent(dsl_agent(*actor))),
+                ("target",   EvalValue::Agent(dsl_agent(*target))),
+                ("distance", EvalValue::F32(*distance)),
+                ("c",        EvalValue::Agent(dsl_agent(*actor))),
+                ("t",        EvalValue::Agent(dsl_agent(*target))),
+                ("d",        EvalValue::F32(*distance)),
+                ("tick",     EvalValue::U32(*tick)),
+            ],
+            // ---- EffectPullApplied ---------------------------------------
+            // Wave 2 piece 2 — same shape as Knockback (forced motion).
+            Event::EffectPullApplied { actor, target, distance, tick } => vec![
+                ("actor",    EvalValue::Agent(dsl_agent(*actor))),
+                ("target",   EvalValue::Agent(dsl_agent(*target))),
+                ("distance", EvalValue::F32(*distance)),
+                ("c",        EvalValue::Agent(dsl_agent(*actor))),
+                ("t",        EvalValue::Agent(dsl_agent(*target))),
+                ("d",        EvalValue::F32(*distance)),
+                ("tick",     EvalValue::U32(*tick)),
             ],
             // ---- EffectSlowApplied ----------------------------------------
             Event::EffectSlowApplied { actor, target, expires_at_tick, factor_q8, tick } => vec![

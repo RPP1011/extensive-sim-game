@@ -22,13 +22,17 @@ pub mod announce_emitted;
 pub mod bid_placed;
 pub mod cast_depth_exceeded;
 pub mod chronicle_entry;
+pub mod effect_blink_applied;
 pub mod effect_damage_applied;
 pub mod effect_damage_modify_applied;
+pub mod effect_dash_applied;
 pub mod effect_execute_applied;
 pub mod effect_fear_applied;
 pub mod effect_gold_transfer;
 pub mod effect_heal_applied;
+pub mod effect_knockback_applied;
 pub mod effect_life_steal_applied;
+pub mod effect_pull_applied;
 pub mod effect_root_applied;
 pub mod effect_self_damage_applied;
 pub mod effect_shield_applied;
@@ -69,13 +73,17 @@ pub use announce_emitted::AnnounceEmitted;
 pub use bid_placed::BidPlaced;
 pub use cast_depth_exceeded::CastDepthExceeded;
 pub use chronicle_entry::ChronicleEntry;
+pub use effect_blink_applied::EffectBlinkApplied;
 pub use effect_damage_applied::EffectDamageApplied;
 pub use effect_damage_modify_applied::EffectDamageModifyApplied;
+pub use effect_dash_applied::EffectDashApplied;
 pub use effect_execute_applied::EffectExecuteApplied;
 pub use effect_fear_applied::EffectFearApplied;
 pub use effect_gold_transfer::EffectGoldTransfer;
 pub use effect_heal_applied::EffectHealApplied;
+pub use effect_knockback_applied::EffectKnockbackApplied;
 pub use effect_life_steal_applied::EffectLifeStealApplied;
+pub use effect_pull_applied::EffectPullApplied;
 pub use effect_root_applied::EffectRootApplied;
 pub use effect_self_damage_applied::EffectSelfDamageApplied;
 pub use effect_shield_applied::EffectShieldApplied;
@@ -310,6 +318,28 @@ pub enum Event {
         expires_at_tick: u32,
         tick: u32,
     },
+    EffectDashApplied {
+        actor: AgentId,
+        distance: f32,
+        tick: u32,
+    },
+    EffectBlinkApplied {
+        actor: AgentId,
+        distance: f32,
+        tick: u32,
+    },
+    EffectKnockbackApplied {
+        actor: AgentId,
+        target: AgentId,
+        distance: f32,
+        tick: u32,
+    },
+    EffectPullApplied {
+        actor: AgentId,
+        target: AgentId,
+        distance: f32,
+        tick: u32,
+    },
     EngagementBroken {
         actor: AgentId,
         former_target: AgentId,
@@ -407,6 +437,10 @@ impl Event {
             Event::EffectSilenceApplied { tick, .. } => *tick,
             Event::EffectFearApplied { tick, .. } => *tick,
             Event::EffectTauntApplied { tick, .. } => *tick,
+            Event::EffectDashApplied { tick, .. } => *tick,
+            Event::EffectBlinkApplied { tick, .. } => *tick,
+            Event::EffectKnockbackApplied { tick, .. } => *tick,
+            Event::EffectPullApplied { tick, .. } => *tick,
             Event::EngagementBroken { tick, .. } => *tick,
             Event::EngagementCommitted { tick, .. } => *tick,
             Event::FearSpread { tick, .. } => *tick,
@@ -457,6 +491,10 @@ impl Event {
             Event::EffectSilenceApplied { .. } => true,
             Event::EffectFearApplied { .. } => true,
             Event::EffectTauntApplied { .. } => true,
+            Event::EffectDashApplied { .. } => true,
+            Event::EffectBlinkApplied { .. } => true,
+            Event::EffectKnockbackApplied { .. } => true,
+            Event::EffectPullApplied { .. } => true,
             Event::EngagementBroken { .. } => true,
             Event::EngagementCommitted { .. } => true,
             Event::FearSpread { .. } => true,

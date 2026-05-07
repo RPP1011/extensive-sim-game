@@ -47,6 +47,10 @@ impl crate::event::EventLike for Event {
             Event::EffectSilenceApplied { .. } => EventKindId::EffectSilenceApplied,
             Event::EffectFearApplied { .. } => EventKindId::EffectFearApplied,
             Event::EffectTauntApplied { .. } => EventKindId::EffectTauntApplied,
+            Event::EffectDashApplied { .. } => EventKindId::EffectDashApplied,
+            Event::EffectBlinkApplied { .. } => EventKindId::EffectBlinkApplied,
+            Event::EffectKnockbackApplied { .. } => EventKindId::EffectKnockbackApplied,
+            Event::EffectPullApplied { .. } => EventKindId::EffectPullApplied,
             Event::EngagementBroken { .. } => EventKindId::EngagementBroken,
             Event::EngagementCommitted { .. } => EventKindId::EngagementCommitted,
             Event::FearSpread { .. } => EventKindId::FearSpread,
@@ -480,6 +484,50 @@ impl crate::event::EventLike for Event {
                 h.update(actor.raw().to_le_bytes());
                 h.update(target.raw().to_le_bytes());
                 h.update(expires_at_tick.to_le_bytes());
+                h.update(tick.to_le_bytes());
+            }
+            Event::EffectDashApplied {
+                actor,
+                distance,
+                tick,
+            } => {
+                h.update([EventKindId::EffectDashApplied as u8]);
+                h.update(actor.raw().to_le_bytes());
+                h.update(distance.to_bits().to_le_bytes());
+                h.update(tick.to_le_bytes());
+            }
+            Event::EffectBlinkApplied {
+                actor,
+                distance,
+                tick,
+            } => {
+                h.update([EventKindId::EffectBlinkApplied as u8]);
+                h.update(actor.raw().to_le_bytes());
+                h.update(distance.to_bits().to_le_bytes());
+                h.update(tick.to_le_bytes());
+            }
+            Event::EffectKnockbackApplied {
+                actor,
+                target,
+                distance,
+                tick,
+            } => {
+                h.update([EventKindId::EffectKnockbackApplied as u8]);
+                h.update(actor.raw().to_le_bytes());
+                h.update(target.raw().to_le_bytes());
+                h.update(distance.to_bits().to_le_bytes());
+                h.update(tick.to_le_bytes());
+            }
+            Event::EffectPullApplied {
+                actor,
+                target,
+                distance,
+                tick,
+            } => {
+                h.update([EventKindId::EffectPullApplied as u8]);
+                h.update(actor.raw().to_le_bytes());
+                h.update(target.raw().to_le_bytes());
+                h.update(distance.to_bits().to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
             Event::EngagementBroken {

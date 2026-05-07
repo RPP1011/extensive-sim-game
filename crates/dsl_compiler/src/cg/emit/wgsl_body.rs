@@ -2106,6 +2106,18 @@ pub(crate) const EFFECT_KIND_TO_EVENT_KIND_ID: &[(u32, u32)] = &[
     (9,  44), // EffectOp::Silence → EventKindId::EffectSilenceApplied
     (10, 45), // EffectOp::Fear    → EventKindId::EffectFearApplied
     (11, 46), // EffectOp::Taunt   → EventKindId::EffectTauntApplied
+    // Wave 2 piece 2 — movement EffectOps. Dash/Blink are caster-self
+    // motion (payload = actor + f32 distance). Knockback/Pull are
+    // forced motion on a target (payload = actor + target + f32
+    // distance). The packed effect-kind ordinals (Dash=12, Blink=13,
+    // Knockback=14, Pull=15) come from `pack_effect` in
+    // `crates/engine/src/ability/packed.rs`; the dispatcher arm
+    // bodies for these in `emit_chronicle_arm_chain` (below) match
+    // these ordinals via `kind == 12u..=15u`.
+    (12, 47), // EffectOp::Dash      → EventKindId::EffectDashApplied
+    (13, 48), // EffectOp::Blink     → EventKindId::EffectBlinkApplied
+    (14, 49), // EffectOp::Knockback → EventKindId::EffectKnockbackApplied
+    (15, 50), // EffectOp::Pull      → EventKindId::EffectPullApplied
 ];
 
 /// Look up the runtime `EventKindId` for an `EffectOp` discriminant.
@@ -2189,6 +2201,14 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Fear=10");
     let taunt_event_id = event_kind_id_for_effect_kind(11)
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Taunt=11");
+    let dash_event_id = event_kind_id_for_effect_kind(12)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Dash=12");
+    let blink_event_id = event_kind_id_for_effect_kind(13)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Blink=13");
+    let knockback_event_id = event_kind_id_for_effect_kind(14)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Knockback=14");
+    let pull_event_id = event_kind_id_for_effect_kind(15)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Pull=15");
 
     let i4  = indent;                   // arm `if`/`else if` lines
     let i8  = format!("{i4}    ");      // body of arm
@@ -2355,23 +2375,82 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
-    // TODO arms for kinds 12..15 (Dash/Blink/Knockback/Pull)
+    // Wave 2 piece 2 — movement EffectOps (Dash/Blink/Knockback/Pull).
+    // Dash and Blink are caster-self motion: 2-payload-word chronicle
+    // record (actor + distance, no target slot in the engine event).
+    // The dispatcher still writes `target_slot` into ring offset 3 to
+    // keep the 10-word stride consistent across all chronicle records
+    // — the engine event struct ignores that slot and the cascade
+    // decode in `event_to_fields` reads only `actor` + `distance`.
+    // Knockback and Pull are forced motion on a target: 3-payload-word
+    // chronicle record (actor + target + distance) — same shape family
+    // as Damage/Heal/Shield (also bitcast<f32> at ring offset 4).
+
+    // Dash = 12 → 47
     s.push_str(&format!("{i4}}} else if (kind == 12u) {{\n"));
-    s.push_str(&format!("{i8}// Dash: payload_a = distance (f32 via bitcast)\n"));
+    s.push_str(&format!("{i8}// Dash = 12 → EventKindId::EffectDashApplied = 47\n"));
+    s.push_str(&format!("{i8}// payload_a = distance (f32 via bitcast); caster-self motion (no target field on engine event)\n"));
     s.push_str(&format!("{i8}let distance: f32 = bitcast<f32>(payload_a);\n"));
-    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_dash(caster, distance);\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectDashApplied (caster_slot + distance)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {dash_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], bitcast<u32>(distance));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // Blink = 13 → 48
     s.push_str(&format!("{i4}}} else if (kind == 13u) {{\n"));
-    s.push_str(&format!("{i8}// Blink: payload_a = distance (f32 via bitcast)\n"));
+    s.push_str(&format!("{i8}// Blink = 13 → EventKindId::EffectBlinkApplied = 48\n"));
+    s.push_str(&format!("{i8}// payload_a = distance (f32 via bitcast); caster-self motion (no target field on engine event)\n"));
     s.push_str(&format!("{i8}let distance: f32 = bitcast<f32>(payload_a);\n"));
-    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_blink(caster, distance);\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectBlinkApplied (caster_slot + distance)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {blink_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], bitcast<u32>(distance));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // Knockback = 14 → 49
     s.push_str(&format!("{i4}}} else if (kind == 14u) {{\n"));
-    s.push_str(&format!("{i8}// Knockback: payload_a = distance (f32 via bitcast)\n"));
+    s.push_str(&format!("{i8}// Knockback = 14 → EventKindId::EffectKnockbackApplied = 49\n"));
+    s.push_str(&format!("{i8}// payload_a = distance (f32 via bitcast); forced motion on target\n"));
     s.push_str(&format!("{i8}let distance: f32 = bitcast<f32>(payload_a);\n"));
-    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_knockback(caster, target, distance);\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectKnockbackApplied (caster_slot + target_slot + distance)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {knockback_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(distance));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // Pull = 15 → 50
     s.push_str(&format!("{i4}}} else if (kind == 15u) {{\n"));
-    s.push_str(&format!("{i8}// Pull: payload_a = distance (f32 via bitcast)\n"));
+    s.push_str(&format!("{i8}// Pull = 15 → EventKindId::EffectPullApplied = 50\n"));
+    s.push_str(&format!("{i8}// payload_a = distance (f32 via bitcast); forced motion on target\n"));
     s.push_str(&format!("{i8}let distance: f32 = bitcast<f32>(payload_a);\n"));
-    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_pull(caster, target, distance);\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectPullApplied (caster_slot + target_slot + distance)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {pull_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(distance));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
 
     // TODO arms for kinds 27..30 (Stealth/Charm/Grounded/Suppress)
     s.push_str(&format!("{i4}}} else if (kind == 27u) {{\n"));
@@ -5094,11 +5173,10 @@ mod tests {
         // Wave 2 piece 1 — Root/Silence/Fear/Taunt are now wired (kinds
         // 43/44/45/46), no longer carry TODO markers; see the explicit
         // assertions below.
+        // Wave 2 piece 2 — Dash/Blink/Knockback/Pull are now wired (kinds
+        // 47/48/49/50), no longer carry TODO markers; see the explicit
+        // assertions below.
         for marker in &[
-            "chronicle_append_dash",
-            "chronicle_append_blink",
-            "chronicle_append_knockback",
-            "chronicle_append_pull",
             "chronicle_append_damage_over_time",
             "chronicle_append_heal_over_time",
             "chronicle_append_timed_shield",
@@ -5145,6 +5223,50 @@ mod tests {
                 "{name} arm must store kind={expected_event_id};\n{wgsl}"
             );
         }
+
+        // Wave 2 piece 2 — movement EffectOps now write real chronicle
+        // records (kinds 47/48/49/50). Dash/Blink are caster-self motion
+        // (no target slot in the engine event); Knockback/Pull are
+        // forced motion on a target. Pin the kind tags so a regression
+        // that drops the wire-up surfaces here.
+        for (kind_token, expected_event_id, name) in &[
+            ("kind == 12u", 47u32, "Dash"),
+            ("kind == 13u", 48u32, "Blink"),
+            ("kind == 14u", 49u32, "Knockback"),
+            ("kind == 15u", 50u32, "Pull"),
+        ] {
+            assert!(
+                !wgsl.contains(&format!(
+                    "TODO slice γ: chronicle_append_{}",
+                    name.to_lowercase()
+                )),
+                "{name} arm should no longer carry the TODO marker;\n{wgsl}"
+            );
+            assert!(
+                wgsl.contains(kind_token),
+                "{name} arm dispatch ({kind_token}) must be present;\n{wgsl}"
+            );
+            assert!(
+                wgsl.contains(&format!(
+                    "atomicStore(&event_ring[_slot * 10u + 0u], {expected_event_id}u);"
+                )),
+                "{name} arm must store kind={expected_event_id};\n{wgsl}"
+            );
+        }
+
+        // Wave 2 piece 2 — Knockback/Pull store distance at payload
+        // word 2 (= ring slot offset 4), same shape as Damage/Heal/
+        // Shield. Dash/Blink store distance at payload word 1 (= ring
+        // slot offset 3) since the engine event has no target field.
+        // Pin both shapes so a regression that swaps them surfaces here.
+        assert!(
+            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 3u], bitcast<u32>(distance));"),
+            "Dash/Blink arms must store distance at payload word 1 (ring offset 3);\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(distance));"),
+            "Knockback/Pull arms must store distance at payload word 2 (ring offset 4);\n{wgsl}"
+        );
 
         // Slice γ — Damage arm wiring assertions.
         // The Damage arm replaced its TODO marker with a real chronicle
@@ -5398,11 +5520,15 @@ mod tests {
                 9  => EffectOp::Silence   { duration_ticks: 30 },
                 10 => EffectOp::Fear      { duration_ticks: 30 },
                 11 => EffectOp::Taunt     { duration_ticks: 30 },
+                12 => EffectOp::Dash      { distance: 10.0 },
+                13 => EffectOp::Blink     { distance: 10.0 },
+                14 => EffectOp::Knockback { distance: 5.0 },
+                15 => EffectOp::Pull      { distance: 5.0 },
                 16 => EffectOp::Execute   { hp_threshold: 20.0 },
                 17 => EffectOp::SelfDamage { amount: 5.0 },
                 18 => EffectOp::LifeSteal { duration_ticks: 50, fraction_q8: 128 },
                 19 => EffectOp::DamageModify { duration_ticks: 50, multiplier_q8: 128 },
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=11 + 16 + 17 + 18 + 19"),
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19"),
             }
         };
 
@@ -5421,11 +5547,15 @@ mod tests {
                 9  => EngineEventKindId::EffectSilenceApplied as u32,
                 10 => EngineEventKindId::EffectFearApplied   as u32,
                 11 => EngineEventKindId::EffectTauntApplied  as u32,
+                12 => EngineEventKindId::EffectDashApplied   as u32,
+                13 => EngineEventKindId::EffectBlinkApplied  as u32,
+                14 => EngineEventKindId::EffectKnockbackApplied as u32,
+                15 => EngineEventKindId::EffectPullApplied   as u32,
                 16 => EngineEventKindId::EffectExecuteApplied as u32,
                 17 => EngineEventKindId::EffectSelfDamageApplied as u32,
                 18 => EngineEventKindId::EffectLifeStealApplied as u32,
                 19 => EngineEventKindId::EffectDamageModifyApplied as u32,
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=11 + 16 + 17 + 18 + 19"),
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19"),
             }
         };
 
@@ -5469,30 +5599,40 @@ mod tests {
             "Fear → EffectFearApplied (Wave 2 piece 1)");
         assert_eq!(event_kind_id_for_effect_kind(11), Some(46),
             "Taunt → EffectTauntApplied (Wave 2 piece 1)");
+        // Wave 2 piece 2 — movement EffectOps now wired:
+        assert_eq!(event_kind_id_for_effect_kind(12), Some(47),
+            "Dash → EffectDashApplied (Wave 2 piece 2)");
+        assert_eq!(event_kind_id_for_effect_kind(13), Some(48),
+            "Blink → EffectBlinkApplied (Wave 2 piece 2)");
+        assert_eq!(event_kind_id_for_effect_kind(14), Some(49),
+            "Knockback → EffectKnockbackApplied (Wave 2 piece 2)");
+        assert_eq!(event_kind_id_for_effect_kind(15), Some(50),
+            "Pull → EffectPullApplied (Wave 2 piece 2)");
         assert_eq!(event_kind_id_for_effect_kind(7), None,
             "CastAbility (recursive dispatch) has no chronicle kind");
-        assert_eq!(event_kind_id_for_effect_kind(12), None,
-            "Dash has no chronicle counterpart today");
+        assert_eq!(event_kind_id_for_effect_kind(20), None,
+            "DamageOverTime has no chronicle counterpart today");
     }
 
     #[test]
     fn effect_kind_to_event_kind_map_covers_chronicle_bearing_variants_only() {
-        // 15 chronicle-bearing variants today — Damage/Heal/Shield/Stun/
+        // 19 chronicle-bearing variants today — Damage/Heal/Shield/Stun/
         // Slow/TransferGold/ModifyStanding + SelfDamage (Bleed verb
         // swap, Task #138 follow-on, 2026-05-06) + LifeSteal (Vampirize
         // verb swap, Task #138 follow-on, mirror of Bleed) + DamageModify
         // (Fortify verb swap, Task #138 follow-on, mirror of Vampirize)
         // + Execute (Reap verb swap, Task #138 follow-on, mirror of
         // Fortify — closes the slice across all 8 duel_abilities verbs)
-        // + Root/Silence/Fear/Taunt (Wave 2 piece 1, control statuses).
+        // + Root/Silence/Fear/Taunt (Wave 2 piece 1, control statuses)
+        // + Dash/Blink/Knockback/Pull (Wave 2 piece 2, movement EffectOps).
         // If this number changes, either the engine grew a new
         // `EffectXxxApplied` event (in which case the map gets a new
         // entry) or a variant lost its chronicle counterpart (in which
         // case the map drops an entry). Pin the count so the gap between
         // source-of-truths is loud.
         assert_eq!(
-            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 15,
-            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 15 \
+            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 19,
+            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 19 \
              chronicle-bearing variants today; if you added or removed an \
              entry, update this assertion (and the slice γ wire-up that \
              consumes the new entry)"
