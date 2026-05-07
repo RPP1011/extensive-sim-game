@@ -2665,24 +2665,112 @@ fn build_apply_ability_per_target_body(
          \x20                   } // end for dx (hull walk)\n\
          \x20               } // end for dy (hull walk)\n\
          \x20           } // end for dz (hull walk)\n\
-         \x20       } else {\n\
-         \x20           // Spread (kind 4) is deferred on the GPU side — sort + cap\n\
-         \x20           // in WGSL is non-trivial under atomicAdd ring writes; the CPU\n\
-         \x20           // oracle handles the count cap correctly\n\
-         \x20           // (`apply_program_aoe_spread_filter` sorts by AgentId then\n\
-         \x20           // truncates), but cross-backend parity for Spread requires\n\
-         \x20           // either a workgroup-local sort or a deterministic ring\n\
-         \x20           // partition we haven't designed yet. Until that lands, Spread\n\
-         \x20           // falls through to the single-target fallback here, matching\n\
-         \x20           // the previous behaviour.\n\
+         \x20       } else if (area_kind == 4u) {\n\
+         \x20           // Spread (#183). area_args layout: [radius, max_targets, _, _]\n\
+         \x20           // (max_targets is stored as f32 in the registry; cast to u32).\n\
          \x20           //\n\
-         \x20           // Non-Circle / non-Cone / non-Box / non-Sphere / non-Ring /\n\
-         \x20           // non-Line / non-Column / non-Wall / non-Cylinder / non-Dome /\n\
-         \x20           // non-Hull (sentinel 0xFFu = no area, kind=4 Spread, or\n\
-         \x20           // unrecognised shape). Single-target fallback — same chain\n\
-         \x20           // shape as the with_aoe_dispatch==false path, just at the\n\
-         \x20           // deeper indent (12/16 spaces) the AOE arm-chain helper\n\
-         \x20           // rendered for the in-radius branch.\n",
+         \x20           // Path B: Circle gate + sort by AgentId ascending + truncate to\n\
+         \x20           // max_targets. P11 requires the kept set to be the lowest-K\n\
+         \x20           // AgentIds; sorting then truncating gives that ordering on\n\
+         \x20           // both backends.\n\
+         \x20           //\n\
+         \x20           // Per-thread implementation: each WGSL thread processes one\n\
+         \x20           // ActionSelected/cast independently. Workgroup-shared sort is\n\
+         \x20           // overkill — we collect candidates into a fixed-size local\n\
+         \x20           // array and sequential-insertion-sort within the single thread.\n\
+         \x20           //\n\
+         \x20           // **16-slot cap (documented limitation).** The local array is\n\
+         \x20           // sized for at most 16 in-radius candidates per cast. Overflow\n\
+         \x20           // beyond 16 (or max_targets > 16) silently truncates to the\n\
+         \x20           // first 16 *collected* — which depends on spatial-grid walk\n\
+         \x20           // order, NOT AgentId order, so the kept set may not match the\n\
+         \x20           // CPU oracle's lowest-K-AgentId post-sort selection. Fixtures\n\
+         \x20           // and abilities targeting > 16 simultaneous candidates per\n\
+         \x20           // cast must keep n_in_radius ≤ 16 to stay byte-equal.\n\
+         \x20           //\n\
+         \x20           // **Spatial walk limitation.** 27-cell walk; if radius exceeds\n\
+         \x20           // SPATIAL_CELL_SIZE candidates beyond the 27-cell footprint\n\
+         \x20           // are missed (same caveat as Circle/Sphere/Box).\n\
+         \x20           let area_args_base: u32 = (effect_base + i) * 4u;\n\
+         \x20           let radius: f32 = ability_registry_area_args[area_args_base + 0u];\n\
+         \x20           let max_targets: u32 = u32(ability_registry_area_args[area_args_base + 1u]);\n\
+         \x20           let radius_sq: f32 = radius * radius;\n\
+         \x20           let aoe_center: vec3<f32> = agent_pos[target_slot];\n\
+         \x20           // Local fixed-size collection buffer (per-thread).\n\
+         \x20           var collected: array<u32, 16>;\n\
+         \x20           var n_collected: u32 = 0u;\n\
+         \x20           let _self_cell_f = (aoe_center + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
+         \x20           let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
+         \x20           let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
+         \x20           let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
+         \x20           let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
+         \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
+         \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
+         \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
+         \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
+         \x20                       let _start = spatial_grid_starts[_cell];\n\
+         \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
+         \x20                       for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {\n\
+         \x20                           let _candidate: u32 = spatial_grid_cells[_i];\n\
+         \x20                           let _cand_pos: vec3<f32> = agent_pos[_candidate];\n\
+         \x20                           let _dvec: vec3<f32> = _cand_pos - aoe_center;\n\
+         \x20                           if (dot(_dvec, _dvec) <= radius_sq) {\n\
+         \x20                               if (n_collected < 16u) {\n\
+         \x20                                   collected[n_collected] = _candidate;\n\
+         \x20                                   n_collected = n_collected + 1u;\n\
+         \x20                               }\n\
+         \x20                               // else: silently drop pre-sort overflow.\n\
+         \x20                           }\n\
+         \x20                       } // end for _i (spread collect)\n\
+         \x20                   } // end for dx (spread collect)\n\
+         \x20               } // end for dy (spread collect)\n\
+         \x20           } // end for dz (spread collect)\n\
+         \x20           // Sequential insertion sort by AgentId ascending (per-thread,\n\
+         \x20           // n_collected ≤ 16 ⇒ O(n²) ≤ 256 comparisons is trivial). The\n\
+         \x20           // inner shift loop uses signed `j` so the j<0 termination is\n\
+         \x20           // explicit (WGSL has no break-on-decrement-from-0u).\n\
+         \x20           for (var _ii: u32 = 1u; _ii < n_collected; _ii = _ii + 1u) {\n\
+         \x20               let _key: u32 = collected[_ii];\n\
+         \x20               var _j: i32 = i32(_ii) - 1;\n\
+         \x20               loop {\n\
+         \x20                   if (_j < 0) { break; }\n\
+         \x20                   if (collected[u32(_j)] <= _key) { break; }\n\
+         \x20                   collected[u32(_j) + 1u] = collected[u32(_j)];\n\
+         \x20                   _j = _j - 1;\n\
+         \x20               }\n\
+         \x20               collected[u32(_j + 1)] = _key;\n\
+         \x20           }\n\
+         \x20           // Truncate to max_targets and emit one chronicle record per\n\
+         \x20           // kept slot via the standard arm chain (target_slot shadowed).\n\
+         \x20           let n_emit: u32 = min(n_collected, max_targets);\n\
+         \x20           for (var _ii: u32 = 0u; _ii < n_emit; _ii = _ii + 1u) {\n\
+         \x20               // Shadow target_slot for the arm chain's chronicle writes.\n\
+         \x20               let target_slot: u32 = collected[_ii];\n",
+    );
+    s.push_str(primary_arm_chain);
+    s.push_str(
+        "                                // Nested loop runs per kept spread target —\n\
+         \x20                               // same shape as Circle/Cone/Box/Sphere.\n\
+         \x20                               let nested_slot_base: u32 = nested_base + i * 2u;\n\
+         \x20                               for (var j: u32 = 0u; j < 2u; j = j + 1u) {\n\
+         \x20                                   let kind: u32 = ability_registry_nested_effect_kinds[nested_slot_base + j];\n\
+         \x20                                   if (kind == 0xFFu) { continue; } // EFFECT_KIND_EMPTY\n\
+         \x20                                   let payload_a: u32 = ability_registry_nested_effect_payload_a[nested_slot_base + j];\n\
+         \x20                                   let payload_b: u32 = ability_registry_nested_effect_payload_b[nested_slot_base + j];\n\
+         \x20                                   let nested_scale_bonus: f32 = 0.0;\n",
+    );
+    s.push_str(nested_arm_chain);
+    s.push_str(
+        "                                }\n\
+         \x20           } // end for _ii (spread emit)\n\
+         \x20       } else {\n\
+         \x20           // Sentinel 0xFFu (= no area) or unrecognised shape →\n\
+         \x20           // single-target fallback at the same indent the non-AOE\n\
+         \x20           // path uses, just deeper (12/16 spaces) since the AOE\n\
+         \x20           // arm-chain helper rendered for the in-radius branch.\n\
+         \x20           // All 12 enumerated AOE shapes (Circle, Cone, Box,\n\
+         \x20           // Sphere, Ring, Line, Spread, Column, Wall, Cylinder,\n\
+         \x20           // Dome, Hull) have explicit branches above.\n",
     );
     s.push_str(primary_arm_chain);
     s.push_str(
@@ -2697,7 +2785,7 @@ fn build_apply_ability_per_target_body(
     s.push_str(nested_arm_chain);
     s.push_str(
         "                }\n\
-         \x20       } // end if (area_kind == 0u) … else if (1u) … else if (5u) … else if (6u) … else if (3u) … else if (2u) … else if (7u) … else if (8u) … else if (9u) … else if (10u) … else if (11u) … else (Spread + sentinel)\n",
+         \x20       } // end if (area_kind == 0u) … else if (1u) … else if (5u) … else if (6u) … else if (3u) … else if (2u) … else if (7u) … else if (8u) … else if (9u) … else if (10u) … else if (11u) … else if (4u Spread) … else (sentinel)\n",
     );
     s
 }
