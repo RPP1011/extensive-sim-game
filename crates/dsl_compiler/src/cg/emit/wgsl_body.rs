@@ -1929,9 +1929,19 @@ fn lower_cg_stmt_body_to_wgsl(
 ///     excluded by the `_dist_sq < 1e-6 -> continue` guard so the
 ///     CPU oracle (`apply_program_aoe_cone_filter`) and GPU emit
 ///     match bit-for-bit.
+///   - `5u` (Box, #179): walk the 27-cell neighborhood around
+///     `aoe_center = agent_pos[target_slot]` (same convention as
+///     Circle); for each candidate within
+///     `abs(d.x) <= wx && abs(d.y) <= wy && abs(d.z) <= wz` (closed
+///     AABB — candidates exactly at a wall are in-box), shadow
+///     `target_slot = candidate` and run the chronicle arm chain.
+///     CPU oracle is `apply_program_aoe_box_filter`. **Spatial walk
+///     limitation:** any half-extent exceeding `SPATIAL_CELL_SIZE`
+///     would miss candidates beyond the 27-cell ring; test fixtures
+///     keep extents ≤ cell size.
 ///   - else (sentinel `0xFFu` = no area, or non-AOE-Path-B shape):
 ///     fall through to the single-target chain with the explicit
-///     cast `target_slot`. Other shapes (Line/Sphere/Capsule/Aabb)
+///     cast `target_slot`. Other shapes (Line/Sphere/Capsule/etc.)
 ///     are deferred — their additional geometry kernels would extend
 ///     this branch.
 ///
@@ -2012,6 +2022,9 @@ fn build_apply_ability_per_target_body(
          \x20       // Cone (1u) walks the 27 cells around `agent_pos[caster_slot]`\n\
          \x20       // (the apex), gates each candidate on range² ∧ angular dot,\n\
          \x20       // and shadows target_slot the same way (#178).\n\
+         \x20       // Box (5u) walks the 27 cells around `agent_pos[target_slot]`,\n\
+         \x20       // gates each candidate on per-axis `|d.<axis>| <= w<axis>`\n\
+         \x20       // (closed AABB), and shadows target_slot the same way (#179).\n\
          \x20       // Sentinel 0xFFu / unrecognised shape → single-target\n\
          \x20       // fallback at the same indent the non-AOE path uses.\n\
          \x20       let area_kind: u32 = ability_registry_area_kinds[effect_base + i];\n\
@@ -2133,8 +2146,64 @@ fn build_apply_ability_per_target_body(
          \x20                   } // end for dy (cone walk)\n\
          \x20               } // end for dz (cone walk)\n\
          \x20           } // end if (dir_len_sq >= 1e-6) — degenerate cone is no-op\n\
+         \x20       } else if (area_kind == 5u) {\n\
+         \x20           // Box (#179). area_args layout: [wx, wy, wz, _] (half-\n\
+         \x20           // extents along each world axis). Center =\n\
+         \x20           // `agent_pos[target_slot]` — same convention as Circle.\n\
+         \x20           // Per-candidate gate: per-axis `|d.<axis>| <= w<axis>`\n\
+         \x20           // (closed AABB; candidates exactly at a wall are in-box).\n\
+         \x20           //\n\
+         \x20           // **Spatial walk limitation.** The 27-cell walk only\n\
+         \x20           // visits the immediate cell ring around the center.\n\
+         \x20           // Any half-extent exceeding `SPATIAL_CELL_SIZE` would\n\
+         \x20           // miss candidates beyond the 27-cell footprint.\n\
+         \x20           // Test fixtures must keep extents ≤ cell size.\n\
+         \x20           let area_args_base: u32 = (effect_base + i) * 4u;\n\
+         \x20           let wx: f32 = ability_registry_area_args[area_args_base + 0u];\n\
+         \x20           let wy: f32 = ability_registry_area_args[area_args_base + 1u];\n\
+         \x20           let wz: f32 = ability_registry_area_args[area_args_base + 2u];\n\
+         \x20           let aoe_center: vec3<f32> = agent_pos[target_slot];\n\
+         \x20           let _self_cell_f = (aoe_center + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
+         \x20           let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
+         \x20           let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
+         \x20           let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
+         \x20           let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
+         \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
+         \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
+         \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
+         \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
+         \x20                       let _start = spatial_grid_starts[_cell];\n\
+         \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
+         \x20                       for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {\n\
+         \x20                           let _candidate: u32 = spatial_grid_cells[_i];\n\
+         \x20                           let _cand_pos: vec3<f32> = agent_pos[_candidate];\n\
+         \x20                           let _dvec: vec3<f32> = _cand_pos - aoe_center;\n\
+         \x20                           if (abs(_dvec.x) <= wx && abs(_dvec.y) <= wy && abs(_dvec.z) <= wz) {\n\
+         \x20                               // Shadow target_slot for the arm chain's chronicle writes.\n\
+         \x20                               let target_slot: u32 = _candidate;\n",
+    );
+    s.push_str(primary_arm_chain);
+    s.push_str(
+        "                                // Nested loop runs per in-box target —\n\
+         \x20                               // same shape as the Circle/Cone branches.\n\
+         \x20                               let nested_slot_base: u32 = nested_base + i * 2u;\n\
+         \x20                               for (var j: u32 = 0u; j < 2u; j = j + 1u) {\n\
+         \x20                                   let kind: u32 = ability_registry_nested_effect_kinds[nested_slot_base + j];\n\
+         \x20                                   if (kind == 0xFFu) { continue; } // EFFECT_KIND_EMPTY\n\
+         \x20                                   let payload_a: u32 = ability_registry_nested_effect_payload_a[nested_slot_base + j];\n\
+         \x20                                   let payload_b: u32 = ability_registry_nested_effect_payload_b[nested_slot_base + j];\n\
+         \x20                                   let nested_scale_bonus: f32 = 0.0;\n",
+    );
+    s.push_str(nested_arm_chain);
+    s.push_str(
+        "                                }\n\
+         \x20                           } // end if (in box)\n\
+         \x20                       } // end for _i (box walk)\n\
+         \x20                   } // end for dx (box walk)\n\
+         \x20               } // end for dy (box walk)\n\
+         \x20           } // end for dz (box walk)\n\
          \x20       } else {\n\
-         \x20           // Non-Circle / non-Cone (sentinel 0xFFu = no area, or\n\
+         \x20           // Non-Circle / non-Cone / non-Box (sentinel 0xFFu = no area, or\n\
          \x20           // unrecognised shape). Single-target fallback — same chain\n\
          \x20           // shape as the with_aoe_dispatch==false path, just at the\n\
          \x20           // deeper indent (12/16 spaces) the AOE arm-chain helper\n\
@@ -2153,7 +2222,7 @@ fn build_apply_ability_per_target_body(
     s.push_str(nested_arm_chain);
     s.push_str(
         "                }\n\
-         \x20       } // end if (area_kind == 0u) … else if (1u) … else\n",
+         \x20       } // end if (area_kind == 0u) … else if (1u) … else if (5u) … else\n",
     );
     s
 }

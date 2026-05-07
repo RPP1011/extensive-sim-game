@@ -263,3 +263,117 @@ fn aoe_cone_degenerate_under_self_cast_emits_no_records() {
          returning an empty in-cone set. Got tail={tail}",
     );
 }
+
+#[test]
+fn aoe_box_hits_within_aabb_extents() {
+    // #179 AOE Path B Box — GPU pin for the box branch.
+    //
+    // Fixture shape: same 4-agent row as Cleave (positions at x=0, 1.5,
+    // 3.0, 4.5). Pulverize ability: `Damage(20) in box(1.5, 1.5, 1.5)`.
+    // Cast from caster slot 0 (target_slot=0 ⇒ aoe_center=(0,0,0) under
+    // the smoke fixture's implicit-target rule). With half-extents
+    // (1.5, 1.5, 1.5):
+    //   - slot 0 at (0,0,0):       |d|=0 → in-box
+    //   - slot 1 at (1.5, 0, 0):   |d.x|=1.5 → in-box (closed AABB,
+    //                              candidate at the wall is in)
+    //   - slot 2 at (3.0, 0, 0):   |d.x|=3.0 > 1.5 → out
+    //   - slot 3 at (4.5, 0, 0):   |d.x|=4.5 > 1.5 → out
+    //
+    // Expected: 2 chronicle records (kind=26 EffectDamageApplied,
+    // actor=0, payload_a=bitcast<u32>(20.0)=0x41A00000), targets in
+    // {0, 1} after sort.
+    //
+    // **Closed-AABB pin.** Agent 1 at exactly the wall (|d.x|=wx)
+    // landing in-box validates that the WGSL's `<=` predicate matches
+    // the CPU oracle's `<=` semantic. A future "open AABB" change
+    // (using `<`) would silently drop slot 1 — this assertion catches
+    // it.
+    //
+    // **Spatial walk constraint pin.** wx=wy=wz=1.5 ≤ cell_size=6.0,
+    // so the 27-cell walk visits every cell that could hold a
+    // candidate. Larger extents would require additional cell rings
+    // (deferred — see the box branch's WGSL doc-comment).
+    let mut pulverize = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 20.0 }],
+    );
+    pulverize.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Box,
+        args: [1.5, 1.5, 1.5, 0.0],
+    }));
+
+    let mut builder = AbilityRegistryBuilder::new();
+    let pulverize_id = builder.register(pulverize);
+    assert_eq!(
+        pulverize_id,
+        AbilityId::new(1).unwrap(),
+        "Pulverize must register at AbilityId(1)",
+    );
+    let registry = builder.build();
+
+    const N_AGENTS: u32 = 4;
+    let levels: Vec<u32> = vec![pulverize_id.raw(); N_AGENTS as usize];
+    let stats: Vec<PerAgentStats> = vec![PerAgentStats::default(); N_AGENTS as usize];
+
+    let state = match ApplyAbilitySmokeState::try_new_with_registry(
+        N_AGENTS,
+        &registry,
+        &levels,
+        &stats,
+    ) {
+        Some(s) => s,
+        None => {
+            eprintln!(
+                "[aoe_chronicle_pin] skipping box test: no wgpu adapter available."
+            );
+            return;
+        }
+    };
+    let mut state = state;
+
+    state.set_agent_alive(&[1, 0, 0, 0]);
+    state.set_agent_positions(&[
+        [0.0, 0.0, 0.0],
+        [1.5, 0.0, 0.0],  // exactly at +x wall — in-box (closed AABB)
+        [3.0, 0.0, 0.0],
+        [4.5, 0.0, 0.0],
+    ]);
+
+    state.step(0);
+
+    let tail = state.read_event_tail();
+    assert_eq!(
+        tail, 2,
+        "AOE Pulverize (box(1.5, 1.5, 1.5)) at center (0,0,0) over row \
+         of 4 agents must emit exactly 2 chronicle records (slots 0 + \
+         1 are in-box; slot 1 at the +x wall is in-box per the closed-\
+         AABB ≤ semantic). Got tail={tail}",
+    );
+
+    let mut records = state.read_event_ring(tail);
+    // P11 sort: GPU's atomicAdd doesn't preserve target order. Sort by
+    // target slot so the assertions can index by sorted position.
+    records.sort_by_key(|r| (r[3], r[0]));
+
+    // Both records: kind=26 (EffectDamageApplied), tick=0, actor=0,
+    // payload_a=bitcast<u32>(20.0)=0x41A00000.
+    let damage_kind: u32 = 26;
+    let amount_bits: u32 = 20.0_f32.to_bits();
+    for (i, expected_target) in [0u32, 1u32].iter().enumerate() {
+        let r = records[i];
+        assert_eq!(r[0], damage_kind, "record {i} kind: expected EffectDamageApplied=26 got {}", r[0]);
+        assert_eq!(r[1], 0, "record {i} tick must be 0");
+        assert_eq!(r[2], 0, "record {i} actor must be caster slot 0");
+        assert_eq!(
+            r[3], *expected_target,
+            "record {i} target: expected slot {expected_target} got {}",
+            r[3],
+        );
+        assert_eq!(
+            r[4], amount_bits,
+            "record {i} payload_a: expected bitcast<u32>(20.0)=0x{amount_bits:08x} got 0x{:08x}",
+            r[4],
+        );
+    }
+}

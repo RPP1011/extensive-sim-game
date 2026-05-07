@@ -28,7 +28,9 @@
 //! because that sweep uses no AOE-shape abilities; this slice does NOT
 //! extend that sweep (would require GPU-side spatial expansion).
 
-use engine::ability::apply::{apply_program_aoe, apply_program_aoe_cone_filter, ApplyEvent};
+use engine::ability::apply::{
+    apply_program_aoe, apply_program_aoe_box_filter, apply_program_aoe_cone_filter, ApplyEvent,
+};
 use engine::ability::program::{
     AbilityProgram, CasterStats, EffectAreaShape, EffectOp, Gate, ShapeKind,
 };
@@ -356,6 +358,125 @@ fn aoe_cone_hits_three_in_fan_five_agent_fixture() {
             other => panic!("expected Damage, got {other:?}"),
         }
     }
+}
+
+#[test]
+fn aoe_box_hits_agents_within_aabb_extents_six_agent_3d_scatter() {
+    // 6 agents scattered in 3D around the origin. Cast center =
+    // ids[0]'s position (origin). Box half-extents (wx=2, wy=2, wz=2)
+    // — a 4×4×4 cube. Expected in-box: agents at distances ≤ 2 along
+    // each axis. The fixture is a mix of in-box / out-of-box positions
+    // covering the wall-inclusive (≤) semantic and per-axis filtering.
+    //
+    //   ids[0] at (0, 0, 0)     in-box (origin)
+    //   ids[1] at (2, 0, 0)     in-box (|x|=2 — wall, ≤ semantic)
+    //   ids[2] at (1, 1, 1)     in-box (all three axes < 2)
+    //   ids[3] at (0, -2, 0)    in-box (|y|=2 — wall, ≤ semantic)
+    //   ids[4] at (3, 0, 0)     out (|x|=3 > 2)
+    //   ids[5] at (1, 0, 5)     out (|z|=5 > 2)
+    let mut state = SimState::new(8, 0xCAFE);
+    let positions = [
+        glam::Vec3::new(0.0, 0.0, 0.0),
+        glam::Vec3::new(2.0, 0.0, 0.0),
+        glam::Vec3::new(1.0, 1.0, 1.0),
+        glam::Vec3::new(0.0, -2.0, 0.0),
+        glam::Vec3::new(3.0, 0.0, 0.0),
+        glam::Vec3::new(1.0, 0.0, 5.0),
+    ];
+    let ids: Vec<AgentId> = positions
+        .iter()
+        .map(|&pos| {
+            state
+                .spawn_agent(AgentSpawn { pos, ..Default::default() })
+                .expect("agent_cap large enough for 6 agents")
+        })
+        .collect();
+    assert_eq!(ids.len(), 6);
+
+    let mut prog = AbilityProgram::new_single_target(
+        5.0,
+        Gate {
+            cooldown_ticks: 10,
+            hostile_only: false,
+            line_of_sight: false,
+        },
+        [EffectOp::Damage { amount: 20.0 }],
+    );
+    prog.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Box,
+        args: [2.0, 2.0, 2.0, 0.0],
+    }));
+
+    // Caller-side box filter — candidates from the spatial query
+    // (radius bounded by max extent · √3 ≈ 3.464 to cover the AABB
+    // diagonal). The box filter then picks the in-AABB subset.
+    let center = state.agent_pos(ids[0]).expect("ids[0] alive");
+    let candidates: Vec<(AgentId, glam::Vec3)> = state
+        .spatial()
+        .within_radius(&state, center, 4.0)
+        .into_iter()
+        .map(|id| (id, state.agent_pos(id).expect("alive")))
+        .collect();
+    let aoe_targets = apply_program_aoe_box_filter(
+        center, /*wx*/ 2.0, /*wy*/ 2.0, /*wz*/ 2.0, &candidates,
+    );
+    assert_eq!(
+        aoe_targets,
+        vec![ids[0], ids[1], ids[2], ids[3]],
+        "box(2,2,2) at origin must hit ids[0..=3] only (sorted ascending; \
+         ids[4] outside x extent, ids[5] outside z extent); got {aoe_targets:?}",
+    );
+
+    let events = apply_program_aoe(
+        &prog,
+        ids[0],
+        ids[0],
+        &aoe_targets,
+        0,
+        0xCAFE,
+        &CasterStats::default(),
+        &CasterStats::default(),
+    );
+    assert_eq!(
+        events.len(),
+        4,
+        "box AOE → 4 chronicle records (one per in-box target)"
+    );
+    for (i, expected_target) in [ids[0], ids[1], ids[2], ids[3]].iter().enumerate() {
+        match &events[i] {
+            ApplyEvent::Damage { source, target, amount } => {
+                assert_eq!(*source, ids[0], "event[{i}] source must be caster ids[0]");
+                assert_eq!(*target, *expected_target, "event[{i}] target");
+                assert_eq!(*amount, 20.0, "event[{i}] amount must be 20.0");
+            }
+            other => panic!("expected Damage, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn aoe_box_filter_zero_extent_collapses_to_axis_equality() {
+    // Edge case: zero half-extent on an axis → strict equality semantic
+    // on that axis (only candidates with `cand.<axis> == center.<axis>`
+    // match). Pin the documented behavior.
+    let center = glam::Vec3::new(0.0, 0.0, 0.0);
+    let candidates = vec![
+        // In-box (z=0 exactly): wx/wy slack admits everything else.
+        (AgentId::new(1).unwrap(), glam::Vec3::new(1.0, 1.0, 0.0)),
+        (AgentId::new(2).unwrap(), glam::Vec3::new(-1.0, -1.0, 0.0)),
+        // Out: any non-zero z drops them from the in-box set.
+        (AgentId::new(3).unwrap(), glam::Vec3::new(0.0, 0.0, 0.001)),
+        (AgentId::new(4).unwrap(), glam::Vec3::new(0.0, 0.0, -0.001)),
+    ];
+    let hits = apply_program_aoe_box_filter(
+        center, /*wx*/ 5.0, /*wy*/ 5.0, /*wz*/ 0.0, &candidates,
+    );
+    assert_eq!(
+        hits,
+        vec![AgentId::new(1).unwrap(), AgentId::new(2).unwrap()],
+        "wz=0 collapses z-axis to equality with center.z=0; only z==0 \
+         candidates remain in-box; got {hits:?}"
+    );
 }
 
 #[test]

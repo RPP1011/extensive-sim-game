@@ -449,20 +449,23 @@ pub(crate) fn evaluate_predicate(
 ///
 /// Per-effect slot dispatch:
 ///   * If `program.per_effect_areas[i]` is `Some(EffectAreaShape{
-///     kind: Circle, .. })` or `Some(EffectAreaShape{ kind: Cone, .. })`,
-///     the slot fires once per `aoe_targets` entry — one ApplyEvent
-///     per target. The caller is responsible for performing the
-///     spatial + geometric filter (Circle: `state.spatial().within_radius(
-///     state, target_pos, args[0])`; Cone: range² gate ∧ angular gate,
-///     see `apply_program_aoe_cone_filter` for the canonical CPU
-///     filter that mirrors the GPU kernel's WGSL math) and passing
-///     the result here. The slice MUST be sorted ascending by raw
-///     `AgentId` (P11 — `SpatialHash::within_radius` does this by
-///     construction; the cone helper sorts as its final step).
-///   * Any other `Some(...)` shape (Line, Sphere, Box, etc.) —
-///     deferred. The slot falls back to single-target dispatch on
+///     kind: Circle, .. })`, `Some(EffectAreaShape{ kind: Cone, .. })`,
+///     or `Some(EffectAreaShape{ kind: Box, .. })`, the slot fires once
+///     per `aoe_targets` entry — one ApplyEvent per target. The caller
+///     is responsible for performing the spatial + geometric filter
+///     (Circle: `state.spatial().within_radius(state, target_pos,
+///     args[0])`; Cone: range² gate ∧ angular gate, see
+///     `apply_program_aoe_cone_filter` for the canonical CPU filter
+///     that mirrors the GPU kernel's WGSL math; Box: per-axis
+///     `|d.<axis>| <= w<axis>` AABB containment, see
+///     `apply_program_aoe_box_filter`) and passing the result here.
+///     The slice MUST be sorted ascending by raw `AgentId` (P11 —
+///     `SpatialHash::within_radius` does this by construction; the
+///     cone and box helpers sort as their final step).
+///   * Any other `Some(...)` shape (Line, Sphere, etc.) — deferred.
+///     The slot falls back to single-target dispatch on
 ///     `primary_target`. The other shapes need additional geometry
-///     kernels (capsule, AABB, etc.) which Path A defers.
+///     kernels (capsule, etc.) which Path A defers.
 ///   * `None` slot (single-target, default) — fires once on
 ///     `primary_target`, identical to `apply_program`'s behavior.
 ///
@@ -541,15 +544,17 @@ pub fn apply_program_aoe(
             })
             .unwrap_or(0.0);
 
-        // Choose target list for this slot. Circle and Cone expand
-        // across aoe_targets (caller pre-filters for both — Circle by
-        // `within_radius`, Cone by `apply_program_aoe_cone_filter`);
-        // everything else (None, or unrecognised shape) is
-        // single-target on primary_target.
+        // Choose target list for this slot. Circle, Cone, and Box
+        // expand across aoe_targets (caller pre-filters for all three —
+        // Circle by `within_radius`, Cone by
+        // `apply_program_aoe_cone_filter`, Box by
+        // `apply_program_aoe_box_filter`); everything else (None, or
+        // unrecognised shape) is single-target on primary_target.
         let is_aoe_shape = matches!(
             program.per_effect_areas.get(i).copied().flatten(),
             Some(shape) if shape.kind == ShapeKind::Circle
                         || shape.kind == ShapeKind::Cone
+                        || shape.kind == ShapeKind::Box
         );
         let targets_for_slot: &[AgentId] = if is_aoe_shape {
             aoe_targets
@@ -648,6 +653,68 @@ pub fn apply_program_aoe_cone_filter(
             continue;
         }
         hits.push(id);
+    }
+    // P11 reduction-determinism: sort ascending by raw AgentId so the
+    // CPU oracle and GPU dispatcher (after canonicalize) agree on
+    // emit order.
+    hits.sort_by_key(|id| id.raw());
+    hits
+}
+
+/// CPU-side box-filter oracle for AOE Path B Box (mirrors the GPU
+/// kernel's WGSL math bit-for-bit so callers feeding `apply_program_aoe`
+/// produce a chronicle record set byte-equal to the GPU dispatcher).
+///
+/// Inputs:
+///   * `center` — explicit cast target's position (same convention as
+///     Circle: `aoe_center = agent_pos[target_slot]`).
+///   * `wx`, `wy`, `wz` — `args[0..=2]` from the `EffectAreaShape` (box
+///     half-extents along each world axis). `args[3]` is unused.
+///   * `candidates` — slice of `(AgentId, position)` pairs the caller
+///     pre-collected from the spatial grid (the GPU walks 27 cells
+///     around `center`; the CPU helper accepts any superset and filters
+///     down).
+///
+/// Output: in-box `AgentId`s sorted ascending by raw id (P11).
+///
+/// In-box predicate (per candidate, identical to the WGSL kernel):
+///   1. `abs(cand.x - center.x) <= wx`
+///   2. `abs(cand.y - center.y) <= wy`
+///   3. `abs(cand.z - center.z) <= wz`
+///
+/// Edge case: any half-extent of 0 collapses that axis to a strict
+/// equality (only candidates exactly at `center.<axis>` on that axis
+/// match). Same closed-AABB semantic as Circle's `<=` on radius² —
+/// candidates exactly at the wall are inside.
+///
+/// **Spatial walk limitation.** The GPU dispatcher walks the 27-cell
+/// neighborhood around the center; if any of `wx`, `wy`, `wz` exceed
+/// the spatial cell size (`SPATIAL_CELL_SIZE = 6.0`), candidates beyond
+/// the 27-cell ring are missed by the GPU walk. The CPU helper does
+/// not impose this constraint — callers are responsible for sizing the
+/// candidate superset accordingly (typical caller passes
+/// `state.spatial().within_radius(state, center, max(wx, wy, wz) * √3)`
+/// or similar). Tests + parity sweeps must keep extents ≤ cell size to
+/// stay byte-equal across backends.
+///
+/// **P11.** Both backends evaluate the predicate identically (three
+/// abs/sub/cmp ops in the same order). The final sort makes the
+/// post-filter set deterministic — GPU's atomic ring claim doesn't
+/// preserve order, but the parity sweep sorts post-readback
+/// (canonicalize) and the sets agree.
+pub fn apply_program_aoe_box_filter(
+    center:     glam::Vec3,
+    wx:         f32,
+    wy:         f32,
+    wz:         f32,
+    candidates: &[(AgentId, glam::Vec3)],
+) -> Vec<AgentId> {
+    let mut hits: Vec<AgentId> = Vec::with_capacity(candidates.len());
+    for &(id, cand_pos) in candidates {
+        let dvec = cand_pos - center;
+        if dvec.x.abs() <= wx && dvec.y.abs() <= wy && dvec.z.abs() <= wz {
+            hits.push(id);
+        }
     }
     // P11 reduction-determinism: sort ascending by raw AgentId so the
     // CPU oracle and GPU dispatcher (after canonicalize) agree on
@@ -1385,6 +1452,102 @@ mod tests {
             hits,
             vec![agent_n(3)],
             "apex-coincident candidates must be excluded; got {hits:?}",
+        );
+    }
+
+    #[test]
+    fn aoe_box_expands_across_pre_filtered_targets() {
+        // Box shape: same expansion contract as Circle/Cone — the caller
+        // pre-filters and passes the in-box set, the dispatcher emits
+        // one ApplyEvent per target. The AABB math itself is exercised
+        // by `aoe_box_filter_*` tests below; this test pins the
+        // dispatch leg.
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 20.0 }],
+        );
+        prog.per_effect_areas.push(Some(EffectAreaShape {
+            kind: ShapeKind::Box,
+            args: [1.5, 1.5, 1.5, 0.0],
+        }));
+        let aoe_targets = [agent_n(2), agent_n(3)];
+        let events = apply_program_aoe(
+            &prog,
+            agent_n(1),
+            agent_n(2),
+            &aoe_targets,
+            0, 0xCAFE,
+            &CasterStats::default(),
+            &CasterStats::default(),
+        );
+        assert_eq!(events.len(), 2, "Box AOE → one event per pre-filtered target");
+        assert!(matches!(
+            events[0],
+            ApplyEvent::Damage { target: t, .. } if t == agent_n(2)
+        ));
+        assert!(matches!(
+            events[1],
+            ApplyEvent::Damage { target: t, .. } if t == agent_n(3)
+        ));
+    }
+
+    #[test]
+    fn aoe_box_filter_non_uniform_extents() {
+        // Non-uniform extents (wx=2, wy=0.5, wz=2) — narrow band along
+        // the y-axis. Candidates at varying y must be filtered down to
+        // only those with |y - center.y| ≤ 0.5; x and z extents are
+        // wide enough to admit the full row.
+        let center = glam::Vec3::new(0.0, 0.0, 0.0);
+        let candidates = vec![
+            (agent_n(1), glam::Vec3::new(0.0, 0.0, 0.0)),     // in-box (origin)
+            (agent_n(2), glam::Vec3::new(1.0, 0.4, 0.5)),     // in-box (|y|=0.4 ≤ 0.5)
+            (agent_n(3), glam::Vec3::new(-1.5, 0.5, -1.0)),   // in-box (|y|=0.5 — wall, ≤ semantic)
+            (agent_n(4), glam::Vec3::new(0.0, 0.6, 0.0)),     // out (|y|=0.6 > 0.5)
+            (agent_n(5), glam::Vec3::new(0.0, -0.7, 0.0)),    // out (|y|=0.7 > 0.5)
+            (agent_n(6), glam::Vec3::new(2.5, 0.0, 0.0)),     // out (|x|=2.5 > 2.0)
+        ];
+        let hits = apply_program_aoe_box_filter(center, 2.0, 0.5, 2.0, &candidates);
+        assert_eq!(
+            hits,
+            vec![agent_n(1), agent_n(2), agent_n(3)],
+            "narrow-band box must filter to {{1,2,3}} (sorted ascending by id); got {hits:?}"
+        );
+    }
+
+    #[test]
+    fn aoe_box_filter_wall_inclusive_edge_case() {
+        // A candidate at exactly `center + (wx, 0, 0)` is in-box (≤
+        // semantic, not <). Pin so a future "open AABB" change surfaces.
+        let center = glam::Vec3::new(0.0, 0.0, 0.0);
+        let wx = 1.5;
+        let candidates = vec![
+            (agent_n(1), glam::Vec3::new(wx, 0.0, 0.0)),       // at +x wall
+            (agent_n(2), glam::Vec3::new(-wx, 0.0, 0.0)),      // at -x wall
+            (agent_n(3), glam::Vec3::new(wx + 0.001, 0.0, 0.0)), // just past +x wall — out
+        ];
+        let hits = apply_program_aoe_box_filter(center, wx, 1.5, 1.5, &candidates);
+        assert_eq!(
+            hits,
+            vec![agent_n(1), agent_n(2)],
+            "candidates at the AABB walls (|d|=wx) are in-box (closed AABB), \
+             but |d|=wx+ε is out; got {hits:?}"
+        );
+    }
+
+    #[test]
+    fn aoe_box_filter_empty_set_outside_extents() {
+        // No candidate inside the box → empty in-box set.
+        let center = glam::Vec3::new(0.0, 0.0, 0.0);
+        let candidates = vec![
+            (agent_n(1), glam::Vec3::new(2.0, 0.0, 0.0)),  // out (|x|=2 > 1.5)
+            (agent_n(2), glam::Vec3::new(0.0, 5.0, 0.0)),  // out (|y|=5 > 1.5)
+            (agent_n(3), glam::Vec3::new(0.0, 0.0, -10.0)), // out (|z|=10 > 1.5)
+        ];
+        let hits = apply_program_aoe_box_filter(center, 1.5, 1.5, 1.5, &candidates);
+        assert!(
+            hits.is_empty(),
+            "all candidates outside extents → empty in-box set; got {hits:?}"
         );
     }
 
