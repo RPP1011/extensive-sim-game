@@ -358,8 +358,17 @@ fn lower_one_handler(
         ctx,
     )?;
 
+    // Slice δ part 2 (#161): set the per-agent flag so
+    // `IrStmt::ApplyAbility` lowering (in `lower_stmt`) can branch
+    // on dispatch shape. The flag toggles around the body lowering
+    // and restores afterward — symmetric to the `target_local`
+    // toggle pattern in `lower_filter_for_mask`.
+    let prev_per_agent = ctx.current_per_agent_rule;
+    ctx.current_per_agent_rule = per_agent;
+
     // Lower the handler body.
     let body_stmt_ids = lower_stmt_list(rule_id, &handler.body, ctx)?;
+    ctx.current_per_agent_rule = prev_per_agent;
     // If the handler had a `where` clause, wrap the lowered body in a
     // `CgStmt::If { cond: where_expr, then: body, else_: None }` so
     // the per-thread dispatch only commits writes for matching agents.
@@ -566,18 +575,26 @@ fn lower_stmt(
             span: *span,
         }),
         IrStmt::ApplyAbility { ability, span } => {
-            // #136 / slice δ (#161): lower both the ability operand
-            // AND an explicit caster expression. Caster defaults to
-            // `AgentSelfId` — the per-thread agent in PerAgent kernel
-            // shape. PerEvent rules need a different binding (event
-            // payload's `actor` field) which lands as a follow-up; the
-            // current emit gates that case off via the `agent_id`
-            // identifier referenced at WGSL emit time.
+            // Slice δ part 2 (#161): gate on dispatch shape. PerAgent
+            // rules lower caster to `AgentSelfId` (→ `agent_id` in
+            // WGSL); PerEvent rules need the actor read from the
+            // event payload, which the current shape of
+            // `CgStmt::ApplyAbility` doesn't yet support — surface a
+            // typed error so the user sees the gap clearly instead
+            // of broken WGSL (the prior silent-hardcoded-`agent_id`
+            // path produced "no definition in scope" naga errors
+            // far from the design context).
             //
-            // The dispatcher reads `caster` to compose chronicle records
-            // — slice γ writes it into both actor + target slots
-            // (self-cast convention) until an explicit target operand
-            // grows here too.
+            // When PerEvent caster synthesis lands, this branch
+            // returns a `Read(EventField{actor})` expression instead
+            // of erroring.
+            if !ctx.current_per_agent_rule {
+                return Err(LoweringError::UnsupportedPhysicsStmt {
+                    rule: rule_id,
+                    ast_label: "ApplyAbility/PerEvent",
+                    span: *span,
+                });
+            }
             let ability_id = lower_expr(ability, ctx)?;
             let caster_id = ctx
                 .builder

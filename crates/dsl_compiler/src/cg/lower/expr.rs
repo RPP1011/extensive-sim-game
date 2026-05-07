@@ -154,6 +154,19 @@ pub struct LoweringCtx<'a> {
     /// shape as other unbound receivers) so the driver-side invariant is
     /// enforced at every layer.
     pub target_local: bool,
+    /// Slice δ part 2 (#161): set to `true` while lowering a body
+    /// inside a `@phase(per_agent)` physics rule, `false` for
+    /// PerEvent rules. Inspected by `IrStmt::ApplyAbility` lowering
+    /// to choose between caster=`AgentSelfId` (PerAgent — works
+    /// today) and caster=event-payload-actor (PerEvent — not yet
+    /// implemented; surfaces as a typed error so the user sees the
+    /// gap clearly instead of broken WGSL).
+    ///
+    /// `lower_one_handler` toggles this around its `lower_stmt_list`
+    /// call and restores afterward. Default `false` matches the
+    /// most-restrictive shape so callers that forget to set it get
+    /// the typed error rather than silent agent_id-undeclared WGSL.
+    pub current_per_agent_rule: bool,
     /// `(NamespaceId::Config, "<block>.<field>")` → typed `ConfigConstId`
     /// resolver. Populated by the driver's
     /// [`super::driver::populate_config_consts`] walk over
@@ -278,6 +291,7 @@ impl<'a> LoweringCtx<'a> {
             action_ids: HashMap::new(),
             diagnostics: Vec::new(),
             target_local: false,
+            current_per_agent_rule: false,
             config_const_ids: HashMap::new(),
             lazy_view_bodies: HashMap::new(),
             local_tys: HashMap::new(),

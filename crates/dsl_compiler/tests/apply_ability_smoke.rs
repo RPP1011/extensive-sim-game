@@ -367,37 +367,28 @@ fn apply_ability_in_fused_kernel_with_plain_rule_passes_naga_validator() {
 /// than `agent_cap`, and the cfg uniform carries event-count, not
 /// agent-count.
 ///
-/// **Known-failing — captured here as documentation, not a CI gate.**
+/// **Slice δ part 2 (#161): now errors cleanly at lowering time.**
 ///
-/// **Structural plumbing landed (#161 part 1)**: `CgStmt::ApplyAbility`
-/// now carries an explicit `caster` operand, and the dispatcher emit
-/// reads `caster` instead of the prior hardcoded `agent_id`. This
-/// fixes the PerAgent path cleanly (caster lowers to `AgentSelfId` →
-/// `agent_id`) — see the surrounding tests in this file.
+/// Was previously `#[ignore]` because the dispatcher hardcoded
+/// `agent_id` (PerAgent's per-thread var) and PerEvent kernels
+/// produced broken WGSL. Slice δ part 1 made caster an explicit
+/// operand; part 2 (this iteration) gates the lowering: PerAgent
+/// rules lower caster to `AgentSelfId` as before, PerEvent rules
+/// surface a typed `UnsupportedPhysicsStmt` so the user sees the
+/// gap at compile time instead of getting an opaque naga error
+/// from the runtime far from the design context.
 ///
-/// **PerEvent path still broken**: lowering today
-/// (`cg/lower/physics.rs:567`) populates caster from
-/// `CgExpr::AgentSelfId` REGARDLESS of dispatch shape. PerEvent
-/// kernels still resolve `agent_id` to the same undeclared
-/// identifier — the structural change unblocks the next step but
-/// doesn't solve PerEvent on its own.
+/// **Still pending (slice δ part 3)**: actually synthesize the
+/// caster from the event payload's actor field for PerEvent rules
+/// — replace the typed-error branch with a real
+/// `Read(EventField{actor})` lowering. That needs a convention
+/// for which event field is the actor (or per-event opt-in) plus
+/// resolution against the event-field-index registry.
 ///
-/// **Next slice (#161 part 2)**: thread `DispatchShape` through
-/// `lower_physics_stmt` and synthesize the caster from the event
-/// payload's actor field when the surrounding rule is PerEvent.
-/// Without an actor convention on every event, this also needs a
-/// design decision (e.g., gate apply_ability to events with an
-/// `actor: AgentId` field).
-///
-/// Removing the `#[ignore]` is the natural reproducer when the
-/// PerEvent lowering branch lands.
+/// This test now PASSES — it asserts the lowering fails with the
+/// expected typed error rather than producing broken WGSL.
 #[test]
-#[ignore = "slice δ part 2 — needs PerEvent-aware caster lowering \
-            from event payload's actor field; structural plumbing \
-            (CgStmt::ApplyAbility.caster) is in but lowering still \
-            populates AgentSelfId for both shapes"]
-fn apply_ability_in_per_event_rule_passes_naga_validator() {
-    use naga::valid::{Capabilities, ValidationFlags, Validator};
+fn apply_ability_in_per_event_rule_errors_at_lowering() {
     let src = "
         event Tick { }
         event Triggered { who: AgentId, ability_id: u32 }
@@ -412,51 +403,22 @@ fn apply_ability_in_per_event_rule_passes_naga_validator() {
     ";
     let program = dsl_compiler::parse(src).expect("parse");
     let comp = dsl_ast::resolve::resolve(program).expect("resolve");
-    let cg = dsl_compiler::cg::lower::lower_compilation_to_cg(&comp)
-        .expect("lower");
-    let schedule_result = dsl_compiler::cg::schedule::synthesize_schedule(
-        &cg,
-        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    // Lowering must surface a typed UnsupportedPhysicsStmt with
+    // ast_label="ApplyAbility/PerEvent" — NOT proceed to emit and
+    // produce broken WGSL.
+    let outcome = dsl_compiler::cg::lower::lower_compilation_to_cg(&comp);
+    let err = outcome.expect_err(
+        "PerEvent ApplyAbility must error at lowering time \
+         (slice δ part 2 typed-error gate)",
     );
-    let art = dsl_compiler::cg::emit::emit_cg_program(&schedule_result.schedule, &cg)
-        .expect("emit");
-
-    let body = kernel_body_containing(&art, "DispatchOnTrigger")
-        .or_else(|| kernel_body_containing(&art, "physics"))
-        .expect("physics kernel emitted");
-    // PerEvent shape: cfg carries event_count, not agent_cap.
+    let diags = format!("{err:?}");
     assert!(
-        body.contains("cfg.event_count") || body.contains("event_count"),
-        "PerEvent kernel must reference event_count in its preamble \
-         (cfg uniform shape);\n{body}"
+        diags.contains("UnsupportedPhysicsStmt"),
+        "expected UnsupportedPhysicsStmt diagnostic, got: {diags}"
     );
-    // Dispatcher loop reached.
     assert!(
-        body.contains("for (var i: u32 = 0u; i < 6u;"),
-        "dispatcher loop must land in PerEvent rule body;\n{body}"
-    );
-
-    // Naga validator. Catches PerEvent-specific shape errors (e.g.
-    // event_idx vs agent_id confusion in the chronicle writes).
-    let mut errs = Vec::new();
-    for (name, kernel_body) in &art.wgsl_files {
-        let module = match naga::front::wgsl::parse_str(kernel_body) {
-            Ok(m) => m,
-            Err(e) => {
-                errs.push(format!("  {name}: parse failed: {e}"));
-                continue;
-            }
-        };
-        let mut validator = Validator::new(ValidationFlags::all(), Capabilities::all());
-        if let Err(e) = validator.validate(&module) {
-            errs.push(format!("  {name}: validate failed: {e:?}"));
-        }
-    }
-    assert!(
-        errs.is_empty(),
-        "PerEvent ApplyAbility variant emitted {} kernels naga rejects:\n{}",
-        errs.len(),
-        errs.join("\n"),
+        diags.contains("ApplyAbility/PerEvent"),
+        "expected ast_label=\"ApplyAbility/PerEvent\", got: {diags}"
     );
 }
 
