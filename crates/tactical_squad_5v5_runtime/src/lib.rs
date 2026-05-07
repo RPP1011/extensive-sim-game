@@ -40,6 +40,8 @@
 //!   - `level[i]`: 0=Red, 1=Blue (team membership discriminant)
 //!   - `hp[i]`: 200 for Tank, 80 for Healer, 120 for DPS
 
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
 use engine::sim_trait::{AgentSnapshot, CompiledSim, VizGlyph};
 use engine::GpuContext;
 use glam::Vec3;
@@ -48,6 +50,8 @@ use wgpu::util::DeviceExt;
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
 use engine::gpu::{EventRing, ViewStorage};
+
+mod binding_check;
 
 // Role discriminants — match `entity Tank/Healer/Dps : Agent`
 // declaration order in `assets/sim/tactical_squad_5v5.sim`.
@@ -89,6 +93,26 @@ pub struct TacticalSquad5v5State {
     /// `target.level != self.level` (enemies) or
     /// `target.level == self.level` (allies).
     agent_level_buf: wgpu::Buffer,
+    /// Task #138 follow-on (tactical_squad_5v5 port, 2026-05-07) —
+    /// per-stat agent SoA columns the apply_ability dispatcher's
+    /// `scale_bonus = Σ percent * agent_stat[caster_slot]` switch reads.
+    /// tactical_squad_5v5's TankAttack + DpsAttack have no scaling
+    /// entries today, so all five columns sit at their inert init
+    /// values; the dispatcher's `scale_bonus` collapses to 0
+    /// unconditionally. Kept on the state struct because the Strike
+    /// + Snipe verb-chronicle kernels still BIND them (the dispatcher
+    /// emits the stat-switch arms whether or not any program actually
+    /// scales). Mirrors apply_ability_smoke_runtime + duel_abilities_runtime
+    /// + duel_25v25_runtime exactly — the same five-column shape.
+    #[allow(dead_code)]
+    agent_attack_damage_buf: wgpu::Buffer,
+    agent_max_hp_buf: wgpu::Buffer,
+    #[allow(dead_code)]
+    agent_armor_buf: wgpu::Buffer,
+    #[allow(dead_code)]
+    agent_magic_resist_buf: wgpu::Buffer,
+    #[allow(dead_code)]
+    agent_move_speed_buf: wgpu::Buffer,
 
     // -- Mask bitmaps (one per verb in source order: Strike=0,
     //    Snipe=1, Heal=2) --
@@ -115,8 +139,26 @@ pub struct TacticalSquad5v5State {
     chronicle_strike_cfg_buf: wgpu::Buffer,
     chronicle_snipe_cfg_buf: wgpu::Buffer,
     chronicle_heal_cfg_buf: wgpu::Buffer,
+    /// Task #138 follow-on (tactical_squad_5v5 port, 2026-05-07) —
+    /// cfg uniform for the new ApplyDamageFromChronicle physics rule.
+    /// Reads EffectDamageApplied(kind=26) records from the event ring
+    /// (written by Strike + Snipe's apply_ability dispatcher arms) and
+    /// re-emits them as Damaged events the existing
+    /// ApplyDamage_and_ApplyHeal cascade drains.
+    apply_chronicle_cfg_buf: wgpu::Buffer,
     apply_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
+
+    /// Task #138 follow-on (tactical_squad_5v5 port, 2026-05-07) —
+    /// Packed AbilityRegistry uploaded to the GPU. The Strike + Snipe
+    /// verb-chronicle kernels bind `effect_kinds` /
+    /// `effect_payload_a` / `effect_payload_b` (and the modifier
+    /// columns) for the apply_ability dispatcher arm. Built once at
+    /// construction by `binding_check::build_tactical_squad_5v5_registry`
+    /// (TankAttack at AbilityId(1), DpsAttack at AbilityId(2)) and
+    /// uploaded via `PackedAbilityRegistryGpu::upload`. The buffers
+    /// live for the rest of the run.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
 
@@ -149,6 +191,18 @@ impl TacticalSquad5v5State {
             agent_count, 10,
             "tactical_squad_5v5 requires agent_count=10 (5 per team × 2 teams)"
         );
+
+        // Task #138 follow-on (tactical_squad_5v5 port, 2026-05-07) —
+        // runs ONCE at startup before any GPU work. Asserts the
+        // runtime's hand-built TankAttack + DpsAttack programs land
+        // at AbilityId(1) and AbilityId(2) so the
+        // `apply_ability 1` / `apply_ability 2` literals in
+        // `assets/sim/tactical_squad_5v5.sim` (Strike + Snipe verb
+        // bodies) dispatch the correct programs. Cheap (two-program
+        // registry build); panics on any drift before the expensive
+        // GPU init below.
+        binding_check::assert_ability_registry_matches_sim_constants();
+
         let gpu = GpuContext::new_blocking().expect("init wgpu adapter + device");
 
         // Per-slot init — 5 Red (0..5), 5 Blue (5..10).
@@ -210,6 +264,53 @@ impl TacticalSquad5v5State {
                 | wgpu::BufferUsages::COPY_DST
                 | wgpu::BufferUsages::COPY_SRC,
         });
+
+        // ---- AbilityRegistry GPU upload (Task #138 follow-on) ----
+        // Build the two-program registry (TankAttack at AbilityId(1),
+        // DpsAttack at AbilityId(2)), pack it via
+        // PackedAbilityRegistry::pack, and upload one buffer per SoA
+        // column. The Strike + Snipe verb-chronicle kernels bind these
+        // for the apply_ability dispatcher arm. Building the registry
+        // repeats the binding-check's program-build pass (cheap — two
+        // hand-built programs) but keeps construction colocated with
+        // the upload site, mirroring duel_25v25 / duel_abilities.
+        let registry = binding_check::build_tactical_squad_5v5_registry();
+        let packed = PackedAbilityRegistry::pack(&registry);
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &packed, &gpu, "tactical_squad_5v5_runtime",
+        );
+
+        // ---- Per-stat agent SoA columns (Task #138 follow-on) ----
+        // The apply_ability dispatcher's `scale_bonus = Σ percent *
+        // agent_stat[caster_slot]` switch reads these unconditionally
+        // even though tactical_squad_5v5's TankAttack + DpsAttack have
+        // no scaling entries — the per-effect scaling SoA is empty,
+        // so scale_bonus collapses to 0.0 inside the dispatcher. We
+        // still need to bind real buffers because the kernel's BGL
+        // declares the bindings. Init values mirror duel_25v25
+        // (max_hp=100, others=0).
+        let n = agent_count as usize;
+        let zeros_f32: Vec<f32> = vec![0.0_f32; n];
+        let max_hp_init: Vec<f32> = vec![100.0_f32; n];
+        let agent_max_hp_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("tactical_squad_5v5_runtime::agent_max_hp"),
+            contents: bytemuck::cast_slice(&max_hp_init),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+        let mk_zero_stat = |label: &str| {
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: bytemuck::cast_slice(&zeros_f32),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            })
+        };
+        let agent_attack_damage_buf =
+            mk_zero_stat("tactical_squad_5v5_runtime::agent_attack_damage");
+        let agent_armor_buf = mk_zero_stat("tactical_squad_5v5_runtime::agent_armor");
+        let agent_magic_resist_buf =
+            mk_zero_stat("tactical_squad_5v5_runtime::agent_magic_resist");
+        let agent_move_speed_buf =
+            mk_zero_stat("tactical_squad_5v5_runtime::agent_move_speed");
 
         // Three mask bitmaps — one per verb. Cleared each tick.
         let mask_bitmap_words = (agent_count + 31) / 32;
@@ -320,6 +421,21 @@ impl TacticalSquad5v5State {
             contents: bytemuck::bytes_of(&apply_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        // Task #138 follow-on (tactical_squad_5v5 port, 2026-05-07) —
+        // Cfg uniform for the new ApplyDamageFromChronicle physics rule
+        // that translates EffectDamageApplied(kind=26) records emitted
+        // by the apply_ability dispatcher (Strike + Snipe) into Damaged
+        // events the existing ApplyDamage_and_ApplyHeal cascade
+        // consumes (with HP drain + Defeated emit + damage_dealt fold).
+        let apply_chronicle_cfg_init =
+            physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleCfg {
+                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            };
+        let apply_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("tactical_squad_5v5_runtime::apply_chronicle_cfg"),
+            contents: bytemuck::bytes_of(&apply_chronicle_cfg_init),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let seed_cfg_init = seed_indirect_0::SeedIndirect0Cfg {
             agent_cap: agent_count, tick: 0, seed: 0, _pad: 0,
         };
@@ -353,6 +469,11 @@ impl TacticalSquad5v5State {
             agent_mana_buf,
             agent_creature_type_buf,
             agent_level_buf,
+            agent_attack_damage_buf,
+            agent_max_hp_buf,
+            agent_armor_buf,
+            agent_magic_resist_buf,
+            agent_move_speed_buf,
             mask_0_bitmap_buf,
             mask_1_bitmap_buf,
             mask_2_bitmap_buf,
@@ -370,8 +491,10 @@ impl TacticalSquad5v5State {
             chronicle_strike_cfg_buf,
             chronicle_snipe_cfg_buf,
             chronicle_heal_cfg_buf,
+            apply_chronicle_cfg_buf,
             apply_cfg_buf,
             seed_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             tick: 0,
             agent_count,
@@ -585,7 +708,14 @@ impl CompiledSim for TacticalSquad5v5State {
             self.agent_count,
         );
 
-        // (4) Strike chronicle — gates on action_id==0, emits Damaged.
+        // (4) Strike chronicle — gates on action_id==0. Task #138
+        // follow-on (tactical_squad_5v5 port, 2026-05-07): instead of
+        // emitting Damaged directly, the kernel walks the
+        // AbilityRegistry's effect SoA columns (TankAttack at
+        // AbilityId(1)) and writes EffectDamageApplied chronicle
+        // records (kind=26). The new ApplyDamageFromChronicle kernel
+        // below re-emits those as Damaged so the existing
+        // ApplyDamage_and_ApplyHeal cascade keeps working unchanged.
         let event_count_estimate = self.agent_count * 4;
         let strike_cfg = physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeCfg {
             event_count: event_count_estimate, tick: self.tick as u32, seed: 0, _pad0: 0,
@@ -596,6 +726,25 @@ impl CompiledSim for TacticalSquad5v5State {
         let strike_bindings = physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
+            agent_hp:            &self.agent_hp_buf,
+            agent_max_hp:        &self.agent_max_hp_buf,
+            agent_move_speed:    &self.agent_move_speed_buf,
+            agent_armor:         &self.agent_armor_buf,
+            agent_magic_resist:  &self.agent_magic_resist_buf,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_mana:          &self.agent_mana_buf,
+            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
+            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             cfg: &self.chronicle_strike_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_strike(
@@ -603,7 +752,10 @@ impl CompiledSim for TacticalSquad5v5State {
             event_count_estimate,
         );
 
-        // (5) Snipe chronicle — gates on action_id==1, emits Damaged.
+        // (5) Snipe chronicle — gates on action_id==1. Same
+        // apply_ability dispatcher shape as Strike above (DpsAttack at
+        // AbilityId(2)) — writes EffectDamageApplied(kind=26) records
+        // re-emitted by ApplyDamageFromChronicle.
         let snipe_cfg = physics_verb_chronicle_Snipe::PhysicsVerbChronicleSnipeCfg {
             event_count: event_count_estimate, tick: self.tick as u32, seed: 0, _pad0: 0,
         };
@@ -613,6 +765,25 @@ impl CompiledSim for TacticalSquad5v5State {
         let snipe_bindings = physics_verb_chronicle_Snipe::PhysicsVerbChronicleSnipeBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
+            agent_hp:            &self.agent_hp_buf,
+            agent_max_hp:        &self.agent_max_hp_buf,
+            agent_move_speed:    &self.agent_move_speed_buf,
+            agent_armor:         &self.agent_armor_buf,
+            agent_magic_resist:  &self.agent_magic_resist_buf,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_mana:          &self.agent_mana_buf,
+            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
+            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             cfg: &self.chronicle_snipe_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_snipe(
@@ -635,6 +806,33 @@ impl CompiledSim for TacticalSquad5v5State {
         dispatch::dispatch_physics_verb_chronicle_heal(
             &mut self.cache, &heal_bindings, &self.gpu.device, &mut encoder,
             event_count_estimate,
+        );
+
+        // (6b) ApplyDamageFromChronicle — chronicle re-emit. Task #138
+        // follow-on (tactical_squad_5v5 port, 2026-05-07): consumes
+        // EffectDamageApplied(kind=26) records the apply_ability
+        // dispatcher writes from Strike + Snipe and re-emits them as
+        // Damaged events. The existing ApplyDamage_and_ApplyHeal
+        // kernel below drains Damaged unchanged.
+        //
+        // PerEvent + emit-only kernel — does NOT trip P6.
+        let apply_chronicle_cfg = physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleCfg {
+            event_count: event_count_estimate, tick: self.tick as u32,
+            seed: 0, _pad0: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.apply_chronicle_cfg_buf, 0,
+            bytemuck::bytes_of(&apply_chronicle_cfg),
+        );
+        let apply_chronicle_bindings =
+            physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleBindings {
+                event_ring: self.event_ring.ring(),
+                event_tail: self.event_ring.tail(),
+                cfg: &self.apply_chronicle_cfg_buf,
+            };
+        dispatch::dispatch_physics_applydamagefromchronicle(
+            &mut self.cache, &apply_chronicle_bindings,
+            &self.gpu.device, &mut encoder, event_count_estimate,
         );
 
         // (7) ApplyDamage_and_ApplyHeal — fused PerEvent kernel.

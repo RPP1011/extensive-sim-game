@@ -53,6 +53,29 @@ event Damaged {
   amount: f32,
 }
 
+// Engine-side chronicle event written by the apply_ability dispatcher
+// at hardcoded EventKindId 26 (see
+// `dsl_ast::engine_events::engine_event_kind_id_for_name`).
+//
+// Task #138 follow-on (tactical_squad_5v5 port, 2026-05-07) — Strike
+// (Tank) and Snipe (DPS) verb bodies now dispatch via apply_ability
+// instead of inline `emit Damaged`. The dispatcher writes
+// EffectDamageApplied records into the event ring; the new
+// ApplyDamageFromChronicle physics rule (declared below near
+// ApplyDamage) re-emits these records as `Damaged` so the rest of the
+// cascade (ApplyDamage's per-agent hp decrement + Defeated emit) and
+// the `damage_dealt` view fold keep working unchanged. Same chronicle
+// re-emit pattern duel_abilities + duel_25v25 use.
+//
+// Heal stays on the existing `Healed` chronicle path (apply_ability
+// swap for Heal is followup, not in this slice).
+@replayable @gpu_amenable
+event EffectDamageApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
 @replayable @gpu_amenable
 event Healed {
   source: AgentId,
@@ -109,7 +132,25 @@ verb Strike(self, target: Agent) =
         && self.creature_type == Tank
         && target.level != self.level
         && (world.tick % 3 == 0))
-  emit Damaged { source: self, target: target, amount: config.combat.tank_damage }
+  // Task #138 follow-on (tactical_squad_5v5 port, 2026-05-07) —
+  // Strike was `emit Damaged { source: self, target: target, amount:
+  // config.combat.tank_damage }`. The literal `1` is TankAttack's
+  // AbilityId in the tactical_squad_5v5 AbilityRegistry built by
+  // `crates/tactical_squad_5v5_runtime/src/binding_check.rs`
+  // (TankAttack registers first → AbilityId(1); DpsAttack second →
+  // AbilityId(2)). The dispatcher writes EffectDamageApplied
+  // chronicle records (kind=26); ApplyDamageFromChronicle below
+  // re-emits as Damaged so ApplyDamage's HP drain + Defeated emit
+  // (and the `damage_dealt` fold) keep working unchanged.
+  //
+  // CONFIG → REGISTRY BRIDGE: the dispatcher's literal damage amount
+  // is hardcoded in the runtime's hand-built program (10.0, matching
+  // `config.combat.tank_damage = 10.0`). apply_ability's pack-time
+  // literal API doesn't accept config refs, so the runtime mirrors
+  // the config default. If `tank_damage` ever drifts, the
+  // binding-check assertion in `binding_check.rs` flags the
+  // divergence at startup.
+  apply_ability 1 by self target target
   // Filter dead candidates: their hp is negative (driven down by
   // continued post-mortem damage when no alive-check happens), so a
   // dead target's `(C - target.hp)` term would dominate the argmax
@@ -136,7 +177,19 @@ verb Snipe(self, target: Agent) =
         && self.creature_type == Dps
         && target.level != self.level
         && (world.tick % 4 == 0))
-  emit Damaged { source: self, target: target, amount: config.combat.dps_damage }
+  // Task #138 follow-on (tactical_squad_5v5 port, 2026-05-07) —
+  // Snipe was `emit Damaged { source: self, target: target, amount:
+  // config.combat.dps_damage }`. The literal `2` is DpsAttack's
+  // AbilityId in the tactical_squad_5v5 AbilityRegistry (TankAttack=1,
+  // DpsAttack=2). Same chronicle re-emit shape as Strike above —
+  // dispatcher writes EffectDamageApplied(kind=26),
+  // ApplyDamageFromChronicle re-emits as Damaged.
+  //
+  // CONFIG → REGISTRY BRIDGE: damage amount hardcoded in the runtime
+  // as 22.0 (matches `config.combat.dps_damage = 22.0`). Same
+  // bridge caveat as Strike — pack-time literals don't accept config
+  // refs today.
+  apply_ability 2 by self target target
   // Same dead-target filter as Strike — without `target.alive` in the
   // score expression, post-mortem `target.hp` driven negative by
   // continued targeting would dominate the argmax forever.
@@ -164,6 +217,27 @@ verb Heal(self, target: Agent) =
   // the score collapses to -infinity-ish and the next-lowest alive
   // ally takes over.
   score (if target.alive { 200.0 - target.hp } else { -1000000.0 })
+
+// -------------------------------------------------------------------
+// Task #138 follow-on (tactical_squad_5v5 port, 2026-05-07) — Strike
+// (Tank) and Snipe (DPS) verb bodies now use `apply_ability N by self
+// target target`. The dispatcher writes EffectDamageApplied chronicle
+// records (engine-aliased to kind=26) instead of the source-declared
+// Damaged event. This rule consumes those records and re-emits Damaged
+// so the rest of the cascade (ApplyDamage's per-agent hp decrement +
+// Defeated emit AND the `damage_dealt` view fold) keeps working
+// unchanged. Mirrors the chronicle re-emit shape duel_abilities and
+// duel_25v25 use.
+//
+// P6 caveat: this rule is PerEvent + emit-only (no AgentField writes)
+// — does NOT trip P6, unlike ApplyDamage / ApplyHeal below.
+// -------------------------------------------------------------------
+@phase(post)
+physics ApplyDamageFromChronicle {
+  on EffectDamageApplied { actor: a, target: t, amount: amt } {
+    emit Damaged { source: a, target: t, amount: amt }
+  }
+}
 
 // -------------------------------------------------------------------
 // ApplyDamage chronicle — same shape as duel_1v1. Reduces target HP
