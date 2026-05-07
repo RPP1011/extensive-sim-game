@@ -89,7 +89,7 @@ pub struct BossFightState {
     /// HeroStun control-status proof (boss_fight, 2026-05-07) —
     /// per-agent `stun_expires_at_tick` SoA column. Written by the
     /// fused
-    /// `physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`
+    /// `physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle`
     /// kernel from kind=29 EffectStunApplied chronicle records produced
     /// by HeroStun's verb chronicle dispatcher (kind=29 records carry
     /// `expires_at_tick = world.tick + 15` precomputed by the
@@ -127,16 +127,19 @@ pub struct BossFightState {
     chronicle_hero_stun_cfg_buf: wgpu::Buffer,
     chronicle_hero_heal_cfg_buf: wgpu::Buffer,
     /// Task #138 follow-on (boss_fight port, 2026-05-07) + HeroStun
-    /// control-status proof (boss_fight, 2026-05-07) — cfg uniform for
+    /// control-status proof (boss_fight, 2026-05-07) + HeroHeal
+    /// apply_ability proof (boss_fight, 2026-05-07) — cfg uniform for
     /// the FUSED chronicle-consumer kernel. The lower pass folded
-    /// ApplyDamageFromChronicle (drains kind=26 → emit Damaged) and
+    /// ApplyDamageFromChronicle (drains kind=26 → emit Damaged),
     /// ApplyStunFromChronicle (drains kind=29 → write
-    /// `agents.set_stun_expires_at_tick`) into ONE kernel
-    /// (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`)
-    /// because both consume from the same event ring at @phase(post)
-    /// with non-overlapping kind tags. Single cfg + single dispatch
-    /// per tick. Mirrors the same fusion duel_25v25 +
-    /// mass_battle_100v100's lib.rs surfaced.
+    /// `agents.set_stun_expires_at_tick`), and ApplyHealFromChronicle
+    /// (drains kind=27 → write
+    /// `agents.set_hp(min(hp+amt, max_hp))`) into ONE kernel
+    /// (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle`)
+    /// because all three consume from the same event ring at
+    /// @phase(post) with non-overlapping kind tags (26 + 29 + 27).
+    /// Single cfg + single dispatch per tick. Fusion grew from 2-way
+    /// to 3-way when HeroHeal switched to the chronicle-pipeline shape.
     apply_chronicle_cfg_buf: wgpu::Buffer,
     apply_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
@@ -267,8 +270,10 @@ impl BossFightState {
         // HeroStun control-status proof (boss_fight, 2026-05-07) —
         // per-agent `stun_expires_at_tick` SoA column. Init to 0 = "never
         // stunned" (the convention established by duel_abilities). The
-        // fused ApplyDamageFromChronicle_and_ApplyStunFromChronicle
-        // kernel writes this slot from kind=29 EffectStunApplied
+        // fused
+        // ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle
+        // kernel (3-way fusion since HeroHeal joined the chronicle path,
+        // 2026-05-07) writes this slot from kind=29 EffectStunApplied
         // chronicle records (one record per HeroStun cast). COPY_SRC
         // is on so the test can read it back via `read_u32`.
         let stun_expires_init: Vec<u32> = vec![0_u32; agent_count as usize];
@@ -427,17 +432,21 @@ impl BossFightState {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         // Task #138 follow-on (boss_fight port, 2026-05-07) + HeroStun
-        // control-status proof (boss_fight, 2026-05-07) — cfg uniform
+        // control-status proof (boss_fight, 2026-05-07) + HeroHeal
+        // apply_ability proof (boss_fight, 2026-05-07) — cfg uniform
         // for the FUSED chronicle-consumer kernel. The lower pass folded
-        // ApplyDamageFromChronicle (kind=26 → emit Damaged) and
+        // ApplyDamageFromChronicle (kind=26 → emit Damaged),
         // ApplyStunFromChronicle (kind=29 → write
-        // `agents.set_stun_expires_at_tick`) into one kernel
-        // (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`)
-        // because both consume from the same event ring at @phase(post)
-        // with non-overlapping kind tags. Single cfg + single dispatch
-        // per tick.
+        // `agents.set_stun_expires_at_tick`), and ApplyHealFromChronicle
+        // (kind=27 → write `agents.set_hp(min(hp+amt, max_hp))`) into
+        // ONE kernel
+        // (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle`)
+        // because all three consume from the same event ring at
+        // @phase(post) with non-overlapping kind tags (26 + 29 + 27).
+        // Single cfg + single dispatch per tick. Fusion grew from 2-way
+        // to 3-way when HeroHeal switched to the chronicle pipeline.
         let apply_chronicle_cfg_init =
-            physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleCfg {
+            physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleAndApplyHealFromChronicleCfg {
                 event_count: 0, tick: 0, seed: 0, _pad0: 0,
             };
         let apply_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -538,7 +547,7 @@ impl BossFightState {
     /// Per-agent `stun_expires_at_tick` readback (u32 absolute tick at
     /// which the stun expires; 0 = "never stunned"). HeroStun control-
     /// status proof (boss_fight, 2026-05-07) — written by the fused
-    /// `physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`
+    /// `physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle`
     /// kernel from kind=29 EffectStunApplied chronicle records emitted
     /// by HeroStun's verb chronicle dispatcher.
     pub fn read_stun_expires_at_tick(&self) -> Vec<u32> {
@@ -598,6 +607,31 @@ impl BossFightState {
     pub fn agent_count(&self) -> u32 { self.agent_count }
     pub fn tick(&self) -> u64 { self.tick }
     pub fn seed(&self) -> u64 { self.seed }
+
+    /// Test-only hook: stamp `hp` into one slot of `agent_hp_buf` so a
+    /// behavioural test can pre-seed a wounded agent before stepping.
+    /// HeroHeal apply_ability proof (boss_fight, 2026-05-07): the
+    /// `hero_heal_recovers_friendly_hp` test seeds a hero slot at
+    /// hp=50.0 (well below max_hp=100.0) so HeroHeal's score expression
+    /// (`if (... && target.hp < 100.0) { 1000.0 - target.hp } else { -1000.0 }`)
+    /// elects that slot as every other hero's argmax target on tick 7,
+    /// driving the chronicle Heal arm to write hp > 50 back to the
+    /// SoA. Same shape `duel_25v25_runtime` uses ad-hoc; we expose it
+    /// as a method for explicit test wiring rather than reaching into
+    /// the buffer directly via `gpu.queue`.
+    #[cfg(test)]
+    pub fn write_hp_slot(&self, slot: u32, hp: f32) {
+        assert!(
+            slot < self.agent_count,
+            "write_hp_slot: slot={slot} out of range (agent_count={})",
+            self.agent_count,
+        );
+        let offset = (slot as wgpu::BufferAddress) * 4;
+        self.gpu.queue.write_buffer(
+            &self.agent_hp_buf, offset, bytemuck::bytes_of(&hp),
+        );
+        self.gpu.queue.submit(std::iter::empty());
+    }
 }
 
 impl CompiledSim for BossFightState {
@@ -867,12 +901,22 @@ impl CompiledSim for BossFightState {
             self.agent_count,
         );
 
-        // (7) HeroHeal chronicle — gates on action_id==4u, emits Healed.
-        // HeroStun control-status proof (boss_fight, 2026-05-07):
-        // HeroHeal's action_id shifted from 3 to 4 because HeroStun was
-        // inserted at source position 3. The kernel name + binding
-        // shape are unchanged — the action_id literal in the generated
-        // kernel is the only detail that moved.
+        // (7) HeroHeal chronicle. HeroHeal apply_ability proof (boss_fight,
+        // 2026-05-07) — verb body now uses `apply_ability 4 by self target
+        // target` (was `emit Healed { ..self.. }`). Same chronicle re-emit
+        // pattern as BossStrike + HeroAttack except the AbilityProgram at
+        // slot 4 declares EffectOp::Heal{ amount: 25.0 } instead of Damage,
+        // so the apply_ability dispatcher writes kind=27
+        // EffectHealApplied records (carrying `amount = 25.0`). The fused
+        // ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle
+        // kernel below drains kind=27 into a clamped `agents.set_hp(t,
+        // min(hp + amt, max_hp))` write.
+        //
+        // Action_id == 4 (source-order: BossStrike=0, BossSelfHeal=1,
+        // HeroAttack=2, HeroStun=3, HeroHeal=4). Kernel-byte size grew
+        // 1688 → 85129 because the body switched from a single `emit`
+        // to the full apply_ability dispatcher arm (effect-SoA walk +
+        // scaling switch). Bindings count grew 3 → 23.
         let hh_cfg = physics_verb_chronicle_HeroHeal::PhysicsVerbChronicleHeroHealCfg {
             event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
         };
@@ -882,6 +926,26 @@ impl CompiledSim for BossFightState {
         let hh_bindings = physics_verb_chronicle_HeroHeal::PhysicsVerbChronicleHeroHealBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
+            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
+            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
+            ability_registry_chances:           &self.registry_gpu.chances,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_max_hp: &self.agent_max_hp_buf,
+            agent_hp: &self.agent_hp_buf,
+            agent_armor: &self.agent_armor_buf,
+            agent_magic_resist: &self.agent_magic_resist_buf,
+            agent_move_speed: &self.agent_move_speed_buf,
+            agent_mana: &self.agent_mana_buf,
             cfg: &self.chronicle_hero_heal_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_heroheal(
@@ -890,22 +954,31 @@ impl CompiledSim for BossFightState {
         );
 
         // (7b) Fused ApplyDamageFromChronicle + ApplyStunFromChronicle
-        // — chronicle consumers fused into ONE kernel by the lower pass
-        // (both run @phase(post) over the same event ring with
-        // non-overlapping kind tags). HeroStun control-status proof
-        // (boss_fight, 2026-05-07). Drains:
+        // + ApplyHealFromChronicle — chronicle consumers fused into ONE
+        // kernel by the lower pass (all three run @phase(post) over the
+        // same event ring with non-overlapping kind tags). HeroStun
+        // control-status proof (boss_fight, 2026-05-07) + HeroHeal
+        // apply_ability proof (boss_fight, 2026-05-07). Drains:
         //   - kind=26 EffectDamageApplied → emit `Damaged` (re-emit;
         //     the standalone ApplyDamage_and_ApplyHeal kernel below
         //     decrements HP)
         //   - kind=29 EffectStunApplied → write
         //     `agents.set_stun_expires_at_tick(t, expires_at_tick)`
         //     directly into the per-agent SoA slot.
+        //   - kind=27 EffectHealApplied → write
+        //     `agents.set_hp(t, min(hp + amt, max_hp))` directly
+        //     (HeroHeal apply_ability proof, 2026-05-07).
+        // Fusion grew 2-way → 3-way when HeroHeal switched from emit
+        // Healed (a 3-binding kernel) to the apply_ability chronicle
+        // pipeline. Bindings on the fused kernel grew from 4 → 6
+        // (added agent_hp + agent_max_hp).
         //
         // event_count is the upper bound on chronicle records produced
-        // per tick across BossStrike + HeroAttack + HeroStun. Same
-        // agent_count*4 headroom estimate the rest of the cascade uses.
+        // per tick across BossStrike + HeroAttack + HeroStun + HeroHeal.
+        // Same agent_count*4 headroom estimate the rest of the cascade
+        // uses.
         let event_count_estimate = self.agent_count * 4;
-        let apply_chronicle_cfg = physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleCfg {
+        let apply_chronicle_cfg = physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleAndApplyHealFromChronicleCfg {
             event_count: event_count_estimate,
             tick: self.tick as u32,
             seed: 0,
@@ -917,13 +990,15 @@ impl CompiledSim for BossFightState {
             bytemuck::bytes_of(&apply_chronicle_cfg),
         );
         let apply_chronicle_bindings =
-            physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleBindings {
+            physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleAndApplyHealFromChronicleBindings {
                 event_ring: self.event_ring.ring(),
                 event_tail: self.event_ring.tail(),
+                agent_hp: &self.agent_hp_buf,
+                agent_max_hp: &self.agent_max_hp_buf,
                 agent_stun_expires_at_tick: &self.agent_stun_expires_at_tick_buf,
                 cfg: &self.apply_chronicle_cfg_buf,
             };
-        dispatch::dispatch_physics_applydamagefromchronicle_and_applystunfromchronicle(
+        dispatch::dispatch_physics_applydamagefromchronicle_and_applystunfromchronicle_and_applyhealfromchronicle(
             &mut self.cache,
             &apply_chronicle_bindings,
             &self.gpu.device,
@@ -1371,5 +1446,112 @@ mod viz_tests {
                 stun[i],
             );
         }
+    }
+
+    /// HeroHeal apply_ability proof (boss_fight, 2026-05-07) — proves
+    /// the apply_ability dispatcher emits kind=27 EffectHealApplied
+    /// chronicle records in the asymmetric 1-vs-N RPG combat shape AND
+    /// the 3-way fused
+    /// `physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle`
+    /// kernel ferries the per-record `amount` into the per-agent hp
+    /// SoA via `agents.set_hp(t, min(hp + amt, max_hp))`.
+    ///
+    /// PRE-SEED: a hero slot (slot 2) is stamped at hp=50 before
+    /// stepping. The HeroHeal score expression `if (target.alive &&
+    /// target.creature_type == Hero && target.hp < 100.0) { 1000.0 -
+    /// target.hp }` qualifies slot 2 (score 950) but sentinel-rejects
+    /// the unwounded heroes (slots 1, 3, 4, 5 at hp=200; 200 NOT <
+    /// 100). So at tick 7 every alive hero's argmax picks slot 2 as
+    /// the HeroHeal target (score 950 > HeroStun's 2.0 > HeroAttack's
+    /// 1.0).
+    ///
+    /// CADENCE AT THE SEAM: HeroHeal fires at `world.tick % 7 == 0`,
+    /// so steps 0..=6 (= ticks 0..=6) drive ONE cast cycle at tick 0.
+    /// At tick 0, slot 2's HeroHeal score is 950 (qualifies; hp=50 <
+    /// 100); the 4 other heroes pick slot 2 as their argmax target
+    /// (slot 2 also picks itself — see Gap-E note in HeroHeal score).
+    /// After ApplyHealFromChronicle drains the 5 records, slot 2's hp
+    /// ends ≥ 75 (a single cast: 50 + 25 = 75; multiple casters race-
+    /// write the same SoA slot but each reads the same input snapshot,
+    /// so all writes converge on 75).
+    ///
+    /// HOW THE TEST PROVES HERO-HEAL FIRED:
+    ///   1. After 7 ticks, slot 2's hp is > 50 (proves the chronicle
+    ///      path emitted kind=27 records AND the fused consumer wrote
+    ///      the SoA).
+    ///   2. Slot 2's hp does NOT exceed max_hp=100 (proves the
+    ///      `min(hp+amt, max_hp)` clamp engaged in
+    ///      ApplyHealFromChronicle).
+    #[test]
+    fn hero_heal_recovers_friendly_hp() {
+        const N: u32 = 6;
+        const WOUNDED_SLOT: u32 = 2;
+        let mut state = BossFightState::new(0xCAFE_F00D, N);
+
+        // Pre-seed slot 2 at hp=50. The other heroes start at hp=200.
+        // Slot 2 sits below the HeroHeal `target.hp < 100.0` gate;
+        // the others don't, so slot 2 is the universal argmax pick at
+        // tick 7. Boss stays at hp=5000, far above any threshold.
+        state.write_hp_slot(WOUNDED_SLOT, 50.0);
+
+        // Sanity: pre-tick hp readback shows the seed landed.
+        let initial_hp = state.read_hp();
+        assert_eq!(
+            initial_hp[WOUNDED_SLOT as usize], 50.0,
+            "pre-seed write failed: slot {} hp={} (expected 50.0)",
+            WOUNDED_SLOT, initial_hp[WOUNDED_SLOT as usize],
+        );
+        for i in 1..(N as usize) {
+            if i as u32 == WOUNDED_SLOT { continue; }
+            assert_eq!(
+                initial_hp[i], 200.0,
+                "non-wounded hero slot {i} must start at hp=200; got {}",
+                initial_hp[i],
+            );
+        }
+
+        // Run 7 ticks (steps 0..=6). HeroHeal (% 7 == 0) fires at tick
+        // 0 only — the next firing tick is 7, beyond the window.
+        // BossStrike fires at tick 0 too, but argmax picks slot 1 (the
+        // first alive hero by slot order) for damage; slot 2 stays
+        // un-struck. HeroAttack (% 3 = 0, 3, 6) fires too but at tick
+        // 0 the scoring argmax for heroes picks HeroHeal (score 950)
+        // over HeroAttack (1.0), so HeroAttack only lands at ticks 3
+        // and 6 — irrelevant to slot 2's hp arithmetic.
+        for _ in 0..7 {
+            state.step();
+        }
+
+        let hp_now = state.read_hp();
+
+        // Pin 1: slot 2's hp moved above the seed value of 50 — proves
+        // HeroHeal's apply_ability dispatch emitted kind=27
+        // EffectHealApplied records AND the fused chronicle consumer
+        // wrote the SoA with a clamped `agents.set_hp(t, min(hp + amt,
+        // max_hp))`.
+        assert!(
+            hp_now[WOUNDED_SLOT as usize] > 50.0,
+            "after 7 ticks slot {WOUNDED_SLOT}'s hp must be > 50 \
+             (HeroHeal apply_ability proof); got hp[{WOUNDED_SLOT}]={}. \
+             Per-slot hp: {:?}",
+            hp_now[WOUNDED_SLOT as usize],
+            hp_now,
+        );
+
+        // Pin 2: slot 2's hp is bounded above by max_hp=100 — proves
+        // the `min(hp + amt, max_hp)` clamp in ApplyHealFromChronicle
+        // engaged. Five heroes targeting slot 2 each compute
+        // min(50+25, 100) = 75; without the clamp a hypothetical
+        // higher-seed run would climb past max_hp. Other hero slots
+        // are unhealed in this scenario (they don't qualify as
+        // HeroHeal targets — hp ≥ 100) so we don't pin them; they may
+        // sit at hp=150 (BossStrike landed on slot 1) or hp=200 (no
+        // damage), neither of which speaks to the heal clamp.
+        assert!(
+            hp_now[WOUNDED_SLOT as usize] <= 100.0 + 0.001,
+            "slot {WOUNDED_SLOT}: hp={} exceeds max_hp=100.0; clamp \
+             in ApplyHealFromChronicle didn't engage",
+            hp_now[WOUNDED_SLOT as usize],
+        );
     }
 }
