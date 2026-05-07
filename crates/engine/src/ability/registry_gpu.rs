@@ -75,6 +75,12 @@ pub struct PackedAbilityRegistryGpu {
     /// u8 widened to u32.
     pub scaling_stat_refs: wgpu::Buffer,
     pub scaling_percents: wgpu::Buffer,
+
+    // -- Nested-effect rows (stride = MAX_EFFECTS_PER_PROGRAM ×
+    //    MAX_NESTED_PER_EFFECT). Wave 1.5#9 — see `PackedAbilityRegistry`.
+    pub nested_effect_kinds:     wgpu::Buffer,
+    pub nested_effect_payload_a: wgpu::Buffer,
+    pub nested_effect_payload_b: wgpu::Buffer,
 }
 
 impl PackedAbilityRegistryGpu {
@@ -136,6 +142,10 @@ impl PackedAbilityRegistryGpu {
             area_args:         mk_f32("area_args",         &packed.area_args),
             scaling_stat_refs: mk_u32("scaling_stat_refs", &widen_u8(&packed.scaling_stat_refs)),
             scaling_percents:  mk_f32("scaling_percents",  &packed.scaling_percents),
+
+            nested_effect_kinds:     mk_u32("nested_effect_kinds",     &packed.nested_effect_kinds),
+            nested_effect_payload_a: mk_u32("nested_effect_payload_a", &packed.nested_effect_payload_a),
+            nested_effect_payload_b: mk_u32("nested_effect_payload_b", &packed.nested_effect_payload_b),
         }
     }
 }
@@ -188,6 +198,8 @@ mod tests {
             &gpu.chances, &gpu.lifetime_kinds, &gpu.lifetime_payloads,
             &gpu.area_kinds, &gpu.area_args, &gpu.scaling_stat_refs,
             &gpu.scaling_percents,
+            &gpu.nested_effect_kinds, &gpu.nested_effect_payload_a,
+            &gpu.nested_effect_payload_b,
         );
     }
 }

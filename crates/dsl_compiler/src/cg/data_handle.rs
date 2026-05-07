@@ -1084,6 +1084,15 @@ pub enum AbilityRegistryColumn {
     /// stride = MAX_EFFECTS_PER_PROGRAM × MAX_SCALINGS_PER_EFFECT.
     ScalingStatRefs  = 15,
     ScalingPercents  = 16,
+    /// Wave 1.5#9 nested-effect dispatch — per-(effect, nested-slot)
+    /// EffectOp discriminant + 2-word payload. Stride =
+    /// MAX_EFFECTS_PER_PROGRAM × MAX_NESTED_PER_EFFECT (= 6 × 2).
+    /// Empty slots use `EFFECT_KIND_EMPTY` (0xFF) parallel to the
+    /// primary `EffectKinds` column. The dispatcher walks these
+    /// AFTER the primary effect's chronicle write per slot.
+    NestedEffectKinds    = 17,
+    NestedEffectPayloadA = 18,
+    NestedEffectPayloadB = 19,
 }
 
 /// Kind tag for an interned id surfaced by [`DataHandle::fmt_with`].

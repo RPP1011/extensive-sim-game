@@ -40,8 +40,8 @@
 
 use super::program::{
     Area, Delivery, EffectAreaShape, EffectOp, EffectScaling, LifetimeMode,
-    MAX_EFFECTS_PER_PROGRAM, MAX_SCALINGS_PER_EFFECT, MAX_TAGS_PER_PROGRAM, StackingMode,
-    TargetSelector,
+    MAX_EFFECTS_PER_PROGRAM, MAX_NESTED_PER_EFFECT, MAX_SCALINGS_PER_EFFECT,
+    MAX_TAGS_PER_PROGRAM, StackingMode, TargetSelector,
 };
 use super::{AbilityProgram, AbilityRegistry, AbilityTag};
 
@@ -284,6 +284,43 @@ pub struct PackedAbilityRegistry {
     /// percent by itself.
     /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM * MAX_SCALINGS_PER_EFFECT`.
     pub scaling_percents: Vec<f32>,
+
+    // -- Nested-effect rows (flat, stride =
+    //    MAX_EFFECTS_PER_PROGRAM * MAX_NESTED_PER_EFFECT). -------------
+    //
+    // Wave 1.5#9: per-effect nested follow-up effects from
+    // `<verb> <args> { <inner_stmt>; ... }`. The dispatcher walks the
+    // primary effect's chronicle write, then walks up to
+    // `MAX_NESTED_PER_EFFECT` (=2) nested ops on that slot and writes
+    // a chronicle record per chronicle-bearing nested op. Closes the
+    // documented gap from the Reap verb swap (commit `72a35307`):
+    // Reap's `{ stun 1s }` produces an EffectStunApplied chronicle
+    // record alongside EffectExecuteApplied.
+    //
+    // Inner-effect modifiers (chance / scaling / lifetime / etc.)
+    // are silently dropped at lowering today — see
+    // `program.nested_per_effect` doc — so nested ops carry only the
+    // (kind, payload_a, payload_b) triple. No companion sentinel
+    // columns are needed; the primary's `EFFECT_KIND_EMPTY` (0xFF)
+    // sentinel serves the same role for empty inner slots.
+
+    /// Per-effect-per-nested EffectOp discriminant (same encoding as
+    /// `effect_kinds`, e.g. `Damage=0`, `Stun=3`). `EFFECT_KIND_EMPTY`
+    /// (0xFF) marks slots where the source ability had no nested op
+    /// (or fewer than `MAX_NESTED_PER_EFFECT` nested ops on that
+    /// effect). The dispatcher's nested-walk skips sentinel slots.
+    /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM * MAX_NESTED_PER_EFFECT`.
+    pub nested_effect_kinds: Vec<u32>,
+
+    /// Per-effect-per-nested first payload word (same encoding as
+    /// `effect_payload_a`). `0` for sentinel slots. Length matches
+    /// `nested_effect_kinds`.
+    pub nested_effect_payload_a: Vec<u32>,
+
+    /// Per-effect-per-nested second payload word (same encoding as
+    /// `effect_payload_b`). `0` for sentinel slots. Length matches
+    /// `nested_effect_kinds`.
+    pub nested_effect_payload_b: Vec<u32>,
 }
 
 impl PackedAbilityRegistry {
@@ -352,6 +389,16 @@ impl PackedAbilityRegistry {
         let mut scaling_stat_refs = vec![SCALING_STAT_NONE_SENTINEL; scaling_total];
         let mut scaling_percents = vec![0.0_f32; scaling_total];
 
+        // Nested effects: pre-fill kinds with `EFFECT_KIND_EMPTY` and
+        // payloads with `0` so empty effect slots + effects without a
+        // `{ <inner> }` block + nested-slot indices that exceed the
+        // number of nested ops authored share a single resting state.
+        // Per-effect-per-nested overrides land in `pack_program_nested`.
+        let nested_total = n * MAX_EFFECTS_PER_PROGRAM * MAX_NESTED_PER_EFFECT;
+        let mut nested_effect_kinds = vec![EFFECT_KIND_EMPTY; nested_total];
+        let mut nested_effect_payload_a = vec![0_u32; nested_total];
+        let mut nested_effect_payload_b = vec![0_u32; nested_total];
+
         for slot in 0..n {
             // `AbilityId` is 1-based; the registry's `get` accepts an id,
             // so reconstruct it from the slot. The registry guarantees
@@ -389,6 +436,13 @@ impl PackedAbilityRegistry {
                 &mut scaling_stat_refs,
                 &mut scaling_percents,
             );
+            pack_program_nested(
+                program,
+                slot,
+                &mut nested_effect_kinds,
+                &mut nested_effect_payload_a,
+                &mut nested_effect_payload_b,
+            );
         }
 
         Self {
@@ -410,6 +464,9 @@ impl PackedAbilityRegistry {
             area_args,
             scaling_stat_refs,
             scaling_percents,
+            nested_effect_kinds,
+            nested_effect_payload_a,
+            nested_effect_payload_b,
         }
     }
 
@@ -679,6 +736,54 @@ fn pack_program_scalings(
     }
 }
 
+/// Wave 1.5#9: splat one program's per-effect-per-nested EffectOps
+/// into the row-major `nested_effect_kinds` + `nested_effect_payload_*`
+/// buffers. Slots already pre-filled (`EFFECT_KIND_EMPTY` / `0` / `0`);
+/// only authored entries overwrite. `program.nested_per_effect` is
+/// outer-index-parallel to `program.effects` when populated; an empty
+/// outer slice means no effect carried a `{ <inner> }` block (every
+/// slot stays at the sentinel + zero payloads). Inner SmallVec is
+/// bounded at `MAX_NESTED_PER_EFFECT` (2 today).
+///
+/// Stride is `MAX_EFFECTS_PER_PROGRAM * MAX_NESTED_PER_EFFECT` so a
+/// GPU shader addresses slot `(ability, effect, nested)` as
+/// `slot * MAX_EFFECTS_PER_PROGRAM * MAX_NESTED_PER_EFFECT
+///  + effect * MAX_NESTED_PER_EFFECT + nested`.
+///
+/// Encoding mirrors `pack_effect`'s primary-effect encoding 1:1 — the
+/// dispatcher's nested-walk reuses the same arm-chain shape, so the
+/// payload columns must carry identical semantics per kind discriminant.
+fn pack_program_nested(
+    program:                 &AbilityProgram,
+    slot:                    usize,
+    nested_effect_kinds:     &mut [u32],
+    nested_effect_payload_a: &mut [u32],
+    nested_effect_payload_b: &mut [u32],
+) {
+    let base = slot * MAX_EFFECTS_PER_PROGRAM * MAX_NESTED_PER_EFFECT;
+    for (eff_i, inner) in program.nested_per_effect.iter().enumerate() {
+        // Defensive bounds parallel to the other per-effect packers —
+        // the lowering pass enforces
+        // `program.nested_per_effect.len() <= MAX_EFFECTS_PER_PROGRAM`,
+        // but a hand-built program could violate it; clamp instead of
+        // panicking on the startup pack path.
+        if eff_i >= MAX_EFFECTS_PER_PROGRAM {
+            break;
+        }
+        for (nested_i, op) in inner.iter().enumerate() {
+            // Same defensive clamp on the inner stride.
+            if nested_i >= MAX_NESTED_PER_EFFECT {
+                break;
+            }
+            let off = base + eff_i * MAX_NESTED_PER_EFFECT + nested_i;
+            let (kind, a, b) = pack_effect(*op);
+            nested_effect_kinds[off]     = kind;
+            nested_effect_payload_a[off] = a;
+            nested_effect_payload_b[off] = b;
+        }
+    }
+}
+
 /// Encode a `StackingMode` to its u8 discriminant. Pinned by
 /// `crates/engine/src/schema_hash.rs` (the `StackingMode:` line).
 #[inline]
@@ -882,6 +987,9 @@ mod tests {
         assert!(p.area_args.is_empty());
         assert!(p.scaling_stat_refs.is_empty());
         assert!(p.scaling_percents.is_empty());
+        assert!(p.nested_effect_kinds.is_empty());
+        assert!(p.nested_effect_payload_a.is_empty());
+        assert!(p.nested_effect_payload_b.is_empty());
     }
 
     #[test]
@@ -2018,5 +2126,105 @@ mod tests {
         // MaxHp discriminant == 2.
         assert_eq!(p.scaling_stat_refs[0], 2, "stat-ref = MaxHp");
         assert_eq!(p.scaling_percents[0], 1.5, "percent must round-trip 1.5");
+    }
+
+    // ---- Wave 1.5#9 nested-effect packing -------------------------------
+
+    #[test]
+    fn pack_nested_default_all_sentinel() {
+        // Programs without any `{ <inner> }` block keep every nested
+        // slot at the EFFECT_KIND_EMPTY sentinel + zero payloads —
+        // back-compat for the legacy corpus.
+        let prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 30.0 }],
+        );
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+        assert_eq!(
+            p.nested_effect_kinds.len(),
+            MAX_EFFECTS_PER_PROGRAM * MAX_NESTED_PER_EFFECT,
+            "nested column stride = MAX_EFFECTS × MAX_NESTED",
+        );
+        for i in 0..p.nested_effect_kinds.len() {
+            assert_eq!(p.nested_effect_kinds[i], EFFECT_KIND_EMPTY,
+                "slot {i}: empty (no nested authored)");
+            assert_eq!(p.nested_effect_payload_a[i], 0);
+            assert_eq!(p.nested_effect_payload_b[i], 0);
+        }
+    }
+
+    #[test]
+    fn pack_nested_stun_on_damage_writes_kind_3() {
+        // Reap-shape: primary Damage, nested `{ stun 10 }`. The first
+        // nested slot of effect 0 carries kind=3 (Stun discriminant)
+        // and payload_a=10 (duration_ticks); the second nested slot
+        // and all other effects' nested slots stay at the sentinel.
+        use smallvec::SmallVec;
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 20.0 }],
+        );
+        let mut outer: SmallVec<
+            [SmallVec<[EffectOp; MAX_NESTED_PER_EFFECT]>; MAX_EFFECTS_PER_PROGRAM],
+        > = SmallVec::new();
+        let mut inner: SmallVec<[EffectOp; MAX_NESTED_PER_EFFECT]> = SmallVec::new();
+        inner.push(EffectOp::Stun { duration_ticks: 10 });
+        outer.push(inner);
+        prog.nested_per_effect = outer;
+
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // Effect 0 nested slot 0 == Stun (discriminant 3), payload_a=10.
+        assert_eq!(p.nested_effect_kinds[0], 3, "Stun discriminant");
+        assert_eq!(p.nested_effect_payload_a[0], 10, "duration_ticks");
+        assert_eq!(p.nested_effect_payload_b[0], 0);
+        // Effect 0 nested slot 1 (unused): sentinel.
+        assert_eq!(p.nested_effect_kinds[1], EFFECT_KIND_EMPTY);
+        assert_eq!(p.nested_effect_payload_a[1], 0);
+        // Effects 1..MAX: all nested slots sentinel.
+        for eff_i in 1..MAX_EFFECTS_PER_PROGRAM {
+            for nested_i in 0..MAX_NESTED_PER_EFFECT {
+                let off = eff_i * MAX_NESTED_PER_EFFECT + nested_i;
+                assert_eq!(p.nested_effect_kinds[off], EFFECT_KIND_EMPTY,
+                    "effect {eff_i} nested {nested_i} sentinel");
+            }
+        }
+    }
+
+    #[test]
+    fn pack_nested_two_ops_in_declaration_order() {
+        // MAX_NESTED_PER_EFFECT == 2 — both inner slots populated, each
+        // carrying its own kind + payload encoding (Stun=3, Slow=4
+        // with payload_b sign-widened factor).
+        use smallvec::SmallVec;
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 30.0 }],
+        );
+        let mut outer: SmallVec<
+            [SmallVec<[EffectOp; MAX_NESTED_PER_EFFECT]>; MAX_EFFECTS_PER_PROGRAM],
+        > = SmallVec::new();
+        let mut inner: SmallVec<[EffectOp; MAX_NESTED_PER_EFFECT]> = SmallVec::new();
+        inner.push(EffectOp::Stun { duration_ticks: 5 });
+        inner.push(EffectOp::Slow { duration_ticks: 20, factor_q8: -64 });
+        outer.push(inner);
+        prog.nested_per_effect = outer;
+
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // Slot 0: Stun(5).
+        assert_eq!(p.nested_effect_kinds[0], 3);
+        assert_eq!(p.nested_effect_payload_a[0], 5);
+        // Slot 1: Slow(20, -64).
+        assert_eq!(p.nested_effect_kinds[1], 4);
+        assert_eq!(p.nested_effect_payload_a[1], 20);
+        // i16(-64) → i32(-64) → as u32 = 0xFFFF_FFC0 (sign-widened).
+        assert_eq!(p.nested_effect_payload_b[1], 0xFFFF_FFC0);
     }
 }

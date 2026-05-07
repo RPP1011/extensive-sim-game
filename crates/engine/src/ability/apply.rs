@@ -14,10 +14,21 @@
 //!     resolver — pass via callback or context struct in a follow-up)
 //!   * per_effect_areas spatial dispatch (single-target only today —
 //!     AOE expansion lives in #121)
-//!   * nested_per_effect cascade (deferred — #123 IR done; runtime
-//!     scheduler not wired)
 //!   * delivery method scheduling (Projectile travel, Channel hold —
 //!     #124 IR done; runtime not wired)
+//!
+//! **Wave 1.5#9 nested-effect dispatch (2026-05-06).** After the
+//! primary effect's ApplyEvent is emitted for slot `i`, the dispatch
+//! walks `program.nested_per_effect[i]` and emits an ApplyEvent per
+//! nested op. Nested ops apply to the SAME target as the primary
+//! (the .ability source's `<verb> <args> { <inner_stmt>; ... }` shape
+//! treats inner stmts as auxiliary effects riding on the primary's
+//! cast). Nested ops carry no chance gate or scaling slot today —
+//! inner-stmt modifiers were silently dropped at lowering (see
+//! `program.nested_per_effect` doc; recursive aggregator capture is
+//! later infrastructure). Closes the documented gap surfaced by the
+//! Reap verb swap (commit `72a35307`): Reap's `{ stun 1s }` now
+//! produces an ApplyEvent::Stun in addition to ApplyEvent::Execute.
 //!
 //! # Contract with sims
 //!
@@ -198,77 +209,120 @@ pub fn apply_program(
             })
             .unwrap_or(0.0);
         // -- Per-EffectOp dispatch. Mirrors pack_effect's variant
-        // walk. Future in-shape / nested handling threads into here.
-        match *op {
-            EffectOp::Damage    { amount } => out.push(ApplyEvent::Damage { source: caster, target, amount: amount + scale_bonus }),
-            EffectOp::Heal      { amount } => out.push(ApplyEvent::Heal   { source: caster, target, amount: amount + scale_bonus }),
-            EffectOp::Shield    { amount } => out.push(ApplyEvent::Shield { source: caster, target, amount: amount + scale_bonus }),
-            EffectOp::Stun      { duration_ticks } => out.push(ApplyEvent::Stun    { target, duration_ticks }),
-            EffectOp::Slow      { duration_ticks, factor_q8 } =>
-                out.push(ApplyEvent::Slow { target, duration_ticks, factor_q8 }),
-            EffectOp::Root      { duration_ticks } => out.push(ApplyEvent::Root    { target, duration_ticks }),
-            EffectOp::Silence   { duration_ticks } => out.push(ApplyEvent::Silence { target, duration_ticks }),
-            EffectOp::Fear      { duration_ticks } => out.push(ApplyEvent::Fear    { target, duration_ticks }),
-            EffectOp::Taunt     { duration_ticks } => out.push(ApplyEvent::Taunt   { target, duration_ticks }),
-            EffectOp::Dash      { distance } => out.push(ApplyEvent::Dash  { source: caster, distance }),
-            EffectOp::Blink     { distance } => out.push(ApplyEvent::Blink { source: caster, distance }),
-            EffectOp::Knockback { distance } => out.push(ApplyEvent::Knockback { source: caster, target, distance }),
-            EffectOp::Pull      { distance } => out.push(ApplyEvent::Pull      { source: caster, target, distance }),
-            EffectOp::Execute   { hp_threshold } => out.push(ApplyEvent::Execute { target, hp_threshold }),
-            EffectOp::SelfDamage{ amount } => out.push(ApplyEvent::SelfDamage { source: caster, amount: amount + scale_bonus }),
-            EffectOp::LifeSteal { duration_ticks, fraction_q8 } =>
-                out.push(ApplyEvent::LifeSteal { target: caster, duration_ticks, fraction_q8 }),
-            EffectOp::DamageModify { duration_ticks, multiplier_q8 } =>
-                out.push(ApplyEvent::DamageModify { target, duration_ticks, multiplier_q8 }),
-            EffectOp::DamageOverTime { amount, duration_ticks } =>
-                out.push(ApplyEvent::DamageOverTime { source: caster, target, amount: amount + scale_bonus, duration_ticks }),
-            EffectOp::HealOverTime   { amount, duration_ticks } =>
-                out.push(ApplyEvent::HealOverTime   { source: caster, target, amount: amount + scale_bonus, duration_ticks }),
-            EffectOp::TimedShield    { amount, duration_ticks } =>
-                out.push(ApplyEvent::TimedShield    { source: caster, target, amount: amount + scale_bonus, duration_ticks }),
-            EffectOp::Buff { stat, magnitude_q8, duration_ticks } =>
-                out.push(ApplyEvent::Buff { target, stat, magnitude_q8, duration_ticks }),
-            EffectOp::Summon { template_hash, count, lifetime_ticks } =>
-                out.push(ApplyEvent::Summon { source: caster, template_hash, count, lifetime_ticks }),
-            // Non-combat verbs phase 1 — world primitives. No scaling
-            // applies (these aren't amount-bearing in the combat sense
-            // — `amount` is a resource quantity, not an HP delta).
-            EffectOp::Harvest    { kind_hash, amount } =>
-                out.push(ApplyEvent::Harvest    { source: caster, kind_hash, amount }),
-            EffectOp::PlaceVoxel { kind_hash } =>
-                out.push(ApplyEvent::PlaceVoxel { source: caster, kind_hash }),
-            // Wave 2 piece 7: stealth is self-cast (apply handler
-            // gates target selection by caster's stealth flag).
-            EffectOp::Stealth    { duration_ticks } =>
-                out.push(ApplyEvent::Stealth { source: caster, duration_ticks }),
-            // Wave 2 piece 8 CC verbs — target-cast, single duration.
-            EffectOp::Charm      { duration_ticks } =>
-                out.push(ApplyEvent::Charm    { target, duration_ticks }),
-            EffectOp::Grounded   { duration_ticks } =>
-                out.push(ApplyEvent::Grounded { target, duration_ticks }),
-            EffectOp::Suppress   { duration_ticks } =>
-                out.push(ApplyEvent::Suppress { target, duration_ticks }),
-            EffectOp::Reflect    { duration_ticks, fraction_q8 } =>
-                out.push(ApplyEvent::Reflect  { target, duration_ticks, fraction_q8 }),
-            // TransferGold / ModifyStanding emit chronicle-bearing
-            // ApplyEvents that signal "the cast happened". The
-            // world-state effects (debiting/crediting purses, mutating
-            // standing tables) are downstream of apply_program — kept
-            // intentionally separate so the chronicle stream stays a
-            // pure function of the cast inputs (P5/P11) regardless of
-            // when the world-state side-effects land. Pairs with
-            // `EventKindId::EffectGoldTransfer = 31` and
-            // `EffectStandingDelta = 32` respectively.
-            EffectOp::TransferGold { amount } =>
-                out.push(ApplyEvent::TransferGold { source: caster, target, amount }),
-            EffectOp::ModifyStanding { delta } =>
-                out.push(ApplyEvent::ModifyStanding { source: caster, target, delta }),
-            // CastAbility is recursive (needs cascade-style
-            // re-dispatch); deferred to slice δ. Skip for now.
-            EffectOp::CastAbility { .. } => {}
+        // walk. Primary effect carries the slot's scaling bonus; nested
+        // ops below are emitted with `scale_bonus = 0.0` because nested
+        // ops have no scaling slot in the registry today (inner-stmt
+        // modifiers were silently dropped at lowering — see
+        // `program.nested_per_effect` doc).
+        push_effect_event(&mut out, op, caster, target, scale_bonus);
+
+        // -- Wave 1.5#9 nested-effect dispatch. After the primary's
+        // ApplyEvent is emitted for slot `i`, walk
+        // `program.nested_per_effect[i]` and emit one ApplyEvent per
+        // nested op. Nested ops:
+        //   * apply to the SAME target as the primary (auxiliary
+        //     effects riding on the primary's cast — `execute ... {
+        //     stun 1s }` stuns the target the execute hit),
+        //   * have no chance gate (no slot in `program.chances` —
+        //     inner-stmt modifiers dropped at lowering),
+        //   * have no scaling (no slot in `scalings_per_effect` —
+        //     inner-stmt modifiers dropped at lowering).
+        // Closes the gap surfaced by the Reap verb swap
+        // (commit `72a35307`): Reap's `{ stun 1s }` now produces an
+        // ApplyEvent::Stun alongside ApplyEvent::Execute.
+        if let Some(nested) = program.nested_per_effect.get(i) {
+            for nested_op in nested {
+                push_effect_event(&mut out, nested_op, caster, target, 0.0);
+            }
         }
     }
     out
+}
+
+/// Translate one `EffectOp` into the matching `ApplyEvent` and push
+/// it onto `out`. Shared between the primary-effect dispatch and the
+/// nested-effect dispatch in `apply_program`. `scale_bonus` is added
+/// to amount-bearing variants; pass `0.0` for nested ops (no scaling
+/// slot in the registry today).
+///
+/// Mirrors `pack_effect`'s variant walk in
+/// `crates/engine/src/ability/packed.rs` 1:1 — both must enumerate
+/// the same set of `EffectOp` variants in the same order.
+fn push_effect_event(
+    out: &mut SmallVec<[ApplyEvent; APPLY_INLINE]>,
+    op: &EffectOp,
+    caster: AgentId,
+    target: AgentId,
+    scale_bonus: f32,
+) {
+    match *op {
+        EffectOp::Damage    { amount } => out.push(ApplyEvent::Damage { source: caster, target, amount: amount + scale_bonus }),
+        EffectOp::Heal      { amount } => out.push(ApplyEvent::Heal   { source: caster, target, amount: amount + scale_bonus }),
+        EffectOp::Shield    { amount } => out.push(ApplyEvent::Shield { source: caster, target, amount: amount + scale_bonus }),
+        EffectOp::Stun      { duration_ticks } => out.push(ApplyEvent::Stun    { target, duration_ticks }),
+        EffectOp::Slow      { duration_ticks, factor_q8 } =>
+            out.push(ApplyEvent::Slow { target, duration_ticks, factor_q8 }),
+        EffectOp::Root      { duration_ticks } => out.push(ApplyEvent::Root    { target, duration_ticks }),
+        EffectOp::Silence   { duration_ticks } => out.push(ApplyEvent::Silence { target, duration_ticks }),
+        EffectOp::Fear      { duration_ticks } => out.push(ApplyEvent::Fear    { target, duration_ticks }),
+        EffectOp::Taunt     { duration_ticks } => out.push(ApplyEvent::Taunt   { target, duration_ticks }),
+        EffectOp::Dash      { distance } => out.push(ApplyEvent::Dash  { source: caster, distance }),
+        EffectOp::Blink     { distance } => out.push(ApplyEvent::Blink { source: caster, distance }),
+        EffectOp::Knockback { distance } => out.push(ApplyEvent::Knockback { source: caster, target, distance }),
+        EffectOp::Pull      { distance } => out.push(ApplyEvent::Pull      { source: caster, target, distance }),
+        EffectOp::Execute   { hp_threshold } => out.push(ApplyEvent::Execute { target, hp_threshold }),
+        EffectOp::SelfDamage{ amount } => out.push(ApplyEvent::SelfDamage { source: caster, amount: amount + scale_bonus }),
+        EffectOp::LifeSteal { duration_ticks, fraction_q8 } =>
+            out.push(ApplyEvent::LifeSteal { target: caster, duration_ticks, fraction_q8 }),
+        EffectOp::DamageModify { duration_ticks, multiplier_q8 } =>
+            out.push(ApplyEvent::DamageModify { target, duration_ticks, multiplier_q8 }),
+        EffectOp::DamageOverTime { amount, duration_ticks } =>
+            out.push(ApplyEvent::DamageOverTime { source: caster, target, amount: amount + scale_bonus, duration_ticks }),
+        EffectOp::HealOverTime   { amount, duration_ticks } =>
+            out.push(ApplyEvent::HealOverTime   { source: caster, target, amount: amount + scale_bonus, duration_ticks }),
+        EffectOp::TimedShield    { amount, duration_ticks } =>
+            out.push(ApplyEvent::TimedShield    { source: caster, target, amount: amount + scale_bonus, duration_ticks }),
+        EffectOp::Buff { stat, magnitude_q8, duration_ticks } =>
+            out.push(ApplyEvent::Buff { target, stat, magnitude_q8, duration_ticks }),
+        EffectOp::Summon { template_hash, count, lifetime_ticks } =>
+            out.push(ApplyEvent::Summon { source: caster, template_hash, count, lifetime_ticks }),
+        // Non-combat verbs phase 1 — world primitives. No scaling
+        // applies (these aren't amount-bearing in the combat sense
+        // — `amount` is a resource quantity, not an HP delta).
+        EffectOp::Harvest    { kind_hash, amount } =>
+            out.push(ApplyEvent::Harvest    { source: caster, kind_hash, amount }),
+        EffectOp::PlaceVoxel { kind_hash } =>
+            out.push(ApplyEvent::PlaceVoxel { source: caster, kind_hash }),
+        // Wave 2 piece 7: stealth is self-cast (apply handler
+        // gates target selection by caster's stealth flag).
+        EffectOp::Stealth    { duration_ticks } =>
+            out.push(ApplyEvent::Stealth { source: caster, duration_ticks }),
+        // Wave 2 piece 8 CC verbs — target-cast, single duration.
+        EffectOp::Charm      { duration_ticks } =>
+            out.push(ApplyEvent::Charm    { target, duration_ticks }),
+        EffectOp::Grounded   { duration_ticks } =>
+            out.push(ApplyEvent::Grounded { target, duration_ticks }),
+        EffectOp::Suppress   { duration_ticks } =>
+            out.push(ApplyEvent::Suppress { target, duration_ticks }),
+        EffectOp::Reflect    { duration_ticks, fraction_q8 } =>
+            out.push(ApplyEvent::Reflect  { target, duration_ticks, fraction_q8 }),
+        // TransferGold / ModifyStanding emit chronicle-bearing
+        // ApplyEvents that signal "the cast happened". The
+        // world-state effects (debiting/crediting purses, mutating
+        // standing tables) are downstream of apply_program — kept
+        // intentionally separate so the chronicle stream stays a
+        // pure function of the cast inputs (P5/P11) regardless of
+        // when the world-state side-effects land. Pairs with
+        // `EventKindId::EffectGoldTransfer = 31` and
+        // `EffectStandingDelta = 32` respectively.
+        EffectOp::TransferGold { amount } =>
+            out.push(ApplyEvent::TransferGold { source: caster, target, amount }),
+        EffectOp::ModifyStanding { delta } =>
+            out.push(ApplyEvent::ModifyStanding { source: caster, target, delta }),
+        // CastAbility is recursive (needs cascade-style
+        // re-dispatch); deferred to slice δ. Skip for now.
+        EffectOp::CastAbility { .. } => {}
+    }
 }
 
 #[cfg(test)]
@@ -521,5 +575,115 @@ mod tests {
             ApplyEvent::Summon { source, template_hash, count, lifetime_ticks }
             if source == caster() && template_hash == 0xDEADBEEF && count == 3 && lifetime_ticks == 80
         ));
+    }
+
+    // -- Wave 1.5#9 nested-effect dispatch ----------------------------------
+
+    #[test]
+    fn nested_stun_on_damage_emits_two_events_in_order() {
+        // Reap-shape: primary Damage + nested `{ stun 1s }`. apply_program
+        // emits Damage first, then Stun, both targeting the same target.
+        // Closes the gap surfaced by the Reap verb swap (commit
+        // `72a35307`).
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 20.0 }],
+        );
+        prog.nested_per_effect.push(smallvec![EffectOp::Stun { duration_ticks: 10 }]);
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+        assert_eq!(events.len(), 2, "primary + nested → 2 ApplyEvents");
+        assert!(
+            matches!(events[0], ApplyEvent::Damage { source, target: t, amount }
+                if source == caster() && t == target() && amount == 20.0),
+            "first event must be the primary Damage",
+        );
+        assert!(
+            matches!(events[1], ApplyEvent::Stun { target: t, duration_ticks }
+                if t == target() && duration_ticks == 10),
+            "second event must be the nested Stun targeting same target",
+        );
+    }
+
+    #[test]
+    fn nested_two_ops_emit_in_declaration_order() {
+        // MAX_NESTED_PER_EFFECT == 2 — both inner ops fire after the
+        // primary, in the order they appear in the source.
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 30.0 }],
+        );
+        prog.nested_per_effect.push(smallvec![
+            EffectOp::Stun { duration_ticks: 5 },
+            EffectOp::Slow { duration_ticks: 20, factor_q8: -64 },
+        ]);
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+        assert_eq!(events.len(), 3, "primary + 2 nested → 3 ApplyEvents");
+        assert!(matches!(events[0], ApplyEvent::Damage { .. }));
+        assert!(matches!(events[1], ApplyEvent::Stun { duration_ticks: 5, .. }));
+        assert!(matches!(events[2], ApplyEvent::Slow { duration_ticks: 20, factor_q8: -64, .. }));
+    }
+
+    #[test]
+    fn empty_nested_slot_emits_only_primary() {
+        // Outer slice populated but inner slot empty → only the primary
+        // event fires (back-compat with abilities whose source has no
+        // `{ ... }` block).
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 10.0 }],
+        );
+        prog.nested_per_effect.push(smallvec![]); // empty inner — no nested op
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+        assert_eq!(events.len(), 1, "empty nested slot → only primary fires");
+        assert!(matches!(events[0], ApplyEvent::Damage { .. }));
+    }
+
+    #[test]
+    fn chance_gate_skips_primary_and_nested() {
+        // The chance gate checks the OUTER slot — when it fails, the
+        // primary AND nested are skipped together. This matches the
+        // "auxiliary effect riding on the primary" semantic: if the
+        // primary doesn't fire, neither does the nested.
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 10.0 }],
+        );
+        prog.chances.push(Some(0)); // gate-out the primary
+        prog.nested_per_effect.push(smallvec![EffectOp::Stun { duration_ticks: 10 }]);
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default());
+        assert_eq!(events.len(), 0, "chance=0 must skip both primary and nested");
+    }
+
+    #[test]
+    fn nested_op_does_not_carry_scaling_bonus() {
+        // The slot's scaling applies only to the primary effect's
+        // amount; nested ops emit with `scale_bonus = 0.0`. Pin this
+        // because nested ops don't have their own scaling slot in the
+        // registry today (inner-stmt modifiers dropped at lowering).
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 30.0 }],
+        );
+        // Outer slot scales: +50% AD on the Damage.
+        prog.scalings_per_effect.push(smallvec![EffectScaling {
+            stat_ref: ScalingStatRef::AttackDamage,
+            percent:  0.50,
+        }]);
+        // Nested Damage 5 — should emit with amount=5.0, NOT 5.0+50=55.
+        prog.nested_per_effect.push(smallvec![EffectOp::Damage { amount: 5.0 }]);
+        let stats = CasterStats { attack_damage: 100.0, ..Default::default() };
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &stats);
+        assert_eq!(events.len(), 2);
+        // Primary scaled.
+        assert!(matches!(events[0], ApplyEvent::Damage { amount, .. } if (amount - 80.0).abs() < 1e-5),
+            "primary amount must include scaling bonus (30 + 50 = 80), got {events:?}");
+        // Nested NOT scaled.
+        assert!(matches!(events[1], ApplyEvent::Damage { amount, .. } if (amount - 5.0).abs() < 1e-5),
+            "nested amount must NOT carry the slot's scaling bonus (5.0 expected), got {events:?}");
     }
 }

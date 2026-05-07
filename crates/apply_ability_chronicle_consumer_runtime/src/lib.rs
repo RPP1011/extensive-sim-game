@@ -350,6 +350,9 @@ impl ApplyAbilityChronicleConsumerState {
                 ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
                 ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
                 ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+                ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+                ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+                ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
                 cfg: &self.physics_cfg_buf,
             };
         dispatch::dispatch_physics_dispatchability(

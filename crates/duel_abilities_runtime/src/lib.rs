@@ -1113,6 +1113,9 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
             ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
             ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
             cfg: &self.chronicle_shieldup_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_shieldup(
@@ -1137,6 +1140,9 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
             ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
             ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
             cfg: &self.chronicle_mend_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_mend(
@@ -1165,6 +1171,9 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
             ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
             ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
             cfg: &self.chronicle_bleed_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_bleed(
@@ -1193,6 +1202,9 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
             ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
             ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
             cfg: &self.chronicle_reap_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_reap(
@@ -1223,6 +1235,9 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
             ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
             ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
             cfg: &self.chronicle_vampirize_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_vampirize(
@@ -1253,6 +1268,9 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
             ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
             ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
             cfg: &self.chronicle_fortify_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_fortify(
@@ -1283,6 +1301,9 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
             ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
             ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
             cfg: &self.chronicle_daze_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_daze(
@@ -1578,6 +1599,9 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
             ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
             ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
             cfg: &self.chronicle_strike_cfg_buf,
         };
         dispatch::dispatch_physics_applyheal_and_applyshield_and_applydefeat_and_applylifestealactivation_and_applydamagemodactivation_and_applystun_and_verb_chronicle_strike(
