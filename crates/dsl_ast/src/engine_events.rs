@@ -75,6 +75,17 @@ pub const ENGINE_EVENT_KIND_IDS: &[(&str, u32)] = &[
     ("EffectSilenceApplied", 44),
     ("EffectFearApplied",    45),
     ("EffectTauntApplied",   46),
+    // Wave 2 piece 2 — movement EffectOps (Dash/Blink/Knockback/Pull).
+    // Dash and Blink are caster-self motion: payload is actor + f32
+    // distance (no target). Knockback and Pull are forced motion on a
+    // target: payload is actor + target + f32 distance. Slots 47..50
+    // are contiguous with the Wave 2 piece 1 control statuses (43..46).
+    // No consumer rule in any sim today; the dispatcher write
+    // end-to-end works without a fold consumer.
+    ("EffectDashApplied",      47),
+    ("EffectBlinkApplied",     48),
+    ("EffectKnockbackApplied", 49),
+    ("EffectPullApplied",      50),
 ];
 
 /// Look up the engine-defined `EventKindId` discriminant for an
@@ -111,6 +122,10 @@ mod tests {
         assert_eq!(engine_event_kind_id_for_name("EffectSilenceApplied"), Some(44));
         assert_eq!(engine_event_kind_id_for_name("EffectFearApplied"), Some(45));
         assert_eq!(engine_event_kind_id_for_name("EffectTauntApplied"), Some(46));
+        assert_eq!(engine_event_kind_id_for_name("EffectDashApplied"), Some(47));
+        assert_eq!(engine_event_kind_id_for_name("EffectBlinkApplied"), Some(48));
+        assert_eq!(engine_event_kind_id_for_name("EffectKnockbackApplied"), Some(49));
+        assert_eq!(engine_event_kind_id_for_name("EffectPullApplied"), Some(50));
     }
 
     #[test]

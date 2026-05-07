@@ -30,6 +30,10 @@
 //!  12. `Silence(3s)`                               — Mute-shape (Wave 2 piece 1)
 //!  13. `Fear(3s)`                                  — Terrify-shape (Wave 2 piece 1)
 //!  14. `Taunt(3s)`                                 — Provoke-shape (Wave 2 piece 1)
+//!  15. `Dash(12)`                                  — Lunge-shape (Wave 2 piece 2)
+//!  16. `Blink(8)`                                  — Phase-shape (Wave 2 piece 2)
+//!  17. `Knockback(5)`                              — Smash-shape (Wave 2 piece 2)
+//!  18. `Pull(3)`                                   — Hook-shape (Wave 2 piece 2)
 //!
 //! M = 1 caster×target permutation in this fixture: `(c=0, t=0)`
 //! self-cast. The smoke fixture's `apply_ability` source uses the
@@ -41,7 +45,7 @@
 //! T = 5 ticks (0, 17, 100, 1000, 65500) — varied across the u32 range
 //! to surface any wraparound bug in expires_at_tick computations.
 //!
-//! K = 14 × 1 × 5 = **70 casts**, producing 75 chronicle records (70
+//! K = 18 × 1 × 5 = **90 casts**, producing 95 chronicle records (90
 //! primary + 5 nested-Stun follow-ups from the Reap+Stun-shape arm).
 //!
 //! ## What's deferred
@@ -342,6 +346,60 @@ fn build_sweep() -> Vec<(&'static str, AbilityProgram, CasterStats)> {
             5.0,
             Gate { cooldown_ticks: 60, hostile_only: true, line_of_sight: false },
             [EffectOp::Taunt { duration_ticks: 30 }],
+        ),
+        CasterStats::default(),
+    ));
+
+    // Wave 2 piece 2 — movement EffectOps (Dash/Blink/Knockback/Pull).
+    // Two distinct shapes:
+    //   - Dash/Blink: caster-self motion. Engine event has no target
+    //     field; the chronicle record stores distance at payload word
+    //     1 (= ring slot offset 3).
+    //   - Knockback/Pull: forced motion on a target. 3-payload-word
+    //     record: actor + target + distance at ring slot offset 4.
+    // Adding all four extends the sweep matrix to 18 abilities so the
+    // four new GPU dispatcher arms get parity-pinned.
+
+    // 15. Lunge-shape — Dash (caster-self motion).
+    out.push((
+        "Lunge",
+        AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 30, hostile_only: false, line_of_sight: false },
+            [EffectOp::Dash { distance: 12.0 }],
+        ),
+        CasterStats::default(),
+    ));
+
+    // 16. Phase-shape — Blink (caster-self motion).
+    out.push((
+        "Phase",
+        AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 30, hostile_only: false, line_of_sight: false },
+            [EffectOp::Blink { distance: 8.0 }],
+        ),
+        CasterStats::default(),
+    ));
+
+    // 17. Smash-shape — Knockback (forced motion on target).
+    out.push((
+        "Smash",
+        AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+            [EffectOp::Knockback { distance: 5.0 }],
+        ),
+        CasterStats::default(),
+    ));
+
+    // 18. Hook-shape — Pull (forced motion on target).
+    out.push((
+        "Hook",
+        AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+            [EffectOp::Pull { distance: 3.0 }],
         ),
         CasterStats::default(),
     ));

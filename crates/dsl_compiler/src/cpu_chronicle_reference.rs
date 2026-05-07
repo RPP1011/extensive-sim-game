@@ -147,6 +147,47 @@ pub fn apply_event_to_chronicle_record(
             rec[4] = tick + duration_ticks;
             Some(rec)
         }
+        // --- Dash = 12 → EventKindId::EffectDashApplied = 47.
+        // Wave 2 piece 2 — caster-self motion. The engine event has no
+        // target field; the GPU dispatcher writes:
+        //   slot 2 = caster_slot
+        //   slot 3 = bitcast<u32>(distance)
+        // — i.e. distance lands at payload word 1 (NOT word 2 like the
+        // forced-motion shape). The CPU reference mirrors this exactly.
+        ApplyEvent::Dash { source: _, distance } => {
+            rec[0] = 47;
+            rec[2] = caster_id;
+            rec[3] = distance.to_bits();
+            Some(rec)
+        }
+        // --- Blink = 13 → EventKindId::EffectBlinkApplied = 48.
+        // Wave 2 piece 2 — same shape as Dash (caster-self motion).
+        ApplyEvent::Blink { source: _, distance } => {
+            rec[0] = 48;
+            rec[2] = caster_id;
+            rec[3] = distance.to_bits();
+            Some(rec)
+        }
+        // --- Knockback = 14 → EventKindId::EffectKnockbackApplied = 49.
+        // Wave 2 piece 2 — forced motion on a target. 3-payload-word
+        // chronicle record: actor + target + distance (bitcast f32 →
+        // u32). Same shape family as Damage/Heal/Shield/Execute.
+        ApplyEvent::Knockback { source: _, target: _, distance } => {
+            rec[0] = 49;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            rec[4] = distance.to_bits();
+            Some(rec)
+        }
+        // --- Pull = 15 → EventKindId::EffectPullApplied = 50.
+        // Wave 2 piece 2 — same shape as Knockback (forced motion).
+        ApplyEvent::Pull { source: _, target: _, distance } => {
+            rec[0] = 50;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            rec[4] = distance.to_bits();
+            Some(rec)
+        }
         // --- Slow = 4 → EventKindId::EffectSlowApplied = 30.
         // 4-field payload: actor, target, expires_at_tick, factor_q8.
         ApplyEvent::Slow { target: _, duration_ticks, factor_q8 } => {
@@ -376,29 +417,111 @@ mod tests {
 
     #[test]
     fn variants_without_chronicle_counterpart_return_none() {
-        // Movement verbs (Dash/Blink/Knockback/Pull) don't have 1:1
-        // chronicle kinds in the engine today. Mirrors the dispatcher's
-        // `// TODO slice γ` arms — no chronicle write, so the CPU
-        // reference returns None.
+        // ApplyEvent variants without chronicle counterparts today.
+        // After Wave 2 piece 2 (movement EffectOps Dash/Blink/Knockback/
+        // Pull), every slice-γ-and-onward chronicle-bearing variant has
+        // a wire-up; the variants below are all deferred-infrastructure
+        // ApplyEvents (Summon/Harvest/PlaceVoxel/Stealth/Charm/etc.)
+        // that emit ApplyEvents but have no engine `EventKindId` yet.
         //
         // Status effects already wired up:
         // - SelfDamage (Bleed verb swap, Task #138 follow-on,
         //   2026-05-06) → kind=39, see `self_damage_chronicle_record_uses_kind_39`.
         // - Execute (Reap verb swap, Task #138 follow-on, mirror of
         //   Fortify) → kind=42, see `execute_chronicle_record_uses_kind_42`.
-        // - Root/Silence/Fear/Taunt (Wave 2 piece 1, this slice) →
+        // - Root/Silence/Fear/Taunt (Wave 2 piece 1) →
         //   kinds 43..46, see `control_status_chronicle_records_use_kinds_43_46`.
+        // - Dash/Blink/Knockback/Pull (Wave 2 piece 2, this slice) →
+        //   kinds 47..50, see `movement_chronicle_records_use_kinds_47_50`.
         for ev in [
-            ApplyEvent::Dash    { source: aid(1), distance: 10.0 },
-            ApplyEvent::Blink   { source: aid(1), distance: 10.0 },
-            ApplyEvent::Knockback { source: aid(1), target: aid(2), distance: 5.0 },
-            ApplyEvent::Pull      { source: aid(1), target: aid(2), distance: 5.0 },
+            ApplyEvent::Summon  { source: aid(1), template_hash: 0xDEADBEEF, count: 2, lifetime_ticks: 100 },
+            ApplyEvent::Harvest { source: aid(1), kind_hash: 0xCAFEBABE, amount: 5 },
+            ApplyEvent::PlaceVoxel { source: aid(1), kind_hash: 0xFACEFEED },
         ] {
             assert!(
                 apply_event_to_chronicle_record(ev, 100, 0, 0).is_none(),
                 "variant {ev:?} should have no chronicle counterpart \
                  (dispatcher arm carries TODO marker)"
             );
+        }
+    }
+
+    /// Wave 2 piece 2 — movement EffectOps (Dash/Blink/Knockback/Pull).
+    /// Two distinct shapes:
+    ///   - Dash/Blink: caster-self motion. Engine event has no target
+    ///     field; the chronicle record stores distance at payload word 1
+    ///     (= ring slot offset 3), NOT word 2 like the forced-motion
+    ///     shape. Slot 4 stays zero.
+    ///   - Knockback/Pull: forced motion on a target. Same shape as
+    ///     Damage/Heal/Shield/Execute — actor + target + distance
+    ///     (bitcast f32 → u32) at payload word 2 (= ring slot offset 4).
+    /// Pin per-variant kind tags (47..50) and per-shape distance offsets.
+    #[test]
+    fn movement_chronicle_records_use_kinds_47_50() {
+        // Dash — caster-self motion (no target in engine event).
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::Dash { source: aid(7), distance: 12.5 },
+            /*tick*/ 100,
+            /*caster_id*/ 7,
+            /*target_id*/ 7,
+        )
+        .expect("Dash has chronicle counterpart");
+        assert_eq!(rec[0], 47, "Dash: kind tag — EffectDashApplied");
+        assert_eq!(rec[1], 100, "Dash: tick");
+        assert_eq!(rec[2], 7, "Dash: actor slot — caster_id");
+        assert_eq!(rec[3], 12.5_f32.to_bits(), "Dash: distance at payload word 1");
+        for i in 4..CHRONICLE_RECORD_STRIDE_U32 {
+            assert_eq!(rec[i], 0, "Dash: tail word {i} should be zero");
+        }
+
+        // Blink — same shape as Dash.
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::Blink { source: aid(7), distance: 8.0 },
+            /*tick*/ 50,
+            /*caster_id*/ 7,
+            /*target_id*/ 7,
+        )
+        .expect("Blink has chronicle counterpart");
+        assert_eq!(rec[0], 48, "Blink: kind tag — EffectBlinkApplied");
+        assert_eq!(rec[1], 50, "Blink: tick");
+        assert_eq!(rec[2], 7, "Blink: actor slot — caster_id");
+        assert_eq!(rec[3], 8.0_f32.to_bits(), "Blink: distance at payload word 1");
+        for i in 4..CHRONICLE_RECORD_STRIDE_U32 {
+            assert_eq!(rec[i], 0, "Blink: tail word {i} should be zero");
+        }
+
+        // Knockback — forced motion on a target.
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::Knockback { source: aid(7), target: aid(11), distance: 5.0 },
+            /*tick*/ 200,
+            /*caster_id*/ 7,
+            /*target_id*/ 11,
+        )
+        .expect("Knockback has chronicle counterpart");
+        assert_eq!(rec[0], 49, "Knockback: kind tag — EffectKnockbackApplied");
+        assert_eq!(rec[1], 200, "Knockback: tick");
+        assert_eq!(rec[2], 7, "Knockback: actor slot — caster_id");
+        assert_eq!(rec[3], 11, "Knockback: target slot — target_id");
+        assert_eq!(rec[4], 5.0_f32.to_bits(), "Knockback: distance at payload word 2");
+        for i in 5..CHRONICLE_RECORD_STRIDE_U32 {
+            assert_eq!(rec[i], 0, "Knockback: tail word {i} should be zero");
+        }
+
+        // Pull — same shape as Knockback.
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::Pull { source: aid(7), target: aid(11), distance: 3.5 },
+            /*tick*/ 300,
+            /*caster_id*/ 7,
+            /*target_id*/ 11,
+        )
+        .expect("Pull has chronicle counterpart");
+        assert_eq!(rec[0], 50, "Pull: kind tag — EffectPullApplied");
+        assert_eq!(rec[1], 300, "Pull: tick");
+        assert_eq!(rec[2], 7, "Pull: actor slot — caster_id");
+        assert_eq!(rec[3], 11, "Pull: target slot — target_id");
+        assert_eq!(rec[4], 3.5_f32.to_bits(), "Pull: distance at payload word 2");
+        for i in 5..CHRONICLE_RECORD_STRIDE_U32 {
+            assert_eq!(rec[i], 0, "Pull: tail word {i} should be zero");
         }
     }
 
@@ -615,6 +738,10 @@ mod tests {
                 9  => ApplyEvent::Silence        { target: aid(2), duration_ticks: 5 },
                 10 => ApplyEvent::Fear           { target: aid(2), duration_ticks: 5 },
                 11 => ApplyEvent::Taunt          { target: aid(2), duration_ticks: 5 },
+                12 => ApplyEvent::Dash           { source: aid(1), distance: 10.0 },
+                13 => ApplyEvent::Blink          { source: aid(1), distance: 10.0 },
+                14 => ApplyEvent::Knockback      { source: aid(1), target: aid(2), distance: 5.0 },
+                15 => ApplyEvent::Pull           { source: aid(1), target: aid(2), distance: 5.0 },
                 16 => ApplyEvent::Execute        { target: aid(2), hp_threshold: 20.0 },
                 17 => ApplyEvent::SelfDamage     { source: aid(1), amount: 1.0 },
                 18 => ApplyEvent::LifeSteal      { target: aid(1), duration_ticks: 5, fraction_q8: 128 },

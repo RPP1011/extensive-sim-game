@@ -151,7 +151,22 @@ pub enum EventKindId {
     EffectSilenceApplied = 44,
     EffectFearApplied    = 45,
     EffectTauntApplied   = 46,
-    // Slots 47-127 reserved for replayable event variants added in later tasks.
+    // Wave 2 piece 2 — movement EffectOps (Dash/Blink/Knockback/Pull).
+    // Each is a chronicle event for the matching `EffectOp` (op#12..15).
+    // Dash and Blink are caster-self motion: payload carries the actor +
+    // f32 distance (no target). Knockback and Pull are forced motion on
+    // a target: payload carries actor + target + f32 distance. The
+    // `apply_ability` dispatcher writes these from the per-effect-slot
+    // arm chain when the corresponding `EffectOp` slot fires; consumer
+    // physics rules can fold the distance into per-agent position
+    // updates the same way other effect chronicle records flow into
+    // SoA-fold rules (consumer wiring deferred — no sim currently uses
+    // these movement effects).
+    EffectDashApplied    = 47,
+    EffectBlinkApplied   = 48,
+    EffectKnockbackApplied = 49,
+    EffectPullApplied    = 50,
+    // Slots 51-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 

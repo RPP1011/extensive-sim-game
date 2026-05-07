@@ -114,21 +114,24 @@ fn multi_effect_ability_produces_record_per_chronicle_arm() {
 
 #[test]
 fn ability_with_only_non_chronicle_effects_produces_no_records() {
-    // Movement verbs (Dash/Blink/Knockback/Pull) have no chronicle
-    // counterparts today (CPU reference returns None for them). The
-    // pipeline produces an empty record vec — the dispatcher's WGSL
-    // would still emit TODO-marker arms for these on GPU, but no
+    // Deferred-infrastructure variants (Summon/Harvest/PlaceVoxel/
+    // Stealth/Charm/Grounded/Suppress/Reflect/DoT/HoT/TimedShield/Buff)
+    // still have no chronicle counterparts today — the dispatcher's
+    // WGSL would still emit TODO-marker arms for these on GPU, but no
     // chronicle write.
     //
-    // Root/Silence/Fear/Taunt got wired up by Wave 2 piece 1 (this
-    // slice) and now produce kind=43..46 records — see
-    // `control_status_pipelines_emit_kinds_43_46` below.
+    // Already wired up:
+    // - Root/Silence/Fear/Taunt (Wave 2 piece 1) → kinds 43..46.
+    // - Dash/Blink/Knockback/Pull (Wave 2 piece 2, this slice) → kinds
+    //   47..50 — see `movement_pipelines_emit_kinds_47_50` below.
+    //
+    // Pick Charm (kind 28) + Grounded (kind 29) — both still TODO.
     let program = AbilityProgram::new_single_target(
         5.0,
         Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
         [
-            EffectOp::Dash  { distance: 10.0 },
-            EffectOp::Blink { distance: 10.0 },
+            EffectOp::Charm    { duration_ticks: 50 },
+            EffectOp::Grounded { duration_ticks: 30 },
         ],
     );
     let records = run_pipeline(&program, aid(1), aid(2), 100);
@@ -212,6 +215,95 @@ fn taunt_pipeline_emits_kind_46_record() {
     assert_eq!(r[2], 7, "actor slot — caster_id");
     assert_eq!(r[3], 7, "target slot — target_id (self-cast: ==caster)");
     assert_eq!(r[4], 125, "expires_at_tick = tick(100) + duration(25)");
+}
+
+/// Wave 2 piece 2 — movement EffectOps (Dash/Blink/Knockback/Pull). Two
+/// distinct shapes flow through `apply_program` (which emits
+/// ApplyEvent::Dash/Blink with `{ source, distance }` and
+/// ApplyEvent::Knockback/Pull with `{ source, target, distance }`) and
+/// the CPU reference (which writes a kind=47..50 record). Dash/Blink
+/// are caster-self motion: distance lands at payload word 1 (= ring
+/// slot offset 3), no target field. Knockback/Pull are forced motion
+/// on a target: distance at payload word 2 (= ring slot offset 4),
+/// target at payload word 1. Mirrors the GPU dispatcher's per-op arm
+/// shapes.
+#[test]
+fn dash_pipeline_emits_kind_47_record() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 20, hostile_only: false, line_of_sight: false },
+        [EffectOp::Dash { distance: 12.0 }],
+    );
+    let records = run_pipeline(&program, aid(7), aid(7), 100);
+    assert_eq!(records.len(), 1, "one Dash effect → one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 47, "EventKindId::EffectDashApplied = 47");
+    assert_eq!(r[1], 100, "tick");
+    assert_eq!(r[2], 7, "actor slot — caster_id");
+    assert_eq!(r[3], 12.0_f32.to_bits(), "distance at payload word 1 (no target field)");
+    // No payload word 2 — engine event has no target field.
+    for i in 4..10 {
+        assert_eq!(r[i], 0, "Dash: tail word {i} should be zero");
+    }
+}
+
+#[test]
+fn blink_pipeline_emits_kind_48_record() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 20, hostile_only: false, line_of_sight: false },
+        [EffectOp::Blink { distance: 8.5 }],
+    );
+    let records = run_pipeline(&program, aid(7), aid(7), 100);
+    assert_eq!(records.len(), 1, "one Blink effect → one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 48, "EventKindId::EffectBlinkApplied = 48");
+    assert_eq!(r[1], 100, "tick");
+    assert_eq!(r[2], 7, "actor slot — caster_id");
+    assert_eq!(r[3], 8.5_f32.to_bits(), "distance at payload word 1 (no target field)");
+    for i in 4..10 {
+        assert_eq!(r[i], 0, "Blink: tail word {i} should be zero");
+    }
+}
+
+#[test]
+fn knockback_pipeline_emits_kind_49_record() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 20, hostile_only: true, line_of_sight: false },
+        [EffectOp::Knockback { distance: 5.0 }],
+    );
+    let records = run_pipeline(&program, aid(7), aid(7), 100);
+    assert_eq!(records.len(), 1, "one Knockback effect → one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 49, "EventKindId::EffectKnockbackApplied = 49");
+    assert_eq!(r[1], 100, "tick");
+    assert_eq!(r[2], 7, "actor slot — caster_id");
+    assert_eq!(r[3], 7, "target slot — target_id (self-cast: ==caster)");
+    assert_eq!(r[4], 5.0_f32.to_bits(), "distance at payload word 2 (forced-motion shape)");
+    for i in 5..10 {
+        assert_eq!(r[i], 0, "Knockback: tail word {i} should be zero");
+    }
+}
+
+#[test]
+fn pull_pipeline_emits_kind_50_record() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 20, hostile_only: true, line_of_sight: false },
+        [EffectOp::Pull { distance: 3.5 }],
+    );
+    let records = run_pipeline(&program, aid(7), aid(7), 100);
+    assert_eq!(records.len(), 1, "one Pull effect → one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 50, "EventKindId::EffectPullApplied = 50");
+    assert_eq!(r[1], 100, "tick");
+    assert_eq!(r[2], 7, "actor slot — caster_id");
+    assert_eq!(r[3], 7, "target slot — target_id (self-cast: ==caster)");
+    assert_eq!(r[4], 3.5_f32.to_bits(), "distance at payload word 2 (forced-motion shape)");
+    for i in 5..10 {
+        assert_eq!(r[i], 0, "Pull: tail word {i} should be zero");
+    }
 }
 
 #[test]
