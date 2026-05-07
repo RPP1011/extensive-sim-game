@@ -442,6 +442,26 @@ pub enum CgStmt {
         /// caster expression (slice-γ self-cast convention preserved).
         /// Slice ε part 1.
         target: CgExprId,
+        /// AOE Path B BGL opt-in flag (#121, 2026-05-07). Per-fixture
+        /// build-time decision: when `true`, the WGSL dispatcher emits
+        /// the AOE walk shape (gates per-effect on `area_kinds[i] ==
+        /// Circle`, walks the 27-cell spatial neighborhood around
+        /// `agent_pos[target_slot]`, re-executes the chronicle arm
+        /// chain per in-radius candidate); when `false`, the dispatcher
+        /// emits the existing single-target chain. Auto-fires the
+        /// spatial-bind requirement (`agent_pos`, `spatial_grid_*`) so
+        /// non-AOE production fixtures (duel_abilities,
+        /// tactical_squad_5v5, boss_fight, etc.) keep their
+        /// zero-spatial-overhead BGL by leaving the flag at default
+        /// `false`. The smoke fixture
+        /// (`apply_ability_smoke_runtime`) is the canonical opt-in
+        /// caller.
+        ///
+        /// Lowering populates this from
+        /// [`super::lower::LowerOpts::aoe_dispatch`] — every
+        /// `apply_ability` call lowered under a given `Compilation`
+        /// shares the flag value.
+        with_aoe_dispatch: bool,
     },
 }
 
@@ -515,15 +535,23 @@ impl fmt::Display for CgStmt {
                     binder, body.0, radius_cells
                 )
             }
-            CgStmt::ApplyAbility { ability, caster, target } => {
+            CgStmt::ApplyAbility { ability, caster, target, with_aoe_dispatch } => {
                 // Slice ε: include caster + target operand ids in the
                 // Display so debug-prints / cycle-detector traces show
                 // the distinct operands (was previously info-lossy —
                 // dropped both fields).
+                //
+                // 2026-05-07 (#121 BGL opt-in): include the AOE flag
+                // when set. Off-by-default, so the existing Display
+                // shape stays stable for non-AOE fixtures (the bulk of
+                // the corpus). When the flag is on, append `; aoe`
+                // after the operand list so debug traces flag the
+                // dispatcher path divergence.
+                let aoe_suffix = if *with_aoe_dispatch { "; aoe" } else { "" };
                 write!(
                     f,
-                    "apply_ability(expr#{}, caster=expr#{}, target=expr#{})",
-                    ability.0, caster.0, target.0
+                    "apply_ability(expr#{}, caster=expr#{}, target=expr#{}{})",
+                    ability.0, caster.0, target.0, aoe_suffix
                 )
             }
         }
@@ -863,7 +891,7 @@ pub fn collect_stmt_dependencies(
                 target: super::data_handle::AgentRef::Self_,
             });
         }
-        CgStmt::ApplyAbility { ability, caster, target } => {
+        CgStmt::ApplyAbility { ability, caster, target, with_aoe_dispatch: _ } => {
             // #136 + slice ε: all three operand expressions
             // contribute reads. The ability operand resolves to the
             // AbilityId; caster/target may be non-trivial
@@ -874,6 +902,16 @@ pub fn collect_stmt_dependencies(
             // producing naga-rejected WGSL with undeclared
             // identifiers. Symmetric to the `wire_ability_registry_
             // column_reads` walk in `cg::lower::driver`.
+            //
+            // The `with_aoe_dispatch` flag is consumed by the
+            // BGL/WGSL emit, NOT by the auto-walker: the AOE-mode
+            // dispatcher's spatial reads (`agent_pos`,
+            // `spatial_grid_*`, `area_kinds`, `area_args`) are
+            // surfaced via `cg::lower::driver::wire_apply_ability_aoe_reads`
+            // — same shape as the existing
+            // `wire_ability_registry_column_reads` for the
+            // single-target columns. Centralising structural reads
+            // there keeps this walk simple (operand reads only).
             collect_expr_reads(*ability, exprs, reads);
             collect_expr_reads(*caster, exprs, reads);
             collect_expr_reads(*target, exprs, reads);
@@ -993,10 +1031,32 @@ mod tests {
             ability: CgExprId(7),
             caster: CgExprId(11),
             target: CgExprId(13),
+            with_aoe_dispatch: false,
         };
         assert_eq!(
             format!("{}", s),
             "apply_ability(expr#7, caster=expr#11, target=expr#13)"
+        );
+        assert_roundtrip(&s);
+    }
+
+    /// 2026-05-07 (#121 BGL opt-in): when `with_aoe_dispatch: true`,
+    /// the Display surfaces the flag so debug-prints / cycle-detector
+    /// traces distinguish AOE-shaped dispatchers from single-target.
+    /// Pin the surface so a regression that drops the suffix shows up
+    /// here rather than as silently-incomplete debug output (mirrors
+    /// the slice-ε precedent).
+    #[test]
+    fn apply_ability_display_includes_aoe_flag_when_set() {
+        let s = CgStmt::ApplyAbility {
+            ability: CgExprId(7),
+            caster: CgExprId(11),
+            target: CgExprId(13),
+            with_aoe_dispatch: true,
+        };
+        assert_eq!(
+            format!("{}", s),
+            "apply_ability(expr#7, caster=expr#11, target=expr#13; aoe)"
         );
         assert_roundtrip(&s);
     }

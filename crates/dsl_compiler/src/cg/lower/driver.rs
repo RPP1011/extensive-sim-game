@@ -160,7 +160,52 @@ use super::view::{lower_view, HandlerResolution};
 /// See the module-level "Limitations" section for the deferred
 /// pieces — per-mask spatial query selection, replayability
 /// annotation parsing, and view-call signature registration.
+/// Per-fixture lowering options. Today only [`Self::aoe_dispatch`] is
+/// surfaced; future flags can stack here without breaking the public
+/// `lower_compilation_to_cg(comp)` shorthand.
+///
+/// 2026-05-07 (#121 BGL opt-in): the AOE Path B dispatcher requires
+/// spatial bindings (`agent_pos` + `spatial_grid_*`) on the chronicle
+/// dispatcher kernel. Surfacing those bindings unconditionally would
+/// auto-fire the five build-hash phases in EVERY `apply_ability`-using
+/// fixture (see `collect_required_spatial_kinds`), forcing 3 production
+/// runtimes (`duel_abilities_runtime`, `tactical_squad_5v5_runtime`,
+/// `boss_fight_runtime`) to allocate ≈ 1.4 MB of spatial buffers they
+/// don't currently use. The opt-in flag lets per-fixture build.rs
+/// scripts choose between the AOE shape (smoke runtime — wants the
+/// walk for parity testing) and the existing single-target chain
+/// (production runtimes — keep their zero-spatial-overhead BGL).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LowerOpts {
+    /// When `true`, every `apply_ability` lowered under this
+    /// `Compilation` carries `with_aoe_dispatch: true` on its
+    /// [`crate::cg::stmt::CgStmt::ApplyAbility`] node. The WGSL emit
+    /// gates the spatial walk + multi-target chronicle write on the
+    /// flag; the BGL composer surfaces the spatial reads via
+    /// `wire_apply_ability_aoe_reads` only when at least one
+    /// flag-on dispatcher exists in a kernel's body.
+    ///
+    /// Default `false` preserves the existing single-target shape
+    /// for every non-opt-in fixture (the entire production-runtime
+    /// set today).
+    pub aoe_dispatch: bool,
+}
+
+/// Backward-compat shorthand for [`lower_compilation_to_cg_with_opts`]
+/// with [`LowerOpts::default()`]. Most fixtures today (no AOE) use
+/// this entry point.
 pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOutcome> {
+    lower_compilation_to_cg_with_opts(comp, LowerOpts::default())
+}
+
+/// Lower a fully resolved [`Compilation`] to a [`CgProgram`] with
+/// per-fixture options.
+///
+/// See [`LowerOpts`] for the per-flag semantics.
+pub fn lower_compilation_to_cg_with_opts(
+    comp: &Compilation,
+    opts: LowerOpts,
+) -> Result<CgProgram, DriverOutcome> {
     let mut builder = CgProgramBuilder::new();
     let mut diagnostics: Vec<LoweringError> = Vec::new();
 
@@ -189,6 +234,12 @@ pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOu
     // assignments; they're handed to the per-construct lowerings via
     // `LoweringCtx`.
     let mut ctx = LoweringCtx::new(&mut builder);
+    // 2026-05-07 (#121 BGL opt-in): thread the AOE flag onto the
+    // shared lowering context so every `apply_ability` lowered under
+    // this Compilation picks up the same flag value. The flag is read
+    // by `cg::lower::physics::lower_apply_ability` and stamped onto
+    // `CgStmt::ApplyAbility::with_aoe_dispatch`.
+    ctx.aoe_dispatch = opts.aoe_dispatch;
 
     let event_rings = populate_event_kinds(comp, &mut ctx, &mut diagnostics);
     populate_variants_from_enums(comp, &mut ctx, &mut diagnostics);

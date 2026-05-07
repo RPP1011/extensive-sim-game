@@ -615,11 +615,23 @@ fn lower_stmt(
                 // Default: target = caster (slice-γ self-cast).
                 None => caster_id,
             };
+            // 2026-05-07 (#121 BGL opt-in): every `apply_ability`
+            // lowered under a given `Compilation` shares the AOE
+            // dispatch flag (registry-level decision). The flag is
+            // sourced from `LoweringCtx::aoe_dispatch` — a per-fixture
+            // build-time choice the caller threads through
+            // `lower_compilation_to_cg_with_opts`. Default `false` for
+            // every non-opt-in fixture preserves the existing
+            // single-target dispatcher emit; production runtimes
+            // (duel_abilities, tactical_squad_5v5, boss_fight, etc.)
+            // keep their zero-spatial-overhead BGL.
+            let with_aoe_dispatch = ctx.aoe_dispatch;
             push_stmt(
                 CgStmt::ApplyAbility {
                     ability: ability_id,
                     caster: caster_id,
                     target: target_id,
+                    with_aoe_dispatch,
                 },
                 *span,
                 ctx,

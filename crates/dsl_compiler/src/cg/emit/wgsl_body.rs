@@ -1600,7 +1600,7 @@ fn lower_cg_stmt_body_to_wgsl(
             );
             Ok(body)
         }
-        CgStmt::ApplyAbility { ability, caster, target } => {
+        CgStmt::ApplyAbility { ability, caster, target, with_aoe_dispatch: _with_aoe_dispatch } => {
             // #136 slice β step 2: per-effect-slot dispatch loop.
             // Reads `ability_id` from the operand expression, walks
             // every effect slot in the PackedAbilityRegistry SoA,
@@ -1646,8 +1646,22 @@ fn lower_cg_stmt_body_to_wgsl(
             // duel_abilities with apply_ability) lights it up at
             // sim-level.
             //
-            // **Path B (GPU AOE multi-target) — scoping note,
-            // 2026-05-07.** The CPU oracle (`apply_program_aoe`)
+            // **Path B (GPU AOE multi-target) — BGL opt-in landed
+            // 2026-05-07; emit-side TODO remains.** The
+            // `with_aoe_dispatch` flag on `CgStmt::ApplyAbility` is
+            // now plumbed through lowering — every fixture's flag
+            // value is read here as `_with_aoe_dispatch`. When the
+            // flag is `true`, the WGSL emit will gate the spatial
+            // walk + multi-target chronicle write on
+            // `area_kinds[i] == 0u` (Circle); when `false`, it
+            // emits the existing single-target chain. **The walk
+            // itself is not yet wired** — every fixture today
+            // (smoke + production runtimes alike) has the flag at
+            // its default `false`, so the dispatcher unconditionally
+            // emits the single-target chain. Wiring the AOE walk +
+            // surfacing the spatial reads via
+            // `wire_apply_ability_aoe_reads` is the next slice
+            // (Path B emit). The CPU oracle (`apply_program_aoe`)
             // expands Circle slots via `state.spatial().within_radius`
             // and emits one ApplyEvent per in-circle target. The
             // analogous GPU shape is to wrap the `if (when_passes)
@@ -5409,6 +5423,7 @@ mod tests {
                 ability: ability_lit,
                 caster: caster_self,
                 target: target_self,
+                with_aoe_dispatch: false,
             },
         );
         let ctx = EmitCtx::structural(&prog);
