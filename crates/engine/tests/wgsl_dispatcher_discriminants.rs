@@ -200,6 +200,148 @@ fn suppress_packs_to_discriminant_30_matching_wgsl_dispatcher() {
     );
 }
 
+// Wave 2 piece 3 — Execute / SelfDamage (Damage-shape, f32 payload).
+#[test]
+fn execute_packs_to_discriminant_16_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Execute { hp_threshold: 25.0 }),
+        16,
+        "Execute discriminant — WGSL dispatcher arm `kind == 16u` depends on this"
+    );
+}
+
+#[test]
+fn self_damage_packs_to_discriminant_17_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::SelfDamage { amount: 5.0 }),
+        17,
+        "SelfDamage discriminant — WGSL dispatcher arm `kind == 17u` depends on this"
+    );
+}
+
+// Wave 1 economy — TransferGold / ModifyStanding (sign-extended i32).
+#[test]
+fn transfer_gold_packs_to_discriminant_5_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::TransferGold { amount: -50 }),
+        5,
+        "TransferGold discriminant — WGSL dispatcher arm `kind == 5u` depends on this"
+    );
+}
+
+#[test]
+fn modify_standing_packs_to_discriminant_6_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::ModifyStanding { delta: -10 }),
+        6,
+        "ModifyStanding discriminant — WGSL dispatcher arm `kind == 6u` depends on this"
+    );
+}
+
+// Wave 2 piece 4 — LifeSteal / DamageModify (Slow-shape, dual u32+i16).
+#[test]
+fn life_steal_packs_to_discriminant_18_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::LifeSteal { duration_ticks: 30, fraction_q8: 76 }),
+        18,
+        "LifeSteal discriminant — WGSL dispatcher arm `kind == 18u` depends on this"
+    );
+}
+
+#[test]
+fn damage_modify_packs_to_discriminant_19_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::DamageModify { duration_ticks: 30, multiplier_q8: 128 }),
+        19,
+        "DamageModify discriminant — WGSL dispatcher arm `kind == 19u` depends on this"
+    );
+}
+
+// DoT / HoT / TimedShield (dual f32 + u32).
+#[test]
+fn damage_over_time_packs_to_discriminant_20_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::DamageOverTime { amount: 5.0, duration_ticks: 10 }),
+        20,
+        "DamageOverTime discriminant — WGSL dispatcher arm `kind == 20u` depends on this"
+    );
+}
+
+#[test]
+fn heal_over_time_packs_to_discriminant_21_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::HealOverTime { amount: 5.0, duration_ticks: 10 }),
+        21,
+        "HealOverTime discriminant — WGSL dispatcher arm `kind == 21u` depends on this"
+    );
+}
+
+#[test]
+fn timed_shield_packs_to_discriminant_22_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::TimedShield { amount: 50.0, duration_ticks: 30 }),
+        22,
+        "TimedShield discriminant — WGSL dispatcher arm `kind == 22u` depends on this"
+    );
+}
+
+// Buff / Summon — packed payloads with bit unpacking.
+#[test]
+fn buff_packs_to_discriminant_23_matching_wgsl_dispatcher() {
+    use engine::ability::program::BuffStat;
+    assert_eq!(
+        pack_one(EffectOp::Buff {
+            stat: BuffStat::MoveSpeed,
+            magnitude_q8: 76,
+            duration_ticks: 50,
+        }),
+        23,
+        "Buff discriminant — WGSL dispatcher arm `kind == 23u` depends on this"
+    );
+}
+
+#[test]
+fn summon_packs_to_discriminant_24_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Summon {
+            template_hash: 0xCAFE_BABE,
+            count: 3,
+            lifetime_ticks: 600,
+        }),
+        24,
+        "Summon discriminant — WGSL dispatcher arm `kind == 24u` depends on this"
+    );
+}
+
+// Non-combat verbs (Wave 2 phase 1).
+#[test]
+fn harvest_packs_to_discriminant_25_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Harvest { kind_hash: 0xDEAD_BEEF, amount: 5 }),
+        25,
+        "Harvest discriminant — WGSL dispatcher arm `kind == 25u` depends on this"
+    );
+}
+
+#[test]
+fn place_voxel_packs_to_discriminant_26_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::PlaceVoxel { kind_hash: 0xFEED_FACE }),
+        26,
+        "PlaceVoxel discriminant — WGSL dispatcher arm `kind == 26u` depends on this"
+    );
+}
+
+// Wave 2 piece 8 — Reflect (Slow-shape, dual u32+i16).
+#[test]
+fn reflect_packs_to_discriminant_31_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Reflect { duration_ticks: 30, fraction_q8: 76 }),
+        31,
+        "Reflect discriminant — WGSL dispatcher arm `kind == 31u` depends on this"
+    );
+}
+
 #[test]
 fn empty_sentinel_byte_matches_wgsl_dispatcher() {
     // The dispatcher loop's `if (kind == 0xFFu) { continue; }` early-out

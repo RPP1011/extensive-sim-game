@@ -1692,14 +1692,75 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 30u) {{\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Suppress: payload_a = duration_ticks (u32)\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_suppress(target, payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 5u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TransferGold: payload_a = amount (i32 sign-widened to u32)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let amount_i32: i32 = bitcast<i32>(payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_transfer_gold(caster, target, amount_i32);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 6u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// ModifyStanding: payload_a = delta (i16 sign-widened to u32)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let delta_i32: i32 = bitcast<i32>(payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_modify_standing(caster, target, delta_i32);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 16u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Execute: payload_a = hp_threshold (f32 via bitcast)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let hp_threshold: f32 = bitcast<f32>(payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_execute(target, hp_threshold);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 17u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// SelfDamage: payload_a = amount (f32 via bitcast)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let amount: f32 = bitcast<f32>(payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_self_damage(caster, amount);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 18u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// LifeSteal: payload_a = duration_ticks,\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b's low 16 bits = fraction_q8 (i16)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let fraction_q8: i32 = bitcast<i32>(payload_b);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_life_steal(target, payload_a, fraction_q8);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 19u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// DamageModify: payload_a = duration_ticks,\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b's low 16 bits = multiplier_q8 (i16)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let multiplier_q8: i32 = bitcast<i32>(payload_b);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_damage_modify(target, payload_a, multiplier_q8);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 20u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// DamageOverTime: payload_a = amount-per-tick (f32),\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b = duration_ticks (u32)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let amount: f32 = bitcast<f32>(payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_damage_over_time(caster, target, amount, payload_b);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 21u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// HealOverTime: payload_a = amount-per-tick (f32),\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b = duration_ticks (u32)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let amount: f32 = bitcast<f32>(payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_heal_over_time(caster, target, amount, payload_b);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 22u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TimedShield: payload_a = amount (f32),\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b = duration_ticks (u32)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let amount: f32 = bitcast<f32>(payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_timed_shield(caster, target, amount, payload_b);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 23u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Buff: payload_a = (stat ordinal in low byte | magnitude_q8 in bits 8..),\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b = duration_ticks. magnitude_q8 is i16 sign-extended.\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let buff_stat: u32 = payload_a & 0xFFu;\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let buff_magnitude_q8: i32 = bitcast<i32>(payload_a) >> 8;\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_buff(target, buff_stat, buff_magnitude_q8, payload_b);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 24u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Summon: payload_a = template_hash (u32),\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b = (count in high byte | lifetime in low 24 bits)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let summon_count: u32 = (payload_b >> 24u) & 0xFFu;\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let summon_lifetime: u32 = payload_b & 0x00FFFFFFu;\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_summon(caster, payload_a, summon_count, summon_lifetime);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 25u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Harvest: payload_a = kind_hash, payload_b = amount\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_harvest(caster, payload_a, payload_b);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 26u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// PlaceVoxel: payload_a = kind_hash; placement at cast's target pos\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_place_voxel(caster, payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 31u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Reflect: payload_a = duration_ticks,\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b's low 16 bits = fraction_q8 (i16)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let fraction_q8: i32 = bitcast<i32>(payload_b);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_reflect(target, payload_a, fraction_q8);\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// Variants 5–7, 16–26, 31 (TransferGold, ModifyStanding,\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// CastAbility, Execute, SelfDamage, LifeSteal,\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// DamageModify, DoT/HoT/TimedShield, Buff, Summon,\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// Harvest/PlaceVoxel, Reflect): unhandled in slice β.\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// Each needs a typed payload decode + chronicle-append\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// arm; the shape is established by the 17 arms above so\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// they're additive in slice δ (#137).\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// Variant 7 (CastAbility) — recursive dispatch. The\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// nested ability_id lives in payload_a; recursing\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// requires either a depth-bounded re-entry into this\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// loop or a separate work queue. Deferred to slice δ.\n\
                  \x20\x20\x20\x20}}\n\
                  }}"
             );
@@ -4306,15 +4367,17 @@ mod tests {
         assert!(wgsl.contains("ability_registry_effect_payload_b[effect_base + i]"),
             "payload_b read must hit the new column binding;\n{wgsl}");
 
-        // Seventeen implemented variant arms covering Wave 1 + Wave
-        // 2 pieces 1, 2, 7, 8 (single-payload shapes that mirror
-        // Damage / Stun verbatim modulo the chronicle-append target).
+        // Thirty-one implemented variant arms — every EffectOp
+        // variant except `CastAbility` (= 7), which needs a
+        // recursive dispatch shape (deferred to slice δ).
         for (kind, label) in &[
             (0,  "Damage"),
             (1,  "Heal"),
             (2,  "Shield"),
             (3,  "Stun"),
             (4,  "Slow"),
+            (5,  "TransferGold"),
+            (6,  "ModifyStanding"),
             (8,  "Root"),
             (9,  "Silence"),
             (10, "Fear"),
@@ -4323,10 +4386,22 @@ mod tests {
             (13, "Blink"),
             (14, "Knockback"),
             (15, "Pull"),
+            (16, "Execute"),
+            (17, "SelfDamage"),
+            (18, "LifeSteal"),
+            (19, "DamageModify"),
+            (20, "DamageOverTime"),
+            (21, "HealOverTime"),
+            (22, "TimedShield"),
+            (23, "Buff"),
+            (24, "Summon"),
+            (25, "Harvest"),
+            (26, "PlaceVoxel"),
             (27, "Stealth"),
             (28, "Charm"),
             (29, "Grounded"),
             (30, "Suppress"),
+            (31, "Reflect"),
         ] {
             let kind_token = if *kind == 0 {
                 format!("if (kind == {kind}u)")
@@ -4339,21 +4414,29 @@ mod tests {
             );
         }
 
-        // Damage / Heal / Shield + 4 movement verbs use bitcast<f32>
-        // on payload_a (amount/distance-bearing variants).
-        assert!(wgsl.matches("bitcast<f32>(payload_a)").count() >= 7,
-            "3 amount + 4 distance variants each bitcast payload_a to f32;\n{wgsl}");
+        // f32-bitcast payload count: Damage / Heal / Shield (3) +
+        // Execute / SelfDamage (2) + DoT / HoT / TimedShield (3) +
+        // 4 movement verbs (4) = 12 arms total bitcast payload_a.
+        assert!(wgsl.matches("bitcast<f32>(payload_a)").count() >= 12,
+            "12 amount/distance variants must bitcast payload_a to f32;\n{wgsl}");
 
-        // chronicle_append TODO markers — the runtime helper hookup
-        // is slice γ; locked here so a future regression can't
-        // accidentally claim the dispatcher writes events. One
-        // marker per implemented arm.
+        // Buff / Summon decoders (the only packed-payload arms).
+        assert!(wgsl.contains("payload_a & 0xFFu"),
+            "Buff stat ordinal extracted from payload_a low byte;\n{wgsl}");
+        assert!(wgsl.contains("(payload_b >> 24u) & 0xFFu"),
+            "Summon count extracted from payload_b high byte;\n{wgsl}");
+        assert!(wgsl.contains("payload_b & 0x00FFFFFFu"),
+            "Summon lifetime extracted from payload_b low 24 bits;\n{wgsl}");
+
+        // chronicle_append TODO markers — one per implemented arm.
         for marker in &[
             "chronicle_append_damage",
             "chronicle_append_heal",
             "chronicle_append_shield",
             "chronicle_append_stun",
             "chronicle_append_slow",
+            "chronicle_append_transfer_gold",
+            "chronicle_append_modify_standing",
             "chronicle_append_root",
             "chronicle_append_silence",
             "chronicle_append_fear",
@@ -4362,10 +4445,22 @@ mod tests {
             "chronicle_append_blink",
             "chronicle_append_knockback",
             "chronicle_append_pull",
+            "chronicle_append_execute",
+            "chronicle_append_self_damage",
+            "chronicle_append_life_steal",
+            "chronicle_append_damage_modify",
+            "chronicle_append_damage_over_time",
+            "chronicle_append_heal_over_time",
+            "chronicle_append_timed_shield",
+            "chronicle_append_buff",
+            "chronicle_append_summon",
+            "chronicle_append_harvest",
+            "chronicle_append_place_voxel",
             "chronicle_append_stealth",
             "chronicle_append_charm",
             "chronicle_append_grounded",
             "chronicle_append_suppress",
+            "chronicle_append_reflect",
         ] {
             assert!(
                 wgsl.contains(&format!("TODO slice γ: {marker}")),
