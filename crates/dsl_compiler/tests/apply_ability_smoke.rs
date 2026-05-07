@@ -801,6 +801,66 @@ fn smoke_fixture_implicit_target_still_emits_target_slot_let() {
     );
 }
 
+/// The smoke fixture has TWO PerAgent rules (`DispatchAbility` with
+/// implicit target + `DispatchAbilityExplicit` with `by self target
+/// self`). They emit as two separate kernels (`physics_DispatchAbility`
+/// + `physics_DispatchAbilityExplicit`), each carrying its own
+/// dispatcher block.
+///
+/// Pins that the explicit-clause rule:
+///   1. produces its own kernel (not silently dropped during scheduling),
+///   2. carries a complete 7-arm dispatcher block in that kernel,
+///   3. emits both `caster_slot` + `target_slot` lets like the
+///      implicit-target rule.
+///
+/// Without (3), the slice-ε explicit-operand surface in .sim corpus
+/// could regress at lowering and ship blank dispatcher arms.
+#[test]
+fn smoke_fixture_explicit_rule_kernel_has_full_dispatcher() {
+    let path = workspace_path("assets/sim/apply_ability_smoke.sim");
+    let art = compile_sim(&path).expect("apply_ability_smoke compiles");
+
+    let explicit_body = art
+        .wgsl_files
+        .iter()
+        .find(|(name, _)| name.contains("DispatchAbilityExplicit"))
+        .map(|(_, body)| body.as_str())
+        .unwrap_or_else(|| {
+            panic!(
+                "expected `physics_DispatchAbilityExplicit` kernel in artifacts; \
+                 a missing kernel here means the second rule was dropped \
+                 during scheduling. Available: {:?}",
+                art.wgsl_files.keys().collect::<Vec<_>>()
+            );
+        });
+
+    // Full 7-arm chronicle dispatch in the explicit-clause kernel.
+    let slot_acquisitions = explicit_body
+        .matches("let _slot: u32 = atomicAdd(&event_tail[0], 1u);")
+        .count();
+    assert_eq!(
+        slot_acquisitions, 7,
+        "DispatchAbilityExplicit kernel must carry all 7 chronicle slot \
+         acquisitions (one per chronicle-bearing EffectOp variant); got \
+         {slot_acquisitions}\nbody:\n{explicit_body}"
+    );
+
+    // Slice ε surface: explicit `by self target self` lowers to both
+    // operand lets — same shape as the implicit default but proves
+    // the explicit-clause path through parser → resolve → lower → emit
+    // doesn't regress on the .sim corpus surface.
+    assert!(
+        explicit_body.contains("let caster_slot: u32"),
+        "explicit-clause kernel must emit `let caster_slot`;\n{explicit_body}"
+    );
+    assert!(
+        explicit_body.contains("let target_slot: u32"),
+        "explicit-clause kernel must emit `let target_slot` (the \
+         `target self` clause should produce a let, not be dropped);\n\
+         {explicit_body}"
+    );
+}
+
 /// Pin the BGL composer's wiring of `event_ring` + `event_tail` into
 /// the dispatcher kernel. Without these bindings, the chronicle writes
 /// emitted by the dispatcher arms would reference undeclared identifiers
