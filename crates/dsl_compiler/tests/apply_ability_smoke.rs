@@ -1079,6 +1079,36 @@ fn apply_ability_rejects_agentid_as_ability_operand() {
     );
 }
 
+/// `world.tick` is a valid u32 source under the namespace registry's
+/// type tag (`NamespaceField { ty: U32 }`), even though `CgTy::Tick`
+/// exists for the scoring/anchor case. The slice-ε type-check
+/// permits it as target — semantically dubious (using the tick value
+/// as an agent slot index), but mechanically u32. This pin documents
+/// that.
+///
+/// If the namespace registry ever upgrades `world.tick` to
+/// `CgTy::Tick` (more accurate type tag), this test flips and the
+/// type-check would need updating to reject Tick — different decision
+/// to make at that point.
+#[test]
+fn apply_ability_accepts_world_tick_as_target_today() {
+    let src = "
+        event Tick { }
+        entity Hero : Agent { }
+
+        physics TickAsTarget @phase(per_agent) {
+          on Tick {} where (self.alive) {
+            apply_ability agents.level(self) by self target world.tick
+          }
+        }
+    ";
+    let program = dsl_compiler::parse(src).expect("parse");
+    let comp = dsl_ast::resolve::resolve(program).expect("resolve");
+    dsl_compiler::cg::lower::lower_compilation_to_cg(&comp)
+        .expect("world.tick is registered as CgTy::U32 in NamespaceRegistry — \
+                 acceptable as target operand under the slice-ε type-check");
+}
+
 /// Bool target (e.g., a typo where the user wrote `target self.alive`
 /// instead of `target self`). Without the type-check fix, this would
 /// also silently coerce through `u32(bool)` in emit. Asserts the
