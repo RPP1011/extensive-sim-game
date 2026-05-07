@@ -1966,4 +1966,163 @@ mod tests {
         // Post-condition: restored.
         assert_eq!(restored, Some(pre_registered_self));
     }
+
+    /// Gap Z regression: a verb with both `self` and `target`
+    /// parameters lowering a score expression that field-accesses
+    /// `self.<field>` (e.g. `Heal(self, target: Agent)` with
+    /// `score (100.0 - self.hp)`).
+    ///
+    /// The verb expander emits a scoring entry whose head shape is
+    /// `Positional [(target, target_ref, AgentId)]` (mirrored from the
+    /// mask head via `build_mask_head`); the cascade-physics lowering
+    /// (which runs BEFORE scoring) registers BOTH the verb's `self`
+    /// and `target` LocalRefs in `ctx.local_ids` via
+    /// `synthesize_pattern_binding_lets`.
+    ///
+    /// Without `self`-shadowing, the score body's `self.hp` would hit
+    /// `lower_field`'s "let-bound AgentId local" arm (line ~1050) and
+    /// route through `AgentRef::Target(<base_id>)` — producing a WGSL
+    /// `agent_hp[target_expr_<N>]` read with no matching `let` binding
+    /// (the cascade-kernel-local binding doesn't exist in scoring's
+    /// kernel scope). The pre-existing `target` shadow handles the
+    /// `target` binder; this test pins that the SYMMETRIC `self`
+    /// shadow is in place too.
+    ///
+    /// Asserts the lowered CgExpr graph contains
+    /// `Read(AgentField { field: Hp, target: AgentRef::Self_ })` and
+    /// NOT `AgentRef::Target(_)` for `self.hp`.
+    #[test]
+    fn self_field_in_pair_field_score_routes_through_caster() {
+        use crate::cg::expr::CgExpr;
+        use dsl_ast::ast::BinOp;
+        use dsl_ast::ir::LocalRef;
+        use std::collections::HashSet;
+
+        // Verb shape: `Heal(self, target: Agent)` → scoring entry
+        // with positional head `(target: AgentId)`. Score expression
+        // `(100.0 - self.hp)` — only references `self.<field>`, not
+        // `target.<field>`.
+        let self_ref = LocalRef(1);
+        let target_ref = LocalRef(2);
+        let self_hp = node(IrExpr::Field {
+            base: Box::new(node(IrExpr::Local(self_ref, "self".to_string()))),
+            field_name: "hp".to_string(),
+            field: None,
+        });
+        let utility = node(IrExpr::Binary(
+            BinOp::Sub,
+            Box::new(lit_f32(100.0)),
+            Box::new(self_hp),
+        ));
+
+        let ir = scoring_with(
+            vec![ScoringEntryIR {
+                head: IrActionHead {
+                    name: "Heal".to_string(),
+                    shape: IrActionHeadShape::Positional(vec![(
+                        "target".to_string(),
+                        target_ref,
+                        dsl_ast::ir::IrType::AgentId,
+                    )]),
+                    span: span(0, 20),
+                },
+                expr: utility,
+                span: span(0, 0),
+            }],
+            vec![],
+        );
+
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        ctx.register_action("Heal", ActionId(3));
+
+        // Pre-register BOTH `self` and `target` LocalRefs as
+        // let-bound AgentId locals — mirroring what
+        // `synthesize_pattern_binding_lets` does during the verb's
+        // cascade-physics lowering (`on ActionSelected { actor: self,
+        // target: target, action_id: ... }`). Without the
+        // `self`-shadowing in `lower_standard_row`, `self.hp` in the
+        // score body would route through the let-bound arm in
+        // `lower_field` and produce `AgentRef::Target(<base_id>)`,
+        // emitting `agent_hp[target_expr_<N>]` in the WGSL — Naga
+        // rejects with "no definition in scope for identifier:
+        // target_expr_<N>".
+        let pre_registered_self = LocalId(50);
+        let pre_registered_target = LocalId(51);
+        ctx.register_local(self_ref, pre_registered_self);
+        ctx.record_local_ty(pre_registered_self, CgTy::AgentId);
+        ctx.register_local(target_ref, pre_registered_target);
+        ctx.record_local_ty(pre_registered_target, CgTy::AgentId);
+
+        let op_id = lower_scoring(ScoringId(0), &ir, &mut ctx).expect("Heal score lowers cleanly");
+        let restored_self = ctx.local_ids.get(&self_ref).copied();
+        let restored_target = ctx.local_ids.get(&target_ref).copied();
+        let prog = builder.finish();
+
+        // Walk the row's CgExpr graph and collect every AgentRef
+        // referenced by an `AgentField` Read. The `self.hp` access
+        // must produce `AgentRef::Self_`; no `AgentRef::Target(_)` may
+        // appear (would mean self.hp leaked through the let-bound arm).
+        match &prog.ops[op_id.0 as usize].kind {
+            ComputeOpKind::ScoringArgmax { rows, .. } => {
+                let utility_id = rows[0].utility;
+                let mut visited = HashSet::new();
+                let mut stack = vec![utility_id];
+                let mut saw_self_hp = false;
+                while let Some(id) = stack.pop() {
+                    if !visited.insert(id) {
+                        continue;
+                    }
+                    let n = &prog.exprs[id.0 as usize];
+                    match n {
+                        CgExpr::Read(DataHandle::AgentField { field, target }) => {
+                            assert!(
+                                !matches!(target, AgentRef::Target(_)),
+                                "self.hp leaked through let-bound arm to AgentRef::Target — \
+                                 the verb expander pre-registered `self` LocalRef and \
+                                 `lower_standard_row` failed to shadow it; field={:?} target={:?}",
+                                field,
+                                target
+                            );
+                            if *field == AgentFieldId::Hp && matches!(target, AgentRef::Self_) {
+                                saw_self_hp = true;
+                            }
+                        }
+                        CgExpr::Binary { lhs, rhs, .. } => {
+                            stack.push(*lhs);
+                            stack.push(*rhs);
+                        }
+                        CgExpr::Select { cond, then, else_, .. } => {
+                            stack.push(*cond);
+                            stack.push(*then);
+                            stack.push(*else_);
+                        }
+                        _ => {}
+                    }
+                }
+                assert!(
+                    saw_self_hp,
+                    "expected `self.hp` to lower to Read(AgentField {{ field: Hp, target: \
+                     AgentRef::Self_ }}); none observed"
+                );
+            }
+            other => panic!("unexpected kind: {other:?}"),
+        }
+
+        // Post-condition: BOTH pre-registered bindings are restored.
+        // The `target` binder is shadowed by the positional-head arm,
+        // the `self` binder by `shadow_self_binders`. Both must
+        // restore cleanly so adjacent rows / downstream passes
+        // observe the prior bindings intact.
+        assert_eq!(
+            restored_self,
+            Some(pre_registered_self),
+            "shadowed `self` LocalRef must restore to its prior LocalId"
+        );
+        assert_eq!(
+            restored_target,
+            Some(pre_registered_target),
+            "shadowed `target` LocalRef must restore to its prior LocalId"
+        );
+    }
 }

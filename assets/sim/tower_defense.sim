@@ -118,23 +118,11 @@ verb Shoot(self, target: Agent) =
         && target.mana <= config.td.enemy_mana_max
         && distance(self.pos, target.pos) < config.td.defender_range)
   emit Damaged { source: self, target: target, amount: config.td.defender_damage }
-  // GAP WORKAROUND (binder shadowing — same shape as duel_1v1's Heal):
-  //   The natural `score (range - distance(self.pos, target.pos))`
-  //   lowers `self.pos` in the score body to
-  //   `agent_pos[target_expr_<N>]` instead of `agent_pos[agent_id]` —
-  //   the verb expander's binder shadowing routes `self` through the
-  //   PerPairCandidate buffer when the verb has a `target` param.
-  //   See duel_1v1.sim's Heal NOTE for the same gap surface.
-  //
-  // Workaround: score "closer to the base = higher priority". The
-  // base is at a fixed config position, so the score body needs only
-  // `target.pos` (which lowers correctly to per_pair_candidate) and
-  // a constant vec3 — sidestepping the `self.*` shadowing path.
-  // Functionally similar: defenders prefer enemies advancing on the
-  // base over enemies still at the spawn line.
-  score (100.0 - distance(target.pos, vec3(config.td.base_pos_x,
-                                           config.td.base_pos_y,
-                                           config.td.base_pos_z)))
+  // Natural inverse-distance score: defenders prioritise enemies
+  // closest to themselves. `self.pos` correctly resolves to the
+  // caster's position (outer agent_id), `target.pos` resolves to the
+  // per-pair candidate.
+  score (config.td.defender_range - distance(self.pos, target.pos))
 
 // ---- Apply damage chronicle (duel_1v1 precedent) ---------------------
 //
