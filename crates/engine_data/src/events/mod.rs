@@ -25,11 +25,13 @@ pub mod chronicle_entry;
 pub mod effect_blink_applied;
 pub mod effect_damage_applied;
 pub mod effect_damage_modify_applied;
+pub mod effect_damage_over_time_applied;
 pub mod effect_dash_applied;
 pub mod effect_execute_applied;
 pub mod effect_fear_applied;
 pub mod effect_gold_transfer;
 pub mod effect_heal_applied;
+pub mod effect_heal_over_time_applied;
 pub mod effect_knockback_applied;
 pub mod effect_life_steal_applied;
 pub mod effect_pull_applied;
@@ -41,6 +43,7 @@ pub mod effect_slow_applied;
 pub mod effect_standing_delta;
 pub mod effect_stun_applied;
 pub mod effect_taunt_applied;
+pub mod effect_timed_shield_applied;
 pub mod engagement_broken;
 pub mod engagement_committed;
 pub mod fear_spread;
@@ -76,11 +79,13 @@ pub use chronicle_entry::ChronicleEntry;
 pub use effect_blink_applied::EffectBlinkApplied;
 pub use effect_damage_applied::EffectDamageApplied;
 pub use effect_damage_modify_applied::EffectDamageModifyApplied;
+pub use effect_damage_over_time_applied::EffectDamageOverTimeApplied;
 pub use effect_dash_applied::EffectDashApplied;
 pub use effect_execute_applied::EffectExecuteApplied;
 pub use effect_fear_applied::EffectFearApplied;
 pub use effect_gold_transfer::EffectGoldTransfer;
 pub use effect_heal_applied::EffectHealApplied;
+pub use effect_heal_over_time_applied::EffectHealOverTimeApplied;
 pub use effect_knockback_applied::EffectKnockbackApplied;
 pub use effect_life_steal_applied::EffectLifeStealApplied;
 pub use effect_pull_applied::EffectPullApplied;
@@ -92,6 +97,7 @@ pub use effect_slow_applied::EffectSlowApplied;
 pub use effect_standing_delta::EffectStandingDelta;
 pub use effect_stun_applied::EffectStunApplied;
 pub use effect_taunt_applied::EffectTauntApplied;
+pub use effect_timed_shield_applied::EffectTimedShieldApplied;
 pub use engagement_broken::EngagementBroken;
 pub use engagement_committed::EngagementCommitted;
 pub use fear_spread::FearSpread;
@@ -340,6 +346,27 @@ pub enum Event {
         distance: f32,
         tick: u32,
     },
+    EffectDamageOverTimeApplied {
+        actor: AgentId,
+        target: AgentId,
+        amount_per_tick: f32,
+        duration_ticks: u32,
+        tick: u32,
+    },
+    EffectHealOverTimeApplied {
+        actor: AgentId,
+        target: AgentId,
+        amount_per_tick: f32,
+        duration_ticks: u32,
+        tick: u32,
+    },
+    EffectTimedShieldApplied {
+        actor: AgentId,
+        target: AgentId,
+        amount: f32,
+        duration_ticks: u32,
+        tick: u32,
+    },
     EngagementBroken {
         actor: AgentId,
         former_target: AgentId,
@@ -441,6 +468,9 @@ impl Event {
             Event::EffectBlinkApplied { tick, .. } => *tick,
             Event::EffectKnockbackApplied { tick, .. } => *tick,
             Event::EffectPullApplied { tick, .. } => *tick,
+            Event::EffectDamageOverTimeApplied { tick, .. } => *tick,
+            Event::EffectHealOverTimeApplied { tick, .. } => *tick,
+            Event::EffectTimedShieldApplied { tick, .. } => *tick,
             Event::EngagementBroken { tick, .. } => *tick,
             Event::EngagementCommitted { tick, .. } => *tick,
             Event::FearSpread { tick, .. } => *tick,
@@ -495,6 +525,9 @@ impl Event {
             Event::EffectBlinkApplied { .. } => true,
             Event::EffectKnockbackApplied { .. } => true,
             Event::EffectPullApplied { .. } => true,
+            Event::EffectDamageOverTimeApplied { .. } => true,
+            Event::EffectHealOverTimeApplied { .. } => true,
+            Event::EffectTimedShieldApplied { .. } => true,
             Event::EngagementBroken { .. } => true,
             Event::EngagementCommitted { .. } => true,
             Event::FearSpread { .. } => true,

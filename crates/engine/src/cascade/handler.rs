@@ -166,7 +166,23 @@ pub enum EventKindId {
     EffectBlinkApplied   = 48,
     EffectKnockbackApplied = 49,
     EffectPullApplied    = 50,
-    // Slots 51-127 reserved for replayable event variants added in later tasks.
+    // Wave 1.5+ — multi-tick effect EffectOps (DamageOverTime/HealOverTime/
+    // TimedShield). Each is a chronicle event for the matching `EffectOp`
+    // (op#20..22). DoT/HoT carry an actor + target + per-tick amount + a
+    // u32 duration_ticks (the cast records the magnitude + window once;
+    // a future consumer rule will re-emit per-tick damage/heal events).
+    // TimedShield carries actor + target + total shield amount + duration
+    // (the shield is applied once on cast and persists for the window).
+    // The `apply_ability` dispatcher writes these from the per-effect-slot
+    // arm chain when the corresponding `EffectOp` slot fires; consumer
+    // physics rules can fold them into per-agent multi-tick state the
+    // same way other effect chronicle records flow into SoA-fold rules
+    // (consumer wiring deferred — no sim currently re-emits multi-tick
+    // damage/heal/shield events).
+    EffectDamageOverTimeApplied = 51,
+    EffectHealOverTimeApplied   = 52,
+    EffectTimedShieldApplied    = 53,
+    // Slots 54-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 

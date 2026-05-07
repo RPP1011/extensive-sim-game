@@ -2118,6 +2118,19 @@ pub(crate) const EFFECT_KIND_TO_EVENT_KIND_ID: &[(u32, u32)] = &[
     (13, 48), // EffectOp::Blink     → EventKindId::EffectBlinkApplied
     (14, 49), // EffectOp::Knockback → EventKindId::EffectKnockbackApplied
     (15, 50), // EffectOp::Pull      → EventKindId::EffectPullApplied
+    // Wave 1.5+ — multi-tick effects. DamageOverTime / HealOverTime
+    // share a 4-payload-word shape (actor + target + amount-per-tick
+    // f32 + duration_ticks u32). TimedShield has the same payload
+    // shape with `amount` as the one-shot shield magnitude (with
+    // scale_bonus already folded in by the existing arm). The packed
+    // effect-kind ordinals (DamageOverTime=20, HealOverTime=21,
+    // TimedShield=22) come from `pack_effect` in
+    // `crates/engine/src/ability/packed.rs`; the dispatcher arm
+    // bodies for these in `emit_chronicle_arm_chain` (below) match
+    // these ordinals via `kind == 20u..=22u`.
+    (20, 51), // EffectOp::DamageOverTime → EventKindId::EffectDamageOverTimeApplied
+    (21, 52), // EffectOp::HealOverTime   → EventKindId::EffectHealOverTimeApplied
+    (22, 53), // EffectOp::TimedShield    → EventKindId::EffectTimedShieldApplied
 ];
 
 /// Look up the runtime `EventKindId` for an `EffectOp` discriminant.
@@ -2209,6 +2222,12 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Knockback=14");
     let pull_event_id = event_kind_id_for_effect_kind(15)
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Pull=15");
+    let damage_over_time_event_id = event_kind_id_for_effect_kind(20)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain DamageOverTime=20");
+    let heal_over_time_event_id = event_kind_id_for_effect_kind(21)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain HealOverTime=21");
+    let timed_shield_event_id = event_kind_id_for_effect_kind(22)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain TimedShield=22");
 
     let i4  = indent;                   // arm `if`/`else if` lines
     let i8  = format!("{i4}    ");      // body of arm
@@ -2591,27 +2610,80 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
-    // TODO arms for kinds 20..26 (DoT/HoT/TimedShield/Buff/Summon/Harvest/PlaceVoxel).
-    // Wave 1.5#4 GPU wire-up: scale_bonus is folded into amount for the
-    // f32-amount arms (DoT=20, HoT=21, TimedShield=22) so when the
-    // chronicle write lands here, the scaled amount is already correct.
+    // Wave 1.5+ — multi-tick effects (DamageOverTime/HealOverTime/
+    // TimedShield). All three share a 5-word chronicle record:
+    //   slot 0 = kind tag (51 / 52 / 53)
+    //   slot 1 = tick
+    //   slot 2 = caster_slot
+    //   slot 3 = target_slot
+    //   slot 4 = bitcast<u32>(amount)            // amount already includes scale_bonus
+    //   slot 5 = duration_ticks (raw u32)
+    // The cast records the magnitude + window once; a future consumer
+    // rule will re-emit per-tick damage/heal events. Wave 1.5#4 GPU
+    // wire-up already folded scale_bonus into the amount above this
+    // chain (the existing `bitcast<f32>(payload_a) + scale_bonus_var`
+    // is correct); we just bitcast the result back to u32 for the
+    // ring storage.
     // Buff(23) tickAmount uses scale_bonus, but period_ticks does not —
     // not relevant here because Buff packs `magnitude_q8` not `amount`.
+
+    // DamageOverTime = 20 → 51
     s.push_str(&format!("{i4}}} else if (kind == 20u) {{\n"));
-    s.push_str(&format!("{i8}// DamageOverTime: payload_a = amount-per-tick (f32),\n"));
+    s.push_str(&format!("{i8}// DamageOverTime = 20 → EventKindId::EffectDamageOverTimeApplied = 51\n"));
+    s.push_str(&format!("{i8}// payload_a = amount-per-tick (f32, scale_bonus folded in),\n"));
     s.push_str(&format!("{i8}// payload_b = duration_ticks (u32)\n"));
     s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a) + {scale_bonus_var};\n"));
-    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_damage_over_time(caster, target, amount, payload_b);\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectDamageOverTimeApplied (caster_slot + target_slot + amount + duration)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {damage_over_time_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // HealOverTime = 21 → 52
     s.push_str(&format!("{i4}}} else if (kind == 21u) {{\n"));
-    s.push_str(&format!("{i8}// HealOverTime: payload_a = amount-per-tick (f32),\n"));
+    s.push_str(&format!("{i8}// HealOverTime = 21 → EventKindId::EffectHealOverTimeApplied = 52\n"));
+    s.push_str(&format!("{i8}// payload_a = amount-per-tick (f32, scale_bonus folded in),\n"));
     s.push_str(&format!("{i8}// payload_b = duration_ticks (u32)\n"));
     s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a) + {scale_bonus_var};\n"));
-    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_heal_over_time(caster, target, amount, payload_b);\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectHealOverTimeApplied (caster_slot + target_slot + amount + duration)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {heal_over_time_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // TimedShield = 22 → 53
     s.push_str(&format!("{i4}}} else if (kind == 22u) {{\n"));
-    s.push_str(&format!("{i8}// TimedShield: payload_a = amount (f32),\n"));
+    s.push_str(&format!("{i8}// TimedShield = 22 → EventKindId::EffectTimedShieldApplied = 53\n"));
+    s.push_str(&format!("{i8}// payload_a = amount (f32, scale_bonus folded in),\n"));
     s.push_str(&format!("{i8}// payload_b = duration_ticks (u32)\n"));
     s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a) + {scale_bonus_var};\n"));
-    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_timed_shield(caster, target, amount, payload_b);\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectTimedShieldApplied (caster_slot + target_slot + amount + duration)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {timed_shield_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
     s.push_str(&format!("{i4}}} else if (kind == 23u) {{\n"));
     s.push_str(&format!("{i8}// Buff: payload_a = (stat ordinal in low byte | magnitude_q8 in bits 8..),\n"));
     s.push_str(&format!("{i8}// payload_b = duration_ticks. magnitude_q8 is i16 sign-extended.\n"));
@@ -5176,10 +5248,10 @@ mod tests {
         // Wave 2 piece 2 — Dash/Blink/Knockback/Pull are now wired (kinds
         // 47/48/49/50), no longer carry TODO markers; see the explicit
         // assertions below.
+        // Wave 1.5+ — DamageOverTime/HealOverTime/TimedShield are now
+        // wired (kinds 51/52/53), no longer carry TODO markers; see the
+        // explicit assertions below.
         for marker in &[
-            "chronicle_append_damage_over_time",
-            "chronicle_append_heal_over_time",
-            "chronicle_append_timed_shield",
             "chronicle_append_buff",
             "chronicle_append_summon",
             "chronicle_append_harvest",
@@ -5266,6 +5338,53 @@ mod tests {
         assert!(
             wgsl.contains("atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(distance));"),
             "Knockback/Pull arms must store distance at payload word 2 (ring offset 4);\n{wgsl}"
+        );
+
+        // Wave 1.5+ — multi-tick effects (DoT/HoT/TimedShield) now write
+        // real chronicle records (kinds 51/52/53). All three share the
+        // same 5-payload-word shape: actor + target + amount (bitcast
+        // f32 → u32) at payload word 2 (ring slot offset 4) +
+        // duration_ticks (raw u32) at payload word 3 (ring slot offset
+        // 5). Pin per-variant kind tags + the duration write so a
+        // regression that drops the duration surfaces here.
+        for (kind_token, expected_event_id, name) in &[
+            ("kind == 20u", 51u32, "DamageOverTime"),
+            ("kind == 21u", 52u32, "HealOverTime"),
+            ("kind == 22u", 53u32, "TimedShield"),
+        ] {
+            // The TODO markers used Rust snake_case (e.g.
+            // chronicle_append_damage_over_time). Since the shorthand
+            // form would be ambiguous (DamageOverTime → damage_over_time),
+            // we hard-code the snake_case form per name.
+            let snake = match *name {
+                "DamageOverTime" => "damage_over_time",
+                "HealOverTime"   => "heal_over_time",
+                "TimedShield"    => "timed_shield",
+                _ => unreachable!(),
+            };
+            assert!(
+                !wgsl.contains(&format!("TODO slice γ: chronicle_append_{snake}")),
+                "{name} arm should no longer carry the TODO marker;\n{wgsl}"
+            );
+            assert!(
+                wgsl.contains(kind_token),
+                "{name} arm dispatch ({kind_token}) must be present;\n{wgsl}"
+            );
+            assert!(
+                wgsl.contains(&format!(
+                    "atomicStore(&event_ring[_slot * 10u + 0u], {expected_event_id}u);"
+                )),
+                "{name} arm must store kind={expected_event_id};\n{wgsl}"
+            );
+        }
+        // DoT/HoT/TimedShield: amount at slot 4 (bitcast<u32>(amount)),
+        // duration_ticks at slot 5 (raw u32 from payload_b). Pin the
+        // duration write — distinct from the q8 / expires_at_tick
+        // shapes so it surfaces here on swap regressions.
+        assert!(
+            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));"),
+            "DoT/HoT/TimedShield arms must store duration_ticks at payload \
+             word 3 (ring offset 5) as raw u32 (= payload_b);\n{wgsl}"
         );
 
         // Slice γ — Damage arm wiring assertions.
@@ -5528,7 +5647,10 @@ mod tests {
                 17 => EffectOp::SelfDamage { amount: 5.0 },
                 18 => EffectOp::LifeSteal { duration_ticks: 50, fraction_q8: 128 },
                 19 => EffectOp::DamageModify { duration_ticks: 50, multiplier_q8: 128 },
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19"),
+                20 => EffectOp::DamageOverTime { amount: 5.0, duration_ticks: 30 },
+                21 => EffectOp::HealOverTime   { amount: 3.0, duration_ticks: 30 },
+                22 => EffectOp::TimedShield    { amount: 25.0, duration_ticks: 30 },
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22"),
             }
         };
 
@@ -5555,7 +5677,10 @@ mod tests {
                 17 => EngineEventKindId::EffectSelfDamageApplied as u32,
                 18 => EngineEventKindId::EffectLifeStealApplied as u32,
                 19 => EngineEventKindId::EffectDamageModifyApplied as u32,
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19"),
+                20 => EngineEventKindId::EffectDamageOverTimeApplied as u32,
+                21 => EngineEventKindId::EffectHealOverTimeApplied   as u32,
+                22 => EngineEventKindId::EffectTimedShieldApplied    as u32,
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22"),
             }
         };
 
@@ -5608,15 +5733,22 @@ mod tests {
             "Knockback → EffectKnockbackApplied (Wave 2 piece 2)");
         assert_eq!(event_kind_id_for_effect_kind(15), Some(50),
             "Pull → EffectPullApplied (Wave 2 piece 2)");
+        // Wave 1.5+ — multi-tick effects now wired:
+        assert_eq!(event_kind_id_for_effect_kind(20), Some(51),
+            "DamageOverTime → EffectDamageOverTimeApplied (Wave 1.5+)");
+        assert_eq!(event_kind_id_for_effect_kind(21), Some(52),
+            "HealOverTime → EffectHealOverTimeApplied (Wave 1.5+)");
+        assert_eq!(event_kind_id_for_effect_kind(22), Some(53),
+            "TimedShield → EffectTimedShieldApplied (Wave 1.5+)");
         assert_eq!(event_kind_id_for_effect_kind(7), None,
             "CastAbility (recursive dispatch) has no chronicle kind");
-        assert_eq!(event_kind_id_for_effect_kind(20), None,
-            "DamageOverTime has no chronicle counterpart today");
+        assert_eq!(event_kind_id_for_effect_kind(23), None,
+            "Buff has no chronicle counterpart today");
     }
 
     #[test]
     fn effect_kind_to_event_kind_map_covers_chronicle_bearing_variants_only() {
-        // 19 chronicle-bearing variants today — Damage/Heal/Shield/Stun/
+        // 22 chronicle-bearing variants today — Damage/Heal/Shield/Stun/
         // Slow/TransferGold/ModifyStanding + SelfDamage (Bleed verb
         // swap, Task #138 follow-on, 2026-05-06) + LifeSteal (Vampirize
         // verb swap, Task #138 follow-on, mirror of Bleed) + DamageModify
@@ -5624,15 +5756,16 @@ mod tests {
         // + Execute (Reap verb swap, Task #138 follow-on, mirror of
         // Fortify — closes the slice across all 8 duel_abilities verbs)
         // + Root/Silence/Fear/Taunt (Wave 2 piece 1, control statuses)
-        // + Dash/Blink/Knockback/Pull (Wave 2 piece 2, movement EffectOps).
+        // + Dash/Blink/Knockback/Pull (Wave 2 piece 2, movement EffectOps)
+        // + DamageOverTime/HealOverTime/TimedShield (Wave 1.5+ multi-tick).
         // If this number changes, either the engine grew a new
         // `EffectXxxApplied` event (in which case the map gets a new
         // entry) or a variant lost its chronicle counterpart (in which
         // case the map drops an entry). Pin the count so the gap between
         // source-of-truths is loud.
         assert_eq!(
-            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 19,
-            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 19 \
+            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 22,
+            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 22 \
              chronicle-bearing variants today; if you added or removed an \
              entry, update this assertion (and the slice γ wire-up that \
              consumes the new entry)"

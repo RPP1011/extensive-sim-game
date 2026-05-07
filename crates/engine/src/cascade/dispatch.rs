@@ -85,6 +85,9 @@ pub mod interp {
             Event::EffectBlinkApplied    { .. } => "EffectBlinkApplied",
             Event::EffectKnockbackApplied { .. } => "EffectKnockbackApplied",
             Event::EffectPullApplied     { .. } => "EffectPullApplied",
+            Event::EffectDamageOverTimeApplied { .. } => "EffectDamageOverTimeApplied",
+            Event::EffectHealOverTimeApplied   { .. } => "EffectHealOverTimeApplied",
+            Event::EffectTimedShieldApplied    { .. } => "EffectTimedShieldApplied",
             Event::EffectSlowApplied     { .. } => "EffectSlowApplied",
             Event::EffectGoldTransfer    { .. } => "EffectGoldTransfer",
             Event::EffectStandingDelta   { .. } => "EffectStandingDelta",
@@ -327,6 +330,51 @@ pub mod interp {
                 ("t",        EvalValue::Agent(dsl_agent(*target))),
                 ("d",        EvalValue::F32(*distance)),
                 ("tick",     EvalValue::U32(*tick)),
+            ],
+            // ---- EffectDamageOverTimeApplied -----------------------------
+            // Wave 1.5+ — multi-tick effect. 4-payload-word chronicle
+            // record (actor + target + amount_per_tick f32 + duration_ticks
+            // u32). The cast records the magnitude + window once; a future
+            // consumer rule will re-emit per-tick damage events.
+            Event::EffectDamageOverTimeApplied { actor, target, amount_per_tick, duration_ticks, tick } => vec![
+                ("actor",            EvalValue::Agent(dsl_agent(*actor))),
+                ("target",           EvalValue::Agent(dsl_agent(*target))),
+                ("amount_per_tick",  EvalValue::F32(*amount_per_tick)),
+                ("duration_ticks",   EvalValue::U32(*duration_ticks)),
+                ("c",                EvalValue::Agent(dsl_agent(*actor))),
+                ("t",                EvalValue::Agent(dsl_agent(*target))),
+                ("a",                EvalValue::F32(*amount_per_tick)),
+                ("d",                EvalValue::U32(*duration_ticks)),
+                ("tick",             EvalValue::U32(*tick)),
+            ],
+            // ---- EffectHealOverTimeApplied -------------------------------
+            // Wave 1.5+ — same shape as DamageOverTime.
+            Event::EffectHealOverTimeApplied { actor, target, amount_per_tick, duration_ticks, tick } => vec![
+                ("actor",            EvalValue::Agent(dsl_agent(*actor))),
+                ("target",           EvalValue::Agent(dsl_agent(*target))),
+                ("amount_per_tick",  EvalValue::F32(*amount_per_tick)),
+                ("duration_ticks",   EvalValue::U32(*duration_ticks)),
+                ("c",                EvalValue::Agent(dsl_agent(*actor))),
+                ("t",                EvalValue::Agent(dsl_agent(*target))),
+                ("a",                EvalValue::F32(*amount_per_tick)),
+                ("d",                EvalValue::U32(*duration_ticks)),
+                ("tick",             EvalValue::U32(*tick)),
+            ],
+            // ---- EffectTimedShieldApplied --------------------------------
+            // Wave 1.5+ — same payload shape as DoT/HoT (4 words: actor +
+            // target + amount + duration_ticks). Differs in semantics:
+            // amount is the one-shot shield magnitude, applied once on
+            // cast and persisting for `duration_ticks`.
+            Event::EffectTimedShieldApplied { actor, target, amount, duration_ticks, tick } => vec![
+                ("actor",            EvalValue::Agent(dsl_agent(*actor))),
+                ("target",           EvalValue::Agent(dsl_agent(*target))),
+                ("amount",           EvalValue::F32(*amount)),
+                ("duration_ticks",   EvalValue::U32(*duration_ticks)),
+                ("c",                EvalValue::Agent(dsl_agent(*actor))),
+                ("t",                EvalValue::Agent(dsl_agent(*target))),
+                ("a",                EvalValue::F32(*amount)),
+                ("d",                EvalValue::U32(*duration_ticks)),
+                ("tick",             EvalValue::U32(*tick)),
             ],
             // ---- EffectSlowApplied ----------------------------------------
             Event::EffectSlowApplied { actor, target, expires_at_tick, factor_q8, tick } => vec![
