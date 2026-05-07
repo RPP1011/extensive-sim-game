@@ -582,9 +582,22 @@ fn hash_stmt(h: &mut Sha256, s: &IrStmt) {
                 hash_expr(h, &f.value);
             }
         }
-        IrStmt::ApplyAbility { ability, .. } => {
+        IrStmt::ApplyAbility { ability, caster, target, .. } => {
             h.update([0x18u8]);
             hash_expr(h, ability);
+            // Slice ε (#161 + d0bc37fd): caster + target operands are
+            // schema-affecting — a sim with `apply_ability a by w`
+            // must hash distinctly from `apply_ability a`. Encode
+            // None / Some discriminants explicitly so two different
+            // shapes don't collide.
+            match caster {
+                Some(c) => { h.update([0x01u8]); hash_expr(h, c); }
+                None    => { h.update([0x00u8]); }
+            }
+            match target {
+                Some(t) => { h.update([0x01u8]); hash_expr(h, t); }
+                None    => { h.update([0x00u8]); }
+            }
         }
     }
 }
