@@ -107,10 +107,13 @@ fn compile_sim_tolerating_diagnostics(
 /// the missing link between dispatcher writes and game state for #138.
 ///
 /// Trips the same P6 well_formed diagnostic that
-/// duel_abilities.sim::ApplyDamage trips (PerEvent + agents.set_hp).
-/// duel_abilities's build.rs tolerates this via the
-/// `DriverOutcome::Err → o.program` pattern; this test uses
-/// `compile_sim_tolerating_diagnostics` to mirror that.
+/// duel_abilities.sim::ApplyDamage used to trip (PerEvent +
+/// agents.set_hp). Gap X (2026-05-04) extended the P6 check to
+/// recognize the authored `@phase(post)` annotation as the spec'd
+/// chronicle / telemetry channel — agent mutation is exactly the
+/// point of `@phase(post)` rules. The fixture now annotates the
+/// chronicle consumer with `@phase(post)` and the diagnostic no
+/// longer fires; the test pins clean lowering.
 #[test]
 fn apply_ability_chronicle_consumer_compiles_with_tolerated_p6() {
     let path = workspace_path("assets/sim/apply_ability_chronicle_consumer.sim");
@@ -118,24 +121,13 @@ fn apply_ability_chronicle_consumer_compiles_with_tolerated_p6() {
         panic!("apply_ability_chronicle_consumer.sim hard-failed at: {e}");
     });
 
-    // Pin: the only diagnostic is the expected P6 violation on the
-    // consumer rule (matches the duel_abilities.sim::ApplyDamage
-    // pattern). Any OTHER diagnostic is a real failure.
-    let unexpected: Vec<&String> = diags
-        .iter()
-        .filter(|d| !d.contains("P6Violation"))
-        .collect();
+    // Pin: NO diagnostics post-Gap-X. The `@phase(post)` annotation
+    // on `ApplyChronicleDamage` opts into the P6 exemption for
+    // authored chronicle physics. Any diagnostic — P6 or otherwise —
+    // is a regression.
     assert!(
-        unexpected.is_empty(),
-        "unexpected non-P6 diagnostics from chronicle consumer:\n{:?}",
-        unexpected,
-    );
-    // The diagnostic carries OpId(1) (not the rule name string),
-    // and `field: Hp` (the consumer rule's set_hp target).
-    assert!(
-        diags.iter().any(|d| d.contains("P6Violation")
-            && d.contains("Hp")),
-        "expected P6Violation on agent_hp write; got: {:?}",
+        diags.is_empty(),
+        "unexpected diagnostics from chronicle consumer post-Gap-X:\n{:?}",
         diags,
     );
 
@@ -277,10 +269,11 @@ fn apply_ability_verb_smoke_compiles() {
 /// template for task #138's Strike swap — once this works, swapping
 /// duel_abilities Strike onto the same shape is a mechanical port.
 ///
-/// Trips the same P6 well_formed diagnostic that
-/// apply_ability_chronicle_consumer.sim trips (PerEvent + agents.set_hp);
-/// uses `compile_sim_tolerating_diagnostics` to mirror the build.rs
-/// pattern used by `apply_ability_verb_chronicle_consumer_runtime`.
+/// Used to trip the same P6 well_formed diagnostic that
+/// apply_ability_chronicle_consumer.sim tripped (PerEvent +
+/// agents.set_hp). Gap X (2026-05-04) added `@phase(post)`
+/// recognition to the P6 check — the fixture now annotates the
+/// consumer rule and lowers cleanly.
 #[test]
 fn apply_ability_verb_chronicle_consumer_compiles_with_tolerated_p6() {
     let path = workspace_path("assets/sim/apply_ability_verb_chronicle_consumer.sim");
@@ -288,21 +281,11 @@ fn apply_ability_verb_chronicle_consumer_compiles_with_tolerated_p6() {
         panic!("apply_ability_verb_chronicle_consumer.sim hard-failed at: {e}");
     });
 
-    // Pin: only diagnostic should be the expected P6 violation on the
-    // consumer rule (mirrors apply_ability_chronicle_consumer.sim's
-    // diagnostic shape). Any other diagnostic is a real failure.
-    let unexpected: Vec<&String> = diags
-        .iter()
-        .filter(|d| !d.contains("P6Violation"))
-        .collect();
+    // Pin: NO diagnostics post-Gap-X. Authored `@phase(post)`
+    // chronicle physics is the spec'd channel for agent mutation.
     assert!(
-        unexpected.is_empty(),
-        "unexpected non-P6 diagnostics from verb+chronicle-consumer fixture:\n{:?}",
-        unexpected,
-    );
-    assert!(
-        diags.iter().any(|d| d.contains("P6Violation") && d.contains("Hp")),
-        "expected P6Violation on agent_hp write; got: {:?}",
+        diags.is_empty(),
+        "unexpected diagnostics from verb+chronicle-consumer fixture post-Gap-X:\n{:?}",
         diags,
     );
 
