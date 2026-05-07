@@ -251,6 +251,21 @@ pub struct LoweringCtx<'a> {
     /// kernel binding metadata can resolve (entity ref, slot) →
     /// (entity name, field name, ty) without a separate registry walk.
     pub entity_field_catalog: super::super::program::EntityFieldCatalog,
+    /// 2026-05-07 (#121 BGL opt-in): per-fixture flag controlling
+    /// whether `apply_ability` lowers as the AOE-shaped dispatcher
+    /// (spatial walk + multi-target chronicle write) or the existing
+    /// single-target chain. Source: caller-supplied
+    /// [`super::driver::LowerOpts::aoe_dispatch`] threaded through
+    /// [`super::driver::lower_compilation_to_cg_with_opts`].
+    ///
+    /// Default `false` so every fixture's existing emit shape is
+    /// preserved byte-for-byte until the runtime opts in. The smoke
+    /// fixture (`apply_ability_smoke_runtime`) is the canonical
+    /// opt-in caller — its build.rs flips the flag for the AOE Path B
+    /// parity sweep + behavioral pin. Production runtimes
+    /// (duel_abilities, tactical_squad_5v5, boss_fight, etc.) keep
+    /// the default and don't auto-fire the spatial-build phases.
+    pub aoe_dispatch: bool,
 }
 
 /// Captured form of a `@lazy` view's resolved AST: enough to
@@ -300,6 +315,11 @@ impl<'a> LoweringCtx<'a> {
             pending_pre_stmts: Vec::new(),
             fold_binder_name: None,
             entity_field_catalog: super::super::program::EntityFieldCatalog::default(),
+            // Default `false` — non-opt-in fixtures keep their existing
+            // single-target dispatcher emit. Caller-side opt-in via
+            // `lower_compilation_to_cg_with_opts(LowerOpts { aoe_dispatch: true })`
+            // flips this for the smoke runtime's AOE parity sweep.
+            aoe_dispatch: false,
         }
     }
 

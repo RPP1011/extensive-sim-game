@@ -1448,13 +1448,15 @@ impl CgProgramBuilder {
                 // primitive payload.
                 self.check_list_id(*body)
             }
-            CgStmt::ApplyAbility { ability, caster, target } => {
+            CgStmt::ApplyAbility { ability, caster, target, with_aoe_dispatch: _ } => {
                 // Slice ε: range-check all 3 expr ids. Each operand
                 // resolves to a CgExprId that must exist in the
                 // arena before the program is well-formed; without
                 // checking caster/target, an invalid id would land
                 // in the IR and surface much later as an opaque
-                // out-of-range panic at emit time.
+                // out-of-range panic at emit time. The
+                // `with_aoe_dispatch` flag is a primitive bool (no
+                // arena reference), so no range check applies.
                 self.check_expr_id(*ability)?;
                 self.check_expr_id(*caster)?;
                 self.check_expr_id(*target)

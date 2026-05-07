@@ -1013,7 +1013,7 @@ fn walk_body_expr_subtrees(
                     );
                 }
             }
-            CgStmt::ApplyAbility { ability, caster, target } => {
+            CgStmt::ApplyAbility { ability, caster, target, with_aoe_dispatch: _ } => {
                 // Slice ε: validate all three operands' expr-id
                 // subtrees. A malformed caster/target operand
                 // (e.g. references an out-of-range CgExprId)
@@ -1614,7 +1614,7 @@ fn type_check_list(
                 // `walk_body_expr_subtrees` pass which descends into
                 // each nested stmt list's expressions.
             }
-            CgStmt::ApplyAbility { ability, caster, target } => {
+            CgStmt::ApplyAbility { ability, caster, target, with_aoe_dispatch: _ } => {
                 // The ability expression must evaluate to an
                 // AbilityId (encoded as `CgTy::U32` since AbilityId
                 // wraps NonZeroU32). Type-check the operand here;
@@ -1930,7 +1930,7 @@ fn event_field_scope_walk_list(
                     );
                 }
             }
-            CgStmt::ApplyAbility { ability, caster, target } => {
+            CgStmt::ApplyAbility { ability, caster, target, with_aoe_dispatch: _ } => {
                 // Slice ε: scope-walk all three operands. PerEvent
                 // rules can reference event-payload bindings via
                 // `by <e.field>`; the scope walker must visit those

@@ -17,39 +17,28 @@
 //!   * GPU-side multi-target AOE expansion (Path B for #121 — the
 //!     CPU oracle path lives in `apply_program_aoe`, but the GPU
 //!     dispatcher's chronicle write loop still consumes a single
-//!     explicit target slot per cast). Adding a multi-record-per-cast
-//!     loop with a spatial query inside the kernel is a major
-//!     architectural change and stays deferred. **Path B scoping
-//!     attempt 2026-05-07 — STOP-and-document outcome.** The blocker
-//!     is not the WGSL emit (the chain-wrap shape is straightforward:
-//!     gate on `area_kinds[effect_base + i] == 0u` for Circle, walk
-//!     the 27-cell neighborhood around `agent_pos[target_slot]`, gate
+//!     explicit target slot per cast). **BGL opt-in landed
+//!     2026-05-07** (commit message: `feat(dsl): BGL opt-in for
+//!     spatial-bind in chronicle dispatcher`): a per-fixture
+//!     [`dsl_compiler::cg::lower::LowerOpts::aoe_dispatch`] flag
+//!     stamps `with_aoe_dispatch: true` onto every
+//!     `CgStmt::ApplyAbility` lowered under the opting-in
+//!     `Compilation`. Production runtimes (`duel_abilities_runtime`,
+//!     `tactical_squad_5v5_runtime`, `boss_fight_runtime`,
+//!     `duel_25v25_runtime`, `mass_battle_100v100_runtime`) keep
+//!     the default `false` so their existing single-target
+//!     dispatcher emit + zero-spatial-overhead BGL are preserved.
+//!     **Path B emit remains TODO** — the WGSL dispatcher's
+//!     `CgStmt::ApplyAbility` arm reads the flag (currently as
+//!     `_with_aoe_dispatch`) but unconditionally emits the
+//!     single-target chain. Wiring the AOE walk shape (gate on
+//!     `area_kinds[effect_base + i] == 0u` for Circle, walk the
+//!     27-cell neighborhood around `agent_pos[target_slot]`, gate
 //!     each candidate on `dist² <= radius²`, then re-execute the
 //!     chronicle arm chain with the candidate slot shadowing
-//!     `target_slot`). The blocker is the BGL composer + scheduler:
-//!     adding `agent_pos` + `spatial_grid_*` + `area_kinds` /
-//!     `area_args` reads to the dispatcher op auto-fires
-//!     `BuildHashCount` / `*ScanLocal` / `*ScanCarry` / `*ScanAdd` /
-//!     `*Scatter` ops in EVERY apply_ability-using fixture (see
-//!     `cg::lower::driver::collect_required_spatial_kinds` —
-//!     non-empty SpatialStorage reads → all five build phases get
-//!     scheduled). Three production runtimes —
-//!     `boss_fight_runtime`, `duel_abilities_runtime`,
-//!     `tactical_squad_5v5_runtime` — currently bind no spatial
-//!     buffers; auto-firing the build phases would force their state
-//!     structs to allocate `spatial_grid_starts` / `_cells` /
-//!     `_offsets` (≈ 22³ × 32 × 4 = 1.4 MB per fixture) AND uphold
-//!     the `agent_pos` SoA contract (which they don't all keep
-//!     populated for the dispatcher's `caster_slot` index since the
-//!     fixtures don't move agents through `agents.set_pos`). The
-//!     fix is multi-runtime + multi-fixture; the slice's brief
-//!     explicitly says STOP if "fundamental dispatcher refactoring
-//!     (e.g. ring-allocation strategy changes)" surfaces, and this
-//!     qualifies. Next-slice plan: gate the AOE emit on a
-//!     per-fixture build-time flag (`emit_cg_program(... AoeOpts)`)
-//!     so opt-in fixtures (smoke runtime first) ship the walk +
-//!     bindings while the production runtimes keep their current
-//!     single-target shape and zero-spatial-overhead BGL.
+//!     `target_slot`) and surfacing the matching reads via a new
+//!     `wire_apply_ability_aoe_reads` helper (sibling to
+//!     `wire_ability_registry_column_reads`) is the next slice.
 //!   * Non-Circle AOE shapes (Cone, Line, Sphere, Box, etc.) on CPU.
 //!     `apply_program_aoe` only expands `Circle`-shape slots today;
 //!     other shapes fall back to single-target dispatch on
