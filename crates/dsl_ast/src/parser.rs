@@ -1875,6 +1875,9 @@ fn parse_stmt(c: &mut Cursor) -> PResult<Stmt> {
                 || ck.starts_with("by ")
                 || ck.starts_with("by\t")
                 || ck.starts_with("by\n")
+                || ck.starts_with("target ")
+                || ck.starts_with("target\t")
+                || ck.starts_with("target\n")
         })?;
         c.skip_ws();
         let caster = if c.starts_with("by ")
@@ -1887,9 +1890,31 @@ fn parse_stmt(c: &mut Cursor) -> PResult<Stmt> {
                 ck.starts_with_char(';')
                     || ck.starts_with_char('}')
                     || ck.starts_with_char('\n')
+                    || ck.starts_with("target ")
+                    || ck.starts_with("target\t")
+                    || ck.starts_with("target\n")
             })?;
             c.skip_ws();
             Some(caster_expr)
+        } else {
+            None
+        };
+        // Slice ε part 1: optional `target <expr>` clause — explicit
+        // target operand for chronicle records that distinguish actor
+        // from target.
+        let target = if c.starts_with("target ")
+            || c.starts_with("target\t")
+            || c.starts_with("target\n")
+        {
+            c.bump("target".len());
+            c.skip_ws();
+            let target_expr = parse_expr_bounded(c, |ck| {
+                ck.starts_with_char(';')
+                    || ck.starts_with_char('}')
+                    || ck.starts_with_char('\n')
+            })?;
+            c.skip_ws();
+            Some(target_expr)
         } else {
             None
         };
@@ -1899,6 +1924,7 @@ fn parse_stmt(c: &mut Cursor) -> PResult<Stmt> {
         return Ok(Stmt::ApplyAbility(crate::ast::ApplyAbilityStmt {
             ability,
             caster,
+            target,
             span: Span::new(start, c.pos),
         }));
     }

@@ -1013,7 +1013,7 @@ fn walk_body_expr_subtrees(
                     );
                 }
             }
-            CgStmt::ApplyAbility { ability, caster: _ } => {
+            CgStmt::ApplyAbility { ability, caster: _, target: _ } => {
                 validate_expr_subtree(arena, *ability, op_id, expr_arena_len, errors);
             }
         }
@@ -1606,7 +1606,7 @@ fn type_check_list(
                 // `walk_body_expr_subtrees` pass which descends into
                 // each nested stmt list's expressions.
             }
-            CgStmt::ApplyAbility { ability, caster: _ } => {
+            CgStmt::ApplyAbility { ability, caster: _, target: _ } => {
                 // The ability expression must evaluate to an
                 // AbilityId (encoded as `CgTy::U32` since AbilityId
                 // wraps NonZeroU32). Type-check the operand here;
@@ -1868,7 +1868,7 @@ fn event_field_scope_walk_list(
                     );
                 }
             }
-            CgStmt::ApplyAbility { ability, caster: _ } => {
+            CgStmt::ApplyAbility { ability, caster: _, target: _ } => {
                 event_field_scope_walk_expr(
                     *ability,
                     op_id,

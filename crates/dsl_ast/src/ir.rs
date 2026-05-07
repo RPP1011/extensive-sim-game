@@ -492,6 +492,11 @@ pub enum IrStmt {
         /// `None`, lowering uses the per-thread agent (PerAgent rules)
         /// or surfaces a typed error (PerEvent rules).
         caster:  Option<IrExprNode>,
+        /// Optional explicit target operand from `apply_ability <a>
+        /// [by <c>] target <t>` (slice ε part 1). When `None`, the
+        /// dispatcher writes the caster into the target chronicle
+        /// slot (slice-γ self-cast convention).
+        target:  Option<IrExprNode>,
         span:    Span,
     },
 }

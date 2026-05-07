@@ -574,19 +574,23 @@ fn lower_stmt(
             ast_label: "BeliefObserve",
             span: *span,
         }),
-        IrStmt::ApplyAbility { ability, caster, span } => {
+        IrStmt::ApplyAbility { ability, caster, target, span } => {
             // Slice δ part 3 (#161): if the source carried explicit
             // `by <caster>`, lower that expression. Otherwise default:
             //   - PerAgent  → `AgentSelfId` (per-thread agent — works)
             //   - PerEvent  → typed error (no implicit caster context)
             //
-            // The explicit-caster path UNBLOCKS PerEvent — a rule like
-            //   on Triggered { who: w, ability_id: a } {
-            //     apply_ability a by w
-            //   }
-            // gets `caster = w` (a local read of the event-pattern
-            // binding), which lowers cleanly through the same
-            // expression path as any other operand.
+            // Slice ε part 1: optional `target <t>` clause — lowers
+            // through the same path. When absent, target defaults to
+            // the caster expression (slice-γ self-cast convention),
+            // so the dispatcher's chronicle records keep their
+            // existing per-record byte layout when the source doesn't
+            // supply an explicit target.
+            //
+            // Both PerEvent (`apply_ability a by w target t`) and
+            // PerAgent (`apply_ability a target t`) shapes are
+            // supported — the explicit operands lower through the
+            // same expression path as any other operand.
             let ability_id = lower_expr(ability, ctx)?;
             let caster_id = match caster {
                 Some(caster_expr) => lower_expr(caster_expr, ctx)?,
@@ -606,10 +610,16 @@ fn lower_stmt(
                         })?
                 }
             };
+            let target_id = match target {
+                Some(target_expr) => lower_expr(target_expr, ctx)?,
+                // Default: target = caster (slice-γ self-cast).
+                None => caster_id,
+            };
             push_stmt(
                 CgStmt::ApplyAbility {
                     ability: ability_id,
                     caster: caster_id,
+                    target: target_id,
                 },
                 *span,
                 ctx,

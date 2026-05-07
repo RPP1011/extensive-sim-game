@@ -422,6 +422,84 @@ fn apply_ability_in_per_event_rule_errors_at_lowering() {
     );
 }
 
+/// Slice ε part 1: explicit `target <expr>` syntax. The dispatcher
+/// writes the caster slot into chronicle payload word 2 (actor) and
+/// the target slot into payload word 3 — distinct values when the
+/// source supplies them. This unblocks chronicle records where the
+/// caster ≠ target (the slice-γ self-cast default coalesces them).
+///
+/// Pinned by:
+///   - kernel body has BOTH `caster_slot` AND `target_slot` lets,
+///   - chronicle write at payload word 3 references `(target_slot)`,
+///     not `(caster_slot)` (slice-ε behavior),
+///   - naga full validator passes the kernel.
+#[test]
+fn apply_ability_per_event_with_target_lowers_distinctly() {
+    use naga::valid::{Capabilities, ValidationFlags, Validator};
+    let src = "
+        event Tick { }
+        event Triggered { who: AgentId, victim: AgentId, ability_id: u32 }
+
+        entity Hero : Agent { }
+
+        physics DispatchOnTrigger {
+          on Triggered { who: w, victim: v, ability_id: a } {
+            apply_ability a by w target v
+          }
+        }
+    ";
+    let program = dsl_compiler::parse(src).expect("parse");
+    let comp = dsl_ast::resolve::resolve(program).expect("resolve");
+    let cg = dsl_compiler::cg::lower::lower_compilation_to_cg(&comp)
+        .expect("PerEvent ApplyAbility with `by w target v` lowers");
+    let schedule_result = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&schedule_result.schedule, &cg)
+        .expect("emit");
+
+    let body = kernel_body_containing(&art, "DispatchOnTrigger")
+        .or_else(|| kernel_body_containing(&art, "physics"))
+        .expect("physics kernel emitted");
+    // Both let-bindings present.
+    assert!(
+        body.contains("let caster_slot: u32"),
+        "dispatcher must emit `let caster_slot` from the by-operand;\n{body}"
+    );
+    assert!(
+        body.contains("let target_slot: u32"),
+        "dispatcher must emit `let target_slot` from the target-operand;\n{body}"
+    );
+    // Chronicle payload word 3 (target slot) reads target_slot.
+    assert!(
+        body.contains("atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));"),
+        "chronicle word 3 must write target_slot when distinct target is supplied;\n{body}"
+    );
+
+    // Naga full validator over every emitted kernel.
+    let mut errs = Vec::new();
+    for (name, kernel_body) in &art.wgsl_files {
+        let module = match naga::front::wgsl::parse_str(kernel_body) {
+            Ok(m) => m,
+            Err(e) => {
+                errs.push(format!("  {name}: parse: {e}"));
+                continue;
+            }
+        };
+        let mut validator = Validator::new(ValidationFlags::all(), Capabilities::all());
+        if let Err(e) = validator.validate(&module) {
+            errs.push(format!("  {name}: validate: {e:?}"));
+        }
+    }
+    assert!(
+        errs.is_empty(),
+        "PerEvent + `by w target v` variant emitted {} naga-rejected kernels:\n{}",
+        errs.len(),
+        errs.join("\n"),
+    );
+}
+
 /// Slice δ part 3 (#161): explicit `by <caster>` syntax unblocks
 /// PerEvent ApplyAbility. The same rule that errored above (no
 /// caster context for PerEvent kernel) now lowers cleanly when the

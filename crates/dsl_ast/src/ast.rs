@@ -690,6 +690,13 @@ pub struct ApplyAbilityStmt {
     /// an event payload's actor field via the `on EventName { actor: e.actor }`
     /// pattern. Slice δ part 3 (#161).
     pub caster: Option<Expr>,
+    /// Optional explicit target expression (`apply_ability <a> [by <c>]
+    /// target <t>`). When `None`, the dispatcher writes the caster
+    /// into the target chronicle slot (slice-γ self-cast convention —
+    /// preserves prior behavior). When `Some(expr)`, lowering uses the
+    /// expression as a distinct target slot, so chronicle records
+    /// distinguish actor from target. Slice ε part 1.
+    pub target: Option<Expr>,
     pub span: Span,
 }
 

@@ -433,9 +433,15 @@ pub enum CgStmt {
     /// Stun, Slow), then #137 expands to the full vocabulary.
     ApplyAbility {
         ability: CgExprId,
-        /// Caster slot — u32-typed expression. Slice-γ writes this
-        /// into both actor and target chronicle slots.
+        /// Caster slot — u32-typed expression. Written into the actor
+        /// chronicle slot (payload word 0).
         caster: CgExprId,
+        /// Target slot — u32-typed expression. Written into the target
+        /// chronicle slot (payload word 1). When the source omits the
+        /// `target <expr>` clause, lowering populates this with the
+        /// caster expression (slice-γ self-cast convention preserved).
+        /// Slice ε part 1.
+        target: CgExprId,
     },
 }
 
@@ -509,7 +515,7 @@ impl fmt::Display for CgStmt {
                     binder, body.0, radius_cells
                 )
             }
-            CgStmt::ApplyAbility { ability, caster: _ } => {
+            CgStmt::ApplyAbility { ability, caster: _, target: _ } => {
                 write!(f, "apply_ability(expr#{})", ability.0)
             }
         }
@@ -849,7 +855,7 @@ pub fn collect_stmt_dependencies(
                 target: super::data_handle::AgentRef::Self_,
             });
         }
-        CgStmt::ApplyAbility { ability, caster: _ } => {
+        CgStmt::ApplyAbility { ability, caster: _, target: _ } => {
             // #136: the ability expression's reads contribute (the
             // operand may reference `self.<field>` or a config slot).
             // The dispatcher kernel itself reads from the

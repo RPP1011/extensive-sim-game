@@ -1803,7 +1803,11 @@ fn resolve_stmt(
                 Some(c) => Some(resolve_expr(c, scope, symbols)?),
                 None => None,
             };
-            Ok(IrStmt::ApplyAbility { ability, caster, span: a.span })
+            let target = match &a.target {
+                Some(t) => Some(resolve_expr(t, scope, symbols)?),
+                None => None,
+            };
+            Ok(IrStmt::ApplyAbility { ability, caster, target, span: a.span })
         }
         Stmt::For { binder, iter, filter, body, span } => {
             let iter_ir = resolve_expr(iter, scope, symbols)?;
