@@ -1203,6 +1203,64 @@ mod tests {
         assert_eq!(h1, h2, "rules_hash must be sort-stable");
     }
 
+    /// Slice ε: `apply_ability a` and `apply_ability a by w` are
+    /// structurally distinct DSL surfaces; their `rules_hash` must
+    /// differ. Pre-`0b729b9d` the hash collapsed both shapes
+    /// (caster/target operands were ignored), violating P2.
+    /// This test pins the fix.
+    #[test]
+    fn rules_hash_distinguishes_apply_ability_caster() {
+        use crate::ir::{
+            EventRef, IrEventPattern, IrExpr, IrExprNode, IrPhysicsPattern, IrStmt,
+            PhysicsHandlerIR, PhysicsIR,
+        };
+        let lit = || IrExprNode {
+            kind: IrExpr::LitInt(1),
+            span: Span::dummy(),
+        };
+        // Two physics rules, identical except for the ApplyAbility
+        // shape: rule A has no caster operand, rule B does.
+        let mk = |stmt: IrStmt| -> PhysicsIR {
+            PhysicsIR {
+                name: "Dispatch".into(),
+                handlers: vec![PhysicsHandlerIR {
+                    pattern: IrPhysicsPattern::Kind(IrEventPattern {
+                        name: "Tick".into(),
+                        event: Some(EventRef(0)),
+                        bindings: vec![],
+                        span: Span::dummy(),
+                    }),
+                    where_clause: None,
+                    body: vec![stmt],
+                    span: Span::dummy(),
+                }],
+                annotations: vec![],
+                cpu_only: false,
+                span: Span::dummy(),
+            }
+        };
+        let no_caster = IrStmt::ApplyAbility {
+            ability: lit(),
+            caster: None,
+            target: None,
+            span: Span::dummy(),
+        };
+        let with_caster = IrStmt::ApplyAbility {
+            ability: lit(),
+            caster: Some(lit()),
+            target: None,
+            span: Span::dummy(),
+        };
+        let h_no_caster = rules_hash(&[mk(no_caster)], &[], &[]);
+        let h_with_caster = rules_hash(&[mk(with_caster)], &[], &[]);
+        assert_ne!(
+            h_no_caster, h_with_caster,
+            "rules_hash must distinguish `apply_ability a` from \
+             `apply_ability a by <expr>` — they are structurally \
+             different DSL surfaces (slice ε / commit 0b729b9d)"
+        );
+    }
+
     #[test]
     fn combined_hash_xors_in_each_subhash() {
         let zero = [0u8; 32];
