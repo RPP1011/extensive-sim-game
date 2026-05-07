@@ -92,6 +92,10 @@ pub mod interp {
             Event::EffectCharmApplied    { .. } => "EffectCharmApplied",
             Event::EffectGroundedApplied { .. } => "EffectGroundedApplied",
             Event::EffectSuppressApplied { .. } => "EffectSuppressApplied",
+            Event::EffectBuffApplied        { .. } => "EffectBuffApplied",
+            Event::EffectHarvestApplied     { .. } => "EffectHarvestApplied",
+            Event::EffectPlaceVoxelApplied  { .. } => "EffectPlaceVoxelApplied",
+            Event::EffectReflectApplied     { .. } => "EffectReflectApplied",
             Event::EffectSlowApplied     { .. } => "EffectSlowApplied",
             Event::EffectGoldTransfer    { .. } => "EffectGoldTransfer",
             Event::EffectStandingDelta   { .. } => "EffectStandingDelta",
@@ -425,6 +429,67 @@ pub mod interp {
                 ("c",              EvalValue::Agent(dsl_agent(*actor))),
                 ("t",              EvalValue::Agent(dsl_agent(*target))),
                 ("d",              EvalValue::U32(*duration_ticks)),
+                ("tick",           EvalValue::U32(*tick)),
+            ],
+            // ---- EffectBuffApplied ---------------------------------------
+            // Slice γ tail — target-cast with packed payload. Exposes
+            // `stat_ordinal` (u8 BuffStat discriminant) and `magnitude_q8`
+            // (i16 sign-extended) decoded from the dispatcher's packed
+            // payload_a; consumer rules read the typed values directly.
+            Event::EffectBuffApplied { actor, target, stat_ordinal, magnitude_q8, duration_ticks, tick } => vec![
+                ("actor",          EvalValue::Agent(dsl_agent(*actor))),
+                ("target",         EvalValue::Agent(dsl_agent(*target))),
+                ("stat_ordinal",   EvalValue::U32(*stat_ordinal as u32)),
+                ("magnitude_q8",   EvalValue::I32(*magnitude_q8 as i32)),
+                ("duration_ticks", EvalValue::U32(*duration_ticks)),
+                ("c",              EvalValue::Agent(dsl_agent(*actor))),
+                ("t",              EvalValue::Agent(dsl_agent(*target))),
+                ("s",              EvalValue::U32(*stat_ordinal as u32)),
+                ("m",              EvalValue::I32(*magnitude_q8 as i32)),
+                ("d",              EvalValue::U32(*duration_ticks)),
+                ("tick",           EvalValue::U32(*tick)),
+            ],
+            // ---- EffectHarvestApplied ------------------------------------
+            // Slice γ tail — caster-self resource gather. No target field;
+            // consumer rules see `kind_hash` (u32 FxHash of the resource
+            // ident) and `amount` (u32, widened from u16 EffectOp side).
+            Event::EffectHarvestApplied { actor, kind_hash, amount, tick } => vec![
+                ("actor",     EvalValue::Agent(dsl_agent(*actor))),
+                ("kind_hash", EvalValue::U32(*kind_hash)),
+                ("amount",    EvalValue::U32(*amount)),
+                ("c",         EvalValue::Agent(dsl_agent(*actor))),
+                ("k",         EvalValue::U32(*kind_hash)),
+                ("a",         EvalValue::U32(*amount)),
+                ("tick",      EvalValue::U32(*tick)),
+            ],
+            // ---- EffectPlaceVoxelApplied ---------------------------------
+            // Slice γ tail — caster-self voxel placement. Position is
+            // implicit from the cast's target world position; the engine
+            // event today carries only `kind_hash` (u32 FxHash of the
+            // voxel kind ident) — apply handlers reconstruct placement
+            // location from the cast's stamped target position.
+            Event::EffectPlaceVoxelApplied { actor, kind_hash, tick } => vec![
+                ("actor",     EvalValue::Agent(dsl_agent(*actor))),
+                ("kind_hash", EvalValue::U32(*kind_hash)),
+                ("c",         EvalValue::Agent(dsl_agent(*actor))),
+                ("k",         EvalValue::U32(*kind_hash)),
+                ("tick",      EvalValue::U32(*tick)),
+            ],
+            // ---- EffectReflectApplied ------------------------------------
+            // Slice γ tail — target-cast fraction-of-damage bounce.
+            // `fraction_q8` is i16 (sign-extended on read from the
+            // dispatcher's packed payload_b low 16 bits). Same payload
+            // shape family as Slow / LifeSteal / DamageModify (all carry
+            // a duration + signed q8 fraction/multiplier).
+            Event::EffectReflectApplied { actor, target, duration_ticks, fraction_q8, tick } => vec![
+                ("actor",          EvalValue::Agent(dsl_agent(*actor))),
+                ("target",         EvalValue::Agent(dsl_agent(*target))),
+                ("duration_ticks", EvalValue::U32(*duration_ticks)),
+                ("fraction_q8",    EvalValue::I32(*fraction_q8 as i32)),
+                ("c",              EvalValue::Agent(dsl_agent(*actor))),
+                ("t",              EvalValue::Agent(dsl_agent(*target))),
+                ("d",              EvalValue::U32(*duration_ticks)),
+                ("f",              EvalValue::I32(*fraction_q8 as i32)),
                 ("tick",           EvalValue::U32(*tick)),
             ],
             // ---- EffectSlowApplied ----------------------------------------

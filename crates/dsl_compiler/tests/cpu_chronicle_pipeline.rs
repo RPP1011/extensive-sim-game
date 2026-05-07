@@ -114,27 +114,28 @@ fn multi_effect_ability_produces_record_per_chronicle_arm() {
 
 #[test]
 fn ability_with_only_non_chronicle_effects_produces_no_records() {
-    // Deferred-infrastructure variants (Summon/Harvest/PlaceVoxel/
-    // Reflect/Buff) still have no chronicle counterparts today — the
-    // dispatcher's WGSL would still emit TODO-marker arms for these on
-    // GPU, but no chronicle write.
+    // Deferred-infrastructure variants today: only Summon (kind 24) —
+    // multi-spawn semantics (one cast → N entity spawns) need a new
+    // dispatch shape and is deferred. The dispatcher's WGSL would still
+    // emit a TODO-marker arm for Summon on GPU, but no chronicle write.
     //
     // Already wired up:
     // - Root/Silence/Fear/Taunt (Wave 2 piece 1) → kinds 43..46.
     // - Dash/Blink/Knockback/Pull (Wave 2 piece 2) → kinds 47..50.
     // - DoT/HoT/TimedShield (Wave 1.5+) → kinds 51..53.
     // - Stealth/Charm/Grounded/Suppress (extended-status slice) →
-    //   kinds 54..57, see the `*_pipeline_emits_kind_54..57_record`
+    //   kinds 54..57.
+    // - Buff/Harvest/PlaceVoxel/Reflect (slice γ tail) → kinds 58..61,
+    //   see the corresponding `*_pipeline_emits_kind_58..61_record`
     //   tests below.
     //
-    // Pick Buff (kind 23) + Reflect (kind 31) — both still TODO.
-    use engine::ability::program::BuffStat;
+    // Pick Summon — the only remaining EffectOp without a chronicle
+    // counterpart.
     let program = AbilityProgram::new_single_target(
         5.0,
         Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
         [
-            EffectOp::Buff    { stat: BuffStat::AttackSpeed, magnitude_q8: 64, duration_ticks: 30 },
-            EffectOp::Reflect { duration_ticks: 50, fraction_q8: 128 },
+            EffectOp::Summon { template_hash: 0xDEADBEEF, count: 2, lifetime_ticks: 100 },
         ],
     );
     let records = run_pipeline(&program, aid(1), aid(2), 100);
@@ -469,6 +470,123 @@ fn suppress_pipeline_emits_kind_57_record() {
     assert_eq!(r[4], 40, "duration_ticks at payload word 2 (target-cast shape)");
     for i in 5..10 {
         assert_eq!(r[i], 0, "Suppress: tail word {i} should be zero");
+    }
+}
+
+/// Slice γ tail (Buff/Harvest/PlaceVoxel/Reflect). Four distinct shapes
+/// flow through `apply_program` (which emits `ApplyEvent::Buff/Harvest/
+/// PlaceVoxel/Reflect`) and the CPU reference (which writes a
+/// kind=58..61 record). Buff: target-cast with packed payload, raw
+/// payload_a (= stat | mag_q8 << 8) at slot 4, raw duration_ticks at
+/// slot 5. Harvest: caster-self, kind_hash at slot 3, amount at slot 4.
+/// PlaceVoxel: caster-self, kind_hash at slot 3 only. Reflect:
+/// target-cast, duration_ticks at slot 4, payload_b's low 16 bits
+/// (= fraction_q8 i16) at slot 5. Both Buff and Reflect exercise the
+/// signed-packed-payload sign-cast path with negative magnitudes.
+#[test]
+fn buff_pipeline_emits_kind_58_record_with_signed_magnitude() {
+    use engine::ability::program::BuffStat;
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 60, hostile_only: false, line_of_sight: false },
+        [EffectOp::Buff {
+            stat: BuffStat::AttackSpeed,  // ordinal 1
+            magnitude_q8: -64,            // negative — exercise sign-cast
+            duration_ticks: 50,
+        }],
+    );
+    let records = run_pipeline(&program, aid(7), aid(7), 100);
+    assert_eq!(records.len(), 1, "one Buff effect → one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 58, "EventKindId::EffectBuffApplied = 58");
+    assert_eq!(r[1], 100, "tick");
+    assert_eq!(r[2], 7, "actor slot — caster_id");
+    assert_eq!(r[3], 7, "target slot — target_id (self-cast: ==caster)");
+    // Reconstruct expected packed payload_a:
+    //   low byte = stat ordinal (1 = AttackSpeed)
+    //   bits 8..  = magnitude_q8 sign-cast i16 → i32 → u32 << 8
+    let expected_pa = 1u32 | ((-64_i32 as u32) << 8);
+    assert_eq!(
+        r[4], expected_pa,
+        "Buff payload_a packs stat (low byte) + magnitude_q8 (bits 8..; signed); \
+         negative magnitude must sign-extend i16 → i32 before shift"
+    );
+    assert_eq!(r[5], 50, "duration_ticks at payload word 3 (raw u32)");
+    for i in 6..10 {
+        assert_eq!(r[i], 0, "Buff: tail word {i} should be zero");
+    }
+}
+
+#[test]
+fn harvest_pipeline_emits_kind_59_record() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 60, hostile_only: false, line_of_sight: false },
+        [EffectOp::Harvest { kind_hash: 0xCAFEBABE, amount: 5 }],
+    );
+    let records = run_pipeline(&program, aid(7), aid(7), 100);
+    assert_eq!(records.len(), 1, "one Harvest effect → one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 59, "EventKindId::EffectHarvestApplied = 59");
+    assert_eq!(r[1], 100, "tick");
+    assert_eq!(r[2], 7, "actor slot — caster_id");
+    assert_eq!(r[3], 0xCAFEBABE, "kind_hash at payload word 1 (no target field)");
+    assert_eq!(r[4], 5, "amount at payload word 2 (u16 widened to u32)");
+    for i in 5..10 {
+        assert_eq!(r[i], 0, "Harvest: tail word {i} should be zero");
+    }
+}
+
+#[test]
+fn place_voxel_pipeline_emits_kind_60_record() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 60, hostile_only: false, line_of_sight: false },
+        [EffectOp::PlaceVoxel { kind_hash: 0xFACEFEED }],
+    );
+    let records = run_pipeline(&program, aid(7), aid(7), 100);
+    assert_eq!(records.len(), 1, "one PlaceVoxel effect → one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 60, "EventKindId::EffectPlaceVoxelApplied = 60");
+    assert_eq!(r[1], 100, "tick");
+    assert_eq!(r[2], 7, "actor slot — caster_id");
+    assert_eq!(r[3], 0xFACEFEED, "kind_hash at payload word 1 (no target / position fields)");
+    // Position is implicit from the cast's target world position;
+    // chronicle record stops here.
+    for i in 4..10 {
+        assert_eq!(r[i], 0, "PlaceVoxel: tail word {i} should be zero");
+    }
+}
+
+#[test]
+fn reflect_pipeline_emits_kind_61_record_with_signed_fraction() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 60, hostile_only: true, line_of_sight: false },
+        [EffectOp::Reflect {
+            duration_ticks: 50,
+            fraction_q8: -64,  // negative — exercise sign-cast through u16
+        }],
+    );
+    let records = run_pipeline(&program, aid(7), aid(7), 100);
+    assert_eq!(records.len(), 1, "one Reflect effect → one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 61, "EventKindId::EffectReflectApplied = 61");
+    assert_eq!(r[1], 100, "tick");
+    assert_eq!(r[2], 7, "actor slot — caster_id");
+    assert_eq!(r[3], 7, "target slot — target_id (self-cast: ==caster)");
+    assert_eq!(r[4], 50, "duration_ticks at payload word 2 (raw u32)");
+    // payload_b matches `pack_effect`'s Reflect arm: `(fraction_q8 as u16) as u32`.
+    // For -64_i16: u16 wraps to 0xFFC0; u32 zero-extend → 0x0000_FFC0.
+    let expected_pb = (-64_i16 as u16) as u32;
+    assert_eq!(expected_pb, 0x0000_FFC0, "sanity: -64 → 0xFFC0 in low 16 bits");
+    assert_eq!(
+        r[5], expected_pb,
+        "Reflect payload_b's low 16 bits carry fraction_q8 (i16 → u16 → u32, \
+         zero-extend). Consumer sign-extends to recover the negative value."
+    );
+    for i in 6..10 {
+        assert_eq!(r[i], 0, "Reflect: tail word {i} should be zero");
     }
 }
 

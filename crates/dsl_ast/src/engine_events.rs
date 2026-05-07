@@ -110,6 +110,22 @@ pub const ENGINE_EVENT_KIND_IDS: &[(&str, u32)] = &[
     ("EffectCharmApplied",    55),
     ("EffectGroundedApplied", 56),
     ("EffectSuppressApplied", 57),
+    // Slice γ tail — Buff/Harvest/PlaceVoxel/Reflect. Buff and Reflect
+    // carry signed packed payloads (`magnitude_q8 i16` and `fraction_q8
+    // i16`); the chronicle ring stores raw u32 payload words and
+    // consumers sign-extend on read. Harvest and PlaceVoxel are caster-
+    // self (no target field) — Harvest carries `kind_hash` + `amount`,
+    // PlaceVoxel carries `kind_hash` only (placement position is implicit
+    // from the cast's target world position). Slots 58..61 are
+    // contiguous with the extended-status block (54..57). No consumer
+    // rule in any sim today; the dispatcher write end-to-end works
+    // without a fold consumer. Summon (kind 24) is the only remaining
+    // `// TODO slice γ` arm — its multi-spawn semantics need a new
+    // dispatch shape and is deferred.
+    ("EffectBuffApplied",       58),
+    ("EffectHarvestApplied",    59),
+    ("EffectPlaceVoxelApplied", 60),
+    ("EffectReflectApplied",    61),
 ];
 
 /// Look up the engine-defined `EventKindId` discriminant for an
@@ -157,6 +173,10 @@ mod tests {
         assert_eq!(engine_event_kind_id_for_name("EffectCharmApplied"), Some(55));
         assert_eq!(engine_event_kind_id_for_name("EffectGroundedApplied"), Some(56));
         assert_eq!(engine_event_kind_id_for_name("EffectSuppressApplied"), Some(57));
+        assert_eq!(engine_event_kind_id_for_name("EffectBuffApplied"), Some(58));
+        assert_eq!(engine_event_kind_id_for_name("EffectHarvestApplied"), Some(59));
+        assert_eq!(engine_event_kind_id_for_name("EffectPlaceVoxelApplied"), Some(60));
+        assert_eq!(engine_event_kind_id_for_name("EffectReflectApplied"), Some(61));
     }
 
     #[test]

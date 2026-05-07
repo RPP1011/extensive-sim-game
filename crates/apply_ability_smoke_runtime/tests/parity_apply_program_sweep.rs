@@ -41,6 +41,10 @@
 //!  23. `Charm(30)`                                 — Allure-shape (extended status)
 //!  24. `Grounded(25)`                              — Tether-shape (extended status)
 //!  25. `Suppress(40)`                              — Hush-shape (extended status)
+//!  26. `Buff(AttackSpeed, -64, 50)`                — Empower-shape (slice γ tail, packed signed magnitude)
+//!  27. `Reflect(50, -64)`                          — Mirror-shape (slice γ tail, packed signed fraction)
+//!  28. `Harvest(0xCAFEBABE, 5)`                    — Reap_Ore-shape (slice γ tail, caster-self)
+//!  29. `PlaceVoxel(0xFACEFEED)`                    — Drop_Stone-shape (slice γ tail, caster-self)
 //!
 //! M = 1 caster×target permutation in this fixture: `(c=0, t=0)`
 //! self-cast. The smoke fixture's `apply_ability` source uses the
@@ -52,7 +56,7 @@
 //! T = 5 ticks (0, 17, 100, 1000, 65500) — varied across the u32 range
 //! to surface any wraparound bug in expires_at_tick computations.
 //!
-//! K = 25 × 1 × 5 = **125 casts**, producing 130 chronicle records (125
+//! K = 29 × 1 × 5 = **145 casts**, producing 150 chronicle records (145
 //! primary + 5 nested-Stun follow-ups from the Reap+Stun-shape arm).
 //!
 //! ## What's deferred
@@ -90,7 +94,7 @@ use apply_ability_smoke_runtime::{ApplyAbilitySmokeState, PerAgentStats, CHRONIC
 use dsl_compiler::cpu_chronicle_reference::apply_event_to_chronicle_record;
 use engine::ability::apply::apply_program;
 use engine::ability::program::{
-    CasterStats, EffectOp, EffectPredicate, EffectPredicateBinder, EffectPredicateOp,
+    BuffStat, CasterStats, EffectOp, EffectPredicate, EffectPredicateBinder, EffectPredicateOp,
     EffectScaling, EffectWhenCondition, Gate, ScalingStatRef,
 };
 use engine::ability::{AbilityId, AbilityProgram, AbilityRegistry, AbilityRegistryBuilder};
@@ -502,6 +506,71 @@ fn build_sweep() -> Vec<(&'static str, AbilityProgram, CasterStats)> {
             5.0,
             Gate { cooldown_ticks: 60, hostile_only: true, line_of_sight: false },
             [EffectOp::Suppress { duration_ticks: 40 }],
+        ),
+        CasterStats::default(),
+    ));
+
+    // Slice γ tail — Buff/Harvest/PlaceVoxel/Reflect. Four distinct
+    // shapes:
+    //   - Buff: target-cast with packed payload (stat | mag_q8 << 8 | duration).
+    //     Negative magnitude_q8 exercises the i16 → i32 → u32 sign-cast.
+    //   - Reflect: target-cast with packed payload (duration | fraction_q8 in
+    //     payload_b's low 16 bits). Negative fraction_q8 exercises the
+    //     i16 → u16 → u32 zero-extend through low 16 bits.
+    //   - Harvest: caster-self (kind_hash + amount). No target field.
+    //   - PlaceVoxel: caster-self (kind_hash). Position implicit.
+    // Adding all four extends the sweep matrix to 29 abilities.
+
+    // 26. Empower-shape — Buff (target-cast, packed signed magnitude).
+    //     Negative magnitude_q8 exercises the sign-cast path on both
+    //     CPU and GPU sides — the chronicle bytes round-trip iff
+    //     `pack_effect`'s OR of `(stat as u32) | ((mag as i32 as u32) << 8)`
+    //     matches the dispatcher's raw payload_a write.
+    out.push((
+        "Empower",
+        AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 60, hostile_only: false, line_of_sight: false },
+            [EffectOp::Buff {
+                stat: BuffStat::AttackSpeed,
+                magnitude_q8: -64,
+                duration_ticks: 50,
+            }],
+        ),
+        CasterStats::default(),
+    ));
+
+    // 27. Mirror-shape — Reflect (target-cast, packed signed fraction).
+    //     Negative fraction_q8 exercises the i16 → u16 → u32 zero-extend
+    //     path; consumer rules sign-extend low 16 bits to recover.
+    out.push((
+        "Mirror",
+        AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 60, hostile_only: true, line_of_sight: false },
+            [EffectOp::Reflect { duration_ticks: 50, fraction_q8: -64 }],
+        ),
+        CasterStats::default(),
+    ));
+
+    // 28. Reap_Ore-shape — Harvest (caster-self).
+    out.push((
+        "Reap_Ore",
+        AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 60, hostile_only: false, line_of_sight: false },
+            [EffectOp::Harvest { kind_hash: 0xCAFEBABE, amount: 5 }],
+        ),
+        CasterStats::default(),
+    ));
+
+    // 29. Drop_Stone-shape — PlaceVoxel (caster-self).
+    out.push((
+        "Drop_Stone",
+        AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 60, hostile_only: false, line_of_sight: false },
+            [EffectOp::PlaceVoxel { kind_hash: 0xFACEFEED }],
         ),
         CasterStats::default(),
     ));

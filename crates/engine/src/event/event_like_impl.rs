@@ -58,6 +58,10 @@ impl crate::event::EventLike for Event {
             Event::EffectCharmApplied { .. } => EventKindId::EffectCharmApplied,
             Event::EffectGroundedApplied { .. } => EventKindId::EffectGroundedApplied,
             Event::EffectSuppressApplied { .. } => EventKindId::EffectSuppressApplied,
+            Event::EffectBuffApplied { .. } => EventKindId::EffectBuffApplied,
+            Event::EffectHarvestApplied { .. } => EventKindId::EffectHarvestApplied,
+            Event::EffectPlaceVoxelApplied { .. } => EventKindId::EffectPlaceVoxelApplied,
+            Event::EffectReflectApplied { .. } => EventKindId::EffectReflectApplied,
             Event::EngagementBroken { .. } => EventKindId::EngagementBroken,
             Event::EngagementCommitted { .. } => EventKindId::EngagementCommitted,
             Event::FearSpread { .. } => EventKindId::FearSpread,
@@ -623,6 +627,58 @@ impl crate::event::EventLike for Event {
                 h.update(actor.raw().to_le_bytes());
                 h.update(target.raw().to_le_bytes());
                 h.update(duration_ticks.to_le_bytes());
+                h.update(tick.to_le_bytes());
+            }
+            Event::EffectBuffApplied {
+                actor,
+                target,
+                stat_ordinal,
+                magnitude_q8,
+                duration_ticks,
+                tick,
+            } => {
+                h.update([EventKindId::EffectBuffApplied as u8]);
+                h.update(actor.raw().to_le_bytes());
+                h.update(target.raw().to_le_bytes());
+                h.update([*stat_ordinal]);
+                h.update(magnitude_q8.to_le_bytes());
+                h.update(duration_ticks.to_le_bytes());
+                h.update(tick.to_le_bytes());
+            }
+            Event::EffectHarvestApplied {
+                actor,
+                kind_hash,
+                amount,
+                tick,
+            } => {
+                h.update([EventKindId::EffectHarvestApplied as u8]);
+                h.update(actor.raw().to_le_bytes());
+                h.update(kind_hash.to_le_bytes());
+                h.update(amount.to_le_bytes());
+                h.update(tick.to_le_bytes());
+            }
+            Event::EffectPlaceVoxelApplied {
+                actor,
+                kind_hash,
+                tick,
+            } => {
+                h.update([EventKindId::EffectPlaceVoxelApplied as u8]);
+                h.update(actor.raw().to_le_bytes());
+                h.update(kind_hash.to_le_bytes());
+                h.update(tick.to_le_bytes());
+            }
+            Event::EffectReflectApplied {
+                actor,
+                target,
+                duration_ticks,
+                fraction_q8,
+                tick,
+            } => {
+                h.update([EventKindId::EffectReflectApplied as u8]);
+                h.update(actor.raw().to_le_bytes());
+                h.update(target.raw().to_le_bytes());
+                h.update(duration_ticks.to_le_bytes());
+                h.update(fraction_q8.to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
             Event::EngagementBroken {
