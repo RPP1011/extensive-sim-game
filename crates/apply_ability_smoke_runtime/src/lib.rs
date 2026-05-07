@@ -83,6 +83,18 @@ pub struct ApplyAbilitySmokeState {
     // -- Agent SoA --
     agent_alive_buf: wgpu::Buffer,
     agent_level_buf: wgpu::Buffer,
+    // Wave 1.5#4 GPU wire-up: per-stat agent SoA columns the dispatcher
+    // reads at `caster_slot` for the `scale_bonus = Σ percent * stat`
+    // computation. Initialized to zero — the smoke fixture's program
+    // (Damage 30 with no scaling slots) writes zero scale_bonus
+    // regardless. Real fixtures (Bleed-style +5% MaxHp) populate these.
+    agent_attack_damage_buf: wgpu::Buffer,
+    agent_max_hp_buf: wgpu::Buffer,
+    agent_hp_buf: wgpu::Buffer,
+    agent_armor_buf: wgpu::Buffer,
+    agent_magic_resist_buf: wgpu::Buffer,
+    agent_move_speed_buf: wgpu::Buffer,
+    agent_mana_buf: wgpu::Buffer,
 
     // -- Packed AbilityRegistry on GPU (only the 3 columns the
     // dispatcher binds are read; the upload helper allocates all
@@ -163,6 +175,26 @@ impl ApplyAbilitySmokeState {
                 contents: bytemuck::cast_slice(&level_init),
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             });
+        // Wave 1.5#4 GPU scaling: per-stat columns for the dispatcher's
+        // `agent_stat()` switch. All zero — the smoke program has no
+        // scaling slots so `scale_bonus = 0.0` regardless. The
+        // `bytemuck::cast_slice(&vec![0.0_f32; ...])` shape mirrors
+        // `agent_alive`/`agent_level`.
+        let zeros_f32: Vec<f32> = vec![0.0_f32; n_agents as usize];
+        let mk_stat = |label: &str| {
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: bytemuck::cast_slice(&zeros_f32),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            })
+        };
+        let agent_attack_damage_buf = mk_stat("apply_ability_smoke_runtime::agent_attack_damage");
+        let agent_max_hp_buf        = mk_stat("apply_ability_smoke_runtime::agent_max_hp");
+        let agent_hp_buf            = mk_stat("apply_ability_smoke_runtime::agent_hp");
+        let agent_armor_buf         = mk_stat("apply_ability_smoke_runtime::agent_armor");
+        let agent_magic_resist_buf  = mk_stat("apply_ability_smoke_runtime::agent_magic_resist");
+        let agent_move_speed_buf    = mk_stat("apply_ability_smoke_runtime::agent_move_speed");
+        let agent_mana_buf          = mk_stat("apply_ability_smoke_runtime::agent_mana");
 
         // -- Event ring + tail. The kernel binds both as
         //    `array<atomic<u32>>` so we tag them STORAGE (the dispatcher
@@ -228,6 +260,13 @@ impl ApplyAbilitySmokeState {
             gpu,
             agent_alive_buf,
             agent_level_buf,
+            agent_attack_damage_buf,
+            agent_max_hp_buf,
+            agent_hp_buf,
+            agent_armor_buf,
+            agent_magic_resist_buf,
+            agent_move_speed_buf,
+            agent_mana_buf,
             registry_gpu,
             event_ring_buf,
             event_tail_buf,
@@ -275,6 +314,15 @@ impl ApplyAbilitySmokeState {
             ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
             ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
             ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+            ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_max_hp:        &self.agent_max_hp_buf,
+            agent_hp:            &self.agent_hp_buf,
+            agent_armor:         &self.agent_armor_buf,
+            agent_magic_resist:  &self.agent_magic_resist_buf,
+            agent_move_speed:    &self.agent_move_speed_buf,
+            agent_mana:          &self.agent_mana_buf,
             cfg: &self.physics_cfg_buf,
         };
         dispatch::dispatch_physics_dispatchability(

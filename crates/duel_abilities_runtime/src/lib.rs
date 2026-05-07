@@ -141,6 +141,18 @@ pub struct DuelAbilitiesState {
     /// (read-side) and the fused PerEvent kernel (write-side via the
     /// ApplyStun arm).
     agent_stun_expires_at_tick_buf: wgpu::Buffer,
+    /// Wave 1.5#4 GPU wire-up: per-stat columns the dispatcher reads at
+    /// `caster_slot` for the `scale_bonus = Σ percent * caster_stat`
+    /// computation. Bleed's `+5% max_hp` lands here — `agent_max_hp[i]`
+    /// is seeded to 100.0 so a +5% scaling produces +5.0 on the
+    /// chronicle write (= 5 + 5 = 10 base+scaled). The other four
+    /// (attack_damage / armor / magic_resist / move_speed) are
+    /// 0-initialized — duel_abilities verbs scale only on max_hp today.
+    agent_attack_damage_buf: wgpu::Buffer,
+    agent_max_hp_buf: wgpu::Buffer,
+    agent_armor_buf: wgpu::Buffer,
+    agent_magic_resist_buf: wgpu::Buffer,
+    agent_move_speed_buf: wgpu::Buffer,
 
     // -- Mask bitmaps (one per verb in source order: Strike=0,
     //    ShieldUp=1, Mend=2, Bleed=3, Reap=4, Vampirize=5, Fortify=6,
@@ -391,6 +403,32 @@ impl DuelAbilitiesState {
             contents: bytemuck::cast_slice(&stun_expires_init),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
+
+        // Wave 1.5#4 GPU scaling: per-stat columns the dispatcher reads
+        // at `caster_slot` for `scale_bonus`. Bleed declares
+        // `+5% max_hp`, so `agent_max_hp` is seeded to 100.0 (matching
+        // the prior hand-mirrored constant in `bleed_amount = 10.0 = 5
+        // + 5%·100`). The other four (attack_damage / armor /
+        // magic_resist / move_speed) stay zero — duel_abilities verbs
+        // scale only on max_hp today.
+        let max_hp_init: Vec<f32> = vec![100.0_f32; agent_count as usize];
+        let agent_max_hp_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_abilities_runtime::agent_max_hp"),
+            contents: bytemuck::cast_slice(&max_hp_init),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+        let zeros_f32: Vec<f32> = vec![0.0_f32; agent_count as usize];
+        let mk_stat = |label: &str| {
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: bytemuck::cast_slice(&zeros_f32),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            })
+        };
+        let agent_attack_damage_buf = mk_stat("duel_abilities_runtime::agent_attack_damage");
+        let agent_armor_buf         = mk_stat("duel_abilities_runtime::agent_armor");
+        let agent_magic_resist_buf  = mk_stat("duel_abilities_runtime::agent_magic_resist");
+        let agent_move_speed_buf    = mk_stat("duel_abilities_runtime::agent_move_speed");
 
         // Eight mask bitmaps — one per verb. Cleared each tick.
         let mask_bitmap_words = (agent_count + 31) / 32;
@@ -736,6 +774,11 @@ impl DuelAbilitiesState {
             agent_damage_taken_mult_q8_buf,
             agent_damage_taken_mult_expires_at_tick_buf,
             agent_stun_expires_at_tick_buf,
+            agent_attack_damage_buf,
+            agent_max_hp_buf,
+            agent_armor_buf,
+            agent_magic_resist_buf,
+            agent_move_speed_buf,
             mask_0_bitmap_buf,
             mask_1_bitmap_buf,
             mask_2_bitmap_buf,
@@ -1116,6 +1159,15 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
             ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
             ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+            ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_max_hp:        &self.agent_max_hp_buf,
+            agent_hp:            &self.agent_hp_buf,
+            agent_armor:         &self.agent_armor_buf,
+            agent_magic_resist:  &self.agent_magic_resist_buf,
+            agent_move_speed:    &self.agent_move_speed_buf,
+            agent_mana:          &self.agent_mana_buf,
             cfg: &self.chronicle_shieldup_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_shieldup(
@@ -1143,6 +1195,15 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
             ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
             ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+            ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_max_hp:        &self.agent_max_hp_buf,
+            agent_hp:            &self.agent_hp_buf,
+            agent_armor:         &self.agent_armor_buf,
+            agent_magic_resist:  &self.agent_magic_resist_buf,
+            agent_move_speed:    &self.agent_move_speed_buf,
+            agent_mana:          &self.agent_mana_buf,
             cfg: &self.chronicle_mend_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_mend(
@@ -1174,6 +1235,15 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
             ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
             ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+            ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_max_hp:        &self.agent_max_hp_buf,
+            agent_hp:            &self.agent_hp_buf,
+            agent_armor:         &self.agent_armor_buf,
+            agent_magic_resist:  &self.agent_magic_resist_buf,
+            agent_move_speed:    &self.agent_move_speed_buf,
+            agent_mana:          &self.agent_mana_buf,
             cfg: &self.chronicle_bleed_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_bleed(
@@ -1205,6 +1275,15 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
             ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
             ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+            ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_max_hp:        &self.agent_max_hp_buf,
+            agent_hp:            &self.agent_hp_buf,
+            agent_armor:         &self.agent_armor_buf,
+            agent_magic_resist:  &self.agent_magic_resist_buf,
+            agent_move_speed:    &self.agent_move_speed_buf,
+            agent_mana:          &self.agent_mana_buf,
             cfg: &self.chronicle_reap_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_reap(
@@ -1238,6 +1317,15 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
             ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
             ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+            ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_max_hp:        &self.agent_max_hp_buf,
+            agent_hp:            &self.agent_hp_buf,
+            agent_armor:         &self.agent_armor_buf,
+            agent_magic_resist:  &self.agent_magic_resist_buf,
+            agent_move_speed:    &self.agent_move_speed_buf,
+            agent_mana:          &self.agent_mana_buf,
             cfg: &self.chronicle_vampirize_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_vampirize(
@@ -1271,6 +1359,15 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
             ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
             ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+            ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_max_hp:        &self.agent_max_hp_buf,
+            agent_hp:            &self.agent_hp_buf,
+            agent_armor:         &self.agent_armor_buf,
+            agent_magic_resist:  &self.agent_magic_resist_buf,
+            agent_move_speed:    &self.agent_move_speed_buf,
+            agent_mana:          &self.agent_mana_buf,
             cfg: &self.chronicle_fortify_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_fortify(
@@ -1304,6 +1401,15 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
             ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
             ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+            ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_max_hp:        &self.agent_max_hp_buf,
+            agent_hp:            &self.agent_hp_buf,
+            agent_armor:         &self.agent_armor_buf,
+            agent_magic_resist:  &self.agent_magic_resist_buf,
+            agent_move_speed:    &self.agent_move_speed_buf,
+            agent_mana:          &self.agent_mana_buf,
             cfg: &self.chronicle_daze_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_daze(
@@ -1602,6 +1708,14 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
             ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
             ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+            ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_max_hp:        &self.agent_max_hp_buf,
+            agent_armor:         &self.agent_armor_buf,
+            agent_magic_resist:  &self.agent_magic_resist_buf,
+            agent_move_speed:    &self.agent_move_speed_buf,
+            agent_mana:          &self.agent_mana_buf,
             cfg: &self.chronicle_strike_cfg_buf,
         };
         dispatch::dispatch_physics_applyheal_and_applyshield_and_applydefeat_and_applylifestealactivation_and_applydamagemodactivation_and_applystun_and_verb_chronicle_strike(
@@ -2195,16 +2309,14 @@ mod tests {
         // fails, so Bleed is the only verb that can win argmax at
         // tick 0 (Mend/ShieldUp's hp-low gates also fail at hp=100).
         //
-        // Task #138 follow-on (Bleed, 2026-05-06) — Bleed now flows
-        // .ability → AbilityRegistry → apply_ability dispatcher →
-        // EffectSelfDamageApplied (kind=39) → ApplyDamageFromSelfDamage
-        // Chronicle re-emit → Damaged → ApplyDamage. The dispatcher
-        // does NOT today consult `scalings_per_effect`, so the
-        // chronicle amount is the EffectOp's base (5.0) instead of
-        // the .sim's hand-mirrored 5 + 5%·100 = 10.0. Bleed fires at
-        // tick 0 and tick 50 → hp = 100 - 5 - 5 = 90.0. The
-        // assertion floor is unchanged (`<= 90.0`) but the comment
-        // explains why both halves now agree on 5.0 per fire.
+        // Wave 1.5#4 GPU scaling (2026-05-07): the dispatcher now
+        // reads `scalings_per_effect` SoA + per-stat agent SoA at
+        // `caster_slot` to compute `scale_bonus = Σ percent * stat`.
+        // Bleed declares `self_damage 5 + 5% max_hp`; with
+        // `agent_max_hp[*] = 100.0`, the dispatcher writes
+        // `5 + 0.05 * 100 = 10.0` into the chronicle (= the prior
+        // hand-mirrored `bleed_amount = 10.0` constant). Bleed fires
+        // at tick 0 and tick 50 → hp = 100 - 10 - 10 = 80.0.
         let mut state = DuelAbilitiesState::new(0xCAFE_F00D, 1);
         for _ in 0..51 {
             state.step();
@@ -2214,12 +2326,11 @@ mod tests {
         let alive = state.read_alive();
         assert_eq!(hp.len(), 1);
         assert!(
-            hp[0] <= 90.0,
-            "expected hp to drop by AT LEAST 10 (Bleed base 5.0 fires \
-             twice at ticks 0 and 50 — registry-driven scaling dispatch \
-             is later infrastructure, so the +5% max_hp scaling does NOT \
-             apply at the apply_ability arm), got hp={:.2}, shield={:.2}, \
-             alive={}",
+            (hp[0] - 80.0).abs() < 1e-3,
+            "expected hp = 80.0 (Bleed scaled amount 10.0 fires twice at \
+             ticks 0 and 50 — registry-driven scaling dispatch reads \
+             5 + 5%·MaxHp = 10.0 from agent_max_hp[*]=100.0), got \
+             hp={:.4}, shield={:.4}, alive={}",
             hp[0], shield[0], alive[0],
         );
         // Sanity: the agent must still be alive; Bleed is supposed

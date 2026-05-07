@@ -2040,13 +2040,17 @@ fn apply_emit_destination_rings(ops: &mut [ComputeOp], pairs: &[(usize, EventRin
 /// surrounding kernel's binding set, but neither stmt carries the
 /// handles directly in its IR shape.
 fn wire_ability_registry_column_reads(prog: &CgProgram, ops: &mut [ComputeOp]) {
-    use crate::cg::data_handle::AbilityRegistryColumn;
+    use crate::cg::data_handle::{AbilityRegistryColumn, AgentFieldId, AgentRef};
     use crate::cg::op::ComputeOpKind;
     // Mirror the dispatcher's emit (`cg::emit::wgsl_body`):
     // it reads `effect_kinds`, `effect_payload_a`, `effect_payload_b`
     // every iteration of its slot loop, and Wave 1.5#9 added an inner
     // walk that reads the parallel `nested_effect_*` SoA columns
-    // after every primary effect's chronicle write.
+    // after every primary effect's chronicle write. Wave 1.5#4 GPU
+    // wire-up (this slice) added `scaling_stat_refs` + `scaling_percents`
+    // + per-stat agent SoA columns for the per-effect `scale_bonus =
+    // Σ percent * caster_stat` bonus emitted before the chronicle
+    // arm-chain.
     const COLUMNS: &[AbilityRegistryColumn] = &[
         AbilityRegistryColumn::EffectKinds,
         AbilityRegistryColumn::EffectPayloadA,
@@ -2054,6 +2058,26 @@ fn wire_ability_registry_column_reads(prog: &CgProgram, ops: &mut [ComputeOp]) {
         AbilityRegistryColumn::NestedEffectKinds,
         AbilityRegistryColumn::NestedEffectPayloadA,
         AbilityRegistryColumn::NestedEffectPayloadB,
+        AbilityRegistryColumn::ScalingStatRefs,
+        AbilityRegistryColumn::ScalingPercents,
+    ];
+
+    // Agent SoA stat columns the dispatcher's `agent_stat()` switch
+    // reads at `caster_slot` for the scale_bonus computation. Mirrors
+    // `ScalingStatRef` → `AgentFieldId` mapping in the dispatcher's
+    // emit (and in `engine::ability::program::CasterStats::get`):
+    //   AttackDamage(0) → AttackDamage, AbilityPower(1) → no SoA slot
+    //   (returns 0.0 — LoL-only stat), MaxHp(2) → MaxHp, Hp(3) → Hp,
+    //   Armor(4) → Armor, MagicResist(5) → MagicResist, MoveSpeed(6)
+    //   → MoveSpeed, Mana(7) → Mana.
+    const AGENT_STAT_FIELDS: &[AgentFieldId] = &[
+        AgentFieldId::AttackDamage,
+        AgentFieldId::MaxHp,
+        AgentFieldId::Hp,
+        AgentFieldId::Armor,
+        AgentFieldId::MagicResist,
+        AgentFieldId::MoveSpeed,
+        AgentFieldId::Mana,
     ];
 
     for (op_index, op) in ops.iter_mut().enumerate() {
@@ -2074,6 +2098,12 @@ fn wire_ability_registry_column_reads(prog: &CgProgram, ops: &mut [ComputeOp]) {
         }
         for column in COLUMNS {
             op.record_read(DataHandle::AbilityRegistryColumn { column: *column });
+        }
+        for field in AGENT_STAT_FIELDS {
+            op.record_read(DataHandle::AgentField {
+                field:  *field,
+                target: AgentRef::Self_,
+            });
         }
     }
 }

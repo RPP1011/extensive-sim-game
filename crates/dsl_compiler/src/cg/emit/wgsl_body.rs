@@ -1659,49 +1659,34 @@ fn lower_cg_stmt_body_to_wgsl(
             // the caster expression, preserving slice-γ self-cast
             // semantics for callers that don't need explicit targets.
             let target_wgsl = lower_cg_expr_to_wgsl(*target, ctx)?;
-            // Resolve the runtime EventKindId for each chronicle-bearing
-            // arm via the pinned table. `expect` is sound: the table is
-            // pinned by `effect_kind_to_event_kind_map_matches_engine`
-            // and any future divergence surfaces as a build-time test
-            // failure rather than a panic at this site.
-            let damage_event_id = event_kind_id_for_effect_kind(0)
-                .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Damage=0");
-            let heal_event_id = event_kind_id_for_effect_kind(1)
-                .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Heal=1");
-            let shield_event_id = event_kind_id_for_effect_kind(2)
-                .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Shield=2");
-            let stun_event_id = event_kind_id_for_effect_kind(3)
-                .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Stun=3");
-            let slow_event_id = event_kind_id_for_effect_kind(4)
-                .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Slow=4");
-            let transfer_gold_event_id = event_kind_id_for_effect_kind(5)
-                .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain TransferGold=5");
-            let modify_standing_event_id = event_kind_id_for_effect_kind(6)
-                .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain ModifyStanding=6");
-            let self_damage_event_id = event_kind_id_for_effect_kind(17)
-                .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain SelfDamage=17");
-            let life_steal_event_id = event_kind_id_for_effect_kind(18)
-                .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain LifeSteal=18");
-            let damage_modify_event_id = event_kind_id_for_effect_kind(19)
-                .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain DamageModify=19");
-            let execute_event_id = event_kind_id_for_effect_kind(16)
-                .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Execute=16");
+            // Wave 1.5#4 GPU wire-up (2026-05-07): the `let *_event_id`
+            // resolutions previously rendered into the inline primary
+            // chain were dropped — `emit_chronicle_arm_chain` calls
+            // `event_kind_id_for_effect_kind` itself (same pinned
+            // table). The `expect` panic-on-missing semantic remains
+            // sound there.
             // Wave 1.5#9 (2026-05-06): the nested-effect walk emits the
             // SAME if-else chain shape as the primary, just reading
             // from `ability_registry_nested_effect_*` columns at a
             // deeper indent. `emit_chronicle_arm_chain` builds the
             // shared chain once at 12-space indent (12 = inside the
             // outer for-loop's 8-space indent + 4 for the inner
-            // for-loop body); the primary walk inlines the same
-            // chain at 8-space indent in the format! string below
-            // because the primary's let-binding shape is too
-            // entangled with the format!'s `{...}` substitutions to
-            // factor cleanly without rewriting the whole site. The
-            // nested walk's chain has no `{event_id}`-style
-            // substitutions because it builds the WGSL string
-            // directly via format-with-named args; it uses the same
-            // pinned `event_kind_id_for_effect_kind` lookups.
-            let nested_arm_chain = emit_chronicle_arm_chain("            ");
+            // for-loop body).
+            //
+            // Wave 1.5#4 GPU wire-up (this slice, 2026-05-07): the
+            // primary walk now ALSO routes through
+            // `emit_chronicle_arm_chain` (at 8-space indent), replacing
+            // the prior inline copy of the if-chain. Single-source
+            // arm-chain means scale_bonus folding into f32-amount arms
+            // lives in one place. Nested ops carry no scaling slot
+            // (mirrors `apply.rs`'s nested-op `scale_bonus = 0.0`
+            // contract) so the nested walk passes a literal `0.0`
+            // identifier; the primary walk passes `scale_bonus`
+            // (computed from `scaling_stat_refs`/`scaling_percents` SoA
+            // + per-stat agent SoA reads at `caster_slot` above the
+            // chain).
+            let primary_arm_chain = emit_chronicle_arm_chain("        ", "scale_bonus");
+            let nested_arm_chain = emit_chronicle_arm_chain("            ", "nested_scale_bonus");
             // Engine pins MAX_EFFECTS_PER_PROGRAM = 6 + EFFECT_KIND_EMPTY = 0xFFu
             // (see crates/engine/src/ability/program.rs:28 +
             // crates/engine/src/ability/packed.rs). Inlining the
@@ -1727,19 +1712,25 @@ fn lower_cg_stmt_body_to_wgsl(
             // columns.
             let body = format!(
                 "// #136 apply_ability dispatcher (slice β step 2)\n\
+                 // Wave 1.5#4 GPU wire-up: per-effect slot reads\n\
+                 // `scaling_stat_refs` + `scaling_percents` SoA + per-stat\n\
+                 // agent SoA at `caster_slot` to compute the additive\n\
+                 // `scale_bonus = Σ percent * caster_stat`. Mirrors the\n\
+                 // CPU oracle in `engine::ability::apply::apply_program`\n\
+                 // (sums `inner.iter().map(|s| s.percent * stats.get(s.stat_ref))`\n\
+                 // — same iteration order j=0 then j=1 per P11 reduction\n\
+                 // ordering). AbilityPower(tag=1) returns 0.0 — no agent\n\
+                 // SoA slot for it today (LoL-only stat).\n\
                  {{\n\
                  \x20\x20\x20\x20let ability_id__u32: u32 = u32({ability_wgsl});\n\
-                 \x20\x20\x20\x20// Slice δ (#161): caster operand evaluated once + reused\n\
-                 \x20\x20\x20\x20// across every chronicle write below. The prior emit\n\
-                 \x20\x20\x20\x20// hardcoded `agent_id` here, which broke PerEvent shape.\n\
                  \x20\x20\x20\x20let caster_slot: u32 = u32({caster_wgsl});\n\
-                 \x20\x20\x20\x20// Slice ε part 1: target operand evaluated once + reused\n\
-                 \x20\x20\x20\x20// across every chronicle write below. Defaults to caster\n\
-                 \x20\x20\x20\x20// (slice-γ self-cast) when source omits `target <expr>`.\n\
                  \x20\x20\x20\x20let target_slot: u32 = u32({target_wgsl});\n\
                  \x20\x20\x20\x20// AbilityId is 1-based (NonZeroU32); slot index is id - 1.\n\
                  \x20\x20\x20\x20let ability_slot: u32 = ability_id__u32 - 1u;\n\
                  \x20\x20\x20\x20let effect_base: u32 = ability_slot * 6u; // MAX_EFFECTS_PER_PROGRAM\n\
+                 \x20\x20\x20\x20// Wave 1.5#4 GPU scaling: per-(effect, scaling-slot) stride\n\
+                 \x20\x20\x20\x20// = MAX_EFFECTS_PER_PROGRAM × MAX_SCALINGS_PER_EFFECT = 6 × 2 = 12.\n\
+                 \x20\x20\x20\x20let scaling_base: u32 = ability_slot * 12u;\n\
                  \x20\x20\x20\x20// Wave 1.5#9 nested base: ability_slot × MAX_EFFECTS_PER_PROGRAM\n\
                  \x20\x20\x20\x20// × MAX_NESTED_PER_EFFECT = 6 × 2 entries per ability.\n\
                  \x20\x20\x20\x20let nested_base: u32 = ability_slot * 12u;\n\
@@ -1748,273 +1739,32 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20\x20\x20\x20\x20if (kind == 0xFFu) {{ continue; }} // EFFECT_KIND_EMPTY\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20let payload_a: u32 = ability_registry_effect_payload_a[effect_base + i];\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20let payload_b: u32 = ability_registry_effect_payload_b[effect_base + i];\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// Damage = 0 → EventKindId::EffectDamageApplied = 26\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20if (kind == 0u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let amount: f32 = bitcast<f32>(payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// chronicle: emit EffectDamageApplied (caster_slot + target_slot)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20{{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (_slot < 65536u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 0u], {damage_event_id}u);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 1u], tick);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// Wave 1.5#4: compute scale_bonus from the slot's two\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// `scaling_stat_refs`/`scaling_percents` entries (sentinel\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// 0xFFu = unused slot → 0.0 contribution).\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20var scale_bonus: f32 = 0.0;\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20for (var k: u32 = 0u; k < 2u; k = k + 1u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let s_off: u32 = scaling_base + i * 2u + k;\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let s_tag: u32 = ability_registry_scaling_stat_refs[s_off];\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (s_tag == 0xFFu) {{ continue; }} // SCALING_STAT_NONE_SENTINEL\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let s_pct: f32 = ability_registry_scaling_percents[s_off];\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// agent_stat: dispatch s_tag → SoA read at caster_slot.\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Mirrors `CasterStats::get` in engine/src/ability/program.rs.\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20var stat_v: f32 = 0.0;\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20switch (s_tag) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 0u: {{ stat_v = agent_attack_damage[caster_slot]; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 1u: {{ stat_v = 0.0; }} // AbilityPower — no agent SoA slot\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 2u: {{ stat_v = agent_max_hp[caster_slot]; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 3u: {{ stat_v = agent_hp[caster_slot]; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 4u: {{ stat_v = agent_armor[caster_slot]; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 5u: {{ stat_v = agent_magic_resist[caster_slot]; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 6u: {{ stat_v = agent_move_speed[caster_slot]; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 7u: {{ stat_v = agent_mana[caster_slot]; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20default: {{ stat_v = 0.0; }}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 1u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Heal = 1 → EventKindId::EffectHealApplied = 27\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let amount: f32 = bitcast<f32>(payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// chronicle: emit EffectHealApplied (caster_slot + target_slot)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20{{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (_slot < 65536u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 0u], {heal_event_id}u);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 1u], tick);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 2u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Shield = 2 → EventKindId::EffectShieldApplied = 28\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let amount: f32 = bitcast<f32>(payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// chronicle: emit EffectShieldApplied (caster_slot + target_slot)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20{{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (_slot < 65536u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 0u], {shield_event_id}u);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 1u], tick);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 3u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Stun = 3 → EventKindId::EffectStunApplied = 29\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_a = duration_ticks (u32); expires_at_tick = tick + duration\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let expires_at_tick: u32 = tick + payload_a;\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// chronicle: emit EffectStunApplied (caster_slot + target_slot)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20{{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (_slot < 65536u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 0u], {stun_event_id}u);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 1u], tick);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 4u], (expires_at_tick));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 4u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Slow = 4 → EventKindId::EffectSlowApplied = 30\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_a = duration_ticks (u32); expires = tick + duration\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b sign-widened i16 → factor_q8 (i32 via bitcast)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let expires_at_tick: u32 = tick + payload_a;\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let factor_q8: i32 = bitcast<i32>(payload_b);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// chronicle: emit EffectSlowApplied (caster_slot + target_slot)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20{{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (_slot < 65536u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 0u], {slow_event_id}u);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 1u], tick);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 4u], (expires_at_tick));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 5u], bitcast<u32>(factor_q8));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 8u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Root: payload_a = duration_ticks (u32)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_root(target, payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 9u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Silence: payload_a = duration_ticks (u32)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_silence(target, payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 10u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Fear: payload_a = duration_ticks (u32)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_fear(target, payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 11u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Taunt: payload_a = duration_ticks (u32)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_taunt(target, payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 12u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Dash: payload_a = distance (f32 via bitcast)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let distance: f32 = bitcast<f32>(payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_dash(caster, distance);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 13u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Blink: payload_a = distance (f32 via bitcast)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let distance: f32 = bitcast<f32>(payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_blink(caster, distance);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 14u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Knockback: payload_a = distance (f32 via bitcast)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let distance: f32 = bitcast<f32>(payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_knockback(caster, target, distance);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 15u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Pull: payload_a = distance (f32 via bitcast)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let distance: f32 = bitcast<f32>(payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_pull(caster, target, distance);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 27u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Stealth: payload_a = duration_ticks (u32, self-cast)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_stealth(caster, payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 28u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Charm: payload_a = duration_ticks (u32)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_charm(target, payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 29u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Grounded: payload_a = duration_ticks (u32)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_grounded(target, payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 30u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Suppress: payload_a = duration_ticks (u32)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_suppress(target, payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 5u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TransferGold = 5 → EventKindId::EffectGoldTransfer = 31\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_a = amount (i32 sign-widened to u32)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Engine event carries amount as i64 — GPU writes the low 32\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// bits + zero-extends. Cascade chronicle decode reads the u32\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// then sign-extends back to i64 (matches the EffectOp's i32\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// source-of-truth — i64 is host-side widening only).\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let amount_i32: i32 = bitcast<i32>(payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// chronicle: emit EffectGoldTransfer (caster_slot + target_slot)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20{{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (_slot < 65536u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 0u], {transfer_gold_event_id}u);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 1u], tick);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount_i32));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 6u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// ModifyStanding = 6 → EventKindId::EffectStandingDelta = 32\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_a = delta (i16 sign-widened to u32)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let delta_i32: i32 = bitcast<i32>(payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// chronicle: emit EffectStandingDelta (caster_slot + target_slot)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20{{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (_slot < 65536u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 0u], {modify_standing_event_id}u);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 1u], tick);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(delta_i32));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 16u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Execute = 16 → EventKindId::EffectExecuteApplied = 42\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_a = hp_threshold (f32 via bitcast). The when-\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// condition `target.hp < hp_threshold` is NOT evaluated\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// here — that's the .ability's `when_per_effect[i]` and\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// stays unconsulted by apply_program today. Duel_abilities\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Reap's outer verb gate already enforces the threshold.\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Same shape family as EffectDamageApplied — 3 payload\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// words (actor, target, hp_threshold).\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let hp_threshold: f32 = bitcast<f32>(payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// chronicle: emit EffectExecuteApplied (caster_slot + target_slot)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20{{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (_slot < 65536u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 0u], {execute_event_id}u);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 1u], tick);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(hp_threshold));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 17u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// SelfDamage = 17 → EventKindId::EffectSelfDamageApplied = 39\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_a = amount (f32 via bitcast). Self-damage targets\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// the caster — the chronicle writes caster_slot into BOTH actor\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// (slot 2) and target (slot 3) so the re-emit physics rule's\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// pattern can ferry both ids verbatim into Damaged.\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let amount: f32 = bitcast<f32>(payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// chronicle: emit EffectSelfDamageApplied (caster_slot for both actor + target)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20{{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (_slot < 65536u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 0u], {self_damage_event_id}u);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 1u], tick);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 3u], (caster_slot));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 18u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// LifeSteal = 18 → EventKindId::EffectLifeStealApplied = 40\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_a = duration_ticks (u32); expires = tick + duration\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b sign-widened i16 → fraction_q8 (i32 via bitcast)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Same shape as Slow (kind == 4u): 4 payload words —\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// actor, target, expires_at_tick, fraction_q8.\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let expires_at_tick: u32 = tick + payload_a;\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let fraction_q8: i32 = bitcast<i32>(payload_b);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// chronicle: emit EffectLifeStealApplied (caster_slot + target_slot)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20{{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (_slot < 65536u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 0u], {life_steal_event_id}u);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 1u], tick);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 4u], (expires_at_tick));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 5u], bitcast<u32>(fraction_q8));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 19u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// DamageModify = 19 → EventKindId::EffectDamageModifyApplied = 41\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_a = duration_ticks (u32); expires = tick + duration\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b sign-widened i16 → multiplier_q8 (i32 via bitcast)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Same shape as Slow (kind == 4u) / LifeSteal (kind == 18u):\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// 4 payload words — actor, target, expires_at_tick, multiplier_q8.\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let expires_at_tick: u32 = tick + payload_a;\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let multiplier_q8: i32 = bitcast<i32>(payload_b);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// chronicle: emit EffectDamageModifyApplied (caster_slot + target_slot)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20{{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (_slot < 65536u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 0u], {damage_modify_event_id}u);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 1u], tick);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 4u], (expires_at_tick));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 5u], bitcast<u32>(multiplier_q8));\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 20u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// DamageOverTime: payload_a = amount-per-tick (f32),\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b = duration_ticks (u32)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let amount: f32 = bitcast<f32>(payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_damage_over_time(caster, target, amount, payload_b);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 21u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// HealOverTime: payload_a = amount-per-tick (f32),\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b = duration_ticks (u32)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let amount: f32 = bitcast<f32>(payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_heal_over_time(caster, target, amount, payload_b);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 22u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TimedShield: payload_a = amount (f32),\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b = duration_ticks (u32)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let amount: f32 = bitcast<f32>(payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_timed_shield(caster, target, amount, payload_b);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 23u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Buff: payload_a = (stat ordinal in low byte | magnitude_q8 in bits 8..),\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b = duration_ticks. magnitude_q8 is i16 sign-extended.\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let buff_stat: u32 = payload_a & 0xFFu;\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let buff_magnitude_q8: i32 = bitcast<i32>(payload_a) >> 8;\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_buff(target, buff_stat, buff_magnitude_q8, payload_b);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 24u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Summon: payload_a = template_hash (u32),\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b = (count in high byte | lifetime in low 24 bits)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let summon_count: u32 = (payload_b >> 24u) & 0xFFu;\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let summon_lifetime: u32 = payload_b & 0x00FFFFFFu;\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_summon(caster, payload_a, summon_count, summon_lifetime);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 25u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Harvest: payload_a = kind_hash, payload_b = amount\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_harvest(caster, payload_a, payload_b);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 26u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// PlaceVoxel: payload_a = kind_hash; placement at cast's target pos\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_place_voxel(caster, payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 31u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Reflect: payload_a = duration_ticks,\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b's low 16 bits = fraction_q8 (i16)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let fraction_q8: i32 = bitcast<i32>(payload_b);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_reflect(target, payload_a, fraction_q8);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20scale_bonus = scale_bonus + s_pct * stat_v;\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20}}\n\
+                 {primary_arm_chain}\
                  \x20\x20\x20\x20\x20\x20\x20\x20// Variant 7 (CastAbility) — recursive dispatch. The\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20// nested ability_id lives in payload_a; recursing\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20// requires either a depth-bounded re-entry into this\n\
@@ -2025,12 +1775,16 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20\x20\x20\x20\x20// and write a chronicle record per chronicle-bearing\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20// kind. Block-scoped so the inner `kind` / `payload_a`\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20// / `payload_b` locals don't shadow the primary walk's.\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// Nested ops carry no scaling slot in the registry today\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// (mirrors `apply.rs`'s `push_effect_event(..., 0.0)` for\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// nested), so `nested_scale_bonus` is forced to 0.0.\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20let nested_slot_base: u32 = nested_base + i * 2u;\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20for (var j: u32 = 0u; j < 2u; j = j + 1u) {{\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let kind: u32 = ability_registry_nested_effect_kinds[nested_slot_base + j];\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (kind == 0xFFu) {{ continue; }} // EFFECT_KIND_EMPTY\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let payload_a: u32 = ability_registry_nested_effect_payload_a[nested_slot_base + j];\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let payload_b: u32 = ability_registry_nested_effect_payload_b[nested_slot_base + j];\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let nested_scale_bonus: f32 = 0.0;\n\
                  {nested_arm_chain}\
                  \x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20}}\n\
@@ -2336,12 +2090,23 @@ pub(crate) fn event_kind_id_for_effect_kind(effect_kind: u32) -> Option<u32> {
 /// indent stride (4 + 4 + 4 spaces) for the if-body, atomicAdd
 /// block, and atomicStore lines respectively.
 ///
+/// `scale_bonus_var` is the WGSL identifier (in scope at `indent`) that
+/// holds the per-effect-slot `Σ percent * caster_stat` bonus, added to
+/// the f32 `amount` field of every amount-bearing chronicle arm
+/// (Damage / Heal / Shield / SelfDamage / DamageOverTime / HealOverTime /
+/// TimedShield). The primary walk passes `"scale_bonus"` (computed
+/// from `scaling_stat_refs`/`scaling_percents` SoA + per-stat agent
+/// SoA reads at `caster_slot` above the chain); the nested walk passes
+/// `"nested_scale_bonus"` which is forced to `0.0` because nested ops
+/// have no scaling slot in the registry today (mirrors the CPU's
+/// `apply.rs` line ~233-237 — `push_effect_event(... 0.0)` for nested).
+///
 /// Pinned by `apply_ability_dispatcher_emits_chronicle_arms_test`
 /// (and the various other dispatcher tests) — any per-arm payload
 /// drift surfaces there. The chain is structurally identical to
 /// `pack_effect`'s variant ordering in
 /// `crates/engine/src/ability/packed.rs`.
-fn emit_chronicle_arm_chain(indent: &str) -> String {
+fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     let damage_event_id = event_kind_id_for_effect_kind(0)
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Damage=0");
     let heal_event_id = event_kind_id_for_effect_kind(1)
@@ -2375,7 +2140,7 @@ fn emit_chronicle_arm_chain(indent: &str) -> String {
     // Damage = 0 → 26
     s.push_str(&format!("{i4}// Damage = 0 → EventKindId::EffectDamageApplied = 26\n"));
     s.push_str(&format!("{i4}if (kind == 0u) {{\n"));
-    s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a);\n"));
+    s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a) + {scale_bonus_var};\n"));
     s.push_str(&format!("{i8}// chronicle: emit EffectDamageApplied (caster_slot + target_slot)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
@@ -2391,7 +2156,7 @@ fn emit_chronicle_arm_chain(indent: &str) -> String {
     // Heal = 1 → 27
     s.push_str(&format!("{i4}}} else if (kind == 1u) {{\n"));
     s.push_str(&format!("{i8}// Heal = 1 → EventKindId::EffectHealApplied = 27\n"));
-    s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a);\n"));
+    s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a) + {scale_bonus_var};\n"));
     s.push_str(&format!("{i8}// chronicle: emit EffectHealApplied (caster_slot + target_slot)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
@@ -2407,7 +2172,7 @@ fn emit_chronicle_arm_chain(indent: &str) -> String {
     // Shield = 2 → 28
     s.push_str(&format!("{i4}}} else if (kind == 2u) {{\n"));
     s.push_str(&format!("{i8}// Shield = 2 → EventKindId::EffectShieldApplied = 28\n"));
-    s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a);\n"));
+    s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a) + {scale_bonus_var};\n"));
     s.push_str(&format!("{i8}// chronicle: emit EffectShieldApplied (caster_slot + target_slot)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
@@ -2569,7 +2334,7 @@ fn emit_chronicle_arm_chain(indent: &str) -> String {
     s.push_str(&format!("{i8}// the caster — the chronicle writes caster_slot into BOTH actor\n"));
     s.push_str(&format!("{i8}// (slot 2) and target (slot 3) so the re-emit physics rule's\n"));
     s.push_str(&format!("{i8}// pattern can ferry both ids verbatim into Damaged.\n"));
-    s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a);\n"));
+    s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a) + {scale_bonus_var};\n"));
     s.push_str(&format!("{i8}// chronicle: emit EffectSelfDamageApplied (caster_slot for both actor + target)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
@@ -2626,21 +2391,26 @@ fn emit_chronicle_arm_chain(indent: &str) -> String {
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
-    // TODO arms for kinds 20..26 (DoT/HoT/TimedShield/Buff/Summon/Harvest/PlaceVoxel)
+    // TODO arms for kinds 20..26 (DoT/HoT/TimedShield/Buff/Summon/Harvest/PlaceVoxel).
+    // Wave 1.5#4 GPU wire-up: scale_bonus is folded into amount for the
+    // f32-amount arms (DoT=20, HoT=21, TimedShield=22) so when the
+    // chronicle write lands here, the scaled amount is already correct.
+    // Buff(23) tickAmount uses scale_bonus, but period_ticks does not —
+    // not relevant here because Buff packs `magnitude_q8` not `amount`.
     s.push_str(&format!("{i4}}} else if (kind == 20u) {{\n"));
     s.push_str(&format!("{i8}// DamageOverTime: payload_a = amount-per-tick (f32),\n"));
     s.push_str(&format!("{i8}// payload_b = duration_ticks (u32)\n"));
-    s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a);\n"));
+    s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a) + {scale_bonus_var};\n"));
     s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_damage_over_time(caster, target, amount, payload_b);\n"));
     s.push_str(&format!("{i4}}} else if (kind == 21u) {{\n"));
     s.push_str(&format!("{i8}// HealOverTime: payload_a = amount-per-tick (f32),\n"));
     s.push_str(&format!("{i8}// payload_b = duration_ticks (u32)\n"));
-    s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a);\n"));
+    s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a) + {scale_bonus_var};\n"));
     s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_heal_over_time(caster, target, amount, payload_b);\n"));
     s.push_str(&format!("{i4}}} else if (kind == 22u) {{\n"));
     s.push_str(&format!("{i8}// TimedShield: payload_a = amount (f32),\n"));
     s.push_str(&format!("{i8}// payload_b = duration_ticks (u32)\n"));
-    s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a);\n"));
+    s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a) + {scale_bonus_var};\n"));
     s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_timed_shield(caster, target, amount, payload_b);\n"));
     s.push_str(&format!("{i4}}} else if (kind == 23u) {{\n"));
     s.push_str(&format!("{i8}// Buff: payload_a = (stat ordinal in low byte | magnitude_q8 in bits 8..),\n"));
