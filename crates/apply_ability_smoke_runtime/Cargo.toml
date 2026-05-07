@@ -33,3 +33,10 @@ dsl_compiler = { path = "../dsl_compiler" }
 [build-dependencies]
 dsl_ast = { path = "../dsl_ast" }
 dsl_compiler = { path = "../dsl_compiler" }
+
+[dev-dependencies]
+# Used by `tests/parity_apply_program_sweep.rs` to construct the
+# `EffectScaling` / `EffectOp` SmallVec slots inline (the same SmallVec
+# type the engine's `AbilityProgram` exposes for `scalings_per_effect`
+# and `nested_per_effect`).
+smallvec = "1.13"

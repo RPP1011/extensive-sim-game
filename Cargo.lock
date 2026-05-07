@@ -102,6 +102,7 @@ dependencies = [
  "engine",
  "glam",
  "pollster",
+ "smallvec",
  "wgpu",
 ]
 
