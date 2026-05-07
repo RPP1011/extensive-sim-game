@@ -385,7 +385,7 @@ config combat {
   cooldown_shieldup: u32 = 40,    // ShieldUp.ability: cooldown 4s == 40 ticks
   cooldown_mend:    u32 = 30,     // Mend.ability: cooldown 3s == 30 ticks
   cooldown_bleed:   u32 = 50,     // Bleed.ability: cooldown 5s == 50 ticks
-  bleed_amount:     f32 = 10.0,   // Bleed.ability: self_damage 5 + 5%·MaxHp; fixture MaxHp=100 → 5 + 5 = 10 (Wave 1.5#4 scaling, hand-mirrored)
+  bleed_amount:     f32 = 10.0,   // Bleed.ability: self_damage 5 + 5%·MaxHp; fixture MaxHp=100 → 5 + 5 = 10. RETIRED 2026-05-07: registry-driven GPU scaling now computes this dynamically from agent_max_hp[caster_slot]. Field kept to avoid config.combat type churn — no .sim site references it after the apply_ability swap.
   reap_threshold:   f32 = 20.0,   // Reap.ability: execute 20
   cooldown_reap:    u32 = 20,     // Reap.ability: cooldown 2s == 20 ticks
   strike_range:     f32 = 5.0,    // Strike.ability: range 5.0
@@ -545,19 +545,16 @@ verb Bleed(self, target: Agent) =
   // Damaged so the existing ApplyDamage cascade (shield/lifesteal/
   // damage-modify) keeps working unchanged.
   //
-  // SCALING NOTE: the .ability declares `+ 5% max_hp`, lowered to
-  // scalings_per_effect[0] = (MaxHp, 0.05). The runtime apply path
-  // (which runs CPU-side via apply_program) populates CasterStats
-  // from per-agent SoA reads at cast-decide time. The GPU dispatcher
-  // does NOT today consult scalings_per_effect at the apply_ability
-  // arm — only the base `amount` (= 5.0) lands in the chronicle write.
-  // The .sim verb's existing config.combat.bleed_amount (= 10.0,
-  // hand-mirrored 5 + 5%·100) is no longer the load-bearing constant
-  // because the verb stops emitting Damaged directly; the chronicle
-  // amount is the EffectOp's base 5.0 until registry-driven scaling
-  // dispatch lands. The `bleed_drains_caster_hp_when_selected`
-  // runtime test relaxes its hp floor accordingly (still proves the
-  // SelfDamage flow is wired end-to-end via the chronicle re-emit).
+  // SCALING NOTE (Wave 1.5#4 GPU wire-up, 2026-05-07): the .ability
+  // declares `+ 5% max_hp`, lowered to scalings_per_effect[0] = (MaxHp,
+  // 0.05). The dispatcher now reads scalings_per_effect SoA + agent SoA
+  // at `caster_slot` to compute `scale_bonus = Σ percent * stat`, so
+  // the chronicle write carries the scaled amount directly (5 + 0.05 *
+  // agent_max_hp[caster_slot]). With the fixture's `agent_max_hp[*] =
+  // 100.0`, the chronicle amount is 5 + 5 = 10.0 — matching the
+  // retired hand-mirrored `config.combat.bleed_amount`. The
+  // `bleed_drains_caster_hp_when_selected` runtime test pins
+  // `hp = 100 - 10 - 10 = 80` after Bleed fires twice (ticks 0, 50).
   apply_ability 4 by self target self
   score 75.0
 

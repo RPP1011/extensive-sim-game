@@ -460,6 +460,58 @@ fn apply_ability_smoke_emits_dispatcher_loop_in_kernel_body() {
          got {slot_acquisitions};\n\
          body:\n{body}"
     );
+
+    // Wave 1.5#4 GPU wire-up (2026-05-07): the dispatcher computes
+    // `scale_bonus = Σ percent * caster_stat` from the per-slot
+    // `scaling_stat_refs` / `scaling_percents` SoA + per-stat agent SoA
+    // reads at `caster_slot`, then folds it into amount-bearing arms via
+    // `bitcast<f32>(payload_a) + scale_bonus`. Pin three structural
+    // facts so any future drift surfaces here:
+    //   1. The scaling SoA reads land at the slot's `scaling_base + i*2 + k`
+    //      offset (k=0..1 covers MAX_SCALINGS_PER_EFFECT=2).
+    //   2. The per-stat switch reaches every non-AbilityPower variant
+    //      (the AbilityPower=1 tag returns 0.0 — no agent SoA slot).
+    //   3. The Damage arm now writes `payload_a + scale_bonus` (NOT just
+    //      `payload_a`).
+    assert!(
+        body.contains("ability_registry_scaling_stat_refs[s_off]"),
+        "expected dispatcher to read the scaling_stat_refs SoA at \
+         per-slot offset; got body:\n{body}"
+    );
+    assert!(
+        body.contains("ability_registry_scaling_percents[s_off]"),
+        "expected dispatcher to read the scaling_percents SoA at \
+         per-slot offset; got body:\n{body}"
+    );
+    assert!(
+        body.contains("agent_max_hp[caster_slot]"),
+        "expected agent_stat switch to read agent_max_hp at caster_slot \
+         (the MaxHp branch is the load-bearing case for the duel \
+         Bleed verb's `+5% max_hp` scaling); got body:\n{body}"
+    );
+    assert!(
+        body.contains("agent_attack_damage[caster_slot]"),
+        "expected agent_stat switch to cover agent_attack_damage; \
+         got body:\n{body}"
+    );
+    assert!(
+        body.contains("scale_bonus = scale_bonus + s_pct * stat_v"),
+        "expected scale_bonus accumulator to fold each percent * stat \
+         contribution; got body:\n{body}"
+    );
+    assert!(
+        body.contains("bitcast<f32>(payload_a) + scale_bonus"),
+        "expected amount-bearing arms (Damage / Heal / Shield / \
+         SelfDamage / DoT / HoT / TimedShield) to fold scale_bonus into \
+         the f32 amount; got body:\n{body}"
+    );
+    assert!(
+        body.contains("let nested_scale_bonus: f32 = 0.0;"),
+        "expected the nested-effect walk to force scale_bonus = 0.0 \
+         (mirrors apply.rs's `push_effect_event(... 0.0)` for nested \
+         ops — they have no scaling slot in the registry); \
+         got body:\n{body}"
+    );
 }
 
 /// Naga-validate the dispatcher's emitted WGSL. Format-string
