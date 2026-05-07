@@ -2280,6 +2280,52 @@ fn detect_cycles(prog: &CgProgram, errors: &mut Vec<CgError>) {
                             continue;
                         }
                     }
+                    // Event-kind disjointness on the shared event ring.
+                    //
+                    // The schema-level model: every event kind shares
+                    // `EventRingId(0)` (the unified `batch_events` ring;
+                    // see `cg::lower::driver::populate_event_kinds`).
+                    // `DataHandle::EventRing` therefore carries no event-
+                    // kind discriminant — the producer/consumer kind
+                    // information lives on the OP, not the handle:
+                    //
+                    // * Consumer (reader) — `ComputeOpKind::ViewFold {
+                    //   on_event: K, .. }` or `PhysicsRule { on_event:
+                    //   Some(K), .. }`. The op subscribes to ONE event
+                    //   kind; the kernel filters non-matching tags out
+                    //   at the dispatch boundary.
+                    // * Producer (writer) — `CgStmt::Emit { event: K }`
+                    //   inside the body, OR a synthesised
+                    //   `ScoringArgmax` (implicitly emits
+                    //   `ActionSelected`). Either way the producer
+                    //   emits a known set of kinds.
+                    //
+                    // When a consumer subscribes to kind K and the
+                    // producer's emit set is non-empty, fully resolved
+                    // (no `ApplyAbility` wildcard placeholder), and
+                    // does NOT contain K, the runtime dispatch is
+                    // disjoint: the consumer's PerEvent threads see
+                    // tag-filtered events that this producer never
+                    // wrote. Skip the edge.
+                    //
+                    // Closes the Gap Y follow-on: 5 surviving phantom
+                    // cycles in `tactical_squad_5v5`, `boss_fight`,
+                    // `mass_battle_100v100`, `duel_abilities`, and
+                    // `duel_25v25`, all from `@phase(post)` PerEvent
+                    // chronicle consumers listening on different
+                    // engine-aliased kinds (EffectDamageApplied,
+                    // EffectHealApplied, EffectStunApplied, …) sharing
+                    // the unified ring.
+                    if matches!(r, DataHandle::EventRing { .. }) {
+                        if let Some(consumer_kind) = op_on_event_kind(op) {
+                            let producer_kinds = op_emit_kind_set(prog, producer_op);
+                            if let EmitKindSet::Specific(kinds) = &producer_kinds {
+                                if !kinds.is_empty() && !kinds.contains(&consumer_kind) {
+                                    continue;
+                                }
+                            }
+                        }
+                    }
                     adj[producer.0 as usize].insert(consumer.0);
                 }
             }
@@ -2436,6 +2482,165 @@ fn chronicle_action_id_gate(
         on_event,
         action_id,
     })
+}
+
+/// Producer's emitted-kind set — what event kinds an op writes to the
+/// shared event ring.
+///
+/// `EventRing { ring: EventRingId(0) }` carries no kind tag at the IR
+/// level (every kind is multiplexed onto one ring; the WGSL kernel
+/// filters by `event.tag` decode). Producer kinds therefore come from
+/// inspecting the op's body: each `CgStmt::Emit { event }` contributes
+/// one kind; a `ScoringArgmax` op implicitly emits `ActionSelected`;
+/// an `ApplyAbility` stmt's dispatcher writes engine-aliased kinds
+/// that vary by ability — represented as [`Wildcard`] here so the
+/// edge filter stays conservative.
+///
+/// Used by [`detect_cycles`] to recognise that two PerEvent rules
+/// listening on different kinds (e.g. one on `EffectDamageApplied`,
+/// another on `EffectHealApplied`) are runtime-disjoint dispatches
+/// even though both touch `EventRingId(0)`.
+#[derive(Debug, Clone)]
+enum EmitKindSet {
+    /// The producer's body has an `ApplyAbility` stmt or a similar
+    /// dynamic dispatcher whose emitted kinds aren't statically
+    /// resolvable from a `CgStmt::Emit` walk. Treat as "may emit any
+    /// kind" — the edge filter falls back to the existing checks.
+    Wildcard,
+    /// The producer emits exactly this set of kinds (possibly empty
+    /// — an op that has an `EventRing { Append }` write recorded but
+    /// no static `Emit` site, e.g. a future runtime-only producer,
+    /// also lands here with an empty set; the filter then drops the
+    /// edge as disjoint, which is the correct conservative outcome
+    /// because there's nothing left for a kind-K reader to consume).
+    Specific(BTreeSet<crate::cg::op::EventKindId>),
+}
+
+/// Extract the consumer's `on_event: EventKindId` from an op, or
+/// `None` if the op doesn't subscribe to a specific kind.
+///
+/// `ViewFold { on_event }` is always a specific kind (PerEvent fold
+/// handler). `PhysicsRule { on_event: Some(K) }` is the chronicle /
+/// apply shape — also a specific kind. `PhysicsRule { on_event: None }`
+/// (per-agent sweeps) and other op kinds (mask, scoring, spatial,
+/// plumbing) don't subscribe to any kind from the event ring.
+fn op_on_event_kind(op: &crate::cg::op::ComputeOp) -> Option<crate::cg::op::EventKindId> {
+    use crate::cg::op::ComputeOpKind;
+    match &op.kind {
+        ComputeOpKind::ViewFold { on_event, .. } => Some(*on_event),
+        ComputeOpKind::PhysicsRule {
+            on_event: Some(k), ..
+        } => Some(*k),
+        _ => None,
+    }
+}
+
+/// Compute the producer's emit-kind set for an op.
+///
+/// Walks the op's body for `CgStmt::Emit { event }` (descending
+/// through `If` arms, `Match` arms, and `ForEachNeighborBody`) and
+/// folds those kind ids into a [`BTreeSet`]. Two op shapes get
+/// special treatment:
+///
+/// * `ScoringArgmax` — the verb expander synthesises an implicit
+///   `ActionSelected` emit at the kernel boundary (no `CgStmt::Emit`
+///   site in the body). The interner is consulted for the kind id;
+///   if the program registered the name, that id is added to the set.
+/// * Any body containing `CgStmt::ApplyAbility` — the ability
+///   dispatcher emits engine-aliased kinds (e.g. EffectDamageApplied,
+///   EffectHealApplied, EffectStunApplied) that depend on the
+///   ability's effect slots and are not statically derivable from
+///   the IR. Returns [`EmitKindSet::Wildcard`] so the edge filter
+///   stays conservative.
+fn op_emit_kind_set(prog: &CgProgram, op: &crate::cg::op::ComputeOp) -> EmitKindSet {
+    use crate::cg::lower::verb_expand::ACTION_SELECTED_EVENT_NAME;
+    use crate::cg::op::{ComputeOpKind, EventKindId};
+
+    let body = match &op.kind {
+        ComputeOpKind::PhysicsRule { body, .. } => Some(*body),
+        ComputeOpKind::ViewFold { body, .. } => Some(*body),
+        ComputeOpKind::ScoringArgmax { .. } => {
+            // Implicit ActionSelected emit at the kernel boundary.
+            // Look up the kind id from the interner; if the program
+            // didn't register the name (no verb expander injected it),
+            // the producer has no static emits.
+            let mut set = BTreeSet::new();
+            for (id, name) in &prog.interner.event_kinds {
+                if name == ACTION_SELECTED_EVENT_NAME {
+                    set.insert(EventKindId(*id));
+                    break;
+                }
+            }
+            return EmitKindSet::Specific(set);
+        }
+        // Mask / SpatialQuery / Plumbing / ViewDecay don't carry a
+        // body that emits events. Treat as empty Specific set — if
+        // they ever record an `EventRing { Append }` write, the
+        // disjointness check correctly drops the edge.
+        _ => None,
+    };
+    let Some(body_id) = body else {
+        return EmitKindSet::Specific(BTreeSet::new());
+    };
+
+    let mut set = BTreeSet::new();
+    let mut wildcard = false;
+    collect_emit_kinds_in_list(body_id, prog, &mut set, &mut wildcard);
+    if wildcard {
+        EmitKindSet::Wildcard
+    } else {
+        EmitKindSet::Specific(set)
+    }
+}
+
+/// Recursive helper for [`op_emit_kind_set`]: walk a stmt list,
+/// descending through `If` / `Match` / `ForEachNeighborBody` arms,
+/// and accumulate `CgStmt::Emit { event }` kinds. If an
+/// `CgStmt::ApplyAbility` is encountered, set the wildcard flag.
+fn collect_emit_kinds_in_list(
+    list_id: CgStmtListId,
+    prog: &CgProgram,
+    out: &mut BTreeSet<crate::cg::op::EventKindId>,
+    wildcard: &mut bool,
+) {
+    let Some(list) = prog.stmt_lists.get(list_id.0 as usize) else {
+        return;
+    };
+    for &stmt_id in &list.stmts {
+        let Some(stmt) = prog.stmts.get(stmt_id.0 as usize) else {
+            continue;
+        };
+        match stmt {
+            CgStmt::Emit { event, .. } => {
+                out.insert(*event);
+            }
+            CgStmt::If { then, else_, .. } => {
+                collect_emit_kinds_in_list(*then, prog, out, wildcard);
+                if let Some(else_list) = else_ {
+                    collect_emit_kinds_in_list(*else_list, prog, out, wildcard);
+                }
+            }
+            CgStmt::Match { arms, .. } => {
+                for arm in arms {
+                    collect_emit_kinds_in_list(arm.body, prog, out, wildcard);
+                }
+            }
+            CgStmt::ForEachNeighborBody { body, .. } => {
+                collect_emit_kinds_in_list(*body, prog, out, wildcard);
+            }
+            CgStmt::ApplyAbility { .. } => {
+                // Dispatcher emits engine-aliased kinds (Damage / Heal
+                // / Stun / …) that aren't statically resolvable from
+                // the IR. Stay conservative: keep edges into / out of
+                // this producer.
+                *wildcard = true;
+            }
+            CgStmt::Assign { .. }
+            | CgStmt::Let { .. }
+            | CgStmt::ForEachAgent { .. }
+            | CgStmt::ForEachNeighbor { .. } => {}
+        }
+    }
 }
 
 /// Per-tick phase position for an op, used by [`detect_cycles`] to
@@ -3595,6 +3800,258 @@ mod tests {
         assert!(
             saw_cycle,
             "missing Cycle for same-phase agent-field race in {:?}",
+            errs
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // 7d. Gap Y follow-on — event-kind disjointness on the shared ring
+    // -----------------------------------------------------------------
+
+    /// Two `@phase(post)` PerEvent PhysicsRule ops listening on
+    /// DIFFERENT event kinds (e.g. `EffectDamageApplied` vs
+    /// `EffectHealApplied`) sharing the unified `EventRingId(0)` are
+    /// runtime-disjoint dispatches: each PerEvent thread sees one
+    /// event with one tag, only the matching kernel runs. Even though
+    /// both record `EventRing { Read }` and `EventRing { Append }` on
+    /// the shared ring, the event-kind discriminant carried on the OP
+    /// (`on_event` for the consumer; `Emit { event }` in the body for
+    /// the producer) tells the cycle detector the dispatches do not
+    /// share data. No cycle should be reported.
+    ///
+    /// Closes the Gap Y follow-on (5 surviving phantom cycles in
+    /// production sims after Gap Y fixed the temporal-edge skip;
+    /// this test pins the resolution at the unit level).
+    #[test]
+    fn per_event_pair_on_different_kinds_not_a_cycle() {
+        let mut b = CgProgramBuilder::new();
+
+        // op#0: PerEvent fold over EffectDamageApplied (kind 26).
+        // Body emits Damaged (kind 0) — a different kind, simulating
+        // the chronicle re-emit shape duel_25v25 uses.
+        let lit_actor = b.add_expr(CgExpr::Lit(LitValue::U32(0))).unwrap();
+        let lit_target = b.add_expr(CgExpr::Lit(LitValue::U32(0))).unwrap();
+        let lit_amount = b.add_expr(lit_f32(1.0)).unwrap();
+        let emit_damaged = b
+            .add_stmt(CgStmt::Emit {
+                event: EventKindId(0),
+                fields: vec![
+                    (
+                        EventField {
+                            event: EventKindId(0),
+                            index: 0,
+                        },
+                        lit_actor,
+                    ),
+                    (
+                        EventField {
+                            event: EventKindId(0),
+                            index: 1,
+                        },
+                        lit_target,
+                    ),
+                    (
+                        EventField {
+                            event: EventKindId(0),
+                            index: 2,
+                        },
+                        lit_amount,
+                    ),
+                ],
+            })
+            .unwrap();
+        let body_damage = b
+            .add_stmt_list(CgStmtList::new(vec![emit_damaged]))
+            .unwrap();
+        b.add_op(
+            ComputeOpKind::PhysicsRule {
+                rule: PhysicsRuleId(0),
+                on_event: Some(EventKindId(26)),
+                body: body_damage,
+                replayable: ReplayabilityFlag::Replayable,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+        )
+        .unwrap();
+
+        // op#1: PerEvent fold over EffectHealApplied (kind 27). Body
+        // emits Healed (kind 1) — also different kind from the source.
+        let lit_h_target = b.add_expr(CgExpr::Lit(LitValue::U32(0))).unwrap();
+        let lit_h_amount = b.add_expr(lit_f32(1.0)).unwrap();
+        let emit_healed = b
+            .add_stmt(CgStmt::Emit {
+                event: EventKindId(1),
+                fields: vec![
+                    (
+                        EventField {
+                            event: EventKindId(1),
+                            index: 0,
+                        },
+                        lit_h_target,
+                    ),
+                    (
+                        EventField {
+                            event: EventKindId(1),
+                            index: 1,
+                        },
+                        lit_h_amount,
+                    ),
+                ],
+            })
+            .unwrap();
+        let body_heal = b
+            .add_stmt_list(CgStmtList::new(vec![emit_healed]))
+            .unwrap();
+        b.add_op(
+            ComputeOpKind::PhysicsRule {
+                rule: PhysicsRuleId(1),
+                on_event: Some(EventKindId(27)),
+                body: body_heal,
+                replayable: ReplayabilityFlag::Replayable,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+        )
+        .unwrap();
+        // Both `@phase(post)` so the temporal-phase filter alone does
+        // NOT skip the edge — the kind disjointness is what closes it.
+        b.mark_post_phase_physics_rule(PhysicsRuleId(0));
+        b.mark_post_phase_physics_rule(PhysicsRuleId(1));
+        let mut prog = b.finish();
+
+        // Wire both ops to Read+Append the shared ring. The walker
+        // already records the EventRing read implicitly via the
+        // PerEvent dispatch shape, but explicit record matches the
+        // production driver shape (drivers also pin the Append write
+        // for the body's Emit kinds).
+        prog.ops[0].record_read(DataHandle::EventRing {
+            ring: EventRingId(0),
+            kind: EventRingAccess::Read,
+        });
+        prog.ops[0].record_write(DataHandle::EventRing {
+            ring: EventRingId(0),
+            kind: EventRingAccess::Append,
+        });
+        prog.ops[1].record_read(DataHandle::EventRing {
+            ring: EventRingId(0),
+            kind: EventRingAccess::Read,
+        });
+        prog.ops[1].record_write(DataHandle::EventRing {
+            ring: EventRingId(0),
+            kind: EventRingAccess::Append,
+        });
+
+        let result = check_well_formed(&prog);
+        assert!(
+            !matches!(
+                &result,
+                Err(errs) if errs.iter().any(|e| matches!(e, CgError::Cycle { .. }))
+            ),
+            "expected no Cycle error for kind-disjoint PerEvent pair, got {result:?}",
+        );
+    }
+
+    /// Gap Y follow-on negative: two PerEvent rules listening on the
+    /// SAME event kind whose bodies emit each other's source kind
+    /// must STILL surface as a cycle. The kind-disjointness gate must
+    /// not silence real same-kind cycles — only those where the
+    /// producer's emit set is disjoint from the consumer's `on_event`.
+    #[test]
+    fn per_event_pair_on_same_kind_with_cross_emits_still_cycles() {
+        let mut b = CgProgramBuilder::new();
+
+        // op#0: on_event = K0; body emits K0 (a self-feeding chain
+        // that would loop with op#1 through the shared ring).
+        let lit_v_a = b.add_expr(CgExpr::Lit(LitValue::U32(0))).unwrap();
+        let emit_k0_a = b
+            .add_stmt(CgStmt::Emit {
+                event: EventKindId(0),
+                fields: vec![(
+                    EventField {
+                        event: EventKindId(0),
+                        index: 0,
+                    },
+                    lit_v_a,
+                )],
+            })
+            .unwrap();
+        let body_a = b.add_stmt_list(CgStmtList::new(vec![emit_k0_a])).unwrap();
+        b.add_op(
+            ComputeOpKind::PhysicsRule {
+                rule: PhysicsRuleId(0),
+                on_event: Some(EventKindId(0)),
+                body: body_a,
+                replayable: ReplayabilityFlag::Replayable,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+        )
+        .unwrap();
+
+        // op#1: on_event = K0; body emits K0 too.
+        let lit_v_b = b.add_expr(CgExpr::Lit(LitValue::U32(0))).unwrap();
+        let emit_k0_b = b
+            .add_stmt(CgStmt::Emit {
+                event: EventKindId(0),
+                fields: vec![(
+                    EventField {
+                        event: EventKindId(0),
+                        index: 0,
+                    },
+                    lit_v_b,
+                )],
+            })
+            .unwrap();
+        let body_b = b.add_stmt_list(CgStmtList::new(vec![emit_k0_b])).unwrap();
+        b.add_op(
+            ComputeOpKind::PhysicsRule {
+                rule: PhysicsRuleId(1),
+                on_event: Some(EventKindId(0)),
+                body: body_b,
+                replayable: ReplayabilityFlag::Replayable,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+        )
+        .unwrap();
+        let mut prog = b.finish();
+        prog.ops[0].record_read(DataHandle::EventRing {
+            ring: EventRingId(0),
+            kind: EventRingAccess::Read,
+        });
+        prog.ops[0].record_write(DataHandle::EventRing {
+            ring: EventRingId(0),
+            kind: EventRingAccess::Append,
+        });
+        prog.ops[1].record_read(DataHandle::EventRing {
+            ring: EventRingId(0),
+            kind: EventRingAccess::Read,
+        });
+        prog.ops[1].record_write(DataHandle::EventRing {
+            ring: EventRingId(0),
+            kind: EventRingAccess::Append,
+        });
+
+        let errs = check_well_formed(&prog)
+            .expect_err("same-kind PerEvent pair with cross-emits should cycle");
+        let saw_cycle = errs.iter().any(|e| {
+            matches!(
+                e,
+                CgError::Cycle { ops } if ops.contains(&OpId(0)) && ops.contains(&OpId(1))
+            )
+        });
+        assert!(
+            saw_cycle,
+            "missing Cycle for same-kind PerEvent pair in {:?}",
             errs
         );
     }
