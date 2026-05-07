@@ -260,6 +260,107 @@ fn apply_ability_nested_in_if_body_passes_naga_validator() {
     );
 }
 
+/// Variant: two PerAgent physics rules sharing `on Tick` — one uses
+/// `apply_ability`, one doesn't. The schedule fusion pass combines
+/// them into a single kernel (`cs_physics_DispatcherRule_and_PlainRule`)
+/// because both share the same dispatch shape, event source, and
+/// have no read/write conflicts.
+///
+/// The fused kernel's binding set is the UNION of both rules' reads
+/// and writes — so `ability_registry_*` is present (DispatcherRule
+/// needs it) and `event_ring` is present (DispatcherRule's chronicle
+/// writes), even though PlainRule individually doesn't reference
+/// either. This is correct behavior; the test pins it so a future
+/// fusion-pass change that disables this case surfaces deliberately
+/// rather than as a confusing kernel-naming change.
+///
+/// What this test guards: the post-fusion kernel still passes naga
+/// validation. The dispatcher's binding-recording logic
+/// (`wire_ability_registry_column_reads`) survives fusion correctly
+/// — a fusion-time bug would either drop the recorded reads (kernel
+/// references undeclared identifiers) or duplicate them (double
+/// binding declarations).
+#[test]
+fn apply_ability_in_fused_kernel_with_plain_rule_passes_naga_validator() {
+    use naga::valid::{Capabilities, ValidationFlags, Validator};
+    let src = "
+        event Tick { }
+
+        entity Hero : Agent { }
+
+        physics DispatcherRule @phase(per_agent) {
+          on Tick {} where (self.alive) {
+            apply_ability agents.level(self)
+          }
+        }
+
+        physics PlainRule @phase(per_agent) {
+          on Tick {} where (self.alive) {
+            agents.set_hp(self, agents.hp(self) + 1.0)
+          }
+        }
+    ";
+    let program = dsl_compiler::parse(src).expect("parse");
+    let comp = dsl_ast::resolve::resolve(program).expect("resolve");
+    let cg = dsl_compiler::cg::lower::lower_compilation_to_cg(&comp)
+        .expect("lower");
+    let schedule_result = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&schedule_result.schedule, &cg)
+        .expect("emit");
+
+    // The fused kernel name is composer-driven; look for either rule
+    // name, taking whichever the composer picked.
+    let fused_body = kernel_body_containing(&art, "DispatcherRule")
+        .or_else(|| kernel_body_containing(&art, "PlainRule"))
+        .expect("fused physics kernel emitted");
+
+    // Bindings present (union of both rules):
+    assert!(
+        fused_body.contains("ability_registry_effect_kinds"),
+        "fused kernel must carry ability_registry_effect_kinds (from \
+         DispatcherRule's apply_ability);\n{fused_body}"
+    );
+    assert!(
+        fused_body.contains("agent_hp"),
+        "fused kernel must carry agent_hp (from PlainRule's HP write);\n{fused_body}"
+    );
+
+    // Each binding declared exactly once (dedup correct under fusion).
+    let kinds_decls = fused_body
+        .lines()
+        .filter(|l| l.contains("var<storage") && l.contains("ability_registry_effect_kinds"))
+        .count();
+    assert_eq!(
+        kinds_decls, 1,
+        "ability_registry_effect_kinds declared exactly once even under fusion;\n{fused_body}"
+    );
+
+    // Naga validator confirms the fused kernel is well-formed.
+    let mut errs = Vec::new();
+    for (name, body) in &art.wgsl_files {
+        let module = match naga::front::wgsl::parse_str(body) {
+            Ok(m) => m,
+            Err(e) => {
+                errs.push(format!("  {name}: parse: {e}"));
+                continue;
+            }
+        };
+        let mut validator = Validator::new(ValidationFlags::all(), Capabilities::all());
+        if let Err(e) = validator.validate(&module) {
+            errs.push(format!("  {name}: validate: {e:?}"));
+        }
+    }
+    assert!(
+        errs.is_empty(),
+        "fused-rule variant emitted {} naga-rejected kernels:\n{}",
+        errs.len(),
+        errs.join("\n"),
+    );
+}
+
 /// Variant: `apply_ability` inside a PerEvent rule (driven by a
 /// custom event with payload binding). Different kernel shape than
 /// the PerAgent fixtures — the kernel iterates `event_count` rather
