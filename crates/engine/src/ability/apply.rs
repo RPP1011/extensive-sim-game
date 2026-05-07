@@ -12,8 +12,18 @@
 //! scope for this slice:
 //!   * scaling lookup against caster stat SoA (needs sim-side stat
 //!     resolver — pass via callback or context struct in a follow-up)
-//!   * per_effect_areas spatial dispatch (single-target only today —
-//!     AOE expansion lives in #121)
+//!   * GPU-side multi-target AOE expansion (Path B for #121 — the
+//!     CPU oracle path lives in `apply_program_aoe`, but the GPU
+//!     dispatcher's chronicle write loop still consumes a single
+//!     explicit target slot per cast). Adding a multi-record-per-cast
+//!     loop with a spatial query inside the kernel is a major
+//!     architectural change and stays deferred.
+//!   * Non-Circle AOE shapes (Cone, Line, Sphere, Box, etc.) on CPU.
+//!     `apply_program_aoe` only expands `Circle`-shape slots today;
+//!     other shapes fall back to single-target dispatch on
+//!     `primary_target`. CPU spatial infra (`SpatialHash::within_radius`)
+//!     directly supports Circle; the other 11 shapes need additional
+//!     geometry kernels (cone half-angle, capsule, AABB, …).
 //!   * delivery method scheduling (Projectile travel, Channel hold —
 //!     #124 IR done; runtime not wired)
 //!
@@ -48,7 +58,7 @@
 
 use crate::ability::program::{
     AbilityProgram, BuffStat, CasterStats, EffectOp, EffectPredicate,
-    EffectPredicateBinder, EffectPredicateOp,
+    EffectPredicateBinder, EffectPredicateOp, ShapeKind,
 };
 use crate::ids::AgentId;
 use crate::rng::per_agent_u32;
@@ -393,11 +403,130 @@ pub(crate) fn evaluate_predicate(
     }
 }
 
+/// Task #121 (Path A — CPU-only): multi-target AOE dispatch.
+///
+/// Translate one cast of `program` (caster → primary_target at `tick`)
+/// into a stream of ApplyEvents, expanding per-effect AOE slots over
+/// `aoe_targets`.
+///
+/// Per-effect slot dispatch:
+///   * If `program.per_effect_areas[i]` is `Some(EffectAreaShape{
+///     kind: Circle, .. })`, the slot fires once per `aoe_targets`
+///     entry — one ApplyEvent per target. The caller is responsible
+///     for performing the spatial query (e.g.
+///     `state.spatial().within_radius(state, target_pos, args[0])`)
+///     and passing the result here. The slice MUST be sorted ascending
+///     by raw `AgentId` (P11 — `SpatialHash::within_radius` does this
+///     by construction).
+///   * Any other `Some(...)` shape (Cone, Line, Sphere, Box, etc.) —
+///     deferred. The slot falls back to single-target dispatch on
+///     `primary_target`. This is intentional minimum-viable scope:
+///     Circle is the only shape with directly compatible CPU spatial
+///     infra (`SpatialHash::within_radius`); the other shapes need
+///     additional geometry kernels (cone half-angle, capsule, AABB,
+///     etc.) which Path A defers.
+///   * `None` slot (single-target, default) — fires once on
+///     `primary_target`, identical to `apply_program`'s behavior.
+///
+/// **Chance gate semantic.** The chance gate's RNG draw is keyed by
+/// `(world_seed, caster, tick, slot_index)` — NOT per target. This
+/// makes the AOE slot all-or-nothing: when the gate fires, every
+/// target in `aoe_targets` receives the event; when it fails, none
+/// of them do. Per-target independent procs would require a different
+/// purpose tag and are out of scope for this slice.
+///
+/// **When-predicate semantic.** The when-predicate evaluates against
+/// `target_stats` (the primary target's snapshot) — same as the
+/// single-target dispatcher. Per-target predicate evaluation across
+/// the AOE expansion is deferred (would require a per-target stat
+/// snapshot slice; this slice ships the simplest semantic — the
+/// predicate gates the AOE *slot* as a whole, then the slot fires
+/// across all targets if it passes).
+///
+/// **Nested-effect semantic.** When the primary effect on a slot is
+/// expanded across `aoe_targets`, each target receives the nested
+/// ops too — same target as the primary on that iteration.
+///
+/// **GPU parity.** GPU dispatcher is single-target only today
+/// (consumes only the explicit cast target slot). Multi-target AOE
+/// dispatch on GPU is deferred (Path B): the kernel would need a
+/// spatial-query loop inside the apply path. Until then, AOE
+/// expansion is a CPU-only oracle path.
+pub fn apply_program_aoe(
+    program:        &AbilityProgram,
+    caster:         AgentId,
+    primary_target: AgentId,
+    aoe_targets:    &[AgentId],
+    tick:           u64,
+    world_seed:     u64,
+    caster_stats:   &CasterStats,
+    target_stats:   &CasterStats,
+) -> SmallVec<[ApplyEvent; APPLY_INLINE]> {
+    let mut out: SmallVec<[ApplyEvent; APPLY_INLINE]> = SmallVec::new();
+
+    for (i, op) in program.effects.iter().enumerate() {
+        // Chance gate (same shape as apply_program — slot-keyed,
+        // all-or-nothing across the AOE expansion).
+        if let Some(Some(q16)) = program.chances.get(i).copied() {
+            let purpose = [b'c', b'h', b'a', b'n', b'c', b'e', i as u8];
+            let draw = per_agent_u32(world_seed, caster, tick, &purpose) & 0xFFFF;
+            if (draw as u16) >= q16 {
+                continue;
+            }
+        }
+        // When-predicate gate (slot-keyed against `target_stats` —
+        // primary target's snapshot; per-target eval deferred).
+        if let Some(Some(when)) = program.when_per_effect.get(i) {
+            if let Some(pred) = when.when_compiled.as_ref() {
+                if !evaluate_predicate(pred, caster_stats, target_stats) {
+                    continue;
+                }
+            }
+        }
+        // Scaling bonus (same shape as apply_program).
+        let scale_bonus: f32 = program
+            .scalings_per_effect
+            .get(i)
+            .map(|inner| {
+                inner
+                    .iter()
+                    .map(|s| s.percent * caster_stats.get(s.stat_ref))
+                    .sum::<f32>()
+            })
+            .unwrap_or(0.0);
+
+        // Choose target list for this slot. Circle expands across
+        // aoe_targets; everything else (None, or non-Circle shape)
+        // is single-target on primary_target.
+        let is_circle_aoe = matches!(
+            program.per_effect_areas.get(i).copied().flatten(),
+            Some(shape) if shape.kind == ShapeKind::Circle
+        );
+        let targets_for_slot: &[AgentId] = if is_circle_aoe {
+            aoe_targets
+        } else {
+            std::slice::from_ref(&primary_target)
+        };
+
+        for &t in targets_for_slot {
+            push_effect_event(&mut out, op, caster, t, scale_bonus);
+            // Nested ops ride on each target (auxiliary effects fire
+            // on the same target the primary just hit).
+            if let Some(nested) = program.nested_per_effect.get(i) {
+                for nested_op in nested {
+                    push_effect_event(&mut out, nested_op, caster, t, 0.0);
+                }
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ability::program::{
-        EffectScaling, EffectWhenCondition, Gate, ScalingStatRef,
+        EffectAreaShape, EffectScaling, EffectWhenCondition, Gate, ScalingStatRef,
     };
     use crate::ability::AbilityId;
     use smallvec::smallvec;
@@ -885,5 +1014,276 @@ mod tests {
             &prog, caster(), target(), 0, 0xCAFE, &high, &CasterStats::default(),
         );
         assert_eq!(evs_high.len(), 0, "self.hp=60 NOT < 50 → skipped");
+    }
+
+    // -- Task #121 (Path A): multi-target AOE behavioral E2E ---------------
+
+    /// Helpers for the AOE behavioral fixture. Three agents in a row;
+    /// the AOE pre-query returns ids 2 and 3 (the targets within the
+    /// caster's circle), sorted ascending.
+    fn agent_n(n: u32) -> AgentId { AgentId::new(n).unwrap() }
+
+    #[test]
+    fn aoe_circle_expands_across_multiple_targets() {
+        // Strike-shape: damage 30 in circle(0.5). Caster id=1, primary
+        // target id=2; aoe_targets = [2, 3] (both inside the circle —
+        // the spatial query is the caller's responsibility; here we
+        // simulate its output directly). Expect 2 ApplyEvents (one
+        // Damage per target) — pinning the multi-target AOE expansion.
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 30.0 }],
+        );
+        prog.per_effect_areas.push(Some(EffectAreaShape {
+            kind: ShapeKind::Circle,
+            args: [0.5, 0.0, 0.0, 0.0],
+        }));
+        let aoe_targets = [agent_n(2), agent_n(3)];
+        let events = apply_program_aoe(
+            &prog,
+            agent_n(1),                 // caster
+            agent_n(2),                 // primary target (irrelevant for Circle slot)
+            &aoe_targets,
+            0, 0xCAFE,
+            &CasterStats::default(),
+            &CasterStats::default(),
+        );
+        assert_eq!(events.len(), 2, "Circle AOE → one event per aoe_target");
+        // Sorted-by-AgentId-ascending preservation: emitted events
+        // mirror the input slice order (P11 — caller pre-sorts the
+        // spatial query, dispatch preserves the order).
+        assert!(matches!(
+            events[0],
+            ApplyEvent::Damage { source, target, amount }
+            if source == agent_n(1) && target == agent_n(2) && amount == 30.0
+        ), "first event must target lowest AgentId, got {events:?}");
+        assert!(matches!(
+            events[1],
+            ApplyEvent::Damage { source, target, amount }
+            if source == agent_n(1) && target == agent_n(3) && amount == 30.0
+        ), "second event must target next AgentId, got {events:?}");
+    }
+
+    #[test]
+    fn aoe_circle_with_three_targets_emits_three_records() {
+        // ≥3 agents in a row: caster id=1; AOE targets ids [2, 3, 4].
+        // Pins the "≥3 chronicle records produced from 1 cast"
+        // requirement of the task's behavioral E2E.
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 30.0 }],
+        );
+        prog.per_effect_areas.push(Some(EffectAreaShape {
+            kind: ShapeKind::Circle,
+            args: [2.0, 0.0, 0.0, 0.0],
+        }));
+        let aoe_targets = [agent_n(2), agent_n(3), agent_n(4)];
+        let events = apply_program_aoe(
+            &prog,
+            agent_n(1),
+            agent_n(2),
+            &aoe_targets,
+            0, 0xCAFE,
+            &CasterStats::default(),
+            &CasterStats::default(),
+        );
+        assert_eq!(events.len(), 3, "3 targets in AOE → 3 chronicle records from 1 cast");
+        for (i, target) in [agent_n(2), agent_n(3), agent_n(4)].iter().enumerate() {
+            assert!(matches!(
+                events[i],
+                ApplyEvent::Damage { target: t, amount, .. }
+                if t == *target && amount == 30.0
+            ), "event {i} must target {target:?}, got {events:?}");
+        }
+    }
+
+    #[test]
+    fn aoe_non_circle_shape_falls_back_to_single_target() {
+        // Cone (and every other non-Circle shape) is deferred in
+        // Path A — the slot fires once on `primary_target` even when
+        // `aoe_targets` is populated. Pin this so the deferral is
+        // explicit (regression guard for future shape additions).
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 50.0 }],
+        );
+        prog.per_effect_areas.push(Some(EffectAreaShape {
+            kind: ShapeKind::Cone,
+            args: [45.0, 5.0, 0.0, 0.0],
+        }));
+        // aoe_targets is non-empty, but Cone isn't expanded yet.
+        let aoe_targets = [agent_n(2), agent_n(3), agent_n(4)];
+        let events = apply_program_aoe(
+            &prog,
+            agent_n(1),
+            agent_n(2),
+            &aoe_targets,
+            0, 0xCAFE,
+            &CasterStats::default(),
+            &CasterStats::default(),
+        );
+        assert_eq!(events.len(), 1, "Cone shape → single-target fallback (Path A defers)");
+        assert!(matches!(
+            events[0],
+            ApplyEvent::Damage { target: t, .. } if t == agent_n(2)
+        ));
+    }
+
+    #[test]
+    fn aoe_no_shape_slot_is_single_target() {
+        // No per_effect_areas slot at all — single-target by default,
+        // identical to apply_program. aoe_targets is ignored.
+        let prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 25.0 }],
+        );
+        let aoe_targets = [agent_n(2), agent_n(3)];
+        let events = apply_program_aoe(
+            &prog,
+            agent_n(1),
+            agent_n(2),
+            &aoe_targets,
+            0, 0xCAFE,
+            &CasterStats::default(),
+            &CasterStats::default(),
+        );
+        assert_eq!(events.len(), 1, "no shape slot → single-target");
+        assert!(matches!(
+            events[0],
+            ApplyEvent::Damage { target: t, amount, .. }
+            if t == agent_n(2) && amount == 25.0
+        ));
+    }
+
+    #[test]
+    fn aoe_circle_with_empty_target_list_emits_nothing() {
+        // Caller's spatial query found no targets in the circle —
+        // the slot fires zero times. Important guard: empty AOE must
+        // not panic, must not fall back to primary_target (the AOE
+        // slot's contract is "only the spatial-query result hits";
+        // primary_target is for non-Circle slots only).
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 30.0 }],
+        );
+        prog.per_effect_areas.push(Some(EffectAreaShape {
+            kind: ShapeKind::Circle,
+            args: [0.5, 0.0, 0.0, 0.0],
+        }));
+        let events = apply_program_aoe(
+            &prog,
+            agent_n(1),
+            agent_n(2),
+            &[],
+            0, 0xCAFE,
+            &CasterStats::default(),
+            &CasterStats::default(),
+        );
+        assert_eq!(events.len(), 0, "empty AOE target list → zero events");
+    }
+
+    #[test]
+    fn aoe_chance_gate_is_all_or_nothing() {
+        // Chance gate is keyed by slot, NOT per target — so when it
+        // fails, all aoe_targets are skipped together; when it fires,
+        // all are hit. Pins the "AOE proc'd or didn't" semantic.
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 30.0 }],
+        );
+        prog.chances.push(Some(0)); // gate-out
+        prog.per_effect_areas.push(Some(EffectAreaShape {
+            kind: ShapeKind::Circle,
+            args: [0.5, 0.0, 0.0, 0.0],
+        }));
+        let aoe_targets = [agent_n(2), agent_n(3), agent_n(4)];
+        let events = apply_program_aoe(
+            &prog,
+            agent_n(1),
+            agent_n(2),
+            &aoe_targets,
+            0, 0xCAFE,
+            &CasterStats::default(),
+            &CasterStats::default(),
+        );
+        assert_eq!(events.len(), 0, "chance=0 must skip ALL AOE targets");
+    }
+
+    #[test]
+    fn aoe_nested_op_fires_per_target() {
+        // damage 30 in circle, with nested { stun 1s }. Each target
+        // in the AOE receives the Damage AND a Stun (nested ops ride
+        // on each target the primary hits).
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 30.0 }],
+        );
+        prog.per_effect_areas.push(Some(EffectAreaShape {
+            kind: ShapeKind::Circle,
+            args: [0.5, 0.0, 0.0, 0.0],
+        }));
+        prog.nested_per_effect.push(smallvec![EffectOp::Stun { duration_ticks: 10 }]);
+        let aoe_targets = [agent_n(2), agent_n(3)];
+        let events = apply_program_aoe(
+            &prog,
+            agent_n(1),
+            agent_n(2),
+            &aoe_targets,
+            0, 0xCAFE,
+            &CasterStats::default(),
+            &CasterStats::default(),
+        );
+        // 2 targets × (1 primary + 1 nested) = 4 events, in
+        // (primary_t1, nested_t1, primary_t2, nested_t2) order.
+        assert_eq!(events.len(), 4, "2 targets × (Damage + Stun) → 4 events");
+        assert!(matches!(events[0], ApplyEvent::Damage { target: t, .. } if t == agent_n(2)));
+        assert!(matches!(events[1], ApplyEvent::Stun   { target: t, .. } if t == agent_n(2)));
+        assert!(matches!(events[2], ApplyEvent::Damage { target: t, .. } if t == agent_n(3)));
+        assert!(matches!(events[3], ApplyEvent::Stun   { target: t, .. } if t == agent_n(3)));
+    }
+
+    #[test]
+    fn aoe_scaling_applies_to_each_target() {
+        // damage 30 + 50% AD with caster.attack_damage = 100 → each
+        // target receives 80.0 (= 30 + 50). Scaling is computed once
+        // from caster_stats and applied uniformly across the AOE
+        // expansion (same caster, same scaling).
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 30.0 }],
+        );
+        prog.per_effect_areas.push(Some(EffectAreaShape {
+            kind: ShapeKind::Circle,
+            args: [0.5, 0.0, 0.0, 0.0],
+        }));
+        prog.scalings_per_effect.push(smallvec![EffectScaling {
+            stat_ref: ScalingStatRef::AttackDamage,
+            percent:  0.50,
+        }]);
+        let stats = CasterStats { attack_damage: 100.0, ..Default::default() };
+        let aoe_targets = [agent_n(2), agent_n(3)];
+        let events = apply_program_aoe(
+            &prog,
+            agent_n(1),
+            agent_n(2),
+            &aoe_targets,
+            0, 0xCAFE,
+            &stats,
+            &CasterStats::default(),
+        );
+        assert_eq!(events.len(), 2);
+        for ev in &events {
+            assert!(matches!(*ev, ApplyEvent::Damage { amount, .. }
+                if (amount - 80.0).abs() < 1e-5),
+                "each AOE target must get scaled amount 80.0, got {ev:?}");
+        }
     }
 }
