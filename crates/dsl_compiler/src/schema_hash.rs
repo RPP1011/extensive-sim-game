@@ -1259,6 +1259,28 @@ mod tests {
              `apply_ability a by <expr>` — they are structurally \
              different DSL surfaces (slice ε / commit 0b729b9d)"
         );
+
+        // Symmetric pin: target operand. A regression that dropped
+        // target from the hash but kept caster would pass the
+        // assertion above. Each operand needs its own coverage.
+        let with_target_only = IrStmt::ApplyAbility {
+            ability: lit(),
+            caster: None,
+            target: Some(lit()),
+            span: Span::dummy(),
+        };
+        let h_with_target = rules_hash(&[mk(with_target_only)], &[], &[]);
+        assert_ne!(
+            h_no_caster, h_with_target,
+            "rules_hash must distinguish `apply_ability a` from \
+             `apply_ability a target <expr>`"
+        );
+        assert_ne!(
+            h_with_caster, h_with_target,
+            "rules_hash must distinguish `apply_ability a by <expr>` \
+             from `apply_ability a target <expr>` — discriminant byte \
+             positions differ"
+        );
     }
 
     #[test]
