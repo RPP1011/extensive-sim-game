@@ -2044,11 +2044,16 @@ fn wire_ability_registry_column_reads(prog: &CgProgram, ops: &mut [ComputeOp]) {
     use crate::cg::op::ComputeOpKind;
     // Mirror the dispatcher's emit (`cg::emit::wgsl_body`):
     // it reads `effect_kinds`, `effect_payload_a`, `effect_payload_b`
-    // every iteration of its slot loop.
+    // every iteration of its slot loop, and Wave 1.5#9 added an inner
+    // walk that reads the parallel `nested_effect_*` SoA columns
+    // after every primary effect's chronicle write.
     const COLUMNS: &[AbilityRegistryColumn] = &[
         AbilityRegistryColumn::EffectKinds,
         AbilityRegistryColumn::EffectPayloadA,
         AbilityRegistryColumn::EffectPayloadB,
+        AbilityRegistryColumn::NestedEffectKinds,
+        AbilityRegistryColumn::NestedEffectPayloadA,
+        AbilityRegistryColumn::NestedEffectPayloadB,
     ];
 
     for (op_index, op) in ops.iter_mut().enumerate() {

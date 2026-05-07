@@ -332,6 +332,9 @@ fn ability_registry_column_token(column: super::super::data_handle::AbilityRegis
         AreaArgs        => "area_args",
         ScalingStatRefs => "scaling_stat_refs",
         ScalingPercents => "scaling_percents",
+        NestedEffectKinds    => "nested_effect_kinds",
+        NestedEffectPayloadA => "nested_effect_payload_a",
+        NestedEffectPayloadB => "nested_effect_payload_b",
     }
 }
 
@@ -1675,62 +1678,53 @@ fn lower_cg_stmt_body_to_wgsl(
                 .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain TransferGold=5");
             let modify_standing_event_id = event_kind_id_for_effect_kind(6)
                 .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain ModifyStanding=6");
-            // Task #138 follow-on (Bleed) — SelfDamage chronicle arm
-            // (kind=17 → EventKindId::EffectSelfDamageApplied=39). The
-            // dispatcher writes one record per non-empty SelfDamage
-            // slot; the runtime's ApplyDamageFromSelfDamageChronicle
-            // re-emit physics rule translates the records back into
-            // `Damaged` so the existing ApplyDamage cascade keeps
-            // working unchanged.
             let self_damage_event_id = event_kind_id_for_effect_kind(17)
                 .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain SelfDamage=17");
-            // Vampirize verb swap (Task #138 follow-on, mirror of Bleed
-            // at `486eb08f`) — LifeSteal chronicle arm (kind=18 →
-            // EventKindId::EffectLifeStealApplied=40). The dispatcher
-            // writes one record per non-empty LifeSteal slot; the
-            // runtime's ApplyLifestealFromChronicle re-emit physics rule
-            // translates the records back into `SetLifesteal` so the
-            // existing ApplyLifestealActivation cascade (writing the
-            // per-agent lifesteal SoA fields) keeps working unchanged.
             let life_steal_event_id = event_kind_id_for_effect_kind(18)
                 .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain LifeSteal=18");
-            // Fortify verb swap (Task #138 follow-on, mirror of Vampirize
-            // at `60115f64`) — DamageModify chronicle arm (kind=19 →
-            // EventKindId::EffectDamageModifyApplied=41). The dispatcher
-            // writes one record per non-empty DamageModify slot; the
-            // runtime's ApplyDamageModFromChronicle re-emit physics rule
-            // translates the records back into `SetDamageMod` so the
-            // existing ApplyDamageModActivation cascade (writing the
-            // per-agent damage_taken_mult_q8 + damage_taken_mult_expires_at_tick
-            // SoA fields) keeps working unchanged.
             let damage_modify_event_id = event_kind_id_for_effect_kind(19)
                 .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain DamageModify=19");
-            // Reap verb swap (Task #138 follow-on, mirror of Fortify at
-            // `001ae9a6`) — Execute chronicle arm (kind=16 →
-            // EventKindId::EffectExecuteApplied=42). The dispatcher
-            // writes one record per non-empty Execute slot; the runtime's
-            // ApplyExecuteFromChronicle re-emit physics rule translates
-            // the records back into `Executed` so the existing ApplyDefeat
-            // cascade (or whatever defeat path the host sim wires)
-            // keeps working unchanged. 3-payload-word shape (actor +
-            // target + hp_threshold).
-            //
-            // SEMANTICS NOTE: the when-condition `target.hp <
-            // hp_threshold` is NOT evaluated by apply_program /
-            // dispatcher — that's the .ability's
-            // `when_per_effect[i].when_cond` field, registry-driven
-            // predicate dispatch is later infrastructure. The
-            // duel_abilities Reap verb's outer `when` clause already
-            // gates emission on `target.hp <
-            // config.combat.reap_threshold`, so the unconditional
-            // dispatcher write is gated upstream.
             let execute_event_id = event_kind_id_for_effect_kind(16)
                 .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Execute=16");
+            // Wave 1.5#9 (2026-05-06): the nested-effect walk emits the
+            // SAME if-else chain shape as the primary, just reading
+            // from `ability_registry_nested_effect_*` columns at a
+            // deeper indent. `emit_chronicle_arm_chain` builds the
+            // shared chain once at 12-space indent (12 = inside the
+            // outer for-loop's 8-space indent + 4 for the inner
+            // for-loop body); the primary walk inlines the same
+            // chain at 8-space indent in the format! string below
+            // because the primary's let-binding shape is too
+            // entangled with the format!'s `{...}` substitutions to
+            // factor cleanly without rewriting the whole site. The
+            // nested walk's chain has no `{event_id}`-style
+            // substitutions because it builds the WGSL string
+            // directly via format-with-named args; it uses the same
+            // pinned `event_kind_id_for_effect_kind` lookups.
+            let nested_arm_chain = emit_chronicle_arm_chain("            ");
             // Engine pins MAX_EFFECTS_PER_PROGRAM = 6 + EFFECT_KIND_EMPTY = 0xFFu
             // (see crates/engine/src/ability/program.rs:28 +
             // crates/engine/src/ability/packed.rs). Inlining the
             // constants keeps the kernel self-contained without
             // pulling in a shared `consts.wgsl` preamble.
+            //
+            // Wave 1.5#9 nested-effect dispatch (2026-05-06). After the
+            // primary's chronicle write, the dispatcher walks
+            // `ability_registry_nested_effect_kinds` (stride =
+            // MAX_EFFECTS_PER_PROGRAM × MAX_NESTED_PER_EFFECT, both =
+            // 6 × 2 = 12 entries per ability) and writes a chronicle
+            // record per chronicle-bearing nested op. Closes the
+            // documented gap surfaced by the Reap verb swap (commit
+            // `72a35307`): Reap's `{ stun 1s }` produces an
+            // EffectStunApplied chronicle record alongside
+            // EffectExecuteApplied. The arm-chain is structurally
+            // identical to the primary's — same kind/payload encoding,
+            // same EventKindId mapping (`pack_effect` in
+            // `crates/engine/src/ability/packed.rs` is the single
+            // source of truth) — so the inner walk wraps in its own
+            // `{}` block scope to re-declare the fresh `kind` /
+            // `payload_a` / `payload_b` locals from the nested SoA
+            // columns.
             let body = format!(
                 "// #136 apply_ability dispatcher (slice β step 2)\n\
                  {{\n\
@@ -1746,6 +1740,9 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20// AbilityId is 1-based (NonZeroU32); slot index is id - 1.\n\
                  \x20\x20\x20\x20let ability_slot: u32 = ability_id__u32 - 1u;\n\
                  \x20\x20\x20\x20let effect_base: u32 = ability_slot * 6u; // MAX_EFFECTS_PER_PROGRAM\n\
+                 \x20\x20\x20\x20// Wave 1.5#9 nested base: ability_slot × MAX_EFFECTS_PER_PROGRAM\n\
+                 \x20\x20\x20\x20// × MAX_NESTED_PER_EFFECT = 6 × 2 entries per ability.\n\
+                 \x20\x20\x20\x20let nested_base: u32 = ability_slot * 12u;\n\
                  \x20\x20\x20\x20for (var i: u32 = 0u; i < 6u; i = i + 1u) {{\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20let kind: u32 = ability_registry_effect_kinds[effect_base + i];\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20if (kind == 0xFFu) {{ continue; }} // EFFECT_KIND_EMPTY\n\
@@ -2022,6 +2019,20 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20\x20\x20\x20\x20// nested ability_id lives in payload_a; recursing\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20// requires either a depth-bounded re-entry into this\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20// loop or a separate work queue. Deferred to slice δ.\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// Wave 1.5#9 nested-effect walk. After the primary's\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// chronicle write resolves, walk up to\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// MAX_NESTED_PER_EFFECT (=2) nested ops on this slot\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// and write a chronicle record per chronicle-bearing\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// kind. Block-scoped so the inner `kind` / `payload_a`\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// / `payload_b` locals don't shadow the primary walk's.\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20let nested_slot_base: u32 = nested_base + i * 2u;\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20for (var j: u32 = 0u; j < 2u; j = j + 1u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let kind: u32 = ability_registry_nested_effect_kinds[nested_slot_base + j];\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (kind == 0xFFu) {{ continue; }} // EFFECT_KIND_EMPTY\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let payload_a: u32 = ability_registry_nested_effect_payload_a[nested_slot_base + j];\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let payload_b: u32 = ability_registry_nested_effect_payload_b[nested_slot_base + j];\n\
+                 {nested_arm_chain}\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20}}\n\
                  }}"
             );
@@ -2304,6 +2315,359 @@ pub(crate) fn event_kind_id_for_effect_kind(effect_kind: u32) -> Option<u32> {
         .iter()
         .find(|(ek, _)| *ek == effect_kind)
         .map(|(_, vk)| *vk)
+}
+
+/// Wave 1.5#9: render the apply_ability dispatcher's per-effect
+/// `if (kind == X)` arm-chain at the given indent prefix. Reads
+/// `kind`, `payload_a`, `payload_b`, `tick`, `caster_slot`,
+/// `target_slot` as outer-scope WGSL identifiers and writes
+/// chronicle records via `atomicAdd(&event_tail[0], 1u)` +
+/// `atomicStore(&event_ring[...])` per chronicle-bearing variant.
+///
+/// Reused by the primary effect walk and the nested-effect walk
+/// (`nested_per_effect[i]` SoA) — both produce identical chronicle
+/// records given identical (kind, payload_a, payload_b, caster,
+/// target, tick) tuples, so the arm-chain emit is single-source.
+///
+/// `indent` is the leading whitespace per line — `"        "` (8
+/// spaces) for the primary walk inside `for (var i ...) {`, and
+/// `"            "` (12 spaces) for the nested walk inside the inner
+/// `for (var j ...) {`. The arm-chain has its own internal extra
+/// indent stride (4 + 4 + 4 spaces) for the if-body, atomicAdd
+/// block, and atomicStore lines respectively.
+///
+/// Pinned by `apply_ability_dispatcher_emits_chronicle_arms_test`
+/// (and the various other dispatcher tests) — any per-arm payload
+/// drift surfaces there. The chain is structurally identical to
+/// `pack_effect`'s variant ordering in
+/// `crates/engine/src/ability/packed.rs`.
+fn emit_chronicle_arm_chain(indent: &str) -> String {
+    let damage_event_id = event_kind_id_for_effect_kind(0)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Damage=0");
+    let heal_event_id = event_kind_id_for_effect_kind(1)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Heal=1");
+    let shield_event_id = event_kind_id_for_effect_kind(2)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Shield=2");
+    let stun_event_id = event_kind_id_for_effect_kind(3)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Stun=3");
+    let slow_event_id = event_kind_id_for_effect_kind(4)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Slow=4");
+    let transfer_gold_event_id = event_kind_id_for_effect_kind(5)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain TransferGold=5");
+    let modify_standing_event_id = event_kind_id_for_effect_kind(6)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain ModifyStanding=6");
+    let self_damage_event_id = event_kind_id_for_effect_kind(17)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain SelfDamage=17");
+    let life_steal_event_id = event_kind_id_for_effect_kind(18)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain LifeSteal=18");
+    let damage_modify_event_id = event_kind_id_for_effect_kind(19)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain DamageModify=19");
+    let execute_event_id = event_kind_id_for_effect_kind(16)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Execute=16");
+
+    let i4  = indent;                   // arm `if`/`else if` lines
+    let i8  = format!("{i4}    ");      // body of arm
+    let i12 = format!("{i4}        ");  // inside chronicle-write `{`
+    let i16 = format!("{i4}            "); // inside `if (_slot < 65536u)`
+
+    let mut s = String::new();
+
+    // Damage = 0 → 26
+    s.push_str(&format!("{i4}// Damage = 0 → EventKindId::EffectDamageApplied = 26\n"));
+    s.push_str(&format!("{i4}if (kind == 0u) {{\n"));
+    s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a);\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectDamageApplied (caster_slot + target_slot)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {damage_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // Heal = 1 → 27
+    s.push_str(&format!("{i4}}} else if (kind == 1u) {{\n"));
+    s.push_str(&format!("{i8}// Heal = 1 → EventKindId::EffectHealApplied = 27\n"));
+    s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a);\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectHealApplied (caster_slot + target_slot)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {heal_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // Shield = 2 → 28
+    s.push_str(&format!("{i4}}} else if (kind == 2u) {{\n"));
+    s.push_str(&format!("{i8}// Shield = 2 → EventKindId::EffectShieldApplied = 28\n"));
+    s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a);\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectShieldApplied (caster_slot + target_slot)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {shield_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // Stun = 3 → 29
+    s.push_str(&format!("{i4}}} else if (kind == 3u) {{\n"));
+    s.push_str(&format!("{i8}// Stun = 3 → EventKindId::EffectStunApplied = 29\n"));
+    s.push_str(&format!("{i8}// payload_a = duration_ticks (u32); expires_at_tick = tick + duration\n"));
+    s.push_str(&format!("{i8}let expires_at_tick: u32 = tick + payload_a;\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectStunApplied (caster_slot + target_slot)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {stun_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (expires_at_tick));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // Slow = 4 → 30
+    s.push_str(&format!("{i4}}} else if (kind == 4u) {{\n"));
+    s.push_str(&format!("{i8}// Slow = 4 → EventKindId::EffectSlowApplied = 30\n"));
+    s.push_str(&format!("{i8}// payload_a = duration_ticks (u32); expires = tick + duration\n"));
+    s.push_str(&format!("{i8}// payload_b sign-widened i16 → factor_q8 (i32 via bitcast)\n"));
+    s.push_str(&format!("{i8}let expires_at_tick: u32 = tick + payload_a;\n"));
+    s.push_str(&format!("{i8}let factor_q8: i32 = bitcast<i32>(payload_b);\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectSlowApplied (caster_slot + target_slot)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {slow_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (expires_at_tick));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], bitcast<u32>(factor_q8));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // TODO arms for kinds 8..15 (Root/Silence/Fear/Taunt/Dash/Blink/Knockback/Pull)
+    s.push_str(&format!("{i4}}} else if (kind == 8u) {{\n"));
+    s.push_str(&format!("{i8}// Root: payload_a = duration_ticks (u32)\n"));
+    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_root(target, payload_a);\n"));
+    s.push_str(&format!("{i4}}} else if (kind == 9u) {{\n"));
+    s.push_str(&format!("{i8}// Silence: payload_a = duration_ticks (u32)\n"));
+    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_silence(target, payload_a);\n"));
+    s.push_str(&format!("{i4}}} else if (kind == 10u) {{\n"));
+    s.push_str(&format!("{i8}// Fear: payload_a = duration_ticks (u32)\n"));
+    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_fear(target, payload_a);\n"));
+    s.push_str(&format!("{i4}}} else if (kind == 11u) {{\n"));
+    s.push_str(&format!("{i8}// Taunt: payload_a = duration_ticks (u32)\n"));
+    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_taunt(target, payload_a);\n"));
+    s.push_str(&format!("{i4}}} else if (kind == 12u) {{\n"));
+    s.push_str(&format!("{i8}// Dash: payload_a = distance (f32 via bitcast)\n"));
+    s.push_str(&format!("{i8}let distance: f32 = bitcast<f32>(payload_a);\n"));
+    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_dash(caster, distance);\n"));
+    s.push_str(&format!("{i4}}} else if (kind == 13u) {{\n"));
+    s.push_str(&format!("{i8}// Blink: payload_a = distance (f32 via bitcast)\n"));
+    s.push_str(&format!("{i8}let distance: f32 = bitcast<f32>(payload_a);\n"));
+    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_blink(caster, distance);\n"));
+    s.push_str(&format!("{i4}}} else if (kind == 14u) {{\n"));
+    s.push_str(&format!("{i8}// Knockback: payload_a = distance (f32 via bitcast)\n"));
+    s.push_str(&format!("{i8}let distance: f32 = bitcast<f32>(payload_a);\n"));
+    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_knockback(caster, target, distance);\n"));
+    s.push_str(&format!("{i4}}} else if (kind == 15u) {{\n"));
+    s.push_str(&format!("{i8}// Pull: payload_a = distance (f32 via bitcast)\n"));
+    s.push_str(&format!("{i8}let distance: f32 = bitcast<f32>(payload_a);\n"));
+    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_pull(caster, target, distance);\n"));
+
+    // TODO arms for kinds 27..30 (Stealth/Charm/Grounded/Suppress)
+    s.push_str(&format!("{i4}}} else if (kind == 27u) {{\n"));
+    s.push_str(&format!("{i8}// Stealth: payload_a = duration_ticks (u32, self-cast)\n"));
+    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_stealth(caster, payload_a);\n"));
+    s.push_str(&format!("{i4}}} else if (kind == 28u) {{\n"));
+    s.push_str(&format!("{i8}// Charm: payload_a = duration_ticks (u32)\n"));
+    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_charm(target, payload_a);\n"));
+    s.push_str(&format!("{i4}}} else if (kind == 29u) {{\n"));
+    s.push_str(&format!("{i8}// Grounded: payload_a = duration_ticks (u32)\n"));
+    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_grounded(target, payload_a);\n"));
+    s.push_str(&format!("{i4}}} else if (kind == 30u) {{\n"));
+    s.push_str(&format!("{i8}// Suppress: payload_a = duration_ticks (u32)\n"));
+    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_suppress(target, payload_a);\n"));
+
+    // TransferGold = 5 → 31
+    s.push_str(&format!("{i4}}} else if (kind == 5u) {{\n"));
+    s.push_str(&format!("{i8}// TransferGold = 5 → EventKindId::EffectGoldTransfer = 31\n"));
+    s.push_str(&format!("{i8}// payload_a = amount (i32 sign-widened to u32)\n"));
+    s.push_str(&format!("{i8}// Engine event carries amount as i64 — GPU writes the low 32\n"));
+    s.push_str(&format!("{i8}// bits + zero-extends. Cascade chronicle decode reads the u32\n"));
+    s.push_str(&format!("{i8}// then sign-extends back to i64 (matches the EffectOp's i32\n"));
+    s.push_str(&format!("{i8}// source-of-truth — i64 is host-side widening only).\n"));
+    s.push_str(&format!("{i8}let amount_i32: i32 = bitcast<i32>(payload_a);\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectGoldTransfer (caster_slot + target_slot)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {transfer_gold_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount_i32));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // ModifyStanding = 6 → 32
+    s.push_str(&format!("{i4}}} else if (kind == 6u) {{\n"));
+    s.push_str(&format!("{i8}// ModifyStanding = 6 → EventKindId::EffectStandingDelta = 32\n"));
+    s.push_str(&format!("{i8}// payload_a = delta (i16 sign-widened to u32)\n"));
+    s.push_str(&format!("{i8}let delta_i32: i32 = bitcast<i32>(payload_a);\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectStandingDelta (caster_slot + target_slot)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {modify_standing_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(delta_i32));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // Execute = 16 → 42
+    s.push_str(&format!("{i4}}} else if (kind == 16u) {{\n"));
+    s.push_str(&format!("{i8}// Execute = 16 → EventKindId::EffectExecuteApplied = 42\n"));
+    s.push_str(&format!("{i8}// payload_a = hp_threshold (f32 via bitcast). The when-\n"));
+    s.push_str(&format!("{i8}// condition `target.hp < hp_threshold` is NOT evaluated\n"));
+    s.push_str(&format!("{i8}// here — that's the .ability's `when_per_effect[i]` and\n"));
+    s.push_str(&format!("{i8}// stays unconsulted by apply_program today. Duel_abilities\n"));
+    s.push_str(&format!("{i8}// Reap's outer verb gate already enforces the threshold.\n"));
+    s.push_str(&format!("{i8}// Same shape family as EffectDamageApplied — 3 payload\n"));
+    s.push_str(&format!("{i8}// words (actor, target, hp_threshold).\n"));
+    s.push_str(&format!("{i8}let hp_threshold: f32 = bitcast<f32>(payload_a);\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectExecuteApplied (caster_slot + target_slot)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {execute_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(hp_threshold));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // SelfDamage = 17 → 39
+    s.push_str(&format!("{i4}}} else if (kind == 17u) {{\n"));
+    s.push_str(&format!("{i8}// SelfDamage = 17 → EventKindId::EffectSelfDamageApplied = 39\n"));
+    s.push_str(&format!("{i8}// payload_a = amount (f32 via bitcast). Self-damage targets\n"));
+    s.push_str(&format!("{i8}// the caster — the chronicle writes caster_slot into BOTH actor\n"));
+    s.push_str(&format!("{i8}// (slot 2) and target (slot 3) so the re-emit physics rule's\n"));
+    s.push_str(&format!("{i8}// pattern can ferry both ids verbatim into Damaged.\n"));
+    s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a);\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectSelfDamageApplied (caster_slot for both actor + target)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {self_damage_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // LifeSteal = 18 → 40
+    s.push_str(&format!("{i4}}} else if (kind == 18u) {{\n"));
+    s.push_str(&format!("{i8}// LifeSteal = 18 → EventKindId::EffectLifeStealApplied = 40\n"));
+    s.push_str(&format!("{i8}// payload_a = duration_ticks (u32); expires = tick + duration\n"));
+    s.push_str(&format!("{i8}// payload_b sign-widened i16 → fraction_q8 (i32 via bitcast)\n"));
+    s.push_str(&format!("{i8}// Same shape as Slow (kind == 4u): 4 payload words —\n"));
+    s.push_str(&format!("{i8}// actor, target, expires_at_tick, fraction_q8.\n"));
+    s.push_str(&format!("{i8}let expires_at_tick: u32 = tick + payload_a;\n"));
+    s.push_str(&format!("{i8}let fraction_q8: i32 = bitcast<i32>(payload_b);\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectLifeStealApplied (caster_slot + target_slot)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {life_steal_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (expires_at_tick));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], bitcast<u32>(fraction_q8));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // DamageModify = 19 → 41
+    s.push_str(&format!("{i4}}} else if (kind == 19u) {{\n"));
+    s.push_str(&format!("{i8}// DamageModify = 19 → EventKindId::EffectDamageModifyApplied = 41\n"));
+    s.push_str(&format!("{i8}// payload_a = duration_ticks (u32); expires = tick + duration\n"));
+    s.push_str(&format!("{i8}// payload_b sign-widened i16 → multiplier_q8 (i32 via bitcast)\n"));
+    s.push_str(&format!("{i8}// Same shape as Slow (kind == 4u) / LifeSteal (kind == 18u):\n"));
+    s.push_str(&format!("{i8}// 4 payload words — actor, target, expires_at_tick, multiplier_q8.\n"));
+    s.push_str(&format!("{i8}let expires_at_tick: u32 = tick + payload_a;\n"));
+    s.push_str(&format!("{i8}let multiplier_q8: i32 = bitcast<i32>(payload_b);\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectDamageModifyApplied (caster_slot + target_slot)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {damage_modify_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (expires_at_tick));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], bitcast<u32>(multiplier_q8));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // TODO arms for kinds 20..26 (DoT/HoT/TimedShield/Buff/Summon/Harvest/PlaceVoxel)
+    s.push_str(&format!("{i4}}} else if (kind == 20u) {{\n"));
+    s.push_str(&format!("{i8}// DamageOverTime: payload_a = amount-per-tick (f32),\n"));
+    s.push_str(&format!("{i8}// payload_b = duration_ticks (u32)\n"));
+    s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a);\n"));
+    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_damage_over_time(caster, target, amount, payload_b);\n"));
+    s.push_str(&format!("{i4}}} else if (kind == 21u) {{\n"));
+    s.push_str(&format!("{i8}// HealOverTime: payload_a = amount-per-tick (f32),\n"));
+    s.push_str(&format!("{i8}// payload_b = duration_ticks (u32)\n"));
+    s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a);\n"));
+    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_heal_over_time(caster, target, amount, payload_b);\n"));
+    s.push_str(&format!("{i4}}} else if (kind == 22u) {{\n"));
+    s.push_str(&format!("{i8}// TimedShield: payload_a = amount (f32),\n"));
+    s.push_str(&format!("{i8}// payload_b = duration_ticks (u32)\n"));
+    s.push_str(&format!("{i8}let amount: f32 = bitcast<f32>(payload_a);\n"));
+    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_timed_shield(caster, target, amount, payload_b);\n"));
+    s.push_str(&format!("{i4}}} else if (kind == 23u) {{\n"));
+    s.push_str(&format!("{i8}// Buff: payload_a = (stat ordinal in low byte | magnitude_q8 in bits 8..),\n"));
+    s.push_str(&format!("{i8}// payload_b = duration_ticks. magnitude_q8 is i16 sign-extended.\n"));
+    s.push_str(&format!("{i8}let buff_stat: u32 = payload_a & 0xFFu;\n"));
+    s.push_str(&format!("{i8}let buff_magnitude_q8: i32 = bitcast<i32>(payload_a) >> 8;\n"));
+    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_buff(target, buff_stat, buff_magnitude_q8, payload_b);\n"));
+    s.push_str(&format!("{i4}}} else if (kind == 24u) {{\n"));
+    s.push_str(&format!("{i8}// Summon: payload_a = template_hash (u32),\n"));
+    s.push_str(&format!("{i8}// payload_b = (count in high byte | lifetime in low 24 bits)\n"));
+    s.push_str(&format!("{i8}let summon_count: u32 = (payload_b >> 24u) & 0xFFu;\n"));
+    s.push_str(&format!("{i8}let summon_lifetime: u32 = payload_b & 0x00FFFFFFu;\n"));
+    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_summon(caster, payload_a, summon_count, summon_lifetime);\n"));
+    s.push_str(&format!("{i4}}} else if (kind == 25u) {{\n"));
+    s.push_str(&format!("{i8}// Harvest: payload_a = kind_hash, payload_b = amount\n"));
+    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_harvest(caster, payload_a, payload_b);\n"));
+    s.push_str(&format!("{i4}}} else if (kind == 26u) {{\n"));
+    s.push_str(&format!("{i8}// PlaceVoxel: payload_a = kind_hash; placement at cast's target pos\n"));
+    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_place_voxel(caster, payload_a);\n"));
+    s.push_str(&format!("{i4}}} else if (kind == 31u) {{\n"));
+    s.push_str(&format!("{i8}// Reflect: payload_a = duration_ticks,\n"));
+    s.push_str(&format!("{i8}// payload_b's low 16 bits = fraction_q8 (i16)\n"));
+    s.push_str(&format!("{i8}let fraction_q8: i32 = bitcast<i32>(payload_b);\n"));
+    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_reflect(target, payload_a, fraction_q8);\n"));
+    s.push_str(&format!("{i4}}}\n"));
+
+    s
 }
 
 /// Lower a [`CgStmt::Match`] as a scrutinee-bound `if`-chain. WGSL's
@@ -4979,12 +5343,40 @@ mod tests {
 
         // Stun, Slow, LifeSteal, and DamageModify each compute
         // expires_at_tick = tick + duration. Four arms × one statement
-        // → exactly four occurrences.
+        // = 4 occurrences in the primary walk, and Wave 1.5#9 added a
+        // structurally-identical nested walk that re-emits the same
+        // chain at a deeper indent — total 8 occurrences across the
+        // dispatcher.
         assert_eq!(
             wgsl.matches("let expires_at_tick: u32 = tick + payload_a;").count(),
-            4,
-            "Stun + Slow + LifeSteal + DamageModify arms each compute expires_at_tick; \
-             expected 4 occurrences across the dispatcher;\n{wgsl}"
+            8,
+            "Stun + Slow + LifeSteal + DamageModify arms each compute expires_at_tick \
+             twice (primary + nested walks); expected 8 occurrences across the dispatcher;\n{wgsl}"
+        );
+
+        // Wave 1.5#9 nested-effect walk pin: the dispatcher reads the
+        // nested SoA columns and walks MAX_NESTED_PER_EFFECT (=2)
+        // entries per slot, after the primary's chronicle write.
+        assert!(
+            wgsl.contains("ability_registry_nested_effect_kinds[nested_slot_base + j]"),
+            "nested walk must read nested_effect_kinds SoA column;\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("ability_registry_nested_effect_payload_a[nested_slot_base + j]"),
+            "nested walk must read nested_effect_payload_a SoA column;\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("ability_registry_nested_effect_payload_b[nested_slot_base + j]"),
+            "nested walk must read nested_effect_payload_b SoA column;\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("for (var j: u32 = 0u; j < 2u"),
+            "nested walk must iterate MAX_NESTED_PER_EFFECT (=2) entries per slot;\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("nested_base: u32 = ability_slot * 12u"),
+            "nested base = ability_slot * MAX_EFFECTS_PER_PROGRAM * MAX_NESTED_PER_EFFECT \
+             = ability_slot * 12;\n{wgsl}"
         );
     }
 

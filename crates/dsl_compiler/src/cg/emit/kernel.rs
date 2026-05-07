@@ -1067,6 +1067,14 @@ fn handle_to_binding_metadata(h: &DataHandle, prog: &CgProgram) -> Option<Bindin
                 LifetimeKinds    => ("lifetime_kinds",   "array<u32>"),
                 AreaKinds        => ("area_kinds",       "array<u32>"),
                 ScalingStatRefs  => ("scaling_stat_refs","array<u32>"),
+                // Wave 1.5#9 nested-effect columns. Pre-widened to u32
+                // by `PackedAbilityRegistryGpu::upload` (the source
+                // is already u32 for `nested_effect_kinds` to match
+                // `effect_kinds`'s shape, and the payload columns are
+                // u32 directly from `pack_effect`).
+                NestedEffectKinds    => ("nested_effect_kinds",     "array<u32>"),
+                NestedEffectPayloadA => ("nested_effect_payload_a", "array<u32>"),
+                NestedEffectPayloadB => ("nested_effect_payload_b", "array<u32>"),
             };
             Some(BindingMetadata {
                 bg_source: BgSource::External(format!("ability_registry_{suffix}")),
@@ -1350,6 +1358,9 @@ fn structural_binding_name(h: &DataHandle, prog: Option<&CgProgram>) -> String {
                 AreaArgs        => "area_args",
                 ScalingStatRefs => "scaling_stat_refs",
                 ScalingPercents => "scaling_percents",
+                NestedEffectKinds    => "nested_effect_kinds",
+                NestedEffectPayloadA => "nested_effect_payload_a",
+                NestedEffectPayloadB => "nested_effect_payload_b",
             };
             format!("ability_registry_{s}")
         }

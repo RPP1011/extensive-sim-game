@@ -779,3 +779,60 @@ fn cpu_pipeline_is_deterministic_under_chance_gate() {
         "expected at least one chance-skip across 50 sweep combos at 50% gate"
     );
 }
+
+/// Wave 1.5#9 nested-effect dispatch (2026-05-06): a program with a
+/// primary `Damage` effect and a nested `{ stun 1s }` block emits TWO
+/// chronicle records — kind=26 (EffectDamageApplied) followed by
+/// kind=29 (EffectStunApplied) — in declaration order.
+///
+/// This is the Reap-shape pin: `apply_program` produces an
+/// ApplyEvent::Damage AND ApplyEvent::Stun, and
+/// `apply_event_to_chronicle_record` translates each into its
+/// matching record. Closes the documented gap surfaced by the Reap
+/// verb swap (commit `72a35307`).
+#[test]
+fn nested_stun_on_damage_emits_two_chronicle_records_in_order() {
+    use smallvec::smallvec;
+    let mut program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 25.0 }],
+    );
+    program.nested_per_effect.push(smallvec![EffectOp::Stun { duration_ticks: 10 }]);
+    let records = run_pipeline(&program, aid(1), aid(2), 100);
+    assert_eq!(
+        records.len(), 2,
+        "primary Damage + nested Stun → 2 chronicle records (got {})",
+        records.len(),
+    );
+    // First record: Damage = kind 26.
+    assert_eq!(records[0][0], 26, "first record must be EffectDamageApplied (26)");
+    assert_eq!(records[0][1], 100, "tick");
+    assert_eq!(records[0][4], 25.0_f32.to_bits(), "amount");
+    // Second record: nested Stun = kind 29 with expires_at_tick.
+    assert_eq!(records[1][0], 29, "second record must be EffectStunApplied (29)");
+    assert_eq!(records[1][1], 100, "tick");
+    assert_eq!(records[1][4], 110, "expires_at_tick = tick(100) + duration(10)");
+}
+
+/// Wave 1.5#9: when the chance gate skips the primary, the nested
+/// chronicle record is also skipped — pin both halves together so a
+/// future runtime can't accidentally let nested ops outlive a gated
+/// primary.
+#[test]
+fn nested_effect_record_is_skipped_when_chance_gate_fails() {
+    use smallvec::smallvec;
+    let mut program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 25.0 }],
+    );
+    program.chances.push(Some(0)); // gate-out the primary
+    program.nested_per_effect.push(smallvec![EffectOp::Stun { duration_ticks: 10 }]);
+    let records = run_pipeline(&program, aid(1), aid(2), 100);
+    assert!(
+        records.is_empty(),
+        "chance=0 must skip both primary AND nested chronicle records (got {})",
+        records.len(),
+    );
+}
