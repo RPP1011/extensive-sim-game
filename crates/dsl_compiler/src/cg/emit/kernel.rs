@@ -1032,14 +1032,47 @@ fn handle_to_binding_metadata(h: &DataHandle, prog: &CgProgram) -> Option<Bindin
             base_access: AccessMode::AtomicStorage,
             wgsl_ty: "u32".into(),
         }),
-        DataHandle::AbilityRegistryColumn { column: _ } => {
-            // #136 slice α: structural variant landed; the BGL
-            // composer's binding-table assignment for these columns
-            // arrives in slice β alongside the WGSL emit. Returning
-            // None keeps the binding off the BGL until then — safe
-            // because no current sim references ApplyAbility (corpus
-            // grep is empty), so this arm is dead at HEAD.
-            None
+        DataHandle::AbilityRegistryColumn { column } => {
+            // #136 slice β step 1: BGL binding metadata for the
+            // PackedAbilityRegistry SoA columns. Each column maps to
+            // a host-uploaded `wgpu::Buffer` — the registry is
+            // immutable post-build, so STORAGE+read-only access; no
+            // COPY_DST. The runtime crate is responsible for exposing
+            // these as fields on `BindingSources::external` named
+            // `ability_registry_<column>`. Until a sim wires
+            // `apply_ability`, these arms are dead at HEAD.
+            //
+            // Element types are widened-to-u32 for u8/u16 source
+            // columns (see `PackedAbilityRegistryGpu::upload`) and
+            // f32 for the 5 float-typed columns (Range / TagValues /
+            // LifetimePayloads / AreaArgs / ScalingPercents). Naming
+            // mirrors `structural_binding_name` so the body-emit
+            // identifier resolves against the binding declaration.
+            use crate::cg::data_handle::AbilityRegistryColumn::*;
+            let (suffix, wgsl_ty) = match column {
+                Range            => ("range",            "array<f32>"),
+                TagValues        => ("tag_values",       "array<f32>"),
+                LifetimePayloads => ("lifetime_payloads","array<f32>"),
+                AreaArgs         => ("area_args",        "array<f32>"),
+                ScalingPercents  => ("scaling_percents", "array<f32>"),
+                Hints            => ("hints",            "array<u32>"),
+                CooldownTicks    => ("cooldown_ticks",   "array<u32>"),
+                GateFlags        => ("gate_flags",       "array<u32>"),
+                DeliveryKind     => ("delivery_kind",    "array<u32>"),
+                EffectKinds      => ("effect_kinds",     "array<u32>"),
+                EffectPayloadA   => ("effect_payload_a", "array<u32>"),
+                EffectPayloadB   => ("effect_payload_b", "array<u32>"),
+                Stackings        => ("stackings",        "array<u32>"),
+                Chances          => ("chances",          "array<u32>"),
+                LifetimeKinds    => ("lifetime_kinds",   "array<u32>"),
+                AreaKinds        => ("area_kinds",       "array<u32>"),
+                ScalingStatRefs  => ("scaling_stat_refs","array<u32>"),
+            };
+            Some(BindingMetadata {
+                bg_source: BgSource::External(format!("ability_registry_{suffix}")),
+                base_access: AccessMode::ReadStorage,
+                wgsl_ty: wgsl_ty.into(),
+            })
         }
     }
 }
