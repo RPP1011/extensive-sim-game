@@ -1877,40 +1877,75 @@ fn lower_emit_to_wgsl(
         }
     }
 
-    // Wrap the ring-append in `{ … }` so the `slot` let doesn't
-    // collide with sibling emits. `event_ring_cap` is supplied as a
-    // wgsl const by the kernel preamble (todo: thread through
-    // PhysicsRule cfg uniform). For now hardcode 65536 slots — the
-    // runtime allocates that many u32-words / stride.
+    Ok(emit_chronicle_append_skeleton(
+        event_id,
+        buf,
+        stride,
+        fields.len(),
+        &field_writes,
+    ))
+}
+
+/// Render the chronicle-ring atomic-append skeleton for an event of a
+/// given kind. Pure WGSL string-builder — takes the event id, the SoA
+/// buffer name (`buf`), the per-record stride in u32-words, and a
+/// pre-built list of field-write lines (each already starting with
+/// 4-space indent and including its trailing semicolon).
+///
+/// Shape:
+/// ```wgsl
+/// // emit event#<event_id> (N fields)
+/// {
+///     let slot = atomicAdd(&event_tail[0], 1u);
+///     if (slot < <CAP>u) {
+///         atomicStore(&<buf>[slot * <stride>u + 0u], <event_id>u);
+///         atomicStore(&<buf>[slot * <stride>u + 1u], tick);
+///         <field_writes…>
+///     }
+/// }
+/// ```
+///
+/// Used by:
+///   - `lower_emit_to_wgsl` — the canonical compile-time-known-event
+///     emit path. Field values are CG-lowered then handed to this
+///     helper as pre-rendered strings.
+///   - The #136 ApplyAbility dispatcher (slice γ + δ follow-ups) —
+///     each branch arm constructs the field-write lines from
+///     `payload_a/b` decodes and calls this helper with the matching
+///     kind/buf/stride. Without the shared helper, every dispatcher
+///     arm would duplicate the atomicAdd / bounds-check / header-
+///     write boilerplate; centralizing keeps slot-acquisition
+///     semantics consistent across both paths.
+///
+/// `field_count` is purely cosmetic — used in the header comment for
+/// frame-capture readability.
+pub(crate) fn emit_chronicle_append_skeleton(
+    event_id: u32,
+    buf: &str,
+    stride: u32,
+    field_count: usize,
+    field_writes: &[String],
+) -> String {
     let mut out = String::new();
-    out.push_str(&format!("// emit event#{event_id} ({} fields)\n", fields.len()));
+    out.push_str(&format!("// emit event#{event_id} ({field_count} fields)\n"));
     out.push_str("{\n");
-    // Tail is `array<atomic<u32>>` with a single element — slot 0 is
-    // the count. atomicAdd returns the prior value (this producer's
-    // unique slot index).
     out.push_str("    let slot = atomicAdd(&event_tail[0], 1u);\n");
-    // Bounds check — silently drop if ring full. Runtime sizes
-    // event_ring to `DEFAULT_EVENT_RING_CAP_SLOTS * stride * 4` bytes.
     out.push_str(&format!(
         "    if (slot < {}u) {{\n",
         DEFAULT_EVENT_RING_CAP_SLOTS
     ));
-    // Tag + tick header words also go through atomicStore since the
-    // binding is `array<atomic<u32>>`.
     out.push_str(&format!(
         "        atomicStore(&{buf}[slot * {stride}u + 0u], {event_id}u);\n"
     ));
     out.push_str(&format!(
         "        atomicStore(&{buf}[slot * {stride}u + 1u], tick);\n"
     ));
-    for line in &field_writes {
-        // Each `field_writes` entry already starts with 4-space
-        // indent; bump to 8 for the nested-if scope.
+    for line in field_writes {
         out.push_str(&format!("    {line}\n"));
     }
     out.push_str("    }\n");
     out.push_str("}");
-    Ok(out)
+    out
 }
 
 /// Default event-ring slot capacity — 65 536 events per tick. The
@@ -4467,5 +4502,62 @@ mod tests {
                 "{marker} arm must keep the TODO marker;\n{wgsl}"
             );
         }
+    }
+
+    // ---- emit_chronicle_append_skeleton — shared by lower_emit_to_wgsl
+    //      and the #136 ApplyAbility dispatcher arms (slice γ+).
+
+    #[test]
+    fn chronicle_skeleton_renders_atomicadd_bounds_check_and_header_writes() {
+        let field_writes = vec![
+            "        atomicStore(&my_ring[slot * 4u + 2u], (caster_id));"
+                .to_string(),
+            "        atomicStore(&my_ring[slot * 4u + 3u], bitcast<u32>(amount));"
+                .to_string(),
+        ];
+        let wgsl = emit_chronicle_append_skeleton(
+            /*event_id*/ 26,
+            /*buf*/ "my_ring",
+            /*stride*/ 4,
+            /*field_count*/ 2,
+            &field_writes,
+        );
+
+        // Header comment carries event id + field count for capture
+        // diagnostics.
+        assert!(wgsl.contains("// emit event#26 (2 fields)"),
+            "header comment must include id + field count;\n{wgsl}");
+
+        // Slot acquisition via atomicAdd on the canonical event_tail.
+        assert!(wgsl.contains("let slot = atomicAdd(&event_tail[0], 1u);"),
+            "slot acquisition must use atomicAdd on event_tail[0];\n{wgsl}");
+
+        // Bounds check against DEFAULT_EVENT_RING_CAP_SLOTS (65536).
+        assert!(wgsl.contains("if (slot < 65536u) {"),
+            "must bounds-check slot against DEFAULT_EVENT_RING_CAP_SLOTS;\n{wgsl}");
+
+        // Header words: event-kind tag at offset 0, tick at offset 1.
+        assert!(wgsl.contains("atomicStore(&my_ring[slot * 4u + 0u], 26u);"),
+            "tag header at slot*stride+0;\n{wgsl}");
+        assert!(wgsl.contains("atomicStore(&my_ring[slot * 4u + 1u], tick);"),
+            "tick header at slot*stride+1;\n{wgsl}");
+
+        // Caller's field-write lines round-trip verbatim.
+        assert!(wgsl.contains("atomicStore(&my_ring[slot * 4u + 2u], (caster_id));"),
+            "field-write lines must round-trip;\n{wgsl}");
+        assert!(wgsl.contains("atomicStore(&my_ring[slot * 4u + 3u], bitcast<u32>(amount));"),
+            "field-write lines must round-trip;\n{wgsl}");
+    }
+
+    #[test]
+    fn chronicle_skeleton_zero_field_emit_still_writes_header() {
+        // Some events (e.g. AgentDied = no payload beyond agent id in
+        // the standard layout's header) have zero declared fields.
+        // The skeleton must still emit the slot acquisition + tag/tick
+        // header writes, just with no field-write lines.
+        let wgsl = emit_chronicle_append_skeleton(2, "ring", 2, 0, &[]);
+        assert!(wgsl.contains("atomicAdd(&event_tail[0], 1u);"));
+        assert!(wgsl.contains("atomicStore(&ring[slot * 2u + 0u], 2u);"));
+        assert!(wgsl.contains("atomicStore(&ring[slot * 2u + 1u], tick);"));
     }
 }
