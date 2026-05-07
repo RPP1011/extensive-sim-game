@@ -791,6 +791,34 @@ fn fields_to_event(
                 .unwrap_or_else(|| field_u32(fields, "duration_ticks").unwrap_or(0));
             Some(Event::EffectStunApplied { actor, target, expires_at_tick, tick })
         }
+        "EffectRootApplied" => {
+            let actor           = field_agent(fields, "actor")?;
+            let target          = field_agent(fields, "target")?;
+            let expires_at_tick = field_u32(fields, "expires_at_tick")
+                .unwrap_or_else(|| field_u32(fields, "duration_ticks").unwrap_or(0));
+            Some(Event::EffectRootApplied { actor, target, expires_at_tick, tick })
+        }
+        "EffectSilenceApplied" => {
+            let actor           = field_agent(fields, "actor")?;
+            let target          = field_agent(fields, "target")?;
+            let expires_at_tick = field_u32(fields, "expires_at_tick")
+                .unwrap_or_else(|| field_u32(fields, "duration_ticks").unwrap_or(0));
+            Some(Event::EffectSilenceApplied { actor, target, expires_at_tick, tick })
+        }
+        "EffectFearApplied" => {
+            let actor           = field_agent(fields, "actor")?;
+            let target          = field_agent(fields, "target")?;
+            let expires_at_tick = field_u32(fields, "expires_at_tick")
+                .unwrap_or_else(|| field_u32(fields, "duration_ticks").unwrap_or(0));
+            Some(Event::EffectFearApplied { actor, target, expires_at_tick, tick })
+        }
+        "EffectTauntApplied" => {
+            let actor           = field_agent(fields, "actor")?;
+            let target          = field_agent(fields, "target")?;
+            let expires_at_tick = field_u32(fields, "expires_at_tick")
+                .unwrap_or_else(|| field_u32(fields, "duration_ticks").unwrap_or(0));
+            Some(Event::EffectTauntApplied { actor, target, expires_at_tick, tick })
+        }
         "EffectSlowApplied" => {
             let actor           = field_agent(fields, "actor")?;
             let target          = field_agent(fields, "target")?;

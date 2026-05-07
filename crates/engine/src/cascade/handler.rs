@@ -137,7 +137,21 @@ pub enum EventKindId {
     // write is gated upstream and the consumer rule can ferry the record
     // directly into Defeated.
     EffectExecuteApplied = 42,
-    // Slots 43-127 reserved for replayable event variants added in later tasks.
+    // Wave 2 piece 1 — control statuses (Root/Silence/Fear/Taunt).
+    // Each is a chronicle event for the matching `EffectOp` (op#7..10).
+    // Same shape as `EffectStunApplied` (actor + target + expires_at_tick
+    // + tick): a target agent and a u32 expiry deadline. The
+    // `apply_ability` dispatcher writes these from the per-effect-slot
+    // arm chain when the corresponding `EffectOp` slot fires; consumer
+    // physics rules can fold them back into per-agent
+    // `*_expires_at_tick` SoA fields the same way the Stun consumer
+    // does (consumer wiring in duel_abilities.sim is deferred — no sim
+    // currently uses these statuses).
+    EffectRootApplied    = 43,
+    EffectSilenceApplied = 44,
+    EffectFearApplied    = 45,
+    EffectTauntApplied   = 46,
+    // Slots 47-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 

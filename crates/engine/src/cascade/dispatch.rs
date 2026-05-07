@@ -77,6 +77,10 @@ pub mod interp {
             Event::EffectExecuteApplied  { .. } => "EffectExecuteApplied",
             Event::EffectShieldApplied   { .. } => "EffectShieldApplied",
             Event::EffectStunApplied     { .. } => "EffectStunApplied",
+            Event::EffectRootApplied     { .. } => "EffectRootApplied",
+            Event::EffectSilenceApplied  { .. } => "EffectSilenceApplied",
+            Event::EffectFearApplied     { .. } => "EffectFearApplied",
+            Event::EffectTauntApplied    { .. } => "EffectTauntApplied",
             Event::EffectSlowApplied     { .. } => "EffectSlowApplied",
             Event::EffectGoldTransfer    { .. } => "EffectGoldTransfer",
             Event::EffectStandingDelta   { .. } => "EffectStandingDelta",
@@ -225,6 +229,49 @@ pub mod interp {
             ],
             // ---- EffectStunApplied ----------------------------------------
             Event::EffectStunApplied { actor, target, expires_at_tick, tick } => vec![
+                ("actor",           EvalValue::Agent(dsl_agent(*actor))),
+                ("target",          EvalValue::Agent(dsl_agent(*target))),
+                ("expires_at_tick", EvalValue::U32(*expires_at_tick)),
+                ("c",               EvalValue::Agent(dsl_agent(*actor))),
+                ("t",               EvalValue::Agent(dsl_agent(*target))),
+                ("e",               EvalValue::U32(*expires_at_tick)),
+                ("tick",            EvalValue::U32(*tick)),
+            ],
+            // ---- EffectRootApplied ---------------------------------------
+            // Wave 2 piece 1 — same shape as Stun (actor + target +
+            // expires_at_tick). No consumer rule in any sim today; the
+            // chronicle write end-to-end works without a fold.
+            Event::EffectRootApplied { actor, target, expires_at_tick, tick } => vec![
+                ("actor",           EvalValue::Agent(dsl_agent(*actor))),
+                ("target",          EvalValue::Agent(dsl_agent(*target))),
+                ("expires_at_tick", EvalValue::U32(*expires_at_tick)),
+                ("c",               EvalValue::Agent(dsl_agent(*actor))),
+                ("t",               EvalValue::Agent(dsl_agent(*target))),
+                ("e",               EvalValue::U32(*expires_at_tick)),
+                ("tick",            EvalValue::U32(*tick)),
+            ],
+            // ---- EffectSilenceApplied ------------------------------------
+            Event::EffectSilenceApplied { actor, target, expires_at_tick, tick } => vec![
+                ("actor",           EvalValue::Agent(dsl_agent(*actor))),
+                ("target",          EvalValue::Agent(dsl_agent(*target))),
+                ("expires_at_tick", EvalValue::U32(*expires_at_tick)),
+                ("c",               EvalValue::Agent(dsl_agent(*actor))),
+                ("t",               EvalValue::Agent(dsl_agent(*target))),
+                ("e",               EvalValue::U32(*expires_at_tick)),
+                ("tick",            EvalValue::U32(*tick)),
+            ],
+            // ---- EffectFearApplied ---------------------------------------
+            Event::EffectFearApplied { actor, target, expires_at_tick, tick } => vec![
+                ("actor",           EvalValue::Agent(dsl_agent(*actor))),
+                ("target",          EvalValue::Agent(dsl_agent(*target))),
+                ("expires_at_tick", EvalValue::U32(*expires_at_tick)),
+                ("c",               EvalValue::Agent(dsl_agent(*actor))),
+                ("t",               EvalValue::Agent(dsl_agent(*target))),
+                ("e",               EvalValue::U32(*expires_at_tick)),
+                ("tick",            EvalValue::U32(*tick)),
+            ],
+            // ---- EffectTauntApplied --------------------------------------
+            Event::EffectTauntApplied { actor, target, expires_at_tick, tick } => vec![
                 ("actor",           EvalValue::Agent(dsl_agent(*actor))),
                 ("target",          EvalValue::Agent(dsl_agent(*target))),
                 ("expires_at_tick", EvalValue::U32(*expires_at_tick)),

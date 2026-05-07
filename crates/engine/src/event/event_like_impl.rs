@@ -43,6 +43,10 @@ impl crate::event::EventLike for Event {
             Event::EffectSlowApplied { .. } => EventKindId::EffectSlowApplied,
             Event::EffectStandingDelta { .. } => EventKindId::EffectStandingDelta,
             Event::EffectStunApplied { .. } => EventKindId::EffectStunApplied,
+            Event::EffectRootApplied { .. } => EventKindId::EffectRootApplied,
+            Event::EffectSilenceApplied { .. } => EventKindId::EffectSilenceApplied,
+            Event::EffectFearApplied { .. } => EventKindId::EffectFearApplied,
+            Event::EffectTauntApplied { .. } => EventKindId::EffectTauntApplied,
             Event::EngagementBroken { .. } => EventKindId::EngagementBroken,
             Event::EngagementCommitted { .. } => EventKindId::EngagementCommitted,
             Event::FearSpread { .. } => EventKindId::FearSpread,
@@ -425,6 +429,54 @@ impl crate::event::EventLike for Event {
                 tick,
             } => {
                 h.update([EventKindId::EffectStunApplied as u8]);
+                h.update(actor.raw().to_le_bytes());
+                h.update(target.raw().to_le_bytes());
+                h.update(expires_at_tick.to_le_bytes());
+                h.update(tick.to_le_bytes());
+            }
+            Event::EffectRootApplied {
+                actor,
+                target,
+                expires_at_tick,
+                tick,
+            } => {
+                h.update([EventKindId::EffectRootApplied as u8]);
+                h.update(actor.raw().to_le_bytes());
+                h.update(target.raw().to_le_bytes());
+                h.update(expires_at_tick.to_le_bytes());
+                h.update(tick.to_le_bytes());
+            }
+            Event::EffectSilenceApplied {
+                actor,
+                target,
+                expires_at_tick,
+                tick,
+            } => {
+                h.update([EventKindId::EffectSilenceApplied as u8]);
+                h.update(actor.raw().to_le_bytes());
+                h.update(target.raw().to_le_bytes());
+                h.update(expires_at_tick.to_le_bytes());
+                h.update(tick.to_le_bytes());
+            }
+            Event::EffectFearApplied {
+                actor,
+                target,
+                expires_at_tick,
+                tick,
+            } => {
+                h.update([EventKindId::EffectFearApplied as u8]);
+                h.update(actor.raw().to_le_bytes());
+                h.update(target.raw().to_le_bytes());
+                h.update(expires_at_tick.to_le_bytes());
+                h.update(tick.to_le_bytes());
+            }
+            Event::EffectTauntApplied {
+                actor,
+                target,
+                expires_at_tick,
+                tick,
+            } => {
+                h.update([EventKindId::EffectTauntApplied as u8]);
                 h.update(actor.raw().to_le_bytes());
                 h.update(target.raw().to_le_bytes());
                 h.update(expires_at_tick.to_le_bytes());

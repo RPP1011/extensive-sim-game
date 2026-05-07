@@ -66,6 +66,15 @@ pub const ENGINE_EVENT_KIND_IDS: &[(&str, u32)] = &[
     // (slot 42, after EffectDamageModifyApplied=41). Closes the slice
     // across all 8 duel_abilities verbs.
     ("EffectExecuteApplied", 42),
+    // Wave 2 piece 1 — control statuses (Root/Silence/Fear/Taunt). Each
+    // mirrors Stun's shape (target agent + u32 expires_at_tick), packed
+    // into the 4-payload chronicle record at slots 43..46 contiguous
+    // with the Execute=42 wire-up. No consumer rule in any sim today;
+    // the dispatcher write end-to-end works without a fold consumer.
+    ("EffectRootApplied",    43),
+    ("EffectSilenceApplied", 44),
+    ("EffectFearApplied",    45),
+    ("EffectTauntApplied",   46),
 ];
 
 /// Look up the engine-defined `EventKindId` discriminant for an
@@ -98,6 +107,10 @@ mod tests {
         assert_eq!(engine_event_kind_id_for_name("EffectLifeStealApplied"), Some(40));
         assert_eq!(engine_event_kind_id_for_name("EffectDamageModifyApplied"), Some(41));
         assert_eq!(engine_event_kind_id_for_name("EffectExecuteApplied"), Some(42));
+        assert_eq!(engine_event_kind_id_for_name("EffectRootApplied"), Some(43));
+        assert_eq!(engine_event_kind_id_for_name("EffectSilenceApplied"), Some(44));
+        assert_eq!(engine_event_kind_id_for_name("EffectFearApplied"), Some(45));
+        assert_eq!(engine_event_kind_id_for_name("EffectTauntApplied"), Some(46));
     }
 
     #[test]

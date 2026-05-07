@@ -25,14 +25,18 @@ pub mod chronicle_entry;
 pub mod effect_damage_applied;
 pub mod effect_damage_modify_applied;
 pub mod effect_execute_applied;
+pub mod effect_fear_applied;
 pub mod effect_gold_transfer;
 pub mod effect_heal_applied;
 pub mod effect_life_steal_applied;
+pub mod effect_root_applied;
 pub mod effect_self_damage_applied;
 pub mod effect_shield_applied;
+pub mod effect_silence_applied;
 pub mod effect_slow_applied;
 pub mod effect_standing_delta;
 pub mod effect_stun_applied;
+pub mod effect_taunt_applied;
 pub mod engagement_broken;
 pub mod engagement_committed;
 pub mod fear_spread;
@@ -68,14 +72,18 @@ pub use chronicle_entry::ChronicleEntry;
 pub use effect_damage_applied::EffectDamageApplied;
 pub use effect_damage_modify_applied::EffectDamageModifyApplied;
 pub use effect_execute_applied::EffectExecuteApplied;
+pub use effect_fear_applied::EffectFearApplied;
 pub use effect_gold_transfer::EffectGoldTransfer;
 pub use effect_heal_applied::EffectHealApplied;
 pub use effect_life_steal_applied::EffectLifeStealApplied;
+pub use effect_root_applied::EffectRootApplied;
 pub use effect_self_damage_applied::EffectSelfDamageApplied;
 pub use effect_shield_applied::EffectShieldApplied;
+pub use effect_silence_applied::EffectSilenceApplied;
 pub use effect_slow_applied::EffectSlowApplied;
 pub use effect_standing_delta::EffectStandingDelta;
 pub use effect_stun_applied::EffectStunApplied;
+pub use effect_taunt_applied::EffectTauntApplied;
 pub use engagement_broken::EngagementBroken;
 pub use engagement_committed::EngagementCommitted;
 pub use fear_spread::FearSpread;
@@ -278,6 +286,30 @@ pub enum Event {
         expires_at_tick: u32,
         tick: u32,
     },
+    EffectRootApplied {
+        actor: AgentId,
+        target: AgentId,
+        expires_at_tick: u32,
+        tick: u32,
+    },
+    EffectSilenceApplied {
+        actor: AgentId,
+        target: AgentId,
+        expires_at_tick: u32,
+        tick: u32,
+    },
+    EffectFearApplied {
+        actor: AgentId,
+        target: AgentId,
+        expires_at_tick: u32,
+        tick: u32,
+    },
+    EffectTauntApplied {
+        actor: AgentId,
+        target: AgentId,
+        expires_at_tick: u32,
+        tick: u32,
+    },
     EngagementBroken {
         actor: AgentId,
         former_target: AgentId,
@@ -371,6 +403,10 @@ impl Event {
             Event::EffectSlowApplied { tick, .. } => *tick,
             Event::EffectStandingDelta { tick, .. } => *tick,
             Event::EffectStunApplied { tick, .. } => *tick,
+            Event::EffectRootApplied { tick, .. } => *tick,
+            Event::EffectSilenceApplied { tick, .. } => *tick,
+            Event::EffectFearApplied { tick, .. } => *tick,
+            Event::EffectTauntApplied { tick, .. } => *tick,
             Event::EngagementBroken { tick, .. } => *tick,
             Event::EngagementCommitted { tick, .. } => *tick,
             Event::FearSpread { tick, .. } => *tick,
@@ -417,6 +453,10 @@ impl Event {
             Event::EffectSlowApplied { .. } => true,
             Event::EffectStandingDelta { .. } => true,
             Event::EffectStunApplied { .. } => true,
+            Event::EffectRootApplied { .. } => true,
+            Event::EffectSilenceApplied { .. } => true,
+            Event::EffectFearApplied { .. } => true,
+            Event::EffectTauntApplied { .. } => true,
             Event::EngagementBroken { .. } => true,
             Event::EngagementCommitted { .. } => true,
             Event::FearSpread { .. } => true,

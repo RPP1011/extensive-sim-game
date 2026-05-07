@@ -26,6 +26,10 @@
 //!   8. `Heal(8) + 50% AbilityPower`                — AP scaling (=0.0 on both backends)
 //!   9. `LifeSteal(0.5, 5s)`                        — Vampirize-shape (q8 fraction)
 //!  10. `DamageModify(0.5, 5s)`                     — Fortify-shape (q8 multiplier)
+//!  11. `Root(3s)`                                  — Stop-shape (Wave 2 piece 1)
+//!  12. `Silence(3s)`                               — Mute-shape (Wave 2 piece 1)
+//!  13. `Fear(3s)`                                  — Terrify-shape (Wave 2 piece 1)
+//!  14. `Taunt(3s)`                                 — Provoke-shape (Wave 2 piece 1)
 //!
 //! M = 1 caster×target permutation in this fixture: `(c=0, t=0)`
 //! self-cast. The smoke fixture's `apply_ability` source uses the
@@ -37,7 +41,7 @@
 //! T = 5 ticks (0, 17, 100, 1000, 65500) — varied across the u32 range
 //! to surface any wraparound bug in expires_at_tick computations.
 //!
-//! K = 10 × 1 × 5 = **50 casts**, producing 55 chronicle records (50
+//! K = 14 × 1 × 5 = **70 casts**, producing 75 chronicle records (70
 //! primary + 5 nested-Stun follow-ups from the Reap+Stun-shape arm).
 //!
 //! ## What's deferred
@@ -287,6 +291,57 @@ fn build_sweep() -> Vec<(&'static str, AbilityProgram, CasterStats)> {
             5.0,
             Gate { cooldown_ticks: 80, hostile_only: false, line_of_sight: false },
             [EffectOp::DamageModify { duration_ticks: 50, multiplier_q8: 128 }],
+        ),
+        CasterStats::default(),
+    ));
+
+    // Wave 2 piece 1 — control statuses (Root/Silence/Fear/Taunt).
+    // Each shares Stun's shape: 3-payload-word chronicle record
+    // (actor + target + expires_at_tick = tick + duration). Adding all
+    // four extends the sweep matrix to 14 abilities so the four new
+    // GPU dispatcher arms get parity-pinned alongside the existing
+    // Stun arm.
+
+    // 11. Stop-shape — Root.
+    out.push((
+        "Stop",
+        AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 60, hostile_only: true, line_of_sight: false },
+            [EffectOp::Root { duration_ticks: 30 }],
+        ),
+        CasterStats::default(),
+    ));
+
+    // 12. Mute-shape — Silence.
+    out.push((
+        "Mute",
+        AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 60, hostile_only: true, line_of_sight: false },
+            [EffectOp::Silence { duration_ticks: 30 }],
+        ),
+        CasterStats::default(),
+    ));
+
+    // 13. Terrify-shape — Fear.
+    out.push((
+        "Terrify",
+        AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 60, hostile_only: true, line_of_sight: false },
+            [EffectOp::Fear { duration_ticks: 30 }],
+        ),
+        CasterStats::default(),
+    ));
+
+    // 14. Provoke-shape — Taunt.
+    out.push((
+        "Provoke",
+        AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 60, hostile_only: true, line_of_sight: false },
+            [EffectOp::Taunt { duration_ticks: 30 }],
         ),
         CasterStats::default(),
     ));

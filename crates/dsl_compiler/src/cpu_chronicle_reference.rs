@@ -110,6 +110,43 @@ pub fn apply_event_to_chronicle_record(
             rec[4] = tick + duration_ticks;
             Some(rec)
         }
+        // --- Root = 8 → EventKindId::EffectRootApplied = 43.
+        // Wave 2 piece 1 — same shape as Stun: 3 payload words
+        // (actor + target + expires_at_tick = tick + duration).
+        ApplyEvent::Root { target: _, duration_ticks } => {
+            rec[0] = 43;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            rec[4] = tick + duration_ticks;
+            Some(rec)
+        }
+        // --- Silence = 9 → EventKindId::EffectSilenceApplied = 44.
+        // Wave 2 piece 1 — same shape as Stun.
+        ApplyEvent::Silence { target: _, duration_ticks } => {
+            rec[0] = 44;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            rec[4] = tick + duration_ticks;
+            Some(rec)
+        }
+        // --- Fear = 10 → EventKindId::EffectFearApplied = 45.
+        // Wave 2 piece 1 — same shape as Stun.
+        ApplyEvent::Fear { target: _, duration_ticks } => {
+            rec[0] = 45;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            rec[4] = tick + duration_ticks;
+            Some(rec)
+        }
+        // --- Taunt = 11 → EventKindId::EffectTauntApplied = 46.
+        // Wave 2 piece 1 — same shape as Stun.
+        ApplyEvent::Taunt { target: _, duration_ticks } => {
+            rec[0] = 46;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            rec[4] = tick + duration_ticks;
+            Some(rec)
+        }
         // --- Slow = 4 → EventKindId::EffectSlowApplied = 30.
         // 4-field payload: actor, target, expires_at_tick, factor_q8.
         ApplyEvent::Slow { target: _, duration_ticks, factor_q8 } => {
@@ -339,23 +376,19 @@ mod tests {
 
     #[test]
     fn variants_without_chronicle_counterpart_return_none() {
-        // Root / Silence / Fear / Taunt / movement / etc. don't have
-        // 1:1 chronicle kinds in the engine today. Mirrors the
-        // dispatcher's `// TODO slice γ` arms — no chronicle write,
-        // so the CPU reference returns None.
+        // Movement verbs (Dash/Blink/Knockback/Pull) don't have 1:1
+        // chronicle kinds in the engine today. Mirrors the dispatcher's
+        // `// TODO slice γ` arms — no chronicle write, so the CPU
+        // reference returns None.
         //
-        // SelfDamage was wired up by the Bleed verb swap (Task #138
-        // follow-on, 2026-05-06) and now produces kind=39 records, so
-        // it's no longer in this list — see
-        // `self_damage_chronicle_record_uses_kind_39` below.
-        // Execute was wired up by the Reap verb swap (Task #138
-        // follow-on, mirror of Fortify) and now produces kind=42
-        // records — see `execute_chronicle_record_uses_kind_42` below.
+        // Status effects already wired up:
+        // - SelfDamage (Bleed verb swap, Task #138 follow-on,
+        //   2026-05-06) → kind=39, see `self_damage_chronicle_record_uses_kind_39`.
+        // - Execute (Reap verb swap, Task #138 follow-on, mirror of
+        //   Fortify) → kind=42, see `execute_chronicle_record_uses_kind_42`.
+        // - Root/Silence/Fear/Taunt (Wave 2 piece 1, this slice) →
+        //   kinds 43..46, see `control_status_chronicle_records_use_kinds_43_46`.
         for ev in [
-            ApplyEvent::Root    { target: aid(1), duration_ticks: 5 },
-            ApplyEvent::Silence { target: aid(1), duration_ticks: 5 },
-            ApplyEvent::Fear    { target: aid(1), duration_ticks: 5 },
-            ApplyEvent::Taunt   { target: aid(1), duration_ticks: 5 },
             ApplyEvent::Dash    { source: aid(1), distance: 10.0 },
             ApplyEvent::Blink   { source: aid(1), distance: 10.0 },
             ApplyEvent::Knockback { source: aid(1), target: aid(2), distance: 5.0 },
@@ -366,6 +399,37 @@ mod tests {
                 "variant {ev:?} should have no chronicle counterpart \
                  (dispatcher arm carries TODO marker)"
             );
+        }
+    }
+
+    /// Wave 2 piece 1 — control statuses (Root/Silence/Fear/Taunt).
+    /// Each shares Stun's shape: 3 payload words (actor + target +
+    /// expires_at_tick = tick + duration). Pin per-variant kind tags
+    /// (43..46) and the expires_at_tick computation.
+    #[test]
+    fn control_status_chronicle_records_use_kinds_43_46() {
+        let cases: &[(ApplyEvent, u32, &str)] = &[
+            (ApplyEvent::Root    { target: aid(11), duration_ticks: 50 }, 43, "Root"),
+            (ApplyEvent::Silence { target: aid(11), duration_ticks: 50 }, 44, "Silence"),
+            (ApplyEvent::Fear    { target: aid(11), duration_ticks: 50 }, 45, "Fear"),
+            (ApplyEvent::Taunt   { target: aid(11), duration_ticks: 50 }, 46, "Taunt"),
+        ];
+        for (ev, expected_kind, name) in cases {
+            let rec = apply_event_to_chronicle_record(
+                *ev,
+                /*tick*/ 100,
+                /*caster_id*/ 7,
+                /*target_id*/ 11,
+            )
+            .unwrap_or_else(|| panic!("{name} has chronicle counterpart"));
+            assert_eq!(rec[0], *expected_kind, "{name}: kind tag");
+            assert_eq!(rec[1], 100, "{name}: tick");
+            assert_eq!(rec[2], 7, "{name}: actor slot — caster_id");
+            assert_eq!(rec[3], 11, "{name}: target slot — target_id");
+            assert_eq!(rec[4], 150, "{name}: expires_at_tick = tick(100) + duration(50)");
+            for i in 5..CHRONICLE_RECORD_STRIDE_U32 {
+                assert_eq!(rec[i], 0, "{name}: tail word {i} should be zero");
+            }
         }
     }
 
@@ -547,6 +611,10 @@ mod tests {
                 4  => ApplyEvent::Slow           { target: aid(2), duration_ticks: 5, factor_q8: 128 },
                 5  => ApplyEvent::TransferGold   { source: aid(1), target: aid(2), amount: 7 },
                 6  => ApplyEvent::ModifyStanding { source: aid(1), target: aid(2), delta: 3 },
+                8  => ApplyEvent::Root           { target: aid(2), duration_ticks: 5 },
+                9  => ApplyEvent::Silence        { target: aid(2), duration_ticks: 5 },
+                10 => ApplyEvent::Fear           { target: aid(2), duration_ticks: 5 },
+                11 => ApplyEvent::Taunt          { target: aid(2), duration_ticks: 5 },
                 16 => ApplyEvent::Execute        { target: aid(2), hp_threshold: 20.0 },
                 17 => ApplyEvent::SelfDamage     { source: aid(1), amount: 1.0 },
                 18 => ApplyEvent::LifeSteal      { target: aid(1), duration_ticks: 5, fraction_q8: 128 },

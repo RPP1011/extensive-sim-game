@@ -114,16 +114,21 @@ fn multi_effect_ability_produces_record_per_chronicle_arm() {
 
 #[test]
 fn ability_with_only_non_chronicle_effects_produces_no_records() {
-    // Root + Silence have no chronicle counterparts today (CPU
-    // reference returns None for both). The pipeline produces an
-    // empty record vec — the dispatcher's WGSL would still emit
-    // TODO-marker arms for these on GPU, but no chronicle write.
+    // Movement verbs (Dash/Blink/Knockback/Pull) have no chronicle
+    // counterparts today (CPU reference returns None for them). The
+    // pipeline produces an empty record vec — the dispatcher's WGSL
+    // would still emit TODO-marker arms for these on GPU, but no
+    // chronicle write.
+    //
+    // Root/Silence/Fear/Taunt got wired up by Wave 2 piece 1 (this
+    // slice) and now produce kind=43..46 records — see
+    // `control_status_pipelines_emit_kinds_43_46` below.
     let program = AbilityProgram::new_single_target(
         5.0,
         Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
         [
-            EffectOp::Root    { duration_ticks: 10 },
-            EffectOp::Silence { duration_ticks: 10 },
+            EffectOp::Dash  { distance: 10.0 },
+            EffectOp::Blink { distance: 10.0 },
         ],
     );
     let records = run_pipeline(&program, aid(1), aid(2), 100);
@@ -133,6 +138,80 @@ fn ability_with_only_non_chronicle_effects_produces_no_records() {
         records.len(),
         records,
     );
+}
+
+/// Wave 2 piece 1 — control statuses (Root/Silence/Fear/Taunt). Each
+/// flows through `apply_program` (which emits ApplyEvent::Root/Silence/
+/// Fear/Taunt with `{ target, duration_ticks }`) and the CPU reference
+/// (which writes a kind=43..46 record with the same 3-payload-word
+/// shape as Stun: actor, target, expires_at_tick = tick + duration).
+/// Mirrors the GPU dispatcher's per-status arm shapes.
+#[test]
+fn root_pipeline_emits_kind_43_record() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Root { duration_ticks: 25 }],
+    );
+    let records = run_pipeline(&program, aid(7), aid(7), 100);
+    assert_eq!(records.len(), 1, "one Root effect → one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 43, "EventKindId::EffectRootApplied = 43");
+    assert_eq!(r[1], 100, "tick");
+    assert_eq!(r[2], 7, "actor slot — caster_id");
+    assert_eq!(r[3], 7, "target slot — target_id (self-cast: ==caster)");
+    assert_eq!(r[4], 125, "expires_at_tick = tick(100) + duration(25)");
+}
+
+#[test]
+fn silence_pipeline_emits_kind_44_record() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Silence { duration_ticks: 25 }],
+    );
+    let records = run_pipeline(&program, aid(7), aid(7), 100);
+    assert_eq!(records.len(), 1, "one Silence effect → one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 44, "EventKindId::EffectSilenceApplied = 44");
+    assert_eq!(r[1], 100, "tick");
+    assert_eq!(r[2], 7, "actor slot — caster_id");
+    assert_eq!(r[3], 7, "target slot — target_id (self-cast: ==caster)");
+    assert_eq!(r[4], 125, "expires_at_tick = tick(100) + duration(25)");
+}
+
+#[test]
+fn fear_pipeline_emits_kind_45_record() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Fear { duration_ticks: 25 }],
+    );
+    let records = run_pipeline(&program, aid(7), aid(7), 100);
+    assert_eq!(records.len(), 1, "one Fear effect → one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 45, "EventKindId::EffectFearApplied = 45");
+    assert_eq!(r[1], 100, "tick");
+    assert_eq!(r[2], 7, "actor slot — caster_id");
+    assert_eq!(r[3], 7, "target slot — target_id (self-cast: ==caster)");
+    assert_eq!(r[4], 125, "expires_at_tick = tick(100) + duration(25)");
+}
+
+#[test]
+fn taunt_pipeline_emits_kind_46_record() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Taunt { duration_ticks: 25 }],
+    );
+    let records = run_pipeline(&program, aid(7), aid(7), 100);
+    assert_eq!(records.len(), 1, "one Taunt effect → one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 46, "EventKindId::EffectTauntApplied = 46");
+    assert_eq!(r[1], 100, "tick");
+    assert_eq!(r[2], 7, "actor slot — caster_id");
+    assert_eq!(r[3], 7, "target slot — target_id (self-cast: ==caster)");
+    assert_eq!(r[4], 125, "expires_at_tick = tick(100) + duration(25)");
 }
 
 #[test]
