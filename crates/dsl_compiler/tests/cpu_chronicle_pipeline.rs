@@ -196,6 +196,34 @@ fn modify_standing_pipeline_emits_kind_32_record() {
     assert_eq!(records[0][4], (-50_i32) as u32, "delta sign-widens through pipeline");
 }
 
+/// Bleed verb swap (Task #138 follow-on, 2026-05-06): SelfDamage
+/// flows through `apply_program` (which emits
+/// `ApplyEvent::SelfDamage{source, amount}`) and the CPU reference
+/// (which writes a kind=39 record with caster_id in BOTH actor +
+/// target slots — self-damage targets caster). Mirrors the GPU
+/// dispatcher's SelfDamage arm shape.
+#[test]
+fn self_damage_pipeline_emits_kind_39_record() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 50, hostile_only: false, line_of_sight: false },
+        [EffectOp::SelfDamage { amount: 5.0 }],
+    );
+    // Self-cast: caster == target. The pipeline helper passes
+    // caster_id = target_id = caster.raw() into the CPU reference,
+    // mirroring the duel_abilities Bleed verb's
+    // `apply_ability 4 by self target self` shape. The SelfDamage
+    // arm explicitly writes caster_id into both slots regardless.
+    let records = run_pipeline(&program, aid(7), aid(7), 100);
+    assert_eq!(records.len(), 1, "one SelfDamage effect → one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 39, "EventKindId::EffectSelfDamageApplied = 39");
+    assert_eq!(r[1], 100, "tick");
+    assert_eq!(r[2], 7, "actor slot — caster_id (the bleeder)");
+    assert_eq!(r[3], 7, "target slot — caster_id (self-damage targets caster)");
+    assert_eq!(r[4], 5.0_f32.to_bits(), "amount as bitcast<u32>");
+}
+
 /// Slice ε part 1 pipeline integration: when the caller passes
 /// distinct caster + target ids, the chronicle records have
 /// distinct values in slot 2 (actor) and slot 3 (target). Mirrors

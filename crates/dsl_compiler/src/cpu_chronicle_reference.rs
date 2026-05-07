@@ -144,6 +144,21 @@ pub fn apply_event_to_chronicle_record(
             rec[4] = (delta as i32) as u32;
             Some(rec)
         }
+        // --- SelfDamage = 17 → EventKindId::EffectSelfDamageApplied = 39.
+        // Bleed verb swap (Task #138 follow-on, 2026-05-06). Self-damage
+        // targets the caster, so the GPU dispatcher writes caster_slot
+        // into BOTH actor (slot 2) and target (slot 3). The CPU
+        // reference's call sites pass `target_id == caster_id` for
+        // this variant, but we explicitly write `caster_id` into slot 3
+        // so the record is correct even when the caller forgets the
+        // self-target convention.
+        ApplyEvent::SelfDamage { source: _, amount } => {
+            rec[0] = 39;
+            rec[2] = caster_id;
+            rec[3] = caster_id;
+            rec[4] = amount.to_bits();
+            Some(rec)
+        }
         _ => None,
     }
 }
@@ -266,6 +281,11 @@ mod tests {
         // 1:1 chronicle kinds in the engine today. Mirrors the
         // dispatcher's `// TODO slice γ` arms — no chronicle write,
         // so the CPU reference returns None.
+        //
+        // SelfDamage was wired up by the Bleed verb swap (Task #138
+        // follow-on, 2026-05-06) and now produces kind=39 records, so
+        // it's no longer in this list — see
+        // `self_damage_chronicle_record_uses_kind_39` below.
         for ev in [
             ApplyEvent::Root    { target: aid(1), duration_ticks: 5 },
             ApplyEvent::Silence { target: aid(1), duration_ticks: 5 },
@@ -276,13 +296,37 @@ mod tests {
             ApplyEvent::Knockback { source: aid(1), target: aid(2), distance: 5.0 },
             ApplyEvent::Pull      { source: aid(1), target: aid(2), distance: 5.0 },
             ApplyEvent::Execute   { target: aid(1), hp_threshold: 50.0 },
-            ApplyEvent::SelfDamage{ source: aid(1), amount: 10.0 },
         ] {
             assert!(
                 apply_event_to_chronicle_record(ev, 100, 0, 0).is_none(),
                 "variant {ev:?} should have no chronicle counterpart \
                  (dispatcher arm carries TODO marker)"
             );
+        }
+    }
+
+    /// Bleed verb swap (Task #138 follow-on, 2026-05-06): SelfDamage
+    /// produces kind=39 records with caster_id in both actor (slot 2)
+    /// and target (slot 3). Round-trip the amount via to_bits().
+    #[test]
+    fn self_damage_chronicle_record_uses_kind_39() {
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::SelfDamage { source: aid(7), amount: 10.0 },
+            /*tick*/ 100,
+            /*caster_id*/ 7, /*target_id*/ 7,
+        )
+        .expect("SelfDamage has chronicle counterpart");
+        assert_eq!(rec[0], 39, "kind tag — EffectSelfDamageApplied");
+        assert_eq!(rec[1], 100, "tick");
+        assert_eq!(rec[2], 7, "actor slot — caster_id (the bleeder)");
+        assert_eq!(
+            rec[3], 7,
+            "target slot — caster_id (self-damage targets caster)",
+        );
+        assert_eq!(rec[4], 10.0_f32.to_bits(), "amount as bitcast<u32>");
+        // Tail words zeroed.
+        for i in 5..CHRONICLE_RECORD_STRIDE_U32 {
+            assert_eq!(rec[i], 0, "tail word {i} should be zero");
         }
     }
 
@@ -295,17 +339,19 @@ mod tests {
     fn cpu_reference_covers_all_dispatcher_chronicle_arms() {
         // Every chronicle-bearing effect-kind entry must have a
         // matching CPU-reference arm. After wiring TransferGold +
-        // ModifyStanding ApplyEvents (engine/src/ability/apply.rs),
-        // all 7 entries are covered — no None fall-throughs.
+        // ModifyStanding ApplyEvents (engine/src/ability/apply.rs)
+        // and SelfDamage (Bleed verb swap, Task #138 follow-on,
+        // 2026-05-06), all 8 entries are covered — no None fall-throughs.
         let ev_for_kind = |effect_kind: u32| -> ApplyEvent {
             match effect_kind {
-                0 => ApplyEvent::Damage         { source: aid(1), target: aid(2), amount: 1.0 },
-                1 => ApplyEvent::Heal           { source: aid(1), target: aid(2), amount: 1.0 },
-                2 => ApplyEvent::Shield         { source: aid(1), target: aid(2), amount: 1.0 },
-                3 => ApplyEvent::Stun           { target: aid(2), duration_ticks: 5 },
-                4 => ApplyEvent::Slow           { target: aid(2), duration_ticks: 5, factor_q8: 128 },
-                5 => ApplyEvent::TransferGold   { source: aid(1), target: aid(2), amount: 7 },
-                6 => ApplyEvent::ModifyStanding { source: aid(1), target: aid(2), delta: 3 },
+                0  => ApplyEvent::Damage         { source: aid(1), target: aid(2), amount: 1.0 },
+                1  => ApplyEvent::Heal           { source: aid(1), target: aid(2), amount: 1.0 },
+                2  => ApplyEvent::Shield         { source: aid(1), target: aid(2), amount: 1.0 },
+                3  => ApplyEvent::Stun           { target: aid(2), duration_ticks: 5 },
+                4  => ApplyEvent::Slow           { target: aid(2), duration_ticks: 5, factor_q8: 128 },
+                5  => ApplyEvent::TransferGold   { source: aid(1), target: aid(2), amount: 7 },
+                6  => ApplyEvent::ModifyStanding { source: aid(1), target: aid(2), delta: 3 },
+                17 => ApplyEvent::SelfDamage     { source: aid(1), amount: 1.0 },
                 _ => panic!("unexpected effect_kind in table"),
             }
         };

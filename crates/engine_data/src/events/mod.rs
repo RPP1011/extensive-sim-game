@@ -25,6 +25,7 @@ pub mod chronicle_entry;
 pub mod effect_damage_applied;
 pub mod effect_gold_transfer;
 pub mod effect_heal_applied;
+pub mod effect_self_damage_applied;
 pub mod effect_shield_applied;
 pub mod effect_slow_applied;
 pub mod effect_standing_delta;
@@ -64,6 +65,7 @@ pub use chronicle_entry::ChronicleEntry;
 pub use effect_damage_applied::EffectDamageApplied;
 pub use effect_gold_transfer::EffectGoldTransfer;
 pub use effect_heal_applied::EffectHealApplied;
+pub use effect_self_damage_applied::EffectSelfDamageApplied;
 pub use effect_shield_applied::EffectShieldApplied;
 pub use effect_slow_applied::EffectSlowApplied;
 pub use effect_standing_delta::EffectStandingDelta;
@@ -219,6 +221,12 @@ pub enum Event {
         amount: f32,
         tick: u32,
     },
+    EffectSelfDamageApplied {
+        actor: AgentId,
+        target: AgentId,
+        amount: f32,
+        tick: u32,
+    },
     EffectShieldApplied {
         actor: AgentId,
         target: AgentId,
@@ -329,6 +337,7 @@ impl Event {
             Event::EffectDamageApplied { tick, .. } => *tick,
             Event::EffectGoldTransfer { tick, .. } => *tick,
             Event::EffectHealApplied { tick, .. } => *tick,
+            Event::EffectSelfDamageApplied { tick, .. } => *tick,
             Event::EffectShieldApplied { tick, .. } => *tick,
             Event::EffectSlowApplied { tick, .. } => *tick,
             Event::EffectStandingDelta { tick, .. } => *tick,
@@ -371,6 +380,7 @@ impl Event {
             Event::EffectDamageApplied { .. } => true,
             Event::EffectGoldTransfer { .. } => true,
             Event::EffectHealApplied { .. } => true,
+            Event::EffectSelfDamageApplied { .. } => true,
             Event::EffectShieldApplied { .. } => true,
             Event::EffectSlowApplied { .. } => true,
             Event::EffectStandingDelta { .. } => true,

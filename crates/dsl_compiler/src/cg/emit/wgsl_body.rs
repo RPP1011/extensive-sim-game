@@ -1675,6 +1675,15 @@ fn lower_cg_stmt_body_to_wgsl(
                 .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain TransferGold=5");
             let modify_standing_event_id = event_kind_id_for_effect_kind(6)
                 .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain ModifyStanding=6");
+            // Task #138 follow-on (Bleed) — SelfDamage chronicle arm
+            // (kind=17 → EventKindId::EffectSelfDamageApplied=39). The
+            // dispatcher writes one record per non-empty SelfDamage
+            // slot; the runtime's ApplyDamageFromSelfDamageChronicle
+            // re-emit physics rule translates the records back into
+            // `Damaged` so the existing ApplyDamage cascade keeps
+            // working unchanged.
+            let self_damage_event_id = event_kind_id_for_effect_kind(17)
+                .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain SelfDamage=17");
             // Engine pins MAX_EFFECTS_PER_PROGRAM = 6 + EFFECT_KIND_EMPTY = 0xFFu
             // (see crates/engine/src/ability/program.rs:28 +
             // crates/engine/src/ability/packed.rs). Inlining the
@@ -1854,9 +1863,23 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let hp_threshold: f32 = bitcast<f32>(payload_a);\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_execute(target, hp_threshold);\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 17u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// SelfDamage: payload_a = amount (f32 via bitcast)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// SelfDamage = 17 → EventKindId::EffectSelfDamageApplied = 39\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_a = amount (f32 via bitcast). Self-damage targets\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// the caster — the chronicle writes caster_slot into BOTH actor\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// (slot 2) and target (slot 3) so the re-emit physics rule's\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// pattern can ferry both ids verbatim into Damaged.\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let amount: f32 = bitcast<f32>(payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_self_damage(caster, amount);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// chronicle: emit EffectSelfDamageApplied (caster_slot for both actor + target)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20{{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (_slot < 65536u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 0u], {self_damage_event_id}u);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 1u], tick);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 3u], (caster_slot));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 18u) {{\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// LifeSteal: payload_a = duration_ticks,\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b's low 16 bits = fraction_q8 (i16)\n\
@@ -2164,6 +2187,9 @@ pub(crate) const EFFECT_KIND_TO_EVENT_KIND_ID: &[(u32, u32)] = &[
     (5,  31),
     // EffectOp::ModifyStanding  → EventKindId::EffectStandingDelta
     (6,  32),
+    // EffectOp::SelfDamage      → EventKindId::EffectSelfDamageApplied
+    // (Bleed verb swap, Task #138 follow-on, 2026-05-06).
+    (17, 39),
 ];
 
 /// Look up the runtime `EventKindId` for an `EffectOp` discriminant.
@@ -4699,6 +4725,8 @@ mod tests {
         //   - chronicle_append_slow            → EffectSlowApplied
         //   - chronicle_append_transfer_gold   → EffectGoldTransfer
         //   - chronicle_append_modify_standing → EffectStandingDelta
+        //   - chronicle_append_self_damage     → EffectSelfDamageApplied
+        //                                        (Bleed verb swap, Task #138 follow-on)
         // Below-list arms keep their TODO markers because the runtime
         // has no 1:1 chronicle counterpart (Root / Silence / Fear /
         // Taunt / movement verbs / etc.) — slice δ scope or a future
@@ -4713,7 +4741,6 @@ mod tests {
             "chronicle_append_knockback",
             "chronicle_append_pull",
             "chronicle_append_execute",
-            "chronicle_append_self_damage",
             "chronicle_append_life_steal",
             "chronicle_append_damage_modify",
             "chronicle_append_damage_over_time",
@@ -4802,6 +4829,9 @@ mod tests {
             ("Slow",            30u32),
             ("TransferGold",    31u32),
             ("ModifyStanding",  32u32),
+            // Bleed verb swap (Task #138 follow-on, 2026-05-06):
+            // SelfDamage = 17 → EventKindId::EffectSelfDamageApplied = 39.
+            ("SelfDamage",      39u32),
         ] {
             let needle = format!(
                 "atomicStore(&event_ring[_slot * 10u + 0u], {expected_kind_tag}u);"
@@ -4918,14 +4948,15 @@ mod tests {
         // pack table's output for a representative `EffectOp` value.
         let representative_for = |kind: u32| -> EffectOp {
             match kind {
-                0 => EffectOp::Damage    { amount: 10.0 },
-                1 => EffectOp::Heal      { amount: 5.0 },
-                2 => EffectOp::Shield    { amount: 25.0 },
-                3 => EffectOp::Stun      { duration_ticks: 10 },
-                4 => EffectOp::Slow      { duration_ticks: 10, factor_q8: 128 },
-                5 => EffectOp::TransferGold   { amount: 7 },
-                6 => EffectOp::ModifyStanding { delta: 3 },
-                _ => panic!("test only covers chronicle-bearing variants 0..=6"),
+                0  => EffectOp::Damage    { amount: 10.0 },
+                1  => EffectOp::Heal      { amount: 5.0 },
+                2  => EffectOp::Shield    { amount: 25.0 },
+                3  => EffectOp::Stun      { duration_ticks: 10 },
+                4  => EffectOp::Slow      { duration_ticks: 10, factor_q8: 128 },
+                5  => EffectOp::TransferGold   { amount: 7 },
+                6  => EffectOp::ModifyStanding { delta: 3 },
+                17 => EffectOp::SelfDamage { amount: 5.0 },
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 17"),
             }
         };
 
@@ -4933,14 +4964,15 @@ mod tests {
         // enum's `as u32`.
         let event_kind_id_for = |effect_kind: u32| -> u32 {
             match effect_kind {
-                0 => EngineEventKindId::EffectDamageApplied as u32,
-                1 => EngineEventKindId::EffectHealApplied   as u32,
-                2 => EngineEventKindId::EffectShieldApplied as u32,
-                3 => EngineEventKindId::EffectStunApplied   as u32,
-                4 => EngineEventKindId::EffectSlowApplied   as u32,
-                5 => EngineEventKindId::EffectGoldTransfer  as u32,
-                6 => EngineEventKindId::EffectStandingDelta as u32,
-                _ => panic!("test only covers chronicle-bearing variants 0..=6"),
+                0  => EngineEventKindId::EffectDamageApplied as u32,
+                1  => EngineEventKindId::EffectHealApplied   as u32,
+                2  => EngineEventKindId::EffectShieldApplied as u32,
+                3  => EngineEventKindId::EffectStunApplied   as u32,
+                4  => EngineEventKindId::EffectSlowApplied   as u32,
+                5  => EngineEventKindId::EffectGoldTransfer  as u32,
+                6  => EngineEventKindId::EffectStandingDelta as u32,
+                17 => EngineEventKindId::EffectSelfDamageApplied as u32,
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 17"),
             }
         };
 
@@ -4983,15 +5015,17 @@ mod tests {
 
     #[test]
     fn effect_kind_to_event_kind_map_covers_chronicle_bearing_variants_only() {
-        // 7 chronicle-bearing variants today — Damage/Heal/Shield/Stun/
-        // Slow/TransferGold/ModifyStanding. If this number changes,
-        // either the engine grew a new `EffectXxxApplied` event (in
-        // which case the map gets a new entry) or a variant lost its
-        // chronicle counterpart (in which case the map drops an entry).
-        // Pin the count so the gap between source-of-truths is loud.
+        // 8 chronicle-bearing variants today — Damage/Heal/Shield/Stun/
+        // Slow/TransferGold/ModifyStanding + SelfDamage (Bleed verb
+        // swap, Task #138 follow-on, 2026-05-06). If this number
+        // changes, either the engine grew a new `EffectXxxApplied`
+        // event (in which case the map gets a new entry) or a variant
+        // lost its chronicle counterpart (in which case the map drops
+        // an entry). Pin the count so the gap between source-of-truths
+        // is loud.
         assert_eq!(
-            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 7,
-            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 7 \
+            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 8,
+            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 8 \
              chronicle-bearing variants today; if you added or removed an \
              entry, update this assertion (and the slice γ wire-up that \
              consumes the new entry)"
