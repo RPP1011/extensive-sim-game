@@ -107,7 +107,9 @@ use crate::kernel_binding_ir::{
 };
 
 use super::wgsl_body::EmitError as InnerEmitError;
-use super::wgsl_body::{lower_cg_expr_to_wgsl, lower_cg_stmt_list_to_wgsl, EmitCtx};
+use super::wgsl_body::{
+    lower_cg_expr_to_wgsl, lower_cg_stmt_list_to_wgsl, stmt_list_contains_set_alive_false, EmitCtx,
+};
 
 // ---------------------------------------------------------------------------
 // KernelEmitError
@@ -550,6 +552,38 @@ pub fn kernel_topology_to_spec_and_body(
         }
     }
 
+    // Gap N atomicCAS guard
+    // (`docs/superpowers/notes/2026-05-04-duel_25v25.md`): when the
+    // kernel body contains
+    // `Assign(AgentField::Alive, _, Lit(Bool(false)))` (the kill-
+    // transition pattern), upgrade `agent_alive` to AtomicStorage
+    // (`array<atomic<u32>>`) so the per-stmt emit can lower the
+    // assign as `atomicCompareExchangeWeak(&agent_alive[t], 1u, 0u)`
+    // — only the thread that actually flips alive 1→0 wins the
+    // transition; sibling threads that race on the same target see
+    // `cas.exchanged == false` and skip the guarded `emit Defeated`
+    // (or whatever follows the set_alive in the same stmt-list).
+    //
+    // Without this, N>1 Damaged events landing on one target in one
+    // tick all observed `old_hp > 0.0` and all emitted Defeated,
+    // inflating the `defeats_received` view by ~15× at 25v25 scale.
+    let has_alive_cas = body_ops_have_set_alive_false(&body_ops, prog);
+    if has_alive_cas {
+        for binding in bindings.iter_mut() {
+            if binding.name == "agent_alive"
+                && matches!(binding.access, AccessMode::ReadStorage | AccessMode::ReadWriteStorage)
+            {
+                binding.access = AccessMode::AtomicStorage;
+                // `agent_field_wgsl_ty` returns `array<u32>` for
+                // Bool fields; the kernel-binding-IR renderer wraps
+                // the element type in `array<atomic<...>>` for
+                // AtomicStorage, so we pass the bare element type
+                // here (matches the EventRing upgrade above).
+                binding.wgsl_ty = "u32".to_string();
+            }
+        }
+    }
+
     // 10. Compose the WGSL body — one fragment per op, joined with
     //     blank lines. Computing the body here surfaces any inner-walk
     //     arena failures as typed errors before the spec is returned,
@@ -568,7 +602,13 @@ pub fn kernel_topology_to_spec_and_body(
     // restore on exit — defensive scoping in case the same `EmitCtx`
     // instance is reused across multiple kernels.
     let prior_atomic_loads = ctx.event_ring_atomic_loads.replace(is_per_event_emit);
+    // Gap N: stash the alive-CAS flag for the duration of the body
+    // emit so the per-stmt Assign arm + `lower_cg_stmt_list_to_wgsl`
+    // wrap pick the atomicCAS shape; restore on exit so the same
+    // EmitCtx instance can drive multiple kernels safely.
+    let prior_alive_cas = ctx.alive_atomic_writes.replace(has_alive_cas);
     let wgsl_body_result = build_wgsl_body(&body_ops, &dispatch, prog, ctx);
+    ctx.alive_atomic_writes.set(prior_alive_cas);
     ctx.event_ring_atomic_loads.set(prior_atomic_loads);
     let wgsl_body = wgsl_body_result?;
 
@@ -2167,6 +2207,30 @@ fn body_ops_have_emit(body_ops: &[OpId], prog: &CgProgram) -> bool {
         };
         if let Some(list_id) = body_list {
             if stmt_list_has_emit(list_id, prog) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Walk every body op's statement list and return `true` if any
+/// reachable `Assign(AgentField::Alive, _, Lit(Bool(false)))` exists.
+/// Used by the binding-synthesis path to upgrade `agent_alive` to
+/// `AtomicStorage` when the kernel's body needs the atomicCAS guard
+/// (Gap N — `docs/superpowers/notes/2026-05-04-duel_25v25.md`).
+fn body_ops_have_set_alive_false(body_ops: &[OpId], prog: &CgProgram) -> bool {
+    for op_id in body_ops {
+        let Ok(op) = resolve_op(prog, *op_id) else {
+            continue;
+        };
+        let body_list = match &op.kind {
+            ComputeOpKind::PhysicsRule { body, .. } => Some(*body),
+            ComputeOpKind::ViewFold { body, .. } => Some(*body),
+            _ => None,
+        };
+        if let Some(list_id) = body_list {
+            if stmt_list_contains_set_alive_false(prog, list_id) {
                 return true;
             }
         }
