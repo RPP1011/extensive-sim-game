@@ -322,6 +322,46 @@ fn distinct_caster_and_target_pipeline_handles_friendly_heal() {
     assert_eq!(r[4], 12.5_f32.to_bits(), "amount as bitcast<u32>");
 }
 
+/// Slice ε pipeline pin for ModifyStanding — closes per-variant
+/// pipeline coverage. Standing deltas naturally bind caster (the
+/// observer/initiator whose opinion is being recorded) to target
+/// (the agent whose standing changes); the i16→i32→u32 sign-widening
+/// payload mirrors TransferGold's shape but emits kind=32.
+#[test]
+fn distinct_caster_and_target_pipeline_handles_modify_standing() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
+        [EffectOp::ModifyStanding { delta: -100 }],
+    );
+    let caster = aid(21);
+    let target = aid(34);
+    let tick: u32 = 750;
+
+    let events = apply_program(
+        &program,
+        caster,
+        target,
+        tick as u64,
+        0xF00D_BABE,
+        &CasterStats::default(),
+    );
+    let records: Vec<_> = events
+        .into_iter()
+        .filter_map(|e| {
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw())
+        })
+        .collect();
+
+    assert_eq!(records.len(), 1, "ModifyStanding produces one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 32, "EffectStandingDelta");
+    assert_eq!(r[1], 750, "tick");
+    assert_eq!(r[2], 21, "actor slot — caster_id (the observer recording opinion)");
+    assert_eq!(r[3], 34, "target slot — distinct target_id (the judged agent)");
+    assert_eq!(r[4], (-100_i32) as u32, "negative delta sign-widened i16→i32→u32");
+}
+
 /// Slice ε pipeline pin for TransferGold — the chronicle variant
 /// where caster≠target is the *canonical* shape (gold flows from
 /// source to recipient; self-transfer is a degenerate case). Confirms
