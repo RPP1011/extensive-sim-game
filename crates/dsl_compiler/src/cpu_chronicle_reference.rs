@@ -229,6 +229,52 @@ pub fn apply_event_to_chronicle_record(
             rec[5] = duration_ticks;
             Some(rec)
         }
+        // --- Stealth = 27 → EventKindId::EffectStealthApplied = 54.
+        // Extended-corpus status — caster-self stealth. The engine event
+        // has no target field; the GPU dispatcher writes:
+        //   slot 2 = caster_slot
+        //   slot 3 = duration_ticks (raw u32, NOT bitcast — duration is
+        //            already u32 on the EffectOp side, no widening)
+        // Same slot layout as Dash/Blink (caster-self motion), but
+        // payload word 1 carries duration rather than bitcast f32 distance.
+        ApplyEvent::Stealth { source: _, duration_ticks } => {
+            rec[0] = 54;
+            rec[2] = caster_id;
+            rec[3] = duration_ticks;
+            Some(rec)
+        }
+        // --- Charm = 28 → EventKindId::EffectCharmApplied = 55.
+        // Extended-corpus status — target-cast charm. 3-payload-word
+        // chronicle record (actor + target + duration_ticks). Distinct
+        // from Stun/Root/Silence/Fear/Taunt (kinds 29/43..46) which fold
+        // the deadline at dispatch time as `expires_at_tick = tick +
+        // duration_ticks` — the extended-status family stores the raw
+        // duration so a future consumer rule can compute its own window.
+        ApplyEvent::Charm { target: _, duration_ticks } => {
+            rec[0] = 55;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            rec[4] = duration_ticks;
+            Some(rec)
+        }
+        // --- Grounded = 29 → EventKindId::EffectGroundedApplied = 56.
+        // Extended-corpus status — same shape as Charm (target-cast).
+        ApplyEvent::Grounded { target: _, duration_ticks } => {
+            rec[0] = 56;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            rec[4] = duration_ticks;
+            Some(rec)
+        }
+        // --- Suppress = 30 → EventKindId::EffectSuppressApplied = 57.
+        // Extended-corpus status — same shape as Charm/Grounded.
+        ApplyEvent::Suppress { target: _, duration_ticks } => {
+            rec[0] = 57;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            rec[4] = duration_ticks;
+            Some(rec)
+        }
         // --- Slow = 4 → EventKindId::EffectSlowApplied = 30.
         // 4-field payload: actor, target, expires_at_tick, factor_q8.
         ApplyEvent::Slow { target: _, duration_ticks, factor_q8 } => {
@@ -459,11 +505,10 @@ mod tests {
     #[test]
     fn variants_without_chronicle_counterpart_return_none() {
         // ApplyEvent variants without chronicle counterparts today.
-        // After Wave 1.5+ (DoT/HoT/TimedShield, this slice), every
-        // amount-bearing chronicle ApplyEvent has a wire-up; the
-        // variants below are all deferred-infrastructure ApplyEvents
-        // (Summon/Harvest/PlaceVoxel) that emit ApplyEvents but have
-        // no engine `EventKindId` yet.
+        // After the extended-status slice (Stealth/Charm/Grounded/
+        // Suppress) the only deferred-infrastructure ApplyEvents left
+        // are Summon/Harvest/PlaceVoxel — emit ApplyEvents but have no
+        // engine `EventKindId` yet.
         //
         // Status effects already wired up:
         // - SelfDamage (Bleed verb swap, Task #138 follow-on,
@@ -474,9 +519,11 @@ mod tests {
         //   kinds 43..46, see `control_status_chronicle_records_use_kinds_43_46`.
         // - Dash/Blink/Knockback/Pull (Wave 2 piece 2) →
         //   kinds 47..50, see `movement_chronicle_records_use_kinds_47_50`.
-        // - DamageOverTime/HealOverTime/TimedShield (Wave 1.5+, this
-        //   slice) → kinds 51..53, see
-        //   `multi_tick_chronicle_records_use_kinds_51_53`.
+        // - DamageOverTime/HealOverTime/TimedShield (Wave 1.5+) →
+        //   kinds 51..53, see `multi_tick_chronicle_records_use_kinds_51_53`.
+        // - Stealth/Charm/Grounded/Suppress (extended-status slice) →
+        //   kinds 54..57, see
+        //   `extended_status_chronicle_records_use_kinds_54_57`.
         for ev in [
             ApplyEvent::Summon  { source: aid(1), template_hash: 0xDEADBEEF, count: 2, lifetime_ticks: 100 },
             ApplyEvent::Harvest { source: aid(1), kind_hash: 0xCAFEBABE, amount: 5 },
@@ -487,6 +534,87 @@ mod tests {
                 "variant {ev:?} should have no chronicle counterpart \
                  (dispatcher arm carries TODO marker)"
             );
+        }
+    }
+
+    /// Extended-corpus statuses (Stealth/Charm/Grounded/Suppress).
+    /// Two distinct shapes:
+    ///   - Stealth: caster-self status. Engine event has no target
+    ///     field; chronicle record stores duration_ticks at payload
+    ///     word 1 (= ring slot offset 3) — same family as Dash/Blink.
+    ///   - Charm/Grounded/Suppress: target-cast statuses. 3-payload-word
+    ///     record: actor + target + duration_ticks at ring slot offset 4.
+    /// Distinct from Stun/Root/Silence/Fear/Taunt: the extended-status
+    /// arms store raw `duration_ticks` (not `expires_at_tick`),
+    /// consistent with the multi-tick effect family (DoT/HoT/TimedShield).
+    /// Pin per-variant kind tags (54..57) and per-shape duration offsets.
+    #[test]
+    fn extended_status_chronicle_records_use_kinds_54_57() {
+        // Stealth — caster-self status (no target in engine event).
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::Stealth { source: aid(7), duration_ticks: 50 },
+            /*tick*/ 100,
+            /*caster_id*/ 7,
+            /*target_id*/ 7,
+        )
+        .expect("Stealth has chronicle counterpart");
+        assert_eq!(rec[0], 54, "Stealth: kind tag — EffectStealthApplied");
+        assert_eq!(rec[1], 100, "Stealth: tick");
+        assert_eq!(rec[2], 7, "Stealth: actor slot — caster_id");
+        assert_eq!(rec[3], 50, "Stealth: duration_ticks at payload word 1 (raw u32)");
+        for i in 4..CHRONICLE_RECORD_STRIDE_U32 {
+            assert_eq!(rec[i], 0, "Stealth: tail word {i} should be zero");
+        }
+
+        // Charm — target-cast status (3 payload words).
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::Charm { target: aid(11), duration_ticks: 30 },
+            /*tick*/ 200,
+            /*caster_id*/ 7,
+            /*target_id*/ 11,
+        )
+        .expect("Charm has chronicle counterpart");
+        assert_eq!(rec[0], 55, "Charm: kind tag — EffectCharmApplied");
+        assert_eq!(rec[1], 200, "Charm: tick");
+        assert_eq!(rec[2], 7, "Charm: actor slot — caster_id");
+        assert_eq!(rec[3], 11, "Charm: target slot — target_id");
+        assert_eq!(rec[4], 30, "Charm: duration_ticks at payload word 2 (raw u32)");
+        for i in 5..CHRONICLE_RECORD_STRIDE_U32 {
+            assert_eq!(rec[i], 0, "Charm: tail word {i} should be zero");
+        }
+
+        // Grounded — same shape as Charm.
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::Grounded { target: aid(11), duration_ticks: 25 },
+            /*tick*/ 300,
+            /*caster_id*/ 7,
+            /*target_id*/ 11,
+        )
+        .expect("Grounded has chronicle counterpart");
+        assert_eq!(rec[0], 56, "Grounded: kind tag — EffectGroundedApplied");
+        assert_eq!(rec[1], 300, "Grounded: tick");
+        assert_eq!(rec[2], 7, "Grounded: actor slot — caster_id");
+        assert_eq!(rec[3], 11, "Grounded: target slot — target_id");
+        assert_eq!(rec[4], 25, "Grounded: duration_ticks at payload word 2");
+        for i in 5..CHRONICLE_RECORD_STRIDE_U32 {
+            assert_eq!(rec[i], 0, "Grounded: tail word {i} should be zero");
+        }
+
+        // Suppress — same shape as Charm/Grounded.
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::Suppress { target: aid(11), duration_ticks: 40 },
+            /*tick*/ 400,
+            /*caster_id*/ 7,
+            /*target_id*/ 11,
+        )
+        .expect("Suppress has chronicle counterpart");
+        assert_eq!(rec[0], 57, "Suppress: kind tag — EffectSuppressApplied");
+        assert_eq!(rec[1], 400, "Suppress: tick");
+        assert_eq!(rec[2], 7, "Suppress: actor slot — caster_id");
+        assert_eq!(rec[3], 11, "Suppress: target slot — target_id");
+        assert_eq!(rec[4], 40, "Suppress: duration_ticks at payload word 2");
+        for i in 5..CHRONICLE_RECORD_STRIDE_U32 {
+            assert_eq!(rec[i], 0, "Suppress: tail word {i} should be zero");
         }
     }
 
@@ -870,6 +998,10 @@ mod tests {
                 20 => ApplyEvent::DamageOverTime { source: aid(1), target: aid(2), amount: 5.0, duration_ticks: 30 },
                 21 => ApplyEvent::HealOverTime   { source: aid(1), target: aid(2), amount: 3.0, duration_ticks: 30 },
                 22 => ApplyEvent::TimedShield    { source: aid(1), target: aid(2), amount: 25.0, duration_ticks: 30 },
+                27 => ApplyEvent::Stealth        { source: aid(1), duration_ticks: 50 },
+                28 => ApplyEvent::Charm          { target: aid(2), duration_ticks: 50 },
+                29 => ApplyEvent::Grounded       { target: aid(2), duration_ticks: 50 },
+                30 => ApplyEvent::Suppress       { target: aid(2), duration_ticks: 50 },
                 _ => panic!("unexpected effect_kind in table"),
             }
         };

@@ -862,6 +862,29 @@ fn fields_to_event(
             let duration_ticks = field_u32(fields, "duration_ticks").unwrap_or(0);
             Some(Event::EffectTimedShieldApplied { actor, target, amount, duration_ticks, tick })
         }
+        "EffectStealthApplied" => {
+            let actor          = field_agent(fields, "actor")?;
+            let duration_ticks = field_u32(fields, "duration_ticks").unwrap_or(0);
+            Some(Event::EffectStealthApplied { actor, duration_ticks, tick })
+        }
+        "EffectCharmApplied" => {
+            let actor          = field_agent(fields, "actor")?;
+            let target         = field_agent(fields, "target")?;
+            let duration_ticks = field_u32(fields, "duration_ticks").unwrap_or(0);
+            Some(Event::EffectCharmApplied { actor, target, duration_ticks, tick })
+        }
+        "EffectGroundedApplied" => {
+            let actor          = field_agent(fields, "actor")?;
+            let target         = field_agent(fields, "target")?;
+            let duration_ticks = field_u32(fields, "duration_ticks").unwrap_or(0);
+            Some(Event::EffectGroundedApplied { actor, target, duration_ticks, tick })
+        }
+        "EffectSuppressApplied" => {
+            let actor          = field_agent(fields, "actor")?;
+            let target         = field_agent(fields, "target")?;
+            let duration_ticks = field_u32(fields, "duration_ticks").unwrap_or(0);
+            Some(Event::EffectSuppressApplied { actor, target, duration_ticks, tick })
+        }
         "EffectSlowApplied" => {
             let actor           = field_agent(fields, "actor")?;
             let target          = field_agent(fields, "target")?;

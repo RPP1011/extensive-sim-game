@@ -97,6 +97,19 @@ pub const ENGINE_EVENT_KIND_IDS: &[(&str, u32)] = &[
     ("EffectDamageOverTimeApplied", 51),
     ("EffectHealOverTimeApplied",   52),
     ("EffectTimedShieldApplied",    53),
+    // Extended-corpus statuses (Stealth/Charm/Grounded/Suppress).
+    // Stealth is caster-self stealth: payload is actor + duration_ticks
+    // (no target field on engine event). Charm/Grounded/Suppress are
+    // target-cast: payload is actor + target + duration_ticks. All four
+    // store raw `duration_ticks` (rather than expires_at_tick) — same
+    // convention as the multi-tick effect shapes (51..53). Slots 54..57
+    // are contiguous with the Wave 1.5+ multi-tick effects (51..53). No
+    // consumer rule in any sim today; the dispatcher write end-to-end
+    // works without a fold consumer.
+    ("EffectStealthApplied",  54),
+    ("EffectCharmApplied",    55),
+    ("EffectGroundedApplied", 56),
+    ("EffectSuppressApplied", 57),
 ];
 
 /// Look up the engine-defined `EventKindId` discriminant for an
@@ -140,6 +153,10 @@ mod tests {
         assert_eq!(engine_event_kind_id_for_name("EffectDamageOverTimeApplied"), Some(51));
         assert_eq!(engine_event_kind_id_for_name("EffectHealOverTimeApplied"), Some(52));
         assert_eq!(engine_event_kind_id_for_name("EffectTimedShieldApplied"), Some(53));
+        assert_eq!(engine_event_kind_id_for_name("EffectStealthApplied"), Some(54));
+        assert_eq!(engine_event_kind_id_for_name("EffectCharmApplied"), Some(55));
+        assert_eq!(engine_event_kind_id_for_name("EffectGroundedApplied"), Some(56));
+        assert_eq!(engine_event_kind_id_for_name("EffectSuppressApplied"), Some(57));
     }
 
     #[test]

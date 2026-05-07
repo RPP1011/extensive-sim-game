@@ -182,7 +182,30 @@ pub enum EventKindId {
     EffectDamageOverTimeApplied = 51,
     EffectHealOverTimeApplied   = 52,
     EffectTimedShieldApplied    = 53,
-    // Slots 54-127 reserved for replayable event variants added in later tasks.
+    // Extended-corpus statuses (Stealth/Charm/Grounded/Suppress).
+    // Stealth is caster-self (the actor goes invisible, no target field
+    // on the engine event); Charm/Grounded/Suppress mirror Stun's shape
+    // (actor + target + duration_ticks) — apply to a target agent for
+    // a deadline window. The `apply_ability` dispatcher writes these
+    // from the per-effect-slot arm chain when the corresponding
+    // `EffectOp` slot fires; consumer physics rules can fold them back
+    // into per-agent state the same way other effect chronicle records
+    // flow into SoA-fold rules (consumer wiring deferred — no sim
+    // currently uses these statuses).
+    //
+    // SHAPE NOTE: Stealth records carry only `duration_ticks` (no
+    // expires_at_tick fold by the dispatcher) — symmetric with the
+    // multi-tick effect shapes (DoT/HoT/TimedShield, kinds 51..53)
+    // which also store raw `duration_ticks` for a future consumer to
+    // re-emit per-tick. Charm/Grounded/Suppress also store raw
+    // `duration_ticks` (rather than `expires_at_tick`) — same convention,
+    // distinct from the legacy Stun/Slow/Root/Silence/Fear/Taunt arms
+    // (kinds 29/30/43..46) which fold the deadline at dispatch time.
+    EffectStealthApplied    = 54,
+    EffectCharmApplied      = 55,
+    EffectGroundedApplied   = 56,
+    EffectSuppressApplied   = 57,
+    // Slots 58-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 

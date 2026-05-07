@@ -2131,6 +2131,23 @@ pub(crate) const EFFECT_KIND_TO_EVENT_KIND_ID: &[(u32, u32)] = &[
     (20, 51), // EffectOp::DamageOverTime → EventKindId::EffectDamageOverTimeApplied
     (21, 52), // EffectOp::HealOverTime   → EventKindId::EffectHealOverTimeApplied
     (22, 53), // EffectOp::TimedShield    → EventKindId::EffectTimedShieldApplied
+    // Extended-corpus statuses — Stealth (caster-self) plus Charm/
+    // Grounded/Suppress (target-cast). Stealth shares Dash's payload
+    // shape: actor + payload_a-as-u32 (duration_ticks here, not bitcast
+    // f32 like Dash's distance) at slot 3, no target word. Charm/
+    // Grounded/Suppress share Stun's 3-payload-word shape (actor +
+    // target + duration_ticks at slot 4) but store raw `duration_ticks`
+    // rather than `expires_at_tick` — consistent with the multi-tick
+    // effect family (DoT/HoT/TimedShield, kinds 51..53). The packed
+    // effect-kind ordinals (Stealth=27, Charm=28, Grounded=29,
+    // Suppress=30) come from `pack_effect` in
+    // `crates/engine/src/ability/packed.rs`; the dispatcher arm bodies
+    // for these in `emit_chronicle_arm_chain` (below) match these
+    // ordinals via `kind == 27u..=30u`.
+    (27, 54), // EffectOp::Stealth   → EventKindId::EffectStealthApplied
+    (28, 55), // EffectOp::Charm     → EventKindId::EffectCharmApplied
+    (29, 56), // EffectOp::Grounded  → EventKindId::EffectGroundedApplied
+    (30, 57), // EffectOp::Suppress  → EventKindId::EffectSuppressApplied
 ];
 
 /// Look up the runtime `EventKindId` for an `EffectOp` discriminant.
@@ -2228,6 +2245,14 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain HealOverTime=21");
     let timed_shield_event_id = event_kind_id_for_effect_kind(22)
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain TimedShield=22");
+    let stealth_event_id = event_kind_id_for_effect_kind(27)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Stealth=27");
+    let charm_event_id = event_kind_id_for_effect_kind(28)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Charm=28");
+    let grounded_event_id = event_kind_id_for_effect_kind(29)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Grounded=29");
+    let suppress_event_id = event_kind_id_for_effect_kind(30)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Suppress=30");
 
     let i4  = indent;                   // arm `if`/`else if` lines
     let i8  = format!("{i4}    ");      // body of arm
@@ -2471,19 +2496,85 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
-    // TODO arms for kinds 27..30 (Stealth/Charm/Grounded/Suppress)
+    // Extended-corpus statuses (Stealth/Charm/Grounded/Suppress).
+    // Stealth is caster-self stealth: 2-payload-word chronicle record
+    // (actor + duration_ticks at ring slot 3) — same family as
+    // Dash/Blink (caster-self motion). The dispatcher writes
+    // `target_slot` is NOT consulted here — the engine event has no
+    // target field, so we mirror Dash's slot layout: payload_a (raw u32
+    // duration) lands at slot 3.
+    // Charm/Grounded/Suppress are target-cast: 3-payload-word chronicle
+    // record (actor + target + duration_ticks at ring slot 4) — same
+    // family as Knockback/Pull (forced-motion-on-target shape). Distinct
+    // from Stun/Root/Silence/Fear/Taunt: those fold the deadline
+    // (`expires_at_tick = tick + duration_ticks`); we store the raw
+    // duration here, consistent with the multi-tick effect family
+    // (DoT/HoT/TimedShield, kinds 51..53), so a future consumer rule
+    // can compute its own per-tick re-emission window.
+
+    // Stealth = 27 → 54
     s.push_str(&format!("{i4}}} else if (kind == 27u) {{\n"));
-    s.push_str(&format!("{i8}// Stealth: payload_a = duration_ticks (u32, self-cast)\n"));
-    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_stealth(caster, payload_a);\n"));
+    s.push_str(&format!("{i8}// Stealth = 27 → EventKindId::EffectStealthApplied = 54\n"));
+    s.push_str(&format!("{i8}// payload_a = duration_ticks (u32); caster-self stealth\n"));
+    s.push_str(&format!("{i8}// (no target field on engine event — same shape as Dash/Blink)\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectStealthApplied (caster_slot + duration_ticks)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {stealth_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (payload_a));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // Charm = 28 → 55
     s.push_str(&format!("{i4}}} else if (kind == 28u) {{\n"));
-    s.push_str(&format!("{i8}// Charm: payload_a = duration_ticks (u32)\n"));
-    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_charm(target, payload_a);\n"));
+    s.push_str(&format!("{i8}// Charm = 28 → EventKindId::EffectCharmApplied = 55\n"));
+    s.push_str(&format!("{i8}// payload_a = duration_ticks (u32); target-cast charm\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectCharmApplied (caster_slot + target_slot + duration_ticks)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {charm_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // Grounded = 29 → 56
     s.push_str(&format!("{i4}}} else if (kind == 29u) {{\n"));
-    s.push_str(&format!("{i8}// Grounded: payload_a = duration_ticks (u32)\n"));
-    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_grounded(target, payload_a);\n"));
+    s.push_str(&format!("{i8}// Grounded = 29 → EventKindId::EffectGroundedApplied = 56\n"));
+    s.push_str(&format!("{i8}// payload_a = duration_ticks (u32); target-cast grounded\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectGroundedApplied (caster_slot + target_slot + duration_ticks)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {grounded_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // Suppress = 30 → 57
     s.push_str(&format!("{i4}}} else if (kind == 30u) {{\n"));
-    s.push_str(&format!("{i8}// Suppress: payload_a = duration_ticks (u32)\n"));
-    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_suppress(target, payload_a);\n"));
+    s.push_str(&format!("{i8}// Suppress = 30 → EventKindId::EffectSuppressApplied = 57\n"));
+    s.push_str(&format!("{i8}// payload_a = duration_ticks (u32); target-cast suppress\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectSuppressApplied (caster_slot + target_slot + duration_ticks)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {suppress_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
 
     // TransferGold = 5 → 31
     s.push_str(&format!("{i4}}} else if (kind == 5u) {{\n"));
@@ -5251,15 +5342,14 @@ mod tests {
         // Wave 1.5+ — DamageOverTime/HealOverTime/TimedShield are now
         // wired (kinds 51/52/53), no longer carry TODO markers; see the
         // explicit assertions below.
+        // Extended-status slice — Stealth/Charm/Grounded/Suppress are
+        // now wired (kinds 54/55/56/57), no longer carry TODO markers;
+        // see the explicit assertions below.
         for marker in &[
             "chronicle_append_buff",
             "chronicle_append_summon",
             "chronicle_append_harvest",
             "chronicle_append_place_voxel",
-            "chronicle_append_stealth",
-            "chronicle_append_charm",
-            "chronicle_append_grounded",
-            "chronicle_append_suppress",
             "chronicle_append_reflect",
         ] {
             assert!(
@@ -5385,6 +5475,52 @@ mod tests {
             wgsl.contains("atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));"),
             "DoT/HoT/TimedShield arms must store duration_ticks at payload \
              word 3 (ring offset 5) as raw u32 (= payload_b);\n{wgsl}"
+        );
+
+        // Extended-status slice — Stealth/Charm/Grounded/Suppress now
+        // write real chronicle records (kinds 54/55/56/57). Stealth is
+        // caster-self status (no target slot in the engine event),
+        // duration at payload word 1 (= ring slot offset 3). Charm/
+        // Grounded/Suppress are target-cast statuses, duration at
+        // payload word 2 (= ring slot offset 4). Pin the kind tags so
+        // a regression that drops the wire-up surfaces here.
+        for (kind_token, expected_event_id, name) in &[
+            ("kind == 27u", 54u32, "Stealth"),
+            ("kind == 28u", 55u32, "Charm"),
+            ("kind == 29u", 56u32, "Grounded"),
+            ("kind == 30u", 57u32, "Suppress"),
+        ] {
+            assert!(
+                !wgsl.contains(&format!(
+                    "TODO slice γ: chronicle_append_{}",
+                    name.to_lowercase()
+                )),
+                "{name} arm should no longer carry the TODO marker;\n{wgsl}"
+            );
+            assert!(
+                wgsl.contains(kind_token),
+                "{name} arm dispatch ({kind_token}) must be present;\n{wgsl}"
+            );
+            assert!(
+                wgsl.contains(&format!(
+                    "atomicStore(&event_ring[_slot * 10u + 0u], {expected_event_id}u);"
+                )),
+                "{name} arm must store kind={expected_event_id};\n{wgsl}"
+            );
+        }
+        // Stealth: duration_ticks at slot 3 (raw u32 from payload_a, no
+        // target field). Charm/Grounded/Suppress: duration_ticks at slot
+        // 4 (raw u32 from payload_a, target at slot 3). Pin both shapes
+        // so a regression that swaps them surfaces here.
+        assert!(
+            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 3u], (payload_a));"),
+            "Stealth arm must store duration_ticks at payload word 1 \
+             (ring offset 3) as raw u32 (= payload_a, no target field);\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));"),
+            "Charm/Grounded/Suppress arms must store duration_ticks at \
+             payload word 2 (ring offset 4) as raw u32 (= payload_a);\n{wgsl}"
         );
 
         // Slice γ — Damage arm wiring assertions.
@@ -5650,7 +5786,11 @@ mod tests {
                 20 => EffectOp::DamageOverTime { amount: 5.0, duration_ticks: 30 },
                 21 => EffectOp::HealOverTime   { amount: 3.0, duration_ticks: 30 },
                 22 => EffectOp::TimedShield    { amount: 25.0, duration_ticks: 30 },
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22"),
+                27 => EffectOp::Stealth   { duration_ticks: 50 },
+                28 => EffectOp::Charm     { duration_ticks: 50 },
+                29 => EffectOp::Grounded  { duration_ticks: 50 },
+                30 => EffectOp::Suppress  { duration_ticks: 50 },
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30"),
             }
         };
 
@@ -5680,7 +5820,11 @@ mod tests {
                 20 => EngineEventKindId::EffectDamageOverTimeApplied as u32,
                 21 => EngineEventKindId::EffectHealOverTimeApplied   as u32,
                 22 => EngineEventKindId::EffectTimedShieldApplied    as u32,
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22"),
+                27 => EngineEventKindId::EffectStealthApplied        as u32,
+                28 => EngineEventKindId::EffectCharmApplied          as u32,
+                29 => EngineEventKindId::EffectGroundedApplied       as u32,
+                30 => EngineEventKindId::EffectSuppressApplied       as u32,
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30"),
             }
         };
 
@@ -5740,6 +5884,15 @@ mod tests {
             "HealOverTime → EffectHealOverTimeApplied (Wave 1.5+)");
         assert_eq!(event_kind_id_for_effect_kind(22), Some(53),
             "TimedShield → EffectTimedShieldApplied (Wave 1.5+)");
+        // Extended-corpus statuses now wired:
+        assert_eq!(event_kind_id_for_effect_kind(27), Some(54),
+            "Stealth → EffectStealthApplied (extended status)");
+        assert_eq!(event_kind_id_for_effect_kind(28), Some(55),
+            "Charm → EffectCharmApplied (extended status)");
+        assert_eq!(event_kind_id_for_effect_kind(29), Some(56),
+            "Grounded → EffectGroundedApplied (extended status)");
+        assert_eq!(event_kind_id_for_effect_kind(30), Some(57),
+            "Suppress → EffectSuppressApplied (extended status)");
         assert_eq!(event_kind_id_for_effect_kind(7), None,
             "CastAbility (recursive dispatch) has no chronicle kind");
         assert_eq!(event_kind_id_for_effect_kind(23), None,
@@ -5748,7 +5901,7 @@ mod tests {
 
     #[test]
     fn effect_kind_to_event_kind_map_covers_chronicle_bearing_variants_only() {
-        // 22 chronicle-bearing variants today — Damage/Heal/Shield/Stun/
+        // 26 chronicle-bearing variants today — Damage/Heal/Shield/Stun/
         // Slow/TransferGold/ModifyStanding + SelfDamage (Bleed verb
         // swap, Task #138 follow-on, 2026-05-06) + LifeSteal (Vampirize
         // verb swap, Task #138 follow-on, mirror of Bleed) + DamageModify
@@ -5757,15 +5910,16 @@ mod tests {
         // Fortify — closes the slice across all 8 duel_abilities verbs)
         // + Root/Silence/Fear/Taunt (Wave 2 piece 1, control statuses)
         // + Dash/Blink/Knockback/Pull (Wave 2 piece 2, movement EffectOps)
-        // + DamageOverTime/HealOverTime/TimedShield (Wave 1.5+ multi-tick).
+        // + DamageOverTime/HealOverTime/TimedShield (Wave 1.5+ multi-tick)
+        // + Stealth/Charm/Grounded/Suppress (extended-corpus statuses).
         // If this number changes, either the engine grew a new
         // `EffectXxxApplied` event (in which case the map gets a new
         // entry) or a variant lost its chronicle counterpart (in which
         // case the map drops an entry). Pin the count so the gap between
         // source-of-truths is loud.
         assert_eq!(
-            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 22,
-            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 22 \
+            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 26,
+            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 26 \
              chronicle-bearing variants today; if you added or removed an \
              entry, update this assertion (and the slice γ wire-up that \
              consumes the new entry)"
