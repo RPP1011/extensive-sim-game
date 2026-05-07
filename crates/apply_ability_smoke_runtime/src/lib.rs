@@ -152,6 +152,28 @@ pub struct ApplyAbilitySmokeState {
     agent_move_speed_buf: wgpu::Buffer,
     agent_mana_buf: wgpu::Buffer,
 
+    // #182 AOE Path B non-degenerate-direction pin: per-agent
+    // `engaged_with` SoA column. Read by the third physics rule
+    // (`DispatchAbilityToOther`) at `target = agents.engaged_with(self)`
+    // — the dispatcher kernel emits
+    //   `let target_slot: u32 = u32(agent_engaged_with[agent_id]);`
+    // so the cast's target slot is decoupled from `caster_slot`. With a
+    // non-self target, Cone / Line / Wall (and any other direction-bearing
+    // shape) form a non-degenerate `apex → target_pos` axis and the GPU
+    // walk's spatial filter actually gates candidates instead of
+    // collapsing through the `dir_len_sq < 1e-6 → no-op` branch.
+    //
+    // Encoding: raw u32 holding the 0-based slot index (matches
+    // `target_chaser_runtime`'s `engaged_with_init` convention — slot 0
+    // points at slot 0, slot 1 points at slot 0, etc.; the kernel reads
+    // `agent_engaged_with[caster] as u32` directly without offset). The
+    // None-sentinel (`0xFFFFFFFFu`) is the caller's responsibility for
+    // any agent the kernel will dispatch from — the smoke fixture only
+    // marks the caster alive, so the engaged_with value of the others is
+    // dead-store and the kernel's `where (self.alive)` gate prevents the
+    // sentinel from feeding into a pos read.
+    agent_engaged_with_buf: wgpu::Buffer,
+
     // #121 AOE Path B: spatial-grid state read by the dispatcher's
     // 27-cell walk. The smoke runtime pre-populates these on the host
     // (no real BuildHash kernel runs in this fixture's schedule); the
@@ -369,6 +391,23 @@ impl ApplyAbilitySmokeState {
             mk_stat_col("apply_ability_smoke_runtime::agent_move_speed",    |s| s.move_speed);
         let agent_mana_buf          =
             mk_stat_col("apply_ability_smoke_runtime::agent_mana",          |s| s.mana);
+        // #182: per-agent `engaged_with` column. Default-init to the
+        // caster's own slot for every agent (raw u32 = slot index). The
+        // explicit-target physics rule reads
+        // `agent_engaged_with[caster]` to drive `target_slot`; callers
+        // override the caster's entry via `set_agent_engaged_with` to
+        // dispatch at a non-self target. Default-self matches the
+        // existing degenerate-cone test fixture's behavior so that
+        // dispatching the new kernel without overrides reproduces the
+        // self-cast (degenerate) outcome — useful as the default
+        // behavioral floor; non-degenerate tests must opt in.
+        let engaged_with_init: Vec<u32> = (0..n_agents).collect();
+        let agent_engaged_with_buf =
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("apply_ability_smoke_runtime::agent_engaged_with"),
+                contents: bytemuck::cast_slice(&engaged_with_init),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            });
         // NOTE: AbilityPower has no per-agent SoA column on the GPU
         // (the dispatcher's `agent_stat()` switch returns 0.0 for
         // ScalingStatRef::AbilityPower). The CPU oracle's
@@ -452,6 +491,7 @@ impl ApplyAbilitySmokeState {
             agent_magic_resist_buf,
             agent_move_speed_buf,
             agent_mana_buf,
+            agent_engaged_with_buf,
             spatial_grid_cells_buf,
             spatial_grid_starts_buf,
             registry_gpu,
@@ -583,6 +623,39 @@ impl ApplyAbilitySmokeState {
         );
     }
 
+    /// Overwrite per-agent `engaged_with` slots. Used by the
+    /// explicit-target AOE pins (`tests/aoe_chronicle_pin.rs::aoe_*_
+    /// non_degenerate_*`) to seed the caster's engagement target so the
+    /// `DispatchAbilityToOther` kernel computes a non-self `target_slot
+    /// = agent_engaged_with[caster_slot]`. With a real non-self target,
+    /// the apex→target_pos direction is non-degenerate and the Cone /
+    /// Line / Wall walks gate candidates by their actual angular /
+    /// corridor predicate instead of short-circuiting through the
+    /// `dir_len_sq < 1e-6 → no-op` branch.
+    ///
+    /// Encoding: raw u32 = 0-based slot index. Mirror of
+    /// `target_chaser_runtime`'s `engaged_with_init` convention — the
+    /// kernel reads `agent_engaged_with[caster_slot]` and feeds it
+    /// directly into `agent_pos[target_slot]` / spatial walks. Caller
+    /// MUST keep the value in `[0, n_agents)` for any caster slot the
+    /// kernel will run on (the `where (self.alive)` gate prevents reads
+    /// for dead agents — set their engaged_with however you like, it's
+    /// dead-store).
+    pub fn set_agent_engaged_with(&self, engaged_with: &[u32]) {
+        assert_eq!(
+            engaged_with.len(),
+            self.n_agents as usize,
+            "engaged_with slice must have one entry per agent (got {} for {} agents)",
+            engaged_with.len(),
+            self.n_agents,
+        );
+        self.gpu.queue.write_buffer(
+            &self.agent_engaged_with_buf,
+            0,
+            bytemuck::cast_slice(engaged_with),
+        );
+    }
+
     /// Encode + dispatch one tick of `physics_DispatchAbility`.
     /// The encoder also clears `event_tail` to zero before the
     /// dispatch (so producers atomicAdd from 0).
@@ -659,6 +732,97 @@ impl ApplyAbilitySmokeState {
         );
 
         self.gpu.queue.submit(Some(encoder.finish()));
+    }
+
+    /// Encode + dispatch one tick of `physics_DispatchAbilityToOther`
+    /// — the third physics rule whose `target` operand reads
+    /// `agents.engaged_with(self)`. The dispatcher kernel emits
+    /// `target_slot = u32(agent_engaged_with[caster_slot])`, decoupling
+    /// the target slot from the caster slot. With a non-self target
+    /// seeded via `set_agent_engaged_with`, AOE shapes that gate on
+    /// apex→target direction (Cone / Line / Wall) hit a non-degenerate
+    /// branch; the GPU walk then filters candidates by their actual
+    /// angular / corridor predicate instead of short-circuiting.
+    ///
+    /// Mirrors `step_with_seed` for the ring-clear + cfg uniform write,
+    /// just routes through the new kernel's dispatch fn (which has the
+    /// extra `agent_engaged_with` binding). Same `cfg.seed` shape →
+    /// chance gates draw bit-for-bit identically across the two
+    /// kernels (the seed flows through `per_agent_u32_with_extra`
+    /// keyed on `caster_slot`, not on the kernel id).
+    pub fn step_explicit_target_with_seed(&mut self, tick: u32, seed: u32) {
+        let cfg = physics_DispatchAbilityToOther::PhysicsDispatchAbilityToOtherCfg {
+            agent_cap: self.n_agents,
+            tick,
+            seed,
+            _pad: 0,
+        };
+        // `physics_cfg_buf` is shared across kernels (same 16-byte
+        // `{agent_cap, tick, seed, _pad}` shape) — overwrite it with
+        // this kernel's cfg before recording.
+        self.gpu
+            .queue
+            .write_buffer(&self.physics_cfg_buf, 0, bytemuck::bytes_of(&cfg));
+
+        let mut encoder =
+            self.gpu
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("apply_ability_smoke_runtime::step_explicit_target"),
+                });
+
+        encoder.copy_buffer_to_buffer(&self.event_tail_zero, 0, &self.event_tail_buf, 0, 4);
+
+        let bindings =
+            physics_DispatchAbilityToOther::PhysicsDispatchAbilityToOtherBindings {
+                event_ring: &self.event_ring_buf,
+                event_tail: &self.event_tail_buf,
+                agent_alive: &self.agent_alive_buf,
+                agent_level: &self.agent_level_buf,
+                agent_pos:           &self.agent_pos_buf,
+                agent_engaged_with:  &self.agent_engaged_with_buf,
+                ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+                ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+                ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+                ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+                ability_registry_nested_effect_payload_a:
+                    &self.registry_gpu.nested_effect_payload_a,
+                ability_registry_nested_effect_payload_b:
+                    &self.registry_gpu.nested_effect_payload_b,
+                ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+                ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
+                ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
+                ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
+                ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
+                ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
+                ability_registry_chances:           &self.registry_gpu.chances,
+                ability_registry_area_kinds:        &self.registry_gpu.area_kinds,
+                ability_registry_area_args:         &self.registry_gpu.area_args,
+                spatial_grid_cells:  &self.spatial_grid_cells_buf,
+                spatial_grid_starts: &self.spatial_grid_starts_buf,
+                agent_attack_damage: &self.agent_attack_damage_buf,
+                agent_max_hp:        &self.agent_max_hp_buf,
+                agent_hp:            &self.agent_hp_buf,
+                agent_armor:         &self.agent_armor_buf,
+                agent_magic_resist:  &self.agent_magic_resist_buf,
+                agent_move_speed:    &self.agent_move_speed_buf,
+                agent_mana:          &self.agent_mana_buf,
+                cfg: &self.physics_cfg_buf,
+            };
+        dispatch::dispatch_physics_dispatchabilitytoother(
+            &mut self.cache,
+            &bindings,
+            &self.gpu.device,
+            &mut encoder,
+            self.n_agents,
+        );
+
+        self.gpu.queue.submit(Some(encoder.finish()));
+    }
+
+    /// Convenience wrapper for `step_explicit_target_with_seed(tick, 0)`.
+    pub fn step_explicit_target(&mut self, tick: u32) {
+        self.step_explicit_target_with_seed(tick, 0);
     }
 
     /// Block on the GPU and read back `event_tail`. Returns the

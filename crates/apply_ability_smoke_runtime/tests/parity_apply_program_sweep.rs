@@ -52,6 +52,9 @@
 //!  34. `Damage(18) in sphere(2.0)`                  — BlastSphere-shape (#180 AOE Path B Sphere, 4-agent row, alias of Circle)
 //!  35. `Damage(14) in ring(0.5, 2.0)`               — ShockwaveRing-shape (#180 AOE Path B Ring, 4-agent row, inner-excludes slot 0)
 //!  36. `Damage(22) in line(5.0, 1.0)`               — PiercingLine-shape (#180 AOE Path B Line, 4-agent row, degenerate self-cast)
+//!  43. `Damage(25) in cone(45°, 5)`                  — NonDegSlash-shape (#182 explicit-target Cone, 5-agent fan, +X direction)
+//!  44. `Damage(22) in line(5.0, 1.0)`                — NonDegPiercingLine-shape (#182 explicit-target Line, 4-agent fixture, +X direction)
+//!  45. `Damage(11) in wall(4, 2, 2, 0°)`             — NonDegShieldWall-shape (#182 explicit-target Wall, 4-agent fixture, slab at target)
 //!
 //! M = 1 caster×target permutation in this fixture: `(c=0, t=0)`
 //! self-cast. The smoke fixture's `apply_ability` source uses the
@@ -916,6 +919,95 @@ fn build_sweep() -> Vec<(&'static str, AbilityProgram, CasterStats)> {
         CasterStats::default(),
     ));
 
+    // ---- Non-degenerate direction-bearing AOE shapes (#182). ----
+    //
+    // The Slash/PiercingLine/ShieldWall entries above all dispatch
+    // through the `DispatchAbility` (target=self) physics rule; under
+    // self-cast, Cone and Line collapse to the `dir_len_sq < 1e-6 →
+    // no-op` branch and Wall centers its slab at the caster (covering
+    // the same agents as a target=self cast). The CPU oracle has full
+    // direction-aware coverage in unit tests, but the GPU branches that
+    // gate on a non-zero apex→target direction were unexercised in the
+    // sweep matrix before #182. The three entries below dispatch through
+    // the new `DispatchAbilityToOther` physics rule (target =
+    // agents.engaged_with(self)); the test runner seeds engaged_with[0]
+    // = 1 so target_slot = 1, the cone faces the target, and the GPU
+    // walk's angular / corridor / closed-AABB gates fire on real
+    // candidates. Both backends compute the in-shape set on the same
+    // (apex, target_pos) → byte-equal chronicle records.
+    //
+    // Position layouts mirror the explicit-target pins in
+    // `aoe_chronicle_pin.rs::aoe_*_non_degenerate_*` so the same
+    // CPU-oracle slot-set drives both pin shapes.
+
+    // 43. NonDegSlash-shape — `Damage(25) in cone(45°, 5)` (#182). Apex
+    //     = caster slot 0 at (0,0,0); target slot 1 at (4,0,0) drives
+    //     the +X direction. 5-agent fan layout. Expected hit set =
+    //     {slot 1 (on-axis), slot 2 (in-cone, dot ≈ 0.949)}; slot 0
+    //     apex-excluded, slot 3 off-axis (dot ≈ 0.316), slot 4 out-of-
+    //     range (dist=6 > 5). Both backends emit 2 chronicle records.
+    let mut non_deg_slash = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 25.0 }],
+    );
+    non_deg_slash.per_effect_areas.push(Some(engine::ability::program::EffectAreaShape {
+        kind: engine::ability::program::ShapeKind::Cone,
+        args: [45.0, 5.0, 0.0, 0.0],
+    }));
+    out.push((
+        "NonDegSlash",
+        non_deg_slash,
+        CasterStats::default(),
+    ));
+
+    // 44. NonDegPiercingLine-shape — `Damage(22) in line(5.0, 1.0)`
+    //     (#182). Apex = caster slot 0 at (0,0,0); target slot 1 at
+    //     (4,0,0) drives +X direction. 4-agent layout. Expected hit
+    //     set = {slot 0 (apex, along=0), slot 1 (target, along=4),
+    //     slot 2 (along=2, perp²=0.16 ≤ 0.25)}; slot 3 perp²=0.36 >
+    //     0.25 outside corridor. Both backends emit 3 chronicle
+    //     records. Note Line has NO apex-exclusion (unlike Cone) — the
+    //     caster is in-corridor at along=0.
+    let mut non_deg_piercing_line = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 22.0 }],
+    );
+    non_deg_piercing_line.per_effect_areas.push(Some(engine::ability::program::EffectAreaShape {
+        kind: engine::ability::program::ShapeKind::Line,
+        args: [5.0, 1.0, 0.0, 0.0],
+    }));
+    out.push((
+        "NonDegPiercingLine",
+        non_deg_piercing_line,
+        CasterStats::default(),
+    ));
+
+    // 45. NonDegShieldWall-shape — `Damage(11) in wall(4, 2, 2, 0°)`
+    //     (#182). Wall is centered at agent_pos[target_slot] (slot 1
+    //     at (3,0,0)) with fixed +X facing. 4-agent layout. Expected
+    //     hit set = {slot 1 (slab origin), slot 2 (forward=1.5 ≤ 2)};
+    //     slot 0 forward=-3 (behind), slot 3 forward=2.5 > thickness=2
+    //     out. Both backends emit 2 chronicle records. Distinguishes
+    //     "wall centered at target" from "wall centered at caster" —
+    //     the existing Slot 0+1 hit-set under self-cast moves to slot
+    //     1+2 when the explicit-target rule shifts the slab.
+    let mut non_deg_shield_wall = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 11.0 }],
+    );
+    non_deg_shield_wall.per_effect_areas.push(Some(engine::ability::program::EffectAreaShape {
+        kind: engine::ability::program::ShapeKind::Wall,
+        args: [4.0, 2.0, 2.0, 0.0],
+    }));
+    out.push((
+        "NonDegShieldWall",
+        non_deg_shield_wall,
+        CasterStats::default(),
+    ));
+
     out
 }
 
@@ -1233,6 +1325,13 @@ fn cpu_gpu_apply_program_byte_equal_across_modifier_matrix() {
             "Dropzone"      => 4,
             "Aegis"         => 4,
             "Bulwark"       => 4,
+            // #182 non-degenerate direction-bearing shapes — caster +
+            // target + extra candidates, dispatched through the new
+            // `DispatchAbilityToOther` physics rule (target =
+            // agents.engaged_with(self)).
+            "NonDegSlash"        => 5,
+            "NonDegPiercingLine" => 4,
+            "NonDegShieldWall"   => 4,
             _               => N_AGENTS,
         };
 
@@ -1385,6 +1484,44 @@ fn cpu_gpu_apply_program_byte_equal_across_modifier_matrix() {
                 [4.5, 0.0, 0.0],
             ]);
         }
+        // #182 non-degenerate direction-bearing AOE setup. Each fixture
+        // seeds caster=slot 0 alive, target=slot 1 alive=0 but at the
+        // direction-driving position, plus the rest of the fan/row at
+        // shape-specific positions. engaged_with[0] = 1 so the dispatcher
+        // computes target_slot = 1 from `agent_engaged_with[caster_slot]`.
+        if *name == "NonDegSlash" {
+            // Cone fan layout, mirrors the explicit-target pin in
+            // `aoe_chronicle_pin.rs::aoe_cone_non_degenerate_*`.
+            state.set_agent_alive(&[1, 0, 0, 0, 0]);
+            state.set_agent_positions(&[
+                [0.0, 0.0, 0.0],   // slot 0: caster apex
+                [4.0, 0.0, 0.0],   // slot 1: target (drives +X direction)
+                [3.0, 1.0, 0.0],   // slot 2: in-cone (dot ≈ 0.949)
+                [1.0, 3.0, 0.0],   // slot 3: off-axis (dot ≈ 0.316)
+                [6.0, 0.0, 0.0],   // slot 4: out of range (d=6 > 5)
+            ]);
+            state.set_agent_engaged_with(&[1, 1, 2, 3, 4]);
+        }
+        if *name == "NonDegPiercingLine" {
+            state.set_agent_alive(&[1, 0, 0, 0]);
+            state.set_agent_positions(&[
+                [0.0, 0.0, 0.0],   // slot 0: caster apex (along=0, perp=0)
+                [4.0, 0.0, 0.0],   // slot 1: target (along=4)
+                [2.0, 0.4, 0.0],   // slot 2: in-corridor (perp²=0.16)
+                [2.0, 0.6, 0.0],   // slot 3: outside corridor (perp²=0.36)
+            ]);
+            state.set_agent_engaged_with(&[1, 1, 2, 3]);
+        }
+        if *name == "NonDegShieldWall" {
+            state.set_agent_alive(&[1, 0, 0, 0]);
+            state.set_agent_positions(&[
+                [0.0, 0.0, 0.0],   // slot 0: caster (forward=-3, behind slab)
+                [3.0, 0.0, 0.0],   // slot 1: target (slab origin → slab x ∈ [3,5])
+                [4.5, 0.0, 0.0],   // slot 2: forward=1.5 ≤ thickness=2 → in
+                [5.5, 0.0, 0.0],   // slot 3: forward=2.5 > thickness → out
+            ]);
+            state.set_agent_engaged_with(&[1, 1, 2, 3]);
+        }
 
         for &tick in TICKS {
             // -- CPU oracle.
@@ -1476,6 +1613,44 @@ fn cpu_gpu_apply_program_byte_equal_across_modifier_matrix() {
                         caster_stats,
                     )
                 }
+                // #182 non-degenerate direction-bearing AOE: the
+                // pre-filtered slot lists below mirror the GPU-side
+                // candidate sets computed by the cone/line/wall WGSL
+                // walks. The CPU oracle's `apply_program_aoe` iterates
+                // these slot lists and emits one ApplyEvent per (op,
+                // target) pair; both backends produce byte-equal
+                // chronicle records when keyed on (actor=caster_slot,
+                // target=per-target slot).
+                //
+                // For Cone:  apex-excluded caster + slot 1 (on-axis) +
+                //            slot 2 (in-cone). Slot 3 off-axis, slot 4
+                //            out-of-range.
+                // For Line:  no apex-exclusion; slots 0+1+2 in-corridor;
+                //            slot 3 perp²=0.36 > 0.25 outside.
+                // For Wall:  centered at slot 1's position; slot 1 +
+                //            slot 2 in-slab; slot 0 behind, slot 3
+                //            past thickness.
+                "NonDegSlash" => aoe_cpu_records_for_cast(
+                    program,
+                    /*caster_slot*/ 0,
+                    /*aoe_target_slots*/ &[1, 2],
+                    tick,
+                    caster_stats,
+                ),
+                "NonDegPiercingLine" => aoe_cpu_records_for_cast(
+                    program,
+                    /*caster_slot*/ 0,
+                    /*aoe_target_slots*/ &[0, 1, 2],
+                    tick,
+                    caster_stats,
+                ),
+                "NonDegShieldWall" => aoe_cpu_records_for_cast(
+                    program,
+                    /*caster_slot*/ 0,
+                    /*aoe_target_slots*/ &[1, 2],
+                    tick,
+                    caster_stats,
+                ),
                 _ => cpu_records_for_cast(
                     program,
                     /*caster_slot*/ 0,
@@ -1490,7 +1665,21 @@ fn cpu_gpu_apply_program_byte_equal_across_modifier_matrix() {
             // -- GPU dispatch. Pin the GPU's cfg.seed to the same
             //    `world_seed as u32` the CPU oracle keys on, so the
             //    chance-gate PCG draws agree bit-for-bit (P11).
-            state.step_with_seed(tick, WORLD_SEED as u32);
+            //
+            // #182: direction-bearing non-degenerate entries dispatch
+            // through the third physics rule (`DispatchAbilityToOther`,
+            // target = agents.engaged_with(self)) so the dispatcher
+            // computes target_slot from `agent_engaged_with[caster_slot]`
+            // (seeded to slot 1 above). All other entries continue to
+            // use the self-cast `DispatchAbility` rule.
+            match *name {
+                "NonDegSlash" | "NonDegPiercingLine" | "NonDegShieldWall" => {
+                    state.step_explicit_target_with_seed(tick, WORLD_SEED as u32);
+                }
+                _ => {
+                    state.step_with_seed(tick, WORLD_SEED as u32);
+                }
+            }
             let tail = state.read_event_tail();
             let mut gpu = state.read_event_ring(tail);
             canonicalize(&mut gpu);
