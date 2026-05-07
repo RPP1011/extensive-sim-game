@@ -1002,3 +1002,320 @@ fn aoe_hull_aliases_sphere_on_gpu() {
         assert_eq!(records[i][4], amount_bits, "hull record {i} payload_a (5.0)");
     }
 }
+
+// ---------------------------------------------------------------- //
+// AOE Path B non-degenerate-direction GPU pins (#182).
+//
+// The pins above route through the smoke fixture's first physics rule
+// (`DispatchAbility`, target=self) — fine for shapes whose math doesn't
+// depend on the apex→target direction (Circle / Sphere / Ring / Box /
+// Spread / Column / Cylinder / Dome / Hull), but the direction-bearing
+// shapes (Cone / Line / Wall) collapse to a degenerate `(0,0,0)`
+// direction under self-cast and the GPU's `dir_len_sq < 1e-6 → no-op`
+// branch fires. The CPU oracle has full coverage for non-degenerate
+// directions; the GPU branches that gate on the actual angular /
+// corridor predicate were unexercised end-to-end on real hardware.
+//
+// The third physics rule in `apply_ability_smoke.sim`
+// (`DispatchAbilityToOther`) reads `target = agents.engaged_with(self)`,
+// so `target_slot` is decoupled from `caster_slot`. The runtime exposes
+// `set_agent_engaged_with(&[u32])` to seed the caster's target slot;
+// `step_explicit_target_with_seed` dispatches the new kernel. With a
+// non-self target, Cone's `direction = normalize(target_pos - apex)` is
+// non-zero, Line's is the same, and Wall's slab is centered at the
+// (non-caster) target so candidates around the caster are no longer
+// trivially in-slab.
+// ---------------------------------------------------------------- //
+
+#[test]
+fn aoe_cone_non_degenerate_hits_in_cone_targets_on_gpu() {
+    // #182: explicit-target Cone GPU pin. The cone's apex is at the
+    // caster (slot 0); the target (slot 1) drives the cone's facing
+    // direction. With apex=(0,0,0) and target_pos=(4,0,0), the cone
+    // faces +X. Half-angle=45° (cos=0.707...) keeps the gate selective:
+    //
+    //   slot 0 (caster, at apex, dist=0):
+    //       apex-excluded (`_dist_sq < 1e-6` short-circuit) → OUT
+    //   slot 1 (target, at (4,0,0), dist=4 ≤ 5):
+    //       on-axis (dot=1.0 ≥ 0.707) → IN
+    //   slot 2 ((3,1,0), dist²=10 ≤ 25, dot=3/√10 ≈ 0.949):
+    //       in-cone → IN
+    //   slot 3 ((1,3,0), dist²=10 ≤ 25, dot=1/√10 ≈ 0.316):
+    //       off-axis (< 0.707) → OUT
+    //   slot 4 ((6,0,0), dist=6 > range=5):
+    //       out-of-range → OUT
+    //
+    // Expected hit set = {slot 1, slot 2}. Pins the GPU's apex-
+    // exclusion branch (caster excluded), the angular-dot gate
+    // (`< cos_half_angle → continue`), and the range-squared gate.
+    let mut slash = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 25.0 }],
+    );
+    slash.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Cone,
+        args: [45.0, 5.0, 0.0, 0.0],
+    }));
+
+    let mut builder = AbilityRegistryBuilder::new();
+    let slash_id = builder.register(slash);
+    let registry = builder.build();
+
+    const N_AGENTS: u32 = 5;
+    let levels: Vec<u32> = vec![slash_id.raw(); N_AGENTS as usize];
+    let stats: Vec<PerAgentStats> = vec![PerAgentStats::default(); N_AGENTS as usize];
+
+    let state = match ApplyAbilitySmokeState::try_new_with_registry(
+        N_AGENTS,
+        &registry,
+        &levels,
+        &stats,
+    ) {
+        Some(s) => s,
+        None => {
+            eprintln!(
+                "[aoe_chronicle_pin] skipping non-degenerate cone test: no wgpu adapter available."
+            );
+            return;
+        }
+    };
+    let mut state = state;
+
+    // Only caster (slot 0) alive — keeps the dispatch focused on a
+    // single cast. The spatial grid still holds entries for slots 1..4
+    // so the cone walk finds them as candidates.
+    state.set_agent_alive(&[1, 0, 0, 0, 0]);
+    state.set_agent_positions(&[
+        [0.0, 0.0, 0.0],   // slot 0: caster apex
+        [4.0, 0.0, 0.0],   // slot 1: target (drives direction); on-axis hit
+        [3.0, 1.0, 0.0],   // slot 2: in-cone (dot ≈ 0.949)
+        [1.0, 3.0, 0.0],   // slot 3: off-axis (dot ≈ 0.316 < 0.707)
+        [6.0, 0.0, 0.0],   // slot 4: on-axis but out of range (d=6 > 5)
+    ]);
+    // Caster's engaged_with → slot 1 (the target driving the cone's
+    // direction). Other agents' engaged_with values are dead-store
+    // because they're alive=0 and the `where (self.alive)` gate skips
+    // them; default-init left them at their own slot.
+    state.set_agent_engaged_with(&[1, 1, 2, 3, 4]);
+
+    state.step_explicit_target(0);
+
+    let tail = state.read_event_tail();
+    assert_eq!(
+        tail, 2,
+        "Non-degenerate Cone(45°, 5) cast from slot 0 toward slot 1 \
+         (apex=(0,0,0), target=(4,0,0) ⇒ direction=+X) over 5-agent \
+         fan must hit slots 1 + 2. Slot 0 apex-excluded, slot 3 off- \
+         axis, slot 4 out-of-range. Got tail={tail}",
+    );
+
+    let mut records = state.read_event_ring(tail);
+    records.sort_by_key(|r| (r[3], r[0]));
+    let damage_kind: u32 = 26;
+    let amount_bits: u32 = 25.0_f32.to_bits();
+    for (i, expected_target) in [1u32, 2u32].iter().enumerate() {
+        let r = records[i];
+        assert_eq!(r[0], damage_kind, "cone record {i} kind");
+        assert_eq!(r[1], 0, "cone record {i} tick");
+        assert_eq!(r[2], 0, "cone record {i} actor must be caster slot 0");
+        assert_eq!(
+            r[3], *expected_target,
+            "cone record {i} target: expected slot {expected_target} got {}",
+            r[3],
+        );
+        assert_eq!(r[4], amount_bits, "cone record {i} payload_a (25.0)");
+    }
+}
+
+#[test]
+fn aoe_line_non_degenerate_hits_in_corridor_targets_on_gpu() {
+    // #182: explicit-target Line GPU pin. Apex = caster (slot 0);
+    // target (slot 1) drives the line's direction. With apex=(0,0,0)
+    // and target=(4,0,0), the line points +X. Length=5, width=1
+    // (so half-width=0.5; `perp_sq ≤ 0.25`):
+    //
+    //   slot 0 (apex, along=0, perp=0):
+    //       along ≥ 0 ∧ along ≤ 5 ∧ perp²=0 ≤ 0.25 → IN
+    //   slot 1 (target, (4,0,0), along=4, perp=0):
+    //       in-corridor → IN
+    //   slot 2 ((2,0.4,0), along=2, perp²=0.16 ≤ 0.25):
+    //       in-corridor → IN
+    //   slot 3 ((2,0.6,0), along=2, perp²=0.36 > 0.25):
+    //       outside corridor (perp too large) → OUT
+    //
+    // Expected hit set = {slot 0, slot 1, slot 2}. Note: unlike Cone,
+    // the Line filter does NOT have an explicit apex-exclusion (the
+    // caster at along=0 is in-corridor and emits a record); the line
+    // hits everyone in the corridor including the caster. Pins:
+    //   - the GPU's `along ∈ [0, length]` corridor gate;
+    //   - the `perp_sq ≤ half_width_sq` width gate;
+    //   - that the caster IS in the line under the in-corridor predicate
+    //     (no apex-exclusion equivalent to Cone's).
+    let mut piercing_line = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 22.0 }],
+    );
+    piercing_line.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Line,
+        args: [5.0, 1.0, 0.0, 0.0],
+    }));
+
+    let mut builder = AbilityRegistryBuilder::new();
+    let piercing_line_id = builder.register(piercing_line);
+    let registry = builder.build();
+
+    const N_AGENTS: u32 = 4;
+    let levels: Vec<u32> = vec![piercing_line_id.raw(); N_AGENTS as usize];
+    let stats: Vec<PerAgentStats> = vec![PerAgentStats::default(); N_AGENTS as usize];
+
+    let state = match ApplyAbilitySmokeState::try_new_with_registry(
+        N_AGENTS,
+        &registry,
+        &levels,
+        &stats,
+    ) {
+        Some(s) => s,
+        None => {
+            eprintln!(
+                "[aoe_chronicle_pin] skipping non-degenerate line test: no wgpu adapter available."
+            );
+            return;
+        }
+    };
+    let mut state = state;
+
+    state.set_agent_alive(&[1, 0, 0, 0]);
+    state.set_agent_positions(&[
+        [0.0, 0.0, 0.0],   // slot 0: caster apex (in corridor at along=0)
+        [4.0, 0.0, 0.0],   // slot 1: target (drives direction); along=4
+        [2.0, 0.4, 0.0],   // slot 2: along=2, perp²=0.16 ≤ 0.25 → IN
+        [2.0, 0.6, 0.0],   // slot 3: along=2, perp²=0.36 > 0.25 → OUT
+    ]);
+    state.set_agent_engaged_with(&[1, 1, 2, 3]);
+
+    state.step_explicit_target(0);
+
+    let tail = state.read_event_tail();
+    assert_eq!(
+        tail, 3,
+        "Non-degenerate Line(5.0, 1.0) cast from slot 0 toward slot 1 \
+         (apex=(0,0,0), target=(4,0,0) ⇒ direction=+X) over 4-agent \
+         fixture must hit slots 0 + 1 + 2. Slot 3 perp²=0.36 > 0.25 \
+         out of corridor. Got tail={tail}",
+    );
+
+    let mut records = state.read_event_ring(tail);
+    records.sort_by_key(|r| (r[3], r[0]));
+    let damage_kind: u32 = 26;
+    let amount_bits: u32 = 22.0_f32.to_bits();
+    for (i, expected_target) in [0u32, 1u32, 2u32].iter().enumerate() {
+        let r = records[i];
+        assert_eq!(r[0], damage_kind, "line record {i} kind");
+        assert_eq!(r[1], 0, "line record {i} tick");
+        assert_eq!(r[2], 0, "line record {i} actor must be caster slot 0");
+        assert_eq!(
+            r[3], *expected_target,
+            "line record {i} target: expected slot {expected_target} got {}",
+            r[3],
+        );
+        assert_eq!(r[4], amount_bits, "line record {i} payload_a (22.0)");
+    }
+}
+
+#[test]
+fn aoe_wall_non_degenerate_centered_at_explicit_target_on_gpu() {
+    // #182: explicit-target Wall GPU pin. The Wall slab is centered at
+    // `agent_pos[target_slot]` (NOT caster) with a fixed facing
+    // direction from `args[3] = facing_deg`. Under the prior self-cast
+    // pin (`aoe_wall_facing_plus_x_slab_on_gpu`), aoe_center==caster's
+    // position; under explicit-target, aoe_center moves to slot 1's
+    // position. Pins that the GPU correctly reads target_slot through
+    // the engaged_with indirection rather than collapsing to caster.
+    //
+    // Fixture: caster at (0,0,0), target slot 1 at (3,0,0). Wall
+    // (length=4, height=2, thickness=2, facing=0° → +X). Slab covers
+    // x ∈ [3, 5], z ∈ [-2, 2], y ∈ [0, 2] (relative to target's
+    // position):
+    //
+    //   slot 0 (caster, at (0,0,0)):  forward=0-3=-3 < 0 → OUT
+    //   slot 1 (target, at (3,0,0)):  forward=0, lateral=0, dy=0 → IN
+    //   slot 2 (at (4.5,0,0)):        forward=1.5, lateral=0 → IN
+    //   slot 3 (at (5.5,0,0)):        forward=2.5 > thickness=2 → OUT
+    //
+    // Expected hit set = {slot 1, slot 2}. Pins the
+    // `aoe_center = agent_pos[target_slot]` plumbing — without the
+    // explicit-target rule, Wall would center at caster=(0,0,0) and
+    // hit slot 0+slot 1 (the existing self-cast test). Confirms the
+    // engaged_with indirection lands the slab at the right location.
+    let mut shield_wall = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 11.0 }],
+    );
+    shield_wall.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Wall,
+        args: [4.0, 2.0, 2.0, 0.0],
+    }));
+
+    let mut builder = AbilityRegistryBuilder::new();
+    let shield_wall_id = builder.register(shield_wall);
+    let registry = builder.build();
+
+    const N_AGENTS: u32 = 4;
+    let levels: Vec<u32> = vec![shield_wall_id.raw(); N_AGENTS as usize];
+    let stats: Vec<PerAgentStats> = vec![PerAgentStats::default(); N_AGENTS as usize];
+
+    let state = match ApplyAbilitySmokeState::try_new_with_registry(
+        N_AGENTS,
+        &registry,
+        &levels,
+        &stats,
+    ) {
+        Some(s) => s,
+        None => {
+            eprintln!(
+                "[aoe_chronicle_pin] skipping non-degenerate wall test: no wgpu adapter available."
+            );
+            return;
+        }
+    };
+    let mut state = state;
+
+    state.set_agent_alive(&[1, 0, 0, 0]);
+    state.set_agent_positions(&[
+        [0.0, 0.0, 0.0],   // slot 0: caster (forward=-3 from target → OUT)
+        [3.0, 0.0, 0.0],   // slot 1: target (slab origin → IN)
+        [4.5, 0.0, 0.0],   // slot 2: forward=1.5 ≤ 2 → IN
+        [5.5, 0.0, 0.0],   // slot 3: forward=2.5 > thickness → OUT
+    ]);
+    state.set_agent_engaged_with(&[1, 1, 2, 3]);
+
+    state.step_explicit_target(0);
+
+    let tail = state.read_event_tail();
+    assert_eq!(
+        tail, 2,
+        "Non-degenerate Wall(4, 2, 2, 0°) centered at slot 1 = (3,0,0) \
+         must hit slots 1 + 2. Slot 0 forward=-3 (behind), slot 3 \
+         forward=2.5 (past thickness). Got tail={tail}",
+    );
+
+    let mut records = state.read_event_ring(tail);
+    records.sort_by_key(|r| (r[3], r[0]));
+    let damage_kind: u32 = 26;
+    let amount_bits: u32 = 11.0_f32.to_bits();
+    for (i, expected_target) in [1u32, 2u32].iter().enumerate() {
+        let r = records[i];
+        assert_eq!(r[0], damage_kind, "wall record {i} kind");
+        assert_eq!(r[1], 0, "wall record {i} tick");
+        assert_eq!(r[2], 0, "wall record {i} actor must be caster slot 0");
+        assert_eq!(
+            r[3], *expected_target,
+            "wall record {i} target: expected slot {expected_target} got {}",
+            r[3],
+        );
+        assert_eq!(r[4], amount_bits, "wall record {i} payload_a (11.0)");
+    }
+}

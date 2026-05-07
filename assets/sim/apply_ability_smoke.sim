@@ -87,3 +87,37 @@ physics DispatchAbilityExplicit @phase(per_agent) {
     apply_ability agents.level(self) by self target self
   }
 }
+
+// AOE Path B non-degenerate-direction pin (#182 follow-on, 2026-05-07).
+//
+// Identical shape to DispatchAbilityExplicit but the `target` operand
+// reads `agents.engaged_with(self)` — the per-agent SoA `engaged_with`
+// field, lowered via the `(Agents, _)` 1-arg field-read arm in
+// `cg/lower/expr.rs` into `Read(AgentField { field: EngagedWith,
+// target: Self_ })`. The runtime populates `agent_engaged_with[caster]`
+// with a target slot (0-based AgentId), so the dispatcher computes
+// `target_slot = u32(agent_engaged_with[caster_slot])` and the AOE
+// walk's `apex = agent_pos[caster_slot]` / `target_pos =
+// agent_pos[target_slot]` form a non-degenerate direction for Cone /
+// Line / Wall. With the prior two rules' `target self` shape, the
+// direction collapses to `(0,0,0)` and the GPU kernel's `dir_len_sq <
+// 1e-6 → no-op` branch fires; the in-shape candidate set is therefore
+// empty under self-cast even when other agents sit in the would-be
+// in-shape footprint. This rule unlocks the explicit-target test
+// fixtures in `tests/aoe_chronicle_pin.rs::aoe_*_non_degenerate_*` so
+// the GPU branches that gate on apex→target direction get covered
+// end-to-end (matching the CPU oracle's `apply_program_aoe_*_filter`
+// helpers, which already accept arbitrary apex/target).
+//
+// `agents.engaged_with(self)` returns `CgTy::AgentId` (`OptAgentId`
+// folds to AgentId at the type-check boundary in well_formed.rs's
+// ApplyAbility arm). The None-sentinel (`0xFFFFFFFFu`) is the caller's
+// responsibility to keep at None for non-engaged agents — for this
+// fixture, the runtime only marks agent 0 alive and seeds
+// `agent_engaged_with[0]` to a real slot, so the where-clause gates
+// every other agent out before the dispatcher reads engaged_with.
+physics DispatchAbilityToOther @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    apply_ability agents.level(self) by self target agents.engaged_with(self)
+  }
+}
