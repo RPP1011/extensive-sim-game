@@ -2258,16 +2258,25 @@ fn collect_emits_in_list(list_id: CgStmtListId, prog: &CgProgram, out: &mut Vec<
             CgStmt::Assign { .. }
             | CgStmt::Let { .. }
             | CgStmt::ForEachAgent { .. }
-            | CgStmt::ForEachNeighbor { .. }
-            | CgStmt::ApplyAbility { .. } => {
-                // ApplyAbility writes to the chronicle ring per
-                // emitted ApplyEvent at runtime; the event-kind set
-                // it can emit is the union of every variant's
-                // ApplyEvent translation. The emit-side companion
-                // (#136 follow-up) will surface those event kinds
-                // through a dedicated dispatcher binding rather than
-                // through this collect-emits walk; for now no
-                // EventKindId contribution.
+            | CgStmt::ForEachNeighbor { .. } => {}
+            CgStmt::ApplyAbility { .. } => {
+                // #136 slice β step 4: ApplyAbility's WGSL dispatcher
+                // (cg/emit/wgsl_body.rs) atomic-appends to the
+                // chronicle ring once per non-EMPTY effect slot — the
+                // dispatcher's silent-skip arms are no-ops at runtime
+                // but the structural binding is required so the BGL
+                // composer wires `event_ring` + `event_tail` into the
+                // physics kernel.
+                //
+                // `collect_emit_destination_rings` collapses every
+                // returned kind to the single shared ring
+                // `EventRingId(0)` regardless of variant — so a
+                // synthetic placeholder kind is enough to trigger
+                // the EventRing(Append) write recording without
+                // committing to the dispatcher's full per-event
+                // layout map (that lands later when chronicle-append
+                // wiring replaces the TODO markers).
+                out.push(EventKindId(0));
             }
         }
     }

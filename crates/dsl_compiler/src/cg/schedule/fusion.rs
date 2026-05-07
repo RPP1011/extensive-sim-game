@@ -970,11 +970,19 @@ fn collect_emits_in_list(
             CgStmt::Assign { .. }
             | CgStmt::Let { .. }
             | CgStmt::ForEachAgent { .. }
-            | CgStmt::ForEachNeighbor { .. }
-            | CgStmt::ApplyAbility { .. } => {
+            | CgStmt::ForEachNeighbor { .. } => {}
+            CgStmt::ApplyAbility { .. } => {
                 // Mirrors the driver's collect_emits_in_list arm —
-                // ApplyAbility's per-variant event surface is
-                // routed by the emit-side companion, not this walk.
+                // ApplyAbility's WGSL dispatcher writes to the
+                // chronicle ring, so push a placeholder kind to
+                // trigger the EventRing(Append) write recording.
+                // Fusion uses the kinds list to decide whether
+                // adjacent ops can fuse based on shared event-ring
+                // writes; with the synthetic kind, an
+                // ApplyAbility-bearing op is treated as "writes to
+                // the shared ring" the same way an Emit-bearing op
+                // is.
+                out.push(EventKindId(0));
             }
         }
     }
