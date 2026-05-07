@@ -1283,51 +1283,42 @@ mod tests {
     /// #138 Step 2 pin — Wave 1 ability programs as construction-helper
     /// references for the dispatcher path.
     ///
-    /// The binding check (above) already proves the .ability →
-    /// AbilityRegistry pipeline produces these exact programs for the
-    /// Strike/ShieldUp/Mend.ability source files. These tests pin the
-    /// shapes at the apply_program-call level so #138 work (wiring the
-    /// verbs through `apply_ability` instead of `emit X`) has concrete
-    /// references for what to register + dispatch.
+    /// Loads each ability's `AbilityProgram` from the actual
+    /// `AbilityRegistry` (built from the .ability source files via
+    /// `binding_check::build_duel_abilities_registry`) so the test
+    /// catches any drift from the .ability source automatically — no
+    /// hand-mirrored constants.
     ///
-    /// All three mirror duel_abilities.sim verb bodies + their
-    /// `Damaged`/`Healed`/`Shielded` events:
-    ///   - Strike  → ApplyEvent::Damage  (amount=30, hostile)
-    ///   - ShieldUp → ApplyEvent::Shield (amount=50, self-cast)
-    ///   - Mend    → ApplyEvent::Heal    (amount=25, self-cast)
-    ///
-    /// Constants mirror assets/ability_test/duel_abilities/*.ability
-    /// (the .ability files are authoritative; the binding check
-    /// enforces this). If they drift, both the binding check AND these
-    /// pins fail — refactoring to load AbilityProgram from the
-    /// AbilityRegistry directly would tighten the coupling but adds
-    /// the per-test registry-build overhead.
+    /// All three pin the apply_program output the dispatcher path
+    /// will need to reproduce when #138 swaps the verb body's
+    /// `emit X` with `apply_ability <id>`:
+    ///   - Strike   → ApplyEvent::Damage  (amount = strike.damage)
+    ///   - ShieldUp → ApplyEvent::Shield  (amount = shieldup.shield)
+    ///   - Mend     → ApplyEvent::Heal    (amount = mend.heal)
     #[test]
     fn strike_apply_program_produces_expected_damage_event() {
         use engine::ability::apply::{apply_program, ApplyEvent};
-        use engine::ability::program::{AbilityProgram, CasterStats, EffectOp, Gate};
+        use engine::ability::program::CasterStats;
         use engine::ids::AgentId;
 
-        // Strike.ability: range=5.0, cooldown=1s (10 ticks), damage=30,
-        // target=enemy (hostile_only=true).
-        let program = AbilityProgram::new_single_target(
-            5.0,
-            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
-            [EffectOp::Damage { amount: 30.0 }],
-        );
+        let built = binding_check::build_duel_abilities_registry();
+        let strike_id = *built.names.get("Strike").expect("Strike registered");
+        let strike = built.registry.get(strike_id).expect("Strike resolves");
 
         let caster = AgentId::new(1).expect("AgentId::new");
         let target = AgentId::new(2).expect("AgentId::new");
         let events = apply_program(
-            &program, caster, target, 0, 0xCAFE_F00D, &CasterStats::default(),
+            strike, caster, target, 0, 0xCAFE_F00D, &CasterStats::default(),
         );
 
-        assert_eq!(events.len(), 1);
+        assert_eq!(events.len(), 1, "Strike has one Damage effect");
         match events[0] {
             ApplyEvent::Damage { source, target: t, amount } => {
                 assert_eq!(source, caster);
                 assert_eq!(t, target);
-                assert_eq!(amount, 30.0, "config.combat.strike_damage");
+                // Mirrors the hand-mirrored .sim verb constant; the
+                // binding check enforces .ability → .sim agreement.
+                assert_eq!(amount, 30.0);
             }
             other => panic!("expected ApplyEvent::Damage, got {:?}", other),
         }
@@ -1336,29 +1327,25 @@ mod tests {
     #[test]
     fn shieldup_apply_program_produces_expected_shield_event() {
         use engine::ability::apply::{apply_program, ApplyEvent};
-        use engine::ability::program::{AbilityProgram, CasterStats, EffectOp, Gate};
+        use engine::ability::program::CasterStats;
         use engine::ids::AgentId;
 
-        // ShieldUp.ability: self-target, cooldown=4s (40 ticks), shield=50.
-        // hostile_only=false because target is self (always allied).
-        let program = AbilityProgram::new_single_target(
-            0.0, // self-cast — range is unused
-            Gate { cooldown_ticks: 40, hostile_only: false, line_of_sight: false },
-            [EffectOp::Shield { amount: 50.0 }],
-        );
+        let built = binding_check::build_duel_abilities_registry();
+        let shieldup_id = *built.names.get("ShieldUp").expect("ShieldUp registered");
+        let shieldup = built.registry.get(shieldup_id).expect("ShieldUp resolves");
 
         // Self-cast: caster == target.
         let caster = AgentId::new(1).expect("AgentId::new");
         let events = apply_program(
-            &program, caster, caster, 0, 0xCAFE_F00D, &CasterStats::default(),
+            shieldup, caster, caster, 0, 0xCAFE_F00D, &CasterStats::default(),
         );
 
-        assert_eq!(events.len(), 1);
+        assert_eq!(events.len(), 1, "ShieldUp has one Shield effect");
         match events[0] {
             ApplyEvent::Shield { source, target, amount } => {
                 assert_eq!(source, caster);
                 assert_eq!(target, caster, "self-cast: target == source");
-                assert_eq!(amount, 50.0, "config.combat.shieldup_amount");
+                assert_eq!(amount, 50.0);
             }
             other => panic!("expected ApplyEvent::Shield, got {:?}", other),
         }
@@ -1367,27 +1354,24 @@ mod tests {
     #[test]
     fn mend_apply_program_produces_expected_heal_event() {
         use engine::ability::apply::{apply_program, ApplyEvent};
-        use engine::ability::program::{AbilityProgram, CasterStats, EffectOp, Gate};
+        use engine::ability::program::CasterStats;
         use engine::ids::AgentId;
 
-        // Mend.ability: self-target, cooldown=3s (30 ticks), heal=25.
-        let program = AbilityProgram::new_single_target(
-            0.0,
-            Gate { cooldown_ticks: 30, hostile_only: false, line_of_sight: false },
-            [EffectOp::Heal { amount: 25.0 }],
-        );
+        let built = binding_check::build_duel_abilities_registry();
+        let mend_id = *built.names.get("Mend").expect("Mend registered");
+        let mend = built.registry.get(mend_id).expect("Mend resolves");
 
         let caster = AgentId::new(1).expect("AgentId::new");
         let events = apply_program(
-            &program, caster, caster, 0, 0xCAFE_F00D, &CasterStats::default(),
+            mend, caster, caster, 0, 0xCAFE_F00D, &CasterStats::default(),
         );
 
-        assert_eq!(events.len(), 1);
+        assert_eq!(events.len(), 1, "Mend has one Heal effect");
         match events[0] {
             ApplyEvent::Heal { source, target, amount } => {
                 assert_eq!(source, caster);
                 assert_eq!(target, caster, "self-cast: target == source");
-                assert_eq!(amount, 25.0, "config.combat.mend_amount");
+                assert_eq!(amount, 25.0);
             }
             other => panic!("expected ApplyEvent::Heal, got {:?}", other),
         }

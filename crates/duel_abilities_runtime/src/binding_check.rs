@@ -31,12 +31,15 @@ use engine::ability::{
     PackedAbilityRegistry,
 };
 
-/// The single binding-check entry point. Called once from
-/// `DuelAbilitiesState::new` at fixture-construction time.
+/// Read + parse + build the AbilityRegistry over every .ability file
+/// under `assets/ability_test/duel_abilities/`. Shared by the binding
+/// check (assert_ability_registry_matches_sim_constants) AND the
+/// apply_program test pins in `lib.rs::tests`.
 ///
-/// Panics with a descriptive message on any divergence between the
-/// .ability files and the .sim hand-mirrored constants.
-pub fn assert_ability_registry_matches_sim_constants() {
+/// Panics on any read/parse/build error — these would also fire from
+/// the binding check at fixture-construction time, so any failure
+/// here points at the same .ability source defect.
+pub(crate) fn build_duel_abilities_registry() -> dsl_compiler::ability_registry::BuiltRegistry {
     let manifest = std::env::var("CARGO_MANIFEST_DIR")
         .expect("CARGO_MANIFEST_DIR set by cargo");
     let corpus = PathBuf::from(manifest)
@@ -46,67 +49,39 @@ pub fn assert_ability_registry_matches_sim_constants() {
         .join("ability_test")
         .join("duel_abilities");
 
-    let strike_src = std::fs::read_to_string(corpus.join("Strike.ability"))
-        .expect("read Strike.ability");
-    let shieldup_src = std::fs::read_to_string(corpus.join("ShieldUp.ability"))
-        .expect("read ShieldUp.ability");
-    let mend_src = std::fs::read_to_string(corpus.join("Mend.ability"))
-        .expect("read Mend.ability");
-    let bleed_src = std::fs::read_to_string(corpus.join("Bleed.ability"))
-        .expect("read Bleed.ability");
-    let reap_src = std::fs::read_to_string(corpus.join("Reap.ability"))
-        .expect("read Reap.ability");
-    let vampirize_src = std::fs::read_to_string(corpus.join("Vampirize.ability"))
-        .expect("read Vampirize.ability");
-    let fortify_src = std::fs::read_to_string(corpus.join("Fortify.ability"))
-        .expect("read Fortify.ability");
-    let daze_src = std::fs::read_to_string(corpus.join("Daze.ability"))
-        .expect("read Daze.ability");
+    let read = |name: &str| {
+        let path = corpus.join(name);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+    };
+    let parse = |name: &str, src: &str| {
+        dsl_ast::parse_ability_file(src)
+            .unwrap_or_else(|e| panic!("parse {name}: {e:?}"))
+    };
 
-    let files = vec![
-        (
-            "Strike.ability".to_string(),
-            dsl_ast::parse_ability_file(&strike_src)
-                .expect("parse Strike.ability"),
-        ),
-        (
-            "ShieldUp.ability".to_string(),
-            dsl_ast::parse_ability_file(&shieldup_src)
-                .expect("parse ShieldUp.ability"),
-        ),
-        (
-            "Mend.ability".to_string(),
-            dsl_ast::parse_ability_file(&mend_src)
-                .expect("parse Mend.ability"),
-        ),
-        (
-            "Bleed.ability".to_string(),
-            dsl_ast::parse_ability_file(&bleed_src)
-                .expect("parse Bleed.ability"),
-        ),
-        (
-            "Reap.ability".to_string(),
-            dsl_ast::parse_ability_file(&reap_src)
-                .expect("parse Reap.ability"),
-        ),
-        (
-            "Vampirize.ability".to_string(),
-            dsl_ast::parse_ability_file(&vampirize_src)
-                .expect("parse Vampirize.ability"),
-        ),
-        (
-            "Fortify.ability".to_string(),
-            dsl_ast::parse_ability_file(&fortify_src)
-                .expect("parse Fortify.ability"),
-        ),
-        (
-            "Daze.ability".to_string(),
-            dsl_ast::parse_ability_file(&daze_src)
-                .expect("parse Daze.ability"),
-        ),
+    let names = [
+        "Strike.ability", "ShieldUp.ability", "Mend.ability", "Bleed.ability",
+        "Reap.ability", "Vampirize.ability", "Fortify.ability", "Daze.ability",
     ];
-    let built = dsl_compiler::ability_registry::build_registry(&files)
-        .expect("build_registry over duel_abilities corpus");
+    let files: Vec<(String, _)> = names
+        .iter()
+        .map(|name| {
+            let src = read(name);
+            (name.to_string(), parse(name, &src))
+        })
+        .collect();
+
+    dsl_compiler::ability_registry::build_registry(&files)
+        .expect("build_registry over duel_abilities corpus")
+}
+
+/// The single binding-check entry point. Called once from
+/// `DuelAbilitiesState::new` at fixture-construction time.
+///
+/// Panics with a descriptive message on any divergence between the
+/// .ability files and the .sim hand-mirrored constants.
+pub fn assert_ability_registry_matches_sim_constants() {
+    let built = build_duel_abilities_registry();
 
     // ---- Strike: cooldown 10 ticks, range 5.0, hostile_only, damage 30.0 ----
     let strike_id = *built.names.get("Strike")
