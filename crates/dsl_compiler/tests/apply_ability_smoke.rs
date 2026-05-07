@@ -149,6 +149,41 @@ fn apply_ability_smoke_emits_dispatcher_loop_in_kernel_body() {
     );
 }
 
+/// Naga-validate the dispatcher's emitted WGSL. Format-string
+/// assertions catch missing arms / wrong constants, but they DON'T
+/// catch syntax errors the WGSL frontend rejects (mismatched braces,
+/// undeclared identifiers, type errors, atomic-handle misuse, etc.).
+/// Without this gate, a malformed dispatcher could ship green at the
+/// dsl_compiler test boundary and only blow up when a runtime crate
+/// tries to feed the kernel into wgpu.
+///
+/// Naga 26.0.0 is the WGSL frontend that wgpu 26.0.1 uses (see
+/// `Cargo.toml` pinning), so passing naga here is a strong proxy for
+/// "this kernel will compile on a real GPU device". The actual
+/// device-driving GPU parity test (#133) layers on top of this gate
+/// once a runtime crate consumes the dispatcher.
+#[test]
+fn apply_ability_smoke_kernel_parses_through_naga() {
+    let path = workspace_path("assets/sim/apply_ability_smoke.sim");
+    let art = compile_sim(&path).expect("apply_ability_smoke compiles");
+
+    let mut errs = Vec::new();
+    for (name, body) in &art.wgsl_files {
+        if let Err(e) = naga::front::wgsl::parse_str(body) {
+            errs.push(format!("  {name}:\n    {e}"));
+        }
+    }
+    assert!(
+        errs.is_empty(),
+        "apply_ability_smoke emitted {} naga-invalid WGSL kernels — \
+         the dispatcher's chronicle writes (slice-γ self-cast or \
+         per-arm atomicStore layout) likely produced WGSL the frontend \
+         rejects:\n{}",
+        errs.len(),
+        errs.join("\n"),
+    );
+}
+
 /// Pin the BGL composer's wiring of `event_ring` + `event_tail` into
 /// the dispatcher kernel. Without these bindings, the chronicle writes
 /// emitted by the dispatcher arms would reference undeclared identifiers

@@ -292,6 +292,28 @@ pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOu
     wire_source_ring_reads(ctx.builder.ops_mut());
     apply_emit_destination_rings(ctx.builder.ops_mut(), &emit_writes);
 
+    // -- Phase 4a': ApplyAbility AbilityRegistry-column read wiring ---
+    //
+    // The WGSL dispatcher emitted by `cg::emit::wgsl_body`'s
+    // `CgStmt::ApplyAbility` arm references three SoA columns from the
+    // PackedAbilityRegistry by name:
+    //
+    //   ability_registry_effect_kinds[base + i]
+    //   ability_registry_effect_payload_a[base + i]
+    //   ability_registry_effect_payload_b[base + i]
+    //
+    // Without explicit `record_read` calls on the matching
+    // `DataHandle::AbilityRegistryColumn { … }` handles, the BGL
+    // composer (`cg::emit::kernel`) never declares the bindings — so
+    // the dispatcher's emitted WGSL references undeclared identifiers
+    // and naga rejects the kernel at frontend-parse time. Format-string
+    // assertions in `wgsl_body.rs` don't catch this gap (they check
+    // body content, not binding declarations).
+    //
+    // Symmetric to `apply_emit_destination_rings` for the EventRing
+    // (Append) write recording, but on the read side.
+    wire_ability_registry_column_reads(&arena_snapshot, ctx.builder.ops_mut());
+
     // -- Phase 4b: ActionSelected ring-write wiring on ScoringArgmax ---
     //
     // The verb expander (`cg::lower::verb_expand`) injects an
@@ -1971,6 +1993,88 @@ fn apply_emit_destination_rings(ops: &mut [ComputeOp], pairs: &[(usize, EventRin
             });
         }
     }
+}
+
+/// Walk every op's body for [`CgStmt::ApplyAbility`] and record reads
+/// on the three [`DataHandle::AbilityRegistryColumn`] handles the
+/// dispatcher accesses. Without this, the BGL composer never
+/// declares the matching `ability_registry_*` storage bindings and
+/// the emitted WGSL kernel references undeclared identifiers
+/// (caught by naga at frontend-parse time).
+///
+/// Symmetric to [`apply_emit_destination_rings`] but on the read
+/// side. Both helpers solve the same shape of gap: `CgStmt::Emit`
+/// and `CgStmt::ApplyAbility` are the two stmt variants whose WGSL
+/// emit references storage identifiers that must be wired into the
+/// surrounding kernel's binding set, but neither stmt carries the
+/// handles directly in its IR shape.
+fn wire_ability_registry_column_reads(prog: &CgProgram, ops: &mut [ComputeOp]) {
+    use crate::cg::data_handle::AbilityRegistryColumn;
+    use crate::cg::op::ComputeOpKind;
+    // Mirror the dispatcher's emit (`cg::emit::wgsl_body`):
+    // it reads `effect_kinds`, `effect_payload_a`, `effect_payload_b`
+    // every iteration of its slot loop.
+    const COLUMNS: &[AbilityRegistryColumn] = &[
+        AbilityRegistryColumn::EffectKinds,
+        AbilityRegistryColumn::EffectPayloadA,
+        AbilityRegistryColumn::EffectPayloadB,
+    ];
+
+    for (op_index, op) in ops.iter_mut().enumerate() {
+        let snapshot_op = match prog.ops.get(op_index) {
+            Some(o) => o,
+            None => continue,
+        };
+        // Body-bearing op kinds: PhysicsRule / ViewFold. Other op
+        // kinds (Plumbing / Mask / Scoring / etc.) carry no statement
+        // list, so they can't host an ApplyAbility.
+        let body_id = match &snapshot_op.kind {
+            ComputeOpKind::PhysicsRule { body, .. } => *body,
+            ComputeOpKind::ViewFold { body, .. } => *body,
+            _ => continue,
+        };
+        if !list_contains_apply_ability(body_id, prog) {
+            continue;
+        }
+        for column in COLUMNS {
+            op.record_read(DataHandle::AbilityRegistryColumn { column: *column });
+        }
+    }
+}
+
+/// Recursively walk a [`CgStmtList`] for any [`CgStmt::ApplyAbility`].
+/// Returns on the first hit — purely a yes/no probe driving the
+/// `wire_ability_registry_column_reads` walk above.
+fn list_contains_apply_ability(list_id: CgStmtListId, prog: &CgProgram) -> bool {
+    let Some(list) = prog.stmt_lists.get(list_id.0 as usize) else {
+        return false;
+    };
+    for stmt_id in &list.stmts {
+        let Some(stmt) = prog.stmts.get(stmt_id.0 as usize) else { continue };
+        match stmt {
+            CgStmt::ApplyAbility { .. } => return true,
+            CgStmt::If { then, else_, .. } => {
+                if list_contains_apply_ability(*then, prog) { return true; }
+                if let Some(else_list) = else_ {
+                    if list_contains_apply_ability(*else_list, prog) { return true; }
+                }
+            }
+            CgStmt::Match { arms, .. } => {
+                for arm in arms {
+                    if list_contains_apply_ability(arm.body, prog) { return true; }
+                }
+            }
+            CgStmt::ForEachNeighborBody { body, .. } => {
+                if list_contains_apply_ability(*body, prog) { return true; }
+            }
+            CgStmt::Emit { .. }
+            | CgStmt::Assign { .. }
+            | CgStmt::Let { .. }
+            | CgStmt::ForEachAgent { .. }
+            | CgStmt::ForEachNeighbor { .. } => {}
+        }
+    }
+    false
 }
 
 /// Wire the implicit `EventRing { Append }` write each
