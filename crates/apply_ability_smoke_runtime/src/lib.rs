@@ -44,12 +44,29 @@
 //! panics; the parity test detects this and skips with an
 //! explanatory message rather than failing.
 
+use engine::ability::registry::AbilityRegistry;
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
 use engine::ability::{
     AbilityId, AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate, PackedAbilityRegistry,
 };
-use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
 use engine::GpuContext;
 use wgpu::util::DeviceExt;
+
+/// Per-agent stat snapshot for the smoke runtime. Mirrors the 8-field
+/// `engine::ability::program::CasterStats` shape — used by the parity
+/// sweep test to seed both the GPU's per-stat agent SoA buffers AND
+/// the CPU oracle's `CasterStats` snapshot from the same source.
+#[derive(Copy, Clone, Debug, Default)]
+pub struct PerAgentStats {
+    pub attack_damage: f32,
+    pub ability_power: f32,
+    pub max_hp:        f32,
+    pub hp:            f32,
+    pub armor:         f32,
+    pub magic_resist:  f32,
+    pub move_speed:    f32,
+    pub mana:          f32,
+}
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
@@ -135,11 +152,6 @@ impl ApplyAbilitySmokeState {
     /// adapter is available on the host. Lets the parity test in this
     /// crate degrade to a skip-with-message instead of a panic.
     pub fn try_new(n_agents: u32) -> Option<Self> {
-        let gpu = GpuContext::new_blocking().ok()?;
-
-        // -- Build the registry: one Damage(30.0) ability registered at
-        //    AbilityId(1). This matches the canonical CPU oracle test
-        //    in `cpu_chronicle_pipeline::single_damage_ability_produces_one_chronicle_record`.
         let program = AbilityProgram::new_single_target(
             /*range*/ 5.0,
             Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
@@ -153,14 +165,57 @@ impl ApplyAbilitySmokeState {
             "first registered program must land at AbilityId(1)"
         );
         let registry = builder.build();
-        let packed = PackedAbilityRegistry::pack(&registry);
+        Self::try_new_with_registry(
+            n_agents,
+            &registry,
+            /*per_agent_levels*/ &vec![1u32; n_agents as usize],
+            /*per_agent_stats*/  &vec![PerAgentStats::default(); n_agents as usize],
+        )
+    }
+
+    /// Build the smoke fixture against a caller-supplied
+    /// `AbilityRegistry`, with explicit per-agent `agent_level`
+    /// (= AbilityId.raw_u32 to dispatch) and per-agent stat snapshots.
+    ///
+    /// Used by the parity sweep test (`tests/parity_apply_program_sweep.rs`)
+    /// to upload a 10-program registry once, then arrange `agent_level[i]`
+    /// to point at one of the registered ability slots per agent. The
+    /// dispatcher reads `agent_level[caster_slot]` to pick the AbilityId,
+    /// so varying `level` per agent dispatches a different program per
+    /// SoA slot in a single tick — the natural matrix shape for sweep
+    /// testing every modifier × variant combination.
+    ///
+    /// Stats land in the per-stat agent SoA columns the dispatcher's
+    /// `scale_bonus = Σ percent * agent_stat[caster_slot]` switch reads;
+    /// pass `&vec![PerAgentStats::default(); n]` for non-scaling fixtures.
+    /// Returns `None` when no wgpu adapter is available on the host.
+    pub fn try_new_with_registry(
+        n_agents:         u32,
+        registry:         &AbilityRegistry,
+        per_agent_levels: &[u32],
+        per_agent_stats:  &[PerAgentStats],
+    ) -> Option<Self> {
+        assert_eq!(
+            per_agent_levels.len(),
+            n_agents as usize,
+            "per_agent_levels length must match n_agents",
+        );
+        assert_eq!(
+            per_agent_stats.len(),
+            n_agents as usize,
+            "per_agent_stats length must match n_agents",
+        );
+        let gpu = GpuContext::new_blocking().ok()?;
+        let packed = PackedAbilityRegistry::pack(registry);
         let registry_gpu =
             PackedAbilityRegistryGpu::upload(&packed, &gpu, "apply_ability_smoke");
 
-        // -- Agent SoA: alive=1, level=1 for every slot. The kernel's
-        //    per-agent body reads `agent_alive[agent_id]` as the
-        //    where-clause gate and `agent_level[agent_id]` as the
-        //    AbilityId.
+        // -- Agent SoA: alive=1 for every slot; per-agent level + stats
+        //    from the caller. The kernel's per-agent body reads
+        //    `agent_alive[agent_id]` as the where-clause gate and
+        //    `agent_level[caster_slot]` as the AbilityId — varying level
+        //    per agent dispatches a different ability per SoA slot in
+        //    one tick (the matrix shape the parity sweep test relies on).
         let alive_init: Vec<u32> = vec![1u32; n_agents as usize];
         let agent_alive_buf =
             gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -168,33 +223,49 @@ impl ApplyAbilitySmokeState {
                 contents: bytemuck::cast_slice(&alive_init),
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             });
-        let level_init: Vec<u32> = vec![1u32; n_agents as usize];
         let agent_level_buf =
             gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("apply_ability_smoke_runtime::agent_level"),
-                contents: bytemuck::cast_slice(&level_init),
+                contents: bytemuck::cast_slice(per_agent_levels),
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             });
         // Wave 1.5#4 GPU scaling: per-stat columns for the dispatcher's
-        // `agent_stat()` switch. All zero — the smoke program has no
-        // scaling slots so `scale_bonus = 0.0` regardless. The
-        // `bytemuck::cast_slice(&vec![0.0_f32; ...])` shape mirrors
-        // `agent_alive`/`agent_level`.
-        let zeros_f32: Vec<f32> = vec![0.0_f32; n_agents as usize];
-        let mk_stat = |label: &str| {
+        // `agent_stat()` switch. The parity sweep seeds these from
+        // `per_agent_stats[i].<field>` so the GPU and the CPU oracle
+        // (passing `CasterStats { … }` to apply_program) read the same
+        // f32 values.
+        let mk_stat_col = |label: &str, extract: fn(&PerAgentStats) -> f32| {
+            let col: Vec<f32> = per_agent_stats.iter().map(extract).collect();
             gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(label),
-                contents: bytemuck::cast_slice(&zeros_f32),
+                contents: bytemuck::cast_slice(&col),
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             })
         };
-        let agent_attack_damage_buf = mk_stat("apply_ability_smoke_runtime::agent_attack_damage");
-        let agent_max_hp_buf        = mk_stat("apply_ability_smoke_runtime::agent_max_hp");
-        let agent_hp_buf            = mk_stat("apply_ability_smoke_runtime::agent_hp");
-        let agent_armor_buf         = mk_stat("apply_ability_smoke_runtime::agent_armor");
-        let agent_magic_resist_buf  = mk_stat("apply_ability_smoke_runtime::agent_magic_resist");
-        let agent_move_speed_buf    = mk_stat("apply_ability_smoke_runtime::agent_move_speed");
-        let agent_mana_buf          = mk_stat("apply_ability_smoke_runtime::agent_mana");
+        let agent_attack_damage_buf =
+            mk_stat_col("apply_ability_smoke_runtime::agent_attack_damage", |s| s.attack_damage);
+        let agent_max_hp_buf        =
+            mk_stat_col("apply_ability_smoke_runtime::agent_max_hp",        |s| s.max_hp);
+        let agent_hp_buf            =
+            mk_stat_col("apply_ability_smoke_runtime::agent_hp",            |s| s.hp);
+        let agent_armor_buf         =
+            mk_stat_col("apply_ability_smoke_runtime::agent_armor",         |s| s.armor);
+        let agent_magic_resist_buf  =
+            mk_stat_col("apply_ability_smoke_runtime::agent_magic_resist",  |s| s.magic_resist);
+        let agent_move_speed_buf    =
+            mk_stat_col("apply_ability_smoke_runtime::agent_move_speed",    |s| s.move_speed);
+        let agent_mana_buf          =
+            mk_stat_col("apply_ability_smoke_runtime::agent_mana",          |s| s.mana);
+        // NOTE: AbilityPower has no per-agent SoA column on the GPU
+        // (the dispatcher's `agent_stat()` switch returns 0.0 for
+        // ScalingStatRef::AbilityPower). The CPU oracle's
+        // `CasterStats::ability_power` field is therefore intentionally
+        // unread by the GPU side — sweep test pins this gap by including
+        // a Heal ability with `+ N% AbilityPower` scaling that must
+        // produce the same `scale_bonus = 0.0` on both backends (CPU
+        // multiplies by `caster_stats.ability_power = 0.0` from the
+        // PerAgentStats default; GPU returns 0.0 from the AbilityPower
+        // case unconditionally).
 
         // -- Event ring + tail. The kernel binds both as
         //    `array<atomic<u32>>` so we tag them STORAGE (the dispatcher
