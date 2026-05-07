@@ -861,6 +861,76 @@ fn smoke_fixture_explicit_rule_kernel_has_full_dispatcher() {
     );
 }
 
+/// Two `apply_ability` statements with identical operands inside a
+/// single rule body must each emit their own dispatcher block. CSE or
+/// statement deduplication on `CgStmt::ApplyAbility` would silently
+/// halve the chronicle write throughput — same lowered IR ≠ same
+/// runtime semantics, since each statement represents a separate
+/// dispatch operation.
+///
+/// Pinned by inline source (the smoke .sim file's two statements live
+/// in different rules; this exercises the same-rule case).
+#[test]
+fn back_to_back_apply_ability_in_one_rule_emits_two_dispatcher_blocks() {
+    use naga::valid::{Capabilities, ValidationFlags, Validator};
+    let src = "
+        event Tick { }
+        entity Hero : Agent { }
+
+        physics DoubleDispatch @phase(per_agent) {
+          on Tick {} where (self.alive) {
+            apply_ability agents.level(self) by self target self
+            apply_ability agents.level(self) by self target self
+          }
+        }
+    ";
+    let program = dsl_compiler::parse(src).expect("parse");
+    let comp = dsl_ast::resolve::resolve(program).expect("resolve");
+    let cg = dsl_compiler::cg::lower::lower_compilation_to_cg(&comp)
+        .expect("two back-to-back ApplyAbility lower");
+    let schedule_result = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&schedule_result.schedule, &cg)
+        .expect("emit");
+
+    let body = kernel_body_containing(&art, "DoubleDispatch")
+        .or_else(|| kernel_body_containing(&art, "physics"))
+        .expect("physics kernel emitted");
+
+    // Two dispatcher loops, one per statement.
+    let dispatcher_loops = body.matches("for (var i: u32 = 0u; i < 6u;").count();
+    assert_eq!(
+        dispatcher_loops, 2,
+        "two back-to-back apply_ability statements must each emit \
+         their own dispatcher slot loop. Got {dispatcher_loops} — a \
+         value of 1 means CSE/dedup collapsed the second statement, \
+         halving chronicle throughput;\nbody:\n{body}"
+    );
+
+    // 14 slot acquisitions (7 per dispatcher × 2).
+    let slot_acquisitions = body
+        .matches("let _slot: u32 = atomicAdd(&event_tail[0], 1u);")
+        .count();
+    assert_eq!(
+        slot_acquisitions, 14,
+        "expected 14 slot acquisitions (7 chronicle arms × 2 statements); \
+         got {slot_acquisitions}\nbody:\n{body}"
+    );
+
+    // Naga sanity: the duplicated dispatcher emit doesn't introduce
+    // duplicate-identifier conflicts (e.g. two `let _slot` shadowing
+    // would still parse — check anyway since let-rebinding rules can
+    // be subtle in WGSL).
+    let module = naga::front::wgsl::parse_str(body)
+        .unwrap_or_else(|e| panic!("naga parse failed for back-to-back kernel: {e}"));
+    let mut validator = Validator::new(ValidationFlags::all(), Capabilities::all());
+    validator
+        .validate(&module)
+        .unwrap_or_else(|e| panic!("naga validate failed: {e:?}"));
+}
+
 /// Pin the BGL composer's wiring of `event_ring` + `event_tail` into
 /// the dispatcher kernel. Without these bindings, the chronicle writes
 /// emitted by the dispatcher arms would reference undeclared identifiers
