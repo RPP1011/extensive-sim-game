@@ -662,16 +662,26 @@ pub enum Stmt {
     /// mutation primitive (Plan ToM Task 4). Mutates a single `BeliefState`
     /// cell in `SimState::cold_beliefs` for the observer/target pair.
     BeliefObserve(BeliefObserveStmt),
-    /// `apply_ability <ability_expr>` — registry-driven dispatch (#125 /
-    /// #132). Replaces hand-mirrored `emit Damaged{...}` / `emit Healed{...}`
+    /// `apply_ability <ability_expr> [by <caster>] [target <target>]` —
+    /// registry-driven dispatch (#125 / #132 / slice δ #161 / slice ε).
+    /// Replaces hand-mirrored `emit Damaged{...}` / `emit Healed{...}`
     /// patterns with a single statement that the WGSL emitter expands into
     /// a per-effect-slot dispatch loop reading from `PackedAbilityRegistry`
     /// SoA columns. The ability_expr resolves at runtime to an `AbilityId`
     /// (typically `self.action_ability`); the dispatcher honors per-effect
     /// chance gates and emits the matching chronicle event for each
-    /// non-empty effect slot. `caster` defaults to `self`, `target` to
-    /// the verb's `target` binder. Lowering: `IrStmt::ApplyAbility` →
-    /// `CgStmt::ApplyAbility` → WGSL dispatcher (#132C+).
+    /// non-empty effect slot.
+    ///
+    /// **Slice δ + ε surface (post-`d0bc37fd`):** `caster` defaults to
+    /// `self` for PerAgent rules and surfaces a typed
+    /// `UnsupportedPhysicsStmt` for PerEvent rules without explicit
+    /// `by <caster>`. `target` defaults to the resolved caster
+    /// expression (slice-γ self-cast convention). Both can be supplied
+    /// explicitly: `apply_ability a by w target v` distinguishes
+    /// chronicle actor from target slots.
+    ///
+    /// Lowering: `IrStmt::ApplyAbility` → `CgStmt::ApplyAbility { ability,
+    /// caster, target }` → WGSL dispatcher (#132C+ / `92572af8` / `d0bc37fd`).
     ApplyAbility(ApplyAbilityStmt),
 }
 
