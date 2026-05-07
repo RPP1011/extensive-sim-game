@@ -46,6 +46,8 @@
 //!  28. `Harvest(0xCAFEBABE, 5)`                    — Reap_Ore-shape (slice γ tail, caster-self)
 //!  29. `PlaceVoxel(0xFACEFEED)`                    — Drop_Stone-shape (slice γ tail, caster-self)
 //!  30. `Damage(10) chance=0x4000 (~25%)`           — DazeMid-shape, P11 chance-gate parity (intermediate q16)
+//!  31. `Damage(30) in circle(2.0)`                  — Cleave-shape (#121 AOE Path B Circle, 4-agent row)
+//!  32. `Damage(25) in cone(60°, 4)`                 — Slash-shape (#178 AOE Path B Cone, 5-agent fan, degenerate self-cast)
 //!
 //! M = 1 caster×target permutation in this fixture: `(c=0, t=0)`
 //! self-cast. The smoke fixture's `apply_ability` source uses the
@@ -630,6 +632,46 @@ fn build_sweep() -> Vec<(&'static str, AbilityProgram, CasterStats)> {
         CasterStats::default(),
     ));
 
+    // 32. Slash-shape — `Damage(25) in cone(60°, 4)` (#178 AOE Path B Cone).
+    //     Exercises the dispatcher's cone branch (`area_kind == 1u`):
+    //     27-cell walk around the apex (caster), per-candidate range²
+    //     gate + angular dot gate, shadowed `target_slot = candidate`.
+    //
+    //     **Smoke fixture self-cast caveat.** The smoke fixture's
+    //     implicit-target rule writes `caster_slot == target_slot ==
+    //     agent_id` per the per-agent loop, so `agent_pos[caster_slot]
+    //     == agent_pos[target_slot]` and the cone's `direction_raw =
+    //     target - apex` is always (0,0,0) → degenerate. The GPU
+    //     kernel's `dir_len_sq < 1e-6` branch skips the spatial walk;
+    //     the CPU oracle's `apply_program_aoe_cone_filter` returns
+    //     empty in the same condition. Both backends emit 0 chronicle
+    //     records — byte-equal at the trivial-zero level.
+    //
+    //     The non-degenerate cone math is exercised on the CPU via
+    //     `engine::tests::aoe_multi_agent_e2e::aoe_cone_hits_three_in_fan_*`
+    //     and the unit tests in `engine::ability::apply::tests` (5-agent
+    //     arc, apex exclusion, range cutoff). The GPU emit is validated
+    //     here at the WGSL-compile level (the kernel must parse and
+    //     dispatch without error even when the cone branch runs); a
+    //     follow-on fixture with an explicit-target `apply_ability AID
+    //     by self target other` lowering would unlock N>0 GPU cone
+    //     records (deferred — same surface as the Cleave-shape note
+    //     above and the module-level "What's deferred" section).
+    let mut slash = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 25.0 }],
+    );
+    slash.per_effect_areas.push(Some(engine::ability::program::EffectAreaShape {
+        kind: engine::ability::program::ShapeKind::Cone,
+        args: [60.0, 4.0, 0.0, 0.0],
+    }));
+    out.push((
+        "Slash",
+        slash,
+        CasterStats::default(),
+    ));
+
     out
 }
 
@@ -714,6 +756,46 @@ fn cleave_cpu_records_for_cast(
     tick:              u32,
     caster_stats:      &CasterStats,
 ) -> Vec<[u32; CHRONICLE_STRIDE_U32 as usize]> {
+    aoe_cpu_records_for_cast(program, caster_slot, aoe_target_slots, tick, caster_stats)
+}
+
+/// CPU oracle for the AOE Slash entry (#178 Cone). The smoke fixture's
+/// implicit-target rule means `caster_slot == target_slot ==
+/// agent_id` for every alive agent's cast; the cone's `direction =
+/// target_pos - apex = (0,0,0)` is structurally degenerate. The CPU
+/// helper passes an empty `aoe_target_slots` to mirror the GPU
+/// kernel's `dir_len_sq < 1e-6 → no-op` branch — both backends emit 0
+/// chronicle records under this fixture topology.
+///
+/// The shape of this helper is identical to `cleave_cpu_records_for_cast`
+/// (both go through `apply_program_aoe`); the alias name pins the
+/// "Slash routes through the cone CPU oracle path" semantic in the
+/// test runner. A future explicit-target fixture would replace the
+/// empty slot list with the in-cone candidate set computed via
+/// `apply_program_aoe_cone_filter`.
+fn slash_cpu_records_for_cast(
+    program:           &AbilityProgram,
+    caster_slot:       u32,
+    aoe_target_slots:  &[u32],
+    tick:              u32,
+    caster_stats:      &CasterStats,
+) -> Vec<[u32; CHRONICLE_STRIDE_U32 as usize]> {
+    aoe_cpu_records_for_cast(program, caster_slot, aoe_target_slots, tick, caster_stats)
+}
+
+/// Shared CPU oracle for AOE Path B entries (Circle Cleave + Cone
+/// Slash). Calls `apply_program_aoe` with the caller-supplied
+/// pre-filtered target slot list, then maps each emitted ApplyEvent
+/// to a chronicle record. The caller does the geometric filtering
+/// (Circle: spatial walk; Cone: `apply_program_aoe_cone_filter`); the
+/// helper just dispatches and packs.
+fn aoe_cpu_records_for_cast(
+    program:           &AbilityProgram,
+    caster_slot:       u32,
+    aoe_target_slots:  &[u32],
+    tick:              u32,
+    caster_stats:      &CasterStats,
+) -> Vec<[u32; CHRONICLE_STRIDE_U32 as usize]> {
     use engine::ability::apply::apply_program_aoe;
 
     let caster = AgentId::new(caster_slot + 1).expect("caster_slot+1 non-zero");
@@ -746,9 +828,10 @@ fn cleave_cpu_records_for_cast(
             engine::ability::apply::ApplyEvent::Shield { target, .. } => target.raw() - 1,
             engine::ability::apply::ApplyEvent::Stun { target, .. } => target.raw() - 1,
             engine::ability::apply::ApplyEvent::Slow { target, .. } => target.raw() - 1,
-            // Other variants stay un-AOE'd today (Cleave is the only
-            // AOE entry); fall through to the caster_slot if a future
-            // variant lands without an explicit target field.
+            // Other variants stay un-AOE'd today (Cleave/Slash are
+            // the only AOE entries); fall through to the caster_slot
+            // if a future variant lands without an explicit target
+            // field.
             _ => caster_slot,
         };
         if let Some(rec) =
@@ -806,8 +889,16 @@ fn cpu_gpu_apply_program_byte_equal_across_modifier_matrix() {
         // which requires N≥2 agents in the spatial grid (one caster
         // + one in-circle target). Route through the dedicated
         // 4-agent fixture path; every other entry uses the default
-        // 1-agent self-cast path.
-        let n_agents_for_ability = if *name == "Cleave" { 4 } else { N_AGENTS };
+        // 1-agent self-cast path. The Slash entry (#178 cone) uses
+        // a 5-agent fan layout so the cone walk has a meaningful
+        // candidate set even though the smoke fixture's self-cast
+        // rule degenerates the cone direction (see Slash's entry
+        // doc-comment for the byte-equal-at-zero contract).
+        let n_agents_for_ability = match *name {
+            "Cleave" => 4,
+            "Slash"  => 5,
+            _        => N_AGENTS,
+        };
 
         // GPU side seeds slot 0 with this ability's per-agent stats.
         // Self-cast convention: target_stats = caster_stats (CPU
@@ -854,26 +945,54 @@ fn cpu_gpu_apply_program_byte_equal_across_modifier_matrix() {
                 [4.5, 0.0, 0.0],
             ]);
         }
+        if *name == "Slash" {
+            // 5-agent fan layout. Caster at slot 0 (origin); other
+            // slots sit in an arc the cone WOULD hit if the dispatch
+            // were explicit-target (caster≠target):
+            //   slot 1: ( 3, -1, 0) — in-cone bottom (≈18.4° below +X)
+            //   slot 2: ( 4,  0, 0) — on-axis target candidate
+            //   slot 3: ( 3,  1, 0) — in-cone top (≈18.4° above +X)
+            //   slot 4: ( 1,  5, 0) — outside-cone (≈78.7° off-axis)
+            // Only slot 0 alive → one cast per tick from slot 0; the
+            // smoke fixture's implicit-target rule sets target_slot=0,
+            // so apex==target_pos==(0,0,0) → degenerate cone → 0
+            // records emitted. Both CPU oracle and GPU dispatcher
+            // observe the same degenerate result; byte-equal at zero.
+            state.set_agent_alive(&[1, 0, 0, 0, 0]);
+            state.set_agent_positions(&[
+                [0.0, 0.0, 0.0],
+                [3.0, -1.0, 0.0],
+                [4.0, 0.0, 0.0],
+                [3.0, 1.0, 0.0],
+                [1.0, 5.0, 0.0],
+            ]);
+        }
 
         for &tick in TICKS {
             // -- CPU oracle.
-            let mut cpu = if *name == "Cleave" {
-                cleave_cpu_records_for_cast(
+            let mut cpu = match *name {
+                "Cleave" => cleave_cpu_records_for_cast(
                     program,
                     /*caster_slot*/ 0,
                     /*aoe_target_slots*/ &[0, 1],
                     tick,
                     caster_stats,
-                )
-            } else {
-                cpu_records_for_cast(
+                ),
+                "Slash" => slash_cpu_records_for_cast(
+                    program,
+                    /*caster_slot*/ 0,
+                    /*aoe_target_slots*/ &[],
+                    tick,
+                    caster_stats,
+                ),
+                _ => cpu_records_for_cast(
                     program,
                     /*caster_slot*/ 0,
                     /*target_slot*/ 0,
                     tick,
                     caster_stats,
                     /*target_stats*/ caster_stats,
-                )
+                ),
             };
             canonicalize(&mut cpu);
 

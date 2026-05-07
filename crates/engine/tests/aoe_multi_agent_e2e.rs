@@ -28,7 +28,7 @@
 //! because that sweep uses no AOE-shape abilities; this slice does NOT
 //! extend that sweep (would require GPU-side spatial expansion).
 
-use engine::ability::apply::{apply_program_aoe, ApplyEvent};
+use engine::ability::apply::{apply_program_aoe, apply_program_aoe_cone_filter, ApplyEvent};
 use engine::ability::program::{
     AbilityProgram, CasterStats, EffectAreaShape, EffectOp, Gate, ShapeKind,
 };
@@ -260,5 +260,127 @@ fn aoe_strike_shape_in_4_agent_row_drops_hp_on_each_target() {
     assert!(
         (state.agent_hp(ids[3]).unwrap() - 100.0).abs() < f32::EPSILON,
         "ids[3] is OUTSIDE the circle — hp must remain at 100"
+    );
+}
+
+#[test]
+fn aoe_cone_hits_three_in_fan_five_agent_fixture() {
+    // 5 agents in a fan around the caster (`ids[0]` at origin):
+    //   ids[1] at ( 3, -1, 0)  in-cone (≈18.4° below +X axis)
+    //   ids[2] at ( 4,  0, 0)  on-axis target (cone facing +X)
+    //   ids[3] at ( 3,  1, 0)  in-cone (≈18.4° above +X axis)
+    //   ids[4] at ( 1,  5, 0)  out-of-cone (≈78.7° off-axis — outside 60° half-angle)
+    //
+    // Cone(60°, 5) cast from ids[0] facing ids[2] hits {ids[1], ids[2],
+    // ids[3]} but NOT ids[4]. Drives the cone path through the same
+    // `apply_program_aoe` dispatcher Circle uses (the user-facing
+    // contract: caller pre-filters via
+    // `apply_program_aoe_cone_filter`, dispatcher emits one record per
+    // target). End-to-end: chronicle records produced for in-cone
+    // agents only.
+    let mut state = SimState::new(8, 0xCAFE);
+    let positions = [
+        glam::Vec3::new(0.0, 0.0, 0.0),
+        glam::Vec3::new(3.0, -1.0, 0.0),
+        glam::Vec3::new(4.0, 0.0, 0.0),
+        glam::Vec3::new(3.0, 1.0, 0.0),
+        glam::Vec3::new(1.0, 5.0, 0.0),
+    ];
+    let ids: Vec<AgentId> = positions
+        .iter()
+        .map(|&pos| {
+            state
+                .spawn_agent(AgentSpawn { pos, ..Default::default() })
+                .expect("agent_cap large enough for 5 agents")
+        })
+        .collect();
+    assert_eq!(ids.len(), 5);
+
+    let mut prog = AbilityProgram::new_single_target(
+        5.0,
+        Gate {
+            cooldown_ticks: 10,
+            hostile_only: false,
+            line_of_sight: false,
+        },
+        [EffectOp::Damage { amount: 25.0 }],
+    );
+    prog.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Cone,
+        args: [60.0, 5.0, 0.0, 0.0],
+    }));
+
+    // Caller-side cone filter (mirrors the GPU kernel's WGSL math).
+    // Use the spatial query as the candidate superset so the test
+    // exercises the production-shape integration.
+    let apex = state.agent_pos(ids[0]).expect("ids[0] alive");
+    let target_pos = state.agent_pos(ids[2]).expect("ids[2] alive");
+    let candidates: Vec<(AgentId, glam::Vec3)> = state
+        .spatial()
+        .within_radius(&state, apex, 5.0)
+        .into_iter()
+        .map(|id| (id, state.agent_pos(id).expect("alive")))
+        .collect();
+    let aoe_targets = apply_program_aoe_cone_filter(
+        apex,
+        target_pos,
+        /*half_angle_deg*/ 60.0,
+        /*range*/ 5.0,
+        &candidates,
+    );
+    assert_eq!(
+        aoe_targets,
+        vec![ids[1], ids[2], ids[3]],
+        "cone(60°, 5) facing +X must hit ids[1..=3] only (ids[4] outside angle, \
+         ids[0] is the caster apex — excluded), got {aoe_targets:?}",
+    );
+
+    let events = apply_program_aoe(
+        &prog,
+        ids[0],
+        ids[2],
+        &aoe_targets,
+        0,
+        0xCAFE,
+        &CasterStats::default(),
+        &CasterStats::default(),
+    );
+    assert_eq!(events.len(), 3, "cone AOE → 3 chronicle records (one per in-cone target)");
+    for (i, expected_target) in [ids[1], ids[2], ids[3]].iter().enumerate() {
+        match &events[i] {
+            ApplyEvent::Damage { source, target, amount } => {
+                assert_eq!(*source, ids[0], "event[{i}] source must be caster ids[0]");
+                assert_eq!(*target, *expected_target, "event[{i}] target");
+                assert_eq!(*amount, 25.0, "event[{i}] amount must be 25.0");
+            }
+            other => panic!("expected Damage, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn aoe_cone_caster_targets_self_returns_empty_set() {
+    // Edge case: caster targets self ⇒ direction = (0,0,0) is
+    // degenerate. CPU oracle returns empty; GPU's `dir_len_sq < 1e-6`
+    // branch matches by emitting zero records. Pin so the deferred
+    // semantic doesn't drift.
+    let mut state = SimState::new(8, 0xCAFE);
+    let ids = spawn_row(&mut state, 3);
+
+    let apex = state.agent_pos(ids[0]).expect("ids[0] alive");
+    let candidates: Vec<(AgentId, glam::Vec3)> = ids
+        .iter()
+        .map(|&id| (id, state.agent_pos(id).expect("alive")))
+        .collect();
+    let aoe_targets = apply_program_aoe_cone_filter(
+        apex,
+        /*target_pos*/ apex, // caster targets self
+        60.0,
+        5.0,
+        &candidates,
+    );
+    assert!(
+        aoe_targets.is_empty(),
+        "degenerate cone (caster targets self) → empty in-cone set, got {aoe_targets:?}",
     );
 }

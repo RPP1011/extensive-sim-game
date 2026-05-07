@@ -39,12 +39,14 @@
 //!     `target_slot`) and surfacing the matching reads via a new
 //!     `wire_apply_ability_aoe_reads` helper (sibling to
 //!     `wire_ability_registry_column_reads`) is the next slice.
-//!   * Non-Circle AOE shapes (Cone, Line, Sphere, Box, etc.) on CPU.
-//!     `apply_program_aoe` only expands `Circle`-shape slots today;
-//!     other shapes fall back to single-target dispatch on
-//!     `primary_target`. CPU spatial infra (`SpatialHash::within_radius`)
-//!     directly supports Circle; the other 11 shapes need additional
-//!     geometry kernels (cone half-angle, capsule, AABB, …).
+//!   * Non-AOE-Path-B AOE shapes (Line, Sphere, Box, etc.) on CPU.
+//!     `apply_program_aoe` expands `Circle` (#121 follow-on) and
+//!     `Cone` (#178) slots; other shapes fall back to single-target
+//!     dispatch on `primary_target`. The cone math lives in
+//!     `apply_program_aoe_cone_filter` (range² gate ∧ angular
+//!     half-angle gate, mirroring the GPU kernel's WGSL bit-for-bit
+//!     for P11 byte-equal parity). The other 10 shapes still need
+//!     additional geometry kernels (capsule, AABB, …).
 //!   * delivery method scheduling (Projectile travel, Channel hold —
 //!     #124 IR done; runtime not wired)
 //!
@@ -447,20 +449,20 @@ pub(crate) fn evaluate_predicate(
 ///
 /// Per-effect slot dispatch:
 ///   * If `program.per_effect_areas[i]` is `Some(EffectAreaShape{
-///     kind: Circle, .. })`, the slot fires once per `aoe_targets`
-///     entry — one ApplyEvent per target. The caller is responsible
-///     for performing the spatial query (e.g.
-///     `state.spatial().within_radius(state, target_pos, args[0])`)
-///     and passing the result here. The slice MUST be sorted ascending
-///     by raw `AgentId` (P11 — `SpatialHash::within_radius` does this
-///     by construction).
-///   * Any other `Some(...)` shape (Cone, Line, Sphere, Box, etc.) —
+///     kind: Circle, .. })` or `Some(EffectAreaShape{ kind: Cone, .. })`,
+///     the slot fires once per `aoe_targets` entry — one ApplyEvent
+///     per target. The caller is responsible for performing the
+///     spatial + geometric filter (Circle: `state.spatial().within_radius(
+///     state, target_pos, args[0])`; Cone: range² gate ∧ angular gate,
+///     see `apply_program_aoe_cone_filter` for the canonical CPU
+///     filter that mirrors the GPU kernel's WGSL math) and passing
+///     the result here. The slice MUST be sorted ascending by raw
+///     `AgentId` (P11 — `SpatialHash::within_radius` does this by
+///     construction; the cone helper sorts as its final step).
+///   * Any other `Some(...)` shape (Line, Sphere, Box, etc.) —
 ///     deferred. The slot falls back to single-target dispatch on
-///     `primary_target`. This is intentional minimum-viable scope:
-///     Circle is the only shape with directly compatible CPU spatial
-///     infra (`SpatialHash::within_radius`); the other shapes need
-///     additional geometry kernels (cone half-angle, capsule, AABB,
-///     etc.) which Path A defers.
+///     `primary_target`. The other shapes need additional geometry
+///     kernels (capsule, AABB, etc.) which Path A defers.
 ///   * `None` slot (single-target, default) — fires once on
 ///     `primary_target`, identical to `apply_program`'s behavior.
 ///
@@ -539,14 +541,17 @@ pub fn apply_program_aoe(
             })
             .unwrap_or(0.0);
 
-        // Choose target list for this slot. Circle expands across
-        // aoe_targets; everything else (None, or non-Circle shape)
-        // is single-target on primary_target.
-        let is_circle_aoe = matches!(
+        // Choose target list for this slot. Circle and Cone expand
+        // across aoe_targets (caller pre-filters for both — Circle by
+        // `within_radius`, Cone by `apply_program_aoe_cone_filter`);
+        // everything else (None, or unrecognised shape) is
+        // single-target on primary_target.
+        let is_aoe_shape = matches!(
             program.per_effect_areas.get(i).copied().flatten(),
             Some(shape) if shape.kind == ShapeKind::Circle
+                        || shape.kind == ShapeKind::Cone
         );
-        let targets_for_slot: &[AgentId] = if is_circle_aoe {
+        let targets_for_slot: &[AgentId] = if is_aoe_shape {
             aoe_targets
         } else {
             std::slice::from_ref(&primary_target)
@@ -564,6 +569,91 @@ pub fn apply_program_aoe(
         }
     }
     out
+}
+
+/// CPU-side cone-filter oracle for AOE Path B Cone (mirrors the GPU
+/// kernel's WGSL math bit-for-bit so callers feeding `apply_program_aoe`
+/// produce a chronicle record set byte-equal to the GPU dispatcher).
+///
+/// Inputs:
+///   * `apex` — caster's position (cone origin).
+///   * `target_pos` — explicit cast target's position. The cone faces
+///     `direction = normalize(target_pos - apex)`.
+///   * `half_angle_deg` — `args[0]` from the `EffectAreaShape` (cone's
+///     half-angle in degrees; the cone's full opening is `2 *
+///     half_angle_deg`).
+///   * `range` — `args[1]` from the `EffectAreaShape` (max distance
+///     from apex along the cone axis).
+///   * `candidates` — slice of `(AgentId, position)` pairs the caller
+///     pre-collected from the spatial grid (the GPU walks 27 cells
+///     around `apex`; the CPU helper accepts any superset and filters
+///     down — typical caller is `state.spatial().within_radius(state,
+///     apex, range)` mapped to (id, pos) pairs).
+///
+/// Output: in-cone `AgentId`s sorted ascending by raw id (P11). The
+/// apex itself (caster) is excluded — the cone never targets its own
+/// origin (degenerate `to_cand = (0,0,0)` would produce an undefined
+/// direction; the GPU kernel skips the candidate explicitly when its
+/// position equals the apex).
+///
+/// Edge case: if `target_pos == apex` (caster targets self), the
+/// cone's direction is degenerate (zero-vector). Both backends MUST
+/// return an empty in-cone set in this case (the cone is undefined,
+/// and emitting any subset would create CPU↔GPU drift). The CPU
+/// short-circuits here; the GPU's `dir_len_sq < 1e-6` branch matches.
+///
+/// In-cone predicate (per candidate, identical to the WGSL kernel):
+///   1. `cand_pos != apex` (position-equality, not id-equality —
+///      handles two agents stacked at the same world-coord).
+///   2. `dist² ≤ range²` where `dist² = dot(to_cand, to_cand)`.
+///   3. `dot(normalize(to_cand), direction) ≥ cos(half_angle_rad)`.
+///
+/// **P11.** Both backends evaluate the predicate identically (same
+/// f32 ops in the same order: subtract, dot, inverseSqrt, dot). The
+/// final sort makes the post-filter set deterministic — GPU's atomic
+/// ring claim doesn't preserve order, but the parity sweep sorts
+/// post-readback (canonicalize) and the sets agree.
+pub fn apply_program_aoe_cone_filter(
+    apex:           glam::Vec3,
+    target_pos:     glam::Vec3,
+    half_angle_deg: f32,
+    range:          f32,
+    candidates:     &[(AgentId, glam::Vec3)],
+) -> Vec<AgentId> {
+    // Degenerate cone — caster targets self. The direction is
+    // undefined; emit no targets to match the GPU kernel.
+    let direction_raw = target_pos - apex;
+    let dir_len_sq = direction_raw.dot(direction_raw);
+    if dir_len_sq < 1e-6 {
+        return Vec::new();
+    }
+    let direction = direction_raw * dir_len_sq.recip().sqrt();
+    let half_angle_rad = half_angle_deg * std::f32::consts::PI / 180.0;
+    let cos_half_angle = half_angle_rad.cos();
+    let range_sq = range * range;
+
+    let mut hits: Vec<AgentId> = Vec::with_capacity(candidates.len());
+    for &(id, cand_pos) in candidates {
+        let to_cand = cand_pos - apex;
+        let dist_sq = to_cand.dot(to_cand);
+        // Apex exclusion: candidate at the cone origin.
+        if dist_sq < 1e-6 {
+            continue;
+        }
+        if dist_sq > range_sq {
+            continue;
+        }
+        let cand_dir = to_cand * dist_sq.recip().sqrt();
+        if cand_dir.dot(direction) < cos_half_angle {
+            continue;
+        }
+        hits.push(id);
+    }
+    // P11 reduction-determinism: sort ascending by raw AgentId so the
+    // CPU oracle and GPU dispatcher (after canonicalize) agree on
+    // emit order.
+    hits.sort_by_key(|id| id.raw());
+    hits
 }
 
 #[cfg(test)]
@@ -1144,9 +1234,9 @@ mod tests {
     }
 
     #[test]
-    fn aoe_non_circle_shape_falls_back_to_single_target() {
-        // Cone (and every other non-Circle shape) is deferred in
-        // Path A — the slot fires once on `primary_target` even when
+    fn aoe_non_expandable_shape_falls_back_to_single_target() {
+        // Line (and every shape other than Circle/Cone) is deferred —
+        // the slot fires once on `primary_target` even when
         // `aoe_targets` is populated. Pin this so the deferral is
         // explicit (regression guard for future shape additions).
         let mut prog = AbilityProgram::new_single_target(
@@ -1155,10 +1245,10 @@ mod tests {
             [EffectOp::Damage { amount: 50.0 }],
         );
         prog.per_effect_areas.push(Some(EffectAreaShape {
-            kind: ShapeKind::Cone,
-            args: [45.0, 5.0, 0.0, 0.0],
+            kind: ShapeKind::Line,
+            args: [5.0, 1.0, 0.0, 0.0],
         }));
-        // aoe_targets is non-empty, but Cone isn't expanded yet.
+        // aoe_targets is non-empty, but Line isn't expanded yet.
         let aoe_targets = [agent_n(2), agent_n(3), agent_n(4)];
         let events = apply_program_aoe(
             &prog,
@@ -1169,11 +1259,133 @@ mod tests {
             &CasterStats::default(),
             &CasterStats::default(),
         );
-        assert_eq!(events.len(), 1, "Cone shape → single-target fallback (Path A defers)");
+        assert_eq!(events.len(), 1, "Line shape → single-target fallback (Path A defers)");
         assert!(matches!(
             events[0],
             ApplyEvent::Damage { target: t, .. } if t == agent_n(2)
         ));
+    }
+
+    #[test]
+    fn aoe_cone_expands_across_pre_filtered_targets() {
+        // Cone shape: same expansion contract as Circle — the caller
+        // pre-filters and passes the in-cone set, the dispatcher emits
+        // one ApplyEvent per target. The cone math itself is exercised
+        // by `aoe_cone_filter_*` tests below; this test pins the
+        // dispatch leg.
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 25.0 }],
+        );
+        prog.per_effect_areas.push(Some(EffectAreaShape {
+            kind: ShapeKind::Cone,
+            args: [60.0, 4.0, 0.0, 0.0],
+        }));
+        let aoe_targets = [agent_n(2), agent_n(3)];
+        let events = apply_program_aoe(
+            &prog,
+            agent_n(1),
+            agent_n(2),
+            &aoe_targets,
+            0, 0xCAFE,
+            &CasterStats::default(),
+            &CasterStats::default(),
+        );
+        assert_eq!(events.len(), 2, "Cone AOE → one event per pre-filtered target");
+        assert!(matches!(
+            events[0],
+            ApplyEvent::Damage { target: t, .. } if t == agent_n(2)
+        ));
+        assert!(matches!(
+            events[1],
+            ApplyEvent::Damage { target: t, .. } if t == agent_n(3)
+        ));
+    }
+
+    #[test]
+    fn aoe_cone_filter_5_agents_in_arc() {
+        // Fan layout: agent 0 (caster) at origin, agents 1-4 in an arc
+        // in front of agent 0 facing +X.
+        //
+        //   agent 4 (out-of-cone — wide angle):  pos = (1, 5, 0)        ~78.7° off axis
+        //   agent 3 (in-cone, top):               pos = (3, 1, 0)       ~18.4° off axis
+        //   agent 2 (in-cone, on-axis target):    pos = (4, 0, 0)        0° off axis
+        //   agent 1 (in-cone, bottom):            pos = (3, -1, 0)      ~18.4° off axis
+        //   agent 5 (out-of-cone — past range):   pos = (10, 0, 0)      0° off axis but range>5
+        //
+        // cone(60°, 5) from agent 0 facing agent 2 hits {1, 2, 3} but
+        // not 4 (outside angle) or 5 (past range). agent 0 (the caster
+        // itself, at apex) is excluded.
+        let apex = glam::Vec3::new(0.0, 0.0, 0.0);
+        let target_pos = glam::Vec3::new(4.0, 0.0, 0.0);
+        let candidates = vec![
+            (agent_n(1), apex),                              // caster — apex exclusion
+            (agent_n(2), glam::Vec3::new(3.0, -1.0, 0.0)),   // in-cone bottom
+            (agent_n(3), target_pos),                         // on-axis target
+            (agent_n(4), glam::Vec3::new(3.0, 1.0, 0.0)),    // in-cone top
+            (agent_n(5), glam::Vec3::new(1.0, 5.0, 0.0)),    // out-of-cone (wide)
+            (agent_n(6), glam::Vec3::new(10.0, 0.0, 0.0)),   // out-of-cone (range)
+        ];
+        let hits = apply_program_aoe_cone_filter(
+            apex,
+            target_pos,
+            /*half_angle_deg*/ 60.0,
+            /*range*/ 5.0,
+            &candidates,
+        );
+        assert_eq!(
+            hits,
+            vec![agent_n(2), agent_n(3), agent_n(4)],
+            "cone(60°, 5) facing +X must hit agents 2/3/4 only \
+             (caster apex excluded, agent 5 outside angle, agent 6 \
+             past range); got {hits:?}",
+        );
+    }
+
+    #[test]
+    fn aoe_cone_filter_caster_targets_self_returns_empty() {
+        // Edge case: caster targets self ⇒ direction = (0,0,0) is
+        // degenerate. CPU oracle returns empty; GPU's `dir_len_sq <
+        // 1e-6` branch matches by going to no-op. Pinning this so a
+        // future "caster auto-faces nearest enemy on degenerate
+        // direction" change doesn't silently flip CPU↔GPU parity.
+        let apex = glam::Vec3::new(2.0, 3.0, 4.0);
+        let target_pos = apex;
+        let candidates = vec![
+            (agent_n(2), glam::Vec3::new(3.0, 3.0, 4.0)),
+            (agent_n(3), glam::Vec3::new(2.0, 4.0, 4.0)),
+        ];
+        let hits = apply_program_aoe_cone_filter(
+            apex, target_pos, 60.0, 5.0, &candidates,
+        );
+        assert!(
+            hits.is_empty(),
+            "degenerate cone (caster targets self) → empty in-cone set, got {hits:?}",
+        );
+    }
+
+    #[test]
+    fn aoe_cone_filter_apex_exclusion() {
+        // Two candidates at the apex (e.g. caster + a co-located ally
+        // at the same world coord). Both must be excluded from the
+        // in-cone set — the GPU kernel's `dist_sq < 1e-6` branch skips
+        // them, and the CPU oracle matches.
+        let apex = glam::Vec3::new(0.0, 0.0, 0.0);
+        let target_pos = glam::Vec3::new(5.0, 0.0, 0.0);
+        let candidates = vec![
+            (agent_n(1), apex),                              // caster at apex
+            (agent_n(2), apex),                              // co-located ally at apex
+            (agent_n(3), glam::Vec3::new(2.0, 0.0, 0.0)),    // in-cone, NOT at apex
+        ];
+        let hits = apply_program_aoe_cone_filter(
+            apex, target_pos, 60.0, 5.0, &candidates,
+        );
+        assert_eq!(
+            hits,
+            vec![agent_n(3)],
+            "apex-coincident candidates must be excluded; got {hits:?}",
+        );
     }
 
     #[test]
