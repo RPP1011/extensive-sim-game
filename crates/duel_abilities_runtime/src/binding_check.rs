@@ -40,6 +40,21 @@ use engine::ability::{
 /// silent wrong-ability dispatch.
 pub const STRIKE_EXPECTED_ABILITY_ID: u32 = 1;
 
+/// Task #138 follow-on — ShieldUp's verb body in
+/// `assets/sim/duel_abilities.sim` dispatches via
+/// `apply_ability 2 by self target self`. The literal `2` is
+/// ShieldUp's expected `AbilityId` slot in the registry — it lands
+/// second after Strike in the alphabetised file list (Strike=1,
+/// ShieldUp=2, Mend=3, ...).
+pub const SHIELDUP_EXPECTED_ABILITY_ID: u32 = 2;
+
+/// Task #138 follow-on — Mend's verb body in
+/// `assets/sim/duel_abilities.sim` dispatches via
+/// `apply_ability 3 by self target self`. The literal `3` is Mend's
+/// expected `AbilityId` slot in the registry (Strike=1, ShieldUp=2,
+/// Mend=3 in alphabetised order).
+pub const MEND_EXPECTED_ABILITY_ID: u32 = 3;
+
 /// Read + parse + build the AbilityRegistry over every .ability file
 /// under `assets/ability_test/duel_abilities/`. Shared by the binding
 /// check (assert_ability_registry_matches_sim_constants) AND the
@@ -166,6 +181,20 @@ pub fn assert_ability_registry_matches_sim_constants() {
     // ---- ShieldUp: cooldown 40 ticks, self-target, shield 50.0 ----
     let shieldup_id = *built.names.get("ShieldUp")
         .expect("ShieldUp registered in name table");
+    // Task #138 follow-on — ShieldUp's verb body in duel_abilities.sim
+    // hardcodes the literal `apply_ability 2 by self target self`. Pin
+    // the registry slot at startup so any drift in the build_registry
+    // ordering surfaces here, not as silent wrong-ability dispatch
+    // (e.g. the verb fires Strike's effects against self).
+    assert_eq!(
+        shieldup_id,
+        AbilityId::new(SHIELDUP_EXPECTED_ABILITY_ID).expect("non-zero AbilityId"),
+        "ShieldUp's AbilityId drifted from the expected slot {} — \
+         duel_abilities.sim's `apply_ability 2` literal will dispatch the \
+         wrong program. Re-check the alphabetised file order in \
+         `build_duel_abilities_registry()`.",
+        SHIELDUP_EXPECTED_ABILITY_ID,
+    );
     let shieldup = built.registry.get(shieldup_id)
         .expect("ShieldUp resolves to a program");
     assert_eq!(
@@ -229,6 +258,19 @@ pub fn assert_ability_registry_matches_sim_constants() {
     // ---- Mend: cooldown 30 ticks, self-target, heal 25.0 ----
     let mend_id = *built.names.get("Mend")
         .expect("Mend registered in name table");
+    // Task #138 follow-on — Mend's verb body in duel_abilities.sim
+    // hardcodes the literal `apply_ability 3 by self target self`. Pin
+    // the registry slot at startup so any drift in the build_registry
+    // ordering surfaces here, not as silent wrong-ability dispatch.
+    assert_eq!(
+        mend_id,
+        AbilityId::new(MEND_EXPECTED_ABILITY_ID).expect("non-zero AbilityId"),
+        "Mend's AbilityId drifted from the expected slot {} — \
+         duel_abilities.sim's `apply_ability 3` literal will dispatch the \
+         wrong program. Re-check the alphabetised file order in \
+         `build_duel_abilities_registry()`.",
+        MEND_EXPECTED_ABILITY_ID,
+    );
     let mend = built.registry.get(mend_id)
         .expect("Mend resolves to a program");
     assert_eq!(

@@ -15,9 +15,23 @@
 // `Damaged` events, keeping the rest of the cascade (shield absorption,
 // lifesteal, damage-modify, defeat handling) unchanged. The literal `1`
 // is Strike's AbilityId in the registry — pinned at startup by
-// `binding_check::STRIKE_EXPECTED_ABILITY_ID`. The other verbs
-// (ShieldUp/Mend/Bleed/Reap/Vampirize/Fortify/Daze) still use direct
-// emit chronicles; expanding the apply_ability swap to them is followup.
+// `binding_check::STRIKE_EXPECTED_ABILITY_ID`.
+//
+// Task #138 follow-on (2026-05-07) — ShieldUp and Mend extended the same
+// pattern: their verb bodies now dispatch via `apply_ability 2 by self
+// target self` and `apply_ability 3 by self target self` respectively
+// (self-cast, so the explicit `target self` matches the verb's
+// own self-target gate). The dispatcher writes EffectShieldApplied
+// (kind=28) and EffectHealApplied (kind=27) records that the new
+// ApplyShieldFromChronicle / ApplyHealFromChronicle physics rules
+// re-emit as the existing `Shielded` / `Healed` events so the rest of
+// the cascade (ApplyShield / ApplyHeal SoA writes) keeps working
+// unchanged. Slot ids pinned at startup via SHIELDUP_EXPECTED_ABILITY_ID
+// = 2 and MEND_EXPECTED_ABILITY_ID = 3 in binding_check.rs. The
+// remaining verbs (Bleed/Reap/Vampirize/Fortify/Daze) still use direct
+// emit chronicles; expanding the apply_ability swap to them is followup
+// (each has more complex effects — caster scaling, multi-effect,
+// when-conditions, chance gates).
 //
 // CONSTANT TABLE (matches the .ability files exactly):
 //   Strike   : cooldown 10 ticks (1s), range 5.0, damage 15.0, target enemy
@@ -84,6 +98,41 @@ event Damaged {
 // without modification.
 @replayable @gpu_amenable
 event EffectDamageApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Engine-side chronicle event written by the apply_ability dispatcher
+// at hardcoded EventKindId 27 (see
+// `dsl_ast::engine_events::engine_event_kind_id_for_name`).
+//
+// Task #138 follow-on — Mend's verb body is now `apply_ability 3 by
+// self target self`, which writes EffectHealApplied records into the
+// event ring. The new ApplyHealFromChronicle physics rule (declared
+// below near the rest of the consumers) translates these records
+// back into the existing `Healed` event so the existing ApplyHeal
+// cascade (per-agent set_hp) works without modification.
+@replayable @gpu_amenable
+event EffectHealApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Engine-side chronicle event written by the apply_ability dispatcher
+// at hardcoded EventKindId 28 (see
+// `dsl_ast::engine_events::engine_event_kind_id_for_name`).
+//
+// Task #138 follow-on — ShieldUp's verb body is now `apply_ability 2
+// by self target self`, which writes EffectShieldApplied records into
+// the event ring. The new ApplyShieldFromChronicle physics rule
+// (declared below near the rest of the consumers) translates these
+// records back into the existing `Shielded` event so the existing
+// ApplyShield cascade (per-agent set_shield_hp) works without
+// modification.
+@replayable @gpu_amenable
+event EffectShieldApplied {
   actor: AgentId,
   target: AgentId,
   amount: f32,
@@ -240,7 +289,24 @@ verb ShieldUp(self, target: Agent) =
         && target == self
         && (world.tick % 40 == 0)
         && self.hp < 90.0)
-  emit Shielded { source: self, target: self, amount: config.combat.shieldup_amount }
+  // Task #138 follow-on — verb-body apply_ability dispatcher swap.
+  // ShieldUp was `emit Shielded { source: self, target: self, amount:
+  // config.combat.shieldup_amount }`. The literal `2` is ShieldUp's
+  // AbilityId in the duel_abilities AbilityRegistry built from the
+  // alphabetised .ability filenames in
+  // `binding_check.rs::build_duel_abilities_registry` (Strike=1,
+  // ShieldUp=2, Mend=3, ...).
+  //
+  // `target self` mirrors the verb's existing `target == self` gate —
+  // ShieldUp is self-cast so the dispatcher routes the EffectShieldApplied
+  // chronicle's actor and target to the same slot. The runtime extends
+  // the binding check to assert
+  // `built.names.get("ShieldUp") == AbilityId(2)` so any drift surfaces
+  // as a startup panic. See ApplyShieldFromChronicle below for the
+  // chronicle re-emit that funnels EffectShieldApplied(kind=28) records
+  // back into the existing `Shielded` cascade so ApplyShield's
+  // shield_hp accumulation keeps working unchanged.
+  apply_ability 2 by self target self
   score 250.0
 
 // Mend — self-cast, cooldown 30 ticks. Only fires when HP is low.
@@ -254,7 +320,20 @@ verb Mend(self, target: Agent) =
         && target == self
         && (world.tick % 30 == 0)
         && self.hp < config.combat.hp_low_threshold)
-  emit Healed { source: self, target: self, amount: config.combat.mend_amount }
+  // Task #138 follow-on — verb-body apply_ability dispatcher swap.
+  // Mend was `emit Healed { source: self, target: self, amount:
+  // config.combat.mend_amount }`. The literal `3` is Mend's AbilityId
+  // in the duel_abilities AbilityRegistry (Strike=1, ShieldUp=2,
+  // Mend=3 — alphabetised filenames in build_duel_abilities_registry).
+  //
+  // `target self` matches the verb's existing `target == self` gate —
+  // Mend is self-cast. The runtime extends the binding check to assert
+  // `built.names.get("Mend") == AbilityId(3)` so any drift surfaces as
+  // a startup panic. See ApplyHealFromChronicle below for the
+  // chronicle re-emit that funnels EffectHealApplied(kind=27) records
+  // back into the existing `Healed` cascade so ApplyHeal's per-agent
+  // set_hp keeps working unchanged.
+  apply_ability 3 by self target self
   score 300.0
 
 // Bleed — Wave 2 piece N: first SelfDamage E2E demo. Self-cast,
@@ -398,6 +477,40 @@ verb Daze(self, target: Agent) =
 physics ApplyDamageFromChronicle {
   on EffectDamageApplied { actor: c, target: t, amount: a } {
     emit Damaged { source: c, target: t, amount: a }
+  }
+}
+
+// Task #138 follow-on — ShieldUp's verb body now uses
+// `apply_ability 2 by self target self` (see the ShieldUp verb above).
+// The dispatcher writes EffectShieldApplied chronicle records
+// (engine-aliased to kind=28) instead of the source-declared Shielded
+// event. This rule consumes those records and re-emits Shielded so the
+// rest of the cascade (ApplyShield with shield_hp accumulation) keeps
+// working unchanged.
+//
+// P6 caveat: this rule is PerEvent + emit-only (no AgentField writes)
+// — does NOT trip P6.
+@phase(post)
+physics ApplyShieldFromChronicle {
+  on EffectShieldApplied { actor: c, target: t, amount: a } {
+    emit Shielded { source: c, target: t, amount: a }
+  }
+}
+
+// Task #138 follow-on — Mend's verb body now uses
+// `apply_ability 3 by self target self` (see the Mend verb above).
+// The dispatcher writes EffectHealApplied chronicle records
+// (engine-aliased to kind=27) instead of the source-declared Healed
+// event. This rule consumes those records and re-emits Healed so the
+// rest of the cascade (ApplyHeal with per-agent set_hp) keeps working
+// unchanged.
+//
+// P6 caveat: this rule is PerEvent + emit-only (no AgentField writes)
+// — does NOT trip P6.
+@phase(post)
+physics ApplyHealFromChronicle {
+  on EffectHealApplied { actor: c, target: t, amount: a } {
+    emit Healed { source: c, target: t, amount: a }
   }
 }
 
