@@ -97,18 +97,9 @@ verb Spell(self, target: Agent) =
   // Higher score when target HP is low — finisher.
   score (config.combat.spell_damage * 2.0 - target.hp)
 
-// Heal — self-cast. Only fires when self HP is low. Score is a
-// constant high value so it dominates Strike whenever the gate
-// passes (gate already encodes the urgency: hp < threshold).
-//
-// NOTE — Gap E (deferred): the natural shape `score (threshold*2 -
-// self.hp)` lowers `self.hp` to `agent_hp[target_expr_<N>]` (no
-// matching `let` binding emitted). The verb expander's binder
-// shadowing routes `self` through PerPairCandidate when the verb
-// has a `target` param, even when the score body only references
-// `self.*` — the ScoringRow lowering needs a self-vs-target
-// disambiguation pass when the binder context permits both.
-// Workaround: constant score; the gate still encodes urgency.
+// Heal — self-cast. Only fires when self HP is low. Score peaks
+// when self HP is far below the threshold, so the urgency rises
+// monotonically as HP drops.
 verb Heal(self, target: Agent) =
   action HealAction
   when (self.alive
@@ -116,7 +107,7 @@ verb Heal(self, target: Agent) =
         && (world.tick % 4 == 0)
         && self.hp < config.combat.hp_low_threshold)
   emit Healed { source: self, target: self, amount: config.combat.heal_amount }
-  score 100.0
+  score (config.combat.hp_low_threshold * 2.0 - self.hp)
 
 // Apply damage — chronicle physics. On Damaged event, reduce target HP.
 // If new HP <= 0, set the target dead AND emit Defeated.
