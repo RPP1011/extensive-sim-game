@@ -55,6 +55,7 @@
 //!  43. `Damage(25) in cone(45°, 5)`                  — NonDegSlash-shape (#182 explicit-target Cone, 5-agent fan, +X direction)
 //!  44. `Damage(22) in line(5.0, 1.0)`                — NonDegPiercingLine-shape (#182 explicit-target Line, 4-agent fixture, +X direction)
 //!  45. `Damage(11) in wall(4, 2, 2, 0°)`             — NonDegShieldWall-shape (#182 explicit-target Wall, 4-agent fixture, slab at target)
+//!  46. `Summon(0xDEADBEEF, 3, 120)`                  — EvocationSummon-shape (slice γ closer, caster-self packed payload)
 //!
 //! M = 1 caster×target permutation in this fixture: `(c=0, t=0)`
 //! self-cast. The smoke fixture's `apply_ability` source uses the
@@ -1019,6 +1020,34 @@ fn build_sweep() -> Vec<(&'static str, AbilityProgram, CasterStats)> {
     out.push((
         "NonDegShieldWall",
         non_deg_shield_wall,
+        CasterStats::default(),
+    ));
+
+    // 46. EvocationSummon-shape — Summon(template_hash=0xDEADBEEF,
+    //     count=3, lifetime=120) (slice γ closer). Caster-self with
+    //     packed payload — the dispatcher splits the packed `payload_b`
+    //     (= count<<24 | lifetime in low 24 bits) into distinct ring
+    //     slots (slot 4 = count widened u8→u32, slot 5 = lifetime_ticks
+    //     raw u32) so consumers don't have to redo the bit-unpack on
+    //     read. The CPU oracle calls `apply_program`, which emits ONE
+    //     `ApplyEvent::Summon` carrying the typed (count, lifetime);
+    //     `apply_event_to_chronicle_record` reconstructs the same
+    //     5-payload-word record (kind=62 + actor + template_hash +
+    //     count + lifetime). Both backends emit byte-equal records;
+    //     the parity sweep's sort + memcmp pin the equality.
+    //     Adding this entry extends the sweep matrix from 45 → 46
+    //     abilities and closes the last `// TODO slice γ` arm.
+    out.push((
+        "EvocationSummon",
+        AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 60, hostile_only: false, line_of_sight: false },
+            [EffectOp::Summon {
+                template_hash: 0xDEADBEEF,
+                count: 3,
+                lifetime_ticks: 120,
+            }],
+        ),
         CasterStats::default(),
     ));
 

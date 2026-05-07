@@ -126,6 +126,16 @@ pub const ENGINE_EVENT_KIND_IDS: &[(&str, u32)] = &[
     ("EffectHarvestApplied",    59),
     ("EffectPlaceVoxelApplied", 60),
     ("EffectReflectApplied",    61),
+    // Slice γ closer — Summon (kind 24 → ID 62), the last `// TODO
+    // slice γ` placeholder. Caster-self with packed payload — actor
+    // + template_hash + count (u8 widened to u32) + lifetime_ticks.
+    // The CPU side writes ONE `ApplyEvent::Summon` per cast carrying
+    // the packed (count, lifetime); downstream N-entity spawning is
+    // a separate consumer concern, distinct from the dispatcher's
+    // single-record write. Slot 62 contiguous with the slice γ tail
+    // block (58..61). No consumer rule in any sim today; the
+    // dispatcher write end-to-end works without a fold consumer.
+    ("EffectSummonApplied",     62),
 ];
 
 /// Look up the engine-defined `EventKindId` discriminant for an
@@ -177,6 +187,7 @@ mod tests {
         assert_eq!(engine_event_kind_id_for_name("EffectHarvestApplied"), Some(59));
         assert_eq!(engine_event_kind_id_for_name("EffectPlaceVoxelApplied"), Some(60));
         assert_eq!(engine_event_kind_id_for_name("EffectReflectApplied"), Some(61));
+        assert_eq!(engine_event_kind_id_for_name("EffectSummonApplied"), Some(62));
     }
 
     #[test]

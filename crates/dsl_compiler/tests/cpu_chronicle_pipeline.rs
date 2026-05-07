@@ -113,24 +113,26 @@ fn multi_effect_ability_produces_record_per_chronicle_arm() {
 }
 
 #[test]
-fn ability_with_only_non_chronicle_effects_produces_no_records() {
-    // Deferred-infrastructure variants today: only Summon (kind 24) —
-    // multi-spawn semantics (one cast → N entity spawns) need a new
-    // dispatch shape and is deferred. The dispatcher's WGSL would still
-    // emit a TODO-marker arm for Summon on GPU, but no chronicle write.
+fn every_apply_event_produced_via_apply_program_has_chronicle_counterpart() {
+    // After the slice γ closer (Summon → kind 62), every `EffectOp`
+    // EngineEffectOp variant `apply_program` can emit has a chronicle
+    // counterpart in the CPU reference (and the GPU dispatcher).
+    // CastAbility=7 is the only EffectOp without one, by design —
+    // recursive dispatch never lands as a top-level ApplyEvent.
     //
-    // Already wired up:
+    // Wire-up index per variant family:
     // - Root/Silence/Fear/Taunt (Wave 2 piece 1) → kinds 43..46.
     // - Dash/Blink/Knockback/Pull (Wave 2 piece 2) → kinds 47..50.
     // - DoT/HoT/TimedShield (Wave 1.5+) → kinds 51..53.
     // - Stealth/Charm/Grounded/Suppress (extended-status slice) →
     //   kinds 54..57.
-    // - Buff/Harvest/PlaceVoxel/Reflect (slice γ tail) → kinds 58..61,
-    //   see the corresponding `*_pipeline_emits_kind_58..61_record`
-    //   tests below.
+    // - Buff/Harvest/PlaceVoxel/Reflect (slice γ tail) → kinds 58..61.
+    // - Summon (slice γ closer) → kind 62, see the
+    //   `summon_pipeline_emits_kind_62_record` test below.
     //
-    // Pick Summon — the only remaining EffectOp without a chronicle
-    // counterpart.
+    // Smoke-pin the Summon path here — a regression that drops the
+    // dispatcher arm or the CPU reference translation will surface as
+    // an empty `records` Vec.
     let program = AbilityProgram::new_single_target(
         5.0,
         Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
@@ -139,9 +141,11 @@ fn ability_with_only_non_chronicle_effects_produces_no_records() {
         ],
     );
     let records = run_pipeline(&program, aid(1), aid(2), 100);
-    assert!(
-        records.is_empty(),
-        "no chronicle counterparts → no records (got {} records: {:?})",
+    assert_eq!(
+        records.len(),
+        1,
+        "one Summon effect → one chronicle record (slice γ closer);  \
+         got {} records: {:?}",
         records.len(),
         records,
     );
@@ -587,6 +591,38 @@ fn reflect_pipeline_emits_kind_61_record_with_signed_fraction() {
     );
     for i in 6..10 {
         assert_eq!(r[i], 0, "Reflect: tail word {i} should be zero");
+    }
+}
+
+/// Slice γ closer — Summon (kind 24 → 62). Caster-self with packed
+/// payload. 5-payload-word record: actor + template_hash + count
+/// (u8 widened to u32) + lifetime_ticks. The dispatcher splits the
+/// packed `payload_b` into distinct ring slots (slot 4 = count, slot
+/// 5 = lifetime_ticks) so consumers don't have to redo the bit-unpack
+/// on read; the engine event struct carries `count: u8` and
+/// `lifetime_ticks: u32` as separate fields.
+#[test]
+fn summon_pipeline_emits_kind_62_record() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 60, hostile_only: false, line_of_sight: false },
+        [EffectOp::Summon {
+            template_hash: 0xDEADBEEF,
+            count: 3,
+            lifetime_ticks: 120,
+        }],
+    );
+    let records = run_pipeline(&program, aid(7), aid(7), 100);
+    assert_eq!(records.len(), 1, "one Summon effect → one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 62, "EventKindId::EffectSummonApplied = 62");
+    assert_eq!(r[1], 100, "tick");
+    assert_eq!(r[2], 7, "actor slot — caster_id");
+    assert_eq!(r[3], 0xDEADBEEF, "template_hash at payload word 1 (no target field)");
+    assert_eq!(r[4], 3, "count (u8 widened to u32) at payload word 2");
+    assert_eq!(r[5], 120, "lifetime_ticks (raw u32) at payload word 3");
+    for i in 6..10 {
+        assert_eq!(r[i], 0, "Summon: tail word {i} should be zero");
     }
 }
 

@@ -49,6 +49,7 @@ pub mod effect_slow_applied;
 pub mod effect_standing_delta;
 pub mod effect_stealth_applied;
 pub mod effect_stun_applied;
+pub mod effect_summon_applied;
 pub mod effect_suppress_applied;
 pub mod effect_taunt_applied;
 pub mod effect_timed_shield_applied;
@@ -111,6 +112,7 @@ pub use effect_slow_applied::EffectSlowApplied;
 pub use effect_standing_delta::EffectStandingDelta;
 pub use effect_stealth_applied::EffectStealthApplied;
 pub use effect_stun_applied::EffectStunApplied;
+pub use effect_summon_applied::EffectSummonApplied;
 pub use effect_suppress_applied::EffectSuppressApplied;
 pub use effect_taunt_applied::EffectTauntApplied;
 pub use effect_timed_shield_applied::EffectTimedShieldApplied;
@@ -432,6 +434,13 @@ pub enum Event {
         fraction_q8: i16,
         tick: u32,
     },
+    EffectSummonApplied {
+        actor: AgentId,
+        template_hash: u32,
+        count: u8,
+        lifetime_ticks: u32,
+        tick: u32,
+    },
     EngagementBroken {
         actor: AgentId,
         former_target: AgentId,
@@ -544,6 +553,7 @@ impl Event {
             Event::EffectHarvestApplied { tick, .. } => *tick,
             Event::EffectPlaceVoxelApplied { tick, .. } => *tick,
             Event::EffectReflectApplied { tick, .. } => *tick,
+            Event::EffectSummonApplied { tick, .. } => *tick,
             Event::EngagementBroken { tick, .. } => *tick,
             Event::EngagementCommitted { tick, .. } => *tick,
             Event::FearSpread { tick, .. } => *tick,
@@ -609,6 +619,7 @@ impl Event {
             Event::EffectHarvestApplied { .. } => true,
             Event::EffectPlaceVoxelApplied { .. } => true,
             Event::EffectReflectApplied { .. } => true,
+            Event::EffectSummonApplied { .. } => true,
             Event::EngagementBroken { .. } => true,
             Event::EngagementCommitted { .. } => true,
             Event::FearSpread { .. } => true,

@@ -239,14 +239,27 @@ pub enum EventKindId {
     // stores the raw u32 from the dispatcher's effect_payload_a /
     // effect_payload_b columns; consumers downcast/sign-extend on read.
     // Harvest and PlaceVoxel store unsigned u32 hashes / counts.
-    // Summon (kind 24) is the only remaining `// TODO slice γ` arm —
-    // its multi-spawn semantics need a new dispatch shape (one cast →
-    // N entity spawns) and is deferred.
     EffectBuffApplied        = 58,
     EffectHarvestApplied     = 59,
     EffectPlaceVoxelApplied  = 60,
     EffectReflectApplied     = 61,
-    // Slots 62-127 reserved for replayable event variants added in later tasks.
+    // Slice γ closer — Summon (kind 24 → ID 62), the last `// TODO
+    // slice γ` placeholder in the apply_ability dispatcher's WGSL arm
+    // chain. Caster-self with packed payload — 5-payload-word
+    // chronicle record (actor + template_hash + count + lifetime_ticks).
+    // The earlier "multi-spawn semantics need a new dispatch shape"
+    // deferral was misleading: per `crates/engine/src/ability/apply.rs`
+    // the CPU side writes ONE `ApplyEvent::Summon` per cast with
+    // packed (count, lifetime); downstream N-entity spawning is a
+    // separate consumer concern. The dispatcher writes one record per
+    // cast with count + lifetime stored in distinct slots (slot 4 =
+    // count widened u8→u32, slot 5 = lifetime_ticks raw u32) — same
+    // shape family as DoT/HoT/TimedShield (5 payload words). No
+    // target field on the engine event. Position / spawned-entity
+    // allocation are downstream consumer concerns, distinct from the
+    // dispatcher's record write.
+    EffectSummonApplied      = 62,
+    // Slots 63-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 

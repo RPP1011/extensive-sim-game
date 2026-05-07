@@ -3134,14 +3134,26 @@ pub(crate) const EFFECT_KIND_TO_EVENT_KIND_ID: &[(u32, u32)] = &[
     // =26, Reflect=31) come from `pack_effect` in
     // `crates/engine/src/ability/packed.rs`; the dispatcher arm bodies
     // for these in `emit_chronicle_arm_chain` (below) match these
-    // ordinals via `kind == 23u | 25u | 26u | 31u`. Summon (kind 24)
-    // is the only remaining `// TODO slice γ` arm — its multi-spawn
-    // semantics need a new dispatch shape (one cast → N entity spawns)
-    // and is deferred.
+    // ordinals via `kind == 23u | 25u | 26u | 31u`.
     (23, 58), // EffectOp::Buff       → EventKindId::EffectBuffApplied
     (25, 59), // EffectOp::Harvest    → EventKindId::EffectHarvestApplied
     (26, 60), // EffectOp::PlaceVoxel → EventKindId::EffectPlaceVoxelApplied
     (31, 61), // EffectOp::Reflect    → EventKindId::EffectReflectApplied
+    // Slice γ closer — Summon (kind 24 → ID 62), the last `// TODO
+    // slice γ` placeholder in the dispatcher arm chain. Caster-self
+    // with packed payload (5 payload words: actor + template_hash +
+    // count + lifetime_ticks). The earlier "multi-spawn semantics need
+    // a new dispatch shape" deferral was misleading — per
+    // `crates/engine/src/ability/apply.rs`, the CPU side writes ONE
+    // `ApplyEvent::Summon` per cast carrying the packed (count,
+    // lifetime), exactly the same shape family as Buff (kind 23 →
+    // 58). Downstream N-entity spawning is a separate consumer
+    // concern, distinct from the dispatcher's chronicle-record write.
+    // The packed effect-kind ordinal Summon=24 comes from
+    // `pack_effect` in `crates/engine/src/ability/packed.rs`; the
+    // dispatcher arm body in `emit_chronicle_arm_chain` (below)
+    // matches via `kind == 24u`.
+    (24, 62), // EffectOp::Summon     → EventKindId::EffectSummonApplied
 ];
 
 /// Look up the runtime `EventKindId` for an `EffectOp` discriminant.
@@ -3255,6 +3267,8 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain PlaceVoxel=26");
     let reflect_event_id = event_kind_id_for_effect_kind(31)
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Reflect=31");
+    let summon_event_id = event_kind_id_for_effect_kind(24)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Summon=24");
 
     let i4  = indent;                   // arm `if`/`else if` lines
     let i8  = format!("{i4}    ");      // body of arm
@@ -3819,14 +3833,31 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
+    // Summon = 24 → 62 (slice γ closer)
     s.push_str(&format!("{i4}}} else if (kind == 24u) {{\n"));
-    s.push_str(&format!("{i8}// Summon: payload_a = template_hash (u32),\n"));
-    s.push_str(&format!("{i8}// payload_b = (count in high byte | lifetime in low 24 bits)\n"));
+    s.push_str(&format!("{i8}// Summon = 24 → EventKindId::EffectSummonApplied = 62\n"));
+    s.push_str(&format!("{i8}// payload_a = template_hash (u32),\n"));
+    s.push_str(&format!("{i8}// payload_b = (count in high byte | lifetime_ticks in low 24 bits)\n"));
+    s.push_str(&format!("{i8}// — same packing as `pack_effect`'s Summon arm in\n"));
+    s.push_str(&format!("{i8}// `crates/engine/src/ability/packed.rs`. Caster-self — no\n"));
+    s.push_str(&format!("{i8}// target field on engine event. The dispatcher writes count\n"));
+    s.push_str(&format!("{i8}// and lifetime into distinct ring slots so consumers don't\n"));
+    s.push_str(&format!("{i8}// have to redo the bit-unpack on read; downstream N-entity\n"));
+    s.push_str(&format!("{i8}// spawning is a separate consumer concern.\n"));
     s.push_str(&format!("{i8}let summon_count: u32 = (payload_b >> 24u) & 0xFFu;\n"));
     s.push_str(&format!("{i8}let summon_lifetime: u32 = payload_b & 0x00FFFFFFu;\n"));
-    s.push_str(&format!("{i8}// TODO slice γ: chronicle_append_summon(caster, payload_a, summon_count, summon_lifetime);\n"));
-    s.push_str(&format!("{i8}// Deferred — multi-spawn semantics need a new dispatch shape\n"));
-    s.push_str(&format!("{i8}// (one cast → N entity spawns); not closed by the slice γ tail.\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectSummonApplied (caster_slot + template_hash + count + lifetime_ticks)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {summon_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], summon_count);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], summon_lifetime);\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
 
     // Harvest = 25 → 59
     s.push_str(&format!("{i4}}} else if (kind == 25u) {{\n"));
@@ -6390,10 +6421,13 @@ mod tests {
         // Summon decoders. Slice γ tail wired the Buff arm with raw
         // payload_a / payload_b stores — no WGSL-side decode now (the
         // chronicle records the packed payload verbatim and consumers
-        // decode on read). Summon (kind 24) keeps the WGSL-side decode
-        // because its arm body still emits the local lets for the
-        // future chronicle_append_summon call (deferred — see TODO
-        // marker on the Summon arm).
+        // decode on read). Summon (kind 24 → 62, slice γ closer)
+        // KEEPS the WGSL-side decode because the dispatcher needs to
+        // split the packed `payload_b` into distinct ring slots
+        // (slot 4 = count, slot 5 = lifetime_ticks) so consumers
+        // don't have to redo the bit-unpack on read — the engine
+        // event struct carries `count: u8` and `lifetime_ticks: u32`
+        // as separate fields.
         assert!(wgsl.contains("(payload_b >> 24u) & 0xFFu"),
             "Summon count extracted from payload_b high byte;\n{wgsl}");
         assert!(wgsl.contains("payload_b & 0x00FFFFFFu"),
@@ -6435,17 +6469,17 @@ mod tests {
         // see the explicit assertions below.
         // Slice γ tail — Buff/Harvest/PlaceVoxel/Reflect are now wired
         // (kinds 58/59/60/61), no longer carry TODO markers; see the
-        // explicit assertions below. Summon (kind 24) is the only
-        // remaining `// TODO slice γ` arm — its multi-spawn semantics
-        // need a new dispatch shape and is deferred.
-        for marker in &[
-            "chronicle_append_summon",
-        ] {
-            assert!(
-                wgsl.contains(&format!("TODO slice γ: {marker}")),
-                "{marker} arm must keep the TODO marker (deferred);\n{wgsl}"
-            );
-        }
+        // explicit assertions below.
+        // Slice γ closer — Summon (kind 24 → 62) is now wired too;
+        // the dispatcher arm body decodes packed (count, lifetime) and
+        // writes them into distinct ring slots (slot 4 = count, slot
+        // 5 = lifetime_ticks). NO `// TODO slice γ` arms remain in
+        // the apply_ability dispatcher — the slice is closed.
+        assert!(
+            !wgsl.contains("TODO slice γ:"),
+            "all `// TODO slice γ` placeholders should be wired; slice γ \
+             closer (Summon) was the last one;\n{wgsl}"
+        );
 
         // Wave 2 piece 1 — control-status arms now write real chronicle
         // records (kinds 43/44/45/46). Pin the kind tags so a regression
@@ -6632,6 +6666,8 @@ mod tests {
             ("kind == 25u", 59u32, "Harvest"),
             ("kind == 26u", 60u32, "PlaceVoxel"),
             ("kind == 31u", 61u32, "Reflect"),
+            // Slice γ closer — Summon (the last `// TODO slice γ` arm).
+            ("kind == 24u", 62u32, "Summon"),
         ] {
             // Use snake_case for the marker text; match `chronicle_append_<name>`
             // form. PlaceVoxel needs explicit snake_case.
@@ -6640,6 +6676,7 @@ mod tests {
                 "Harvest"    => "harvest",
                 "PlaceVoxel" => "place_voxel",
                 "Reflect"    => "reflect",
+                "Summon"     => "summon",
                 _ => unreachable!(),
             };
             assert!(
@@ -6941,10 +6978,11 @@ mod tests {
                 29 => EffectOp::Grounded  { duration_ticks: 50 },
                 30 => EffectOp::Suppress  { duration_ticks: 50 },
                 23 => EffectOp::Buff       { stat: BuffStat::MoveSpeed, magnitude_q8: 64, duration_ticks: 50 },
+                24 => EffectOp::Summon     { template_hash: 0xDEADBEEF, count: 3, lifetime_ticks: 120 },
                 25 => EffectOp::Harvest    { kind_hash: 0xCAFEBABE, amount: 5 },
                 26 => EffectOp::PlaceVoxel { kind_hash: 0xFACEFEED },
                 31 => EffectOp::Reflect    { duration_ticks: 50, fraction_q8: 64 },
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/25/26/31"),
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31"),
             }
         };
 
@@ -6979,10 +7017,11 @@ mod tests {
                 29 => EngineEventKindId::EffectGroundedApplied       as u32,
                 30 => EngineEventKindId::EffectSuppressApplied       as u32,
                 23 => EngineEventKindId::EffectBuffApplied           as u32,
+                24 => EngineEventKindId::EffectSummonApplied         as u32,
                 25 => EngineEventKindId::EffectHarvestApplied        as u32,
                 26 => EngineEventKindId::EffectPlaceVoxelApplied     as u32,
                 31 => EngineEventKindId::EffectReflectApplied        as u32,
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/25/26/31"),
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31"),
             }
         };
 
@@ -7060,15 +7099,17 @@ mod tests {
             "PlaceVoxel → EffectPlaceVoxelApplied (slice γ tail)");
         assert_eq!(event_kind_id_for_effect_kind(31), Some(61),
             "Reflect → EffectReflectApplied (slice γ tail)");
+        // Slice γ closer — Summon (the last `// TODO slice γ` arm) now
+        // wired:
+        assert_eq!(event_kind_id_for_effect_kind(24), Some(62),
+            "Summon → EffectSummonApplied (slice γ closer)");
         assert_eq!(event_kind_id_for_effect_kind(7), None,
             "CastAbility (recursive dispatch) has no chronicle kind");
-        assert_eq!(event_kind_id_for_effect_kind(24), None,
-            "Summon (multi-spawn) has no chronicle counterpart today (deferred)");
     }
 
     #[test]
     fn effect_kind_to_event_kind_map_covers_chronicle_bearing_variants_only() {
-        // 30 chronicle-bearing variants today — Damage/Heal/Shield/Stun/
+        // 31 chronicle-bearing variants today — Damage/Heal/Shield/Stun/
         // Slow/TransferGold/ModifyStanding + SelfDamage (Bleed verb
         // swap, Task #138 follow-on, 2026-05-06) + LifeSteal (Vampirize
         // verb swap, Task #138 follow-on, mirror of Bleed) + DamageModify
@@ -7079,16 +7120,20 @@ mod tests {
         // + Dash/Blink/Knockback/Pull (Wave 2 piece 2, movement EffectOps)
         // + DamageOverTime/HealOverTime/TimedShield (Wave 1.5+ multi-tick)
         // + Stealth/Charm/Grounded/Suppress (extended-corpus statuses)
-        // + Buff/Harvest/PlaceVoxel/Reflect (slice γ tail — closes 4 of
-        // the 5 remaining `// TODO slice γ` arms; Summon kind 24 deferred).
+        // + Buff/Harvest/PlaceVoxel/Reflect (slice γ tail — closed 4 of
+        // the 5 remaining `// TODO slice γ` arms)
+        // + Summon (slice γ closer — closes the last remaining
+        // `// TODO slice γ` arm; CastAbility=7 is the only EffectOp
+        // without a chronicle counterpart, by design — recursive
+        // dispatch).
         // If this number changes, either the engine grew a new
         // `EffectXxxApplied` event (in which case the map gets a new
         // entry) or a variant lost its chronicle counterpart (in which
         // case the map drops an entry). Pin the count so the gap between
         // source-of-truths is loud.
         assert_eq!(
-            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 30,
-            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 30 \
+            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 31,
+            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 31 \
              chronicle-bearing variants today; if you added or removed an \
              entry, update this assertion (and the slice γ wire-up that \
              consumes the new entry)"

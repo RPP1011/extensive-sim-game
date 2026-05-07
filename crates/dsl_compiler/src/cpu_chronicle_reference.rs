@@ -358,6 +358,28 @@ pub fn apply_event_to_chronicle_record(
             rec[5] = (fraction_q8 as u16) as u32;
             Some(rec)
         }
+        // --- Summon = 24 → EventKindId::EffectSummonApplied = 62.
+        // Slice γ closer — caster-self with packed payload. The GPU
+        // dispatcher writes:
+        //   slot 2 = caster_slot
+        //   slot 3 = template_hash (u32 = payload_a)
+        //   slot 4 = count (u32, widened from u8 via `(payload_b >> 24) & 0xFF`)
+        //   slot 5 = lifetime_ticks (u32 = `payload_b & 0x00FFFFFF`)
+        // The CPU side writes ONE `ApplyEvent::Summon` per cast (per
+        // `engine::ability::apply::apply_program`); downstream N-entity
+        // spawning is a separate consumer concern. No target field on
+        // the engine event. The dispatcher splits count and lifetime
+        // into distinct ring slots so consumers don't have to redo
+        // the bit-unpack on read — the engine event struct carries
+        // `count: u8` and `lifetime_ticks: u32` as separate fields.
+        ApplyEvent::Summon { source: _, template_hash, count, lifetime_ticks } => {
+            rec[0] = 62;
+            rec[2] = caster_id;
+            rec[3] = template_hash;
+            rec[4] = count as u32;
+            rec[5] = lifetime_ticks;
+            Some(rec)
+        }
         // --- Slow = 4 → EventKindId::EffectSlowApplied = 30.
         // 4-field payload: actor, target, expires_at_tick, factor_q8.
         ApplyEvent::Slow { target: _, duration_ticks, factor_q8 } => {
@@ -469,7 +491,15 @@ pub fn apply_event_to_chronicle_record(
             rec[4] = hp_threshold.to_bits();
             Some(rec)
         }
-        _ => None,
+        // After the slice γ closer (Summon → kind 62), every
+        // `ApplyEvent` variant has a chronicle counterpart — no
+        // fallback `_ => None` arm needed. The closed-set match
+        // also serves as a compile-time guarantee: when a future
+        // engine slice adds a new `ApplyEvent` variant, the
+        // unreachable-arm warning forces a deliberate decision
+        // about whether the new variant should land in the
+        // chronicle (add an arm) or be skipped (add `_ => None`
+        // back, with a comment explaining why).
     }
 }
 
@@ -586,15 +616,19 @@ mod tests {
     }
 
     #[test]
-    fn variants_without_chronicle_counterpart_return_none() {
-        // ApplyEvent variants without chronicle counterparts today.
-        // After the slice γ tail (Buff/Harvest/PlaceVoxel/Reflect),
-        // Summon is the only deferred-infrastructure ApplyEvent left
-        // — its multi-spawn semantics need a new dispatch shape (one
-        // cast → N entity spawns), distinct from the single-record
-        // chronicle arms wired by every other variant.
+    fn every_apply_event_variant_has_chronicle_counterpart() {
+        // After the slice γ closer (Summon → kind 62), every
+        // `ApplyEvent` variant emitted by `apply_program` has a
+        // chronicle counterpart in the GPU dispatcher. The earlier
+        // "Summon multi-spawn semantics need a new dispatch shape"
+        // deferral was misleading — per
+        // `crates/engine/src/ability/apply.rs`, the CPU side writes
+        // ONE `ApplyEvent::Summon` per cast carrying packed (count,
+        // lifetime); downstream N-entity spawning is a separate
+        // consumer concern, distinct from the dispatcher's
+        // single-record chronicle write.
         //
-        // Status effects already wired up:
+        // Wire-up index per variant family:
         // - SelfDamage (Bleed verb swap, Task #138 follow-on,
         //   2026-05-06) → kind=39, see `self_damage_chronicle_record_uses_kind_39`.
         // - Execute (Reap verb swap, Task #138 follow-on, mirror of
@@ -611,14 +645,49 @@ mod tests {
         // - Buff/Harvest/PlaceVoxel/Reflect (slice γ tail) →
         //   kinds 58..61, see
         //   `slice_gamma_tail_chronicle_records_use_kinds_58_61`.
-        for ev in [
+        // - Summon (slice γ closer) → kind 62, see
+        //   `summon_chronicle_record_uses_kind_62`.
+        let rec = apply_event_to_chronicle_record(
             ApplyEvent::Summon  { source: aid(1), template_hash: 0xDEADBEEF, count: 2, lifetime_ticks: 100 },
-        ] {
-            assert!(
-                apply_event_to_chronicle_record(ev, 100, 0, 0).is_none(),
-                "variant {ev:?} should have no chronicle counterpart \
-                 (Summon multi-spawn deferred — dispatcher arm carries TODO marker)"
-            );
+            /*tick*/ 50,
+            /*caster_id*/ 1,
+            /*target_id*/ 1,
+        );
+        assert!(
+            rec.is_some(),
+            "Summon should now have chronicle counterpart (slice γ closer)"
+        );
+    }
+
+    /// Slice γ closer — Summon (kind 24 → 62). Caster-self with
+    /// packed payload. 5-payload-word record: actor + template_hash
+    /// + count (u8 widened to u32) + lifetime_ticks. The dispatcher
+    /// splits the packed `payload_b` into distinct ring slots so
+    /// consumers don't have to redo the bit-unpack on read; the
+    /// engine event struct carries `count: u8` and `lifetime_ticks:
+    /// u32` as separate fields.
+    #[test]
+    fn summon_chronicle_record_uses_kind_62() {
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::Summon {
+                source: aid(7),
+                template_hash: 0xDEADBEEF,
+                count: 3,
+                lifetime_ticks: 120,
+            },
+            /*tick*/ 100,
+            /*caster_id*/ 7,
+            /*target_id*/ 7,
+        )
+        .expect("Summon has chronicle counterpart");
+        assert_eq!(rec[0], 62, "Summon: kind tag — EffectSummonApplied");
+        assert_eq!(rec[1], 100, "Summon: tick");
+        assert_eq!(rec[2], 7, "Summon: actor slot — caster_id");
+        assert_eq!(rec[3], 0xDEADBEEF, "Summon: template_hash at payload word 1");
+        assert_eq!(rec[4], 3, "Summon: count (u8 widened to u32) at payload word 2");
+        assert_eq!(rec[5], 120, "Summon: lifetime_ticks (raw u32) at payload word 3");
+        for i in 6..CHRONICLE_RECORD_STRIDE_U32 {
+            assert_eq!(rec[i], 0, "Summon: tail word {i} should be zero");
         }
     }
 
@@ -1208,6 +1277,12 @@ mod tests {
                     stat: engine::ability::program::BuffStat::MoveSpeed,
                     magnitude_q8: 64,
                     duration_ticks: 50,
+                },
+                24 => ApplyEvent::Summon         {
+                    source: aid(1),
+                    template_hash: 0xDEADBEEF,
+                    count: 3,
+                    lifetime_ticks: 120,
                 },
                 25 => ApplyEvent::Harvest        { source: aid(1), kind_hash: 0xCAFEBABE, amount: 5 },
                 26 => ApplyEvent::PlaceVoxel     { source: aid(1), kind_hash: 0xFACEFEED },

@@ -62,6 +62,7 @@ impl crate::event::EventLike for Event {
             Event::EffectHarvestApplied { .. } => EventKindId::EffectHarvestApplied,
             Event::EffectPlaceVoxelApplied { .. } => EventKindId::EffectPlaceVoxelApplied,
             Event::EffectReflectApplied { .. } => EventKindId::EffectReflectApplied,
+            Event::EffectSummonApplied { .. } => EventKindId::EffectSummonApplied,
             Event::EngagementBroken { .. } => EventKindId::EngagementBroken,
             Event::EngagementCommitted { .. } => EventKindId::EngagementCommitted,
             Event::FearSpread { .. } => EventKindId::FearSpread,
@@ -679,6 +680,20 @@ impl crate::event::EventLike for Event {
                 h.update(target.raw().to_le_bytes());
                 h.update(duration_ticks.to_le_bytes());
                 h.update(fraction_q8.to_le_bytes());
+                h.update(tick.to_le_bytes());
+            }
+            Event::EffectSummonApplied {
+                actor,
+                template_hash,
+                count,
+                lifetime_ticks,
+                tick,
+            } => {
+                h.update([EventKindId::EffectSummonApplied as u8]);
+                h.update(actor.raw().to_le_bytes());
+                h.update(template_hash.to_le_bytes());
+                h.update([*count]);
+                h.update(lifetime_ticks.to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
             Event::EngagementBroken {
