@@ -56,7 +56,7 @@ ability BloodPact {
     cost: 100 gold
     hint: utility
 
-    transfer_gold -50 when target.alive
+    transfer_gold -50 when target.hp > 0
     modify_standing 75
     lifesteal 0.4 6s stacking extend [HEAL: 50] {
         self_damage 10

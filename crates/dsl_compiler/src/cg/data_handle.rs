@@ -1093,6 +1093,17 @@ pub enum AbilityRegistryColumn {
     NestedEffectKinds    = 17,
     NestedEffectPayloadA = 18,
     NestedEffectPayloadB = 19,
+    /// Wave 1.5#7 GPU eval — per-effect when-predicate columns. Stride
+    /// = MAX_EFFECTS_PER_PROGRAM. Sentinel `WHEN_PRED_NONE_SENTINEL`
+    /// (0xFF) on the binder column marks slots without a predicate;
+    /// the dispatcher skips evaluation and fires unconditionally.
+    /// Field is a `ScalingStatRef` discriminant (0..=7); op is an
+    /// `EffectPredicateOp` discriminant (0..=5); literal is the f32
+    /// RHS of the comparison.
+    WhenPredBinder  = 20,
+    WhenPredField   = 21,
+    WhenPredOp      = 22,
+    WhenPredLiteral = 23,
 }
 
 /// Kind tag for an interned id surfaced by [`DataHandle::fmt_with`].

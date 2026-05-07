@@ -90,7 +90,7 @@ use dsl_ast::ast::{
     AbilityDecl, AbilityFile, AbilityHeader, EffectArg, EffectStmt, HintName, Span, TargetMode,
 };
 use engine::ability::program::{
-    AbilityCost, AbilityHint, AbilityProgram, AbilityTag, Area, CostAmount, CostResource, Delivery, EffectAreaShape, EffectOp, EffectWhenCondition, MAX_NESTED_PER_EFFECT, TargetModeKind,
+    AbilityCost, AbilityHint, AbilityProgram, AbilityTag, Area, CostAmount, CostResource, Delivery, EffectAreaShape, EffectOp, EffectPredicate, EffectPredicateBinder, EffectPredicateOp, EffectWhenCondition, MAX_NESTED_PER_EFFECT, TargetModeKind,
     EffectScaling, Gate, LifetimeMode, ScalingStatRef, ShapeKind, StackingMode, TargetSelector,
     MAX_EFFECTS_PER_PROGRAM, MAX_SCALINGS_PER_EFFECT, MAX_TAGS_PER_PROGRAM,
 };
@@ -252,6 +252,38 @@ pub enum LowerError {
         field:     String,
         span:      Span,
     },
+    /// Wave 1.5#7 GPU eval: a `when <cond>` modifier carried a
+    /// construct outside the restricted predicate vocab the
+    /// dispatcher (CPU + GPU) evaluates today. Deferred branches —
+    /// open task #163-followup:
+    ///   * `else <cond>` clause
+    ///   * compound predicates (`&&` / `||` / `!`)
+    ///   * field-vs-field comparisons (`target.hp < self.hp`)
+    ///   * non-`<binder>.<field> <op> <literal>` shapes
+    /// Authors must restructure the predicate to the supported shape
+    /// or wait for the deferred slice. Surfaces with the construct's
+    /// name so the diagnostic points at the right thing.
+    WhenConditionUnsupported {
+        ability: String,
+        clause:  &'static str, // "when" or "else"
+        reason:  String,
+        span:    Span,
+    },
+    /// Wave 1.5#7 GPU eval: a `when <cond>` predicate referenced an
+    /// `AgentFieldId` that's outside the GPU-evaluable subset
+    /// (the 8 ScalingStatRef-shaped f32 fields: AttackDamage /
+    /// AbilityPower / MaxHp / Hp / Armor / MagicResist / MoveSpeed /
+    /// Mana). The field IS in the engine's broader agent vocabulary
+    /// (so `WhenConditionUnknownField` does not fire), but the
+    /// dispatcher's per-stat agent-SoA bindings cover only this
+    /// 8-field subset today. Authors should rephrase or extend the
+    /// vocab in a coordinated pass.
+    WhenConditionUnsupportedField {
+        ability: String,
+        clause:  &'static str, // "when" or "else"
+        field:   String,
+        span:    Span,
+    },
     /// #139 (deliver-block body parsing): a `<hook_ident> { … }` inside
     /// a `deliver` body block named a hook not in the engine's
     /// `DeliveryHookKind` vocabulary (on_hit/on_tick/on_arrival/
@@ -369,6 +401,14 @@ impl std::fmt::Display for LowerError {
             LowerError::WhenConditionUnknownField { ability, clause, binder, field, .. } => write!(
                 f,
                 "ability `{ability}`'s `{clause}` clause references `{binder}.{field}` — `{field}` is not in the engine's agent-field vocabulary; valid fields include hp / max_hp / alive / mana / shield_hp / armor / move_speed (see AgentFieldId for the full list). If this is a sim-specific extension field, extend the vocabulary or silence this check."
+            ),
+            LowerError::WhenConditionUnsupported { ability, clause, reason, .. } => write!(
+                f,
+                "ability `{ability}`'s `{clause}` clause uses an unsupported construct: {reason} (Wave 1.5#7 supports only `<binder>.<field> <op> <literal>` with binder ∈ {{self, target}}; deferred — open task #163-followup)"
+            ),
+            LowerError::WhenConditionUnsupportedField { ability, clause, field, .. } => write!(
+                f,
+                "ability `{ability}`'s `{clause}` clause references field `{field}` — outside the GPU-evaluable subset for this slice (supported: attack_damage / ability_power / max_hp / hp / armor / magic_resist / move_speed / mana). Either rephrase or extend the per-stat agent-SoA bindings."
             ),
             LowerError::UnknownDeliveryHook { ability, method, hook, .. } => write!(
                 f,
@@ -939,32 +979,32 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
                     span:    c.span,
                 });
             }
-            if let Some(else_text) = c.else_cond.as_ref() {
-                let else_expr = match dsl_ast::parser::parse_expression(else_text) {
-                    Ok(e) => e,
-                    Err(e) => {
-                        return Err(LowerError::WhenConditionParseError {
-                            ability:   decl.name.clone(),
-                            clause:    "else",
-                            predicate: else_text.clone(),
-                            reason:    e.message.clone(),
-                            span:      c.span,
-                        });
-                    }
-                };
-                if let Some((binder, field)) = first_unknown_agent_field(&else_expr) {
-                    return Err(LowerError::WhenConditionUnknownField {
-                        ability: decl.name.clone(),
-                        clause:  "else",
-                        binder,
-                        field,
-                        span:    c.span,
-                    });
-                }
+            // Wave 1.5#7 GPU eval (this slice): reject `else <cond>`
+            // at lower time. The CPU + GPU evaluators ignore else_cond
+            // — accepting it silently would misrepresent the gate's
+            // semantics. Open task #163-followup.
+            if c.else_cond.is_some() {
+                return Err(LowerError::WhenConditionUnsupported {
+                    ability: decl.name.clone(),
+                    clause:  "else",
+                    reason:  "deferred — open task #163-followup".to_string(),
+                    span:    c.span,
+                });
             }
+            // Wave 1.5#7 GPU eval (this slice): extract a structured
+            // EffectPredicate from the parsed expression. Restricted
+            // vocab (form `<binder>.<field> <op> <literal>`); anything
+            // else surfaces WhenConditionUnsupported / -UnsupportedField.
+            let when_compiled = extract_predicate(
+                &when_expr,
+                &decl.name,
+                "when",
+                c.span,
+            )?;
             Some(EffectWhenCondition {
-                when_cond: c.when_cond.clone(),
-                else_cond: c.else_cond.clone(),
+                when_cond:     c.when_cond.clone(),
+                else_cond:     None, // gated above; guaranteed None here
+                when_compiled: Some(when_compiled),
             })
         } else {
             None
@@ -1797,6 +1837,160 @@ fn summon_template_hash(template: &str) -> u32 {
     // mixes bits well; this is a pure compaction step.
     let full = h.finish();
     ((full >> 32) as u32) ^ (full as u32)
+}
+
+/// Wave 1.5#7 GPU eval: extract a structured [`EffectPredicate`] from
+/// the parsed when-condition expression. Restricted vocab (matched as
+/// a flat top-level binary expression):
+///   * Form: `<binder>.<field> <op> <literal>` (or `<literal> <op>
+///     <binder>.<field>` — flipped via op-flip below).
+///   * binder ∈ {self, target} → [`EffectPredicateBinder`].
+///   * field name → maps via [`AgentFieldId::from_snake`] for vocabulary
+///     validation, then narrows to a [`ScalingStatRef`] discriminant
+///     (the GPU dispatcher's per-stat agent-SoA bindings cover only
+///     this 8-field subset).
+///   * op ∈ {`<`, `<=`, `>`, `>=`, `==`, `!=`} → [`EffectPredicateOp`].
+///   * literal: `LitFloat` or `LitInt` (int promotes to f32).
+///
+/// Anything else (compound predicates `&&`/`||`/`!`, field-vs-field
+/// comparisons, non-binary expressions, unsupported ops) surfaces as
+/// `WhenConditionUnsupported`. Out-of-vocab agent fields surface as
+/// `WhenConditionUnsupportedField`.
+///
+/// Pre-condition: `first_unknown_agent_field` already rejected any
+/// unknown-to-`AgentFieldId` field — so the field name resolves
+/// through `AgentFieldId::from_snake`. This helper additionally
+/// narrows to the `ScalingStatRef`-shaped subset.
+fn extract_predicate(
+    expr:    &dsl_ast::ast::Expr,
+    ability: &str,
+    clause:  &'static str,
+    span:    Span,
+) -> Result<EffectPredicate, LowerError> {
+    use dsl_ast::ast::{BinOp, ExprKind};
+
+    // Top-level must be a Binary expression with a comparison op.
+    let (op_ast, lhs, rhs) = match &expr.kind {
+        ExprKind::Binary { op, lhs, rhs } => (*op, lhs.as_ref(), rhs.as_ref()),
+        _ => return Err(LowerError::WhenConditionUnsupported {
+            ability: ability.to_string(),
+            clause,
+            reason:  "expected `<binder>.<field> <op> <literal>` (top-level binary comparison)".to_string(),
+            span,
+        }),
+    };
+    let op = match op_ast {
+        BinOp::Lt   => EffectPredicateOp::Lt,
+        BinOp::LtEq => EffectPredicateOp::Le,
+        BinOp::Gt   => EffectPredicateOp::Gt,
+        BinOp::GtEq => EffectPredicateOp::Ge,
+        BinOp::Eq   => EffectPredicateOp::Eq,
+        BinOp::NotEq=> EffectPredicateOp::Ne,
+        // Compound predicates (`&&`/`||`) and arithmetic ops are out
+        // of scope for the restricted vocab — surface explicitly so
+        // authors get a pointed diagnostic.
+        BinOp::And | BinOp::Or => return Err(LowerError::WhenConditionUnsupported {
+            ability: ability.to_string(),
+            clause,
+            reason:  "compound predicates (&&/||) deferred — open task #163-followup".to_string(),
+            span,
+        }),
+        _ => return Err(LowerError::WhenConditionUnsupported {
+            ability: ability.to_string(),
+            clause,
+            reason:  format!("operator `{op_ast:?}` not supported in restricted predicate vocab (use one of < <= > >= == !=)"),
+            span,
+        }),
+    };
+    // Match `<binder>.<field>` on one side, literal on the other. If
+    // literal is on LHS, flip the op so the canonical form has
+    // (binder.field) on the LHS for the evaluator.
+    let (binder_ast, field_name, literal, op) = match (
+        extract_binder_field(lhs),
+        extract_literal_f32(rhs),
+    ) {
+        (Some((b, f)), Some(lit)) => (b, f, lit, op),
+        _ => match (extract_binder_field(rhs), extract_literal_f32(lhs)) {
+            (Some((b, f)), Some(lit)) => (b, f, lit, flip_op(op)),
+            _ => return Err(LowerError::WhenConditionUnsupported {
+                ability: ability.to_string(),
+                clause,
+                reason:  "expected `<binder>.<field> <op> <literal>` — got field-vs-field or non-literal operand".to_string(),
+                span,
+            }),
+        },
+    };
+    let binder = match binder_ast.as_str() {
+        "self"   => EffectPredicateBinder::SelfBinder,
+        "target" => EffectPredicateBinder::Target,
+        _ => return Err(LowerError::WhenConditionUnsupported {
+            ability: ability.to_string(),
+            clause,
+            reason:  format!("binder `{binder_ast}` not supported (only `self` and `target`)"),
+            span,
+        }),
+    };
+    // Map field name → ScalingStatRef discriminant. ScalingStatRef
+    // exposes the canonical 8-field f32 subset the GPU dispatcher's
+    // per-stat agent-SoA bindings cover; anything outside that errors
+    // as `WhenConditionUnsupportedField` (distinct from
+    // `WhenConditionUnknownField` — the latter rejects fields outside
+    // the broader agent vocabulary entirely).
+    let stat_ref = match ScalingStatRef::parse(&field_name) {
+        Some(s) => s,
+        None => return Err(LowerError::WhenConditionUnsupportedField {
+            ability: ability.to_string(),
+            clause,
+            field:   field_name,
+            span,
+        }),
+    };
+    Ok(EffectPredicate {
+        binder,
+        field:   stat_ref.discriminant(),
+        op,
+        literal,
+    })
+}
+
+/// Match a `<binder>.<field>` shape, returning `Some((binder_ident,
+/// field_name))` when the expression is a `Field(Ident(binder),
+/// field_name)`. Other shapes return `None`.
+fn extract_binder_field(expr: &dsl_ast::ast::Expr) -> Option<(String, String)> {
+    use dsl_ast::ast::ExprKind;
+    if let ExprKind::Field(base, field_name) = &expr.kind {
+        if let ExprKind::Ident(binder) = &base.kind {
+            return Some((binder.clone(), field_name.clone()));
+        }
+    }
+    None
+}
+
+/// Match a `LitFloat` or `LitInt`, returning the numeric value as f32.
+/// Other shapes (idents, fields, calls) return `None`.
+fn extract_literal_f32(expr: &dsl_ast::ast::Expr) -> Option<f32> {
+    use dsl_ast::ast::ExprKind;
+    match &expr.kind {
+        ExprKind::Float(v) => Some(*v as f32),
+        ExprKind::Int(v)   => Some(*v as f32),
+        _ => None,
+    }
+}
+
+/// Flip a comparison op so `(literal op binder.field)` becomes
+/// `(binder.field flipped_op literal)`. Used when the parser captures
+/// the literal on the LHS — the canonical evaluator expects the binder
+/// on the LHS.
+#[inline]
+fn flip_op(op: EffectPredicateOp) -> EffectPredicateOp {
+    match op {
+        EffectPredicateOp::Lt => EffectPredicateOp::Gt,
+        EffectPredicateOp::Le => EffectPredicateOp::Ge,
+        EffectPredicateOp::Gt => EffectPredicateOp::Lt,
+        EffectPredicateOp::Ge => EffectPredicateOp::Le,
+        EffectPredicateOp::Eq => EffectPredicateOp::Eq,
+        EffectPredicateOp::Ne => EffectPredicateOp::Ne,
+    }
 }
 
 /// #143 follow-up: walk a parsed when-condition expression looking for

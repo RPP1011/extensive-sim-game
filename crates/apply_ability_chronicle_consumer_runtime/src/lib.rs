@@ -146,14 +146,28 @@ impl ApplyAbilityChronicleConsumerState {
     /// adapter is available on the host. Lets the closed-loop test
     /// degrade to a skip-with-message instead of a panic.
     pub fn try_new(n_agents: u32, initial_hp: f32) -> Option<Self> {
-        let gpu = GpuContext::new_blocking().ok()?;
-
         // -- Build the registry: one Damage(30.0) ability at AbilityId(1).
         let program = AbilityProgram::new_single_target(
             /*range*/ 5.0,
             Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
             [EffectOp::Damage { amount: 30.0 }],
         );
+        Self::try_new_with_program(n_agents, initial_hp, program, None)
+    }
+
+    /// Fallible constructor that takes a custom `AbilityProgram` and
+    /// optional initial-hp override per agent. Used by the
+    /// when-predicate behavioral pin to register a Damage(50) ability
+    /// gated on `when target.hp < 20`, then seed agents with mixed
+    /// hp values to verify the predicate gates the chronicle write
+    /// per-agent.
+    pub fn try_new_with_program(
+        n_agents:        u32,
+        initial_hp:      f32,
+        program:         AbilityProgram,
+        per_agent_hp:    Option<&[f32]>,
+    ) -> Option<Self> {
+        let gpu = GpuContext::new_blocking().ok()?;
         let mut builder = AbilityRegistryBuilder::new();
         let id = builder.register(program);
         debug_assert_eq!(
@@ -184,7 +198,22 @@ impl ApplyAbilityChronicleConsumerState {
                 contents: bytemuck::cast_slice(&level_init),
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             });
-        let hp_init: Vec<f32> = vec![initial_hp; n_agents as usize];
+        // Per-agent HP override lets the predicate behavioral pin
+        // seed agents with mixed values (e.g. [10.0, 50.0]) so the
+        // dispatcher's `when target.hp < 20` predicate fires
+        // selectively. Default = uniform `initial_hp` for the
+        // baseline closed-loop test.
+        let hp_init: Vec<f32> = match per_agent_hp {
+            Some(slice) => {
+                assert_eq!(
+                    slice.len(),
+                    n_agents as usize,
+                    "per_agent_hp length mismatch with n_agents",
+                );
+                slice.to_vec()
+            }
+            None => vec![initial_hp; n_agents as usize],
+        };
         let agent_hp_buf =
             gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("apply_ability_chronicle_consumer::agent_hp"),
@@ -393,6 +422,10 @@ impl ApplyAbilityChronicleConsumerState {
                 ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
                 ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
                 ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
+                ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
+                ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
+                ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
+                ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
                 agent_attack_damage: &self.agent_attack_damage_buf,
                 agent_max_hp:        &self.agent_max_hp_buf,
                 agent_hp:            &self.agent_hp_buf,
@@ -534,6 +567,10 @@ impl ApplyAbilityChronicleConsumerState {
 #[cfg(test)]
 mod closed_loop_tests {
     use super::*;
+    use engine::ability::program::{
+        EffectPredicate, EffectPredicateBinder, EffectPredicateOp, EffectWhenCondition,
+        ScalingStatRef,
+    };
 
     /// **Closed-loop pin for task #138.** Demonstrates the full
     /// chronicle pipeline on real wgpu hardware:
@@ -614,5 +651,80 @@ mod closed_loop_tests {
                 "tick 2: agent {i} hp = {h}, expected {expected}"
             );
         }
+    }
+
+    /// **Wave 1.5#7 GPU eval — behavioral pin.** Builds a registry with
+    /// one Damage(50) ability gated on `when target.hp < 20`. Pre-seeds
+    /// 2 agents at hp=[10, 50]. The dispatcher targets each agent with
+    /// itself (single-agent self-cast in this fixture). Asserts:
+    ///
+    ///   - agent 0 (hp=10): predicate passes → chronicle write fires
+    ///     → consumer applies Damage(50) → hp = 10 - 50 = -40.
+    ///   - agent 1 (hp=50): predicate fails → no chronicle write →
+    ///     hp stays at 50 (untouched).
+    ///
+    /// Without the GPU when-predicate gate (Wave 1.5#7 GPU eval), BOTH
+    /// agents would receive the chronicle and lose 50 hp — so the
+    /// expected hp[1] = 50.0 is the load-bearing assertion.
+    #[test]
+    fn agent_hp_decrements_only_when_predicate_passes() {
+        let n_agents: u32 = 2;
+        let initial_per_agent_hp = [10.0_f32, 50.0_f32];
+
+        // Build Damage(50) ability with when target.hp < 20 predicate.
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
+            [EffectOp::Damage { amount: 50.0 }],
+        );
+        prog.when_per_effect.push(Some(EffectWhenCondition {
+            when_cond:     "target.hp < 20".to_string(),
+            else_cond:     None,
+            when_compiled: Some(EffectPredicate {
+                binder:  EffectPredicateBinder::Target,
+                field:   ScalingStatRef::Hp.discriminant(),
+                op:      EffectPredicateOp::Lt,
+                literal: 20.0,
+            }),
+        }));
+
+        let mut state = match ApplyAbilityChronicleConsumerState::try_new_with_program(
+            n_agents,
+            /*initial_hp (unused — overridden below)*/ 0.0,
+            prog,
+            Some(&initial_per_agent_hp),
+        ) {
+            Some(s) => s,
+            None => {
+                eprintln!(
+                    "[apply_ability_chronicle_consumer when-predicate] skipping: \
+                     no wgpu adapter available on this host."
+                );
+                return;
+            }
+        };
+
+        // Tick 0: dispatcher runs once per agent (self-cast). Predicate
+        // gates chronicle write per-agent.
+        state.step(0);
+        let hp = state.read_agent_hp();
+        assert_eq!(hp.len(), n_agents as usize);
+        // Agent 0: hp=10 < 20 → predicate passes → Damage(50) → hp = -40.
+        assert!(
+            (hp[0] - (10.0 - 50.0)).abs() < 1e-4,
+            "agent 0 (initial hp=10) must receive Damage(50) since \
+             predicate `target.hp < 20` passes; saw hp[0]={}",
+            hp[0],
+        );
+        // Agent 1: hp=50 NOT < 20 → predicate fails → NO chronicle →
+        // hp stays at 50.0. THIS IS THE LOAD-BEARING ASSERTION:
+        // without the GPU predicate gate, hp[1] would also drop to 0.
+        assert!(
+            (hp[1] - 50.0).abs() < 1e-4,
+            "agent 1 (initial hp=50) must NOT receive Damage because \
+             predicate `target.hp < 20` fails; saw hp[1]={} (50.0 expected; \
+             a value of 0.0 means the GPU predicate gate did NOT fire)",
+            hp[1],
+        );
     }
 }

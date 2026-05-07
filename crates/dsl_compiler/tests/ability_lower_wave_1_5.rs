@@ -846,3 +846,132 @@ ability CulltheMeek {
     assert_eq!(prog.tags[0].0, AbilityTag::Physical);
     assert_eq!(prog.tags[0].1, 50.0);
 }
+
+// ---------------------------------------------------------------------------
+// Wave 1.5#7 GPU eval — `when <cond>` predicate compilation. The lower
+// pass extracts a structured `EffectPredicate` from the parsed
+// expression (form `<binder>.<field> <op> <literal>`); deferred
+// branches (else / compound / non-literal RHS) error loudly with
+// `WhenConditionUnsupported`.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lower_when_predicate_target_hp_lt_literal_succeeds() {
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::{
+        EffectPredicateBinder, EffectPredicateOp, ScalingStatRef,
+    };
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 when target.hp < 30 }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("when must lower");
+    let cond = prog.when_per_effect[0].as_ref().expect("slot populated");
+    let pred = cond.when_compiled.as_ref().expect("compiled predicate populated");
+    assert_eq!(pred.binder, EffectPredicateBinder::Target);
+    assert_eq!(pred.field, ScalingStatRef::Hp.discriminant());
+    assert_eq!(pred.op, EffectPredicateOp::Lt);
+    assert_eq!(pred.literal, 30.0);
+}
+
+#[test]
+fn lower_when_predicate_self_attack_damage_ge_literal_succeeds() {
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::{
+        EffectPredicateBinder, EffectPredicateOp, ScalingStatRef,
+    };
+    let file = parse_ability_file(
+        "ability X { target: self cooldown: 1s shield 10 when self.attack_damage >= 50 }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("when must lower");
+    let pred = prog.when_per_effect[0]
+        .as_ref().unwrap()
+        .when_compiled.as_ref().unwrap();
+    assert_eq!(pred.binder, EffectPredicateBinder::SelfBinder);
+    assert_eq!(pred.field, ScalingStatRef::AttackDamage.discriminant());
+    assert_eq!(pred.op, EffectPredicateOp::Ge);
+    assert_eq!(pred.literal, 50.0);
+}
+
+#[test]
+fn lower_when_predicate_literal_lhs_flips_op() {
+    // `30 > target.hp` lowers as `target.hp < 30` (op flipped) so the
+    // canonical evaluator always sees the binder on the LHS.
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::{EffectPredicateBinder, EffectPredicateOp};
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 when 30 > target.hp }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("when must lower");
+    let pred = prog.when_per_effect[0]
+        .as_ref().unwrap()
+        .when_compiled.as_ref().unwrap();
+    assert_eq!(pred.binder, EffectPredicateBinder::Target);
+    assert_eq!(pred.op, EffectPredicateOp::Lt, "30 > target.hp ≡ target.hp < 30");
+    assert_eq!(pred.literal, 30.0);
+}
+
+#[test]
+fn lower_when_predicate_else_clause_errors() {
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::{lower_ability_decl, LowerError};
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 when target.hp < 30 else target.hp > 70 }"
+    ).expect("parser");
+    let err = lower_ability_decl(&file.abilities[0]).unwrap_err();
+    assert!(
+        matches!(err, LowerError::WhenConditionUnsupported { clause: "else", .. }),
+        "expected WhenConditionUnsupported{{clause:\"else\"}}, got {err:?}",
+    );
+}
+
+#[test]
+fn lower_when_predicate_compound_and_errors() {
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::{lower_ability_decl, LowerError};
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 when target.hp < 30 && target.hp > 0 }"
+    ).expect("parser");
+    let err = lower_ability_decl(&file.abilities[0]).unwrap_err();
+    assert!(
+        matches!(err, LowerError::WhenConditionUnsupported { clause: "when", .. }),
+        "expected WhenConditionUnsupported{{clause:\"when\"}} for compound predicate, got {err:?}",
+    );
+}
+
+#[test]
+fn lower_when_predicate_field_vs_field_errors() {
+    // `target.hp < self.hp` is field-vs-field (no literal RHS) — must
+    // error with WhenConditionUnsupported, not silently accept.
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::{lower_ability_decl, LowerError};
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 when target.hp < self.hp }"
+    ).expect("parser");
+    let err = lower_ability_decl(&file.abilities[0]).unwrap_err();
+    assert!(
+        matches!(err, LowerError::WhenConditionUnsupported { clause: "when", .. }),
+        "expected WhenConditionUnsupported for field-vs-field, got {err:?}",
+    );
+}
+
+#[test]
+fn lower_when_predicate_unsupported_gpu_field_errors() {
+    // `target.hunger` is a valid AgentFieldId but outside the
+    // GPU-evaluable subset (the 8 ScalingStatRef-shaped fields). Must
+    // error with WhenConditionUnsupportedField — distinct from
+    // WhenConditionUnknownField (which would fire for a field outside
+    // the broader agent vocabulary entirely).
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::{lower_ability_decl, LowerError};
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 when target.hunger < 50 }"
+    ).expect("parser");
+    let err = lower_ability_decl(&file.abilities[0]).unwrap_err();
+    assert!(
+        matches!(&err, LowerError::WhenConditionUnsupportedField { field, .. } if field == "hunger"),
+        "expected WhenConditionUnsupportedField{{field:\"hunger\"}}, got {err:?}",
+    );
+}

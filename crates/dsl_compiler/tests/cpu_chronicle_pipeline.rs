@@ -43,6 +43,7 @@ fn run_pipeline(
         tick as u64,
         /*world_seed*/ 0xDEAD_BEEF,
         &CasterStats::default(),
+        &CasterStats::default(),
     );
     events
         .into_iter()
@@ -289,6 +290,7 @@ fn execute_pipeline_emits_kind_42_record() {
         tick as u64,
         /*world_seed*/ 0xDEAD_BEEF,
         &CasterStats::default(),
+        &CasterStats::default(),
     );
     let records: Vec<_> = events
         .into_iter()
@@ -363,6 +365,7 @@ fn distinct_caster_and_target_pipeline_writes_both_slots() {
         tick as u64,
         /*world_seed*/ 0xDEAD_BEEF,
         &CasterStats::default(),
+        &CasterStats::default(),
     );
     // Route caster + target separately into the CPU reference (the
     // slice-ε path the GPU dispatcher takes when source supplies
@@ -405,6 +408,7 @@ fn distinct_caster_and_target_pipeline_handles_stun_payload_shape() {
         tick as u64,
         0xCAFE_F00D,
         &CasterStats::default(),
+        &CasterStats::default(),
     );
     let records: Vec<_> = events
         .into_iter()
@@ -442,6 +446,7 @@ fn distinct_caster_and_target_pipeline_handles_friendly_heal() {
         target,
         tick as u64,
         0xFEED_FACE,
+        &CasterStats::default(),
         &CasterStats::default(),
     );
     let records: Vec<_> = events
@@ -491,6 +496,7 @@ fn distinct_caster_and_target_pipeline_preserves_routing_across_multi_effect() {
         target,
         tick as u64,
         0xBADD_CAFE,
+        &CasterStats::default(),
         &CasterStats::default(),
     );
     let records: Vec<_> = events
@@ -548,6 +554,7 @@ fn distinct_caster_and_target_pipeline_handles_modify_standing() {
         tick as u64,
         0xF00D_BABE,
         &CasterStats::default(),
+        &CasterStats::default(),
     );
     let records: Vec<_> = events
         .into_iter()
@@ -588,6 +595,7 @@ fn distinct_caster_and_target_pipeline_handles_transfer_gold() {
         tick as u64,
         0xABBA_C0DE,
         &CasterStats::default(),
+        &CasterStats::default(),
     );
     let records: Vec<_> = events
         .into_iter()
@@ -627,6 +635,7 @@ fn distinct_caster_and_target_pipeline_transfer_gold_negative_amount() {
         tick as u64,
         0xDEAD_C0DE,
         &CasterStats::default(),
+        &CasterStats::default(),
     );
     let records: Vec<_> = events
         .into_iter()
@@ -665,6 +674,7 @@ fn distinct_caster_and_target_pipeline_handles_shield() {
         tick as u64,
         0xC0FFEE,
         &CasterStats::default(),
+        &CasterStats::default(),
     );
     let records: Vec<_> = events
         .into_iter()
@@ -702,6 +712,7 @@ fn distinct_caster_and_target_pipeline_handles_slow_4_field_payload() {
         target,
         tick as u64,
         0xBEEF,
+        &CasterStats::default(),
         &CasterStats::default(),
     );
     let records: Vec<_> = events

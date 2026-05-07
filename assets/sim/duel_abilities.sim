@@ -289,15 +289,20 @@ event EffectDamageModifyApplied {
 // these are distinct slots so the chronicle preserves "who killed
 // whom" semantics for downstream chronicle observers.
 //
-// SEMANTICS NOTE: the .ability declares `when target.hp < 20`, lowered
-// to `when_per_effect[0]`. apply_program does NOT consult that field
-// today (registry-driven predicate dispatch is later infrastructure),
-// so the chronicle write fires unconditionally once the verb mask
-// passes. The duel_abilities Reap verb's own outer `when` clause
-// gates emission on `target.hp < config.combat.reap_threshold`, so
-// the threshold check stays load-bearing upstream — the
-// ApplyExecuteFromChronicle re-emit can ferry the record into Defeated
-// unconditionally without re-checking hp.
+// SEMANTICS NOTE (Wave 1.5#7 GPU eval, 2026-05-07): Reap.ability
+// declares `when target.hp < 20`, lowered to a structured
+// EffectPredicate (target.Hp < 20.0) on `when_per_effect[0]`. The CPU
+// `apply_program` AND the GPU dispatcher both evaluate the predicate
+// via the registry's `when_pred_*` SoA columns and gate the chronicle
+// write accordingly. The duel_abilities Reap verb's outer `when`
+// clause ALSO gates on `target.hp < config.combat.reap_threshold` —
+// these gates operate at different layers (verb mask vs. effect
+// write); both stay load-bearing because dropping the verb mask
+// without a unified predicate-aware scorer would let Reap silently
+// win argmax + drop the chronicle when target.hp ≥ 20.
+// ApplyExecuteFromChronicle ferries the record into Defeated
+// unconditionally; the dispatcher only writes the record when the
+// predicate passes.
 //
 // NESTED-EFFECT NOTE: the .ability also declares `{ stun 1s }` as a
 // nested effect, lowered to `nested_per_effect[0]`. apply_program +
@@ -598,16 +603,24 @@ verb Reap(self, target: Agent) =
   // re-emits as Defeated so the existing ApplyDefeat cascade
   // (per-agent set_alive) keeps working unchanged.
   //
-  // WHEN-CONDITION NOTE: the .ability also declares
-  // `when target.hp < 20` as a per-effect predicate, lowered to
-  // `when_per_effect[0]`. apply_program does NOT consult that field
-  // today, so the chronicle would normally fire even when target.hp
-  // >= 20. But the Reap VERB's outer `when` clause already gates on
-  // `target.hp < config.combat.reap_threshold` (= 20), and the verb
-  // mask must pass for apply_ability to dispatch — so the threshold
-  // check is enforced upstream and the chronicle write is correctly
-  // gated. ApplyExecuteFromChronicle can ferry the record into
-  // Defeated unconditionally without re-checking hp.
+  // WHEN-CONDITION NOTE (Wave 1.5#7 GPU eval, 2026-05-07): Reap.ability's
+  // `when target.hp < 20` per-effect predicate is now compiled into a
+  // structured EffectPredicate (target.Hp < 20.0) and evaluated by both
+  // the CPU `apply_program` and the GPU dispatcher (registry's
+  // `when_pred_*` SoA columns gate the chronicle write at apply time).
+  // The verb's outer `when` clause ALSO gates on
+  // `target.hp < config.combat.reap_threshold` (= 20). Both gates are
+  // load-bearing because they operate at DIFFERENT layers — the verb
+  // mask gates argmax SELECTION (per-pair scoring picks one verb per
+  // agent); the per-effect predicate gates the apply_program EFFECT
+  // WRITE (whether the chronicle record is emitted). Drop the verb-mask
+  // gate and Reap (score 1000-target.hp ≈ 900) wins argmax over Fortify
+  // (score 275) when target.hp=100, then writes nothing because the
+  // predicate fails — silently swallowing the tick. Keep BOTH for now;
+  // unifying them is later infrastructure (predicate-aware scoring).
+  // ApplyExecuteFromChronicle still ferries the record into Defeated
+  // unconditionally; the dispatcher only emits the chronicle when both
+  // gates pass.
   //
   // NESTED-STUN NOTE: the .ability also declares `{ stun 1s }` as a
   // nested effect, lowered to `nested_per_effect[0]`. apply_program +

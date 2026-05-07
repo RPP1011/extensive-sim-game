@@ -1075,6 +1075,13 @@ fn handle_to_binding_metadata(h: &DataHandle, prog: &CgProgram) -> Option<Bindin
                 NestedEffectKinds    => ("nested_effect_kinds",     "array<u32>"),
                 NestedEffectPayloadA => ("nested_effect_payload_a", "array<u32>"),
                 NestedEffectPayloadB => ("nested_effect_payload_b", "array<u32>"),
+                // Wave 1.5#7 GPU eval — when-predicate columns
+                // (binder/field/op widened u8→u32 by upload; literal
+                // is f32 directly).
+                WhenPredBinder       => ("when_pred_binder",  "array<u32>"),
+                WhenPredField        => ("when_pred_field",   "array<u32>"),
+                WhenPredOp           => ("when_pred_op",      "array<u32>"),
+                WhenPredLiteral      => ("when_pred_literal", "array<f32>"),
             };
             Some(BindingMetadata {
                 bg_source: BgSource::External(format!("ability_registry_{suffix}")),
@@ -1361,6 +1368,10 @@ fn structural_binding_name(h: &DataHandle, prog: Option<&CgProgram>) -> String {
                 NestedEffectKinds    => "nested_effect_kinds",
                 NestedEffectPayloadA => "nested_effect_payload_a",
                 NestedEffectPayloadB => "nested_effect_payload_b",
+                WhenPredBinder       => "when_pred_binder",
+                WhenPredField        => "when_pred_field",
+                WhenPredOp           => "when_pred_op",
+                WhenPredLiteral      => "when_pred_literal",
             };
             format!("ability_registry_{s}")
         }

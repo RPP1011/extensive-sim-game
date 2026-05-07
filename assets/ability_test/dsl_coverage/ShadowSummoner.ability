@@ -60,7 +60,7 @@ ability SoulChain {
     deliver chain { jumps: 3, falloff: 0.7 } {
         on_hit { damage 22 [MAGICAL: 60] + 25% AP }
     }
-    taunt 1500ms when target.alive else target.shield_hp == 0 [CROWD_CONTROL: 70] + 15% mana
+    taunt 1500ms when target.armor < 50 [CROWD_CONTROL: 70] + 15% mana
     stun 750ms chance 60% [CROWD_CONTROL: 30]
 }
 

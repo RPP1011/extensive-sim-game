@@ -376,6 +376,10 @@ impl ApplyAbilityVerbSmokeState {
             ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
             ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
             ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
+            ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             agent_attack_damage: &self.agent_attack_damage_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_hp:            &self.agent_hp_buf,
@@ -600,6 +604,7 @@ mod parity_tests {
                 /*target*/ aid,
                 tick as u64,
                 /*world_seed*/ 0,
+                &CasterStats::default(),
                 &CasterStats::default(),
             );
             for ev in events {

@@ -179,7 +179,10 @@ fn dsl_coverage_corpus_lowers_clean() {
     assert_eq!(headers.len(),       8,  "Header coverage shrank: {headers:?}");
     assert!(had_chance,    "no `chance N%` modifier exercised");
     assert!(had_when,      "no `when <cond>` modifier exercised");
-    assert!(had_when_else, "no `when <cond> else <cond>` modifier exercised");
+    // Wave 1.5#7 GPU eval (2026-05-07): `else <cond>` clause is now
+    // rejected at lower time (deferred — open task #163-followup), so
+    // no surviving program carries one. Coverage assertion retired.
+    let _ = had_when_else;
     assert!(had_nested,    "no nested `{{ ... }}` block exercised");
 }
 

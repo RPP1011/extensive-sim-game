@@ -335,6 +335,10 @@ fn ability_registry_column_token(column: super::super::data_handle::AbilityRegis
         NestedEffectKinds    => "nested_effect_kinds",
         NestedEffectPayloadA => "nested_effect_payload_a",
         NestedEffectPayloadB => "nested_effect_payload_b",
+        WhenPredBinder       => "when_pred_binder",
+        WhenPredField        => "when_pred_field",
+        WhenPredOp           => "when_pred_op",
+        WhenPredLiteral      => "when_pred_literal",
     }
 }
 
@@ -1764,6 +1768,41 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20scale_bonus = scale_bonus + s_pct * stat_v;\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20}}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// Wave 1.5#7 GPU eval: per-effect when-predicate.\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// Mirrors `apply::evaluate_predicate` (CPU oracle) — same\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// stat dispatch table as the scale_bonus switch above.\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// Sentinel binder == 0xFF → no predicate (fire).\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20var when_passes: bool = true;\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20let pred_binder: u32 = ability_registry_when_pred_binder[effect_base + i];\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20if (pred_binder != 0xFFu) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let pred_field: u32   = ability_registry_when_pred_field[effect_base + i];\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let pred_op: u32      = ability_registry_when_pred_op[effect_base + i];\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let pred_literal: f32 = ability_registry_when_pred_literal[effect_base + i];\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20var pred_agent: u32 = caster_slot;\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (pred_binder == 1u) {{ pred_agent = target_slot; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20var pred_lhs: f32 = 0.0;\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20switch (pred_field) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 0u: {{ pred_lhs = agent_attack_damage[pred_agent]; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 1u: {{ pred_lhs = 0.0; }} // AbilityPower — no agent SoA slot\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 2u: {{ pred_lhs = agent_max_hp[pred_agent]; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 3u: {{ pred_lhs = agent_hp[pred_agent]; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 4u: {{ pred_lhs = agent_armor[pred_agent]; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 5u: {{ pred_lhs = agent_magic_resist[pred_agent]; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 6u: {{ pred_lhs = agent_move_speed[pred_agent]; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 7u: {{ pred_lhs = agent_mana[pred_agent]; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20default: {{ pred_lhs = 0.0; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20switch (pred_op) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 0u: {{ when_passes = pred_lhs <  pred_literal; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 1u: {{ when_passes = pred_lhs <= pred_literal; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 2u: {{ when_passes = pred_lhs >  pred_literal; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 3u: {{ when_passes = pred_lhs >= pred_literal; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 4u: {{ when_passes = pred_lhs == pred_literal; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 5u: {{ when_passes = pred_lhs != pred_literal; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20default: {{ when_passes = false; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20if (when_passes) {{\n\
                  {primary_arm_chain}\
                  \x20\x20\x20\x20\x20\x20\x20\x20// Variant 7 (CastAbility) — recursive dispatch. The\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20// nested ability_id lives in payload_a; recursing\n\
@@ -1778,6 +1817,7 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20\x20\x20\x20\x20// Nested ops carry no scaling slot in the registry today\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20// (mirrors `apply.rs`'s `push_effect_event(..., 0.0)` for\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20// nested), so `nested_scale_bonus` is forced to 0.0.\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// Wave 1.5#7: nested loop INSIDE the `if (when_passes)` block.\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20let nested_slot_base: u32 = nested_base + i * 2u;\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20for (var j: u32 = 0u; j < 2u; j = j + 1u) {{\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let kind: u32 = ability_registry_nested_effect_kinds[nested_slot_base + j];\n\
@@ -1787,6 +1827,7 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let nested_scale_bonus: f32 = 0.0;\n\
                  {nested_arm_chain}\
                  \x20\x20\x20\x20\x20\x20\x20\x20}}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} // end if (when_passes)\n\
                  \x20\x20\x20\x20}}\n\
                  }}"
             );
