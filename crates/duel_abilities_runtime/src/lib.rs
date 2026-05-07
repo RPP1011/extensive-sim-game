@@ -1125,6 +1125,21 @@ impl CompiledSim for DuelAbilitiesState {
             mask_7_bitmap: &self.mask_7_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
             cfg: &self.scoring_cfg_buf,
+            // Wave 1.5#7 follow-on (predicate-aware scoring,
+            // 2026-05-07): the scoring kernel's per-row body inlines a
+            // predicate-eval gate using the same registry SoA columns
+            // and agent stat columns the chronicle dispatcher uses.
+            // See `cg::lower::driver::wire_scoring_predicate_reads`.
+            ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_max_hp:        &self.agent_max_hp_buf,
+            agent_armor:         &self.agent_armor_buf,
+            agent_magic_resist:  &self.agent_magic_resist_buf,
+            agent_move_speed:    &self.agent_move_speed_buf,
+            agent_mana:          &self.agent_mana_buf,
         };
         dispatch::dispatch_scoring(
             &mut self.cache, &scoring_bindings, &self.gpu.device, &mut encoder,

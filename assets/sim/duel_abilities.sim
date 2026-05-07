@@ -583,7 +583,6 @@ verb Reap(self, target: Agent) =
         && agents.stun_expires_at_tick(self) <= world.tick
         && target.alive
         && target != self
-        && target.hp < config.combat.reap_threshold
         && (world.tick % config.combat.cooldown_reap == 0))
   // Task #138 follow-on (Reap, mirror of Fortify at `001ae9a6`) —
   // verb-body apply_ability dispatcher swap. Reap was
@@ -603,24 +602,23 @@ verb Reap(self, target: Agent) =
   // re-emits as Defeated so the existing ApplyDefeat cascade
   // (per-agent set_alive) keeps working unchanged.
   //
-  // WHEN-CONDITION NOTE (Wave 1.5#7 GPU eval, 2026-05-07): Reap.ability's
-  // `when target.hp < 20` per-effect predicate is now compiled into a
-  // structured EffectPredicate (target.Hp < 20.0) and evaluated by both
-  // the CPU `apply_program` and the GPU dispatcher (registry's
-  // `when_pred_*` SoA columns gate the chronicle write at apply time).
-  // The verb's outer `when` clause ALSO gates on
-  // `target.hp < config.combat.reap_threshold` (= 20). Both gates are
-  // load-bearing because they operate at DIFFERENT layers — the verb
-  // mask gates argmax SELECTION (per-pair scoring picks one verb per
-  // agent); the per-effect predicate gates the apply_program EFFECT
-  // WRITE (whether the chronicle record is emitted). Drop the verb-mask
-  // gate and Reap (score 1000-target.hp ≈ 900) wins argmax over Fortify
-  // (score 275) when target.hp=100, then writes nothing because the
-  // predicate fails — silently swallowing the tick. Keep BOTH for now;
-  // unifying them is later infrastructure (predicate-aware scoring).
-  // ApplyExecuteFromChronicle still ferries the record into Defeated
-  // unconditionally; the dispatcher only emits the chronicle when both
-  // gates pass.
+  // WHEN-CONDITION NOTE (Wave 1.5#7 follow-on, 2026-05-07): Reap.ability's
+  // `when target.hp < 20` per-effect predicate is the AUTHORITATIVE
+  // execute gate. It compiles into a structured EffectPredicate
+  // (target.Hp < 20.0) and is now evaluated at TWO layers:
+  //   1. SCORING (this kernel): the predicate-aware scoring kernel
+  //      reads `ability_registry_when_pred_*` for ability_id=5 and
+  //      multiplies into the row's argmax compare — Reap can only
+  //      argmax-win against targets with hp<20.
+  //   2. APPLY (chronicle dispatcher): same predicate, same SoA
+  //      columns, gates the chronicle EffectExecuteApplied write.
+  // The verb's outer `when` clause used to ALSO gate on
+  // `target.hp < config.combat.reap_threshold` — that was a workaround
+  // for the layering gap before predicate-aware scoring. The redundant
+  // gate is now dropped; the per-effect predicate is the single source
+  // of truth for the execute threshold. (Other gates here — alive,
+  // stun, target!=self, cooldown — are NOT covered by per-effect
+  // predicates, so they stay on the verb mask.)
   //
   // NESTED-STUN NOTE: the .ability also declares `{ stun 1s }` as a
   // nested effect, lowered to `nested_per_effect[0]`. apply_program +
