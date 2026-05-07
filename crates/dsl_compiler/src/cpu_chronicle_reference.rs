@@ -57,10 +57,18 @@ pub const CHRONICLE_RECORD_STRIDE_U32: usize = 10;
 ///
 /// `tick` is the runtime tick counter at cast time; mirrors the
 /// `tick` preamble local the dispatcher reads from the kernel cfg.
+///
+/// **Slice ε part 1 update**: now takes `target_id: u32` separately
+/// from `caster_id`. The GPU dispatcher writes the `target` operand
+/// (lowered from `apply_ability ... target <expr>` source) into
+/// chronicle payload word 3 distinct from the caster slot in
+/// payload word 2. For self-cast callers (slice-γ default), pass
+/// `target_id == caster_id` to preserve the prior byte layout.
 pub fn apply_event_to_chronicle_record(
     event: ApplyEvent,
     tick: u32,
     caster_id: u32,
+    target_id: u32,
 ) -> Option<[u32; CHRONICLE_RECORD_STRIDE_U32]> {
     let mut rec = [0u32; CHRONICLE_RECORD_STRIDE_U32];
     rec[1] = tick;
@@ -69,7 +77,7 @@ pub fn apply_event_to_chronicle_record(
         ApplyEvent::Damage { source: _, target: _, amount } => {
             rec[0] = 26;
             rec[2] = caster_id;
-            rec[3] = caster_id; // slice γ self-cast
+            rec[3] = target_id;
             rec[4] = amount.to_bits();
             Some(rec)
         }
@@ -77,7 +85,7 @@ pub fn apply_event_to_chronicle_record(
         ApplyEvent::Heal { source: _, target: _, amount } => {
             rec[0] = 27;
             rec[2] = caster_id;
-            rec[3] = caster_id;
+            rec[3] = target_id;
             rec[4] = amount.to_bits();
             Some(rec)
         }
@@ -85,7 +93,7 @@ pub fn apply_event_to_chronicle_record(
         ApplyEvent::Shield { source: _, target: _, amount } => {
             rec[0] = 28;
             rec[2] = caster_id;
-            rec[3] = caster_id;
+            rec[3] = target_id;
             rec[4] = amount.to_bits();
             Some(rec)
         }
@@ -94,7 +102,7 @@ pub fn apply_event_to_chronicle_record(
         ApplyEvent::Stun { target: _, duration_ticks } => {
             rec[0] = 29;
             rec[2] = caster_id;
-            rec[3] = caster_id;
+            rec[3] = target_id;
             rec[4] = tick + duration_ticks;
             Some(rec)
         }
@@ -103,7 +111,7 @@ pub fn apply_event_to_chronicle_record(
         ApplyEvent::Slow { target: _, duration_ticks, factor_q8 } => {
             rec[0] = 30;
             rec[2] = caster_id;
-            rec[3] = caster_id;
+            rec[3] = target_id;
             rec[4] = tick + duration_ticks;
             // Sign-widen i16 → i32 → bitcast to u32.
             rec[5] = (factor_q8 as i32) as u32;
@@ -117,7 +125,7 @@ pub fn apply_event_to_chronicle_record(
         ApplyEvent::TransferGold { source: _, target: _, amount } => {
             rec[0] = 31;
             rec[2] = caster_id;
-            rec[3] = caster_id; // slice γ self-cast
+            rec[3] = target_id;
             rec[4] = (amount as i32) as u32;
             Some(rec)
         }
@@ -128,7 +136,7 @@ pub fn apply_event_to_chronicle_record(
         ApplyEvent::ModifyStanding { source: _, target: _, delta } => {
             rec[0] = 32;
             rec[2] = caster_id;
-            rec[3] = caster_id;
+            rec[3] = target_id;
             rec[4] = (delta as i32) as u32;
             Some(rec)
         }
@@ -153,7 +161,7 @@ mod tests {
         let rec = apply_event_to_chronicle_record(
             ApplyEvent::Damage { source: aid(7), target: aid(11), amount: 42.0 },
             /*tick*/ 100,
-            /*caster_id*/ 7,
+            /*caster_id*/ 7, /*target_id*/ 7,
         )
         .expect("Damage has chronicle counterpart");
         assert_eq!(rec[0], 26, "kind tag — EffectDamageApplied");
@@ -172,7 +180,7 @@ mod tests {
         let rec = apply_event_to_chronicle_record(
             ApplyEvent::Heal { source: aid(1), target: aid(2), amount: 12.5 },
             /*tick*/ 50,
-            /*caster_id*/ 3,
+            /*caster_id*/ 3, /*target_id*/ 3,
         )
         .expect("Heal has chronicle counterpart");
         assert_eq!(rec[0], 27);
@@ -189,7 +197,7 @@ mod tests {
         let rec = apply_event_to_chronicle_record(
             ApplyEvent::Stun { target: aid(99), duration_ticks: 17 },
             /*tick*/ 100,
-            /*caster_id*/ 4,
+            /*caster_id*/ 4, /*target_id*/ 4,
         )
         .expect("Stun has chronicle counterpart");
         assert_eq!(rec[0], 29);
@@ -205,7 +213,7 @@ mod tests {
                 factor_q8: -64, // half-speed slow with sign bit set
             },
             /*tick*/ 100,
-            /*caster_id*/ 8,
+            /*caster_id*/ 8, /*target_id*/ 8,
         )
         .expect("Slow has chronicle counterpart");
         assert_eq!(rec[0], 30);
@@ -219,10 +227,33 @@ mod tests {
         let rec = apply_event_to_chronicle_record(
             ApplyEvent::Shield { source: aid(1), target: aid(2), amount: 25.0 },
             /*tick*/ 50,
-            /*caster_id*/ 3,
+            /*caster_id*/ 3, /*target_id*/ 3,
         )
         .expect("Shield has chronicle counterpart");
         assert_eq!(rec[0], 28);
+    }
+
+    /// Slice ε part 1 pin: when caster_id and target_id differ, the
+    /// chronicle record's actor (slot 2) and target (slot 3) words
+    /// take distinct values — mirroring the GPU dispatcher's
+    /// distinct `caster_slot` / `target_slot` writes.
+    #[test]
+    fn distinct_caster_and_target_write_distinct_slots() {
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::Damage { source: aid(1), target: aid(2), amount: 100.0 },
+            /*tick*/ 50,
+            /*caster_id*/ 7,
+            /*target_id*/ 11,
+        )
+        .unwrap();
+        assert_eq!(rec[2], 7, "actor slot uses caster_id");
+        assert_eq!(rec[3], 11, "target slot uses target_id (distinct from caster)");
+        // Self-cast call site preserves slice-γ behavior: caster=target.
+        let rec_self = apply_event_to_chronicle_record(
+            ApplyEvent::Damage { source: aid(1), target: aid(2), amount: 100.0 },
+            50, 7, 7,
+        ).unwrap();
+        assert_eq!(rec_self[2], rec_self[3], "self-cast collapses both slots");
     }
 
     #[test]
@@ -244,7 +275,7 @@ mod tests {
             ApplyEvent::SelfDamage{ source: aid(1), amount: 10.0 },
         ] {
             assert!(
-                apply_event_to_chronicle_record(ev, 100, 0).is_none(),
+                apply_event_to_chronicle_record(ev, 100, 0, 0).is_none(),
                 "variant {ev:?} should have no chronicle counterpart \
                  (dispatcher arm carries TODO marker)"
             );
@@ -277,7 +308,7 @@ mod tests {
 
         for &(effect_kind, expected_event_kind_id) in EFFECT_KIND_TO_EVENT_KIND_ID {
             let ev = ev_for_kind(effect_kind);
-            let rec = apply_event_to_chronicle_record(ev, 0, 0)
+            let rec = apply_event_to_chronicle_record(ev, 0, 0, 0)
                 .unwrap_or_else(|| {
                     panic!(
                         "EFFECT_KIND_TO_EVENT_KIND_ID entry effect_kind={effect_kind} \
@@ -297,7 +328,7 @@ mod tests {
         let rec = apply_event_to_chronicle_record(
             ApplyEvent::TransferGold { source: aid(1), target: aid(2), amount: 42 },
             /*tick*/ 100,
-            /*caster_id*/ 9,
+            /*caster_id*/ 9, /*target_id*/ 9,
         )
         .expect("TransferGold has chronicle counterpart");
         assert_eq!(rec[0], 31, "EffectGoldTransfer kind tag");
@@ -310,7 +341,7 @@ mod tests {
         // negative value.
         let rec_neg = apply_event_to_chronicle_record(
             ApplyEvent::TransferGold { source: aid(1), target: aid(2), amount: -7 },
-            100, 9,
+            100, 9, 9,
         ).unwrap();
         assert_eq!(rec_neg[4], (-7_i32) as u32, "negative amount sign-widens correctly");
     }
@@ -320,7 +351,7 @@ mod tests {
         let rec = apply_event_to_chronicle_record(
             ApplyEvent::ModifyStanding { source: aid(1), target: aid(2), delta: -25 },
             /*tick*/ 100,
-            /*caster_id*/ 4,
+            /*caster_id*/ 4, /*target_id*/ 4,
         )
         .expect("ModifyStanding has chronicle counterpart");
         assert_eq!(rec[0], 32, "EffectStandingDelta kind tag");

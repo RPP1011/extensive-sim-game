@@ -46,7 +46,12 @@ fn run_pipeline(
     );
     events
         .into_iter()
-        .filter_map(|e| apply_event_to_chronicle_record(e, tick, caster.raw()))
+        // Slice ε part 1: target_id supplied separately. The pipeline
+        // tests preserve the slice-γ self-cast convention by passing
+        // caster=target — chronicle records keep their existing
+        // per-record byte layout. New tests can vary target_id to
+        // exercise the explicit-target path.
+        .filter_map(|e| apply_event_to_chronicle_record(e, tick, caster.raw(), caster.raw()))
         .collect()
 }
 
