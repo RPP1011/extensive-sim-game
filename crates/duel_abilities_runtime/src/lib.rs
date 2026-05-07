@@ -1377,6 +1377,73 @@ mod tests {
         }
     }
 
+    /// Wave 2 sibling pin — Fortify's apply_program. Same registry-loaded
+    /// shape as Strike/ShieldUp/Mend; exercises the DamageModify EffectOp
+    /// (target + duration_ticks + multiplier_q8 payload triple).
+    ///
+    /// Fortify.ability: `damage_modify 0.5 5s stacking refresh` → 0.5
+    /// multiplier × 256 = 128 in q8 fixed-point; 5s × 10 ticks/s = 50
+    /// duration_ticks. The stacking modifier is captured on the program
+    /// but is enforced at the cascade-handler level, not by apply_program.
+    #[test]
+    fn fortify_apply_program_produces_expected_damage_modify_event() {
+        use engine::ability::apply::{apply_program, ApplyEvent};
+        use engine::ability::program::CasterStats;
+        use engine::ids::AgentId;
+
+        let built = binding_check::build_duel_abilities_registry();
+        let fortify_id = *built.names.get("Fortify").expect("Fortify registered");
+        let fortify = built.registry.get(fortify_id).expect("Fortify resolves");
+
+        let caster = AgentId::new(1).expect("AgentId::new");
+        let events = apply_program(
+            fortify, caster, caster, 0, 0xCAFE_F00D, &CasterStats::default(),
+        );
+
+        assert_eq!(events.len(), 1, "Fortify has one DamageModify effect");
+        match events[0] {
+            ApplyEvent::DamageModify { target, duration_ticks, multiplier_q8 } => {
+                assert_eq!(target, caster, "self-cast");
+                assert_eq!(duration_ticks, 50, "5s × 10 ticks/s");
+                assert_eq!(multiplier_q8, 128, "0.5 × 256 = 128 in q8");
+            }
+            other => panic!("expected ApplyEvent::DamageModify, got {:?}", other),
+        }
+    }
+
+    /// Wave 2 sibling pin — Vampirize's apply_program. Exercises the
+    /// LifeSteal EffectOp (target + duration_ticks + fraction_q8 triple).
+    ///
+    /// Vampirize.ability: `lifesteal 0.5 5s` → 0.5 fraction × 256 = 128
+    /// in q8; 5s × 10 ticks/s = 50 duration_ticks. The cascade handler
+    /// (ApplyLifestealActivation) folds the resulting LifeSteal event
+    /// into per-agent lifesteal SoA fields.
+    #[test]
+    fn vampirize_apply_program_produces_expected_lifesteal_event() {
+        use engine::ability::apply::{apply_program, ApplyEvent};
+        use engine::ability::program::CasterStats;
+        use engine::ids::AgentId;
+
+        let built = binding_check::build_duel_abilities_registry();
+        let vampirize_id = *built.names.get("Vampirize").expect("Vampirize registered");
+        let vampirize = built.registry.get(vampirize_id).expect("Vampirize resolves");
+
+        let caster = AgentId::new(1).expect("AgentId::new");
+        let events = apply_program(
+            vampirize, caster, caster, 0, 0xCAFE_F00D, &CasterStats::default(),
+        );
+
+        assert_eq!(events.len(), 1, "Vampirize has one LifeSteal effect");
+        match events[0] {
+            ApplyEvent::LifeSteal { target, duration_ticks, fraction_q8 } => {
+                assert_eq!(target, caster, "self-cast");
+                assert_eq!(duration_ticks, 50, "5s × 10 ticks/s");
+                assert_eq!(fraction_q8, 128, "0.5 × 256 = 128 in q8");
+            }
+            other => panic!("expected ApplyEvent::LifeSteal, got {:?}", other),
+        }
+    }
+
     /// Snapshot before any tick must report initial state: both heroes
     /// alive at full HP (100.0), shields zero, and the renderer-visible
     /// fields (positions/creature_types/alive) populated for every
