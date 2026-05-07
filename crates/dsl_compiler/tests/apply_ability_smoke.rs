@@ -931,6 +931,67 @@ fn back_to_back_apply_ability_in_one_rule_emits_two_dispatcher_blocks() {
         .unwrap_or_else(|e| panic!("naga validate failed: {e:?}"));
 }
 
+/// Companion to back_to_back: two `apply_ability` statements with
+/// DIFFERENT operands in one body must also each emit their own
+/// dispatcher block. Catches a different regression class than the
+/// identical-operand pin: an operand-aware dedup that only collapsed
+/// structurally-identical statements would pass that test but could
+/// still fail if the IDs of the operands were what got hashed (a
+/// regression where ExprIds rather than CgExpr structure was the
+/// dedup key).
+#[test]
+fn back_to_back_apply_ability_with_distinct_operands_each_emit() {
+    use naga::valid::{Capabilities, ValidationFlags, Validator};
+    let src = "
+        event Tick { }
+        entity Hero : Agent { }
+
+        physics DoubleDistinctDispatch @phase(per_agent) {
+          on Tick {} where (self.alive) {
+            apply_ability agents.level(self) by self target self
+            apply_ability agents.level(self) by self target agents.level(self)
+          }
+        }
+    ";
+    let program = dsl_compiler::parse(src).expect("parse");
+    let comp = dsl_ast::resolve::resolve(program).expect("resolve");
+    let cg = dsl_compiler::cg::lower::lower_compilation_to_cg(&comp)
+        .expect("two distinct-operand ApplyAbility lower");
+    let schedule_result = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&schedule_result.schedule, &cg)
+        .expect("emit");
+
+    let body = kernel_body_containing(&art, "DoubleDistinctDispatch")
+        .or_else(|| kernel_body_containing(&art, "physics"))
+        .expect("physics kernel emitted");
+
+    // 2 dispatcher loops + 14 slot acquisitions (same totals as the
+    // identical-operand case — the structural shape is identical).
+    let dispatcher_loops = body.matches("for (var i: u32 = 0u; i < 6u;").count();
+    assert_eq!(
+        dispatcher_loops, 2,
+        "two distinct-operand apply_ability statements must each emit \
+         their own dispatcher block; got {dispatcher_loops}\nbody:\n{body}"
+    );
+
+    let slot_acquisitions = body
+        .matches("let _slot: u32 = atomicAdd(&event_tail[0], 1u);")
+        .count();
+    assert_eq!(slot_acquisitions, 14);
+
+    // Naga validates — different target_slot expressions in the two
+    // dispatch blocks shouldn't introduce binding conflicts.
+    let module = naga::front::wgsl::parse_str(body)
+        .unwrap_or_else(|e| panic!("naga parse failed: {e}"));
+    let mut validator = Validator::new(ValidationFlags::all(), Capabilities::all());
+    validator
+        .validate(&module)
+        .unwrap_or_else(|e| panic!("naga validate failed: {e:?}"));
+}
+
 /// PerAgent slice-ε surface where `target` is a non-trivial SoA-field
 /// read (`agents.level(self)`) instead of `self`. Confirms lowering
 /// accepts any expression the physics-scope `lower_expr` supports as
