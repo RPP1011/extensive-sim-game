@@ -1918,11 +1918,22 @@ fn lower_cg_stmt_body_to_wgsl(
 ///     loop in a `{ let target_slot = candidate; … }` block that
 ///     shadows the outer `target_slot` for chronicle writes. P11 sort
 ///     handles atomicAdd-induced order non-determinism on readback.
-///   - else (sentinel `0xFFu` = no area, or non-Circle shape): fall
-///     through to the single-target chain with the explicit cast
-///     `target_slot`. Non-Circle shapes (Cone/Capsule/Aabb) are
-///     deferred — their additional geometry kernels would extend this
-///     branch.
+///   - `1u` (Cone, #178): walk the 27-cell neighborhood around the
+///     APEX (`agent_pos[caster_slot]`); for each candidate within
+///     `dist² ≤ range²` AND `dot(normalize(cand - apex), direction)
+///     ≥ cos(half_angle_rad)`, shadow `target_slot = candidate` and
+///     run the chronicle arm chain. `direction = normalize(target -
+///     apex)` (degenerate when caster targets self — guarded by the
+///     `dir_len_sq >= 1e-6` branch which emits no records). Apex-
+///     coincident candidates (caster + co-located agents) are
+///     excluded by the `_dist_sq < 1e-6 -> continue` guard so the
+///     CPU oracle (`apply_program_aoe_cone_filter`) and GPU emit
+///     match bit-for-bit.
+///   - else (sentinel `0xFFu` = no area, or non-AOE-Path-B shape):
+///     fall through to the single-target chain with the explicit
+///     cast `target_slot`. Other shapes (Line/Sphere/Capsule/Aabb)
+///     are deferred — their additional geometry kernels would extend
+///     this branch.
 ///
 /// Why the spatial-walk lives at this layer (rather than in the
 /// per-cast caller): the chronicle arm chain consumes `target_slot`
@@ -1998,6 +2009,9 @@ fn build_apply_ability_per_target_body(
          \x20       // walks the 27-cell spatial neighborhood around\n\
          \x20       // `agent_pos[target_slot]` and runs the chronicle arm chain\n\
          \x20       // once per in-radius candidate (shadowing target_slot).\n\
+         \x20       // Cone (1u) walks the 27 cells around `agent_pos[caster_slot]`\n\
+         \x20       // (the apex), gates each candidate on range² ∧ angular dot,\n\
+         \x20       // and shadows target_slot the same way (#178).\n\
          \x20       // Sentinel 0xFFu / unrecognised shape → single-target\n\
          \x20       // fallback at the same indent the non-AOE path uses.\n\
          \x20       let area_kind: u32 = ability_registry_area_kinds[effect_base + i];\n\
@@ -2054,12 +2068,77 @@ fn build_apply_ability_per_target_body(
          \x20                   } // end for dx\n\
          \x20               } // end for dy\n\
          \x20           } // end for dz\n\
+         \x20       } else if (area_kind == 1u) {\n\
+         \x20           // Cone (#178). area_args layout: [half_angle_deg, range, _, _].\n\
+         \x20           // Apex = caster position; direction = normalize(target_pos -\n\
+         \x20           // apex). Per-candidate gate: dist² ≤ range² ∧ dot(\n\
+         \x20           // normalize(cand-apex), direction) ≥ cos(half_angle). Apex-\n\
+         \x20           // coincident candidates (incl. caster) are excluded — the\n\
+         \x20           // cone never hits its own origin (degenerate direction).\n\
+         \x20           let area_args_base: u32 = (effect_base + i) * 4u;\n\
+         \x20           let half_angle_deg: f32 = ability_registry_area_args[area_args_base + 0u];\n\
+         \x20           let range: f32 = ability_registry_area_args[area_args_base + 1u];\n\
+         \x20           let half_angle_rad: f32 = half_angle_deg * 0.01745329252; // π/180\n\
+         \x20           let cos_half_angle: f32 = cos(half_angle_rad);\n\
+         \x20           let range_sq: f32 = range * range;\n\
+         \x20           let apex: vec3<f32> = agent_pos[caster_slot];\n\
+         \x20           let target_pos_local: vec3<f32> = agent_pos[target_slot];\n\
+         \x20           let direction_raw: vec3<f32> = target_pos_local - apex;\n\
+         \x20           let dir_len_sq: f32 = dot(direction_raw, direction_raw);\n\
+         \x20           if (dir_len_sq >= 1e-6) {\n\
+         \x20               // Non-degenerate cone. Direction = normalize(target -\n\
+         \x20               // apex); inverseSqrt matches CPU's `recip().sqrt()`.\n\
+         \x20               let direction: vec3<f32> = direction_raw * inverseSqrt(dir_len_sq);\n\
+         \x20               let _self_cell_f = (apex + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
+         \x20               let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
+         \x20               let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
+         \x20               let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
+         \x20               let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
+         \x20               for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
+         \x20                   for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
+         \x20                       for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
+         \x20                           let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
+         \x20                           let _start = spatial_grid_starts[_cell];\n\
+         \x20                           let _end = spatial_grid_starts[_cell + 1u];\n\
+         \x20                           for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {\n\
+         \x20                               let _candidate: u32 = spatial_grid_cells[_i];\n\
+         \x20                               let _cand_pos: vec3<f32> = agent_pos[_candidate];\n\
+         \x20                               let _to_cand: vec3<f32> = _cand_pos - apex;\n\
+         \x20                               let _dist_sq: f32 = dot(_to_cand, _to_cand);\n\
+         \x20                               // Apex exclusion (caster + co-located candidates).\n\
+         \x20                               if (_dist_sq < 1e-6) { continue; }\n\
+         \x20                               if (_dist_sq > range_sq) { continue; }\n\
+         \x20                               let _cand_dir: vec3<f32> = _to_cand * inverseSqrt(_dist_sq);\n\
+         \x20                               if (dot(_cand_dir, direction) < cos_half_angle) { continue; }\n\
+         \x20                               // Shadow target_slot for the arm chain's chronicle writes.\n\
+         \x20                               let target_slot: u32 = _candidate;\n",
+    );
+    s.push_str(primary_arm_chain);
+    s.push_str(
+        "                                // Nested loop runs per in-cone target —\n\
+         \x20                               // same shape as the Circle branch.\n\
+         \x20                               let nested_slot_base: u32 = nested_base + i * 2u;\n\
+         \x20                               for (var j: u32 = 0u; j < 2u; j = j + 1u) {\n\
+         \x20                                   let kind: u32 = ability_registry_nested_effect_kinds[nested_slot_base + j];\n\
+         \x20                                   if (kind == 0xFFu) { continue; } // EFFECT_KIND_EMPTY\n\
+         \x20                                   let payload_a: u32 = ability_registry_nested_effect_payload_a[nested_slot_base + j];\n\
+         \x20                                   let payload_b: u32 = ability_registry_nested_effect_payload_b[nested_slot_base + j];\n\
+         \x20                                   let nested_scale_bonus: f32 = 0.0;\n",
+    );
+    s.push_str(nested_arm_chain);
+    s.push_str(
+        "                                }\n\
+         \x20                           } // end for _i (cone walk)\n\
+         \x20                       } // end for dx (cone walk)\n\
+         \x20                   } // end for dy (cone walk)\n\
+         \x20               } // end for dz (cone walk)\n\
+         \x20           } // end if (dir_len_sq >= 1e-6) — degenerate cone is no-op\n\
          \x20       } else {\n\
-         \x20           // Non-Circle (sentinel 0xFFu = no area, or unrecognised\n\
-         \x20           // shape). Single-target fallback — same chain shape as\n\
-         \x20           // the with_aoe_dispatch==false path, just at the deeper\n\
-         \x20           // indent (12/16 spaces) the AOE arm-chain helper rendered\n\
-         \x20           // for the in-radius branch.\n",
+         \x20           // Non-Circle / non-Cone (sentinel 0xFFu = no area, or\n\
+         \x20           // unrecognised shape). Single-target fallback — same chain\n\
+         \x20           // shape as the with_aoe_dispatch==false path, just at the\n\
+         \x20           // deeper indent (12/16 spaces) the AOE arm-chain helper\n\
+         \x20           // rendered for the in-radius branch.\n",
     );
     s.push_str(primary_arm_chain);
     s.push_str(
@@ -2074,7 +2153,7 @@ fn build_apply_ability_per_target_body(
     s.push_str(nested_arm_chain);
     s.push_str(
         "                }\n\
-         \x20       } // end if (area_kind == 0u) … else\n",
+         \x20       } // end if (area_kind == 0u) … else if (1u) … else\n",
     );
     s
 }

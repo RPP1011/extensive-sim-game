@@ -187,3 +187,79 @@ fn aoe_circle_with_zero_radius_hits_only_caster() {
     let records = state.read_event_ring(tail);
     assert_eq!(records[0][3], 0, "the single record's target must be caster slot 0");
 }
+
+#[test]
+fn aoe_cone_degenerate_under_self_cast_emits_no_records() {
+    // #178 AOE Path B Cone — GPU pin for the degenerate-cone branch.
+    //
+    // Smoke-fixture self-cast invariant: `caster_slot == target_slot`,
+    // so `apex == target_pos == agent_pos[0]`. The cone's `direction
+    // = target_pos - apex = (0,0,0)` is degenerate; the WGSL kernel's
+    // `dir_len_sq < 1e-6 → no-op` branch skips the spatial walk and
+    // emits zero records. Pins the degenerate-cone semantic
+    // explicitly so a future change to the direction calc surfaces
+    // here (e.g. a "caster auto-faces nearest enemy on degenerate"
+    // re-target would silently break parity with the CPU oracle's
+    // empty-set).
+    //
+    // Fan layout (4 agents): caster at origin, three candidates that
+    // a non-degenerate cone(60°, 4) would hit (slots 1, 2, 3 in front
+    // of caster). With this fixture the cone WOULD hit them; under
+    // self-cast it doesn't, because the direction is undefined.
+    let mut slash = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 25.0 }],
+    );
+    slash.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Cone,
+        args: [60.0, 4.0, 0.0, 0.0],
+    }));
+
+    let mut builder = AbilityRegistryBuilder::new();
+    let slash_id = builder.register(slash);
+    let registry = builder.build();
+
+    const N_AGENTS: u32 = 4;
+    let levels: Vec<u32> = vec![slash_id.raw(); N_AGENTS as usize];
+    let stats: Vec<PerAgentStats> = vec![PerAgentStats::default(); N_AGENTS as usize];
+
+    let state = match ApplyAbilitySmokeState::try_new_with_registry(
+        N_AGENTS,
+        &registry,
+        &levels,
+        &stats,
+    ) {
+        Some(s) => s,
+        None => {
+            eprintln!(
+                "[aoe_chronicle_pin] skipping cone test: no wgpu adapter available."
+            );
+            return;
+        }
+    };
+    let mut state = state;
+
+    // Only caster (slot 0) alive; spatial grid still holds positions
+    // for slots 1..3 so the walk would find them as candidates if
+    // the direction were non-degenerate.
+    state.set_agent_alive(&[1, 0, 0, 0]);
+    state.set_agent_positions(&[
+        [0.0, 0.0, 0.0],   // caster apex
+        [3.0, -1.0, 0.0],  // would-be in-cone bottom (≈18.4°)
+        [4.0, 0.0, 0.0],   // would-be on-axis
+        [3.0, 1.0, 0.0],   // would-be in-cone top
+    ]);
+
+    state.step(0);
+
+    let tail = state.read_event_tail();
+    assert_eq!(
+        tail, 0,
+        "Self-cast cone (caster_slot == target_slot ⇒ direction \
+         degenerate) must emit zero chronicle records. The cone \
+         WGSL's `dir_len_sq < 1e-6` branch skips the spatial walk; \
+         CPU oracle's `apply_program_aoe_cone_filter` matches by \
+         returning an empty in-cone set. Got tail={tail}",
+    );
+}
