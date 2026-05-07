@@ -188,3 +188,70 @@ behavior-changing piece blocks on the sim wire-up decision).
 Expand the `switch (kind)` arms to cover every EffectOp variant the
 LoL canary uses (currently 30+). Stretches across multiple
 iterations; each variant adds one arm + one apply-path test.
+
+**Status (2026-05-06):** completed. The dispatcher covers 31/32
+EffectOp variants — all variants except `CastAbility=7` (recursive
+dispatch deferred to a future slice). Shipped across the slice γ
+sequence (`0b09317b` / `a7159689` / `940efc30`).
+
+## Slice ε — explicit caster/target operands (#161)
+
+**Status (2026-05-06):** completed across 4 commits.
+
+The original slice γ chronicle wiring used a hardcoded `agent_id`
+identifier for the chronicle records' actor + target slots ("slice-γ
+self-cast convention"). This worked for PerAgent kernels (where
+`agent_id` is the per-thread preamble local) but produced broken
+WGSL for PerEvent kernels (no `agent_id` binding) — naga validation
+caught this as a real bug.
+
+Slice ε plumbs explicit operands through 5+ layers (AST, parser,
+resolver, IR, CG IR, lowering, dispatcher emit, CPU reference) so
+the user can write:
+
+    apply_ability <ability>                            // PerAgent: caster=self, target=self
+    apply_ability <ability> by <caster>                // PerEvent: explicit caster
+    apply_ability <ability> target <target>            // PerAgent + explicit target
+    apply_ability <ability> by <caster> target <target>// fully explicit
+
+When operands are omitted, lowering defaults preserve the prior
+self-cast behavior (chronicle byte layout unchanged).
+
+**Shipped (in landed order):**
+- `92572af8` — part 1: explicit `caster: CgExprId` field on
+  `CgStmt::ApplyAbility`; dispatcher reads `caster_slot` instead of
+  hardcoded `agent_id`. Naga validator caught a reserved-prefix
+  issue (`__caster_slot` → `caster_slot`).
+- `c22f105e` — part 2: `LoweringCtx.current_per_agent_rule` flag +
+  typed `UnsupportedPhysicsStmt` error for PerEvent ApplyAbility
+  without explicit caster (clean failure mode replacing broken
+  WGSL emit).
+- `7c3ce6e4` — part 3: `apply_ability <a> by <caster>` parser
+  syntax. Closes task #161. PerEvent ApplyAbility now lowers
+  cleanly with explicit caster (e.g. `by w` from event-pattern
+  destructuring).
+- `d0bc37fd` — slice ε part 1 (target operand): symmetric
+  `target <expr>` syntax. The dispatcher writes distinct caster
+  vs target chronicle slots when source supplies them.
+- `efef23a1` — CPU reference signature update: now takes
+  `target_id: u32` separately, mirroring the GPU dispatcher's
+  distinct slot writes. Closes the CPU↔GPU contract.
+
+**Naga validation track record:** caught 3 real layered bugs across
+this session (BGL composer column-read recording in `f447d3eb`,
+reserved-prefix `__caster_slot`, PerEvent shape gap surfaced as
+#161). Each commit's validator gate paid for itself; the gate is
+now a load-bearing CI guard.
+
+**Pending slice ε scope (not yet started):**
+- Multi-target / AOE: extend the operand surface from a single
+  `target` expression to a list / spatial query result. Touches
+  the dispatcher loop shape (per-target sub-loop) more than the
+  source surface.
+- Real GPU device test (#133): runs the kernel through wgpu and
+  reads back the chronicle ring for byte-equality vs. the CPU
+  reference. Substantial wgpu scaffolding ahead of CI gating.
+- duel_abilities verb wire-up (#138): pick a self-cast verb
+  (Bleed) and rewrite to `apply_ability` instead of inline
+  emit. Behavior-changing — needs deliberate decision on which
+  verb + chronicle handler convention.
