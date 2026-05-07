@@ -17,6 +17,8 @@
 //! the runtime mirrors those discriminants when seeding the
 //! `agent_creature_type` SoA.
 
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
 use engine::sim_trait::{AgentSnapshot, CompiledSim, VizGlyph};
 use engine::GpuContext;
 use glam::Vec3;
@@ -25,6 +27,8 @@ use wgpu::util::DeviceExt;
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
 use engine::gpu::{EventRing, ViewStorage};
+
+mod binding_check;
 
 /// Per-fixture state for the boss fight.
 pub struct BossFightState {
@@ -37,6 +41,34 @@ pub struct BossFightState {
     /// Hero=1 (slots 1..=5). Read by mask predicates AND scoring
     /// rows that test `target.creature_type == ...`.
     agent_creature_type_buf: wgpu::Buffer,
+    /// Task #138 follow-on (boss_fight port, 2026-05-07) — per-stat
+    /// agent SoA columns the apply_ability dispatcher's
+    /// `scale_bonus = Σ percent * agent_stat[caster_slot]` switch reads.
+    /// boss_fight's BossStrike + HeroAttack programs have no scaling
+    /// entries today, so all five columns sit at their inert init
+    /// values; the dispatcher's `scale_bonus` collapses to 0
+    /// unconditionally. Kept on the state struct because the verb-
+    /// chronicle kernels still BIND them (the dispatcher emits the
+    /// stat-switch arms whether or not any program actually scales).
+    /// Mirrors apply_ability_smoke_runtime + duel_25v25_runtime
+    /// exactly — the same five-column shape.
+    #[allow(dead_code)]
+    agent_attack_damage_buf: wgpu::Buffer,
+    agent_max_hp_buf: wgpu::Buffer,
+    #[allow(dead_code)]
+    agent_armor_buf: wgpu::Buffer,
+    #[allow(dead_code)]
+    agent_magic_resist_buf: wgpu::Buffer,
+    #[allow(dead_code)]
+    agent_move_speed_buf: wgpu::Buffer,
+    /// boss_fight's verbs don't read mana, but the apply_ability
+    /// dispatcher's stat-switch (Wave 1.5#4 GPU wire-up) binds it
+    /// alongside the other stat columns — see the BossStrike +
+    /// HeroAttack `agent_mana` field in the generated
+    /// `PhysicsVerbChronicle*Bindings`. Init to 100.0 for shape parity
+    /// with duel_abilities; no kernel in this fixture reads it.
+    #[allow(dead_code)]
+    agent_mana_buf: wgpu::Buffer,
 
     // -- Mask bitmaps (one per verb in source order:
     //    BossStrike=0, BossSelfHeal=1, HeroAttack=2, HeroHeal=3) --
@@ -65,8 +97,24 @@ pub struct BossFightState {
     chronicle_boss_heal_cfg_buf: wgpu::Buffer,
     chronicle_hero_attack_cfg_buf: wgpu::Buffer,
     chronicle_hero_heal_cfg_buf: wgpu::Buffer,
+    /// Task #138 follow-on (boss_fight port, 2026-05-07) — cfg uniform
+    /// for the new ApplyDamageFromChronicle physics rule (re-emits
+    /// EffectDamageApplied records as Damaged so the existing
+    /// ApplyDamage cascade keeps working unchanged).
+    apply_chronicle_cfg_buf: wgpu::Buffer,
     apply_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
+
+    /// Task #138 follow-on (boss_fight port, 2026-05-07) — Packed
+    /// AbilityRegistry uploaded to the GPU. The BossStrike + HeroAttack
+    /// chronicle kernels bind `effect_kinds` / `effect_payload_a` /
+    /// `effect_payload_b` (and the scaling/nested/when_pred columns)
+    /// for the apply_ability dispatcher arm. Built once at construction
+    /// by `binding_check::build_boss_fight_registry` (two programs:
+    /// BossStrike at AbilityId(1), HeroAttack at AbilityId(2)) and
+    /// uploaded via `PackedAbilityRegistryGpu::upload`. The buffers
+    /// live for the rest of the run.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
 
@@ -81,6 +129,17 @@ impl BossFightState {
             agent_count >= 6,
             "boss_fight requires at least 6 agents (1 boss + 5 heroes); got {agent_count}",
         );
+
+        // Task #138 follow-on (boss_fight port, 2026-05-07) — runs ONCE
+        // at startup before any GPU work. Asserts the runtime's
+        // hand-built BossStrike + HeroAttack programs land at
+        // AbilityId(1) / AbilityId(2) so the `apply_ability 1` /
+        // `apply_ability 2` literals in `assets/sim/boss_fight.sim`
+        // (BossStrike + HeroAttack verb bodies) dispatch the correct
+        // programs. Cheap (two-program registry build); panics on any
+        // drift before the expensive GPU init below.
+        binding_check::assert_ability_registry_matches_sim_constants();
+
         let gpu = GpuContext::new_blocking().expect("init wgpu adapter + device");
 
         // Per-slot HP init: slot 0 = boss (5000), slots 1..=5 = heroes (200).
@@ -112,6 +171,62 @@ impl BossFightState {
                     | wgpu::BufferUsages::COPY_DST
                     | wgpu::BufferUsages::COPY_SRC,
             });
+
+        // ---- AbilityRegistry GPU upload (Task #138 follow-on) ----
+        // Build the two-program registry (BossStrike at AbilityId(1),
+        // HeroAttack at AbilityId(2)), pack it via
+        // PackedAbilityRegistry::pack, and upload one buffer per SoA
+        // column. The verb-chronicle kernels bind these for the
+        // apply_ability dispatcher arm. Building the registry repeats
+        // the binding-check's program-build pass (cheap — two hand-
+        // built programs) but keeps construction colocated with the
+        // upload site, mirroring duel_25v25's pattern.
+        let registry = binding_check::build_boss_fight_registry();
+        let packed = PackedAbilityRegistry::pack(&registry);
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &packed, &gpu, "boss_fight_runtime",
+        );
+
+        // ---- Per-stat agent SoA columns (Task #138 follow-on) ----
+        // The apply_ability dispatcher's `scale_bonus = Σ percent *
+        // agent_stat[caster_slot]` switch reads these unconditionally
+        // even though boss_fight's BossStrike + HeroAttack have no
+        // scaling entries — the per-effect scaling SoA is empty, so
+        // scale_bonus collapses to 0.0 inside the dispatcher. We still
+        // need to bind real buffers because the kernel's BGL declares
+        // the bindings. Init values mirror duel_25v25 (max_hp=100,
+        // mana=100, others=0). Note: agent_max_hp is NOT load-bearing
+        // for boss_fight today (the .sim's hp init for slot 0 = 5000
+        // and slots 1..=5 = 200 lives in agent_hp_buf above; this
+        // column is only a stat-scaling lookup).
+        let n = agent_count as usize;
+        let zeros_f32: Vec<f32> = vec![0.0_f32; n];
+        let max_hp_init: Vec<f32> = vec![100.0_f32; n];
+        let mana_init: Vec<f32> = vec![100.0_f32; n];
+        let agent_max_hp_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("boss_fight_runtime::agent_max_hp"),
+            contents: bytemuck::cast_slice(&max_hp_init),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+        let mk_zero_stat = |label: &str| {
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: bytemuck::cast_slice(&zeros_f32),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            })
+        };
+        let agent_attack_damage_buf =
+            mk_zero_stat("boss_fight_runtime::agent_attack_damage");
+        let agent_armor_buf = mk_zero_stat("boss_fight_runtime::agent_armor");
+        let agent_magic_resist_buf =
+            mk_zero_stat("boss_fight_runtime::agent_magic_resist");
+        let agent_move_speed_buf =
+            mk_zero_stat("boss_fight_runtime::agent_move_speed");
+        let agent_mana_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("boss_fight_runtime::agent_mana"),
+            contents: bytemuck::cast_slice(&mana_init),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
 
         // Four mask bitmaps — one per verb. Cleared each tick.
         let mask_bitmap_words = (agent_count + 31) / 32;
@@ -238,6 +353,19 @@ impl BossFightState {
             contents: bytemuck::bytes_of(&apply_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        // Task #138 follow-on (boss_fight port, 2026-05-07) — cfg
+        // uniform for the new chronicle re-emit physics rule. Reads
+        // EffectDamageApplied records from the event ring, emits
+        // Damaged events the existing ApplyDamage cascade drains.
+        let apply_chronicle_cfg_init =
+            physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleCfg {
+                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            };
+        let apply_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("boss_fight_runtime::apply_chronicle_cfg"),
+            contents: bytemuck::bytes_of(&apply_chronicle_cfg_init),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let seed_cfg_init = seed_indirect_0::SeedIndirect0Cfg {
             agent_cap: agent_count, tick: 0, seed: 0, _pad: 0,
         };
@@ -269,6 +397,12 @@ impl BossFightState {
             agent_hp_buf,
             agent_alive_buf,
             agent_creature_type_buf,
+            agent_attack_damage_buf,
+            agent_max_hp_buf,
+            agent_armor_buf,
+            agent_magic_resist_buf,
+            agent_move_speed_buf,
+            agent_mana_buf,
             mask_0_bitmap_buf,
             mask_1_bitmap_buf,
             mask_2_bitmap_buf,
@@ -288,8 +422,10 @@ impl BossFightState {
             chronicle_boss_heal_cfg_buf,
             chronicle_hero_attack_cfg_buf,
             chronicle_hero_heal_cfg_buf,
+            apply_chronicle_cfg_buf,
             apply_cfg_buf,
             seed_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             tick: 0,
             agent_count,
@@ -460,7 +596,12 @@ impl CompiledSim for BossFightState {
             self.agent_count,
         );
 
-        // (4) BossStrike chronicle — gates on action_id==0, emits Damaged.
+        // (4) BossStrike chronicle. Task #138 follow-on (boss_fight
+        // port, 2026-05-07) — verb body is now `apply_ability 1 by self
+        // target target`, so this kernel walks the AbilityRegistry's
+        // effect SoA columns to expand the dispatch into chronicle
+        // EffectDamageApplied writes (kind=26). Re-emitted as Damaged
+        // by ApplyDamageFromChronicle below.
         let bs_cfg = physics_verb_chronicle_BossStrike::PhysicsVerbChronicleBossStrikeCfg {
             event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
         };
@@ -470,6 +611,25 @@ impl CompiledSim for BossFightState {
         let bs_bindings = physics_verb_chronicle_BossStrike::PhysicsVerbChronicleBossStrikeBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
+            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
+            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_max_hp: &self.agent_max_hp_buf,
+            agent_hp: &self.agent_hp_buf,
+            agent_armor: &self.agent_armor_buf,
+            agent_magic_resist: &self.agent_magic_resist_buf,
+            agent_move_speed: &self.agent_move_speed_buf,
+            agent_mana: &self.agent_mana_buf,
             cfg: &self.chronicle_boss_strike_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_bossstrike(
@@ -494,7 +654,12 @@ impl CompiledSim for BossFightState {
             self.agent_count,
         );
 
-        // (6) HeroAttack chronicle — gates on action_id==2, emits Damaged.
+        // (6) HeroAttack chronicle. Task #138 follow-on (boss_fight
+        // port, 2026-05-07) — verb body is now `apply_ability 2 by self
+        // target target`, so this kernel walks the AbilityRegistry's
+        // effect SoA columns to expand the dispatch into chronicle
+        // EffectDamageApplied writes (kind=26). Re-emitted as Damaged
+        // by ApplyDamageFromChronicle below.
         let ha_cfg = physics_verb_chronicle_HeroAttack::PhysicsVerbChronicleHeroAttackCfg {
             event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
         };
@@ -504,6 +669,25 @@ impl CompiledSim for BossFightState {
         let ha_bindings = physics_verb_chronicle_HeroAttack::PhysicsVerbChronicleHeroAttackBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
+            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
+            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_max_hp: &self.agent_max_hp_buf,
+            agent_hp: &self.agent_hp_buf,
+            agent_armor: &self.agent_armor_buf,
+            agent_magic_resist: &self.agent_magic_resist_buf,
+            agent_move_speed: &self.agent_move_speed_buf,
+            agent_mana: &self.agent_mana_buf,
             cfg: &self.chronicle_hero_attack_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_heroattack(
@@ -528,8 +712,46 @@ impl CompiledSim for BossFightState {
             self.agent_count,
         );
 
-        // (8) ApplyDamage_and_ApplyHeal — fused PerEvent kernel.
+        // (7b) ApplyDamageFromChronicle — chronicle re-emit. Task #138
+        // follow-on (boss_fight port, 2026-05-07): consumes
+        // EffectDamageApplied records (kind=26) the apply_ability
+        // dispatcher writes (BossStrike + HeroAttack) and re-emits them
+        // as Damaged events. The fused ApplyDamage_and_ApplyHeal kernel
+        // below drains Damaged unchanged. event_count is the upper
+        // bound on EffectDamageApplied records produced per tick (=
+        // BossStrike + HeroAttack emits, capped at agent_count).
         let event_count_estimate = self.agent_count * 4;
+        let apply_chronicle_cfg =
+            physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleCfg {
+                event_count: event_count_estimate,
+                tick: self.tick as u32,
+                seed: 0,
+                _pad0: 0,
+            };
+        self.gpu.queue.write_buffer(
+            &self.apply_chronicle_cfg_buf,
+            0,
+            bytemuck::bytes_of(&apply_chronicle_cfg),
+        );
+        let apply_chronicle_bindings =
+            physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleBindings {
+                event_ring: self.event_ring.ring(),
+                event_tail: self.event_ring.tail(),
+                cfg: &self.apply_chronicle_cfg_buf,
+            };
+        dispatch::dispatch_physics_applydamagefromchronicle(
+            &mut self.cache,
+            &apply_chronicle_bindings,
+            &self.gpu.device,
+            &mut encoder,
+            event_count_estimate,
+        );
+
+        // (8) ApplyDamage_and_ApplyHeal — fused PerEvent kernel. Reads
+        // Damaged (re-emitted by ApplyDamageFromChronicle from the
+        // BossStrike + HeroAttack EffectDamageApplied records) and
+        // Healed (still emitted directly by BossSelfHeal + HeroHeal),
+        // writes agent_hp + agent_alive, may emit Defeated.
         let apply_cfg = physics_ApplyDamage_and_ApplyHeal::PhysicsApplyDamageAndApplyHealCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
             seed: 0, _pad0: 0,

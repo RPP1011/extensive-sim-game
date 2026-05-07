@@ -72,6 +72,30 @@ event Healed {
   amount: f32,
 }
 
+// Engine-side chronicle event written by the apply_ability dispatcher
+// at hardcoded EventKindId 26 (see
+// `dsl_ast::engine_events::engine_event_kind_id_for_name`).
+//
+// Task #138 follow-on (boss_fight port, 2026-05-07) — BossStrike and
+// HeroAttack verb bodies are now `apply_ability N by self target target`
+// (BossStrike=1, HeroAttack=2), which writes EffectDamageApplied
+// records into the event ring. The new ApplyDamageFromChronicle
+// physics rule (declared below near ApplyDamage) translates these
+// records back into the existing `Damaged` event so the rest of the
+// cascade (ApplyDamage's per-agent hp decrement + Defeated emit)
+// works without modification — same chronicle re-emit pattern the
+// duel_abilities + duel_25v25 fixtures use for their damage verbs.
+//
+// HEALING is intentionally left on the original `emit Healed` path
+// — the BossSelfHeal / HeroHeal verbs are out of scope for this
+// asymmetric damage port.
+@replayable @gpu_amenable
+event EffectDamageApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
 @replayable @gpu_amenable
 event Defeated {
   combatant: AgentId,
@@ -125,12 +149,27 @@ config combat {
 // Score returns 1.0 when target is an alive Hero, -1000.0 otherwise.
 // argmax across 6 candidates picks the first alive hero (deterministic
 // — slot order). Hero damage is uniformly 50 per strike.
+// Task #138 follow-on (boss_fight port, 2026-05-07) — BossStrike's
+// verb body now uses `apply_ability 1 by self target target`.
+// AbilityId(1) is BossStrike's slot in the boss_fight AbilityRegistry
+// built by `crates/boss_fight_runtime/src/binding_check.rs::
+// build_boss_fight_registry` (BossStrike registered first, HeroAttack
+// second). The dispatcher writes EffectDamageApplied chronicle records
+// (kind=26) carrying `config.combat.boss_strike_damage = 50.0` (the
+// registry-resident program's `EffectOp::Damage { amount: 50.0 }`);
+// `ApplyDamageFromChronicle` re-emits as Damaged so the existing
+// ApplyDamage cascade keeps draining HP unchanged.
+//
+// CREATURE-TYPE GATE NOTE: the verb's `when` clause keeps
+// `self.creature_type == Boss` because today's apply_ability `when`
+// predicates can't reference creature_type — the body-side mask
+// gate stays load-bearing for routing per-tick to Boss-only verbs.
 verb BossStrike(self, target: Agent) =
   action BossStrikeAction
   when (self.alive
         && self.creature_type == Boss
         && (world.tick % 10 == 0))
-  emit Damaged { source: self, target: target, amount: config.combat.boss_strike_damage }
+  apply_ability 1 by self target target
   score (if (target.alive && target.creature_type == Hero) { 1.0 } else { -1000.0 })
 
 // BossSelfHeal — Boss heals self when low. Target binder is unused
@@ -159,12 +198,24 @@ verb BossSelfHeal(self, target: Agent) =
 
 // HeroAttack — every 3 ticks each Hero attacks the Boss. The score
 // expression picks the boss (slot whose creature_type == Boss).
+// Task #138 follow-on (boss_fight port, 2026-05-07) — HeroAttack's
+// verb body now uses `apply_ability 2 by self target target`.
+// AbilityId(2) is HeroAttack's slot in the boss_fight AbilityRegistry
+// (BossStrike=1, HeroAttack=2 in registration order). The dispatcher
+// writes EffectDamageApplied chronicle records (kind=26) carrying
+// `config.combat.hero_attack_damage = 35.0` (the registry-resident
+// program's `EffectOp::Damage { amount: 35.0 }`);
+// `ApplyDamageFromChronicle` re-emits as Damaged so the existing
+// ApplyDamage cascade keeps draining HP unchanged. Tests asymmetric
+// damage routing alongside BossStrike — both verbs feed the same
+// EffectDamageApplied chronicle channel, but the registry program
+// for each carries its own per-side amount.
 verb HeroAttack(self, target: Agent) =
   action HeroAttackAction
   when (self.alive
         && self.creature_type == Hero
         && (world.tick % 3 == 0))
-  emit Damaged { source: self, target: target, amount: config.combat.hero_attack_damage }
+  apply_ability 2 by self target target
   score (if (target.alive && target.creature_type == Boss) { 1.0 } else { -1000.0 })
 
 // HeroHeal — every 20 ticks each Hero self-heals (60 HP). Picking
@@ -184,6 +235,24 @@ verb HeroHeal(self, target: Agent) =
 // ---------------------------------------------------------------------------
 // Chronicle physics (mirrors duel_1v1 shape)
 // ---------------------------------------------------------------------------
+
+// Task #138 follow-on (boss_fight port, 2026-05-07) — BossStrike +
+// HeroAttack verb bodies now use `apply_ability N by self target
+// target`. The dispatcher writes EffectDamageApplied chronicle records
+// (engine-aliased to kind=26) instead of the source-declared Damaged
+// event. This rule consumes those records and re-emits Damaged so the
+// rest of the cascade (ApplyDamage's per-agent hp decrement + Defeated
+// emit) keeps working unchanged. Mirrors the chronicle re-emit shape
+// duel_abilities + duel_25v25 use for their damage-dealing verbs.
+//
+// P6 caveat: this rule is PerEvent + emit-only (no AgentField writes)
+// — does NOT trip P6, unlike ApplyDamage below.
+@phase(post)
+physics ApplyDamageFromChronicle {
+  on EffectDamageApplied { actor: a, target: t, amount: amt } {
+    emit Damaged { source: a, target: t, amount: amt }
+  }
+}
 
 // Apply damage. On Damaged event, reduce target HP. If <= 0, set
 // alive = false and emit Defeated.
