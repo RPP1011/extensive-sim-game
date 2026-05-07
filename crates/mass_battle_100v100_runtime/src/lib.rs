@@ -122,12 +122,34 @@ pub struct MassBattle100v100State {
     agent_mana_buf: wgpu::Buffer,
 
     // -- Mask bitmaps (one per verb in source order:
-    //    Strike=0, Snipe=1, Heal=2) --
+    //    Strike=0, Snipe=1, StunBolt=2, Heal=3) --
+    //
+    // StunBolt control-status proof (200-agent scale, 2026-05-07): the
+    // verb is declared between Snipe and Heal in the .sim, so source-
+    // order action_id assignment lands StunBolt at index 2 and shifts
+    // Heal to index 3. The fused mask kernel writes all four bitmaps;
+    // the scoring argmax reads all four rows.
     mask_0_bitmap_buf: wgpu::Buffer,
     mask_1_bitmap_buf: wgpu::Buffer,
     mask_2_bitmap_buf: wgpu::Buffer,
+    mask_3_bitmap_buf: wgpu::Buffer,
     mask_bitmap_zero_buf: wgpu::Buffer,
     mask_bitmap_words: u32,
+
+    /// StunBolt control-status proof (200-agent scale, 2026-05-07) —
+    /// per-agent `stun_expires_at_tick` SoA column. Written by the
+    /// fused
+    /// `physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`
+    /// kernel from kind=29 EffectStunApplied chronicle records produced
+    /// by StunBolt's verb chronicle dispatcher (kind=29 records carry
+    /// `expires_at_tick = world.tick + 20` precomputed by the
+    /// dispatcher). Init to 0 (= "never stunned" — agents whose
+    /// `stun_expires_at_tick > world.tick` are stunned). The verb
+    /// `where`-clauses in this fixture don't read it today, but the new
+    /// `stun_bolt_stuns_targets_at_200_agent_scale` test asserts the
+    /// SoA column lands the expected expires_at_tick after StunBolt
+    /// cast cycles.
+    agent_stun_expires_at_tick_buf: wgpu::Buffer,
 
     // -- Scoring output --
     scoring_output_buf: wgpu::Buffer,
@@ -145,13 +167,26 @@ pub struct MassBattle100v100State {
     scoring_cfg_buf: wgpu::Buffer,
     chronicle_strike_cfg_buf: wgpu::Buffer,
     chronicle_snipe_cfg_buf: wgpu::Buffer,
+    /// StunBolt control-status proof (200-agent scale, 2026-05-07) —
+    /// fourth per-agent verb chronicle cfg. Same shape as the Strike +
+    /// Snipe cfgs; the StunBolt chronicle kernel filters
+    /// `action_id == 2u` (source-order index — StunBolt is the third
+    /// verb declared after Strike and Snipe) and dispatches the
+    /// AbilityId(3) program through the apply_ability arm, writing
+    /// kind=29 EffectStunApplied records.
+    chronicle_stun_bolt_cfg_buf: wgpu::Buffer,
     chronicle_heal_cfg_buf: wgpu::Buffer,
-    /// Task #138 follow-on (mass_battle_100v100 port, 2026-05-07) —
-    /// cfg uniform for the new ApplyDamageFromChronicle physics rule.
-    /// Reads EffectDamageApplied records (kind=26) from the event
-    /// ring (written by Strike + Snipe chronicle kernels via
-    /// apply_ability), emits Damaged events the existing
-    /// ApplyDamage_and_ApplyHeal cascade drains.
+    /// Task #138 follow-on (mass_battle_100v100 port, 2026-05-07) +
+    /// StunBolt control-status proof (200-agent scale, 2026-05-07) —
+    /// cfg uniform for the FUSED chronicle-consumer kernel. The lower
+    /// pass folded ApplyDamageFromChronicle (drains kind=26 → emit
+    /// Damaged) and ApplyStunFromChronicle (drains kind=29 → write
+    /// `agents.set_stun_expires_at_tick`) into ONE kernel
+    /// (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`)
+    /// because both consume from the same event ring at @phase(post)
+    /// with non-overlapping kind tags. Single cfg + single dispatch
+    /// per tick. Mirrors the same fusion duel_25v25's lib.rs surfaced
+    /// in commit 7a0a6ace.
     apply_chronicle_cfg_buf: wgpu::Buffer,
     apply_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
@@ -300,7 +335,28 @@ impl MassBattle100v100State {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
-        // Three mask bitmaps — one per verb. Cleared each tick.
+        // StunBolt control-status proof (200-agent scale, 2026-05-07) —
+        // per-agent `stun_expires_at_tick` SoA column. Init to 0 = "never
+        // stunned" (the convention established by duel_abilities). The
+        // fused ApplyDamageFromChronicle_and_ApplyStunFromChronicle
+        // kernel writes this slot from kind=29 EffectStunApplied
+        // chronicle records (one record per StunBolt cast). COPY_SRC
+        // is on so the test can read it back via `read_u32`.
+        let stun_expires_init: Vec<u32> = vec![0_u32; n_usize];
+        let agent_stun_expires_at_tick_buf =
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("mass_battle_100v100::agent_stun_expires_at_tick"),
+                contents: bytemuck::cast_slice(&stun_expires_init),
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
+            });
+
+        // Four mask bitmaps — one per verb. Cleared each tick.
+        // StunBolt control-status proof (200-agent scale, 2026-05-07):
+        // mask_3 is the new bitmap added for StunBolt's verb. The fused
+        // mask kernel writes all four bitmaps; the scoring argmax reads
+        // all four rows.
         let mask_bitmap_words = (agent_count + 31) / 32;
         let mask_bitmap_bytes = (mask_bitmap_words as u64) * 4;
         let mk_mask = |label: &str| -> wgpu::Buffer {
@@ -314,6 +370,7 @@ impl MassBattle100v100State {
         let mask_0_bitmap_buf = mk_mask("mass_battle_100v100::mask_0_bitmap");
         let mask_1_bitmap_buf = mk_mask("mass_battle_100v100::mask_1_bitmap");
         let mask_2_bitmap_buf = mk_mask("mass_battle_100v100::mask_2_bitmap");
+        let mask_3_bitmap_buf = mk_mask("mass_battle_100v100::mask_3_bitmap");
         let zero_words: Vec<u32> = vec![0u32; mask_bitmap_words.max(4) as usize];
         let mask_bitmap_zero_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("mass_battle_100v100::mask_bitmap_zero"),
@@ -388,6 +445,19 @@ impl MassBattle100v100State {
             contents: bytemuck::bytes_of(&chronicle_snipe_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        // StunBolt control-status proof (200-agent scale, 2026-05-07) —
+        // cfg uniform for the new verb chronicle kernel. Same shape as
+        // Strike + Snipe; the kernel filters action_id == 2u and
+        // dispatches AbilityId(3) through the apply_ability arm.
+        let chronicle_stun_bolt_cfg_init =
+            physics_verb_chronicle_StunBolt::PhysicsVerbChronicleStunBoltCfg {
+                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            };
+        let chronicle_stun_bolt_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("mass_battle_100v100::chronicle_stun_bolt_cfg"),
+            contents: bytemuck::bytes_of(&chronicle_stun_bolt_cfg_init),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let chronicle_heal_cfg_init =
             physics_verb_chronicle_Heal::PhysicsVerbChronicleHealCfg {
                 event_count: 0, tick: 0, seed: 0, _pad0: 0,
@@ -406,13 +476,18 @@ impl MassBattle100v100State {
             contents: bytemuck::bytes_of(&apply_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        // Task #138 follow-on (mass_battle_100v100 port, 2026-05-07) —
-        // cfg uniform for the new chronicle re-emit physics rule.
-        // Reads EffectDamageApplied records from the event ring, emits
-        // Damaged events the existing ApplyDamage_and_ApplyHeal
-        // cascade drains.
+        // Task #138 follow-on (mass_battle_100v100 port, 2026-05-07) +
+        // StunBolt control-status proof (200-agent scale, 2026-05-07) —
+        // cfg uniform for the FUSED chronicle-consumer kernel. The lower
+        // pass folded ApplyDamageFromChronicle (kind=26 → emit Damaged)
+        // and ApplyStunFromChronicle (kind=29 → write
+        // `agents.set_stun_expires_at_tick`) into one kernel
+        // (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`)
+        // because both consume from the same event ring at @phase(post)
+        // with non-overlapping kind tags. Single cfg + single dispatch
+        // per tick.
         let apply_chronicle_cfg_init =
-            physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleCfg {
+            physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleCfg {
                 event_count: 0, tick: 0, seed: 0, _pad0: 0,
             };
         let apply_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -460,8 +535,10 @@ impl MassBattle100v100State {
             mask_0_bitmap_buf,
             mask_1_bitmap_buf,
             mask_2_bitmap_buf,
+            mask_3_bitmap_buf,
             mask_bitmap_zero_buf,
             mask_bitmap_words,
+            agent_stun_expires_at_tick_buf,
             scoring_output_buf,
             scoring_output_zero_buf,
             event_ring,
@@ -473,6 +550,7 @@ impl MassBattle100v100State {
             scoring_cfg_buf,
             chronicle_strike_cfg_buf,
             chronicle_snipe_cfg_buf,
+            chronicle_stun_bolt_cfg_buf,
             chronicle_heal_cfg_buf,
             apply_chronicle_cfg_buf,
             apply_cfg_buf,
@@ -503,6 +581,17 @@ impl MassBattle100v100State {
 
     pub fn read_level(&self) -> Vec<u32> {
         self.read_u32(&self.agent_level_buf, "level")
+    }
+
+    /// Per-agent `stun_expires_at_tick` readback (u32 absolute tick at
+    /// which the stun expires; 0 = "never stunned"). StunBolt control-
+    /// status proof (200-agent scale, 2026-05-07) — written by the
+    /// fused
+    /// `physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`
+    /// kernel from kind=29 EffectStunApplied chronicle records emitted
+    /// by StunBolt's verb chronicle dispatcher.
+    pub fn read_stun_expires_at_tick(&self) -> Vec<u32> {
+        self.read_u32(&self.agent_stun_expires_at_tick_buf, "stun_expires_at_tick")
     }
 
     fn read_f32(&self, buf: &wgpu::Buffer, label: &str) -> Vec<f32> {
@@ -578,7 +667,16 @@ impl CompiledSim for MassBattle100v100State {
             &self.gpu, &mut encoder, max_slots_per_tick,
         );
         let mask_bytes = (self.mask_bitmap_words as u64) * 4;
-        for buf in [&self.mask_0_bitmap_buf, &self.mask_1_bitmap_buf, &self.mask_2_bitmap_buf] {
+        // StunBolt control-status proof (200-agent scale, 2026-05-07):
+        // mask_3 is the new bitmap added for StunBolt's verb. Cleared
+        // every tick alongside the other three (one bitmap per verb in
+        // source order: Strike=0, Snipe=1, StunBolt=2, Heal=3).
+        for buf in [
+            &self.mask_0_bitmap_buf,
+            &self.mask_1_bitmap_buf,
+            &self.mask_2_bitmap_buf,
+            &self.mask_3_bitmap_buf,
+        ] {
             encoder.copy_buffer_to_buffer(
                 &self.mask_bitmap_zero_buf, 0, buf, 0, mask_bytes.max(4),
             );
@@ -609,6 +707,9 @@ impl CompiledSim for MassBattle100v100State {
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             mask_1_bitmap: &self.mask_1_bitmap_buf,
             mask_2_bitmap: &self.mask_2_bitmap_buf,
+            // StunBolt control-status proof (200-agent scale,
+            // 2026-05-07): fourth verb mask (StunBolt at source index 2).
+            mask_3_bitmap: &self.mask_3_bitmap_buf,
             cfg: &self.mask_cfg_buf,
         };
         // Dispatch agent_cap × agent_cap threads. The `agent_cap`
@@ -637,6 +738,9 @@ impl CompiledSim for MassBattle100v100State {
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             mask_1_bitmap: &self.mask_1_bitmap_buf,
             mask_2_bitmap: &self.mask_2_bitmap_buf,
+            // StunBolt control-status proof (200-agent scale,
+            // 2026-05-07): scoring's argmax now reads four mask rows.
+            mask_3_bitmap: &self.mask_3_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
             cfg: &self.scoring_cfg_buf,
             // Wave 1.5#7 follow-on (predicate-aware scoring,
@@ -744,7 +848,62 @@ impl CompiledSim for MassBattle100v100State {
             self.agent_count,
         );
 
-        // (6) Heal chronicle — gates action_id==2u (Healer heals).
+        // (5b) StunBolt chronicle — StunBolt control-status proof
+        // (200-agent scale, 2026-05-07). Gates action_id==2u (StunBolt
+        // is the third verb in source order, so its action_id is 2 —
+        // shifting Heal's action_id from 2 to 3). Same chronicle re-emit
+        // pattern as Strike + Snipe except the AbilityProgram at slot 3
+        // declares EffectOp::Stun{duration_ticks=20} instead of Damage,
+        // so the apply_ability dispatcher writes kind=29
+        // EffectStunApplied records (with `expires_at_tick = world.tick
+        // + 20` precomputed) instead of kind=26 EffectDamageApplied.
+        // The fused
+        // ApplyDamageFromChronicle_and_ApplyStunFromChronicle kernel
+        // below drains both kind tags into the right SoA target
+        // (Damaged → ApplyDamage HP cascade for kind=26, direct
+        // `agents.set_stun_expires_at_tick` for kind=29).
+        let stun_bolt_cfg = physics_verb_chronicle_StunBolt::PhysicsVerbChronicleStunBoltCfg {
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.chronicle_stun_bolt_cfg_buf, 0, bytemuck::bytes_of(&stun_bolt_cfg),
+        );
+        let stun_bolt_bindings = physics_verb_chronicle_StunBolt::PhysicsVerbChronicleStunBoltBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            agent_hp: &self.agent_hp_buf,
+            agent_max_hp: &self.agent_max_hp_buf,
+            agent_move_speed: &self.agent_move_speed_buf,
+            agent_armor: &self.agent_armor_buf,
+            agent_magic_resist: &self.agent_magic_resist_buf,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_mana: &self.agent_mana_buf,
+            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
+            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
+            ability_registry_chances:           &self.registry_gpu.chances,
+            cfg: &self.chronicle_stun_bolt_cfg_buf,
+        };
+        dispatch::dispatch_physics_verb_chronicle_stunbolt(
+            &mut self.cache, &stun_bolt_bindings, &self.gpu.device, &mut encoder,
+            self.agent_count,
+        );
+
+        // (6) Heal chronicle — gates action_id==3u. StunBolt control-
+        // status proof (200-agent scale, 2026-05-07): Heal's action_id
+        // shifted from 2 to 3 because StunBolt was inserted at source
+        // position 2. The kernel name + binding shape are unchanged —
+        // the action_id literal in the generated kernel is the only
+        // detail that moved.
         let heal_cfg = physics_verb_chronicle_Heal::PhysicsVerbChronicleHealCfg {
             event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
         };
@@ -761,18 +920,24 @@ impl CompiledSim for MassBattle100v100State {
             self.agent_count,
         );
 
-        // (6b) ApplyDamageFromChronicle — chronicle re-emit. Task #138
-        // follow-on (mass_battle_100v100 port, 2026-05-07): consumes
-        // EffectDamageApplied records (kind=26) the apply_ability
-        // dispatcher writes from Strike + Snipe and re-emits them as
-        // Damaged events. The existing ApplyDamage_and_ApplyHeal
-        // kernel below drains Damaged unchanged. event_count is the
-        // upper bound on EffectDamageApplied records produced per
-        // tick (≤ 2 × agent_count = at most one Strike + one Snipe
-        // per actor per tick; bound by agent_count*8 below for the
-        // shared headroom estimate).
+        // (6b) Fused ApplyDamageFromChronicle + ApplyStunFromChronicle
+        // — chronicle consumers fused into ONE kernel by the lower pass
+        // (both run @phase(post) over the same event ring with
+        // non-overlapping kind tags). StunBolt control-status proof
+        // (200-agent scale, 2026-05-07). Drains:
+        //   - kind=26 EffectDamageApplied → emit `Damaged` (re-emit;
+        //     the standalone ApplyDamage_and_ApplyHeal kernel below
+        //     decrements HP)
+        //   - kind=29 EffectStunApplied → write
+        //     `agents.set_stun_expires_at_tick(t, expires_at_tick)`
+        //     directly into the per-agent SoA slot.
+        //
+        // event_count is the upper bound on chronicle records produced
+        // per tick across Strike + Snipe + StunBolt (each can emit one
+        // record per actor per tick). agent_count * 8 reuses the same
+        // slot-count headroom estimate the rest of the cascade uses.
         let event_count_estimate = self.agent_count * 8;
-        let apply_chronicle_cfg = physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleCfg {
+        let apply_chronicle_cfg = physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleCfg {
             event_count: event_count_estimate,
             tick: self.tick as u32,
             seed: 0, _pad0: 0,
@@ -783,12 +948,13 @@ impl CompiledSim for MassBattle100v100State {
             bytemuck::bytes_of(&apply_chronicle_cfg),
         );
         let apply_chronicle_bindings =
-            physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleBindings {
+            physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleBindings {
                 event_ring: self.event_ring.ring(),
                 event_tail: self.event_ring.tail(),
+                agent_stun_expires_at_tick: &self.agent_stun_expires_at_tick_buf,
                 cfg: &self.apply_chronicle_cfg_buf,
             };
-        dispatch::dispatch_physics_applydamagefromchronicle(
+        dispatch::dispatch_physics_applydamagefromchronicle_and_applystunfromchronicle(
             &mut self.cache,
             &apply_chronicle_bindings,
             &self.gpu.device,
@@ -1105,5 +1271,107 @@ mod viz_tests {
              and alive_total stable ({})",
             alive_total_now,
         );
+    }
+
+    /// StunBolt control-status proof (200-agent scale, 2026-05-07) —
+    /// proves the apply_ability dispatcher emits kind=29
+    /// EffectStunApplied chronicle records at production scale (200
+    /// agents through pair-field scoring) AND the fused
+    /// `physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`
+    /// kernel ferries the per-record `expires_at_tick` into the
+    /// `agent_stun_expires_at_tick` SoA via
+    /// `agents.set_stun_expires_at_tick(t, e)`.
+    ///
+    /// CADENCE AT THE SEAM: StunBolt fires at `world.tick % 7 == 0`,
+    /// so steps 0..=13 (= ticks 0..=13) drive cast cycles at tick 0
+    /// and tick 7 — two cast cycles before tick 14 dispatches. Each
+    /// DPS Red actor (80 agents at level=3) on its eligible cycle
+    /// picks a Blue DPS target via the scoring argmax (StunBolt's
+    /// `2000 - target.hp` outscores Snipe's `1000 - target.hp` when
+    /// both are eligible at tick 21 — but at ticks 0 and 7 only
+    /// StunBolt is on for those actors at the 7-cadence anyway, so
+    /// it lands as their argmax pick uncontested for cadence reasons).
+    /// The 80 Blue DPS actors mirror against Red DPS targets the same
+    /// way.
+    ///
+    /// `expires_at_tick` for a tick-0 cast = `world.tick + 20 = 20`;
+    /// for a tick-7 cast = `7 + 20 = 27`. After 14 steps the second
+    /// cast cycle has just finished, so any agent whose
+    /// `stun_expires_at_tick > 0` was hit by either cycle and the
+    /// value lands in {20, 27} (race-tolerant range: [20, 28]). The
+    /// test pins that range.
+    ///
+    /// HOW THE TEST PROVES STUN-BOLT FIRED:
+    ///   1. After 14 steps at least one agent has a non-zero
+    ///      stun_expires_at_tick (proves the chronicle path emitted
+    ///      kind=29 records AND the fused consumer wrote the SoA).
+    ///   2. Every stunned agent's expiry tick is in [20, 28] (matches
+    ///      `tick + 20` for tick∈{0, 7}).
+    #[test]
+    fn stun_bolt_stuns_targets_at_200_agent_scale() {
+        let mut state = MassBattle100v100State::new(0xCAFE_F00D);
+
+        // Pre-tick baseline — every agent's stun_expires_at_tick is 0.
+        let initial_stun = state.read_stun_expires_at_tick();
+        assert_eq!(
+            initial_stun.len(),
+            TOTAL_AGENTS as usize,
+            "stun_expires_at_tick readback must cover all 200 agents",
+        );
+        for (i, &e) in initial_stun.iter().enumerate() {
+            assert_eq!(
+                e, 0,
+                "initial stun_expires_at_tick[{i}] must be 0 (= never \
+                 stunned); got {e}",
+            );
+        }
+
+        // Run 14 ticks. StunBolt fires at tick 0 and tick 7 (two
+        // cast cycles); the next firing tick is 14 (we run steps 0..=13
+        // inclusive, ending BEFORE tick 14 dispatches). Strike (% 2)
+        // fires at ticks 0, 2, 4, 6, 8, 10, 12 — independent. Snipe
+        // (% 3) fires at ticks 0, 3, 6, 9, 12 — independent. Heal
+        // (% 3) at the same ticks but the role gate filters to Healers.
+        for _ in 0..14 {
+            state.step();
+        }
+
+        let stun = state.read_stun_expires_at_tick();
+
+        // Pin 1: at least 1 agent has a non-zero stun expiry — proves
+        // StunBolt's apply_ability dispatch emitted kind=29
+        // EffectStunApplied records AND the fused chronicle consumer
+        // wrote the SoA. With 80 DPS per team firing on a 7-cadence
+        // and pair-field argmax piling many casters onto the
+        // lowest-HP target, the count is typically high (most live
+        // targets get stunned), but the load-bearing pin is "≥ 1"
+        // so the test is robust against scheduling variation.
+        let stunned_count: usize = stun.iter().filter(|&&e| e > 0).count();
+        assert!(
+            stunned_count >= 1,
+            "after 14 ticks at least 1 agent must have a non-zero \
+             stun_expires_at_tick (control-status chronicle proof); \
+             saw {} stunned out of {}. Per-slot stun: {:?}",
+            stunned_count,
+            TOTAL_AGENTS,
+            stun,
+        );
+
+        // Pin 2: every stunned agent's expiry tick is in [20, 28] —
+        // the dispatcher pre-computes `expires_at_tick = world.tick +
+        // duration_ticks(20)` at chronicle-write time. Tick 0 cast →
+        // expires at 20; tick 7 cast → expires at 27. Race-tolerant
+        // bound is [20, 28] (allows for one extra tick of advance from
+        // the apply pass running after the chronicle write).
+        for (i, &e) in stun.iter().enumerate() {
+            if e > 0 {
+                assert!(
+                    (20..=28).contains(&e),
+                    "agent {i}: stun_expires_at_tick={e} outside \
+                     expected range [20, 28] (tick-0 cast → expires at \
+                     20, tick-7 cast → expires at 27)",
+                );
+            }
+        }
     }
 }

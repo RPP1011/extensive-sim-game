@@ -86,6 +86,28 @@ event EffectDamageApplied {
   amount: f32,
 }
 
+// StunBolt control-status proof (200-agent scale, 2026-05-07) —
+// engine-side chronicle event written by the apply_ability dispatcher
+// at hardcoded EventKindId 29 (see
+// `dsl_ast::engine_events::engine_event_kind_id_for_name`).
+//
+// The new `verb StunBolt` (added below near Snipe) is now
+// `apply_ability 3 by self target target`, which the dispatcher
+// translates to a kind=29 EffectStunApplied record with
+// `expires_at_tick = world.tick + 20` (the dispatcher pre-computes
+// the absolute tick from EffectOp::Stun{duration_ticks=20}). The new
+// `physics ApplyStunFromChronicle @phase(post)` rule below drains
+// these records straight into the per-agent `stun_expires_at_tick`
+// SoA via `agents.set_stun_expires_at_tick(t, e)`. First non-Damage
+// EffectOp in this fixture — proves control-status dispatch works at
+// the same 200-agent pair-field scale Strike + Snipe operate at.
+@replayable @gpu_amenable
+event EffectStunApplied {
+  actor: AgentId,
+  target: AgentId,
+  expires_at_tick: u32,
+}
+
 @replayable @gpu_amenable
 event Healed {
   source: AgentId,
@@ -201,6 +223,51 @@ verb Snipe(self, target: Agent) =
   // Lowest HP wins argmax: `1000 - target.hp`.
   score (1000.0 - target.hp)
 
+// ---- StunBolt (DPS) ---------------------------------------------
+//
+// StunBolt control-status proof (200-agent scale, 2026-05-07) — the
+// FIRST non-Damage offensive verb in this fixture. Same role gate as
+// Snipe (DPS, level 3/6) but at a slower cadence (`world.tick % 7 == 0`
+// vs Snipe's `% 3 == 0`) so the two verbs interleave: on ticks where
+// both gates pass (every 21 ticks), the scoring kernel's argmax picks
+// StunBolt because its score base (2000.0 - target.hp) sits between
+// Strike's 5000.0 and Snipe's 1000.0 baselines. On non-overlapping
+// ticks Snipe still fires (% 3 == 0 with % 7 != 0). On pure StunBolt
+// ticks (% 7 == 0 with % 3 != 0, e.g. tick 7, 14), only StunBolt is
+// eligible for DPS actors and lands as their argmax pick.
+//
+// Body: `apply_ability 3 by self target target`. The literal `3` is
+// StunBolt's AbilityId in the mass_battle_100v100 AbilityRegistry
+// built by `crates/mass_battle_100v100_runtime/src/binding_check.rs::
+// build_mass_battle_100v100_registry` (Strike=1, Snipe=2, StunBolt=3
+// in registration order). The dispatcher writes EffectStunApplied
+// chronicle records (engine kind=29) carrying `expires_at_tick =
+// world.tick + 20`; the new ApplyStunFromChronicle physics rule below
+// (auto-fused with ApplyDamageFromChronicle by the lower pass) consumes
+// them straight into the per-agent stun_expires_at_tick SoA via
+// `agents.set_stun_expires_at_tick(t, e)`.
+//
+// COOLDOWN NOTE: same as Strike + Snipe — the registry-resident
+// StunBolt program declares `cooldown_ticks: 0`; the per-tick gate
+// stays in the verb-style `world.tick % 7 == 0` clause below since the
+// GPU dispatcher does not consult program.cooldown_ticks at the
+// apply_ability arm today.
+verb StunBolt(self, target: Agent) =
+  action StunBoltAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && (world.tick % 7 == 0)
+        && (self.level == 3 || self.level == 6)
+        && (((self.level == 3) && (target.level >= 4))
+            || ((self.level == 6) && (target.level <= 3))))
+  apply_ability 3 by self target target
+  // Score base 2000.0 sits between Strike (5000) and Snipe (1000) so
+  // when StunBolt's % 7 cadence overlaps with Snipe's % 3 cadence on
+  // shared DPS actors (every 21 ticks), the argmax picks StunBolt and
+  // the EffectStunApplied chronicle fires.
+  score (2000.0 - target.hp)
+
 // ---- Heal (Healer) ----------------------------------------------
 //
 // Healer: pick lowest-HP-percentage ally. Score uses the inverse
@@ -235,6 +302,35 @@ verb Heal(self, target: Agent) =
 physics ApplyDamageFromChronicle {
   on EffectDamageApplied { actor: a, target: t, amount: amt } {
     emit Damaged { source: a, target: t, amount: amt }
+  }
+}
+
+// StunBolt control-status proof (200-agent scale, 2026-05-07) —
+// chronicle consumer for the kind=29 EffectStunApplied records the
+// new StunBolt verb writes. The dispatcher pre-computes
+// `expires_at_tick = world.tick + duration_ticks` at chronicle-write
+// time (see Stun arm in `cg/emit/wgsl_body.rs`), so this rule ferries
+// the absolute tick verbatim into the per-agent
+// `stun_expires_at_tick` SoA slot via
+// `agents.set_stun_expires_at_tick(t, e)`. Mirror of duel_25v25's
+// ApplyStunFromChronicle (commit 7a0a6ace).
+//
+// AUTO-FUSION: this rule and ApplyDamageFromChronicle both run
+// @phase(post) over the same event ring with non-overlapping kind tags
+// (26 vs 29), so the lower pass folds them into ONE kernel
+// (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`) —
+// same fusion duel_25v25 surfaced.
+//
+// P6 caveat: this rule is PerEvent + writes an AgentField — TRIPS P6
+// in the well_formed checker. mass_battle_100v100's build.rs already
+// tolerates lower diagnostics (matches `lower_compilation_to_cg` on
+// `DriverOutcome::Err` and falls through with the partial program), so
+// the rule lowers regardless. Same tolerance pattern duel_abilities +
+// duel_25v25 use for their AgentField writes from chronicle physics.
+@phase(post)
+physics ApplyStunFromChronicle {
+  on EffectStunApplied { actor: _, target: t, expires_at_tick: e } {
+    agents.set_stun_expires_at_tick(t, e);
   }
 }
 
