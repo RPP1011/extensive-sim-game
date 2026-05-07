@@ -157,3 +157,63 @@ fn slow_record_writes_4_payload_words_with_signed_factor() {
     assert_eq!(r[4], 110, "expires_at_tick = tick(100) + duration(10)");
     assert_eq!(r[5], (-64_i32) as u32, "factor_q8 sign-widened i16→i32→u32");
 }
+
+/// P5 — Determinism via Keyed PCG. The CPU pipeline runs through
+/// `per_agent_u32(world_seed, caster, tick, purpose)` for each chance
+/// gate, which is a pure function of inputs. Two runs with identical
+/// `(caster, target, tick, world_seed)` MUST produce byte-identical
+/// chronicle records — including when the chance gate fires (which
+/// route to a chronicle write) and when it doesn't (which silently
+/// skip).
+///
+/// Replay equivalence + GPU parity require this property to hold
+/// across both backends. The GPU dispatcher will eventually consume
+/// the same `chances` SoA and gate via the same RNG seed; this test
+/// pins the CPU side ahead of that runtime work.
+#[test]
+fn cpu_pipeline_is_deterministic_under_chance_gate() {
+    // 50% chance gate on Damage — exercises both halves of the
+    // chance fork. The chance value `0x8000` is the canonical "50%"
+    // (half of u16::MAX) — apply_program compares
+    // `(per_agent_u32 & 0xFFFF) < q16` so half the seed space fires.
+    let mut program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 30.0 }],
+    );
+    program.chances.push(Some(0x8000));
+
+    // Sweep enough (caster, tick) combinations to hit both
+    // gate-fires-and-record-emitted AND gate-suppresses-record paths
+    // — without the sweep, a deterministic-but-always-firing seed
+    // would silently pass the test.
+    let mut any_emit = false;
+    let mut any_skip = false;
+    for caster_seed in [1u32, 2, 3, 5, 7, 11, 13, 17, 19, 23] {
+        for tick in [10u32, 50, 100, 200, 500] {
+            let run1 = run_pipeline(&program, aid(caster_seed), aid(99), tick);
+            let run2 = run_pipeline(&program, aid(caster_seed), aid(99), tick);
+            assert_eq!(
+                run1, run2,
+                "CPU pipeline must be deterministic for caster={caster_seed} \
+                 tick={tick} (P5 — keyed PCG)"
+            );
+            if run1.is_empty() {
+                any_skip = true;
+            } else {
+                any_emit = true;
+            }
+        }
+    }
+    // Sanity: with 50 (caster, tick) combos at 50% gate, both branches
+    // should fire across the sweep — confirms the determinism check
+    // exercised both halves of the fork.
+    assert!(
+        any_emit,
+        "expected at least one chance-fire across 50 sweep combos at 50% gate"
+    );
+    assert!(
+        any_skip,
+        "expected at least one chance-skip across 50 sweep combos at 50% gate"
+    );
+}
