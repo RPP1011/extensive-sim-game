@@ -1,0 +1,61 @@
+[package]
+name = "apply_ability_verb_chronicle_consumer_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for
+# `assets/sim/apply_ability_verb_chronicle_consumer.sim` — STRUCTURAL TEMPLATE
+# for task #138 (Wire one duel_abilities verb to apply_ability).
+#
+# Combines the verb-body apply_ability dispatcher (the
+# `apply_ability_verb_smoke_runtime` shape) with a chronicle consumer
+# (the `apply_ability_chronicle_consumer_runtime` shape) and runs the
+# whole loop on real wgpu hardware. Once this works, swapping
+# duel_abilities Strike onto the same shape is mechanical.
+#
+# The scheduler FUSES the verb-body chronicle dispatcher (op#2:
+# `physics_verb_chronicle_Cast`) with the consumer (op#1:
+# `physics_ApplyChronicleDamage`) into a single kernel named
+# `physics_ApplyChronicleDamage_and_verb_chronicle_Cast` because both are
+# PerEvent-shape rules over event_ring. Per-tick we run TWO dispatches
+# of the same fused kernel:
+#
+#   1. Seed event_ring[0..n_agents] with synthetic ActionSelected
+#      records (kind=2 — .sim-local index for ActionSelected, since the
+#      fixture declares `Tick` (idx 0) and `EffectDamageApplied` (idx 1)
+#      before ActionSelected lands at idx 2). Set event_tail = n_agents.
+#      Dispatch with cfg.event_count = n_agents. The op#2 half fires:
+#      reads action_id=Cast=0 from each, dispatches the apply_ability
+#      effect loop, appends one EffectDamageApplied record (kind=26) per
+#      agent. event_tail is now 2*n_agents.
+#   2. Read event_tail back; dispatch with cfg.event_count = tail =
+#      2*n_agents. Now slots [n_agents..2*n_agents] match op#1's kind==26
+#      filter and decrement agent_hp[target] by the chronicle's amount
+#      field. (Op#2 also fires again on slots [0..n_agents] and appends
+#      MORE damage records — those get garbage-collected on the next
+#      tick's clear.)
+#
+# Because the consumer rule trips P6 (PerEvent + agents.set_hp), the
+# build.rs tolerates the lower diagnostic the same way
+# `apply_ability_chronicle_consumer_runtime/build.rs` and
+# `duel_abilities_runtime/build.rs` do (returns `o.program` from the
+# `DriverOutcome::Err` path, kernels emit anyway).
+#
+# Mirror crates:
+#   - `apply_ability_verb_smoke_runtime` — verb-body dispatcher half
+#     in isolation (event_ring seeding pattern).
+#   - `apply_ability_chronicle_consumer_runtime` — PerAgent-dispatcher +
+#     consumer closed loop (build.rs tolerated-Err pattern, hp readback).
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

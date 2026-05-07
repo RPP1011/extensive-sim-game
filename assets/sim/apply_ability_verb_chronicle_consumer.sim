@@ -1,0 +1,84 @@
+// apply_ability_verb_chronicle_consumer — closed-loop fixture combining
+// the verb-body apply_ability dispatcher (apply_ability_verb_smoke.sim's
+// shape) with a chronicle consumer rule (apply_ability_chronicle_consumer.sim's
+// consumer half).
+//
+// **Structural template for task #138.** Once this works, the actual
+// duel_abilities Strike swap is a mechanical port of the same pattern:
+//
+//   verb-body `apply_ability` → dispatcher writes EffectDamageApplied
+//   → chronicle consumer reads it → agent_hp decreases per tick
+//
+// The two existing apply_ability fixtures
+// (apply_ability_verb_smoke.sim + apply_ability_chronicle_consumer.sim)
+// each prove half the chain in isolation:
+//   - verb_smoke: verb-body dispatch shape (verb expander synthesises a
+//     `verb_chronicle_<Name>` physics handler, kernels emit; runtime
+//     pin only validates the dispatcher kernel writes records).
+//   - chronicle_consumer: PerAgent dispatcher (NOT verb) + PerEvent
+//     consumer + GPU agent_hp decrement closed loop.
+//
+// This fixture combines them: the dispatcher half is verb-driven (`Cast`
+// verb whose body is `apply_ability ... by self target self` — same as
+// verb_smoke), and the consumer half is the same `on EffectDamageApplied`
+// PerEvent rule as chronicle_consumer.
+//
+// **Closed-loop kind tag (engine-aliased; fixed 2026-05-06).** The
+// dispatcher writes records with the engine's hardcoded
+// `EventKindId::EffectDamageApplied = 26`. Engine event names are
+// aliased to their hardcoded discriminants at resolve time — see
+// `dsl_ast::engine_events::engine_event_kind_id_for_name`. The
+// resolver populates `EventIR::engine_kind_id`; the lowering driver's
+// `populate_event_kinds` and `resolve_event_ref` both mirror that
+// assignment, so the consumer's PerEvent kernel emits
+// `if (kind == 26u)` directly. No build.rs sed-rewrite needed.
+//
+// **P6 caveat (warning, not error).** Trips the same well_formed P6
+// check that `duel_abilities.sim::ApplyDamage` and
+// `apply_ability_chronicle_consumer.sim::ApplyChronicleDamage` trip:
+// PerEvent rules with `agents.set_hp` are flagged because P6's strict
+// reading is "events are the mutation channel, PerEvent rules should
+// emit events not write fields directly". `duel_abilities` tolerates
+// the diagnostic at build.rs (returns `o.program` from the
+// `DriverOutcome::Err` path, kernels emit anyway). The runtime crate
+// for this fixture (`apply_ability_verb_chronicle_consumer_runtime`)
+// uses the same pattern, and the compile-pin in
+// `crates/dsl_compiler/tests/apply_ability_smoke.rs` uses
+// `compile_sim_tolerating_diagnostics`.
+//
+// The verb's `score 1.0` is constant — argmax over a single verb
+// trivially wins, so the verb fires every tick `self.alive` is true.
+
+event Tick { }
+
+// Engine-side chronicle event written by the apply_ability dispatcher
+// (kind=26 in cascade::handler::EventKindId). Declared here so the
+// PerEvent rule below can pattern-match it.
+event EffectDamageApplied { actor: AgentId, target: AgentId, amount: f32 }
+
+entity Hero : Agent { }
+
+scoring {
+  Cast = 1.0
+}
+
+// Verb-body apply_ability dispatcher. The verb expander wraps the
+// ApplyAbility into a synthesised `verb_chronicle_Cast` physics handler;
+// the standard physics-lowering pipeline carries it through to the
+// dispatcher kernel. Mirror of apply_ability_verb_smoke.sim's verb.
+verb Cast(self) =
+  action Cast
+  when  self.alive
+  apply_ability agents.level(self) by self target self
+  score 1.0
+
+// PerEvent: chronicle consumer. Reads EffectDamageApplied records
+// the dispatcher wrote into event_ring, decrements target hp by
+// the chronicle's amount field. Trips P6 (PerEvent + agents.set_hp);
+// build.rs-tolerated like duel_abilities.sim::ApplyDamage and
+// apply_ability_chronicle_consumer.sim::ApplyChronicleDamage.
+physics ApplyChronicleDamage {
+  on EffectDamageApplied { actor: c, target: t, amount: a } {
+    agents.set_hp(t, agents.hp(t) - a);
+  }
+}

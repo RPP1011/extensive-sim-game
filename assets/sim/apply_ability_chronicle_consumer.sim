@@ -36,13 +36,20 @@
 // uses the same pattern: lower may produce a P6 diagnostic, but the
 // program is still emit-able.
 //
-// **Dead at runtime today** — no runtime crate references this
-// fixture. Drives the dsl_compiler pipeline (parse → resolve → lower
-// → schedule → emit) to prove the closed loop COMPILES and emits
-// kernels for both halves. A runtime would need to dispatch:
-//   1. physics_DispatchAbility (apply_ability writes records)
-//   2. physics_ApplyChronicleDamage (consumer decrements hp)
-// in that order per tick.
+// **Runtime today.** Lives at
+// `crates/apply_ability_chronicle_consumer_runtime` — wgpu device test
+// that runs the closed loop on real GPU (PerAgent dispatcher writes
+// records; PerEvent consumer decrements agent_hp). The dispatcher half
+// here is a PerAgent physics rule (`physics DispatchAbility { on Tick {}
+// where (self.alive) { apply_ability ... } }`), NOT a verb body.
+//
+// **Verb-body sibling.** `assets/sim/apply_ability_verb_chronicle_consumer.sim`
+// combines a verb-body dispatcher (the apply_ability_verb_smoke shape)
+// with the same chronicle consumer rule used here, and proves agent_hp
+// decreases per tick on real GPU under that combined shape. That's the
+// structural template for task #138 (Wire one duel_abilities verb to
+// apply_ability). This file remains the isolated PerAgent-dispatcher +
+// consumer pin.
 
 event Tick { }
 
