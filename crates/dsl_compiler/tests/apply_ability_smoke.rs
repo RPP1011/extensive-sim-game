@@ -271,6 +271,114 @@ fn apply_ability_verb_smoke_compiles() {
     );
 }
 
+/// Combined fixture pin: verb-body apply_ability dispatcher (the
+/// apply_ability_verb_smoke shape) together with a chronicle consumer
+/// rule (the apply_ability_chronicle_consumer shape). Structural
+/// template for task #138's Strike swap — once this works, swapping
+/// duel_abilities Strike onto the same shape is a mechanical port.
+///
+/// Trips the same P6 well_formed diagnostic that
+/// apply_ability_chronicle_consumer.sim trips (PerEvent + agents.set_hp);
+/// uses `compile_sim_tolerating_diagnostics` to mirror the build.rs
+/// pattern used by `apply_ability_verb_chronicle_consumer_runtime`.
+#[test]
+fn apply_ability_verb_chronicle_consumer_compiles_with_tolerated_p6() {
+    let path = workspace_path("assets/sim/apply_ability_verb_chronicle_consumer.sim");
+    let (art, diags) = compile_sim_tolerating_diagnostics(&path).unwrap_or_else(|e| {
+        panic!("apply_ability_verb_chronicle_consumer.sim hard-failed at: {e}");
+    });
+
+    // Pin: only diagnostic should be the expected P6 violation on the
+    // consumer rule (mirrors apply_ability_chronicle_consumer.sim's
+    // diagnostic shape). Any other diagnostic is a real failure.
+    let unexpected: Vec<&String> = diags
+        .iter()
+        .filter(|d| !d.contains("P6Violation"))
+        .collect();
+    assert!(
+        unexpected.is_empty(),
+        "unexpected non-P6 diagnostics from verb+chronicle-consumer fixture:\n{:?}",
+        unexpected,
+    );
+    assert!(
+        diags.iter().any(|d| d.contains("P6Violation") && d.contains("Hp")),
+        "expected P6Violation on agent_hp write; got: {:?}",
+        diags,
+    );
+
+    // Half A: verb-body dispatcher kernel emits.
+    let dispatch = art
+        .wgsl_files
+        .iter()
+        .find(|(name, _)| name.contains("verb_chronicle_Cast"))
+        .map(|(_, b)| b.as_str())
+        .unwrap_or_else(|| {
+            panic!(
+                "no verb_chronicle_Cast kernel in artifacts; available: {:?}",
+                art.wgsl_files.keys().collect::<Vec<_>>(),
+            );
+        });
+    assert!(
+        dispatch.contains("for (var i: u32 = 0u; i < 6u;"),
+        "verb_chronicle_Cast must carry the dispatcher slot loop;\n\
+         body:\n{dispatch}"
+    );
+    assert!(
+        dispatch.contains("let caster_slot: u32"),
+        "verb_chronicle_Cast must emit caster_slot from `by self`;\n\
+         body:\n{dispatch}"
+    );
+    assert!(
+        dispatch.contains("let target_slot: u32"),
+        "verb_chronicle_Cast must emit target_slot from `target self`;\n\
+         body:\n{dispatch}"
+    );
+
+    // Half B: chronicle consumer kernel emits and writes agent_hp.
+    // Note: the scheduler FUSES the consumer (op#1: physics
+    // ApplyChronicleDamage) with the verb-body dispatcher (op#2:
+    // physics_verb_chronicle_Cast) into a single kernel named
+    // `physics_ApplyChronicleDamage_and_verb_chronicle_Cast` because
+    // both are PerEvent-shape rules over event_ring. We pull the
+    // fused kernel here and assert on the consumer-half emit.
+    let consumer = art
+        .wgsl_files
+        .iter()
+        .find(|(name, _)| name.contains("ApplyChronicleDamage"))
+        .map(|(_, b)| b.as_str())
+        .expect("ApplyChronicleDamage kernel missing");
+    assert!(
+        consumer.contains("agent_hp"),
+        "ApplyChronicleDamage must touch agent_hp;\n{consumer}"
+    );
+
+    // Engine-event kind aliasing: consumer must filter on engine
+    // discriminant=26 for EffectDamageApplied, NOT the .sim-local
+    // declaration index. Mirrors `chronicle_consumer_filter_uses_engine_discriminant`
+    // for apply_ability_chronicle_consumer.sim.
+    assert!(
+        consumer.contains("== 26u)"),
+        "consumer kernel must filter on engine discriminant=26 for \
+         EffectDamageApplied. Pre-fix the runtime had to sed-rewrite \
+         the WGSL; post-fix `dsl_ast::engine_events` aliases known \
+         engine event names to their hardcoded EventKindId at resolve \
+         time. Kernel:\n{consumer}"
+    );
+    // Belt-and-braces guard against the pre-fix `== 1u)` filter on the
+    // consumer's atomicLoad of `event_ring[event_idx * 10u + 0u]`
+    // (kind word). The fused kernel contains many `== 1u)` instances
+    // for unrelated reasons (Heal effect kind, action_id branch, etc.),
+    // so a flat `!contains("== 1u)")` is too aggressive. Instead pin
+    // the consumer's specific filter shape: the op#1 emit reads
+    // `event_ring[event_idx * 10u + 0u]` and gates on `== 26u)`. If
+    // engine-event aliasing breaks, that filter would emit `== 1u)`.
+    assert!(
+        consumer.contains("event_ring[event_idx * 10u + 0u]) == 26u)"),
+        "consumer's kind-filter must be `event_ring[event_idx * 10u + 0u]) \
+         == 26u)` — exact pre-fix regression target. Kernel:\n{consumer}"
+    );
+}
+
 #[test]
 fn apply_ability_smoke_emits_dispatcher_loop_in_kernel_body() {
     let path = workspace_path("assets/sim/apply_ability_smoke.sim");

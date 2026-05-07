@@ -21,12 +21,19 @@
 //   - mirror of how `apply_ability_smoke.sim` pins the physics-scope
 //     path; symmetric coverage.
 //
-// **Dead at runtime today** — no runtime crate references this fixture.
-// Same rationale as apply_ability_smoke.sim: drives the dsl_compiler
-// pipeline (parse → resolve → lower → schedule → emit) so any
-// regression in the verb-body apply_ability codepath surfaces as a
-// CI failure rather than as a silent breakage when a runtime wires
-// it up.
+// **Runtime today.** Lives at `crates/apply_ability_verb_smoke_runtime`
+// — wgpu device test that pre-seeds event_ring with synthetic
+// ActionSelected records and asserts the dispatcher kernel writes
+// chronicle records byte-for-byte against the CPU oracle. Drives the
+// dsl_compiler pipeline (parse → resolve → lower → schedule → emit) +
+// the dispatcher kernel half of the verb-body path.
+//
+// **Closed-loop sibling.** `assets/sim/apply_ability_verb_chronicle_consumer.sim`
+// combines this verb-body dispatcher with a chronicle consumer rule
+// (`on EffectDamageApplied → agents.set_hp`) and proves agent_hp
+// decreases per tick on real GPU. That's the structural template for
+// task #138 (Wire one duel_abilities verb to apply_ability). This file
+// remains the isolated dispatcher-only pin (no consumer, no agent_hp).
 //
 // The verb's `score 1.0` is constant — argmax over a single verb
 // trivially wins, so the verb fires every tick `self.alive` is true.
