@@ -148,3 +148,57 @@ fn apply_ability_smoke_emits_dispatcher_loop_in_kernel_body() {
          body:\n{body}"
     );
 }
+
+/// Pin the BGL composer's wiring of `event_ring` + `event_tail` into
+/// the dispatcher kernel. Without these bindings, the chronicle writes
+/// emitted by the dispatcher arms would reference undeclared identifiers
+/// at WGSL compile time. Recording an `EventRing(Append)` write on
+/// ApplyAbility-bearing ops (commit `1779b0e6`) is what hooks the
+/// composer; this assertion tests that the hook still fires after the
+/// rest of the pipeline runs.
+#[test]
+fn apply_ability_smoke_kernel_binds_event_ring_and_event_tail() {
+    let path = workspace_path("assets/sim/apply_ability_smoke.sim");
+    let art = compile_sim(&path).expect("apply_ability_smoke compiles");
+
+    let body = kernel_body_containing(&art, "DispatchAbility")
+        .or_else(|| kernel_body_containing(&art, "physics"))
+        .unwrap_or_else(|| {
+            panic!(
+                "no physics kernel found in artifacts; available: {:?}",
+                art.wgsl_files.keys().collect::<Vec<_>>()
+            );
+        });
+
+    // The composer emits `var<storage, ...> event_ring : array<...>;`
+    // and `var<storage, ...> event_tail : array<...>;` declarations
+    // after running the EventRing(Append)+sibling-event_tail synthesis
+    // path in `cg::emit::kernel`. Match the bare `event_ring` /
+    // `event_tail` identifier rather than the full type signature
+    // (`array<atomic<u32>>` vs `array<u32>` may evolve as the binding
+    // metadata refines), so the assertion is robust to wgsl-ty drift.
+    assert!(
+        body.contains("event_ring"),
+        "dispatcher kernel must bind event_ring (the chronicle writes \
+         in the slice-γ arms reference it);\n\
+         got body:\n{body}"
+    );
+    assert!(
+        body.contains("event_tail"),
+        "dispatcher kernel must bind event_tail (the dispatcher's \
+         atomicAdd slot acquisition references it);\n\
+         got body:\n{body}"
+    );
+
+    // The two bindings appear as WGSL `var<storage, ...>` declarations
+    // (one each). At least one declaration per identifier must be
+    // present — multiple references in the chronicle writes are fine
+    // but the binding declaration itself is what the BGL composer
+    // emits exactly once.
+    assert!(
+        body.matches("var<storage").count() >= 2,
+        "expected ≥2 storage binding declarations (event_ring + \
+         event_tail at minimum);\n\
+         got body:\n{body}"
+    );
+}
