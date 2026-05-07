@@ -931,6 +931,84 @@ fn back_to_back_apply_ability_in_one_rule_emits_two_dispatcher_blocks() {
         .unwrap_or_else(|e| panic!("naga validate failed: {e:?}"));
 }
 
+/// PerAgent slice-ε surface where `target` is a non-trivial SoA-field
+/// read (`agents.level(self)`) instead of `self`. Confirms lowering
+/// accepts any expression the physics-scope `lower_expr` supports as
+/// the target operand — not just `AgentSelfId`. Same shape extends to
+/// future `agents.attack_target(self)` style fields once a real u32
+/// SoA column carries an agent id.
+///
+/// Pinned by:
+///   - lowering reaches emit (no UnsupportedPhysicsStmt or expression-
+///     scope rejection),
+///   - emitted WGSL parses and validates through naga,
+///   - chronicle word 3 reads `target_slot` (which itself was
+///     bound from the SoA-field read, not from `agent_id`).
+#[test]
+fn per_agent_apply_ability_with_soa_field_target_validates() {
+    use naga::valid::{Capabilities, ValidationFlags, Validator};
+    let src = "
+        event Tick { }
+        entity Hero : Agent { }
+
+        physics DispatchToFieldTarget @phase(per_agent) {
+          on Tick {} where (self.alive) {
+            apply_ability agents.level(self) by self target agents.level(self)
+          }
+        }
+    ";
+    let program = dsl_compiler::parse(src).expect("parse");
+    let comp = dsl_ast::resolve::resolve(program).expect("resolve");
+    let cg = dsl_compiler::cg::lower::lower_compilation_to_cg(&comp)
+        .expect("PerAgent ApplyAbility with SoA-field target should lower");
+    let schedule_result = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&schedule_result.schedule, &cg)
+        .expect("emit");
+
+    let body = kernel_body_containing(&art, "DispatchToFieldTarget")
+        .or_else(|| kernel_body_containing(&art, "physics"))
+        .expect("physics kernel emitted");
+
+    // The target_slot binding must be present and the chronicle write
+    // must read from it (not from agent_id directly — that would
+    // indicate the SoA-field expression was discarded and target
+    // collapsed back to caster).
+    assert!(
+        body.contains("let target_slot: u32"),
+        "dispatcher must emit `let target_slot` from the SoA-field \
+         target operand;\n{body}"
+    );
+    assert!(
+        body.contains("atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));"),
+        "chronicle word 3 must write target_slot (not agent_id) when \
+         the source supplies a non-self target;\n{body}"
+    );
+
+    let mut errs = Vec::new();
+    for (name, kernel_body) in &art.wgsl_files {
+        match naga::front::wgsl::parse_str(kernel_body) {
+            Ok(m) => {
+                let mut validator = Validator::new(ValidationFlags::all(), Capabilities::all());
+                if let Err(e) = validator.validate(&m) {
+                    errs.push(format!("  {name}: validate: {e:?}"));
+                }
+            }
+            Err(e) => {
+                errs.push(format!("  {name}: parse: {e}"));
+            }
+        }
+    }
+    assert!(
+        errs.is_empty(),
+        "SoA-field-target variant emitted {} naga-rejected kernels:\n{}",
+        errs.len(),
+        errs.join("\n"),
+    );
+}
+
 /// Pin the BGL composer's wiring of `event_ring` + `event_tail` into
 /// the dispatcher kernel. Without these bindings, the chronicle writes
 /// emitted by the dispatcher arms would reference undeclared identifiers
