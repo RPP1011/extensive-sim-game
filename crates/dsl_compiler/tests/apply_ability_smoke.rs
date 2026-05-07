@@ -1079,6 +1079,41 @@ fn apply_ability_rejects_agentid_as_ability_operand() {
     );
 }
 
+/// Probe: literal `0` as ability id. AbilityId wraps NonZeroU32, so
+/// runtime `AbilityId::new(0)` returns None and dispatch silently
+/// skips. Compile-time accepts because 0u32 is a valid u32 literal —
+/// but it's a guaranteed runtime no-op + dead code.
+///
+/// Pinned as documentation; if the well-formed pass grows constant-
+/// folding for this case (rejecting literal 0 ability), this test
+/// flips to `expect_err`.
+#[test]
+fn probe_apply_ability_with_zero_literal() {
+    let src = "
+        event Tick { }
+        entity Hero : Agent { }
+
+        physics ZeroAbility @phase(per_agent) {
+          on Tick {} where (self.alive) {
+            apply_ability 0 by self target self
+          }
+        }
+    ";
+    let program = dsl_compiler::parse(src).expect("parse");
+    let comp = dsl_ast::resolve::resolve(program).expect("resolve");
+    match dsl_compiler::cg::lower::lower_compilation_to_cg(&comp) {
+        Ok(_) => eprintln!(
+            "[probe] literal 0 accepted as ability id. Runtime \
+             AbilityId::new(0) returns None — dispatch silently \
+             skips. A constant-fold check at well-formed could \
+             reject this at compile time as guaranteed dead code."
+        ),
+        Err(e) => eprintln!(
+            "[probe] lowering rejected literal 0 ability (good): {e:?}"
+        ),
+    }
+}
+
 /// `world.tick` is a valid u32 source under the namespace registry's
 /// type tag (`NamespaceField { ty: U32 }`), even though `CgTy::Tick`
 /// exists for the scoring/anchor case. The slice-ε type-check
