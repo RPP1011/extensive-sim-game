@@ -2396,13 +2396,293 @@ fn build_apply_ability_per_target_body(
          \x20                   } // end for dy (line walk)\n\
          \x20               } // end for dz (line walk)\n\
          \x20           } // end if (dir_len_sq >= 1e-6) — degenerate line is no-op\n\
+         \x20       } else if (area_kind == 7u) {\n\
+         \x20           // Column (#181). area_args layout: [radius, height, _, _].\n\
+         \x20           // Vertical cylinder centered on target_slot, extending UP\n\
+         \x20           // ONLY (`0 ≤ dy ≤ height`) — distinct from Cylinder which is\n\
+         \x20           // symmetric. Per-candidate gate:\n\
+         \x20           //   1. dist_xz_sq = dx*dx + dz*dz ≤ radius²\n\
+         \x20           //   2. 0 ≤ dy ≤ height\n\
+         \x20           //\n\
+         \x20           // **Spatial walk limitation.** 27-cell walk; if either radius\n\
+         \x20           // or height exceeds `SPATIAL_CELL_SIZE` candidates beyond the\n\
+         \x20           // 27-cell footprint are missed.\n\
+         \x20           let area_args_base: u32 = (effect_base + i) * 4u;\n\
+         \x20           let radius: f32 = ability_registry_area_args[area_args_base + 0u];\n\
+         \x20           let height: f32 = ability_registry_area_args[area_args_base + 1u];\n\
+         \x20           let radius_sq: f32 = radius * radius;\n\
+         \x20           let aoe_center: vec3<f32> = agent_pos[target_slot];\n\
+         \x20           let _self_cell_f = (aoe_center + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
+         \x20           let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
+         \x20           let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
+         \x20           let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
+         \x20           let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
+         \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
+         \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
+         \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
+         \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
+         \x20                       let _start = spatial_grid_starts[_cell];\n\
+         \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
+         \x20                       for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {\n\
+         \x20                           let _candidate: u32 = spatial_grid_cells[_i];\n\
+         \x20                           let _cand_pos: vec3<f32> = agent_pos[_candidate];\n\
+         \x20                           let _dvec: vec3<f32> = _cand_pos - aoe_center;\n\
+         \x20                           let _dist_xz_sq: f32 = _dvec.x * _dvec.x + _dvec.z * _dvec.z;\n\
+         \x20                           if (_dist_xz_sq > radius_sq) { continue; }\n\
+         \x20                           if (_dvec.y < 0.0) { continue; }\n\
+         \x20                           if (_dvec.y > height) { continue; }\n\
+         \x20                           let target_slot: u32 = _candidate;\n",
+    );
+    s.push_str(primary_arm_chain);
+    s.push_str(
+        "                                // Nested loop runs per in-column target.\n\
+         \x20                               let nested_slot_base: u32 = nested_base + i * 2u;\n\
+         \x20                               for (var j: u32 = 0u; j < 2u; j = j + 1u) {\n\
+         \x20                                   let kind: u32 = ability_registry_nested_effect_kinds[nested_slot_base + j];\n\
+         \x20                                   if (kind == 0xFFu) { continue; } // EFFECT_KIND_EMPTY\n\
+         \x20                                   let payload_a: u32 = ability_registry_nested_effect_payload_a[nested_slot_base + j];\n\
+         \x20                                   let payload_b: u32 = ability_registry_nested_effect_payload_b[nested_slot_base + j];\n\
+         \x20                                   let nested_scale_bonus: f32 = 0.0;\n",
+    );
+    s.push_str(nested_arm_chain);
+    s.push_str(
+        "                                }\n\
+         \x20                       } // end for _i (column walk)\n\
+         \x20                   } // end for dx (column walk)\n\
+         \x20               } // end for dy (column walk)\n\
+         \x20           } // end for dz (column walk)\n\
+         \x20       } else if (area_kind == 8u) {\n\
+         \x20           // Wall (#181). area_args layout: [length, height, thickness,\n\
+         \x20           // facing_deg]. Wall is the only 4-arg shape (the others use\n\
+         \x20           // 1-3 args + zero-padding). Facing-bearing rectangular slab.\n\
+         \x20           //\n\
+         \x20           // Convention: facing direction = (cos θ, 0, sin θ) where θ\n\
+         \x20           // = facing_deg · π/180 (0deg = +X, 90deg = +Z, CCW). Lateral\n\
+         \x20           // axis = (-sin θ, 0, cos θ). Vertical extends UP from center\n\
+         \x20           // (matching Column). Slab covers:\n\
+         \x20           //   0 ≤ forward ≤ thickness\n\
+         \x20           //   |lateral| ≤ length/2\n\
+         \x20           //   0 ≤ dy ≤ height\n\
+         \x20           //\n\
+         \x20           // **Spatial walk limitation.** 27-cell walk around target_slot;\n\
+         \x20           // any of length, height, thickness exceeding SPATIAL_CELL_SIZE\n\
+         \x20           // means candidates beyond the 27-cell footprint are missed.\n\
+         \x20           let area_args_base: u32 = (effect_base + i) * 4u;\n\
+         \x20           let length: f32 = ability_registry_area_args[area_args_base + 0u];\n\
+         \x20           let height: f32 = ability_registry_area_args[area_args_base + 1u];\n\
+         \x20           let thickness: f32 = ability_registry_area_args[area_args_base + 2u];\n\
+         \x20           let facing_deg: f32 = ability_registry_area_args[area_args_base + 3u];\n\
+         \x20           let half_length: f32 = length * 0.5;\n\
+         \x20           let theta_rad: f32 = facing_deg * 0.01745329252; // π/180\n\
+         \x20           let dir_x: f32 = cos(theta_rad);\n\
+         \x20           let dir_z: f32 = sin(theta_rad);\n\
+         \x20           let aoe_center: vec3<f32> = agent_pos[target_slot];\n\
+         \x20           let _self_cell_f = (aoe_center + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
+         \x20           let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
+         \x20           let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
+         \x20           let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
+         \x20           let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
+         \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
+         \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
+         \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
+         \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
+         \x20                       let _start = spatial_grid_starts[_cell];\n\
+         \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
+         \x20                       for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {\n\
+         \x20                           let _candidate: u32 = spatial_grid_cells[_i];\n\
+         \x20                           let _cand_pos: vec3<f32> = agent_pos[_candidate];\n\
+         \x20                           let _to_cand: vec3<f32> = _cand_pos - aoe_center;\n\
+         \x20                           let _forward: f32 = _to_cand.x * dir_x + _to_cand.z * dir_z;\n\
+         \x20                           if (_forward < 0.0) { continue; }\n\
+         \x20                           if (_forward > thickness) { continue; }\n\
+         \x20                           let _lateral: f32 = -_to_cand.x * dir_z + _to_cand.z * dir_x;\n\
+         \x20                           if (abs(_lateral) > half_length) { continue; }\n\
+         \x20                           if (_to_cand.y < 0.0) { continue; }\n\
+         \x20                           if (_to_cand.y > height) { continue; }\n\
+         \x20                           let target_slot: u32 = _candidate;\n",
+    );
+    s.push_str(primary_arm_chain);
+    s.push_str(
+        "                                // Nested loop runs per in-wall target.\n\
+         \x20                               let nested_slot_base: u32 = nested_base + i * 2u;\n\
+         \x20                               for (var j: u32 = 0u; j < 2u; j = j + 1u) {\n\
+         \x20                                   let kind: u32 = ability_registry_nested_effect_kinds[nested_slot_base + j];\n\
+         \x20                                   if (kind == 0xFFu) { continue; } // EFFECT_KIND_EMPTY\n\
+         \x20                                   let payload_a: u32 = ability_registry_nested_effect_payload_a[nested_slot_base + j];\n\
+         \x20                                   let payload_b: u32 = ability_registry_nested_effect_payload_b[nested_slot_base + j];\n\
+         \x20                                   let nested_scale_bonus: f32 = 0.0;\n",
+    );
+    s.push_str(nested_arm_chain);
+    s.push_str(
+        "                                }\n\
+         \x20                       } // end for _i (wall walk)\n\
+         \x20                   } // end for dx (wall walk)\n\
+         \x20               } // end for dy (wall walk)\n\
+         \x20           } // end for dz (wall walk)\n\
+         \x20       } else if (area_kind == 9u) {\n\
+         \x20           // Cylinder (#181). area_args layout: [radius, height, _, _].\n\
+         \x20           // 3D cylinder centered on target_slot, symmetric vertically\n\
+         \x20           // (`|dy| ≤ height/2`) — distinct from Column which extends UP\n\
+         \x20           // only. Per-candidate gate:\n\
+         \x20           //   1. dist_xz_sq = dx*dx + dz*dz ≤ radius²\n\
+         \x20           //   2. |dy| ≤ height/2\n\
+         \x20           let area_args_base: u32 = (effect_base + i) * 4u;\n\
+         \x20           let radius: f32 = ability_registry_area_args[area_args_base + 0u];\n\
+         \x20           let height: f32 = ability_registry_area_args[area_args_base + 1u];\n\
+         \x20           let radius_sq: f32 = radius * radius;\n\
+         \x20           let half_height: f32 = height * 0.5;\n\
+         \x20           let aoe_center: vec3<f32> = agent_pos[target_slot];\n\
+         \x20           let _self_cell_f = (aoe_center + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
+         \x20           let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
+         \x20           let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
+         \x20           let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
+         \x20           let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
+         \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
+         \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
+         \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
+         \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
+         \x20                       let _start = spatial_grid_starts[_cell];\n\
+         \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
+         \x20                       for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {\n\
+         \x20                           let _candidate: u32 = spatial_grid_cells[_i];\n\
+         \x20                           let _cand_pos: vec3<f32> = agent_pos[_candidate];\n\
+         \x20                           let _dvec: vec3<f32> = _cand_pos - aoe_center;\n\
+         \x20                           let _dist_xz_sq: f32 = _dvec.x * _dvec.x + _dvec.z * _dvec.z;\n\
+         \x20                           if (_dist_xz_sq > radius_sq) { continue; }\n\
+         \x20                           if (abs(_dvec.y) > half_height) { continue; }\n\
+         \x20                           let target_slot: u32 = _candidate;\n",
+    );
+    s.push_str(primary_arm_chain);
+    s.push_str(
+        "                                // Nested loop runs per in-cylinder target.\n\
+         \x20                               let nested_slot_base: u32 = nested_base + i * 2u;\n\
+         \x20                               for (var j: u32 = 0u; j < 2u; j = j + 1u) {\n\
+         \x20                                   let kind: u32 = ability_registry_nested_effect_kinds[nested_slot_base + j];\n\
+         \x20                                   if (kind == 0xFFu) { continue; } // EFFECT_KIND_EMPTY\n\
+         \x20                                   let payload_a: u32 = ability_registry_nested_effect_payload_a[nested_slot_base + j];\n\
+         \x20                                   let payload_b: u32 = ability_registry_nested_effect_payload_b[nested_slot_base + j];\n\
+         \x20                                   let nested_scale_bonus: f32 = 0.0;\n",
+    );
+    s.push_str(nested_arm_chain);
+    s.push_str(
+        "                                }\n\
+         \x20                       } // end for _i (cylinder walk)\n\
+         \x20                   } // end for dx (cylinder walk)\n\
+         \x20               } // end for dy (cylinder walk)\n\
+         \x20           } // end for dz (cylinder walk)\n\
+         \x20       } else if (area_kind == 10u) {\n\
+         \x20           // Dome (#181). area_args layout: [radius, _, _, _]. Half-\n\
+         \x20           // sphere covering the upper hemisphere above target_slot's\n\
+         \x20           // horizontal plane:\n\
+         \x20           //   1. dist² ≤ radius² (3D distance — Sphere gate)\n\
+         \x20           //   2. dy ≥ 0 (above plane, inclusive)\n\
+         \x20           let area_args_base: u32 = (effect_base + i) * 4u;\n\
+         \x20           let radius: f32 = ability_registry_area_args[area_args_base + 0u];\n\
+         \x20           let radius_sq: f32 = radius * radius;\n\
+         \x20           let aoe_center: vec3<f32> = agent_pos[target_slot];\n\
+         \x20           let _self_cell_f = (aoe_center + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
+         \x20           let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
+         \x20           let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
+         \x20           let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
+         \x20           let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
+         \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
+         \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
+         \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
+         \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
+         \x20                       let _start = spatial_grid_starts[_cell];\n\
+         \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
+         \x20                       for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {\n\
+         \x20                           let _candidate: u32 = spatial_grid_cells[_i];\n\
+         \x20                           let _cand_pos: vec3<f32> = agent_pos[_candidate];\n\
+         \x20                           let _dvec: vec3<f32> = _cand_pos - aoe_center;\n\
+         \x20                           if (dot(_dvec, _dvec) > radius_sq) { continue; }\n\
+         \x20                           if (_dvec.y < 0.0) { continue; }\n\
+         \x20                           let target_slot: u32 = _candidate;\n",
+    );
+    s.push_str(primary_arm_chain);
+    s.push_str(
+        "                                // Nested loop runs per in-dome target.\n\
+         \x20                               let nested_slot_base: u32 = nested_base + i * 2u;\n\
+         \x20                               for (var j: u32 = 0u; j < 2u; j = j + 1u) {\n\
+         \x20                                   let kind: u32 = ability_registry_nested_effect_kinds[nested_slot_base + j];\n\
+         \x20                                   if (kind == 0xFFu) { continue; } // EFFECT_KIND_EMPTY\n\
+         \x20                                   let payload_a: u32 = ability_registry_nested_effect_payload_a[nested_slot_base + j];\n\
+         \x20                                   let payload_b: u32 = ability_registry_nested_effect_payload_b[nested_slot_base + j];\n\
+         \x20                                   let nested_scale_bonus: f32 = 0.0;\n",
+    );
+    s.push_str(nested_arm_chain);
+    s.push_str(
+        "                                }\n\
+         \x20                       } // end for _i (dome walk)\n\
+         \x20                   } // end for dx (dome walk)\n\
+         \x20               } // end for dy (dome walk)\n\
+         \x20           } // end for dz (dome walk)\n\
+         \x20       } else if (area_kind == 11u) {\n\
+         \x20           // Hull (#181). area_args layout: [radius, _, _, _]. NOTE:\n\
+         \x20           // Hull is a Sphere alias today — spec semantics are not\n\
+         \x20           // nailed down (no doc-comment on `ShapeKind::Hull`, no spec\n\
+         \x20           // text under `dataset/abilities/`). Until refined, Hull\n\
+         \x20           // routes through the same `dist² ≤ radius²` gate as Sphere\n\
+         \x20           // (kind=6). When/if Hull's true semantics land, update both\n\
+         \x20           // this branch and `apply_program_aoe_hull_filter` together.\n\
+         \x20           let area_args_base: u32 = (effect_base + i) * 4u;\n\
+         \x20           let radius: f32 = ability_registry_area_args[area_args_base + 0u];\n\
+         \x20           let radius_sq: f32 = radius * radius;\n\
+         \x20           let aoe_center: vec3<f32> = agent_pos[target_slot];\n\
+         \x20           let _self_cell_f = (aoe_center + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
+         \x20           let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
+         \x20           let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
+         \x20           let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
+         \x20           let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
+         \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
+         \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
+         \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
+         \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
+         \x20                       let _start = spatial_grid_starts[_cell];\n\
+         \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
+         \x20                       for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {\n\
+         \x20                           let _candidate: u32 = spatial_grid_cells[_i];\n\
+         \x20                           let _cand_pos: vec3<f32> = agent_pos[_candidate];\n\
+         \x20                           let _dvec: vec3<f32> = _cand_pos - aoe_center;\n\
+         \x20                           if (dot(_dvec, _dvec) > radius_sq) { continue; }\n\
+         \x20                           let target_slot: u32 = _candidate;\n",
+    );
+    s.push_str(primary_arm_chain);
+    s.push_str(
+        "                                // Nested loop runs per in-hull target.\n\
+         \x20                               let nested_slot_base: u32 = nested_base + i * 2u;\n\
+         \x20                               for (var j: u32 = 0u; j < 2u; j = j + 1u) {\n\
+         \x20                                   let kind: u32 = ability_registry_nested_effect_kinds[nested_slot_base + j];\n\
+         \x20                                   if (kind == 0xFFu) { continue; } // EFFECT_KIND_EMPTY\n\
+         \x20                                   let payload_a: u32 = ability_registry_nested_effect_payload_a[nested_slot_base + j];\n\
+         \x20                                   let payload_b: u32 = ability_registry_nested_effect_payload_b[nested_slot_base + j];\n\
+         \x20                                   let nested_scale_bonus: f32 = 0.0;\n",
+    );
+    s.push_str(nested_arm_chain);
+    s.push_str(
+        "                                }\n\
+         \x20                       } // end for _i (hull walk)\n\
+         \x20                   } // end for dx (hull walk)\n\
+         \x20               } // end for dy (hull walk)\n\
+         \x20           } // end for dz (hull walk)\n\
          \x20       } else {\n\
+         \x20           // Spread (kind 4) is deferred on the GPU side — sort + cap\n\
+         \x20           // in WGSL is non-trivial under atomicAdd ring writes; the CPU\n\
+         \x20           // oracle handles the count cap correctly\n\
+         \x20           // (`apply_program_aoe_spread_filter` sorts by AgentId then\n\
+         \x20           // truncates), but cross-backend parity for Spread requires\n\
+         \x20           // either a workgroup-local sort or a deterministic ring\n\
+         \x20           // partition we haven't designed yet. Until that lands, Spread\n\
+         \x20           // falls through to the single-target fallback here, matching\n\
+         \x20           // the previous behaviour.\n\
+         \x20           //\n\
          \x20           // Non-Circle / non-Cone / non-Box / non-Sphere / non-Ring /\n\
-         \x20           // non-Line (sentinel 0xFFu = no area, or unrecognised\n\
-         \x20           // shape). Single-target fallback — same chain shape as the\n\
-         \x20           // with_aoe_dispatch==false path, just at the deeper indent\n\
-         \x20           // (12/16 spaces) the AOE arm-chain helper rendered for the\n\
-         \x20           // in-radius branch.\n",
+         \x20           // non-Line / non-Column / non-Wall / non-Cylinder / non-Dome /\n\
+         \x20           // non-Hull (sentinel 0xFFu = no area, kind=4 Spread, or\n\
+         \x20           // unrecognised shape). Single-target fallback — same chain\n\
+         \x20           // shape as the with_aoe_dispatch==false path, just at the\n\
+         \x20           // deeper indent (12/16 spaces) the AOE arm-chain helper\n\
+         \x20           // rendered for the in-radius branch.\n",
     );
     s.push_str(primary_arm_chain);
     s.push_str(
@@ -2417,7 +2697,7 @@ fn build_apply_ability_per_target_body(
     s.push_str(nested_arm_chain);
     s.push_str(
         "                }\n\
-         \x20       } // end if (area_kind == 0u) … else if (1u) … else if (5u) … else if (6u) … else if (3u) … else if (2u) … else\n",
+         \x20       } // end if (area_kind == 0u) … else if (1u) … else if (5u) … else if (6u) … else if (3u) … else if (2u) … else if (7u) … else if (8u) … else if (9u) … else if (10u) … else if (11u) … else (Spread + sentinel)\n",
     );
     s
 }

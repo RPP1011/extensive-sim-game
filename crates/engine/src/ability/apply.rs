@@ -566,6 +566,16 @@ pub fn apply_program_aoe(
                         || shape.kind == ShapeKind::Sphere
                         || shape.kind == ShapeKind::Ring
                         || shape.kind == ShapeKind::Line
+                        // #181 AOE Path B remaining shapes: Spread, Column,
+                        // Wall, Cylinder, Dome, Hull. Hull is a Sphere alias
+                        // (no separate filter helper today; see
+                        // `apply_program_aoe_sphere_filter` doc).
+                        || shape.kind == ShapeKind::Spread
+                        || shape.kind == ShapeKind::Column
+                        || shape.kind == ShapeKind::Wall
+                        || shape.kind == ShapeKind::Cylinder
+                        || shape.kind == ShapeKind::Dome
+                        || shape.kind == ShapeKind::Hull
         );
         let targets_for_slot: &[AgentId] = if is_aoe_shape {
             aoe_targets
@@ -897,6 +907,286 @@ pub fn apply_program_aoe_line_filter(
     // P11 reduction-determinism.
     hits.sort_by_key(|id| id.raw());
     hits
+}
+
+/// CPU-side spread-filter oracle for AOE Path B Spread (#181 — count-
+/// capped Circle). Mirrors the GPU kernel's WGSL math bit-for-bit so
+/// callers feeding `apply_program_aoe` produce a chronicle record set
+/// byte-equal to the GPU dispatcher.
+///
+/// Inputs:
+///   * `center` — explicit cast target's position (same convention as
+///     Circle).
+///   * `radius` — `args[0]` (same `dist² ≤ radius²` gate as Circle).
+///   * `max_targets` — `args[1]` rounded to integer (`as u32`). Caps the
+///     emitted set after the in-radius filter + AgentId sort. `0` ⇒
+///     empty set.
+///   * `candidates` — slice of `(AgentId, position)` pairs.
+///
+/// Output: in-radius `AgentId`s sorted ascending by raw id, then
+/// truncated to the first `max_targets` entries (P11). Determinism is
+/// preserved because both the in-radius set and the cap selection are
+/// AgentId-stable.
+///
+/// **Spread vs Circle.** Spread reuses Circle's geometric gate and adds
+/// a hard count cap — the lowest-AgentId K targets within the radius
+/// fire. Useful for "single-target with overflow", "chain-style" hit
+/// caps, and similar bounded multi-hit semantics.
+///
+/// **Spatial walk limitation.** 27-cell walk; if `radius >
+/// SPATIAL_CELL_SIZE`, candidates beyond the 27-cell ring are missed.
+/// Same caveat as Circle/Sphere/Box (#179).
+pub fn apply_program_aoe_spread_filter(
+    center:      glam::Vec3,
+    radius:      f32,
+    max_targets: u32,
+    candidates:  &[(AgentId, glam::Vec3)],
+) -> Vec<AgentId> {
+    let radius_sq = radius * radius;
+    let mut hits: Vec<AgentId> = Vec::with_capacity(candidates.len());
+    for &(id, cand_pos) in candidates {
+        let dvec = cand_pos - center;
+        if dvec.dot(dvec) <= radius_sq {
+            hits.push(id);
+        }
+    }
+    // P11: sort ascending, then truncate to the cap so the kept set is
+    // the lowest-AgentId K hits — both backends agree on the slice
+    // (after canonicalize sort on the GPU side).
+    hits.sort_by_key(|id| id.raw());
+    hits.truncate(max_targets as usize);
+    hits
+}
+
+/// CPU-side column-filter oracle for AOE Path B Column (#181 — vertical
+/// cylinder extending UP from the cast center). Mirrors the GPU kernel's
+/// WGSL math bit-for-bit.
+///
+/// Inputs:
+///   * `center` — explicit cast target's position. The column starts at
+///     `center.y` and extends upward to `center.y + height`.
+///   * `radius` — `args[0]` (horizontal radius in the XZ plane).
+///   * `height` — `args[1]` (vertical extent above `center.y`).
+///   * `candidates` — slice of `(AgentId, position)` pairs.
+///
+/// Output: in-column `AgentId`s sorted ascending by raw id (P11).
+///
+/// In-column predicate (per candidate, identical to the WGSL kernel):
+///   1. `dist_xz_sq ≤ radius²` where `dist_xz_sq = dx*dx + dz*dz`
+///      (Y is the vertical axis, ignored in the horizontal gate).
+///   2. `0 ≤ dy ≤ height` where `dy = cand.y - center.y`. The column
+///      extends UP only — candidates below `center.y` are excluded.
+///
+/// **Column vs Cylinder.** Column extends UP only (like a one-sided
+/// pillar from the ground); Cylinder is symmetric (`|dy| ≤ height/2`).
+/// Pick the one matching the spec'd intent.
+///
+/// **Spatial walk limitation.** 27-cell walk around the center; if
+/// `radius` or `height` exceeds `SPATIAL_CELL_SIZE`, candidates beyond
+/// the 27-cell ring are missed. Same caveat as Circle/Sphere/Box.
+pub fn apply_program_aoe_column_filter(
+    center:     glam::Vec3,
+    radius:     f32,
+    height:     f32,
+    candidates: &[(AgentId, glam::Vec3)],
+) -> Vec<AgentId> {
+    let radius_sq = radius * radius;
+    let mut hits: Vec<AgentId> = Vec::with_capacity(candidates.len());
+    for &(id, cand_pos) in candidates {
+        let dvec = cand_pos - center;
+        let dist_xz_sq = dvec.x * dvec.x + dvec.z * dvec.z;
+        if dist_xz_sq > radius_sq {
+            continue;
+        }
+        if dvec.y < 0.0 || dvec.y > height {
+            continue;
+        }
+        hits.push(id);
+    }
+    hits.sort_by_key(|id| id.raw());
+    hits
+}
+
+/// CPU-side wall-filter oracle for AOE Path B Wall (#181 — facing-
+/// bearing rectangular slab). Mirrors the GPU kernel's WGSL math bit-
+/// for-bit.
+///
+/// Inputs:
+///   * `center` — wall origin (the cast target's position).
+///   * `length` — `args[0]` (width of the slab perpendicular to facing,
+///     symmetric — `lateral ≤ length/2`).
+///   * `height` — `args[1]` (vertical extent — `0 ≤ dy ≤ height`,
+///     extends UP from the center, matching Column's vertical convention).
+///   * `thickness` — `args[2]` (depth in the facing direction —
+///     `0 ≤ forward ≤ thickness`).
+///   * `facing_deg` — `args[3]` (yaw angle in degrees in the XZ plane,
+///     `0deg = +X`, increasing CCW toward `+Z`). The facing direction
+///     is `dir_xz = (cos θ, 0, sin θ)`. The lateral axis is `perp_xz =
+///     (-sin θ, 0, cos θ)` (90°-rotated CCW).
+///   * `candidates` — slice of `(AgentId, position)` pairs.
+///
+/// Output: in-wall `AgentId`s sorted ascending by raw id (P11).
+///
+/// In-wall predicate (per candidate, identical to the WGSL kernel):
+///   1. Compute `to_cand = cand_pos - center`.
+///   2. Forward projection: `forward = to_cand.x * cos(θ) + to_cand.z *
+///      sin(θ)`. Gate `0 ≤ forward ≤ thickness` (slab in front of
+///      center, within thickness depth).
+///   3. Lateral projection: `lateral = -to_cand.x * sin(θ) + to_cand.z *
+///      cos(θ)`. Gate `|lateral| ≤ length/2` (within slab width).
+///   4. Vertical: `0 ≤ to_cand.y ≤ height` (extends up from center).
+///
+/// **Convention chosen.** Wall faces outward from the cast center toward
+/// `facing_deg`, with thickness extending in front (NOT centered on the
+/// center — the slab starts AT the center and extends `thickness` units
+/// forward). Length is perpendicular width (symmetric). Height is
+/// vertical (extends UP, matching Column). The facing arg in degrees
+/// converts to a unit XZ direction via `(cos, 0, sin)` — `0deg` = `+X`.
+///
+/// **Spatial walk limitation.** 27-cell walk; if `length`, `height`, or
+/// `thickness` exceeds `SPATIAL_CELL_SIZE`, candidates beyond the 27-
+/// cell ring are missed. Wall is the only 4-arg shape (the others use
+/// 1-3 args + zero-padding); the schema_hash already pins this layout.
+pub fn apply_program_aoe_wall_filter(
+    center:     glam::Vec3,
+    length:     f32,
+    height:     f32,
+    thickness:  f32,
+    facing_deg: f32,
+    candidates: &[(AgentId, glam::Vec3)],
+) -> Vec<AgentId> {
+    let half_length = length * 0.5;
+    let theta_rad = facing_deg * std::f32::consts::PI / 180.0;
+    let dir_x = theta_rad.cos();
+    let dir_z = theta_rad.sin();
+    let mut hits: Vec<AgentId> = Vec::with_capacity(candidates.len());
+    for &(id, cand_pos) in candidates {
+        let to_cand = cand_pos - center;
+        let forward = to_cand.x * dir_x + to_cand.z * dir_z;
+        if forward < 0.0 || forward > thickness {
+            continue;
+        }
+        let lateral = -to_cand.x * dir_z + to_cand.z * dir_x;
+        if lateral.abs() > half_length {
+            continue;
+        }
+        if to_cand.y < 0.0 || to_cand.y > height {
+            continue;
+        }
+        hits.push(id);
+    }
+    hits.sort_by_key(|id| id.raw());
+    hits
+}
+
+/// CPU-side cylinder-filter oracle for AOE Path B Cylinder (#181 — 3D
+/// cylinder centered on the cast target, vertical-symmetric). Mirrors
+/// the GPU kernel's WGSL math bit-for-bit.
+///
+/// Inputs:
+///   * `center` — explicit cast target's position.
+///   * `radius` — `args[0]` (horizontal radius in the XZ plane).
+///   * `height` — `args[1]` (full vertical extent — symmetric, gate is
+///     `|dy| ≤ height/2`).
+///   * `candidates` — slice of `(AgentId, position)` pairs.
+///
+/// Output: in-cylinder `AgentId`s sorted ascending by raw id (P11).
+///
+/// In-cylinder predicate (per candidate, identical to the WGSL kernel):
+///   1. `dist_xz_sq ≤ radius²` (horizontal gate, ignores Y).
+///   2. `|cand.y - center.y| ≤ height/2` (vertical, symmetric).
+///
+/// **Cylinder vs Column.** Cylinder is symmetric vertically (extends
+/// `height/2` above AND below the center); Column extends UP only.
+pub fn apply_program_aoe_cylinder_filter(
+    center:     glam::Vec3,
+    radius:     f32,
+    height:     f32,
+    candidates: &[(AgentId, glam::Vec3)],
+) -> Vec<AgentId> {
+    let radius_sq = radius * radius;
+    let half_height = height * 0.5;
+    let mut hits: Vec<AgentId> = Vec::with_capacity(candidates.len());
+    for &(id, cand_pos) in candidates {
+        let dvec = cand_pos - center;
+        let dist_xz_sq = dvec.x * dvec.x + dvec.z * dvec.z;
+        if dist_xz_sq > radius_sq {
+            continue;
+        }
+        if dvec.y.abs() > half_height {
+            continue;
+        }
+        hits.push(id);
+    }
+    hits.sort_by_key(|id| id.raw());
+    hits
+}
+
+/// CPU-side dome-filter oracle for AOE Path B Dome (#181 — half-sphere
+/// above the cast center's horizontal plane). Mirrors the GPU kernel's
+/// WGSL math bit-for-bit.
+///
+/// Inputs:
+///   * `center` — explicit cast target's position. The dome covers the
+///     hemisphere where `cand.y ≥ center.y`.
+///   * `radius` — `args[0]` (3D distance gate, same as Sphere).
+///   * `candidates` — slice of `(AgentId, position)` pairs.
+///
+/// Output: in-dome `AgentId`s sorted ascending by raw id (P11).
+///
+/// In-dome predicate:
+///   1. `dist_sq ≤ radius²` (3D distance, same as Sphere).
+///   2. `cand.y ≥ center.y` (above the horizontal plane). The boundary
+///      is inclusive — candidates exactly at `center.y` are in-dome.
+pub fn apply_program_aoe_dome_filter(
+    center:     glam::Vec3,
+    radius:     f32,
+    candidates: &[(AgentId, glam::Vec3)],
+) -> Vec<AgentId> {
+    let radius_sq = radius * radius;
+    let mut hits: Vec<AgentId> = Vec::with_capacity(candidates.len());
+    for &(id, cand_pos) in candidates {
+        let dvec = cand_pos - center;
+        if dvec.dot(dvec) > radius_sq {
+            continue;
+        }
+        if dvec.y < 0.0 {
+            continue;
+        }
+        hits.push(id);
+    }
+    hits.sort_by_key(|id| id.raw());
+    hits
+}
+
+/// CPU-side hull-filter oracle for AOE Path B Hull (#181). The Hull
+/// shape's spec semantics are not nailed down today — the only place
+/// it's mentioned in the codebase is `ShapeKind::Hull = 11` in
+/// `program.rs` (no doc-comment, no spec text under
+/// `dataset/abilities/`). Without a spec, we ship Hull as an **alias to
+/// Sphere** (3D `dist² ≤ radius²`) so author intent matching the most
+/// common reading ("hull around me") works, and a future spec change
+/// can refine the gate without an API break (the args slot already
+/// reserves 4 f32, only `args[0]` is consumed today).
+///
+/// **NOTE: Hull is a Sphere alias.** When/if the spec defines Hull as
+/// a distinct shape (convex hull around an entity group? equipment-
+/// blob hitbox? something else), update both this filter and the GPU
+/// branch in `wgsl_body.rs` together.
+///
+/// Inputs:
+///   * `center` — explicit cast target's position.
+///   * `radius` — `args[0]` (sphere radius).
+///   * `candidates` — slice of `(AgentId, position)` pairs.
+///
+/// Output: in-hull `AgentId`s sorted ascending by raw id (P11).
+pub fn apply_program_aoe_hull_filter(
+    center:     glam::Vec3,
+    radius:     f32,
+    candidates: &[(AgentId, glam::Vec3)],
+) -> Vec<AgentId> {
+    // Hull is a Sphere alias today (see doc-comment NOTE above).
+    apply_program_aoe_sphere_filter(center, radius, candidates)
 }
 
 #[cfg(test)]
@@ -1477,12 +1767,14 @@ mod tests {
     }
 
     #[test]
-    fn aoe_non_expandable_shape_falls_back_to_single_target() {
-        // Spread (and every shape other than Circle/Cone/Box/Sphere/
-        // Ring/Line) is deferred — the slot fires once on
-        // `primary_target` even when `aoe_targets` is populated. Pin
-        // this so the deferral is explicit (regression guard for
-        // future shape additions).
+    fn aoe_spread_caps_target_count_at_max() {
+        // #181 AOE Path B Spread — count-capped Circle. The dispatcher
+        // expands Spread across `aoe_targets` (the caller pre-filters
+        // by Circle's geometric gate AND truncates to `max_targets`
+        // via `apply_program_aoe_spread_filter`). This test pins the
+        // dispatch leg: when the caller passes a single-element slice,
+        // the slot fires once. The geometric + count-cap math is
+        // exercised by `aoe_spread_filter_*` tests below.
         let mut prog = AbilityProgram::new_single_target(
             5.0,
             Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
@@ -1492,8 +1784,9 @@ mod tests {
             kind: ShapeKind::Spread,
             args: [5.0, 1.0, 0.0, 0.0],
         }));
-        // aoe_targets is non-empty, but Spread isn't expanded yet.
-        let aoe_targets = [agent_n(2), agent_n(3), agent_n(4)];
+        // Caller has already capped to max_targets=1 (the lowest-id
+        // agent in radius). Dispatcher fires once on that target.
+        let aoe_targets = [agent_n(2)];
         let events = apply_program_aoe(
             &prog,
             agent_n(1),
@@ -1503,7 +1796,7 @@ mod tests {
             &CasterStats::default(),
             &CasterStats::default(),
         );
-        assert_eq!(events.len(), 1, "Spread shape → single-target fallback (Path B defers)");
+        assert_eq!(events.len(), 1, "Spread (max=1) → single in-radius target receives event");
         assert!(matches!(
             events[0],
             ApplyEvent::Damage { target: t, .. } if t == agent_n(2)
@@ -2086,5 +2379,314 @@ mod tests {
                 if (amount - 80.0).abs() < 1e-5),
                 "each AOE target must get scaled amount 80.0, got {ev:?}");
         }
+    }
+
+    // -- AOE Path B Spread / Column / Wall / Cylinder / Dome / Hull (#181) --
+
+    #[test]
+    fn aoe_spread_filter_caps_to_max_targets() {
+        // 4 candidates, all within radius=2.0; max_targets=2 → keep
+        // the lowest-AgentId 2 (sorted ascending by id, then truncate).
+        let center = glam::Vec3::new(0.0, 0.0, 0.0);
+        let candidates = vec![
+            (agent_n(1), glam::Vec3::new(0.0, 0.0, 0.0)),     // d=0
+            (agent_n(2), glam::Vec3::new(1.0, 0.0, 0.0)),     // d=1
+            (agent_n(3), glam::Vec3::new(0.0, 1.5, 0.0)),     // d=1.5
+            (agent_n(4), glam::Vec3::new(2.0, 0.0, 0.0)),     // d=2.0 wall, in
+        ];
+        let hits = apply_program_aoe_spread_filter(center, /*radius*/ 2.0, /*max*/ 2, &candidates);
+        assert_eq!(
+            hits,
+            vec![agent_n(1), agent_n(2)],
+            "spread(r=2, max=2) must keep lowest-AgentId 2 in-radius hits; got {hits:?}"
+        );
+    }
+
+    #[test]
+    fn aoe_spread_filter_zero_max_returns_empty() {
+        // max_targets=0 ⇒ empty set even when in-radius candidates exist.
+        let center = glam::Vec3::new(0.0, 0.0, 0.0);
+        let candidates = vec![
+            (agent_n(1), glam::Vec3::new(0.0, 0.0, 0.0)),
+            (agent_n(2), glam::Vec3::new(1.0, 0.0, 0.0)),
+        ];
+        let hits = apply_program_aoe_spread_filter(center, 5.0, 0, &candidates);
+        assert!(hits.is_empty(), "max=0 → empty set, got {hits:?}");
+    }
+
+    #[test]
+    fn aoe_spread_filter_max_exceeds_in_radius_keeps_all() {
+        // max_targets larger than in-radius count → all in-radius kept.
+        let center = glam::Vec3::new(0.0, 0.0, 0.0);
+        let candidates = vec![
+            (agent_n(1), glam::Vec3::new(0.0, 0.0, 0.0)),
+            (agent_n(2), glam::Vec3::new(0.5, 0.0, 0.0)),
+            (agent_n(3), glam::Vec3::new(10.0, 0.0, 0.0)),    // out of radius
+        ];
+        let hits = apply_program_aoe_spread_filter(center, 1.0, 100, &candidates);
+        assert_eq!(
+            hits,
+            vec![agent_n(1), agent_n(2)],
+            "max≫in-radius keeps all in-radius hits, got {hits:?}"
+        );
+    }
+
+    #[test]
+    fn aoe_column_filter_extends_up_only() {
+        // Column at origin, radius=1.0, height=3.0. XZ disc at any y in
+        // [0, 3] is in. Below y=0 or above y=3 is out. Outside XZ radius
+        // is out.
+        let center = glam::Vec3::new(0.0, 0.0, 0.0);
+        let candidates = vec![
+            (agent_n(1), glam::Vec3::new(0.0, 0.0, 0.0)),     // origin: in
+            (agent_n(2), glam::Vec3::new(0.5, 1.5, 0.5)),     // mid-column: in (XZ d=0.71<1, y=1.5)
+            (agent_n(3), glam::Vec3::new(0.0, 3.0, 0.0)),     // top wall: in (y=3 ≤ 3)
+            (agent_n(4), glam::Vec3::new(0.0, -0.1, 0.0)),    // below: out (y<0)
+            (agent_n(5), glam::Vec3::new(0.0, 3.1, 0.0)),     // above: out (y>3)
+            (agent_n(6), glam::Vec3::new(1.5, 1.0, 0.0)),     // outside XZ: out (XZ d=1.5>1)
+        ];
+        let hits = apply_program_aoe_column_filter(center, /*r*/ 1.0, /*h*/ 3.0, &candidates);
+        assert_eq!(
+            hits,
+            vec![agent_n(1), agent_n(2), agent_n(3)],
+            "column(r=1, h=3) extends UP only; got {hits:?}"
+        );
+    }
+
+    #[test]
+    fn aoe_column_filter_ignores_y_in_xz_distance() {
+        // Tall column: a candidate far above on the cylinder axis is
+        // in-column even though 3D distance is large. Pin the "Y is
+        // ignored in XZ gate" semantic.
+        let center = glam::Vec3::new(0.0, 0.0, 0.0);
+        let candidates = vec![
+            (agent_n(1), glam::Vec3::new(0.5, 5.0, 0.0)),     // XZ=0.5 in, y=5 in
+            (agent_n(2), glam::Vec3::new(0.0, 9.99, 0.0)),    // XZ=0 in, y=9.99 in
+        ];
+        let hits = apply_program_aoe_column_filter(center, /*r*/ 1.0, /*h*/ 10.0, &candidates);
+        assert_eq!(hits, vec![agent_n(1), agent_n(2)]);
+    }
+
+    #[test]
+    fn aoe_wall_filter_facing_plus_x_basic_slab() {
+        // Wall facing +X (facing_deg=0), length=4 (half=2 lateral),
+        // height=2, thickness=1. Slab covers x∈[0,1], z∈[-2,2], y∈[0,2].
+        let center = glam::Vec3::new(0.0, 0.0, 0.0);
+        let candidates = vec![
+            (agent_n(1), glam::Vec3::new(0.0, 0.0, 0.0)),     // at center: in
+            (agent_n(2), glam::Vec3::new(0.5, 1.0, 1.5)),     // forward=0.5, lateral=1.5, y=1: in
+            (agent_n(3), glam::Vec3::new(1.0, 2.0, -2.0)),    // wall corner: forward=1, lateral=-2, y=2: in (≤)
+            (agent_n(4), glam::Vec3::new(1.5, 0.0, 0.0)),     // forward=1.5 > 1: out
+            (agent_n(5), glam::Vec3::new(-0.5, 0.0, 0.0)),    // forward=-0.5 < 0: out (behind)
+            (agent_n(6), glam::Vec3::new(0.5, 0.0, 2.5)),     // lateral=2.5 > 2: out
+            (agent_n(7), glam::Vec3::new(0.5, 2.5, 0.0)),     // y=2.5 > 2: out
+        ];
+        let hits = apply_program_aoe_wall_filter(
+            center, /*length*/ 4.0, /*height*/ 2.0, /*thickness*/ 1.0,
+            /*facing_deg*/ 0.0, &candidates,
+        );
+        assert_eq!(
+            hits,
+            vec![agent_n(1), agent_n(2), agent_n(3)],
+            "wall(len=4, h=2, thick=1, +X) covers x∈[0,1], z∈[-2,2], y∈[0,2]; got {hits:?}"
+        );
+    }
+
+    #[test]
+    fn aoe_wall_filter_facing_plus_z_rotates_slab() {
+        // Wall facing +Z (facing_deg=90). Direction is now (cos 90, 0,
+        // sin 90) = (0, 0, 1). Forward is +Z; lateral is -X (perp =
+        // (-sin 90, 0, cos 90) = (-1, 0, 0)). Slab covers z∈[0,1],
+        // x∈[-2,2], y∈[0,2] under the same args as the +X test.
+        let center = glam::Vec3::new(0.0, 0.0, 0.0);
+        let candidates = vec![
+            (agent_n(1), glam::Vec3::new(0.0, 0.0, 0.5)),     // forward=0.5 in slab
+            (agent_n(2), glam::Vec3::new(1.5, 1.0, 1.0)),     // forward=1 wall, lateral=-1.5 in (|≤2|)
+            (agent_n(3), glam::Vec3::new(0.0, 0.0, -0.1)),    // forward=-0.1: out (behind)
+            (agent_n(4), glam::Vec3::new(2.5, 0.0, 0.5)),     // lateral=-2.5: out
+        ];
+        let hits = apply_program_aoe_wall_filter(
+            center, 4.0, 2.0, 1.0, /*facing_deg*/ 90.0, &candidates,
+        );
+        assert_eq!(
+            hits,
+            vec![agent_n(1), agent_n(2)],
+            "wall facing +Z must rotate the slab axes accordingly; got {hits:?}"
+        );
+    }
+
+    #[test]
+    fn aoe_cylinder_filter_symmetric_vertical() {
+        // Cylinder at origin, radius=1.0, height=2.0 (half=1). Covers
+        // XZ disc at any y in [-1, 1]. Symmetric vertically — distinct
+        // from Column.
+        let center = glam::Vec3::new(0.0, 0.0, 0.0);
+        let candidates = vec![
+            (agent_n(1), glam::Vec3::new(0.0, 0.0, 0.0)),     // center: in
+            (agent_n(2), glam::Vec3::new(0.5, 1.0, 0.0)),     // top wall: in (y=1 ≤ 1)
+            (agent_n(3), glam::Vec3::new(0.5, -1.0, 0.0)),    // bottom wall: in (|y|=1 ≤ 1)
+            (agent_n(4), glam::Vec3::new(0.0, 1.5, 0.0)),     // y>half: out
+            (agent_n(5), glam::Vec3::new(0.0, -1.5, 0.0)),    // y<-half: out
+            (agent_n(6), glam::Vec3::new(1.5, 0.0, 0.0)),     // XZ outside: out
+        ];
+        let hits = apply_program_aoe_cylinder_filter(center, /*r*/ 1.0, /*h*/ 2.0, &candidates);
+        assert_eq!(
+            hits,
+            vec![agent_n(1), agent_n(2), agent_n(3)],
+            "cylinder(r=1, h=2) symmetric vertically; got {hits:?}"
+        );
+    }
+
+    #[test]
+    fn aoe_dome_filter_above_plane_only() {
+        // Dome at origin, radius=2.0. Sphere gate + y≥0 plane gate.
+        let center = glam::Vec3::new(0.0, 0.0, 0.0);
+        let candidates = vec![
+            (agent_n(1), glam::Vec3::new(0.0, 0.0, 0.0)),     // y=0 plane (boundary): in
+            (agent_n(2), glam::Vec3::new(1.0, 1.0, 0.0)),     // d=1.41, y=1: in
+            (agent_n(3), glam::Vec3::new(0.0, 2.0, 0.0)),     // d=2 wall, y=2: in (≤)
+            (agent_n(4), glam::Vec3::new(0.0, -0.1, 0.0)),    // y<0: out (below plane)
+            (agent_n(5), glam::Vec3::new(0.0, 2.1, 0.0)),     // d>radius: out
+        ];
+        let hits = apply_program_aoe_dome_filter(center, /*r*/ 2.0, &candidates);
+        assert_eq!(
+            hits,
+            vec![agent_n(1), agent_n(2), agent_n(3)],
+            "dome(r=2) covers upper hemisphere; got {hits:?}"
+        );
+    }
+
+    #[test]
+    fn aoe_hull_filter_aliases_sphere() {
+        // Hull is a Sphere alias today (see filter doc-comment NOTE).
+        // Pin equivalence so any future spec change surfaces.
+        let center = glam::Vec3::new(0.0, 0.0, 0.0);
+        let candidates = vec![
+            (agent_n(1), glam::Vec3::new(0.0, 0.0, 0.0)),
+            (agent_n(2), glam::Vec3::new(1.0, 1.0, 1.0)),
+            (agent_n(3), glam::Vec3::new(0.0, 0.0, 2.001)),
+        ];
+        let hull_hits = apply_program_aoe_hull_filter(center, 2.0, &candidates);
+        let sphere_hits = apply_program_aoe_sphere_filter(center, 2.0, &candidates);
+        assert_eq!(
+            hull_hits, sphere_hits,
+            "hull must alias sphere today; got hull={hull_hits:?} sphere={sphere_hits:?}"
+        );
+    }
+
+    #[test]
+    fn aoe_spread_dispatch_one_event_per_target_after_cap() {
+        // Dispatcher contract: same as Circle/Cone/Box/Sphere/Ring/Line.
+        // Caller passes the post-cap target slice.
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 12.0 }],
+        );
+        prog.per_effect_areas.push(Some(EffectAreaShape {
+            kind: ShapeKind::Spread,
+            args: [5.0, 2.0, 0.0, 0.0],
+        }));
+        let aoe_targets = [agent_n(2), agent_n(3)];
+        let events = apply_program_aoe(
+            &prog, agent_n(1), agent_n(2), &aoe_targets, 0, 0xCAFE,
+            &CasterStats::default(), &CasterStats::default(),
+        );
+        assert_eq!(events.len(), 2, "Spread dispatch → one event per target slot");
+    }
+
+    #[test]
+    fn aoe_column_dispatch_one_event_per_target() {
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 16.0 }],
+        );
+        prog.per_effect_areas.push(Some(EffectAreaShape {
+            kind: ShapeKind::Column,
+            args: [1.5, 4.0, 0.0, 0.0],
+        }));
+        let aoe_targets = [agent_n(2), agent_n(3)];
+        let events = apply_program_aoe(
+            &prog, agent_n(1), agent_n(2), &aoe_targets, 0, 0xCAFE,
+            &CasterStats::default(), &CasterStats::default(),
+        );
+        assert_eq!(events.len(), 2, "Column dispatch → one event per target slot");
+    }
+
+    #[test]
+    fn aoe_wall_dispatch_one_event_per_target() {
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 16.0 }],
+        );
+        prog.per_effect_areas.push(Some(EffectAreaShape {
+            kind: ShapeKind::Wall,
+            args: [4.0, 2.0, 1.0, 0.0],
+        }));
+        let aoe_targets = [agent_n(2), agent_n(3)];
+        let events = apply_program_aoe(
+            &prog, agent_n(1), agent_n(2), &aoe_targets, 0, 0xCAFE,
+            &CasterStats::default(), &CasterStats::default(),
+        );
+        assert_eq!(events.len(), 2, "Wall dispatch → one event per target slot");
+    }
+
+    #[test]
+    fn aoe_cylinder_dispatch_one_event_per_target() {
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 16.0 }],
+        );
+        prog.per_effect_areas.push(Some(EffectAreaShape {
+            kind: ShapeKind::Cylinder,
+            args: [1.5, 2.0, 0.0, 0.0],
+        }));
+        let aoe_targets = [agent_n(2), agent_n(3)];
+        let events = apply_program_aoe(
+            &prog, agent_n(1), agent_n(2), &aoe_targets, 0, 0xCAFE,
+            &CasterStats::default(), &CasterStats::default(),
+        );
+        assert_eq!(events.len(), 2, "Cylinder dispatch → one event per target slot");
+    }
+
+    #[test]
+    fn aoe_dome_dispatch_one_event_per_target() {
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 16.0 }],
+        );
+        prog.per_effect_areas.push(Some(EffectAreaShape {
+            kind: ShapeKind::Dome,
+            args: [2.0, 0.0, 0.0, 0.0],
+        }));
+        let aoe_targets = [agent_n(2), agent_n(3)];
+        let events = apply_program_aoe(
+            &prog, agent_n(1), agent_n(2), &aoe_targets, 0, 0xCAFE,
+            &CasterStats::default(), &CasterStats::default(),
+        );
+        assert_eq!(events.len(), 2, "Dome dispatch → one event per target slot");
+    }
+
+    #[test]
+    fn aoe_hull_dispatch_one_event_per_target() {
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 16.0 }],
+        );
+        prog.per_effect_areas.push(Some(EffectAreaShape {
+            kind: ShapeKind::Hull,
+            args: [2.0, 0.0, 0.0, 0.0],
+        }));
+        let aoe_targets = [agent_n(2), agent_n(3)];
+        let events = apply_program_aoe(
+            &prog, agent_n(1), agent_n(2), &aoe_targets, 0, 0xCAFE,
+            &CasterStats::default(), &CasterStats::default(),
+        );
+        assert_eq!(events.len(), 2, "Hull dispatch → one event per target slot");
     }
 }

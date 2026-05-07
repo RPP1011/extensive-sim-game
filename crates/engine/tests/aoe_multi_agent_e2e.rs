@@ -29,9 +29,12 @@
 //! extend that sweep (would require GPU-side spatial expansion).
 
 use engine::ability::apply::{
-    apply_program_aoe, apply_program_aoe_box_filter, apply_program_aoe_cone_filter,
+    apply_program_aoe, apply_program_aoe_box_filter, apply_program_aoe_column_filter,
+    apply_program_aoe_cone_filter, apply_program_aoe_cylinder_filter,
+    apply_program_aoe_dome_filter, apply_program_aoe_hull_filter,
     apply_program_aoe_line_filter, apply_program_aoe_ring_filter,
-    apply_program_aoe_sphere_filter, ApplyEvent,
+    apply_program_aoe_spread_filter, apply_program_aoe_sphere_filter,
+    apply_program_aoe_wall_filter, ApplyEvent,
 };
 use engine::ability::program::{
     AbilityProgram, CasterStats, EffectAreaShape, EffectOp, Gate, ShapeKind,
@@ -732,4 +735,333 @@ fn aoe_cone_caster_targets_self_returns_empty_set() {
         aoe_targets.is_empty(),
         "degenerate cone (caster targets self) → empty in-cone set, got {aoe_targets:?}",
     );
+}
+
+// ---------------------------------------------------------------- //
+// AOE Path B remaining shapes behavioral E2E (#181)
+// ---------------------------------------------------------------- //
+
+#[test]
+fn aoe_spread_caps_to_max_targets_six_agent_fixture() {
+    // Spread(r=2.5, max=2) cast from ids[0] (origin). Six agents in a
+    // row at x = 0, 1, 1.5, 2.0, 3.0, 5.0. In-radius = ids[0..=3]
+    // (distances 0, 1, 1.5, 2.0). Sort by AgentId then truncate to
+    // max=2 → {ids[0], ids[1]}. Expected 2 chronicle records.
+    let mut state = SimState::new(8, 0xCAFE);
+    let positions = [
+        glam::Vec3::new(0.0, 0.0, 0.0),
+        glam::Vec3::new(1.0, 0.0, 0.0),
+        glam::Vec3::new(1.5, 0.0, 0.0),
+        glam::Vec3::new(2.0, 0.0, 0.0),
+        glam::Vec3::new(3.0, 0.0, 0.0),
+        glam::Vec3::new(5.0, 0.0, 0.0),
+    ];
+    let ids: Vec<AgentId> = positions
+        .iter()
+        .map(|&pos| {
+            state
+                .spawn_agent(AgentSpawn { pos, ..Default::default() })
+                .expect("agent_cap large enough for 6 agents")
+        })
+        .collect();
+    assert_eq!(ids.len(), 6);
+
+    let mut prog = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
+        [EffectOp::Damage { amount: 15.0 }],
+    );
+    prog.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Spread,
+        args: [2.5, 2.0, 0.0, 0.0],
+    }));
+
+    let center = state.agent_pos(ids[0]).expect("ids[0] alive");
+    let candidates: Vec<(AgentId, glam::Vec3)> = state
+        .spatial()
+        .within_radius(&state, center, 2.5)
+        .into_iter()
+        .map(|id| (id, state.agent_pos(id).expect("alive")))
+        .collect();
+    let aoe_targets = apply_program_aoe_spread_filter(
+        center, /*radius*/ 2.5, /*max_targets*/ 2, &candidates,
+    );
+    assert_eq!(
+        aoe_targets,
+        vec![ids[0], ids[1]],
+        "spread(r=2.5, max=2) keeps lowest-AgentId 2 in-radius hits; got {aoe_targets:?}"
+    );
+
+    let events = apply_program_aoe(
+        &prog,
+        ids[0],
+        ids[0],
+        &aoe_targets,
+        0,
+        0xCAFE,
+        &CasterStats::default(),
+        &CasterStats::default(),
+    );
+    assert_eq!(events.len(), 2, "spread AOE → 2 chronicle records (capped)");
+    for (i, expected_target) in [ids[0], ids[1]].iter().enumerate() {
+        match &events[i] {
+            ApplyEvent::Damage { source, target, amount } => {
+                assert_eq!(*source, ids[0], "event[{i}] source");
+                assert_eq!(*target, *expected_target, "event[{i}] target");
+                assert_eq!(*amount, 15.0, "event[{i}] amount");
+            }
+            other => panic!("expected Damage, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn aoe_column_extends_up_three_agent_3d_stack() {
+    // Column(r=1.0, h=3.0) cast from ids[0]. Three agents stacked
+    // vertically: ids[0] at (0, 0, 0); ids[1] at (0.5, 1.5, 0.5)
+    // (within column XZ + mid-height); ids[2] at (0, -0.5, 0) (below
+    // the column origin — column extends UP only, so ids[2] is OUT).
+    // Expected in-column: ids[0] + ids[1].
+    let mut state = SimState::new(8, 0xCAFE);
+    let positions = [
+        glam::Vec3::new(0.0, 0.0, 0.0),
+        glam::Vec3::new(0.5, 1.5, 0.5),
+        glam::Vec3::new(0.0, -0.5, 0.0),
+    ];
+    let ids: Vec<AgentId> = positions
+        .iter()
+        .map(|&pos| {
+            state
+                .spawn_agent(AgentSpawn { pos, ..Default::default() })
+                .expect("agent_cap large enough for 3 agents")
+        })
+        .collect();
+
+    let mut prog = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
+        [EffectOp::Damage { amount: 13.0 }],
+    );
+    prog.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Column,
+        args: [1.0, 3.0, 0.0, 0.0],
+    }));
+
+    let center = state.agent_pos(ids[0]).expect("ids[0] alive");
+    let candidates: Vec<(AgentId, glam::Vec3)> = ids
+        .iter()
+        .map(|&id| (id, state.agent_pos(id).expect("alive")))
+        .collect();
+    let aoe_targets = apply_program_aoe_column_filter(center, 1.0, 3.0, &candidates);
+    assert_eq!(
+        aoe_targets,
+        vec![ids[0], ids[1]],
+        "column extends UP only — ids[2] below origin must be excluded; got {aoe_targets:?}"
+    );
+
+    let events = apply_program_aoe(
+        &prog, ids[0], ids[0], &aoe_targets, 0, 0xCAFE,
+        &CasterStats::default(), &CasterStats::default(),
+    );
+    assert_eq!(events.len(), 2);
+}
+
+#[test]
+fn aoe_wall_facing_plus_x_slab_four_agent_fixture() {
+    // Wall(len=4, h=2, thick=2, facing=0deg) cast from ids[0]. Slab
+    // covers x∈[0, 2], z∈[-2, 2], y∈[0, 2]. Agents at:
+    //   ids[0] (0, 0, 0)        — origin, in
+    //   ids[1] (1, 0.5, 0.5)    — forward=1, lateral=0.5, y=0.5: in
+    //   ids[2] (3, 0, 0)        — forward=3 > thick=2: out
+    //   ids[3] (1, 0, 3)        — lateral=3 > len/2=2: out
+    let mut state = SimState::new(8, 0xCAFE);
+    let positions = [
+        glam::Vec3::new(0.0, 0.0, 0.0),
+        glam::Vec3::new(1.0, 0.5, 0.5),
+        glam::Vec3::new(3.0, 0.0, 0.0),
+        glam::Vec3::new(1.0, 0.0, 3.0),
+    ];
+    let ids: Vec<AgentId> = positions
+        .iter()
+        .map(|&pos| {
+            state
+                .spawn_agent(AgentSpawn { pos, ..Default::default() })
+                .expect("agent_cap large enough for 4 agents")
+        })
+        .collect();
+
+    let mut prog = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
+        [EffectOp::Damage { amount: 11.0 }],
+    );
+    prog.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Wall,
+        args: [4.0, 2.0, 2.0, 0.0],
+    }));
+
+    let center = state.agent_pos(ids[0]).expect("ids[0] alive");
+    let candidates: Vec<(AgentId, glam::Vec3)> = ids
+        .iter()
+        .map(|&id| (id, state.agent_pos(id).expect("alive")))
+        .collect();
+    let aoe_targets = apply_program_aoe_wall_filter(
+        center, /*length*/ 4.0, /*height*/ 2.0, /*thickness*/ 2.0,
+        /*facing_deg*/ 0.0, &candidates,
+    );
+    assert_eq!(
+        aoe_targets,
+        vec![ids[0], ids[1]],
+        "wall(len=4, h=2, thick=2, +X) hits ids[0..=1]; got {aoe_targets:?}"
+    );
+
+    let events = apply_program_aoe(
+        &prog, ids[0], ids[0], &aoe_targets, 0, 0xCAFE,
+        &CasterStats::default(), &CasterStats::default(),
+    );
+    assert_eq!(events.len(), 2);
+}
+
+#[test]
+fn aoe_cylinder_symmetric_vertical_three_agent_3d() {
+    // Cylinder(r=1.5, h=2.0) cast from ids[0]. Three agents:
+    //   ids[0] (0, 0, 0)       — center, in
+    //   ids[1] (1, 1, 0)       — XZ d=1, y=1 (= h/2 wall): in
+    //   ids[2] (0, -1.5, 0)    — y=-1.5 > h/2=1: out
+    let mut state = SimState::new(8, 0xCAFE);
+    let positions = [
+        glam::Vec3::new(0.0, 0.0, 0.0),
+        glam::Vec3::new(1.0, 1.0, 0.0),
+        glam::Vec3::new(0.0, -1.5, 0.0),
+    ];
+    let ids: Vec<AgentId> = positions
+        .iter()
+        .map(|&pos| {
+            state
+                .spawn_agent(AgentSpawn { pos, ..Default::default() })
+                .expect("agent_cap large enough for 3 agents")
+        })
+        .collect();
+
+    let mut prog = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
+        [EffectOp::Damage { amount: 9.0 }],
+    );
+    prog.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Cylinder,
+        args: [1.5, 2.0, 0.0, 0.0],
+    }));
+
+    let center = state.agent_pos(ids[0]).expect("ids[0] alive");
+    let candidates: Vec<(AgentId, glam::Vec3)> = ids
+        .iter()
+        .map(|&id| (id, state.agent_pos(id).expect("alive")))
+        .collect();
+    let aoe_targets = apply_program_aoe_cylinder_filter(center, 1.5, 2.0, &candidates);
+    assert_eq!(
+        aoe_targets,
+        vec![ids[0], ids[1]],
+        "cylinder(r=1.5, h=2) symmetric — ids[2] at y=-1.5 OUT; got {aoe_targets:?}"
+    );
+
+    let events = apply_program_aoe(
+        &prog, ids[0], ids[0], &aoe_targets, 0, 0xCAFE,
+        &CasterStats::default(), &CasterStats::default(),
+    );
+    assert_eq!(events.len(), 2);
+}
+
+#[test]
+fn aoe_dome_above_plane_only_three_agent_fixture() {
+    // Dome(r=2.0) cast from ids[0]. Three agents:
+    //   ids[0] (0, 0, 0)       — boundary plane (y=0, in via inclusive)
+    //   ids[1] (1, 1, 0)       — d=1.41, y=1 above plane: in
+    //   ids[2] (0, -1, 0)      — y=-1 below plane: out
+    let mut state = SimState::new(8, 0xCAFE);
+    let positions = [
+        glam::Vec3::new(0.0, 0.0, 0.0),
+        glam::Vec3::new(1.0, 1.0, 0.0),
+        glam::Vec3::new(0.0, -1.0, 0.0),
+    ];
+    let ids: Vec<AgentId> = positions
+        .iter()
+        .map(|&pos| {
+            state
+                .spawn_agent(AgentSpawn { pos, ..Default::default() })
+                .expect("agent_cap large enough for 3 agents")
+        })
+        .collect();
+
+    let mut prog = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
+        [EffectOp::Damage { amount: 7.0 }],
+    );
+    prog.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Dome,
+        args: [2.0, 0.0, 0.0, 0.0],
+    }));
+
+    let center = state.agent_pos(ids[0]).expect("ids[0] alive");
+    let candidates: Vec<(AgentId, glam::Vec3)> = ids
+        .iter()
+        .map(|&id| (id, state.agent_pos(id).expect("alive")))
+        .collect();
+    let aoe_targets = apply_program_aoe_dome_filter(center, 2.0, &candidates);
+    assert_eq!(
+        aoe_targets,
+        vec![ids[0], ids[1]],
+        "dome(r=2) excludes below-plane ids[2]; got {aoe_targets:?}"
+    );
+
+    let events = apply_program_aoe(
+        &prog, ids[0], ids[0], &aoe_targets, 0, 0xCAFE,
+        &CasterStats::default(), &CasterStats::default(),
+    );
+    assert_eq!(events.len(), 2);
+}
+
+#[test]
+fn aoe_hull_aliases_sphere_three_agent_fixture() {
+    // Hull(r=1.5) — Sphere alias today. Three agents in a row at x=0,
+    // 1, 2: hits ids[0] (d=0) + ids[1] (d=1); ids[2] (d=2 > 1.5) OUT.
+    let mut state = SimState::new(8, 0xCAFE);
+    let ids = spawn_row(&mut state, 3);
+
+    let mut prog = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
+        [EffectOp::Damage { amount: 5.0 }],
+    );
+    prog.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Hull,
+        args: [1.5, 0.0, 0.0, 0.0],
+    }));
+
+    let center = state.agent_pos(ids[0]).expect("ids[0] alive");
+    let candidates: Vec<(AgentId, glam::Vec3)> = ids
+        .iter()
+        .map(|&id| (id, state.agent_pos(id).expect("alive")))
+        .collect();
+    let aoe_targets = apply_program_aoe_hull_filter(center, 1.5, &candidates);
+    assert_eq!(
+        aoe_targets,
+        vec![ids[0], ids[1]],
+        "hull(r=1.5) aliases sphere — hits ids[0..=1]; got {aoe_targets:?}"
+    );
+
+    // Also validate the alias against the sphere filter directly.
+    let sphere_targets = apply_program_aoe_sphere_filter(center, 1.5, &candidates);
+    assert_eq!(
+        sphere_targets, aoe_targets,
+        "hull must match sphere result today (alias semantics); \
+         hull={aoe_targets:?} sphere={sphere_targets:?}"
+    );
+
+    let events = apply_program_aoe(
+        &prog, ids[0], ids[0], &aoe_targets, 0, 0xCAFE,
+        &CasterStats::default(), &CasterStats::default(),
+    );
+    assert_eq!(events.len(), 2);
 }

@@ -784,6 +784,138 @@ fn build_sweep() -> Vec<(&'static str, AbilityProgram, CasterStats)> {
         CasterStats::default(),
     ));
 
+    // 37. PickFew-shape — `Damage(15) in spread(2.0, 1)` (#181 AOE Path B
+    //     Spread). Spread is Circle + per-cast cap on number of records
+    //     after sorting by AgentId. The GPU side defers Spread (sort +
+    //     cap in WGSL is non-trivial under atomicAdd ring writes), so the
+    //     dispatcher's WGSL `else` branch falls through to the single-
+    //     target path; the CPU oracle agrees by passing only the post-
+    //     cap target slot list to `apply_program_aoe`. Under the smoke
+    //     fixture's self-cast, both produce 1 chronicle record (target =
+    //     caster slot 0). Pin the alignment between CPU oracle (post-
+    //     cap, 1 target) and GPU (single-target fallback, 1 target).
+    let mut pick_few = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 15.0 }],
+    );
+    pick_few.per_effect_areas.push(Some(engine::ability::program::EffectAreaShape {
+        kind: engine::ability::program::ShapeKind::Spread,
+        args: [2.0, 1.0, 0.0, 0.0],
+    }));
+    out.push((
+        "PickFew",
+        pick_few,
+        CasterStats::default(),
+    ));
+
+    // 38. TallStomp-shape — `Damage(13) in column(2.0, 4.0)` (#181 AOE
+    //     Path B Column). Vertical cylinder extending UP from the cast
+    //     center (XZ disc + `0 ≤ dy ≤ height` gate). Under the smoke
+    //     fixture's 4-agent row at (0, 1.5, 3.0, 4.5) on the X-axis (all
+    //     at y=0), Column(2, 4) at caster slot 0 hits slot 0 (origin,
+    //     y=0 on plane) and slot 1 (XZ d=1.5, y=0 on plane). Slot 2/3
+    //     are outside the XZ radius. Both backends emit 2 chronicle
+    //     records.
+    let mut tall_stomp = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 13.0 }],
+    );
+    tall_stomp.per_effect_areas.push(Some(engine::ability::program::EffectAreaShape {
+        kind: engine::ability::program::ShapeKind::Column,
+        args: [2.0, 4.0, 0.0, 0.0],
+    }));
+    out.push((
+        "TallStomp",
+        tall_stomp,
+        CasterStats::default(),
+    ));
+
+    // 39. ShieldWall-shape — `Damage(11) in wall(4, 2, 2, 0)` (#181 AOE
+    //     Path B Wall). Rectangular slab facing +X (facing_deg=0): slab
+    //     covers x∈[0, 2], z∈[-2, 2], y∈[0, 2]. Under the smoke fixture's
+    //     4-agent row at (0, 1.5, 3.0, 4.5) on the X-axis (all at y=0),
+    //     Wall hits slot 0 (origin: forward=0, lateral=0, y=0 → in) and
+    //     slot 1 (forward=1.5 ≤ 2, lateral=0, y=0 → in). Slots 2/3 are
+    //     forward > 2 → out. Both backends emit 2 chronicle records.
+    let mut shield_wall = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 11.0 }],
+    );
+    shield_wall.per_effect_areas.push(Some(engine::ability::program::EffectAreaShape {
+        kind: engine::ability::program::ShapeKind::Wall,
+        args: [4.0, 2.0, 2.0, 0.0],
+    }));
+    out.push((
+        "ShieldWall",
+        shield_wall,
+        CasterStats::default(),
+    ));
+
+    // 40. Dropzone-shape — `Damage(9) in cylinder(2, 4)` (#181 AOE Path
+    //     B Cylinder). Symmetric vertical cylinder. Under the 4-agent
+    //     row, hits slot 0 + slot 1 (XZ d=1.5 ≤ 2, |y|=0 ≤ 2). Both
+    //     backends emit 2 chronicle records.
+    let mut dropzone = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 9.0 }],
+    );
+    dropzone.per_effect_areas.push(Some(engine::ability::program::EffectAreaShape {
+        kind: engine::ability::program::ShapeKind::Cylinder,
+        args: [2.0, 4.0, 0.0, 0.0],
+    }));
+    out.push((
+        "Dropzone",
+        dropzone,
+        CasterStats::default(),
+    ));
+
+    // 41. Aegis-shape — `Damage(7) in dome(2)` (#181 AOE Path B Dome).
+    //     Half-sphere covering the upper hemisphere (`dist² ≤ radius²`
+    //     ∧ `dy ≥ 0`). Under the 4-agent row at y=0, Dome(2) at caster
+    //     slot 0: slot 0 (d=0, dy=0 → in via inclusive-plane), slot 1
+    //     (d=1.5, dy=0 → in), slots 2/3 out (d > radius). Both backends
+    //     emit 2 chronicle records. The y=0 boundary inclusivity pins
+    //     the `>=` vs `>` semantic for the plane gate.
+    let mut aegis = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 7.0 }],
+    );
+    aegis.per_effect_areas.push(Some(engine::ability::program::EffectAreaShape {
+        kind: engine::ability::program::ShapeKind::Dome,
+        args: [2.0, 0.0, 0.0, 0.0],
+    }));
+    out.push((
+        "Aegis",
+        aegis,
+        CasterStats::default(),
+    ));
+
+    // 42. Bulwark-shape — `Damage(5) in hull(2)` (#181 AOE Path B Hull).
+    //     **Hull is a Sphere alias today** (no spec semantics defined —
+    //     see `apply_program_aoe_hull_filter` doc-comment NOTE). With
+    //     radius=2, behaves identically to BlastSphere: under the 4-agent
+    //     row, hits slot 0 + slot 1. Pin the alias so a future spec
+    //     change surfaces here. Both backends emit 2 chronicle records.
+    let mut bulwark = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 5.0 }],
+    );
+    bulwark.per_effect_areas.push(Some(engine::ability::program::EffectAreaShape {
+        kind: engine::ability::program::ShapeKind::Hull,
+        args: [2.0, 0.0, 0.0, 0.0],
+    }));
+    out.push((
+        "Bulwark",
+        bulwark,
+        CasterStats::default(),
+    ));
+
     out
 }
 
@@ -1092,6 +1224,15 @@ fn cpu_gpu_apply_program_byte_equal_across_modifier_matrix() {
             "BlastSphere"   => 4,
             "ShockwaveRing" => 4,
             "PiercingLine"  => 4,
+            // #181 AOE Path B remaining shapes — 4-agent row fixtures
+            // (same x=0/1.5/3.0/4.5 layout as Cleave) for every shape
+            // that expects a non-trivial in-shape set under self-cast.
+            "PickFew"       => 4,
+            "TallStomp"     => 4,
+            "ShieldWall"    => 4,
+            "Dropzone"      => 4,
+            "Aegis"         => 4,
+            "Bulwark"       => 4,
             _               => N_AGENTS,
         };
 
@@ -1230,6 +1371,20 @@ fn cpu_gpu_apply_program_byte_equal_across_modifier_matrix() {
                 [4.5, 0.0, 0.0],
             ]);
         }
+        // #181 AOE Path B remaining shapes share the same 4-agent row
+        // layout (x=0, 1.5, 3.0, 4.5) as Cleave/Pulverize/BlastSphere/
+        // etc. The per-shape gates determine which slot ids end up in
+        // the in-shape set — see each entry's doc-comment in
+        // `build_sweep` for the expected hit set.
+        if matches!(*name, "PickFew" | "TallStomp" | "ShieldWall" | "Dropzone" | "Aegis" | "Bulwark") {
+            state.set_agent_alive(&[1, 0, 0, 0]);
+            state.set_agent_positions(&[
+                [0.0, 0.0, 0.0],
+                [1.5, 0.0, 0.0],
+                [3.0, 0.0, 0.0],
+                [4.5, 0.0, 0.0],
+            ]);
+        }
 
         for &tick in TICKS {
             // -- CPU oracle.
@@ -1276,6 +1431,51 @@ fn cpu_gpu_apply_program_byte_equal_across_modifier_matrix() {
                     tick,
                     caster_stats,
                 ),
+                // #181 AOE Path B remaining shapes (Spread/Column/Wall/
+                // Cylinder/Dome/Hull). Hit sets under the 4-agent row
+                // fixture (x=0, 1.5, 3.0, 4.5 at y=0):
+                //
+                //   PickFew   (Spread, r=2.0, max=1):
+                //     CPU oracle pre-caps to [slot 0] (lowest AgentId in
+                //     radius). GPU defers Spread → falls through to the
+                //     single-target branch which writes target=caster_slot=0.
+                //     Both produce 1 record with target=0.
+                //
+                //   TallStomp (Column, r=2.0, h=4.0):
+                //     XZ disc gate hits slot 0 (d=0) and slot 1 (d=1.5);
+                //     all at y=0, dy=0 ∈ [0, 4]. → [slot 0, slot 1].
+                //
+                //   ShieldWall (Wall, len=4, h=2, thick=2, +X):
+                //     Slab covers x∈[0,2], z∈[-2,2], y∈[0,2]. Hits slot
+                //     0 (forward=0) and slot 1 (forward=1.5 ≤ 2). Slots
+                //     2/3 forward > 2 ⇒ out. → [slot 0, slot 1].
+                //
+                //   Dropzone (Cylinder, r=2.0, h=4.0):
+                //     XZ disc + |dy| ≤ 2. Hits slot 0 + slot 1. → [slot 0, slot 1].
+                //
+                //   Aegis (Dome, r=2.0):
+                //     Sphere gate + dy ≥ 0 (all at dy=0 boundary). Hits
+                //     slot 0 + slot 1. → [slot 0, slot 1].
+                //
+                //   Bulwark (Hull, r=2.0):
+                //     Sphere alias today. Hits slot 0 + slot 1. →
+                //     [slot 0, slot 1].
+                "PickFew" => aoe_cpu_records_for_cast(
+                    program,
+                    /*caster_slot*/ 0,
+                    /*aoe_target_slots*/ &[0],
+                    tick,
+                    caster_stats,
+                ),
+                "TallStomp" | "ShieldWall" | "Dropzone" | "Aegis" | "Bulwark" => {
+                    aoe_cpu_records_for_cast(
+                        program,
+                        /*caster_slot*/ 0,
+                        /*aoe_target_slots*/ &[0, 1],
+                        tick,
+                        caster_stats,
+                    )
+                }
                 _ => cpu_records_for_cast(
                     program,
                     /*caster_slot*/ 0,
