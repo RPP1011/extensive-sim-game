@@ -283,6 +283,45 @@ fn distinct_caster_and_target_pipeline_handles_stun_payload_shape() {
     assert_eq!(r[4], 225, "expires_at_tick = tick(200) + duration(25)");
 }
 
+/// Slice ε pipeline pin for Heal — the friendly-target chronicle
+/// variant (hostile_only=false). Confirms slot 2/3 routing works
+/// when caster ≠ target on a friendly cast (caster heals an ally),
+/// which is the canonical use case for the explicit-target operand.
+#[test]
+fn distinct_caster_and_target_pipeline_handles_friendly_heal() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
+        [EffectOp::Heal { amount: 12.5 }],
+    );
+    let caster = aid(4);
+    let target = aid(8);
+    let tick: u32 = 300;
+
+    let events = apply_program(
+        &program,
+        caster,
+        target,
+        tick as u64,
+        0xFEED_FACE,
+        &CasterStats::default(),
+    );
+    let records: Vec<_> = events
+        .into_iter()
+        .filter_map(|e| {
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw())
+        })
+        .collect();
+
+    assert_eq!(records.len(), 1, "Heal produces one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 27, "EffectHealApplied");
+    assert_eq!(r[1], 300, "tick");
+    assert_eq!(r[2], 4, "actor slot — caster_id (the healer)");
+    assert_eq!(r[3], 8, "target slot — distinct target_id (the ally)");
+    assert_eq!(r[4], 12.5_f32.to_bits(), "amount as bitcast<u32>");
+}
+
 /// Slice ε pipeline pin for Slow — the only chronicle-bearing
 /// variant with 4 payload words (others have 3). Confirms slot 2/3
 /// routing is independent even when the payload extends to slot 5.
