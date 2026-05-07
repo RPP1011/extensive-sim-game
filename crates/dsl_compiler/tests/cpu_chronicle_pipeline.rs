@@ -322,6 +322,45 @@ fn distinct_caster_and_target_pipeline_handles_friendly_heal() {
     assert_eq!(r[4], 12.5_f32.to_bits(), "amount as bitcast<u32>");
 }
 
+/// Slice ε pipeline pin for Shield — the third amount-only chronicle
+/// variant (alongside Damage + Heal) but with its own EventKindId
+/// (28). Confirms slot 2/3 routing is event-kind-tag independent
+/// across the three structurally-identical payload shapes.
+#[test]
+fn distinct_caster_and_target_pipeline_handles_shield() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
+        [EffectOp::Shield { amount: 45.0 }],
+    );
+    let caster = aid(6);
+    let target = aid(13);
+    let tick: u32 = 400;
+
+    let events = apply_program(
+        &program,
+        caster,
+        target,
+        tick as u64,
+        0xC0FFEE,
+        &CasterStats::default(),
+    );
+    let records: Vec<_> = events
+        .into_iter()
+        .filter_map(|e| {
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw())
+        })
+        .collect();
+
+    assert_eq!(records.len(), 1, "Shield produces one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 28, "EffectShieldApplied");
+    assert_eq!(r[1], 400, "tick");
+    assert_eq!(r[2], 6, "actor slot — caster_id (the shielder)");
+    assert_eq!(r[3], 13, "target slot — distinct target_id (the protected ally)");
+    assert_eq!(r[4], 45.0_f32.to_bits(), "amount as bitcast<u32>");
+}
+
 /// Slice ε pipeline pin for Slow — the only chronicle-bearing
 /// variant with 4 payload words (others have 3). Confirms slot 2/3
 /// routing is independent even when the payload extends to slot 5.
