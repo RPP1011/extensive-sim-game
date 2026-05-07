@@ -44,6 +44,12 @@ pub mod kernel_lowerings;
 // (P2: schema-hash bumps on layout change).
 pub mod schema_hash;
 
+// CPU reference for the WGSL apply_ability dispatcher's chronicle
+// output — establishes the contract that the GPU dispatcher's
+// chronicle records mirror, ahead of the runtime crate that #133
+// will use for full CPU↔GPU parity.
+pub mod cpu_chronicle_reference;
+
 // Top-level symbol re-exports
 pub use ast::{Decl, Program, Span, Spanned};
 pub use error::ParseError;
