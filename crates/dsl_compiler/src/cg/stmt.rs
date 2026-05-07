@@ -982,6 +982,25 @@ mod tests {
         assert_roundtrip(&s);
     }
 
+    /// Slice ε: `apply_ability` Display includes caster + target ids.
+    /// Was previously info-lossy (showed only `expr#<ability>`),
+    /// fixed in commit `150db844`. This test pins the new format
+    /// so a regression that drops the slice-ε operands surfaces
+    /// here rather than as silently-incomplete debug output.
+    #[test]
+    fn apply_ability_display_and_roundtrip_includes_caster_target() {
+        let s = CgStmt::ApplyAbility {
+            ability: CgExprId(7),
+            caster: CgExprId(11),
+            target: CgExprId(13),
+        };
+        assert_eq!(
+            format!("{}", s),
+            "apply_ability(expr#7, caster=expr#11, target=expr#13)"
+        );
+        assert_roundtrip(&s);
+    }
+
     #[test]
     fn emit_display_and_roundtrip() {
         let s = CgStmt::Emit {
