@@ -713,6 +713,41 @@ fn apply_ability_smoke_kernel_passes_naga_validator() {
     );
 }
 
+/// Slice ε regression pin: even when the source omits `target
+/// <expr>`, lowering must still populate the target operand
+/// (defaulting to caster) so the dispatcher emit produces BOTH
+/// `let caster_slot` AND `let target_slot` lets. Without this,
+/// a regression that left `target = None` in the lowered IR would
+/// produce a kernel missing the target_slot binding (silent — the
+/// payload word 3 would reference an undeclared identifier).
+///
+/// The smoke fixture's first rule (`DispatchAbility`) uses implicit
+/// target; this test pins that the implicit-target default lands
+/// correctly through to emit.
+#[test]
+fn smoke_fixture_implicit_target_still_emits_target_slot_let() {
+    let path = workspace_path("assets/sim/apply_ability_smoke.sim");
+    let art = compile_sim(&path).expect("apply_ability_smoke compiles");
+
+    let body = kernel_body_containing(&art, "DispatchAbility")
+        .or_else(|| kernel_body_containing(&art, "physics"))
+        .expect("physics kernel emitted");
+
+    // Both lets present — implicit target defaults to caster, so
+    // the dispatcher emit produces both bindings (with the same
+    // resolved expression). A regression that left target = None
+    // would break the format-string injection.
+    assert!(
+        body.contains("let caster_slot: u32"),
+        "dispatcher must emit `let caster_slot`;\n{body}"
+    );
+    assert!(
+        body.contains("let target_slot: u32"),
+        "dispatcher must emit `let target_slot` even when source \
+         omits `target <expr>` (implicit-target default = caster);\n{body}"
+    );
+}
+
 /// Pin the BGL composer's wiring of `event_ring` + `event_tail` into
 /// the dispatcher kernel. Without these bindings, the chronicle writes
 /// emitted by the dispatcher arms would reference undeclared identifiers
