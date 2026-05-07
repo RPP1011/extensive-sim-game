@@ -68,6 +68,15 @@ pub fn schema_hash() -> [u8; 32] {
     h.update(b"BuiltinMetrics:tick_ms,event_count,agent_alive,cascade_iterations,mask_true_frac");
     h.update(b"BuiltinInvariants:mask_validity,pool_non_overlap");
     h.update(b"FailureMode:Panic,Log");
+    // P5: RngPurpose discriminant table (closed-set FIXED-FOREVER ids
+    // — see `dsl_compiler::cg::data_handle::RngPurpose::wgsl_id`).
+    // Adding/reordering variants is a determinism-breaking change
+    // requiring a schema-hash bump. WGSL prelude
+    // (`RNG_WGSL_PRELUDE` in `dsl_compiler::cg::emit::program`)
+    // mirrors this exact mapping. Slice ζ (2026-05-07) added
+    // `Chance=10` for the apply_ability dispatcher's per-effect
+    // chance gate (CPU/GPU PCG parity).
+    h.update(b"RngPurpose:Action=1,Sample=2,Shuffle=3,Conception=4,Uniform=5,Gauss=6,Coin=7,UniformInt=8,GaussB=9,Chance=10");
     // Plan 3 surface — snapshot format, observation packer, probe harness.
     // Bumping any of these strings invalidates older snapshot files and
     // forces a migration registration.

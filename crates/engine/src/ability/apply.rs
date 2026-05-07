@@ -3,8 +3,10 @@
 //! Translates `AbilityProgram` IR into a stream of typed `ApplyEvent`s
 //! that downstream sims can drain into their existing event rings.
 //! Honors the per-effect chance gate (`program.chances[i]`) using
-//! `per_agent_u32` per the P5 keyed-PCG contract — replay equivalence
-//! and cross-backend parity hold.
+//! `per_agent_u32_pcg_with_extra` per the P5 keyed-PCG contract +
+//! P11 cross-backend bit-equality — same WGSL prelude and host
+//! mixer chain so a chance-gated effect produces a byte-identical
+//! chronicle record across CPU and GPU dispatchers.
 //!
 //! # Status
 //!
@@ -91,7 +93,7 @@ use crate::ability::program::{
     EffectPredicateBinder, EffectPredicateOp, ShapeKind,
 };
 use crate::ids::AgentId;
-use crate::rng::per_agent_u32;
+use crate::rng::per_agent_u32_pcg_with_extra;
 use smallvec::SmallVec;
 
 /// Typed apply-event vocabulary. Each variant matches an `EffectOp`
@@ -216,7 +218,8 @@ const APPLY_INLINE: usize = 4;
 /// `Some(amount) = 0xFFFF` chance slot fires deterministically (max
 /// q16 value — apply handlers treat as "always"); `None` slot also
 /// fires deterministically (no gate authored). The runtime gate
-/// compares `(per_agent_u32 & 0xFFFF) < q16` — when q16=65534
+/// compares `(per_agent_u32_pcg_with_extra(seed, caster_slot, tick,
+/// RngPurpose::Chance, slot_idx) & 0xFFFF) < q16` — when q16=65534
 /// (canonical "100%") this is true 65534/65536 ≈ 99.997% of draws
 /// (indistinguishable from "always" at 16-bit RNG resolution).
 pub fn apply_program(
@@ -231,16 +234,30 @@ pub fn apply_program(
     let mut out: SmallVec<[ApplyEvent; APPLY_INLINE]> = SmallVec::new();
 
     for (i, op) in program.effects.iter().enumerate() {
-        // -- Wave 1.5#5 chance gate. --
+        // -- Wave 1.5#5 chance gate (P11 GPU-parity mixer). --
         // The chances slice is either empty (no effect carried the
         // modifier — fire all) or per-effect Option<u16>. None within
         // a populated slice = no gate on that slot.
+        //
+        // P11: switched from ahash `per_agent_u32` to the GPU-parity
+        // PCG primitive `per_agent_u32_pcg_with_extra` so the GPU
+        // dispatcher's chance gate produces a byte-identical chronicle
+        // record under the same inputs. Caster's 0-based slot index
+        // (`caster.raw() - 1`) keys agent_id — mirrors the WGSL
+        // dispatcher's `caster_slot` (= `gid.x`, 0-based). The
+        // `RngPurpose::Chance` (id 10) tag is shared across all
+        // chance-gated effects; the per-effect slot index `i` is
+        // mixed in via `extra` so multi-effect abilities don't share
+        // a draw across slots.
         if let Some(Some(q16)) = program.chances.get(i).copied() {
-            // P5: derive the draw from (world_seed, caster, tick,
-            // effect_slot) — purpose tag includes the slot index so
-            // multi-effect abilities don't share a draw.
-            let purpose = [b'c', b'h', b'a', b'n', b'c', b'e', i as u8];
-            let draw = per_agent_u32(world_seed, caster, tick, &purpose) & 0xFFFF;
+            let caster_slot = caster.raw().saturating_sub(1);
+            let draw = per_agent_u32_pcg_with_extra(
+                world_seed as u32,
+                caster_slot,
+                tick as u32,
+                /* purpose_id = RngPurpose::Chance.wgsl_id() */ 10,
+                i as u32,
+            ) & 0xFFFF;
             if (draw as u16) >= q16 {
                 continue; // gate fails — skip this effect
             }
@@ -496,10 +513,18 @@ pub fn apply_program_aoe(
 
     for (i, op) in program.effects.iter().enumerate() {
         // Chance gate (same shape as apply_program — slot-keyed,
-        // all-or-nothing across the AOE expansion).
+        // all-or-nothing across the AOE expansion). P11: PCG mixer
+        // for cross-backend parity; see the doc comment in
+        // `apply_program`.
         if let Some(Some(q16)) = program.chances.get(i).copied() {
-            let purpose = [b'c', b'h', b'a', b'n', b'c', b'e', i as u8];
-            let draw = per_agent_u32(world_seed, caster, tick, &purpose) & 0xFFFF;
+            let caster_slot = caster.raw().saturating_sub(1);
+            let draw = per_agent_u32_pcg_with_extra(
+                world_seed as u32,
+                caster_slot,
+                tick as u32,
+                /* purpose_id = RngPurpose::Chance.wgsl_id() */ 10,
+                i as u32,
+            ) & 0xFFFF;
             if (draw as u16) >= q16 {
                 continue;
             }

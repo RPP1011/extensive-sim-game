@@ -140,6 +140,38 @@ pub fn per_agent_u32_pcg(world_seed: u32, agent_id: u32, tick: u32, purpose_id: 
     s
 }
 
+/// Five-input variant of [`per_agent_u32_pcg`] — folds an additional
+/// `extra` u32 into the PCG mixing chain after `purpose_id`.
+///
+/// Used by the per-effect chance gate inside the `apply_ability`
+/// dispatcher: a single `RngPurpose::Chance` (purpose id 10) covers
+/// every chance-gated effect across the registry, and the per-effect
+/// slot index `i ∈ [0, MAX_EFFECTS_PER_PROGRAM)` is mixed in as `extra`
+/// so multi-effect abilities don't share a single draw across slots.
+///
+/// The WGSL mirror is `per_agent_u32_with_extra` in
+/// `crates/dsl_compiler/src/cg/emit/program.rs::RNG_WGSL_PRELUDE` —
+/// both sides must stay bit-equal under shared inputs (P11).
+///
+/// DO NOT modify the mixing chain (or the `extra` fold position)
+/// without bumping the engine schema hash AND updating
+/// `RNG_WGSL_PRELUDE` in lockstep.
+#[inline]
+pub fn per_agent_u32_pcg_with_extra(
+    world_seed: u32,
+    agent_id:   u32,
+    tick:       u32,
+    purpose_id: u32,
+    extra:      u32,
+) -> u32 {
+    let mut s = rng_mix32(world_seed ^ 0x9E37_79B9);
+    s = rng_mix32(s ^ agent_id);
+    s = rng_mix32(s ^ tick);
+    s = rng_mix32(s ^ purpose_id);
+    s = rng_mix32(s ^ extra);
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,5 +280,39 @@ mod tests {
         // hash bump AND a lockstep update to the WGSL prelude.
         let v = per_agent_u32_pcg(42, 1, 100, 1);
         assert_eq!(v, 0x5CBB_D99C);
+    }
+
+    #[test]
+    fn per_agent_pcg_with_extra_distinct_per_extra() {
+        // Slot 0 vs slot 1 must produce distinct draws under the
+        // same (seed, agent, tick, purpose) tuple. This is the
+        // multi-effect chance-gate guarantee: `apply_program`
+        // mixes `i ∈ [0, MAX_EFFECTS_PER_PROGRAM)` as `extra` so a
+        // 2-effect ability with chance modifiers on both slots
+        // doesn't reuse the same gate decision twice.
+        let a = per_agent_u32_pcg_with_extra(42, 1, 100, 10, 0);
+        let b = per_agent_u32_pcg_with_extra(42, 1, 100, 10, 1);
+        assert_ne!(a, b, "slot index must perturb the draw");
+    }
+
+    #[test]
+    fn per_agent_pcg_with_extra_zero_diverges_from_no_extra() {
+        // Folding extra=0 into the chain extends it by one mix32
+        // step, so it must NOT collide with the four-input form.
+        // (It must not — adding a step changes the output.)
+        let four = per_agent_u32_pcg(42, 1, 100, 10);
+        let five = per_agent_u32_pcg_with_extra(42, 1, 100, 10, 0);
+        assert_ne!(four, five, "extra fold must alter the draw");
+    }
+
+    #[test]
+    fn per_agent_pcg_with_extra_golden_value() {
+        // Pin the value — anchors the WGSL prelude (the `extra`
+        // fold in `per_agent_u32_with_extra`) to the exact same
+        // mixing chain. Any change here is a determinism-breaking
+        // change requiring a schema hash bump AND a lockstep
+        // update to the WGSL prelude.
+        let v = per_agent_u32_pcg_with_extra(42, 1, 100, 10, 0);
+        assert_eq!(v, 0xA2E3_BFAE);
     }
 }

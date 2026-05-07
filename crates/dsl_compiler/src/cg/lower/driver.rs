@@ -2124,6 +2124,12 @@ fn wire_ability_registry_column_reads(prog: &CgProgram, ops: &mut [ComputeOp]) {
         AbilityRegistryColumn::WhenPredField,
         AbilityRegistryColumn::WhenPredOp,
         AbilityRegistryColumn::WhenPredLiteral,
+        // Wave 1.5#5 GPU chance-gate — per-effect q16 thresholds
+        // (sentinel `CHANCE_NONE_SENTINEL = 0xFFFFu`). The
+        // dispatcher reads `chances[effect_base + i]` and gates the
+        // chronicle write on a PCG draw against the q16 threshold
+        // for byte-equal cross-backend parity (P11).
+        AbilityRegistryColumn::Chances,
     ];
 
     // Agent SoA stat columns the dispatcher's `agent_stat()` switch

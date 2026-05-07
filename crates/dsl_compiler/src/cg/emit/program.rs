@@ -145,6 +145,21 @@ fn per_agent_u32(seed: u32, agent_id: u32, tick: u32, purpose: u32) -> u32 {
     return s;
 }
 
+// Five-input variant — folds an additional `extra` scalar after
+// `purpose`. Mirror of `engine::rng::per_agent_u32_pcg_with_extra`.
+// Used by the apply_ability dispatcher's per-effect chance gate
+// (RngPurpose::Chance, id 10) to mix the per-effect slot index in
+// as `extra` so multi-effect abilities don't share a draw across
+// slots. Bit-equal cross-backend (P11).
+fn per_agent_u32_with_extra(seed: u32, agent_id: u32, tick: u32, purpose: u32, extra: u32) -> u32 {
+    var s: u32 = rng_mix64(seed ^ 0x9E3779B9u);
+    s = rng_mix64(s ^ agent_id);
+    s = rng_mix64(s ^ tick);
+    s = rng_mix64(s ^ purpose);
+    s = rng_mix64(s ^ extra);
+    return s;
+}
+
 ";
 
 // ---------------------------------------------------------------------------
@@ -488,7 +503,7 @@ fn compose_wgsl_file(
     // purpose_id) tuple, so the cross-backend stream is bit-equal
     // under shared inputs (P11). See stochastic_probe Gap #2 close
     // (2026-05-04).
-    if body.contains("per_agent_u32(") {
+    if body.contains("per_agent_u32(") || body.contains("per_agent_u32_with_extra(") {
         out.push_str(RNG_WGSL_PRELUDE);
         out.push('\n');
     }
