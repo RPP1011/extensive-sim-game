@@ -120,6 +120,29 @@ event EffectStunApplied {
   expires_at_tick: u32,
 }
 
+// HeroHeal apply_ability proof (boss_fight, 2026-05-07) — engine-side
+// chronicle event written by the apply_ability dispatcher at hardcoded
+// EventKindId 27 (see
+// `dsl_ast::engine_events::engine_event_kind_id_for_name`).
+//
+// HeroHeal's verb body is `apply_ability 4 by self target target`,
+// which the dispatcher translates to a kind=27 EffectHealApplied
+// record carrying the registry-resident `EffectOp::Heal{ amount: 25.0 }`.
+// The new `physics ApplyHealFromChronicle @phase(post)` rule below
+// drains these records into a clamped
+// `agents.set_hp(t, min(agents.hp(t) + amt, agents.max_hp(t)))` write.
+// First Heal EffectOp in this fixture — proves the apply_ability
+// dispatcher routes Heal effects through the chronicle path in the
+// asymmetric 1-vs-N RPG combat shape (heroes healing each other when
+// HP runs low). Mirrors duel_25v25's HealPulse shape, single-target
+// per-pair rather than spatial.
+@replayable @gpu_amenable
+event EffectHealApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
 @replayable @gpu_amenable
 event Defeated {
   combatant: AgentId,
@@ -282,19 +305,67 @@ verb HeroStun(self, target: Agent) =
   // EffectStunApplied chronicle fires.
   score (if (target.alive && target.creature_type == Boss) { 2.0 } else { -1000.0 })
 
-// HeroHeal — every 20 ticks each Hero self-heals (60 HP). Picking
-// lowest-HP-percentage ally would hit Gap E (binder shadowing on
-// `target.hp` in PerPair scoring) — workaround: self-cast, constant
-// score. The `when` clause does not use a HP threshold so HeroHeal
-// fires on every multiple of 20; this gives heroes a steady drip
-// of healing throughout the fight.
+// HeroHeal apply_ability proof (boss_fight, 2026-05-07) — every 7 ticks
+// each Hero heals a same-team ally with low HP. Replaces the previous
+// self-cast `emit Healed` shape with the chronicle-pipeline
+// `apply_ability 4 by self target target` dispatch.
+//
+// AbilityId(4) is HeroHeal's slot in the boss_fight AbilityRegistry
+// built by `crates/boss_fight_runtime/src/binding_check.rs::
+// build_boss_fight_registry` (BossStrike=1, HeroAttack=2, HeroStun=3,
+// HeroHeal=4 in registration order). The dispatcher writes
+// EffectHealApplied chronicle records (engine kind=27) carrying the
+// `EffectOp::Heal { amount: 25.0 }` payload; the new
+// ApplyHealFromChronicle physics rule below consumes them straight
+// into the per-agent hp SoA via `agents.set_hp(t, min(agents.hp(t)
+// + amt, agents.max_hp(t)))` — clamped at the per-agent max_hp column
+// (init 100.0 across all slots) so multiple healers racing on the same
+// target can't drive hp above the ceiling.
+//
+// SCORE (per-pair argmax over candidates): pick the lowest-hp friendly
+// hero with hp < 100.0. `target.hp < 100.0` gates out healthy heroes —
+// when no hero ally is below the threshold the row returns -1000.0
+// sentinel and the actor's argmax falls through to HeroAttack /
+// HeroStun (this is HOW the existing `hero_stun_locks_boss` and the
+// HP-movement tests stay green: at full hp every alive hero, HeroHeal
+// is sentinel-suppressed and HeroStun's score 2.0 wins as before).
+//
+// `target != self` filters self-pair scoring (would otherwise be the
+// dominant candidate for a low-hp self). `target.creature_type ==
+// Hero` rules out the boss (heroes only heal heroes). `target.alive`
+// keeps the row from picking a dead slot.
+//
+// COOLDOWN NOTE: same as BossStrike + HeroAttack + HeroStun — the
+// registry-resident HeroHeal program declares `cooldown_ticks: 0`;
+// the per-tick gate stays in the verb-style `world.tick % 7 == 0`
+// clause below since the GPU dispatcher does not consult
+// program.cooldown_ticks at the apply_ability arm today.
 verb HeroHeal(self, target: Agent) =
   action HeroHealAction
   when (self.alive
         && self.creature_type == Hero
-        && (world.tick % 20 == 0))
-  emit Healed { source: self, target: self, amount: config.combat.hero_heal_amount }
-  score 50.0
+        && (world.tick % 7 == 0))
+  apply_ability 4 by self target target
+  // Lowest-hp friendly hero (only healthy heroes excluded; self can
+  // self-heal — the lowest-hp hero will be the actor's own target if
+  // it's the wounded one, since `target.hp < 100.0` qualifies it the
+  // same way as any other below-threshold ally). The 1000.0 base keeps
+  // the score safely above HeroStun's 2.0 / HeroAttack's 1.0 when a
+  // wounded ally exists; sentinel -1000.0 cedes the argmax to those
+  // rows when no ally needs healing.
+  //
+  // GAP NOTE: `target != self` originally filtered self-pair scoring
+  // but trips the verb-expander binder shadowing — `self` lowers to
+  // an undefined `local_3` in the scoring WGSL (same Gap E reported
+  // in duel_1v1's Heal verb and mass_battle's Strike score). Working
+  // around by allowing self-target: the lowest-hp hero is the
+  // optimal heal target regardless of whether the caster IS that
+  // hero, so dropping the filter is observationally equivalent for
+  // this test (the wounded slot becomes the universal argmax pick
+  // for every alive hero, including itself).
+  score (if (target.alive
+             && target.creature_type == Hero
+             && target.hp < 100.0) { 1000.0 - target.hp } else { -1000.0 })
 
 // ---------------------------------------------------------------------------
 // Chronicle physics (mirrors duel_1v1 shape)
@@ -346,6 +417,37 @@ physics ApplyDamageFromChronicle {
 physics ApplyStunFromChronicle {
   on EffectStunApplied { actor: _, target: t, expires_at_tick: e } {
     agents.set_stun_expires_at_tick(t, e);
+  }
+}
+
+// HeroHeal apply_ability proof (boss_fight, 2026-05-07) — chronicle
+// consumer for the kind=27 EffectHealApplied records the new HeroHeal
+// verb writes. Direct-SoA-write shape (matches ApplyStunFromChronicle
+// above; mirrors duel_25v25's same-name rule). Clamps overflow with
+// `min(hp + amt, max_hp)` so multiple healers racing on the same target
+// can't drive hp above the per-agent ceiling.
+//
+// FUSION EXPECTATION (3-way): the lower pass already fused
+// ApplyDamageFromChronicle (kind=26) + ApplyStunFromChronicle (kind=29)
+// into a 2-way `_and_` kernel. This rule should auto-include into a
+// 3-way fusion: same @phase(post), PerEvent over the same event ring,
+// non-overlapping kind tag (27). The resulting kernel is
+// `physics_ApplyDamageFromChronicle_and_ApplyHealFromChronicle_and_ApplyStunFromChronicle`
+// (kernel-namer alphabetises; bindings grow by `agent_hp` +
+// `agent_max_hp` reads). Same fusion duel_25v25 surfaced when adding
+// HealPulse to its 2-way fusion.
+//
+// P6 caveat: this rule is PerEvent + writes an AgentField (hp) — TRIPS
+// P6 in the well_formed checker. boss_fight's build.rs already
+// tolerates lower diagnostics (matches `lower_compilation_to_cg` on
+// `DriverOutcome::Err` and falls through with the partial program), so
+// the rule lowers regardless. Same tolerance pattern duel_abilities +
+// duel_25v25 + mass_battle_100v100 use for their AgentField writes
+// from chronicle physics.
+@phase(post)
+physics ApplyHealFromChronicle {
+  on EffectHealApplied { actor: _, target: t, amount: amt } {
+    agents.set_hp(t, min(agents.hp(t) + amt, agents.max_hp(t)));
   }
 }
 

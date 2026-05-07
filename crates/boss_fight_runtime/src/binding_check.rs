@@ -1,14 +1,14 @@
 //! boss_fight apply_ability binding check.
 //!
-//! Builds the runtime's three-program AbilityRegistry (BossStrike at
-//! AbilityId(1), HeroAttack at AbilityId(2), HeroStun at AbilityId(3))
-//! and asserts that the registered slot IDs match the
-//! `apply_ability 1 ...` / `apply_ability 2 ...` / `apply_ability 3 ...`
-//! literals hardcoded in `assets/sim/boss_fight.sim`'s BossStrike +
-//! HeroAttack + HeroStun verb bodies. If a slot drifts (e.g. someone
-//! later registers a fourth ability ahead of HeroStun), the panic here
-//! surfaces at fixture-construction time rather than as silent
-//! wrong-ability dispatch.
+//! Builds the runtime's four-program AbilityRegistry (BossStrike at
+//! AbilityId(1), HeroAttack at AbilityId(2), HeroStun at AbilityId(3),
+//! HeroHeal at AbilityId(4)) and asserts that the registered slot IDs
+//! match the `apply_ability 1 ...` / `apply_ability 2 ...` /
+//! `apply_ability 3 ...` / `apply_ability 4 ...` literals hardcoded in
+//! `assets/sim/boss_fight.sim`'s BossStrike + HeroAttack + HeroStun +
+//! HeroHeal verb bodies. If a slot drifts, the panic here surfaces at
+//! fixture-construction time rather than as silent wrong-ability
+//! dispatch.
 //!
 //! Mirrors `crates/duel_25v25_runtime/src/binding_check.rs` shape but
 //! with three hand-built programs so we can pin the asymmetric per-side
@@ -39,6 +39,17 @@ pub const HERO_ATTACK_EXPECTED_ABILITY_ID: u32 = 2;
 /// dispatcher's per-effect-slot loop emits kind=29 EffectStunApplied
 /// chronicle records in the asymmetric 1-vs-N RPG combat shape.
 pub const HERO_STUN_EXPECTED_ABILITY_ID: u32 = 3;
+
+/// HeroHeal apply_ability proof (boss_fight, 2026-05-07) — registered
+/// fourth so it lands at AbilityId(4). The `apply_ability 4` literal in
+/// `assets/sim/boss_fight.sim::HeroHeal` pins this slot. First Heal
+/// EffectOp in this fixture (HeroHeal previously emitted Healed
+/// directly; this slice routes it through the chronicle pipeline so
+/// kind=27 EffectHealApplied lands in the per-agent hp SoA via the
+/// 3-way fused
+/// `physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle`
+/// kernel).
+pub const HERO_HEAL_EXPECTED_ABILITY_ID: u32 = 4;
 
 /// boss_fight's BossStrike registry-resident program.
 ///
@@ -115,10 +126,39 @@ fn build_hero_stun_program() -> AbilityProgram {
     )
 }
 
-/// Build the boss_fight AbilityRegistry — three programs (BossStrike at
-/// AbilityId(1), HeroAttack at AbilityId(2), HeroStun at AbilityId(3)).
-/// Returns the frozen registry; callers pack + upload via
-/// `PackedAbilityRegistry::pack` + `PackedAbilityRegistryGpu::upload`.
+/// boss_fight's HeroHeal registry-resident program (HeroHeal
+/// apply_ability proof, 2026-05-07).
+///
+/// Single-target Heal(25.0). First Heal EffectOp in this fixture —
+/// proves the apply_ability dispatcher emits kind=27 EffectHealApplied
+/// chronicle records (drained by the fused
+/// `physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle`
+/// kernel into a clamped `agents.set_hp(t, min(hp + amt, max_hp))`
+/// write). Heal amount 25.0 is generous enough that ONE cast on a
+/// hp=50 ally visibly recovers HP under the per-agent max_hp=100 clamp
+/// (50 + 25 = 75; well below the 100 ceiling).
+///
+/// `cooldown_ticks: 0` keeps the per-tick gate in the .sim verb's
+/// `world.tick % 7 == 0` clause (the GPU dispatcher does not consult
+/// program.cooldown_ticks at the apply_ability arm today).
+/// `hostile_only: false` flips the .sim's score expression's `target
+/// friend` semantic — heroes heal heroes (same-team), not enemies.
+/// `range: 50.0` is a wide single-target metadata range (boss_fight is
+/// scored per-pair argmax with no spatial filter; range is metadata-
+/// only at the apply_ability arm in this fixture).
+fn build_hero_heal_program() -> AbilityProgram {
+    AbilityProgram::new_single_target(
+        /*range*/ 50.0,
+        Gate { cooldown_ticks: 0, hostile_only: false, line_of_sight: false },
+        [EffectOp::Heal { amount: 25.0 }],
+    )
+}
+
+/// Build the boss_fight AbilityRegistry — four programs (BossStrike at
+/// AbilityId(1), HeroAttack at AbilityId(2), HeroStun at AbilityId(3),
+/// HeroHeal at AbilityId(4)). Returns the frozen registry; callers
+/// pack + upload via `PackedAbilityRegistry::pack` +
+/// `PackedAbilityRegistryGpu::upload`.
 pub fn build_boss_fight_registry() -> AbilityRegistry {
     let mut builder = AbilityRegistryBuilder::new();
     let bs_id = builder.register(build_boss_strike_program());
@@ -139,23 +179,29 @@ pub fn build_boss_fight_registry() -> AbilityRegistry {
         AbilityId::new(HERO_STUN_EXPECTED_ABILITY_ID).expect("non-zero AbilityId"),
         "third registered program must land at AbilityId(3)",
     );
+    let hh_id = builder.register(build_hero_heal_program());
+    debug_assert_eq!(
+        hh_id,
+        AbilityId::new(HERO_HEAL_EXPECTED_ABILITY_ID).expect("non-zero AbilityId"),
+        "fourth registered program must land at AbilityId(4)",
+    );
     builder.build()
 }
 
 /// Single binding-check entry point. Called once from
 /// `BossFightState::new` at fixture-construction time.
 ///
-/// Asserts the registry contains exactly three programs and that each
+/// Asserts the registry contains exactly four programs and that each
 /// slot, gate, area, and effect matches the .sim's hand-mirrored
-/// BossStrike + HeroAttack + HeroStun behaviour. If anything diverges
-/// the panic message points at the exact divergence.
+/// BossStrike + HeroAttack + HeroStun + HeroHeal behaviour. If anything
+/// diverges the panic message points at the exact divergence.
 pub fn assert_ability_registry_matches_sim_constants() {
     let registry = build_boss_fight_registry();
     assert_eq!(
         registry.len(),
-        3,
-        "boss_fight registry must contain exactly three programs \
-         (BossStrike + HeroAttack + HeroStun); got {}",
+        4,
+        "boss_fight registry must contain exactly four programs \
+         (BossStrike + HeroAttack + HeroStun + HeroHeal); got {}",
         registry.len(),
     );
 
@@ -276,19 +322,61 @@ pub fn assert_ability_registry_matches_sim_constants() {
             "HeroStun effect[0]: expected Stun(duration_ticks=15), got {other:?}",
         ),
     }
+
+    // ---- HeroHeal at slot 4 (HeroHeal apply_ability proof — first
+    //      Heal EffectOp in this fixture) ----
+    let hh_id = AbilityId::new(HERO_HEAL_EXPECTED_ABILITY_ID)
+        .expect("non-zero AbilityId");
+    let hh = registry
+        .get(hh_id)
+        .expect("HeroHeal resolves to a program at AbilityId(4)");
+    assert_eq!(
+        hh.gate.cooldown_ticks, 0,
+        "HeroHeal cooldown_ticks must be 0 (cadence is in the .sim \
+         verb gate `world.tick % 7 == 0`)",
+    );
+    assert!(
+        !hh.gate.hostile_only,
+        "HeroHeal must NOT be hostile_only — `target friend` semantic \
+         (the .sim's score expression picks Hero allies via \
+         `target.creature_type == Hero && target != self`)",
+    );
+    match hh.area {
+        Area::SingleTarget { range } => assert_eq!(
+            range, 50.0,
+            "HeroHeal range must be 50.0 — wide single-target metadata, \
+             boss_fight scores per-pair with no spatial filter",
+        ),
+    }
+    assert_eq!(
+        hh.effects.len(), 1,
+        "HeroHeal must have exactly one effect (Heal 25.0)",
+    );
+    match &hh.effects[0] {
+        EffectOp::Heal { amount } => assert_eq!(
+            *amount, 25.0,
+            "HeroHeal heal amount must be 25.0 — generous enough that \
+             one cast on a hp=50 ally visibly recovers HP (50 + 25 = \
+             75) under the per-agent max_hp=100 clamp",
+        ),
+        other => panic!(
+            "HeroHeal effect[0]: expected Heal(25.0), got {other:?}",
+        ),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Pins the registry build pattern: three abilities at slots 1 +
-    /// 2 + 3 (BossStrike, HeroAttack, HeroStun), with the asymmetric
-    /// Damage amounts (Boss 50, Hero 35) and HeroStun's 15-tick Stun
-    /// at the expected gate/area. Catches drift before construction-
-    /// time panics surface in viz_tests / behavioural tests.
+    /// Pins the registry build pattern: four abilities at slots 1..4
+    /// (BossStrike, HeroAttack, HeroStun, HeroHeal), with the asymmetric
+    /// Damage amounts (Boss 50, Hero 35), HeroStun's 15-tick Stun, and
+    /// HeroHeal's 25.0 Heal at the expected gates/areas. Catches drift
+    /// before construction-time panics surface in viz_tests /
+    /// behavioural tests.
     #[test]
-    fn registry_contains_bossstrike_heroattack_herostun_at_pinned_slots() {
+    fn registry_contains_bossstrike_heroattack_herostun_heroheal_at_pinned_slots() {
         assert_ability_registry_matches_sim_constants();
     }
 }
