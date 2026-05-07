@@ -5,12 +5,13 @@ edition = "2021"
 
 # Phase 7 wolf-sim wipe (2026-05-02): the wolf-sim engine + engine_data
 # dependencies were dropped along with the runtime crates. The crate
-# survives as the regen target for `compile-dsl --cg-canonical`'s
-# WGSL/Rust kernel output. Until a new DSL fixture is built, `lib.rs`
-# is an empty placeholder. When the new fixture lands, this Cargo.toml
-# may need to add back deps for the runtime types the regenerated code
-# references (likely `bytemuck`, `wgpu`, plus a successor for the
-# state/scratch types previously in `engine_data`).
+# survives as the historical regen target for the retired xtask
+# `compile-dsl --cg-canonical` WGSL/Rust kernel output — that path is
+# gone now (per-runtime build.rs scripts emit into OUT_DIR, not into
+# this crate). `lib.rs` is an empty placeholder. The crate is retained
+# in the workspace for the `engine_gpu_rules/.schema_hash` file which
+# `engine::schema_hash` includes via include_str! — see the cross-crate
+# coupling note in `crates/engine/src/schema_hash.rs`.
 
 [dependencies]
 
