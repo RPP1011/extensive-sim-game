@@ -1047,6 +1047,37 @@ fn apply_ability_rejects_f32_target_at_lowering() {
     );
 }
 
+/// Bool target (e.g., a typo where the user wrote `target self.alive`
+/// instead of `target self`). Without the type-check fix, this would
+/// also silently coerce through `u32(bool)` in emit. Asserts the
+/// fix catches non-numeric types beyond just F32.
+#[test]
+fn apply_ability_rejects_bool_target_at_lowering() {
+    let src = "
+        event Tick { }
+        entity Hero : Agent { }
+
+        physics BadBoolTarget @phase(per_agent) {
+          on Tick {} where (self.alive) {
+            apply_ability agents.level(self) by self target self.alive
+          }
+        }
+    ";
+    let program = dsl_compiler::parse(src).expect("parse");
+    let comp = dsl_ast::resolve::resolve(program).expect("resolve");
+    let err = dsl_compiler::cg::lower::lower_compilation_to_cg(&comp)
+        .expect_err(
+            "lowering must reject Bool target — `self.alive` is a bool \
+             SoA field; coercing through u32() would produce 0 or 1, \
+             not an agent id"
+        );
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("TypeMismatch") || msg.contains("Bool"),
+        "expected TypeMismatch / Bool mention; got: {msg}"
+    );
+}
+
 /// Same regression pin for the caster operand. Symmetric to the
 /// target check — both operands route through the same `u32(...)`
 /// coercion in emit.
