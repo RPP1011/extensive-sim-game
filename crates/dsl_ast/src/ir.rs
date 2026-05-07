@@ -883,7 +883,14 @@ pub struct VerbIR {
     pub params: Vec<IrParam>,
     pub action: VerbActionIR,
     pub when: Option<IrExprNode>,
-    pub emits: Vec<IrEmit>,
+    /// Resolved verb body statements — a sequence of `IrStmt::Emit`
+    /// (`emit <Event> { ... }` source) and/or `IrStmt::ApplyAbility`
+    /// (`apply_ability <a> [by <c>] [target <t>]` source). Lifted
+    /// verbatim by the verb expander into the synthesised
+    /// `verb_chronicle_<name>` cascade physics handler. Wave 1.7 /
+    /// task #138 generalised this from `Vec<IrEmit>` so apply_ability
+    /// can ride the same cascade pipeline.
+    pub body: Vec<IrStmt>,
     pub scoring: Option<IrExprNode>,
     pub annotations: Vec<Annotation>,
     pub span: Span,

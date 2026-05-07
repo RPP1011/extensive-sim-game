@@ -470,9 +470,31 @@ pub struct VerbDecl {
     pub params: Vec<Param>,
     pub action: VerbAction,
     pub when: Option<Expr>,
-    pub emits: Vec<EmitStmt>,
+    /// Verb body — a sequence of `emit <Event> { ... }` and/or
+    /// `apply_ability <expr> [by <c>] [target <t>]` statements. Each
+    /// fires when the verb's action wins the per-agent argmax for the
+    /// tick. The verb expander lifts these into the synthesised
+    /// `verb_chronicle_<name>` cascade physics handler. See task #138
+    /// (Wave 1.7) — `apply_ability` was added as an alternative to
+    /// `emit` so the verb body can dispatch through the
+    /// `PackedAbilityRegistry` rather than hand-mirror per-effect
+    /// chronicle events.
+    pub body: Vec<VerbBodyStmt>,
     pub scoring: Option<Expr>,
     pub span: Span,
+}
+
+/// One statement inside a `verb`'s body. Either an `emit <Event>{...}`
+/// (the legacy / pre-#138 form) or an `apply_ability <expr> [by <c>]
+/// [target <t>]` registry-driven dispatch (#138 / Wave 1.7).
+///
+/// Both variants are lifted into the synthesised `verb_chronicle_<name>`
+/// cascade physics handler by the verb expander; lowering to CG happens
+/// through the standard physics-handler path.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum VerbBodyStmt {
+    Emit(EmitStmt),
+    ApplyAbility(ApplyAbilityStmt),
 }
 
 /// `action Converse(target: shrine.patron_agent_id)`.
