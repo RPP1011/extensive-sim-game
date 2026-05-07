@@ -178,6 +178,35 @@ physics ScanAndStrike @phase(per_agent) {
   }
 }
 
+// AOE Cleave (Path B production proof, 2026-05-07) — second physics rule
+// dispatching AbilityId(2) on a different cadence (every 5 ticks vs
+// Strike's every 2 ticks). Cleave registers as Damage in Circle(1.0)
+// (radius 1.0 ≤ cell_size 6.0 → single 27-cell walk per dispatch is
+// sufficient). The dispatcher walks the 27-cell neighborhood around
+// `agent_pos[target_slot]` and writes one EffectDamageApplied record
+// per in-radius candidate; ApplyDamageFromChronicle below decodes
+// those exactly the same way as the single-target Strike records (the
+// chronicle kind is the same — kind=26 — regardless of whether the
+// effect lowered through SingleTarget or AOE on the dispatcher side).
+//
+// Cadence picked so Strike-only (every 2) ticks and Cleave (every 5)
+// ticks overlap on tick 10, 20, … — both fire and the per-tick HP drop
+// jumps. Tick 0 has both fire (0 % 2 == 0 AND 0 % 5 == 0). Cleave
+// damage is kept low (2.0) since each cast hits multiple targets — the
+// total per-cast damage scales with neighbour density, so 2.0 keeps the
+// battle from collapsing in 2 ticks.
+physics ScanAndCleave @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && (world.tick % 5 == 0)) {
+    for other in spatial.nearby_enemies(self) {
+      if (other.creature_type != self.creature_type
+          && other.alive) {
+        apply_ability 2 by self target other
+      }
+    }
+  }
+}
+
 // Task #138 follow-on (duel_25v25 port, 2026-05-07) — ScanAndStrike's
 // body now uses `apply_ability 1 by self target other`. The dispatcher
 // writes EffectDamageApplied chronicle records (engine-aliased to
@@ -187,6 +216,11 @@ physics ScanAndStrike @phase(per_agent) {
 // working unchanged. Mirrors the chronicle re-emit shape duel_abilities
 // uses for its Strike verb (see
 // `assets/sim/duel_abilities.sim::ApplyDamageFromChronicle`).
+//
+// AOE Cleave (Path B production proof, 2026-05-07) — same rule also
+// catches Cleave's AOE chronicle records: Path B emits the SAME
+// kind=26 EffectDamageApplied per in-radius target, so this rule
+// drains both Strike + Cleave records with no shape change.
 //
 // P6 caveat: this rule is PerEvent + emit-only (no AgentField writes)
 // — does NOT trip P6, unlike ApplyDamage below.

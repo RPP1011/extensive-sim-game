@@ -35,7 +35,29 @@ fn main() {
     // Tolerate lower diagnostics — duel_25v25 has known-deferred
     // well_formed warnings (P6 + cycle) inherited from the chronicle
     // damage application pattern duel_1v1 surfaced.
-    let cg = match dsl_compiler::cg::lower::lower_compilation_to_cg(&comp) {
+    //
+    // AOE Cleave (Path B production proof, 2026-05-07) — opt this
+    // runtime into AOE Path B dispatch by setting `aoe_dispatch: true`.
+    // The flag flips every `apply_ability` lowered under this
+    // Compilation to `with_aoe_dispatch: true`, which (a) emits the
+    // 27-cell spatial walk + per-target chronicle write in the WGSL
+    // dispatcher arm for AOE-equipped programs (Cleave at AbilityId(2)
+    // here), (b) surfaces `agent_pos` + `spatial_grid_cells` +
+    // `spatial_grid_starts` + `area_kinds` + `area_args` reads on the
+    // dispatcher op via `wire_apply_ability_aoe_reads`. duel_25v25
+    // already binds the spatial buffers (the body-form spatial walk
+    // `for other in spatial.nearby_enemies(self)` populates them), so
+    // the runtime crate just needs to wire `area_kinds` + `area_args`
+    // into the ScanAndStrike + ScanAndCleave kernel binding sets.
+    //
+    // Strike's program has empty `per_effect_areas` (single-target),
+    // so the AOE branch falls through to the single-target chain and
+    // Strike's behaviour is unchanged. Only Cleave engages the new
+    // 27-cell walk.
+    let cg = match dsl_compiler::cg::lower::lower_compilation_to_cg_with_opts(
+        &comp,
+        dsl_compiler::cg::lower::LowerOpts { aoe_dispatch: true },
+    ) {
         Ok(p) => p,
         Err(o) => {
             for d in &o.diagnostics {
