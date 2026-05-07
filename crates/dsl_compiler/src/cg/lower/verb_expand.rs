@@ -161,18 +161,19 @@ pub fn expand_verbs(comp: &Compilation) -> VerbExpansionOutcome {
     // has a non-empty emit. Returning the EventRef so each verb's
     // synthesised cascade handler binds against the same kind id (the
     // driver assigns EventKindId by source order in `comp.events`).
-    let action_selected_ref = if verbs.iter().any(|v| !v.emits.is_empty()) {
+    let action_selected_ref = if verbs.iter().any(|v| !v.body.is_empty()) {
         Some(inject_action_selected_event(&mut out))
     } else {
         None
     };
 
     // Stable per-verb action_id allocator. Each verb with a non-empty
-    // emit consumes the next id; verbs without emit are skipped so
-    // the id space is contiguous over the cascade-bearing subset.
+    // body consumes the next id; verbs without a body (no `emit` /
+    // `apply_ability`) are skipped so the id space is contiguous over
+    // the cascade-bearing subset.
     let mut next_action_id: u32 = 0;
     for verb in &verbs {
-        let assigned_action_id = if verb.emits.is_empty() {
+        let assigned_action_id = if verb.body.is_empty() {
             None
         } else {
             let id = next_action_id;
@@ -347,11 +348,11 @@ fn expand_one_verb(
     // `synthesize_pattern_binding_lets` lays down. A fresh LocalRef
     // is allocated for the `action_id` binder (the verb's params
     // never include it).
-    if !verb.emits.is_empty() {
+    if !verb.body.is_empty() {
         let event_ref = action_selected_ref
-            .expect("ActionSelected event ref is always pre-injected when any verb has emits");
+            .expect("ActionSelected event ref is always pre-injected when any verb has a body");
         let action_id = assigned_action_id
-            .expect("assigned_action_id is always Some when verb.emits is non-empty");
+            .expect("assigned_action_id is always Some when verb.body is non-empty");
         let physics = synthesize_cascade_physics(
             verb,
             &synthetic_name,
@@ -377,7 +378,7 @@ fn expand_one_verb(
 ///     on ActionSelected { actor: <verb_self>, action_id: <fresh>, target: <verb_target_or_fresh> }
 ///     where action_id_local == <action_id>
 ///     {
-///         <verb.emits, lifted as IrStmt::Emit>
+///         <verb.body, IrStmt::Emit / IrStmt::ApplyAbility>
 ///     }
 /// }
 /// ```
@@ -487,15 +488,17 @@ fn synthesize_cascade_physics(
         kind: IrExpr::Binary(BinOp::Eq, Box::new(action_id_lhs), Box::new(action_id_rhs)),
         span,
     };
-    let emit_stmts: Vec<IrStmt> = verb
-        .emits
-        .iter()
-        .cloned()
-        .map(IrStmt::Emit)
-        .collect();
+    // Lift the verb's resolved body verbatim. Each statement is
+    // already a fully-resolved `IrStmt` (Emit or ApplyAbility) — see
+    // the verb resolver in `crates/dsl_ast/src/resolve.rs`. The
+    // ApplyAbility variant flows through the same well-formed /
+    // physics-lowering path the physics-scope `apply_ability` uses
+    // (`crates/dsl_compiler/src/cg/lower/physics.rs`), so the
+    // dispatcher / type-check rules fire identically here.
+    let body_stmts: Vec<IrStmt> = verb.body.clone();
     let body: Vec<IrStmt> = vec![IrStmt::If {
         cond: action_id_eq,
-        then_body: emit_stmts,
+        then_body: body_stmts,
         else_body: None,
         span,
     }];

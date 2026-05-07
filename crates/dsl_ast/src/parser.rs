@@ -1236,10 +1236,29 @@ fn verb_decl(c: &mut Cursor, annotations: Vec<Annotation>, start: usize) -> PRes
         when = Some(parse_expr(c)?);
         c.skip_ws();
     }
-    let mut emits = Vec::new();
-    while c.starts_with("emit ") || c.starts_with("emit\t") || c.starts_with("emit\n") {
-        emits.push(parse_emit_stmt(c)?);
+    // Verb body: any mix of `emit <Event> { ... }` and
+    // `apply_ability <expr> [by <c>] [target <t>]` statements, in
+    // source order. Either form fires as part of the synthesised
+    // cascade physics handler when the verb's action wins the
+    // per-agent argmax. Task #138 (Wave 1.7) added the apply_ability
+    // alternative so a verb can dispatch through the
+    // PackedAbilityRegistry rather than hand-mirror per-effect
+    // chronicle events.
+    let mut body = Vec::new();
+    loop {
         c.skip_ws();
+        if c.starts_with("emit ") || c.starts_with("emit\t") || c.starts_with("emit\n") {
+            body.push(VerbBodyStmt::Emit(parse_emit_stmt(c)?));
+            continue;
+        }
+        if c.starts_with("apply_ability ")
+            || c.starts_with("apply_ability\t")
+            || c.starts_with("apply_ability\n")
+        {
+            body.push(VerbBodyStmt::ApplyAbility(parse_apply_ability_stmt(c)?));
+            continue;
+        }
+        break;
     }
     let mut scoring = None;
     if c.starts_with("scoring") {
@@ -1251,7 +1270,7 @@ fn verb_decl(c: &mut Cursor, annotations: Vec<Annotation>, start: usize) -> PRes
         c.skip_ws();
         scoring = Some(parse_expr(c)?);
     }
-    Ok(VerbDecl { annotations, name, params, action, when, emits, scoring, span: Span::new(start, c.pos) })
+    Ok(VerbDecl { annotations, name, params, action, when, body, scoring, span: Span::new(start, c.pos) })
 }
 
 fn parse_verb_action(c: &mut Cursor) -> PResult<VerbAction> {
@@ -1862,71 +1881,7 @@ fn parse_stmt(c: &mut Cursor) -> PResult<Stmt> {
         || c.starts_with("apply_ability\t")
         || c.starts_with("apply_ability\n")
     {
-        let start = c.pos;
-        c.bump("apply_ability".len());
-        c.skip_ws();
-        // Slice δ part 3 (#161): optional `by <caster_expr>` syntax
-        // for the explicit caster operand. The ability operand parses
-        // up to the first `by` keyword OR statement terminator.
-        let ability = parse_expr_bounded(c, |ck| {
-            ck.starts_with_char(';')
-                || ck.starts_with_char('}')
-                || ck.starts_with_char('\n')
-                || ck.starts_with("by ")
-                || ck.starts_with("by\t")
-                || ck.starts_with("by\n")
-                || ck.starts_with("target ")
-                || ck.starts_with("target\t")
-                || ck.starts_with("target\n")
-        })?;
-        c.skip_ws();
-        let caster = if c.starts_with("by ")
-            || c.starts_with("by\t")
-            || c.starts_with("by\n")
-        {
-            c.bump("by".len());
-            c.skip_ws();
-            let caster_expr = parse_expr_bounded(c, |ck| {
-                ck.starts_with_char(';')
-                    || ck.starts_with_char('}')
-                    || ck.starts_with_char('\n')
-                    || ck.starts_with("target ")
-                    || ck.starts_with("target\t")
-                    || ck.starts_with("target\n")
-            })?;
-            c.skip_ws();
-            Some(caster_expr)
-        } else {
-            None
-        };
-        // Slice ε part 1: optional `target <expr>` clause — explicit
-        // target operand for chronicle records that distinguish actor
-        // from target.
-        let target = if c.starts_with("target ")
-            || c.starts_with("target\t")
-            || c.starts_with("target\n")
-        {
-            c.bump("target".len());
-            c.skip_ws();
-            let target_expr = parse_expr_bounded(c, |ck| {
-                ck.starts_with_char(';')
-                    || ck.starts_with_char('}')
-                    || ck.starts_with_char('\n')
-            })?;
-            c.skip_ws();
-            Some(target_expr)
-        } else {
-            None
-        };
-        if c.starts_with_char(';') {
-            c.bump(1);
-        }
-        return Ok(Stmt::ApplyAbility(crate::ast::ApplyAbilityStmt {
-            ability,
-            caster,
-            target,
-            span: Span::new(start, c.pos),
-        }));
+        return Ok(Stmt::ApplyAbility(parse_apply_ability_stmt(c)?));
     }
     if c.starts_with("for ") {
         c.bump("for".len());
@@ -2035,6 +1990,73 @@ fn parse_stmt(c: &mut Cursor) -> PResult<Stmt> {
     // Fallback: a bare expression statement.
     let e = parse_expr(c)?;
     Ok(Stmt::Expr(e))
+}
+
+/// Parse an `apply_ability <expr> [by <c>] [target <t>]` statement
+/// starting at the `apply_ability` keyword. Shared by physics-body
+/// statements (via [`parse_stmt`]) and verb-body statements (via
+/// [`parse_verb_body_stmt`]) so the surface stays in lock-step.
+fn parse_apply_ability_stmt(c: &mut Cursor) -> PResult<crate::ast::ApplyAbilityStmt> {
+    let start = c.pos;
+    expect_keyword(c, "apply_ability")
+        .map_err(|e| e.with_context("parsing `apply_ability` statement"))?;
+    c.skip_ws();
+    // Slice δ part 3 (#161): optional `by <caster_expr>` syntax for the
+    // explicit caster operand. The ability operand parses up to the
+    // first `by` keyword OR statement terminator.
+    let ability = parse_expr_bounded(c, |ck| {
+        ck.starts_with_char(';')
+            || ck.starts_with_char('}')
+            || ck.starts_with_char('\n')
+            || ck.starts_with("by ")
+            || ck.starts_with("by\t")
+            || ck.starts_with("by\n")
+            || ck.starts_with("target ")
+            || ck.starts_with("target\t")
+            || ck.starts_with("target\n")
+    })?;
+    c.skip_ws();
+    let caster = if c.starts_with("by ") || c.starts_with("by\t") || c.starts_with("by\n") {
+        c.bump("by".len());
+        c.skip_ws();
+        let caster_expr = parse_expr_bounded(c, |ck| {
+            ck.starts_with_char(';')
+                || ck.starts_with_char('}')
+                || ck.starts_with_char('\n')
+                || ck.starts_with("target ")
+                || ck.starts_with("target\t")
+                || ck.starts_with("target\n")
+        })?;
+        c.skip_ws();
+        Some(caster_expr)
+    } else {
+        None
+    };
+    // Slice ε part 1: optional `target <expr>` clause — explicit target
+    // operand for chronicle records that distinguish actor from target.
+    let target = if c.starts_with("target ")
+        || c.starts_with("target\t")
+        || c.starts_with("target\n")
+    {
+        c.bump("target".len());
+        c.skip_ws();
+        let target_expr = parse_expr_bounded(c, |ck| {
+            ck.starts_with_char(';') || ck.starts_with_char('}') || ck.starts_with_char('\n')
+        })?;
+        c.skip_ws();
+        Some(target_expr)
+    } else {
+        None
+    };
+    if c.starts_with_char(';') {
+        c.bump(1);
+    }
+    Ok(crate::ast::ApplyAbilityStmt {
+        ability,
+        caster,
+        target,
+        span: Span::new(start, c.pos),
+    })
 }
 
 fn parse_emit_stmt(c: &mut Cursor) -> PResult<EmitStmt> {

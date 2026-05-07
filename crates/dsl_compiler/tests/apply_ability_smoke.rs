@@ -854,3 +854,123 @@ fn apply_ability_smoke_kernel_binds_event_ring_and_event_tail() {
          got body:\n{body}"
     );
 }
+
+/// Wave 1.7 / task #138: a `verb` body accepts `apply_ability <expr>
+/// [by <c>] [target <t>]` as an alternative to `emit <Event> { ... }`.
+///
+/// This test pins the parser → resolve → CG-lower wiring for the new
+/// surface — once it lands, the next bite (Strike's verb body in
+/// `assets/sim/duel_abilities.sim`) can swap from
+/// `emit Damaged { ... }` to `apply_ability self.action_ability` /
+/// equivalent without a separate parser change.
+///
+/// What this proves:
+///   - The verb-body parser accepts `apply_ability` (not just `emit`).
+///   - The resolver lifts it into `IrStmt::ApplyAbility { ability,
+///     caster, target }` inside the verb's `body` vec.
+///   - The verb expander injects the cascade physics handler whose
+///     gated body carries the `IrStmt::ApplyAbility` verbatim.
+///   - The CG lowering pipeline (`lower_compilation_to_cg` →
+///     `synthesize_schedule` → `emit_cg_program`) succeeds end-to-end
+///     against that synthesised handler — i.e. the verb-body
+///     ApplyAbility flows through the same well-formed type-check +
+///     dispatcher arms the physics-scope ApplyAbility uses (see
+///     `crates/dsl_compiler/src/cg/well_formed.rs::type_check_op`).
+///
+/// We use `agents.level(self)` for the ability operand (a u32 SoA
+/// accessor; same pattern `assets/sim/apply_ability_smoke.sim` uses).
+/// `self` for caster / target satisfies the CgTy::AgentId arm of the
+/// well-formed slot type-check.
+#[test]
+fn verb_body_with_apply_ability_lowers_cleanly() {
+    let src = r#"
+event Tick { }
+
+entity Hero : Agent { }
+
+scoring {
+  Cast = 1.0
+}
+
+verb Cast(self) =
+  action Cast
+  when  self.alive
+  apply_ability agents.level(self) by self target self
+  score 1.0
+"#;
+    let program = dsl_compiler::parse(src).expect("verb body with apply_ability parses");
+    let comp = dsl_ast::resolve::resolve(program)
+        .expect("verb body with apply_ability resolves");
+
+    // Surface assertion — the resolver populated the verb's body with
+    // exactly one `IrStmt::ApplyAbility`. This pins the new resolve
+    // path (not just "lowering didn't blow up").
+    assert_eq!(comp.verbs.len(), 1, "expected one verb");
+    let verb = &comp.verbs[0];
+    assert_eq!(verb.name, "Cast");
+    assert_eq!(
+        verb.body.len(),
+        1,
+        "expected verb body to carry one ApplyAbility stmt; got {} stmts",
+        verb.body.len(),
+    );
+    match &verb.body[0] {
+        dsl_ast::ir::IrStmt::ApplyAbility { caster, target, .. } => {
+            assert!(
+                caster.is_some(),
+                "expected `by self` to populate the caster operand"
+            );
+            assert!(
+                target.is_some(),
+                "expected `target self` to populate the target operand"
+            );
+        }
+        other => panic!(
+            "expected verb body[0] = IrStmt::ApplyAbility; got {other:?}",
+        ),
+    }
+
+    // Lower → schedule → emit must succeed; the verb expander wraps
+    // the ApplyAbility in the synthesised `verb_chronicle_Cast`
+    // physics handler and the standard physics-lowering pipeline
+    // takes it from there.
+    let cg = dsl_compiler::cg::lower::lower_compilation_to_cg(&comp)
+        .expect("verb body with apply_ability lowers to CG");
+    let schedule_result = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let _art = dsl_compiler::cg::emit::emit_cg_program(&schedule_result.schedule, &cg)
+        .expect("emit succeeds for verb-body apply_ability");
+}
+
+/// Companion to [`verb_body_with_apply_ability_lowers_cleanly`]: the
+/// shorthand surface (no `by` / `target`) parses + resolves cleanly
+/// into an `IrStmt::ApplyAbility { caster: None, target: None }`. We
+/// don't drive the full lower here — the implicit-caster default for
+/// the synthesised cascade handler depends on the physics-scope arm
+/// that resolves `caster: None` → per-thread agent. The parse +
+/// resolve gate is enough to pin the source surface.
+#[test]
+fn verb_body_apply_ability_without_by_target_parses_and_resolves() {
+    let src = r#"
+event Tick { }
+
+entity Hero : Agent { }
+
+verb Cast(self) =
+  action Cast
+  when  self.alive
+  apply_ability agents.level(self)
+"#;
+    let program = dsl_compiler::parse(src).expect("parse");
+    let comp = dsl_ast::resolve::resolve(program).expect("resolve");
+    assert_eq!(comp.verbs.len(), 1);
+    match &comp.verbs[0].body[0] {
+        dsl_ast::ir::IrStmt::ApplyAbility { caster, target, .. } => {
+            assert!(caster.is_none(), "no `by` clause → caster: None");
+            assert!(target.is_none(), "no `target` clause → target: None");
+        }
+        other => panic!("expected ApplyAbility; got {other:?}"),
+    }
+}

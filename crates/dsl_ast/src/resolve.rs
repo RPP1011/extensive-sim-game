@@ -898,7 +898,7 @@ fn collect(
                         span: d.action.span,
                     },
                     when: None,
-                    emits: Vec::new(),
+                    body: Vec::new(),
                     scoring: None,
                     annotations: d.annotations.clone(),
                     span: d.span,
@@ -1363,10 +1363,37 @@ fn resolve_bodies(
                     .as_ref()
                     .map(|e| resolve_expr(e, &mut scope, symbols))
                     .transpose()?;
-                let emits = d
-                    .emits
+                // Verb body — `emit <Event>{...}` and / or `apply_ability
+                // <a> [by <c>] [target <t>]` statements, in source order.
+                // Both lower into the synthesised cascade physics body via
+                // verb_expand. Each statement carries a fresh `IrStmt`
+                // variant (Emit / ApplyAbility) so the lift is identity —
+                // see `crates/dsl_compiler/src/cg/lower/verb_expand.rs`.
+                let body = d
+                    .body
                     .iter()
-                    .map(|e| resolve_emit(e, &mut scope, symbols))
+                    .map(|s| match s {
+                        ast::VerbBodyStmt::Emit(e) => {
+                            resolve_emit(e, &mut scope, symbols).map(IrStmt::Emit)
+                        }
+                        ast::VerbBodyStmt::ApplyAbility(a) => {
+                            let ability = resolve_expr(&a.ability, &mut scope, symbols)?;
+                            let caster = match &a.caster {
+                                Some(c) => Some(resolve_expr(c, &mut scope, symbols)?),
+                                None => None,
+                            };
+                            let target = match &a.target {
+                                Some(t) => Some(resolve_expr(t, &mut scope, symbols)?),
+                                None => None,
+                            };
+                            Ok(IrStmt::ApplyAbility {
+                                ability,
+                                caster,
+                                target,
+                                span: a.span,
+                            })
+                        }
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
                 let scoring = d
                     .scoring
@@ -1376,7 +1403,7 @@ fn resolve_bodies(
                 comp.verbs[verb_idx].params = params;
                 comp.verbs[verb_idx].action = action;
                 comp.verbs[verb_idx].when = when;
-                comp.verbs[verb_idx].emits = emits;
+                comp.verbs[verb_idx].body = body;
                 comp.verbs[verb_idx].scoring = scoring;
                 verb_idx += 1;
             }
