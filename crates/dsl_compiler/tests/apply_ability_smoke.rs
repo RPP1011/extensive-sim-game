@@ -184,6 +184,44 @@ fn apply_ability_smoke_kernel_parses_through_naga() {
     );
 }
 
+/// Stronger gate than `..._parses_through_naga` — runs naga's full
+/// validator over the parsed module. Catches type errors, missing
+/// `@binding(N) @group(0)` annotations, atomic-handle misuse,
+/// access-mode mismatches, etc. that pure parsing misses.
+///
+/// `Capabilities::default()` matches WebGPU's baseline; the dispatcher
+/// uses no extension features (atomic u32 ops on storage are baseline).
+#[test]
+fn apply_ability_smoke_kernel_passes_naga_validator() {
+    use naga::valid::{Capabilities, ValidationFlags, Validator};
+
+    let path = workspace_path("assets/sim/apply_ability_smoke.sim");
+    let art = compile_sim(&path).expect("apply_ability_smoke compiles");
+
+    let mut errs = Vec::new();
+    for (name, body) in &art.wgsl_files {
+        let module = match naga::front::wgsl::parse_str(body) {
+            Ok(m) => m,
+            Err(e) => {
+                errs.push(format!("  {name}: parse failed: {e}"));
+                continue;
+            }
+        };
+        let mut validator = Validator::new(ValidationFlags::all(), Capabilities::all());
+        if let Err(e) = validator.validate(&module) {
+            errs.push(format!("  {name}: validate failed: {e:?}"));
+        }
+    }
+    assert!(
+        errs.is_empty(),
+        "apply_ability_smoke emitted {} kernels that fail naga \
+         validation (parse OK, validator NOT OK — type / binding / \
+         atomic-handle issues):\n{}",
+        errs.len(),
+        errs.join("\n"),
+    );
+}
+
 /// Pin the BGL composer's wiring of `event_ring` + `event_tail` into
 /// the dispatcher kernel. Without these bindings, the chronicle writes
 /// emitted by the dispatcher arms would reference undeclared identifiers
