@@ -391,7 +391,10 @@ config combat {
   cooldown_mend:    u32 = 30,     // Mend.ability: cooldown 3s == 30 ticks
   cooldown_bleed:   u32 = 50,     // Bleed.ability: cooldown 5s == 50 ticks
   bleed_amount:     f32 = 10.0,   // Bleed.ability: self_damage 5 + 5%·MaxHp; fixture MaxHp=100 → 5 + 5 = 10. RETIRED 2026-05-07: registry-driven GPU scaling now computes this dynamically from agent_max_hp[caster_slot]. Field kept to avoid config.combat type churn — no .sim site references it after the apply_ability swap.
-  reap_threshold:   f32 = 20.0,   // Reap.ability: execute 20
+  // reap_threshold RETIRED 2026-05-07: predicate-aware scoring slice
+  // landed (Reap.ability::when target.hp < 20 is now the single source
+  // of truth — the scoring kernel reads when_pred SoA + agent stats and
+  // gates argmax). Doc references below kept for archaeology.
   cooldown_reap:    u32 = 20,     // Reap.ability: cooldown 2s == 20 ticks
   strike_range:     f32 = 5.0,    // Strike.ability: range 5.0
   hp_low_threshold: f32 = 50.0,   // gate Mend on self-hp drop
