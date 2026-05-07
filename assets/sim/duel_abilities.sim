@@ -441,7 +441,7 @@ verb Strike(self, target: Agent) =
         && agents.stun_expires_at_tick(self) <= world.tick
         && target.alive
         && target != self
-        && (world.tick % 10 == 0))
+        && (world.tick % config.combat.cooldown_strike == 0))
   // Task #138 — verb-body apply_ability dispatcher swap. Strike was
   // `emit Damaged { source: self, target: target, amount:
   // config.combat.strike_damage }`. The literal `1` is Strike's
@@ -471,7 +471,7 @@ verb ShieldUp(self, target: Agent) =
         // every verb so a Daze prevents ALL action this window.
         && agents.stun_expires_at_tick(self) <= world.tick
         && target == self
-        && (world.tick % 40 == 0)
+        && (world.tick % config.combat.cooldown_shieldup == 0)
         && self.hp < 90.0)
   // Task #138 follow-on — verb-body apply_ability dispatcher swap.
   // ShieldUp was `emit Shielded { source: self, target: self, amount:
@@ -502,7 +502,7 @@ verb Mend(self, target: Agent) =
         // Wave 2 cast-gate: stunned agents cannot cast.
         && agents.stun_expires_at_tick(self) <= world.tick
         && target == self
-        && (world.tick % 30 == 0)
+        && (world.tick % config.combat.cooldown_mend == 0)
         && self.hp < config.combat.hp_low_threshold)
   // Task #138 follow-on — verb-body apply_ability dispatcher swap.
   // Mend was `emit Healed { source: self, target: self, amount:
@@ -534,7 +534,7 @@ verb Bleed(self, target: Agent) =
         // Wave 2 cast-gate: stunned agents cannot cast.
         && agents.stun_expires_at_tick(self) <= world.tick
         && target == self
-        && (world.tick % 50 == 0)
+        && (world.tick % config.combat.cooldown_bleed == 0)
         && self.hp > config.combat.hp_bleed_floor)
   // Task #138 follow-on (Bleed, 2026-05-06) — verb-body apply_ability
   // dispatcher swap. Bleed was `emit Damaged { source: self, target:

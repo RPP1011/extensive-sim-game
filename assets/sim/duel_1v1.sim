@@ -73,14 +73,10 @@ config combat {
 // priority when nothing more interesting is available.
 verb Strike(self, target: Agent) =
   action StrikeAction
-  // Cooldown literals (2/5/4) inlined — `config.<ns>.<u32_field>`
-  // resolves to f32 at lowering today (diplomacy_probe Gap #3),
-  // so the config.cooldown_* fields stay declared but unreferenced
-  // until the config-type-resolution fix lands.
   when (self.alive
         && target.alive
         && target != self
-        && (world.tick % 2 == 0))
+        && (world.tick % config.combat.cooldown_strike == 0))
   emit Damaged { source: self, target: target, amount: config.combat.strike_damage }
   score 1.0
 
@@ -91,7 +87,7 @@ verb Spell(self, target: Agent) =
   when (self.alive
         && target.alive
         && target != self
-        && (world.tick % 5 == 0)
+        && (world.tick % config.combat.cooldown_spell == 0)
         && self.mana >= config.combat.spell_cost)
   emit Damaged { source: self, target: target, amount: config.combat.spell_damage }
   // Higher score when target HP is low — finisher.
@@ -104,7 +100,7 @@ verb Heal(self, target: Agent) =
   action HealAction
   when (self.alive
         && target == self
-        && (world.tick % 4 == 0)
+        && (world.tick % config.combat.cooldown_heal == 0)
         && self.hp < config.combat.hp_low_threshold)
   emit Healed { source: self, target: self, amount: config.combat.heal_amount }
   score (config.combat.hp_low_threshold * 2.0 - self.hp)

@@ -147,15 +147,12 @@ view trust(observer: Agent, target: Agent) -> u32 {
 // can't happen given disjoint mods) ProposeAlliance would win;
 // they're recorded as fingerprints in case the mask kernel ever
 // becomes a no-op gate.
-// Mod operand is a literal `3` (not `config.diplomacy.observation_tick_mod`)
-// because `config.<ns>.<u32_field>` resolves to f32 at lowering today —
-// see Gap #3 in the discovery doc. Keeping the literal here yields the
-// FULL-FIRE outcome; the config field stays declared so a future config-
-// type-resolution fix can reactivate the live reference with one
-// (literal → config.<...>) swap.
+// Mod operand is `config.diplomacy.observation_tick_mod` (the typed-
+// Mod arm consults `config_const_values` so the rhs lowers as `u32`
+// per the source declaration — diplomacy_probe Gap #3 closed).
 verb ProposeAlliance(self) =
   action ProposeAllianceAction
-  when  (world.tick % 3 == 0)
+  when  (world.tick % config.diplomacy.observation_tick_mod == 0)
   emit  AllianceProposed {
     proposer: self,
     target:   self,
@@ -164,7 +161,7 @@ verb ProposeAlliance(self) =
 
 verb Betray(self) =
   action BetrayAction
-  when  (world.tick % 3 != 0)
+  when  (world.tick % config.diplomacy.observation_tick_mod != 0)
   emit  Betrayed {
     betrayer: self,
     target:   self,
