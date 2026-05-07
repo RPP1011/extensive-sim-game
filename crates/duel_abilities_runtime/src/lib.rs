@@ -1280,38 +1280,38 @@ mod tests {
         binding_check::assert_ability_registry_matches_sim_constants();
     }
 
-    /// #138 Step 2 pin — Strike's AbilityProgram constant.
+    /// #138 Step 2 pin — Wave 1 ability programs as construction-helper
+    /// references for the dispatcher path.
     ///
-    /// The Wave 1 binding check (above) already proves the .ability →
-    /// AbilityRegistry pipeline produces this exact program for the
-    /// `Strike.ability` source file. This test pins the program shape
-    /// at the construction-helper level so #138 work (wiring Strike
-    /// through `apply_ability` instead of `emit Damaged{...}`) can
-    /// reference it as the AbilityProgram to register + dispatch.
+    /// The binding check (above) already proves the .ability →
+    /// AbilityRegistry pipeline produces these exact programs for the
+    /// Strike/ShieldUp/Mend.ability source files. These tests pin the
+    /// shapes at the apply_program-call level so #138 work (wiring the
+    /// verbs through `apply_ability` instead of `emit X`) has concrete
+    /// references for what to register + dispatch.
     ///
-    /// Mirrors duel_abilities.sim line 180: `emit Damaged { source:
-    /// self, target: target, amount: config.combat.strike_damage }`
-    /// where strike_damage = 30.0 (assets/config/default.toml).
+    /// All three mirror duel_abilities.sim verb bodies + their
+    /// `Damaged`/`Healed`/`Shielded` events:
+    ///   - Strike  → ApplyEvent::Damage  (amount=30, hostile)
+    ///   - ShieldUp → ApplyEvent::Shield (amount=50, self-cast)
+    ///   - Mend    → ApplyEvent::Heal    (amount=25, self-cast)
     ///
-    /// Going through apply_program here verifies the same chronicle-
-    /// records the existing ApplyDamage physics rule writes will be
-    /// reproduced by the registry-driven path: caster → target →
-    /// amount=30. The actual swap (verb body emit → apply_ability) is
-    /// the substantive piece of #138 — it requires extending the
-    /// .sim verb-body parser to accept apply_ability as an alternative
-    /// to emit, which is a multi-iteration design call.
+    /// Constants mirror assets/ability_test/duel_abilities/*.ability
+    /// (the .ability files are authoritative; the binding check
+    /// enforces this). If they drift, both the binding check AND these
+    /// pins fail — refactoring to load AbilityProgram from the
+    /// AbilityRegistry directly would tighten the coupling but adds
+    /// the per-test registry-build overhead.
     #[test]
     fn strike_apply_program_produces_expected_damage_event() {
         use engine::ability::apply::{apply_program, ApplyEvent};
         use engine::ability::program::{AbilityProgram, CasterStats, EffectOp, Gate};
         use engine::ids::AgentId;
 
-        // Strike: 30 damage, range matches strike_range_max (4.0,
-        // per duel_abilities.sim's `range: 4` on Strike.ability).
-        // Hostile-only, no LoS. Cooldown=10 ticks (verb gate is
-        // `world.tick % 10 == 0` in duel_abilities.sim).
+        // Strike.ability: range=5.0, cooldown=1s (10 ticks), damage=30,
+        // target=enemy (hostile_only=true).
         let program = AbilityProgram::new_single_target(
-            /*range*/ 4.0,
+            5.0,
             Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
             [EffectOp::Damage { amount: 30.0 }],
         );
@@ -1319,25 +1319,77 @@ mod tests {
         let caster = AgentId::new(1).expect("AgentId::new");
         let target = AgentId::new(2).expect("AgentId::new");
         let events = apply_program(
-            &program,
-            caster,
-            target,
-            /*tick*/ 0,
-            /*world_seed*/ 0xCAFE_F00D,
-            &CasterStats::default(),
+            &program, caster, target, 0, 0xCAFE_F00D, &CasterStats::default(),
         );
 
-        assert_eq!(events.len(), 1, "single Damage effect → one ApplyEvent");
+        assert_eq!(events.len(), 1);
         match events[0] {
             ApplyEvent::Damage { source, target: t, amount } => {
-                assert_eq!(source, caster, "source slot is caster");
-                assert_eq!(t, target, "target slot is target");
-                assert_eq!(
-                    amount, 30.0,
-                    "amount matches strike_damage (config.combat.strike_damage)"
-                );
+                assert_eq!(source, caster);
+                assert_eq!(t, target);
+                assert_eq!(amount, 30.0, "config.combat.strike_damage");
             }
             other => panic!("expected ApplyEvent::Damage, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn shieldup_apply_program_produces_expected_shield_event() {
+        use engine::ability::apply::{apply_program, ApplyEvent};
+        use engine::ability::program::{AbilityProgram, CasterStats, EffectOp, Gate};
+        use engine::ids::AgentId;
+
+        // ShieldUp.ability: self-target, cooldown=4s (40 ticks), shield=50.
+        // hostile_only=false because target is self (always allied).
+        let program = AbilityProgram::new_single_target(
+            0.0, // self-cast — range is unused
+            Gate { cooldown_ticks: 40, hostile_only: false, line_of_sight: false },
+            [EffectOp::Shield { amount: 50.0 }],
+        );
+
+        // Self-cast: caster == target.
+        let caster = AgentId::new(1).expect("AgentId::new");
+        let events = apply_program(
+            &program, caster, caster, 0, 0xCAFE_F00D, &CasterStats::default(),
+        );
+
+        assert_eq!(events.len(), 1);
+        match events[0] {
+            ApplyEvent::Shield { source, target, amount } => {
+                assert_eq!(source, caster);
+                assert_eq!(target, caster, "self-cast: target == source");
+                assert_eq!(amount, 50.0, "config.combat.shieldup_amount");
+            }
+            other => panic!("expected ApplyEvent::Shield, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn mend_apply_program_produces_expected_heal_event() {
+        use engine::ability::apply::{apply_program, ApplyEvent};
+        use engine::ability::program::{AbilityProgram, CasterStats, EffectOp, Gate};
+        use engine::ids::AgentId;
+
+        // Mend.ability: self-target, cooldown=3s (30 ticks), heal=25.
+        let program = AbilityProgram::new_single_target(
+            0.0,
+            Gate { cooldown_ticks: 30, hostile_only: false, line_of_sight: false },
+            [EffectOp::Heal { amount: 25.0 }],
+        );
+
+        let caster = AgentId::new(1).expect("AgentId::new");
+        let events = apply_program(
+            &program, caster, caster, 0, 0xCAFE_F00D, &CasterStats::default(),
+        );
+
+        assert_eq!(events.len(), 1);
+        match events[0] {
+            ApplyEvent::Heal { source, target, amount } => {
+                assert_eq!(source, caster);
+                assert_eq!(target, caster, "self-cast: target == source");
+                assert_eq!(amount, 25.0, "config.combat.mend_amount");
+            }
+            other => panic!("expected ApplyEvent::Heal, got {:?}", other),
         }
     }
 
