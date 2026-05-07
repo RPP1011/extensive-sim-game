@@ -34,6 +34,8 @@
 //! enemy neighbours per Combatant in the contested zone, an
 //! agent typically takes ~5-15 dmg per active tick.
 
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
 use engine::sim_trait::{AgentSnapshot, CompiledSim, VizGlyph};
 use engine::GpuContext;
 use glam::Vec3;
@@ -42,6 +44,8 @@ use wgpu::util::DeviceExt;
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
 use engine::gpu::{EventRing, ViewStorage};
+
+mod binding_check;
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -67,6 +71,33 @@ pub struct Duel25v25State {
     agent_hp_buf: wgpu::Buffer,
     agent_alive_buf: wgpu::Buffer,
     agent_creature_type_buf: wgpu::Buffer,
+    /// Task #138 follow-on (duel_25v25 port, 2026-05-07) — per-stat
+    /// agent SoA columns the apply_ability dispatcher's
+    /// `scale_bonus = Σ percent * agent_stat[caster_slot]` switch reads.
+    /// duel_25v25's Strike has no scaling entries today, so all five
+    /// columns sit at their inert init values; the dispatcher's
+    /// `scale_bonus` collapses to 0 unconditionally. Kept on the state
+    /// struct because the ScanAndStrike kernel still BINDS them
+    /// (the dispatcher emits the stat-switch arms whether or not any
+    /// program actually scales). Mirrors apply_ability_smoke_runtime
+    /// + duel_abilities_runtime exactly — the same five-column shape.
+    #[allow(dead_code)]
+    agent_attack_damage_buf: wgpu::Buffer,
+    agent_max_hp_buf: wgpu::Buffer,
+    #[allow(dead_code)]
+    agent_armor_buf: wgpu::Buffer,
+    #[allow(dead_code)]
+    agent_magic_resist_buf: wgpu::Buffer,
+    #[allow(dead_code)]
+    agent_move_speed_buf: wgpu::Buffer,
+    /// duel_25v25's verbs don't read mana, but the apply_ability
+    /// dispatcher's stat-switch (Wave 1.5#4 GPU wire-up) binds it
+    /// alongside the other stat columns — see the ScanAndStrike
+    /// `agent_mana` field in the generated `PhysicsScanAndStrikeBindings`.
+    /// Init to 100.0 for shape parity with duel_abilities; no kernel
+    /// in this fixture reads it.
+    #[allow(dead_code)]
+    agent_mana_buf: wgpu::Buffer,
 
     // -- Spatial grid --
     spatial_grid_cells: wgpu::Buffer,
@@ -84,8 +115,20 @@ pub struct Duel25v25State {
 
     // -- Per-kernel cfg uniforms --
     scan_cfg_buf: wgpu::Buffer,
+    apply_chronicle_cfg_buf: wgpu::Buffer,
     apply_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
+
+    /// Task #138 follow-on (duel_25v25 port, 2026-05-07) — Packed
+    /// AbilityRegistry uploaded to the GPU. The ScanAndStrike kernel
+    /// binds `effect_kinds` / `effect_payload_a` / `effect_payload_b`
+    /// (and the modifier columns) for the apply_ability dispatcher
+    /// arm. Built once at construction by
+    /// `binding_check::build_duel_25v25_registry` (one program: Strike
+    /// at AbilityId(1)) and uploaded via
+    /// `PackedAbilityRegistryGpu::upload`. The buffers live for the
+    /// rest of the run.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
 
@@ -103,6 +146,15 @@ impl Duel25v25State {
             "duel_25v25 expects exactly 50 agents (25 Red + 25 Blue); got {agent_count}",
         );
         let n = agent_count as usize;
+
+        // Task #138 follow-on (duel_25v25 port, 2026-05-07) — runs ONCE
+        // at startup before any GPU work. Asserts the runtime's
+        // hand-built Strike program lands at AbilityId(1) so the
+        // `apply_ability 1` literal in `assets/sim/duel_25v25.sim` (the
+        // ScanAndStrike body) dispatches the correct program. Cheap
+        // (one-program registry build); panics on any drift before the
+        // expensive GPU init below.
+        binding_check::assert_ability_registry_matches_sim_constants();
 
         // Position layout: split at x=0. Red on left (x in [-2,0)),
         // Blue on right (x in [0,2]). Slight y-jitter per slot so
@@ -168,6 +220,56 @@ impl Duel25v25State {
                     | wgpu::BufferUsages::COPY_DST
                     | wgpu::BufferUsages::COPY_SRC,
             });
+
+        // ---- AbilityRegistry GPU upload (Task #138 follow-on) ----
+        // Build the one-program registry (Strike at AbilityId(1)), pack
+        // it via PackedAbilityRegistry::pack, and upload one buffer per
+        // SoA column. The ScanAndStrike kernel binds these for the
+        // apply_ability dispatcher arm. Building the registry repeats
+        // the binding-check's program-build pass (cheap — one
+        // hand-built program) but keeps construction colocated with the
+        // upload site, mirroring duel_abilities's pattern.
+        let registry = binding_check::build_duel_25v25_registry();
+        let packed = PackedAbilityRegistry::pack(&registry);
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &packed, &gpu, "duel_25v25_runtime",
+        );
+
+        // ---- Per-stat agent SoA columns (Task #138 follow-on) ----
+        // The apply_ability dispatcher's `scale_bonus = Σ percent *
+        // agent_stat[caster_slot]` switch reads these unconditionally
+        // even though duel_25v25's Strike has no scaling entries —
+        // the per-effect scaling SoA is empty, so scale_bonus collapses
+        // to 0.0 inside the dispatcher. We still need to bind real
+        // buffers because the kernel's BGL declares the bindings. Init
+        // values mirror duel_abilities (max_hp=100, mana=100, others=0).
+        let zeros_f32: Vec<f32> = vec![0.0_f32; n];
+        let max_hp_init: Vec<f32> = vec![100.0_f32; n];
+        let mana_init: Vec<f32> = vec![100.0_f32; n];
+        let agent_max_hp_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_25v25_runtime::agent_max_hp"),
+            contents: bytemuck::cast_slice(&max_hp_init),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+        let mk_zero_stat = |label: &str| {
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: bytemuck::cast_slice(&zeros_f32),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            })
+        };
+        let agent_attack_damage_buf =
+            mk_zero_stat("duel_25v25_runtime::agent_attack_damage");
+        let agent_armor_buf = mk_zero_stat("duel_25v25_runtime::agent_armor");
+        let agent_magic_resist_buf =
+            mk_zero_stat("duel_25v25_runtime::agent_magic_resist");
+        let agent_move_speed_buf =
+            mk_zero_stat("duel_25v25_runtime::agent_move_speed");
+        let agent_mana_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_25v25_runtime::agent_mana"),
+            contents: bytemuck::cast_slice(&mana_init),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
 
         // ---- Spatial-grid buffers (mirror particle_collision_runtime) ----
         use dsl_compiler::cg::emit::spatial as sp;
@@ -251,6 +353,21 @@ impl Duel25v25State {
             contents: bytemuck::bytes_of(&apply_cfg),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        // Task #138 follow-on (duel_25v25 port, 2026-05-07) — cfg
+        // uniform for the new chronicle re-emit physics rule. Reads
+        // EffectDamageApplied records from the event ring, emits
+        // Damaged events the existing ApplyDamage cascade drains.
+        let apply_chronicle_cfg = physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleCfg {
+            event_count: 0,
+            tick: 0,
+            seed: 0,
+            _pad0: 0,
+        };
+        let apply_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_25v25_runtime::apply_chronicle_cfg"),
+            contents: bytemuck::bytes_of(&apply_chronicle_cfg),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let seed_cfg = seed_indirect_0::SeedIndirect0Cfg {
             agent_cap: agent_count,
             tick: 0,
@@ -293,6 +410,12 @@ impl Duel25v25State {
             agent_hp_buf,
             agent_alive_buf,
             agent_creature_type_buf,
+            agent_attack_damage_buf,
+            agent_max_hp_buf,
+            agent_armor_buf,
+            agent_magic_resist_buf,
+            agent_move_speed_buf,
+            agent_mana_buf,
             spatial_grid_cells,
             spatial_grid_offsets,
             spatial_grid_starts,
@@ -304,7 +427,9 @@ impl Duel25v25State {
             defeats_received,
             defeats_received_cfg_buf,
             scan_cfg_buf,
+            apply_chronicle_cfg_buf,
             apply_cfg_buf,
+            registry_gpu,
             seed_cfg_buf,
             cache: dispatch::KernelCache::default(),
             tick: 0,
@@ -548,16 +673,42 @@ impl CompiledSim for Duel25v25State {
             self.agent_count,
         );
 
-        // (3) ScanAndStrike — body-form spatial walk emits Damaged.
+        // (3) ScanAndStrike — body-form spatial walk dispatches the
+        // Strike ability via apply_ability. Task #138 follow-on
+        // (duel_25v25 port, 2026-05-07): instead of emitting Damaged
+        // directly, the kernel walks the AbilityRegistry's effect SoA
+        // columns and writes EffectDamageApplied chronicle records
+        // (engine kind=26). The new ApplyDamageFromChronicle kernel
+        // below re-emits those as Damaged so the existing ApplyDamage
+        // cascade keeps working unchanged.
         let scan_bindings = physics_ScanAndStrike::PhysicsScanAndStrikeBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
             agent_pos: &self.agent_pos_buf,
+            agent_hp: &self.agent_hp_buf,
+            agent_max_hp: &self.agent_max_hp_buf,
             agent_alive: &self.agent_alive_buf,
+            agent_move_speed: &self.agent_move_speed_buf,
+            agent_armor: &self.agent_armor_buf,
+            agent_magic_resist: &self.agent_magic_resist_buf,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_mana: &self.agent_mana_buf,
             agent_creature_type: &self.agent_creature_type_buf,
             spatial_grid_cells: &self.spatial_grid_cells,
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
+            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
+            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             cfg: &self.scan_cfg_buf,
         };
         dispatch::dispatch_physics_scanandstrike(
@@ -568,13 +719,45 @@ impl CompiledSim for Duel25v25State {
             self.agent_count,
         );
 
-        // (4) ApplyDamage — chronicle physics, PerEvent over Damaged.
-        // Reads Damaged, writes agent_hp + agent_alive, may emit
-        // Defeated. event_count is the upper bound on Damaged events
-        // produced per tick (one per ScanAndStrike emit). Over-
-        // provision is safe — the kernel's per-handler tag check
-        // ignores foreign kinds.
+        // (3b) ApplyDamageFromChronicle — chronicle re-emit. Task #138
+        // follow-on (duel_25v25 port, 2026-05-07): consumes
+        // EffectDamageApplied records (kind=26) the apply_ability
+        // dispatcher writes and re-emits them as Damaged events. The
+        // existing ApplyDamage kernel below drains Damaged unchanged.
+        // event_count is the upper bound on EffectDamageApplied
+        // records produced per tick (= max ScanAndStrike emits).
         let event_count_estimate = max_neighbour_emits.min(65536);
+        let apply_chronicle_cfg = physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleCfg {
+            event_count: event_count_estimate,
+            tick: self.tick as u32,
+            seed: 0,
+            _pad0: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.apply_chronicle_cfg_buf,
+            0,
+            bytemuck::bytes_of(&apply_chronicle_cfg),
+        );
+        let apply_chronicle_bindings =
+            physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleBindings {
+                event_ring: self.event_ring.ring(),
+                event_tail: self.event_ring.tail(),
+                cfg: &self.apply_chronicle_cfg_buf,
+            };
+        dispatch::dispatch_physics_applydamagefromchronicle(
+            &mut self.cache,
+            &apply_chronicle_bindings,
+            &self.gpu.device,
+            &mut encoder,
+            event_count_estimate,
+        );
+
+        // (4) ApplyDamage — chronicle physics, PerEvent over Damaged.
+        // Reads Damaged (re-emitted by ApplyDamageFromChronicle from
+        // the apply_ability EffectDamageApplied records), writes
+        // agent_hp + agent_alive, may emit Defeated. Over-provision is
+        // safe — the kernel's per-handler tag check ignores foreign
+        // kinds.
         let apply_cfg = physics_ApplyDamage::PhysicsApplyDamageCfg {
             event_count: event_count_estimate,
             tick: self.tick as u32,

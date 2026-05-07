@@ -47,6 +47,26 @@ event Damaged {
   amount: f32,
 }
 
+// Engine-side chronicle event written by the apply_ability dispatcher
+// at hardcoded EventKindId 26 (see
+// `dsl_ast::engine_events::engine_event_kind_id_for_name`).
+//
+// Task #138 follow-on (duel_25v25 port, 2026-05-07) — ScanAndStrike's
+// spatial-walk body is now `apply_ability 1 by self target other`,
+// which writes EffectDamageApplied records into the event ring. The
+// new ApplyDamageFromChronicle physics rule (declared below near
+// ApplyDamage) translates these records back into the existing
+// `Damaged` event so the rest of the cascade (ApplyDamage's per-agent
+// hp decrement + Defeated emit) works without modification — same
+// chronicle re-emit pattern the duel_abilities fixture uses for its
+// Strike verb.
+@replayable @gpu_amenable
+event EffectDamageApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
 @replayable @gpu_amenable
 event Defeated {
   combatant: AgentId,
@@ -95,27 +115,50 @@ spatial_query nearby_enemies(self: AgentId, candidate: AgentId) =
 //   - Skips if dead (per-handler where).
 //   - Skips off-cooldown ticks (per-handler where).
 //   - Walks the 27-cell neighbourhood of self.
-//   - For each neighbour candidate, emits Damaged if creature_type
-//     opposes ours (body-side `if` because the spatial filter is
-//     informational at the body-iter site today).
+//   - For each neighbour candidate, dispatches the Strike ability
+//     (AbilityId=1, registered by the runtime crate at startup) when
+//     creature_type opposes ours (body-side `if` because the spatial
+//     filter is informational at the body-iter site today, AND because
+//     today's apply_ability `when` predicates can't reference the
+//     creature_type discriminant — see binding-check note in
+//     `crates/duel_25v25_runtime/src/binding_check.rs`).
 //
 // @phase(per_agent) so the dispatch grid is one thread per agent
 // (matching particle_collision_min's MoveParticle rule shape).
+//
+// Task #138 follow-on (duel_25v25 port, 2026-05-07) — port this fixture
+// from inline `emit Damaged` to apply_ability dispatch. The literal
+// `1` is Strike's AbilityId in the duel_25v25 AbilityRegistry built by
+// `crates/duel_25v25_runtime/src/binding_check.rs::build_duel_25v25_registry`
+// (Strike is the only entry so it lands at AbilityId(1)). The
+// dispatcher writes EffectDamageApplied chronicle records (kind=26)
+// instead of the source-declared Damaged event; the new
+// ApplyDamageFromChronicle physics rule below re-emits those records
+// as Damaged so the existing ApplyDamage cascade keeps working
+// unchanged. This stresses the apply_ability codepath at 50-agent
+// scale AND inside spatial-walk bodies (vs. the duel_abilities toy
+// 2-agent verb-body shape).
+//
+// COOLDOWN NOTE: the registry-resident Strike program declares
+// `cooldown_ticks: 0` (see binding_check.rs); the per-tick gate stays
+// in the verb-style `world.tick % 2 == 0` clause below since the GPU
+// dispatcher does not consult program.cooldown_ticks at the
+// apply_ability arm today (registry-driven cooldown dispatch is later
+// infrastructure — same caveat as duel_abilities's chance gating).
 physics ScanAndStrike @phase(per_agent) {
-  // Cooldown literal (2) inlined — `config.<ns>.<u32_field>` resolves
-  // to f32 at lowering today (diplomacy_probe Gap #3) so the
-  // `cooldown_strike` config field stays declared but unreferenced
-  // until the config-type-resolution fix lands. duel_1v1 uses the
-  // same workaround.
   on Tick {} where (self.alive
                     && (world.tick % 2 == 0)) {
     for other in spatial.nearby_enemies(self) {
-      // Body-side team check: only emit damage when the candidate's
+      // Body-side team check: only dispatch Strike when the candidate's
       // creature_type differs from ours. Today's body-form spatial
       // walk routes `other.<field>` reads through PerPairCandidate
       // (the same path boids' fold form uses for `other.pos`), so
       // this predicate lowers via AgentField::CreatureType reads
-      // against `agent_creature_type[per_pair_candidate]`.
+      // against `agent_creature_type[per_pair_candidate]`. apply_ability
+      // `when` predicates today can't reference creature_type, so this
+      // gate must stay in the spatial-walk body — moving it would
+      // require predicate dispatch enhancements that are out of scope
+      // for this port.
       //
       // The inner per-pair-candidate loop also visits self (its own
       // grid cell contains its own slot), so a `candidate != self`
@@ -129,13 +172,28 @@ physics ScanAndStrike @phase(per_agent) {
       // zero again).
       if (other.creature_type != self.creature_type
           && other.alive) {
-        emit Damaged {
-          source: self,
-          target: other,
-          amount: config.combat.strike_damage,
-        }
+        apply_ability 1 by self target other
       }
     }
+  }
+}
+
+// Task #138 follow-on (duel_25v25 port, 2026-05-07) — ScanAndStrike's
+// body now uses `apply_ability 1 by self target other`. The dispatcher
+// writes EffectDamageApplied chronicle records (engine-aliased to
+// kind=26) instead of the source-declared Damaged event. This rule
+// consumes those records and re-emits Damaged so the rest of the
+// cascade (ApplyDamage's per-agent hp decrement + Defeated emit) keeps
+// working unchanged. Mirrors the chronicle re-emit shape duel_abilities
+// uses for its Strike verb (see
+// `assets/sim/duel_abilities.sim::ApplyDamageFromChronicle`).
+//
+// P6 caveat: this rule is PerEvent + emit-only (no AgentField writes)
+// — does NOT trip P6, unlike ApplyDamage below.
+@phase(post)
+physics ApplyDamageFromChronicle {
+  on EffectDamageApplied { actor: a, target: t, amount: amt } {
+    emit Damaged { source: a, target: t, amount: amt }
   }
 }
 
