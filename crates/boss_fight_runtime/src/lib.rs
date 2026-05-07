@@ -71,13 +71,34 @@ pub struct BossFightState {
     agent_mana_buf: wgpu::Buffer,
 
     // -- Mask bitmaps (one per verb in source order:
-    //    BossStrike=0, BossSelfHeal=1, HeroAttack=2, HeroHeal=3) --
+    //    BossStrike=0, BossSelfHeal=1, HeroAttack=2, HeroStun=3, HeroHeal=4) --
+    //
+    // HeroStun control-status proof (boss_fight, 2026-05-07): the verb
+    // is declared between HeroAttack and HeroHeal in the .sim, so
+    // source-order action_id assignment lands HeroStun at index 3 and
+    // shifts HeroHeal to index 4. The fused mask kernel writes all five
+    // bitmaps; the scoring argmax reads all five rows.
     mask_0_bitmap_buf: wgpu::Buffer,
     mask_1_bitmap_buf: wgpu::Buffer,
     mask_2_bitmap_buf: wgpu::Buffer,
     mask_3_bitmap_buf: wgpu::Buffer,
+    mask_4_bitmap_buf: wgpu::Buffer,
     mask_bitmap_zero_buf: wgpu::Buffer,
     mask_bitmap_words: u32,
+
+    /// HeroStun control-status proof (boss_fight, 2026-05-07) —
+    /// per-agent `stun_expires_at_tick` SoA column. Written by the
+    /// fused
+    /// `physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`
+    /// kernel from kind=29 EffectStunApplied chronicle records produced
+    /// by HeroStun's verb chronicle dispatcher (kind=29 records carry
+    /// `expires_at_tick = world.tick + 15` precomputed by the
+    /// dispatcher). Init to 0 (= "never stunned" — agents whose
+    /// `stun_expires_at_tick > world.tick` are stunned). The verb
+    /// `where`-clauses in this fixture don't read it today, but the new
+    /// `hero_stun_locks_boss` test asserts the SoA column lands the
+    /// expected expires_at_tick after HeroStun cast cycles.
+    agent_stun_expires_at_tick_buf: wgpu::Buffer,
 
     // -- Scoring output --
     scoring_output_buf: wgpu::Buffer,
@@ -96,11 +117,26 @@ pub struct BossFightState {
     chronicle_boss_strike_cfg_buf: wgpu::Buffer,
     chronicle_boss_heal_cfg_buf: wgpu::Buffer,
     chronicle_hero_attack_cfg_buf: wgpu::Buffer,
+    /// HeroStun control-status proof (boss_fight, 2026-05-07) — fifth
+    /// per-agent verb chronicle cfg. Same shape as the BossStrike +
+    /// HeroAttack cfgs; the HeroStun chronicle kernel filters
+    /// `action_id == 3u` (source-order index — HeroStun is the fourth
+    /// verb declared after BossStrike + BossSelfHeal + HeroAttack) and
+    /// dispatches the AbilityId(3) program through the apply_ability
+    /// arm, writing kind=29 EffectStunApplied records.
+    chronicle_hero_stun_cfg_buf: wgpu::Buffer,
     chronicle_hero_heal_cfg_buf: wgpu::Buffer,
-    /// Task #138 follow-on (boss_fight port, 2026-05-07) — cfg uniform
-    /// for the new ApplyDamageFromChronicle physics rule (re-emits
-    /// EffectDamageApplied records as Damaged so the existing
-    /// ApplyDamage cascade keeps working unchanged).
+    /// Task #138 follow-on (boss_fight port, 2026-05-07) + HeroStun
+    /// control-status proof (boss_fight, 2026-05-07) — cfg uniform for
+    /// the FUSED chronicle-consumer kernel. The lower pass folded
+    /// ApplyDamageFromChronicle (drains kind=26 → emit Damaged) and
+    /// ApplyStunFromChronicle (drains kind=29 → write
+    /// `agents.set_stun_expires_at_tick`) into ONE kernel
+    /// (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`)
+    /// because both consume from the same event ring at @phase(post)
+    /// with non-overlapping kind tags. Single cfg + single dispatch
+    /// per tick. Mirrors the same fusion duel_25v25 +
+    /// mass_battle_100v100's lib.rs surfaced.
     apply_chronicle_cfg_buf: wgpu::Buffer,
     apply_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
@@ -228,7 +264,30 @@ impl BossFightState {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
-        // Four mask bitmaps — one per verb. Cleared each tick.
+        // HeroStun control-status proof (boss_fight, 2026-05-07) —
+        // per-agent `stun_expires_at_tick` SoA column. Init to 0 = "never
+        // stunned" (the convention established by duel_abilities). The
+        // fused ApplyDamageFromChronicle_and_ApplyStunFromChronicle
+        // kernel writes this slot from kind=29 EffectStunApplied
+        // chronicle records (one record per HeroStun cast). COPY_SRC
+        // is on so the test can read it back via `read_u32`.
+        let stun_expires_init: Vec<u32> = vec![0_u32; agent_count as usize];
+        let agent_stun_expires_at_tick_buf =
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("boss_fight_runtime::agent_stun_expires_at_tick"),
+                contents: bytemuck::cast_slice(&stun_expires_init),
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
+            });
+
+        // Five mask bitmaps — one per verb. Cleared each tick.
+        // HeroStun control-status proof (boss_fight, 2026-05-07):
+        // mask_3 is the new bitmap added for HeroStun's verb. The fused
+        // mask kernel writes all five bitmaps; the scoring argmax reads
+        // all five rows. Source-order verb list:
+        //   BossStrike=0, BossSelfHeal=1, HeroAttack=2, HeroStun=3,
+        //   HeroHeal=4 (HeroHeal shifted from 3 to 4).
         let mask_bitmap_words = (agent_count + 31) / 32;
         let mask_bitmap_bytes = (mask_bitmap_words as u64) * 4;
         let mk_mask = |label: &str| -> wgpu::Buffer {
@@ -243,6 +302,7 @@ impl BossFightState {
         let mask_1_bitmap_buf = mk_mask("boss_fight_runtime::mask_1_bitmap");
         let mask_2_bitmap_buf = mk_mask("boss_fight_runtime::mask_2_bitmap");
         let mask_3_bitmap_buf = mk_mask("boss_fight_runtime::mask_3_bitmap");
+        let mask_4_bitmap_buf = mk_mask("boss_fight_runtime::mask_4_bitmap");
         let zero_words: Vec<u32> = vec![0u32; mask_bitmap_words.max(4) as usize];
         let mask_bitmap_zero_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("boss_fight_runtime::mask_bitmap_zero"),
@@ -335,6 +395,19 @@ impl BossFightState {
             contents: bytemuck::bytes_of(&chronicle_hero_attack_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        // HeroStun control-status proof (boss_fight, 2026-05-07) — cfg
+        // uniform for the new verb chronicle kernel. Same shape as
+        // BossStrike + HeroAttack; the kernel filters action_id == 3u
+        // and dispatches AbilityId(3) through the apply_ability arm.
+        let chronicle_hero_stun_cfg_init =
+            physics_verb_chronicle_HeroStun::PhysicsVerbChronicleHeroStunCfg {
+                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            };
+        let chronicle_hero_stun_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("boss_fight_runtime::chronicle_hero_stun_cfg"),
+            contents: bytemuck::bytes_of(&chronicle_hero_stun_cfg_init),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let chronicle_hero_heal_cfg_init =
             physics_verb_chronicle_HeroHeal::PhysicsVerbChronicleHeroHealCfg {
                 event_count: 0, tick: 0, seed: 0, _pad0: 0,
@@ -353,12 +426,18 @@ impl BossFightState {
             contents: bytemuck::bytes_of(&apply_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        // Task #138 follow-on (boss_fight port, 2026-05-07) — cfg
-        // uniform for the new chronicle re-emit physics rule. Reads
-        // EffectDamageApplied records from the event ring, emits
-        // Damaged events the existing ApplyDamage cascade drains.
+        // Task #138 follow-on (boss_fight port, 2026-05-07) + HeroStun
+        // control-status proof (boss_fight, 2026-05-07) — cfg uniform
+        // for the FUSED chronicle-consumer kernel. The lower pass folded
+        // ApplyDamageFromChronicle (kind=26 → emit Damaged) and
+        // ApplyStunFromChronicle (kind=29 → write
+        // `agents.set_stun_expires_at_tick`) into one kernel
+        // (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`)
+        // because both consume from the same event ring at @phase(post)
+        // with non-overlapping kind tags. Single cfg + single dispatch
+        // per tick.
         let apply_chronicle_cfg_init =
-            physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleCfg {
+            physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleCfg {
                 event_count: 0, tick: 0, seed: 0, _pad0: 0,
             };
         let apply_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -407,8 +486,10 @@ impl BossFightState {
             mask_1_bitmap_buf,
             mask_2_bitmap_buf,
             mask_3_bitmap_buf,
+            mask_4_bitmap_buf,
             mask_bitmap_zero_buf,
             mask_bitmap_words,
+            agent_stun_expires_at_tick_buf,
             scoring_output_buf,
             scoring_output_zero_buf,
             event_ring,
@@ -421,6 +502,7 @@ impl BossFightState {
             chronicle_boss_strike_cfg_buf,
             chronicle_boss_heal_cfg_buf,
             chronicle_hero_attack_cfg_buf,
+            chronicle_hero_stun_cfg_buf,
             chronicle_hero_heal_cfg_buf,
             apply_chronicle_cfg_buf,
             apply_cfg_buf,
@@ -451,6 +533,16 @@ impl BossFightState {
 
     pub fn read_creature_type(&self) -> Vec<u32> {
         self.read_u32(&self.agent_creature_type_buf, "creature_type")
+    }
+
+    /// Per-agent `stun_expires_at_tick` readback (u32 absolute tick at
+    /// which the stun expires; 0 = "never stunned"). HeroStun control-
+    /// status proof (boss_fight, 2026-05-07) — written by the fused
+    /// `physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`
+    /// kernel from kind=29 EffectStunApplied chronicle records emitted
+    /// by HeroStun's verb chronicle dispatcher.
+    pub fn read_stun_expires_at_tick(&self) -> Vec<u32> {
+        self.read_u32(&self.agent_stun_expires_at_tick_buf, "stun_expires_at_tick")
     }
 
     fn read_f32(&self, buf: &wgpu::Buffer, label: &str) -> Vec<f32> {
@@ -524,9 +616,15 @@ impl CompiledSim for BossFightState {
             &self.gpu, &mut encoder, max_slots_per_tick,
         );
         let mask_bytes = (self.mask_bitmap_words as u64) * 4;
+        // HeroStun control-status proof (boss_fight, 2026-05-07):
+        // mask_3 is the new bitmap added for HeroStun's verb. Cleared
+        // every tick alongside the other four (one bitmap per verb in
+        // source order: BossStrike=0, BossSelfHeal=1, HeroAttack=2,
+        // HeroStun=3, HeroHeal=4).
         for buf in [
             &self.mask_0_bitmap_buf, &self.mask_1_bitmap_buf,
             &self.mask_2_bitmap_buf, &self.mask_3_bitmap_buf,
+            &self.mask_4_bitmap_buf,
         ] {
             encoder.copy_buffer_to_buffer(
                 &self.mask_bitmap_zero_buf, 0, buf, 0, mask_bytes.max(4),
@@ -559,6 +657,10 @@ impl CompiledSim for BossFightState {
             mask_1_bitmap: &self.mask_1_bitmap_buf,
             mask_2_bitmap: &self.mask_2_bitmap_buf,
             mask_3_bitmap: &self.mask_3_bitmap_buf,
+            // HeroStun control-status proof (boss_fight, 2026-05-07):
+            // fifth verb mask (HeroStun at source index 3, HeroHeal
+            // shifted to index 4).
+            mask_4_bitmap: &self.mask_4_bitmap_buf,
             cfg: &self.mask_cfg_buf,
         };
         dispatch::dispatch_fused_mask_verb_bossstrike(
@@ -588,6 +690,9 @@ impl CompiledSim for BossFightState {
             mask_1_bitmap: &self.mask_1_bitmap_buf,
             mask_2_bitmap: &self.mask_2_bitmap_buf,
             mask_3_bitmap: &self.mask_3_bitmap_buf,
+            // HeroStun control-status proof (boss_fight, 2026-05-07):
+            // scoring's argmax now reads five mask rows.
+            mask_4_bitmap: &self.mask_4_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
             cfg: &self.scoring_cfg_buf,
             // Wave 1.5#7 follow-on (predicate-aware scoring,
@@ -712,7 +817,62 @@ impl CompiledSim for BossFightState {
             self.agent_count,
         );
 
-        // (7) HeroHeal chronicle — gates on action_id==3, emits Healed.
+        // (6b) HeroStun chronicle — HeroStun control-status proof
+        // (boss_fight, 2026-05-07). Gates action_id==3u (HeroStun is
+        // the fourth verb in source order, so its action_id is 3 —
+        // shifting HeroHeal's action_id from 3 to 4). Same chronicle
+        // re-emit pattern as BossStrike + HeroAttack except the
+        // AbilityProgram at slot 3 declares EffectOp::Stun{
+        // duration_ticks=15} instead of Damage, so the apply_ability
+        // dispatcher writes kind=29 EffectStunApplied records (with
+        // `expires_at_tick = world.tick + 15` precomputed) instead of
+        // kind=26 EffectDamageApplied. The fused
+        // ApplyDamageFromChronicle_and_ApplyStunFromChronicle kernel
+        // below drains both kind tags into the right SoA target
+        // (Damaged → ApplyDamage HP cascade for kind=26, direct
+        // `agents.set_stun_expires_at_tick` for kind=29).
+        let hs_cfg = physics_verb_chronicle_HeroStun::PhysicsVerbChronicleHeroStunCfg {
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.chronicle_hero_stun_cfg_buf, 0, bytemuck::bytes_of(&hs_cfg),
+        );
+        let hs_bindings = physics_verb_chronicle_HeroStun::PhysicsVerbChronicleHeroStunBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
+            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
+            ability_registry_chances:           &self.registry_gpu.chances,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_max_hp: &self.agent_max_hp_buf,
+            agent_hp: &self.agent_hp_buf,
+            agent_armor: &self.agent_armor_buf,
+            agent_magic_resist: &self.agent_magic_resist_buf,
+            agent_move_speed: &self.agent_move_speed_buf,
+            agent_mana: &self.agent_mana_buf,
+            cfg: &self.chronicle_hero_stun_cfg_buf,
+        };
+        dispatch::dispatch_physics_verb_chronicle_herostun(
+            &mut self.cache, &hs_bindings, &self.gpu.device, &mut encoder,
+            self.agent_count,
+        );
+
+        // (7) HeroHeal chronicle — gates on action_id==4u, emits Healed.
+        // HeroStun control-status proof (boss_fight, 2026-05-07):
+        // HeroHeal's action_id shifted from 3 to 4 because HeroStun was
+        // inserted at source position 3. The kernel name + binding
+        // shape are unchanged — the action_id literal in the generated
+        // kernel is the only detail that moved.
         let hh_cfg = physics_verb_chronicle_HeroHeal::PhysicsVerbChronicleHeroHealCfg {
             event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
         };
@@ -729,34 +889,41 @@ impl CompiledSim for BossFightState {
             self.agent_count,
         );
 
-        // (7b) ApplyDamageFromChronicle — chronicle re-emit. Task #138
-        // follow-on (boss_fight port, 2026-05-07): consumes
-        // EffectDamageApplied records (kind=26) the apply_ability
-        // dispatcher writes (BossStrike + HeroAttack) and re-emits them
-        // as Damaged events. The fused ApplyDamage_and_ApplyHeal kernel
-        // below drains Damaged unchanged. event_count is the upper
-        // bound on EffectDamageApplied records produced per tick (=
-        // BossStrike + HeroAttack emits, capped at agent_count).
+        // (7b) Fused ApplyDamageFromChronicle + ApplyStunFromChronicle
+        // — chronicle consumers fused into ONE kernel by the lower pass
+        // (both run @phase(post) over the same event ring with
+        // non-overlapping kind tags). HeroStun control-status proof
+        // (boss_fight, 2026-05-07). Drains:
+        //   - kind=26 EffectDamageApplied → emit `Damaged` (re-emit;
+        //     the standalone ApplyDamage_and_ApplyHeal kernel below
+        //     decrements HP)
+        //   - kind=29 EffectStunApplied → write
+        //     `agents.set_stun_expires_at_tick(t, expires_at_tick)`
+        //     directly into the per-agent SoA slot.
+        //
+        // event_count is the upper bound on chronicle records produced
+        // per tick across BossStrike + HeroAttack + HeroStun. Same
+        // agent_count*4 headroom estimate the rest of the cascade uses.
         let event_count_estimate = self.agent_count * 4;
-        let apply_chronicle_cfg =
-            physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleCfg {
-                event_count: event_count_estimate,
-                tick: self.tick as u32,
-                seed: 0,
-                _pad0: 0,
-            };
+        let apply_chronicle_cfg = physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleCfg {
+            event_count: event_count_estimate,
+            tick: self.tick as u32,
+            seed: 0,
+            _pad0: 0,
+        };
         self.gpu.queue.write_buffer(
             &self.apply_chronicle_cfg_buf,
             0,
             bytemuck::bytes_of(&apply_chronicle_cfg),
         );
         let apply_chronicle_bindings =
-            physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleBindings {
+            physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleBindings {
                 event_ring: self.event_ring.ring(),
                 event_tail: self.event_ring.tail(),
+                agent_stun_expires_at_tick: &self.agent_stun_expires_at_tick_buf,
                 cfg: &self.apply_chronicle_cfg_buf,
             };
-        dispatch::dispatch_physics_applydamagefromchronicle(
+        dispatch::dispatch_physics_applydamagefromchronicle_and_applystunfromchronicle(
             &mut self.cache,
             &apply_chronicle_bindings,
             &self.gpu.device,
@@ -1097,5 +1264,112 @@ mod viz_tests {
              and alive_total stable ({})",
             alive_total_now,
         );
+    }
+
+    /// HeroStun control-status proof (boss_fight, 2026-05-07) — proves
+    /// the apply_ability dispatcher emits kind=29 EffectStunApplied
+    /// chronicle records in the asymmetric 1-vs-N RPG combat shape AND
+    /// the fused
+    /// `physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`
+    /// kernel ferries the per-record `expires_at_tick` into the
+    /// `agent_stun_expires_at_tick` SoA via
+    /// `agents.set_stun_expires_at_tick(t, e)`.
+    ///
+    /// CADENCE AT THE SEAM: HeroStun fires at `world.tick % 7 == 0`,
+    /// so steps 0..=13 (= ticks 0..=13) drive cast cycles at tick 0
+    /// and tick 7 — two cast cycles before tick 14 dispatches. Each
+    /// alive Hero (slots 1..=5) on its eligible cycle picks the Boss
+    /// (slot 0) via the scoring argmax (HeroStun's `score 2.0` outscores
+    /// HeroAttack's `score 1.0` on overlap ticks). At tick 0 both
+    /// HeroStun and HeroAttack are eligible (% 7 and % 3 both pass);
+    /// argmax picks HeroStun. At tick 7 only HeroStun is on for heroes;
+    /// it lands as their argmax pick uncontested.
+    ///
+    /// `expires_at_tick` for a tick-0 cast = `world.tick + 15 = 15`;
+    /// for a tick-7 cast = `7 + 15 = 22`. Each successful hero cast
+    /// writes the boss's `stun_expires_at_tick` slot (multiple heroes
+    /// targeting slot 0 race to write — last-write-wins on the SoA).
+    /// The expected post-run value is in {15, 22} ∪ small race
+    /// neighbours; we pin a tolerant range [15, 23].
+    ///
+    /// HOW THE TEST PROVES HERO-STUN FIRED:
+    ///   1. After 14 ticks, the boss (slot 0) has a non-zero
+    ///      stun_expires_at_tick (proves the chronicle path emitted
+    ///      kind=29 records AND the fused consumer wrote the SoA).
+    ///   2. The boss's expiry tick is in [15, 23] (matches `tick + 15`
+    ///      for tick∈{0, 7}).
+    #[test]
+    fn hero_stun_locks_boss() {
+        const N: u32 = 6;
+        let mut state = BossFightState::new(0xCAFE_F00D, N);
+
+        // Pre-tick baseline — every agent's stun_expires_at_tick is 0.
+        let initial_stun = state.read_stun_expires_at_tick();
+        assert_eq!(
+            initial_stun.len(),
+            N as usize,
+            "stun_expires_at_tick readback must cover all {N} agents",
+        );
+        for (i, &e) in initial_stun.iter().enumerate() {
+            assert_eq!(
+                e, 0,
+                "initial stun_expires_at_tick[{i}] must be 0 (= never \
+                 stunned); got {e}",
+            );
+        }
+
+        // Run 14 ticks. HeroStun fires at tick 0 and tick 7 (two cast
+        // cycles); the next firing tick is 14 (we run steps 0..=13
+        // inclusive, ending BEFORE tick 14 dispatches). HeroAttack (% 3)
+        // still fires at ticks 0, 3, 6, 9, 12 — but at tick 0 the
+        // scoring argmax picks HeroStun (score 2.0 > HeroAttack's 1.0),
+        // and HeroAttack lands the other ticks. BossStrike (% 10) fires
+        // at tick 0 and 10 — independent. BossSelfHeal (% 50, hp <
+        // 1500) doesn't fire in this window (boss starts at HP 5000).
+        for _ in 0..14 {
+            state.step();
+        }
+
+        let stun = state.read_stun_expires_at_tick();
+
+        // Pin 1: the boss (slot 0) has a non-zero stun expiry — proves
+        // HeroStun's apply_ability dispatch emitted kind=29
+        // EffectStunApplied records AND the fused chronicle consumer
+        // wrote the SoA. Multiple heroes target slot 0 on each cycle so
+        // the slot is guaranteed to land at least one stun.
+        assert!(
+            stun[0] > 0,
+            "after 14 ticks the boss (slot 0) must have a non-zero \
+             stun_expires_at_tick (control-status chronicle proof); \
+             got stun[0]={}. Per-slot stun: {:?}",
+            stun[0],
+            stun,
+        );
+
+        // Pin 2: the boss's expiry tick is in [15, 23] — the dispatcher
+        // pre-computes `expires_at_tick = world.tick + duration_ticks(15)`
+        // at chronicle-write time. Tick 0 cast → expires at 15; tick 7
+        // cast → expires at 22. Race-tolerant bound is [15, 23] (allows
+        // for one extra tick of advance from the apply pass running
+        // after the chronicle write).
+        assert!(
+            (15..=23).contains(&stun[0]),
+            "boss stun_expires_at_tick={} outside expected range \
+             [15, 23] (tick-0 cast → expires at 15, tick-7 cast → \
+             expires at 22)",
+            stun[0],
+        );
+
+        // Pin 3: heroes (slots 1..=5) must NOT be stunned — the score
+        // expression's `target.creature_type == Boss` gate filters them
+        // out, so no kind=29 record ever lands on a hero slot.
+        for i in 1..(N as usize) {
+            assert_eq!(
+                stun[i], 0,
+                "hero slot {i} must have stun_expires_at_tick=0 (only \
+                 the boss is a valid HeroStun target); got {}",
+                stun[i],
+            );
+        }
     }
 }
