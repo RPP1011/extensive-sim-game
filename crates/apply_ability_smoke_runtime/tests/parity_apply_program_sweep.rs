@@ -787,16 +787,30 @@ fn build_sweep() -> Vec<(&'static str, AbilityProgram, CasterStats)> {
         CasterStats::default(),
     ));
 
-    // 37. PickFew-shape — `Damage(15) in spread(2.0, 1)` (#181 AOE Path B
-    //     Spread). Spread is Circle + per-cast cap on number of records
-    //     after sorting by AgentId. The GPU side defers Spread (sort +
-    //     cap in WGSL is non-trivial under atomicAdd ring writes), so the
-    //     dispatcher's WGSL `else` branch falls through to the single-
-    //     target path; the CPU oracle agrees by passing only the post-
-    //     cap target slot list to `apply_program_aoe`. Under the smoke
-    //     fixture's self-cast, both produce 1 chronicle record (target =
-    //     caster slot 0). Pin the alignment between CPU oracle (post-
-    //     cap, 1 target) and GPU (single-target fallback, 1 target).
+    // 37. PickFew-shape — `Damage(15) in spread(2.0, 2)` (#181 AOE Path B
+    //     Spread, GPU-emitted Wave 1.6 #183). Spread is Circle gate +
+    //     sort by AgentId ascending + truncate to max_targets. With the
+    //     4-agent row fixture (x=0, 1.5, 3.0, 4.5) self-cast at slot 0,
+    //     the in-radius set under radius=2.0 is {slot 0 (d=0), slot 1
+    //     (d=1.5)} — slots 2/3 are outside. max_targets=2 keeps both
+    //     after sort, so the GPU's per-thread sort+truncate must agree
+    //     with the CPU oracle's `apply_program_aoe_spread_filter`
+    //     post-cap list `[slot 0, slot 1]`. Two chronicle records,
+    //     byte-equal across backends.
+    //
+    //     The `args[1] = 2.0` literal is stored as f32 in the registry
+    //     (per-effect area_args is `[f32; 4]`); the WGSL emit casts it
+    //     to u32 via `u32(area_args[base + 1])`. CPU oracle reads the
+    //     `EffectAreaShape::args[1]` slot as `u32` directly via
+    //     `as u32` (matching the WGSL truncation semantics for
+    //     non-negative finite f32s — see `apply_program_aoe_spread_filter`
+    //     callers).
+    //
+    //     16-slot cap caveat: this fixture's 4 candidates fit comfortably
+    //     under the per-thread `array<u32, 16>` collection buffer; no
+    //     pre-sort overflow is exercised here. Fixtures targeting > 16
+    //     simultaneous in-radius candidates per cast must keep
+    //     n_in_radius ≤ 16 to stay byte-equal across backends.
     let mut pick_few = AbilityProgram::new_single_target(
         5.0,
         Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
@@ -804,7 +818,7 @@ fn build_sweep() -> Vec<(&'static str, AbilityProgram, CasterStats)> {
     );
     pick_few.per_effect_areas.push(Some(engine::ability::program::EffectAreaShape {
         kind: engine::ability::program::ShapeKind::Spread,
-        args: [2.0, 1.0, 0.0, 0.0],
+        args: [2.0, 2.0, 0.0, 0.0],
     }));
     out.push((
         "PickFew",
@@ -1572,11 +1586,13 @@ fn cpu_gpu_apply_program_byte_equal_across_modifier_matrix() {
                 // Cylinder/Dome/Hull). Hit sets under the 4-agent row
                 // fixture (x=0, 1.5, 3.0, 4.5 at y=0):
                 //
-                //   PickFew   (Spread, r=2.0, max=1):
-                //     CPU oracle pre-caps to [slot 0] (lowest AgentId in
-                //     radius). GPU defers Spread → falls through to the
-                //     single-target branch which writes target=caster_slot=0.
-                //     Both produce 1 record with target=0.
+                //   PickFew   (Spread, r=2.0, max=2) — Wave 1.6 #183:
+                //     Circle gate hits slot 0 (d=0) and slot 1 (d=1.5);
+                //     slots 2/3 are outside r=2. After sort by AgentId
+                //     ascending + truncate to 2, kept set = [slot 0,
+                //     slot 1]. CPU oracle's `apply_program_aoe_spread_filter`
+                //     produces the same list; GPU's per-thread insertion
+                //     sort + cap matches. Both produce 2 records.
                 //
                 //   TallStomp (Column, r=2.0, h=4.0):
                 //     XZ disc gate hits slot 0 (d=0) and slot 1 (d=1.5);
@@ -1600,7 +1616,7 @@ fn cpu_gpu_apply_program_byte_equal_across_modifier_matrix() {
                 "PickFew" => aoe_cpu_records_for_cast(
                     program,
                     /*caster_slot*/ 0,
-                    /*aoe_target_slots*/ &[0],
+                    /*aoe_target_slots*/ &[0, 1],
                     tick,
                     caster_stats,
                 ),

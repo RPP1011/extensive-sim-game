@@ -618,19 +618,24 @@ fn aoe_line_degenerate_under_self_cast_emits_no_records() {
 // ---------------------------------------------------------------- //
 
 #[test]
-fn aoe_spread_falls_back_to_single_target_on_gpu() {
-    // #181 Spread is deferred on the GPU side — sort + cap in WGSL is
-    // non-trivial under atomicAdd ring writes. The dispatcher's WGSL
-    // `else` branch falls through to the single-target path; the CPU
-    // oracle agrees by emitting a single record on the post-cap slot
-    // list (lowest-AgentId K targets in radius). Pin the alignment so
-    // a future GPU-side Spread implementation surfaces here as a
-    // count change.
+fn aoe_spread_truncates_to_max_targets_on_gpu() {
+    // #183 (Wave 1.6 GPU emit): Spread is now implemented on GPU via
+    // per-thread Circle collection + sequential insertion sort by
+    // AgentId + truncate to max_targets. P11 requires the kept set to
+    // be the lowest-K AgentIds across both backends.
     //
-    // Fixture: 4-agent row (x=0, 1.5, 3.0, 4.5). Spread(r=2, max=1)
-    // from caster slot 0 → CPU oracle pre-caps to [slot 0]. GPU
-    // dispatcher's fallback writes target=caster_slot=0. Both produce
-    // 1 record.
+    // Fixture: 4-agent row (x=0, 1.5, 3.0, 4.5). Spread(r=2, max=2)
+    // from caster slot 0 (self-cast → aoe_center=(0,0,0)). In-radius
+    // candidates: slot 0 (d=0), slot 1 (d=1.5). Slots 2 (d=3.0) and 3
+    // (d=4.5) are outside r=2.0. Both in-radius slots fit under
+    // max_targets=2 → both kept after sort. Two chronicle records,
+    // targets {0, 1} (sort-canonicalized after readback).
+    //
+    // Discriminating vs the prior fallback test: max_targets=2 with 2
+    // in-radius candidates exercises the GPU's collect+sort+truncate
+    // path end-to-end. Previously max_targets=1 with the deferred
+    // fallback could trivially produce 1 record by writing the caster
+    // slot — that path no longer fires.
     let mut pick_few = AbilityProgram::new_single_target(
         5.0,
         Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
@@ -638,7 +643,7 @@ fn aoe_spread_falls_back_to_single_target_on_gpu() {
     );
     pick_few.per_effect_areas.push(Some(EffectAreaShape {
         kind: ShapeKind::Spread,
-        args: [2.0, 1.0, 0.0, 0.0],
+        args: [2.0, 2.0, 0.0, 0.0],
     }));
 
     let mut builder = AbilityRegistryBuilder::new();
@@ -675,13 +680,20 @@ fn aoe_spread_falls_back_to_single_target_on_gpu() {
 
     let tail = state.read_event_tail();
     assert_eq!(
-        tail, 1,
-        "Spread on GPU defers (single-target fallback) → 1 chronicle \
-         record with target=caster_slot. Got tail={tail}",
+        tail, 2,
+        "Spread on GPU (Circle gate + sort + truncate-to-max_targets) \
+         → 2 chronicle records (slots 0, 1 in-radius under r=2.0, both \
+         kept under max_targets=2). Got tail={tail}",
     );
-    let records = state.read_event_ring(tail);
-    assert_eq!(records[0][3], 0, "Spread fallback target must be caster slot 0");
-    assert_eq!(records[0][4], 15.0_f32.to_bits(), "Spread record payload_a (15.0)");
+    let mut records = state.read_event_ring(tail);
+    // P11: GPU writes via atomicAdd → record order in event_ring is
+    // workgroup-schedule-dependent. Canonicalize by target slot for a
+    // deterministic comparison.
+    records.sort_by_key(|r| r[3]);
+    assert_eq!(records[0][3], 0, "Spread record 0 target must be slot 0 (lowest AgentId in-radius)");
+    assert_eq!(records[1][3], 1, "Spread record 1 target must be slot 1 (next AgentId in-radius)");
+    assert_eq!(records[0][4], 15.0_f32.to_bits(), "Spread record 0 payload_a (15.0)");
+    assert_eq!(records[1][4], 15.0_f32.to_bits(), "Spread record 1 payload_a (15.0)");
 }
 
 #[test]
