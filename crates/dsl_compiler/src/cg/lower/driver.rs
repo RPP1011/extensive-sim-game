@@ -374,6 +374,24 @@ pub fn lower_compilation_to_cg_with_opts(
     // (Append) write recording, but on the read side.
     wire_ability_registry_column_reads(&arena_snapshot, ctx.builder.ops_mut());
 
+    // -- Phase 4a'': AOE Path B reads on flag-on ApplyAbility ops ------
+    //
+    // Sibling to `wire_ability_registry_column_reads` (above): walks
+    // body-bearing PhysicsRule / ViewFold ops, but only records reads
+    // on ops whose body contains at least one `ApplyAbility` with
+    // `with_aoe_dispatch == true`. Adds the spatial walk's bindings
+    // (`agent_pos`, `spatial_grid_cells`, `spatial_grid_starts`) plus
+    // the `area_kinds` / `area_args` SoA columns the WGSL Path B emit
+    // references.
+    //
+    // Default `LowerOpts::aoe_dispatch == false` means this walk is a
+    // no-op for every production runtime — the BGL composer surfaces
+    // zero spatial bindings on their dispatcher kernels and
+    // `collect_required_spatial_kinds` never fires the spatial-build
+    // phases. Only fixtures that opt in (today: smoke runtime via
+    // `lower_compilation_to_cg_with_opts`) pay the binding cost.
+    wire_apply_ability_aoe_reads(&arena_snapshot, ctx.builder.ops_mut());
+
     // -- Phase 4b: ActionSelected ring-write wiring on ScoringArgmax ---
     //
     // The verb expander (`cg::lower::verb_expand`) injects an
@@ -2262,6 +2280,135 @@ fn list_contains_apply_ability(list_id: CgStmtListId, prog: &CgProgram) -> bool 
         }
     }
     false
+}
+
+/// Recursively walk a [`CgStmtList`] for any
+/// [`CgStmt::ApplyAbility`] with `with_aoe_dispatch == true`. Returns
+/// on the first hit. Sibling to [`list_contains_apply_ability`] used by
+/// the AOE-only column read wiring (`wire_apply_ability_aoe_reads`).
+///
+/// Lighter than passing the bool through `list_contains_apply_ability`
+/// because (a) the existing helper has its own callers that don't care
+/// about the AOE flag and (b) this lets the AOE wiring stay a no-op
+/// for every fixture whose dispatchers have `with_aoe_dispatch ==
+/// false` (every production runtime today — the BGL composer surfaces
+/// zero spatial bindings on those dispatcher ops).
+fn list_contains_apply_ability_with_aoe(list_id: CgStmtListId, prog: &CgProgram) -> bool {
+    let Some(list) = prog.stmt_lists.get(list_id.0 as usize) else {
+        return false;
+    };
+    for stmt_id in &list.stmts {
+        let Some(stmt) = prog.stmts.get(stmt_id.0 as usize) else { continue };
+        match stmt {
+            CgStmt::ApplyAbility { with_aoe_dispatch: true, .. } => return true,
+            CgStmt::ApplyAbility { .. } => {}
+            CgStmt::If { then, else_, .. } => {
+                if list_contains_apply_ability_with_aoe(*then, prog) { return true; }
+                if let Some(else_list) = else_ {
+                    if list_contains_apply_ability_with_aoe(*else_list, prog) { return true; }
+                }
+            }
+            CgStmt::Match { arms, .. } => {
+                for arm in arms {
+                    if list_contains_apply_ability_with_aoe(arm.body, prog) { return true; }
+                }
+            }
+            CgStmt::ForEachNeighborBody { body, .. } => {
+                if list_contains_apply_ability_with_aoe(*body, prog) { return true; }
+            }
+            CgStmt::Emit { .. }
+            | CgStmt::Assign { .. }
+            | CgStmt::Let { .. }
+            | CgStmt::ForEachAgent { .. }
+            | CgStmt::ForEachNeighbor { .. } => {}
+        }
+    }
+    false
+}
+
+/// Wire the AOE Path B-specific reads onto every body-bearing op
+/// whose statement tree contains at least one
+/// [`CgStmt::ApplyAbility`] with `with_aoe_dispatch == true` (#121
+/// follow-on, 2026-05-07).
+///
+/// The WGSL emit for AOE-on dispatchers (in
+/// `cg::emit::wgsl_body::build_apply_ability_per_target_body`) walks
+/// the 27-cell spatial neighborhood around the explicit cast target's
+/// world position when `area_kinds[effect_base + i] == 0u` (Circle).
+/// That walk references five additional bindings beyond what the
+/// non-AOE dispatcher uses:
+///
+///   - `agent_pos` (read, vec3<f32>) — both for `aoe_center =
+///     agent_pos[target_slot]` and `agent_pos[candidate]` per cell.
+///   - `spatial_grid_starts` (read, u32) — per-cell `[start..end)`
+///     slice indexing.
+///   - `spatial_grid_cells` (read, u32) — the per-slot AgentId payload.
+///   - `ability_registry_area_kinds` (read, u32) — the area-shape tag
+///     per effect slot (sentinel `0xFFu` = no area; gates the walk).
+///   - `ability_registry_area_args` (read, f32) — the radius f32 per
+///     effect slot (4 f32 per slot, args[0] = radius for Circle).
+///
+/// Sibling to [`wire_ability_registry_column_reads`] (which handles
+/// the always-needed AbilityRegistry SoA columns + agent stat fields)
+/// — that helper records reads on EVERY dispatcher; this helper only
+/// records on dispatchers that opted into AOE. Production runtimes
+/// (`with_aoe_dispatch == false`) never see these reads, so the BGL
+/// composer keeps their dispatcher binding-clean.
+///
+/// The `agent_pos` read auto-fires the spatial-build phases via
+/// `collect_required_spatial_kinds` (BuildHash → BuildHashScanLocal →
+/// BuildHashScanCarry → BuildHashScanAdd → BuildHashScatter), so the
+/// runtime owning a flag-on dispatcher is responsible for allocating
+/// the matching spatial buffers + the `agent_pos` SoA. Today only the
+/// `apply_ability_smoke_runtime` opts in.
+fn wire_apply_ability_aoe_reads(prog: &CgProgram, ops: &mut [ComputeOp]) {
+    use crate::cg::data_handle::{
+        AbilityRegistryColumn, AgentFieldId, AgentRef, SpatialStorageKind,
+    };
+    use crate::cg::op::ComputeOpKind;
+
+    const AOE_COLUMNS: &[AbilityRegistryColumn] = &[
+        AbilityRegistryColumn::AreaKinds,
+        AbilityRegistryColumn::AreaArgs,
+    ];
+    const AOE_SPATIAL: &[SpatialStorageKind] = &[
+        SpatialStorageKind::GridCells,
+        SpatialStorageKind::GridStarts,
+    ];
+
+    for (op_index, op) in ops.iter_mut().enumerate() {
+        let snapshot_op = match prog.ops.get(op_index) {
+            Some(o) => o,
+            None => continue,
+        };
+        // Same body-bearing op-kind set as
+        // `wire_ability_registry_column_reads`. Other op kinds
+        // (Plumbing / Mask / Scoring / etc.) carry no statement list.
+        let body_id = match &snapshot_op.kind {
+            ComputeOpKind::PhysicsRule { body, .. } => *body,
+            ComputeOpKind::ViewFold { body, .. } => *body,
+            _ => continue,
+        };
+        if !list_contains_apply_ability_with_aoe(body_id, prog) {
+            continue;
+        }
+        // Agent SoA: position read at both `target_slot` (cast center)
+        // and at every candidate AgentId pulled from the spatial cells.
+        // Both index through the shared `agent_pos` SoA — one
+        // `AgentField { Pos, Self_ }` read covers the whole binding
+        // (the BGL composer doesn't differentiate read sites; it only
+        // cares the binding is declared).
+        op.record_read(DataHandle::AgentField {
+            field:  AgentFieldId::Pos,
+            target: AgentRef::Self_,
+        });
+        for column in AOE_COLUMNS {
+            op.record_read(DataHandle::AbilityRegistryColumn { column: *column });
+        }
+        for kind in AOE_SPATIAL {
+            op.record_read(DataHandle::SpatialStorage { kind: *kind });
+        }
+    }
 }
 
 /// Wire the implicit `EventRing { Append }` write each

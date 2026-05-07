@@ -596,6 +596,40 @@ fn build_sweep() -> Vec<(&'static str, AbilityProgram, CasterStats)> {
         CasterStats::default(),
     ));
 
+    // 31. Cleave-shape — `Damage(30) in circle(2.0)` (#121 AOE Path B).
+    //     The single AOE entry in the sweep, exercising the Path B
+    //     27-cell spatial walk + per-target chronicle write the
+    //     dispatcher emits when `with_aoe_dispatch == true`. Driven by
+    //     a 4-agent fixture (positions in a row at x=0, 1.5, 3.0, 4.5)
+    //     with only agent 0 alive — the dispatcher fires once on
+    //     caster=slot 0, the spatial walk reads `agent_pos[0]` as the
+    //     center, and the in-radius set (≤2.0) is {slot 0 (d=0),
+    //     slot 1 (d=1.5)}. CPU oracle calls `apply_program_aoe` with
+    //     the same {0, 1} set; both backends emit 2 chronicle records
+    //     (kind=26 EffectDamageApplied, target=0 + target=1).
+    //
+    //     The test runner detects the "Cleave" name and routes through
+    //     the 4-agent fixture path (`run_cleave_parity_iteration`)
+    //     instead of the default 1-agent self-cast path. The CPU
+    //     oracle for Cleave goes through `apply_program_aoe` with the
+    //     CPU-determined in-radius set, mirroring what the GPU walk
+    //     produces structurally (P11 sort handles atomicAdd-induced
+    //     ring order non-determinism on readback).
+    let mut cleave = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 30.0 }],
+    );
+    cleave.per_effect_areas.push(Some(engine::ability::program::EffectAreaShape {
+        kind: engine::ability::program::ShapeKind::Circle,
+        args: [2.0, 0.0, 0.0, 0.0],
+    }));
+    out.push((
+        "Cleave",
+        cleave,
+        CasterStats::default(),
+    ));
+
     out
 }
 
@@ -659,6 +693,73 @@ fn cpu_records_for_cast(
     out
 }
 
+/// CPU oracle for the AOE Cleave entry. Calls
+/// `apply_program_aoe(caster=slot+1, primary_target=slot+1,
+/// aoe_targets=<id-set>)` and emits one chronicle record per
+/// in-circle target. Mirrors the smoke fixture's implicit-target rule
+/// (caster == primary_target == slot 0); the AOE expansion happens
+/// inside `apply_program_aoe`'s per-target loop. The host pre-computes
+/// the in-radius set (the dispatcher walks the spatial grid; the test
+/// pins the expected set against agent positions), so this helper
+/// receives the slot ids as `aoe_target_slots`.
+///
+/// **P11 sort.** Each chronicle record carries the ApplyEvent's
+/// `target` field (1-based AgentId) → 0-based slot via `target_id =
+/// raw - 1`. The canonicalize sort happens at the test runner; this
+/// helper just emits records in `aoe_target_slots` order.
+fn cleave_cpu_records_for_cast(
+    program:           &AbilityProgram,
+    caster_slot:       u32,
+    aoe_target_slots:  &[u32],
+    tick:              u32,
+    caster_stats:      &CasterStats,
+) -> Vec<[u32; CHRONICLE_STRIDE_U32 as usize]> {
+    use engine::ability::apply::apply_program_aoe;
+
+    let caster = AgentId::new(caster_slot + 1).expect("caster_slot+1 non-zero");
+    let primary_target = caster; // self-cast convention (smoke fixture)
+    let aoe_targets: Vec<AgentId> = aoe_target_slots
+        .iter()
+        .map(|s| AgentId::new(s + 1).expect("aoe_target_slot+1 non-zero"))
+        .collect();
+
+    let events = apply_program_aoe(
+        program,
+        caster,
+        primary_target,
+        &aoe_targets,
+        tick as u64,
+        WORLD_SEED,
+        caster_stats,
+        /*target_stats*/ caster_stats,
+    );
+    let mut out = Vec::with_capacity(events.len());
+    for ev in events {
+        // Each ApplyEvent carries the per-target AgentId; pull it back
+        // out as a slot for the chronicle record's target field. The
+        // ApplyEvent kinds we care about (`Damage`) carry `target`
+        // explicitly; pattern-match exhaustively so a future variant
+        // gets the per-target conversion treatment.
+        let target_slot = match &ev {
+            engine::ability::apply::ApplyEvent::Damage { target, .. } => target.raw() - 1,
+            engine::ability::apply::ApplyEvent::Heal { target, .. } => target.raw() - 1,
+            engine::ability::apply::ApplyEvent::Shield { target, .. } => target.raw() - 1,
+            engine::ability::apply::ApplyEvent::Stun { target, .. } => target.raw() - 1,
+            engine::ability::apply::ApplyEvent::Slow { target, .. } => target.raw() - 1,
+            // Other variants stay un-AOE'd today (Cleave is the only
+            // AOE entry); fall through to the caster_slot if a future
+            // variant lands without an explicit target field.
+            _ => caster_slot,
+        };
+        if let Some(rec) =
+            apply_event_to_chronicle_record(ev, tick, caster_slot, target_slot)
+        {
+            out.push(rec);
+        }
+    }
+    out
+}
+
 /// Sort records by `(kind, payload_a, payload_b, payload_c, payload_d)`
 /// for order-stable comparison. The GPU dispatcher uses atomicAdd to
 /// claim ring slots — record order in `event_ring` is workgroup-
@@ -700,17 +801,25 @@ fn cpu_gpu_apply_program_byte_equal_across_modifier_matrix() {
             .get(AbilityId::new(ability_id).expect("non-zero id"))
             .unwrap_or_else(|| panic!("ability {name} not registered"));
 
+        // #121 AOE Path B: the Cleave entry exercises the
+        // dispatcher's spatial walk + per-target chronicle write,
+        // which requires N≥2 agents in the spatial grid (one caster
+        // + one in-circle target). Route through the dedicated
+        // 4-agent fixture path; every other entry uses the default
+        // 1-agent self-cast path.
+        let n_agents_for_ability = if *name == "Cleave" { 4 } else { N_AGENTS };
+
         // GPU side seeds slot 0 with this ability's per-agent stats.
         // Self-cast convention: target_stats = caster_stats (CPU
         // oracle reads target_stats for `target.<field>` predicates;
         // the smoke fixture's implicit-target rule means target_slot
         // == caster_slot ⇒ same SoA row ⇒ same f32 stat value).
         let per_agent_stats =
-            vec![per_agent_from_caster_stats(caster_stats); N_AGENTS as usize];
-        let per_agent_levels = vec![ability_id; N_AGENTS as usize];
+            vec![per_agent_from_caster_stats(caster_stats); n_agents_for_ability as usize];
+        let per_agent_levels = vec![ability_id; n_agents_for_ability as usize];
 
-        let mut state = match ApplyAbilitySmokeState::try_new_with_registry(
-            N_AGENTS,
+        let state = match ApplyAbilitySmokeState::try_new_with_registry(
+            n_agents_for_ability,
             &registry,
             &per_agent_levels,
             &per_agent_stats,
@@ -726,17 +835,46 @@ fn cpu_gpu_apply_program_byte_equal_across_modifier_matrix() {
                 break;
             }
         };
+        let mut state = state;
+
+        // For the Cleave entry, configure the 4-agent fixture: row of
+        // positions (0, 1.5, 3.0, 4.5) on the x-axis; only agent 0
+        // alive (it's the caster); the spatial grid was pre-populated
+        // by the constructor (every slot in cell 0). The caster's AOE
+        // walk reads `agent_pos[0] = (0,0,0)` as the center and
+        // collects every agent within the 2.0 radius — agents 0 (d=0)
+        // and 1 (d=1.5) under our positions; agents 2 (d=3.0) and 3
+        // (d=4.5) are out of range.
+        if *name == "Cleave" {
+            state.set_agent_alive(&[1, 0, 0, 0]);
+            state.set_agent_positions(&[
+                [0.0, 0.0, 0.0],
+                [1.5, 0.0, 0.0],
+                [3.0, 0.0, 0.0],
+                [4.5, 0.0, 0.0],
+            ]);
+        }
 
         for &tick in TICKS {
-            // -- CPU oracle: self-cast at slot 0.
-            let mut cpu = cpu_records_for_cast(
-                program,
-                /*caster_slot*/ 0,
-                /*target_slot*/ 0,
-                tick,
-                caster_stats,
-                /*target_stats*/ caster_stats,
-            );
+            // -- CPU oracle.
+            let mut cpu = if *name == "Cleave" {
+                cleave_cpu_records_for_cast(
+                    program,
+                    /*caster_slot*/ 0,
+                    /*aoe_target_slots*/ &[0, 1],
+                    tick,
+                    caster_stats,
+                )
+            } else {
+                cpu_records_for_cast(
+                    program,
+                    /*caster_slot*/ 0,
+                    /*target_slot*/ 0,
+                    tick,
+                    caster_stats,
+                    /*target_stats*/ caster_stats,
+                )
+            };
             canonicalize(&mut cpu);
 
             // -- GPU dispatch. Pin the GPU's cfg.seed to the same
