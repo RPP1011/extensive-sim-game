@@ -196,6 +196,54 @@ fn modify_standing_pipeline_emits_kind_32_record() {
     assert_eq!(records[0][4], (-50_i32) as u32, "delta sign-widens through pipeline");
 }
 
+/// Slice ε part 1 pipeline integration: when the caller passes
+/// distinct caster + target ids, the chronicle records have
+/// distinct values in slot 2 (actor) and slot 3 (target). Mirrors
+/// what the GPU dispatcher writes when the source supplies
+/// `apply_ability <a> by <c> target <t>`.
+///
+/// Distinct from the self-cast tests above (which preserve slice-γ
+/// convention by passing caster=target). This test inlines its own
+/// pipeline so it can route caster/target separately to the CPU
+/// reference, mirroring how a runtime crate would dispatch from
+/// the GPU side with explicit operands.
+#[test]
+fn distinct_caster_and_target_pipeline_writes_both_slots() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 30.0 }],
+    );
+    let caster = aid(7);
+    let target = aid(11);
+    let tick: u32 = 100;
+
+    let events = apply_program(
+        &program,
+        caster,
+        target,
+        tick as u64,
+        /*world_seed*/ 0xDEAD_BEEF,
+        &CasterStats::default(),
+    );
+    // Route caster + target separately into the CPU reference (the
+    // slice-ε path the GPU dispatcher takes when source supplies
+    // explicit `target <expr>`).
+    let records: Vec<_> = events
+        .into_iter()
+        .filter_map(|e| {
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw())
+        })
+        .collect();
+
+    assert_eq!(records.len(), 1, "Damage produces one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 26, "EffectDamageApplied");
+    assert_eq!(r[2], 7, "actor slot — caster_id");
+    assert_eq!(r[3], 11, "target slot — target_id (distinct from caster)");
+    assert_eq!(r[4], 30.0_f32.to_bits(), "amount");
+}
+
 /// P5 — Determinism via Keyed PCG. The CPU pipeline runs through
 /// `per_agent_u32(world_seed, caster, tick, purpose)` for each chance
 /// gate, which is a pure function of inputs. Two runs with identical
