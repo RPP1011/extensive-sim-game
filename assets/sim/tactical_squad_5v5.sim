@@ -100,6 +100,30 @@ event EffectStunApplied {
   expires_at_tick: u32,
 }
 
+// SquadHeal (single-target ally heal, 2026-05-07) — engine-side
+// chronicle event written by the apply_ability dispatcher at hardcoded
+// EventKindId 27 (see
+// `dsl_ast::engine_events::engine_event_kind_id_for_name`). Same
+// payload shape as EffectDamageApplied (kind=26) and EffectHealApplied
+// in duel_25v25 (commit 049feb0c — third site of this pattern). The
+// new ApplyHealFromChronicle physics rule below drains kind=27 records
+// straight into a clamped `agents.set_hp(t, min(hp + amt, max_hp))`
+// write.
+//
+// Fixture-shape note: tactical_squad_5v5 already has the legacy
+// `Healed` chronicle event + `ApplyHeal` rule consumed by the existing
+// Healer's `Heal` verb. SquadHeal sits ALONGSIDE that path on the new
+// chronicle dispatcher arm — `Heal` keeps emitting Healed via the
+// per-agent kernel; SquadHeal emits EffectHealApplied via the verb
+// chronicle kernel and the `view healing_done` fold ignores kind=27
+// (only sees Healed). Two independent paths share no SoA state.
+@replayable @gpu_amenable
+event EffectHealApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
 @replayable @gpu_amenable
 event Healed {
   source: AgentId,
@@ -294,6 +318,60 @@ verb Heal(self, target: Agent) =
   score (if target.alive { 200.0 - target.hp } else { -1000000.0 })
 
 // -------------------------------------------------------------------
+// SquadHeal — apply_ability-dispatched ally heal (chronicle pipeline,
+// 2026-05-07). FIFTH verb in the source-order, action_id=4 (Strike=0,
+// Snipe=1, ConcussiveBlow=2, Heal=3, SquadHeal=4). Mirrors duel_25v25's
+// HealPulse third-site pattern (commit 049feb0c) but at 5v5 pair-field
+// scale — the score expression replaces duel_25v25's spatial walk.
+//
+// Cadence `world.tick % 7 == 0` matches ConcussiveBlow's, deliberately
+// out-of-phase with TankAttack (`% 3`), DpsAttack (`% 4`), and Heal
+// (`% 3`); ticks 0, 7, 14, 21 see SquadHeal fire while the existing
+// damage cadence has by then drained some HP for it to recover. Body:
+// `apply_ability 4 by self target target`. The literal `4` is
+// SquadHeal's AbilityId in the tactical_squad_5v5 AbilityRegistry built
+// by `crates/tactical_squad_5v5_runtime/src/binding_check.rs::
+// build_tactical_squad_5v5_registry` (TankAttack=1, DpsAttack=2,
+// ConcussiveBlow=3, SquadHeal=4 in registration order). The
+// dispatcher writes EffectHealApplied chronicle records (engine
+// kind=27) carrying `amount = 12.0`; the new
+// ApplyHealFromChronicle physics rule below (auto-fused 3-way with
+// ApplyDamageFromChronicle + ApplyStunFromChronicle by the lower
+// pass) consumes them straight into the per-agent `hp` SoA via
+// `agents.set_hp(t, min(hp + amt, max_hp))`.
+//
+// TARGET PREDICATE — same-TEAM friendly: `target.level == self.level
+// && target != self`. The `target != self` filter prevents
+// self-healing (the verb's argmax inner loop visits self as a
+// candidate; without the inequality, a healthy caster healing itself
+// would dominate the argmax over a low-HP teammate). No role gate —
+// any alive agent on the team can cast (Tank, Healer, and DPS all
+// compete to heal the most-injured ally), so 5 friendlies × 1 cadence
+// gives more heal volume than the existing single-Healer `Heal` verb
+// at `% 3`. Score `(200.0 - target.hp)` peaks for the lowest-HP ally,
+// matching the existing Heal verb's argmax shape.
+//
+// COOLDOWN NOTE: same as Strike + Snipe + ConcussiveBlow + Heal — the
+// registry-resident SquadHeal program declares `cooldown_ticks: 0`;
+// the per-tick gate stays in the verb-style `world.tick % 7 == 0`
+// clause since the GPU dispatcher does not consult
+// program.cooldown_ticks at the apply_ability arm today.
+// -------------------------------------------------------------------
+verb SquadHeal(self, target: Agent) =
+  action SquadHealAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && target.level == self.level
+        && (world.tick % 7 == 0))
+  apply_ability 4 by self target target
+  // Score peaks for the lowest-HP ally on the same team. Same
+  // dead-target filter as Heal — without `target.alive` in the score
+  // expression, post-mortem `target.hp` driven negative by continued
+  // damage would dominate the argmax forever.
+  score (if target.alive { 200.0 - target.hp } else { -1000000.0 })
+
+// -------------------------------------------------------------------
 // Task #138 follow-on (tactical_squad_5v5 port, 2026-05-07) — Strike
 // (Tank) and Snipe (DPS) verb bodies now use `apply_ability N by self
 // target target`. The dispatcher writes EffectDamageApplied chronicle
@@ -342,6 +420,41 @@ physics ApplyDamageFromChronicle {
 physics ApplyStunFromChronicle {
   on EffectStunApplied { actor: _, target: t, expires_at_tick: e } {
     agents.set_stun_expires_at_tick(t, e);
+  }
+}
+
+// -------------------------------------------------------------------
+// SquadHeal (apply_ability ally heal, 2026-05-07) — chronicle consumer
+// for the kind=27 EffectHealApplied records the new SquadHeal verb
+// writes per cast. Direct-SoA-write shape (matches duel_25v25's
+// ApplyHealFromChronicle, commit 049feb0c — third site of this
+// pattern). Clamps overflow with `min(hp + amt, max_hp)` so a tick-7
+// cast on a near-full-HP ally doesn't push hp above the per-agent
+// max_hp ceiling.
+//
+// FUSION EXPECTATION (this is the 6th @phase(post) PerEvent site in
+// tactical_squad_5v5): the lower pass already fused
+// ApplyDamageFromChronicle (kind=26) +  ApplyStunFromChronicle
+// (kind=29) into a 2-way `_and_` kernel
+// (`physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle`).
+// This rule should auto-include into a 3-way fusion: same
+// @phase(post), PerEvent over the same event_ring, non-overlapping
+// kind tag (27). The resulting kernel is
+// `physics_ApplyDamageFromChronicle_and_ApplyHealFromChronicle_and_ApplyStunFromChronicle`
+// (kernel-namer alphabetises). Same auto-fusion duel_25v25 surfaced
+// when HealPulse joined the existing 2-way (commit 049feb0c).
+// Binding count grows by `agent_hp` + `agent_max_hp` reads on top of
+// the prior `agent_stun_expires_at_tick` write.
+//
+// P6 caveat: this rule is PerEvent + writes an AgentField (hp) — TRIPS
+// P6 in the well_formed checker. tactical_squad_5v5's build.rs already
+// tolerates lower diagnostics (matches `lower_compilation_to_cg` on
+// `DriverOutcome::Err` and falls through with the partial program),
+// so the rule lowers regardless.
+@phase(post)
+physics ApplyHealFromChronicle {
+  on EffectHealApplied { actor: _, target: t, amount: amt } {
+    agents.set_hp(t, min(agents.hp(t) + amt, agents.max_hp(t)));
   }
 }
 
