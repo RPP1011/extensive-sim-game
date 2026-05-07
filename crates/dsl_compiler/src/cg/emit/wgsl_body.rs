@@ -1641,6 +1641,18 @@ fn lower_cg_stmt_body_to_wgsl(
             // failure rather than a panic at this site.
             let damage_event_id = event_kind_id_for_effect_kind(0)
                 .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Damage=0");
+            let heal_event_id = event_kind_id_for_effect_kind(1)
+                .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Heal=1");
+            let shield_event_id = event_kind_id_for_effect_kind(2)
+                .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Shield=2");
+            let stun_event_id = event_kind_id_for_effect_kind(3)
+                .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Stun=3");
+            let slow_event_id = event_kind_id_for_effect_kind(4)
+                .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Slow=4");
+            let transfer_gold_event_id = event_kind_id_for_effect_kind(5)
+                .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain TransferGold=5");
+            let modify_standing_event_id = event_kind_id_for_effect_kind(6)
+                .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain ModifyStanding=6");
             // Engine pins MAX_EFFECTS_PER_PROGRAM = 6 + EFFECT_KIND_EMPTY = 0xFFu
             // (see crates/engine/src/ability/program.rs:28 +
             // crates/engine/src/ability/packed.rs). Inlining the
@@ -1673,20 +1685,66 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 1u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Heal\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Heal = 1 → EventKindId::EffectHealApplied = 27\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let amount: f32 = bitcast<f32>(payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_heal(caster, target, amount);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// chronicle: emit EffectHealApplied (slice γ self-cast)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20{{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (_slot < 65536u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 0u], {heal_event_id}u);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 1u], tick);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 2u], (agent_id));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 3u], (agent_id));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 2u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Shield: payload_a = amount (f32)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Shield = 2 → EventKindId::EffectShieldApplied = 28\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let amount: f32 = bitcast<f32>(payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_shield(caster, target, amount);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// chronicle: emit EffectShieldApplied (slice γ self-cast)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20{{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (_slot < 65536u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 0u], {shield_event_id}u);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 1u], tick);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 2u], (agent_id));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 3u], (agent_id));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 3u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Stun: payload_a = duration_ticks (u32)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_stun(target, payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Stun = 3 → EventKindId::EffectStunApplied = 29\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_a = duration_ticks (u32); expires_at_tick = tick + duration\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let expires_at_tick: u32 = tick + payload_a;\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// chronicle: emit EffectStunApplied (slice γ self-cast)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20{{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (_slot < 65536u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 0u], {stun_event_id}u);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 1u], tick);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 2u], (agent_id));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 3u], (agent_id));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 4u], (expires_at_tick));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 4u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Slow: payload_a = duration_ticks (u32),\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b's low 16 bits = factor_q8 (i16)\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_slow(target, payload_a, i32(payload_b));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Slow = 4 → EventKindId::EffectSlowApplied = 30\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_a = duration_ticks (u32); expires = tick + duration\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_b sign-widened i16 → factor_q8 (i32 via bitcast)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let expires_at_tick: u32 = tick + payload_a;\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let factor_q8: i32 = bitcast<i32>(payload_b);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// chronicle: emit EffectSlowApplied (slice γ self-cast)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20{{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (_slot < 65536u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 0u], {slow_event_id}u);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 1u], tick);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 2u], (agent_id));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 3u], (agent_id));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 4u], (expires_at_tick));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 5u], bitcast<u32>(factor_q8));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 8u) {{\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Root: payload_a = duration_ticks (u32)\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_root(target, payload_a);\n\
@@ -1728,13 +1786,39 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Suppress: payload_a = duration_ticks (u32)\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_suppress(target, payload_a);\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 5u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TransferGold: payload_a = amount (i32 sign-widened to u32)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TransferGold = 5 → EventKindId::EffectGoldTransfer = 31\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_a = amount (i32 sign-widened to u32)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Engine event carries amount as i64 — GPU writes the low 32\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// bits + zero-extends. Cascade chronicle decode reads the u32\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// then sign-extends back to i64 (matches the EffectOp's i32\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// source-of-truth — i64 is host-side widening only).\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let amount_i32: i32 = bitcast<i32>(payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_transfer_gold(caster, target, amount_i32);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// chronicle: emit EffectGoldTransfer (slice γ self-cast)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20{{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (_slot < 65536u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 0u], {transfer_gold_event_id}u);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 1u], tick);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 2u], (agent_id));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 3u], (agent_id));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount_i32));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 6u) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// ModifyStanding: payload_a = delta (i16 sign-widened to u32)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// ModifyStanding = 6 → EventKindId::EffectStandingDelta = 32\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// payload_a = delta (i16 sign-widened to u32)\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let delta_i32: i32 = bitcast<i32>(payload_a);\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_modify_standing(caster, target, delta_i32);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// chronicle: emit EffectStandingDelta (slice γ self-cast)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20{{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (_slot < 65536u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 0u], {modify_standing_event_id}u);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 1u], tick);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 2u], (agent_id));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 3u], (agent_id));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(delta_i32));\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 16u) {{\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Execute: payload_a = hp_threshold (f32 via bitcast)\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let hp_threshold: f32 = bitcast<f32>(payload_a);\n\
@@ -4564,17 +4648,19 @@ mod tests {
 
         // chronicle_append TODO markers — one per implemented arm
         // that hasn't yet been wired to a real chronicle write.
-        // **Removed when wired**:
-        //   - "chronicle_append_damage" — slice γ first wire-up
-        //     (writes EffectDamageApplied with self-cast caster=target=
-        //     agent_id; assertion below pins the actual emit shape).
+        // **Removed when wired** (slice γ — self-cast assumption):
+        //   - chronicle_append_damage          → EffectDamageApplied
+        //   - chronicle_append_heal            → EffectHealApplied
+        //   - chronicle_append_shield          → EffectShieldApplied
+        //   - chronicle_append_stun            → EffectStunApplied
+        //   - chronicle_append_slow            → EffectSlowApplied
+        //   - chronicle_append_transfer_gold   → EffectGoldTransfer
+        //   - chronicle_append_modify_standing → EffectStandingDelta
+        // Below-list arms keep their TODO markers because the runtime
+        // has no 1:1 chronicle counterpart (Root / Silence / Fear /
+        // Taunt / movement verbs / etc.) — slice δ scope or a future
+        // engine event-kind extension.
         for marker in &[
-            "chronicle_append_heal",
-            "chronicle_append_shield",
-            "chronicle_append_stun",
-            "chronicle_append_slow",
-            "chronicle_append_transfer_gold",
-            "chronicle_append_modify_standing",
             "chronicle_append_root",
             "chronicle_append_silence",
             "chronicle_append_fear",
@@ -4654,6 +4740,52 @@ mod tests {
         assert!(
             wgsl.contains("let _slot: u32 = atomicAdd(&event_tail[0], 1u);"),
             "Damage arm must acquire slot via atomicAdd on event_tail;\n{wgsl}"
+        );
+
+        // Slice γ — remaining 6 chronicle-bearing arms wired:
+        //   Heal=27, Shield=28, Stun=29, Slow=30,
+        //   TransferGold=31, ModifyStanding=32.
+        // Each pinned by a kind-tag header store + the matching
+        // expected-payload assertion. Per-variant body shapes vary
+        // (Stun/Slow compute expires_at_tick, Slow has 4 payload
+        // fields, TransferGold/ModifyStanding bitcast i32 deltas);
+        // pinning the kind-tag write is the minimal sufficient guard
+        // against the dispatcher wiring drifting from the discriminant
+        // table.
+        for (variant_label, expected_kind_tag) in &[
+            ("Heal",            27u32),
+            ("Shield",          28u32),
+            ("Stun",            29u32),
+            ("Slow",            30u32),
+            ("TransferGold",    31u32),
+            ("ModifyStanding",  32u32),
+        ] {
+            let needle = format!(
+                "atomicStore(&event_ring[_slot * 10u + 0u], {expected_kind_tag}u);"
+            );
+            assert!(
+                wgsl.contains(&needle),
+                "{variant_label} arm must store kind={expected_kind_tag} \
+                 (header word 0 of chronicle ring);\n{wgsl}"
+            );
+        }
+
+        // Slow's 4-field payload — factor_q8 lives at payload word 3
+        // (= ring slot offset 5). Pin it explicitly: this is the
+        // **only** chronicle-bearing arm with more than 3 payload
+        // fields, so a regression that drops it surfaces here.
+        assert!(
+            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 5u], bitcast<u32>(factor_q8));"),
+            "Slow arm must store factor_q8 at payload word 3 (ring offset 5);\n{wgsl}"
+        );
+
+        // Stun and Slow both compute expires_at_tick = tick + duration.
+        // Two arms × one statement → exactly two occurrences.
+        assert_eq!(
+            wgsl.matches("let expires_at_tick: u32 = tick + payload_a;").count(),
+            2,
+            "Stun + Slow arms each compute expires_at_tick; expected 2 \
+             occurrences across the dispatcher;\n{wgsl}"
         );
     }
 
