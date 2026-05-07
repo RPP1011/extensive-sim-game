@@ -1618,21 +1618,23 @@ fn lower_cg_stmt_body_to_wgsl(
             // Stun / Slow). Other variants keep their `// TODO slice δ`
             // markers until the runtime grows matching event kinds.
             //
-            // **Caster/target convention.** `CgStmt::ApplyAbility`
-            // carries only the ability-id operand today — no explicit
-            // caster/target. Slice γ uses the conventional WGSL
-            // identifier `agent_id` (= `AgentRef::Self_`) for both,
-            // i.e. self-cast. This is correct for self-cast verbs
-            // (Bleed / SelfDamage / Stealth) but coarsens the chronicle
-            // for verbs whose true target is the per-pair candidate or
-            // event-target. Plumbing explicit caster/target through
-            // `CgStmt::ApplyAbility` is the next CG IR change after
-            // slice γ proves the dispatcher path end-to-end.
+            // **Caster/target convention.** Slice δ + ε
+            // (`92572af8` / `d0bc37fd`) plumbed explicit `caster` and
+            // `target` operands onto `CgStmt::ApplyAbility`. Source
+            // surface: `apply_ability <a> [by <c>] [target <t>]`.
+            // Defaults: caster = `AgentSelfId` for PerAgent rules
+            // (typed error for PerEvent without explicit `by`);
+            // target = caster (slice-γ self-cast preserved when
+            // source omits `target <expr>`). The dispatcher reads
+            // both operands and writes them into actor (slot 2) and
+            // target (slot 3) chronicle payload words respectively.
             //
-            // This whole arm is dead at HEAD — no current sim
-            // references `apply_ability` (corpus grep is empty).
-            // Lights up the moment slice γ wires one duel_abilities
-            // verb.
+            // This whole arm is dead at HEAD for any sim that
+            // doesn't use `apply_ability` (the corpus uses it only
+            // in `assets/sim/apply_ability_smoke.sim` today). The
+            // wider runtime wire-up (#138 — replace inline emit in
+            // duel_abilities with apply_ability) lights it up at
+            // sim-level.
             let ability_wgsl = lower_cg_expr_to_wgsl(*ability, ctx)?;
             // Slice δ (#161): caster operand is now an explicit
             // CgExpr lowered through the same path as any other
