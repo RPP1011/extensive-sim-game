@@ -260,6 +260,84 @@ fn apply_ability_nested_in_if_body_passes_naga_validator() {
     );
 }
 
+/// Variant: `apply_ability` + regular `emit` in the same rule body.
+/// Both write to `event_ring` — the dispatcher's chronicle writes
+/// (slice-γ kinds 26..=32) and the user-declared `emit Pinged { ... }`
+/// share the same SoA buffer. The BGL composer must wire `event_ring`
+/// + `event_tail` exactly once even when both producers contribute
+/// to the same kernel.
+///
+/// Without correct binding deduplication, the kernel would either
+/// declare `event_ring` twice (WGSL rejects) or once with the wrong
+/// access mode (atomic vs non-atomic). Both surface here as naga
+/// errors; if neither fires, the dedup is correct.
+#[test]
+fn apply_ability_alongside_regular_emit_passes_naga_validator() {
+    use naga::valid::{Capabilities, ValidationFlags, Validator};
+    let src = "
+        event Tick { }
+        event Pinged { who: AgentId, when: u32 }
+
+        entity Hero : Agent { }
+
+        physics MixedDispatch @phase(per_agent) {
+          on Tick {} where (self.alive) {
+            apply_ability agents.level(self)
+            emit Pinged { who: self, when: world.tick }
+          }
+        }
+    ";
+    let program = dsl_compiler::parse(src).expect("parse");
+    let comp = dsl_ast::resolve::resolve(program).expect("resolve");
+    let cg = dsl_compiler::cg::lower::lower_compilation_to_cg(&comp)
+        .expect("lower");
+    let schedule_result = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&schedule_result.schedule, &cg)
+        .expect("emit");
+
+    let body = kernel_body_containing(&art, "MixedDispatch")
+        .or_else(|| kernel_body_containing(&art, "physics"))
+        .expect("physics kernel emitted");
+    // event_ring should appear exactly once as a binding declaration
+    // (the BGL composer dedups). Counting `var<storage` declarations
+    // mentioning `event_ring` is a coarse-but-sufficient proxy.
+    let event_ring_decls = body
+        .lines()
+        .filter(|l| l.contains("var<storage") && l.contains("event_ring"))
+        .count();
+    assert_eq!(
+        event_ring_decls, 1,
+        "event_ring binding must dedup to exactly one declaration \
+         even when ApplyAbility (chronicle writes 26..=32) and regular \
+         emit (Pinged) both target it; found {event_ring_decls};\n{body}"
+    );
+
+    // Naga validator over every emitted kernel.
+    let mut errs = Vec::new();
+    for (name, kernel_body) in &art.wgsl_files {
+        let module = match naga::front::wgsl::parse_str(kernel_body) {
+            Ok(m) => m,
+            Err(e) => {
+                errs.push(format!("  {name}: parse failed: {e}"));
+                continue;
+            }
+        };
+        let mut validator = Validator::new(ValidationFlags::all(), Capabilities::all());
+        if let Err(e) = validator.validate(&module) {
+            errs.push(format!("  {name}: validate failed: {e:?}"));
+        }
+    }
+    assert!(
+        errs.is_empty(),
+        "mixed-emit variant emitted {} kernels naga rejects:\n{}",
+        errs.len(),
+        errs.join("\n"),
+    );
+}
+
 /// Stronger gate than `..._parses_through_naga` — runs naga's full
 /// validator over the parsed module. Catches type errors, missing
 /// `@binding(N) @group(0)` annotations, atomic-handle misuse,
