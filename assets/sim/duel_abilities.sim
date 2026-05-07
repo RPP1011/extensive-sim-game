@@ -203,6 +203,39 @@ event EffectSelfDamageApplied {
   amount: f32,
 }
 
+// Engine-side chronicle event written by the apply_ability dispatcher
+// at hardcoded EventKindId 40 (see
+// `dsl_ast::engine_events::engine_event_kind_id_for_name`).
+//
+// Task #138 follow-on (Vampirize, mirror of Bleed at `486eb08f`) —
+// Vampirize's verb body is now `apply_ability 6 by self target self`,
+// which writes EffectLifeStealApplied records into the event ring.
+// The new ApplyLifestealFromChronicle physics rule (declared below
+// near the rest of the consumers) translates these records back into
+// the existing `SetLifesteal` event so the existing
+// ApplyLifestealActivation cascade (which writes the per-agent
+// lifesteal_frac_q8 + lifesteal_expires_at_tick SoA fields, then
+// ApplyDamage's source lookup heals the source for
+// `frac_q8/256 * bleed-through-damage` per Damaged event) keeps
+// working unchanged.
+//
+// SHAPE NOTE: same payload shape as EffectSlowApplied — actor + target
+// + expires_at_tick + fraction_q8. The dispatcher computes
+// `expires_at_tick = tick + duration_ticks` so the engine event
+// carries an absolute tick (matching what the original Vampirize verb
+// body produced via `world.tick + config.combat.vampirize_dur`). For
+// self-cast LifeSteal actor==target==caster by convention; the
+// dispatcher writes caster_slot into BOTH actor (slot 2) and target
+// (slot 3) so the re-emit physics rule can ferry both ids verbatim
+// into the SetLifesteal event's `caster` field.
+@replayable @gpu_amenable
+event EffectLifeStealApplied {
+  actor: AgentId,
+  target: AgentId,
+  expires_at_tick: u32,
+  fraction_q8: i16,
+}
+
 @replayable @gpu_amenable
 event Healed {
   source: AgentId,
@@ -493,8 +526,31 @@ verb Vampirize(self, target: Agent) =
         && target == self
         && (world.tick % config.combat.cooldown_vampirize == 0)
         && self.hp < config.combat.hp_vampire_floor)
-  emit SetLifesteal { caster: self, frac_q8: config.combat.vampirize_frac_q8,
-                      expires_at: world.tick + config.combat.vampirize_dur }
+  // Task #138 follow-on (Vampirize, mirror of Bleed at `486eb08f`) —
+  // verb-body apply_ability dispatcher swap. Vampirize was
+  // `emit SetLifesteal { caster: self, frac_q8: config.combat.vampirize_frac_q8,
+  //                      expires_at: world.tick + config.combat.vampirize_dur }`.
+  // The literal `6` is Vampirize's AbilityId in the duel_abilities
+  // AbilityRegistry built from the source-order `names` list in
+  // `binding_check.rs::build_duel_abilities_registry` (Strike=1,
+  // ShieldUp=2, Mend=3, Bleed=4, Reap=5, Vampirize=6, Fortify=7,
+  // Daze=8).
+  //
+  // `target self` matches the verb's existing `target == self` gate —
+  // Vampirize is self-cast. The runtime extends the binding check to
+  // assert `built.names.get("Vampirize") == AbilityId(6)` so any drift
+  // surfaces as a startup panic. The dispatcher writes
+  // EffectLifeStealApplied records (engine-aliased to kind=40) which
+  // the new ApplyLifestealFromChronicle physics rule re-emits as
+  // SetLifesteal so the existing ApplyLifestealActivation cascade
+  // keeps working unchanged.
+  //
+  // SCALING NOTE: Vampirize's `lifesteal 0.5 5s` has no explicit
+  // scaling, so the chronicle write semantics are identical to the
+  // hand-mirrored .sim emit — frac_q8=128, duration_ticks=50.
+  // expires_at_tick = tick + 50 lands the same value as the original
+  // `world.tick + config.combat.vampirize_dur`.
+  apply_ability 6 by self target self
   score 350.0
 
 // Fortify — Wave 2 piece N: DamageModify E2E demo. Self-cast, cooldown
@@ -683,6 +739,37 @@ physics ApplyStunFromChronicle {
 physics ApplyDamageFromSelfDamageChronicle {
   on EffectSelfDamageApplied { actor: c, target: t, amount: a } {
     emit Damaged { source: c, target: t, amount: a }
+  }
+}
+
+// Task #138 follow-on (Vampirize, mirror of Bleed at `486eb08f`) —
+// Vampirize's verb body now uses `apply_ability 6 by self target self`
+// (see the Vampirize verb above). The dispatcher writes
+// EffectLifeStealApplied chronicle records (engine-aliased to kind=40)
+// instead of the source-declared SetLifesteal event. This rule
+// consumes those records and re-emits SetLifesteal so the rest of the
+// cascade (ApplyLifestealActivation writing the per-agent SoA fields,
+// then ApplyDamage's source lookup healing the source on subsequent
+// damage) keeps working unchanged — same shape as
+// ApplyDamageFromSelfDamageChronicle but consuming kind=40 records.
+//
+// PAYLOAD NOTE: same shape as EffectSlowApplied (actor + target +
+// expires_at_tick + fraction_q8). The dispatcher writes caster_slot
+// into BOTH actor (slot 2) and target (slot 3) for the LifeSteal arm
+// (self-cast), so this rule's pattern reads `actor: c` and binds the
+// caster id directly into the SetLifesteal `caster` field. The
+// `expires_at_tick` field is already absolute (= tick + duration at
+// chronicle-write time), so the re-emit ferries it verbatim into the
+// `expires_at` field — no `world.tick + d` recomputation is needed
+// (and recomputing would compound the offset since `world.tick` ==
+// the chronicle-record's tick at re-emit time).
+//
+// P6 caveat: this rule is PerEvent + emit-only (no AgentField writes)
+// — does NOT trip P6.
+@phase(post)
+physics ApplyLifestealFromChronicle {
+  on EffectLifeStealApplied { actor: c, target: _, expires_at_tick: e, fraction_q8: f } {
+    emit SetLifesteal { caster: c, frac_q8: f, expires_at: e }
   }
 }
 

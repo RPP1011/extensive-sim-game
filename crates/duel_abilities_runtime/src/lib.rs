@@ -238,6 +238,17 @@ pub struct DuelAbilitiesState {
     /// ApplyDamageFromChronicle: PerEvent + emit-only kernel, no
     /// AgentField writes (so no P6 trip).
     apply_damage_from_self_damage_chronicle_cfg_buf: wgpu::Buffer,
+    /// Task #138 follow-on (Vampirize, mirror of Bleed at `486eb08f`)
+    /// — Cfg uniform for the new `physics_ApplyLifestealFromChronicle`
+    /// kernel that translates `EffectLifeStealApplied` records
+    /// (kind=40, written by the apply_ability dispatcher in the
+    /// standalone Vampirize chronicle kernel) back into `SetLifesteal`
+    /// events so the existing ApplyLifestealActivation cascade (which
+    /// writes the per-agent lifesteal SoA fields) keeps working
+    /// unchanged. Same shape as ApplyDamageFromSelfDamageChronicle:
+    /// PerEvent + emit-only kernel, no AgentField writes (so no P6
+    /// trip).
+    apply_lifesteal_from_chronicle_cfg_buf: wgpu::Buffer,
     /// Task #138 — Packed AbilityRegistry uploaded to the GPU. The
     /// fused kernel binds `effect_kinds` / `effect_payload_a` /
     /// `effect_payload_b` for the apply_ability dispatcher arm
@@ -623,6 +634,21 @@ impl DuelAbilitiesState {
             contents: bytemuck::bytes_of(&apply_damage_from_self_damage_chronicle_cfg_init),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        // Task #138 follow-on (Vampirize, mirror of Bleed at `486eb08f`)
+        // — Cfg uniform for the new ApplyLifestealFromChronicle kernel
+        // that translates EffectLifeStealApplied (kind=40) records
+        // emitted by the apply_ability dispatcher into SetLifesteal
+        // events the existing ApplyLifestealActivation cascade
+        // consumes (writing per-agent lifesteal SoA fields).
+        let apply_lifesteal_from_chronicle_cfg_init =
+            physics_ApplyLifestealFromChronicle::PhysicsApplyLifestealFromChronicleCfg {
+                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            };
+        let apply_lifesteal_from_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("duel_abilities_runtime::apply_lifesteal_from_chronicle_cfg"),
+            contents: bytemuck::bytes_of(&apply_lifesteal_from_chronicle_cfg_init),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let seed_cfg_init = seed_indirect_0::SeedIndirect0Cfg {
             agent_cap: agent_count, tick: 0, seed: 0, _pad: 0,
         };
@@ -693,6 +719,7 @@ impl DuelAbilitiesState {
             apply_heal_from_chronicle_cfg_buf,
             apply_stun_from_chronicle_cfg_buf,
             apply_damage_from_self_damage_chronicle_cfg_buf,
+            apply_lifesteal_from_chronicle_cfg_buf,
             registry_gpu,
             seed_cfg_buf,
             cache: dispatch::KernelCache::default(),
@@ -891,12 +918,16 @@ impl CompiledSim for DuelAbilitiesState {
         // Bleed (kind=39 EffectSelfDamageApplied + Damaged re-emit) —
         // again +2 per-agent overhead, again mutually exclusive with
         // the other verbs.
-        // Bump the upper bound to 24 slots per agent to keep
+        // Task #138 follow-on (Vampirize, mirror of Bleed) extended the
+        // swap to Vampirize (kind=40 EffectLifeStealApplied +
+        // SetLifesteal re-emit) — again +2 per-agent overhead, again
+        // mutually exclusive with the other verbs.
+        // Bump the upper bound to 26 slots per agent to keep
         // clear_ring_headers from leaving stale slots between ticks.
-        // (22 + 2 = 24; the per-tick sum stays in the same
+        // (24 + 2 = 26; the per-tick sum stays in the same
         // verb-mutually-exclusive band but the bump gives every
         // chronicle re-emit its own headroom.)
-        let max_slots_per_tick = self.agent_count * 24;
+        let max_slots_per_tick = self.agent_count * 26;
         self.event_ring.clear_ring_headers_in(
             &self.gpu, &mut encoder, max_slots_per_tick,
         );
@@ -1100,12 +1131,17 @@ impl CompiledSim for DuelAbilitiesState {
             self.agent_count,
         );
 
-        // (7c) Vampirize chronicle — Wave 2 LifeSteal demo. Gates on
-        // action_id==5u and emits SetLifesteal{caster=self, frac_q8=128,
-        // expires_at=tick+50}. Drained by the ApplyLifestealActivation
-        // arm of the fused kernel below — sets the caster's
-        // lifesteal_frac_q8 + lifesteal_expires_at_tick SoA slots so
-        // ApplyDamage's source lookup can heal them on subsequent hits.
+        // (7c) Vampirize chronicle — Wave 2 LifeSteal demo. Task #138
+        // follow-on (Vampirize, mirror of Bleed at `486eb08f`) — verb
+        // body is now `apply_ability 6 by self target self`, so this
+        // kernel walks the AbilityRegistry's effect SoA columns to
+        // expand the dispatch into chronicle EffectLifeStealApplied
+        // writes (kind=40). Re-emitted as SetLifesteal by
+        // ApplyLifestealFromChronicle below; the existing
+        // ApplyLifestealActivation cascade drains SetLifesteal into
+        // the per-agent lifesteal_frac_q8 + lifesteal_expires_at_tick
+        // SoA slots so ApplyDamage's source lookup can heal them on
+        // subsequent hits.
         let vampirize_cfg = physics_verb_chronicle_Vampirize::PhysicsVerbChronicleVampirizeCfg {
             event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
         };
@@ -1115,6 +1151,9 @@ impl CompiledSim for DuelAbilitiesState {
         let vampirize_bindings = physics_verb_chronicle_Vampirize::PhysicsVerbChronicleVampirizeBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
+            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
             cfg: &self.chronicle_vampirize_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_vampirize(
@@ -1300,6 +1339,41 @@ impl CompiledSim for DuelAbilitiesState {
             &self.gpu.device, &mut encoder, max_slots_per_tick,
         );
 
+        // (7j) Task #138 follow-on (Vampirize, mirror of Bleed at
+        // `486eb08f`) — ApplyLifestealFromChronicle. The Vampirize
+        // chronicle (step 7c) just wrote EffectLifeStealApplied records
+        // (kind=40) into the event ring via the apply_ability dispatcher
+        // arm. This kernel filters those records and re-emits them as
+        // `SetLifesteal` events so the fused ApplyLifestealActivation
+        // kernel below (step 8a) can drain them and write the per-agent
+        // lifesteal_frac_q8 + lifesteal_expires_at_tick SoA fields.
+        //
+        // PerEvent shape: scans every event_ring slot up to event_count
+        // and skips slots whose kind != 40. Same pattern as
+        // ApplyDamageFromSelfDamageChronicle (kind=39), just with the
+        // EffectLifeStealApplied discriminant + the 4-payload-word
+        // shape (actor + target + expires_at_tick + fraction_q8). The
+        // dispatcher writes caster_slot into BOTH actor (slot 2) and
+        // target (slot 3) for the LifeSteal arm (self-cast), so the
+        // re-emit's `caster: c` reads the caster id directly.
+        let apply_lifesteal_from_chronicle_cfg = physics_ApplyLifestealFromChronicle::PhysicsApplyLifestealFromChronicleCfg {
+            event_count: max_slots_per_tick, tick: self.tick as u32,
+            seed: 0, _pad0: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.apply_lifesteal_from_chronicle_cfg_buf, 0,
+            bytemuck::bytes_of(&apply_lifesteal_from_chronicle_cfg),
+        );
+        let apply_lifesteal_from_chronicle_bindings = physics_ApplyLifestealFromChronicle::PhysicsApplyLifestealFromChronicleBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            cfg: &self.apply_lifesteal_from_chronicle_cfg_buf,
+        };
+        dispatch::dispatch_physics_applylifestealfromchronicle(
+            &mut self.cache, &apply_lifesteal_from_chronicle_bindings,
+            &self.gpu.device, &mut encoder, max_slots_per_tick,
+        );
+
         // (8a) Fused ApplyHeal + ApplyShield + ApplyDefeat +
         // ApplyLifestealActivation + ApplyDamageModActivation +
         // ApplyStun + verb_chronicle_Strike. The compiler re-fused these
@@ -1324,7 +1398,7 @@ impl CompiledSim for DuelAbilitiesState {
         // `_and_ApplyStun_` segment and adding agent_stun_expires_at_tick
         // to the bind group. No new pass introduced; same single
         // dispatch per tick.
-        let event_count_estimate = self.agent_count * 24;
+        let event_count_estimate = self.agent_count * 26;
         let apply_heal_cfg = physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_ApplyDamageModActivation_and_ApplyStun_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndApplyDamageModActivationAndApplyStunAndVerbChronicleStrikeCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
             seed: 0, _pad0: 0,
@@ -2056,6 +2130,17 @@ mod tests {
         // 1-agent fixture: Strike's `target != self` gate always fails,
         // so Vampirize is the only verb that can win argmax at tick 0
         // with hp=25 (Mend score 300 < Vampirize 350).
+        // Task #138 follow-on (Vampirize, mirror of Bleed at
+        // `486eb08f`) — Vampirize now flows .ability →
+        // AbilityRegistry → apply_ability dispatcher →
+        // EffectLifeStealApplied (kind=40) →
+        // ApplyLifestealFromChronicle re-emit → SetLifesteal →
+        // ApplyLifestealActivation → SoA write. The chronicle's
+        // expires_at_tick is computed by the dispatcher as
+        // `tick + duration_ticks` (= 0 + 50 = 50 at tick 0); the
+        // re-emit ferries it verbatim into SetLifesteal's `expires_at`
+        // field (no `world.tick + d` recomputation, which would
+        // compound the offset).
         let mut state = DuelAbilitiesState::new(0xCAFE_F00D, 1);
         // Engineer the state: agent 0 at hp=25, well under
         // hp_vampire_floor=30.
@@ -2068,9 +2153,10 @@ mod tests {
             pre,
         );
         // Tick 0 satisfies tick%80==0; Vampirize fires for agent 0.
-        // The Vampirize chronicle emits SetLifesteal at step (7c);
-        // ApplyLifestealActivation drains it inside the (8a) fused
-        // kernel.
+        // The Vampirize chronicle emits EffectLifeStealApplied at step
+        // (7c); ApplyLifestealFromChronicle re-emits SetLifesteal at
+        // step (7j); ApplyLifestealActivation drains it inside the
+        // (8a) fused kernel.
         state.step();
         let frac = state.read_lifesteal_frac_q8();
         let expires = state.read_lifesteal_expires_at_tick();

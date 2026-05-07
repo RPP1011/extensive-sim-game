@@ -224,6 +224,35 @@ fn self_damage_pipeline_emits_kind_39_record() {
     assert_eq!(r[4], 5.0_f32.to_bits(), "amount as bitcast<u32>");
 }
 
+/// Vampirize verb swap (Task #138 follow-on, mirror of Bleed at
+/// `486eb08f`): LifeSteal flows through `apply_program` (which emits
+/// `ApplyEvent::LifeSteal{target=caster, duration_ticks, fraction_q8}`)
+/// and the CPU reference (which writes a kind=40 record with the same
+/// 4-payload-word shape as Slow — actor, target, expires_at_tick =
+/// tick + duration, fraction_q8 sign-widened). Mirrors the GPU
+/// dispatcher's LifeSteal arm shape.
+#[test]
+fn life_steal_pipeline_emits_kind_40_record() {
+    let program = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 80, hostile_only: false, line_of_sight: false },
+        [EffectOp::LifeSteal { duration_ticks: 50, fraction_q8: 128 }],
+    );
+    // Self-cast: caster == target. The pipeline helper passes
+    // caster_id = target_id = caster.raw() into the CPU reference,
+    // mirroring the duel_abilities Vampirize verb's
+    // `apply_ability 6 by self target self` shape.
+    let records = run_pipeline(&program, aid(7), aid(7), 100);
+    assert_eq!(records.len(), 1, "one LifeSteal effect → one chronicle record");
+    let r = records[0];
+    assert_eq!(r[0], 40, "EventKindId::EffectLifeStealApplied = 40");
+    assert_eq!(r[1], 100, "tick");
+    assert_eq!(r[2], 7, "actor slot — caster_id");
+    assert_eq!(r[3], 7, "target slot — target_id (self-cast: ==caster)");
+    assert_eq!(r[4], 150, "expires_at_tick = tick(100) + duration(50)");
+    assert_eq!(r[5], 128, "fraction_q8 = 128 (= 0.5×) sign-widened");
+}
+
 /// Slice ε part 1 pipeline integration: when the caller passes
 /// distinct caster + target ids, the chronicle records have
 /// distinct values in slot 2 (actor) and slot 3 (target). Mirrors

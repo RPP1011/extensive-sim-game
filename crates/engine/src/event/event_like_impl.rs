@@ -36,6 +36,7 @@ impl crate::event::EventLike for Event {
             Event::EffectGoldTransfer { .. } => EventKindId::EffectGoldTransfer,
             Event::EffectHealApplied { .. } => EventKindId::EffectHealApplied,
             Event::EffectSelfDamageApplied { .. } => EventKindId::EffectSelfDamageApplied,
+            Event::EffectLifeStealApplied { .. } => EventKindId::EffectLifeStealApplied,
             Event::EffectShieldApplied { .. } => EventKindId::EffectShieldApplied,
             Event::EffectSlowApplied { .. } => EventKindId::EffectSlowApplied,
             Event::EffectStandingDelta { .. } => EventKindId::EffectStandingDelta,
@@ -340,6 +341,20 @@ impl crate::event::EventLike for Event {
                 h.update(actor.raw().to_le_bytes());
                 h.update(target.raw().to_le_bytes());
                 h.update(amount.to_bits().to_le_bytes());
+                h.update(tick.to_le_bytes());
+            }
+            Event::EffectLifeStealApplied {
+                actor,
+                target,
+                expires_at_tick,
+                fraction_q8,
+                tick,
+            } => {
+                h.update([EventKindId::EffectLifeStealApplied as u8]);
+                h.update(actor.raw().to_le_bytes());
+                h.update(target.raw().to_le_bytes());
+                h.update(expires_at_tick.to_le_bytes());
+                h.update(fraction_q8.to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
             Event::EffectShieldApplied {

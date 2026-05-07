@@ -53,6 +53,10 @@ pub const ENGINE_EVENT_KIND_IDS: &[(&str, u32)] = &[
     // = 17 → EventKindId::EffectSelfDamageApplied = 39 (slot 39, after
     // RallyCall=38 in the engine's `EventKindId` enum).
     ("EffectSelfDamageApplied", 39),
+    // Vampirize verb swap (Task #138 follow-on, mirror of Bleed at
+    // `486eb08f`): LifeSteal = 18 → EventKindId::EffectLifeStealApplied
+    // = 40 (slot 40, after EffectSelfDamageApplied=39).
+    ("EffectLifeStealApplied",  40),
 ];
 
 /// Look up the engine-defined `EventKindId` discriminant for an
@@ -82,6 +86,7 @@ mod tests {
         assert_eq!(engine_event_kind_id_for_name("EffectGoldTransfer"), Some(31));
         assert_eq!(engine_event_kind_id_for_name("EffectStandingDelta"), Some(32));
         assert_eq!(engine_event_kind_id_for_name("EffectSelfDamageApplied"), Some(39));
+        assert_eq!(engine_event_kind_id_for_name("EffectLifeStealApplied"), Some(40));
     }
 
     #[test]

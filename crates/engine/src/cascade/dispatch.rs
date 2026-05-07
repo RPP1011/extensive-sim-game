@@ -72,6 +72,7 @@ pub mod interp {
             Event::EffectDamageApplied   { .. } => "EffectDamageApplied",
             Event::EffectHealApplied     { .. } => "EffectHealApplied",
             Event::EffectSelfDamageApplied { .. } => "EffectSelfDamageApplied",
+            Event::EffectLifeStealApplied { .. } => "EffectLifeStealApplied",
             Event::EffectShieldApplied   { .. } => "EffectShieldApplied",
             Event::EffectStunApplied     { .. } => "EffectStunApplied",
             Event::EffectSlowApplied     { .. } => "EffectSlowApplied",
@@ -165,6 +166,21 @@ pub mod interp {
                 ("t",      EvalValue::Agent(dsl_agent(*target))),
                 ("a",      EvalValue::F32(*amount)),
                 ("tick",   EvalValue::U32(*tick)),
+            ],
+            // ---- EffectLifeStealApplied -----------------------------------
+            // Same shape as EffectSlowApplied: actor + target +
+            // expires_at_tick + fraction_q8. Vampirize verb swap
+            // (Task #138 follow-on, mirror of Bleed at `486eb08f`).
+            Event::EffectLifeStealApplied { actor, target, expires_at_tick, fraction_q8, tick } => vec![
+                ("actor",           EvalValue::Agent(dsl_agent(*actor))),
+                ("target",          EvalValue::Agent(dsl_agent(*target))),
+                ("expires_at_tick", EvalValue::U32(*expires_at_tick)),
+                ("fraction_q8",     EvalValue::I32(*fraction_q8 as i32)),
+                ("c",               EvalValue::Agent(dsl_agent(*actor))),
+                ("t",               EvalValue::Agent(dsl_agent(*target))),
+                ("e",               EvalValue::U32(*expires_at_tick)),
+                ("f",               EvalValue::I32(*fraction_q8 as i32)),
+                ("tick",            EvalValue::U32(*tick)),
             ],
             // ---- EffectShieldApplied --------------------------------------
             Event::EffectShieldApplied { actor, target, amount, tick } => vec![

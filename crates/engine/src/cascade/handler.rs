@@ -85,7 +85,21 @@ pub enum EventKindId {
     // for self-damage, actor == target by convention but the field
     // is preserved for uniformity with the other Effect* events.
     EffectSelfDamageApplied = 39,
-    // Slots 40-127 reserved for replayable event variants added in later tasks.
+    // Vampirize verb swap (Task #138 follow-on, mirror of Bleed at
+    // `486eb08f`) — chronicle event for LifeSteal EffectOp (op#18).
+    // Written by the apply_ability dispatcher when an
+    // `EffectOp::LifeSteal` slot fires; the runtime
+    // `ApplyLifestealFromChronicle` re-emit physics rule translates
+    // these records back into the existing `SetLifesteal` event so
+    // the rest of the cascade (ApplyLifestealActivation writing the
+    // per-agent lifesteal_frac_q8 + lifesteal_expires_at_tick SoA
+    // fields, then ApplyDamage's source lookup healing the source
+    // for `frac_q8/256 * bleed-through-damage` per Damaged event)
+    // keeps working unchanged. Same shape as `EffectSlowApplied`
+    // (actor + target + expires_at_tick + fraction_q8 + tick) — for
+    // self-cast LifeSteal actor == target == caster by convention.
+    EffectLifeStealApplied = 40,
+    // Slots 41-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 
