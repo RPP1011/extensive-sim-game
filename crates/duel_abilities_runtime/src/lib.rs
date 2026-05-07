@@ -1444,6 +1444,87 @@ mod tests {
         }
     }
 
+    /// Wave 2 sibling pin — Daze's apply_program. The `chance 50%`
+    /// modifier is the additional complexity vs Strike/ShieldUp/Mend:
+    /// apply_program rolls `(per_agent_u32(world_seed, caster, tick,
+    /// purpose) & 0xFFFF) < q16` per effect slot, so a single
+    /// (caster, target, tick) call may emit ZERO or ONE Stun event
+    /// depending on the seed.
+    ///
+    /// This pin sweeps (caster, tick) combinations and asserts:
+    ///   1. program.chances[0] is populated with q16=0x8000 (50%).
+    ///   2. At least one combo produces an empty event vec
+    ///      (chance gate suppressed).
+    ///   3. At least one combo produces an ApplyEvent::Stun
+    ///      (chance gate fired).
+    ///   4. Determinism: same (caster, target, tick, world_seed) →
+    ///      same output (P5 keyed-PCG contract).
+    ///
+    /// Daze.ability: `stun 1s chance 50%` → Stun { duration_ticks: 10 }
+    /// at chance q16=0x8000.
+    #[test]
+    fn daze_apply_program_honors_chance_gate_deterministically() {
+        use engine::ability::apply::{apply_program, ApplyEvent};
+        use engine::ability::program::CasterStats;
+        use engine::ids::AgentId;
+
+        let built = binding_check::build_duel_abilities_registry();
+        let daze_id = *built.names.get("Daze").expect("Daze registered");
+        let daze = built.registry.get(daze_id).expect("Daze resolves");
+
+        // Pin (1): the chance modifier landed in program.chances.
+        assert_eq!(
+            daze.chances.get(0),
+            Some(&Some(0x8000)),
+            "Daze.ability `stun 1s chance 50%` must populate chances[0]=Some(0x8000) \
+             (50% as q16); got {:?}",
+            daze.chances,
+        );
+
+        let target = AgentId::new(99).expect("AgentId::new");
+        let world_seed = 0xCAFE_F00D;
+
+        let mut any_fire = false;
+        let mut any_skip = false;
+        for caster_seed in [1u32, 2, 3, 5, 7, 11, 13, 17] {
+            for tick in [10u32, 50, 100, 200] {
+                let caster = AgentId::new(caster_seed).expect("AgentId::new");
+
+                // Pin (4): determinism — same input twice → same output.
+                let run1 = apply_program(
+                    daze, caster, target, tick as u64, world_seed,
+                    &CasterStats::default(),
+                );
+                let run2 = apply_program(
+                    daze, caster, target, tick as u64, world_seed,
+                    &CasterStats::default(),
+                );
+                assert_eq!(
+                    run1.len(), run2.len(),
+                    "P5 violation: same input → different output (caster={caster_seed} tick={tick})"
+                );
+
+                match run1.as_slice() {
+                    [] => any_skip = true,
+                    [ApplyEvent::Stun { target: t, duration_ticks }] => {
+                        assert_eq!(*t, target, "Stun targets correct agent");
+                        assert_eq!(*duration_ticks, 10, "1s × 10 ticks/s");
+                        any_fire = true;
+                    }
+                    other => panic!(
+                        "expected [] or [Stun{{...}}] for Daze; got {:?} \
+                         (caster={caster_seed} tick={tick})",
+                        other,
+                    ),
+                }
+            }
+        }
+
+        // Pins (2) + (3): both halves of the chance fork were exercised.
+        assert!(any_fire, "no chance-fire across 32 sweep combos at 50% gate");
+        assert!(any_skip, "no chance-skip across 32 sweep combos at 50% gate");
+    }
+
     /// Snapshot before any tick must report initial state: both heroes
     /// alive at full HP (100.0), shields zero, and the renderer-visible
     /// fields (positions/creature_types/alive) populated for every
