@@ -1664,14 +1664,42 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 11u) {{\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Taunt: payload_a = duration_ticks (u32)\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_taunt(target, payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 12u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Dash: payload_a = distance (f32 via bitcast)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let distance: f32 = bitcast<f32>(payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_dash(caster, distance);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 13u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Blink: payload_a = distance (f32 via bitcast)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let distance: f32 = bitcast<f32>(payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_blink(caster, distance);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 14u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Knockback: payload_a = distance (f32 via bitcast)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let distance: f32 = bitcast<f32>(payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_knockback(caster, target, distance);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 15u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Pull: payload_a = distance (f32 via bitcast)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20let distance: f32 = bitcast<f32>(payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_pull(caster, target, distance);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 27u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Stealth: payload_a = duration_ticks (u32, self-cast)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_stealth(caster, payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 28u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Charm: payload_a = duration_ticks (u32)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_charm(target, payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 29u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Grounded: payload_a = duration_ticks (u32)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_grounded(target, payload_a);\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20}} else if (kind == 30u) {{\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Suppress: payload_a = duration_ticks (u32)\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// TODO slice γ: chronicle_append_suppress(target, payload_a);\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20}}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// Variants 5–7, 12–31 (TransferGold, ModifyStanding,\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// CastAbility, movement, Execute, SelfDamage, LifeSteal,\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// Variants 5–7, 16–26, 31 (TransferGold, ModifyStanding,\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// CastAbility, Execute, SelfDamage, LifeSteal,\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20// DamageModify, DoT/HoT/TimedShield, Buff, Summon,\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// Harvest/PlaceVoxel, Stealth/Charm/Grounded/Suppress/\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// Reflect): unhandled in slice β. Silent-skip is\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// documented + intentional; slice δ (#137) expands to\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20// the full vocabulary.\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// Harvest/PlaceVoxel, Reflect): unhandled in slice β.\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// Each needs a typed payload decode + chronicle-append\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// arm; the shape is established by the 17 arms above so\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20// they're additive in slice δ (#137).\n\
                  \x20\x20\x20\x20}}\n\
                  }}"
             );
@@ -4278,30 +4306,43 @@ mod tests {
         assert!(wgsl.contains("ability_registry_effect_payload_b[effect_base + i]"),
             "payload_b read must hit the new column binding;\n{wgsl}");
 
-        // Nine implemented variant arms (Wave 1 + Wave 2 piece 1).
-        assert!(wgsl.contains("if (kind == 0u)"),
-            "Damage arm (discriminant 0);\n{wgsl}");
-        assert!(wgsl.contains("else if (kind == 1u)"),
-            "Heal arm (discriminant 1);\n{wgsl}");
-        assert!(wgsl.contains("else if (kind == 2u)"),
-            "Shield arm (discriminant 2);\n{wgsl}");
-        assert!(wgsl.contains("else if (kind == 3u)"),
-            "Stun arm (discriminant 3);\n{wgsl}");
-        assert!(wgsl.contains("else if (kind == 4u)"),
-            "Slow arm (discriminant 4);\n{wgsl}");
-        assert!(wgsl.contains("else if (kind == 8u)"),
-            "Root arm (discriminant 8);\n{wgsl}");
-        assert!(wgsl.contains("else if (kind == 9u)"),
-            "Silence arm (discriminant 9);\n{wgsl}");
-        assert!(wgsl.contains("else if (kind == 10u)"),
-            "Fear arm (discriminant 10);\n{wgsl}");
-        assert!(wgsl.contains("else if (kind == 11u)"),
-            "Taunt arm (discriminant 11);\n{wgsl}");
+        // Seventeen implemented variant arms covering Wave 1 + Wave
+        // 2 pieces 1, 2, 7, 8 (single-payload shapes that mirror
+        // Damage / Stun verbatim modulo the chronicle-append target).
+        for (kind, label) in &[
+            (0,  "Damage"),
+            (1,  "Heal"),
+            (2,  "Shield"),
+            (3,  "Stun"),
+            (4,  "Slow"),
+            (8,  "Root"),
+            (9,  "Silence"),
+            (10, "Fear"),
+            (11, "Taunt"),
+            (12, "Dash"),
+            (13, "Blink"),
+            (14, "Knockback"),
+            (15, "Pull"),
+            (27, "Stealth"),
+            (28, "Charm"),
+            (29, "Grounded"),
+            (30, "Suppress"),
+        ] {
+            let kind_token = if *kind == 0 {
+                format!("if (kind == {kind}u)")
+            } else {
+                format!("else if (kind == {kind}u)")
+            };
+            assert!(
+                wgsl.contains(&kind_token),
+                "{label} arm (discriminant {kind}u);\n{wgsl}"
+            );
+        }
 
-        // Damage / Heal / Shield use bitcast<f32> on payload_a
-        // (amount-bearing variants).
-        assert!(wgsl.matches("bitcast<f32>(payload_a)").count() >= 3,
-            "Damage + Heal + Shield each bitcast payload_a to f32;\n{wgsl}");
+        // Damage / Heal / Shield + 4 movement verbs use bitcast<f32>
+        // on payload_a (amount/distance-bearing variants).
+        assert!(wgsl.matches("bitcast<f32>(payload_a)").count() >= 7,
+            "3 amount + 4 distance variants each bitcast payload_a to f32;\n{wgsl}");
 
         // chronicle_append TODO markers — the runtime helper hookup
         // is slice γ; locked here so a future regression can't
@@ -4317,6 +4358,14 @@ mod tests {
             "chronicle_append_silence",
             "chronicle_append_fear",
             "chronicle_append_taunt",
+            "chronicle_append_dash",
+            "chronicle_append_blink",
+            "chronicle_append_knockback",
+            "chronicle_append_pull",
+            "chronicle_append_stealth",
+            "chronicle_append_charm",
+            "chronicle_append_grounded",
+            "chronicle_append_suppress",
         ] {
             assert!(
                 wgsl.contains(&format!("TODO slice γ: {marker}")),

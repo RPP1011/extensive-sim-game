@@ -126,6 +126,80 @@ fn taunt_packs_to_discriminant_eleven_matching_wgsl_dispatcher() {
     );
 }
 
+// Wave 2 piece 2 — movement verbs (`Damage`-shape with f32 distance).
+#[test]
+fn dash_packs_to_discriminant_twelve_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Dash { distance: 5.0 }),
+        12,
+        "Dash discriminant — WGSL dispatcher arm `kind == 12u` depends on this"
+    );
+}
+
+#[test]
+fn blink_packs_to_discriminant_thirteen_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Blink { distance: 5.0 }),
+        13,
+        "Blink discriminant — WGSL dispatcher arm `kind == 13u` depends on this"
+    );
+}
+
+#[test]
+fn knockback_packs_to_discriminant_fourteen_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Knockback { distance: 5.0 }),
+        14,
+        "Knockback discriminant — WGSL dispatcher arm `kind == 14u` depends on this"
+    );
+}
+
+#[test]
+fn pull_packs_to_discriminant_fifteen_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Pull { distance: 5.0 }),
+        15,
+        "Pull discriminant — WGSL dispatcher arm `kind == 15u` depends on this"
+    );
+}
+
+// Wave 2 pieces 7 + 8 — single-duration CC verbs.
+#[test]
+fn stealth_packs_to_discriminant_27_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Stealth { duration_ticks: 30 }),
+        27,
+        "Stealth discriminant — WGSL dispatcher arm `kind == 27u` depends on this"
+    );
+}
+
+#[test]
+fn charm_packs_to_discriminant_28_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Charm { duration_ticks: 12 }),
+        28,
+        "Charm discriminant — WGSL dispatcher arm `kind == 28u` depends on this"
+    );
+}
+
+#[test]
+fn grounded_packs_to_discriminant_29_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Grounded { duration_ticks: 20 }),
+        29,
+        "Grounded discriminant — WGSL dispatcher arm `kind == 29u` depends on this"
+    );
+}
+
+#[test]
+fn suppress_packs_to_discriminant_30_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Suppress { duration_ticks: 15 }),
+        30,
+        "Suppress discriminant — WGSL dispatcher arm `kind == 30u` depends on this"
+    );
+}
+
 #[test]
 fn empty_sentinel_byte_matches_wgsl_dispatcher() {
     // The dispatcher loop's `if (kind == 0xFFu) { continue; }` early-out
