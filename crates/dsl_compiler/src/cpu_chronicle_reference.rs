@@ -16,14 +16,16 @@
 //! dispatcher would write for it. Pairing the two gives a complete
 //! CPU pipeline equivalent to the GPU dispatch path.
 //!
-//! **Slice γ caveat.** The GPU dispatcher today uses `agent_id` for
-//! both actor + target (self-cast assumption — `CgStmt::ApplyAbility`
-//! carries no explicit target operand). This reference mirrors that
-//! convention: `caster_id` is written into both the actor and target
-//! payload slots regardless of what the source `ApplyEvent` carries
-//! for `target`. When `CgStmt::ApplyAbility` grows an explicit target
-//! operand and the dispatcher consumes it, this reference grows the
-//! same operand.
+//! **Slice ε update.** Originally (slice γ), the GPU dispatcher
+//! hardcoded `agent_id` for both actor + target (self-cast). After
+//! slice ε plumbed explicit `caster` + `target` operands through
+//! `CgStmt::ApplyAbility` (commits `92572af8` / `d0bc37fd`), the
+//! dispatcher writes whichever ids the lowering supplies.
+//!
+//! This reference mirrors that: takes `caster_id` and `target_id`
+//! separately and writes them into actor (slot 2) and target (slot 3)
+//! respectively. For self-cast callers, pass `target_id == caster_id`
+//! to preserve the prior chronicle byte layout.
 //!
 //! Pin contract:
 //!   - Each entry of [`EFFECT_KIND_TO_EVENT_KIND_ID`] (in
@@ -51,9 +53,11 @@ pub const CHRONICLE_RECORD_STRIDE_U32: usize = 10;
 ///   - `[1]` = tick
 ///   - `[2..]` = per-variant payload (see variant arms below)
 ///
-/// `caster_id` is the per-thread agent (`agent_id` in WGSL) — used
-/// for both actor + target slots per the slice-γ self-cast
-/// convention. See module docs.
+/// `caster_id` and `target_id` are written into the actor (slot 2)
+/// and target (slot 3) chronicle payload words respectively. Both
+/// are u32 raw AgentIds. For self-cast callers (the slice-γ
+/// default), pass `target_id == caster_id`. See module docs for
+/// the slice-ε plumbing context.
 ///
 /// `tick` is the runtime tick counter at cast time; mirrors the
 /// `tick` preamble local the dispatcher reads from the kernel cfg.
