@@ -1,18 +1,19 @@
 //! mass_battle_100v100 apply_ability binding check.
 //!
-//! Builds the runtime's three-program AbilityRegistry (Strike + Snipe +
-//! StunBolt) and asserts the registered slot IDs match the
-//! `apply_ability 1`, `apply_ability 2`, and `apply_ability 3` literals
-//! hardcoded in `assets/sim/mass_battle_100v100.sim`'s Strike + Snipe +
-//! StunBolt verb bodies. If the registered slots drift (e.g. someone
+//! Builds the runtime's four-program AbilityRegistry (Strike + Snipe +
+//! StunBolt + MassHeal) and asserts the registered slot IDs match the
+//! `apply_ability 1`, `apply_ability 2`, `apply_ability 3`, and
+//! `apply_ability 4` literals hardcoded in
+//! `assets/sim/mass_battle_100v100.sim`'s Strike + Snipe + StunBolt +
+//! MassHeal verb bodies. If the registered slots drift (e.g. someone
 //! reorders the registration in `build_mass_battle_100v100_registry`),
 //! the panic here surfaces at fixture-construction time rather than as
 //! silent wrong-ability dispatch.
 //!
 //! Mirrors `crates/duel_25v25_runtime/src/binding_check.rs` — same
-//! one-program-per-ability hand-built shape, three programs (Strike,
-//! Snipe, StunBolt). No `.ability` files involved; the source of truth
-//! is this file's program builders.
+//! one-program-per-ability hand-built shape, four programs (Strike,
+//! Snipe, StunBolt, MassHeal). No `.ability` files involved; the
+//! source of truth is this file's program builders.
 
 use engine::ability::program::{EffectOp, Gate};
 use engine::ability::{AbilityId, AbilityProgram, AbilityRegistry, AbilityRegistryBuilder};
@@ -37,6 +38,15 @@ pub const SNIPE_EXPECTED_ABILITY_ID: u32 = 2;
 /// kind=29 EffectStunApplied chronicle records at production scale
 /// (200 agents × pair-field scoring).
 pub const STUN_BOLT_EXPECTED_ABILITY_ID: u32 = 3;
+
+/// MassHeal recovery-dynamics proof (200-agent scale, 2026-05-07) —
+/// registered fourth so it lands at AbilityId(4). The `apply_ability 4`
+/// literal in `assets/sim/mass_battle_100v100.sim::MassHeal` pins this
+/// slot. First friendly-targeted (Heal) ability in
+/// mass_battle_100v100; proves the apply_ability dispatcher's per-
+/// effect-slot loop emits kind=27 EffectHealApplied chronicle records
+/// at production scale (200 agents × pair-field scoring).
+pub const MASS_HEAL_EXPECTED_ABILITY_ID: u32 = 4;
 
 /// mass_battle_100v100's Strike registry-resident program.
 ///
@@ -107,10 +117,43 @@ fn build_stun_bolt_program() -> AbilityProgram {
     )
 }
 
-/// Build the mass_battle_100v100 AbilityRegistry — three programs
+/// mass_battle_100v100's MassHeal registry-resident program (recovery-
+/// dynamics proof at 200-agent scale, 2026-05-07).
+///
+/// Single-target Heal(18.0). The first friendly-targeted EffectOp in
+/// this fixture — proves the apply_ability dispatcher emits kind=27
+/// EffectHealApplied chronicle records (drained by
+/// `ApplyHealFromChronicle` straight into the per-agent `agent_hp`
+/// SoA, clamped at the per-agent `max_hp` ceiling). Heal amount 18.0
+/// is sized so a single MassHeal cast visibly recovers HP on a damaged
+/// target without instantly capping at max_hp=100 — leaves headroom
+/// for multiple casts to stack into the clamp.
+///
+/// `cooldown_ticks: 0` keeps the per-tick gate in the .sim verb's
+/// `world.tick % 11 == 0` clause (the GPU dispatcher does not consult
+/// program.cooldown_ticks at the apply_ability arm today).
+/// `hostile_only: false` matches the `target friend` semantic — the
+/// .sim's body-side level-pair check inverts to the ally predicate
+/// (same-team levels), so the dispatch lands on a SAME-TEAM ally.
+/// When future predicate dispatch starts consulting program metadata,
+/// this flag will scope target selection to allies; today the body-
+/// side `where` clause enforces the gate.
+/// `range: 999.0` matches `config.combat.perception_radius` (pair-
+/// field scoring, no spatial narrowing — same metadata as Strike +
+/// Snipe + StunBolt).
+fn build_mass_heal_program() -> AbilityProgram {
+    AbilityProgram::new_single_target(
+        /*range*/ 999.0,
+        Gate { cooldown_ticks: 0, hostile_only: false, line_of_sight: false },
+        [EffectOp::Heal { amount: 18.0 }],
+    )
+}
+
+/// Build the mass_battle_100v100 AbilityRegistry — four programs
 /// (Strike at AbilityId(1), Snipe at AbilityId(2), StunBolt at
-/// AbilityId(3)). Returns the frozen registry; callers pack + upload
-/// via `PackedAbilityRegistry::pack` + `PackedAbilityRegistryGpu::upload`.
+/// AbilityId(3), MassHeal at AbilityId(4)). Returns the frozen
+/// registry; callers pack + upload via `PackedAbilityRegistry::pack` +
+/// `PackedAbilityRegistryGpu::upload`.
 pub fn build_mass_battle_100v100_registry() -> AbilityRegistry {
     let mut builder = AbilityRegistryBuilder::new();
     let strike_id = builder.register(build_strike_program());
@@ -131,23 +174,29 @@ pub fn build_mass_battle_100v100_registry() -> AbilityRegistry {
         AbilityId::new(STUN_BOLT_EXPECTED_ABILITY_ID).expect("non-zero AbilityId"),
         "third registered program must land at AbilityId(3)",
     );
+    let mass_heal_id = builder.register(build_mass_heal_program());
+    debug_assert_eq!(
+        mass_heal_id,
+        AbilityId::new(MASS_HEAL_EXPECTED_ABILITY_ID).expect("non-zero AbilityId"),
+        "fourth registered program must land at AbilityId(4)",
+    );
     builder.build()
 }
 
 /// Single binding-check entry point. Called once from
 /// `MassBattle100v100State::new` at fixture-construction time.
 ///
-/// Asserts the registry contains exactly two programs and that each
-/// slot, gate, area, and effect match the .sim's hand-mirrored Strike
-/// and Snipe verb behaviour. If anything diverges the panic message
-/// points at the exact divergence.
+/// Asserts the registry contains exactly four programs (Strike +
+/// Snipe + StunBolt + MassHeal) and that each slot, gate, area, and
+/// effect match the .sim's hand-mirrored verb behaviour. If anything
+/// diverges the panic message points at the exact divergence.
 pub fn assert_ability_registry_matches_sim_constants() {
     let registry = build_mass_battle_100v100_registry();
     assert_eq!(
         registry.len(),
-        3,
-        "mass_battle_100v100 registry must contain exactly three programs \
-         (Strike + Snipe + StunBolt); got {}",
+        4,
+        "mass_battle_100v100 registry must contain exactly four programs \
+         (Strike + Snipe + StunBolt + MassHeal); got {}",
         registry.len(),
     );
 
@@ -272,18 +321,70 @@ pub fn assert_ability_registry_matches_sim_constants() {
             "StunBolt effect[0]: expected Stun(duration_ticks=20), got {other:?}",
         ),
     }
+
+    // ---- MassHeal at AbilityId(4) (recovery-dynamics proof at
+    //      200-agent scale — first friendly-targeted EffectOp in this
+    //      fixture) ----
+    let mass_heal_id = AbilityId::new(MASS_HEAL_EXPECTED_ABILITY_ID)
+        .expect("non-zero AbilityId");
+    let mass_heal = registry
+        .get(mass_heal_id)
+        .expect("MassHeal resolves to a program at AbilityId(4)");
+    assert_eq!(
+        mass_heal.gate.cooldown_ticks, 0,
+        "MassHeal cooldown_ticks must be 0 (cadence is in the .sim verb \
+         gate `world.tick % 11 == 0`)",
+    );
+    assert!(
+        !mass_heal.gate.hostile_only,
+        "MassHeal must NOT be hostile_only — `target friend` semantic \
+         (the .sim's body-side level-pair check uses the ally \
+         predicate, dispatching on same-team agents)",
+    );
+    match mass_heal.area {
+        Area::SingleTarget { range } => assert_eq!(
+            range, 999.0,
+            "MassHeal range must be 999.0 — matches \
+             config.combat.perception_radius (pair-field scoring, no \
+             spatial narrowing — same as Strike + Snipe + StunBolt)",
+        ),
+    }
+    assert_eq!(
+        mass_heal.effects.len(), 1,
+        "MassHeal must have exactly one effect (Heal 18.0); got {}",
+        mass_heal.effects.len(),
+    );
+    match &mass_heal.effects[0] {
+        EffectOp::Heal { amount } => assert_eq!(
+            *amount, 18.0,
+            "MassHeal heal amount must be 18.0 — sized so a single cast \
+             visibly recovers HP on a damaged target without instantly \
+             capping at max_hp=100",
+        ),
+        other => panic!(
+            "MassHeal effect[0]: expected Heal(18.0), got {other:?}",
+        ),
+    }
+    assert!(
+        mass_heal.per_effect_areas.is_empty()
+            || mass_heal.per_effect_areas[0].is_none(),
+        "MassHeal must NOT have a per-effect area (single-target \
+         Heal); got {:?}",
+        mass_heal.per_effect_areas,
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Pins the registry build pattern: three abilities (Strike at
-    /// slot 1, Snipe at slot 2, StunBolt at slot 3), each with the
-    /// expected gate/area/effect. Catches drift before construction-time
-    /// panics surface in viz_tests / behavioural tests.
+    /// Pins the registry build pattern: four abilities (Strike at
+    /// slot 1, Snipe at slot 2, StunBolt at slot 3, MassHeal at slot
+    /// 4), each with the expected gate/area/effect. Catches drift
+    /// before construction-time panics surface in viz_tests /
+    /// behavioural tests.
     #[test]
-    fn registry_contains_strike_snipe_stun_bolt_at_expected_slots() {
+    fn registry_contains_strike_snipe_stun_bolt_mass_heal_at_expected_slots() {
         assert_ability_registry_matches_sim_constants();
     }
 }
