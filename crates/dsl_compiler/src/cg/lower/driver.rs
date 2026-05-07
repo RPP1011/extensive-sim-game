@@ -199,6 +199,15 @@ pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOu
     populate_namespace_registry(&mut ctx);
     populate_entity_field_catalog(comp, &mut ctx);
 
+    // Predicate-aware scoring (Wave 1.5#7 follow-on): mirror the
+    // verb-name → ability_id map produced by `expand_verbs` into the
+    // interner, keyed by the now-allocated `ActionId`. The scoring
+    // kernel emit reads this via `ctx.prog.interner.verb_action_ability_ids`
+    // to inline per-effect when-predicate evaluation alongside utility
+    // scoring (closing the layering gap documented on
+    // `assets/sim/duel_abilities.sim::Reap`).
+    populate_verb_action_ability_ids(&expansion.verb_ability_ids, &mut ctx);
+
     // -- Phase 2: per-construct lowering --------------------------------
     lower_all_masks(comp, &mut ctx, &mut diagnostics);
     lower_all_views(comp, &event_rings, &mut ctx, &mut diagnostics);
@@ -351,6 +360,25 @@ pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOu
     // unconditionally and the verb's mask predicate had no
     // observable effect on argmax.
     wire_scoring_mask_reads(&arena_snapshot, ctx.builder.ops_mut());
+
+    // -- Phase 4c': ScoringArgmax predicate-eval bindings ---------------
+    //
+    // Predicate-aware scoring (Wave 1.5#7 follow-on). When the program
+    // has at least one verb registered in the interner's
+    // `verb_action_ability_ids` table (the verb expander populated it
+    // above for verbs whose body is a single literal-id apply_ability
+    // dispatch), the scoring kernel emit inlines per-effect when-
+    // predicate evaluation alongside utility scoring. The eval reads
+    // the same SoA columns the chronicle dispatcher reads
+    // (`when_pred_*` plus the seven agent stat columns); without
+    // explicit `record_read` calls here, the BGL composer never
+    // declares the matching bindings and the WGSL references undeclared
+    // identifiers (caught by naga at frontend-parse time).
+    //
+    // Symmetric to `wire_ability_registry_column_reads` but for
+    // ScoringArgmax ops instead of body-bearing PhysicsRule / ViewFold
+    // ops. Same SoA column set; same agent stat field set.
+    wire_scoring_predicate_reads(&arena_snapshot, ctx.builder.ops_mut());
 
     // -- Phase 4d: declared-but-never-emitted event-kind warning --------
     //
@@ -1042,6 +1070,37 @@ fn allocate_action(
     ctx.register_action(name.to_string(), id);
     if let Err(e) = ctx.builder.intern_action_name(id, name.to_string()) {
         diagnostics.push(LoweringError::BuilderRejected { error: e, span });
+    }
+}
+
+/// Populate [`crate::cg::program::Interner::verb_action_ability_ids`]
+/// by joining the verb expander's `verb_<Name>` → ability_id map
+/// against the action-id allocator's `verb_<Name>` → ActionId
+/// assignment. Both maps share the same key space (the synthetic
+/// action name); a verb name absent from `action_ids` (e.g., a verb
+/// whose body is empty so no scoring entry was injected) silently
+/// drops out of the join — the scoring kernel falls back to verb-mask
+/// gating for those rows.
+///
+/// Called between `populate_actions` and `lower_all_*` so the
+/// interner table is populated before the scoring kernel emit reads
+/// it. Conflict (same action_id mapped to different ability_ids by
+/// distinct verbs sharing a synthetic name) surfaces a
+/// `BuilderError::DuplicateInternEntry`-shaped diagnostic.
+fn populate_verb_action_ability_ids(
+    verb_ability_ids: &std::collections::BTreeMap<String, u32>,
+    ctx: &mut LoweringCtx<'_>,
+) {
+    for (synthetic_name, ability_id) in verb_ability_ids {
+        if let Some(action_id) = ctx.action_ids.get(synthetic_name).copied() {
+            // Errors here would indicate a driver-side defect
+            // (duplicate verb name colliding on action_id); silently
+            // skip on conflict — the predicate gate is a best-effort
+            // refinement and the verb-mask still gates argmax.
+            let _ = ctx
+                .builder
+                .record_verb_action_ability_id(action_id, *ability_id);
+        }
     }
 }
 
@@ -2257,6 +2316,88 @@ fn wire_scoring_mask_reads(prog: &CgProgram, ops: &mut [ComputeOp]) {
             for mask_id in to_record {
                 op.record_read(DataHandle::MaskBitmap { mask: mask_id });
             }
+        }
+    }
+}
+
+/// Wire the implicit AbilityRegistry `when_pred_*` SoA column reads
+/// + agent stat SoA reads each [`ComputeOpKind::ScoringArgmax`] op
+/// acquires when at least one of its rows references a verb that
+/// dispatches a single-literal apply_ability (registered in
+/// [`crate::cg::program::Interner::verb_action_ability_ids`]).
+///
+/// Predicate-aware scoring (Wave 1.5#7 follow-on): the scoring kernel
+/// emit inlines per-effect when-predicate evaluation alongside utility
+/// scoring, reading the same SoA columns the chronicle dispatcher
+/// reads (`when_pred_*` plus agent stat SoA at the predicate's
+/// resolved agent index).
+///
+/// Symmetric to [`wire_ability_registry_column_reads`] (the dispatcher
+/// side) and to [`wire_scoring_mask_reads`] (the mask-gate side) —
+/// closes the BGL composer gap created by the scoring kernel emit
+/// referencing identifiers not surfaced through any `CgExpr` node.
+fn wire_scoring_predicate_reads(prog: &CgProgram, ops: &mut [ComputeOp]) {
+    use crate::cg::data_handle::{AbilityRegistryColumn, AgentFieldId, AgentRef};
+    // Same column set the dispatcher consumes for predicate eval.
+    // Agent stat fields mirror the seven slots
+    // `engine::ability::program::CasterStats::get` reads (AbilityPower
+    // returns 0.0 — no agent SoA slot, kept symmetric with the
+    // dispatcher emit).
+    const COLUMNS: &[AbilityRegistryColumn] = &[
+        AbilityRegistryColumn::WhenPredBinder,
+        AbilityRegistryColumn::WhenPredField,
+        AbilityRegistryColumn::WhenPredOp,
+        AbilityRegistryColumn::WhenPredLiteral,
+    ];
+    const AGENT_STAT_FIELDS: &[AgentFieldId] = &[
+        AgentFieldId::AttackDamage,
+        AgentFieldId::MaxHp,
+        AgentFieldId::Hp,
+        AgentFieldId::Armor,
+        AgentFieldId::MagicResist,
+        AgentFieldId::MoveSpeed,
+        AgentFieldId::Mana,
+    ];
+
+    // Skip if no verb→ability mapping exists in the program (no
+    // predicate-eval emit will fire for any row).
+    if prog.interner.verb_action_ability_ids.is_empty() {
+        return;
+    }
+
+    for op in ops.iter_mut() {
+        let ComputeOpKind::ScoringArgmax { rows, .. } = &op.kind else {
+            continue;
+        };
+        // Gate on at least one row whose action has a verb→ability
+        // mapping. Rows without one fall back to mask-only gating; if
+        // every row falls back, this op never references the
+        // predicate-eval bindings and we keep it binding-clean.
+        let any_predicate_row = rows.iter().any(|r| {
+            prog.interner
+                .verb_action_ability_ids
+                .contains_key(&r.action.0)
+        });
+        if !any_predicate_row {
+            continue;
+        }
+        for column in COLUMNS {
+            op.record_read(DataHandle::AbilityRegistryColumn { column: *column });
+        }
+        // Predicate eval reads agent stat SoA at either caster_slot
+        // (binder=0) or target_slot (binder=1) — pre-resolved to
+        // PerPairCandidate for the scoring kernel's per-pair inner
+        // loop. Recording both `Self_` and `PerPairCandidate` would
+        // duplicate the binding; `Self_` is the canonical handle and
+        // the WGSL emit reads `agent_<field>[pred_agent]` at runtime
+        // where `pred_agent` is computed from caster_slot /
+        // per_pair_candidate. Mirrors the dispatcher's `Self_`-only
+        // recording in `wire_ability_registry_column_reads`.
+        for field in AGENT_STAT_FIELDS {
+            op.record_read(DataHandle::AgentField {
+                field: *field,
+                target: AgentRef::Self_,
+            });
         }
     }
 }

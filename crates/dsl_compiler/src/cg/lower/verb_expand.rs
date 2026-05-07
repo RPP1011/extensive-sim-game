@@ -117,6 +117,20 @@ const ACTION_SELECTED_FIELD_TARGET: &str = "target";
 pub struct VerbExpansionOutcome {
     pub compilation: Compilation,
     pub diagnostics: Vec<LoweringError>,
+    /// Synthetic action-name (e.g. `"verb_Reap"`) → dispatched
+    /// ability_id, populated for every verb whose body contains
+    /// exactly ONE [`dsl_ast::ir::IrStmt::ApplyAbility`] with a
+    /// literal-integer `ability` operand. Verbs with zero, multiple,
+    /// or non-literal apply_ability calls are absent — the scoring
+    /// kernel falls back to verb-mask gating for those rows.
+    ///
+    /// Used by the driver to populate
+    /// [`crate::cg::program::Interner::verb_action_ability_ids`] (the
+    /// interner-side mirror keyed by `ActionId`) once the action-id
+    /// allocator has run. The scoring kernel emit reads the interner
+    /// table to inline per-effect when-predicate evaluation alongside
+    /// utility scoring.
+    pub verb_ability_ids: std::collections::BTreeMap<String, u32>,
 }
 
 /// Expand every `verb` declaration in `comp` into its constituent
@@ -172,6 +186,8 @@ pub fn expand_verbs(comp: &Compilation) -> VerbExpansionOutcome {
     // `apply_ability`) are skipped so the id space is contiguous over
     // the cascade-bearing subset.
     let mut next_action_id: u32 = 0;
+    let mut verb_ability_ids: std::collections::BTreeMap<String, u32> =
+        std::collections::BTreeMap::new();
     for verb in &verbs {
         let assigned_action_id = if verb.body.is_empty() {
             None
@@ -180,6 +196,18 @@ pub fn expand_verbs(comp: &Compilation) -> VerbExpansionOutcome {
             next_action_id += 1;
             Some(id)
         };
+        // Predicate-aware scoring (Wave 1.5#7 follow-on): if the verb's
+        // body is a single `apply_ability <lit>` call, record the
+        // dispatched ability_id under the synthetic action name so the
+        // scoring kernel can inline per-effect when-predicate evaluation.
+        // Verbs with zero / multiple / non-literal apply_ability calls
+        // are skipped — the scoring kernel falls back to verb-mask
+        // gating for those rows. See the doc comment on
+        // [`VerbExpansionOutcome::verb_ability_ids`] for rationale.
+        if let Some(ability_id) = extract_single_apply_ability_literal(&verb.body) {
+            let synthetic_name = format!("verb_{}", verb.name);
+            verb_ability_ids.insert(synthetic_name, ability_id);
+        }
         expand_one_verb(
             verb,
             assigned_action_id,
@@ -192,7 +220,43 @@ pub fn expand_verbs(comp: &Compilation) -> VerbExpansionOutcome {
     VerbExpansionOutcome {
         compilation: out,
         diagnostics,
+        verb_ability_ids,
     }
+}
+
+/// Walk a verb body for exactly one [`IrStmt::ApplyAbility`] whose
+/// `ability` operand is a literal-integer `IrExpr::LitInt`. Returns
+/// `Some(id)` only on the canonical single-dispatch shape; verbs with
+/// zero, multiple, or non-literal apply_ability calls return `None`.
+///
+/// The walk is shallow today — every shipped verb body is a flat list
+/// of statements (no nested If/Match), and the only apply_ability
+/// dispatch site is the verb-body root. Should a future verb shape
+/// nest dispatch under a conditional, this helper conservatively
+/// returns `None` (predicate-aware scoring falls back to verb-mask
+/// gating). Closing that gap is a follow-on if the shape lands.
+fn extract_single_apply_ability_literal(body: &[IrStmt]) -> Option<u32> {
+    let mut found: Option<u32> = None;
+    for stmt in body {
+        if let IrStmt::ApplyAbility { ability, .. } = stmt {
+            if let IrExpr::LitInt(n) = &ability.kind {
+                if *n < 0 || *n > u32::MAX as i64 {
+                    return None;
+                }
+                if found.is_some() {
+                    // Multiple apply_ability calls — punt.
+                    return None;
+                }
+                found = Some(*n as u32);
+            } else {
+                // Non-literal ability operand — punt (today's shape is
+                // always a literal but a future call-site may pass a
+                // computed AbilityId).
+                return None;
+            }
+        }
+    }
+    found
 }
 
 /// Inject (or reuse) the singleton `ActionSelected` event kind into

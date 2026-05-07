@@ -3081,6 +3081,80 @@ fn lower_scoring_argmax_body(
             (String::new(), String::new())
         };
 
+        // Predicate-aware scoring (Wave 1.5#7 follow-on, 2026-05-07).
+        // When the row's action is a verb registered in
+        // `verb_action_ability_ids`, the dispatched ability's effect
+        // slot 0 may carry a per-effect when-predicate. Inline the
+        // same predicate-eval shape the chronicle dispatcher uses
+        // (`wgsl_body.rs::lower_apply_ability_to_wgsl`) so the row's
+        // utility is gated on the predicate passing — without this,
+        // argmax wins for targets the predicate would later reject,
+        // and the chronicle dispatcher silently drops the cast.
+        //
+        // Layering rationale: the verb-mask gate (`mask_gate_open`
+        // above) gates argmax SELECTION at the actor level (per-agent
+        // bitmap). The per-effect predicate operates at the (caster,
+        // target) PAIR level — a healthy target with a hurt caster
+        // still passes the verb mask but should not win argmax for
+        // an execute ability gated on `target.hp < 20`. Inlining the
+        // predicate inside the per-pair candidate loop closes that
+        // gap. Effect slot 0 is the canonical primary slot; multi-
+        // effect predicates are deferred (the chronicle dispatcher
+        // checks every slot independently — gating argmax on slot 0
+        // is sufficient because today's authoring convention is one
+        // primary effect per ability).
+        let predicate_gate = ctx
+            .prog
+            .interner
+            .verb_action_ability_ids
+            .get(&row.action.0)
+            .copied()
+            .map(|ability_id| {
+                let target_for_pred = if row_is_per_pair {
+                    "per_pair_candidate"
+                } else {
+                    "agent_id"
+                };
+                format!(
+                    "    // predicate-aware scoring: read effect slot 0's when_pred_*\n\
+                     \x20   // for ability_id={ability_id} (1-based), gate utility on result.\n\
+                     \x20   var pred_passes_{i}: bool = true;\n\
+                     \x20   {{\n\
+                     \x20       let ability_slot_{i}: u32 = {ability_id}u - 1u;\n\
+                     \x20       let effect_base_{i}: u32 = ability_slot_{i} * 6u;\n\
+                     \x20       let pred_binder_{i}: u32 = ability_registry_when_pred_binder[effect_base_{i} + 0u];\n\
+                     \x20       if (pred_binder_{i} != 0xFFu) {{\n\
+                     \x20           let pred_field_{i}: u32   = ability_registry_when_pred_field[effect_base_{i} + 0u];\n\
+                     \x20           let pred_op_{i}: u32      = ability_registry_when_pred_op[effect_base_{i} + 0u];\n\
+                     \x20           let pred_literal_{i}: f32 = ability_registry_when_pred_literal[effect_base_{i} + 0u];\n\
+                     \x20           var pred_agent_{i}: u32 = agent_id;\n\
+                     \x20           if (pred_binder_{i} == 1u) {{ pred_agent_{i} = {target_for_pred}; }}\n\
+                     \x20           var pred_lhs_{i}: f32 = 0.0;\n\
+                     \x20           switch (pred_field_{i}) {{\n\
+                     \x20               case 0u: {{ pred_lhs_{i} = agent_attack_damage[pred_agent_{i}]; }}\n\
+                     \x20               case 1u: {{ pred_lhs_{i} = 0.0; }}\n\
+                     \x20               case 2u: {{ pred_lhs_{i} = agent_max_hp[pred_agent_{i}]; }}\n\
+                     \x20               case 3u: {{ pred_lhs_{i} = agent_hp[pred_agent_{i}]; }}\n\
+                     \x20               case 4u: {{ pred_lhs_{i} = agent_armor[pred_agent_{i}]; }}\n\
+                     \x20               case 5u: {{ pred_lhs_{i} = agent_magic_resist[pred_agent_{i}]; }}\n\
+                     \x20               case 6u: {{ pred_lhs_{i} = agent_move_speed[pred_agent_{i}]; }}\n\
+                     \x20               case 7u: {{ pred_lhs_{i} = agent_mana[pred_agent_{i}]; }}\n\
+                     \x20               default: {{ pred_lhs_{i} = 0.0; }}\n\
+                     \x20           }}\n\
+                     \x20           switch (pred_op_{i}) {{\n\
+                     \x20               case 0u: {{ pred_passes_{i} = pred_lhs_{i} <  pred_literal_{i}; }}\n\
+                     \x20               case 1u: {{ pred_passes_{i} = pred_lhs_{i} <= pred_literal_{i}; }}\n\
+                     \x20               case 2u: {{ pred_passes_{i} = pred_lhs_{i} >  pred_literal_{i}; }}\n\
+                     \x20               case 3u: {{ pred_passes_{i} = pred_lhs_{i} >= pred_literal_{i}; }}\n\
+                     \x20               case 4u: {{ pred_passes_{i} = pred_lhs_{i} == pred_literal_{i}; }}\n\
+                     \x20               case 5u: {{ pred_passes_{i} = pred_lhs_{i} != pred_literal_{i}; }}\n\
+                     \x20               default: {{ pred_passes_{i} = false; }}\n\
+                     \x20           }}\n\
+                     \x20       }}\n\
+                     \x20   }}\n",
+                )
+            });
+
         match row.guard {
             Some(guard_id) => {
                 let guard_wgsl = lower_cg_expr_to_wgsl(guard_id, ctx)?;
@@ -3090,8 +3164,16 @@ fn lower_scoring_argmax_body(
                     out.push_str(open);
                 }
                 out.push_str(&loop_open);
+                if let Some(gate) = &predicate_gate {
+                    out.push_str(gate);
+                }
                 writeln!(out, "    let guard_{i}: bool = {guard_wgsl};").unwrap();
-                writeln!(out, "    if (guard_{i}) {{").unwrap();
+                let combined_guard = if predicate_gate.is_some() {
+                    format!("guard_{i} && pred_passes_{i}")
+                } else {
+                    format!("guard_{i}")
+                };
+                writeln!(out, "    if ({combined_guard}) {{").unwrap();
                 writeln!(out, "        let utility_{i}: f32 = {utility_wgsl};").unwrap();
                 writeln!(out, "        if (utility_{i} > best_utility) {{").unwrap();
                 writeln!(out, "            best_utility = utility_{i};").unwrap();
@@ -3110,8 +3192,16 @@ fn lower_scoring_argmax_body(
                     out.push_str(open);
                 }
                 out.push_str(&loop_open);
+                if let Some(gate) = &predicate_gate {
+                    out.push_str(gate);
+                }
                 writeln!(out, "    let utility_{i}: f32 = {utility_wgsl};").unwrap();
-                writeln!(out, "    if (utility_{i} > best_utility) {{").unwrap();
+                let cmp = if predicate_gate.is_some() {
+                    format!("pred_passes_{i} && utility_{i} > best_utility")
+                } else {
+                    format!("utility_{i} > best_utility")
+                };
+                writeln!(out, "    if ({cmp}) {{").unwrap();
                 writeln!(out, "        best_utility = utility_{i};").unwrap();
                 writeln!(out, "        best_action = {action_lit};").unwrap();
                 writeln!(out, "        best_target = {target_wgsl};").unwrap();

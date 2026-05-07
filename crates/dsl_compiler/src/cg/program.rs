@@ -245,6 +245,22 @@ pub struct Interner {
     pub actions: BTreeMap<u32, String>,
     pub config_consts: BTreeMap<u32, String>,
     pub event_rings: BTreeMap<u32, String>,
+    /// Verb action_id → dispatched ability_id mapping (Wave 1.5#7
+    /// follow-on, predicate-aware scoring). Populated by the verb
+    /// expander when a verb's body contains exactly one
+    /// [`dsl_ast::ir::IrStmt::ApplyAbility`] whose `ability` operand is
+    /// a literal integer (`IrExpr::LitInt`). Verbs with zero, multiple,
+    /// or non-literal apply_ability calls are absent — the scoring
+    /// kernel falls back to verb-mask gating for those rows.
+    ///
+    /// Used by `cg::emit::kernel::lower_scoring_argmax_body` to inline
+    /// per-effect when-predicate evaluation alongside utility scoring,
+    /// so a verb whose dispatched ability declares `when target.hp <
+    /// 20` (e.g. Reap) only argmax-wins for targets actually satisfying
+    /// the predicate. Without this gate, argmax picks the verb for any
+    /// target and the chronicle dispatcher's predicate then silently
+    /// drops the cast.
+    pub verb_action_ability_ids: BTreeMap<u32, u32>,
 }
 
 impl Interner {
@@ -1229,6 +1245,37 @@ impl CgProgramBuilder {
             id.0,
             name.into(),
         )
+    }
+
+    /// Record the verb-action-id → dispatched-ability-id mapping
+    /// produced by the verb expander (Wave 1.5#7 predicate-aware
+    /// scoring). Idempotent for the same (action_id, ability_id) pair;
+    /// a conflict surfaces a [`BuilderError::DuplicateInternEntry`]
+    /// matching the other `intern_*_name` precedents.
+    ///
+    /// See [`Interner::verb_action_ability_ids`] for the consumer
+    /// contract.
+    pub fn record_verb_action_ability_id(
+        &mut self,
+        action: ActionId,
+        ability_id: u32,
+    ) -> Result<(), BuilderError> {
+        match self.inner.interner.verb_action_ability_ids.get(&action.0) {
+            Some(existing) if *existing == ability_id => Ok(()),
+            Some(existing) => Err(BuilderError::DuplicateInternEntry {
+                id_kind: "verb_action_ability_id",
+                id: action.0,
+                prior: format!("ability_id={}", existing),
+                new: format!("ability_id={}", ability_id),
+            }),
+            None => {
+                self.inner
+                    .interner
+                    .verb_action_ability_ids
+                    .insert(action.0, ability_id);
+                Ok(())
+            }
+        }
     }
 
     /// Replace the program's [`EntityFieldCatalog`] in one shot. Called
