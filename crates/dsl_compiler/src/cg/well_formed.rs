@@ -2183,7 +2183,9 @@ fn detect_cycles(prog: &CgProgram, errors: &mut Vec<CgError>) {
         );
         let consumer_is_guarded_per_agent = is_guarded_per_agent_physics(prog, op);
         let consumer_chronicle_gate = chronicle_action_id_gate(prog, op);
+        let consumer_phase = tick_phase_position(prog, op);
         for r in &op.reads {
+            let read_supports_temporal_filter = handle_participates_in_temporal_filter(r);
             if let Some(producers) = writers.get(&r.cycle_edge_key()) {
                 for &producer in producers {
                     if producer == consumer {
@@ -2194,6 +2196,45 @@ fn detect_cycles(prog: &CgProgram, errors: &mut Vec<CgError>) {
                         // Cross-tick read into a per-tick rebuild —
                         // see the comment above.
                         continue;
+                    }
+                    // Across-tick edge: producer (writer) runs in a
+                    // later tick-phase than consumer (reader).
+                    //
+                    // Two motivating shapes:
+                    // * `AgentField`: scoring (phase 1) reads
+                    //   `agent_hp`; an apply rule (phase 4) writes
+                    //   `agent_hp`. Scoring's read is from the PRIOR
+                    //   tick — apply hasn't run yet this tick when
+                    //   scoring fires.
+                    // * `EventRing`: chronicle (phase 2) reads
+                    //   `ActionSelected`; apply (phase 4) writes
+                    //   `Defeated` on the same ring. The
+                    //   `cycle_edge_key` projection collapses access
+                    //   modes onto ring identity, so the apply's
+                    //   `Defeated` producer looks like an edge into
+                    //   the chronicle's `ActionSelected` consumer
+                    //   even though no within-tick dependency exists
+                    //   (apply runs AFTER chronicle this tick; the
+                    //   `Defeated` write is consumed next tick).
+                    //
+                    // The producer→consumer edge in either case is a
+                    // temporal edge, not a same-tick dependency, and
+                    // must not contribute to within-tick cycle
+                    // detection. Restricting the skip to those two
+                    // handle classes keeps mask, view-storage, and
+                    // scoring-output edges intact, so real within-
+                    // tick cycles (e.g. two consumer rules mutating
+                    // the same field at the same phase) still
+                    // surface.
+                    //
+                    // Closes Gap Y from
+                    // `docs/superpowers/notes/2026-05-04-duel_1v1.md`.
+                    if read_supports_temporal_filter {
+                        let producer_phase =
+                            tick_phase_position(prog, &prog.ops[producer.0 as usize]);
+                        if producer_phase > consumer_phase {
+                            continue;
+                        }
                     }
                     // Two PerAgent PhysicsRule ops whose bodies start
                     // with a top-level `if (where_cond) { … }` guard
@@ -2395,6 +2436,93 @@ fn chronicle_action_id_gate(
         on_event,
         action_id,
     })
+}
+
+/// Per-tick phase position for an op, used by [`detect_cycles`] to
+/// classify producer→consumer `AgentField` edges as same-tick (kept)
+/// vs prior-tick (skipped).
+///
+/// The schedule synthesised by `cg::schedule::synthesis` runs ops in
+/// roughly the following order each tick:
+///
+/// 0. Mask predicates — gate verbs by reading agent state.
+/// 1. Scoring argmaxes — read agent state, emit `ActionSelected`.
+/// 2. Chronicle dispatchers — `Replayable` `PhysicsRule`s with
+///    `on_event = Some` (read `ActionSelected`, emit verb events on
+///    deterministic rings).
+/// 3. View folds + view decay — read events, write view storage.
+/// 4. Apply rules — `@phase(post)` `PhysicsRule`s with `on_event =
+///    Some` (read verb events, write agent fields). Today the
+///    `replayable` flag stays `Replayable` for these (the
+///    `@phase(post)` annotation is recorded in
+///    [`CgProgram::post_phase_physics_rules`] instead — see
+///    `lower::driver::physics_replayability`); we consult that
+///    side-table here.
+/// 5. Per-agent sweeps — `PhysicsRule` with `on_event = None` (e.g.
+///    Movement, cooldown ticks; read+write agent fields directly).
+/// 6. Spatial queries — already special-cased above as prior-tick.
+/// 7. Plumbing — pack/unpack and other housekeeping.
+///
+/// The numbers are coarse but the relative ordering matches what the
+/// schedule emits: a scoring op (phase 1) reading `agent_hp` reads the
+/// value an apply rule (phase 4) wrote on the *previous* tick, not what
+/// the apply rule will write later in the *current* tick. The cycle
+/// detector treats such a producer→consumer edge as temporal
+/// (across-tick) and excludes it from within-tick cycle detection.
+///
+/// Closes Gap Y from `docs/superpowers/notes/2026-05-04-duel_1v1.md`.
+fn tick_phase_position(prog: &CgProgram, op: &crate::cg::op::ComputeOp) -> u8 {
+    use crate::cg::op::ComputeOpKind;
+    match &op.kind {
+        ComputeOpKind::MaskPredicate { .. } => 0,
+        ComputeOpKind::ScoringArgmax { .. } => 1,
+        ComputeOpKind::PhysicsRule {
+            rule,
+            on_event: Some(_),
+            ..
+        } => {
+            // `@phase(post)` is the carrier today (replayable flag
+            // stays Replayable for both kinds); consult the side-table
+            // populated by `lower::driver::is_post_phase_authored`.
+            if prog.is_post_phase_physics_rule(*rule) {
+                4
+            } else {
+                2
+            }
+        }
+        ComputeOpKind::ViewFold { .. } | ComputeOpKind::ViewDecay { .. } => 3,
+        ComputeOpKind::PhysicsRule {
+            on_event: None, ..
+        } => 5,
+        ComputeOpKind::SpatialQuery { .. } => 6,
+        ComputeOpKind::Plumbing { .. } => 7,
+    }
+}
+
+/// True iff the given handle is an `AgentField` or `EventRing` — the
+/// two handle classes for which [`detect_cycles`] applies the
+/// temporal-edge filter.
+///
+/// **Why these two classes specifically.** `AgentField` is the
+/// canonical across-tick read: scoring (phase 1) reads `agent_hp`
+/// from the prior tick, apply (phase 4) writes the new value for the
+/// next tick. `EventRing` shares the same shape because
+/// [`DataHandle::cycle_edge_key`] collapses `Read`/`Append`/`Drain`
+/// access modes onto a single ring identity — so a ring-write in a
+/// later phase looks like an edge to a ring-read in an earlier phase
+/// even though that "edge" is actually the next-tick handoff. (The
+/// ring carries multiple event kinds; the projection can't tell apart
+/// a chronicle's `ActionSelected` consumer from an apply's `Defeated`
+/// producer beyond the ring identity.)
+///
+/// Mask bitmaps, view storage, scoring output, etc. all keep their
+/// strict same-tick edges: those producers and consumers form
+/// well-ordered chains the schedule must respect.
+fn handle_participates_in_temporal_filter(h: &DataHandle) -> bool {
+    matches!(
+        h,
+        DataHandle::AgentField { .. } | DataHandle::EventRing { .. }
+    )
 }
 
 /// Tarjan's strongly-connected-components algorithm. Iterative
@@ -3280,6 +3408,195 @@ mod tests {
             )
         });
         assert!(saw_cycle, "missing Cycle for unguarded pair in {:?}", errs);
+    }
+
+    // -----------------------------------------------------------------
+    // 7c. Gap Y — across-tick AgentField + EventRing edges aren't cycles
+    // -----------------------------------------------------------------
+
+    /// Gap Y, agent-field shape: a scoring op that reads `agent.hp`
+    /// AND a chronicle apply rule that writes `agent.hp` form an
+    /// across-tick edge, not a within-tick cycle. The reader (scoring,
+    /// phase 1) sees the prior tick's value; the writer (apply, phase
+    /// 4) updates the value for the next tick. Within the current tick
+    /// scoring runs BEFORE apply, so the producer→consumer edge in the
+    /// cycle graph is temporal and must be skipped.
+    ///
+    /// Closes Gap Y from
+    /// `docs/superpowers/notes/2026-05-04-duel_1v1.md`.
+    #[test]
+    fn scoring_reading_hp_with_apply_writing_hp_is_not_a_cycle() {
+        let mut b = CgProgramBuilder::new();
+
+        // op#0: ScoringArgmax (phase 1) — reads agent.self.hp through
+        // the utility expression.
+        let hp_read = b.add_expr(read_self_hp()).unwrap();
+        let tgt = b.add_expr(CgExpr::Lit(LitValue::AgentId(0))).unwrap();
+        b.add_op(
+            ComputeOpKind::ScoringArgmax {
+                scoring: ScoringId(0),
+                rows: vec![ScoringRowOp {
+                    action: ActionId(0),
+                    utility: hp_read,
+                    target: Some(tgt),
+                    guard: None,
+                }],
+            },
+            DispatchShape::PerAgent,
+            Span::dummy(),
+        )
+        .unwrap();
+
+        // op#1: PhysicsRule (chronicle apply, phase 4 once marked
+        // post-phase) — body writes agent.self.hp.
+        let new_hp = b.add_expr(lit_f32(0.0)).unwrap();
+        let assign = b
+            .add_stmt(CgStmt::Assign {
+                target: DataHandle::AgentField {
+                    field: AgentFieldId::Hp,
+                    target: AgentRef::Self_,
+                },
+                value: new_hp,
+            })
+            .unwrap();
+        let body = b.add_stmt_list(CgStmtList::new(vec![assign])).unwrap();
+        b.add_op(
+            ComputeOpKind::PhysicsRule {
+                rule: PhysicsRuleId(0),
+                on_event: Some(EventKindId(0)),
+                body,
+                replayable: ReplayabilityFlag::Replayable,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+        )
+        .unwrap();
+        // Mark op#1 (PhysicsRuleId(0)) as `@phase(post)`. This is
+        // what the driver's `mark_post_phase_physics_rule` does for
+        // every rule annotated `@phase(post)` — it's the carrier the
+        // phase-position helper consults today since the
+        // ReplayabilityFlag stays Replayable for both kinds.
+        b.mark_post_phase_physics_rule(PhysicsRuleId(0));
+        let mut prog = b.finish();
+
+        // Wire the cross-op edges directly: scoring also writes to
+        // ring 0 (ActionSelected), apply reads ring 0 (Damaged-style).
+        // This pins the dual condition the gap describes — "both
+        // touch the shared ring".
+        prog.ops[0].record_write(DataHandle::EventRing {
+            ring: EventRingId(0),
+            kind: EventRingAccess::Append,
+        });
+        prog.ops[1].record_read(DataHandle::EventRing {
+            ring: EventRingId(0),
+            kind: EventRingAccess::Read,
+        });
+
+        // No P6 (the apply is a chronicle physics — but post_phase
+        // exempts it from the P6 gate; see `is_post_phase_physics_rule`).
+        // No cycle (the agent-hp + ring producer→consumer edges are
+        // both across-tick after the phase-position filter).
+        let result = check_well_formed(&prog);
+        assert!(
+            !matches!(
+                &result,
+                Err(errs) if errs.iter().any(|e| matches!(e, CgError::Cycle { .. }))
+            ),
+            "expected no Cycle error for scoring/apply hp pair, got {result:?}",
+        );
+    }
+
+    /// Gap Y negative: a real within-tick cycle on `agent_hp` between
+    /// two ops at the SAME tick-phase must still surface. Two
+    /// `@phase(post)` apply rules where each reads what the other
+    /// writes is a legitimate within-tick race; the schedule cannot
+    /// safely sequence them. The temporal-edge filter must NOT
+    /// silence this case.
+    #[test]
+    fn same_phase_apply_rules_writing_each_others_agent_field_still_cycles() {
+        let mut b = CgProgramBuilder::new();
+        // op#0 body: assigns agent.self.hp.
+        let new_hp_a = b.add_expr(lit_f32(1.0)).unwrap();
+        let assign_a = b
+            .add_stmt(CgStmt::Assign {
+                target: DataHandle::AgentField {
+                    field: AgentFieldId::Hp,
+                    target: AgentRef::Self_,
+                },
+                value: new_hp_a,
+            })
+            .unwrap();
+        let body_a = b.add_stmt_list(CgStmtList::new(vec![assign_a])).unwrap();
+        // op#1 body: assigns agent.self.mana.
+        let new_mana = b.add_expr(lit_f32(2.0)).unwrap();
+        let assign_b = b
+            .add_stmt(CgStmt::Assign {
+                target: DataHandle::AgentField {
+                    field: AgentFieldId::Mana,
+                    target: AgentRef::Self_,
+                },
+                value: new_mana,
+            })
+            .unwrap();
+        let body_b = b.add_stmt_list(CgStmtList::new(vec![assign_b])).unwrap();
+
+        b.add_op(
+            ComputeOpKind::PhysicsRule {
+                rule: PhysicsRuleId(0),
+                on_event: Some(EventKindId(0)),
+                body: body_a,
+                replayable: ReplayabilityFlag::Replayable,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+        )
+        .unwrap();
+        b.add_op(
+            ComputeOpKind::PhysicsRule {
+                rule: PhysicsRuleId(1),
+                on_event: Some(EventKindId(1)),
+                body: body_b,
+                replayable: ReplayabilityFlag::Replayable,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+        )
+        .unwrap();
+        // Mark BOTH as @phase(post) — same tick-phase (4).
+        b.mark_post_phase_physics_rule(PhysicsRuleId(0));
+        b.mark_post_phase_physics_rule(PhysicsRuleId(1));
+        let mut prog = b.finish();
+
+        // op#0 reads what op#1 writes (mana) and vice versa — a
+        // genuine within-phase agent-field race.
+        prog.ops[0].record_read(DataHandle::AgentField {
+            field: AgentFieldId::Mana,
+            target: AgentRef::Self_,
+        });
+        prog.ops[1].record_read(DataHandle::AgentField {
+            field: AgentFieldId::Hp,
+            target: AgentRef::Self_,
+        });
+
+        let errs = check_well_formed(&prog)
+            .expect_err("same-phase agent-field cross-reads should cycle");
+        let saw_cycle = errs.iter().any(|e| {
+            matches!(
+                e,
+                CgError::Cycle { ops } if ops.contains(&OpId(0)) && ops.contains(&OpId(1))
+            )
+        });
+        assert!(
+            saw_cycle,
+            "missing Cycle for same-phase agent-field race in {:?}",
+            errs
+        );
     }
 
     // -----------------------------------------------------------------
