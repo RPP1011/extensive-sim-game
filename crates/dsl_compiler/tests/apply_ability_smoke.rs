@@ -260,6 +260,103 @@ fn apply_ability_nested_in_if_body_passes_naga_validator() {
     );
 }
 
+/// Variant: `apply_ability` inside a PerEvent rule (driven by a
+/// custom event with payload binding). Different kernel shape than
+/// the PerAgent fixtures — the kernel iterates `event_count` rather
+/// than `agent_cap`, and the cfg uniform carries event-count, not
+/// agent-count.
+///
+/// **Known-failing — captured here as documentation, not a CI gate.**
+///
+/// The dispatcher's chronicle writes hardcode `agent_id` as the
+/// caster slot identifier (slice-γ self-cast convention), but
+/// PerEvent kernels don't bind `agent_id` in their preamble — each
+/// thread is `event_idx`, and the per-event actor lives in the event
+/// payload (which `CgStmt::ApplyAbility` doesn't reference today
+/// because it carries only the ability operand).
+///
+/// The honest fix is the slice-δ design we deferred earlier:
+/// extend `CgStmt::ApplyAbility { ability }` to
+/// `CgStmt::ApplyAbility { ability, caster, target }` and have
+/// lowering populate the operands from the surrounding context
+/// (`AgentRef::Self_` / `AgentRef::Actor` / etc.). Until that lands,
+/// PerEvent ApplyAbility produces broken WGSL — naga rejects the
+/// kernel with `no definition in scope for identifier: 'agent_id'`.
+///
+/// This test stays in the file as a discovery breadcrumb: removing
+/// the `#[ignore]` is the right reproducer when the slice-δ caster
+/// operand work begins. Without the breadcrumb, the gap surfaces
+/// only when a runtime crate finally drives a PerEvent
+/// apply_ability rule and gets the same naga error far from the
+/// design context.
+#[test]
+#[ignore = "slice δ — needs explicit caster/target operands on \
+            CgStmt::ApplyAbility before PerEvent shape can produce \
+            valid WGSL; see test docstring for the deferral context"]
+fn apply_ability_in_per_event_rule_passes_naga_validator() {
+    use naga::valid::{Capabilities, ValidationFlags, Validator};
+    let src = "
+        event Tick { }
+        event Triggered { who: AgentId, ability_id: u32 }
+
+        entity Hero : Agent { }
+
+        physics DispatchOnTrigger {
+          on Triggered { who: w, ability_id: a } {
+            apply_ability a
+          }
+        }
+    ";
+    let program = dsl_compiler::parse(src).expect("parse");
+    let comp = dsl_ast::resolve::resolve(program).expect("resolve");
+    let cg = dsl_compiler::cg::lower::lower_compilation_to_cg(&comp)
+        .expect("lower");
+    let schedule_result = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&schedule_result.schedule, &cg)
+        .expect("emit");
+
+    let body = kernel_body_containing(&art, "DispatchOnTrigger")
+        .or_else(|| kernel_body_containing(&art, "physics"))
+        .expect("physics kernel emitted");
+    // PerEvent shape: cfg carries event_count, not agent_cap.
+    assert!(
+        body.contains("cfg.event_count") || body.contains("event_count"),
+        "PerEvent kernel must reference event_count in its preamble \
+         (cfg uniform shape);\n{body}"
+    );
+    // Dispatcher loop reached.
+    assert!(
+        body.contains("for (var i: u32 = 0u; i < 6u;"),
+        "dispatcher loop must land in PerEvent rule body;\n{body}"
+    );
+
+    // Naga validator. Catches PerEvent-specific shape errors (e.g.
+    // event_idx vs agent_id confusion in the chronicle writes).
+    let mut errs = Vec::new();
+    for (name, kernel_body) in &art.wgsl_files {
+        let module = match naga::front::wgsl::parse_str(kernel_body) {
+            Ok(m) => m,
+            Err(e) => {
+                errs.push(format!("  {name}: parse failed: {e}"));
+                continue;
+            }
+        };
+        let mut validator = Validator::new(ValidationFlags::all(), Capabilities::all());
+        if let Err(e) = validator.validate(&module) {
+            errs.push(format!("  {name}: validate failed: {e:?}"));
+        }
+    }
+    assert!(
+        errs.is_empty(),
+        "PerEvent ApplyAbility variant emitted {} kernels naga rejects:\n{}",
+        errs.len(),
+        errs.join("\n"),
+    );
+}
+
 /// Variant: `apply_ability` + regular `emit` in the same rule body.
 /// Both write to `event_ring` — the dispatcher's chronicle writes
 /// (slice-γ kinds 26..=32) and the user-declared `emit Pinged { ... }`
