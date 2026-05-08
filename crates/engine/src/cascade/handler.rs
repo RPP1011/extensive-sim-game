@@ -294,7 +294,16 @@ pub enum EventKindId {
     // chronicle record carries (actor + target=subject + subject_idx in
     // payload_a). Slot 66 contiguous with the scry slot (65).
     EffectRevealApplied      = 66,
-    // Slots 67-127 reserved for replayable event variants added in later tasks.
+    // Wave 3 ToM Phase 4 — deception verbs (Disguise/Decoy/EraseBelief).
+    // Each is the chronicle counterpart of the matching `EffectOp` slot
+    // (kinds 36/37/38). The dispatcher writes a single record per cast;
+    // downstream BeliefState SoA mutation lives in compiler-emitted
+    // `physics @phase(post)` consumer rules in `tom_probe.sim`. Slots
+    // 67/68/69 contiguous with the Phase 3.5 reveal slot (66).
+    EffectDisguiseApplied    = 67,
+    EffectDecoyApplied       = 68,
+    EffectEraseBeliefApplied = 69,
+    // Slots 70-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 

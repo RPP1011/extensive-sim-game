@@ -230,3 +230,110 @@ physics ApplyRevealBeliefUpdate @phase(post) {
     agents.set_beliefs_flags(o, s, agents.beliefs_flags(a, s));
   }
 }
+
+// -------------------------------------------------------------------
+// Wave 3 ToM Phase 4 — deception verbs (Decoy / EraseBelief).
+// -------------------------------------------------------------------
+//
+// Two engine-aliased event types whose dispatch arms write the
+// corresponding chronicle records (kinds 68/69 — see
+// `dsl_ast::engine_events::ENGINE_EVENT_KIND_IDS`); the consumer rules
+// below mirror Phase 3.8's authoring shape (`@phase(post)` runs after
+// the producer kernels, reads the chronicle event ring, mutates the
+// BeliefState SoA via the existing `agents.set_beliefs_<field>`
+// setters).
+//
+// Disguise (kind 67) ships its dispatcher arm + chronicle record + pin
+// in this slice — the per-agent SoA columns and observe-consumer
+// integration are deferred (the chronicle record carries the packed
+// payload but no consumer rule reads it from the .sim today). See
+// `disguise_chronicle_pin.rs` for the dispatcher-side pin.
+
+// Decoy — caster A writes attacker-controlled belief values into
+// observer T's row about `subject_idx`. The chronicle event payload
+// carries:
+//   * actor=slot 2 (caster A — informational only; the consumer doesn't
+//     read agent SoA, all values come from the event payload),
+//   * target=slot 3 (the OBSERVER whose row gets clobbered),
+//   * subject_idx=slot 4 (the agent slot the belief is ABOUT — distinct
+//     from `target`),
+//   * fake_pos=slot 5 (packed (x_q8, y_q8, z_q8, fake_type) quartet —
+//     the consumer unpacks bytes via shift/mask to f32 q8-decoded pos
+//     coords + a u8 fake_type).
+//
+// The consumer writes 4 cells of target's belief row about subject_idx:
+// `last_known_pos` (decoded from the packed quartet), `last_known_creature_type`
+// (= fake_type byte), `last_seen_tick` (= world.tick, matching observe's
+// "this is fresh" semantic), `confidence` (= 255 q8 max). Leaves the
+// suspicion + flags slots unchanged — Decoy is a positional / identity
+// fake, not a slander or knowledge claim.
+@replayable
+event EffectDecoyApplied {
+  actor: AgentId,
+  target: AgentId,
+  subject_idx: u32,
+  fake_pos: u32,
+}
+
+physics ApplyDecoyBeliefUpdate @phase(post) {
+  on EffectDecoyApplied { actor: _, target: t, subject_idx: s, fake_pos: p } {
+    // Unpack the 4 packed bytes from `p`. The mul-by-1.0 promotes
+    // the u32 byte values to f32 via the existing `promote_int_to_f32`
+    // path (the DSL's vec3 ctor requires f32 args; no surface
+    // `f32(...)` cast builtin today). The high byte is the fake
+    // creature_type (kept as u32 — the setter packs to a u8 byte).
+    // 16777216 = 1<<24, 65536 = 1<<16, 256 = 1<<8.
+    let fx = (p % 256) * 1.0;
+    let fy = ((p / 256) % 256) * 1.0;
+    let fz = ((p / 65536) % 256) * 1.0;
+    let ft = (p / 16777216) % 256;
+    agents.set_beliefs_pos(t, s, vec3(fx, fy, fz));
+    agents.set_beliefs_creature_type(t, s, ft);
+    agents.set_beliefs_last_seen_tick(t, s, world.tick);
+    agents.set_beliefs_confidence(t, s, 255);
+  }
+}
+
+// EraseBelief — caster A clears specific cells of observer T's row
+// about `subject_idx` per the `fields` bitset. Each bit corresponds to
+// one BeliefState column (bit 0 = pos, 1 = type, 2 = tick, 3 =
+// confidence, 4 = suspicion, 5 = flags). The consumer body emits 6
+// `if ((f & bit) != 0) { setter(0) }` blocks — one per column.
+//
+// Field binding mirrors Decoy: `target` (slot 3) is the OBSERVER whose
+// row caster clears; `subject_idx` (slot 4) is the agent slot the
+// belief is ABOUT; `fields` (slot 5) is the u8-in-u32 bitset.
+@replayable
+event EffectEraseBeliefApplied {
+  actor: AgentId,
+  target: AgentId,
+  subject_idx: u32,
+  fields: u32,
+}
+
+physics ApplyEraseBeliefUpdate @phase(post) {
+  on EffectEraseBeliefApplied { actor: _, target: t, subject_idx: s, fields: f } {
+    // Bit-test via modulo + division — the DSL parser doesn't accept
+    // `u` integer suffixes (e.g. `1u`) on bare literals today, and
+    // `&` bitwise-and with bare ints would force the rhs to f32 in
+    // mixed contexts. `(f / N) % 2` is the bit-N extract analogue.
+    if (f % 2 != 0) {
+      agents.set_beliefs_pos(t, s, vec3(0.0, 0.0, 0.0));
+    }
+    if ((f / 2) % 2 != 0) {
+      agents.set_beliefs_creature_type(t, s, 0);
+    }
+    if ((f / 4) % 2 != 0) {
+      agents.set_beliefs_last_seen_tick(t, s, 0);
+    }
+    if ((f / 8) % 2 != 0) {
+      agents.set_beliefs_confidence(t, s, 0);
+    }
+    if ((f / 16) % 2 != 0) {
+      agents.set_beliefs_suspicion(t, s, 0);
+    }
+    if ((f / 32) % 2 != 0) {
+      agents.set_beliefs_flags(t, s, 0);
+    }
+  }
+}

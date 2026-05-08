@@ -1095,6 +1095,24 @@ fn pack_effect(op: EffectOp) -> (u32, u32, u32) {
         // convention where the cast's `target` operand IS the subject).
         EffectOp::Reveal { subject_idx } =>
             (35, subject_idx, 0),
+        // Wave 3 ToM Phase 4 — `disguise` deception verb. payload_a packs
+        // (duration_ticks << 8) | fake_type so the consumer can split with
+        // `payload_a & 0xFF` (fake_type) and `payload_a >> 8` (duration).
+        // payload_b = 0. Caster recorded as `caster_slot`; `target_slot`
+        // is the cast's `target` operand (= caster for self-cast).
+        EffectOp::Disguise { fake_type, duration_ticks } =>
+            (36, ((duration_ticks << 8) & 0xFFFFFF00u32) | (fake_type as u32), 0),
+        // Wave 3 ToM Phase 4 — `decoy` verb. payload_a = subject_idx (the
+        // belief's ABOUT agent slot). payload_b = pre-packed (x_q8 lo …
+        // fake_type hi) quartet — no further packing here. The consumer
+        // unpacks with bit-shifts.
+        EffectOp::Decoy { subject_idx, fake_pos } =>
+            (37, subject_idx, fake_pos),
+        // Wave 3 ToM Phase 4 — `erase_belief` verb. payload_a =
+        // subject_idx. payload_b's low byte = fields bitset (bit 0 = pos,
+        // 1 = type, 2 = tick, 3 = confidence, 4 = suspicion, 5 = flags).
+        EffectOp::EraseBelief { subject_idx, fields } =>
+            (38, subject_idx, fields as u32),
     }
 }
 
