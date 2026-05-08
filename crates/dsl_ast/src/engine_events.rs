@@ -149,6 +149,21 @@ pub const ENGINE_EVENT_KIND_IDS: &[(&str, u32)] = &[
     // full Wave 3 multi-field BeliefState (creature_type / decay /
     // disguise / slander) is deferred.
     ("EffectPlantBeliefApplied", 63),
+    // Wave 3 ToM Phase 3 — `observe` self-observe-target verb. Caster
+    // refreshes its own belief row about `target`. 4-payload-word
+    // chronicle record (actor + target + tick + target_observer u8 in
+    // payload_a). Slot 64 contiguous with the Wave 3 Phase 1
+    // plant_belief slot (EffectPlantBeliefApplied=63). The dispatcher
+    // writes the chronicle record from the per-effect-slot arm chain
+    // when `EffectOp::Observe` (kind=33) fires; downstream runtime
+    // consumers read target's current pos / creature_type from the
+    // agent SoA at consume tick and write the BeliefState SoA's 6
+    // columns at `[actor * agent_cap + target]` indexing. The DSL
+    // view-call lowering shape (`agents.beliefs_<field>(observer,
+    // subject)`) for kernel-side reads is deferred to Phase 4
+    // alongside the deception verbs (disguise / decoy / erase_belief)
+    // and the spy_network sim.
+    ("EffectObserveApplied", 64),
 ];
 
 /// Look up the engine-defined `EventKindId` discriminant for an
@@ -202,6 +217,7 @@ mod tests {
         assert_eq!(engine_event_kind_id_for_name("EffectReflectApplied"), Some(61));
         assert_eq!(engine_event_kind_id_for_name("EffectSummonApplied"), Some(62));
         assert_eq!(engine_event_kind_id_for_name("EffectPlantBeliefApplied"), Some(63));
+        assert_eq!(engine_event_kind_id_for_name("EffectObserveApplied"), Some(64));
     }
 
     #[test]

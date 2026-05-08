@@ -528,6 +528,34 @@ pub enum EffectOp {
     /// deferred — this primitive lights up the apply_ability →
     /// chronicle → pair_map fold loop end-to-end.
     PlantBelief { subject_idx: u32, fact_bit: u8 } = 32,
+
+    // --- Theory-of-Mind belief verbs (Wave 3 phase 3) ---
+    // `observe` is naturally self-observing-target: the caster's own
+    // belief row about `target` gets refreshed with target's CURRENT
+    // pos / creature_type / tick / confidence=255. The chronicle event
+    // carries no payload words beyond actor + target + tick — the
+    // downstream consumer reads target's actual SoA state at consume
+    // time and writes into the BeliefState SoA's 6 columns indexed at
+    // `[caster_slot * agent_cap + target_slot]`. This pattern (chronicle
+    // records the cast minimally; consumer reads agent SoA + writes to
+    // ToM SoA) keeps the chronicle event small and lets the per-event
+    // record stay shape-uniform across the dispatcher arm chain.
+    //
+    // SHAPE NOTE: payload is the empty unit `target_observer` u8 (a
+    // future-extension byte for non-self observe shapes — e.g. "agent A
+    // observes target via agent C's eyes"; today only `0` (self) is
+    // wired). 1B payload + 1B tag = 2B total. The packed effect-kind
+    // ordinal is 33 (next after PlantBelief=32). The chronicle
+    // EventKindId is 64 (next after EffectPlantBeliefApplied=63).
+    /// `observe target` — caster's belief row for `target` is
+    /// refreshed: `last_known_pos`, `last_known_creature_type`,
+    /// `last_seen_tick`, and `confidence` (= 255 / max) all written
+    /// from target's current state at the consume tick. The
+    /// `target_observer` byte is a future-extension hook — only the
+    /// self-observe shape (`0`) is wired today; future shapes (e.g.
+    /// "observe target via observer C") would extend this byte's
+    /// vocabulary without a payload-shape change.
+    Observe { target_observer: u8 } = 33,
 }
 
 /// Stat targeted by `buff`. Vocabulary is small today (just the two

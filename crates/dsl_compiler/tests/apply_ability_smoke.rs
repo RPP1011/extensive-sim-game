@@ -1247,15 +1247,15 @@ fn smoke_fixture_explicit_rule_kernel_has_full_dispatcher() {
     // Slice γ tail adds Buff=58, Harvest=59, PlaceVoxel=60, Reflect=61
     // — count goes 52 → 60. Slice γ closer adds Summon=62 — count
     // goes 60 → 62. Wave 3 ToM Phase 1 adds PlantBelief=63 — count
-    // goes 62 → 64. NO `// TODO slice γ` arms remain; the slice is
-    // closed.)
+    // goes 62 → 64. Wave 3 ToM Phase 3 adds Observe=64 — count goes
+    // 64 → 66. NO `// TODO slice γ` arms remain; the slice is closed.)
     let slot_acquisitions = explicit_body
         .matches("let _slot: u32 = atomicAdd(&event_tail[0], 1u);")
         .count();
     assert_eq!(
-        slot_acquisitions, 64,
-        "DispatchAbilityExplicit kernel must carry all 64 chronicle slot \
-         acquisitions (32 chronicle-bearing variants × {{primary, nested}} \
+        slot_acquisitions, 66,
+        "DispatchAbilityExplicit kernel must carry all 66 chronicle slot \
+         acquisitions (33 chronicle-bearing variants × {{primary, nested}} \
          walk); got {slot_acquisitions}\nbody:\n{explicit_body}"
     );
 
@@ -1332,13 +1332,14 @@ fn back_to_back_apply_ability_in_one_rule_emits_two_dispatcher_blocks() {
     // slice γ tail added 4 arms (Buff/Harvest/PlaceVoxel/Reflect),
     // bumping 104 → 120; slice γ closer added 1 arm (Summon),
     // bumping 120 → 124; Wave 3 ToM Phase 1 added 1 arm
-    // (PlantBelief), bumping 124 → 128).
+    // (PlantBelief), bumping 124 → 128; Wave 3 ToM Phase 3 added 1
+    // arm (Observe), bumping 128 → 132).
     let slot_acquisitions = body
         .matches("let _slot: u32 = atomicAdd(&event_tail[0], 1u);")
         .count();
     assert_eq!(
-        slot_acquisitions, 128,
-        "expected 128 slot acquisitions (32 chronicle arms × 2 statements × \
+        slot_acquisitions, 132,
+        "expected 132 slot acquisitions (33 chronicle arms × 2 statements × \
          {{primary, nested}} walks); got {slot_acquisitions}\nbody:\n{body}"
     );
 
@@ -1405,9 +1406,9 @@ fn back_to_back_apply_ability_with_distinct_operands_each_emit() {
         .count();
     // Wave 1.5#9 + Wave 2 piece 1 + Wave 2 piece 2 + Wave 1.5+ +
     // extended-status slice + slice γ tail + slice γ closer + Wave 3
-    // ToM Phase 1 (PlantBelief): 32 chronicle arms × 2 statements ×
-    // {primary, nested} walks = 128.
-    assert_eq!(slot_acquisitions, 128);
+    // ToM Phase 1 (PlantBelief) + Wave 3 ToM Phase 3 (Observe): 33
+    // chronicle arms × 2 statements × {primary, nested} walks = 132.
+    assert_eq!(slot_acquisitions, 132);
 
     // Naga validates — different target_slot expressions in the two
     // dispatch blocks shouldn't introduce binding conflicts.

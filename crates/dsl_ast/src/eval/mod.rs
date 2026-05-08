@@ -182,6 +182,19 @@ pub enum EffectOp {
     // pattern-matches PlantBelief today (deferred — the dispatcher's
     // chronicle write is the load-bearing path).
     PlantBelief  { subject_idx: u32, fact_bit: u8 },
+    // Wave 3 ToM Phase 3 — `observe` self-observe-target verb (mirror of
+    // `engine::ability::program::EffectOp::Observe`). Caster's own
+    // belief row about `target` is refreshed: the consumer reads
+    // target's CURRENT pos / creature_type from the agent SoA at
+    // consume tick and writes into the BeliefState SoA's 6 columns.
+    // Discriminant 33 pinned by the engine schema_hash. The
+    // `target_observer` byte is a future-extension hook (only the
+    // self-observe shape `0` is wired today). The ast-level mirror
+    // keeps this surface in step with the engine even though no
+    // `.sim` interpreter consumer pattern-matches Observe today
+    // (deferred — the dispatcher's chronicle write is the load-
+    // bearing path).
+    Observe      { target_observer: u8 },
 }
 
 /// Target selection for `CastAbility` effects.  Mirrors
