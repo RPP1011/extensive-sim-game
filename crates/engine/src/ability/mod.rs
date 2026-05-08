@@ -44,6 +44,7 @@ pub mod packed;
 pub mod program;
 pub mod registry;
 pub mod registry_gpu;
+pub mod toml_loader;
 
 pub use program::{
     Area, Delivery, EffectOp, Gate, TargetSelector, MAX_ABILITIES, MAX_EFFECTS_PER_PROGRAM,
@@ -54,6 +55,7 @@ pub use program::{
     ShapeKind, StackingMode, MAX_SCALINGS_PER_EFFECT, MAX_TAGS_PER_PROGRAM,
 };
 pub use registry::{AbilityRegistry, AbilityRegistryBuilder};
+pub use toml_loader::AbilityTomlError;
 pub use packed::{
     PackedAbilityRegistry, CHANCE_NONE_SENTINEL, EFFECT_KIND_EMPTY, HINT_NONE_SENTINEL,
     LIFETIME_KIND_NONE_SENTINEL, NUM_ABILITY_TAGS, SCALING_STAT_NONE_SENTINEL,
