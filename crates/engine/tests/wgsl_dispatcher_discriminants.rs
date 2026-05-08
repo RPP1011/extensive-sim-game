@@ -382,6 +382,36 @@ fn reveal_packs_to_discriminant_35_matching_wgsl_dispatcher() {
     );
 }
 
+// Wave 3 ToM Phase 4 — `disguise` deception verb.
+#[test]
+fn disguise_packs_to_discriminant_36_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Disguise { fake_type: 7, duration_ticks: 200 }),
+        36,
+        "Disguise discriminant — WGSL dispatcher arm `kind == 36u` depends on this"
+    );
+}
+
+// Wave 3 ToM Phase 4 — `decoy` deception verb.
+#[test]
+fn decoy_packs_to_discriminant_37_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Decoy { subject_idx: 4, fake_pos: 0xDEADBEEF }),
+        37,
+        "Decoy discriminant — WGSL dispatcher arm `kind == 37u` depends on this"
+    );
+}
+
+// Wave 3 ToM Phase 4 — `erase_belief` deception verb.
+#[test]
+fn erase_belief_packs_to_discriminant_38_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::EraseBelief { subject_idx: 4, fields: 0b00111111 }),
+        38,
+        "EraseBelief discriminant — WGSL dispatcher arm `kind == 38u` depends on this"
+    );
+}
+
 #[test]
 fn empty_sentinel_byte_matches_wgsl_dispatcher() {
     // The dispatcher loop's `if (kind == 0xFFu) { continue; }` early-out

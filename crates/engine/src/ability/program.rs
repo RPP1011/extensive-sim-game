@@ -613,6 +613,65 @@ pub enum EffectOp {
     /// SoA columns from `[caster * N + subject]` to `[observer * N +
     /// subject]`.
     Reveal { subject_idx: u32 } = 35,
+
+    // --- Theory-of-Mind deception verbs (Wave 3 phase 4) ---
+    //
+    // Phase 4 adds 3 deception verbs that complete the spy_network test
+    // sim's required vocabulary. Each is a thin chronicle-write op; the
+    // downstream BeliefState SoA mutation lives in compiler-emitted
+    // `physics @phase(post)` consumer rules in `tom_probe.sim` (mirror of
+    // the Phase 3.8 observe/scry/reveal authoring).
+    //
+    // SHAPE NOTES:
+    //   * Disguise — caster declares a fake creature_type for a duration.
+    //     payload_a = (duration_ticks << 8) | fake_type. payload_b = 0.
+    //     The dispatcher writes the chronicle record (kind=67) when the
+    //     EffectOp::Disguise (kind=36) slot fires; the consumer writes
+    //     `disguise_expires_at_tick` and `disguise_fake_type` SoA columns
+    //     (one cell per agent, NOT per (observer, target) pair). Subsequent
+    //     `observe` calls consult these two columns to write a fake
+    //     `last_known_creature_type` into the observer's belief row.
+    //     1+4 payload bytes = 5 + 1 tag = 6B total. Packed effect ordinal
+    //     36 (next after Reveal=35). Chronicle EventKindId 67.
+    //
+    //   * Decoy — caster plants a full BeliefState row in target's belief
+    //     map about a subject. payload_a = subject_idx (u32). payload_b =
+    //     packed (fake_pos_x i8, fake_pos_y i8, fake_pos_z i8, fake_type u8).
+    //     Useful for cross-subject misdirection — "agent X believes there's
+    //     a threat at coordinates Y" where Y is attacker-controlled. The
+    //     consumer writes `last_known_pos`, `last_known_creature_type`,
+    //     `last_seen_tick` (= world.tick), `confidence` (= 255) into
+    //     target's row about subject. 4+4 payload bytes = 8 + 1 tag = 9B
+    //     total. Packed effect ordinal 37. Chronicle EventKindId 68.
+    //
+    //   * EraseBelief — caster clears specific fields of target's beliefs
+    //     about subject. payload_a = subject_idx (u32). payload_b = field
+    //     bitset (u8 widened, low byte holds: bit 0 = pos, bit 1 = type,
+    //     bit 2 = tick, bit 3 = confidence, bit 4 = suspicion, bit 5 =
+    //     flags). The consumer reads the bitset and clears the
+    //     corresponding cells in one rule. 4+1 = 5 + 1 tag = 6B. Packed
+    //     effect ordinal 38. Chronicle EventKindId 69.
+
+    /// `disguise <fake_type> for <duration>` — caster publicly poses as
+    /// `fake_type` for `duration_ticks`. Subsequent `observe` calls of the
+    /// disguised caster see `last_known_creature_type = fake_type` instead
+    /// of the caster's true `creature_type`, until `world.tick` exceeds
+    /// `disguise_expires_at_tick`.
+    Disguise { fake_type: u8, duration_ticks: u32 } = 36,
+
+    /// `decoy <subject_idx> at <fake_pos>` — caster writes attacker-
+    /// controlled values into target's beliefs about `subject_idx` (a real
+    /// agent slot). `fake_pos` is a packed (x_q8, y_q8, z_q8, fake_type)
+    /// quartet of bytes. The consumer writes the full BeliefState row at
+    /// `[target * N + subject_idx]` from the chronicle event payload (no
+    /// agent SoA read).
+    Decoy { subject_idx: u32, fake_pos: u32 } = 37,
+
+    /// `erase_belief <subject_idx> { <fields> }` — caster clears specific
+    /// fields of target's beliefs about `subject_idx`. `fields` is a u8
+    /// bitset (bit 0 = pos, 1 = type, 2 = tick, 3 = confidence, 4 =
+    /// suspicion, 5 = flags). Useful for memory wipes / counter-deception.
+    EraseBelief { subject_idx: u32, fields: u8 } = 38,
 }
 
 /// Stat targeted by `buff`. Vocabulary is small today (just the two

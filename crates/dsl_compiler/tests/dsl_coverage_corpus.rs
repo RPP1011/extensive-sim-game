@@ -320,6 +320,9 @@ fn effect_op_label(op: &EffectOp) -> &'static str {
         EffectOp::Observe         { .. } => "Observe",
         EffectOp::Scry            { .. } => "Scry",
         EffectOp::Reveal          { .. } => "Reveal",
+        EffectOp::Disguise        { .. } => "Disguise",
+        EffectOp::Decoy           { .. } => "Decoy",
+        EffectOp::EraseBelief     { .. } => "EraseBelief",
     }
 }
 

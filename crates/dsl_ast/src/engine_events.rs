@@ -184,6 +184,27 @@ pub const ENGINE_EVENT_KIND_IDS: &[(&str, u32)] = &[
     // iterate every observer slot and copy the 6 BeliefState columns from
     // `[caster * N + subject]` to `[observer * N + subject]`.
     ("EffectRevealApplied", 66),
+    // Wave 3 ToM Phase 4 — deception verbs (Disguise/Decoy/EraseBelief).
+    // Each is the chronicle counterpart of the matching `EffectOp` slot
+    // (kinds 36/37/38). The dispatcher writes a single record per cast;
+    // downstream BeliefState SoA mutation lives in compiler-emitted
+    // `physics @phase(post)` consumer rules in `tom_probe.sim` (mirror
+    // of Phase 3.8 observe/scry/reveal authoring).
+    //
+    // Disguise: caster + (duration_ticks<<8 | fake_type) packed in
+    // payload_a. The downstream consumer writes per-agent
+    // `disguise_expires_at_tick` and `disguise_fake_type` SoA columns.
+    //
+    // Decoy: caster + target + subject_idx (= payload_a) + fake_pos
+    // (= payload_b, packed quartet). Consumer writes target's row about
+    // subject_idx with attacker-controlled values.
+    //
+    // EraseBelief: caster + target + subject_idx (= payload_a) + fields
+    // bitset (= payload_b low byte). Consumer clears specific cells of
+    // target's beliefs about subject_idx per the bitset.
+    ("EffectDisguiseApplied",    67),
+    ("EffectDecoyApplied",       68),
+    ("EffectEraseBeliefApplied", 69),
 ];
 
 /// Look up the engine-defined `EventKindId` discriminant for an
@@ -240,6 +261,9 @@ mod tests {
         assert_eq!(engine_event_kind_id_for_name("EffectObserveApplied"), Some(64));
         assert_eq!(engine_event_kind_id_for_name("EffectScryApplied"), Some(65));
         assert_eq!(engine_event_kind_id_for_name("EffectRevealApplied"), Some(66));
+        assert_eq!(engine_event_kind_id_for_name("EffectDisguiseApplied"), Some(67));
+        assert_eq!(engine_event_kind_id_for_name("EffectDecoyApplied"), Some(68));
+        assert_eq!(engine_event_kind_id_for_name("EffectEraseBeliefApplied"), Some(69));
     }
 
     #[test]

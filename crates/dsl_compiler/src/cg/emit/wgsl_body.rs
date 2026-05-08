@@ -3337,6 +3337,15 @@ pub(crate) const EFFECT_KIND_TO_EVENT_KIND_ID: &[(u32, u32)] = &[
     // beliefs about subject → every observer's beliefs about subject)
     // lives in a runtime consumer (`tom_probe_runtime` Phase 3.5).
     (35, 66), // EffectOp::Reveal → EventKindId::EffectRevealApplied
+    // Wave 3 ToM Phase 4 — deception verbs (Disguise/Decoy/EraseBelief).
+    // Each is the chronicle counterpart of the matching `EffectOp` slot
+    // (kinds 36/37/38). The dispatcher writes a single record per cast;
+    // downstream BeliefState SoA mutation lives in compiler-emitted
+    // `physics @phase(post)` consumer rules in `tom_probe.sim` (mirror
+    // of Phase 3.8 observe/scry/reveal authoring).
+    (36, 67), // EffectOp::Disguise    → EventKindId::EffectDisguiseApplied
+    (37, 68), // EffectOp::Decoy       → EventKindId::EffectDecoyApplied
+    (38, 69), // EffectOp::EraseBelief → EventKindId::EffectEraseBeliefApplied
 ];
 
 /// Look up the runtime `EventKindId` for an `EffectOp` discriminant.
@@ -3460,6 +3469,12 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Scry=34");
     let reveal_event_id = event_kind_id_for_effect_kind(35)
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Reveal=35");
+    let disguise_event_id = event_kind_id_for_effect_kind(36)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Disguise=36");
+    let decoy_event_id = event_kind_id_for_effect_kind(37)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Decoy=37");
+    let erase_belief_event_id = event_kind_id_for_effect_kind(38)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain EraseBelief=38");
 
     let i4  = indent;                   // arm `if`/`else if` lines
     let i8  = format!("{i4}    ");      // body of arm
@@ -4195,6 +4210,71 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // Disguise = 36 → 67 (Wave 3 ToM Phase 4 deception verb)
+    s.push_str(&format!("{i4}}} else if (kind == 36u) {{\n"));
+    s.push_str(&format!("{i8}// Disguise = 36 → EventKindId::EffectDisguiseApplied = 67\n"));
+    s.push_str(&format!("{i8}// payload_a = (duration_ticks << 8) | fake_type (low byte = u8\n"));
+    s.push_str(&format!("{i8}// fake_type, high 24 bits = duration_ticks). The consumer reads\n"));
+    s.push_str(&format!("{i8}// `payload_a & 0xFFu` for fake_type and `payload_a >> 8u` for the\n"));
+    s.push_str(&format!("{i8}// duration. payload_b = 0 (unused). The downstream consumer writes\n"));
+    s.push_str(&format!("{i8}// per-agent `disguise_expires_at_tick` and `disguise_fake_type`\n"));
+    s.push_str(&format!("{i8}// SoA columns (one cell per agent). Subsequent observe calls read\n"));
+    s.push_str(&format!("{i8}// these columns to substitute fake_type for the true creature_type.\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectDisguiseApplied (caster_slot + target_slot + packed_payload_a)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {disguise_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // Decoy = 37 → 68 (Wave 3 ToM Phase 4 deception verb)
+    s.push_str(&format!("{i4}}} else if (kind == 37u) {{\n"));
+    s.push_str(&format!("{i8}// Decoy = 37 → EventKindId::EffectDecoyApplied = 68\n"));
+    s.push_str(&format!("{i8}// payload_a = subject_idx (u32 — the agent slot the belief is\n"));
+    s.push_str(&format!("{i8}// ABOUT — distinct from `target` which is the OBSERVER whose row\n"));
+    s.push_str(&format!("{i8}// caster writes). payload_b = packed (x_q8 lo, y_q8, z_q8, fake_type\n"));
+    s.push_str(&format!("{i8}// hi) quartet — pre-packed at pack time so the consumer's bit\n"));
+    s.push_str(&format!("{i8}// extracts (`payload_b & 0xFFu`, `(payload_b >> 8u) & 0xFFu`, …)\n"));
+    s.push_str(&format!("{i8}// recover the per-byte values without re-packing.\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectDecoyApplied (caster_slot + target_slot + subject_idx + fake_pos)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {decoy_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // EraseBelief = 38 → 69 (Wave 3 ToM Phase 4 deception verb)
+    s.push_str(&format!("{i4}}} else if (kind == 38u) {{\n"));
+    s.push_str(&format!("{i8}// EraseBelief = 38 → EventKindId::EffectEraseBeliefApplied = 69\n"));
+    s.push_str(&format!("{i8}// payload_a = subject_idx (u32 — the agent slot the belief is\n"));
+    s.push_str(&format!("{i8}// ABOUT). payload_b's low byte = fields bitset (bit 0 = pos, 1 =\n"));
+    s.push_str(&format!("{i8}// type, 2 = tick, 3 = confidence, 4 = suspicion, 5 = flags). The\n"));
+    s.push_str(&format!("{i8}// consumer reads the bitset and clears matching cells in target's\n"));
+    s.push_str(&format!("{i8}// row about subject_idx (one if-block per bit).\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectEraseBeliefApplied (caster_slot + target_slot + subject_idx + fields)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {erase_belief_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -6741,6 +6821,10 @@ mod tests {
             (34, "Scry"),
             // Wave 3 ToM Phase 3.5 — `reveal` one-to-many propagation verb.
             (35, "Reveal"),
+            // Wave 3 ToM Phase 4 — deception verbs.
+            (36, "Disguise"),
+            (37, "Decoy"),
+            (38, "EraseBelief"),
         ] {
             let kind_token = if *kind == 0 {
                 format!("if (kind == {kind}u)")
@@ -7327,7 +7411,10 @@ mod tests {
                 33 => EffectOp::Observe     { target_observer: 0 },
                 34 => EffectOp::Scry        { target_observer: 3, subject_idx: 4 },
                 35 => EffectOp::Reveal      { subject_idx: 4 },
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35"),
+                36 => EffectOp::Disguise    { fake_type: 7, duration_ticks: 200 },
+                37 => EffectOp::Decoy       { subject_idx: 4, fake_pos: 0xDEADBEEF },
+                38 => EffectOp::EraseBelief { subject_idx: 4, fields: 0b00111111 },
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35/36/37/38"),
             }
         };
 
@@ -7370,7 +7457,10 @@ mod tests {
                 33 => EngineEventKindId::EffectObserveApplied         as u32,
                 34 => EngineEventKindId::EffectScryApplied            as u32,
                 35 => EngineEventKindId::EffectRevealApplied          as u32,
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35"),
+                36 => EngineEventKindId::EffectDisguiseApplied        as u32,
+                37 => EngineEventKindId::EffectDecoyApplied           as u32,
+                38 => EngineEventKindId::EffectEraseBeliefApplied     as u32,
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35/36/37/38"),
             }
         };
 
@@ -7499,8 +7589,8 @@ mod tests {
         // case the map drops an entry). Pin the count so the gap between
         // source-of-truths is loud.
         assert_eq!(
-            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 35,
-            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 35 \
+            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 38,
+            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 38 \
              chronicle-bearing variants today; if you added or removed an \
              entry, update this assertion (and the slice γ wire-up that \
              consumes the new entry)"

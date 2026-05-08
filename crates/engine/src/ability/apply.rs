@@ -210,6 +210,24 @@ pub enum ApplyEvent {
     /// observer. Pairs with `EventKindId::EffectRevealApplied = 66` on
     /// the chronicle side.
     Reveal         { source: AgentId, target: AgentId, subject_idx: u32 },
+    /// Wave 3 ToM Phase 4 — `disguise` deception verb. Caster poses as
+    /// `fake_type` for `duration_ticks`. The downstream consumer writes
+    /// `disguise_expires_at_tick = world.tick + duration_ticks` and
+    /// `disguise_fake_type = fake_type` into per-agent SoA columns.
+    /// Pairs with `EventKindId::EffectDisguiseApplied = 67`.
+    Disguise       { source: AgentId, fake_type: u8, duration_ticks: u32 },
+    /// Wave 3 ToM Phase 4 — `decoy` deception verb. Caster writes
+    /// attacker-controlled belief values into `target`'s row about
+    /// `subject_idx`. `fake_pos` is a packed (x_q8, y_q8, z_q8,
+    /// fake_type) quartet. Pairs with `EventKindId::EffectDecoyApplied
+    /// = 68`.
+    Decoy          { source: AgentId, target: AgentId, subject_idx: u32, fake_pos: u32 },
+    /// Wave 3 ToM Phase 4 — `erase_belief` deception verb. Caster
+    /// clears specific fields of `target`'s beliefs about `subject_idx`
+    /// per the `fields` bitset (bit 0 = pos, 1 = type, 2 = tick, 3 =
+    /// confidence, 4 = suspicion, 5 = flags). Pairs with
+    /// `EventKindId::EffectEraseBeliefApplied = 69`.
+    EraseBelief    { source: AgentId, target: AgentId, subject_idx: u32, fields: u8 },
 }
 
 /// Inline budget — most abilities have ≤4 effects (P4 says
@@ -471,6 +489,15 @@ fn push_effect_event(
         // downstream runtime consumer.
         EffectOp::Reveal { subject_idx } =>
             out.push(ApplyEvent::Reveal { source: caster, target, subject_idx }),
+        // Wave 3 ToM Phase 4 — deception verbs. Each emits one ApplyEvent
+        // per cast; the BeliefState SoA mutation lives in compiler-emitted
+        // .sim consumer rules (parallel to Phase 3.8 observe/scry/reveal).
+        EffectOp::Disguise { fake_type, duration_ticks } =>
+            out.push(ApplyEvent::Disguise { source: caster, fake_type, duration_ticks }),
+        EffectOp::Decoy { subject_idx, fake_pos } =>
+            out.push(ApplyEvent::Decoy { source: caster, target, subject_idx, fake_pos }),
+        EffectOp::EraseBelief { subject_idx, fields } =>
+            out.push(ApplyEvent::EraseBelief { source: caster, target, subject_idx, fields }),
         // CastAbility is recursive (needs cascade-style
         // re-dispatch); deferred to slice δ. Skip for now.
         EffectOp::CastAbility { .. } => {}

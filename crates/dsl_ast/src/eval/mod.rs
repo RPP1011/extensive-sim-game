@@ -212,6 +212,15 @@ pub enum EffectOp {
     // `.sim` interpreter consumer pattern-matches Reveal today (deferred
     // — the dispatcher's chronicle write is the load-bearing path).
     Reveal       { subject_idx: u32 },
+    // Wave 3 ToM Phase 4 — deception verbs (mirror of
+    // `engine::ability::program::EffectOp::{Disguise,Decoy,EraseBelief}`).
+    // Discriminants 36/37/38 pinned by the engine schema_hash. The ast-level
+    // mirror keeps this surface in step with the engine even though no
+    // `.sim` interpreter consumer pattern-matches these today (deferred
+    // — the dispatcher's chronicle write is the load-bearing path).
+    Disguise     { fake_type: u8, duration_ticks: u32 },
+    Decoy        { subject_idx: u32, fake_pos: u32 },
+    EraseBelief  { subject_idx: u32, fields: u8 },
 }
 
 /// Target selection for `CastAbility` effects.  Mirrors

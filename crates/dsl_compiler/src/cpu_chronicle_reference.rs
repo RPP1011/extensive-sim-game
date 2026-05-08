@@ -578,6 +578,55 @@ pub fn apply_event_to_chronicle_record(
             rec[4] = subject_idx;
             Some(rec)
         }
+        // --- Disguise = 36 → EventKindId::EffectDisguiseApplied = 67.
+        // Wave 3 ToM Phase 4 deception verb. payload_a packs
+        // (duration_ticks << 8) | fake_type so the consumer can split
+        // with `payload_a & 0xFF` (fake_type) and `payload_a >> 8`
+        // (duration). payload_b = 0. The dispatcher writes:
+        //   slot 2 = caster_slot
+        //   slot 3 = target_slot       (= caster for self-cast)
+        //   slot 4 = (duration<<8 | fake_type)
+        //   slot 5 = 0
+        ApplyEvent::Disguise { source: _, fake_type, duration_ticks } => {
+            rec[0] = 67;
+            rec[2] = caster_id;
+            rec[3] = caster_id;
+            rec[4] = ((duration_ticks << 8) & 0xFFFFFF00u32) | (fake_type as u32);
+            Some(rec)
+        }
+        // --- Decoy = 37 → EventKindId::EffectDecoyApplied = 68.
+        // Wave 3 ToM Phase 4 deception verb. payload_a = subject_idx
+        // (the agent slot the belief is ABOUT). payload_b = pre-packed
+        // (x_q8, y_q8, z_q8, fake_type) quartet. The dispatcher writes:
+        //   slot 2 = caster_slot
+        //   slot 3 = target_slot       (the OBSERVER whose row caster
+        //                                writes — not the subject)
+        //   slot 4 = subject_idx
+        //   slot 5 = fake_pos          (packed quartet)
+        ApplyEvent::Decoy { source: _, target: _, subject_idx, fake_pos } => {
+            rec[0] = 68;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            rec[4] = subject_idx;
+            rec[5] = fake_pos;
+            Some(rec)
+        }
+        // --- EraseBelief = 38 → EventKindId::EffectEraseBeliefApplied = 69.
+        // Wave 3 ToM Phase 4 deception verb. payload_a = subject_idx.
+        // payload_b's low byte = fields bitset. The dispatcher writes:
+        //   slot 2 = caster_slot
+        //   slot 3 = target_slot       (the OBSERVER whose row caster
+        //                                clears — not the subject)
+        //   slot 4 = subject_idx
+        //   slot 5 = fields            (low byte = bit 0 pos … bit 5 flags)
+        ApplyEvent::EraseBelief { source: _, target: _, subject_idx, fields } => {
+            rec[0] = 69;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            rec[4] = subject_idx;
+            rec[5] = fields as u32;
+            Some(rec)
+        }
         // After the slice γ closer (Summon → kind 62), every
         // `ApplyEvent` variant has a chronicle counterpart — no
         // fallback `_ => None` arm needed. The closed-set match
@@ -1378,6 +1427,9 @@ mod tests {
                 33 => ApplyEvent::Observe        { source: aid(1), target: aid(2), target_observer: 0 },
                 34 => ApplyEvent::Scry           { source: aid(1), target: aid(2), target_observer: 3, subject_idx: 4 },
                 35 => ApplyEvent::Reveal         { source: aid(1), target: aid(2), subject_idx: 4 },
+                36 => ApplyEvent::Disguise       { source: aid(1), fake_type: 7, duration_ticks: 200 },
+                37 => ApplyEvent::Decoy          { source: aid(1), target: aid(2), subject_idx: 4, fake_pos: 0xDEADBEEF },
+                38 => ApplyEvent::EraseBelief    { source: aid(1), target: aid(2), subject_idx: 4, fields: 0b00111111 },
                 _ => panic!("unexpected effect_kind in table"),
             }
         };

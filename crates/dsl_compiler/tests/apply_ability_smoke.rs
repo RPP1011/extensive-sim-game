@@ -1249,14 +1249,16 @@ fn smoke_fixture_explicit_rule_kernel_has_full_dispatcher() {
     // goes 60 → 62. Wave 3 ToM Phase 1 adds PlantBelief=63 — count
     // goes 62 → 64. Wave 3 ToM Phase 3 adds Observe=64 — count goes
     // 64 → 66. Wave 3 ToM Phase 3.5 adds Scry=65 + Reveal=66 — count
-    // goes 66 → 70. NO `// TODO slice γ` arms remain; the slice is closed.)
+    // goes 66 → 70. Wave 3 ToM Phase 4 adds Disguise=67 + Decoy=68 +
+    // EraseBelief=69 — count goes 70 → 76.
+    // NO `// TODO slice γ` arms remain; the slice is closed.)
     let slot_acquisitions = explicit_body
         .matches("let _slot: u32 = atomicAdd(&event_tail[0], 1u);")
         .count();
     assert_eq!(
-        slot_acquisitions, 70,
-        "DispatchAbilityExplicit kernel must carry all 70 chronicle slot \
-         acquisitions (35 chronicle-bearing variants × {{primary, nested}} \
+        slot_acquisitions, 76,
+        "DispatchAbilityExplicit kernel must carry all 76 chronicle slot \
+         acquisitions (38 chronicle-bearing variants × {{primary, nested}} \
          walk); got {slot_acquisitions}\nbody:\n{explicit_body}"
     );
 
@@ -1335,13 +1337,14 @@ fn back_to_back_apply_ability_in_one_rule_emits_two_dispatcher_blocks() {
     // bumping 120 → 124; Wave 3 ToM Phase 1 added 1 arm
     // (PlantBelief), bumping 124 → 128; Wave 3 ToM Phase 3 added 1
     // arm (Observe), bumping 128 → 132; Wave 3 ToM Phase 3.5 added 2
-    // arms (Scry + Reveal), bumping 132 → 140).
+    // arms (Scry + Reveal), bumping 132 → 140; Wave 3 ToM Phase 4
+    // added 3 arms (Disguise + Decoy + EraseBelief), bumping 140 → 152).
     let slot_acquisitions = body
         .matches("let _slot: u32 = atomicAdd(&event_tail[0], 1u);")
         .count();
     assert_eq!(
-        slot_acquisitions, 140,
-        "expected 140 slot acquisitions (35 chronicle arms × 2 statements × \
+        slot_acquisitions, 152,
+        "expected 152 slot acquisitions (38 chronicle arms × 2 statements × \
          {{primary, nested}} walks); got {slot_acquisitions}\nbody:\n{body}"
     );
 
@@ -1409,9 +1412,10 @@ fn back_to_back_apply_ability_with_distinct_operands_each_emit() {
     // Wave 1.5#9 + Wave 2 piece 1 + Wave 2 piece 2 + Wave 1.5+ +
     // extended-status slice + slice γ tail + slice γ closer + Wave 3
     // ToM Phase 1 (PlantBelief) + Wave 3 ToM Phase 3 (Observe) + Wave 3
-    // ToM Phase 3.5 (Scry + Reveal): 35 chronicle arms × 2 statements
-    // × {primary, nested} walks = 140.
-    assert_eq!(slot_acquisitions, 140);
+    // ToM Phase 3.5 (Scry + Reveal) + Wave 3 ToM Phase 4 (Disguise +
+    // Decoy + EraseBelief): 38 chronicle arms × 2 statements × {primary,
+    // nested} walks = 152.
+    assert_eq!(slot_acquisitions, 152);
 
     // Naga validates — different target_slot expressions in the two
     // dispatch blocks shouldn't introduce binding conflicts.
