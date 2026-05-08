@@ -491,6 +491,29 @@ pub fn apply_event_to_chronicle_record(
             rec[4] = hp_threshold.to_bits();
             Some(rec)
         }
+        // --- PlantBelief = 32 → EventKindId::EffectPlantBeliefApplied = 63.
+        // Wave 3 ToM Phase 1 bit-flag belief primitive. The GPU
+        // dispatcher writes:
+        //   slot 2 = caster_slot
+        //   slot 3 = target_slot   (the belief's HOLDER agent)
+        //   slot 4 = subject_idx   (= payload_a; agent slot the
+        //                            belief is ABOUT)
+        //   slot 5 = fact_bit_mask (= payload_b = `1u << fact_bit`,
+        //                            pre-shifted at pack time so the
+        //                            downstream view's `self |= b`
+        //                            body doesn't re-shift)
+        // The CPU oracle mirrors the same record shape: subject_idx
+        // and fact_bit_mask land at slots 4 and 5 respectively, with
+        // the bit-shift applied here to match the GPU `pack_effect`
+        // arm (`1u32 << fact_bit as u32`).
+        ApplyEvent::PlantBelief { source: _, target: _, subject_idx, fact_bit } => {
+            rec[0] = 63;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            rec[4] = subject_idx;
+            rec[5] = 1u32 << (fact_bit as u32);
+            Some(rec)
+        }
         // After the slice γ closer (Summon → kind 62), every
         // `ApplyEvent` variant has a chronicle counterpart — no
         // fallback `_ => None` arm needed. The closed-set match
@@ -1287,6 +1310,7 @@ mod tests {
                 25 => ApplyEvent::Harvest        { source: aid(1), kind_hash: 0xCAFEBABE, amount: 5 },
                 26 => ApplyEvent::PlaceVoxel     { source: aid(1), kind_hash: 0xFACEFEED },
                 31 => ApplyEvent::Reflect        { target: aid(2), duration_ticks: 50, fraction_q8: 64 },
+                32 => ApplyEvent::PlantBelief    { source: aid(1), target: aid(2), subject_idx: 7, fact_bit: 5 },
                 _ => panic!("unexpected effect_kind in table"),
             }
         };

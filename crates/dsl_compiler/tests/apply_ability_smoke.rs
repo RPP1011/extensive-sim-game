@@ -1230,9 +1230,9 @@ fn smoke_fixture_explicit_rule_kernel_has_full_dispatcher() {
             );
         });
 
-    // Full 31-arm chronicle dispatch in the explicit-clause kernel,
+    // Full 32-arm chronicle dispatch in the explicit-clause kernel,
     // emitted twice (primary effect walk + Wave 1.5#9 nested-effect
-    // walk = 62 chronicle slot acquisitions per `apply_ability` stmt).
+    // walk = 64 chronicle slot acquisitions per `apply_ability` stmt).
     // (Was 7 pre-Bleed-swap; SelfDamage=39 added 2026-05-06; LifeSteal=40
     // added by Vampirize verb swap, mirror of Bleed; DamageModify=41
     // added by Fortify verb swap, mirror of Vampirize; Execute=42 added
@@ -1246,15 +1246,16 @@ fn smoke_fixture_explicit_rule_kernel_has_full_dispatcher() {
     // Charm=55, Grounded=56, Suppress=57 — count goes 44 → 52.
     // Slice γ tail adds Buff=58, Harvest=59, PlaceVoxel=60, Reflect=61
     // — count goes 52 → 60. Slice γ closer adds Summon=62 — count
-    // goes 60 → 62. NO `// TODO slice γ` arms remain; the slice is
+    // goes 60 → 62. Wave 3 ToM Phase 1 adds PlantBelief=63 — count
+    // goes 62 → 64. NO `// TODO slice γ` arms remain; the slice is
     // closed.)
     let slot_acquisitions = explicit_body
         .matches("let _slot: u32 = atomicAdd(&event_tail[0], 1u);")
         .count();
     assert_eq!(
-        slot_acquisitions, 62,
-        "DispatchAbilityExplicit kernel must carry all 62 chronicle slot \
-         acquisitions (31 chronicle-bearing variants × {{primary, nested}} \
+        slot_acquisitions, 64,
+        "DispatchAbilityExplicit kernel must carry all 64 chronicle slot \
+         acquisitions (32 chronicle-bearing variants × {{primary, nested}} \
          walk); got {slot_acquisitions}\nbody:\n{explicit_body}"
     );
 
@@ -1322,7 +1323,7 @@ fn back_to_back_apply_ability_in_one_rule_emits_two_dispatcher_blocks() {
          halving chronicle throughput;\nbody:\n{body}"
     );
 
-    // 124 slot acquisitions (31 chronicle arms × 2 statements ×
+    // 128 slot acquisitions (32 chronicle arms × 2 statements ×
     // {primary, nested} — Wave 1.5#9 doubled this with the nested
     // walk, 2026-05-06; Wave 2 piece 1 added 4 control-status arms,
     // bumping 44 → 60; Wave 2 piece 2 added 4 movement arms, bumping
@@ -1330,13 +1331,14 @@ fn back_to_back_apply_ability_in_one_rule_emits_two_dispatcher_blocks() {
     // extended-status slice added 4 status arms, bumping 88 → 104;
     // slice γ tail added 4 arms (Buff/Harvest/PlaceVoxel/Reflect),
     // bumping 104 → 120; slice γ closer added 1 arm (Summon),
-    // bumping 120 → 124).
+    // bumping 120 → 124; Wave 3 ToM Phase 1 added 1 arm
+    // (PlantBelief), bumping 124 → 128).
     let slot_acquisitions = body
         .matches("let _slot: u32 = atomicAdd(&event_tail[0], 1u);")
         .count();
     assert_eq!(
-        slot_acquisitions, 124,
-        "expected 124 slot acquisitions (31 chronicle arms × 2 statements × \
+        slot_acquisitions, 128,
+        "expected 128 slot acquisitions (32 chronicle arms × 2 statements × \
          {{primary, nested}} walks); got {slot_acquisitions}\nbody:\n{body}"
     );
 
@@ -1402,9 +1404,10 @@ fn back_to_back_apply_ability_with_distinct_operands_each_emit() {
         .matches("let _slot: u32 = atomicAdd(&event_tail[0], 1u);")
         .count();
     // Wave 1.5#9 + Wave 2 piece 1 + Wave 2 piece 2 + Wave 1.5+ +
-    // extended-status slice + slice γ tail + slice γ closer: 31
-    // chronicle arms × 2 statements × {primary, nested} walks = 124.
-    assert_eq!(slot_acquisitions, 124);
+    // extended-status slice + slice γ tail + slice γ closer + Wave 3
+    // ToM Phase 1 (PlantBelief): 32 chronicle arms × 2 statements ×
+    // {primary, nested} walks = 128.
+    assert_eq!(slot_acquisitions, 128);
 
     // Naga validates — different target_slot expressions in the two
     // dispatch blocks shouldn't introduce binding conflicts.

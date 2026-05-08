@@ -1053,6 +1053,17 @@ fn pack_effect(op: EffectOp) -> (u32, u32, u32) {
         // — same convention as `LifeSteal` / `DamageModify`.
         EffectOp::Reflect    { duration_ticks, fraction_q8 } =>
             (31, duration_ticks, (fraction_q8 as u16) as u32),
+        // Wave 3 ToM Phase 1 — `plant_belief` bit-flag primitive.
+        // payload_a = subject_idx (u32 — the agent slot the belief is
+        // ABOUT, distinct from the cast's `target` slot which is the
+        // belief's HOLDER). payload_b = fact_bit_mask (= `1u <<
+        // fact_bit`, pre-shifted at pack time so the dispatcher arm
+        // and downstream view's `self |= b` body don't re-shift).
+        // Caster + target are recorded by the dispatcher's standard
+        // `caster_slot` / `target_slot` ring slots (no new payload
+        // word for either).
+        EffectOp::PlantBelief { subject_idx, fact_bit } =>
+            (32, subject_idx, 1u32 << (fact_bit as u32)),
     }
 }
 

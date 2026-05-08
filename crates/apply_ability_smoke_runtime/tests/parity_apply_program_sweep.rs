@@ -1051,6 +1051,33 @@ fn build_sweep() -> Vec<(&'static str, AbilityProgram, CasterStats)> {
         CasterStats::default(),
     ));
 
+    // 47. PlantBelief-shape — Wave 3 ToM Phase 1 bit-flag belief verb.
+    //     Caster CAUSES target's belief map for `subject_idx` to gain
+    //     `1u << fact_bit` via atomic-OR. The dispatcher writes a
+    //     5-payload-word chronicle record (kind=63) with subject_idx in
+    //     slot 4 (= payload_a) and fact_bit_mask (= 1u << fact_bit) in
+    //     slot 5 (= payload_b, pre-shifted at pack time). Caster +
+    //     target are recorded by the standard dispatcher slot writes.
+    //     Both backends emit byte-equal records via the parity sweep's
+    //     sort + memcmp pin. Adding this entry extends the sweep matrix
+    //     from 46 → 47 abilities and pins the Wave 3 ToM Phase 1
+    //     dispatcher arm. The actual atomicOr write into the pair_map
+    //     cell is a downstream view fold consumer's concern (existing
+    //     `tom_probe.sim::beliefs` shape) — exercised by the
+    //     `tom_probe_runtime` pair_map_behavioral_pin test.
+    out.push((
+        "PlantBeliefCanonical",
+        AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 30, hostile_only: false, line_of_sight: false },
+            [EffectOp::PlantBelief {
+                subject_idx: 7,
+                fact_bit: 5,
+            }],
+        ),
+        CasterStats::default(),
+    ));
+
     out
 }
 

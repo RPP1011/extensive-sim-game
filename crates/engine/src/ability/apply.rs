@@ -173,6 +173,18 @@ pub enum ApplyEvent {
     /// TransferGold. Pairs with `EventKindId::EffectStandingDelta =
     /// 32` on the chronicle side.
     ModifyStanding { source: AgentId, target: AgentId, delta: i16 },
+    /// Wave 3 ToM Phase 1 bit-flag belief primitive. Caster causes
+    /// `target`'s belief map for `subject_idx` to gain
+    /// `1u << fact_bit` via atomic-OR fold. The chronicle dispatcher
+    /// writes a record (kind=63) carrying caster + target +
+    /// subject_idx + fact_bit_mask; downstream view consumers
+    /// (`view <name>(target: Agent, subject: Agent) -> u32 { on
+    /// EffectPlantBeliefApplied { ... } { self |= b } }`) fold the
+    /// mask into the pair_map cell. Pairs with
+    /// `EventKindId::EffectPlantBeliefApplied = 63` on the chronicle
+    /// side. The full Wave 3 multi-field BeliefState (creature_type
+    /// / decay phase / disguise verbs / slander cascade) is deferred.
+    PlantBelief    { source: AgentId, target: AgentId, subject_idx: u32, fact_bit: u8 },
 }
 
 /// Inline budget — most abilities have ≤4 effects (P4 says
@@ -400,6 +412,16 @@ fn push_effect_event(
             out.push(ApplyEvent::TransferGold { source: caster, target, amount }),
         EffectOp::ModifyStanding { delta } =>
             out.push(ApplyEvent::ModifyStanding { source: caster, target, delta }),
+        // Wave 3 ToM Phase 1 — `plant_belief` bit-flag primitive. The
+        // dispatcher records the cast as a chronicle event (kind=63);
+        // the actual atomic-OR write into the pair_map cell happens in
+        // a downstream view consumer (the existing `tom_probe.sim`
+        // fold-body shape: `on EffectPlantBeliefApplied { ... } { self
+        // |= b }`). Same separation of concerns as Damage/Heal/etc.,
+        // where ApplyEvent emission is the cast record and the
+        // world-state mutation lives in the cascade consumer.
+        EffectOp::PlantBelief { subject_idx, fact_bit } =>
+            out.push(ApplyEvent::PlantBelief { source: caster, target, subject_idx, fact_bit }),
         // CastAbility is recursive (needs cascade-style
         // re-dispatch); deferred to slice δ. Skip for now.
         EffectOp::CastAbility { .. } => {}

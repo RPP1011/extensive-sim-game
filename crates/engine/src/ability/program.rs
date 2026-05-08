@@ -501,6 +501,33 @@ pub enum EffectOp {
     /// shape; apply handlers can layer on top of the existing
     /// `DamageModify` infrastructure. 1 LoL file (Mel).
     Reflect  { duration_ticks: u32, fraction_q8: i16 } = 31,
+
+    // --- Theory-of-Mind belief verbs (Wave 3 phase 1) ---
+    // Bit-flag belief primitive: caster causes target's
+    // per-(target, subject) belief map to gain `1u << fact_bit`. The
+    // chronicle dispatcher writes a record (kind=63) carrying caster +
+    // target + subject_idx + fact_bit_mask. A downstream view consumer
+    // (`view <name>(target: Agent, subject: Agent) -> u32 { on
+    // EffectPlantBeliefApplied { ... } { self |= b } }`) folds the bit
+    // mask into the pair_map cell at `[target * agent_cap +
+    // subject_idx]` via WGSL native `atomicOr` — same path the existing
+    // `tom_probe.sim::beliefs` view uses. The full Wave 3 BeliefState
+    // SoA (`last_known_creature_type` / decay phase / disguise verbs /
+    // slander cascade) is deferred — this slice ships only the bit-flag
+    // primitive so the apply_ability dispatcher learns to write
+    // chronicle records into the existing pair_map fold infrastructure.
+    //
+    // SHAPE NOTE: 5B payload + 1B tag = 6B total (subject_idx u32 +
+    // fact_bit u8). Well under the P4 ≤16-byte EffectOp ceiling. The
+    // packed effect-kind ordinal is 32 (next after Reflect=31). The
+    // chronicle EventKindId is 63 (next after Summon=62).
+    /// `plant_belief target of <subject_idx> { <fact_bit> }` — caster
+    /// causes target's belief map for subject `subject_idx` to gain
+    /// `1u << fact_bit` via atomic-OR. Bit-flag primitive: a single
+    /// fact bit per call. The full Wave 3 multi-field BeliefState is
+    /// deferred — this primitive lights up the apply_ability →
+    /// chronicle → pair_map fold loop end-to-end.
+    PlantBelief { subject_idx: u32, fact_bit: u8 } = 32,
 }
 
 /// Stat targeted by `buff`. Vocabulary is small today (just the two

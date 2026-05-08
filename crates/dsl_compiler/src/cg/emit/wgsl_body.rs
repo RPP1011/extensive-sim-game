@@ -3289,6 +3289,22 @@ pub(crate) const EFFECT_KIND_TO_EVENT_KIND_ID: &[(u32, u32)] = &[
     // dispatcher arm body in `emit_chronicle_arm_chain` (below)
     // matches via `kind == 24u`.
     (24, 62), // EffectOp::Summon     → EventKindId::EffectSummonApplied
+    // Wave 3 ToM Phase 1 — `plant_belief` bit-flag primitive (kind 32 →
+    // ID 63). Caster CAUSES target's belief map for `subject_idx` to
+    // gain `1u << fact_bit` via atomic-OR. The packed effect-kind
+    // ordinal (PlantBelief=32) comes from `pack_effect` in
+    // `crates/engine/src/ability/packed.rs`; the dispatcher arm body
+    // for this in `emit_chronicle_arm_chain` (below) matches via
+    // `kind == 32u`. 5-payload-word chronicle shape (caster + target +
+    // subject_idx (= payload_a) + fact_bit_mask (= payload_b, pre-
+    // shifted at pack time so the dispatcher and downstream view
+    // consumer's `self |= b` body don't re-shift). The pair_map
+    // atomicOr lives in the downstream view consumer (existing
+    // `tom_probe.sim::beliefs` fold pattern), NOT in this arm — the
+    // dispatcher only writes the chronicle record. This keeps the
+    // apply_ability dispatcher's BGL stable (no new pair_map binding)
+    // and routes the bit-fold through the standard view-fold pipeline.
+    (32, 63), // EffectOp::PlantBelief → EventKindId::EffectPlantBeliefApplied
 ];
 
 /// Look up the runtime `EventKindId` for an `EffectOp` discriminant.
@@ -3404,6 +3420,8 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Reflect=31");
     let summon_event_id = event_kind_id_for_effect_kind(24)
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Summon=24");
+    let plant_belief_event_id = event_kind_id_for_effect_kind(32)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain PlantBelief=32");
 
     let i4  = indent;                   // arm `if`/`else if` lines
     let i8  = format!("{i4}    ");      // body of arm
@@ -4040,6 +4058,33 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {reflect_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // PlantBelief = 32 → 63 (Wave 3 ToM Phase 1 bit-flag primitive)
+    s.push_str(&format!("{i4}}} else if (kind == 32u) {{\n"));
+    s.push_str(&format!("{i8}// PlantBelief = 32 → EventKindId::EffectPlantBeliefApplied = 63\n"));
+    s.push_str(&format!("{i8}// payload_a = subject_idx (u32 — agent slot the belief is ABOUT),\n"));
+    s.push_str(&format!("{i8}// payload_b = fact_bit_mask (= 1u << fact_bit, pre-shifted at\n"));
+    s.push_str(&format!("{i8}// pack time so the downstream view consumer's `self |= b` body\n"));
+    s.push_str(&format!("{i8}// doesn't re-shift). The dispatcher writes only the chronicle\n"));
+    s.push_str(&format!("{i8}// record here; the actual atomicOr write into the pair_map\n"));
+    s.push_str(&format!("{i8}// cell happens in a downstream view fold consumer (existing\n"));
+    s.push_str(&format!("{i8}// `tom_probe.sim::beliefs` shape: view ... -> u32 with\n"));
+    s.push_str(&format!("{i8}// `on EffectPlantBeliefApplied {{ ... }} {{ self |= b }}`. This keeps\n"));
+    s.push_str(&format!("{i8}// the apply_ability dispatcher's BGL stable (no new pair_map\n"));
+    s.push_str(&format!("{i8}// binding) and routes the bit-fold through the standard\n"));
+    s.push_str(&format!("{i8}// view-fold pipeline.\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectPlantBeliefApplied (caster_slot + target_slot + subject_idx + fact_bit_mask)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {plant_belief_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
@@ -6582,6 +6627,8 @@ mod tests {
             (29, "Grounded"),
             (30, "Suppress"),
             (31, "Reflect"),
+            // Wave 3 ToM Phase 1 — `plant_belief` bit-flag primitive.
+            (32, "PlantBelief"),
         ] {
             let kind_token = if *kind == 0 {
                 format!("if (kind == {kind}u)")
@@ -7164,7 +7211,8 @@ mod tests {
                 25 => EffectOp::Harvest    { kind_hash: 0xCAFEBABE, amount: 5 },
                 26 => EffectOp::PlaceVoxel { kind_hash: 0xFACEFEED },
                 31 => EffectOp::Reflect    { duration_ticks: 50, fraction_q8: 64 },
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31"),
+                32 => EffectOp::PlantBelief { subject_idx: 7, fact_bit: 5 },
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32"),
             }
         };
 
@@ -7203,7 +7251,8 @@ mod tests {
                 25 => EngineEventKindId::EffectHarvestApplied        as u32,
                 26 => EngineEventKindId::EffectPlaceVoxelApplied     as u32,
                 31 => EngineEventKindId::EffectReflectApplied        as u32,
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31"),
+                32 => EngineEventKindId::EffectPlantBeliefApplied     as u32,
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32"),
             }
         };
 
@@ -7308,14 +7357,18 @@ mod tests {
         // `// TODO slice γ` arm; CastAbility=7 is the only EffectOp
         // without a chronicle counterpart, by design — recursive
         // dispatch).
+        // + PlantBelief (Wave 3 ToM Phase 1 — bit-flag belief verb;
+        // dispatcher writes EffectPlantBeliefApplied=63 records that
+        // downstream `view ... -> u32` consumers fold into pair_map
+        // cells via `self |= b`, same shape as `tom_probe.sim::beliefs`).
         // If this number changes, either the engine grew a new
         // `EffectXxxApplied` event (in which case the map gets a new
         // entry) or a variant lost its chronicle counterpart (in which
         // case the map drops an entry). Pin the count so the gap between
         // source-of-truths is loud.
         assert_eq!(
-            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 31,
-            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 31 \
+            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 32,
+            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 32 \
              chronicle-bearing variants today; if you added or removed an \
              entry, update this assertion (and the slice γ wire-up that \
              consumes the new entry)"
