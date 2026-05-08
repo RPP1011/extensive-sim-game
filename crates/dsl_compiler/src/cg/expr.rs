@@ -910,6 +910,24 @@ pub fn data_handle_ty(h: &DataHandle) -> CgTy {
                 _ => CgTy::U32,
             }
         }
+        // BeliefStateColumn handles are written by `agents.set_beliefs_*`
+        // setter calls and (in future) read by `agents.beliefs_*`
+        // getter calls. The setter call site is the only construct that
+        // touches them today, and that path doesn't go through
+        // `CgExpr::Read` — the namespace-call lowering routes through
+        // `CgExpr::NamespaceCall` whose result type comes from the
+        // namespace registry's `MethodDef::return_ty`. Reaching this arm
+        // would mean a hand-built `CgExpr::Read { handle: BeliefStateColumn }`,
+        // which the lowering never produces. Surface the per-column
+        // element type so a future read site lands on something honest
+        // rather than silently coercing to U32.
+        H::BeliefStateColumn { column } => {
+            use crate::cg::data_handle::BeliefStateColumn::*;
+            match column {
+                Pos => CgTy::Vec3F32,
+                CreatureType | LastSeenTick | Confidence | Suspicion | Flags => CgTy::U32,
+            }
+        }
     }
 }
 

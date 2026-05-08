@@ -1059,6 +1059,66 @@ pub enum DataHandle {
     /// Splitting the columns at the DataHandle level lets the
     /// schedule synthesizer keep each kernel's BGL minimal.
     AbilityRegistryColumn { column: AbilityRegistryColumn },
+
+    /// One SoA column of the per-(observer, subject) BeliefState. The
+    /// fixture-side runtime allocates a paired (primary, staging)
+    /// `wgpu::Buffer` per column sized `agent_cap × agent_cap` cells.
+    /// Setter calls (`agents.set_beliefs_<field>(observer, subject,
+    /// value)`) lower to writes against the matching column; the BGL
+    /// composer surfaces the binding as `beliefs_<field>` on the
+    /// kernel's `Bindings` struct so the runtime supplies its own
+    /// buffers.
+    ///
+    /// Only emitted when [`crate::cg::lower::driver::LowerOpts::
+    /// belief_state`] is true — production runtimes never see this
+    /// handle and pay no binding cost.
+    BeliefStateColumn { column: BeliefStateColumn },
+}
+
+/// One SoA column of the per-(observer, subject) BeliefState. Mirrors
+/// `tom_probe_runtime`'s 6 host-side cache columns 1:1 (see the
+/// `TomProbeState` field block doc-commented "BeliefState SoA").
+///
+/// Numeric discriminants are pinned for stable WGSL identifier emit +
+/// BGL binding-slot assignment.
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum BeliefStateColumn {
+    /// `vec3<f32>` (vec4-padded for std430) — observer's last sighted
+    /// position of the subject. Buffer field name `beliefs_pos`.
+    Pos              = 0,
+    /// `u8` packed in `array<atomic<u32>>` — observer's last sighted
+    /// classification ordinal. Buffer field name `beliefs_type`.
+    CreatureType     = 1,
+    /// `u32` — tick of the most recent observation. Buffer field name
+    /// `beliefs_tick`.
+    LastSeenTick     = 2,
+    /// `u8` packed q8 in `array<atomic<u32>>` — observer's confidence
+    /// (0..255 ≈ 0.0..1.0). Buffer field name `beliefs_confidence`.
+    Confidence       = 3,
+    /// `u8` packed q8 in `array<atomic<u32>>` — observer's hostility/
+    /// suspicion of the subject. Buffer field name `beliefs_suspicion`.
+    Suspicion        = 4,
+    /// `u32` — bit-OR slot of the BeliefAcquired fold. Same buffer the
+    /// existing Phase 1 `view_storage_beliefs_flags` writes to. Buffer
+    /// field name `beliefs_flags`.
+    Flags            = 5,
+}
+
+impl BeliefStateColumn {
+    /// Snake-case field name for both the WGSL binding identifier and
+    /// the runtime-side `Bindings` struct field. Stable contract — the
+    /// per-fixture runtime constructs `Bindings { beliefs_pos: ... }`
+    /// using these names.
+    pub fn binding_name(self) -> &'static str {
+        match self {
+            BeliefStateColumn::Pos          => "beliefs_pos",
+            BeliefStateColumn::CreatureType => "beliefs_type",
+            BeliefStateColumn::LastSeenTick => "beliefs_tick",
+            BeliefStateColumn::Confidence   => "beliefs_confidence",
+            BeliefStateColumn::Suspicion    => "beliefs_suspicion",
+            BeliefStateColumn::Flags        => "beliefs_flags",
+        }
+    }
 }
 
 /// One SoA column of the `engine::ability::PackedAbilityRegistry`.
@@ -1243,6 +1303,9 @@ impl DataHandle {
             DataHandle::AbilityRegistryColumn { column } => {
                 write!(f, "ability_registry.{:?}", column)
             }
+            DataHandle::BeliefStateColumn { column } => {
+                write!(f, "belief_state.{}", column.binding_name())
+            }
         }
     }
 }
@@ -1337,7 +1400,8 @@ impl DataHandle {
             | DataHandle::AgentScratch { .. }
             | DataHandle::SimCfgBuffer
             | DataHandle::SnapshotKick
-            | DataHandle::AbilityRegistryColumn { .. } => CycleEdgeKey::Other(self.clone()),
+            | DataHandle::AbilityRegistryColumn { .. }
+            | DataHandle::BeliefStateColumn { .. } => CycleEdgeKey::Other(self.clone()),
         }
     }
 }

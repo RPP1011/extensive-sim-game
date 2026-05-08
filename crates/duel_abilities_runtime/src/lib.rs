@@ -527,7 +527,7 @@ impl DuelAbilitiesState {
         // the kernel that runs it.
         let chronicle_strike_cfg_init =
             physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_ApplyDamageModActivation_and_ApplyStun_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndApplyDamageModActivationAndApplyStunAndVerbChronicleStrikeCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_strike_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_abilities_runtime::chronicle_strike_cfg"),
@@ -536,7 +536,7 @@ impl DuelAbilitiesState {
         });
         let chronicle_shieldup_cfg_init =
             physics_verb_chronicle_ShieldUp::PhysicsVerbChronicleShieldUpCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_shieldup_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_abilities_runtime::chronicle_shieldup_cfg"),
@@ -545,7 +545,7 @@ impl DuelAbilitiesState {
         });
         let chronicle_mend_cfg_init =
             physics_verb_chronicle_Mend::PhysicsVerbChronicleMendCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_mend_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_abilities_runtime::chronicle_mend_cfg"),
@@ -554,7 +554,7 @@ impl DuelAbilitiesState {
         });
         let chronicle_bleed_cfg_init =
             physics_verb_chronicle_Bleed::PhysicsVerbChronicleBleedCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_bleed_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_abilities_runtime::chronicle_bleed_cfg"),
@@ -563,7 +563,7 @@ impl DuelAbilitiesState {
         });
         let chronicle_reap_cfg_init =
             physics_verb_chronicle_Reap::PhysicsVerbChronicleReapCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_reap_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_abilities_runtime::chronicle_reap_cfg"),
@@ -578,7 +578,7 @@ impl DuelAbilitiesState {
         // different event variant.
         let chronicle_vampirize_cfg_init =
             physics_verb_chronicle_Vampirize::PhysicsVerbChronicleVampirizeCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_vampirize_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_abilities_runtime::chronicle_vampirize_cfg"),
@@ -592,7 +592,7 @@ impl DuelAbilitiesState {
         // ApplyDefeat/ApplyLifestealActivation/verb_chronicle_Strike).
         let chronicle_fortify_cfg_init =
             physics_verb_chronicle_Fortify::PhysicsVerbChronicleFortifyCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_fortify_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_abilities_runtime::chronicle_fortify_cfg"),
@@ -605,7 +605,7 @@ impl DuelAbilitiesState {
         // kernel.
         let chronicle_daze_cfg_init =
             physics_verb_chronicle_Daze::PhysicsVerbChronicleDazeCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_daze_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_abilities_runtime::chronicle_daze_cfg"),
@@ -622,7 +622,7 @@ impl DuelAbilitiesState {
         // uniforms where it used to have one fused `apply_cfg`.
         let apply_damage_cfg_init =
             physics_ApplyDamage::PhysicsApplyDamageCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let apply_damage_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_abilities_runtime::apply_damage_cfg"),
@@ -635,7 +635,7 @@ impl DuelAbilitiesState {
         // events the existing ApplyDamage cascade consumes.
         let apply_damage_from_chronicle_cfg_init =
             physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let apply_damage_from_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_abilities_runtime::apply_damage_from_chronicle_cfg"),
@@ -649,7 +649,7 @@ impl DuelAbilitiesState {
         // trip P6).
         let apply_shield_from_chronicle_cfg_init =
             physics_ApplyShieldFromChronicle::PhysicsApplyShieldFromChronicleCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let apply_shield_from_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_abilities_runtime::apply_shield_from_chronicle_cfg"),
@@ -658,7 +658,7 @@ impl DuelAbilitiesState {
         });
         let apply_heal_from_chronicle_cfg_init =
             physics_ApplyHealFromChronicle::PhysicsApplyHealFromChronicleCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let apply_heal_from_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_abilities_runtime::apply_heal_from_chronicle_cfg"),
@@ -671,7 +671,7 @@ impl DuelAbilitiesState {
         // Stunned events the existing ApplyStun cascade consumes.
         let apply_stun_from_chronicle_cfg_init =
             physics_ApplyStunFromChronicle::PhysicsApplyStunFromChronicleCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let apply_stun_from_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_abilities_runtime::apply_stun_from_chronicle_cfg"),
@@ -685,7 +685,7 @@ impl DuelAbilitiesState {
         // ApplyDamage cascade consumes (with shield_hp absorption etc).
         let apply_damage_from_self_damage_chronicle_cfg_init =
             physics_ApplyDamageFromSelfDamageChronicle::PhysicsApplyDamageFromSelfDamageChronicleCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let apply_damage_from_self_damage_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_abilities_runtime::apply_damage_from_self_damage_chronicle_cfg"),
@@ -700,7 +700,7 @@ impl DuelAbilitiesState {
         // consumes (writing per-agent lifesteal SoA fields).
         let apply_lifesteal_from_chronicle_cfg_init =
             physics_ApplyLifestealFromChronicle::PhysicsApplyLifestealFromChronicleCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let apply_lifesteal_from_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_abilities_runtime::apply_lifesteal_from_chronicle_cfg"),
@@ -715,7 +715,7 @@ impl DuelAbilitiesState {
         // consumes (writing per-agent damage_taken_mult SoA fields).
         let apply_damagemod_from_chronicle_cfg_init =
             physics_ApplyDamageModFromChronicle::PhysicsApplyDamageModFromChronicleCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let apply_damagemod_from_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_abilities_runtime::apply_damagemod_from_chronicle_cfg"),
@@ -730,7 +730,7 @@ impl DuelAbilitiesState {
         // slice across all 8 duel_abilities verbs.
         let apply_execute_from_chronicle_cfg_init =
             physics_ApplyExecuteFromChronicle::PhysicsApplyExecuteFromChronicleCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let apply_execute_from_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_abilities_runtime::apply_execute_from_chronicle_cfg"),
@@ -1160,7 +1160,7 @@ impl CompiledSim for DuelAbilitiesState {
         // dispatch into chronicle EffectShieldApplied writes (kind=28).
         // Re-emitted as Shielded by ApplyShieldFromChronicle below.
         let shieldup_cfg = physics_verb_chronicle_ShieldUp::PhysicsVerbChronicleShieldUpCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_shieldup_cfg_buf, 0, bytemuck::bytes_of(&shieldup_cfg),
@@ -1201,7 +1201,7 @@ impl CompiledSim for DuelAbilitiesState {
         // dispatch into chronicle EffectHealApplied writes (kind=27).
         // Re-emitted as Healed by ApplyHealFromChronicle below.
         let mend_cfg = physics_verb_chronicle_Mend::PhysicsVerbChronicleMendCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_mend_cfg_buf, 0, bytemuck::bytes_of(&mend_cfg),
@@ -1246,7 +1246,7 @@ impl CompiledSim for DuelAbilitiesState {
         // ApplyDamage cascade drains shield first then hp, so the
         // caster's hp drops by min(5, max(0, 5 - shield)) per cast.
         let bleed_cfg = physics_verb_chronicle_Bleed::PhysicsVerbChronicleBleedCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_bleed_cfg_buf, 0, bytemuck::bytes_of(&bleed_cfg),
@@ -1291,7 +1291,7 @@ impl CompiledSim for DuelAbilitiesState {
         // `set_alive(t, false)`. Closes the slice across all 8
         // duel_abilities verbs.
         let reap_cfg = physics_verb_chronicle_Reap::PhysicsVerbChronicleReapCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_reap_cfg_buf, 0, bytemuck::bytes_of(&reap_cfg),
@@ -1338,7 +1338,7 @@ impl CompiledSim for DuelAbilitiesState {
         // SoA slots so ApplyDamage's source lookup can heal them on
         // subsequent hits.
         let vampirize_cfg = physics_verb_chronicle_Vampirize::PhysicsVerbChronicleVampirizeCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_vampirize_cfg_buf, 0, bytemuck::bytes_of(&vampirize_cfg),
@@ -1385,7 +1385,7 @@ impl CompiledSim for DuelAbilitiesState {
         // damage_taken_mult_expires_at_tick SoA slots so ApplyDamage's
         // target lookup scales bleed by mult/256 on subsequent hits.
         let fortify_cfg = physics_verb_chronicle_Fortify::PhysicsVerbChronicleFortifyCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_fortify_cfg_buf, 0, bytemuck::bytes_of(&fortify_cfg),
@@ -1432,7 +1432,7 @@ impl CompiledSim for DuelAbilitiesState {
         // `stun_expires_at_tick > world.tick` and skips casting for
         // the duration of the window.
         let daze_cfg = physics_verb_chronicle_Daze::PhysicsVerbChronicleDazeCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_daze_cfg_buf, 0, bytemuck::bytes_of(&daze_cfg),
@@ -1483,7 +1483,7 @@ impl CompiledSim for DuelAbilitiesState {
         // computed at the top of step() for clear_ring_headers.
         let apply_shield_from_chronicle_cfg = physics_ApplyShieldFromChronicle::PhysicsApplyShieldFromChronicleCfg {
             event_count: max_slots_per_tick, tick: self.tick as u32,
-            seed: 0, _pad0: 0,
+            seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_shield_from_chronicle_cfg_buf, 0,
@@ -1508,7 +1508,7 @@ impl CompiledSim for DuelAbilitiesState {
         // intact.
         let apply_heal_from_chronicle_cfg = physics_ApplyHealFromChronicle::PhysicsApplyHealFromChronicleCfg {
             event_count: max_slots_per_tick, tick: self.tick as u32,
-            seed: 0, _pad0: 0,
+            seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_heal_from_chronicle_cfg_buf, 0,
@@ -1541,7 +1541,7 @@ impl CompiledSim for DuelAbilitiesState {
         // speaks — re-emit ferries verbatim, no conversion required.
         let apply_stun_from_chronicle_cfg = physics_ApplyStunFromChronicle::PhysicsApplyStunFromChronicleCfg {
             event_count: max_slots_per_tick, tick: self.tick as u32,
-            seed: 0, _pad0: 0,
+            seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_stun_from_chronicle_cfg_buf, 0,
@@ -1576,7 +1576,7 @@ impl CompiledSim for DuelAbilitiesState {
         // caster.
         let apply_damage_from_self_damage_chronicle_cfg = physics_ApplyDamageFromSelfDamageChronicle::PhysicsApplyDamageFromSelfDamageChronicleCfg {
             event_count: max_slots_per_tick, tick: self.tick as u32,
-            seed: 0, _pad0: 0,
+            seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_damage_from_self_damage_chronicle_cfg_buf, 0,
@@ -1611,7 +1611,7 @@ impl CompiledSim for DuelAbilitiesState {
         // re-emit's `caster: c` reads the caster id directly.
         let apply_lifesteal_from_chronicle_cfg = physics_ApplyLifestealFromChronicle::PhysicsApplyLifestealFromChronicleCfg {
             event_count: max_slots_per_tick, tick: self.tick as u32,
-            seed: 0, _pad0: 0,
+            seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_lifesteal_from_chronicle_cfg_buf, 0,
@@ -1647,7 +1647,7 @@ impl CompiledSim for DuelAbilitiesState {
         // re-emit's `actor: c` reads the caster id directly.
         let apply_damagemod_from_chronicle_cfg = physics_ApplyDamageModFromChronicle::PhysicsApplyDamageModFromChronicleCfg {
             event_count: max_slots_per_tick, tick: self.tick as u32,
-            seed: 0, _pad0: 0,
+            seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_damagemod_from_chronicle_cfg_buf, 0,
@@ -1688,7 +1688,7 @@ impl CompiledSim for DuelAbilitiesState {
         // Defeated without re-checking hp.
         let apply_execute_from_chronicle_cfg = physics_ApplyExecuteFromChronicle::PhysicsApplyExecuteFromChronicleCfg {
             event_count: max_slots_per_tick, tick: self.tick as u32,
-            seed: 0, _pad0: 0,
+            seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_execute_from_chronicle_cfg_buf, 0,
@@ -1731,7 +1731,7 @@ impl CompiledSim for DuelAbilitiesState {
         let event_count_estimate = self.agent_count * 30;
         let apply_heal_cfg = physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_ApplyDamageModActivation_and_ApplyStun_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndApplyDamageModActivationAndApplyStunAndVerbChronicleStrikeCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
-            seed: 0, _pad0: 0,
+            seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_strike_cfg_buf, 0, bytemuck::bytes_of(&apply_heal_cfg),
@@ -1792,7 +1792,7 @@ impl CompiledSim for DuelAbilitiesState {
         // (skipped) and non-EffectDamageApplied records also skipped.
         let apply_damage_from_chronicle_cfg = physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
-            seed: 0, _pad0: 0,
+            seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_damage_from_chronicle_cfg_buf, 0,
@@ -1827,7 +1827,7 @@ impl CompiledSim for DuelAbilitiesState {
         // arrives well within the lifesteal window.
         let apply_damage_cfg = physics_ApplyDamage::PhysicsApplyDamageCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
-            seed: 0, _pad0: 0,
+            seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_damage_cfg_buf, 0, bytemuck::bytes_of(&apply_damage_cfg),

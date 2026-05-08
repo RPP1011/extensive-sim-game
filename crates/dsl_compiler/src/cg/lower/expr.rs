@@ -266,6 +266,16 @@ pub struct LoweringCtx<'a> {
     /// (duel_abilities, tactical_squad_5v5, boss_fight, etc.) keep
     /// the default and don't auto-fire the spatial-build phases.
     pub aoe_dispatch: bool,
+    /// 2026-05-07 (Wave 3 ToM Phase 3.7): per-fixture flag controlling
+    /// whether `agents.set_beliefs_<field>(...)` calls lower as real
+    /// SoA writes (BGL-bound `beliefs_<field>` storage + atomic byte
+    /// writes for the q8 columns) or stay no-op stubs.
+    ///
+    /// Source: caller-supplied
+    /// [`super::driver::LowerOpts::belief_state`] threaded through
+    /// [`super::driver::lower_compilation_to_cg_with_opts`]. Today
+    /// only `tom_probe_runtime`'s build.rs flips it on.
+    pub belief_state: bool,
 }
 
 /// Captured form of a `@lazy` view's resolved AST: enough to
@@ -320,6 +330,11 @@ impl<'a> LoweringCtx<'a> {
             // `lower_compilation_to_cg_with_opts(LowerOpts { aoe_dispatch: true })`
             // flips this for the smoke runtime's AOE parity sweep.
             aoe_dispatch: false,
+            // Default `false` — non-opt-in fixtures keep the no-op
+            // setter stubs (Phase 3.5 shape). Caller-side opt-in via
+            // `lower_compilation_to_cg_with_opts(LowerOpts { belief_state: true })`
+            // flips this for `tom_probe_runtime`'s ToM consumer rules.
+            belief_state: false,
         }
     }
 

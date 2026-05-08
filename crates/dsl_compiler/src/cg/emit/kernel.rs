@@ -1129,6 +1129,36 @@ fn handle_to_binding_metadata(h: &DataHandle, prog: &CgProgram) -> Option<Bindin
                 wgsl_ty: wgsl_ty.into(),
             })
         }
+        DataHandle::BeliefStateColumn { column } => {
+            // Per-fixture runtime allocates these buffers (see
+            // `tom_probe_runtime::TomProbeState`). The kernel's
+            // `Bindings` struct surfaces a `&wgpu::Buffer` field per
+            // bound column; the runtime constructs the struct directly
+            // (no `bind()`-via-`BindingSources` call site here today).
+            // `BgSource::External(<name>)` keeps the field name = the
+            // binding name, mirroring `AbilityRegistryColumn`'s shape.
+            //
+            // pos / tick / flags map to plain typed arrays. The three
+            // u8 columns (creature_type / confidence / suspicion) live
+            // in `array<atomic<u32>>` with 4 packed LE bytes per word
+            // — the setter WGSL stub bodies use the
+            // `_bel_write_packed_byte_atomic` helper to do byte-
+            // granularity writes.
+            use crate::cg::data_handle::BeliefStateColumn::*;
+            let (access, wgsl_ty) = match column {
+                Pos          => (AccessMode::ReadWriteStorage, "array<vec4<f32>>".to_string()),
+                CreatureType => (AccessMode::AtomicStorage,    "u32".to_string()),
+                LastSeenTick => (AccessMode::ReadWriteStorage, "array<u32>".to_string()),
+                Confidence   => (AccessMode::AtomicStorage,    "u32".to_string()),
+                Suspicion    => (AccessMode::AtomicStorage,    "u32".to_string()),
+                Flags        => (AccessMode::ReadWriteStorage, "array<u32>".to_string()),
+            };
+            Some(BindingMetadata {
+                bg_source: BgSource::External(column.binding_name().to_string()),
+                base_access: access,
+                wgsl_ty,
+            })
+        }
     }
 }
 
@@ -1415,6 +1445,7 @@ fn structural_binding_name(h: &DataHandle, prog: Option<&CgProgram>) -> String {
             };
             format!("ability_registry_{s}")
         }
+        DataHandle::BeliefStateColumn { column } => column.binding_name().to_string(),
     }
 }
 
@@ -1815,10 +1846,19 @@ fn build_generic_cfg_build_expr(cfg_struct: &str) -> String {
 /// header word both resolve. Two `_pad` fields preserve the 16-byte
 /// uniform alignment.
 fn build_per_event_emit_cfg_struct_decl(cfg_struct: &str) -> String {
+    // `agent_cap: u32` joined the layout in Wave 3 ToM Phase 3.7 so the
+    // belief-setter WGSL stubs (`agents.set_beliefs_<field>`) can index
+    // their target columns as `cell = observer * cfg.agent_cap +
+    // subject`. Non-belief PerEventEmit kernels ignore the field — they
+    // never reference `cfg.agent_cap` from their bodies. Backwards-compat
+    // note: every per-fixture runtime constructs cfg manually, so the
+    // renamed pad (`_pad0: u32` → `agent_cap: u32`) surfaces as a
+    // missing-field error at the per-fixture build site — caller updates
+    // that in lockstep.
     format!(
         "#[repr(C)]\n\
          #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]\n\
-         pub struct {cfg_struct} {{ pub event_count: u32, pub tick: u32, pub seed: u32, pub _pad0: u32 }}"
+         pub struct {cfg_struct} {{ pub event_count: u32, pub tick: u32, pub seed: u32, pub agent_cap: u32 }}"
     )
 }
 
@@ -1829,7 +1869,7 @@ fn build_per_event_emit_cfg_struct_decl(cfg_struct: &str) -> String {
 /// [`build_view_fold_cfg_build_expr`] convention.
 fn build_per_event_emit_cfg_build_expr(cfg_struct: &str) -> String {
     format!(
-        "{cfg_struct} {{ event_count: 0, tick: state.tick as u32, seed: state.seed as u32, _pad0: 0 }}"
+        "{cfg_struct} {{ event_count: 0, tick: state.tick as u32, seed: state.seed as u32, agent_cap: state.agent_cap() }}"
     )
 }
 

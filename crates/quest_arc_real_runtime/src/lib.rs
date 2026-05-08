@@ -214,7 +214,7 @@ impl QuestArcRealState {
 
         let mk_per_event_cfg = |label: &str| -> wgpu::Buffer {
             let init = physics_verb_chronicle_AcceptQuest::PhysicsVerbChronicleAcceptQuestCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
             gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(label),
@@ -487,7 +487,7 @@ impl CompiledSim for QuestArcRealState {
         // (4) Five chronicle kernels — each gates on action_id == N
         // and emits StageAdvanced (or QuestCompleted for op#4).
         let chronicle_accept_cfg = physics_verb_chronicle_AcceptQuest::PhysicsVerbChronicleAcceptQuestCfg {
-            event_count: event_count_estimate, tick, seed: 0, _pad0: 0,
+            event_count: event_count_estimate, tick, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_accept_cfg_buf, 0, bytemuck::bytes_of(&chronicle_accept_cfg),
@@ -503,7 +503,7 @@ impl CompiledSim for QuestArcRealState {
         );
 
         let chronicle_hunt_cfg = physics_verb_chronicle_HuntMonster::PhysicsVerbChronicleHuntMonsterCfg {
-            event_count: event_count_estimate, tick, seed: 0, _pad0: 0,
+            event_count: event_count_estimate, tick, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_hunt_cfg_buf, 0, bytemuck::bytes_of(&chronicle_hunt_cfg),
@@ -519,7 +519,7 @@ impl CompiledSim for QuestArcRealState {
         );
 
         let chronicle_collect_cfg = physics_verb_chronicle_CollectItem::PhysicsVerbChronicleCollectItemCfg {
-            event_count: event_count_estimate, tick, seed: 0, _pad0: 0,
+            event_count: event_count_estimate, tick, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_collect_cfg_buf, 0, bytemuck::bytes_of(&chronicle_collect_cfg),
@@ -535,7 +535,7 @@ impl CompiledSim for QuestArcRealState {
         );
 
         let chronicle_return_cfg = physics_verb_chronicle_ReturnHome::PhysicsVerbChronicleReturnHomeCfg {
-            event_count: event_count_estimate, tick, seed: 0, _pad0: 0,
+            event_count: event_count_estimate, tick, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_return_cfg_buf, 0, bytemuck::bytes_of(&chronicle_return_cfg),
@@ -551,7 +551,7 @@ impl CompiledSim for QuestArcRealState {
         );
 
         let chronicle_complete_cfg = physics_verb_chronicle_CompleteQuest::PhysicsVerbChronicleCompleteQuestCfg {
-            event_count: event_count_estimate, tick, seed: 0, _pad0: 0,
+            event_count: event_count_estimate, tick, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_complete_cfg_buf, 0, bytemuck::bytes_of(&chronicle_complete_cfg),
@@ -570,7 +570,7 @@ impl CompiledSim for QuestArcRealState {
         // writes mana = mana + 1.0. Run AFTER the chronicle kernels
         // so the StageAdvanced events are present in the ring.
         let apply_stage_cfg = physics_ApplyStageAdvance::PhysicsApplyStageAdvanceCfg {
-            event_count: event_count_estimate, tick, seed: 0, _pad0: 0,
+            event_count: event_count_estimate, tick, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_stage_cfg_buf, 0, bytemuck::bytes_of(&apply_stage_cfg),
@@ -589,7 +589,7 @@ impl CompiledSim for QuestArcRealState {
         // (6) ApplyQuestCompleted — reads QuestCompleted (kind=2u),
         // writes mana = 0.0.
         let apply_complete_cfg = physics_ApplyQuestCompleted::PhysicsApplyQuestCompletedCfg {
-            event_count: event_count_estimate, tick, seed: 0, _pad0: 0,
+            event_count: event_count_estimate, tick, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_complete_cfg_buf, 0, bytemuck::bytes_of(&apply_complete_cfg),

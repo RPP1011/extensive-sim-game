@@ -706,8 +706,11 @@ fn compose_wgsl_cfg_struct(spec: &KernelSpec) -> String {
         // the `Emit` writes still need `tick` for the event header
         // word. `seed: u32` joined when the rng.* surface wired
         // through (stochastic_probe Gaps #1-#3 close, 2026-05-04).
+        // `agent_cap: u32` joined in Wave 3 ToM Phase 3.7 so the
+        // belief-setter WGSL stubs can index columns as
+        // `cell = observer * cfg.agent_cap + subject`.
         // Mirrors `build_per_event_emit_cfg_struct_decl`.
-        KernelKind::PerEventEmit => "event_count: u32, tick: u32, seed: u32, _pad0: u32",
+        KernelKind::PerEventEmit => "event_count: u32, tick: u32, seed: u32, agent_cap: u32",
         // Generic kernels (physics/mask/plumbing) carry `seed: u32`
         // so the kernel preamble can bind `let seed = cfg.seed;` for
         // any `per_agent_u32(seed, agent_id, tick, purpose)` call the

@@ -109,3 +109,45 @@ physics WhatIBelieve @phase(per_agent) {
     emit BeliefAcquired { observer: self, subject: self, fact_bit: 1 }
   }
 }
+
+// Wave 3 ToM Phase 3.7 — DSL-authored consumer rule that lowers to
+// real BeliefState SoA writes via the compiler-emitted setter WGSL
+// bodies (`agents.set_beliefs_<field>`).
+//
+// Pre-existing `WhatIBelieve` producer emits one
+// `BeliefAcquired { self, self, 1 }` per alive Knower per tick. This
+// consumer runs in the same tick and stamps the
+// `beliefs_last_seen_tick` column on the (observer, subject) cell to
+// `fact_bit` (= 1 for the producer's per-tick event). Functional
+// purpose: PROVE the compiler's belief-setter end-to-end pipe
+// (`LowerOpts.belief_state` + `DataHandle::BeliefStateColumn` + WGSL
+// real-write stubs + BGL composer) is wired correctly without
+// requiring new chronicle event kinds + CPU→event_ring writers.
+//
+// The runtime opt-in lives in `tom_probe_runtime/build.rs`
+// (`LowerOpts { belief_state: true }`); the runtime allocates the 6
+// BeliefState SoA columns and feeds them as bindings (`beliefs_pos`,
+// `beliefs_type`, `beliefs_tick`, `beliefs_confidence`,
+// `beliefs_suspicion`, `beliefs_flags`) on the per-event consumer
+// kernel's `Bindings` struct (the BGL composer surfaces only the
+// columns this rule writes; non-touched columns aren't bound).
+//
+// The full ApplyObserve / ApplyScry / ApplyReveal / Decay consumer
+// suite per the spec sketch (which would replace
+// `tom_probe_runtime`'s 4 hand-written WGSL kernels in
+// `OBSERVE_WGSL` / `SCRY_WGSL` / `REVEAL_WGSL` / `DECAY_WGSL`) is
+// deferred to a follow-on commit — those need either:
+//   (a) new chronicle event kinds (EffectObserveApplied=64,
+//       EffectScryApplied=65, EffectRevealApplied=66) AND a runtime-
+//       side CPU→event_ring writer for the observer/scry/reveal
+//       trigger calls, OR
+//   (b) shrink-wrapping observe/scry/reveal as bare event kinds in
+//       `tom_probe.sim` plus a runtime-side `queue_event` helper
+//       (new infrastructure).
+// Either path is a separate slice; this rule lights up the compiler
+// pipe so the follow-on can scaffold on top of it.
+physics ApplyTickBeliefStamp @phase(post) {
+  on BeliefAcquired { observer: o, subject: s, fact_bit: b } {
+    agents.set_beliefs_last_seen_tick(o, s, b);
+  }
+}

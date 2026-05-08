@@ -322,7 +322,7 @@ impl TowerDefenseState {
 
         let chronicle_shoot_cfg_init =
             physics_verb_chronicle_Shoot::PhysicsVerbChronicleShootCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_shoot_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("tower_defense_runtime::chronicle_shoot_cfg"),
@@ -331,7 +331,7 @@ impl TowerDefenseState {
         });
 
         let apply_damage_cfg_init = physics_ApplyDamage::PhysicsApplyDamageCfg {
-            event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            event_count: 0, tick: 0, seed: 0, agent_cap: 0,
         };
         let apply_damage_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("tower_defense_runtime::apply_damage_cfg"),
@@ -670,7 +670,7 @@ impl CompiledSim for TowerDefenseState {
 
         // (4) Shoot chronicle — gates on action_id==0u, emits Damaged.
         let shoot_cfg = physics_verb_chronicle_Shoot::PhysicsVerbChronicleShootCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_shoot_cfg_buf, 0, bytemuck::bytes_of(&shoot_cfg),
@@ -709,7 +709,7 @@ impl CompiledSim for TowerDefenseState {
         // (6) ApplyDamage — PerEvent: reads Damaged events, writes target HP.
         let event_count_estimate = self.agent_count * 4;
         let apply_cfg = physics_ApplyDamage::PhysicsApplyDamageCfg {
-            event_count: event_count_estimate, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: event_count_estimate, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_damage_cfg_buf, 0, bytemuck::bytes_of(&apply_cfg),

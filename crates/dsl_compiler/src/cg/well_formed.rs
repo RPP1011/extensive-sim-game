@@ -1220,7 +1220,8 @@ fn check_data_handle_consistency(
         | DataHandle::AgentScratch { .. }
         | DataHandle::SimCfgBuffer
         | DataHandle::SnapshotKick
-        | DataHandle::AbilityRegistryColumn { .. } => None,
+        | DataHandle::AbilityRegistryColumn { .. }
+        | DataHandle::BeliefStateColumn { .. } => None,
     }
 }
 

@@ -255,7 +255,7 @@ impl VillageDayCycleState {
 
         let mk_per_event_cfg = |label: &str| -> wgpu::Buffer {
             let init = physics_verb_chronicle_WorkHarvest::PhysicsVerbChronicleWorkHarvestCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
             gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(label),
@@ -606,7 +606,7 @@ impl CompiledSim for VillageDayCycleState {
         // (4) Five chronicle kernels — each gates on action_id == N
         // and emits its respective event.
         let chr_work_cfg = physics_verb_chronicle_WorkHarvest::PhysicsVerbChronicleWorkHarvestCfg {
-            event_count: event_count_estimate, tick, seed: 0, _pad0: 0,
+            event_count: event_count_estimate, tick, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_work_cfg_buf, 0, bytemuck::bytes_of(&chr_work_cfg),
@@ -622,7 +622,7 @@ impl CompiledSim for VillageDayCycleState {
         );
 
         let chr_trade_cfg = physics_verb_chronicle_TradeFood::PhysicsVerbChronicleTradeFoodCfg {
-            event_count: event_count_estimate, tick, seed: 0, _pad0: 0,
+            event_count: event_count_estimate, tick, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_trade_cfg_buf, 0, bytemuck::bytes_of(&chr_trade_cfg),
@@ -638,7 +638,7 @@ impl CompiledSim for VillageDayCycleState {
         );
 
         let chr_eat_cfg = physics_verb_chronicle_EatFood::PhysicsVerbChronicleEatFoodCfg {
-            event_count: event_count_estimate, tick, seed: 0, _pad0: 0,
+            event_count: event_count_estimate, tick, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_eat_cfg_buf, 0, bytemuck::bytes_of(&chr_eat_cfg),
@@ -654,7 +654,7 @@ impl CompiledSim for VillageDayCycleState {
         );
 
         let chr_rest_cfg = physics_verb_chronicle_Rest::PhysicsVerbChronicleRestCfg {
-            event_count: event_count_estimate, tick, seed: 0, _pad0: 0,
+            event_count: event_count_estimate, tick, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_rest_cfg_buf, 0, bytemuck::bytes_of(&chr_rest_cfg),
@@ -670,7 +670,7 @@ impl CompiledSim for VillageDayCycleState {
         );
 
         let chr_drain_cfg = physics_verb_chronicle_DrainEnergy::PhysicsVerbChronicleDrainEnergyCfg {
-            event_count: event_count_estimate, tick, seed: 0, _pad0: 0,
+            event_count: event_count_estimate, tick, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_drain_cfg_buf, 0, bytemuck::bytes_of(&chr_drain_cfg),
@@ -687,7 +687,7 @@ impl CompiledSim for VillageDayCycleState {
 
         // (5) ApplyWork — reads WorkDone, writes mana += 1.
         let aw_cfg = physics_ApplyWork::PhysicsApplyWorkCfg {
-            event_count: event_count_estimate, tick, seed: 0, _pad0: 0,
+            event_count: event_count_estimate, tick, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_work_cfg_buf, 0, bytemuck::bytes_of(&aw_cfg),
@@ -705,7 +705,7 @@ impl CompiledSim for VillageDayCycleState {
 
         // (6) ApplyTrade — reads TradeDone, writes mana -= 1, hp += 3.
         let at_cfg = physics_ApplyTrade::PhysicsApplyTradeCfg {
-            event_count: event_count_estimate, tick, seed: 0, _pad0: 0,
+            event_count: event_count_estimate, tick, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_trade_cfg_buf, 0, bytemuck::bytes_of(&at_cfg),
@@ -724,7 +724,7 @@ impl CompiledSim for VillageDayCycleState {
 
         // (7) ApplyEat — reads AteFood, writes mana -= 2, hp += 15.
         let ae_cfg = physics_ApplyEat::PhysicsApplyEatCfg {
-            event_count: event_count_estimate, tick, seed: 0, _pad0: 0,
+            event_count: event_count_estimate, tick, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_eat_cfg_buf, 0, bytemuck::bytes_of(&ae_cfg),
@@ -744,7 +744,7 @@ impl CompiledSim for VillageDayCycleState {
         // (8) ApplyEnergyDecay — reads EnergyDrained, writes hp -= 0.4.
         // If new_hp <= 0 also writes alive = false.
         let ad_cfg = physics_ApplyEnergyDecay::PhysicsApplyEnergyDecayCfg {
-            event_count: event_count_estimate, tick, seed: 0, _pad0: 0,
+            event_count: event_count_estimate, tick, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_decay_cfg_buf, 0, bytemuck::bytes_of(&ad_cfg),

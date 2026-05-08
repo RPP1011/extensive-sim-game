@@ -310,7 +310,7 @@ impl ApplyAbilityChronicleConsumerState {
                 event_count: 0,
                 tick: 0,
                 seed: 0,
-                _pad0: 0,
+                agent_cap: 0,
             };
         let consumer_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -491,7 +491,7 @@ impl ApplyAbilityChronicleConsumerState {
                 event_count: tail,
                 tick,
                 seed: 0,
-                _pad0: 0,
+                agent_cap: 0,
             };
         self.gpu
             .queue

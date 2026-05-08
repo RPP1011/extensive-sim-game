@@ -454,7 +454,7 @@ impl MassBattle100v100State {
         });
         let chronicle_strike_cfg_init =
             physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_strike_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("mass_battle_100v100::chronicle_strike_cfg"),
@@ -463,7 +463,7 @@ impl MassBattle100v100State {
         });
         let chronicle_snipe_cfg_init =
             physics_verb_chronicle_Snipe::PhysicsVerbChronicleSnipeCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_snipe_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("mass_battle_100v100::chronicle_snipe_cfg"),
@@ -476,7 +476,7 @@ impl MassBattle100v100State {
         // dispatches AbilityId(3) through the apply_ability arm.
         let chronicle_stun_bolt_cfg_init =
             physics_verb_chronicle_StunBolt::PhysicsVerbChronicleStunBoltCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_stun_bolt_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("mass_battle_100v100::chronicle_stun_bolt_cfg"),
@@ -491,7 +491,7 @@ impl MassBattle100v100State {
         // apply_ability arm, writing kind=27 EffectHealApplied records.
         let chronicle_mass_heal_cfg_init =
             physics_verb_chronicle_MassHeal::PhysicsVerbChronicleMassHealCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_mass_heal_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("mass_battle_100v100::chronicle_mass_heal_cfg"),
@@ -500,7 +500,7 @@ impl MassBattle100v100State {
         });
         let chronicle_heal_cfg_init =
             physics_verb_chronicle_Heal::PhysicsVerbChronicleHealCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_heal_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("mass_battle_100v100::chronicle_heal_cfg"),
@@ -509,7 +509,7 @@ impl MassBattle100v100State {
         });
         let apply_cfg_init =
             physics_ApplyDamage_and_ApplyHeal::PhysicsApplyDamageAndApplyHealCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let apply_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("mass_battle_100v100::apply_cfg"),
@@ -532,7 +532,7 @@ impl MassBattle100v100State {
         // when MassHeal was added.
         let apply_chronicle_cfg_init =
             physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleAndApplyHealFromChronicleCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let apply_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("mass_battle_100v100::apply_chronicle_cfg"),
@@ -832,7 +832,7 @@ impl CompiledSim for MassBattle100v100State {
         // kernel below re-emits those as Damaged so the existing
         // ApplyDamage_and_ApplyHeal cascade keeps working unchanged.
         let strike_cfg = physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_strike_cfg_buf, 0, bytemuck::bytes_of(&strike_cfg),
@@ -873,7 +873,7 @@ impl CompiledSim for MassBattle100v100State {
         // flow through ApplyDamageFromChronicle → Damaged →
         // ApplyDamage_and_ApplyHeal cascade unchanged.
         let snipe_cfg = physics_verb_chronicle_Snipe::PhysicsVerbChronicleSnipeCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_snipe_cfg_buf, 0, bytemuck::bytes_of(&snipe_cfg),
@@ -923,7 +923,7 @@ impl CompiledSim for MassBattle100v100State {
         // (Damaged → ApplyDamage HP cascade for kind=26, direct
         // `agents.set_stun_expires_at_tick` for kind=29).
         let stun_bolt_cfg = physics_verb_chronicle_StunBolt::PhysicsVerbChronicleStunBoltCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_stun_bolt_cfg_buf, 0, bytemuck::bytes_of(&stun_bolt_cfg),
@@ -974,7 +974,7 @@ impl CompiledSim for MassBattle100v100State {
         // `agents.set_stun_expires_at_tick` for kind=29, direct
         // `agents.set_hp(min(hp+amt, max_hp))` for kind=27).
         let mass_heal_cfg = physics_verb_chronicle_MassHeal::PhysicsVerbChronicleMassHealCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_mass_heal_cfg_buf, 0, bytemuck::bytes_of(&mass_heal_cfg),
@@ -1019,7 +1019,7 @@ impl CompiledSim for MassBattle100v100State {
         // binding shape are unchanged — the action_id literal in the
         // generated kernel is the only detail that moved.
         let heal_cfg = physics_verb_chronicle_Heal::PhysicsVerbChronicleHealCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_heal_cfg_buf, 0, bytemuck::bytes_of(&heal_cfg),
@@ -1060,7 +1060,7 @@ impl CompiledSim for MassBattle100v100State {
         let apply_chronicle_cfg = physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleAndApplyHealFromChronicleCfg {
             event_count: event_count_estimate,
             tick: self.tick as u32,
-            seed: 0, _pad0: 0,
+            seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_chronicle_cfg_buf,
@@ -1090,7 +1090,7 @@ impl CompiledSim for MassBattle100v100State {
         // direct-emitted by Heal chronicle today; Heal isn't ported).
         let apply_cfg = physics_ApplyDamage_and_ApplyHeal::PhysicsApplyDamageAndApplyHealCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
-            seed: 0, _pad0: 0,
+            seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_cfg_buf, 0, bytemuck::bytes_of(&apply_cfg),

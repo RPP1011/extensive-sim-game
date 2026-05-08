@@ -294,7 +294,7 @@ impl ApplyAbilityVerbChronicleConsumerState {
             event_count: n_agents,
             tick: 0,
             seed: 0,
-            _pad0: 0,
+            agent_cap: 0,
         };
         let physics_cfg_buf = gpu
             .device
@@ -347,7 +347,7 @@ impl ApplyAbilityVerbChronicleConsumerState {
             event_count: self.n_agents,
             tick,
             seed: 0,
-            _pad0: 0,
+            agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.physics_cfg_buf,
@@ -492,7 +492,7 @@ impl ApplyAbilityVerbChronicleConsumerState {
             event_count: tail,
             tick,
             seed: 0,
-            _pad0: 0,
+            agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.physics_cfg_buf,

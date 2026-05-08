@@ -661,6 +661,13 @@ pub struct TomProbeState {
     event_ring: EventRing,
     physics_cfg_buf: wgpu::Buffer,
     fold_cfg_buf: wgpu::Buffer,
+    /// Wave 3 ToM Phase 3.7 — cfg uniform for the compiler-emitted
+    /// `physics_ApplyTickBeliefStamp` kernel (PerEventEmit shape:
+    /// `{ event_count, tick, seed, agent_cap }`). The kernel's body
+    /// references `cfg.agent_cap` from inside the
+    /// `agents_set_beliefs_last_seen_tick` setter stub for the cell-
+    /// index expression.
+    apply_tick_belief_stamp_cfg_buf: wgpu::Buffer,
 
     cache: dispatch::KernelCache,
 
@@ -843,6 +850,27 @@ impl TomProbeState {
 
         let consumer_gpu = BeliefConsumerGpu::new(&gpu.device);
 
+        // Wave 3 ToM Phase 3.7 — cfg buf for the compiler-emitted
+        // `physics_ApplyTickBeliefStamp` consumer kernel. Per-tick
+        // updates write `event_count + tick + agent_cap` into this
+        // buffer before the dispatch in `step()`.
+        let apply_tick_belief_stamp_cfg_init =
+            physics_ApplyTickBeliefStamp::PhysicsApplyTickBeliefStampCfg {
+                event_count: 0,
+                tick: 0,
+                seed: 0,
+                agent_cap: agent_count,
+            };
+        let apply_tick_belief_stamp_cfg_buf = gpu
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(
+                    "tom_probe_runtime::physics_ApplyTickBeliefStamp_cfg",
+                ),
+                contents: bytemuck::bytes_of(&apply_tick_belief_stamp_cfg_init),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+
         Self {
             gpu,
             agent_alive_buf,
@@ -881,6 +909,7 @@ impl TomProbeState {
             event_ring,
             physics_cfg_buf,
             fold_cfg_buf,
+            apply_tick_belief_stamp_cfg_buf,
             cache: dispatch::KernelCache::default(),
             consumer_gpu,
             tick: 0,
@@ -1833,8 +1862,44 @@ impl CompiledSim for TomProbeState {
             event_count_estimate.max(1),
         );
 
+        // (4) Wave 3 ToM Phase 3.7 — compiler-emitted
+        // `physics_ApplyTickBeliefStamp` consumer. Reads
+        // `BeliefAcquired` events from the event_ring (same ring the
+        // fold above just folded over) and writes
+        // `agents.set_beliefs_last_seen_tick(o, s, b)` for each event.
+        // The setter WGSL body (compiler-emitted from the .sim source)
+        // does `beliefs_tick[o * cfg.agent_cap + s] = b`. End-to-end
+        // proof of the setter pipe — no hand-written WGSL on this path.
+        let apply_tick_cfg =
+            physics_ApplyTickBeliefStamp::PhysicsApplyTickBeliefStampCfg {
+                event_count: event_count_estimate,
+                tick: self.tick as u32,
+                seed: 0,
+                agent_cap: self.agent_count,
+            };
+        self.gpu.queue.write_buffer(
+            &self.apply_tick_belief_stamp_cfg_buf,
+            0,
+            bytemuck::bytes_of(&apply_tick_cfg),
+        );
+        let apply_tick_bindings =
+            physics_ApplyTickBeliefStamp::PhysicsApplyTickBeliefStampBindings {
+                event_ring: self.event_ring.ring(),
+                event_tail: self.event_ring.tail(),
+                beliefs_tick: &self.beliefs_tick_primary,
+                cfg: &self.apply_tick_belief_stamp_cfg_buf,
+            };
+        dispatch::dispatch_physics_applytickbeliefstamp(
+            &mut self.cache,
+            &apply_tick_bindings,
+            &self.gpu.device,
+            &mut encoder,
+            event_count_estimate.max(1),
+        );
+
         self.gpu.queue.submit(Some(encoder.finish()));
         self.beliefs_flags_dirty = true;
+        self.beliefs_tick_dirty = true;
         self.tick += 1;
     }
 

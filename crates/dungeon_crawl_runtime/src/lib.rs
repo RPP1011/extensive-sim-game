@@ -237,7 +237,7 @@ impl DungeonCrawlState {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let chronicle_strike_cfg_init = physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeCfg {
-            event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            event_count: 0, tick: 0, seed: 0, agent_cap: 0,
         };
         let chronicle_strike_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("dungeon_crawl_runtime::chronicle_strike_cfg"),
@@ -245,7 +245,7 @@ impl DungeonCrawlState {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let chronicle_spell_cfg_init = physics_verb_chronicle_Spell::PhysicsVerbChronicleSpellCfg {
-            event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            event_count: 0, tick: 0, seed: 0, agent_cap: 0,
         };
         let chronicle_spell_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("dungeon_crawl_runtime::chronicle_spell_cfg"),
@@ -253,7 +253,7 @@ impl DungeonCrawlState {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let chronicle_heal_cfg_init = physics_verb_chronicle_Heal::PhysicsVerbChronicleHealCfg {
-            event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            event_count: 0, tick: 0, seed: 0, agent_cap: 0,
         };
         let chronicle_heal_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("dungeon_crawl_runtime::chronicle_heal_cfg"),
@@ -261,7 +261,7 @@ impl DungeonCrawlState {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let apply_cfg_init = physics_ApplyDamage_and_ApplyHeal::PhysicsApplyDamageAndApplyHealCfg {
-            event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            event_count: 0, tick: 0, seed: 0, agent_cap: 0,
         };
         let apply_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("dungeon_crawl_runtime::apply_cfg"),
@@ -581,7 +581,7 @@ impl CompiledSim for DungeonCrawlState {
 
         // (4) Strike chronicle.
         let strike_cfg = physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_strike_cfg_buf, 0, bytemuck::bytes_of(&strike_cfg),
@@ -597,7 +597,7 @@ impl CompiledSim for DungeonCrawlState {
 
         // (5) Spell chronicle.
         let spell_cfg = physics_verb_chronicle_Spell::PhysicsVerbChronicleSpellCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_spell_cfg_buf, 0, bytemuck::bytes_of(&spell_cfg),
@@ -613,7 +613,7 @@ impl CompiledSim for DungeonCrawlState {
 
         // (6) Heal chronicle.
         let heal_cfg = physics_verb_chronicle_Heal::PhysicsVerbChronicleHealCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_heal_cfg_buf, 0, bytemuck::bytes_of(&heal_cfg),
@@ -630,7 +630,7 @@ impl CompiledSim for DungeonCrawlState {
         // (7) ApplyDamage_and_ApplyHeal.
         let event_count_estimate = self.agent_count * 4;
         let apply_cfg = physics_ApplyDamage_and_ApplyHeal::PhysicsApplyDamageAndApplyHealCfg {
-            event_count: event_count_estimate, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: event_count_estimate, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(&self.apply_cfg_buf, 0, bytemuck::bytes_of(&apply_cfg));
         let apply_bindings = physics_ApplyDamage_and_ApplyHeal::PhysicsApplyDamageAndApplyHealBindings {
