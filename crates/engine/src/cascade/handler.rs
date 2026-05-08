@@ -282,7 +282,19 @@ pub enum EventKindId {
     // Slot 64 contiguous with the Wave 3 Phase 1 plant_belief slot
     // (EffectPlantBeliefApplied=63).
     EffectObserveApplied     = 64,
-    // Slots 65-127 reserved for replayable event variants added in later tasks.
+    // Wave 3 ToM Phase 3.5 — `scry` cross-observer access. Caster reads
+    // agent C's beliefs about subject B (via C as `target_observer`),
+    // writes into caster's beliefs about subject. The chronicle record
+    // carries (actor + target=subject + target_observer in payload_a +
+    // subject_idx in payload_b). Slot 65 contiguous with the Phase 3
+    // observe slot (EffectObserveApplied=64).
+    EffectScryApplied        = 65,
+    // Wave 3 ToM Phase 3.5 — `reveal` one-to-many propagation. Caster
+    // broadcasts its beliefs about `subject` to all observers. The
+    // chronicle record carries (actor + target=subject + subject_idx in
+    // payload_a). Slot 66 contiguous with the scry slot (65).
+    EffectRevealApplied      = 66,
+    // Slots 67-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 

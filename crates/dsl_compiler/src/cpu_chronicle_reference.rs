@@ -535,6 +535,49 @@ pub fn apply_event_to_chronicle_record(
             rec[4] = target_observer as u32;
             Some(rec)
         }
+        // --- Scry = 34 → EventKindId::EffectScryApplied = 65.
+        // Wave 3 ToM Phase 3.5 cross-observer access verb. The GPU
+        // dispatcher writes:
+        //   slot 2 = caster_slot       (the OBSERVER reading C's eyes)
+        //   slot 3 = target_slot       (= subject_idx; the agent the
+        //                                belief is ABOUT)
+        //   slot 4 = target_observer   (= payload_a; u8 widened to u32
+        //                                — the agent slot whose beliefs
+        //                                caster reads. With `0` (self)
+        //                                this collapses to the observe
+        //                                shape — no behaviour difference)
+        //   slot 5 = subject_idx       (= payload_b; u32 — same as
+        //                                target_slot; redundant on the
+        //                                wire but kept for arm-symmetry
+        //                                with PlantBelief and downstream
+        //                                consumer convenience)
+        ApplyEvent::Scry { source: _, target: _, target_observer, subject_idx } => {
+            rec[0] = 65;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            rec[4] = target_observer as u32;
+            rec[5] = subject_idx;
+            Some(rec)
+        }
+        // --- Reveal = 35 → EventKindId::EffectRevealApplied = 66.
+        // Wave 3 ToM Phase 3.5 one-to-many propagation verb. The GPU
+        // dispatcher writes:
+        //   slot 2 = caster_slot       (the BROADCASTER)
+        //   slot 3 = target_slot       (= subject_idx; the agent the
+        //                                broadcast is ABOUT)
+        //   slot 4 = subject_idx       (= payload_a; u32 — same as
+        //                                target_slot; redundant on the
+        //                                wire but kept for arm-symmetry)
+        //   slot 5 = 0                 (unused — payload_b is 0; the
+        //                                fan-out target set is "all
+        //                                observers" at consume time)
+        ApplyEvent::Reveal { source: _, target: _, subject_idx } => {
+            rec[0] = 66;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            rec[4] = subject_idx;
+            Some(rec)
+        }
         // After the slice γ closer (Summon → kind 62), every
         // `ApplyEvent` variant has a chronicle counterpart — no
         // fallback `_ => None` arm needed. The closed-set match
@@ -1333,6 +1376,8 @@ mod tests {
                 31 => ApplyEvent::Reflect        { target: aid(2), duration_ticks: 50, fraction_q8: 64 },
                 32 => ApplyEvent::PlantBelief    { source: aid(1), target: aid(2), subject_idx: 7, fact_bit: 5 },
                 33 => ApplyEvent::Observe        { source: aid(1), target: aid(2), target_observer: 0 },
+                34 => ApplyEvent::Scry           { source: aid(1), target: aid(2), target_observer: 3, subject_idx: 4 },
+                35 => ApplyEvent::Reveal         { source: aid(1), target: aid(2), subject_idx: 4 },
                 _ => panic!("unexpected effect_kind in table"),
             }
         };

@@ -1075,6 +1075,26 @@ fn pack_effect(op: EffectOp) -> (u32, u32, u32) {
         // `target_slot` ring slots.
         EffectOp::Observe { target_observer } =>
             (33, target_observer as u32, 0),
+        // Wave 3 ToM Phase 3.5 — `scry` cross-observer access. payload_a
+        // = target_observer (u8 widened to u32 — agent slot whose belief
+        // row caster reads). payload_b = subject_idx (u32 — agent slot
+        // the belief is ABOUT). The downstream runtime consumer copies
+        // the 6 BeliefState columns from `[target_observer * N +
+        // subject_idx]` to `[caster * N + subject_idx]`. Caster is
+        // recorded by the dispatcher's standard `caster_slot` ring slot;
+        // `target_slot` carries `subject_idx` semantically (the cast's
+        // explicit `target` operand IS the subject for scry).
+        EffectOp::Scry { target_observer, subject_idx } =>
+            (34, target_observer as u32, subject_idx),
+        // Wave 3 ToM Phase 3.5 — `reveal` one-to-many propagation.
+        // payload_a = subject_idx (u32 — agent slot the broadcast is
+        // ABOUT). payload_b = 0 (no second payload — fan-out target set
+        // is "all observers" at consume time). Caster + subject are
+        // recorded as `caster_slot` / `target_slot` ring slots
+        // respectively (target_slot = subject_idx, mirroring scry's
+        // convention where the cast's `target` operand IS the subject).
+        EffectOp::Reveal { subject_idx } =>
+            (35, subject_idx, 0),
     }
 }
 

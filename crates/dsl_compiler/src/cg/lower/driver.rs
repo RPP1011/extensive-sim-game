@@ -838,6 +838,122 @@ fn populate_namespace_registry(ctx: &mut LoweringCtx<'_>) {
                     .to_string(),
         },
     );
+    // Wave 3 ToM Phase 3.5 — 2-arg `agents.beliefs_<field>(observer,
+    // subject)` view-call lowering. The 6 BeliefState SoA columns
+    // (per-(observer, subject) cells indexed `observer_idx *
+    // agent_count + subject_idx`) are runtime-allocated by
+    // `tom_probe_runtime`. The DSL surface needs the call sites to
+    // typecheck + lower for kernel-side reads in scry/reveal consumer
+    // rules; the WGSL stubs return placeholder values today (the actual
+    // GPU-side cell-copy lives in the runtime CPU consumer until a
+    // future phase emits the WGSL kernel from the chronicle stream).
+    //
+    // Pairs with the `EffectOp::Scry` (kind=34) / `EffectOp::Reveal`
+    // (kind=35) dispatcher arms — without these registry entries, a
+    // future `agents.beliefs_pos(observer, subject)` call site would
+    // fall through to `UnsupportedNamespaceCall`. Today the entries are
+    // stubs-only (each WGSL function returns 0 / sentinel); the runtime
+    // CPU consumer (`tom_probe_runtime::scry` / `::reveal`) does the
+    // actual cell-copy work outside the WGSL kernel boundary.
+    //
+    // Field column inventory (mirrors `tom_probe_runtime::TomProbeState`):
+    //   * beliefs_pos              — vec3 padded to vec4 (returns Vec3)
+    //   * beliefs_creature_type    — u8 widened to u32
+    //   * beliefs_last_seen_tick   — u32
+    //   * beliefs_confidence       — u8 widened to u32 (q8)
+    //   * beliefs_suspicion        — u8 widened to u32 (q8)
+    //   * beliefs_flags            — u32 (Phase 1 bit-OR slot)
+    //
+    // Setters (`agents.set_beliefs_<field>(observer, subject, value)`)
+    // mirror the readers with a `_value` arg; WGSL stubs are no-ops
+    // (the runtime CPU consumer handles the actual SoA write).
+    for (method, ret_ty, stub_body) in [
+        (
+            "beliefs_pos",
+            CgTy::Vec3F32,
+            "fn agents_beliefs_pos(observer: u32, subject: u32) -> vec3<f32> { return vec3<f32>(0.0, 0.0, 0.0); }",
+        ),
+        (
+            "beliefs_creature_type",
+            CgTy::U32,
+            "fn agents_beliefs_creature_type(observer: u32, subject: u32) -> u32 { return 0u; }",
+        ),
+        (
+            "beliefs_last_seen_tick",
+            CgTy::U32,
+            "fn agents_beliefs_last_seen_tick(observer: u32, subject: u32) -> u32 { return 0u; }",
+        ),
+        (
+            "beliefs_confidence",
+            CgTy::U32,
+            "fn agents_beliefs_confidence(observer: u32, subject: u32) -> u32 { return 0u; }",
+        ),
+        (
+            "beliefs_suspicion",
+            CgTy::U32,
+            "fn agents_beliefs_suspicion(observer: u32, subject: u32) -> u32 { return 0u; }",
+        ),
+        (
+            "beliefs_flags",
+            CgTy::U32,
+            "fn agents_beliefs_flags(observer: u32, subject: u32) -> u32 { return 0u; }",
+        ),
+    ] {
+        agents.methods.insert(
+            method.to_string(),
+            MethodDef {
+                return_ty: ret_ty,
+                arg_tys: vec![CgTy::AgentId, CgTy::AgentId],
+                wgsl_fn_name: format!("agents_{}", method),
+                wgsl_stub: stub_body.to_string(),
+            },
+        );
+    }
+    // Setters — 3-arg form `agents.set_beliefs_<field>(observer, subject, value)`.
+    // Return Bool as a placeholder ack (matching `auctions.place_bid`'s
+    // pattern); WGSL stubs are no-ops returning `true`.
+    for (method, value_ty, stub_body) in [
+        (
+            "set_beliefs_pos",
+            CgTy::Vec3F32,
+            "fn agents_set_beliefs_pos(observer: u32, subject: u32, v: vec3<f32>) -> bool { return true; }",
+        ),
+        (
+            "set_beliefs_creature_type",
+            CgTy::U32,
+            "fn agents_set_beliefs_creature_type(observer: u32, subject: u32, v: u32) -> bool { return true; }",
+        ),
+        (
+            "set_beliefs_last_seen_tick",
+            CgTy::U32,
+            "fn agents_set_beliefs_last_seen_tick(observer: u32, subject: u32, v: u32) -> bool { return true; }",
+        ),
+        (
+            "set_beliefs_confidence",
+            CgTy::U32,
+            "fn agents_set_beliefs_confidence(observer: u32, subject: u32, v: u32) -> bool { return true; }",
+        ),
+        (
+            "set_beliefs_suspicion",
+            CgTy::U32,
+            "fn agents_set_beliefs_suspicion(observer: u32, subject: u32, v: u32) -> bool { return true; }",
+        ),
+        (
+            "set_beliefs_flags",
+            CgTy::U32,
+            "fn agents_set_beliefs_flags(observer: u32, subject: u32, v: u32) -> bool { return true; }",
+        ),
+    ] {
+        agents.methods.insert(
+            method.to_string(),
+            MethodDef {
+                return_ty: CgTy::Bool,
+                arg_tys: vec![CgTy::AgentId, CgTy::AgentId, value_ty],
+                wgsl_fn_name: format!("agents_{}", method),
+                wgsl_stub: stub_body.to_string(),
+            },
+        );
+    }
     registry.namespaces.insert(NamespaceId::Agents, agents);
 
     // -- query namespace --
@@ -3393,5 +3509,77 @@ mod tests {
         // Flag must be restored to its prior value (false) even on the
         // error path — the same save/restore contract as lower_mask.
         assert!(!ctx.target_local, "target_local must be restored even on error");
+    }
+
+    /// Wave 3 ToM Phase 3.5 — `populate_namespace_registry` exposes the
+    /// 6 read methods + 6 setter methods for `agents.beliefs_<field>(o,
+    /// s)` 2-arg view-call lowering. This is the registry surface that
+    /// makes scry/reveal consumer rules typecheck and lower; the WGSL
+    /// stubs are placeholders today (the actual SoA cell access lives
+    /// in the runtime CPU consumer until a future phase emits a WGSL
+    /// kernel from the chronicle stream).
+    ///
+    /// A regression that drops one of the 12 entries would surface in
+    /// the .sim authors' first call site as `UnsupportedNamespaceCall`;
+    /// pinning the count + the per-method shape here makes the gap
+    /// loud at the registry boundary.
+    #[test]
+    fn populate_namespace_registry_includes_2arg_beliefs_methods() {
+        use crate::cg::expr::CgTy;
+
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        populate_namespace_registry(&mut ctx);
+
+        let agents = ctx
+            .namespace_registry
+            .namespaces
+            .get(&NamespaceId::Agents)
+            .expect("agents namespace registered");
+
+        // 6 readers — each takes (observer, subject) AgentIds.
+        for (method, expected_ret_ty) in &[
+            ("beliefs_pos", CgTy::Vec3F32),
+            ("beliefs_creature_type", CgTy::U32),
+            ("beliefs_last_seen_tick", CgTy::U32),
+            ("beliefs_confidence", CgTy::U32),
+            ("beliefs_suspicion", CgTy::U32),
+            ("beliefs_flags", CgTy::U32),
+        ] {
+            let def = agents
+                .methods
+                .get(*method)
+                .unwrap_or_else(|| panic!("agents.{method} should be registered"));
+            assert_eq!(def.return_ty, *expected_ret_ty, "agents.{method} return type");
+            assert_eq!(
+                def.arg_tys, vec![CgTy::AgentId, CgTy::AgentId],
+                "agents.{method} should take (observer, subject) AgentIds",
+            );
+            assert_eq!(
+                def.wgsl_fn_name, format!("agents_{}", method),
+                "agents.{method} WGSL fn name",
+            );
+        }
+
+        // 6 setters — each takes (observer, subject, value).
+        for (method, expected_value_ty) in &[
+            ("set_beliefs_pos", CgTy::Vec3F32),
+            ("set_beliefs_creature_type", CgTy::U32),
+            ("set_beliefs_last_seen_tick", CgTy::U32),
+            ("set_beliefs_confidence", CgTy::U32),
+            ("set_beliefs_suspicion", CgTy::U32),
+            ("set_beliefs_flags", CgTy::U32),
+        ] {
+            let def = agents
+                .methods
+                .get(*method)
+                .unwrap_or_else(|| panic!("agents.{method} should be registered"));
+            assert_eq!(def.return_ty, CgTy::Bool, "agents.{method} return type — bool ack");
+            assert_eq!(
+                def.arg_tys,
+                vec![CgTy::AgentId, CgTy::AgentId, *expected_value_ty],
+                "agents.{method} should take (observer, subject, value)",
+            );
+        }
     }
 }

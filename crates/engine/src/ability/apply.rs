@@ -194,6 +194,22 @@ pub enum ApplyEvent {
     /// The `target_observer` byte is a future-extension hook (only the
     /// self-observe shape `0` is wired today).
     Observe        { source: AgentId, target: AgentId, target_observer: u8 },
+    /// Wave 3 ToM Phase 3.5 — `scry` cross-observer access verb. Caster
+    /// reads `target_observer`'s beliefs about `subject_idx` and writes
+    /// them into the caster's own beliefs about `subject_idx`. The
+    /// downstream consumer copies all 6 BeliefState columns from
+    /// `[target_observer * N + subject_idx]` to
+    /// `[caster * N + subject_idx]`. Pairs with
+    /// `EventKindId::EffectScryApplied = 65` on the chronicle side.
+    Scry           { source: AgentId, target: AgentId, target_observer: u8, subject_idx: u32 },
+    /// Wave 3 ToM Phase 3.5 — `reveal` one-to-many propagation verb.
+    /// Caster broadcasts its beliefs about `subject_idx` to every
+    /// observer slot. The downstream consumer iterates the agent SoA and
+    /// copies the 6 BeliefState columns from `[caster * N +
+    /// subject_idx]` to `[observer * N + subject_idx]` for every
+    /// observer. Pairs with `EventKindId::EffectRevealApplied = 66` on
+    /// the chronicle side.
+    Reveal         { source: AgentId, target: AgentId, subject_idx: u32 },
 }
 
 /// Inline budget — most abilities have ≤4 effects (P4 says
@@ -441,6 +457,20 @@ fn push_effect_event(
         // mutation lives in the cascade consumer.
         EffectOp::Observe { target_observer } =>
             out.push(ApplyEvent::Observe { source: caster, target, target_observer }),
+        // Wave 3 ToM Phase 3.5 — `scry` cross-observer access. The
+        // dispatcher records the cast as a chronicle event (kind=65); the
+        // actual 6-column copy from `[target_observer * N + subject_idx]`
+        // to `[caster * N + subject_idx]` lives in a downstream runtime
+        // consumer (parallel to the Observe consumer's writeback).
+        EffectOp::Scry { target_observer, subject_idx } =>
+            out.push(ApplyEvent::Scry { source: caster, target, target_observer, subject_idx }),
+        // Wave 3 ToM Phase 3.5 — `reveal` one-to-many propagation. The
+        // dispatcher records the cast as a chronicle event (kind=66); the
+        // actual fan-out copy (caster's beliefs about `subject_idx` →
+        // every observer's beliefs about `subject_idx`) lives in a
+        // downstream runtime consumer.
+        EffectOp::Reveal { subject_idx } =>
+            out.push(ApplyEvent::Reveal { source: caster, target, subject_idx }),
         // CastAbility is recursive (needs cascade-style
         // re-dispatch); deferred to slice δ. Skip for now.
         EffectOp::CastAbility { .. } => {}

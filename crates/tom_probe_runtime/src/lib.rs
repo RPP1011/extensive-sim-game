@@ -936,6 +936,231 @@ impl TomProbeState {
         self.beliefs_confidence_dirty = true;
     }
 
+    /// Wave 3 ToM Phase 3.5 — runtime-side scry consumer. Mirrors the
+    /// CHRONICLE consumer rule that a future `EffectScryApplied` PerEvent
+    /// handler would run on GPU: the caster (= `observer`) reads the
+    /// `target_observer`'s belief row about `subject` and writes the same
+    /// 6-column tuple into the caster's belief row about `subject`.
+    ///
+    ///   For each field `f` in {pos, type, tick, confidence, suspicion,
+    ///   flags}: `beliefs_f[observer * N + subject] =
+    ///                beliefs_f[target_observer * N + subject]`
+    ///
+    /// Distinct from `observe`: scry copies BELIEFS (a snapshot of
+    /// another observer's information state), whereas observe copies
+    /// GROUND TRUTH (the agent SoA at consume tick). When
+    /// `target_observer == observer` the call collapses semantically to
+    /// "no-op" — caster's belief about subject equals caster's belief
+    /// about subject. The 6-column copy still runs for shape uniformity
+    /// (cheaper than a per-cell guard).
+    ///
+    /// Same column-rewrite trick as `observe` for the u8 columns: u8
+    /// cells share a 4-byte stride for std430, so a 1-byte partial write
+    /// would clobber 3 neighbouring cells. We pull each u8 column into
+    /// host memory, patch the target byte, and write the entire column
+    /// back. Cost is O(N²) per scry call but agent_count is small in
+    /// fixtures (≤ 16 typically).
+    pub fn scry(&mut self, observer: u32, target_observer: u32, subject: u32) {
+        assert!(
+            observer < self.agent_count,
+            "scry: observer {observer} >= agent_count {}",
+            self.agent_count,
+        );
+        assert!(
+            target_observer < self.agent_count,
+            "scry: target_observer {target_observer} >= agent_count {}",
+            self.agent_count,
+        );
+        assert!(
+            subject < self.agent_count,
+            "scry: subject {subject} >= agent_count {}",
+            self.agent_count,
+        );
+
+        let n = self.agent_count as usize;
+        let src_cell = (target_observer as usize) * n + (subject as usize);
+        let dst_cell = (observer as usize) * n + (subject as usize);
+
+        // Read the 6 source-cell values BEFORE touching any column write
+        // — readbacks dirty-cache so reading the cache after a write
+        // would see the patched value if the writes were interleaved.
+        let src_pos = self.beliefs_pos()[src_cell];
+        let src_type = self.beliefs_type()[src_cell];
+        let src_tick = self.beliefs_tick()[src_cell];
+        let src_confidence = self.beliefs_confidence()[src_cell];
+        let src_suspicion = self.beliefs_suspicion()[src_cell];
+        let src_flags = self.beliefs_flags()[src_cell];
+
+        // Write each column at the (observer, subject) cell.
+
+        // last_known_pos: 16 B per cell.
+        self.gpu.queue.write_buffer(
+            &self.beliefs_pos_primary,
+            (dst_cell as u64) * 16,
+            bytemuck::bytes_of(&src_pos),
+        );
+
+        // last_seen_tick: 4 B per cell.
+        self.gpu.queue.write_buffer(
+            &self.beliefs_tick_primary,
+            (dst_cell as u64) * 4,
+            bytemuck::bytes_of(&src_tick),
+        );
+
+        // flags: 4 B per cell.
+        self.gpu.queue.write_buffer(
+            &self.beliefs_flags_primary,
+            (dst_cell as u64) * 4,
+            bytemuck::bytes_of(&src_flags),
+        );
+
+        // u8 columns — column-rewrite trick (see `observe`).
+        let mut type_bytes = self.beliefs_type().to_vec();
+        type_bytes[dst_cell] = src_type;
+        let padded_size = ((type_bytes.len() + 15) / 16 * 16).max(16);
+        let mut padded = vec![0u8; padded_size];
+        padded[..type_bytes.len()].copy_from_slice(&type_bytes);
+        self.gpu
+            .queue
+            .write_buffer(&self.beliefs_type_primary, 0, &padded);
+
+        let mut conf_bytes = self.beliefs_confidence().to_vec();
+        conf_bytes[dst_cell] = src_confidence;
+        let mut padded = vec![0u8; padded_size];
+        padded[..conf_bytes.len()].copy_from_slice(&conf_bytes);
+        self.gpu
+            .queue
+            .write_buffer(&self.beliefs_confidence_primary, 0, &padded);
+
+        let mut susp_bytes = self.beliefs_suspicion().to_vec();
+        susp_bytes[dst_cell] = src_suspicion;
+        let mut padded = vec![0u8; padded_size];
+        padded[..susp_bytes.len()].copy_from_slice(&susp_bytes);
+        self.gpu
+            .queue
+            .write_buffer(&self.beliefs_suspicion_primary, 0, &padded);
+
+        // Mark every column dirty.
+        self.beliefs_pos_dirty = true;
+        self.beliefs_type_dirty = true;
+        self.beliefs_tick_dirty = true;
+        self.beliefs_confidence_dirty = true;
+        self.beliefs_suspicion_dirty = true;
+        self.beliefs_flags_dirty = true;
+    }
+
+    /// Wave 3 ToM Phase 3.5 — runtime-side reveal consumer. One-to-many
+    /// propagation: `caster` broadcasts its beliefs about `subject` to
+    /// every observer slot. Mirrors the CHRONICLE consumer rule that a
+    /// future `EffectRevealApplied` PerEvent handler would run on GPU:
+    /// for each observer in 0..agent_count, copy the 6-column tuple
+    /// from `[caster * N + subject]` to `[observer * N + subject]`.
+    ///
+    ///   For each observer in 0..N, for each field `f`:
+    ///   `beliefs_f[observer * N + subject] = beliefs_f[caster * N + subject]`
+    ///
+    /// The caster's own slot is included in the loop (idempotent — copies
+    /// to itself). Phase 3.5 ships the "all observers" fan-out shape;
+    /// range-gated reveal (`reveal subject in <volume>`) lands when
+    /// spatial query infrastructure for "observers within radius of
+    /// caster" matures.
+    ///
+    /// Implementation detail: rather than issuing N partial buffer
+    /// writes for the wide columns (pos/tick/flags), we build the full
+    /// updated columns in host memory (each column is `N * N` cells)
+    /// and write each column back in a single buffer write. This is
+    /// O(N²) per call but is the same cost as the existing observe
+    /// consumer's u8-column rewrite shape — agent_count is small in
+    /// fixtures (≤ 16 typically).
+    pub fn reveal(&mut self, caster: u32, subject: u32) {
+        assert!(
+            caster < self.agent_count,
+            "reveal: caster {caster} >= agent_count {}",
+            self.agent_count,
+        );
+        assert!(
+            subject < self.agent_count,
+            "reveal: subject {subject} >= agent_count {}",
+            self.agent_count,
+        );
+
+        let n = self.agent_count as usize;
+        let src_cell = (caster as usize) * n + (subject as usize);
+
+        // Read the 6 source-cell values BEFORE touching any column.
+        let src_pos = self.beliefs_pos()[src_cell];
+        let src_type = self.beliefs_type()[src_cell];
+        let src_tick = self.beliefs_tick()[src_cell];
+        let src_confidence = self.beliefs_confidence()[src_cell];
+        let src_suspicion = self.beliefs_suspicion()[src_cell];
+        let src_flags = self.beliefs_flags()[src_cell];
+
+        // Pull each column wholesale, patch the per-observer cells, and
+        // write back in one shot.
+        let mut pos_col = self.beliefs_pos().to_vec();
+        let mut type_col = self.beliefs_type().to_vec();
+        let mut tick_col = self.beliefs_tick().to_vec();
+        let mut conf_col = self.beliefs_confidence().to_vec();
+        let mut susp_col = self.beliefs_suspicion().to_vec();
+        let mut flags_col = self.beliefs_flags().to_vec();
+
+        for observer in 0..n {
+            let dst_cell = observer * n + (subject as usize);
+            pos_col[dst_cell] = src_pos;
+            type_col[dst_cell] = src_type;
+            tick_col[dst_cell] = src_tick;
+            conf_col[dst_cell] = src_confidence;
+            susp_col[dst_cell] = src_suspicion;
+            flags_col[dst_cell] = src_flags;
+        }
+
+        // Write each column wholesale.
+        self.gpu.queue.write_buffer(
+            &self.beliefs_pos_primary,
+            0,
+            bytemuck::cast_slice(&pos_col),
+        );
+        self.gpu.queue.write_buffer(
+            &self.beliefs_tick_primary,
+            0,
+            bytemuck::cast_slice(&tick_col),
+        );
+        self.gpu.queue.write_buffer(
+            &self.beliefs_flags_primary,
+            0,
+            bytemuck::cast_slice(&flags_col),
+        );
+
+        // u8 columns: pad to 16-byte multiple before writing.
+        let cell_count = type_col.len();
+        let padded_size = ((cell_count + 15) / 16 * 16).max(16);
+
+        let mut padded = vec![0u8; padded_size];
+        padded[..cell_count].copy_from_slice(&type_col);
+        self.gpu
+            .queue
+            .write_buffer(&self.beliefs_type_primary, 0, &padded);
+
+        let mut padded = vec![0u8; padded_size];
+        padded[..cell_count].copy_from_slice(&conf_col);
+        self.gpu
+            .queue
+            .write_buffer(&self.beliefs_confidence_primary, 0, &padded);
+
+        let mut padded = vec![0u8; padded_size];
+        padded[..cell_count].copy_from_slice(&susp_col);
+        self.gpu
+            .queue
+            .write_buffer(&self.beliefs_suspicion_primary, 0, &padded);
+
+        self.beliefs_pos_dirty = true;
+        self.beliefs_type_dirty = true;
+        self.beliefs_tick_dirty = true;
+        self.beliefs_confidence_dirty = true;
+        self.beliefs_suspicion_dirty = true;
+        self.beliefs_flags_dirty = true;
+    }
+
     /// Wave 3 ToM Phase 3 — per-tick decay phase. Walks every
     /// (observer, target) cell and decrements `confidence` by exactly
     /// `decay_per_tick`, saturating at 0. Cells observed THIS tick
