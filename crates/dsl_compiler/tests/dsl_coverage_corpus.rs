@@ -317,6 +317,7 @@ fn effect_op_label(op: &EffectOp) -> &'static str {
         EffectOp::Suppress        { .. } => "Suppress",
         EffectOp::Reflect         { .. } => "Reflect",
         EffectOp::PlantBelief     { .. } => "PlantBelief",
+        EffectOp::Observe         { .. } => "Observe",
     }
 }
 

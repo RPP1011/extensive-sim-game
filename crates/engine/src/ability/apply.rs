@@ -185,6 +185,15 @@ pub enum ApplyEvent {
     /// side. The full Wave 3 multi-field BeliefState (creature_type
     /// / decay phase / disguise verbs / slander cascade) is deferred.
     PlantBelief    { source: AgentId, target: AgentId, subject_idx: u32, fact_bit: u8 },
+    /// Wave 3 ToM Phase 3 — `observe` self-observe-target verb. Caster
+    /// refreshes its own belief row about `target`: the consumer reads
+    /// target's CURRENT pos / creature_type from the agent SoA at
+    /// consume tick and writes into the BeliefState SoA's 6 columns at
+    /// `[caster_slot * agent_cap + target_slot]`. Pairs with
+    /// `EventKindId::EffectObserveApplied = 64` on the chronicle side.
+    /// The `target_observer` byte is a future-extension hook (only the
+    /// self-observe shape `0` is wired today).
+    Observe        { source: AgentId, target: AgentId, target_observer: u8 },
 }
 
 /// Inline budget — most abilities have ≤4 effects (P4 says
@@ -422,6 +431,16 @@ fn push_effect_event(
         // world-state mutation lives in the cascade consumer.
         EffectOp::PlantBelief { subject_idx, fact_bit } =>
             out.push(ApplyEvent::PlantBelief { source: caster, target, subject_idx, fact_bit }),
+        // Wave 3 ToM Phase 3 — `observe` self-observe-target verb. The
+        // dispatcher records the cast as a chronicle event (kind=64);
+        // the actual writeback into the BeliefState SoA's 6 columns
+        // happens in a downstream runtime consumer that reads target's
+        // current pos / creature_type from the agent SoA at consume
+        // tick. Same separation of concerns as PlantBelief, where
+        // ApplyEvent emission is the cast record and the world-state
+        // mutation lives in the cascade consumer.
+        EffectOp::Observe { target_observer } =>
+            out.push(ApplyEvent::Observe { source: caster, target, target_observer }),
         // CastAbility is recursive (needs cascade-style
         // re-dispatch); deferred to slice δ. Skip for now.
         EffectOp::CastAbility { .. } => {}

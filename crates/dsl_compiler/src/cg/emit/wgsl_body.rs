@@ -3305,6 +3305,20 @@ pub(crate) const EFFECT_KIND_TO_EVENT_KIND_ID: &[(u32, u32)] = &[
     // apply_ability dispatcher's BGL stable (no new pair_map binding)
     // and routes the bit-fold through the standard view-fold pipeline.
     (32, 63), // EffectOp::PlantBelief → EventKindId::EffectPlantBeliefApplied
+    // Wave 3 ToM Phase 3 — `observe` self-observe-target verb (kind 33 →
+    // ID 64). Caster refreshes its own belief row about target. The
+    // packed effect-kind ordinal (Observe=33) comes from `pack_effect`
+    // in `crates/engine/src/ability/packed.rs`; the dispatcher arm
+    // body for this in `emit_chronicle_arm_chain` (below) matches via
+    // `kind == 33u`. 4-payload-word chronicle shape (caster + target +
+    // tick + target_observer u8 in payload_a). The downstream
+    // BeliefState SoA writeback (reading target's pos / creature_type
+    // from agent SoA, writing into the 6 columns at
+    // `[caster * agent_cap + target]`) lives in a runtime consumer
+    // (`tom_probe_runtime` Phase 3) — not on the WGSL fold path. The
+    // dispatcher only writes the chronicle record; this keeps the
+    // apply_ability dispatcher's BGL stable (no new SoA bindings).
+    (33, 64), // EffectOp::Observe → EventKindId::EffectObserveApplied
 ];
 
 /// Look up the runtime `EventKindId` for an `EffectOp` discriminant.
@@ -3422,6 +3436,8 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Summon=24");
     let plant_belief_event_id = event_kind_id_for_effect_kind(32)
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain PlantBelief=32");
+    let observe_event_id = event_kind_id_for_effect_kind(33)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Observe=33");
 
     let i4  = indent;                   // arm `if`/`else if` lines
     let i8  = format!("{i4}    ");      // body of arm
@@ -4090,6 +4106,29 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // Observe = 33 → 64 (Wave 3 ToM Phase 3 self-observe-target verb)
+    s.push_str(&format!("{i4}}} else if (kind == 33u) {{\n"));
+    s.push_str(&format!("{i8}// Observe = 33 → EventKindId::EffectObserveApplied = 64\n"));
+    s.push_str(&format!("{i8}// payload_a = target_observer (u8 widened to u32 — future-extension\n"));
+    s.push_str(&format!("{i8}// hook for non-self observe shapes; today only `0` (self) is wired).\n"));
+    s.push_str(&format!("{i8}// payload_b = 0 (unused — the consumer reads target's CURRENT\n"));
+    s.push_str(&format!("{i8}// pos / creature_type from the agent SoA at consume tick rather\n"));
+    s.push_str(&format!("{i8}// than carrying them on the chronicle record). The actual\n"));
+    s.push_str(&format!("{i8}// writeback into the BeliefState SoA's 6 columns at\n"));
+    s.push_str(&format!("{i8}// `[caster * agent_cap + target]` indexing happens in a\n"));
+    s.push_str(&format!("{i8}// downstream runtime consumer (`tom_probe_runtime` Phase 3).\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectObserveApplied (caster_slot + target_slot + target_observer)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {observe_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
     s.push_str(&format!("{i4}}}\n"));
@@ -6629,6 +6668,8 @@ mod tests {
             (31, "Reflect"),
             // Wave 3 ToM Phase 1 — `plant_belief` bit-flag primitive.
             (32, "PlantBelief"),
+            // Wave 3 ToM Phase 3 — `observe` self-observe-target verb.
+            (33, "Observe"),
         ] {
             let kind_token = if *kind == 0 {
                 format!("if (kind == {kind}u)")
@@ -7212,7 +7253,8 @@ mod tests {
                 26 => EffectOp::PlaceVoxel { kind_hash: 0xFACEFEED },
                 31 => EffectOp::Reflect    { duration_ticks: 50, fraction_q8: 64 },
                 32 => EffectOp::PlantBelief { subject_idx: 7, fact_bit: 5 },
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32"),
+                33 => EffectOp::Observe     { target_observer: 0 },
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33"),
             }
         };
 
@@ -7252,7 +7294,8 @@ mod tests {
                 26 => EngineEventKindId::EffectPlaceVoxelApplied     as u32,
                 31 => EngineEventKindId::EffectReflectApplied        as u32,
                 32 => EngineEventKindId::EffectPlantBeliefApplied     as u32,
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32"),
+                33 => EngineEventKindId::EffectObserveApplied         as u32,
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33"),
             }
         };
 
@@ -7361,14 +7404,18 @@ mod tests {
         // dispatcher writes EffectPlantBeliefApplied=63 records that
         // downstream `view ... -> u32` consumers fold into pair_map
         // cells via `self |= b`, same shape as `tom_probe.sim::beliefs`).
+        // + Observe (Wave 3 ToM Phase 3 — self-observe-target verb;
+        // dispatcher writes EffectObserveApplied=64 records that a
+        // downstream runtime consumer reads to refresh the BeliefState
+        // SoA's 6 columns from the agent SoA at consume tick).
         // If this number changes, either the engine grew a new
         // `EffectXxxApplied` event (in which case the map gets a new
         // entry) or a variant lost its chronicle counterpart (in which
         // case the map drops an entry). Pin the count so the gap between
         // source-of-truths is loud.
         assert_eq!(
-            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 32,
-            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 32 \
+            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 33,
+            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 33 \
              chronicle-bearing variants today; if you added or removed an \
              entry, update this assertion (and the slice γ wire-up that \
              consumes the new entry)"

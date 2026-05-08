@@ -271,7 +271,18 @@ pub enum EventKindId {
     // BeliefState (creature_type / decay / disguise / slander) is
     // deferred. Slot 63 contiguous with the slice γ closer (Summon=62).
     EffectPlantBeliefApplied = 63,
-    // Slots 64-127 reserved for replayable event variants added in later tasks.
+    // Wave 3 ToM Phase 3 — `observe` self-observe-target verb. Caster
+    // refreshes its own belief row about `target`: the chronicle
+    // record carries actor + target + tick + target_observer (= u8
+    // future-extension hook stored as payload_a). The consumer reads
+    // target's current pos / creature_type from the agent SoA at
+    // consume tick and writes into the BeliefState SoA's 6 columns at
+    // `[actor * agent_cap + target]` indexing. 4-payload-word
+    // chronicle record (slots 0..=4 used; slot 4 = target_observer).
+    // Slot 64 contiguous with the Wave 3 Phase 1 plant_belief slot
+    // (EffectPlantBeliefApplied=63).
+    EffectObserveApplied     = 64,
+    // Slots 65-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 

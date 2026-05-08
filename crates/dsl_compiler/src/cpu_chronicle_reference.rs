@@ -514,6 +514,27 @@ pub fn apply_event_to_chronicle_record(
             rec[5] = 1u32 << (fact_bit as u32);
             Some(rec)
         }
+        // --- Observe = 33 → EventKindId::EffectObserveApplied = 64.
+        // Wave 3 ToM Phase 3 self-observe-target verb. The GPU
+        // dispatcher writes:
+        //   slot 2 = caster_slot      (the OBSERVER)
+        //   slot 3 = target_slot      (the OBSERVED)
+        //   slot 4 = target_observer  (= payload_a; u8 widened to u32 —
+        //                                future-extension hook for non-
+        //                                self observe shapes; today only
+        //                                `0` (self) is wired)
+        //   slot 5 = 0                (unused — payload_b is 0)
+        // The CPU oracle mirrors the same record shape: target_observer
+        // lands at slot 4, slot 5 is left zero. No payload words for
+        // pos / creature_type — the consumer reads them from the
+        // agent SoA at consume tick.
+        ApplyEvent::Observe { source: _, target: _, target_observer } => {
+            rec[0] = 64;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            rec[4] = target_observer as u32;
+            Some(rec)
+        }
         // After the slice γ closer (Summon → kind 62), every
         // `ApplyEvent` variant has a chronicle counterpart — no
         // fallback `_ => None` arm needed. The closed-set match
@@ -1311,6 +1332,7 @@ mod tests {
                 26 => ApplyEvent::PlaceVoxel     { source: aid(1), kind_hash: 0xFACEFEED },
                 31 => ApplyEvent::Reflect        { target: aid(2), duration_ticks: 50, fraction_q8: 64 },
                 32 => ApplyEvent::PlantBelief    { source: aid(1), target: aid(2), subject_idx: 7, fact_bit: 5 },
+                33 => ApplyEvent::Observe        { source: aid(1), target: aid(2), target_observer: 0 },
                 _ => panic!("unexpected effect_kind in table"),
             }
         };

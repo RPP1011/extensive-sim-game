@@ -76,6 +76,28 @@ pub struct TomProbeState {
     /// the producer rule each tick.
     agent_alive_buf: wgpu::Buffer,
 
+    // -- Agent SoA (Wave 3 ToM Phase 3) — addressed by the `observe`
+    // consumer to read target's CURRENT pos / creature_type at consume
+    // tick. These columns aren't read by any DSL kernel today (the
+    // existing Knower entity declares `pos: vec3, vel: vec3` but the
+    // .sim consumer doesn't bind them); they're allocated runtime-side
+    // so the observe round-trip pin can pre-seed target's state and
+    // verify the consumer copies it into the BeliefState SoA.
+    //
+    // `agent_pos`: vec4 f32 padded (vec3 padded to vec4 for std430 +
+    // future-proofing parity with the existing `beliefs_pos` column).
+    // `agent_creature_type`: u8 (one byte per slot). Both share the
+    // same `agent_count`-sized footprint.
+    agent_pos_buf: wgpu::Buffer,
+    agent_pos_staging: wgpu::Buffer,
+    agent_pos_cache: Vec<[f32; 4]>,
+    agent_pos_dirty: bool,
+
+    agent_creature_type_buf: wgpu::Buffer,
+    agent_creature_type_staging: wgpu::Buffer,
+    agent_creature_type_cache: Vec<u8>,
+    agent_creature_type_dirty: bool,
+
     // -- BeliefState SoA: `flags` column (Wave 3 ToM Phase 1 + Phase 2) --
     //
     // `pair_map`-keyed: `agent_cap × agent_cap × u32`. The fold body
@@ -197,6 +219,28 @@ impl TomProbeState {
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             });
 
+        // Wave 3 ToM Phase 3 agent SoA — `agent_pos` (vec4 padded) and
+        // `agent_creature_type` (u8). Allocated paired (primary +
+        // staging) so the observe consumer can read them off-line into
+        // host memory and write the result into the BeliefState SoA's
+        // 6 columns. Both start zero-filled; tests pre-seed via
+        // `seed_agent_pos` / `seed_agent_creature_type`.
+        let agent_pos_bytes = (agent_count as u64) * 16;
+        let (agent_pos_buf, agent_pos_staging) = alloc_belief_column_pair(
+            &gpu.device,
+            "tom_probe_runtime::agent_pos_primary",
+            "tom_probe_runtime::agent_pos_staging",
+            agent_pos_bytes,
+        );
+        let agent_type_bytes = (((agent_count as u64) + 15) / 16 * 16).max(16);
+        let (agent_creature_type_buf, agent_creature_type_staging) =
+            alloc_belief_column_pair(
+                &gpu.device,
+                "tom_probe_runtime::agent_creature_type_primary",
+                "tom_probe_runtime::agent_creature_type_staging",
+                agent_type_bytes,
+            );
+
         // -- BeliefState SoA columns --
         //
         // All 6 columns share the same `agent_count × agent_count`
@@ -299,6 +343,14 @@ impl TomProbeState {
         Self {
             gpu,
             agent_alive_buf,
+            agent_pos_buf,
+            agent_pos_staging,
+            agent_pos_cache: vec![[0.0f32; 4]; agent_count as usize],
+            agent_pos_dirty: false,
+            agent_creature_type_buf,
+            agent_creature_type_staging,
+            agent_creature_type_cache: vec![0u8; agent_count as usize],
+            agent_creature_type_dirty: false,
             beliefs_flags_primary,
             beliefs_flags_staging,
             beliefs_flags_cache: vec![0u32; cell_count as usize],
@@ -663,6 +715,305 @@ impl TomProbeState {
     /// pre-allocates seed vectors.
     pub fn cell_count(&self) -> u32 {
         self.agent_count * self.agent_count
+    }
+
+    // -- Wave 3 ToM Phase 3 agent SoA seeders + readers --
+    //
+    // The observe consumer reads target's CURRENT pos / creature_type
+    // from the agent SoA at consume tick. These are runtime-only
+    // helpers (the .sim consumer doesn't bind these columns today —
+    // the existing Knower entity declares `pos: vec3, vel: vec3` but
+    // no kernel reads them). The closed-loop `observe_round_trip_pin`
+    // pre-seeds target B's state via `seed_agent_pos` /
+    // `seed_agent_creature_type`, calls `observe(observer_a, target_b,
+    // tick)`, then asserts the BeliefState SoA's 6 columns at
+    // `[a * N + b]` reflect what was seeded.
+
+    /// Test-only: seed agent SoA `pos` column. Each cell is a
+    /// `[f32; 4]` (vec3 padded to vec4 for std430 alignment).
+    pub fn seed_agent_pos(&mut self, values: &[[f32; 4]]) {
+        let expected = self.agent_count as usize;
+        assert_eq!(
+            values.len(),
+            expected,
+            "seed_agent_pos expected {expected} agents, got {}",
+            values.len(),
+        );
+        self.gpu
+            .queue
+            .write_buffer(&self.agent_pos_buf, 0, bytemuck::cast_slice(values));
+        self.agent_pos_dirty = true;
+    }
+
+    /// Test-only: seed agent SoA `creature_type` column. Each cell is
+    /// a `u8` classification ordinal.
+    pub fn seed_agent_creature_type(&mut self, values: &[u8]) {
+        let expected = self.agent_count as usize;
+        assert_eq!(
+            values.len(),
+            expected,
+            "seed_agent_creature_type expected {expected} agents, got {}",
+            values.len(),
+        );
+        let padded_size = ((expected + 15) / 16 * 16).max(16);
+        let mut padded = vec![0u8; padded_size];
+        padded[..expected].copy_from_slice(values);
+        self.gpu
+            .queue
+            .write_buffer(&self.agent_creature_type_buf, 0, &padded);
+        self.agent_creature_type_dirty = true;
+    }
+
+    /// Read the agent SoA `pos` column back to host memory. The cache
+    /// is staged on first read and reused until any seeder dirties it.
+    pub fn agent_pos(&mut self) -> &[[f32; 4]] {
+        if self.agent_pos_dirty {
+            let bytes = (self.agent_pos_cache.len() as u64) * 16;
+            let mut encoder = self.gpu.device.create_command_encoder(
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("tom_probe_runtime::agent_pos::readback"),
+                },
+            );
+            encoder.copy_buffer_to_buffer(
+                &self.agent_pos_buf,
+                0,
+                &self.agent_pos_staging,
+                0,
+                bytes,
+            );
+            self.gpu.queue.submit(Some(encoder.finish()));
+            let slice = self.agent_pos_staging.slice(..);
+            slice.map_async(wgpu::MapMode::Read, |_| {});
+            self.gpu.device.poll(wgpu::PollType::Wait).expect("poll");
+            let mapped = slice.get_mapped_range();
+            let raw: &[[f32; 4]] = bytemuck::cast_slice(&mapped);
+            self.agent_pos_cache.copy_from_slice(raw);
+            drop(mapped);
+            self.agent_pos_staging.unmap();
+            self.agent_pos_dirty = false;
+        }
+        &self.agent_pos_cache
+    }
+
+    /// Read the agent SoA `creature_type` column back to host memory.
+    pub fn agent_creature_type(&mut self) -> &[u8] {
+        if self.agent_creature_type_dirty {
+            let cell_count = self.agent_creature_type_cache.len();
+            let bytes = cell_count as u64;
+            let mut encoder = self.gpu.device.create_command_encoder(
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("tom_probe_runtime::agent_creature_type::readback"),
+                },
+            );
+            encoder.copy_buffer_to_buffer(
+                &self.agent_creature_type_buf,
+                0,
+                &self.agent_creature_type_staging,
+                0,
+                bytes,
+            );
+            self.gpu.queue.submit(Some(encoder.finish()));
+            let slice = self.agent_creature_type_staging.slice(..bytes);
+            slice.map_async(wgpu::MapMode::Read, |_| {});
+            self.gpu.device.poll(wgpu::PollType::Wait).expect("poll");
+            let mapped = slice.get_mapped_range();
+            self.agent_creature_type_cache
+                .copy_from_slice(&mapped[..cell_count]);
+            drop(mapped);
+            self.agent_creature_type_staging.unmap();
+            self.agent_creature_type_dirty = false;
+        }
+        &self.agent_creature_type_cache
+    }
+
+    /// Wave 3 ToM Phase 3 — runtime-side observe consumer. Mirrors the
+    /// CHRONICLE consumer rule that a future `EffectObserveApplied`
+    /// PerEvent handler would run on GPU: reads target's current pos
+    /// + creature_type from the agent SoA, and writes into ALL 6
+    /// BeliefState SoA columns at `[observer * agent_count + target]`:
+    ///
+    ///   - `last_known_pos[idx]` ← target's current pos
+    ///   - `last_known_creature_type[idx]` ← target's current type
+    ///   - `last_seen_tick[idx]` ← `current_tick`
+    ///   - `confidence[idx]` ← 255 (max — fresh observation)
+    ///   - `flags[idx]` ← unchanged (Phase 1 bit-OR slot; observe
+    ///     doesn't set bits)
+    ///   - `suspicion[idx]` ← unchanged (Phase 4 deception verbs
+    ///     mutate this; observe leaves it alone)
+    ///
+    /// `observer` and `target` are 0-based agent slot indices into the
+    /// `agent_count`-sized SoA. The current sim tick (`self.tick`) is
+    /// stamped into `last_seen_tick` so subsequent decay_step() calls
+    /// can compute the `delta = world.tick - last_seen_tick` decay
+    /// driver.
+    ///
+    /// The DSL view-call lowering for kernel-side reads of
+    /// `agents.beliefs_<field>(observer, subject)` is deferred to
+    /// Phase 4 alongside the `scry` / `reveal` verbs that pair with
+    /// the deception verbs (disguise / decoy / erase_belief). Today
+    /// the runtime hand-rolls the consumer logic so the closed-loop
+    /// pin lands without expanding the DSL surface.
+    pub fn observe(&mut self, observer: u32, target: u32) {
+        assert!(
+            observer < self.agent_count,
+            "observe: observer {observer} >= agent_count {}",
+            self.agent_count,
+        );
+        assert!(
+            target < self.agent_count,
+            "observe: target {target} >= agent_count {}",
+            self.agent_count,
+        );
+        // Read target's current pos / creature_type from the agent SoA
+        // (CPU-side staging readback). `agent_pos()` /
+        // `agent_creature_type()` are dirty-cached; the first call
+        // each tick pays the staging copy, subsequent calls reuse the
+        // cache.
+        let target_pos = self.agent_pos()[target as usize];
+        let target_type = self.agent_creature_type()[target as usize];
+
+        let n = self.agent_count as usize;
+        let cell = (observer as usize) * n + (target as usize);
+        let cell_offset = cell as u64;
+        let tick_u32 = self.tick as u32;
+
+        // Write each column at the (observer, target) cell. Each write
+        // is a 1-cell partial buffer write (queue.write_buffer accepts
+        // any byte-aligned offset). The writes go through the GPU
+        // queue (stamped at submit time); the readback accessors mark
+        // the columns dirty so subsequent reads see the new bytes.
+
+        // last_known_pos: 16 B per cell.
+        self.gpu.queue.write_buffer(
+            &self.beliefs_pos_primary,
+            cell_offset * 16,
+            bytemuck::bytes_of(&target_pos),
+        );
+        // last_known_creature_type: 1 B per cell. wgpu requires the
+        // write size to be a multiple of 4, so we widen to a u32 word
+        // and write 4 bytes — but only if the write doesn't span a
+        // cell boundary. With u8 cells packed contiguously, writing 1
+        // byte at offset N would clobber 3 neighbouring cells. So we
+        // staging-read the 4-byte aligned word, patch the target byte,
+        // and write the whole word back.
+        //
+        // Simpler: pre-fetch the entire u8 column (already cached in
+        // `beliefs_type_cache` if dirty), patch the byte, and write
+        // back the entire column. This is O(N²) per observe call but
+        // the agent_count is small in fixtures (≤ 16 typically) — the
+        // round-trip pin uses N=4, so total is 16 bytes per call.
+        let mut type_bytes = self.beliefs_type().to_vec();
+        type_bytes[cell] = target_type;
+        let padded_size = ((type_bytes.len() + 15) / 16 * 16).max(16);
+        let mut padded = vec![0u8; padded_size];
+        padded[..type_bytes.len()].copy_from_slice(&type_bytes);
+        self.gpu
+            .queue
+            .write_buffer(&self.beliefs_type_primary, 0, &padded);
+
+        // last_seen_tick: 4 B per cell.
+        self.gpu.queue.write_buffer(
+            &self.beliefs_tick_primary,
+            cell_offset * 4,
+            bytemuck::bytes_of(&tick_u32),
+        );
+        // confidence: 1 B per cell — same column-rewrite trick as
+        // creature_type.
+        let mut conf_bytes = self.beliefs_confidence().to_vec();
+        conf_bytes[cell] = 255u8;
+        let padded_size = ((conf_bytes.len() + 15) / 16 * 16).max(16);
+        let mut padded = vec![0u8; padded_size];
+        padded[..conf_bytes.len()].copy_from_slice(&conf_bytes);
+        self.gpu
+            .queue
+            .write_buffer(&self.beliefs_confidence_primary, 0, &padded);
+
+        // Mark all touched columns dirty so the next readback restages
+        // the bytes.
+        self.beliefs_pos_dirty = true;
+        self.beliefs_type_dirty = true;
+        self.beliefs_tick_dirty = true;
+        self.beliefs_confidence_dirty = true;
+    }
+
+    /// Wave 3 ToM Phase 3 — per-tick decay phase. Walks every
+    /// (observer, target) cell and decrements `confidence` by exactly
+    /// `decay_per_tick`, saturating at 0. Cells observed THIS tick
+    /// (`last_seen_tick == current_tick`) skip — the observe consumer
+    /// already pegged confidence at 255 and a same-tick decay would
+    /// drop it back to 254 immediately.
+    ///
+    /// **Decay slope rationale.** The spec sketch in the Phase 3 brief
+    /// initially read `new_confidence = saturating_sub(confidence,
+    /// (world.tick - last_seen_tick) * decay_per_tick)` — but applying
+    /// that formula every tick double-counts the delta (`tick 1` =
+    /// drop 1, `tick 2` = drop 2 more, `tick 3` = drop 3 more, etc.,
+    /// summing to N(N+1)/2 instead of the linear N). The companion
+    /// pin (`decay_pin.rs::decay_slope_is_one_per_tick`) explicitly
+    /// asserts `confidence == 155` after 100 ticks (= 255 - 100), so
+    /// the implementation must produce a *linear* slope. The simplest
+    /// linear formulation is "decrement by `decay_per_tick` per call,
+    /// skipping cells observed this tick" — which matches the
+    /// observable target slope without needing a baseline-confidence
+    /// register. A future refinement might gate decay on `delta` but
+    /// would still need to guarantee `slope == decay_per_tick * ticks`
+    /// for the pin to hold.
+    ///
+    /// Cells with `last_seen_tick == 0` AND `confidence == 0` are
+    /// no-ops (no observation has happened — both at default — and the
+    /// saturating arithmetic would no-op anyway; the guard is just an
+    /// efficiency + intent hint).
+    ///
+    /// Run AFTER `observe` calls for the same tick so a cell observed
+    /// at tick T (confidence=255, last_seen_tick=T) skips this round
+    /// via the same-tick guard. The runtime sequence in `step()` is:
+    /// observe injection (test API) → physics + fold kernels → decay
+    /// sweep.
+    ///
+    /// `decay_per_tick = 1` is the canonical rate — confidence drops
+    /// by 1 per tick of staleness. Pinned by `decay_pin.rs`.
+    pub fn decay_step(&mut self) {
+        let decay_per_tick: u8 = 1;
+        let current_tick = self.tick as u32;
+
+        // Pull both columns into host memory. The observe-side writes
+        // for THIS tick haven't necessarily been staged yet (the GPU
+        // queue is async), but `beliefs_*()` issues a fresh staging
+        // copy when dirty so we see the latest bytes.
+        let confidence = self.beliefs_confidence().to_vec();
+        let last_seen_tick = self.beliefs_tick().to_vec();
+
+        // Compute new confidence per cell.
+        let mut new_confidence = confidence.clone();
+        for cell in 0..(self.cell_count() as usize) {
+            let last = last_seen_tick[cell];
+            // Skip never-observed cells (intent + perf — the
+            // saturating arithmetic would no-op anyway since confidence
+            // is already 0).
+            if last == 0 && confidence[cell] == 0 {
+                continue;
+            }
+            // Skip cells observed THIS tick — observe just pegged
+            // confidence at 255 and the same-tick decay would drop it
+            // to 254 immediately (the observe consumer's writeback
+            // shouldn't be silently undone by the next decay sweep).
+            if last == current_tick {
+                continue;
+            }
+            new_confidence[cell] = confidence[cell].saturating_sub(decay_per_tick);
+        }
+
+        // Write back the new confidence column in a single buffer
+        // write. Same padding strategy as `seed_beliefs_confidence` /
+        // `observe`'s confidence patch (rounds up to 16-byte multiple).
+        let expected = self.cell_count() as usize;
+        let padded_size = ((expected + 15) / 16 * 16).max(16);
+        let mut padded = vec![0u8; padded_size];
+        padded[..expected].copy_from_slice(&new_confidence);
+        self.gpu
+            .queue
+            .write_buffer(&self.beliefs_confidence_primary, 0, &padded);
+        self.beliefs_confidence_dirty = true;
     }
 
     pub fn agent_count(&self) -> u32 {

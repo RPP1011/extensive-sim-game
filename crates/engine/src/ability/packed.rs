@@ -1064,6 +1064,17 @@ fn pack_effect(op: EffectOp) -> (u32, u32, u32) {
         // word for either).
         EffectOp::PlantBelief { subject_idx, fact_bit } =>
             (32, subject_idx, 1u32 << (fact_bit as u32)),
+        // Wave 3 ToM Phase 3 — `observe` self-observe-target verb.
+        // payload_a = target_observer (u8 widened to u32 — future-
+        // extension hook for non-self observe shapes; today only `0`
+        // (self) is wired). payload_b = 0 (no second payload word —
+        // the consumer reads target's current pos / creature_type
+        // from the agent SoA at consume tick rather than carrying
+        // them on the chronicle record). Caster + target are
+        // recorded by the dispatcher's standard `caster_slot` /
+        // `target_slot` ring slots.
+        EffectOp::Observe { target_observer } =>
+            (33, target_observer as u32, 0),
     }
 }
 
