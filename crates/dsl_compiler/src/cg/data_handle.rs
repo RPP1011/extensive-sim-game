@@ -218,6 +218,20 @@ pub enum AgentFieldId {
     DamageTakenMultQ8,
     DamageTakenMultExpiresAtTick,
 
+    // --- Hot SoA: Wave 3 ToM Phase 5 disguise SoA (per-agent) ---
+    /// `disguise_expires_at_tick` — until what world.tick the disguise
+    /// is active. Until that tick, observers see the agent's
+    /// `disguise_fake_type` instead of its true `creature_type`. The
+    /// observe consumer rule (`ApplyObserveBeliefUpdate` in
+    /// `tom_probe.sim`) gates on `t > world.tick` and substitutes
+    /// `disguise_fake_type` when active.
+    DisguiseExpiresAtTick,
+    /// `disguise_fake_type` — the (low-byte) creature_type the agent is
+    /// projecting while their disguise window is active. Stored as
+    /// `array<u32>` for parity with the `creature_type` column shape;
+    /// the consumer reads only the low byte.
+    DisguiseFakeType,
+
     // --- Cold SoA: identity and lifecycle ---
     CreatureType,
     SpawnTick,
@@ -256,7 +270,8 @@ impl AgentFieldId {
             Level | StunExpiresAtTick | SlowExpiresAtTick | CooldownNextReadyTick
             | RootExpiresAtTick | SilenceExpiresAtTick | FearExpiresAtTick
             | TauntExpiresAtTick | LifestealExpiresAtTick
-            | DamageTakenMultExpiresAtTick => {
+            | DamageTakenMultExpiresAtTick
+            | DisguiseExpiresAtTick | DisguiseFakeType => {
                 AgentFieldTy::U32
             }
 
@@ -334,6 +349,8 @@ impl AgentFieldId {
             LifestealExpiresAtTick => "lifesteal_expires_at_tick",
             DamageTakenMultQ8 => "damage_taken_mult_q8",
             DamageTakenMultExpiresAtTick => "damage_taken_mult_expires_at_tick",
+            DisguiseExpiresAtTick => "disguise_expires_at_tick",
+            DisguiseFakeType => "disguise_fake_type",
             CreatureType => "creature_type",
             SpawnTick => "spawn_tick",
             GridId => "grid_id",
@@ -397,6 +414,8 @@ impl AgentFieldId {
             LifestealExpiresAtTick,
             DamageTakenMultQ8,
             DamageTakenMultExpiresAtTick,
+            DisguiseExpiresAtTick,
+            DisguiseFakeType,
             CreatureType,
             SpawnTick,
             GridId,
@@ -469,6 +488,8 @@ impl AgentFieldId {
             "lifesteal_expires_at_tick" => LifestealExpiresAtTick,
             "damage_taken_mult_q8" => DamageTakenMultQ8,
             "damage_taken_mult_expires_at_tick" => DamageTakenMultExpiresAtTick,
+            "disguise_expires_at_tick" => DisguiseExpiresAtTick,
+            "disguise_fake_type" => DisguiseFakeType,
             "slow_expires_at_tick" => SlowExpiresAtTick,
             "slow_factor_q8" => SlowFactorQ8,
             "cooldown_next_ready_tick" => CooldownNextReadyTick,
@@ -1541,6 +1562,8 @@ mod tests {
             AgentFieldId::SlowExpiresAtTick,
             AgentFieldId::SlowFactorQ8,
             AgentFieldId::CooldownNextReadyTick,
+            AgentFieldId::DisguiseExpiresAtTick,
+            AgentFieldId::DisguiseFakeType,
             AgentFieldId::CreatureType,
             AgentFieldId::SpawnTick,
             AgentFieldId::GridId,
@@ -1602,6 +1625,8 @@ mod tests {
             AgentFieldId::SlowExpiresAtTick,
             AgentFieldId::SlowFactorQ8,
             AgentFieldId::CooldownNextReadyTick,
+            AgentFieldId::DisguiseExpiresAtTick,
+            AgentFieldId::DisguiseFakeType,
             AgentFieldId::CreatureType,
             AgentFieldId::SpawnTick,
             AgentFieldId::GridId,
@@ -1907,13 +1932,13 @@ mod tests {
                 "all_variants entry {v:?} did not round-trip through snake"
             );
         }
-        // A spot-check on count — the enum has 47 variants today (38
+        // A spot-check on count — the enum has 49 variants today (38
         // wolf-sim baseline + Vel added 2026-05-02 for the Boids fixture
         // + 4 control statuses Wave 2 piece 1 + 4 buff multipliers Wave
-        // 2 piece 4); if a new variant lands and `all_variants` isn't
-        // updated, this assertion fails before the round-trip loop
-        // above can.
-        assert_eq!(all.len(), 47);
+        // 2 piece 4 + 2 Disguise SoA columns Wave 3 ToM Phase 5); if a
+        // new variant lands and `all_variants` isn't updated, this
+        // assertion fails before the round-trip loop above can.
+        assert_eq!(all.len(), 49);
     }
 
     #[test]
