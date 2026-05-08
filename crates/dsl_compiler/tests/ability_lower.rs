@@ -381,6 +381,26 @@ fn target_ground_lowers_to_target_mode_kind_ground() {
     assert!(!prog.gate.hostile_only);
 }
 
+// ---------------------------------------------------------------------------
+// Wave 3 phase 3.5 — Theory-of-Mind `observe` verb. Single positional
+// `<id:u8>` arg (agent slot id) → `EffectOp::Observe { target_observer }`.
+// Mirrors `dash`'s single-positional shape; engine op kind = 33.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lowers_observe() {
+    let src = "ability Spy { target: self cooldown: 1s observe 7 }";
+    let file = parse_ability_file(src).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+    assert_eq!(prog.effects.len(), 1);
+    match prog.effects[0] {
+        EffectOp::Observe { target_observer } => {
+            assert_eq!(target_observer, 7, "observe id payload");
+        }
+        ref other => panic!("expected Observe; got {other:?}"),
+    }
+}
+
 #[test]
 fn unknown_verb_is_rejected() {
     // `whirl` isn't in the Wave 1.6 catalog. (Wave 1.0 parser captures

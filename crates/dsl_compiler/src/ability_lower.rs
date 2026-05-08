@@ -1658,6 +1658,18 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
                 selector: TargetSelector::Caster,
             })
         }
+        // Wave 3 phase 3.5 — Theory-of-Mind `observe` verb. Single
+        // positional `<id:u8>` arg (agent slot id) — the future-extension
+        // `target_observer` byte; today only `0` (self) is wired engine-
+        // side. Engine op is `EffectOp::Observe { target_observer: u8 }`
+        // (kind=33). Out-of-range ids clamp into 0..=255 to match the
+        // `summon`/`harvest` u8/u16 cast precedent rather than reject.
+        "observe" => {
+            let id_f = require_number_arg(stmt, 0)?;
+            require_arity(stmt, 1)?;
+            let target_observer = id_f.round().clamp(0.0, u8::MAX as f32) as u8;
+            Ok(EffectOp::Observe { target_observer })
+        }
         _ => Err(LowerError::UnknownEffectVerb {
             verb:       stmt.verb.clone(),
             span:       stmt.span,
