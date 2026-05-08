@@ -1,0 +1,20 @@
+// duel_25v25's Strike — single-target damage at the @spatial-radius
+// shape. No AOE in-shape (the .sim's binding check verifies
+// `per_effect_areas.is_empty() || per_effect_areas[0].is_none()`).
+//
+// Lowers to AbilityProgram { gate: { cooldown_ticks: 0, hostile_only: true },
+//                            area: SingleTarget { range: 1.5 },
+//                            effects: [EffectOp::Damage { amount: 5.0 }] }.
+//
+// `cooldown: 0` keeps the per-tick gate in the .sim's verb-style
+// `world.tick % 2 == 0` clause; the dispatcher does not consult
+// program.cooldown_ticks at the apply_ability arm today (matches
+// pre-port behavior exactly).
+
+ability Strike {
+    target: enemy
+    range: 1.5
+    cooldown: 0
+
+    damage 5
+}

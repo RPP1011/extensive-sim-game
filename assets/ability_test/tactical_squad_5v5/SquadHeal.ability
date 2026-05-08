@@ -1,0 +1,24 @@
+// tactical_squad_5v5's SquadHeal — single-target ally Heal(12.0). FIRST
+// chronicle-pipeline heal ability in this fixture (the existing `Heal`
+// verb still emits the legacy `Healed` event via the per-agent kernel;
+// SquadHeal is the new verb that writes kind=27 EffectHealApplied via
+// the apply_ability dispatcher).
+//
+// Lowers to AbilityProgram { gate: { cooldown_ticks: 0, hostile_only: false },
+//                            area: SingleTarget { range: 50.0 },
+//                            effects: [EffectOp::Heal { amount: 12.0 }] }.
+//
+// `target: ally` semantic (the .sim's body-side `target.level ==
+// self.level` enforces same-team predicate today; future predicate
+// dispatch will consult `hostile_only = false`).
+// `range: 50` is metadata-only at 5v5 scale (verb is per-pair scoring,
+// not spatial); signals "any target on the team" without affecting
+// dispatch.
+
+ability SquadHeal {
+    target: ally
+    range: 50
+    cooldown: 0
+
+    heal 12
+}

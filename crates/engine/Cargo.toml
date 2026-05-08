@@ -29,12 +29,6 @@ pollster = "0.4"
 bytemuck = { version = "1.16", features = ["derive"] }
 # DSL IR interpreter — optional; only pulled in under `interpreted-rules`.
 dsl_ast = { path = "../dsl_ast", optional = true }
-# TOML registry loader (`AbilityRegistry::from_toml`) — collapses
-# hand-rolled `binding_check.rs` boilerplate (e.g. duel_25v25 ~500 LOC
-# of `AbilityProgram::new_single_target` calls) to a 1-call file load.
-# `parse` feature only; we don't need the writer.
-toml  = { version = "0.8", default-features = false, features = ["parse"] }
-serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 trybuild = "1"

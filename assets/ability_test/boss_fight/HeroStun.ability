@@ -1,0 +1,16 @@
+// boss_fight's HeroStun — single-target Stun(15 ticks = 1.5s @ 100ms
+// tick). First non-Damage EffectOp in this fixture; proves the
+// apply_ability dispatcher emits kind=29 EffectStunApplied chronicle
+// records in the asymmetric 1-vs-N RPG combat shape.
+//
+// Lowers to AbilityProgram { gate: { cooldown_ticks: 0, hostile_only: true },
+//                            area: SingleTarget { range: 1.5 },
+//                            effects: [EffectOp::Stun { duration_ticks: 15 }] }.
+
+ability HeroStun {
+    target: enemy
+    range: 1.5
+    cooldown: 0
+
+    stun 1500ms
+}

@@ -326,8 +326,8 @@ impl TacticalSquad5v5State {
         // repeats the binding-check's program-build pass (cheap — two
         // hand-built programs) but keeps construction colocated with
         // the upload site, mirroring duel_25v25 / duel_abilities.
-        let registry = binding_check::build_tactical_squad_5v5_registry();
-        let packed = PackedAbilityRegistry::pack(&registry);
+        let built_registry = binding_check::build_tactical_squad_5v5_registry();
+        let packed = PackedAbilityRegistry::pack(&built_registry.registry);
         let registry_gpu = PackedAbilityRegistryGpu::upload(
             &packed, &gpu, "tactical_squad_5v5_runtime",
         );

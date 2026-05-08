@@ -714,10 +714,8 @@ dependencies = [
  "rayon",
  "rustc-hash 2.1.2",
  "safetensors",
- "serde",
  "sha2",
  "smallvec",
- "toml 0.8.23",
  "trybuild",
  "wgpu",
 ]

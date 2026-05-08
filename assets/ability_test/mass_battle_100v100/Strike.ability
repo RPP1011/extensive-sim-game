@@ -1,0 +1,19 @@
+// mass_battle_100v100's Strike — single-target damage at the Tank
+// damage tier (`config.combat.strike_damage = 30.0`).
+//
+// `range: 999` matches `config.combat.perception_radius = 999.0`
+// (mass_battle uses pair-field scoring, not spatial narrowing — the
+// argmax loops over all candidates regardless of distance). The
+// registry's `range` is metadata-only at the apply_ability arm today.
+//
+// Lowers to AbilityProgram { gate: { cooldown_ticks: 0, hostile_only: true },
+//                            area: SingleTarget { range: 999.0 },
+//                            effects: [EffectOp::Damage { amount: 30.0 }] }.
+
+ability Strike {
+    target: enemy
+    range: 999
+    cooldown: 0
+
+    damage 30
+}

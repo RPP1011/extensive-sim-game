@@ -1,0 +1,21 @@
+// boss_fight's BossStrike — single-target damage targeting Hero
+// creatures. `range: 1.5` matches the duel_25v25 convention; boss_fight
+// has no @spatial annotation today (the verb's score expression
+// iterates all candidates and argmaxes Hero matches), so range is
+// metadata-only at the apply_ability arm.
+//
+// Lowers to AbilityProgram { gate: { cooldown_ticks: 0, hostile_only: true },
+//                            area: SingleTarget { range: 1.5 },
+//                            effects: [EffectOp::Damage { amount: 50.0 }] }.
+//
+// `config.combat.boss_strike_damage = 50.0` — apply_ability's literal
+// API doesn't accept config refs today, so the .ability file mirrors
+// the .sim constant.
+
+ability BossStrike {
+    target: enemy
+    range: 1.5
+    cooldown: 0
+
+    damage 50
+}

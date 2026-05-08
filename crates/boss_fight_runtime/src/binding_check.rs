@@ -1,191 +1,89 @@
 //! boss_fight apply_ability binding check.
 //!
-//! Builds the runtime's four-program AbilityRegistry (BossStrike at
-//! AbilityId(1), HeroAttack at AbilityId(2), HeroStun at AbilityId(3),
-//! HeroHeal at AbilityId(4)) and asserts that the registered slot IDs
-//! match the `apply_ability 1 ...` / `apply_ability 2 ...` /
-//! `apply_ability 3 ...` / `apply_ability 4 ...` literals hardcoded in
-//! `assets/sim/boss_fight.sim`'s BossStrike + HeroAttack + HeroStun +
-//! HeroHeal verb bodies. If a slot drifts, the panic here surfaces at
-//! fixture-construction time rather than as silent wrong-ability
-//! dispatch.
+//! The registry source-of-truth lives in
+//! `assets/ability_test/boss_fight/*.ability`; this module re-parses
+//! the files via `dsl_ast::parse_ability_file` + lowers + builds the
+//! registry through `dsl_compiler::ability_registry::build_registry` at
+//! fixture-construction time, then asserts each program lowered to the
+//! constants the .sim verb bodies hand-mirror. The four programs land at:
 //!
-//! Mirrors `crates/duel_25v25_runtime/src/binding_check.rs` shape but
-//! with three hand-built programs so we can pin the asymmetric per-side
-//! damage values (Boss 50.0 vs. Hero 35.0) plus HeroStun's 15-tick
-//! Stun. Source of truth is the runtime's hand-built programs (no
-//! `.ability` files involved). Keeps the same naming conventions the
-//! larger duel_abilities binding-check uses so a future port that grows
-//! ability variety can crib the pattern straight from there.
+//!   - slot 1 / AbilityId(1) — BossStrike (Damage 50.0)
+//!   - slot 2 / AbilityId(2) — HeroAttack (Damage 35.0)
+//!   - slot 3 / AbilityId(3) — HeroStun (Stun 15 ticks)
+//!   - slot 4 / AbilityId(4) — HeroHeal (Heal 25.0)
+//!
+//! `apply_ability 1..=4` literals in `assets/sim/boss_fight.sim`'s
+//! BossStrike + HeroAttack + HeroStun + HeroHeal verb bodies pin each
+//! slot. If any drifts the panic here surfaces at fixture-construction
+//! time rather than as silent wrong-ability dispatch.
+//!
+//! Pre-port this module hand-rolled four `AbilityProgram` builders. The
+//! port to `.ability` files mirrors the canonical
+//! `duel_abilities_runtime` pattern (no engine-side TOML loader; the
+//! `.ability` DSL is the only authoring surface for ability programs).
 
-use engine::ability::program::{EffectOp, Gate};
-use engine::ability::{AbilityId, AbilityProgram, AbilityRegistry, AbilityRegistryBuilder};
+use std::path::PathBuf;
+
+use engine::ability::program::EffectOp;
+use engine::ability::AbilityId;
 
 /// BossStrike is registered first so it lands at AbilityId(1).
-/// The `apply_ability 1` literal in `assets/sim/boss_fight.sim::BossStrike`
-/// pins this slot. Drift trips
-/// `assert_ability_registry_matches_sim_constants` at startup.
 pub const BOSS_STRIKE_EXPECTED_ABILITY_ID: u32 = 1;
 
 /// HeroAttack is registered second so it lands at AbilityId(2).
-/// The `apply_ability 2` literal in `assets/sim/boss_fight.sim::HeroAttack`
-/// pins this slot.
 pub const HERO_ATTACK_EXPECTED_ABILITY_ID: u32 = 2;
 
 /// HeroStun control-status proof (boss_fight, 2026-05-07) — registered
-/// third so it lands at AbilityId(3). The `apply_ability 3` literal in
-/// `assets/sim/boss_fight.sim::HeroStun` pins this slot. First control-
-/// status (Stun) ability in boss_fight; proves the apply_ability
-/// dispatcher's per-effect-slot loop emits kind=29 EffectStunApplied
-/// chronicle records in the asymmetric 1-vs-N RPG combat shape.
+/// third so it lands at AbilityId(3).
 pub const HERO_STUN_EXPECTED_ABILITY_ID: u32 = 3;
 
 /// HeroHeal apply_ability proof (boss_fight, 2026-05-07) — registered
-/// fourth so it lands at AbilityId(4). The `apply_ability 4` literal in
-/// `assets/sim/boss_fight.sim::HeroHeal` pins this slot. First Heal
-/// EffectOp in this fixture (HeroHeal previously emitted Healed
-/// directly; this slice routes it through the chronicle pipeline so
-/// kind=27 EffectHealApplied lands in the per-agent hp SoA via the
-/// 3-way fused
-/// `physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle`
-/// kernel).
+/// fourth so it lands at AbilityId(4).
 pub const HERO_HEAL_EXPECTED_ABILITY_ID: u32 = 4;
 
-/// boss_fight's BossStrike registry-resident program.
+/// Read + parse + build the AbilityRegistry over every .ability file
+/// under `assets/ability_test/boss_fight/`. Shared by the binding check
+/// AND the GPU upload site in `lib.rs`.
 ///
-/// `cooldown_ticks: 0` keeps the per-tick gate in the .sim's verb-style
-/// `world.tick % 10 == 0` clause (the GPU dispatcher does not consult
-/// program.cooldown_ticks at the apply_ability arm today — same caveat
-/// as duel_abilities's chance gating). `hostile_only: true` matches the
-/// .sim's score expression that picks Hero-creature_type targets; the
-/// .sim's body-side `self.creature_type == Boss` mask gate is the
-/// load-bearing creature-type gate today (predicate dispatch can't
-/// reference creature_type).
-///
-/// `range: 1.5` matches the duel_25v25 convention — boss_fight has no
-/// @spatial annotation today (the verb's score expression iterates all
-/// candidates and argmaxes Hero matches), so range is metadata-only at
-/// the apply_ability arm. The single-target dispatcher routes one
-/// effect per (caster, target) pair regardless of distance.
-///
-/// Effect: one `Damage { amount: 50.0 }` — matches
-/// `config.combat.boss_strike_damage = 50.0` in the .sim. The chronicle
-/// dispatcher writes EffectDamageApplied records carrying this amount;
-/// `ApplyDamageFromChronicle` re-emits as `Damaged` so the existing
-/// `ApplyDamage` cascade keeps draining HP unchanged.
-fn build_boss_strike_program() -> AbilityProgram {
-    AbilityProgram::new_single_target(
-        /*range*/ 1.5,
-        Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
-        [EffectOp::Damage { amount: 50.0 }],
-    )
-}
+/// Slot order is the source-order names array literal here. Mirrors
+/// the canonical `duel_abilities_runtime::binding_check::
+/// build_duel_abilities_registry` pattern.
+pub fn build_boss_fight_registry() -> dsl_compiler::ability_registry::BuiltRegistry {
+    let manifest = std::env::var("CARGO_MANIFEST_DIR")
+        .expect("CARGO_MANIFEST_DIR set by cargo");
+    let corpus = PathBuf::from(manifest)
+        .join("..")
+        .join("..")
+        .join("assets")
+        .join("ability_test")
+        .join("boss_fight");
 
-/// boss_fight's HeroAttack registry-resident program.
-///
-/// Same shape as BossStrike but with the Hero-side damage value. The
-/// .sim's body-side `self.creature_type == Hero` mask gate routes this
-/// verb to hero slots (1..=5) only.
-///
-/// Effect: one `Damage { amount: 35.0 }` — matches
-/// `config.combat.hero_attack_damage = 35.0` in the .sim.
-fn build_hero_attack_program() -> AbilityProgram {
-    AbilityProgram::new_single_target(
-        /*range*/ 1.5,
-        Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
-        [EffectOp::Damage { amount: 35.0 }],
-    )
-}
+    let read = |name: &str| {
+        let path = corpus.join(name);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+    };
+    let parse = |name: &str, src: &str| {
+        dsl_ast::parse_ability_file(src)
+            .unwrap_or_else(|e| panic!("parse {name}: {e:?}"))
+    };
 
-/// boss_fight's HeroStun registry-resident program (HeroStun control-
-/// status proof, 2026-05-07).
-///
-/// Single-target Stun(15 ticks). The first non-Damage EffectOp in this
-/// fixture — proves the apply_ability dispatcher emits kind=29
-/// EffectStunApplied chronicle records (drained by
-/// `ApplyStunFromChronicle` straight into the per-agent
-/// `stun_expires_at_tick` SoA). 15 ticks (= 1.5s at 100ms tick) gives
-/// the stun a long enough window that several `world.tick % 7 == 0`
-/// cast cycles can land before any single stun expires, so the test
-/// sees a non-zero `stun_expires_at_tick` after one or two cast pulses.
-/// Matches duel_25v25's ConcussiveCleave Stun duration verbatim.
-///
-/// `cooldown_ticks: 0` keeps the per-tick gate in the .sim verb's
-/// `world.tick % 7 == 0` clause (the GPU dispatcher does not consult
-/// program.cooldown_ticks at the apply_ability arm today). `hostile_only:
-/// true` matches the .sim's score expression that picks Boss-
-/// creature_type targets; the .sim's body-side `self.creature_type ==
-/// Hero` mask gate routes this verb to hero slots (1..=5) only.
-/// `range: 1.5` matches BossStrike + HeroAttack — pair-field scoring
-/// argmaxes the Boss as the only valid candidate.
-fn build_hero_stun_program() -> AbilityProgram {
-    AbilityProgram::new_single_target(
-        /*range*/ 1.5,
-        Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
-        [EffectOp::Stun { duration_ticks: 15 }],
-    )
-}
+    let names = [
+        "BossStrike.ability",
+        "HeroAttack.ability",
+        "HeroStun.ability",
+        "HeroHeal.ability",
+    ];
+    let files: Vec<(String, _)> = names
+        .iter()
+        .map(|name| {
+            let src = read(name);
+            (name.to_string(), parse(name, &src))
+        })
+        .collect();
 
-/// boss_fight's HeroHeal registry-resident program (HeroHeal
-/// apply_ability proof, 2026-05-07).
-///
-/// Single-target Heal(25.0). First Heal EffectOp in this fixture —
-/// proves the apply_ability dispatcher emits kind=27 EffectHealApplied
-/// chronicle records (drained by the fused
-/// `physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle`
-/// kernel into a clamped `agents.set_hp(t, min(hp + amt, max_hp))`
-/// write). Heal amount 25.0 is generous enough that ONE cast on a
-/// hp=50 ally visibly recovers HP under the per-agent max_hp=100 clamp
-/// (50 + 25 = 75; well below the 100 ceiling).
-///
-/// `cooldown_ticks: 0` keeps the per-tick gate in the .sim verb's
-/// `world.tick % 7 == 0` clause (the GPU dispatcher does not consult
-/// program.cooldown_ticks at the apply_ability arm today).
-/// `hostile_only: false` flips the .sim's score expression's `target
-/// friend` semantic — heroes heal heroes (same-team), not enemies.
-/// `range: 50.0` is a wide single-target metadata range (boss_fight is
-/// scored per-pair argmax with no spatial filter; range is metadata-
-/// only at the apply_ability arm in this fixture).
-fn build_hero_heal_program() -> AbilityProgram {
-    AbilityProgram::new_single_target(
-        /*range*/ 50.0,
-        Gate { cooldown_ticks: 0, hostile_only: false, line_of_sight: false },
-        [EffectOp::Heal { amount: 25.0 }],
-    )
-}
-
-/// Build the boss_fight AbilityRegistry — four programs (BossStrike at
-/// AbilityId(1), HeroAttack at AbilityId(2), HeroStun at AbilityId(3),
-/// HeroHeal at AbilityId(4)). Returns the frozen registry; callers
-/// pack + upload via `PackedAbilityRegistry::pack` +
-/// `PackedAbilityRegistryGpu::upload`.
-pub fn build_boss_fight_registry() -> AbilityRegistry {
-    let mut builder = AbilityRegistryBuilder::new();
-    let bs_id = builder.register(build_boss_strike_program());
-    debug_assert_eq!(
-        bs_id,
-        AbilityId::new(BOSS_STRIKE_EXPECTED_ABILITY_ID).expect("non-zero AbilityId"),
-        "first registered program must land at AbilityId(1)",
-    );
-    let ha_id = builder.register(build_hero_attack_program());
-    debug_assert_eq!(
-        ha_id,
-        AbilityId::new(HERO_ATTACK_EXPECTED_ABILITY_ID).expect("non-zero AbilityId"),
-        "second registered program must land at AbilityId(2)",
-    );
-    let hs_id = builder.register(build_hero_stun_program());
-    debug_assert_eq!(
-        hs_id,
-        AbilityId::new(HERO_STUN_EXPECTED_ABILITY_ID).expect("non-zero AbilityId"),
-        "third registered program must land at AbilityId(3)",
-    );
-    let hh_id = builder.register(build_hero_heal_program());
-    debug_assert_eq!(
-        hh_id,
-        AbilityId::new(HERO_HEAL_EXPECTED_ABILITY_ID).expect("non-zero AbilityId"),
-        "fourth registered program must land at AbilityId(4)",
-    );
-    builder.build()
+    dsl_compiler::ability_registry::build_registry(&files)
+        .expect("build_registry over boss_fight corpus")
 }
 
 /// Single binding-check entry point. Called once from
@@ -196,7 +94,8 @@ pub fn build_boss_fight_registry() -> AbilityRegistry {
 /// BossStrike + HeroAttack + HeroStun + HeroHeal behaviour. If anything
 /// diverges the panic message points at the exact divergence.
 pub fn assert_ability_registry_matches_sim_constants() {
-    let registry = build_boss_fight_registry();
+    let built = build_boss_fight_registry();
+    let registry = &built.registry;
     assert_eq!(
         registry.len(),
         4,
@@ -337,7 +236,7 @@ pub fn assert_ability_registry_matches_sim_constants() {
     );
     assert!(
         !hh.gate.hostile_only,
-        "HeroHeal must NOT be hostile_only — `target friend` semantic \
+        "HeroHeal must NOT be hostile_only — `target ally` semantic \
          (the .sim's score expression picks Hero allies via \
          `target.creature_type == Hero && target != self`)",
     );

@@ -1,0 +1,14 @@
+// tactical_squad_5v5's DpsAttack — same shape as TankAttack but at the
+// DPS damage tier (`config.combat.dps_damage = 22.0`).
+//
+// Lowers to AbilityProgram { gate: { cooldown_ticks: 0, hostile_only: true },
+//                            area: SingleTarget { range: 0.0 },
+//                            effects: [EffectOp::Damage { amount: 22.0 }] }.
+
+ability DpsAttack {
+    target: enemy
+    range: 0
+    cooldown: 0
+
+    damage 22
+}

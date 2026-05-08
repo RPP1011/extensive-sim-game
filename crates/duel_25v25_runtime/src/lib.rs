@@ -270,8 +270,8 @@ impl Duel25v25State {
         // the binding-check's program-build pass (cheap — one
         // hand-built program) but keeps construction colocated with the
         // upload site, mirroring duel_abilities's pattern.
-        let registry = binding_check::build_duel_25v25_registry();
-        let packed = PackedAbilityRegistry::pack(&registry);
+        let built_registry = binding_check::build_duel_25v25_registry();
+        let packed = PackedAbilityRegistry::pack(&built_registry.registry);
         let registry_gpu = PackedAbilityRegistryGpu::upload(
             &packed, &gpu, "duel_25v25_runtime",
         );
