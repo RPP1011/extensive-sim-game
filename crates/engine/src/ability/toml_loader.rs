@@ -1134,6 +1134,55 @@ mod tests {
     }
 
     #[test]
+    fn loads_spy_network_corpus() {
+        // Round-trip the spy_network ability set (Wave 3 fixture) to
+        // prove the loader handles the full ToM verb vocabulary in
+        // one document. The runtime crate is deferred to Phase 6;
+        // this test pins that the TOML parses + lowers cleanly today.
+        let manifest = std::env::var("CARGO_MANIFEST_DIR")
+            .expect("CARGO_MANIFEST_DIR set by cargo");
+        let path = std::path::PathBuf::from(manifest)
+            .join("..").join("..")
+            .join("assets").join("abilities").join("spy_network.toml");
+        let reg = AbilityRegistry::from_toml(&path)
+            .unwrap_or_else(|e| panic!("load {}: {e}", path.display()));
+        assert_eq!(reg.len(), 6, "spy_network has 6 abilities");
+
+        // Slot 1: Disguise → EffectOp::Disguise
+        match reg.get(AbilityId::new(1).unwrap()).unwrap().effects[0] {
+            EffectOp::Disguise { fake_type: 2, duration_ticks: 600 } => {}
+            ref e => panic!("slot 1 expected Disguise(2, 600), got {e:?}"),
+        }
+        // Slot 2: PlantRumor → EffectOp::PlantBelief (bit-flag form).
+        match reg.get(AbilityId::new(2).unwrap()).unwrap().effects[0] {
+            EffectOp::PlantBelief { subject_idx: 0, fact_bit: 0 } => {}
+            ref e => panic!("slot 2 expected PlantBelief(0, 0), got {e:?}"),
+        }
+        // Slot 3: Slander → EffectOp::ModifyStanding{-15} (Phase 6
+        // substitute for `slander third_party by 15`).
+        match reg.get(AbilityId::new(3).unwrap()).unwrap().effects[0] {
+            EffectOp::ModifyStanding { delta: -15 } => {}
+            ref e => panic!("slot 3 expected ModifyStanding(-15), got {e:?}"),
+        }
+        // Slot 4: VanishingAct → EffectOp::Stealth
+        match reg.get(AbilityId::new(4).unwrap()).unwrap().effects[0] {
+            EffectOp::Stealth { duration_ticks: 80 } => {}
+            ref e => panic!("slot 4 expected Stealth(80), got {e:?}"),
+        }
+        // Slot 5: ChallengeToDuel → EffectOp::Damage{20.0} (Phase 6
+        // substitute for `duel_challenge`).
+        match reg.get(AbilityId::new(5).unwrap()).unwrap().effects[0] {
+            EffectOp::Damage { amount } if amount == 20.0 => {}
+            ref e => panic!("slot 5 expected Damage(20.0), got {e:?}"),
+        }
+        // Slot 6: Decree → EffectOp::ModifyStanding{25}
+        match reg.get(AbilityId::new(6).unwrap()).unwrap().effects[0] {
+            EffectOp::ModifyStanding { delta: 25 } => {}
+            ref e => panic!("slot 6 expected ModifyStanding(25), got {e:?}"),
+        }
+    }
+
+    #[test]
     fn shape_kind_is_case_insensitive() {
         // ShapeKind::parse expects lowercase; the loader normalises.
         let src = r#"
