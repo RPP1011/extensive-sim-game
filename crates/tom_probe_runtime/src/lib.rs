@@ -60,7 +60,502 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::EventRing;
+use engine::gpu::{bgl_storage, bgl_uniform, EventRing};
+
+// =====================================================================
+// Wave 3 ToM Phase 3.6 — GPU consumer kernels for observe/scry/reveal +
+// per-tick decay (close the Phase 3 deferred items).
+//
+// The Phase 3/3.5 consumer methods (`observe` / `scry` / `reveal`) and
+// the per-tick `decay_step` shipped as runtime-side CPU sweeps that
+// patched the BeliefState SoA columns via `queue.write_buffer`. The
+// "column-rewrite trick" (rewrite the whole u8 column to dodge wgpu's
+// 4-byte-multiple write constraint) was O(N²) per call.
+//
+// Phase 3.6 replaces those CPU sweeps with hand-written WGSL compute
+// kernels invoked from the runtime each call (observe/scry/reveal) or
+// each tick (decay). The DSL `@decay(beliefs)` annotation + chronicle-
+// stream PerEvent emission for the consumers stay deferred (they would
+// require new compiler IR variants and a schema-hash bump). Hand-
+// written WGSL gives the same CPU→GPU move with zero impact on the
+// schema hash and zero new DSL surface — see the `# Alternative` note
+// in the Phase 3.6 brief.
+//
+// **Storage convention.** The 6 BeliefState columns live in
+// `(primary, staging)` buffer pairs (see `alloc_belief_column_pair`).
+// Five columns map cleanly onto WGSL types:
+//
+//   * `flags` / `tick`             — `array<u32>` (4 B per cell)
+//   * `pos`                        — `array<vec4<f32>>` (16 B per cell)
+//
+// The three u8 columns (`type`, `confidence`, `suspicion`) are
+// allocated as byte buffers rounded up to a 16-byte multiple. WGSL has
+// no `u8`, so kernels treat them as `array<atomic<u32>>` (4 packed
+// little-endian bytes per word) and read/write a single byte via the
+// `read_packed_byte` / `write_packed_byte` helpers below. The two-step
+// `atomicAnd` + `atomicOr` write IS NOT atomic across the pair, which
+// is fine here because:
+//
+//   - observe / scry: each dispatch runs ONE thread that touches at
+//     most one byte per word.
+//   - reveal: N threads, each writing cell `[obs * N + subject]`.
+//     Different observers' bytes land in different words for any
+//     `N >= 4` (the only fixture size used today is N = 4).
+//   - decay: kernel dispatches `(cell_count + 3) / 4` threads, each
+//     thread owns one full word and processes its 4 cells in registers
+//     before writing the word back — no inter-thread word contention.
+//
+// **Cell indexing.** All columns use `observer * agent_count + subject`
+// row-major flat indexing — same as Phase 1 / Phase 2 / 3 / 3.5.
+// =====================================================================
+
+/// Uniform payload for the observe / scry / reveal kernels. The same
+/// 16-byte struct backs all three; unused fields are set to 0 by
+/// `dispatch_belief_consumer`.
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct BeliefConsumerCfg {
+    /// `observe.observer` / `scry.observer` / `reveal.caster`.
+    observer: u32,
+    /// `observe.target` / `scry.target_observer` / `reveal.subject`.
+    target_or_subject: u32,
+    /// `scry.subject` (only used by scry; 0 elsewhere).
+    subject: u32,
+    /// Width of the 2-D pair grid = agent_count. Drives the
+    /// `observer * agent_count + subject` cell-index expression and
+    /// (for reveal) the per-thread observer index.
+    agent_count: u32,
+    /// Current sim tick. observe stamps this into `last_seen_tick`.
+    /// decay reads it to compute `last == current_tick` (skip same-tick
+    /// cells so the observe→decay pipeline doesn't immediately undo
+    /// observe's confidence=255 writeback).
+    tick: u32,
+    /// Total cell count = `agent_count * agent_count`. Decay's only
+    /// upper-bound check (`cell_idx >= cell_count` early-return) reads
+    /// this to filter the round-up tail of the dispatch.
+    cell_count: u32,
+    /// Pad to 32 B so every `BeliefConsumerCfg` upload is a clean
+    /// 16-byte-multiple write (wgpu min-binding-size + std140 friendly).
+    _pad0: u32,
+    _pad1: u32,
+}
+
+/// Pipelines + bind-group layouts for the four hand-written GPU
+/// consumer kernels. Built once at `TomProbeState::new` time and
+/// reused per call. The cfg uniform buffer is shared across kernels —
+/// each dispatch overwrites it via `write_buffer` before binding.
+struct BeliefConsumerGpu {
+    /// Single 32-byte uniform buffer reused across all 4 kernels.
+    cfg_buf: wgpu::Buffer,
+    /// observe kernel — 1 workgroup × 1 thread; binds all 6 BeliefState
+    /// columns + agent_pos / agent_creature_type.
+    observe_pipeline: wgpu::ComputePipeline,
+    observe_bgl: wgpu::BindGroupLayout,
+    /// scry kernel — 1 workgroup × 1 thread; binds all 6 columns
+    /// (read-modify-write since src and dst are both in the same
+    /// buffers) + cfg.
+    scry_pipeline: wgpu::ComputePipeline,
+    scry_bgl: wgpu::BindGroupLayout,
+    /// reveal kernel — N workgroups × 1 thread (one thread per
+    /// observer slot); binds all 6 columns + cfg.
+    reveal_pipeline: wgpu::ComputePipeline,
+    reveal_bgl: wgpu::BindGroupLayout,
+    /// decay kernel — `(cell_count + 3) / 4 / 64` workgroups × 64
+    /// threads (one thread per packed-byte word in the confidence
+    /// column); binds confidence + tick columns + cfg.
+    decay_pipeline: wgpu::ComputePipeline,
+    decay_bgl: wgpu::BindGroupLayout,
+}
+
+/// Shared WGSL helpers used by every belief-consumer kernel. Treats a
+/// `array<atomic<u32>>` u8-column buffer as 4 little-endian bytes per
+/// word and exposes byte-granularity read/write. The two-step write
+/// (`atomicAnd` mask-clear → `atomicOr` value-set) is safe under the
+/// per-kernel concurrency rules documented at the module header.
+const BELIEF_HELPERS_WGSL: &str = r#"
+fn read_packed_byte(buf_idx: u32, byte_in_word: u32, word: u32) -> u32 {
+    let shift = byte_in_word * 8u;
+    return (word >> shift) & 0xFFu;
+}
+
+fn write_packed_byte_atomic(buf: ptr<storage, array<atomic<u32>>, read_write>, cell_idx: u32, value: u32) {
+    let word_idx = cell_idx / 4u;
+    let byte_in_word = cell_idx % 4u;
+    let shift = byte_in_word * 8u;
+    let mask = 0xFFu << shift;
+    let payload = (value & 0xFFu) << shift;
+    // Two-step write: clear the byte slot, then set the new bits. Safe
+    // under the per-kernel concurrency rules (see module-header notes).
+    atomicAnd(&((*buf)[word_idx]), ~mask);
+    atomicOr(&((*buf)[word_idx]), payload);
+}
+"#;
+
+/// observe: copy target's CURRENT pos / creature_type from the agent
+/// SoA + stamp `last_seen_tick = cfg.tick` and `confidence = 255` into
+/// the (observer, target) cell of the 6 BeliefState columns.
+///
+///   beliefs_pos[obs * N + tgt]        = agent_pos[tgt]
+///   beliefs_type[obs * N + tgt]       = agent_creature_type[tgt]
+///   beliefs_tick[obs * N + tgt]       = cfg.tick
+///   beliefs_confidence[obs * N + tgt] = 255u
+///   beliefs_flags[obs * N + tgt]      = unchanged (Phase 1 bit-OR slot)
+///   beliefs_suspicion[obs * N + tgt]  = unchanged (Phase 4 deception)
+///
+/// Single-thread dispatch — the work is one cell per call.
+const OBSERVE_WGSL: &str = r#"
+struct Cfg {
+    observer: u32,
+    target_or_subject: u32,
+    subject: u32,
+    agent_count: u32,
+    tick: u32,
+    cell_count: u32,
+    _pad0: u32,
+    _pad1: u32,
+}
+
+@group(0) @binding(0) var<uniform> cfg: Cfg;
+@group(0) @binding(1) var<storage, read>            agent_pos: array<vec4<f32>>;
+@group(0) @binding(2) var<storage, read>            agent_creature_type: array<atomic<u32>>;
+@group(0) @binding(3) var<storage, read_write>      beliefs_pos: array<vec4<f32>>;
+@group(0) @binding(4) var<storage, read_write>      beliefs_type: array<atomic<u32>>;
+@group(0) @binding(5) var<storage, read_write>      beliefs_tick: array<u32>;
+@group(0) @binding(6) var<storage, read_write>      beliefs_confidence: array<atomic<u32>>;
+
+%HELPERS%
+
+@compute @workgroup_size(1)
+fn cs_observe(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x != 0u) { return; }
+    let observer = cfg.observer;
+    let target = cfg.target_or_subject;
+    let cell = observer * cfg.agent_count + target;
+
+    // pos: direct vec4<f32> copy.
+    beliefs_pos[cell] = agent_pos[target];
+
+    // creature_type: read packed byte at `target` from agent SoA, write
+    // packed byte at `cell` into beliefs SoA.
+    let agent_type_word_idx = target / 4u;
+    let agent_type_word = atomicLoad(&agent_creature_type[agent_type_word_idx]);
+    let target_type = read_packed_byte(agent_type_word_idx, target % 4u, agent_type_word);
+    write_packed_byte_atomic(&beliefs_type, cell, target_type);
+
+    // tick: direct u32 store.
+    beliefs_tick[cell] = cfg.tick;
+
+    // confidence: peg to 255 (q8 max — fresh observation).
+    write_packed_byte_atomic(&beliefs_confidence, cell, 255u);
+}
+"#;
+
+/// scry: cross-observer 6-field copy. caster (`cfg.observer`) reads
+/// target_observer (`cfg.target_or_subject`)'s belief row about
+/// `cfg.subject` and writes the same tuple into caster's belief row
+/// about subject.
+///
+///   For each field f in {pos, type, tick, confidence, suspicion, flags}:
+///     beliefs_f[observer * N + subject] = beliefs_f[target_obs * N + subject]
+///
+/// Single-thread dispatch — same shape as observe.
+const SCRY_WGSL: &str = r#"
+struct Cfg {
+    observer: u32,
+    target_or_subject: u32,
+    subject: u32,
+    agent_count: u32,
+    tick: u32,
+    cell_count: u32,
+    _pad0: u32,
+    _pad1: u32,
+}
+
+@group(0) @binding(0) var<uniform> cfg: Cfg;
+@group(0) @binding(1) var<storage, read_write> beliefs_pos: array<vec4<f32>>;
+@group(0) @binding(2) var<storage, read_write> beliefs_type: array<atomic<u32>>;
+@group(0) @binding(3) var<storage, read_write> beliefs_tick: array<u32>;
+@group(0) @binding(4) var<storage, read_write> beliefs_confidence: array<atomic<u32>>;
+@group(0) @binding(5) var<storage, read_write> beliefs_suspicion: array<atomic<u32>>;
+@group(0) @binding(6) var<storage, read_write> beliefs_flags: array<u32>;
+
+%HELPERS%
+
+@compute @workgroup_size(1)
+fn cs_scry(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x != 0u) { return; }
+    let observer = cfg.observer;
+    let target_obs = cfg.target_or_subject;
+    let subject = cfg.subject;
+    let n = cfg.agent_count;
+    let src_cell = target_obs * n + subject;
+    let dst_cell = observer  * n + subject;
+
+    // Read all 6 source-cell values BEFORE writing any destination —
+    // when src == dst (self-scry) this prevents the per-byte writes
+    // from clobbering the source mid-copy.
+    let src_pos        = beliefs_pos[src_cell];
+    let src_type_word  = atomicLoad(&beliefs_type[src_cell / 4u]);
+    let src_type       = read_packed_byte(src_cell / 4u, src_cell % 4u, src_type_word);
+    let src_tick       = beliefs_tick[src_cell];
+    let src_conf_word  = atomicLoad(&beliefs_confidence[src_cell / 4u]);
+    let src_conf       = read_packed_byte(src_cell / 4u, src_cell % 4u, src_conf_word);
+    let src_susp_word  = atomicLoad(&beliefs_suspicion[src_cell / 4u]);
+    let src_susp       = read_packed_byte(src_cell / 4u, src_cell % 4u, src_susp_word);
+    let src_flags      = beliefs_flags[src_cell];
+
+    beliefs_pos[dst_cell]   = src_pos;
+    beliefs_tick[dst_cell]  = src_tick;
+    beliefs_flags[dst_cell] = src_flags;
+    write_packed_byte_atomic(&beliefs_type,       dst_cell, src_type);
+    write_packed_byte_atomic(&beliefs_confidence, dst_cell, src_conf);
+    write_packed_byte_atomic(&beliefs_suspicion,  dst_cell, src_susp);
+}
+"#;
+
+/// reveal: one-to-many fan-out. caster broadcasts its beliefs about
+/// subject to every observer slot. Each thread owns one observer slot
+/// and writes the (observer, subject) cell.
+///
+///   For obs in 0..N: beliefs_f[obs * N + subject] = beliefs_f[caster * N + subject]
+///
+/// Phase 3.5 ships the "all observers" fan-out shape; range-gated
+/// reveal (`reveal subject in <volume>`) defers until spatial-query
+/// infrastructure for "observers within radius of caster" matures.
+const REVEAL_WGSL: &str = r#"
+struct Cfg {
+    observer: u32,
+    target_or_subject: u32,
+    subject: u32,
+    agent_count: u32,
+    tick: u32,
+    cell_count: u32,
+    _pad0: u32,
+    _pad1: u32,
+}
+
+@group(0) @binding(0) var<uniform> cfg: Cfg;
+@group(0) @binding(1) var<storage, read_write> beliefs_pos: array<vec4<f32>>;
+@group(0) @binding(2) var<storage, read_write> beliefs_type: array<atomic<u32>>;
+@group(0) @binding(3) var<storage, read_write> beliefs_tick: array<u32>;
+@group(0) @binding(4) var<storage, read_write> beliefs_confidence: array<atomic<u32>>;
+@group(0) @binding(5) var<storage, read_write> beliefs_suspicion: array<atomic<u32>>;
+@group(0) @binding(6) var<storage, read_write> beliefs_flags: array<u32>;
+
+%HELPERS%
+
+@compute @workgroup_size(64)
+fn cs_reveal(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let observer = gid.x;
+    let n = cfg.agent_count;
+    if (observer >= n) { return; }
+    let caster  = cfg.observer;
+    let subject = cfg.target_or_subject;
+    let src_cell = caster   * n + subject;
+    let dst_cell = observer * n + subject;
+
+    // Every thread reads the same src_cell — the GPU's L1/SMEM coalesces
+    // the broadcast. No write-after-write hazard since we never write
+    // src_cell from observers != caster.
+    let src_pos        = beliefs_pos[src_cell];
+    let src_type_word  = atomicLoad(&beliefs_type[src_cell / 4u]);
+    let src_type       = read_packed_byte(src_cell / 4u, src_cell % 4u, src_type_word);
+    let src_tick       = beliefs_tick[src_cell];
+    let src_conf_word  = atomicLoad(&beliefs_confidence[src_cell / 4u]);
+    let src_conf       = read_packed_byte(src_cell / 4u, src_cell % 4u, src_conf_word);
+    let src_susp_word  = atomicLoad(&beliefs_suspicion[src_cell / 4u]);
+    let src_susp       = read_packed_byte(src_cell / 4u, src_cell % 4u, src_susp_word);
+    let src_flags      = beliefs_flags[src_cell];
+
+    beliefs_pos[dst_cell]   = src_pos;
+    beliefs_tick[dst_cell]  = src_tick;
+    beliefs_flags[dst_cell] = src_flags;
+    write_packed_byte_atomic(&beliefs_type,       dst_cell, src_type);
+    write_packed_byte_atomic(&beliefs_confidence, dst_cell, src_conf);
+    write_packed_byte_atomic(&beliefs_suspicion,  dst_cell, src_susp);
+}
+"#;
+
+/// decay: per-tick confidence decrement. Walks every (observer, target)
+/// cell, decrements `confidence` by 1 saturating, with two skip rules:
+///
+///   - cells observed THIS tick (`last_seen_tick == cfg.tick`) skip
+///     so observe→decay in the same tick doesn't immediately undo
+///     observe's confidence=255 writeback.
+///   - never-observed cells (`last == 0 && conf == 0`) skip — the
+///     saturating arithmetic would no-op anyway; the guard is intent +
+///     a tiny perf hint.
+///
+/// Each thread owns one packed-byte word (4 cells). It loads the word
+/// once, processes 4 cells in registers, and writes the word back —
+/// avoiding inter-thread word contention. No atomic needed: only one
+/// thread ever owns a given word.
+const DECAY_WGSL: &str = r#"
+struct Cfg {
+    observer: u32,
+    target_or_subject: u32,
+    subject: u32,
+    agent_count: u32,
+    tick: u32,
+    cell_count: u32,
+    _pad0: u32,
+    _pad1: u32,
+}
+
+@group(0) @binding(0) var<uniform> cfg: Cfg;
+@group(0) @binding(1) var<storage, read_write> beliefs_confidence: array<u32>;
+@group(0) @binding(2) var<storage, read>       beliefs_tick:       array<u32>;
+
+@compute @workgroup_size(64)
+fn cs_decay(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let word_idx = gid.x;
+    // word_count = ceil(cell_count / 4). We dispatch with an integer-
+    // divided ceiling so the trailing thread might own a partial word
+    // (cell_count not a multiple of 4); skip cells beyond cell_count
+    // inside the loop.
+    let cell_count = cfg.cell_count;
+    let word_count = (cell_count + 3u) / 4u;
+    if (word_idx >= word_count) { return; }
+
+    let word = beliefs_confidence[word_idx];
+    var new_word: u32 = 0u;
+
+    for (var b: u32 = 0u; b < 4u; b = b + 1u) {
+        let cell = word_idx * 4u + b;
+        let shift = b * 8u;
+        let conf = (word >> shift) & 0xFFu;
+        var new_conf: u32 = conf;
+        if (cell < cell_count) {
+            let last = beliefs_tick[cell];
+            // Skip never-observed cells: leaves new_conf == conf == 0.
+            // Skip cells observed this tick: same-tick observe pegged
+            // confidence at 255; don't drop it back to 254 immediately.
+            let observed_this_tick = last == cfg.tick;
+            let never_observed = last == 0u && conf == 0u;
+            if (!observed_this_tick && !never_observed) {
+                if (conf > 0u) {
+                    new_conf = conf - 1u;
+                } else {
+                    new_conf = 0u;
+                }
+            }
+        }
+        new_word = new_word | ((new_conf & 0xFFu) << shift);
+    }
+    beliefs_confidence[word_idx] = new_word;
+}
+"#;
+
+impl BeliefConsumerGpu {
+    fn new(device: &wgpu::Device) -> Self {
+        let cfg_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("tom_probe_runtime::belief_consumer::cfg"),
+            size: std::mem::size_of::<BeliefConsumerCfg>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let observe_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("tom_probe_runtime::observe::bgl"),
+            entries: &[
+                bgl_uniform(0),
+                bgl_storage(1, true),  // agent_pos
+                bgl_storage(2, false), // agent_creature_type (atomic)
+                bgl_storage(3, false), // beliefs_pos
+                bgl_storage(4, false), // beliefs_type (atomic)
+                bgl_storage(5, false), // beliefs_tick
+                bgl_storage(6, false), // beliefs_confidence (atomic)
+            ],
+        });
+        let observe_pipeline =
+            build_pipeline(device, &observe_bgl, "observe", OBSERVE_WGSL, "cs_observe");
+
+        let scry_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("tom_probe_runtime::scry::bgl"),
+            entries: &[
+                bgl_uniform(0),
+                bgl_storage(1, false), // beliefs_pos
+                bgl_storage(2, false), // beliefs_type (atomic)
+                bgl_storage(3, false), // beliefs_tick
+                bgl_storage(4, false), // beliefs_confidence (atomic)
+                bgl_storage(5, false), // beliefs_suspicion (atomic)
+                bgl_storage(6, false), // beliefs_flags
+            ],
+        });
+        let scry_pipeline =
+            build_pipeline(device, &scry_bgl, "scry", SCRY_WGSL, "cs_scry");
+
+        // reveal binds the same 6 columns as scry — same BGL layout but
+        // separate object so wgpu's pipeline-cache lookup keys cleanly.
+        let reveal_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("tom_probe_runtime::reveal::bgl"),
+            entries: &[
+                bgl_uniform(0),
+                bgl_storage(1, false),
+                bgl_storage(2, false),
+                bgl_storage(3, false),
+                bgl_storage(4, false),
+                bgl_storage(5, false),
+                bgl_storage(6, false),
+            ],
+        });
+        let reveal_pipeline =
+            build_pipeline(device, &reveal_bgl, "reveal", REVEAL_WGSL, "cs_reveal");
+
+        let decay_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("tom_probe_runtime::decay::bgl"),
+            entries: &[
+                bgl_uniform(0),
+                bgl_storage(1, false), // beliefs_confidence
+                bgl_storage(2, true),  // beliefs_tick (read-only)
+            ],
+        });
+        let decay_pipeline =
+            build_pipeline(device, &decay_bgl, "decay", DECAY_WGSL, "cs_decay");
+
+        Self {
+            cfg_buf,
+            observe_pipeline,
+            observe_bgl,
+            scry_pipeline,
+            scry_bgl,
+            reveal_pipeline,
+            reveal_bgl,
+            decay_pipeline,
+            decay_bgl,
+        }
+    }
+}
+
+/// Helper: substitute `%HELPERS%` for `BELIEF_HELPERS_WGSL`, build the
+/// shader module + pipeline. Centralised so each kernel definition stays
+/// a single `const &str` literal.
+fn build_pipeline(
+    device: &wgpu::Device,
+    bgl: &wgpu::BindGroupLayout,
+    label: &str,
+    wgsl: &str,
+    entry: &str,
+) -> wgpu::ComputePipeline {
+    let resolved = wgsl.replace("%HELPERS%", BELIEF_HELPERS_WGSL);
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some(&format!("tom_probe_runtime::{label}::wgsl")),
+        source: wgpu::ShaderSource::Wgsl(resolved.into()),
+    });
+    let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some(&format!("tom_probe_runtime::{label}::pl")),
+        bind_group_layouts: &[bgl],
+        push_constant_ranges: &[],
+    });
+    device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some(&format!("tom_probe_runtime::{label}::pipeline")),
+        layout: Some(&pl),
+        module: &module,
+        entry_point: Some(entry),
+        compilation_options: Default::default(),
+        cache: None,
+    })
+}
 
 /// Per-fixture state for the ToM probe. Carries the Knower SoA
 /// (`agent_alive`), the `BeliefAcquired` event ring, the 6-column
@@ -168,6 +663,12 @@ pub struct TomProbeState {
     fold_cfg_buf: wgpu::Buffer,
 
     cache: dispatch::KernelCache,
+
+    /// Wave 3 ToM Phase 3.6 — hand-written GPU pipelines for the
+    /// observe / scry / reveal consumers + per-tick decay sweep.
+    /// Replaces the Phase 3/3.5 runtime-side CPU `queue.write_buffer`
+    /// column-rewrite trick with proper compute dispatches.
+    consumer_gpu: BeliefConsumerGpu,
 
     tick: u64,
     agent_count: u32,
@@ -340,6 +841,8 @@ impl TomProbeState {
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
 
+        let consumer_gpu = BeliefConsumerGpu::new(&gpu.device);
+
         Self {
             gpu,
             agent_alive_buf,
@@ -379,6 +882,7 @@ impl TomProbeState {
             physics_cfg_buf,
             fold_cfg_buf,
             cache: dispatch::KernelCache::default(),
+            consumer_gpu,
             tick: 0,
             agent_count,
             seed,
@@ -826,10 +1330,9 @@ impl TomProbeState {
         &self.agent_creature_type_cache
     }
 
-    /// Wave 3 ToM Phase 3 — runtime-side observe consumer. Mirrors the
-    /// CHRONICLE consumer rule that a future `EffectObserveApplied`
-    /// PerEvent handler would run on GPU: reads target's current pos
-    /// + creature_type from the agent SoA, and writes into ALL 6
+    /// Wave 3 ToM Phase 3.6 — GPU observe consumer. Dispatches a single
+    /// hand-written WGSL workgroup that reads target's CURRENT pos +
+    /// creature_type from the agent SoA and writes into ALL 6
     /// BeliefState SoA columns at `[observer * agent_count + target]`:
     ///
     ///   - `last_known_pos[idx]` ← target's current pos
@@ -841,18 +1344,11 @@ impl TomProbeState {
     ///   - `suspicion[idx]` ← unchanged (Phase 4 deception verbs
     ///     mutate this; observe leaves it alone)
     ///
-    /// `observer` and `target` are 0-based agent slot indices into the
-    /// `agent_count`-sized SoA. The current sim tick (`self.tick`) is
-    /// stamped into `last_seen_tick` so subsequent decay_step() calls
-    /// can compute the `delta = world.tick - last_seen_tick` decay
-    /// driver.
-    ///
-    /// The DSL view-call lowering for kernel-side reads of
-    /// `agents.beliefs_<field>(observer, subject)` is deferred to
-    /// Phase 4 alongside the `scry` / `reveal` verbs that pair with
-    /// the deception verbs (disguise / decoy / erase_belief). Today
-    /// the runtime hand-rolls the consumer logic so the closed-loop
-    /// pin lands without expanding the DSL surface.
+    /// Replaces the Phase 3 CPU consumer (which read both agent columns
+    /// off-line, patched 6 host-side buffers, and re-uploaded the whole
+    /// u8 columns to dodge the 4-byte-multiple write constraint —
+    /// O(N²) per call). The GPU consumer is one workgroup × 1 thread,
+    /// one dispatch — no staging readback, no host-side column rewrite.
     pub fn observe(&mut self, observer: u32, target: u32) {
         assert!(
             observer < self.agent_count,
@@ -864,102 +1360,86 @@ impl TomProbeState {
             "observe: target {target} >= agent_count {}",
             self.agent_count,
         );
-        // Read target's current pos / creature_type from the agent SoA
-        // (CPU-side staging readback). `agent_pos()` /
-        // `agent_creature_type()` are dirty-cached; the first call
-        // each tick pays the staging copy, subsequent calls reuse the
-        // cache.
-        let target_pos = self.agent_pos()[target as usize];
-        let target_type = self.agent_creature_type()[target as usize];
 
-        let n = self.agent_count as usize;
-        let cell = (observer as usize) * n + (target as usize);
-        let cell_offset = cell as u64;
-        let tick_u32 = self.tick as u32;
-
-        // Write each column at the (observer, target) cell. Each write
-        // is a 1-cell partial buffer write (queue.write_buffer accepts
-        // any byte-aligned offset). The writes go through the GPU
-        // queue (stamped at submit time); the readback accessors mark
-        // the columns dirty so subsequent reads see the new bytes.
-
-        // last_known_pos: 16 B per cell.
-        self.gpu.queue.write_buffer(
-            &self.beliefs_pos_primary,
-            cell_offset * 16,
-            bytemuck::bytes_of(&target_pos),
-        );
-        // last_known_creature_type: 1 B per cell. wgpu requires the
-        // write size to be a multiple of 4, so we widen to a u32 word
-        // and write 4 bytes — but only if the write doesn't span a
-        // cell boundary. With u8 cells packed contiguously, writing 1
-        // byte at offset N would clobber 3 neighbouring cells. So we
-        // staging-read the 4-byte aligned word, patch the target byte,
-        // and write the whole word back.
-        //
-        // Simpler: pre-fetch the entire u8 column (already cached in
-        // `beliefs_type_cache` if dirty), patch the byte, and write
-        // back the entire column. This is O(N²) per observe call but
-        // the agent_count is small in fixtures (≤ 16 typically) — the
-        // round-trip pin uses N=4, so total is 16 bytes per call.
-        let mut type_bytes = self.beliefs_type().to_vec();
-        type_bytes[cell] = target_type;
-        let padded_size = ((type_bytes.len() + 15) / 16 * 16).max(16);
-        let mut padded = vec![0u8; padded_size];
-        padded[..type_bytes.len()].copy_from_slice(&type_bytes);
+        let cfg = BeliefConsumerCfg {
+            observer,
+            target_or_subject: target,
+            subject: 0,
+            agent_count: self.agent_count,
+            tick: self.tick as u32,
+            cell_count: self.cell_count(),
+            _pad0: 0,
+            _pad1: 0,
+        };
         self.gpu
             .queue
-            .write_buffer(&self.beliefs_type_primary, 0, &padded);
+            .write_buffer(&self.consumer_gpu.cfg_buf, 0, bytemuck::bytes_of(&cfg));
 
-        // last_seen_tick: 4 B per cell.
-        self.gpu.queue.write_buffer(
-            &self.beliefs_tick_primary,
-            cell_offset * 4,
-            bytemuck::bytes_of(&tick_u32),
-        );
-        // confidence: 1 B per cell — same column-rewrite trick as
-        // creature_type.
-        let mut conf_bytes = self.beliefs_confidence().to_vec();
-        conf_bytes[cell] = 255u8;
-        let padded_size = ((conf_bytes.len() + 15) / 16 * 16).max(16);
-        let mut padded = vec![0u8; padded_size];
-        padded[..conf_bytes.len()].copy_from_slice(&conf_bytes);
-        self.gpu
-            .queue
-            .write_buffer(&self.beliefs_confidence_primary, 0, &padded);
+        let bg = self
+            .gpu
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("tom_probe_runtime::observe::bg"),
+                layout: &self.consumer_gpu.observe_bgl,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.consumer_gpu.cfg_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: self.agent_pos_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: self.agent_creature_type_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: self.beliefs_pos_primary.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: self.beliefs_type_primary.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: self.beliefs_tick_primary.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: self.beliefs_confidence_primary.as_entire_binding(),
+                    },
+                ],
+            });
 
-        // Mark all touched columns dirty so the next readback restages
-        // the bytes.
+        let mut encoder =
+            self.gpu
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("tom_probe_runtime::observe::encoder"),
+                });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("tom_probe_runtime::observe::pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.consumer_gpu.observe_pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            pass.dispatch_workgroups(1, 1, 1);
+        }
+        self.gpu.queue.submit(Some(encoder.finish()));
+
         self.beliefs_pos_dirty = true;
         self.beliefs_type_dirty = true;
         self.beliefs_tick_dirty = true;
         self.beliefs_confidence_dirty = true;
     }
 
-    /// Wave 3 ToM Phase 3.5 — runtime-side scry consumer. Mirrors the
-    /// CHRONICLE consumer rule that a future `EffectScryApplied` PerEvent
-    /// handler would run on GPU: the caster (= `observer`) reads the
-    /// `target_observer`'s belief row about `subject` and writes the same
-    /// 6-column tuple into the caster's belief row about `subject`.
-    ///
-    ///   For each field `f` in {pos, type, tick, confidence, suspicion,
-    ///   flags}: `beliefs_f[observer * N + subject] =
-    ///                beliefs_f[target_observer * N + subject]`
-    ///
-    /// Distinct from `observe`: scry copies BELIEFS (a snapshot of
-    /// another observer's information state), whereas observe copies
-    /// GROUND TRUTH (the agent SoA at consume tick). When
-    /// `target_observer == observer` the call collapses semantically to
-    /// "no-op" — caster's belief about subject equals caster's belief
-    /// about subject. The 6-column copy still runs for shape uniformity
-    /// (cheaper than a per-cell guard).
-    ///
-    /// Same column-rewrite trick as `observe` for the u8 columns: u8
-    /// cells share a 4-byte stride for std430, so a 1-byte partial write
-    /// would clobber 3 neighbouring cells. We pull each u8 column into
-    /// host memory, patch the target byte, and write the entire column
-    /// back. Cost is O(N²) per scry call but agent_count is small in
-    /// fixtures (≤ 16 typically).
+    /// Wave 3 ToM Phase 3.6 — GPU scry consumer. Single workgroup × 1
+    /// thread; 6-field cross-observer copy. The kernel reads all 6
+    /// source-cell values into registers BEFORE writing the destination
+    /// so self-scry (src == dst) preserves the source-cell payload.
     pub fn scry(&mut self, observer: u32, target_observer: u32, subject: u32) {
         assert!(
             observer < self.agent_count,
@@ -977,70 +1457,75 @@ impl TomProbeState {
             self.agent_count,
         );
 
-        let n = self.agent_count as usize;
-        let src_cell = (target_observer as usize) * n + (subject as usize);
-        let dst_cell = (observer as usize) * n + (subject as usize);
-
-        // Read the 6 source-cell values BEFORE touching any column write
-        // — readbacks dirty-cache so reading the cache after a write
-        // would see the patched value if the writes were interleaved.
-        let src_pos = self.beliefs_pos()[src_cell];
-        let src_type = self.beliefs_type()[src_cell];
-        let src_tick = self.beliefs_tick()[src_cell];
-        let src_confidence = self.beliefs_confidence()[src_cell];
-        let src_suspicion = self.beliefs_suspicion()[src_cell];
-        let src_flags = self.beliefs_flags()[src_cell];
-
-        // Write each column at the (observer, subject) cell.
-
-        // last_known_pos: 16 B per cell.
-        self.gpu.queue.write_buffer(
-            &self.beliefs_pos_primary,
-            (dst_cell as u64) * 16,
-            bytemuck::bytes_of(&src_pos),
-        );
-
-        // last_seen_tick: 4 B per cell.
-        self.gpu.queue.write_buffer(
-            &self.beliefs_tick_primary,
-            (dst_cell as u64) * 4,
-            bytemuck::bytes_of(&src_tick),
-        );
-
-        // flags: 4 B per cell.
-        self.gpu.queue.write_buffer(
-            &self.beliefs_flags_primary,
-            (dst_cell as u64) * 4,
-            bytemuck::bytes_of(&src_flags),
-        );
-
-        // u8 columns — column-rewrite trick (see `observe`).
-        let mut type_bytes = self.beliefs_type().to_vec();
-        type_bytes[dst_cell] = src_type;
-        let padded_size = ((type_bytes.len() + 15) / 16 * 16).max(16);
-        let mut padded = vec![0u8; padded_size];
-        padded[..type_bytes.len()].copy_from_slice(&type_bytes);
+        let cfg = BeliefConsumerCfg {
+            observer,
+            target_or_subject: target_observer,
+            subject,
+            agent_count: self.agent_count,
+            tick: self.tick as u32,
+            cell_count: self.cell_count(),
+            _pad0: 0,
+            _pad1: 0,
+        };
         self.gpu
             .queue
-            .write_buffer(&self.beliefs_type_primary, 0, &padded);
+            .write_buffer(&self.consumer_gpu.cfg_buf, 0, bytemuck::bytes_of(&cfg));
 
-        let mut conf_bytes = self.beliefs_confidence().to_vec();
-        conf_bytes[dst_cell] = src_confidence;
-        let mut padded = vec![0u8; padded_size];
-        padded[..conf_bytes.len()].copy_from_slice(&conf_bytes);
-        self.gpu
-            .queue
-            .write_buffer(&self.beliefs_confidence_primary, 0, &padded);
+        let bg = self
+            .gpu
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("tom_probe_runtime::scry::bg"),
+                layout: &self.consumer_gpu.scry_bgl,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.consumer_gpu.cfg_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: self.beliefs_pos_primary.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: self.beliefs_type_primary.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: self.beliefs_tick_primary.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: self.beliefs_confidence_primary.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: self.beliefs_suspicion_primary.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: self.beliefs_flags_primary.as_entire_binding(),
+                    },
+                ],
+            });
 
-        let mut susp_bytes = self.beliefs_suspicion().to_vec();
-        susp_bytes[dst_cell] = src_suspicion;
-        let mut padded = vec![0u8; padded_size];
-        padded[..susp_bytes.len()].copy_from_slice(&susp_bytes);
-        self.gpu
-            .queue
-            .write_buffer(&self.beliefs_suspicion_primary, 0, &padded);
+        let mut encoder =
+            self.gpu
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("tom_probe_runtime::scry::encoder"),
+                });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("tom_probe_runtime::scry::pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.consumer_gpu.scry_pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            pass.dispatch_workgroups(1, 1, 1);
+        }
+        self.gpu.queue.submit(Some(encoder.finish()));
 
-        // Mark every column dirty.
         self.beliefs_pos_dirty = true;
         self.beliefs_type_dirty = true;
         self.beliefs_tick_dirty = true;
@@ -1049,29 +1534,14 @@ impl TomProbeState {
         self.beliefs_flags_dirty = true;
     }
 
-    /// Wave 3 ToM Phase 3.5 — runtime-side reveal consumer. One-to-many
-    /// propagation: `caster` broadcasts its beliefs about `subject` to
-    /// every observer slot. Mirrors the CHRONICLE consumer rule that a
-    /// future `EffectRevealApplied` PerEvent handler would run on GPU:
-    /// for each observer in 0..agent_count, copy the 6-column tuple
-    /// from `[caster * N + subject]` to `[observer * N + subject]`.
+    /// Wave 3 ToM Phase 3.6 — GPU reveal consumer. One thread per
+    /// observer slot; each thread reads `[caster * N + subject]` and
+    /// writes its own `[observer_slot * N + subject]` cell (the caster's
+    /// own slot is included as a self-write — idempotent).
     ///
-    ///   For each observer in 0..N, for each field `f`:
-    ///   `beliefs_f[observer * N + subject] = beliefs_f[caster * N + subject]`
-    ///
-    /// The caster's own slot is included in the loop (idempotent — copies
-    /// to itself). Phase 3.5 ships the "all observers" fan-out shape;
-    /// range-gated reveal (`reveal subject in <volume>`) lands when
-    /// spatial query infrastructure for "observers within radius of
-    /// caster" matures.
-    ///
-    /// Implementation detail: rather than issuing N partial buffer
-    /// writes for the wide columns (pos/tick/flags), we build the full
-    /// updated columns in host memory (each column is `N * N` cells)
-    /// and write each column back in a single buffer write. This is
-    /// O(N²) per call but is the same cost as the existing observe
-    /// consumer's u8-column rewrite shape — agent_count is small in
-    /// fixtures (≤ 16 typically).
+    /// Phase 3.5 ships the "all observers" fan-out shape; range-gated
+    /// reveal lands when spatial-query infrastructure for "observers
+    /// within radius of caster" matures.
     pub fn reveal(&mut self, caster: u32, subject: u32) {
         assert!(
             caster < self.agent_count,
@@ -1084,74 +1554,79 @@ impl TomProbeState {
             self.agent_count,
         );
 
-        let n = self.agent_count as usize;
-        let src_cell = (caster as usize) * n + (subject as usize);
+        let cfg = BeliefConsumerCfg {
+            observer: caster,
+            target_or_subject: subject,
+            subject: 0,
+            agent_count: self.agent_count,
+            tick: self.tick as u32,
+            cell_count: self.cell_count(),
+            _pad0: 0,
+            _pad1: 0,
+        };
+        self.gpu
+            .queue
+            .write_buffer(&self.consumer_gpu.cfg_buf, 0, bytemuck::bytes_of(&cfg));
 
-        // Read the 6 source-cell values BEFORE touching any column.
-        let src_pos = self.beliefs_pos()[src_cell];
-        let src_type = self.beliefs_type()[src_cell];
-        let src_tick = self.beliefs_tick()[src_cell];
-        let src_confidence = self.beliefs_confidence()[src_cell];
-        let src_suspicion = self.beliefs_suspicion()[src_cell];
-        let src_flags = self.beliefs_flags()[src_cell];
+        let bg = self
+            .gpu
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("tom_probe_runtime::reveal::bg"),
+                layout: &self.consumer_gpu.reveal_bgl,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.consumer_gpu.cfg_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: self.beliefs_pos_primary.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: self.beliefs_type_primary.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: self.beliefs_tick_primary.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: self.beliefs_confidence_primary.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: self.beliefs_suspicion_primary.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: self.beliefs_flags_primary.as_entire_binding(),
+                    },
+                ],
+            });
 
-        // Pull each column wholesale, patch the per-observer cells, and
-        // write back in one shot.
-        let mut pos_col = self.beliefs_pos().to_vec();
-        let mut type_col = self.beliefs_type().to_vec();
-        let mut tick_col = self.beliefs_tick().to_vec();
-        let mut conf_col = self.beliefs_confidence().to_vec();
-        let mut susp_col = self.beliefs_suspicion().to_vec();
-        let mut flags_col = self.beliefs_flags().to_vec();
-
-        for observer in 0..n {
-            let dst_cell = observer * n + (subject as usize);
-            pos_col[dst_cell] = src_pos;
-            type_col[dst_cell] = src_type;
-            tick_col[dst_cell] = src_tick;
-            conf_col[dst_cell] = src_confidence;
-            susp_col[dst_cell] = src_suspicion;
-            flags_col[dst_cell] = src_flags;
+        let mut encoder =
+            self.gpu
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("tom_probe_runtime::reveal::encoder"),
+                });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("tom_probe_runtime::reveal::pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.consumer_gpu.reveal_pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            // workgroup_size = 64 in the kernel — one workgroup covers
+            // every fixture today (max agent_count = 16 in the round-trip
+            // pins). div_ceil keeps shape correct for larger fixtures
+            // if/when they appear.
+            let workgroups = self.agent_count.div_ceil(64).max(1);
+            pass.dispatch_workgroups(workgroups, 1, 1);
         }
-
-        // Write each column wholesale.
-        self.gpu.queue.write_buffer(
-            &self.beliefs_pos_primary,
-            0,
-            bytemuck::cast_slice(&pos_col),
-        );
-        self.gpu.queue.write_buffer(
-            &self.beliefs_tick_primary,
-            0,
-            bytemuck::cast_slice(&tick_col),
-        );
-        self.gpu.queue.write_buffer(
-            &self.beliefs_flags_primary,
-            0,
-            bytemuck::cast_slice(&flags_col),
-        );
-
-        // u8 columns: pad to 16-byte multiple before writing.
-        let cell_count = type_col.len();
-        let padded_size = ((cell_count + 15) / 16 * 16).max(16);
-
-        let mut padded = vec![0u8; padded_size];
-        padded[..cell_count].copy_from_slice(&type_col);
-        self.gpu
-            .queue
-            .write_buffer(&self.beliefs_type_primary, 0, &padded);
-
-        let mut padded = vec![0u8; padded_size];
-        padded[..cell_count].copy_from_slice(&conf_col);
-        self.gpu
-            .queue
-            .write_buffer(&self.beliefs_confidence_primary, 0, &padded);
-
-        let mut padded = vec![0u8; padded_size];
-        padded[..cell_count].copy_from_slice(&susp_col);
-        self.gpu
-            .queue
-            .write_buffer(&self.beliefs_suspicion_primary, 0, &padded);
+        self.gpu.queue.submit(Some(encoder.finish()));
 
         self.beliefs_pos_dirty = true;
         self.beliefs_type_dirty = true;
@@ -1161,83 +1636,99 @@ impl TomProbeState {
         self.beliefs_flags_dirty = true;
     }
 
-    /// Wave 3 ToM Phase 3 — per-tick decay phase. Walks every
-    /// (observer, target) cell and decrements `confidence` by exactly
-    /// `decay_per_tick`, saturating at 0. Cells observed THIS tick
-    /// (`last_seen_tick == current_tick`) skip — the observe consumer
-    /// already pegged confidence at 255 and a same-tick decay would
-    /// drop it back to 254 immediately.
+    /// Wave 3 ToM Phase 3.6 — GPU per-tick decay phase. Replaces the
+    /// runtime-side CPU sweep with a hand-written compute kernel that
+    /// processes one packed-byte word (4 cells) per thread:
+    ///
+    ///   - Loads the word from `beliefs_confidence` and the 4
+    ///     corresponding `beliefs_tick` values.
+    ///   - For each of the 4 cells: skip if observed-this-tick or
+    ///     never-observed, else `saturating_sub(conf, 1)`.
+    ///   - Repacks and stores the new word — no atomic needed since
+    ///     each thread owns a unique word.
     ///
     /// **Decay slope rationale.** The spec sketch in the Phase 3 brief
     /// initially read `new_confidence = saturating_sub(confidence,
     /// (world.tick - last_seen_tick) * decay_per_tick)` — but applying
     /// that formula every tick double-counts the delta (`tick 1` =
-    /// drop 1, `tick 2` = drop 2 more, `tick 3` = drop 3 more, etc.,
-    /// summing to N(N+1)/2 instead of the linear N). The companion
-    /// pin (`decay_pin.rs::decay_slope_is_one_per_tick`) explicitly
-    /// asserts `confidence == 155` after 100 ticks (= 255 - 100), so
-    /// the implementation must produce a *linear* slope. The simplest
-    /// linear formulation is "decrement by `decay_per_tick` per call,
-    /// skipping cells observed this tick" — which matches the
-    /// observable target slope without needing a baseline-confidence
-    /// register. A future refinement might gate decay on `delta` but
-    /// would still need to guarantee `slope == decay_per_tick * ticks`
-    /// for the pin to hold.
+    /// drop 1, `tick 2` = drop 2 more, etc., summing to N(N+1)/2 instead
+    /// of the linear N). The companion pin
+    /// (`decay_pin.rs::decay_slope_is_one_per_tick`) explicitly asserts
+    /// `confidence == 155` after 100 ticks (= 255 - 100), so the
+    /// implementation must produce a *linear* slope. The simplest
+    /// linear formulation is "decrement by 1 per call, skipping cells
+    /// observed this tick" — which matches the observable target slope
+    /// without needing a baseline-confidence register.
     ///
-    /// Cells with `last_seen_tick == 0` AND `confidence == 0` are
-    /// no-ops (no observation has happened — both at default — and the
-    /// saturating arithmetic would no-op anyway; the guard is just an
-    /// efficiency + intent hint).
+    /// **Why a separate `decay_step` API instead of folding into
+    /// `step()`.** The `decay_pin.rs` regression intentionally exercises
+    /// the order `step() → decay_step()`; collapsing the two into a
+    /// single `step()` call would make the semantics implicit and break
+    /// the test's "fresh observation resets decay" assertion (which
+    /// calls observe between ticks before the next decay sweep). Phase
+    /// 3.6 keeps the API split; the `@decay(beliefs)` annotation that
+    /// would auto-trigger the kernel from the .sim surface is deferred.
     ///
-    /// Run AFTER `observe` calls for the same tick so a cell observed
-    /// at tick T (confidence=255, last_seen_tick=T) skips this round
-    /// via the same-tick guard. The runtime sequence in `step()` is:
-    /// observe injection (test API) → physics + fold kernels → decay
-    /// sweep.
-    ///
-    /// `decay_per_tick = 1` is the canonical rate — confidence drops
-    /// by 1 per tick of staleness. Pinned by `decay_pin.rs`.
+    /// `decay_per_tick = 1` is the canonical rate, hardcoded in
+    /// `DECAY_WGSL`. Pinned by `decay_pin.rs`.
     pub fn decay_step(&mut self) {
-        let decay_per_tick: u8 = 1;
-        let current_tick = self.tick as u32;
-
-        // Pull both columns into host memory. The observe-side writes
-        // for THIS tick haven't necessarily been staged yet (the GPU
-        // queue is async), but `beliefs_*()` issues a fresh staging
-        // copy when dirty so we see the latest bytes.
-        let confidence = self.beliefs_confidence().to_vec();
-        let last_seen_tick = self.beliefs_tick().to_vec();
-
-        // Compute new confidence per cell.
-        let mut new_confidence = confidence.clone();
-        for cell in 0..(self.cell_count() as usize) {
-            let last = last_seen_tick[cell];
-            // Skip never-observed cells (intent + perf — the
-            // saturating arithmetic would no-op anyway since confidence
-            // is already 0).
-            if last == 0 && confidence[cell] == 0 {
-                continue;
-            }
-            // Skip cells observed THIS tick — observe just pegged
-            // confidence at 255 and the same-tick decay would drop it
-            // to 254 immediately (the observe consumer's writeback
-            // shouldn't be silently undone by the next decay sweep).
-            if last == current_tick {
-                continue;
-            }
-            new_confidence[cell] = confidence[cell].saturating_sub(decay_per_tick);
-        }
-
-        // Write back the new confidence column in a single buffer
-        // write. Same padding strategy as `seed_beliefs_confidence` /
-        // `observe`'s confidence patch (rounds up to 16-byte multiple).
-        let expected = self.cell_count() as usize;
-        let padded_size = ((expected + 15) / 16 * 16).max(16);
-        let mut padded = vec![0u8; padded_size];
-        padded[..expected].copy_from_slice(&new_confidence);
+        let cfg = BeliefConsumerCfg {
+            observer: 0,
+            target_or_subject: 0,
+            subject: 0,
+            agent_count: self.agent_count,
+            tick: self.tick as u32,
+            cell_count: self.cell_count(),
+            _pad0: 0,
+            _pad1: 0,
+        };
         self.gpu
             .queue
-            .write_buffer(&self.beliefs_confidence_primary, 0, &padded);
+            .write_buffer(&self.consumer_gpu.cfg_buf, 0, bytemuck::bytes_of(&cfg));
+
+        let bg = self
+            .gpu
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("tom_probe_runtime::decay::bg"),
+                layout: &self.consumer_gpu.decay_bgl,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.consumer_gpu.cfg_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: self.beliefs_confidence_primary.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: self.beliefs_tick_primary.as_entire_binding(),
+                    },
+                ],
+            });
+
+        let mut encoder =
+            self.gpu
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("tom_probe_runtime::decay::encoder"),
+                });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("tom_probe_runtime::decay::pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.consumer_gpu.decay_pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            // One thread per packed-byte word in the confidence column;
+            // workgroup_size = 64 in the kernel.
+            let word_count = self.cell_count().div_ceil(4);
+            let workgroups = word_count.div_ceil(64).max(1);
+            pass.dispatch_workgroups(workgroups, 1, 1);
+        }
+        self.gpu.queue.submit(Some(encoder.finish()));
+
         self.beliefs_confidence_dirty = true;
     }
 
