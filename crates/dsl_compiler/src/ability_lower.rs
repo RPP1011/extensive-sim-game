@@ -1724,6 +1724,24 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             let target_observer = id_f.round().clamp(0.0, u8::MAX as f32) as u8;
             Ok(EffectOp::Observe { target_observer })
         }
+        // Wave 3 ToM Phase 4 — `disguise <fake_type> for <duration>`
+        // (spy_network surface). Mirrors `stun`'s shape: one positional
+        // arg + duration-bearing `for` modifier. The positional is a u8
+        // ordinal naming the creature_type the caster publicly poses as
+        // (e.g. `disguise 3 for 20s` for commoner). Apply handlers write
+        // `disguise_fake_type` + `disguise_expires_at_tick` SoA cells;
+        // observers see the fake type until the tick budget elapses.
+        "disguise" => {
+            let fake_type = require_number_arg(stmt, 0)?
+                .round()
+                .clamp(0.0, u8::MAX as f32) as u8;
+            let (dur, arity) = extract_duration(stmt, 1, 2)?;
+            require_arity(stmt, arity)?;
+            Ok(EffectOp::Disguise {
+                fake_type,
+                duration_ticks: duration_to_ticks(dur),
+            })
+        }
         _ => Err(LowerError::UnknownEffectVerb {
             verb:       stmt.verb.clone(),
             span:       stmt.span,
@@ -1869,6 +1887,9 @@ fn is_duration_bearing_verb(verb: &str) -> bool {
         // charm/grounded/suppress have stun-shape (positional duration);
         // reflect has lifesteal-shape (fraction + duration).
         | "charm" | "grounded" | "suppress" | "reflect"
+        // Wave 3 ToM Phase 4 — `disguise <fake_type> for <duration>`
+        // (spy_network surface). Stun-shape with a u8 ordinal positional.
+        | "disguise"
     )
 }
 
