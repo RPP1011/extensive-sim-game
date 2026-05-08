@@ -355,7 +355,7 @@ impl std::fmt::Display for LowerError {
             LowerError::UnknownEffectVerb { verb, suggestion, .. } => {
                 write!(
                     f,
-                    "unknown effect verb '{verb}'; valid verbs at this stage: damage / heal / shield / stun / slow / transfer_gold / modify_standing / cast / root / silence / fear / taunt / dash / blink / knockback / pull / execute / self_damage / lifesteal / damage_modify / summon / reveal"
+                    "unknown effect verb '{verb}'; valid verbs at this stage: damage / heal / shield / stun / slow / transfer_gold / modify_standing / cast / root / silence / fear / taunt / dash / blink / knockback / pull / execute / self_damage / lifesteal / damage_modify / summon / reveal / erase_belief"
                 )?;
                 if let Some(s) = suggestion {
                     write!(f, " (did you mean '{s}'?)")?;
@@ -1531,6 +1531,7 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             // accepts both). Preserve the sign.
             Ok(EffectOp::TransferGold { amount: amt.round() as i32 })
         }
+<<<<<<< HEAD
         "scry" => {
             // `scry <target_observer> <subject_idx>` — Wave 3 ToM Phase
             // 3.5. Two positional integer args; no duration (one-shot
@@ -1584,6 +1585,17 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             let subject_idx = subject.round().clamp(0.0, u32::MAX as f32) as u32;
             let fact_bit_u8 = fact_bit.round().clamp(0.0, u8::MAX as f32) as u8;
             Ok(EffectOp::PlantBelief { subject_idx, fact_bit: fact_bit_u8 })
+        }
+        // Wave 3 ToM Phase 4 — `erase_belief <subject_idx> <fields>`.
+        // `fields` is a u8 bitset: bit 0=pos, 1=type, 2=tick,
+        // 3=confidence, 4=suspicion, 5=flags. Engine variant 38, kind 69.
+        "erase_belief" => {
+            let subject = require_number_arg(stmt, 0)?;
+            let fields = require_number_arg(stmt, 1)?;
+            require_arity(stmt, 2)?;
+            let subject_idx = subject.round().clamp(0.0, u32::MAX as f32) as u32;
+            let fields = fields.round().clamp(0.0, u8::MAX as f32) as u8;
+            Ok(EffectOp::EraseBelief { subject_idx, fields })
         }
         "modify_standing" => {
             let delta = require_number_arg(stmt, 0)?;

@@ -402,6 +402,24 @@ fn lowers_observe() {
 }
 
 #[test]
+fn lower_erase_belief_with_field_bitset() {
+    // Wave 3 ToM Phase 4 — `erase_belief <subject_idx> <fields>`. The
+    // .ability parser doesn't lex hex (Wave 1.0), so the bitset arrives
+    // as a plain decimal: `7` == 0b00000111 == pos|type|tick.
+    let src = "ability Wipe { target: enemy range: 5.0 cooldown: 1s erase_belief 5 7 }";
+    let file = parse_ability_file(src).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+    assert_eq!(prog.effects.len(), 1);
+    match prog.effects[0] {
+        EffectOp::EraseBelief { subject_idx, fields } => {
+            assert_eq!(subject_idx, 5);
+            assert_eq!(fields, 0x07, "0b00000111 = pos|type|tick");
+        }
+        ref other => panic!("expected EraseBelief; got {other:?}"),
+    }
+}
+
+#[test]
 fn unknown_verb_is_rejected() {
     // `whirl` isn't in the Wave 1.6 catalog. (Wave 1.0 parser captures
     // any bare ident as a verb name; lowering is the gate.)
