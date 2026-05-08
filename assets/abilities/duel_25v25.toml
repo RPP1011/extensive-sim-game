@@ -1,0 +1,77 @@
+# duel_25v25 ability registry — formerly hand-rolled in
+# `crates/duel_25v25_runtime/src/binding_check.rs::build_*_program`.
+# Loaded at startup via `AbilityRegistry::from_toml(...)`.
+#
+# Slot order is source-order (first `[[ability]]` lands at
+# `AbilityId(1)`), pinned by binding_check assertions:
+#   1: Strike, 2: Cleave, 3: ConcussiveCleave, 4: HealPulse.
+# Drift surfaces as a panic at fixture-construction time.
+#
+# All four abilities use `cooldown_ticks = 0` because cadence is
+# enforced in the .sim verb gates (`world.tick % N == 0`); the
+# dispatcher does not consult the registry's cooldown today.
+
+# ---- Strike (slot 1, AbilityId(1)) ----
+# Single-target damage. Range matches the @spatial annotation
+# radius; body-side `other.creature_type != self.creature_type`
+# carries the actual team gate today. Damage 5.0 matches
+# config.combat.strike_damage in duel_25v25.sim.
+[[ability]]
+name = "Strike"
+range = 1.5
+gate = { cooldown_ticks = 0, hostile_only = true, line_of_sight = false }
+
+[[ability.effects]]
+op = "Damage"
+amount = 5.0
+
+# ---- Cleave (slot 2, AbilityId(2)) ----
+# AOE Path B production proof — single Damage in Circle(1.0). The
+# dispatcher walks the 27-cell neighbourhood around the dispatched
+# target and emits one chronicle record per in-radius candidate.
+# Radius 1.0 ≤ SPATIAL_CELL_SIZE (6.0) so the single 27-cell walk
+# covers the full circle.
+[[ability]]
+name = "Cleave"
+range = 3.0
+gate = { cooldown_ticks = 0, hostile_only = true, line_of_sight = false }
+
+[[ability.effects]]
+op = "Damage"
+amount = 2.0
+area = { kind = "Circle", args = [1.0, 0.0, 0.0, 0.0] }
+
+# ---- ConcussiveCleave (slot 3, AbilityId(3)) ----
+# Multi-effect AOE — Damage 3.0 + Stun 15 ticks (1.5s @ 100ms),
+# both in Circle(1.0). Each in-radius target receives one
+# kind=26 (EffectDamageApplied) AND one kind=29 (EffectStunApplied)
+# chronicle record.
+[[ability]]
+name = "ConcussiveCleave"
+range = 3.0
+gate = { cooldown_ticks = 0, hostile_only = true, line_of_sight = false }
+
+[[ability.effects]]
+op = "Damage"
+amount = 3.0
+area = { kind = "Circle", args = [1.0, 0.0, 0.0, 0.0] }
+
+[[ability.effects]]
+op = "Stun"
+duration_ticks = 15
+area = { kind = "Circle", args = [1.0, 0.0, 0.0, 0.0] }
+
+# ---- HealPulse (slot 4, AbilityId(4)) ----
+# Single-target ally healing. `target friend` semantic — the .sim's
+# body-side check inverts the team test, dispatching on same-team
+# agents; `hostile_only = false` records that intent in the
+# registry metadata. Heal 15.0 partially offsets seam-tick HP drain
+# (~5-7 dmg/tick) without making fights unwinnable.
+[[ability]]
+name = "HealPulse"
+range = 1.5
+gate = { cooldown_ticks = 0, hostile_only = false, line_of_sight = false }
+
+[[ability.effects]]
+op = "Heal"
+amount = 15.0
