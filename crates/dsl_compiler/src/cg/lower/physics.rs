@@ -904,6 +904,11 @@ fn agents_setter_field(method: &str) -> Option<&'static AgentFieldId> {
         "set_lifesteal_expires_at_tick" => Some(&AgentFieldId::LifestealExpiresAtTick),
         "set_damage_taken_mult_q8" => Some(&AgentFieldId::DamageTakenMultQ8),
         "set_damage_taken_mult_expires_at_tick" => Some(&AgentFieldId::DamageTakenMultExpiresAtTick),
+        // Wave 3 ToM Phase 5 disguise SoA (per-agent). The
+        // `ApplyDisguise` consumer writes both columns from the chronicle
+        // event payload (`a` = caster, `t` from packed payload_a).
+        "set_disguise_expires_at_tick" => Some(&AgentFieldId::DisguiseExpiresAtTick),
+        "set_disguise_fake_type" => Some(&AgentFieldId::DisguiseFakeType),
         // foraging_real fixture: per-ant `hunger` is repurposed as
         // an energy counter (decays each tick, reset on Eat). Used
         // by `EnergyDecay` (per_agent: agents.set_hunger(self,

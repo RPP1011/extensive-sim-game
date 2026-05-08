@@ -176,17 +176,30 @@ event EffectRevealApplied {
 // engine's `agents.pos(t)` / `agents.creature_type(t)` accessors) and
 // stamps:
 //   * beliefs_pos[a * N + t]        ← agents.pos(t)
-//   * beliefs_creature_type[a * N + t] ← agents.creature_type(t)
+//   * beliefs_creature_type[a * N + t] ← (disguised? fake : true)
 //   * beliefs_last_seen_tick[a * N + t] ← world.tick (= cfg.tick;
 //     but the chronicle event payload is the tick the dispatcher
 //     wrote, which is the consume tick — same value)
 //   * beliefs_confidence[a * N + t] ← 255 (q8 max — fresh observation)
 // Leaves beliefs_flags (Phase 1 bit-OR slot) and beliefs_suspicion
 // (Phase 4 deception channel) unchanged.
+//
+// Wave 3 ToM Phase 5 — disguise integration. If T's per-agent
+// `disguise_expires_at_tick` is in the future relative to `world.tick`,
+// the observer learns T's `disguise_fake_type` instead of T's true
+// `creature_type`. The if-expr lowers to a `CgExpr::Select` with both
+// arms u32. Once the disguise window expires, observers see the true
+// type again — no extra cleanup needed because the consumer reads the
+// state at observe time, not at disguise-cast time.
 physics ApplyObserveBeliefUpdate @phase(post) {
   on EffectObserveApplied { actor: a, target: t, target_observer: _ } {
     agents.set_beliefs_pos(a, t, agents.pos(t));
-    agents.set_beliefs_creature_type(a, t, agents.creature_type(t));
+    let displayed_type = if (agents.disguise_expires_at_tick(t) > world.tick) {
+      agents.disguise_fake_type(t)
+    } else {
+      agents.creature_type(t)
+    };
+    agents.set_beliefs_creature_type(a, t, displayed_type);
     agents.set_beliefs_last_seen_tick(a, t, world.tick);
     agents.set_beliefs_confidence(a, t, 255);
   }
@@ -335,5 +348,49 @@ physics ApplyEraseBeliefUpdate @phase(post) {
     if ((f / 32) % 2 != 0) {
       agents.set_beliefs_flags(t, s, 0);
     }
+  }
+}
+
+// -------------------------------------------------------------------
+// Wave 3 ToM Phase 5 — disguise SoA integration.
+// -------------------------------------------------------------------
+//
+// The `EffectOp::Disguise` (kind 36) dispatcher arm in
+// `cg::emit::wgsl_body` writes a chronicle record with kind 67. The
+// wire layout is:
+//   * slot 2 = actor (caster)
+//   * slot 3 = target (= caster for the self-cast implicit-target rule)
+//   * slot 4 = (duration_ticks << 8) | fake_type — packed u32 (low byte
+//     = u8 fake_type, high 24 bits = u32 duration_ticks)
+//
+// The consumer reads the packed payload, decodes both fields, and
+// writes the per-agent `disguise_expires_at_tick` /
+// `disguise_fake_type` SoA columns at slot `a` (= actor). Subsequent
+// observe calls (above) substitute `disguise_fake_type` for the true
+// `creature_type` while `world.tick < disguise_expires_at_tick`.
+//
+// Slot binding note: the `target` field carries the same value as
+// `actor` for self-cast disguise (the dispatcher's implicit-target
+// rule). We bind it into `_` because the consumer only writes to the
+// actor's row — the target slot is informational on the wire.
+@replayable
+event EffectDisguiseApplied {
+  actor: AgentId,
+  target: AgentId,
+  fake_type_and_duration: u32,
+}
+
+physics ApplyDisguise @phase(post) {
+  on EffectDisguiseApplied { actor: a, target: _, fake_type_and_duration: p } {
+    // Decode the packed payload. The fake_type is the low byte; the
+    // duration occupies the high 24 bits (`(duration_ticks << 8) |
+    // fake_type` per the dispatcher's pack form). `% 256` and `/ 256`
+    // mirror the EraseBelief / Decoy bit-extract conventions in this
+    // file — the DSL parser doesn't accept hex literals or the `u`
+    // integer suffix on bare literals today.
+    let fake_type = p % 256;
+    let duration = p / 256;
+    agents.set_disguise_expires_at_tick(a, world.tick + duration);
+    agents.set_disguise_fake_type(a, fake_type);
   }
 }
