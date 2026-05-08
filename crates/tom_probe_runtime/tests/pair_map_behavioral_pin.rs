@@ -1,15 +1,22 @@
 //! Wave 3 ToM Phase 1 behavioral pin on the existing `pair_map`-storage
-//! belief view.
+//! belief view (renamed to `beliefs_flags` in Phase 2).
 //!
 //! ## What this exercises
 //!
-//! The `view beliefs(observer, subject) -> u32` materialised view in
-//! `assets/sim/tom_probe.sim` uses `storage = pair_map`, which composes
-//! a flat `agent_count × agent_count × u32` cell array at slot
-//! `[observer * agent_count + subject]`. The folded accumulator is a
-//! bit-OR (`self |= b`), implemented in WGSL as native `atomicOr` on
-//! the primary storage buffer (no CAS retry — bit-OR is commutative
-//! and associative, P11 trivial).
+//! The `view beliefs_flags(observer, subject) -> u32` materialised
+//! view in `assets/sim/tom_probe.sim` uses `storage = pair_map`,
+//! which composes a flat `agent_count × agent_count × u32` cell
+//! array at slot `[observer * agent_count + subject]`. The folded
+//! accumulator is a bit-OR (`self |= b`), implemented in WGSL as
+//! native `atomicOr` on the primary storage buffer (no CAS retry —
+//! bit-OR is commutative and associative, P11 trivial).
+//!
+//! Phase 2 (Wave 3 ToM): the view was renamed `beliefs` →
+//! `beliefs_flags` to disambiguate it from the 5 other BeliefState
+//! SoA columns now allocated by `tom_probe_runtime` (see
+//! `lib.rs::TomProbeState` and `belief_state_soa_pin.rs`). The
+//! Phase 1 fold semantics are unchanged — only the accessor name
+//! moved from `sim.beliefs()` to `sim.beliefs_flags()`.
 //!
 //! Pre-fix (commit 51b5853b shipped the basic mechanism), the
 //! `tom_probe_app` binary asserts the FULL FIRE shape end-to-end. This
@@ -74,7 +81,7 @@ fn pair_map_diagonal_lights_up_after_one_tick() {
     // the diagonal cell.
     sim.step();
 
-    let beliefs = sim.beliefs().to_vec();
+    let beliefs = sim.beliefs_flags().to_vec();
     let n = N as usize;
     assert_eq!(
         beliefs.len(),
@@ -127,7 +134,7 @@ fn pair_map_second_tick_is_idempotent() {
     sim.step();
     sim.step();
 
-    let beliefs = sim.beliefs().to_vec();
+    let beliefs = sim.beliefs_flags().to_vec();
     let n = N as usize;
 
     for i in 0..n {

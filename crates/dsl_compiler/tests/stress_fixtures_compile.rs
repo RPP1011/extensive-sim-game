@@ -908,9 +908,14 @@ fn tom_probe_lowers_clean_and_emits_belief_kernels() {
     );
     let art = dsl_compiler::cg::emit::emit_cg_program(&sched.schedule, &cg)
         .expect("emit tom_probe program");
+    // Wave 3 ToM Phase 2: the view was renamed `beliefs` →
+    // `beliefs_flags` to disambiguate the bit-OR slot from the 5
+    // other BeliefState SoA columns now living runtime-side. The
+    // emit shape is otherwise unchanged — same atomicOr fold body,
+    // same pair_map index — only the kernel filename moved.
     assert!(
-        art.kernel_index.iter().any(|k| k == "fold_beliefs"),
-        "expected fold_beliefs kernel in artifacts; got: {:?}",
+        art.kernel_index.iter().any(|k| k == "fold_beliefs_flags"),
+        "expected fold_beliefs_flags kernel in artifacts; got: {:?}",
         art.kernel_index,
     );
     assert!(
@@ -923,11 +928,11 @@ fn tom_probe_lowers_clean_and_emits_belief_kernels() {
     // selects the bit-OR emit branch.
     let fold_wgsl = art
         .wgsl_files
-        .get("fold_beliefs.wgsl")
-        .expect("fold_beliefs.wgsl missing");
+        .get("fold_beliefs_flags.wgsl")
+        .expect("fold_beliefs_flags.wgsl missing");
     assert!(
         fold_wgsl.contains("atomicOr"),
-        "expected atomicOr in fold_beliefs body; got:\n{fold_wgsl}",
+        "expected atomicOr in fold_beliefs_flags body; got:\n{fold_wgsl}",
     );
     assert!(
         !fold_wgsl.contains("atomicCompareExchangeWeak"),
