@@ -318,6 +318,8 @@ fn effect_op_label(op: &EffectOp) -> &'static str {
         EffectOp::Reflect         { .. } => "Reflect",
         EffectOp::PlantBelief     { .. } => "PlantBelief",
         EffectOp::Observe         { .. } => "Observe",
+        EffectOp::Scry            { .. } => "Scry",
+        EffectOp::Reveal          { .. } => "Reveal",
     }
 }
 

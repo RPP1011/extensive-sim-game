@@ -342,6 +342,46 @@ fn reflect_packs_to_discriminant_31_matching_wgsl_dispatcher() {
     );
 }
 
+// Wave 3 ToM Phase 1 — `plant_belief` bit-flag belief verb.
+#[test]
+fn plant_belief_packs_to_discriminant_32_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::PlantBelief { subject_idx: 7, fact_bit: 5 }),
+        32,
+        "PlantBelief discriminant — WGSL dispatcher arm `kind == 32u` depends on this"
+    );
+}
+
+// Wave 3 ToM Phase 3 — `observe` self-observe-target verb.
+#[test]
+fn observe_packs_to_discriminant_33_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Observe { target_observer: 0 }),
+        33,
+        "Observe discriminant — WGSL dispatcher arm `kind == 33u` depends on this"
+    );
+}
+
+// Wave 3 ToM Phase 3.5 — `scry` cross-observer access verb.
+#[test]
+fn scry_packs_to_discriminant_34_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Scry { target_observer: 3, subject_idx: 4 }),
+        34,
+        "Scry discriminant — WGSL dispatcher arm `kind == 34u` depends on this"
+    );
+}
+
+// Wave 3 ToM Phase 3.5 — `reveal` one-to-many propagation verb.
+#[test]
+fn reveal_packs_to_discriminant_35_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Reveal { subject_idx: 4 }),
+        35,
+        "Reveal discriminant — WGSL dispatcher arm `kind == 35u` depends on this"
+    );
+}
+
 #[test]
 fn empty_sentinel_byte_matches_wgsl_dispatcher() {
     // The dispatcher loop's `if (kind == 0xFFu) { continue; }` early-out

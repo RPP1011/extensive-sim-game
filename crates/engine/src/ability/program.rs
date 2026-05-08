@@ -556,6 +556,63 @@ pub enum EffectOp {
     /// "observe target via observer C") would extend this byte's
     /// vocabulary without a payload-shape change.
     Observe { target_observer: u8 } = 33,
+
+    // --- Theory-of-Mind belief verbs (Wave 3 phase 3.5) ---
+    //
+    // `Scry` is cross-observer access: caster A reads agent C's beliefs
+    // about subject B (via C as `target_observer`), writes into A's
+    // beliefs about B. Tests subterfuge / chain-of-trust mechanics: a
+    // diviner can pull intelligence from a third party's eyes even when
+    // direct observation isn't possible. The chronicle record carries
+    // (caster + target=subject + target_observer=eyes-of-agent +
+    // 0). The downstream consumer copies the 6 BeliefState columns from
+    // `[target_observer * N + subject]` to `[caster * N + subject]`
+    // wholesale — caster inherits the C's full belief state about B.
+    //
+    // `Reveal` is one-to-many propagation: caster broadcasts its own
+    // beliefs about a `subject` agent to all observers in range (or all
+    // observers — Phase 3.5 picks "all observers" for simplicity, range-
+    // gated reveal lands when spatial query infrastructure for "observers
+    // within radius of caster" matures). Different shape from observe
+    // (fan-out, not point-to-point). The chronicle record carries
+    // (caster + target=subject + 0 + 0). The downstream consumer iterates
+    // every observer slot and copies caster's beliefs about subject into
+    // observer's beliefs about subject.
+    //
+    // SHAPE NOTES:
+    //   * Scry — payload_a = target_observer (u8 widened to u32, low
+    //     byte). payload_b = subject_idx (u32 — the agent the belief is
+    //     ABOUT). 1+4 = 5B + 1B tag = 6B total. Well under the P4 ≤16-byte
+    //     EffectOp ceiling. The packed effect-kind ordinal is 34 (next
+    //     after Observe=33). The chronicle EventKindId is 65 (next after
+    //     EffectObserveApplied=64).
+    //   * Reveal — payload_a = subject_idx (u32). payload_b = 0 (no
+    //     additional payload — fan-out target set is "all observers" at
+    //     consume time). 4B + 1B tag = 5B total. Packed effect-kind
+    //     ordinal is 35 (next after Scry=34). Chronicle EventKindId is 66.
+    //
+    // Both pair with the spec's `agents.beliefs_<field>(observer,
+    // subject)` 2-arg view-call lowering (Phase 3.5 ships the namespace
+    // registry methods that make the call sites lower; the WGSL stubs
+    // are placeholders today — the actual GPU-side cell-copy lives in
+    // the runtime CPU consumer until a future phase emits the WGSL kernel
+    // from the chronicle stream).
+    /// `scry target_observer subject` — caster reads `target_observer`'s
+    /// beliefs about `subject` and folds them into the caster's beliefs
+    /// about `subject`. The chronicle record carries (caster + subject as
+    /// `target_slot` + target_observer as payload_a + subject_idx as
+    /// payload_b). The downstream consumer copies all 6 BeliefState SoA
+    /// columns from `[target_observer * N + subject]` to
+    /// `[caster * N + subject]`.
+    Scry { target_observer: u8, subject_idx: u32 } = 34,
+
+    /// `reveal subject` — caster broadcasts its beliefs about `subject`
+    /// to all observers. The chronicle record carries (caster + subject
+    /// as `target_slot` + subject_idx as payload_a). The downstream
+    /// consumer iterates every observer slot and copies the 6 BeliefState
+    /// SoA columns from `[caster * N + subject]` to `[observer * N +
+    /// subject]`.
+    Reveal { subject_idx: u32 } = 35,
 }
 
 /// Stat targeted by `buff`. Vocabulary is small today (just the two

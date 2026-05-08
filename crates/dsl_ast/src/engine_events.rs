@@ -164,6 +164,26 @@ pub const ENGINE_EVENT_KIND_IDS: &[(&str, u32)] = &[
     // alongside the deception verbs (disguise / decoy / erase_belief)
     // and the spy_network sim.
     ("EffectObserveApplied", 64),
+    // Wave 3 ToM Phase 3.5 — `scry` cross-observer access. Caster reads
+    // agent C's beliefs about subject B (via C as `target_observer`),
+    // writes into A's beliefs about B. 5-payload-word chronicle record
+    // (actor + subject (= target_slot) + target_observer u8 in payload_a
+    // + subject_idx u32 in payload_b). Slot 65 contiguous with the
+    // observe slot (EffectObserveApplied=64). The dispatcher writes the
+    // chronicle record from the per-effect-slot arm chain when
+    // `EffectOp::Scry` (kind=34) fires; downstream runtime consumers copy
+    // the 6 BeliefState columns from `[target_observer * N + subject]` to
+    // `[caster * N + subject]`.
+    ("EffectScryApplied", 65),
+    // Wave 3 ToM Phase 3.5 — `reveal` one-to-many propagation. Caster
+    // broadcasts its beliefs about `subject` to all observers. 4-payload-
+    // word chronicle record (actor + subject (= target_slot) +
+    // subject_idx u32 in payload_a). Slot 66 contiguous with the scry
+    // slot (65). The dispatcher writes the chronicle record when
+    // `EffectOp::Reveal` (kind=35) fires; downstream runtime consumers
+    // iterate every observer slot and copy the 6 BeliefState columns from
+    // `[caster * N + subject]` to `[observer * N + subject]`.
+    ("EffectRevealApplied", 66),
 ];
 
 /// Look up the engine-defined `EventKindId` discriminant for an
@@ -218,6 +238,8 @@ mod tests {
         assert_eq!(engine_event_kind_id_for_name("EffectSummonApplied"), Some(62));
         assert_eq!(engine_event_kind_id_for_name("EffectPlantBeliefApplied"), Some(63));
         assert_eq!(engine_event_kind_id_for_name("EffectObserveApplied"), Some(64));
+        assert_eq!(engine_event_kind_id_for_name("EffectScryApplied"), Some(65));
+        assert_eq!(engine_event_kind_id_for_name("EffectRevealApplied"), Some(66));
     }
 
     #[test]

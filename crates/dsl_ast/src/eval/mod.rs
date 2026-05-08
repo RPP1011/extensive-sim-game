@@ -195,6 +195,23 @@ pub enum EffectOp {
     // (deferred — the dispatcher's chronicle write is the load-
     // bearing path).
     Observe      { target_observer: u8 },
+    // Wave 3 ToM Phase 3.5 — `scry` cross-observer access verb (mirror of
+    // `engine::ability::program::EffectOp::Scry`). Caster reads
+    // `target_observer`'s beliefs about `subject_idx` and writes them
+    // into the caster's beliefs about `subject_idx`. Discriminant 34
+    // pinned by the engine schema_hash. The ast-level mirror keeps this
+    // surface in step with the engine even though no `.sim` interpreter
+    // consumer pattern-matches Scry today (deferred — the dispatcher's
+    // chronicle write is the load-bearing path).
+    Scry         { target_observer: u8, subject_idx: u32 },
+    // Wave 3 ToM Phase 3.5 — `reveal` one-to-many propagation verb
+    // (mirror of `engine::ability::program::EffectOp::Reveal`). Caster
+    // broadcasts its beliefs about `subject_idx` to every observer.
+    // Discriminant 35 pinned by the engine schema_hash. The ast-level
+    // mirror keeps this surface in step with the engine even though no
+    // `.sim` interpreter consumer pattern-matches Reveal today (deferred
+    // — the dispatcher's chronicle write is the load-bearing path).
+    Reveal       { subject_idx: u32 },
 }
 
 /// Target selection for `CastAbility` effects.  Mirrors

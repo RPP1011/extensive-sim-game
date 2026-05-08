@@ -3319,6 +3319,23 @@ pub(crate) const EFFECT_KIND_TO_EVENT_KIND_ID: &[(u32, u32)] = &[
     // dispatcher only writes the chronicle record; this keeps the
     // apply_ability dispatcher's BGL stable (no new SoA bindings).
     (33, 64), // EffectOp::Observe → EventKindId::EffectObserveApplied
+    // Wave 3 ToM Phase 3.5 — `scry` cross-observer access (kind 34 → ID
+    // 65). Caster reads `target_observer`'s beliefs about
+    // `subject_idx`; the dispatcher writes the chronicle record with
+    // payload_a = target_observer u8 widened, payload_b = subject_idx
+    // u32. The downstream 6-column copy from `[target_observer * N +
+    // subject_idx]` to `[caster * N + subject_idx]` lives in a runtime
+    // consumer (`tom_probe_runtime` Phase 3.5) — not on the WGSL fold
+    // path. The dispatcher only writes the chronicle record; this keeps
+    // the apply_ability dispatcher's BGL stable (no new SoA bindings).
+    (34, 65), // EffectOp::Scry → EventKindId::EffectScryApplied
+    // Wave 3 ToM Phase 3.5 — `reveal` one-to-many propagation (kind 35
+    // → ID 66). Caster broadcasts its beliefs about `subject_idx`; the
+    // dispatcher writes the chronicle record with payload_a =
+    // subject_idx u32, payload_b = 0. The downstream fan-out (caster's
+    // beliefs about subject → every observer's beliefs about subject)
+    // lives in a runtime consumer (`tom_probe_runtime` Phase 3.5).
+    (35, 66), // EffectOp::Reveal → EventKindId::EffectRevealApplied
 ];
 
 /// Look up the runtime `EventKindId` for an `EffectOp` discriminant.
@@ -3438,6 +3455,10 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain PlantBelief=32");
     let observe_event_id = event_kind_id_for_effect_kind(33)
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Observe=33");
+    let scry_event_id = event_kind_id_for_effect_kind(34)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Scry=34");
+    let reveal_event_id = event_kind_id_for_effect_kind(35)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Reveal=35");
 
     let i4  = indent;                   // arm `if`/`else if` lines
     let i8  = format!("{i4}    ");      // body of arm
@@ -4131,6 +4152,51 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
+
+    // Scry = 34 → 65 (Wave 3 ToM Phase 3.5 cross-observer access)
+    s.push_str(&format!("{i4}}} else if (kind == 34u) {{\n"));
+    s.push_str(&format!("{i8}// Scry = 34 → EventKindId::EffectScryApplied = 65\n"));
+    s.push_str(&format!("{i8}// payload_a = target_observer (u8 widened to u32 — agent slot whose\n"));
+    s.push_str(&format!("{i8}// beliefs caster reads). payload_b = subject_idx (u32 — agent slot\n"));
+    s.push_str(&format!("{i8}// the belief is ABOUT). The downstream 6-column copy from\n"));
+    s.push_str(&format!("{i8}// `[target_observer * N + subject_idx]` to\n"));
+    s.push_str(&format!("{i8}// `[caster * N + subject_idx]` lives in a runtime consumer\n"));
+    s.push_str(&format!("{i8}// (`tom_probe_runtime` Phase 3.5). The dispatcher only writes the\n"));
+    s.push_str(&format!("{i8}// chronicle record; this keeps the apply_ability dispatcher's BGL\n"));
+    s.push_str(&format!("{i8}// stable (no new SoA bindings).\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectScryApplied (caster_slot + target_slot + target_observer + subject_idx)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {scry_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // Reveal = 35 → 66 (Wave 3 ToM Phase 3.5 one-to-many propagation)
+    s.push_str(&format!("{i4}}} else if (kind == 35u) {{\n"));
+    s.push_str(&format!("{i8}// Reveal = 35 → EventKindId::EffectRevealApplied = 66\n"));
+    s.push_str(&format!("{i8}// payload_a = subject_idx (u32 — agent slot the broadcast is\n"));
+    s.push_str(&format!("{i8}// ABOUT). payload_b = 0 (unused — the fan-out target set is `all\n"));
+    s.push_str(&format!("{i8}// observers` at consume time). The downstream fan-out (caster's\n"));
+    s.push_str(&format!("{i8}// beliefs about subject → every observer's beliefs about subject)\n"));
+    s.push_str(&format!("{i8}// lives in a runtime consumer (`tom_probe_runtime` Phase 3.5).\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectRevealApplied (caster_slot + target_slot + subject_idx)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {reveal_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
     s.push_str(&format!("{i4}}}\n"));
 
     s
@@ -6670,6 +6736,10 @@ mod tests {
             (32, "PlantBelief"),
             // Wave 3 ToM Phase 3 — `observe` self-observe-target verb.
             (33, "Observe"),
+            // Wave 3 ToM Phase 3.5 — `scry` cross-observer access verb.
+            (34, "Scry"),
+            // Wave 3 ToM Phase 3.5 — `reveal` one-to-many propagation verb.
+            (35, "Reveal"),
         ] {
             let kind_token = if *kind == 0 {
                 format!("if (kind == {kind}u)")
@@ -7254,7 +7324,9 @@ mod tests {
                 31 => EffectOp::Reflect    { duration_ticks: 50, fraction_q8: 64 },
                 32 => EffectOp::PlantBelief { subject_idx: 7, fact_bit: 5 },
                 33 => EffectOp::Observe     { target_observer: 0 },
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33"),
+                34 => EffectOp::Scry        { target_observer: 3, subject_idx: 4 },
+                35 => EffectOp::Reveal      { subject_idx: 4 },
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35"),
             }
         };
 
@@ -7295,7 +7367,9 @@ mod tests {
                 31 => EngineEventKindId::EffectReflectApplied        as u32,
                 32 => EngineEventKindId::EffectPlantBeliefApplied     as u32,
                 33 => EngineEventKindId::EffectObserveApplied         as u32,
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33"),
+                34 => EngineEventKindId::EffectScryApplied            as u32,
+                35 => EngineEventKindId::EffectRevealApplied          as u32,
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35"),
             }
         };
 
@@ -7408,14 +7482,24 @@ mod tests {
         // dispatcher writes EffectObserveApplied=64 records that a
         // downstream runtime consumer reads to refresh the BeliefState
         // SoA's 6 columns from the agent SoA at consume tick).
+        // + Scry (Wave 3 ToM Phase 3.5 — cross-observer access verb;
+        // dispatcher writes EffectScryApplied=65 records that a
+        // downstream runtime consumer copies the 6 BeliefState columns
+        // from `[target_observer * N + subject_idx]` to
+        // `[caster * N + subject_idx]`).
+        // + Reveal (Wave 3 ToM Phase 3.5 — one-to-many propagation verb;
+        // dispatcher writes EffectRevealApplied=66 records that a
+        // downstream runtime consumer iterates every observer slot and
+        // copies the 6 BeliefState columns from `[caster * N +
+        // subject_idx]` to `[observer * N + subject_idx]`).
         // If this number changes, either the engine grew a new
         // `EffectXxxApplied` event (in which case the map gets a new
         // entry) or a variant lost its chronicle counterpart (in which
         // case the map drops an entry). Pin the count so the gap between
         // source-of-truths is loud.
         assert_eq!(
-            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 33,
-            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 33 \
+            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 35,
+            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 35 \
              chronicle-bearing variants today; if you added or removed an \
              entry, update this assertion (and the slice γ wire-up that \
              consumes the new entry)"
