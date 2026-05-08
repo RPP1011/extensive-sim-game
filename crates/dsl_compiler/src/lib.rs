@@ -50,6 +50,18 @@ pub mod schema_hash;
 // will use for full CPU↔GPU parity.
 pub mod cpu_chronicle_reference;
 
+// Wave 3 ToM Phase 3.8 — generated WGSL for the per-tick BeliefState
+// decay sweep. Replaces the hand-written `DECAY_WGSL` constant the
+// `tom_probe_runtime` crate used to carry. The runtime now obtains
+// the decay kernel WGSL by calling [`belief_decay_wgsl::decay_kernel_wgsl`]
+// at construction time — the WGSL string lives with the compiler, not
+// the runtime, per the user's "no hand-written WGSL in runtime crates"
+// constraint. There is no DSL surface for the decay rule today
+// (`for_each_agent` body shape isn't a DSL primitive); the kernel is
+// authored as a function in the compiler instead of as a literal
+// const string in the runtime.
+pub mod belief_decay_wgsl;
+
 // Top-level symbol re-exports
 pub use ast::{Decl, Program, Span, Spanned};
 pub use error::ParseError;
