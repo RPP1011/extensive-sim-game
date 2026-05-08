@@ -1,12 +1,13 @@
 // tom_probe — Theory-of-Mind end-to-end probe (post-fix shape).
 //
 // **Outcome target: (a) FULL FIRE.** Per-(observer, subject) belief
-// bitset is materialized as a `pair_map`-storage `view beliefs(...)
-// -> u32`. Each tick every alive Knower emits a `BeliefAcquired`
-// event with `fact_bit = 1`; the view's bit-OR accumulator
-// (`self |= b`) folds them into `beliefs(self, self)`. The runtime
-// reads back the primary storage and asserts the diagonal converged
-// to `1u` while every off-diagonal slot stayed `0u`.
+// flag bitset is materialized as a `pair_map`-storage
+// `view beliefs_flags(...) -> u32`. Each tick every alive Knower
+// emits a `BeliefAcquired` event with `fact_bit = 1`; the view's
+// bit-OR accumulator (`self |= b`) folds them into
+// `beliefs_flags(self, self)`. The runtime reads back the primary
+// storage and asserts the diagonal converged to `1u` while every
+// off-diagonal slot stayed `0u`.
 //
 // Sidesteps the AST-level `BeliefsAccessor` + `theory_of_mind.
 // believes_knows` namespace gaps by routing belief mutations through
@@ -29,14 +30,41 @@
 //   4. WGSL emit branches on `view_signatures.result` — `u32` views
 //      use `atomicOr(&storage[idx], rhs)` (commutative + associative
 //      → P11 trivial); `f32` views keep the existing CAS+add loop.
+//
+// Wave 3 ToM Phase 2 — multi-field BeliefState SoA.
+// ----------------------------------------------------------------
+// The single-u32 `beliefs` view from Phase 1 is now `beliefs_flags`;
+// the `_flags` suffix names the bit-OR slot in the multi-field
+// BeliefState (per `docs/spec/ability_dsl_test_sims.md` spy_network).
+// The other 5 fields (`last_known_pos`, `last_known_creature_type`,
+// `last_seen_tick`, `confidence`, `suspicion`) are stored
+// runtime-side as parallel SoA columns by `tom_probe_runtime` —
+// Phase 2 is a storage + read-accessor slice (no new writer verbs;
+// those land in Phase 3 alongside the spec's `agents.beliefs(o, s).
+// <field>` struct-then-field access syntax). The Phase 1 fold path
+// is unchanged: only `beliefs_flags` carries an event-fold writer
+// today, and the runtime exposes `beliefs_pos()`, `beliefs_type()`,
+// `beliefs_tick()`, `beliefs_confidence()`, `beliefs_suspicion()`
+// reader methods plus test-only setters that pre-seed each column
+// for the `belief_state_soa_pin.rs` regression pin.
+//
+// The 5 other-field views are NOT declared as `@materialized` views
+// in this fixture for Phase 2 — declaring them would produce 5
+// extra fold kernels with no producers (the writer verbs that emit
+// the corresponding `EffectScryApplied` / `EffectObserveApplied`
+// events land in Phase 3). The runtime allocates the buffers
+// directly so the SoA isolation property can be exercised today,
+// and the spec's `agents.beliefs_<field>(observer, subject)`
+// view-call lowering is deferred to Phase 3 alongside the writer
+// verbs that need to address those buffers from kernels.
 
 event Tick { }
 
 // Per-event belief acquisition record. Each emission OR's `fact_bit`
-// into `beliefs(observer, subject)`. `fact_bit` is pre-shifted by the
-// producer (e.g. `1u << fact_id`) so the view body itself doesn't
-// need shift-arithmetic — matches the bare-bones u32 accumulator
-// shape the probe targets.
+// into `beliefs_flags(observer, subject)`. `fact_bit` is pre-shifted
+// by the producer (e.g. `1u << fact_id`) so the view body itself
+// doesn't need shift-arithmetic — matches the bare-bones u32
+// accumulator shape the probe targets.
 @replayable
 @gpu_amenable
 event BeliefAcquired {
@@ -50,13 +78,16 @@ entity Knower : Agent {
   vel: vec3,
 }
 
-// Per-(observer, subject) belief bitset. Storage = `pair_map`, so the
-// fold body indexes `view_storage_primary[observer * agent_cap +
-// subject]`. With agent_cap = N the storage is N×N×u32. Initial 0 (no
-// beliefs); clamp covers the full u32 range (the bit-OR accumulator
-// can never exceed 0xFFFFFFFFu).
+// Per-(observer, subject) belief flag bitset (`flags` slot of the
+// BeliefState SoA). Storage = `pair_map`, so the fold body indexes
+// `view_storage_primary[observer * agent_cap + subject]`. With
+// agent_cap = N the storage is N×N×u32. Initial 0 (no beliefs);
+// clamp covers the full u32 range (the bit-OR accumulator can never
+// exceed 0xFFFFFFFFu). Renamed from `beliefs` → `beliefs_flags` in
+// Wave 3 ToM Phase 2 to disambiguate from the 5 other BeliefState
+// fields living runtime-side (see header).
 @materialized(on_event = [BeliefAcquired], storage = pair_map)
-view beliefs(observer: Agent, subject: Agent) -> u32 {
+view beliefs_flags(observer: Agent, subject: Agent) -> u32 {
   initial: 0,
   on BeliefAcquired { observer: o, subject: s, fact_bit: b } { self |= b }
   clamp: [0, 4294967295],
@@ -64,14 +95,15 @@ view beliefs(observer: Agent, subject: Agent) -> u32 {
 
 // Producer: every alive Knower emits one `BeliefAcquired { self,
 // self, 1 }` per tick. The view's bit-OR fold turns this into
-// "beliefs(i, i) has bit 0 set" after the first tick — and stays that
-// way (bit-OR is idempotent on a bit that's already set). The
-// off-diagonal `beliefs(i, j != i)` cells stay at 0 forever because
-// no event with (observer=i, subject=j) is ever emitted.
+// "beliefs_flags(i, i) has bit 0 set" after the first tick — and
+// stays that way (bit-OR is idempotent on a bit that's already
+// set). The off-diagonal `beliefs_flags(i, j != i)` cells stay at 0
+// forever because no event with (observer=i, subject=j) is ever
+// emitted.
 //
 // FULL FIRE observable (asserted by tom_probe_app):
-//   - beliefs[i * N + i] == 1u for every i in 0..N
-//   - beliefs[i * N + j] == 0u for every i != j
+//   - beliefs_flags[i * N + i] == 1u for every i in 0..N
+//   - beliefs_flags[i * N + j] == 0u for every i != j
 physics WhatIBelieve @phase(per_agent) {
   on Tick {} where (self.alive) {
     emit BeliefAcquired { observer: self, subject: self, fact_bit: 1 }

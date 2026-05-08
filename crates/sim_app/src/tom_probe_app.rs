@@ -46,7 +46,7 @@ fn main() {
         sim.step();
     }
 
-    let beliefs = sim.beliefs().to_vec();
+    let beliefs = sim.beliefs_flags().to_vec();
     let n = AGENT_COUNT as usize;
     println!(
         "tom_probe_app: finished — final tick={} agents={} beliefs.len()={}",
