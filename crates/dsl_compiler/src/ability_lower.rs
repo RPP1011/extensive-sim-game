@@ -1531,6 +1531,24 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             // accepts both). Preserve the sign.
             Ok(EffectOp::TransferGold { amount: amt.round() as i32 })
         }
+        "scry" => {
+            // `scry <target_observer> <subject_idx>` — Wave 3 ToM Phase
+            // 3.5. Two positional integer args; no duration (one-shot
+            // belief copy). target_observer is a u8 slot id (0..255);
+            // subject_idx is a u32 agent index. The chronicle consumer
+            // copies the 6 BeliefState SoA columns from
+            // `[target_observer * N + subject_idx]` to
+            // `[caster * N + subject_idx]`. Mirrors the transfer_gold
+            // arm's multi-arg, no-duration shape.
+            let observer = require_number_arg(stmt, 0)?;
+            let subject = require_number_arg(stmt, 1)?;
+            require_arity(stmt, 2)?;
+            let target_observer =
+                observer.round().clamp(0.0, u8::MAX as f32) as u8;
+            let subject_idx =
+                subject.round().clamp(0.0, u32::MAX as f32) as u32;
+            Ok(EffectOp::Scry { target_observer, subject_idx })
+        }
         "modify_standing" => {
             let delta = require_number_arg(stmt, 0)?;
             require_arity(stmt, 1)?;
@@ -2096,5 +2114,28 @@ fn first_unknown_agent_field(expr: &dsl_ast::ast::Expr) -> Option<(String, Strin
         // Leaves: literals + bare idents have no nested fields to check.
         ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_)
         | ExprKind::String(_) | ExprKind::Ident(_) => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dsl_ast::parse_ability_file;
+
+    /// Wave 3 ToM Phase 3.5: `scry <observer> <subject>` lowers to
+    /// `EffectOp::Scry { target_observer, subject_idx }`.
+    #[test]
+    fn scry_lowers_two_positional_ints() {
+        let src = "ability Spy { target: self cooldown: 1s hint: utility scry 3 5 }";
+        let file = parse_ability_file(src).expect("parser");
+        let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+        assert_eq!(prog.effects.len(), 1);
+        match prog.effects[0] {
+            EffectOp::Scry { target_observer, subject_idx } => {
+                assert_eq!(target_observer, 3);
+                assert_eq!(subject_idx, 5);
+            }
+            ref other => panic!("expected Scry; got {other:?}"),
+        }
     }
 }
