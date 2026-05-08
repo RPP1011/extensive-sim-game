@@ -467,7 +467,7 @@ impl TacticalSquad5v5State {
         });
         let chronicle_strike_cfg_init =
             physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_strike_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("tactical_squad_5v5_runtime::chronicle_strike_cfg"),
@@ -476,7 +476,7 @@ impl TacticalSquad5v5State {
         });
         let chronicle_snipe_cfg_init =
             physics_verb_chronicle_Snipe::PhysicsVerbChronicleSnipeCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_snipe_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("tactical_squad_5v5_runtime::chronicle_snipe_cfg"),
@@ -489,7 +489,7 @@ impl TacticalSquad5v5State {
         // dispatches AbilityId(3) through the apply_ability arm.
         let chronicle_concussive_blow_cfg_init =
             physics_verb_chronicle_ConcussiveBlow::PhysicsVerbChronicleConcussiveBlowCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_concussive_blow_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("tactical_squad_5v5_runtime::chronicle_concussive_blow_cfg"),
@@ -498,7 +498,7 @@ impl TacticalSquad5v5State {
         });
         let chronicle_heal_cfg_init =
             physics_verb_chronicle_Heal::PhysicsVerbChronicleHealCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_heal_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("tactical_squad_5v5_runtime::chronicle_heal_cfg"),
@@ -513,7 +513,7 @@ impl TacticalSquad5v5State {
         // records.
         let chronicle_squad_heal_cfg_init =
             physics_verb_chronicle_SquadHeal::PhysicsVerbChronicleSquadHealCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_squad_heal_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("tactical_squad_5v5_runtime::chronicle_squad_heal_cfg"),
@@ -522,7 +522,7 @@ impl TacticalSquad5v5State {
         });
         let apply_cfg_init =
             physics_ApplyDamage_and_ApplyHeal::PhysicsApplyDamageAndApplyHealCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let apply_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("tactical_squad_5v5_runtime::apply_cfg"),
@@ -546,7 +546,7 @@ impl TacticalSquad5v5State {
         // 049feb0c).
         let apply_chronicle_cfg_init =
             physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleAndApplyHealFromChronicleCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let apply_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("tactical_squad_5v5_runtime::apply_chronicle_cfg"),
@@ -916,7 +916,7 @@ impl CompiledSim for TacticalSquad5v5State {
         // ApplyDamage_and_ApplyHeal cascade keeps working unchanged.
         let event_count_estimate = self.agent_count * 4;
         let strike_cfg = physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeCfg {
-            event_count: event_count_estimate, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: event_count_estimate, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_strike_cfg_buf, 0, bytemuck::bytes_of(&strike_cfg),
@@ -956,7 +956,7 @@ impl CompiledSim for TacticalSquad5v5State {
         // AbilityId(2)) — writes EffectDamageApplied(kind=26) records
         // re-emitted by ApplyDamageFromChronicle.
         let snipe_cfg = physics_verb_chronicle_Snipe::PhysicsVerbChronicleSnipeCfg {
-            event_count: event_count_estimate, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: event_count_estimate, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_snipe_cfg_buf, 0, bytemuck::bytes_of(&snipe_cfg),
@@ -1006,7 +1006,7 @@ impl CompiledSim for TacticalSquad5v5State {
         // (Damaged → ApplyDamage HP cascade for kind=26, direct
         // `agents.set_stun_expires_at_tick` for kind=29).
         let concussive_blow_cfg = physics_verb_chronicle_ConcussiveBlow::PhysicsVerbChronicleConcussiveBlowCfg {
-            event_count: event_count_estimate, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: event_count_estimate, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_concussive_blow_cfg_buf, 0, bytemuck::bytes_of(&concussive_blow_cfg),
@@ -1048,7 +1048,7 @@ impl CompiledSim for TacticalSquad5v5State {
         // unchanged — the action_id literal in the generated kernel is
         // the only detail that moved.
         let heal_cfg = physics_verb_chronicle_Heal::PhysicsVerbChronicleHealCfg {
-            event_count: event_count_estimate, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: event_count_estimate, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_heal_cfg_buf, 0, bytemuck::bytes_of(&heal_cfg),
@@ -1078,7 +1078,7 @@ impl CompiledSim for TacticalSquad5v5State {
         // `agents.set_hp(min(hp + amt, max_hp))` for kind=27, direct
         // `agents.set_stun_expires_at_tick` for kind=29).
         let squad_heal_cfg = physics_verb_chronicle_SquadHeal::PhysicsVerbChronicleSquadHealCfg {
-            event_count: event_count_estimate, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: event_count_estimate, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_squad_heal_cfg_buf, 0, bytemuck::bytes_of(&squad_heal_cfg),
@@ -1134,7 +1134,7 @@ impl CompiledSim for TacticalSquad5v5State {
         // mirrors duel_25v25's HealPulse fusion (commit 049feb0c).
         let apply_chronicle_cfg = physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleAndApplyHealFromChronicleCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
-            seed: 0, _pad0: 0,
+            seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_chronicle_cfg_buf, 0,
@@ -1157,7 +1157,7 @@ impl CompiledSim for TacticalSquad5v5State {
         // (7) ApplyDamage_and_ApplyHeal — fused PerEvent kernel.
         let apply_cfg = physics_ApplyDamage_and_ApplyHeal::PhysicsApplyDamageAndApplyHealCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
-            seed: 0, _pad0: 0,
+            seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_cfg_buf, 0, bytemuck::bytes_of(&apply_cfg),

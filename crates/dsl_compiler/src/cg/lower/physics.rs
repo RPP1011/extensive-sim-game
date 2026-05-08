@@ -808,12 +808,68 @@ fn lower_expr_stmt(
         if let Some(field) = agents_setter_field(method) {
             return lower_agents_setter(rule_id, *field, args, e.span, ctx);
         }
+        // Wave 3 ToM Phase 3.7 — `agents.set_beliefs_<field>(observer,
+        // subject, value)` setters lower as a discarded namespace call.
+        // The call's `CgExpr::NamespaceCall` lowers via the standard
+        // expression path; the result is wrapped in a `CgStmt::Let`
+        // with a synthetic local so the WGSL emit produces a `let _ =
+        // agents_set_beliefs_<field>(...);` line. The setter's WGSL
+        // stub body does the actual SoA write (when
+        // `LowerOpts.belief_state` is opted in by the caller's build.rs;
+        // otherwise the stub is a no-op `return true`).
+        //
+        // The opt-in gates are wired through `populate_namespace_registry`
+        // (selects the real-write WGSL stub bodies) and
+        // `wire_belief_state_setter_writes` (records the matching
+        // `BeliefStateColumn` write so the BGL composer surfaces the
+        // binding). Lowering at the call site stays uniform — both opt-in
+        // and opt-out programs lower the call the same way; only the
+        // emitted stub body + binding set differ.
+        if method.starts_with("set_beliefs_") {
+            return lower_belief_setter_stmt(rule_id, e, ctx);
+        }
     }
     Err(LoweringError::UnsupportedPhysicsStmt {
         rule: rule_id,
         ast_label: "Expr",
         span: e.span,
     })
+}
+
+/// Lower a `agents.set_beliefs_<field>(...)` call used as a statement
+/// (its Bool result is discarded). Wraps the call in a `CgStmt::Let`
+/// with a synthetic local so the standard expression + statement
+/// emission paths handle the rest.
+fn lower_belief_setter_stmt(
+    rule_id: PhysicsRuleId,
+    e: &IrExprNode,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<CgStmtId, LoweringError> {
+    let _ = rule_id;
+    let value_id = lower_expr(e, ctx)?;
+    let value_ty = super::expr::typecheck_node(ctx, value_id, e.span)?;
+    // Allocate a fresh internal local — there's no AST `LocalRef` to
+    // map from (the source is an expression statement, not a `let`),
+    // so allocate one past the max existing id over both the AST-
+    // bound local registry and the typed-local map. Mirrors the fold
+    // accumulator allocation in `lower_expr.rs` (the only other
+    // anonymous-local allocator).
+    let next_id = ctx
+        .local_ids
+        .values()
+        .map(|id| id.0)
+        .chain(ctx.local_tys.keys().map(|id| id.0))
+        .max()
+        .map(|m| m + 1)
+        .unwrap_or(0);
+    let local_id = crate::cg::stmt::LocalId(next_id);
+    ctx.record_local_ty(local_id, value_ty);
+    let stmt = CgStmt::Let {
+        local: local_id,
+        value: value_id,
+        ty: value_ty,
+    };
+    push_stmt(stmt, e.span, ctx)
 }
 
 /// Map an `agents.set_<field>` method name to the `AgentFieldId` it

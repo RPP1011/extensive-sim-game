@@ -245,7 +245,7 @@ impl DiplomacyProbeState {
                 event_count: 0,
                 tick: 0,
                 seed: 0,
-                _pad0: 0,
+                agent_cap: 0,
             };
         let chronicle_propose_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -259,7 +259,7 @@ impl DiplomacyProbeState {
                 event_count: 0,
                 tick: 0,
                 seed: 0,
-                _pad0: 0,
+                agent_cap: 0,
             };
         let chronicle_betray_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -556,7 +556,7 @@ impl CompiledSim for DiplomacyProbeState {
                 event_count: chronicle_event_count,
                 tick: self.tick as u32,
                 seed: 0,
-                _pad0: 0,
+                agent_cap: 0,
             };
         self.gpu.queue.write_buffer(
             &self.chronicle_propose_cfg_buf,
@@ -593,7 +593,7 @@ impl CompiledSim for DiplomacyProbeState {
                 event_count: betray_chronicle_event_count,
                 tick: self.tick as u32,
                 seed: 0,
-                _pad0: 0,
+                agent_cap: 0,
             };
         self.gpu.queue.write_buffer(
             &self.chronicle_betray_cfg_buf,

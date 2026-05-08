@@ -375,7 +375,7 @@ impl BossFightState {
         });
         let chronicle_boss_strike_cfg_init =
             physics_verb_chronicle_BossStrike::PhysicsVerbChronicleBossStrikeCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_boss_strike_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("boss_fight_runtime::chronicle_boss_strike_cfg"),
@@ -384,7 +384,7 @@ impl BossFightState {
         });
         let chronicle_boss_heal_cfg_init =
             physics_verb_chronicle_BossSelfHeal::PhysicsVerbChronicleBossSelfHealCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_boss_heal_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("boss_fight_runtime::chronicle_boss_heal_cfg"),
@@ -393,7 +393,7 @@ impl BossFightState {
         });
         let chronicle_hero_attack_cfg_init =
             physics_verb_chronicle_HeroAttack::PhysicsVerbChronicleHeroAttackCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_hero_attack_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("boss_fight_runtime::chronicle_hero_attack_cfg"),
@@ -406,7 +406,7 @@ impl BossFightState {
         // and dispatches AbilityId(3) through the apply_ability arm.
         let chronicle_hero_stun_cfg_init =
             physics_verb_chronicle_HeroStun::PhysicsVerbChronicleHeroStunCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_hero_stun_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("boss_fight_runtime::chronicle_hero_stun_cfg"),
@@ -415,7 +415,7 @@ impl BossFightState {
         });
         let chronicle_hero_heal_cfg_init =
             physics_verb_chronicle_HeroHeal::PhysicsVerbChronicleHeroHealCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_hero_heal_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("boss_fight_runtime::chronicle_hero_heal_cfg"),
@@ -424,7 +424,7 @@ impl BossFightState {
         });
         let apply_cfg_init =
             physics_ApplyDamage_and_ApplyHeal::PhysicsApplyDamageAndApplyHealCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let apply_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("boss_fight_runtime::apply_cfg"),
@@ -447,7 +447,7 @@ impl BossFightState {
         // to 3-way when HeroHeal switched to the chronicle pipeline.
         let apply_chronicle_cfg_init =
             physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleAndApplyHealFromChronicleCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let apply_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("boss_fight_runtime::apply_chronicle_cfg"),
@@ -757,7 +757,7 @@ impl CompiledSim for BossFightState {
         // EffectDamageApplied writes (kind=26). Re-emitted as Damaged
         // by ApplyDamageFromChronicle below.
         let bs_cfg = physics_verb_chronicle_BossStrike::PhysicsVerbChronicleBossStrikeCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_boss_strike_cfg_buf, 0, bytemuck::bytes_of(&bs_cfg),
@@ -794,7 +794,7 @@ impl CompiledSim for BossFightState {
 
         // (5) BossSelfHeal chronicle — gates on action_id==1, emits Healed.
         let bh_cfg = physics_verb_chronicle_BossSelfHeal::PhysicsVerbChronicleBossSelfHealCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_boss_heal_cfg_buf, 0, bytemuck::bytes_of(&bh_cfg),
@@ -816,7 +816,7 @@ impl CompiledSim for BossFightState {
         // EffectDamageApplied writes (kind=26). Re-emitted as Damaged
         // by ApplyDamageFromChronicle below.
         let ha_cfg = physics_verb_chronicle_HeroAttack::PhysicsVerbChronicleHeroAttackCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_hero_attack_cfg_buf, 0, bytemuck::bytes_of(&ha_cfg),
@@ -866,7 +866,7 @@ impl CompiledSim for BossFightState {
         // (Damaged → ApplyDamage HP cascade for kind=26, direct
         // `agents.set_stun_expires_at_tick` for kind=29).
         let hs_cfg = physics_verb_chronicle_HeroStun::PhysicsVerbChronicleHeroStunCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_hero_stun_cfg_buf, 0, bytemuck::bytes_of(&hs_cfg),
@@ -918,7 +918,7 @@ impl CompiledSim for BossFightState {
         // to the full apply_ability dispatcher arm (effect-SoA walk +
         // scaling switch). Bindings count grew 3 → 23.
         let hh_cfg = physics_verb_chronicle_HeroHeal::PhysicsVerbChronicleHeroHealCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_hero_heal_cfg_buf, 0, bytemuck::bytes_of(&hh_cfg),
@@ -982,7 +982,7 @@ impl CompiledSim for BossFightState {
             event_count: event_count_estimate,
             tick: self.tick as u32,
             seed: 0,
-            _pad0: 0,
+            agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_chronicle_cfg_buf,
@@ -1013,7 +1013,7 @@ impl CompiledSim for BossFightState {
         // writes agent_hp + agent_alive, may emit Defeated.
         let apply_cfg = physics_ApplyDamage_and_ApplyHeal::PhysicsApplyDamageAndApplyHealCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
-            seed: 0, _pad0: 0,
+            seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_cfg_buf, 0, bytemuck::bytes_of(&apply_cfg),

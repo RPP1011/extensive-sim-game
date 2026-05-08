@@ -56,7 +56,7 @@ fn main() {
     // 27-cell walk.
     let cg = match dsl_compiler::cg::lower::lower_compilation_to_cg_with_opts(
         &comp,
-        dsl_compiler::cg::lower::LowerOpts { aoe_dispatch: true },
+        dsl_compiler::cg::lower::LowerOpts { aoe_dispatch: true, belief_state: false },
     ) {
         Ok(p) => p,
         Err(o) => {

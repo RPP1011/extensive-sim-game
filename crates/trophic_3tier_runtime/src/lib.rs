@@ -404,7 +404,7 @@ impl Trophic3TierState {
             event_count: 0,
             tick: 0,
             seed: 0,
-            _pad0: 0,
+            agent_cap: 0,
         };
         let applyeat_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("trophic_3tier_runtime::applyeat_cfg"),
@@ -426,7 +426,7 @@ impl Trophic3TierState {
             event_count: 0,
             tick: 0,
             seed: 0,
-            _pad0: 0,
+            agent_cap: 0,
         };
         let applystrike_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("trophic_3tier_runtime::applystrike_cfg"),
@@ -982,7 +982,7 @@ impl CompiledSim for Trophic3TierState {
             event_count: event_count_estimate,
             tick: self.tick as u32,
             seed: 0,
-            _pad0: 0,
+            agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.applyeat_cfg_buf, 0, bytemuck::bytes_of(&applyeat_cfg),
@@ -1029,7 +1029,7 @@ impl CompiledSim for Trophic3TierState {
             event_count: event_count_estimate,
             tick: self.tick as u32,
             seed: 0,
-            _pad0: 0,
+            agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.applystrike_cfg_buf, 0, bytemuck::bytes_of(&applystrike_cfg),

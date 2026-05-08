@@ -288,7 +288,7 @@ impl ObjectiveCapture10v10State {
         });
         let chronicle_strike_cfg_init =
             physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_strike_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("obj_cap::chronicle_strike_cfg"),
@@ -296,7 +296,7 @@ impl ObjectiveCapture10v10State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let apply_cfg_init = physics_ApplyDamage::PhysicsApplyDamageCfg {
-            event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            event_count: 0, tick: 0, seed: 0, agent_cap: 0,
         };
         let apply_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("obj_cap::apply_cfg"),
@@ -637,7 +637,7 @@ impl CompiledSim for ObjectiveCapture10v10State {
 
         // (4) Strike chronicle.
         let strike_cfg = physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_strike_cfg_buf, 0, bytemuck::bytes_of(&strike_cfg),
@@ -656,7 +656,7 @@ impl CompiledSim for ObjectiveCapture10v10State {
         let event_count_estimate = self.agent_count * 4;
         let apply_cfg = physics_ApplyDamage::PhysicsApplyDamageCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
-            seed: 0, _pad0: 0,
+            seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_cfg_buf, 0, bytemuck::bytes_of(&apply_cfg),

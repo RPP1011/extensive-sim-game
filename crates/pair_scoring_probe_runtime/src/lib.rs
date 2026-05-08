@@ -202,7 +202,7 @@ impl PairScoringProbeState {
                 event_count: 0,
                 tick: 0,
                 seed: 0,
-                _pad0: 0,
+                agent_cap: 0,
             };
         let chronicle_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -409,7 +409,7 @@ impl CompiledSim for PairScoringProbeState {
                 event_count: self.agent_count,
                 tick: self.tick as u32,
                 seed: 0,
-                _pad0: 0,
+                agent_cap: 0,
             };
         self.gpu.queue.write_buffer(
             &self.chronicle_cfg_buf,

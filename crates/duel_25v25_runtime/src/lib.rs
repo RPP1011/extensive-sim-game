@@ -450,7 +450,7 @@ impl Duel25v25State {
             event_count: 0,
             tick: 0,
             seed: 0,
-            _pad0: 0,
+            agent_cap: 0,
         };
         let apply_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_25v25_runtime::apply_cfg"),
@@ -475,7 +475,7 @@ impl Duel25v25State {
             event_count: 0,
             tick: 0,
             seed: 0,
-            _pad0: 0,
+            agent_cap: 0,
         };
         let apply_chronicle_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_25v25_runtime::apply_chronicle_cfg"),
@@ -1090,7 +1090,7 @@ impl CompiledSim for Duel25v25State {
             event_count: event_count_estimate,
             tick: self.tick as u32,
             seed: 0,
-            _pad0: 0,
+            agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_chronicle_cfg_buf,
@@ -1124,7 +1124,7 @@ impl CompiledSim for Duel25v25State {
             event_count: event_count_estimate,
             tick: self.tick as u32,
             seed: 0,
-            _pad0: 0,
+            agent_cap: 0,
         };
         self.gpu
             .queue

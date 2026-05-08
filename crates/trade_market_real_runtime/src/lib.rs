@@ -292,7 +292,7 @@ impl TradeMarketRealState {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let chronicle_buy_cfg_init = physics_verb_chronicle_Buy::PhysicsVerbChronicleBuyCfg {
-            event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            event_count: 0, tick: 0, seed: 0, agent_cap: 0,
         };
         let chronicle_buy_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("trade_market_real_runtime::chronicle_buy_cfg"),
@@ -300,7 +300,7 @@ impl TradeMarketRealState {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let apply_cfg_init = physics_ApplyTrade::PhysicsApplyTradeCfg {
-            event_count: 0, tick: 0, seed: 0, _pad0: 0,
+            event_count: 0, tick: 0, seed: 0, agent_cap: 0,
         };
         let apply_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("trade_market_real_runtime::apply_cfg"),
@@ -610,7 +610,7 @@ impl CompiledSim for TradeMarketRealState {
         // (4) Chronicle — gates on action_id==0u, emits Trade.
         let chronicle_cfg = physics_verb_chronicle_Buy::PhysicsVerbChronicleBuyCfg {
             event_count: self.agent_count, tick: self.tick as u32,
-            seed: self.seed as u32, _pad0: 0,
+            seed: self.seed as u32, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_buy_cfg_buf, 0, bytemuck::bytes_of(&chronicle_cfg),
@@ -631,7 +631,7 @@ impl CompiledSim for TradeMarketRealState {
         let event_count_estimate = self.agent_count * 4;
         let apply_cfg = physics_ApplyTrade::PhysicsApplyTradeCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
-            seed: self.seed as u32, _pad0: 0,
+            seed: self.seed as u32, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_cfg_buf, 0, bytemuck::bytes_of(&apply_cfg),

@@ -394,6 +394,7 @@ fn structural_handle_name(h: &DataHandle) -> String {
             // up against the same string the body references.
             format!("ability_registry_{}", ability_registry_column_token(*column))
         }
+        DataHandle::BeliefStateColumn { column } => column.binding_name().to_string(),
     }
 }
 

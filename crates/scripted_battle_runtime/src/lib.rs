@@ -251,7 +251,7 @@ impl ScriptedBattleState {
         });
         let chronicle_forage_peaceful_cfg_init =
             physics_verb_chronicle_ForagePeaceful::PhysicsVerbChronicleForagePeacefulCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_forage_peaceful_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("scripted_battle_runtime::chronicle_forage_peaceful_cfg"),
@@ -260,7 +260,7 @@ impl ScriptedBattleState {
         });
         let chronicle_villager_strike_cfg_init =
             physics_verb_chronicle_VillagerStrike::PhysicsVerbChronicleVillagerStrikeCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_villager_strike_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("scripted_battle_runtime::chronicle_villager_strike_cfg"),
@@ -269,7 +269,7 @@ impl ScriptedBattleState {
         });
         let chronicle_enemy_strike_cfg_init =
             physics_verb_chronicle_EnemyStrike::PhysicsVerbChronicleEnemyStrikeCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_enemy_strike_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("scripted_battle_runtime::chronicle_enemy_strike_cfg"),
@@ -278,7 +278,7 @@ impl ScriptedBattleState {
         });
         let chronicle_forage_aftermath_cfg_init =
             physics_verb_chronicle_ForageAftermath::PhysicsVerbChronicleForageAftermathCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_forage_aftermath_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("scripted_battle_runtime::chronicle_forage_aftermath_cfg"),
@@ -287,7 +287,7 @@ impl ScriptedBattleState {
         });
         let apply_cfg_init =
             physics_ApplyDamage_and_ApplyHeal::PhysicsApplyDamageAndApplyHealCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let apply_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("scripted_battle_runtime::apply_cfg"),
@@ -548,7 +548,7 @@ impl CompiledSim for ScriptedBattleState {
 
         // (4) Per-verb chronicle kernels — one per action_id.
         let fp_cfg = physics_verb_chronicle_ForagePeaceful::PhysicsVerbChronicleForagePeacefulCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_forage_peaceful_cfg_buf, 0, bytemuck::bytes_of(&fp_cfg),
@@ -564,7 +564,7 @@ impl CompiledSim for ScriptedBattleState {
         );
 
         let vs_cfg = physics_verb_chronicle_VillagerStrike::PhysicsVerbChronicleVillagerStrikeCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_villager_strike_cfg_buf, 0, bytemuck::bytes_of(&vs_cfg),
@@ -580,7 +580,7 @@ impl CompiledSim for ScriptedBattleState {
         );
 
         let es_cfg = physics_verb_chronicle_EnemyStrike::PhysicsVerbChronicleEnemyStrikeCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_enemy_strike_cfg_buf, 0, bytemuck::bytes_of(&es_cfg),
@@ -596,7 +596,7 @@ impl CompiledSim for ScriptedBattleState {
         );
 
         let fa_cfg = physics_verb_chronicle_ForageAftermath::PhysicsVerbChronicleForageAftermathCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_forage_aftermath_cfg_buf, 0, bytemuck::bytes_of(&fa_cfg),
@@ -615,7 +615,7 @@ impl CompiledSim for ScriptedBattleState {
         let event_count_estimate = self.agent_count * 4;
         let apply_cfg = physics_ApplyDamage_and_ApplyHeal::PhysicsApplyDamageAndApplyHealCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
-            seed: 0, _pad0: 0,
+            seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_cfg_buf, 0, bytemuck::bytes_of(&apply_cfg),

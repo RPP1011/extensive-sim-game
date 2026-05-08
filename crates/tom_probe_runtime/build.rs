@@ -32,7 +32,19 @@ fn main() {
     // even though both CheckBelief* physics rules drop out at lower
     // time (BeliefsAccessor + theory_of_mind.believes_knows are not
     // yet lowered).
-    let cg = match dsl_compiler::cg::lower::lower_compilation_to_cg(&comp) {
+    // Wave 3 ToM Phase 3.7 — opt in to belief-state lowering. Flips the
+    // `agents.set_beliefs_<field>(observer, subject, value)` setter
+    // WGSL stubs from `return true` no-ops to real writes against the
+    // matching `beliefs_<field>` BGL bindings. Runtime allocates the 6
+    // BeliefState SoA buffers (pre-existing) and supplies them via the
+    // per-event consumer kernel's `Bindings` struct.
+    let cg = match dsl_compiler::cg::lower::lower_compilation_to_cg_with_opts(
+        &comp,
+        dsl_compiler::cg::lower::LowerOpts {
+            aoe_dispatch: false,
+            belief_state: true,
+        },
+    ) {
         Ok(p) => p,
         Err(o) => {
             for d in &o.diagnostics {

@@ -189,6 +189,22 @@ pub struct LowerOpts {
     /// for every non-opt-in fixture (the entire production-runtime
     /// set today).
     pub aoe_dispatch: bool,
+    /// 2026-05-07 (Wave 3 ToM Phase 3.7): when `true`, every
+    /// `agents.set_beliefs_<field>(observer, subject, value)` call in
+    /// the program records a write on the matching
+    /// [`crate::cg::data_handle::DataHandle::BeliefStateColumn`]
+    /// handle, surfaces the column as a real BGL binding on the
+    /// hosting kernel (`beliefs_pos` / `beliefs_type` / `beliefs_tick`
+    /// / `beliefs_confidence` / `beliefs_suspicion` / `beliefs_flags`),
+    /// and emits real WGSL store bodies instead of the `return true`
+    /// no-op stubs. The fixture-side runtime allocates the 6 paired
+    /// (primary, staging) buffers and supplies them via the kernel's
+    /// `Bindings` struct.
+    ///
+    /// Default `false` keeps every other fixture binding-clean — the
+    /// stubs stay no-ops and the BGL composer surfaces zero
+    /// belief-state bindings. Today only `tom_probe_runtime` opts in.
+    pub belief_state: bool,
 }
 
 /// Backward-compat shorthand for [`lower_compilation_to_cg_with_opts`]
@@ -240,6 +256,12 @@ pub fn lower_compilation_to_cg_with_opts(
     // by `cg::lower::physics::lower_apply_ability` and stamped onto
     // `CgStmt::ApplyAbility::with_aoe_dispatch`.
     ctx.aoe_dispatch = opts.aoe_dispatch;
+    // 2026-05-07 (Wave 3 ToM Phase 3.7): thread the BeliefState opt-in
+    // onto the same context. Read by `populate_namespace_registry`
+    // (selects real-write WGSL stub bodies vs. no-op return-true) and
+    // by `wire_belief_state_setter_writes` below (records writes on
+    // ops whose body contains `set_beliefs_*` calls).
+    ctx.belief_state = opts.belief_state;
 
     let event_rings = populate_event_kinds(comp, &mut ctx, &mut diagnostics);
     populate_variants_from_enums(comp, &mut ctx, &mut diagnostics);
@@ -391,6 +413,24 @@ pub fn lower_compilation_to_cg_with_opts(
     // phases. Only fixtures that opt in (today: smoke runtime via
     // `lower_compilation_to_cg_with_opts`) pay the binding cost.
     wire_apply_ability_aoe_reads(&arena_snapshot, ctx.builder.ops_mut());
+
+    // -- Phase 4a''': BeliefState setter write wiring (Wave 3 ToM 3.7) -
+    //
+    // Sibling to `wire_apply_ability_aoe_reads` (above): walks
+    // body-bearing PhysicsRule / ViewFold ops, but only records writes
+    // on ops whose body contains at least one `agents.set_beliefs_*`
+    // namespace call. Adds the matching
+    // [`crate::cg::data_handle::DataHandle::BeliefStateColumn`] write
+    // so the BGL composer surfaces the per-column `beliefs_<field>`
+    // binding on the kernel's BGL.
+    //
+    // Default `LowerOpts::belief_state == false` means this walk is a
+    // no-op for every production runtime — the per-column bindings
+    // never appear and the setter WGSL stubs stay no-op `return true`.
+    // Only `tom_probe_runtime` opts in.
+    if opts.belief_state {
+        wire_belief_state_setter_writes(&arena_snapshot, ctx.builder.ops_mut());
+    }
 
     // -- Phase 4b: ActionSelected ring-write wiring on ScoringArgmax ---
     //
@@ -805,6 +845,34 @@ fn cg_ty_for_event_field(ty: &IrType) -> Option<(CgTy, u32)> {
 ///   resolves cleanly; non-fold kernels that read `world.tick` would
 ///   need the same preamble entry, but today no non-fold kernel uses
 ///   it.
+/// Build the WGSL body of a `agents.set_beliefs_<u8 column>` setter
+/// for the q8-packed BeliefState columns (`creature_type`,
+/// `confidence`, `suspicion`).
+///
+/// Each cell is one of 4 bytes packed LE into an `array<atomic<u32>>`
+/// word. The two-step `atomicAnd` (mask-clear) + `atomicOr` (value-set)
+/// shape mirrors `BELIEF_HELPERS_WGSL::write_packed_byte_atomic` from
+/// the Phase 3.6 hand-written runtime kernels (now retired) — the
+/// per-kernel concurrency rule (one writer per cell per dispatch) is
+/// the same in the compiler-emitted shape, so the non-atomic
+/// "intermediate state visible across two writes" gap doesn't apply.
+fn build_packed_u8_setter_wgsl(fn_name: &str, buf_name: &str) -> String {
+    format!(
+        "fn {fn_name}(observer: u32, subject: u32, v: u32) -> bool {{\n    \
+             let cap = cfg.agent_cap;\n    \
+             let cell = observer * cap + subject;\n    \
+             let word_idx = cell / 4u;\n    \
+             let byte_in_word = cell % 4u;\n    \
+             let shift = byte_in_word * 8u;\n    \
+             let mask: u32 = 0xFFu << shift;\n    \
+             let payload: u32 = (v & 0xFFu) << shift;\n    \
+             atomicAnd(&{buf_name}[word_idx], ~mask);\n    \
+             atomicOr(&{buf_name}[word_idx], payload);\n    \
+             return true;\n\
+         }}"
+    )
+}
+
 fn populate_namespace_registry(ctx: &mut LoweringCtx<'_>) {
     let mut registry = NamespaceRegistry::default();
 
@@ -911,46 +979,112 @@ fn populate_namespace_registry(ctx: &mut LoweringCtx<'_>) {
     }
     // Setters — 3-arg form `agents.set_beliefs_<field>(observer, subject, value)`.
     // Return Bool as a placeholder ack (matching `auctions.place_bid`'s
-    // pattern); WGSL stubs are no-ops returning `true`.
-    for (method, value_ty, stub_body) in [
-        (
-            "set_beliefs_pos",
-            CgTy::Vec3F32,
-            "fn agents_set_beliefs_pos(observer: u32, subject: u32, v: vec3<f32>) -> bool { return true; }",
-        ),
-        (
-            "set_beliefs_creature_type",
-            CgTy::U32,
-            "fn agents_set_beliefs_creature_type(observer: u32, subject: u32, v: u32) -> bool { return true; }",
-        ),
-        (
-            "set_beliefs_last_seen_tick",
-            CgTy::U32,
-            "fn agents_set_beliefs_last_seen_tick(observer: u32, subject: u32, v: u32) -> bool { return true; }",
-        ),
-        (
-            "set_beliefs_confidence",
-            CgTy::U32,
-            "fn agents_set_beliefs_confidence(observer: u32, subject: u32, v: u32) -> bool { return true; }",
-        ),
-        (
-            "set_beliefs_suspicion",
-            CgTy::U32,
-            "fn agents_set_beliefs_suspicion(observer: u32, subject: u32, v: u32) -> bool { return true; }",
-        ),
-        (
-            "set_beliefs_flags",
-            CgTy::U32,
-            "fn agents_set_beliefs_flags(observer: u32, subject: u32, v: u32) -> bool { return true; }",
-        ),
-    ] {
+    // pattern). When `ctx.belief_state` is `false` (the default), the
+    // stubs stay no-op `return true`s — matches the Phase 3.5 shape so
+    // every non-opt-in fixture binding-set is unchanged. When `true`,
+    // the stubs become REAL WGSL writes against the `beliefs_<field>`
+    // module-scope storage decls the BGL composer surfaces.
+    //
+    // For the q8 columns (`beliefs_type` / `beliefs_confidence` /
+    // `beliefs_suspicion`) the storage is `array<atomic<u32>>` with 4
+    // packed LE bytes per word; the helper `_bel_write_packed_byte`
+    // does a single-byte write via `atomicAnd` (mask-clear) +
+    // `atomicOr` (value-set). The two-step write is safe under the
+    // tom_probe usage pattern (one writer per cell per dispatch — see
+    // `tom_probe_runtime/src/lib.rs` module-header notes).
+    let belief_state = ctx.belief_state;
+    let setter_specs: [(&str, CgTy, String); 6] = if belief_state {
+        [
+            (
+                "set_beliefs_pos",
+                CgTy::Vec3F32,
+                // vec3<f32> argument widened to vec4 for std430 storage
+                // (the runtime allocates `array<vec4<f32>>` per cell).
+                // Pad lane 3 to 1.0 so the readback round-trips with the
+                // existing `[10.0, 20.0, 30.0, 1.0]` shape the
+                // observe_round_trip_pin pre-seeds.
+                "fn agents_set_beliefs_pos(observer: u32, subject: u32, v: vec3<f32>) -> bool {\n    \
+                     let cap = cfg.agent_cap;\n    \
+                     beliefs_pos[observer * cap + subject] = vec4<f32>(v, 1.0);\n    \
+                     return true;\n\
+                 }".to_string(),
+            ),
+            (
+                "set_beliefs_creature_type",
+                CgTy::U32,
+                build_packed_u8_setter_wgsl("agents_set_beliefs_creature_type", "beliefs_type"),
+            ),
+            (
+                "set_beliefs_last_seen_tick",
+                CgTy::U32,
+                "fn agents_set_beliefs_last_seen_tick(observer: u32, subject: u32, v: u32) -> bool {\n    \
+                     let cap = cfg.agent_cap;\n    \
+                     beliefs_tick[observer * cap + subject] = v;\n    \
+                     return true;\n\
+                 }".to_string(),
+            ),
+            (
+                "set_beliefs_confidence",
+                CgTy::U32,
+                build_packed_u8_setter_wgsl("agents_set_beliefs_confidence", "beliefs_confidence"),
+            ),
+            (
+                "set_beliefs_suspicion",
+                CgTy::U32,
+                build_packed_u8_setter_wgsl("agents_set_beliefs_suspicion", "beliefs_suspicion"),
+            ),
+            (
+                "set_beliefs_flags",
+                CgTy::U32,
+                "fn agents_set_beliefs_flags(observer: u32, subject: u32, v: u32) -> bool {\n    \
+                     let cap = cfg.agent_cap;\n    \
+                     beliefs_flags[observer * cap + subject] = v;\n    \
+                     return true;\n\
+                 }".to_string(),
+            ),
+        ]
+    } else {
+        [
+            (
+                "set_beliefs_pos",
+                CgTy::Vec3F32,
+                "fn agents_set_beliefs_pos(observer: u32, subject: u32, v: vec3<f32>) -> bool { return true; }".to_string(),
+            ),
+            (
+                "set_beliefs_creature_type",
+                CgTy::U32,
+                "fn agents_set_beliefs_creature_type(observer: u32, subject: u32, v: u32) -> bool { return true; }".to_string(),
+            ),
+            (
+                "set_beliefs_last_seen_tick",
+                CgTy::U32,
+                "fn agents_set_beliefs_last_seen_tick(observer: u32, subject: u32, v: u32) -> bool { return true; }".to_string(),
+            ),
+            (
+                "set_beliefs_confidence",
+                CgTy::U32,
+                "fn agents_set_beliefs_confidence(observer: u32, subject: u32, v: u32) -> bool { return true; }".to_string(),
+            ),
+            (
+                "set_beliefs_suspicion",
+                CgTy::U32,
+                "fn agents_set_beliefs_suspicion(observer: u32, subject: u32, v: u32) -> bool { return true; }".to_string(),
+            ),
+            (
+                "set_beliefs_flags",
+                CgTy::U32,
+                "fn agents_set_beliefs_flags(observer: u32, subject: u32, v: u32) -> bool { return true; }".to_string(),
+            ),
+        ]
+    };
+    for (method, value_ty, stub_body) in setter_specs {
         agents.methods.insert(
             method.to_string(),
             MethodDef {
                 return_ty: CgTy::Bool,
                 arg_tys: vec![CgTy::AgentId, CgTy::AgentId, value_ty],
                 wgsl_fn_name: format!("agents_{}", method),
-                wgsl_stub: stub_body.to_string(),
+                wgsl_stub: stub_body,
             },
         );
     }
@@ -2563,6 +2697,175 @@ fn wire_apply_ability_aoe_reads(prog: &CgProgram, ops: &mut [ComputeOp]) {
         }
         for kind in AOE_SPATIAL {
             op.record_read(DataHandle::SpatialStorage { kind: *kind });
+        }
+    }
+}
+
+/// Walk a [`CgStmtList`] for any `agents.set_beliefs_<field>(...)`
+/// namespace call and return the matching
+/// [`crate::cg::data_handle::BeliefStateColumn`] discriminants.
+///
+/// Reads the program's expression arena to inspect each statement's
+/// embedded `CgExpr::NamespaceCall` nodes (lowered from the source
+/// `agents.set_beliefs_<field>(...)` form by
+/// `lower_namespace_call`). The result drives `record_write` on the
+/// hosting op so the BGL composer surfaces the per-column binding.
+///
+/// Returns the `Vec<BeliefStateColumn>` so the caller can dedup +
+/// record one write per touched column.
+fn collect_belief_state_setter_writes(
+    list_id: CgStmtListId,
+    prog: &CgProgram,
+) -> Vec<crate::cg::data_handle::BeliefStateColumn> {
+    use crate::cg::data_handle::BeliefStateColumn;
+    let mut out = Vec::new();
+    fn walk_expr(
+        expr_id: crate::cg::data_handle::CgExprId,
+        prog: &CgProgram,
+        out: &mut Vec<BeliefStateColumn>,
+    ) {
+        let Some(expr) = prog.exprs.get(expr_id.0 as usize) else { return };
+        use crate::cg::expr::CgExpr;
+        match expr {
+            CgExpr::NamespaceCall { ns, method, args, .. } => {
+                if matches!(ns, dsl_ast::ir::NamespaceId::Agents) {
+                    if let Some(col) = method_to_belief_column(method.as_str()) {
+                        out.push(col);
+                    }
+                }
+                for a in args {
+                    walk_expr(*a, prog, out);
+                }
+            }
+            // Recurse through every other expression shape so nested
+            // setters (rare today, but possible inside a let-binding
+            // RHS) still surface.
+            other => {
+                for child in expr_children(other) {
+                    walk_expr(child, prog, out);
+                }
+            }
+        }
+    }
+    fn walk_list(
+        list_id: CgStmtListId,
+        prog: &CgProgram,
+        out: &mut Vec<BeliefStateColumn>,
+    ) {
+        let Some(list) = prog.stmt_lists.get(list_id.0 as usize) else { return };
+        for stmt_id in &list.stmts {
+            let Some(stmt) = prog.stmts.get(stmt_id.0 as usize) else { continue };
+            match stmt {
+                CgStmt::Assign { value, .. } => walk_expr(*value, prog, out),
+                CgStmt::Let { value, .. } => walk_expr(*value, prog, out),
+                CgStmt::If { cond, then, else_ } => {
+                    walk_expr(*cond, prog, out);
+                    walk_list(*then, prog, out);
+                    if let Some(else_list) = else_ {
+                        walk_list(*else_list, prog, out);
+                    }
+                }
+                CgStmt::Match { scrutinee, arms, .. } => {
+                    walk_expr(*scrutinee, prog, out);
+                    for arm in arms {
+                        walk_list(arm.body, prog, out);
+                    }
+                }
+                CgStmt::ForEachAgent { init, projection, .. } => {
+                    walk_expr(*init, prog, out);
+                    walk_expr(*projection, prog, out);
+                }
+                CgStmt::ForEachNeighbor { init, projection, .. } => {
+                    walk_expr(*init, prog, out);
+                    walk_expr(*projection, prog, out);
+                }
+                CgStmt::ForEachNeighborBody { body, .. } => walk_list(*body, prog, out),
+                CgStmt::Emit { fields, .. } => {
+                    for (_, expr_id) in fields {
+                        walk_expr(*expr_id, prog, out);
+                    }
+                }
+                CgStmt::ApplyAbility { caster, target, .. } => {
+                    walk_expr(*caster, prog, out);
+                    walk_expr(*target, prog, out);
+                }
+            }
+        }
+    }
+    walk_list(list_id, prog, &mut out);
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Helper: enumerate the direct child `CgExprId`s of a `CgExpr` for
+/// the recursive walk. Conservative — overlooks no children. Only the
+/// shapes that can hold setter calls deeper in their tree need to be
+/// listed; leaves return an empty vec.
+fn expr_children(expr: &crate::cg::expr::CgExpr) -> Vec<crate::cg::data_handle::CgExprId> {
+    use crate::cg::expr::CgExpr;
+    let mut out = Vec::new();
+    match expr {
+        CgExpr::Binary { lhs, rhs, .. } => { out.push(*lhs); out.push(*rhs); }
+        CgExpr::Unary { arg, .. } => out.push(*arg),
+        CgExpr::Builtin { args, .. } => out.extend(args.iter().copied()),
+        CgExpr::Select { cond, then, else_, .. } => {
+            out.push(*cond);
+            out.push(*then);
+            out.push(*else_);
+        }
+        CgExpr::NamespaceCall { args, .. } => out.extend(args.iter().copied()),
+        // Every other variant is a leaf for our purposes (no nested
+        // CgExprId children that could host another setter call).
+        _ => {}
+    }
+    out
+}
+
+/// Map a setter method name (e.g. `"set_beliefs_pos"`) to its
+/// matching [`crate::cg::data_handle::BeliefStateColumn`]. Returns
+/// `None` for any other method name (the namespace registry has many
+/// other entries).
+fn method_to_belief_column(
+    method: &str,
+) -> Option<crate::cg::data_handle::BeliefStateColumn> {
+    use crate::cg::data_handle::BeliefStateColumn::*;
+    match method {
+        "set_beliefs_pos"               => Some(Pos),
+        "set_beliefs_creature_type"     => Some(CreatureType),
+        "set_beliefs_last_seen_tick"    => Some(LastSeenTick),
+        "set_beliefs_confidence"        => Some(Confidence),
+        "set_beliefs_suspicion"         => Some(Suspicion),
+        "set_beliefs_flags"             => Some(Flags),
+        _ => None,
+    }
+}
+
+/// Wire BeliefState setter writes onto every body-bearing op whose
+/// statement tree contains at least one `agents.set_beliefs_<field>`
+/// call. Mirrors [`wire_apply_ability_aoe_reads`] in shape — body-
+/// bearing op-kinds (PhysicsRule / ViewFold) are walked, and per-
+/// column writes are recorded so the BGL composer surfaces the
+/// matching `beliefs_<field>` binding.
+///
+/// Only invoked when [`LowerOpts::belief_state`] is `true`. Production
+/// runtimes opt out → never see this walk → BGL stays binding-clean.
+fn wire_belief_state_setter_writes(prog: &CgProgram, ops: &mut [ComputeOp]) {
+    use crate::cg::data_handle::DataHandle;
+    use crate::cg::op::ComputeOpKind;
+    for (op_index, op) in ops.iter_mut().enumerate() {
+        let snapshot_op = match prog.ops.get(op_index) {
+            Some(o) => o,
+            None => continue,
+        };
+        let body_id = match &snapshot_op.kind {
+            ComputeOpKind::PhysicsRule { body, .. } => *body,
+            ComputeOpKind::ViewFold { body, .. } => *body,
+            _ => continue,
+        };
+        let columns = collect_belief_state_setter_writes(body_id, prog);
+        for column in columns {
+            op.record_write(DataHandle::BeliefStateColumn { column });
         }
     }
 }

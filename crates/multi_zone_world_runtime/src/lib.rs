@@ -304,7 +304,7 @@ impl MultiZoneWorldState {
         });
         let chronicle_gather_cfg_init =
             physics_verb_chronicle_GatherWood::PhysicsVerbChronicleGatherWoodCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_gather_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("multi_zone_world_runtime::chronicle_gather_cfg"),
@@ -313,7 +313,7 @@ impl MultiZoneWorldState {
         });
         let chronicle_trade_cfg_init =
             physics_verb_chronicle_TradeWoodForGold::PhysicsVerbChronicleTradeWoodForGoldCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_trade_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("multi_zone_world_runtime::chronicle_trade_cfg"),
@@ -322,7 +322,7 @@ impl MultiZoneWorldState {
         });
         let chronicle_strike_cfg_init =
             physics_verb_chronicle_DungeonStrike::PhysicsVerbChronicleDungeonStrikeCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_strike_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("multi_zone_world_runtime::chronicle_strike_cfg"),
@@ -765,7 +765,7 @@ impl CompiledSim for MultiZoneWorldState {
         // documented in multi_zone_world.sim — the schedule fuses
         // chronicles + apply otherwise, breaking visibility).
         let cg = physics_verb_chronicle_GatherWood::PhysicsVerbChronicleGatherWoodCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(&self.chronicle_gather_cfg_buf, 0, bytemuck::bytes_of(&cg));
         let cb = physics_verb_chronicle_GatherWood::PhysicsVerbChronicleGatherWoodBindings {
@@ -779,7 +779,7 @@ impl CompiledSim for MultiZoneWorldState {
 
         // (5) TradeWoodForGold chronicle (action_id == 1).
         let cg = physics_verb_chronicle_TradeWoodForGold::PhysicsVerbChronicleTradeWoodForGoldCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(&self.chronicle_trade_cfg_buf, 0, bytemuck::bytes_of(&cg));
         let cb = physics_verb_chronicle_TradeWoodForGold::PhysicsVerbChronicleTradeWoodForGoldBindings {
@@ -793,7 +793,7 @@ impl CompiledSim for MultiZoneWorldState {
 
         // (6) DungeonStrike chronicle (action_id == 2).
         let cg = physics_verb_chronicle_DungeonStrike::PhysicsVerbChronicleDungeonStrikeCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(&self.chronicle_strike_cfg_buf, 0, bytemuck::bytes_of(&cg));
         let cb = physics_verb_chronicle_DungeonStrike::PhysicsVerbChronicleDungeonStrikeBindings {

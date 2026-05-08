@@ -417,7 +417,7 @@ impl PredatorPreyRealState {
             event_count: 0,
             tick: 0,
             seed: 0,
-            _pad0: 0,
+            agent_cap: 0,
         };
         let applykill_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("predator_prey_real_runtime::applykill_cfg"),
@@ -1015,7 +1015,7 @@ impl CompiledSim for PredatorPreyRealState {
             event_count: event_count_estimate,
             tick: self.tick as u32,
             seed: 0,
-            _pad0: 0,
+            agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.applykill_cfg_buf,

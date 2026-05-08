@@ -274,7 +274,7 @@ impl ApplyAbilityVerbSmokeState {
             event_count: n_agents,
             tick: 0,
             seed: 0,
-            _pad0: 0,
+            agent_cap: 0,
         };
         let physics_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("apply_ability_verb_smoke_runtime::physics_cfg"),
@@ -317,7 +317,7 @@ impl ApplyAbilityVerbSmokeState {
             event_count: self.n_agents,
             tick,
             seed: 0,
-            _pad0: 0,
+            agent_cap: 0,
         };
         self.gpu
             .queue

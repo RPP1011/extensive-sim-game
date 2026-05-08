@@ -221,7 +221,7 @@ impl Duel1v1State {
         });
         let chronicle_strike_cfg_init =
             physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_strike_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_1v1_runtime::chronicle_strike_cfg"),
@@ -230,7 +230,7 @@ impl Duel1v1State {
         });
         let chronicle_spell_cfg_init =
             physics_verb_chronicle_Spell::PhysicsVerbChronicleSpellCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_spell_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_1v1_runtime::chronicle_spell_cfg"),
@@ -239,7 +239,7 @@ impl Duel1v1State {
         });
         let chronicle_heal_cfg_init =
             physics_verb_chronicle_Heal::PhysicsVerbChronicleHealCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let chronicle_heal_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_1v1_runtime::chronicle_heal_cfg"),
@@ -248,7 +248,7 @@ impl Duel1v1State {
         });
         let apply_cfg_init =
             physics_ApplyDamage_and_ApplyHeal::PhysicsApplyDamageAndApplyHealCfg {
-                event_count: 0, tick: 0, seed: 0, _pad0: 0,
+                event_count: 0, tick: 0, seed: 0, agent_cap: 0,
             };
         let apply_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("duel_1v1_runtime::apply_cfg"),
@@ -512,7 +512,7 @@ impl CompiledSim for Duel1v1State {
 
         // (4) Strike chronicle — gates on action_id==0, emits Damaged.
         let strike_cfg = physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_strike_cfg_buf, 0, bytemuck::bytes_of(&strike_cfg),
@@ -529,7 +529,7 @@ impl CompiledSim for Duel1v1State {
 
         // (5) Spell chronicle — gates on action_id==1, emits Damaged.
         let spell_cfg = physics_verb_chronicle_Spell::PhysicsVerbChronicleSpellCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_spell_cfg_buf, 0, bytemuck::bytes_of(&spell_cfg),
@@ -546,7 +546,7 @@ impl CompiledSim for Duel1v1State {
 
         // (6) Heal chronicle — gates on action_id==2, emits Healed.
         let heal_cfg = physics_verb_chronicle_Heal::PhysicsVerbChronicleHealCfg {
-            event_count: self.agent_count, tick: self.tick as u32, seed: 0, _pad0: 0,
+            event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_heal_cfg_buf, 0, bytemuck::bytes_of(&heal_cfg),
@@ -570,7 +570,7 @@ impl CompiledSim for Duel1v1State {
         let event_count_estimate = self.agent_count * 4;
         let apply_cfg = physics_ApplyDamage_and_ApplyHeal::PhysicsApplyDamageAndApplyHealCfg {
             event_count: event_count_estimate, tick: self.tick as u32,
-            seed: 0, _pad0: 0,
+            seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.apply_cfg_buf, 0, bytemuck::bytes_of(&apply_cfg),
