@@ -1,0 +1,18 @@
+// spy_network acceptance: noble-on-noble combat verb. Fires once
+// `target.mana >= suspicion_threshold` (from accumulated Slanders).
+// The verb body in `assets/sim/spy_network.sim` emits a `Damaged`
+// event drained by ApplyDamage — same path as `duel_1v1.sim::Strike`.
+//
+// `damage 30` lowers via the standard "damage" arm; the runtime
+// binding check pins this to AbilityId(3) (Strike is alphabetically
+// last of the three ability files in `build_spy_network_registry`'s
+// names list — Disguise=1, Slander=2, Strike=3).
+
+ability Strike {
+    target: enemy
+    range: 100.0
+    cooldown: 1s
+    hint: damage
+
+    damage 30 [PHYSICAL: 100]
+}

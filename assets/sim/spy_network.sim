@@ -1,0 +1,242 @@
+// spy_network — multi-faction social-cascade fixture.
+//
+// Tests three primitives composing into a behavioral cascade:
+//   - Disguise (spies pose as commoners; observers see fake type)
+//   - Slander  (nobles accumulate suspicion against rival nobles)
+//   - Strike   (nobles duel rivals once their suspicion threshold trips)
+//
+// Faction layout (creature_type discriminant):
+//   1 = spy      — silent observers, cast Disguise once
+//   2 = noble    — slander each other, then duel
+//   3 = commoner — bystanders, never cast or are targeted
+//
+// MIRRORS `duel_1v1.sim` SHAPE: per-pair mask kernels, per-agent argmax
+// scoring, per-action chronicle physics blocks, fused PerEvent apply.
+// Three verbs (Disguise, Slander, Strike) compete in one argmax row per
+// agent.
+//
+// CASCADE WIRING:
+//
+// 1. Disguise fires once per spy at tick 0 (cooldown 200, gate
+//    `self.creature_type == 1`). Emits engine-aliased
+//    EffectDisguiseApplied (kind=67); ApplyDisguise consumes it and
+//    writes per-agent `disguise_expires_at_tick` / `disguise_fake_type`
+//    SoA columns. Observers using `agents.disguise_*` (or the
+//    tom_probe-shape consumer) see the spy as creature_type=3 until
+//    expiry.
+//
+// 2. Slander fires every 10 ticks for each noble against another noble.
+//    Picks the lowest-mana noble (`200 - target.mana` score) so the
+//    slander piles onto a single victim and the cascade tips faster.
+//    Emits Slandered{source, target}; ApplySlander adds 50.0 to the
+//    target's `mana` SoA — REPURPOSED here as the per-agent suspicion
+//    counter. The fixture seeds mana=0 (init below) so the gate sits
+//    high above any natural mana. (The original duel_1v1 mana gate
+//    dropped — no Spell verb here costs mana.)
+//
+// 3. Strike fires noble-on-noble every 10 ticks once `target.mana >=
+//    100.0` (i.e. the target has been slandered ≥2 times). Reuses the
+//    duel_1v1 Damaged → ApplyDamage path verbatim.
+//
+// Behavioral pin (runtime test): with N=10 (slots 0..2 spy, 3..5 noble,
+// 6..9 commoner), at least one noble drops alive=0 within 200 ticks.
+// Each pair of nobles (3 of them, so 6 ordered pairs) slanders every 10
+// ticks — after 30 ticks every noble has at least 100 mana from peers,
+// and Strike (30 dmg, 50 hp init) finishes within ~2 strike cycles.
+//
+// `mana` reuse rationale: we need a per-agent f32 counter for the
+// slander threshold, and `agent_mana` is already wired through the
+// duel_1v1-shape mask/score/chronicle/apply BGLs. Adding a custom SoA
+// column is engine surface work; the constraint is "use existing
+// primitives only", so we re-purpose. The test prose comments call it
+// "suspicion" wherever it leaks into logic.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Defeated {
+  combatant: AgentId,
+}
+
+// Custom event — emitted by Slander verb body. ApplySlander adds 50.0
+// to target's mana column (re-purposed as suspicion counter).
+@replayable @gpu_amenable
+event Slandered {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Engine-aliased event (kind=67) — same shape as tom_probe.sim's
+// `EffectDisguiseApplied`. Slot 4 packs `(duration_ticks << 8) |
+// fake_type` per the dispatcher convention. Emitting it directly from
+// a verb body bypasses the apply_ability dispatcher path while
+// reusing the existing engine event-id alias and the consumer-rule
+// pattern below. The runtime can read the same disguise SoA columns
+// (`disguise_expires_at_tick`, `disguise_fake_type`) tom_probe's
+// ApplyDisguise rule populates.
+@replayable @gpu_amenable
+event EffectDisguiseApplied {
+  actor: AgentId,
+  target: AgentId,
+  fake_type_and_duration: u32,
+}
+
+entity Combatant : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config combat {
+  // Strike — combat verb (noble-on-noble). 30 dmg @ 50 hp init means
+  // ~2 hits to kill once strikes start firing.
+  strike_damage:    f32 = 30.0,
+  cooldown_strike:  u32 = 10,
+  // Slander threshold — re-purposed mana counter. Slander adds 50.0
+  // per cast; threshold of 100.0 means 2+ slanders trigger Strike.
+  cooldown_slander: u32 = 10,
+  slander_amount:   f32 = 50.0,
+  suspicion_threshold: f32 = 100.0,
+  // Disguise — spy self-cast, fires once at tick 0 then sleeps for
+  // 200 ticks (longer than the test horizon).
+  cooldown_disguise: u32 = 200,
+  // Packed payload for EffectDisguiseApplied slot 4 — fake_type=3
+  // (commoner) packed into the low byte; duration=200 ticks (= 20s)
+  // packed into the high 24 bits via `(200 << 8) | 3 = 51203`.
+  disguise_payload: u32 = 51203,
+  // Faction discriminants — must match the runtime's seed assignments.
+  type_spy:      u32 = 1,
+  type_noble:    u32 = 2,
+  // commoner = 3 — bystanders, no verb gates them.
+}
+
+// Disguise — spy self-cast on the first tick. Self-target so the
+// scoring kernel binds best_target to caster_slot. Score 500 dominates
+// any other verb at tick 0 (Slander only fires at tick==0 boundary too,
+// but Disguise is self-cast — different argmax row). Once fired,
+// cooldown 200 keeps it out for the rest of the 200-tick window.
+verb Disguise(self, target: Agent) =
+  action DisguiseAction
+  when (self.alive
+        && target == self
+        && self.creature_type == config.combat.type_spy
+        && (world.tick % config.combat.cooldown_disguise == 0))
+  emit EffectDisguiseApplied {
+    actor: self,
+    target: self,
+    fake_type_and_duration: config.combat.disguise_payload
+  }
+  score 500.0
+
+// Slander — noble cast on another noble. Adds suspicion to target.
+//
+// SCORING NOTE: the mask kernel writes mask_1[agent_id]=1 if ANY pair
+// (agent_id, candidate) passes the when-clause. Scoring then iterates
+// every per_pair_candidate and computes utility — without re-gating
+// inside the score formula, the argmax would pick a non-noble
+// candidate (e.g. a spy at slot 0 with mana=0). Mirror megaswarm_1000's
+// per-candidate gate: `if target.creature_type == noble && target !=
+// self { (200 - target.mana) } else { -1e9 }` — non-nobles get
+// sentinel-utility so they never win argmax.
+verb Slander(self, target: Agent) =
+  action SlanderAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && self.creature_type == config.combat.type_noble
+        && target.creature_type == config.combat.type_noble
+        && (world.tick % config.combat.cooldown_slander == 0))
+  emit Slandered {
+    source: self,
+    target: target,
+    amount: config.combat.slander_amount
+  }
+  score (if (target.creature_type == config.combat.type_noble && target != self) {
+    200.0 - target.mana
+  } else {
+    -1000000000.0
+  })
+
+// Strike — noble-on-noble damage when target has accumulated enough
+// suspicion. Same per-candidate gate as Slander above. Score peaks for
+// high-suspicion targets so once the cascade tips, the most-slandered
+// noble wins argmax. The `target.mana >= suspicion_threshold` mask
+// gate ensures Strike only fires when at least one noble has been
+// slandered enough; the per-candidate score gate below ensures the
+// argmax picks the right noble specifically.
+verb Strike(self, target: Agent) =
+  action StrikeAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && self.creature_type == config.combat.type_noble
+        && target.creature_type == config.combat.type_noble
+        && (world.tick % config.combat.cooldown_strike == 0)
+        && target.mana >= config.combat.suspicion_threshold)
+  emit Damaged {
+    source: self,
+    target: target,
+    amount: config.combat.strike_damage
+  }
+  score (if (target.creature_type == config.combat.type_noble
+             && target != self
+             && target.mana >= config.combat.suspicion_threshold) {
+    target.mana
+  } else {
+    -1000000000.0
+  })
+
+// Slander consumer — adds slander_amount to target's mana (= per-agent
+// suspicion counter). Mirrors duel_1v1::ApplyHeal's `agents.set_hp(t,
+// hp + a)` shape, just on a different column.
+@phase(post)
+physics ApplySlander {
+  on Slandered { source: _, target: t, amount: a } {
+    let new_mana = agents.mana(t) + a;
+    agents.set_mana(t, new_mana);
+  }
+}
+
+// Damage consumer — same shape as duel_1v1::ApplyDamage. On hp<=0,
+// flip alive and emit Defeated.
+@phase(post)
+physics ApplyDamage {
+  on Damaged { source: _, target: t, amount: a } {
+    let new_hp = agents.hp(t) - a;
+    agents.set_hp(t, new_hp);
+    if (new_hp <= 0.0) {
+      agents.set_alive(t, false);
+      emit Defeated { combatant: t }
+    }
+  }
+}
+
+// Disguise consumer — same shape as tom_probe.sim::ApplyDisguise.
+// Decodes `(duration << 8) | fake_type` and writes the per-agent
+// disguise SoA columns. Subsequent observe consumers (or runtime
+// readbacks) consult these columns to substitute `fake_type` for the
+// agent's true `creature_type`.
+@phase(post)
+physics ApplyDisguise {
+  on EffectDisguiseApplied { actor: a, target: _, fake_type_and_duration: p } {
+    let fake_type = p % 256;
+    let duration = p / 256;
+    agents.set_disguise_expires_at_tick(a, world.tick + duration);
+    agents.set_disguise_fake_type(a, fake_type);
+  }
+}
+
+// Per-source damage_dealt — observability view (mirror duel_1v1).
+@materialized(on_event = [Damaged])
+view damage_dealt(source: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: s, target: _, amount: a } { self += a }
+  clamp: [0.0, 1000000.0],
+}
