@@ -23,6 +23,10 @@ wgpu = "=26.0.1"
 bytemuck = { version = "1.16", features = ["derive"] }
 glam = "0.29"
 pollster = "0.4"
+# `dsl_ast` is a runtime dep (NOT just build-deps) because the binding
+# check calls `dsl_ast::parse_ability_file` at fixture construction time
+# to re-parse the source-of-truth `.ability` files in the workspace tree.
+dsl_ast = { path = "../dsl_ast" }
 dsl_compiler = { path = "../dsl_compiler" }
 
 [build-dependencies]

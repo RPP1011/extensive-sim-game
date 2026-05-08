@@ -1,0 +1,20 @@
+// duel_25v25's ConcussiveCleave — multi-effect AOE: Damage 3.0 + Stun
+// 15 ticks (1.5s @ 100ms), both in Circle(1.0). Each in-radius target
+// receives one kind=26 (EffectDamageApplied) AND one kind=29
+// (EffectStunApplied) chronicle record.
+//
+// Lowers to AbilityProgram { gate: { cooldown_ticks: 0, hostile_only: true },
+//                            area: SingleTarget { range: 3.0 },
+//                            effects: [EffectOp::Damage { amount: 3.0 },
+//                                      EffectOp::Stun  { duration_ticks: 15 }],
+//                            per_effect_areas: [Some(Circle(1.0)),
+//                                               Some(Circle(1.0))] }.
+
+ability ConcussiveCleave {
+    target: enemy
+    range: 3.0
+    cooldown: 0
+
+    damage 3 in circle(1.0)
+    stun 1500ms in circle(1.0)
+}

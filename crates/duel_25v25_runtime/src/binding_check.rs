@@ -1,10 +1,12 @@
 //! duel_25v25 apply_ability binding check.
 //!
 //! The registry source-of-truth lives in
-//! `assets/abilities/duel_25v25.toml`; this module loads it via
-//! `AbilityRegistry::from_toml(...)` at fixture-construction time and
-//! asserts each program lowered to the constants the .sim verb bodies
-//! hand-mirror. The four programs land at:
+//! `assets/ability_test/duel_25v25/*.ability`; this module re-parses the
+//! files via `dsl_ast::parse_ability_file` + lowers + builds the
+//! registry through `dsl_compiler::ability_registry::build_registry` at
+//! fixture-construction time, then asserts each program lowered to the
+//! constants the .sim verb bodies hand-mirror. The four programs land
+//! at:
 //!
 //!   - slot 1 / AbilityId(1) — Strike (single-target Damage 5.0)
 //!   - slot 2 / AbilityId(2) — Cleave (AOE Damage 2.0 in Circle(1.0))
@@ -17,15 +19,18 @@
 //! surfaces at fixture-construction time rather than as silent
 //! wrong-ability dispatch.
 //!
-//! Pre-TOML this module hand-rolled four `AbilityProgram` builders +
-//! a `register()` chain (~250 LOC); the TOML port collapses that to
-//! a single `from_toml()` call. The slot-pin assertions stayed
-//! verbatim — they're the load-bearing contract between the
-//! registry's slot order and the .sim's `apply_ability N` literals.
+//! Pre-port this module loaded the registry via
+//! `AbilityRegistry::from_toml(...)`. The TOML loader was retired in
+//! favour of the `.ability` DSL surface, which is more expressive
+//! (per-effect predicates, scalings, modifiers, deliver-block hooks).
+//! The slot-pin assertions stayed verbatim — they're the load-bearing
+//! contract between the registry's slot order and the .sim's
+//! `apply_ability N` literals.
+
+use std::path::PathBuf;
 
 use engine::ability::program::{EffectOp, ShapeKind};
-use engine::ability::{AbilityId, AbilityRegistry};
-use std::path::PathBuf;
+use engine::ability::AbilityId;
 
 /// Strike is registered first — so it lands at AbilityId(1). The
 /// `apply_ability 1` literal in `assets/sim/duel_25v25.sim::ScanAndStrike`
@@ -49,25 +54,56 @@ pub const CONCUSSIVE_CLEAVE_EXPECTED_ABILITY_ID: u32 = 3;
 /// dynamics in 50-agent combat (2026-05-07).
 pub const HEAL_PULSE_EXPECTED_ABILITY_ID: u32 = 4;
 
-/// Build the duel_25v25 AbilityRegistry by loading
-/// `assets/abilities/duel_25v25.toml`. Returns the frozen registry —
-/// callers pack + upload via `PackedAbilityRegistry::pack` +
-/// `PackedAbilityRegistryGpu::upload`.
+/// Read + parse + build the AbilityRegistry over every .ability file
+/// under `assets/ability_test/duel_25v25/`. Shared by the binding check
+/// AND the GPU upload site in `lib.rs`.
 ///
-/// Slot order is the source order of `[[ability]]` entries in the TOML
-/// (Strike → Cleave → ConcussiveCleave → HealPulse). The slot-pin
-/// assertions in `assert_ability_registry_matches_sim_constants`
-/// validate the loader produced the expected 4 programs at the
-/// expected slot ids — drift surfaces as a panic at fixture-
-/// construction time.
-pub fn build_duel_25v25_registry() -> AbilityRegistry {
+/// Slot order is the source-order names array literal here, pinned by
+/// the slot-pin assertions in
+/// `assert_ability_registry_matches_sim_constants`. Drift surfaces as a
+/// panic at fixture-construction time. Mirrors the canonical
+/// `duel_abilities_runtime` pattern at `binding_check.rs::
+/// build_duel_abilities_registry`.
+///
+/// Panics on any read/parse/build error — these would also fire from
+/// the binding check at fixture-construction time, so any failure here
+/// points at the same .ability source defect.
+pub fn build_duel_25v25_registry() -> dsl_compiler::ability_registry::BuiltRegistry {
     let manifest = std::env::var("CARGO_MANIFEST_DIR")
         .expect("CARGO_MANIFEST_DIR set by cargo");
-    let path = PathBuf::from(manifest)
-        .join("..").join("..")
-        .join("assets").join("abilities").join("duel_25v25.toml");
-    AbilityRegistry::from_toml(&path)
-        .unwrap_or_else(|e| panic!("load {}: {e}", path.display()))
+    let corpus = PathBuf::from(manifest)
+        .join("..")
+        .join("..")
+        .join("assets")
+        .join("ability_test")
+        .join("duel_25v25");
+
+    let read = |name: &str| {
+        let path = corpus.join(name);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+    };
+    let parse = |name: &str, src: &str| {
+        dsl_ast::parse_ability_file(src)
+            .unwrap_or_else(|e| panic!("parse {name}: {e:?}"))
+    };
+
+    let names = [
+        "Strike.ability",
+        "Cleave.ability",
+        "ConcussiveCleave.ability",
+        "HealPulse.ability",
+    ];
+    let files: Vec<(String, _)> = names
+        .iter()
+        .map(|name| {
+            let src = read(name);
+            (name.to_string(), parse(name, &src))
+        })
+        .collect();
+
+    dsl_compiler::ability_registry::build_registry(&files)
+        .expect("build_registry over duel_25v25 corpus")
 }
 
 /// Single binding-check entry point. Called once from
@@ -79,7 +115,8 @@ pub fn build_duel_25v25_registry() -> AbilityRegistry {
 /// mirrors. If anything diverges the panic message points at the exact
 /// divergence.
 pub fn assert_ability_registry_matches_sim_constants() {
-    let registry = build_duel_25v25_registry();
+    let built = build_duel_25v25_registry();
+    let registry = &built.registry;
     assert_eq!(
         registry.len(),
         4,
@@ -296,7 +333,7 @@ pub fn assert_ability_registry_matches_sim_constants() {
     );
     assert!(
         !heal_pulse.gate.hostile_only,
-        "HealPulse must NOT be hostile_only — `target friend` semantic \
+        "HealPulse must NOT be hostile_only — `target ally` semantic \
          (the .sim's body-side check inverts the team test, dispatching \
          on same-team agents)",
     );

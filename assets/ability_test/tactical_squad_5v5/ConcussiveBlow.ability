@@ -1,0 +1,17 @@
+// tactical_squad_5v5's ConcussiveBlow — single-target Stun(20 ticks =
+// 2s @ 100ms tick), the first non-Damage EffectOp in this fixture.
+// Proves the apply_ability dispatcher emits kind=29 EffectStunApplied
+// chronicle records (drained by ApplyStunFromChronicle straight into
+// the per-agent stun_expires_at_tick SoA).
+//
+// Lowers to AbilityProgram { gate: { cooldown_ticks: 0, hostile_only: true },
+//                            area: SingleTarget { range: 0.0 },
+//                            effects: [EffectOp::Stun { duration_ticks: 20 }] }.
+
+ability ConcussiveBlow {
+    target: enemy
+    range: 0
+    cooldown: 0
+
+    stun 2s
+}

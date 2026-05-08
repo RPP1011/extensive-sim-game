@@ -1,0 +1,18 @@
+// duel_25v25's Cleave — AOE Path B production proof, single Damage in
+// Circle(1.0). The dispatcher walks the 27-cell neighbourhood around the
+// dispatched target and emits one chronicle record per in-radius
+// candidate. Radius 1.0 ≤ SPATIAL_CELL_SIZE (6.0) so the single 27-cell
+// walk covers the full circle.
+//
+// Lowers to AbilityProgram { gate: { cooldown_ticks: 0, hostile_only: true },
+//                            area: SingleTarget { range: 3.0 },
+//                            effects: [EffectOp::Damage { amount: 2.0 }],
+//                            per_effect_areas: [Some(Circle(1.0))] }.
+
+ability Cleave {
+    target: enemy
+    range: 3.0
+    cooldown: 0
+
+    damage 2 in circle(1.0)
+}

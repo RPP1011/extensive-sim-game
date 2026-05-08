@@ -1,0 +1,21 @@
+// tactical_squad_5v5's TankAttack — single-target damage with `range: 0`
+// metadata (Strike has no spatial filter in tactical_squad_5v5.sim; the
+// verb is a flat per-pair scoring kernel, not a spatial walk).
+//
+// Lowers to AbilityProgram { gate: { cooldown_ticks: 0, hostile_only: true },
+//                            area: SingleTarget { range: 0.0 },
+//                            effects: [EffectOp::Damage { amount: 10.0 }] }.
+//
+// CONFIG → REGISTRY BRIDGE: amount mirrors `config.combat.tank_damage =
+// 10.0` in the .sim. apply_ability's pack-time literal API doesn't
+// accept config refs today, so the runtime hardcodes the matching value;
+// if the .sim config drifts, the binding-check assertion flags the
+// divergence.
+
+ability TankAttack {
+    target: enemy
+    range: 0
+    cooldown: 0
+
+    damage 10
+}

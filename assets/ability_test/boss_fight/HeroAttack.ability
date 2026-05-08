@@ -1,0 +1,16 @@
+// boss_fight's HeroAttack — same shape as BossStrike but with the
+// Hero-side damage value (`config.combat.hero_attack_damage = 35.0`).
+// The .sim's body-side `self.creature_type == Hero` mask gate routes
+// this verb to hero slots (1..=5) only.
+//
+// Lowers to AbilityProgram { gate: { cooldown_ticks: 0, hostile_only: true },
+//                            area: SingleTarget { range: 1.5 },
+//                            effects: [EffectOp::Damage { amount: 35.0 }] }.
+
+ability HeroAttack {
+    target: enemy
+    range: 1.5
+    cooldown: 0
+
+    damage 35
+}

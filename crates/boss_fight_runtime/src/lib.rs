@@ -220,8 +220,8 @@ impl BossFightState {
         // the binding-check's program-build pass (cheap — two hand-
         // built programs) but keeps construction colocated with the
         // upload site, mirroring duel_25v25's pattern.
-        let registry = binding_check::build_boss_fight_registry();
-        let packed = PackedAbilityRegistry::pack(&registry);
+        let built_registry = binding_check::build_boss_fight_registry();
+        let packed = PackedAbilityRegistry::pack(&built_registry.registry);
         let registry_gpu = PackedAbilityRegistryGpu::upload(
             &packed, &gpu, "boss_fight_runtime",
         );

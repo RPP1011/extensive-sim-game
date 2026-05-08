@@ -1,0 +1,14 @@
+// mass_battle_100v100's Snipe — same shape as Strike but at the DPS
+// damage tier (`config.combat.snipe_damage = 22.0`).
+//
+// Lowers to AbilityProgram { gate: { cooldown_ticks: 0, hostile_only: true },
+//                            area: SingleTarget { range: 999.0 },
+//                            effects: [EffectOp::Damage { amount: 22.0 }] }.
+
+ability Snipe {
+    target: enemy
+    range: 999
+    cooldown: 0
+
+    damage 22
+}

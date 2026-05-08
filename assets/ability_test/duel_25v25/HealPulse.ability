@@ -1,0 +1,18 @@
+// duel_25v25's HealPulse — single-target ally healing for chronicle-
+// pipeline recovery dynamics in 50-agent combat.
+//
+// Lowers to AbilityProgram { gate: { cooldown_ticks: 0, hostile_only: false },
+//                            area: SingleTarget { range: 1.5 },
+//                            effects: [EffectOp::Heal { amount: 15.0 }] }.
+//
+// `target: ally` semantic (the .sim's body-side check inverts the team
+// test, dispatching on same-team agents); the lowering pass sets
+// `hostile_only = false` for ally targeting.
+
+ability HealPulse {
+    target: ally
+    range: 1.5
+    cooldown: 0
+
+    heal 15
+}

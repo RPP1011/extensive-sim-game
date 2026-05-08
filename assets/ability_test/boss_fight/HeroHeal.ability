@@ -1,0 +1,22 @@
+// boss_fight's HeroHeal — single-target ally Heal(25.0). First Heal
+// EffectOp in this fixture; proves the apply_ability dispatcher emits
+// kind=27 EffectHealApplied chronicle records via the fused
+// `physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle`
+// kernel.
+//
+// Lowers to AbilityProgram { gate: { cooldown_ticks: 0, hostile_only: false },
+//                            area: SingleTarget { range: 50.0 },
+//                            effects: [EffectOp::Heal { amount: 25.0 }] }.
+//
+// `target: ally` flips `hostile_only` to `false`; the .sim's score
+// expression picks Hero allies via `target.creature_type == Hero &&
+// target != self`. `range: 50` is wide single-target metadata (boss_fight
+// scores per-pair argmax with no spatial filter).
+
+ability HeroHeal {
+    target: ally
+    range: 50
+    cooldown: 0
+
+    heal 25
+}
