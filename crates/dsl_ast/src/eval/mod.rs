@@ -173,6 +173,15 @@ pub enum EffectOp {
     // `Slow`. Discriminants 18..=19 pinned by the engine schema_hash.
     LifeSteal    { duration_ticks: u32, fraction_q8: i16 },
     DamageModify { duration_ticks: u32, multiplier_q8: i16 },
+    // Wave 3 ToM Phase 1 — `plant_belief` bit-flag belief verb (mirror
+    // of `engine::ability::program::EffectOp::PlantBelief`). Caster
+    // CAUSES target's belief map for `subject_idx` to gain `1u <<
+    // fact_bit` via atomic-OR. Discriminant 32 pinned by the engine
+    // schema_hash. The ast-level mirror keeps this surface in step
+    // with the engine even though no `.sim` interpreter consumer
+    // pattern-matches PlantBelief today (deferred — the dispatcher's
+    // chronicle write is the load-bearing path).
+    PlantBelief  { subject_idx: u32, fact_bit: u8 },
 }
 
 /// Target selection for `CastAbility` effects.  Mirrors

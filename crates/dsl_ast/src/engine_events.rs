@@ -136,6 +136,19 @@ pub const ENGINE_EVENT_KIND_IDS: &[(&str, u32)] = &[
     // block (58..61). No consumer rule in any sim today; the
     // dispatcher write end-to-end works without a fold consumer.
     ("EffectSummonApplied",     62),
+    // Wave 3 ToM Phase 1 — `plant_belief` bit-flag primitive. Caster
+    // CAUSES target's belief map for `subject_idx` to gain `1u <<
+    // fact_bit` via atomic-OR. 5-payload-word chronicle record (actor
+    // + target + subject_idx + fact_bit_mask). Slot 63 contiguous with
+    // the slice γ closer (Summon=62). The dispatcher writes the
+    // chronicle record from the per-effect-slot arm chain when
+    // `EffectOp::PlantBelief` (kind=32) fires; downstream view
+    // consumers fold the bit mask into a `pair_map` cell via the
+    // existing `view ... -> u32 { on EffectPlantBeliefApplied { ... }
+    // { self |= b } }` shape (same as `tom_probe.sim::beliefs`). The
+    // full Wave 3 multi-field BeliefState (creature_type / decay /
+    // disguise / slander) is deferred.
+    ("EffectPlantBeliefApplied", 63),
 ];
 
 /// Look up the engine-defined `EventKindId` discriminant for an
@@ -188,6 +201,7 @@ mod tests {
         assert_eq!(engine_event_kind_id_for_name("EffectPlaceVoxelApplied"), Some(60));
         assert_eq!(engine_event_kind_id_for_name("EffectReflectApplied"), Some(61));
         assert_eq!(engine_event_kind_id_for_name("EffectSummonApplied"), Some(62));
+        assert_eq!(engine_event_kind_id_for_name("EffectPlantBeliefApplied"), Some(63));
     }
 
     #[test]

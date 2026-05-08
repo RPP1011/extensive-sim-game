@@ -259,7 +259,19 @@ pub enum EventKindId {
     // allocation are downstream consumer concerns, distinct from the
     // dispatcher's record write.
     EffectSummonApplied      = 62,
-    // Slots 63-127 reserved for replayable event variants added in later tasks.
+    // Wave 3 ToM Phase 1 — `plant_belief` bit-flag primitive. Caster
+    // CAUSES `target`'s belief map for `subject_idx` to gain
+    // `1u << fact_bit` via atomic-OR fold. 5-payload-word chronicle
+    // record (actor + target + subject_idx + fact_bit_mask). The
+    // dispatcher writes the chronicle record from the per-effect-slot
+    // arm chain when the corresponding `EffectOp::PlantBelief` slot
+    // fires; downstream view consumers fold the bit mask into a
+    // `pair_map`-storage `u32` view via `self |= b` (atomicOr) — same
+    // pattern as `tom_probe.sim::beliefs`. The full Wave 3 multi-field
+    // BeliefState (creature_type / decay / disguise / slander) is
+    // deferred. Slot 63 contiguous with the slice γ closer (Summon=62).
+    EffectPlantBeliefApplied = 63,
+    // Slots 64-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 

@@ -316,6 +316,7 @@ fn effect_op_label(op: &EffectOp) -> &'static str {
         EffectOp::Grounded        { .. } => "Grounded",
         EffectOp::Suppress        { .. } => "Suppress",
         EffectOp::Reflect         { .. } => "Reflect",
+        EffectOp::PlantBelief     { .. } => "PlantBelief",
     }
 }
 
