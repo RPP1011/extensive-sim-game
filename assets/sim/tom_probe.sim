@@ -110,44 +110,123 @@ physics WhatIBelieve @phase(per_agent) {
   }
 }
 
-// Wave 3 ToM Phase 3.7 — DSL-authored consumer rule that lowers to
-// real BeliefState SoA writes via the compiler-emitted setter WGSL
-// bodies (`agents.set_beliefs_<field>`).
+// Wave 3 ToM Phase 3.7 — DSL-authored demo rule
+// `ApplyTickBeliefStamp` was retired in Phase 3.8 (this commit). The
+// rule unilaterally stamped `beliefs_last_seen_tick[i*N+i] = 1` every
+// tick from the unconditional `BeliefAcquired` producer fanout, which
+// clashes with the `observe_round_trip_pin` per-cell isolation
+// assertion (every off-target cell stays 0 between observe calls).
+// Pre-3.8 the rule was effectively dead at runtime — the hand-written
+// `OBSERVE_WGSL` const triggered naga validation
+// (`name 'target' is a reserved keyword`), causing
+// `TomProbeState::new()` to panic, the round-trip test caught it via
+// `try_new()` and skipped with "no wgpu adapter". With the
+// hand-written kernel retired in favour of the .sim-authored consumers
+// below, the demo rule would fire and break the regression pin's
+// isolation invariant. The 3 chronicle-driven consumers below
+// (ApplyObserveBeliefUpdate / ApplyScryBeliefUpdate /
+// ApplyRevealBeliefUpdate) supersede it: they write the BeliefState
+// SoA only when an explicit observe / scry / reveal verb fires.
+
+// Wave 3 ToM Phase 3.8 — chronicle-event consumer rules that retire
+// the hand-written WGSL kernels in `tom_probe_runtime/src/lib.rs`
+// (`OBSERVE_WGSL` / `SCRY_WGSL` / `REVEAL_WGSL`). The 3 chronicle
+// event kinds are engine-aliased (EffectObserveApplied=64,
+// EffectScryApplied=65, EffectRevealApplied=66 in
+// `dsl_ast::engine_events`); the runtime's `observe()`, `scry()`,
+// `reveal()` methods now write a synthetic 10-word chronicle record
+// into `event_ring` via `EventRing::append_chronicle_record()` and
+// dispatch THESE consumer kernels instead of the retired
+// hand-written-WGSL pipelines.
 //
-// Pre-existing `WhatIBelieve` producer emits one
-// `BeliefAcquired { self, self, 1 }` per alive Knower per tick. This
-// consumer runs in the same tick and stamps the
-// `beliefs_last_seen_tick` column on the (observer, subject) cell to
-// `fact_bit` (= 1 for the producer's per-tick event). Functional
-// purpose: PROVE the compiler's belief-setter end-to-end pipe
-// (`LowerOpts.belief_state` + `DataHandle::BeliefStateColumn` + WGSL
-// real-write stubs + BGL composer) is wired correctly without
-// requiring new chronicle event kinds + CPU→event_ring writers.
+// Field-position contract (matches the chronicle dispatcher's
+// `apply_event_to_chronicle_record` shape, see
+// `crates/dsl_compiler/src/cpu_chronicle_reference.rs`):
+//   * EffectObserveApplied: actor=slot 2 (observer), target=slot 3,
+//     target_observer=slot 4 (unused — single-observer self).
+//   * EffectScryApplied: actor=slot 2 (caster), subject=slot 3,
+//     target_observer=slot 4 (the source observer), subject_idx=slot 5.
+//   * EffectRevealApplied: actor=slot 2 (caster), subject=slot 3,
+//     subject_idx=slot 4 (= subject; redundant on the wire).
+
+@replayable
+event EffectObserveApplied {
+  actor: AgentId,
+  target: AgentId,
+  target_observer: u32,
+}
+
+@replayable
+event EffectScryApplied {
+  actor: AgentId,
+  subject: AgentId,
+  target_observer: u32,
+  subject_idx: u32,
+}
+
+@replayable
+event EffectRevealApplied {
+  actor: AgentId,
+  subject: AgentId,
+  subject_idx: u32,
+}
+
+// Observe consumer — agent A learns agent T's current state. Reads
+// target T's CURRENT pos / creature_type from the agent SoA (via the
+// engine's `agents.pos(t)` / `agents.creature_type(t)` accessors) and
+// stamps:
+//   * beliefs_pos[a * N + t]        ← agents.pos(t)
+//   * beliefs_creature_type[a * N + t] ← agents.creature_type(t)
+//   * beliefs_last_seen_tick[a * N + t] ← world.tick (= cfg.tick;
+//     but the chronicle event payload is the tick the dispatcher
+//     wrote, which is the consume tick — same value)
+//   * beliefs_confidence[a * N + t] ← 255 (q8 max — fresh observation)
+// Leaves beliefs_flags (Phase 1 bit-OR slot) and beliefs_suspicion
+// (Phase 4 deception channel) unchanged.
+physics ApplyObserveBeliefUpdate @phase(post) {
+  on EffectObserveApplied { actor: a, target: t, target_observer: _ } {
+    agents.set_beliefs_pos(a, t, agents.pos(t));
+    agents.set_beliefs_creature_type(a, t, agents.creature_type(t));
+    agents.set_beliefs_last_seen_tick(a, t, world.tick);
+    agents.set_beliefs_confidence(a, t, 255);
+  }
+}
+
+// Scry consumer — caster A reads agent O's belief row about subject S
+// and copies the 6-column tuple verbatim into A's row about S. The
+// `o` binder comes from the chronicle's `target_observer` (slot 4)
+// — NOT from the `subject` field (slot 3, = `s` here, redundant with
+// the explicit `subject_idx` slot 5 alias).
+physics ApplyScryBeliefUpdate @phase(post) {
+  on EffectScryApplied { actor: a, subject: _, target_observer: o, subject_idx: s } {
+    agents.set_beliefs_pos(a, s, agents.beliefs_pos(o, s));
+    agents.set_beliefs_creature_type(a, s, agents.beliefs_creature_type(o, s));
+    agents.set_beliefs_last_seen_tick(a, s, agents.beliefs_last_seen_tick(o, s));
+    agents.set_beliefs_confidence(a, s, agents.beliefs_confidence(o, s));
+    agents.set_beliefs_suspicion(a, s, agents.beliefs_suspicion(o, s));
+    agents.set_beliefs_flags(a, s, agents.beliefs_flags(o, s));
+  }
+}
+
+// Reveal consumer — caster A broadcasts its beliefs about subject S
+// to one observer slot (= chronicle event's `actor`+`target_observer`
+// pair, fanned out by the runtime side as one event per (caster,
+// observer) pair from the AOE-style multi-target dispatch). The
+// runtime queues N synthetic events (one per observer slot in
+// 0..agent_count) — the consumer body sees them as N separate
+// EffectRevealApplied events, each writing its own observer cell.
 //
-// The runtime opt-in lives in `tom_probe_runtime/build.rs`
-// (`LowerOpts { belief_state: true }`); the runtime allocates the 6
-// BeliefState SoA columns and feeds them as bindings (`beliefs_pos`,
-// `beliefs_type`, `beliefs_tick`, `beliefs_confidence`,
-// `beliefs_suspicion`, `beliefs_flags`) on the per-event consumer
-// kernel's `Bindings` struct (the BGL composer surfaces only the
-// columns this rule writes; non-touched columns aren't bound).
-//
-// The full ApplyObserve / ApplyScry / ApplyReveal / Decay consumer
-// suite per the spec sketch (which would replace
-// `tom_probe_runtime`'s 4 hand-written WGSL kernels in
-// `OBSERVE_WGSL` / `SCRY_WGSL` / `REVEAL_WGSL` / `DECAY_WGSL`) is
-// deferred to a follow-on commit — those need either:
-//   (a) new chronicle event kinds (EffectObserveApplied=64,
-//       EffectScryApplied=65, EffectRevealApplied=66) AND a runtime-
-//       side CPU→event_ring writer for the observer/scry/reveal
-//       trigger calls, OR
-//   (b) shrink-wrapping observe/scry/reveal as bare event kinds in
-//       `tom_probe.sim` plus a runtime-side `queue_event` helper
-//       (new infrastructure).
-// Either path is a separate slice; this rule lights up the compiler
-// pipe so the follow-on can scaffold on top of it.
-physics ApplyTickBeliefStamp @phase(post) {
-  on BeliefAcquired { observer: o, subject: s, fact_bit: b } {
-    agents.set_beliefs_last_seen_tick(o, s, b);
+// Field-binding note: `target` (slot 3) is reused as the observer
+// destination (so the 4-payload chronicle stays the same physical
+// shape as a 1-target reveal), and `subject_idx` (slot 4) carries
+// the subject id. `actor` (slot 2) is the caster (source row).
+physics ApplyRevealBeliefUpdate @phase(post) {
+  on EffectRevealApplied { actor: a, subject: o, subject_idx: s } {
+    agents.set_beliefs_pos(o, s, agents.beliefs_pos(a, s));
+    agents.set_beliefs_creature_type(o, s, agents.beliefs_creature_type(a, s));
+    agents.set_beliefs_last_seen_tick(o, s, agents.beliefs_last_seen_tick(a, s));
+    agents.set_beliefs_confidence(o, s, agents.beliefs_confidence(a, s));
+    agents.set_beliefs_suspicion(o, s, agents.beliefs_suspicion(a, s));
+    agents.set_beliefs_flags(o, s, agents.beliefs_flags(a, s));
   }
 }

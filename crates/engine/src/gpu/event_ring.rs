@@ -254,6 +254,75 @@ impl EventRing {
     pub fn tail_value(&self) -> u32 {
         self.tail_estimate
     }
+
+    /// Force the host-side tail estimate back to 0. Used by host-driven
+    /// chronicle injection paths that bypass the per-step
+    /// `clear_tail_in()` flow (e.g. `tom_probe_runtime::observe()` queues
+    /// a synthetic record OUTSIDE the per-tick step encoder).
+    pub fn reset_tail_estimate(&mut self) {
+        self.tail_estimate = 0;
+    }
+
+    /// Append one 10-word chronicle record into the ring at the
+    /// current host-side tail estimate slot, then bump the tail (both
+    /// the GPU `event_tail` counter and the host-side estimate) by 1.
+    ///
+    /// Used by host-driven runtime APIs that need to inject synthetic
+    /// chronicle events from CPU (without going through a producer
+    /// kernel). Today's only caller is `tom_probe_runtime`'s
+    /// `observe()` / `scry()` / `reveal()` methods, which retired their
+    /// hand-written WGSL consumers in favour of .sim-authored
+    /// `on EffectObserveApplied { ... }` / `EffectScryApplied` /
+    /// `EffectRevealApplied` consumer rules — the rules read from this
+    /// ring, so the runtime needs to write into it.
+    ///
+    /// The 10-word record layout mirrors the GPU dispatcher's
+    /// `atomicStore` writes (see
+    /// `crates/dsl_compiler/src/cpu_chronicle_reference.rs`):
+    ///   * `[0]` = kind tag (e.g. `64` for EffectObserveApplied)
+    ///   * `[1]` = tick
+    ///   * `[2..]` = per-variant payload words
+    ///
+    /// `record` carries the full 10 words; the caller is responsible
+    /// for setting kind+tick+payload into `record[0..]` per the engine
+    /// `EventKindId` schema.
+    ///
+    /// Both writes are queued via `wgpu::Queue::write_buffer`; the
+    /// next encoder submission will see the bumped tail and the new
+    /// record. If the caller is mid-encoder (between
+    /// `clear_tail_in()` and a consumer dispatch), the writes still
+    /// land in submission order — wgpu sequences `write_buffer` calls
+    /// before the encoder's commands at submit time.
+    ///
+    /// **Out-of-band tail assumption.** This helper writes the new
+    /// tail directly via `write_buffer` (not atomicAdd from a
+    /// producer kernel). It assumes no producer kernel is concurrently
+    /// running — the caller drains the ring (`clear_tail_in`), queues
+    /// the synthetic record, then dispatches the consumer. Mixing
+    /// host-side appends with kernel-side producers in the same tick
+    /// is not supported.
+    pub fn append_chronicle_record(
+        &mut self,
+        queue: &wgpu::Queue,
+        record: &[u32; EVENT_STRIDE_U32 as usize],
+    ) {
+        let slot_idx = self.tail_estimate;
+        // Slot beyond ring capacity? Saturate (drop the record).
+        // Today's fixtures stay well under 65k; this is just defensive.
+        if slot_idx >= EVENT_RING_CAP_SLOTS {
+            return;
+        }
+        let byte_offset =
+            (slot_idx as u64) * (EVENT_STRIDE_U32 as u64) * 4;
+        queue.write_buffer(
+            &self.ring,
+            byte_offset,
+            bytemuck::cast_slice(record),
+        );
+        let next_tail = slot_idx + 1;
+        queue.write_buffer(&self.tail, 0, bytemuck::bytes_of(&next_tail));
+        self.tail_estimate = next_tail;
+    }
 }
 
 /// Per-view fold-storage buffers: `primary` (the accumulator the
