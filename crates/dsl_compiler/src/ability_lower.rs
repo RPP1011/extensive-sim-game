@@ -1549,6 +1549,42 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
                 subject.round().clamp(0.0, u32::MAX as f32) as u32;
             Ok(EffectOp::Scry { target_observer, subject_idx })
         }
+        "plant_belief" => {
+            // `plant_belief <subject_idx:u32> bit <fact_bit:u8>` — Wave 3
+            // ToM primitive (#223 spy_network). Three positional args
+            // with the `bit` keyword acting as an in-band separator so
+            // the surface reads as natural English ("plant belief about
+            // subject 5, bit 3"). Engine variant ordinal is 32; payload
+            // is 5 bytes (u32 + u8) under the P4 ≤16-byte ceiling. The
+            // apply handler folds `1u << fact_bit` into the
+            // `[caster_slot * agent_cap + subject_idx]` cell of the
+            // BeliefState bitset via WGSL `atomicOr` — see
+            // `engine::ability::program::EffectOp::PlantBelief` docs for
+            // the chronicle / pair_map fold contract.
+            //
+            // Bounds: `subject_idx` is u32 (full agent id range);
+            // `fact_bit` is u8 in 0..32 (bit position into the suspicion
+            // bitset). We clamp at cast time rather than erroring so a
+            // typo doesn't gate the whole .ability file from lowering —
+            // the engine schema will reject out-of-range bits at apply
+            // time anyway and the diagnostic there names the offending
+            // EffectOp directly.
+            let subject = require_number_arg(stmt, 0)?;
+            let bit_kw = require_name_arg(stmt, 1)?;
+            if bit_kw != "bit" {
+                return Err(LowerError::EffectArgMismatch {
+                    verb:     "plant_belief".to_string(),
+                    expected: 3,
+                    got:      stmt.args.len(),
+                    span:     stmt.span,
+                });
+            }
+            let fact_bit = require_number_arg(stmt, 2)?;
+            require_arity(stmt, 3)?;
+            let subject_idx = subject.round().clamp(0.0, u32::MAX as f32) as u32;
+            let fact_bit_u8 = fact_bit.round().clamp(0.0, u8::MAX as f32) as u8;
+            Ok(EffectOp::PlantBelief { subject_idx, fact_bit: fact_bit_u8 })
+        }
         "modify_standing" => {
             let delta = require_number_arg(stmt, 0)?;
             require_arity(stmt, 1)?;
@@ -2136,6 +2172,27 @@ mod tests {
                 assert_eq!(subject_idx, 5);
             }
             ref other => panic!("expected Scry; got {other:?}"),
+        }
+    }
+
+    /// Wave 3 ToM unit pin — `plant_belief 5 bit 3` lowers to
+    /// `EffectOp::PlantBelief { subject_idx: 5, fact_bit: 3 }`. This is
+    /// the smallest end-to-end check that the new arm wires up: it
+    /// proves the parser accepts the surface syntax (positional number
+    /// + `bit` ident + positional number) and that the lowering casts
+    /// both args to the right widths (u32 / u8).
+    #[test]
+    fn lower_plant_belief_basic() {
+        let src = "ability Spy { target: enemy range: 5.0 cooldown: 1s plant_belief 5 bit 3 }";
+        let file = parse_ability_file(src).expect("parser");
+        let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+        assert_eq!(prog.effects.len(), 1);
+        match prog.effects[0] {
+            EffectOp::PlantBelief { subject_idx, fact_bit } => {
+                assert_eq!(subject_idx, 5);
+                assert_eq!(fact_bit, 3);
+            }
+            ref other => panic!("expected PlantBelief; got {other:?}"),
         }
     }
 }
