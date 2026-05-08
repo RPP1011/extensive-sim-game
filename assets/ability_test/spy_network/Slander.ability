@@ -1,0 +1,21 @@
+// spy_network acceptance: noble-on-noble suspicion bump. The verb
+// body in `assets/sim/spy_network.sim` emits a custom Slandered event
+// drained by an ApplySlander physics rule that bumps the target's
+// `mana` SoA column (re-purposed as the per-agent suspicion counter).
+//
+// `modify_standing -10` is the closest existing surface vocabulary
+// for "lower target's social standing". It lowers cleanly via
+// `dsl_compiler::ability_lower::lower_effect_stmt`'s "modify_standing"
+// arm to `EffectOp::ModifyStanding { delta: -10 }`. Like the other
+// .ability files in this fixture, the lowered EffectOp is metadata —
+// the actual chronicle write happens in the .sim verb body, not via
+// apply_ability dispatch.
+
+ability Slander {
+    target: enemy
+    range: 100.0
+    cooldown: 1s
+    hint: utility
+
+    modify_standing -10 [UTILITY: 100]
+}
