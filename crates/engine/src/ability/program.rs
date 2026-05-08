@@ -672,6 +672,35 @@ pub enum EffectOp {
     /// bitset (bit 0 = pos, 1 = type, 2 = tick, 3 = confidence, 4 =
     /// suspicion, 5 = flags). Useful for memory wipes / counter-deception.
     EraseBelief { subject_idx: u32, fields: u8 } = 38,
+
+    // --- Lift A — multi-tick procedures (travel) ---
+    //
+    // `travel_to (x, y, z) for <duration>` — caster begins a multi-tick
+    // walk from current pos toward `(dest_x, dest_y, dest_z)`. The
+    // dispatcher writes a chronicle record (kind=70). The downstream
+    // consumer rule sets `busy_until_tick = world.tick + eta_ticks` and
+    // populates `travel_dest_{x,y,z}` SoA cells. A second per-tick
+    // PerAgent rule walks alive agents and interpolates `pos` toward
+    // the destination by `(dest - pos) / (busy_until_tick - tick)` per
+    // tick. On the final tick (`world.tick == busy_until_tick`), the
+    // consumer snaps `pos` to the exact destination.
+    //
+    // SHAPE NOTE: `dest_x_q8`, `dest_y_q8` are i16 q8 fixed-point (256
+    // = 1.0 unit; range ±127.99 covers any reasonable 2D battlefield).
+    // For 2D-flat sims (boids, tactical), `dest_z` is implied 0. For
+    // 3D sims, the consumer can read `target_observer`-style hooks via
+    // a future extension. Payload is 2 + 2 + 4 = 8 bytes + 1B tag = 9B
+    // total. Well under the P4 ≤16-byte EffectOp ceiling.
+    //
+    // The packed effect-kind ordinal is 39 (next after EraseBelief=38).
+    // The chronicle EventKindId is 70 (next after EffectEraseBeliefApplied=69).
+    /// `travel_to <dest_x> <dest_y> for <duration>` — caster initiates
+    /// a multi-tick travel to the destination point. `dest_x_q8` /
+    /// `dest_y_q8` are q8 fixed-point coords (256 = 1 unit). On consume,
+    /// the agent's `busy_until_tick` is set to `world.tick + eta_ticks`
+    /// and the per-tick travel kernel interpolates `pos` toward the
+    /// destination.
+    TravelTo { dest_x_q8: i16, dest_y_q8: i16, eta_ticks: u32 } = 39,
 }
 
 /// Stat targeted by `buff`. Vocabulary is small today (just the two

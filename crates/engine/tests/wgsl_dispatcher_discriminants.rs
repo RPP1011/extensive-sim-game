@@ -412,6 +412,16 @@ fn erase_belief_packs_to_discriminant_38_matching_wgsl_dispatcher() {
     );
 }
 
+// Lift A — `travel_to` multi-tick travel verb.
+#[test]
+fn travel_to_packs_to_discriminant_39_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::TravelTo { dest_x_q8: 1280, dest_y_q8: 1280, eta_ticks: 50 }),
+        39,
+        "TravelTo discriminant — WGSL dispatcher arm `kind == 39u` depends on this"
+    );
+}
+
 #[test]
 fn empty_sentinel_byte_matches_wgsl_dispatcher() {
     // The dispatcher loop's `if (kind == 0xFFu) { continue; }` early-out

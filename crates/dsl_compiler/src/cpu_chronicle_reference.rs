@@ -627,6 +627,34 @@ pub fn apply_event_to_chronicle_record(
             rec[5] = fields as u32;
             Some(rec)
         }
+        // --- TravelTo = 39 → EventKindId::EffectTravelToApplied = 70.
+        // Lift A multi-tick travel verb. payload_a packs
+        // (dest_y_q8 << 16) | (dest_x_q8 & 0xFFFF). payload_b =
+        // eta_ticks. The dispatcher writes:
+        //   slot 2 = caster_slot (the traveler)
+        //   slot 3 = caster_slot (target = caster for self-cast)
+        //   slot 4 = packed (dest_y_q8 hi << 16 | dest_x_q8 lo & 0xFFFF)
+        //   slot 5 = eta_ticks
+        ApplyEvent::TravelTo { source: _, dest_x, dest_y, eta_ticks } => {
+            // Re-pack f32 → i16 q8 → packed u32 the same way `pack_effect`
+            // does in engine/src/ability/packed.rs. Round-half-to-even via
+            // `.round()` then clamp into i16 range so a malformed cast
+            // can't overflow the SoA cell.
+            let dx = (dest_x * 256.0)
+                .round()
+                .clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+            let dy = (dest_y * 256.0)
+                .round()
+                .clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+            let lo = (dx as u16) as u32;
+            let hi = ((dy as u16) as u32) << 16;
+            rec[0] = 70;
+            rec[2] = caster_id;
+            rec[3] = caster_id;
+            rec[4] = hi | lo;
+            rec[5] = eta_ticks;
+            Some(rec)
+        }
         // After the slice γ closer (Summon → kind 62), every
         // `ApplyEvent` variant has a chronicle counterpart — no
         // fallback `_ => None` arm needed. The closed-set match
@@ -1430,6 +1458,7 @@ mod tests {
                 36 => ApplyEvent::Disguise       { source: aid(1), fake_type: 7, duration_ticks: 200 },
                 37 => ApplyEvent::Decoy          { source: aid(1), target: aid(2), subject_idx: 4, fake_pos: 0xDEADBEEF },
                 38 => ApplyEvent::EraseBelief    { source: aid(1), target: aid(2), subject_idx: 4, fields: 0b00111111 },
+                39 => ApplyEvent::TravelTo       { source: aid(1), dest_x: 5.0, dest_y: 5.0, eta_ticks: 50 },
                 _ => panic!("unexpected effect_kind in table"),
             }
         };
@@ -1486,5 +1515,48 @@ mod tests {
         assert_eq!(rec[2], 4);
         assert_eq!(rec[3], 4);
         assert_eq!(rec[4], (-25_i32) as u32, "delta sign-widens i16 → i32 → u32");
+    }
+
+    // Lift A — `travel_to` chronicle record. Self-cast: target slot ==
+    // caster slot. payload_a packs (dest_y_q8 << 16) | (dest_x_q8 &
+    // 0xFFFF); payload_b = eta_ticks. Round-trip the q8 packing rule:
+    // 5.0 → i16 1280 → bit pattern 0x0500. Both halves: low = 0x0500,
+    // high = 0x0500 — combined 0x05000500.
+    #[test]
+    fn travel_to_chronicle_record_uses_kind_70_and_packs_q8() {
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::TravelTo { source: aid(1), dest_x: 5.0, dest_y: 5.0, eta_ticks: 50 },
+            /*tick*/ 100,
+            /*caster_id*/ 7, /*target_id*/ 7,
+        )
+        .expect("TravelTo has chronicle counterpart");
+        assert_eq!(rec[0], 70, "EffectTravelToApplied kind tag");
+        assert_eq!(rec[1], 100, "tick");
+        assert_eq!(rec[2], 7, "caster slot — self-cast");
+        assert_eq!(rec[3], 7, "target slot == caster slot for self-cast travel");
+        // dest_x = 5.0 → q8 1280 → low 16 bits 0x0500
+        // dest_y = 5.0 → q8 1280 → high 16 bits 0x0500 << 16 = 0x05000000
+        // combined: 0x05000500
+        assert_eq!(rec[4], 0x0500_0500, "packed q8 dest");
+        assert_eq!(rec[5], 50, "eta_ticks");
+    }
+
+    // Negative-coord packing: dest_y = -1.0 → q8 -256 → bit pattern
+    // 0xFF00 (i16 sign-extend). Combined low half (dest_x = 1.0 → q8
+    // 256 → 0x0100): 0xFF000100.
+    #[test]
+    fn travel_to_chronicle_handles_negative_q8_coords() {
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::TravelTo { source: aid(1), dest_x: 1.0, dest_y: -1.0, eta_ticks: 25 },
+            /*tick*/ 50,
+            /*caster_id*/ 3, /*target_id*/ 3,
+        )
+        .expect("TravelTo has chronicle counterpart");
+        assert_eq!(rec[0], 70);
+        // -1.0 q8 → -256 → i16 bit pattern 0xFF00 → as u16 → u32 0xFF00.
+        // Shifted to high half: 0xFF000000. Combined with low (1.0 → 256
+        // → 0x0100): 0xFF000100.
+        assert_eq!(rec[4], 0xFF00_0100, "q8 negative coord packs with sign bits intact");
+        assert_eq!(rec[5], 25);
     }
 }

@@ -1436,6 +1436,74 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             require_arity(stmt, 1)?;
             Ok(EffectOp::Pull { distance: dist })
         }
+        // Lift A — multi-tick procedure: `travel_to <x> <y> for <duration>`.
+        // The caster initiates a multi-tick walk to (x, y) over `eta_ticks`
+        // (10 Hz, so `for 5s` ≈ 50 ticks). The destination is packed q8
+        // (256 = 1 unit; range ±127.99). The DSL surface accepts an
+        // optional positional Z (today ignored — 2D-flat sims dominate; a
+        // future SoA cell extension can carry Z too without a verb shape
+        // change). The downstream consumer rule sets `busy_until_tick =
+        // world.tick + eta_ticks` and populates the per-agent
+        // `travel_dest_{x,y,z}` SoA cells; a per-tick travel kernel
+        // interpolates `pos` toward the destination.
+        "travel_to" => {
+            // Two positional args: (dest_x, dest_y). The optional dest_z
+            // is accepted but ignored for the q8-packed payload (the SoA
+            // cell still receives it on the apply side via the consumer
+            // rule — a future EffectOp evolution can carry z too).
+            let dx = require_number_arg(stmt, 0)?;
+            let dy = require_number_arg(stmt, 1)?;
+            // Optional positional dest_z — accept but don't pack into the
+            // EffectOp payload today (Lift A ships 2D-flat travel; the SoA
+            // cell `travel_dest_z` is reserved for a future variant).
+            let _dz = match stmt.args.get(2) {
+                None => 0.0,
+                Some(EffectArg::Number(v)) => *v,
+                Some(_) => {
+                    return Err(LowerError::EffectArgMismatch {
+                        verb:     "travel_to".to_string(),
+                        expected: 2,
+                        got:      stmt.args.len(),
+                        span:     stmt.span,
+                    });
+                }
+            };
+            // Duration MUST come from the `for` modifier — travel without
+            // an ETA is meaningless. The is_duration_bearing_verb guard
+            // upstream ensures we only land here when `stmt.duration` is
+            // Some.
+            let dur = stmt
+                .duration
+                .as_ref()
+                .map(|d| d.duration.millis)
+                .ok_or_else(|| LowerError::EffectArgMismatch {
+                    verb:     "travel_to".to_string(),
+                    expected: 3, // x + y + for-duration
+                    got:      stmt.args.len(),
+                    span:     stmt.span,
+                })?;
+            // 2 or 3 positional args allowed (x, y, [z]). The for-modifier
+            // doesn't count toward arity.
+            if stmt.args.len() != 2 && stmt.args.len() != 3 {
+                return Err(LowerError::EffectArgMismatch {
+                    verb:     "travel_to".to_string(),
+                    expected: 2,
+                    got:      stmt.args.len(),
+                    span:     stmt.span,
+                });
+            }
+            let dest_x_q8 = (dx * 256.0)
+                .round()
+                .clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+            let dest_y_q8 = (dy * 256.0)
+                .round()
+                .clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+            Ok(EffectOp::TravelTo {
+                dest_x_q8,
+                dest_y_q8,
+                eta_ticks: duration_to_ticks(dur),
+            })
+        }
         // Wave 2 piece 3 — two new advanced verbs. Each takes a single
         // `<f32>` arg (mirrors `damage`'s shape exactly). NEITHER adds
         // SoA fields:
@@ -1925,6 +1993,11 @@ fn is_duration_bearing_verb(verb: &str) -> bool {
         // `fake_type` ordinal is the single positional arg; the
         // duration comes from `for`.
         | "disguise"
+        // Lift A — `travel_to <x> <y> for <duration>`. Same `for`-as-
+        // duration-source pattern as the buffs above; the duration IS
+        // the eta_ticks, NOT a positional. Travel without a duration is
+        // meaningless (would imply teleport, which is the `blink` verb).
+        | "travel_to"
     )
 }
 

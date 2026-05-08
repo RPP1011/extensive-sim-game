@@ -215,6 +215,72 @@ fn lowers_dash() {
     }
 }
 
+// Lift A — `travel_to <x> <y> for <duration>` multi-tick travel.
+// Self-cast: the caster initiates a multi-tick walk to the destination.
+// q8 packing: 5.0 → 1280 (= 5 * 256). 5s @ 100ms = 50 ticks.
+#[test]
+fn lowers_travel_to() {
+    let src = "ability Walk { target: self cooldown: 1s travel_to 5 5 for 5s }";
+    let file = parse_ability_file(src).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+    assert_eq!(prog.effects.len(), 1);
+    match prog.effects[0] {
+        EffectOp::TravelTo { dest_x_q8, dest_y_q8, eta_ticks } => {
+            assert_eq!(dest_x_q8, 1280, "5.0 packed q8");
+            assert_eq!(dest_y_q8, 1280, "5.0 packed q8");
+            assert_eq!(eta_ticks, 50, "5s @ 100ms = 50 ticks");
+        }
+        ref other => panic!("expected TravelTo; got {other:?}"),
+    }
+}
+
+// Lift A — travel_to with optional Z arg accepted (today ignored in
+// the EffectOp payload — 2D-flat sims dominate; the SoA cell carries Z
+// independently via the consumer rule).
+#[test]
+fn lowers_travel_to_with_optional_z() {
+    let src = "ability WalkZ { target: self cooldown: 1s travel_to 5 5 0 for 5s }";
+    let file = parse_ability_file(src).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+    assert_eq!(prog.effects.len(), 1);
+    assert!(matches!(
+        prog.effects[0],
+        EffectOp::TravelTo { dest_x_q8: 1280, dest_y_q8: 1280, eta_ticks: 50 }
+    ));
+}
+
+// Lift A — travel_to without `for` modifier is a hard error. Travel
+// without an ETA is meaningless — that's just `blink` (instant teleport).
+#[test]
+fn travel_to_without_duration_errors() {
+    let src = "ability NoEta { target: self cooldown: 1s travel_to 5 5 }";
+    let file = parse_ability_file(src).expect("parser");
+    let err = lower_ability_decl(&file.abilities[0])
+        .expect_err("missing for-duration must error");
+    // Should surface as EffectArgMismatch (verb expects 2 args + for).
+    match err {
+        LowerError::EffectArgMismatch { verb, .. } => assert_eq!(verb, "travel_to"),
+        other => panic!("expected EffectArgMismatch on travel_to; got {other:?}"),
+    }
+}
+
+// Lift A — q8 round-trip: 0.5 → 128, -1.0 → -256, etc. Pin the packing
+// rule so a future change to the q8 convention surfaces here.
+#[test]
+fn lowers_travel_to_q8_packing_round_trips() {
+    let src = "ability Walk { target: self cooldown: 1s travel_to 0.5 -1.0 for 1s }";
+    let file = parse_ability_file(src).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+    match prog.effects[0] {
+        EffectOp::TravelTo { dest_x_q8, dest_y_q8, eta_ticks } => {
+            assert_eq!(dest_x_q8, 128, "0.5 * 256 = 128");
+            assert_eq!(dest_y_q8, -256, "-1.0 * 256 = -256");
+            assert_eq!(eta_ticks, 10);
+        }
+        ref other => panic!("expected TravelTo; got {other:?}"),
+    }
+}
+
 #[test]
 fn lowers_blink() {
     let src = "ability Flash { target: enemy range: 6 cooldown: 1s blink 6 }";

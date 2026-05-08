@@ -232,6 +232,28 @@ pub enum AgentFieldId {
     /// the consumer reads only the low byte.
     DisguiseFakeType,
 
+    // --- Hot SoA: Lift A multi-tick procedures (busy_until_tick + travel) ---
+    /// `busy_until_tick` — universal "this agent is busy until tick T"
+    /// gate. Mask kernels for casts / actions consult this column and
+    /// suppress the agent while `world.tick < busy_until_tick`. Multiple
+    /// busy sources (travel / craft / negotiate) share the same column;
+    /// a busy agent can't do anything else regardless of which verb made
+    /// them busy. Lift A — multi-tick procedures.
+    BusyUntilTick,
+    /// `travel_dest_x` — pending travel destination X coord (f32). The
+    /// per-tick travel-interpolation kernel reads this alongside
+    /// `BusyUntilTick` to interpolate `Pos` toward the destination. Set
+    /// by the `EffectOp::TravelTo` consumer rule on cast; consulted by
+    /// the per-tick travel kernel until `world.tick >= busy_until_tick`,
+    /// at which point `Pos` is snapped to the exact destination. Lift A.
+    TravelDestX,
+    /// `travel_dest_y` — pending travel destination Y coord (f32).
+    /// Mirror of `TravelDestX`. Lift A.
+    TravelDestY,
+    /// `travel_dest_z` — pending travel destination Z coord (f32).
+    /// Mirror of `TravelDestX`. Lift A.
+    TravelDestZ,
+
     // --- Cold SoA: identity and lifecycle ---
     CreatureType,
     SpawnTick,
@@ -271,9 +293,13 @@ impl AgentFieldId {
             | RootExpiresAtTick | SilenceExpiresAtTick | FearExpiresAtTick
             | TauntExpiresAtTick | LifestealExpiresAtTick
             | DamageTakenMultExpiresAtTick
-            | DisguiseExpiresAtTick | DisguiseFakeType => {
+            | DisguiseExpiresAtTick | DisguiseFakeType
+            | BusyUntilTick => {
                 AgentFieldTy::U32
             }
+
+            // f32 — Lift A travel destination cells (pending interpolation target)
+            TravelDestX | TravelDestY | TravelDestZ => AgentFieldTy::F32,
 
             // i16 — q8 fixed-point factors (slow + Wave 2 piece 4 buffs)
             SlowFactorQ8 | LifestealFracQ8 | DamageTakenMultQ8 => AgentFieldTy::I16,
@@ -351,6 +377,10 @@ impl AgentFieldId {
             DamageTakenMultExpiresAtTick => "damage_taken_mult_expires_at_tick",
             DisguiseExpiresAtTick => "disguise_expires_at_tick",
             DisguiseFakeType => "disguise_fake_type",
+            BusyUntilTick => "busy_until_tick",
+            TravelDestX => "travel_dest_x",
+            TravelDestY => "travel_dest_y",
+            TravelDestZ => "travel_dest_z",
             CreatureType => "creature_type",
             SpawnTick => "spawn_tick",
             GridId => "grid_id",
@@ -416,6 +446,10 @@ impl AgentFieldId {
             DamageTakenMultExpiresAtTick,
             DisguiseExpiresAtTick,
             DisguiseFakeType,
+            BusyUntilTick,
+            TravelDestX,
+            TravelDestY,
+            TravelDestZ,
             CreatureType,
             SpawnTick,
             GridId,
@@ -490,6 +524,10 @@ impl AgentFieldId {
             "damage_taken_mult_expires_at_tick" => DamageTakenMultExpiresAtTick,
             "disguise_expires_at_tick" => DisguiseExpiresAtTick,
             "disguise_fake_type" => DisguiseFakeType,
+            "busy_until_tick" => BusyUntilTick,
+            "travel_dest_x" => TravelDestX,
+            "travel_dest_y" => TravelDestY,
+            "travel_dest_z" => TravelDestZ,
             "slow_expires_at_tick" => SlowExpiresAtTick,
             "slow_factor_q8" => SlowFactorQ8,
             "cooldown_next_ready_tick" => CooldownNextReadyTick,
@@ -1932,13 +1970,15 @@ mod tests {
                 "all_variants entry {v:?} did not round-trip through snake"
             );
         }
-        // A spot-check on count — the enum has 49 variants today (38
+        // A spot-check on count — the enum has 53 variants today (38
         // wolf-sim baseline + Vel added 2026-05-02 for the Boids fixture
         // + 4 control statuses Wave 2 piece 1 + 4 buff multipliers Wave
-        // 2 piece 4 + 2 Disguise SoA columns Wave 3 ToM Phase 5); if a
-        // new variant lands and `all_variants` isn't updated, this
-        // assertion fails before the round-trip loop above can.
-        assert_eq!(all.len(), 49);
+        // 2 piece 4 + 2 Disguise SoA columns Wave 3 ToM Phase 5 + 4
+        // Lift A multi-tick procedure columns: BusyUntilTick +
+        // TravelDestX/Y/Z); if a new variant lands and `all_variants`
+        // isn't updated, this assertion fails before the round-trip loop
+        // above can.
+        assert_eq!(all.len(), 53);
     }
 
     #[test]

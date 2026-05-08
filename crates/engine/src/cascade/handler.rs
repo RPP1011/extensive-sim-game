@@ -303,7 +303,25 @@ pub enum EventKindId {
     EffectDisguiseApplied    = 67,
     EffectDecoyApplied       = 68,
     EffectEraseBeliefApplied = 69,
-    // Slots 70-127 reserved for replayable event variants added in later tasks.
+    // Lift A — multi-tick procedures + Travel. The dispatcher writes a
+    // single chronicle record (kind=70) when an `EffectOp::TravelTo`
+    // (op#39) slot fires. The downstream consumer rule sets
+    // `busy_until_tick = world.tick + eta_ticks` and populates the
+    // `travel_dest_{x,y,z}` SoA cells. A second per-tick PerAgent rule
+    // walks alive agents and interpolates `pos` toward the destination
+    // by `(dest - pos) / max(1, busy_until_tick - tick)` per tick. On
+    // the final tick (`world.tick == busy_until_tick`), the consumer
+    // snaps `pos` to the exact destination.
+    //
+    // SHAPE NOTE: 5-payload-word chronicle record (actor + dest_x_q8 +
+    // dest_y_q8 + eta_ticks). The dispatcher writes:
+    //   slot 2 = caster_slot (the traveler)
+    //   slot 3 = caster_slot (target = caster for self-cast)
+    //   slot 4 = packed (dest_y_q8 << 16) | (dest_x_q8 & 0xFFFF) — the
+    //            consumer sign-extends each i16 half via bit shifts.
+    //   slot 5 = eta_ticks (u32)
+    EffectTravelToApplied = 70,
+    // Slots 71-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 
