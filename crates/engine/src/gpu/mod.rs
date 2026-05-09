@@ -22,11 +22,13 @@
 //! iteration layer.
 
 pub mod bgl;
+pub mod bindings_context;
 pub mod context;
 pub mod event_ring;
 pub mod kernel;
 
 pub use bgl::{bgl_storage, bgl_uniform};
+pub use bindings_context::{AgentBuffers, KernelBindingsContext};
 pub use context::{GpuContext, GpuContextError};
 pub use event_ring::{EventRing, ViewStorage, EVENT_RING_CAP_SLOTS, EVENT_STRIDE_U32};
 pub use kernel::Kernel;

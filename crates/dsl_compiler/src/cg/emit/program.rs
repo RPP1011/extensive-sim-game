@@ -878,6 +878,14 @@ fn compose_rust_module_file(spec: &KernelSpec, topology: &KernelTopology) -> Str
     }
     out.push_str("}\n\n");
 
+    // ViewFold kernels skip the constructor — their custom
+    // anchor/ids/sim_cfg shape doesn't fit the standard naming
+    // convention; per-fixture runtimes construct them via the existing
+    // `view_storage` helpers.
+    if !matches!(spec.kind, KernelKind::ViewFold) {
+        out.push_str(&compose_bindings_from_context(spec));
+    }
+
     // Cfg struct decl — KernelSpec.cfg_struct_decl is the full
     // `#[repr(C)] ... pub struct <Cfg> { ... }` form.
     out.push_str(&spec.cfg_struct_decl);
@@ -930,6 +938,180 @@ fn compose_rust_module_file(spec: &KernelSpec, topology: &KernelTopology) -> Str
         // args at the dispatch call site (e.g.,
         // `PhysicsMoveBoidCfg { agent_cap: 16, _pad: [0; 3] }`).
     }
+
+    out
+}
+
+/// Classify an emitted Bindings field by name → which shared source
+/// the compiler-emitted `from_context()` constructor pulls it from.
+///
+/// The naming convention (kept in sync with the
+/// `engine::gpu::bindings_context` module docs):
+///
+/// | Field name pattern              | Classification                    |
+/// |---------------------------------|-----------------------------------|
+/// | `event_ring`                    | `BindingSource::EventRingRing`    |
+/// | `event_tail`                    | `BindingSource::EventRingTail`    |
+/// | `agent_<col>` where col is in   | `BindingSource::AgentBuffer(col)` |
+/// |   `engine::gpu::AgentBuffers::STANDARD_COLUMNS` |                  |
+/// | `ability_registry_<col>`        | `BindingSource::Registry(col)`    |
+/// | `cfg`                           | `BindingSource::Cfg`              |
+/// | (anything else)                 | `BindingSource::Extras`           |
+///
+/// The "anything else" bucket catches fixture-specific buffers — mask
+/// bitmaps, scoring output, fixture-specific SoA columns (e.g.,
+/// `agent_creature_type` in spy_network) — which ride a per-kernel
+/// `<Pascal>Extras` struct passed to `from_context_with_extras`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BindingSource<'a> {
+    EventRingRing,
+    EventRingTail,
+    AgentBuffer(&'a str),
+    Registry(&'a str),
+    Cfg,
+    Extras,
+}
+
+/// The compiler's mirror of `engine::gpu::AgentBuffers::STANDARD_COLUMNS`.
+/// Kept in sync by the `bindings_context_standard_columns_in_sync` test.
+const STANDARD_AGENT_COLUMNS: &[&str] = &[
+    "hp",
+    "max_hp",
+    "alive",
+    "pos",
+    "level",
+    "move_speed",
+    "move_speed_mult",
+    "shield_hp",
+    "armor",
+    "magic_resist",
+    "attack_damage",
+    "attack_range",
+    "mana",
+    "max_mana",
+    "ability_power",
+];
+
+fn classify_binding(name: &str) -> BindingSource<'_> {
+    if name == "event_ring" {
+        return BindingSource::EventRingRing;
+    }
+    if name == "event_tail" {
+        return BindingSource::EventRingTail;
+    }
+    if name == "cfg" {
+        return BindingSource::Cfg;
+    }
+    if let Some(col) = name.strip_prefix("ability_registry_") {
+        return BindingSource::Registry(col);
+    }
+    if let Some(col) = name.strip_prefix("agent_") {
+        if STANDARD_AGENT_COLUMNS.contains(&col) {
+            return BindingSource::AgentBuffer(col);
+        }
+    }
+    BindingSource::Extras
+}
+
+/// Render the Rust expression that yields the `&'a wgpu::Buffer` for
+/// a binding classified through [`classify_binding`]. `name` is the
+/// emitted Bindings field name (used for the extras-arm getter and for
+/// the AgentBuffer's `.expect()` message).
+fn render_from_context_expr(src: &BindingSource<'_>, name: &str) -> String {
+    match src {
+        BindingSource::EventRingRing => "ctx.event_ring.ring()".to_string(),
+        BindingSource::EventRingTail => "ctx.event_ring.tail()".to_string(),
+        BindingSource::AgentBuffer(col) => format!(
+            "ctx.state.{col}_buf.expect(\"kernel binds agent_{col} but the runtime didn't supply ctx.state.{col}_buf\")"
+        ),
+        BindingSource::Registry(col) => format!("&ctx.registry.{col}"),
+        BindingSource::Cfg => "extras.cfg".to_string(),
+        BindingSource::Extras => format!("extras.{name}"),
+    }
+}
+
+/// Compose the `from_context(ctx)` (or `from_context_with_extras(ctx,
+/// extras)` plus sibling `<Pascal>Extras` struct) impl block for a
+/// generic-kernel Bindings struct.
+///
+/// Walks the spec's bindings, classifies each via [`classify_binding`],
+/// and emits:
+///
+/// - When every binding routes through shared sources (state /
+///   event_ring / registry): a parameterless `from_context(ctx)` impl.
+/// - Otherwise (at least one binding falls through to extras OR a
+///   `cfg` binding exists — cfg always rides on extras since cfg
+///   buffers are per-fixture): a `<Pascal>Extras<'a>` struct holding
+///   the unclassified fields + a `from_context_with_extras(ctx, extras)`
+///   impl.
+///
+/// The Cfg binding is treated as "extras" because the cfg buffer is
+/// always a per-fixture per-kernel buffer the runtime owns and writes
+/// each tick. Routing it through extras keeps the constructor's
+/// shared-context narrow (no per-kernel cfg fanout in the context
+/// type).
+fn compose_bindings_from_context(spec: &KernelSpec) -> String {
+    // AliasOf bindings have no struct field (handled at BindGroupEntry
+    // time in lower_rust_bg_entries).
+    let classified: Vec<(&str, BindingSource<'_>)> = spec
+        .bindings
+        .iter()
+        .filter(|b| !matches!(b.bg_source, BgSource::AliasOf(_)))
+        .map(|b| (b.name.as_str(), classify_binding(&b.name)))
+        .collect();
+
+    let needs_extras = classified
+        .iter()
+        .any(|(_, src)| matches!(src, BindingSource::Cfg | BindingSource::Extras));
+
+    let pascal = &spec.pascal;
+    let mut out = String::new();
+
+    if needs_extras {
+        writeln!(out, "pub struct {pascal}Extras<'a> {{").expect("write");
+        for (name, _) in classified
+            .iter()
+            .filter(|(_, src)| matches!(src, BindingSource::Cfg | BindingSource::Extras))
+        {
+            writeln!(out, "    pub {name}: &'a wgpu::Buffer,").expect("write");
+        }
+        out.push_str("}\n\n");
+    }
+
+    writeln!(out, "impl<'a> {pascal}Bindings<'a> {{").expect("write");
+    out.push_str("    /// Construct from the shared [`engine::gpu::KernelBindingsContext`].\n");
+    if needs_extras {
+        writeln!(
+            out,
+            "    /// + per-kernel [`{pascal}Extras`] supplying fixture-specific buffers."
+        )
+        .expect("write");
+    }
+    out.push_str(
+        "    ///\n    \
+         /// Compiler-emitted; see the naming convention in\n    \
+         /// [`engine::gpu::bindings_context`].\n",
+    );
+    if needs_extras {
+        writeln!(
+            out,
+            "    pub fn from_context_with_extras(\n        \
+                 ctx: &engine::gpu::KernelBindingsContext<'a>,\n        \
+                 extras: &{pascal}Extras<'a>,\n    ) -> Self {{"
+        )
+        .expect("write");
+    } else {
+        out.push_str(
+            "    pub fn from_context(\n        \
+             ctx: &engine::gpu::KernelBindingsContext<'a>,\n    ) -> Self {\n",
+        );
+    }
+    out.push_str("        Self {\n");
+    for (name, src) in &classified {
+        let expr = render_from_context_expr(src, name);
+        writeln!(out, "            {name}: {expr},").expect("write");
+    }
+    out.push_str("        }\n    }\n}\n\n");
 
     out
 }
@@ -1726,4 +1908,262 @@ mod tests {
 
 
     // ---- 11. lib.rs synthesis (Task 5.2) ----
+
+    // ---- 12. Bindings::from_context() emit (Task #245) ------------------
+
+    use crate::kernel_binding_ir::{KernelBinding, KernelSpec};
+
+    fn make_spec_with_bindings(name: &str, fields: &[(&str, BgSource)]) -> KernelSpec {
+        let bindings = fields
+            .iter()
+            .enumerate()
+            .map(|(i, (n, src))| KernelBinding {
+                slot: i as u32,
+                name: (*n).to_string(),
+                access: AccessMode::ReadStorage,
+                wgsl_ty: "array<u32>".to_string(),
+                bg_source: src.clone(),
+            })
+            .collect();
+        KernelSpec {
+            name: name.to_string(),
+            pascal: snake_to_pascal(name),
+            entry_point: format!("cs_{name}"),
+            cfg_struct: format!("{}Cfg", snake_to_pascal(name)),
+            cfg_build_expr: "Default::default()".to_string(),
+            cfg_struct_decl: format!("pub struct {}Cfg;", snake_to_pascal(name)),
+            bindings,
+            kind: KernelKind::Generic,
+        }
+    }
+
+    #[test]
+    fn standard_agent_columns_match_engine_agent_buffers() {
+        // Drift guard: the compiler's classifier table must match the
+        // `engine::gpu::AgentBuffers::STANDARD_COLUMNS` const exposed
+        // to runtimes. If a column is added to one but not the other,
+        // generated `from_context` bodies reference fields that don't
+        // exist (or runtimes initialize fields the compiler never
+        // routes), surfacing as a build failure across every runtime.
+        // This test catches the drift in dsl_compiler's own test suite
+        // before the fanout.
+        let compiler_set: std::collections::BTreeSet<&str> =
+            STANDARD_AGENT_COLUMNS.iter().copied().collect();
+        let engine_set: std::collections::BTreeSet<&str> =
+            engine::gpu::AgentBuffers::STANDARD_COLUMNS
+                .iter()
+                .copied()
+                .collect();
+        assert_eq!(
+            compiler_set, engine_set,
+            "STANDARD_AGENT_COLUMNS in dsl_compiler::cg::emit::program drifted from engine::gpu::AgentBuffers::STANDARD_COLUMNS — keep both in sync"
+        );
+    }
+
+    #[test]
+    fn classify_binding_routes_event_ring_and_tail() {
+        assert_eq!(classify_binding("event_ring"), BindingSource::EventRingRing);
+        assert_eq!(classify_binding("event_tail"), BindingSource::EventRingTail);
+    }
+
+    #[test]
+    fn classify_binding_routes_standard_agent_columns() {
+        assert_eq!(classify_binding("agent_hp"), BindingSource::AgentBuffer("hp"));
+        assert_eq!(
+            classify_binding("agent_max_hp"),
+            BindingSource::AgentBuffer("max_hp")
+        );
+        assert_eq!(
+            classify_binding("agent_ability_power"),
+            BindingSource::AgentBuffer("ability_power")
+        );
+    }
+
+    #[test]
+    fn classify_binding_routes_registry_columns() {
+        assert_eq!(
+            classify_binding("ability_registry_effect_kinds"),
+            BindingSource::Registry("effect_kinds")
+        );
+        assert_eq!(
+            classify_binding("ability_registry_when_pred_field"),
+            BindingSource::Registry("when_pred_field")
+        );
+    }
+
+    #[test]
+    fn classify_binding_routes_cfg_to_extras_arm() {
+        assert_eq!(classify_binding("cfg"), BindingSource::Cfg);
+    }
+
+    #[test]
+    fn classify_binding_routes_unknown_to_extras() {
+        // Fixture-specific SoA columns fall through to extras.
+        assert_eq!(
+            classify_binding("agent_creature_type"),
+            BindingSource::Extras
+        );
+        assert_eq!(
+            classify_binding("agent_disguise_fake_type"),
+            BindingSource::Extras
+        );
+        // Per-fixture mask bitmaps fall through.
+        assert_eq!(classify_binding("mask_0_bitmap"), BindingSource::Extras);
+        // Scoring output buffer.
+        assert_eq!(classify_binding("scoring_output"), BindingSource::Extras);
+        // Indirect args (per-EventRing infrastructure but not the
+        // ring/tail pair).
+        assert_eq!(classify_binding("indirect_args_0"), BindingSource::Extras);
+    }
+
+    #[test]
+    fn bindings_from_context_emits_extras_when_unclassified_present() {
+        // Spec with one Cfg binding + one extras binding (mask
+        // bitmap-style name) → from_context_with_extras + Extras struct.
+        let spec = make_spec_with_bindings(
+            "demo_with_extras",
+            &[
+                ("agent_hp", BgSource::Cfg /* placeholder; not used */),
+                ("mask_0_bitmap", BgSource::Cfg),
+                ("cfg", BgSource::Cfg),
+            ],
+        );
+        let emitted = compose_bindings_from_context(&spec);
+        assert!(
+            emitted.contains("pub struct DemoWithExtrasExtras<'a>"),
+            "missing Extras struct decl in:\n{emitted}"
+        );
+        assert!(
+            emitted.contains("pub mask_0_bitmap: &'a wgpu::Buffer,"),
+            "Extras struct missing mask_0_bitmap field:\n{emitted}"
+        );
+        assert!(
+            emitted.contains("pub cfg: &'a wgpu::Buffer,"),
+            "Extras struct missing cfg field:\n{emitted}"
+        );
+        assert!(
+            emitted.contains("pub fn from_context_with_extras("),
+            "missing from_context_with_extras impl:\n{emitted}"
+        );
+        assert!(
+            emitted.contains("ctx.state.hp_buf.expect("),
+            "agent_hp should route through ctx.state.hp_buf:\n{emitted}"
+        );
+        assert!(
+            emitted.contains("mask_0_bitmap: extras.mask_0_bitmap,"),
+            "mask_0_bitmap should route through extras:\n{emitted}"
+        );
+        assert!(
+            emitted.contains("cfg: extras.cfg,"),
+            "cfg should route through extras:\n{emitted}"
+        );
+    }
+
+    #[test]
+    fn bindings_from_context_emits_no_extras_when_all_classified() {
+        // Spec where every binding routes through the shared sources
+        // (event_ring + ability_registry_*) — no cfg, no fixture-specific
+        // buffer → parameterless from_context, no Extras struct.
+        let spec = make_spec_with_bindings(
+            "demo_all_shared",
+            &[
+                ("event_ring", BgSource::Cfg),
+                ("event_tail", BgSource::Cfg),
+                ("agent_hp", BgSource::Cfg),
+                ("ability_registry_effect_kinds", BgSource::Cfg),
+            ],
+        );
+        let emitted = compose_bindings_from_context(&spec);
+        assert!(
+            !emitted.contains("Extras"),
+            "no Extras struct should emit when every binding classifies into shared sources:\n{emitted}"
+        );
+        assert!(
+            emitted.contains("pub fn from_context("),
+            "missing parameterless from_context impl:\n{emitted}"
+        );
+        assert!(
+            !emitted.contains("from_context_with_extras"),
+            "should NOT emit from_context_with_extras when no extras needed:\n{emitted}"
+        );
+        assert!(
+            emitted.contains("event_ring: ctx.event_ring.ring(),"),
+            "event_ring routing:\n{emitted}"
+        );
+        assert!(
+            emitted.contains("event_tail: ctx.event_ring.tail(),"),
+            "event_tail routing:\n{emitted}"
+        );
+        assert!(
+            emitted.contains("ability_registry_effect_kinds: &ctx.registry.effect_kinds,"),
+            "ability_registry_* routing:\n{emitted}"
+        );
+    }
+
+    #[test]
+    fn bindings_from_context_emits_for_every_kernel_in_a_real_program() {
+        // End-to-end smoke: drive an actual .sim through emit and
+        // confirm every emitted Bindings struct has a matching
+        // `from_context` or `from_context_with_extras` impl in the
+        // same module file.
+        let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let workspace = manifest
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("workspace root");
+        let sim_path = workspace.join("assets/sim/spy_network.sim");
+        let src = std::fs::read_to_string(&sim_path).expect("read spy_network.sim");
+        let program = crate::parse(&src).expect("parse spy_network.sim");
+        let comp = dsl_ast::resolve::resolve(program).expect("resolve");
+        let cg = lower_compilation_to_cg(&comp).expect("CG lower");
+        let result = synthesize_schedule(&cg, ScheduleStrategy::Default);
+        let artifacts =
+            emit_cg_program(&result.schedule, &cg).expect("emit_cg_program");
+
+        // Walk every per-kernel rust file (exclude lib.rs, schedule.rs,
+        // dispatch.rs which have no Bindings structs).
+        let mut kernels_checked = 0;
+        for (filename, contents) in &artifacts.rust_files {
+            if filename == "lib.rs" || filename == "schedule.rs" || filename == "dispatch.rs"
+            {
+                continue;
+            }
+            // Find every "pub struct <X>Bindings<'a>" in the file.
+            for line in contents.lines() {
+                if let Some(rest) = line.strip_prefix("pub struct ") {
+                    if let Some(name_end) = rest.find("Bindings<'a>") {
+                        let pascal_with_bindings = &rest[..name_end];
+                        // Skip ViewFold kernels — their custom shape
+                        // doesn't fit the standard convention; the
+                        // emitter intentionally skips from_context for
+                        // them.
+                        if pascal_with_bindings.starts_with("Fold") {
+                            continue;
+                        }
+                        // Confirm the file has either a parameterless
+                        // `from_context(` or `from_context_with_extras(`
+                        // impl for this struct.
+                        let from_context_marker = format!(
+                            "impl<'a> {pascal_with_bindings}Bindings<'a> {{"
+                        );
+                        assert!(
+                            contents.contains(&from_context_marker),
+                            "kernel {filename} has Bindings struct '{pascal_with_bindings}Bindings' but no impl block found"
+                        );
+                        let has_from_context = contents.contains("pub fn from_context(")
+                            || contents.contains("pub fn from_context_with_extras(");
+                        assert!(
+                            has_from_context,
+                            "kernel {filename} Bindings struct '{pascal_with_bindings}Bindings' is missing from_context / from_context_with_extras"
+                        );
+                        kernels_checked += 1;
+                    }
+                }
+            }
+        }
+        assert!(
+            kernels_checked > 0,
+            "expected at least one non-ViewFold Bindings struct in spy_network's emit"
+        );
+    }
 }
