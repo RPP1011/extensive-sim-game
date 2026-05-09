@@ -3360,6 +3360,14 @@ pub(crate) const EFFECT_KIND_TO_EVENT_KIND_ID: &[(u32, u32)] = &[
     // + §4.3 (capital goods).
     (40, 71), // EffectOp::Recipe      → EventKindId::EffectRecipeApplied
     (41, 72), // EffectOp::WearTool    → EventKindId::EffectWearToolApplied
+    // Lift C — bilateral consent + observer fan-out. Dispatcher writes
+    // one chronicle record per cast for each verb. Per-fixture consumer
+    // rules register the proposal in a ContractRegistry (Propose) or
+    // walk the spatial-hash and emit per-observer perception events
+    // (Announce). See `docs/spec/economy.md §6` (observer fan-out) +
+    // §7 (contracts).
+    (42, 73), // EffectOp::Propose     → EventKindId::EffectProposeApplied
+    (43, 74), // EffectOp::Announce    → EventKindId::EffectAnnounceApplied
 ];
 
 /// Look up the runtime `EventKindId` for an `EffectOp` discriminant.
@@ -3495,6 +3503,10 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Recipe=40");
     let wear_tool_event_id = event_kind_id_for_effect_kind(41)
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain WearTool=41");
+    let propose_event_id = event_kind_id_for_effect_kind(42)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Propose=42");
+    let announce_event_id = event_kind_id_for_effect_kind(43)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Announce=43");
 
     let i4  = indent;                   // arm `if`/`else if` lines
     let i8  = format!("{i4}    ");      // body of arm
@@ -4367,6 +4379,49 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {wear_tool_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // Propose = 42 → 73 (Lift C bilateral consent)
+    s.push_str(&format!("{i4}}} else if (kind == 42u) {{\n"));
+    s.push_str(&format!("{i8}// Propose = 42 → EventKindId::EffectProposeApplied = 73\n"));
+    s.push_str(&format!("{i8}// payload_a low 8 bits = contract_kind ordinal. payload_b =\n"));
+    s.push_str(&format!("{i8}// expires_at_tick (0 sentinel = no expiry). The consumer reads\n"));
+    s.push_str(&format!("{i8}// the proposal pair (caster_slot → target_slot) and registers it\n"));
+    s.push_str(&format!("{i8}// in the per-fixture ContractRegistry, to be resolved when the\n"));
+    s.push_str(&format!("{i8}// target later fires the companion accept / decline verb.\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectProposeApplied (caster_slot + target_slot + payload_a + payload_b)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {propose_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // Announce = 43 → 74 (Lift C observer fan-out)
+    s.push_str(&format!("{i4}}} else if (kind == 43u) {{\n"));
+    s.push_str(&format!("{i8}// Announce = 43 → EventKindId::EffectAnnounceApplied = 74\n"));
+    s.push_str(&format!("{i8}// payload_a low 8 bits = announcement_kind; next 16 bits = radius_q8\n"));
+    s.push_str(&format!("{i8}// (q8 fraction-of-cell — 256 = 1.0 cell). payload_b = 0. The\n"));
+    s.push_str(&format!("{i8}// consumer walks the spatial-hash within `radius_q8 / 256` cells\n"));
+    s.push_str(&format!("{i8}// of the caster and emits per-observer perception events. Self-\n"));
+    s.push_str(&format!("{i8}// origin: announcements radiate from the caster's cell\n"));
+    s.push_str(&format!("{i8}// (`target_slot == caster_slot`).\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectAnnounceApplied (caster_slot + caster_slot + payload_a + 0)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {announce_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (caster_slot));\n"));
@@ -7514,7 +7569,9 @@ mod tests {
                 39 => EffectOp::TravelTo    { dest_x_q8: 1280, dest_y_q8: 1280, eta_ticks: 50 },
                 40 => EffectOp::Recipe      { recipe_id: 42, target_tool: 0xFF },
                 41 => EffectOp::WearTool    { tool_kind: 3, amount: 64 },
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35/36/37/38/39/40/41"),
+                42 => EffectOp::Propose     { contract_kind: 1, expires_at_tick: 0 },
+                43 => EffectOp::Announce    { announcement_kind: 7, radius_q8: 896 },
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35/36/37/38/39/40/41/42/43"),
             }
         };
 
@@ -7563,7 +7620,9 @@ mod tests {
                 39 => EngineEventKindId::EffectTravelToApplied        as u32,
                 40 => EngineEventKindId::EffectRecipeApplied          as u32,
                 41 => EngineEventKindId::EffectWearToolApplied        as u32,
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35/36/37/38/39/40/41"),
+                42 => EngineEventKindId::EffectProposeApplied         as u32,
+                43 => EngineEventKindId::EffectAnnounceApplied        as u32,
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35/36/37/38/39/40/41/42/43"),
             }
         };
 
@@ -7700,9 +7759,14 @@ mod tests {
         // EffectWearToolApplied=72 records that per-fixture consumer
         // rules turn into inventory ingredient/output deltas + tool wear
         // increments. See `docs/spec/economy.md §4.1` + §4.3).
+        // + Propose + Announce (Lift C — bilateral consent + observer
+        // fan-out; dispatcher writes EffectProposeApplied=73 +
+        // EffectAnnounceApplied=74 records that per-fixture consumer
+        // rules turn into ContractRegistry registrations + spatial-hash
+        // observer broadcasts. See `docs/spec/economy.md §6` + §7).
         assert_eq!(
-            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 41,
-            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 41 \
+            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 43,
+            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 43 \
              chronicle-bearing variants today; if you added or removed an \
              entry, update this assertion (and the slice γ wire-up that \
              consumes the new entry)"

@@ -1139,6 +1139,20 @@ fn pack_effect(op: EffectOp) -> (u32, u32, u32) {
         // (tool_kind) and `(payload_a >> 8) & 0xFFFF` (amount).
         EffectOp::WearTool { tool_kind, amount } =>
             (41, (tool_kind as u32) | ((amount as u32) << 8), 0),
+        // Lift C — `propose <contract_kind> [expires_at <tick>]`. payload_a's
+        // low 8 bits = contract_kind ordinal; remaining 24 bits unused.
+        // payload_b = expires_at_tick (u32; `0` sentinel = no expiry). The
+        // consumer unpacks via `payload_a & 0xFF` (contract_kind) and
+        // `payload_b` (expires_at_tick).
+        EffectOp::Propose { contract_kind, expires_at_tick } =>
+            (42, contract_kind as u32, expires_at_tick),
+        // Lift C — `announce <announcement_kind> radius <radius_cells>`.
+        // payload_a's low 8 bits = announcement_kind ordinal; next 16 bits =
+        // radius_q8 (q8 fixed-point cells). payload_b = 0. The consumer
+        // unpacks via `payload_a & 0xFF` (announcement_kind) and
+        // `(payload_a >> 8) & 0xFFFF` (radius_q8).
+        EffectOp::Announce { announcement_kind, radius_q8 } =>
+            (43, (announcement_kind as u32) | ((radius_q8 as u32) << 8), 0),
     }
 }
 

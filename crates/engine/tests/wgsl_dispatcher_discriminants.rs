@@ -442,6 +442,26 @@ fn wear_tool_packs_to_discriminant_41_matching_wgsl_dispatcher() {
     );
 }
 
+// Lift C — `propose` bilateral-consent verb.
+#[test]
+fn propose_packs_to_discriminant_42_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Propose { contract_kind: 1, expires_at_tick: 0 }),
+        42,
+        "Propose discriminant — WGSL dispatcher arm `kind == 42u` depends on this"
+    );
+}
+
+// Lift C — `announce` observer fan-out verb.
+#[test]
+fn announce_packs_to_discriminant_43_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Announce { announcement_kind: 7, radius_q8: 896 }),
+        43,
+        "Announce discriminant — WGSL dispatcher arm `kind == 43u` depends on this"
+    );
+}
+
 #[test]
 fn empty_sentinel_byte_matches_wgsl_dispatcher() {
     // The dispatcher loop's `if (kind == 0xFFu) { continue; }` early-out
