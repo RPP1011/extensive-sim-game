@@ -19,32 +19,35 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libudev-dev pkg-config
+          sudo apt-get install -y libasound2-dev libudev-dev pkg-config \
+            mesa-vulkan-drivers vulkan-tools libvulkan1
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      # Swatinem/rust-cache instead of actions/cache@v4: the latter
+      # restores target/ with the cache-extraction mtime (newer than
+      # source mtimes from actions/checkout), which makes cargo treat
+      # cached crates as up-to-date even when their source has changed.
+      # Symptom: edits to engine src/ silently get ignored; tests link
+      # against stale rlibs. Swatinem/rust-cache normalises mtimes and
+      # is the de-facto standard for cargo workspaces on GH Actions.
       - name: Cache cargo registry & build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+        uses: Swatinem/rust-cache@v2
 
       - name: cargo check
-        run: cargo check --all-targets
+        run: cargo check --workspace --lib --bins
 
-      - name: cargo check (tactical_sim)
-        run: cargo check -p tactical_sim --all-targets
-
+      # Lavapipe (Mesa software vulkan) provides a wgpu-compatible
+      # adapter on GPU-less CI runners. Without VK_ICD_FILENAMES wgpu
+      # falls through to NoAdapter; with it, kernels run on CPU at
+      # ~10x slower than a real GPU. RUST_MIN_STACK is required by
+      # AOE Path B's naga validator (see project_aoe_gotchas memory).
       - name: cargo test (unit + integration)
-        run: cargo test --lib --tests -- --test-threads=1
-
-      - name: cargo test (tactical_sim)
-        run: cargo test -p tactical_sim --lib --tests -- --test-threads=1
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
+          RUST_MIN_STACK: "33554432"
+        run: cargo test --workspace --lib --tests -- --test-threads=1
 
   architecture-guards:
     name: Architecture Guards
@@ -54,32 +57,32 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # Swatinem/rust-cache instead of actions/cache@v4: the latter
+      # restores target/ with the cache-extraction mtime (newer than
+      # source mtimes from actions/checkout), which makes cargo treat
+      # cached crates as up-to-date even when their source has changed.
+      # Symptom: edits to engine src/ silently get ignored; tests link
+      # against stale rlibs. Swatinem/rust-cache normalises mtimes and
+      # is the de-facto standard for cargo workspaces on GH Actions.
       - name: Cache cargo registry & build
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install ast-grep
+        uses: taiki-e/install-action@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          tool: ast-grep
 
       - name: ast-grep scan (architectural rules)
-        run: |
-          curl -fsSL https://github.com/ast-grep/ast-grep/releases/latest/download/ast-grep-x86_64-unknown-linux-gnu.tar.gz | tar xz
-          ./ast-grep scan
+        run: ast-grep scan
 
-      - name: Regenerate DSL artefacts and verify no diff (stale-content guard)
-        run: |
-          cargo run --bin xtask -- compile-dsl
-          if ! git diff --quiet crates/engine_rules/ crates/engine_data/; then
-            echo "::error::Generated dirs are stale — DSL source changed but artefacts not committed."
-            git diff --stat crates/engine_rules/ crates/engine_data/
-            exit 1
-          fi
+      # Note: the legacy `xtask compile-dsl` + engine_rules diff check
+      # was retired with the Phase 7 wolf-sim wipe (2026-05-02). Each
+      # *_runtime crate's build.rs now compiles its own .sim source on
+      # `cargo check`; staleness surfaces as a per-crate compile error
+      # in the Check & Test job.
 
       - name: Schema hash freshness
-        run: cargo test -p engine --test schema_hash 2>/dev/null || echo "(schema_hash test not present; skip)"
+        run: cargo test -p engine --test schema_hash
 
   determinism:
     name: Determinism Tests
@@ -90,23 +93,29 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libudev-dev pkg-config
+          sudo apt-get install -y libasound2-dev libudev-dev pkg-config \
+            mesa-vulkan-drivers vulkan-tools
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      # Swatinem/rust-cache instead of actions/cache@v4: the latter
+      # restores target/ with the cache-extraction mtime (newer than
+      # source mtimes from actions/checkout), which makes cargo treat
+      # cached crates as up-to-date even when their source has changed.
+      # Symptom: edits to engine src/ silently get ignored; tests link
+      # against stale rlibs. Swatinem/rust-cache normalises mtimes and
+      # is the de-facto standard for cargo workspaces on GH Actions.
       - name: Cache cargo registry & build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+        uses: Swatinem/rust-cache@v2
 
-      - name: Run determinism tests (debug)
-        run: cargo test -p tactical_sim determinism -- --test-threads=1
-
-      - name: Run determinism tests (release)
-        run: cargo test -p tactical_sim --release determinism -- --test-threads=1
+      # Post-wolf-sim-wipe (2026-05-02), `tactical_sim` no longer exists.
+      # The closest semantic determinism pin is wave_defense's
+      # `same_seed_same_death_tick` — same world seed must reproduce the
+      # exact death tick across reruns. Lavapipe + RUST_MIN_STACK
+      # rationale matches the Check & Test job above.
+      - name: Run wave_defense determinism pin (release)
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
+          RUST_MIN_STACK: "33554432"
+        run: cargo test -p wave_defense_runtime --release same_seed_same_death_tick -- --test-threads=1

@@ -70,14 +70,30 @@ impl GpuContext {
             backends: wgpu::Backends::PRIMARY,
             ..Default::default()
         });
-        let adapter = instance
+        // Try discrete/integrated first; on GPU-less hosts (CI), fall
+        // back to a software adapter (Mesa lavapipe). HighPerformance +
+        // force_fallback_adapter=false filters out CPU-class adapters
+        // entirely, so lavapipe is invisible on the first request even
+        // when its ICD is on the loader path. The retry is cheap and
+        // keeps real-GPU hosts unchanged.
+        let adapter = match instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 compatible_surface: None,
                 force_fallback_adapter: false,
             })
             .await
-            .map_err(|_| GpuContextError::NoAdapter)?;
+        {
+            Ok(a) => a,
+            Err(_) => instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::LowPower,
+                    compatible_surface: None,
+                    force_fallback_adapter: true,
+                })
+                .await
+                .map_err(|_| GpuContextError::NoAdapter)?,
+        };
         // Opportunistically request the timestamp-query feature
         // bundle so per-fixture runtime crates can attribute GPU time
         // per kernel via a `wgpu::QuerySet`. We ask for both:

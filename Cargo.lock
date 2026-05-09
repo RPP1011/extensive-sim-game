@@ -2696,6 +2696,7 @@ dependencies = [
 [[package]]
 name = "voxel_engine"
 version = "0.1.0"
+source = "git+https://github.com/RPP1011/voxel_engine?rev=02d21a2866f53603ce89c5708c4a10e771e19bf8#02d21a2866f53603ce89c5708c4a10e771e19bf8"
 dependencies = [
  "anyhow",
  "ash",
