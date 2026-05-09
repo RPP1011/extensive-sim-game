@@ -1,0 +1,22 @@
+// Stress fixture B (task #238) — maximum AOE candidate density.
+//
+// Single Damage(0.0) effect wrapped in spread(radius=1.5, max_targets=256).
+// At runtime the apply_ability dispatcher walks each per-agent cast:
+//   - aoe_center = agent_pos[caster] (= self-cast)
+//   - 27-cell spatial walk collects in-radius candidates (capped at the
+//     bitonic-sort scratch's 256-slot ceiling).
+//   - bitonic sort by AgentId ascending, truncate to max_targets=256.
+//   - emit one EffectDamageApplied chronicle record per kept slot.
+//
+// `damage 0.0` is intentional — the stress test measures dispatch / sort /
+// chronicle-ring throughput, not state mutation. Zero-damage chronicle
+// records still consume one slot in the per-dispatch ring (see
+// `if (_slot < 65536u)` in `crates/dsl_compiler/src/cg/emit/wgsl_body.rs`).
+
+ability AoePulse {
+    target: self
+    cooldown: 100ms
+    hint: damage
+
+    damage 0.0 in spread(1.5, 256)
+}
