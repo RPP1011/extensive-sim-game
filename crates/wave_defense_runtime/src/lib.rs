@@ -2169,6 +2169,7 @@ impl CompiledSim for WaveDefenseState {
                 ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
                 ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
                 ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
+                voxel_grid: self.voxel_mirror.buffer(),
                 cfg: &self.monster_phys_cfg_buf,
             },
             &self.gpu.device,

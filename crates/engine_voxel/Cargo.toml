@@ -12,16 +12,16 @@ edition = "2021"
 #   D — DSL → WGSL emit for terrain queries
 #   E — production fixture opt-in + determinism pin
 #
-# voxel_engine is a path dep; we touch only `voxel::grid` + `voxel::raycast`
-# in this phase. The `default = []` feature set on voxel_engine means
-# `winit`/`egui` are NOT pulled. Vulkan deps (ash + gpu-allocator) and the
-# `shaderc` build-dep ARE unconditional in voxel_engine — they get compiled
-# whether or not we use them. Sim engine consumers without voxel terrain
-# simply don't depend on this crate, so they don't pay that cost.
+# voxel_engine is pinned to a git rev on github.com/RPP1011/voxel_engine; we
+# touch only `voxel::grid` + `voxel::raycast`. The `default = []` feature
+# set means `winit`/`egui` are NOT pulled. Vulkan deps (ash + gpu-allocator)
+# and the `shaderc` build-dep ARE unconditional in voxel_engine — they get
+# compiled whether or not we use them. Sim engine consumers without voxel
+# terrain simply don't depend on this crate, so they don't pay that cost.
 
 [dependencies]
 engine = { path = "../engine" }
-voxel_engine = { path = "/home/ricky/Projects/voxel_engine", default-features = false }
+voxel_engine = { git = "https://github.com/RPP1011/voxel_engine", rev = "02d21a2866f53603ce89c5708c4a10e771e19bf8", default-features = false }
 glam = "0.29"
 # Phase C — GPU-resident voxel mirror needs `wgpu::Buffer` + `bytemuck`
 # slice casts. wgpu version pinned to match `engine`'s `=26.0.1` so we

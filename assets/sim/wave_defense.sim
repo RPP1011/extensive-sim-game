@@ -284,7 +284,13 @@ verb BuildPalisade(self, target: Agent) =
 // ---------------------------------------------------------------------
 // MonsterMarch — per_agent physics. Each alive monster steps toward
 // origin. Mirrors tower_defense's MarchEnemies. Once close enough
-// (within monster_melee), MonsterCleaveScan engages.
+// (within monster_melee), MonsterCleaveScan engages. As of Phase E
+// follow-up: candidate `new_pos` is checked against `terrain.walkable`
+// — if the next step would land in a non-empty voxel cell (a settler
+// palisade), the monster holds position that tick. The settler
+// palisade ring built around (0,0,0) at tick %50==0 thus actually
+// blocks monsters from reaching the origin instead of being
+// host-side-only state.
 physics MonsterMarch @phase(per_agent) {
   on Tick {} where (self.alive
                     && self.creature_type == config.combat.type_monster) {
@@ -294,7 +300,11 @@ physics MonsterMarch @phase(per_agent) {
     if (dist > config.combat.monster_melee) {
       let step = to_origin * (config.combat.monster_speed / dist);
       let new_pos = self.pos + step;
-      agents.set_pos(self, new_pos);
+      // mode=0 = Walk (matches engine::state::agent::MovementMode::Walk).
+      // Fly/Fall always return walkable; Walk consults the voxel cell.
+      if (terrain.walkable(new_pos, 0u)) {
+        agents.set_pos(self, new_pos);
+      }
     }
   }
 }
