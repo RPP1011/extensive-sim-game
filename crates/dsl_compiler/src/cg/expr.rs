@@ -539,7 +539,21 @@ pub enum BuiltinId {
     /// at construction by the only call site (the lowering helper).
     /// Closes Gap #2 from
     /// `docs/superpowers/notes/2026-05-04-pair_scoring_probe.md`.
+    /// Also reachable from the surface DSL via `f32(x)`.
     AsF32(NumericTy),
+    /// `u32(x)` where `x: F32 | I32` — explicit cast of a numeric
+    /// scalar to `u32`. Lowers to WGSL `u32(<arg>)`. The carried
+    /// [`NumericTy`] is the SOURCE type (`F32` or `I32`); `U32` is
+    /// rejected (no-op cast) at the only construction site. Reached
+    /// only from the surface DSL `u32(...)` cast; no implicit
+    /// insertion site today (no implicit lossy conversions).
+    AsU32(NumericTy),
+    /// `i32(x)` where `x: F32 | U32` — explicit cast of a numeric
+    /// scalar to `i32`. Lowers to WGSL `i32(<arg>)`. The carried
+    /// [`NumericTy`] is the SOURCE type (`F32` or `U32`); `I32` is
+    /// rejected (no-op cast) at the only construction site. Reached
+    /// only from the surface DSL `i32(...)` cast.
+    AsI32(NumericTy),
 }
 
 /// Typed signature of a builtin call. `args` is the list of expected
@@ -598,6 +612,14 @@ impl BuiltinId {
                 args: vec![t.cg_ty()],
                 result: CgTy::F32,
             },
+            AsU32(t) => BuiltinSignature::Fixed {
+                args: vec![t.cg_ty()],
+                result: CgTy::U32,
+            },
+            AsI32(t) => BuiltinSignature::Fixed {
+                args: vec![t.cg_ty()],
+                result: CgTy::I32,
+            },
         }
     }
 
@@ -622,6 +644,8 @@ impl BuiltinId {
             ViewCall { view } => format!("view_call.#{}", view.0),
             Vec3Ctor => "vec3".to_string(),
             AsF32(t) => format!("as_f32.{}", t.label()),
+            AsU32(t) => format!("as_u32.{}", t.label()),
+            AsI32(t) => format!("as_i32.{}", t.label()),
         }
     }
 }

@@ -2025,10 +2025,10 @@ fn lower_builtin_call(
             // types at type-check time; the lowering just records the
             // CgExpr::Builtin shape with the three arg ids.
             expect_arity(builtin, 3, args.len(), span)?;
-            for arg_ty in &arg_tys {
+            for (idx, arg_ty) in arg_tys.iter().enumerate() {
                 if *arg_ty != CgTy::F32 {
-                    return Err(LoweringError::IllTypedExpression {
-                        expected: CgTy::F32,
+                    return Err(LoweringError::Vec3RequiresF32 {
+                        component_index: idx as u8,
                         got: *arg_ty,
                         span,
                     });
@@ -2044,11 +2044,87 @@ fn lower_builtin_call(
                 span,
             )
         }
+        Builtin::F32Cast => lower_numeric_cast(
+            builtin,
+            CgTy::F32,
+            BuiltinId::AsF32,
+            &arg_ids,
+            &arg_tys,
+            args,
+            span,
+            ctx,
+        ),
+        Builtin::U32Cast => lower_numeric_cast(
+            builtin,
+            CgTy::U32,
+            BuiltinId::AsU32,
+            &arg_ids,
+            &arg_tys,
+            args,
+            span,
+            ctx,
+        ),
+        Builtin::I32Cast => lower_numeric_cast(
+            builtin,
+            CgTy::I32,
+            BuiltinId::AsI32,
+            &arg_ids,
+            &arg_tys,
+            args,
+            span,
+            ctx,
+        ),
         // Already filtered above.
         Builtin::Forall | Builtin::Exists | Builtin::Count | Builtin::Sum => {
             unreachable!("filtered earlier in lower_builtin_call")
         }
     }
+}
+
+/// Lower an explicit numeric cast (`f32(x)` / `u32(x)` / `i32(x)`).
+///
+/// All three share the same shape: arity 1, source must be a different
+/// numeric type than the target (no-op casts are rejected so authors
+/// don't accidentally mask a type-inference mistake), result type is
+/// the target. Lowers to `CgExpr::Builtin { fn_id: AsF32 | AsU32 |
+/// AsI32 }` per the `id_ctor` callback.
+#[allow(clippy::too_many_arguments)]
+fn lower_numeric_cast(
+    builtin: Builtin,
+    target: CgTy,
+    id_ctor: fn(NumericTy) -> BuiltinId,
+    arg_ids: &[CgExprId],
+    arg_tys: &[CgTy],
+    args: &[IrCallArg],
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<CgExprId, LoweringError> {
+    expect_arity(builtin, 1, args.len(), span)?;
+    let src_ty = arg_tys[0];
+    let src = match src_ty {
+        CgTy::F32 => NumericTy::F32,
+        CgTy::U32 => NumericTy::U32,
+        CgTy::I32 => NumericTy::I32,
+        _ => {
+            return Err(LoweringError::CastNonNumericOperand {
+                target,
+                got: src_ty,
+                span,
+            });
+        }
+    };
+    if src.cg_ty() == target {
+        return Err(LoweringError::CastNoOp { target, span });
+    }
+    add(
+        ctx,
+        CgExpr::Builtin {
+            fn_id: id_ctor(src),
+            args: arg_ids.to_vec(),
+            ty: target,
+        },
+        span,
+    )
 }
 
 /// Tag distinguishing the three pairwise-numeric AST builtins that
@@ -5655,5 +5731,201 @@ mod tests {
         });
         let err = lower_with_catalog(&ast).unwrap_err();
         assert!(matches!(err, LoweringError::IllTypedExpression { .. }));
+    }
+
+    // ---- Vec3 strict-f32 typing ----
+
+    #[test]
+    fn vec3_with_three_f32_literals_lowers() {
+        // vec3(1.0, 2.0, 3.0) — strict-f32 form, parses + lowers cleanly.
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::Vec3,
+            vec![
+                arg(node(IrExpr::LitFloat(1.0))),
+                arg(node(IrExpr::LitFloat(2.0))),
+                arg(node(IrExpr::LitFloat(3.0))),
+            ],
+        ));
+        let s = lower_to_string(&ast).unwrap();
+        assert_eq!(
+            s,
+            "(builtin.vec3 (lit 1.0f32) (lit 2.0f32) (lit 3.0f32))",
+            "expected vec3(...) to lower as builtin.vec3, got {s:?}"
+        );
+    }
+
+    #[test]
+    fn vec3_with_int_literals_errors_with_helpful_message() {
+        // Int literals widen to U32 in CG IR; the strict Vec3 typing
+        // rule rejects the first non-f32 component with a helpful
+        // Vec3RequiresF32 diagnostic.
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::Vec3,
+            vec![
+                arg(node(IrExpr::LitInt(1))),
+                arg(node(IrExpr::LitInt(2))),
+                arg(node(IrExpr::LitInt(3))),
+            ],
+        ));
+        let err = lower_to_string(&ast).unwrap_err();
+        match err {
+            LoweringError::Vec3RequiresF32 {
+                component_index,
+                got,
+                ..
+            } => {
+                assert_eq!(component_index, 0, "first non-f32 component is index 0");
+                assert_eq!(got, CgTy::U32);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn vec3_diagnostic_renders_with_f32_hint() {
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::Vec3,
+            vec![
+                arg(node(IrExpr::LitFloat(1.0))),
+                arg(node(IrExpr::LitInt(2))),
+                arg(node(IrExpr::LitFloat(3.0))),
+            ],
+        ));
+        let err = lower_to_string(&ast).unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("vec3"),
+            "diagnostic should name vec3, got: {msg}"
+        );
+        assert!(
+            msg.contains("f32(...)"),
+            "diagnostic should suggest f32(...) cast, got: {msg}"
+        );
+    }
+
+    // ---- Explicit numeric casts ----
+
+    #[test]
+    fn f32_cast_of_u32_literal_lowers() {
+        // f32(5) — int literal lowers to U32; F32Cast wraps it as
+        // BuiltinId::AsF32(U32) emitting WGSL `f32(5u)`.
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::F32Cast,
+            vec![arg(node(IrExpr::LitInt(5)))],
+        ));
+        let s = lower_to_string(&ast).unwrap();
+        assert_eq!(
+            s, "(builtin.as_f32.u32 (lit 5u32))",
+            "expected f32(<u32>) to lower as builtin.as_f32.u32, got {s:?}"
+        );
+    }
+
+    #[test]
+    fn f32_cast_of_i32_literal_lowers() {
+        // f32(-3) — negative int picks I32; F32Cast wraps it as
+        // BuiltinId::AsF32(I32).
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::F32Cast,
+            vec![arg(node(IrExpr::LitInt(-3)))],
+        ));
+        let s = lower_to_string(&ast).unwrap();
+        assert_eq!(s, "(builtin.as_f32.i32 (lit -3i32))");
+    }
+
+    #[test]
+    fn u32_cast_of_f32_literal_lowers() {
+        // u32(1.5) — F32 source; lowers as BuiltinId::AsU32(F32).
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::U32Cast,
+            vec![arg(node(IrExpr::LitFloat(1.5)))],
+        ));
+        let s = lower_to_string(&ast).unwrap();
+        assert_eq!(s, "(builtin.as_u32.f32 (lit 1.5f32))");
+    }
+
+    #[test]
+    fn i32_cast_of_f32_literal_lowers() {
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::I32Cast,
+            vec![arg(node(IrExpr::LitFloat(2.5)))],
+        ));
+        let s = lower_to_string(&ast).unwrap();
+        assert_eq!(s, "(builtin.as_i32.f32 (lit 2.5f32))");
+    }
+
+    #[test]
+    fn f32_cast_of_f32_value_is_noop_rejected() {
+        // f32(1.5) — no-op cast; surfaces as CastNoOp so authors can't
+        // mask a type-inference mistake.
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::F32Cast,
+            vec![arg(node(IrExpr::LitFloat(1.5)))],
+        ));
+        let err = lower_to_string(&ast).unwrap_err();
+        match err {
+            LoweringError::CastNoOp { target, .. } => {
+                assert_eq!(target, CgTy::F32);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn f32_cast_of_bool_rejected() {
+        // f32(true) — non-numeric source; surfaces as CastNonNumericOperand.
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::F32Cast,
+            vec![arg(node(IrExpr::LitBool(true)))],
+        ));
+        let err = lower_to_string(&ast).unwrap_err();
+        match err {
+            LoweringError::CastNonNumericOperand { target, got, .. } => {
+                assert_eq!(target, CgTy::F32);
+                assert_eq!(got, CgTy::Bool);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn f32_cast_arity_mismatch_rejected() {
+        // f32(1, 2) — two args; surfaces as BuiltinArityMismatch.
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::F32Cast,
+            vec![
+                arg(node(IrExpr::LitInt(1))),
+                arg(node(IrExpr::LitInt(2))),
+            ],
+        ));
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(
+            matches!(err, LoweringError::BuiltinArityMismatch { .. }),
+            "expected BuiltinArityMismatch, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn f32_cast_inside_vec3_works() {
+        // vec3(f32(1), f32(2), f32(3)) — explicit casts in every slot;
+        // each component lowers to as_f32 then feeds Vec3Ctor.
+        let mk_cast = |v: i64| {
+            node(IrExpr::BuiltinCall(
+                Builtin::F32Cast,
+                vec![arg(node(IrExpr::LitInt(v)))],
+            ))
+        };
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::Vec3,
+            vec![arg(mk_cast(1)), arg(mk_cast(2)), arg(mk_cast(3))],
+        ));
+        let s = lower_to_string(&ast).unwrap();
+        assert_eq!(
+            s,
+            "(builtin.vec3 \
+             (builtin.as_f32.u32 (lit 1u32)) \
+             (builtin.as_f32.u32 (lit 2u32)) \
+             (builtin.as_f32.u32 (lit 3u32)))",
+            "expected vec3(f32(1), f32(2), f32(3)) to lower with three as_f32 children, got {s:?}"
+        );
     }
 }
