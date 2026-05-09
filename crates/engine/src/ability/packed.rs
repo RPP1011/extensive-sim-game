@@ -950,7 +950,7 @@ fn pack_delivery(d: &Delivery) -> u32 {
 /// so a GPU shader doing `bitcast<i32>(payload_a)` recovers the signed
 /// value losslessly.
 #[inline]
-fn pack_effect(op: EffectOp) -> (u32, u32, u32) {
+pub fn pack_effect(op: EffectOp) -> (u32, u32, u32) {
     // The discriminant matches `#[repr(u8)]` ordinals on `EffectOp`; the
     // schema_hash string pins those ordinals.
     match op {

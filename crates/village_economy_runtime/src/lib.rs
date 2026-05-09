@@ -31,31 +31,40 @@
 //!      (WalkToWorkshop) + mask_1 (ForgeIron) + mask_2 (OfferDeal).
 //!   3. scoring — PerAgent argmax over 3 rows; emits ActionSelected.
 //!   4. physics_verb_chronicle_ForgeIron — gates action_id==1u, walks
-//!      ForgeIron's program; emits 4 chronicle records per cast.
+//!      ForgeIron's program; emits 4 chronicle records per cast (kinds
+//!      71/72/74/75).
 //!   5. physics_verb_chronicle_OfferDeal — gates action_id==2u, walks
-//!      OfferDeal's program; emits 2 chronicle records per cast.
-//!   6. physics_FoldTravel_and_FoldRecipe_and_FoldWear_and_FoldPropose_and_
-//!      FoldAnnounce_and_FoldSkill_and_FoldObligation_and_verb_chronicle_
-//!      WalkToWorkshop — fused PerEvent kernel. The seven FoldX sub-
-//!      ops fold the kinds 71-76 events emitted by ForgeIron + OfferDeal
-//!      in steps 4-5; the verb_chronicle_WalkToWorkshop sub-op walks
-//!      WalkToWorkshop's 1-effect program and writes kind=70 records
-//!      into NEW slots in the same kernel pass. FoldTravel at those new
-//!      event_idx values reads kind=70 and bumps the per-agent counter.
-//!   7. seed_indirect_0
+//!      OfferDeal's program; emits 2 chronicle records per cast (kinds
+//!      73/76).
+//!   6. physics_verb_chronicle_WalkToWorkshop — gates action_id==0u,
+//!      walks WalkToWorkshop's program; emits 1 chronicle record per
+//!      cast (kind=70). Task #235 split this kernel out of the fused
+//!      Fold kernel below; see the FoldTravel commentary in
+//!      `assets/sim/village_economy.sim` for the analyzer fix that
+//!      enabled the split.
+//!   7. physics_FoldTravel_and_FoldRecipe_and_FoldWear_and_FoldPropose_and_
+//!      FoldAnnounce_and_FoldSkill_and_FoldObligation — fused PerEvent
+//!      kernel that drains the 7 chronicle kinds (70-76) emitted in
+//!      steps 4-6 and folds them into the per-agent SoA counters.
+//!   8. seed_indirect_0
 //!
 //! ## Fusion-correctness note
 //!
-//! The compiler fuses verb_chronicle_WalkToWorkshop with all 7 FoldX
-//! consumer rules into ONE PerEvent kernel. Within that kernel each
-//! workgroup thread iterates the op chain in source order: FoldX reads
-//! ring[event_idx] (sees stale = no event), then verb_chronicle_Walk
-//! writes kind=70 to a NEW slot via atomicAdd on event_tail. Other
-//! workgroup threads at those new event_idx values read kind=70 and
-//! fold them — provided `event_count` (the kernel's dispatch upper
-//! bound) is ≥ post-write tail size. We dispatch with `event_count =
-//! agent_count * 8` (= 64 for N=8) — plenty of room for the ~14 events
-//! per tick that this fixture emits.
+//! Pre-Task #235 the compiler fused verb_chronicle_WalkToWorkshop with
+//! every FoldX consumer rule into ONE PerEvent kernel because the
+//! schedule analyzer's rule 4 (producer/consumer event-ring split) only
+//! recognised explicit `Emit` statements as event-ring writes; an
+//! `apply_ability <literal>` whose program emits a chronicle kind landed
+//! a placeholder `EventKindId(0)` instead, missing the real kind=70
+//! emission. With the analyzer now enumerating ApplyAbility's
+//! dispatched kinds via the AbilityRegistry (see `dsl_compiler::cg::
+//! schedule::fusion::push_apply_ability_event_kinds`), rule 4 fires and
+//! WalkToWorkshop is dispatched as its own kernel BEFORE the fold pass —
+//! the per-kernel dispatch barrier makes the kind=70 records visible to
+//! the FoldTravel consumer. The same rule already protected ForgeIron /
+//! OfferDeal (their producer kernels were ordered before the consumer
+//! group naturally because the topo walk found their adjacent
+//! producer/consumer pair).
 //!
 //! ## Faction layout (8 agents)
 //!
@@ -142,6 +151,7 @@ pub struct VillageEconomyState {
     scoring_cfg_buf: wgpu::Buffer,
     chronicle_forge_cfg_buf: wgpu::Buffer,
     chronicle_offer_cfg_buf: wgpu::Buffer,
+    chronicle_walk_cfg_buf: wgpu::Buffer,
     fold_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
 
@@ -318,7 +328,19 @@ impl VillageEconomyState {
                 contents: bytemuck::bytes_of(&offer_cfg_init),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
-        let fold_cfg_init = physics_FoldTravel_and_FoldRecipe_and_FoldWear_and_FoldPropose_and_FoldAnnounce_and_FoldSkill_and_FoldObligation_and_verb_chronicle_WalkToWorkshop::PhysicsFoldTravelAndFoldRecipeAndFoldWearAndFoldProposeAndFoldAnnounceAndFoldSkillAndFoldObligationAndVerbChronicleWalkToWorkshopCfg {
+        let walk_cfg_init = physics_verb_chronicle_WalkToWorkshop::PhysicsVerbChronicleWalkToWorkshopCfg {
+            event_count: 0,
+            tick: 0,
+            seed: 0,
+            agent_cap: 0,
+        };
+        let chronicle_walk_cfg_buf =
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("village_economy::chronicle_walk_cfg"),
+                contents: bytemuck::bytes_of(&walk_cfg_init),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+        let fold_cfg_init = physics_FoldTravel_and_FoldRecipe_and_FoldWear_and_FoldPropose_and_FoldAnnounce_and_FoldSkill_and_FoldObligation::PhysicsFoldTravelAndFoldRecipeAndFoldWearAndFoldProposeAndFoldAnnounceAndFoldSkillAndFoldObligationCfg {
             event_count: 0,
             tick: 0,
             seed: 0,
@@ -368,6 +390,7 @@ impl VillageEconomyState {
             scoring_cfg_buf,
             chronicle_forge_cfg_buf,
             chronicle_offer_cfg_buf,
+            chronicle_walk_cfg_buf,
             fold_cfg_buf,
             seed_cfg_buf,
             registry_gpu,
@@ -683,12 +706,67 @@ impl CompiledSim for VillageEconomyState {
             self.agent_count,
         );
 
-        // (6) Fused PerEvent kernel — folds kinds 71-76 emitted in
-        // steps 4-5; verb_chronicle_WalkToWorkshop sub-op walks Walk's
-        // 1-effect program and writes kind=70 records into NEW slots,
-        // which FoldTravel at those new event_idx values reads.
+        // (6) WalkToWorkshop chronicle dispatch — gates action_id==0u,
+        // walks WalkToWorkshop's program (1 effect: TravelTo); writes
+        // 1 chronicle record per cast (kind=70). Task #235 split this
+        // out from the fused FoldTravel kernel so the runtime can
+        // dispatch the producer kernel before the FoldX consumer
+        // kernel and the per-dispatch barrier makes kind=70 records
+        // visible to the FoldTravel reader.
+        let walk_cfg = physics_verb_chronicle_WalkToWorkshop::PhysicsVerbChronicleWalkToWorkshopCfg {
+            event_count: self.agent_count,
+            tick: self.tick as u32,
+            seed: 0,
+            agent_cap: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.chronicle_walk_cfg_buf,
+            0,
+            bytemuck::bytes_of(&walk_cfg),
+        );
+        let walk_bindings =
+            physics_verb_chronicle_WalkToWorkshop::PhysicsVerbChronicleWalkToWorkshopBindings {
+                event_ring: self.event_ring.ring(),
+                event_tail: self.event_ring.tail(),
+                agent_hp: &self.agent_hp_buf,
+                agent_max_hp: &self.agent_max_hp_buf,
+                agent_move_speed: &self.agent_move_speed_buf,
+                agent_armor: &self.agent_armor_buf,
+                agent_magic_resist: &self.agent_magic_resist_buf,
+                agent_attack_damage: &self.agent_attack_damage_buf,
+                agent_mana: &self.agent_mana_buf,
+                ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+                ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+                ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+                ability_registry_chances: &self.registry_gpu.chances,
+                ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+                ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
+                ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+                ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+                ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+                ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
+                ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
+                ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
+                ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
+                cfg: &self.chronicle_walk_cfg_buf,
+            };
+        dispatch::dispatch_physics_verb_chronicle_walktoworkshop(
+            &mut self.cache,
+            &walk_bindings,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+
+        // (7) Fused PerEvent fold kernel — folds kinds 70-76 emitted in
+        // steps 4-6. Now that the producer kernels (ForgeIron / OfferDeal /
+        // WalkToWorkshop) are all sequenced BEFORE this fold pass, the
+        // per-dispatch GPU barrier guarantees their chronicle records are
+        // visible to every FoldX consumer. The pre-#235 double-dispatch
+        // workaround is gone — see `assets/sim/village_economy.sim::FoldTravel`
+        // for the analyzer fix that enabled the split.
         let event_count_estimate = self.agent_count * 8;
-        let fold_cfg = physics_FoldTravel_and_FoldRecipe_and_FoldWear_and_FoldPropose_and_FoldAnnounce_and_FoldSkill_and_FoldObligation_and_verb_chronicle_WalkToWorkshop::PhysicsFoldTravelAndFoldRecipeAndFoldWearAndFoldProposeAndFoldAnnounceAndFoldSkillAndFoldObligationAndVerbChronicleWalkToWorkshopCfg {
+        let fold_cfg = physics_FoldTravel_and_FoldRecipe_and_FoldWear_and_FoldPropose_and_FoldAnnounce_and_FoldSkill_and_FoldObligation::PhysicsFoldTravelAndFoldRecipeAndFoldWearAndFoldProposeAndFoldAnnounceAndFoldSkillAndFoldObligationCfg {
             event_count: event_count_estimate,
             tick: self.tick as u32,
             seed: 0,
@@ -699,61 +777,17 @@ impl CompiledSim for VillageEconomyState {
             0,
             bytemuck::bytes_of(&fold_cfg),
         );
-        let fold_bindings = physics_FoldTravel_and_FoldRecipe_and_FoldWear_and_FoldPropose_and_FoldAnnounce_and_FoldSkill_and_FoldObligation_and_verb_chronicle_WalkToWorkshop::PhysicsFoldTravelAndFoldRecipeAndFoldWearAndFoldProposeAndFoldAnnounceAndFoldSkillAndFoldObligationAndVerbChronicleWalkToWorkshopBindings {
+        let fold_bindings = physics_FoldTravel_and_FoldRecipe_and_FoldWear_and_FoldPropose_and_FoldAnnounce_and_FoldSkill_and_FoldObligation::PhysicsFoldTravelAndFoldRecipeAndFoldWearAndFoldProposeAndFoldAnnounceAndFoldSkillAndFoldObligationBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
             agent_hp: &self.agent_hp_buf,
-            agent_max_hp: &self.agent_max_hp_buf,
-            agent_move_speed: &self.agent_move_speed_buf,
             agent_shield_hp: &self.agent_shield_hp_buf,
-            agent_armor: &self.agent_armor_buf,
-            agent_magic_resist: &self.agent_magic_resist_buf,
-            agent_attack_damage: &self.agent_attack_damage_buf,
             agent_mana: &self.agent_mana_buf,
             agent_hunger: &self.agent_hunger_buf,
             agent_disguise_expires_at_tick: &self.agent_disguise_expires_at_tick_buf,
-            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
-            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
-            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
-            ability_registry_chances: &self.registry_gpu.chances,
-            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
-            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
-            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
-            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
-            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
-            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             cfg: &self.fold_cfg_buf,
         };
-        dispatch::dispatch_physics_foldtravel_and_foldrecipe_and_foldwear_and_foldpropose_and_foldannounce_and_foldskill_and_foldobligation_and_verb_chronicle_walktoworkshop(
-            &mut self.cache,
-            &fold_bindings,
-            &self.gpu.device,
-            &mut encoder,
-            event_count_estimate,
-        );
-
-        // (6.5) DOUBLE DISPATCH — the compiler fused FoldTravel with
-        // verb_chronicle_WalkToWorkshop into one PerEvent kernel. Within
-        // a single kernel pass FoldTravel can't see the kind=70 records
-        // the dispatcher writes later in the same pass (no GPU barrier
-        // between producer + consumer threads). Dispatching the fused
-        // kernel a SECOND time means: (a) FoldTravel sees the kind=70
-        // records the first pass wrote and bumps the counter; (b) the
-        // FoldRecipe/Wear/Skill/Announce sub-ops re-fold the kinds
-        // 71/72/74/75 events written by ForgeIron's prior kernel,
-        // doubling those counters; (c) verb_chronicle_WalkToWorkshop
-        // re-fires emitting more kind=70 records (further inflating the
-        // travel counter on subsequent ticks but not double-counting
-        // within this tick — those new records get folded next tick's
-        // first pass).
-        //
-        // The behavioral pin only requires counters > 0 — doubling the
-        // numerical magnitudes is fine. Root cause + analyzer-fix path
-        // documented in `assets/sim/village_economy.sim::FoldTravel`.
-        dispatch::dispatch_physics_foldtravel_and_foldrecipe_and_foldwear_and_foldpropose_and_foldannounce_and_foldskill_and_foldobligation_and_verb_chronicle_walktoworkshop(
+        dispatch::dispatch_physics_foldtravel_and_foldrecipe_and_foldwear_and_foldpropose_and_foldannounce_and_foldskill_and_foldobligation(
             &mut self.cache,
             &fold_bindings,
             &self.gpu.device,

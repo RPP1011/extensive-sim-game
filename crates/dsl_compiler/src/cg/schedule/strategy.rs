@@ -81,13 +81,15 @@
 //!   here so downstream consumers see consistent behaviour across
 //!   strategies.
 
+use engine::ability::AbilityRegistry;
+
 use crate::cg::dispatch::DispatchShape;
 use crate::cg::op::OpId;
 use crate::cg::program::CgProgram;
 
 use super::fusion::{
-    classify, fusion_decisions, FusibilityClass, FusionDiagnostic, FusionDiagnosticKind,
-    FusionGroup,
+    classify, fusion_decisions_with_registry, FusibilityClass, FusionDiagnostic,
+    FusionDiagnosticKind, FusionGroup,
 };
 use super::topology::{topological_sort, DepGraph};
 
@@ -177,8 +179,24 @@ pub fn fusion_decisions_with_strategy(
     deps: &DepGraph,
     strategy: ScheduleStrategy,
 ) -> (Vec<FusionGroup>, Vec<FusionDiagnostic>) {
+    fusion_decisions_with_strategy_and_registry(prog, deps, strategy, None)
+}
+
+/// Registry-aware variant of [`fusion_decisions_with_strategy`]. Threads
+/// the optional [`AbilityRegistry`] view down into the `Default` strategy's
+/// rule-4 (producer/consumer event-ring split) check so the schedule layer
+/// can split `apply_ability` dispatcher kernels out from same-tick consumer
+/// kernels that subscribe to the dispatched chronicle event kinds (Task
+/// #235). `Conservative` and `Megakernel` ignore the registry — their
+/// grouping policies don't consult per-op event-kind sets.
+pub fn fusion_decisions_with_strategy_and_registry(
+    prog: &CgProgram,
+    deps: &DepGraph,
+    strategy: ScheduleStrategy,
+    registry: Option<&AbilityRegistry>,
+) -> (Vec<FusionGroup>, Vec<FusionDiagnostic>) {
     match strategy {
-        ScheduleStrategy::Default => fusion_decisions(prog, deps),
+        ScheduleStrategy::Default => fusion_decisions_with_registry(prog, deps, registry),
         ScheduleStrategy::Conservative => conservative_decisions(prog, deps),
         ScheduleStrategy::Megakernel => megakernel_decisions(prog, deps),
     }

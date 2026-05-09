@@ -58,8 +58,11 @@
 
 use std::collections::BTreeSet;
 
+use engine::ability::AbilityRegistry;
+
 use crate::cg::data_handle::{CycleEdgeKey, DataHandle, EventRingId, ViewId};
 use crate::cg::dispatch::{DispatchShape, PerPairSource};
+use crate::cg::expr::{CgExpr, LitValue};
 use crate::cg::op::{ComputeOp, ComputeOpKind, EventKindId, OpId};
 use crate::cg::program::CgProgram;
 use crate::cg::stmt::{CgStmt, CgStmtListId};
@@ -284,6 +287,16 @@ pub fn fusion_candidates(prog: &CgProgram, deps: &DepGraph) -> Vec<FusionGroup> 
     fusion_decisions(prog, deps).0
 }
 
+/// Registry-aware variant of [`fusion_candidates`]. See
+/// [`fusion_decisions_with_registry`] for the rationale (Task #235).
+pub fn fusion_candidates_with_registry(
+    prog: &CgProgram,
+    deps: &DepGraph,
+    registry: Option<&AbilityRegistry>,
+) -> Vec<FusionGroup> {
+    fusion_decisions_with_registry(prog, deps, registry).0
+}
+
 /// Compute the fusion-group partition AND the diagnostic stream
 /// explaining each grouping/split decision. Both outputs are returned in
 /// topological-walk order; the diagnostics are emitted in the same order
@@ -306,6 +319,32 @@ pub fn fusion_candidates(prog: &CgProgram, deps: &DepGraph) -> Vec<FusionGroup> 
 pub fn fusion_decisions(
     prog: &CgProgram,
     deps: &DepGraph,
+) -> (Vec<FusionGroup>, Vec<FusionDiagnostic>) {
+    fusion_decisions_with_registry(prog, deps, None)
+}
+
+/// Registry-aware variant of [`fusion_decisions`]. When `registry` is
+/// `Some`, the producer/consumer event-ring split (rule 4) sees real
+/// `EventKindId`s emitted by `ApplyAbility`'s WGSL dispatcher (the
+/// chronicle-record writes synthesised at GPU dispatch time) and can
+/// split the dispatcher kernel out of any same-tick consumer kernel
+/// that subscribes to those kinds. When `None`, the analyzer falls
+/// back to a placeholder (`EventKindId(0)`) — preserves the pre-#235
+/// behaviour for call sites that don't yet plumb the registry through.
+///
+/// See `assets/sim/village_economy.sim::FoldTravel` (in tree at the
+/// time of writing) for the worked example: WalkToWorkshop dispatches
+/// `EffectTravelToApplied` (kind=70); FoldTravel `on
+/// EffectTravelToApplied` consumes it. Pre-#235 the analyzer didn't
+/// witness the producer's emission and fused the two into one kernel
+/// — the runtime worked around the within-kernel barrier gap by
+/// dispatching the fused kernel twice. Post-#235 (with the registry
+/// plumbed through) rule 4 fires correctly and the schedule splits
+/// FoldTravel into its own PerEvent kernel.
+pub fn fusion_decisions_with_registry(
+    prog: &CgProgram,
+    deps: &DepGraph,
+    registry: Option<&AbilityRegistry>,
 ) -> (Vec<FusionGroup>, Vec<FusionDiagnostic>) {
     let mut groups: Vec<FusionGroup> = Vec::new();
     let mut diagnostics: Vec<FusionDiagnostic> = Vec::new();
@@ -348,6 +387,7 @@ pub fn fusion_decisions(
         // why not.
         let join_decision = decide_join(
             prog,
+            registry,
             &current_shape,
             &current_ops,
             &current_writes,
@@ -504,6 +544,7 @@ enum JoinDecision {
 ///    `docs/superpowers/notes/2026-05-04-abilities_probe.md`.
 fn decide_join(
     prog: &CgProgram,
+    registry: Option<&AbilityRegistry>,
     current_shape: &Option<DispatchShape>,
     current_ops: &[OpId],
     current_writes: &BTreeSet<CycleEdgeKey>,
@@ -537,8 +578,30 @@ fn decide_join(
     };
     // Cross-domain split (rules 1 + 2 + 4) — fires regardless of
     // write disjointness.
-    if let Some(decision) = cross_domain_split_decision(prog, prev_op, op) {
+    if let Some(decision) = cross_domain_split_decision(prog, registry, prev_op, op) {
         return decision;
+    }
+    // Rule 4 extension (Task #235): the pairwise check above only
+    // looks at `prev_op`, which catches the common case (producer
+    // and consumer adjacent in topo order). When the topo walk
+    // places several consumers first and the producer last, the
+    // producer/consumer round-trip lives between `op` and an
+    // EARLIER member of the group — checked here. Lift-A's
+    // village_economy fixture surfaces this: FoldTravel/.../
+    // verb_chronicle_WalkToWorkshop walks 7 consumers then 1
+    // producer; only FoldTravel (added first) matches kind=70 with
+    // verb_chronicle_WalkToWorkshop's apply_ability dispatch.
+    for &member_id in current_ops.split_last().map(|(_, rest)| rest).unwrap_or(&[]) {
+        let Some(member_op) = prog.ops.get(member_id.0 as usize) else {
+            continue;
+        };
+        if let Some(witness) =
+            producer_consumer_event_witness(prog, registry, member_op, op)
+        {
+            return JoinDecision::SplitWrite(event_ring_split_witness(
+                member_op, op, witness,
+            ));
+        }
     }
     // Same-view ViewFold accumulator override (rule 3) and the
     // conventional WAW-conflict check.
@@ -577,6 +640,7 @@ fn waw_check(
 /// considered explicitly.
 fn cross_domain_split_decision(
     prog: &CgProgram,
+    registry: Option<&AbilityRegistry>,
     prev: &ComputeOp,
     next: &ComputeOp,
 ) -> Option<JoinDecision> {
@@ -588,7 +652,7 @@ fn cross_domain_split_decision(
     // side's `on_event`. A non-empty intersection means same-tick
     // event-ring round-trip — un-fusable for read-before-write
     // correctness (see rule-4 doc on `decide_join`).
-    if let Some(witness) = producer_consumer_event_witness(prog, prev, next) {
+    if let Some(witness) = producer_consumer_event_witness(prog, registry, prev, next) {
         return Some(JoinDecision::SplitWrite(
             event_ring_split_witness(prev, next, witness),
         ));
@@ -882,15 +946,16 @@ fn cross_replayability_split_witness(
 /// safe.
 fn producer_consumer_event_witness(
     prog: &CgProgram,
+    registry: Option<&AbilityRegistry>,
     prev: &ComputeOp,
     next: &ComputeOp,
 ) -> Option<EventKindId> {
     // prev produces, next consumes
-    if let Some(witness) = event_round_trip_witness(prog, prev, next) {
+    if let Some(witness) = event_round_trip_witness(prog, registry, prev, next) {
         return Some(witness);
     }
     // next produces, prev consumes (symmetric)
-    event_round_trip_witness(prog, next, prev)
+    event_round_trip_witness(prog, registry, next, prev)
 }
 
 /// Returns the first `EventKindId` that `producer` emits in its body
@@ -899,6 +964,7 @@ fn producer_consumer_event_witness(
 /// the consumer reads.
 fn event_round_trip_witness(
     prog: &CgProgram,
+    registry: Option<&AbilityRegistry>,
     producer: &ComputeOp,
     consumer: &ComputeOp,
 ) -> Option<EventKindId> {
@@ -927,7 +993,7 @@ fn event_round_trip_witness(
         | ComputeOpKind::Plumbing { .. } => return None,
     };
     let mut emits: Vec<EventKindId> = Vec::new();
-    collect_emits_in_list(body, prog, &mut emits);
+    collect_emits_in_list(body, prog, registry, &mut emits);
     emits.into_iter().find(|e| *e == consumed)
 }
 
@@ -940,9 +1006,22 @@ fn event_round_trip_witness(
 /// (the schedule analyzer must stay below lowering in the dep
 /// graph). Listed exhaustively over `CgStmt` variants — adding a
 /// new emit-bearing statement variant forces an explicit case here.
+///
+/// `registry` (Task #235): when `Some`, an `ApplyAbility { ability }`
+/// whose `ability` operand is a literal `AbilityId` is resolved to its
+/// registry program and the per-effect `EventKindId` it dispatches into
+/// the chronicle ring (via the `EFFECT_KIND_TO_EVENT_KIND_ID` table) is
+/// pushed to `out` — rather than the historic `EventKindId(0)`
+/// placeholder. This lets [`producer_consumer_event_witness`] (rule 4)
+/// detect same-tick event round-trips through the dispatcher and split
+/// the producer kernel out of the consumer kernel. When `registry` is
+/// `None`, or the ability operand isn't a literal, fall back to the
+/// placeholder so the analyzer at least conservatively flags
+/// "writes to the shared ring".
 fn collect_emits_in_list(
     list_id: CgStmtListId,
     prog: &CgProgram,
+    registry: Option<&AbilityRegistry>,
     out: &mut Vec<EventKindId>,
 ) {
     let Some(list) = prog.stmt_lists.get(list_id.0 as usize) else {
@@ -955,37 +1034,79 @@ fn collect_emits_in_list(
         match stmt {
             CgStmt::Emit { event, .. } => out.push(*event),
             CgStmt::If { then, else_, .. } => {
-                collect_emits_in_list(*then, prog, out);
+                collect_emits_in_list(*then, prog, registry, out);
                 if let Some(else_list) = else_ {
-                    collect_emits_in_list(*else_list, prog, out);
+                    collect_emits_in_list(*else_list, prog, registry, out);
                 }
             }
             CgStmt::Match { arms, .. } => {
                 for arm in arms {
-                    collect_emits_in_list(arm.body, prog, out);
+                    collect_emits_in_list(arm.body, prog, registry, out);
                 }
             }
             CgStmt::ForEachNeighborBody { body, .. } => {
-                collect_emits_in_list(*body, prog, out);
+                collect_emits_in_list(*body, prog, registry, out);
             }
             CgStmt::Assign { .. }
             | CgStmt::Let { .. }
             | CgStmt::ForEachAgent { .. }
             | CgStmt::ForEachNeighbor { .. } => {}
-            CgStmt::ApplyAbility { .. } => {
-                // Mirrors the driver's collect_emits_in_list arm —
-                // ApplyAbility's WGSL dispatcher writes to the
-                // chronicle ring, so push a placeholder kind to
-                // trigger the EventRing(Append) write recording.
-                // Fusion uses the kinds list to decide whether
-                // adjacent ops can fuse based on shared event-ring
-                // writes; with the synthetic kind, an
-                // ApplyAbility-bearing op is treated as "writes to
-                // the shared ring" the same way an Emit-bearing op
-                // is.
-                out.push(EventKindId(0));
+            CgStmt::ApplyAbility { ability, .. } => {
+                push_apply_ability_event_kinds(*ability, prog, registry, out);
             }
         }
+    }
+}
+
+/// Resolve an `ApplyAbility { ability, .. }` to the chronicle event
+/// kinds its WGSL dispatcher will write, and push them to `out`.
+///
+/// Walks the ability operand:
+///   - if it's a literal `CgExpr::Lit(LitValue::U32(N))` AND `registry`
+///     is `Some` AND the registry has a program at slot `N`, enumerate
+///     that program's `EffectOp`s, look each effect kind up in the
+///     `EFFECT_KIND_TO_EVENT_KIND_ID` table, and push the resulting
+///     `EventKindId`s. This is the path that lets
+///     [`producer_consumer_event_witness`] split the dispatcher kernel
+///     from same-tick consumer rules (Task #235);
+///   - on any miss (no registry, non-literal, unknown slot, unmapped
+///     effect kind), fall back to `EventKindId(0)` so the analyzer
+///     conservatively still records "writes to the shared ring" — this
+///     preserves the pre-#235 behaviour that the binding scanner
+///     depends on for the EventRing(Append) write recording.
+fn push_apply_ability_event_kinds(
+    ability: crate::cg::data_handle::CgExprId,
+    prog: &CgProgram,
+    registry: Option<&AbilityRegistry>,
+    out: &mut Vec<EventKindId>,
+) {
+    use crate::cg::emit::wgsl_body::event_kind_id_for_effect_kind;
+    use engine::ability::packed::pack_effect;
+    use engine::ability::AbilityId;
+
+    let program = prog
+        .exprs
+        .get(ability.0 as usize)
+        .and_then(|e| match e {
+            CgExpr::Lit(LitValue::U32(n)) => AbilityId::new(*n),
+            _ => None,
+        })
+        .zip(registry)
+        .and_then(|(id, reg)| reg.get(id));
+    let before = out.len();
+    if let Some(program) = program {
+        out.extend(program.effects.iter().filter_map(|op| {
+            let (effect_kind, _, _) = pack_effect(*op);
+            event_kind_id_for_effect_kind(effect_kind).map(EventKindId)
+        }));
+    }
+    if out.len() == before {
+        // Conservative placeholder — keeps the EventRing(Append) write
+        // recording shape the binding scanner depends on when no
+        // resolved kinds got pushed (no registry, non-literal operand,
+        // unknown slot, or every effect in the program lacked an
+        // EFFECT_KIND_TO_EVENT_KIND_ID mapping).
+        out.push(EventKindId(0));
     }
 }
 
