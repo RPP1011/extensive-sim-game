@@ -31,13 +31,21 @@
 use crate::gpu::GpuContext;
 use wgpu::util::DeviceExt;
 
-/// Default slot capacity of the per-tick event ring. Mirrors
-/// `DEFAULT_EVENT_RING_CAP_SLOTS` in the WGSL emit body
-/// (`cg/emit/wgsl_body.rs::lower_emit_to_wgsl`). 65 536 slots ×
-/// 10 u32/slot × 4 bytes = 2.5 MB per fixture — comfortable
-/// margin for any per-tick producer cap a smoke fixture would
-/// realistically configure.
-pub const EVENT_RING_CAP_SLOTS: u32 = 65_536;
+/// Default slot capacity of the per-tick event ring. Mirrors the
+/// `if (_slot < 1048576u)` gate the WGSL emit writes per producer
+/// site (47 sites in `cg/emit/wgsl_body.rs`). 1 048 576 slots ×
+/// 10 u32/slot × 4 bytes = 40 MB per fixture.
+///
+/// Bumped 65 536 → 1 048 576 (16×) on 2026-05-09 (Task #239) after
+/// stress fixtures (`crates/stress_cast_density_runtime/`) showed the
+/// previous cap saturated at agent_cap ≈ 480-500 in max-density AOE
+/// fixtures — silently dropping ~99.6% of casts at agent_cap=64 000.
+/// Real VRAM measurement: heaviest fixture used ~56 MB delta (0.23%
+/// of 24 GB), so 40 MB ring is trivial.
+///
+/// If this cap saturates again, the next bump candidates are: 16M
+/// slots (640 MB, 1% of 24 GB VRAM) or per-event-kind ring fanout.
+pub const EVENT_RING_CAP_SLOTS: u32 = 1_048_576;
 
 /// u32 words per event record (2 header + 8 payload). Matches
 /// `populate_event_kinds` in the CG lowering driver. Future

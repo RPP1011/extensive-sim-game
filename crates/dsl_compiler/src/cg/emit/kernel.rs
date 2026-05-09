@@ -4990,7 +4990,7 @@ mod tests {
         );
         // Bounds check.
         assert!(
-            body.contains("if (slot < 65536u)"),
+            body.contains("if (slot < 1048576u)"),
             "missing bounds check; body: {body}"
         );
     }
