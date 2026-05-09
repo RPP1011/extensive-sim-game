@@ -37,7 +37,7 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::EventRing;
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext};
 
 /// Slot count for the WGSL `event_kind_counts: array<atomic<u32>>`
 /// instrumentation buffer. Sized for `EventKindId::ChronicleEntry =
@@ -478,6 +478,27 @@ impl CompiledSim for DebugProbeState {
             (self.agent_count as u64) * 4,
         );
 
+        // Shared once per tick; each dispatch below adds only its
+        // fixture-specific `*Extras` (mask bitmap, scoring output,
+        // instrumentation buffers, indirect args).
+        let agent_buffers = AgentBuffers {
+            hp_buf: Some(&self.agent_hp_buf),
+            max_hp_buf: Some(&self.agent_max_hp_buf),
+            alive_buf: Some(&self.agent_alive_buf),
+            mana_buf: Some(&self.agent_mana_buf),
+            attack_damage_buf: Some(&self.agent_attack_damage_buf),
+            ability_power_buf: Some(&self.agent_ability_power_buf),
+            armor_buf: Some(&self.agent_armor_buf),
+            magic_resist_buf: Some(&self.agent_magic_resist_buf),
+            move_speed_buf: Some(&self.agent_move_speed_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+        };
+
         // (2) Mask round.
         let mask_cfg = mask_verb_Pulse::MaskVerbPulseCfg {
             agent_cap: self.agent_count,
@@ -490,13 +511,17 @@ impl CompiledSim for DebugProbeState {
             0,
             bytemuck::bytes_of(&mask_cfg),
         );
-        let mask_bindings = mask_verb_Pulse::MaskVerbPulseBindings {
-            agent_alive: &self.agent_alive_buf,
+        let mask_extras = mask_verb_Pulse::MaskVerbPulseExtras {
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             mask_total: &self.mask_total_buf,
             mask_passed: &self.mask_passed_buf,
             cfg: &self.mask_cfg_buf,
         };
+        let mask_bindings =
+            mask_verb_Pulse::MaskVerbPulseBindings::from_context_with_extras(
+                &ctx,
+                &mask_extras,
+            );
         dispatch::dispatch_mask_verb_pulse(
             &mut self.cache,
             &mask_bindings,
@@ -517,26 +542,14 @@ impl CompiledSim for DebugProbeState {
             0,
             bytemuck::bytes_of(&scoring_cfg),
         );
-        let scoring_bindings = scoring::ScoringBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp: &self.agent_hp_buf,
-            agent_max_hp: &self.agent_max_hp_buf,
-            agent_move_speed: &self.agent_move_speed_buf,
-            agent_armor: &self.agent_armor_buf,
-            agent_magic_resist: &self.agent_magic_resist_buf,
-            agent_attack_damage: &self.agent_attack_damage_buf,
-            agent_ability_power: &self.agent_ability_power_buf,
-            agent_mana: &self.agent_mana_buf,
+        let scoring_extras = scoring::ScoringExtras {
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
-            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             score_kernel_visits: &self.score_kernel_visits_buf,
             cfg: &self.scoring_cfg_buf,
         };
+        let scoring_bindings =
+            scoring::ScoringBindings::from_context_with_extras(&ctx, &scoring_extras);
         dispatch::dispatch_scoring(
             &mut self.cache,
             &scoring_bindings,
@@ -558,33 +571,14 @@ impl CompiledSim for DebugProbeState {
             0,
             bytemuck::bytes_of(&chronicle_cfg),
         );
-        let chronicle_bindings = physics_ApplyDamageFromChronicle_and_verb_chronicle_Pulse::PhysicsApplyDamageFromChronicleAndVerbChroniclePulseBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp: &self.agent_hp_buf,
-            agent_max_hp: &self.agent_max_hp_buf,
-            agent_move_speed: &self.agent_move_speed_buf,
-            agent_armor: &self.agent_armor_buf,
-            agent_magic_resist: &self.agent_magic_resist_buf,
-            agent_attack_damage: &self.agent_attack_damage_buf,
-            agent_ability_power: &self.agent_ability_power_buf,
-            agent_mana: &self.agent_mana_buf,
-            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
-            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
-            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
-            ability_registry_chances: &self.registry_gpu.chances,
-            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
-            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
-            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
-            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
-            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
-            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
+        let chronicle_extras = physics_ApplyDamageFromChronicle_and_verb_chronicle_Pulse::PhysicsApplyDamageFromChronicleAndVerbChroniclePulseExtras {
             event_kind_counts: &self.event_kind_counts_buf,
             cfg: &self.chronicle_cfg_buf,
         };
+        let chronicle_bindings = physics_ApplyDamageFromChronicle_and_verb_chronicle_Pulse::PhysicsApplyDamageFromChronicleAndVerbChroniclePulseBindings::from_context_with_extras(
+            &ctx,
+            &chronicle_extras,
+        );
         dispatch::dispatch_physics_applydamagefromchronicle_and_verb_chronicle_pulse(
             &mut self.cache,
             &chronicle_bindings,
@@ -605,12 +599,15 @@ impl CompiledSim for DebugProbeState {
             0,
             bytemuck::bytes_of(&seed_cfg),
         );
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.seed_cfg_buf,
         };
+        let seed_bindings =
+            seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+                &ctx,
+                &seed_extras,
+            );
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache,
             &seed_bindings,
