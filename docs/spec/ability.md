@@ -1,11 +1,32 @@
 # Ability DSL — Language Reference
 
+> ⚠️ **Spec audit (2026-05-08) — `[CRITICAL]` items:** The §22.2 `EffectOp`
+> ordinal table (variants 8–26) is **wrong** — the engine shipped a different
+> ordering during Wave 2 / Wave 3 / Lift A–D. Codegen against the documented
+> ordinals would produce silently-mismatched chronicle records (e.g. `8` is
+> `Root` in the engine, not `PlaceVoxels`). See the appended "Spec audit
+> 2026-05-08" callout in §22.2 and the per-row reconciliation table in §8.11.
+> The companion event ordinal table (§22.4) carried the same shape mismatch
+> and is replaced with the shipped chronicle ordinals 26–76.
+>
+> Counts: **CRITICAL 1 / STATUS-FLIP 28 / UNDOCUMENTED 16 / MISSING 13 /
+> STALE 2.**
+
 > ⚠️ **Audit 2026-04-26 — two-stack reality:** This spec describes a future-state engine path. There are **two parallel ability stacks** in the codebase:
 > - **Engine** (`crates/engine`) — what this spec targets. Hand-built `AbilityProgram`. `Delivery` enum has only `Instant`. `Area` enum has only `SingleTarget`. `EffectOp` has 8 variants (0-7). No passive triggers. The §23 status matrix describes only this stack.
 > - **TacticalSim** (`crates/tactical_sim/src/effects/dsl/`) — the running implementation for campaign play. Winnow-based parser, full `Delivery` (Projectile/Chain/Zone/Channel), full `Area` (all 5 disc shapes), 17+ passive trigger kinds, control/movement/buff verbs (charm, polymorph, dash, knockback, buff, debuff, …). TacticalSim is **1–2 tracks ahead** of the spec's `runs-today` claims, and implements several constructs the spec marks `reserved` (charm, polymorph, banish, reflect, summon, leash, redirect, …).
 >
 > All `.ability` files in `dataset/hero_templates/` and `assets/hero_templates/` are loaded by the **TacticalSim** parser, **not** by the engine or `dsl_compiler`. Cross-check spec claims against TacticalSim's implementation as a reference.
 > See `docs/superpowers/notes/2026-04-26-audit-ability.md` for the per-§23-row status (48 rows: ~10 ✅ engine / ~8 🤔 TacticalSim-only / ~15 ⚠️ partial / ~12 ❌).
+>
+> **NOTE (2026-05-08):** The `tactical_sim` crate has been retired
+> (Phase 7 wolf-sim wipe, 2026-05-02). The "two-stack reality" callout is
+> retained for historical context but the second stack no longer exists —
+> the only `.ability` consumer today is `crates/dsl_compiler` →
+> `crates/engine`. The `assets/hero_templates/` directory was retired and
+> is not coming back; the `.ability` corpus lives at
+> `dataset/abilities/lol_heroes/` and is only loaded for parser regression
+> coverage.
 
 > **Status:** Design spec (2026-04-24). Canonical syntax, semantics, and
 > IR-lowering contract for `.ability` files. Authoritative for language
@@ -75,7 +96,7 @@ Status changes are engine-side PRs, not spec edits.
 |---|---|---|
 | `IDENT` | `[A-Za-z_][A-Za-z0-9_]*` | case-sensitive |
 | `TAG_SYMBOL` | `[A-Z][A-Z0-9_]*` | e.g. `FIRE`, `CROWD_CONTROL` |
-| `INT` | `-?[0-9]+` | |
+| `INT` | `-?[0-9]+` \| `0x[0-9A-Fa-f_]+` `[ui](8\|16\|32\|64)?` | hex + Rust-style int suffix shipped 2026-05-08 (PR #38, `b3326fec`); suffix is consumed and discarded at the lex layer |
 | `FLOAT` | `-?[0-9]+\.[0-9]+` | no exponent form in v1 |
 | `DURATION` | `INT (s\|ms)` \| `INT` (bare = ms) \| `FLOAT (s\|ms)` | `5s`, `300ms`, `5000`, `1.5s` |
 | `PERCENT` | `(INT\|FLOAT) %` | `30%`, `12.5%` |
@@ -496,11 +517,21 @@ by `unstoppable` and by `on_cast_interrupted` (future passive).
 ### 5.5 `hint:` — AI category
 
 Coarse category consumed by scoring DSL (`ability::hint`) and ML.
-Lowers to `AbilityProgram.hint = Some(AbilityHint::*)`. `heal` is
-`planned`; the enum today has four variants (`heal` lowers to `Utility`
-at a documented loss until the enum is extended).
+Lowers to `AbilityProgram.hint = Some(AbilityHint::*)`. The enum today
+has **six** variants: `Damage`, `Defense`, `CrowdControl`, `Utility`,
+`Heal` (added per #142), and `Buff` (added per #142 as a distinct
+duration-bound stat-boost category). `Economic` is a parser-AST hint
+that is rejected at lower time (`HintReserved`) and remains
+`reserved`.
 
-**Status.** `runs-today` for four values; `planned` for `heal`.
+> **Spec audit (2026-05-08) — STATUS-FLIP:** `heal` is `runs-today`
+> (engine `AbilityHint::Heal = 4`); the previous "lowers to `Utility`
+> at a documented loss" claim is stale. `buff` is **UNDOCUMENTED** in
+> this spec — it is a real engine variant (`AbilityHint::Buff = 5`)
+> that scoring already consumes; the lowering is `runs-today`.
+
+**Status.** `runs-today` for `damage` / `defense` / `crowd_control` /
+`utility` / `heal` / `buff`; `reserved` for `economic`.
 
 ### 5.6 `cost:` — resource cost
 
@@ -666,55 +697,82 @@ omitted.
 
 | Verb | Args | IR mapping | Status |
 |---|---|---|---|
-| `root` | duration | new `EffectOp::Root` | `planned` |
-| `silence` | duration | new `EffectOp::Silence` | `planned` |
-| `fear` | duration | new `EffectOp::Fear` | `planned` |
-| `taunt` | duration | emits `EngagementCommitted` with caster | `planned` |
-| `charm` | duration | see §20 H1.β | `reserved` |
+| `root` | duration | `EffectOp::Root` (variant 8) | `runs-today` |
+| `silence` | duration | `EffectOp::Silence` (variant 9) | `runs-today` |
+| `fear` | duration | `EffectOp::Fear` (variant 10) | `runs-today` |
+| `taunt` | duration | `EffectOp::Taunt` (variant 11) | `runs-today` |
+| `charm` | duration | `EffectOp::Charm` (variant 28) | `runs-today` |
 | `polymorph` | duration | `EffectOp::Polymorph` + shape override | `reserved` |
 | `banish` | duration | `EffectOp::Banish` (target removed from sim) | `reserved` |
 | `confuse` | duration | intent-randomization modifier | `reserved` |
-| `suppress` | duration | ability-use block | `reserved` |
-| `grounded` | duration | `MovementMode::Fly → Walk` gate | `reserved` |
+| `suppress` | duration | `EffectOp::Suppress` (variant 30) | `runs-today` |
+| `grounded` | duration | `EffectOp::Grounded` (variant 29) | `runs-today` |
+
+> **Spec audit (2026-05-08) — STATUS-FLIP:** `root` / `silence` / `fear`
+> / `taunt` / `charm` / `grounded` / `suppress` lower today (Wave 2
+> pieces 1, 8). Apply-handler runtime gating for some of these is still
+> deferred — IR variant + DSL lowering are shipped; the cascade-fold
+> consumer rules land per fixture. The lower-time test is the source of
+> truth (the IR ordinal is pinned).
 
 ### 8.3 Movement
 
 | Verb | Args | IR mapping | Status |
 |---|---|---|---|
-| `dash` | distance:f32 | `EffectOp::Dash { dir, dist }` | `planned` |
-| `dash to_target` | distance:f32 | `Dash { to: TargetPos, dist }` | `planned` |
-| `dash to_position` | — | `Dash { to: CursorPos }` | `planned` |
-| `blink` | distance:f32 | `EffectOp::Blink` (instant tp) | `planned` |
-| `knockback` | distance:f32 | `EffectOp::Knockback` | `planned` |
-| `pull` | distance:f32 | `EffectOp::Pull` | `planned` |
+| `dash` | distance:f32 | `EffectOp::Dash { distance }` (variant 12) | `runs-today` |
+| `dash to_target` | — | `Dash { distance: f32::INFINITY }` (sentinel) | `runs-today` |
+| `dash to_position` | — | `Dash { to: CursorPos }` | `reserved` |
+| `blink` | distance:f32 | `EffectOp::Blink` (variant 13) | `runs-today` |
+| `knockback` | distance:f32 | `EffectOp::Knockback` (variant 14) | `runs-today` |
+| `pull` | distance:f32 | `EffectOp::Pull` (variant 15) | `runs-today` |
 | `swap` | — | caster ↔ target positions | `reserved` |
+| `travel_to` | dest_x:f32, dest_y:f32, [dest_z:f32], `for` duration | `EffectOp::TravelTo { dest_x_q8, dest_y_q8, eta_ticks }` (variant 39) | `runs-today` |
+
+> **Spec audit (2026-05-08) — STATUS-FLIP:** `dash` / `blink` /
+> `knockback` / `pull` lower today (Wave 2 piece 2). The `dash to_target`
+> alias encodes "travel until the cast's target is reached" via a
+> `f32::INFINITY` sentinel in the same single-f32 payload — the spec
+> previously described it as a separate IR shape.
+>
+> **UNDOCUMENTED:** `travel_to` is a Lift A multi-tick movement verb
+> (`7bb0929c`). Self-cast — caster initiates a multi-tick walk to a 2D
+> destination over `eta_ticks` (with an optional ignored Z arg for
+> forward compatibility). Destination packs as q8 (`256 = 1.0`); range
+> ±127.99 cells. Distinct from `blink` (instant teleport) and `dash`
+> (single-tick travel along facing).
 
 ### 8.4 Buffs / Debuffs
 
 | Verb | Args | IR mapping | Status |
 |---|---|---|---|
-| `buff` | stat:id, delta:f32 | `EffectOp::BuffStat` | `planned` |
-| `debuff` | stat:id, delta:f32 | `EffectOp::BuffStat` (negative) | `planned` |
-| `damage_modify` | factor:f32 | incoming-damage multiplier | `planned` |
-| `reflect` | fraction:f32 | incoming-damage reflect | `reserved` |
-| `lifesteal` | fraction:f32 | heal-on-hit ratio | `planned` |
+| `buff` | stat:id, magnitude:f32, `for` duration | `EffectOp::Buff { stat, magnitude_q8, duration_ticks }` (variant 23) | `runs-today` |
+| `debuff` | stat:id, delta:f32 | `EffectOp::Buff` (negative magnitude) | `planned` |
+| `damage_modify` | factor:f32, duration | `EffectOp::DamageModify { duration_ticks, multiplier_q8 }` (variant 19) | `runs-today` |
+| `reflect` | fraction:f32, `for` duration | `EffectOp::Reflect { duration_ticks, fraction_q8 }` (variant 31) | `runs-today` |
+| `lifesteal` | fraction:f32, duration | `EffectOp::LifeSteal { duration_ticks, fraction_q8 }` (variant 18) | `runs-today` |
 | `blind` | factor:f32 | hit-chance reduction | `reserved` |
+
+> **Spec audit (2026-05-08) — STATUS-FLIP:** `buff` / `damage_modify` /
+> `lifesteal` / `reflect` all lower today. `buff`'s stat vocabulary is
+> currently two values (`move_speed`, `attack_speed`); the `BuffStat`
+> enum (`crates/engine/src/ability/program.rs`) extends as more apply
+> paths land. Magnitudes pack q8 (`1.0 → 256`).
 
 ### 8.5 Advanced / narrative
 
 | Verb | Args | IR mapping | Status |
 |---|---|---|---|
-| `summon` | name:STRING, "x" n:INT | spawn N of named template | `reserved` |
+| `summon` | name:STRING, [count:INT], [`for` duration] | `EffectOp::Summon { template_hash, count, lifetime_ticks }` (variant 24) | `runs-today` (lower-only — apply handler deferred) |
 | `summon clone` | — | clone caster | `reserved` |
-| `stealth` | duration, `break_on_damage`? | see §20 J1.β | `reserved` |
+| `stealth` | `for` duration, [`break_on_damage`] | `EffectOp::Stealth { duration_ticks }` (variant 27) | `runs-today` |
 | `leash` | distance:f32 | enforce max distance to target | `reserved` |
 | `link` | fraction:f32 | share-damage link | `reserved` |
 | `redirect` | duration, `charges` n:INT | intercept incoming | `reserved` |
 | `rewind` | duration | snapshot-restore | `reserved` |
 | `cooldown_modify` | delta, [name] | cooldown delta (all or one) | `reserved` |
 | `apply_stacks` | name:STRING, n, `max`, duration | stack application | `reserved` |
-| `execute` | threshold:PERCENT | kill-if-hp-below | `planned` |
-| `self_damage` | amount:f32 | caster self-hit | `planned` |
+| `execute` | hp_threshold:f32 | `EffectOp::Execute { hp_threshold }` (variant 16) | `runs-today` |
+| `self_damage` | amount:f32 | `EffectOp::SelfDamage { amount }` (variant 17) | `runs-today` |
 | `dispel` | tag_list | remove status matching tags | `reserved` |
 | `immunity` | tag_list, duration | grant status-family immunity | `reserved` |
 | `death_mark` | duration, damage_pct | on-expire damage | `reserved` |
@@ -749,17 +807,32 @@ machinery. Verbs cross-listed here for completeness.
 
 | Verb | Args | IR mapping | Status |
 |---|---|---|---|
-| `transfer_gold` | amount:i32 | `EffectOp::TransferGold` | `runs-today` |
-| `modify_standing` | delta:i16 | `EffectOp::ModifyStanding` (§20 H) | `runs-today` |
-| `consume` / `produce` (within recipe) | commodity, amount, quality formula | `EffectOp::Recipe` (variant 17) | `planned` |
-| `wear_tool` | tool_kind, amount | `EffectOp::WearTool` (variant 18) | `planned` |
-| `transfer_property` | property_id, target | `EffectOp::TransferProperty` (variant 19) | `planned` |
-| `pickpocket` / `demand` | target, item, contest_kind | `EffectOp::ForcibleTransfer` (variant 20) | `planned` |
-| `create_obligation` | kind, parties, terms | `EffectOp::CreateObligation` (variant 21) | `planned` |
-| `discharge_obligation` | obligation_id | `EffectOp::DischargeObligation` (variant 22) | `planned` |
-| `establish_route` | from, to | `EffectOp::EstablishRoute` (variant 24) | `planned` |
-| `join_caravan` | caravan: GroupId | `EffectOp::JoinCaravan` (variant 25) | `planned` |
-| `transfer_obligation` | obligation_id, target | `EffectOp::TransferObligation` (variant 26) | `planned` |
+| `transfer_gold` | amount:i32 | `EffectOp::TransferGold` (variant 5) | `runs-today` |
+| `modify_standing` | delta:i16 | `EffectOp::ModifyStanding { delta }` (variant 6, legacy single-i16 shape) | `runs-today` |
+| `cast_recipe` | recipe_id:u16, [`target` tool_slot:u8] | `EffectOp::Recipe { recipe_id, target_tool }` (variant **40**) | `runs-today` |
+| `wear_tool` | tool_kind:u8, amount:u16 (q8) | `EffectOp::WearTool { tool_kind, amount }` (variant **41**) | `runs-today` |
+| `propose` | contract_kind:u8, [`expires_at` tick:u32] | `EffectOp::Propose { contract_kind, expires_at_tick }` (variant **42**) | `runs-today` |
+| `announce` | announcement_kind:u8, `radius` cells:f32 (q8) | `EffectOp::Announce { announcement_kind, radius_q8 }` (variant **43**) | `runs-today` |
+| `gain_skill` | skill_id:u8, amount:u16 (q8) | `EffectOp::GainSkill { skill_id, amount_q8 }` (variant **44**) | `runs-today` |
+| `create_obligation` | obligation_id:u16, kind:u8 | `EffectOp::CreateObligation { obligation_id, kind }` (variant **45**) | `runs-today` |
+| `transfer_property` | property_id, target | `EffectOp::TransferProperty` | `reserved` |
+| `pickpocket` / `demand` | target, item, contest_kind | `EffectOp::ForcibleTransfer` | `reserved` |
+| `discharge_obligation` | obligation_id | `EffectOp::DischargeObligation` | `reserved` |
+| `establish_route` | from, to | `EffectOp::EstablishRoute` | `reserved` |
+| `join_caravan` | caravan: GroupId | `EffectOp::JoinCaravan` | `reserved` |
+| `transfer_obligation` | obligation_id, target | `EffectOp::TransferObligation` | `reserved` |
+
+> **Spec audit (2026-05-08) — STATUS-FLIP + ordinal correction:** Lift B
+> (`cast_recipe` / `wear_tool`), Lift C (`propose` / `announce`), and
+> Lift D (`gain_skill` / `create_obligation`) all lower today. The
+> previous economy table claimed ordinals 17–26; the actual shipped
+> ordinals are **40–45** (engine `EffectOp` 17–22 are
+> `SelfDamage`/`LifeSteal`/`DamageModify`/`DoT`/`HoT`/`TimedShield`;
+> engine ordinals 23–27 are `Buff`/`Summon`/`Harvest`/`PlaceVoxel`/
+> `Stealth`). The `transfer_property` / `pickpocket` /
+> `discharge_obligation` / `establish_route` / `join_caravan` /
+> `transfer_obligation` verbs are still `reserved` (no engine variant,
+> no DSL arm). See §8.11 for the full IR-vs-spec ordinal reconciliation.
 
 ### 8.8 AI-state manipulation (see §20)
 
@@ -782,6 +855,119 @@ Only these verbs accept a trailing `{ <effect_stmt>… }` block:
   (today they live inside `deliver` hook blocks; §10).
 
 Other verbs with a trailing `{ … }` → parse error.
+
+### 8.11 Spec-audit verb additions (2026-05-08)
+
+The following verbs are shipped in the `crates/dsl_compiler` ability
+lowerer + `crates/engine::EffectOp` enum but were never (or only
+partially) catalogued in §8.1–8.9. Listed here for completeness; the
+section structure above stays unchanged.
+
+#### 8.11.1 Multi-tick / over-time variants (UNDOCUMENTED)
+
+These are `for`-modifier swaps on already-catalogued verbs, but the
+modifier flips them to a different `EffectOp` variant — they are not
+just lifetime-tagged versions of the base op.
+
+| Surface | IR mapping | Variant | Status |
+|---|---|---|---|
+| `damage <amount> for <dur>` | `EffectOp::DamageOverTime { amount, duration_ticks }` | 20 | `runs-today` |
+| `heal <amount> for <dur>` | `EffectOp::HealOverTime { amount, duration_ticks }` | 21 | `runs-today` |
+| `shield <amount> for <dur>` | `EffectOp::TimedShield { amount, duration_ticks }` | 22 | `runs-today` |
+
+The base `Damage` / `Heal` / `Shield` ops (variants 0–2) carry no
+duration. Apply-side scheduler that re-emits per-tick events is
+deferred — IR + lowering ship today.
+
+#### 8.11.2 World primitives — `harvest` / `mine` / `place_voxel` (UNDOCUMENTED)
+
+Bridge verbs into the existing non-combat event surface
+(`AgentHarvested = 9`, `AgentHarvestedVoxel = 12`,
+`AgentPlacedVoxel = 11`).
+
+| Surface | IR mapping | Variant | Status |
+|---|---|---|---|
+| `harvest "<kind>" [amount]` | `EffectOp::Harvest { kind_hash, amount }` | 25 | `runs-today` |
+| `mine "<kind>" [amount]` | alias for `harvest` (lowers identically) | 25 | `runs-today` |
+| `place_voxel "<kind>"` | `EffectOp::PlaceVoxel { kind_hash }` | 26 | `runs-today` |
+
+`kind_hash` is FxHash of the resource ident — apply handlers map the
+hash to a concrete resource via the runtime registry. Voxel resources
+emit `AgentHarvestedVoxel`; surface resources emit `AgentHarvested`. The
+spec's §18 voxel-shape verbs (`place_voxels` / `harvest_voxels` /
+`transform_voxels` / `place_structure`) remain `planned` — `place_voxel`
+(singular) is a separate single-cell primitive, not the area-stamp
+verb.
+
+#### 8.11.3 Theory-of-Mind verbs (UNDOCUMENTED — Wave 3)
+
+Seven ToM verbs shipped between Wave 3 Phase 1 and Phase 4. The §20.2
+table catalogs the design surface; this table reflects the actual
+shipped IR ordinals.
+
+| Surface | IR mapping | Variant | Chronicle event | Status |
+|---|---|---|---|---|
+| `plant_belief <subject_idx> bit <fact_bit>` | `EffectOp::PlantBelief { subject_idx, fact_bit }` | 32 | `EffectPlantBeliefApplied = 63` | `runs-today` |
+| `observe <id>` | `EffectOp::Observe { target_observer }` | 33 | `EffectObserveApplied = 64` | `runs-today` |
+| `scry <observer> <subject>` | `EffectOp::Scry { target_observer, subject_idx }` | 34 | `EffectScryApplied = 65` | `runs-today` |
+| `reveal <subject_idx>` | `EffectOp::Reveal { subject_idx }` | 35 | `EffectRevealApplied = 66` | `runs-today` |
+| `disguise <fake_type> for <dur>` | `EffectOp::Disguise { fake_type, duration_ticks }` | 36 | `EffectDisguiseApplied = 67` | `runs-today` |
+| `decoy <subject_idx> <fake_pos>` | `EffectOp::Decoy { subject_idx, fake_pos }` | 37 | `EffectDecoyApplied = 68` | `runs-today` |
+| `erase_belief <subject_idx> <fields>` | `EffectOp::EraseBelief { subject_idx, fields }` | 38 | `EffectEraseBeliefApplied = 69` | `runs-today` |
+
+All seven are bit-flag / payload-only chronicle writes; the BeliefState
+SoA mutation lives in compiler-emitted `physics @phase(post)` consumer
+rules in `tom_probe.sim`. Cast shape:
+- `plant_belief` / `observe` / `scry` / `reveal` / `decoy` /
+  `erase_belief` — target the `cast.target` agent (writes into target's
+  belief row about `subject_idx`).
+- `disguise` — self-cast (caster declares fake type).
+
+> **Spec audit (2026-05-08):** §20.2 documents these under design
+> identifiers (`AgentSel`, `SubjectSel`, `BeliefFieldMask`, `PlantBelief
+> { observer_sel, subject_sel, fields }`). The actual shipped shapes
+> are simpler — the IR carries a `subject_idx: u32` directly (no
+> selector enum) and the consumer rules in `.sim` resolve the
+> observer = caster, target = cast.target convention. The richer
+> selector model is `reserved` — current spy_network tests only need
+> the simpler shape.
+
+#### 8.11.4 Production / consent / knowledge verbs (Lifts A–D)
+
+Catalogued in §8.3 (movement: `travel_to`) and §8.7 (economic surface:
+`cast_recipe`/`wear_tool`/`propose`/`announce`/`gain_skill`/
+`create_obligation`). Variants 39–45; chronicle events 70–76. Full
+ordinal reconciliation in §22.2.1 / §22.4.1.
+
+#### 8.11.5 P4 (≤16-byte EffectOp) compliance
+
+Per project constitution P4, every `EffectOp` variant must fit ≤16
+bytes including the discriminant tag. The Wave 2+ / Wave 3 / Lift A–D
+additions all comply (the in-source comments in
+`crates/engine/src/ability/program.rs` annotate each variant with its
+payload+tag size). Tightest end of the range:
+
+| Variant | Payload | Tag | Total |
+|---|---|---|---|
+| `Observe { target_observer: u8 }` (33) | 1B | 1B | **2B** |
+| `Recipe { recipe_id: u16, target_tool: u8 }` (40) | 3B | 1B | **4B** |
+| `WearTool { tool_kind: u8, amount: u16 }` (41) | 3B | 1B | **4B** |
+| `Announce { announcement_kind: u8, radius_q8: u16 }` (43) | 3B | 1B | **4B** |
+| `GainSkill { skill_id: u8, amount_q8: u16 }` (44) | 3B | 1B | **4B** |
+| `CreateObligation { obligation_id: u16, kind: u8 }` (45) | 3B | 1B | **4B** |
+| `PlantBelief { subject_idx: u32, fact_bit: u8 }` (32) | 5B | 1B | **6B** |
+| `Disguise { fake_type: u8, duration_ticks: u32 }` (36) | 5B | 1B | **6B** |
+| `EraseBelief { subject_idx: u32, fields: u8 }` (38) | 5B | 1B | **6B** |
+| `Scry { target_observer: u8, subject_idx: u32 }` (34) | 5B | 1B | **6B** |
+| `Reveal { subject_idx: u32 }` (35) | 4B | 1B | **5B** |
+| `Propose { contract_kind: u8, expires_at_tick: u32 }` (42) | 5B | 1B | **6B** |
+| `Decoy { subject_idx: u32, fake_pos: u32 }` (37) | 8B | 1B | **9B** |
+| `TravelTo { dest_x_q8: i16, dest_y_q8: i16, eta_ticks: u32 }` (39) | 8B | 1B | **9B** |
+| `Summon { template_hash: u32, count: u8, lifetime_ticks: u32 }` (24) | 9B | 1B | **10B** |
+
+All shipped variants (0–45) sit at ≤10B with tag — well below the 16B
+ceiling. The `Reflect` / `Buff` family (signed q8 magnitudes packed in
+i16) is the widest at 12B with tag.
 
 ---
 
@@ -1407,25 +1593,52 @@ listed for completeness; all `reserved`.
 
 #### Phase 1 writes
 
+> **Spec audit (2026-05-08) — STATUS-FLIP + shape correction:** All
+> seven verbs below shipped (Wave 3 phases 1, 3, 3.5, 4) but with
+> simpler IR shapes than the original `observer_sel` / `subject_sel` /
+> `BeliefFieldMask` design. The actual shipped `EffectOp` ordinals are
+> 32–38 (not 12–14), each carrying a flat `subject_idx: u32` rather
+> than a selector enum. `observe` shipped as a self-observe verb
+> (`Observe { target_observer: u8 }`, variant 33) — refreshes caster's
+> own belief row about cast target. `scry` shipped as cross-observer
+> (`Scry { target_observer, subject_idx }`, variant 34). The
+> "observers in volume" / range-gated fan-out for `reveal` collapses to
+> "all observers" today (range gating awaits spatial-query infra).
+> `stealth` ships as variant 27 (`runs-today`) but is a self-cast
+> invisibility flag, NOT the "observers' beliefs of caster retain
+> stale pos" semantic — the observer-side stale-pos behavior is
+> downstream consumer-rule territory.
+
 | Verb | Semantics | IR | Status |
 |---|---|---|---|
-| `scry <target>` | Refresh caster's belief of target to ground truth | Synthetic `AgentObserved` event | `planned` |
-| `reveal <target> in <vol>` | All observers in volume refresh belief of target | Broadcast synthetic observation | `planned` |
-| `stealth for <dur>` | Observers' beliefs of caster retain stale pos; re-observation skips for dur | Timed `ClearBelief` per observer | `planned` |
-| `disguise as <ct> for <dur>` | Observers' `last_known_creature_type` of caster becomes `ct` | `PlantBelief` per observer | `planned` |
-| `decoy at <pos>` | Observers in range receive `PlantBelief { last_known_pos: pos, confidence: 1.0 }` | Bulk `PlantBelief` | `planned` |
-| `erase_belief <target> of <subj>` | Remove target's belief entry for subj | `ClearBelief { observer: target, subject: subj }` | `planned` |
-| `plant_belief <target> of <subj> { … }` | Write chosen fields into target's belief map | `PlantBelief { observer, subject, fields }` | `planned` |
+| `observe <id>` (NEW — replaces synthetic `AgentObserved` plan) | Caster's own belief row about cast target refreshes from ground truth | `EffectOp::Observe { target_observer: u8 }` (variant 33) | `runs-today` |
+| `scry <observer> <subject>` | Caster reads `observer`'s beliefs about `subject`, folds into caster's | `EffectOp::Scry { target_observer, subject_idx }` (variant 34) | `runs-today` |
+| `reveal <subject>` | Caster broadcasts beliefs about subject to all observers (no range gate yet) | `EffectOp::Reveal { subject_idx }` (variant 35) | `runs-today` |
+| `stealth for <dur>` | Self-cast invisibility flag (binary state) | `EffectOp::Stealth { duration_ticks }` (variant 27) | `runs-today` (lower-only — apply handler deferred) |
+| `disguise <fake_type> for <dur>` | Caster publicly poses as `fake_type` for the duration | `EffectOp::Disguise { fake_type, duration_ticks }` (variant 36) | `runs-today` |
+| `decoy <subject_idx> <fake_pos>` | Caster plants attacker-controlled BeliefState row in target's belief map about `subject_idx` | `EffectOp::Decoy { subject_idx, fake_pos }` (variant 37) | `runs-today` |
+| `erase_belief <subject_idx> <fields>` | Caster clears specific fields of target's beliefs about `subject_idx` (bitset: pos/type/tick/confidence/suspicion/flags) | `EffectOp::EraseBelief { subject_idx, fields }` (variant 38) | `runs-today` |
+| `plant_belief <subject_idx> bit <fact_bit>` | Bit-flag primitive: target's belief map for `subject_idx` gains `1u << fact_bit` via atomic-OR | `EffectOp::PlantBelief { subject_idx, fact_bit }` (variant 32) | `runs-today` |
 
-New `EffectOp`s:
+Shipped `EffectOp`s (source: `crates/engine/src/ability/program.rs`):
 ```rust
-ClearBelief    { observer_sel, subject_sel } = 12
-PlantBelief    { observer_sel, subject_sel, fields: BeliefFieldMask + inline payload } = 13
-RefreshBelief  { observer_sel, subject_sel } = 14
+PlantBelief { subject_idx: u32, fact_bit: u8 } = 32
+Observe     { target_observer: u8 }            = 33
+Scry        { target_observer: u8, subject_idx: u32 } = 34
+Reveal      { subject_idx: u32 }                = 35
+Disguise    { fake_type: u8, duration_ticks: u32 } = 36
+Decoy       { subject_idx: u32, fake_pos: u32 } = 37
+EraseBelief { subject_idx: u32, fields: u8 }    = 38
 ```
-New events: `EffectBeliefCleared`, `EffectBeliefPlanted`, `EffectBeliefRefreshed`.
+Shipped events (source: `crates/engine/src/cascade/handler.rs`):
+`EffectPlantBeliefApplied = 63`, `EffectObserveApplied = 64`,
+`EffectScryApplied = 65`, `EffectRevealApplied = 66`,
+`EffectDisguiseApplied = 67`, `EffectDecoyApplied = 68`,
+`EffectEraseBeliefApplied = 69`.
 
-All J verbs feature-gated on `theory-of-mind` (same as Phase 1).
+The original-design `ClearBelief` / `RefreshBelief` selector-typed
+ops are `reserved` — the shipped `EraseBelief` (with fields bitset)
+and `Observe` (refresh) cover the same use cases with simpler shapes.
 
 #### Phase 2 extensions (reserved)
 
@@ -1677,40 +1890,108 @@ struct AbilityProgram {
 
 ### 22.2 `EffectOp` variants
 
-Existing (ordinals 0–7): `Damage`, `Heal`, `Shield`, `Stun`, `Slow`,
-`TransferGold`, `ModifyStanding`, `CastAbility`.
+> ⚠️ **Spec audit (2026-05-08) — `[CRITICAL]`:** The previous ordinal
+> assignments below (8–26) were a design proposal that the engine
+> shipped a **different** layout for. The engine's actual
+> `crates/engine/src/ability/program.rs::EffectOp` enum is the source
+> of truth — replace the design proposal with the shipped table. Any
+> code compiled against the old (8 = `PlaceVoxels`, 12 = `ClearBelief`,
+> …) ordinals would produce silently-mismatched chronicle records.
+> The shipped engine reserves variants 8–11 for `Root`/`Silence`/`Fear`/
+> `Taunt` (Wave 2 piece 1), 12–15 for movement (Dash/Blink/Knockback/
+> Pull), 16–17 for Execute/SelfDamage, 18–19 for LifeSteal/DamageModify,
+> 20–22 for the over-time triplet, 23–24 for Buff/Summon, 25–26 for
+> Harvest/PlaceVoxel, 27 for Stealth, 28–31 for the extended-CC
+> vocabulary, 32–38 for the seven ToM verbs, 39 for TravelTo, and
+> 40–45 for Lifts B/C/D (Recipe/WearTool/Propose/Announce/GainSkill/
+> CreateObligation). The original design's voxel-area ops
+> (`PlaceVoxels`/`HarvestVoxels`/`TransformVoxels`/`PlaceStructure`),
+> belief-selector ops (`ClearBelief`/`RefreshBelief`/`PlantBelief` with
+> selectors), the `EmitEvent` escape hatch, the
+> `ModifyGroupStanding` op, and the rest of the economy ops
+> (`TransferProperty`/`ForcibleTransfer`/`DischargeObligation`/
+> `DefaultObligation`/`EstablishRoute`/`JoinCaravan`/
+> `TransferObligation`) are all **MISSING** — no engine variant, no
+> DSL arm. They remain `reserved`.
 
-Added by this spec (ordinals 8+):
+#### 22.2.1 Shipped layout (source of truth: `crates/engine/src/ability/program.rs`)
 
-| Ordinal | Variant | Source |
+| Ordinal | Variant | Wave / Lift | Status |
+|---|---|---|---|
+| 0 | `Damage { amount: f32 }` | Combat | `runs-today` |
+| 1 | `Heal { amount: f32 }` | Combat | `runs-today` |
+| 2 | `Shield { amount: f32 }` | Combat | `runs-today` |
+| 3 | `Stun { duration_ticks: u32 }` | Combat | `runs-today` |
+| 4 | `Slow { duration_ticks, factor_q8: i16 }` | Combat | `runs-today` |
+| 5 | `TransferGold { amount: i32 }` | World | `runs-today` |
+| 6 | `ModifyStanding { delta: i16 }` (legacy single-i16 shape) | World | `runs-today` |
+| 7 | `CastAbility { ability, selector }` | Meta | `runs-today` |
+| 8 | `Root { duration_ticks }` | Wave 2 piece 1 | `runs-today` |
+| 9 | `Silence { duration_ticks }` | Wave 2 piece 1 | `runs-today` |
+| 10 | `Fear { duration_ticks }` | Wave 2 piece 1 | `runs-today` |
+| 11 | `Taunt { duration_ticks }` | Wave 2 piece 1 | `runs-today` |
+| 12 | `Dash { distance: f32 }` (∞ = `to_target` sentinel) | Wave 2 piece 2 | `runs-today` |
+| 13 | `Blink { distance: f32 }` | Wave 2 piece 2 | `runs-today` |
+| 14 | `Knockback { distance: f32 }` | Wave 2 piece 2 | `runs-today` |
+| 15 | `Pull { distance: f32 }` | Wave 2 piece 2 | `runs-today` |
+| 16 | `Execute { hp_threshold: f32 }` | Wave 2 piece 3 | `runs-today` |
+| 17 | `SelfDamage { amount: f32 }` | Wave 2 piece 3 | `runs-today` |
+| 18 | `LifeSteal { duration_ticks, fraction_q8: i16 }` | Wave 2 piece 4 | `runs-today` |
+| 19 | `DamageModify { duration_ticks, multiplier_q8: i16 }` | Wave 2 piece 4 | `runs-today` |
+| 20 | `DamageOverTime { amount: f32, duration_ticks }` | Wave 1.5+ | `runs-today` |
+| 21 | `HealOverTime { amount: f32, duration_ticks }` | Wave 1.5+ | `runs-today` |
+| 22 | `TimedShield { amount: f32, duration_ticks }` | Wave 1.5+ | `runs-today` |
+| 23 | `Buff { stat: BuffStat, magnitude_q8: i16, duration_ticks }` | Wave 2 piece 4 | `runs-today` |
+| 24 | `Summon { template_hash: u32, count: u8, lifetime_ticks }` | Wave 2 | `runs-today` (lower-only) |
+| 25 | `Harvest { kind_hash: u32, amount: u16 }` | Non-combat ph1 | `runs-today` |
+| 26 | `PlaceVoxel { kind_hash: u32 }` | Non-combat ph1 | `runs-today` |
+| 27 | `Stealth { duration_ticks }` | Wave 2 piece 7 | `runs-today` |
+| 28 | `Charm { duration_ticks }` | Wave 2 piece 8 | `runs-today` |
+| 29 | `Grounded { duration_ticks }` | Wave 2 piece 8 | `runs-today` |
+| 30 | `Suppress { duration_ticks }` | Wave 2 piece 8 | `runs-today` |
+| 31 | `Reflect { duration_ticks, fraction_q8: i16 }` | Wave 2 piece 8 | `runs-today` |
+| 32 | `PlantBelief { subject_idx: u32, fact_bit: u8 }` | Wave 3 phase 1 (ToM) | `runs-today` |
+| 33 | `Observe { target_observer: u8 }` | Wave 3 phase 3 (ToM) | `runs-today` |
+| 34 | `Scry { target_observer: u8, subject_idx: u32 }` | Wave 3 phase 3.5 (ToM) | `runs-today` |
+| 35 | `Reveal { subject_idx: u32 }` | Wave 3 phase 3.5 (ToM) | `runs-today` |
+| 36 | `Disguise { fake_type: u8, duration_ticks }` | Wave 3 phase 4 (ToM) | `runs-today` |
+| 37 | `Decoy { subject_idx: u32, fake_pos: u32 }` | Wave 3 phase 4 (ToM) | `runs-today` |
+| 38 | `EraseBelief { subject_idx: u32, fields: u8 }` | Wave 3 phase 4 (ToM) | `runs-today` |
+| 39 | `TravelTo { dest_x_q8: i16, dest_y_q8: i16, eta_ticks }` | Lift A | `runs-today` |
+| 40 | `Recipe { recipe_id: u16, target_tool: u8 }` | Lift B | `runs-today` |
+| 41 | `WearTool { tool_kind: u8, amount: u16 }` | Lift B | `runs-today` |
+| 42 | `Propose { contract_kind: u8, expires_at_tick: u32 }` | Lift C | `runs-today` |
+| 43 | `Announce { announcement_kind: u8, radius_q8: u16 }` | Lift C | `runs-today` |
+| 44 | `GainSkill { skill_id: u8, amount_q8: u16 }` | Lift D | `runs-today` |
+| 45 | `CreateObligation { obligation_id: u16, kind: u8 }` | Lift D | `runs-today` |
+
+#### 22.2.2 Reserved (planned / not shipped)
+
+The original spec proposed several IR shapes that the engine has not
+adopted. Listed here for traceability:
+
+| Variant | Source | Status |
 |---|---|---|
-| 8 | `PlaceVoxels { mask, material, lifetime, damageable_hp }` | §18.1 |
-| 9 | `HarvestVoxels { mask, drop }` | §18.1 |
-| 10 | `TransformVoxels { mask, from, to, lifetime }` | §18.1 |
-| 11 | `PlaceStructure { structure, lifetime }` | §18.1 |
-| 12 | `ClearBelief { observer_sel, subject_sel }` | §20.2 |
-| 13 | `PlantBelief { observer_sel, subject_sel, fields }` | §20.2 |
-| 14 | `RefreshBelief { observer_sel, subject_sel }` | §20.2 |
-| 15 | `EmitEvent { kind: EventKindId, payload_sel: PayloadSel }` | AI-state §20.6, §20.3 |
-| 16 | `ModifyGroupStanding { group_sel, other_group, delta: i16 }` | §20.4 |
+| `PlaceVoxels { mask, material, lifetime, damageable_hp }` | §18.1 (area-stamp) | `reserved` (no engine variant) |
+| `HarvestVoxels { mask, drop }` | §18.1 (area-harvest) | `reserved` (single-cell `Harvest`/`PlaceVoxel` ship today; area shapes await mask registry) |
+| `TransformVoxels { mask, from, to, lifetime }` | §18.1 | `reserved` |
+| `PlaceStructure { structure, lifetime }` | §18.1 | `reserved` |
+| `ClearBelief { observer_sel, subject_sel }` | §20.2 | `reserved` (use `EraseBelief { subject_idx, fields }` for fields-bitset; selector-typed clear is unimplemented) |
+| `RefreshBelief { observer_sel, subject_sel }` | §20.2 | `reserved` (use `Observe { target_observer }`) |
+| `EmitEvent { kind: EventKindId, payload_sel: PayloadSel }` | §20.3, §20.6 | `reserved` (each verb gets its own packed EffectOp instead) |
+| `ModifyGroupStanding { group_sel, other_group, delta: i16 }` | §20.4 | `reserved` |
+| `TransferProperty { property_id, target_sel }` | econ §6.1 | `reserved` |
+| `ForcibleTransfer { subject, target_sel, contest_kind, detection_threshold }` | econ §6.3 | `reserved` |
+| `DischargeObligation { obligation_id }` | econ §7.5 | `reserved` |
+| `DefaultObligation { obligation_id }` | econ §7.5 | `reserved` |
+| `EstablishRoute { from, to }` | econ §5.6 | `reserved` |
+| `JoinCaravan { caravan: GroupId }` | econ §5.6 | `reserved` |
+| `TransferObligation { obligation_id, target_sel }` | econ §12.1 | `reserved` |
 
-Added by the economic depth spec (`spec/economy.md`,
-ordinals 17–26):
-
-| Ordinal | Variant | Source |
-|---|---|---|
-| 17 | `Recipe { recipe: RecipeId, target_tool_sel: ToolSel }` | econ §4.1 |
-| 18 | `WearTool { tool_kind: ToolKindId, amount: f32 }` | econ §4.3 |
-| 19 | `TransferProperty { property_id, target_sel }` | econ §6.1 |
-| 20 | `ForcibleTransfer { subject, target_sel, contest_kind, detection_threshold }` | econ §6.3 |
-| 21 | `CreateObligation { kind, parties, terms }` | econ §7.1 |
-| 22 | `DischargeObligation { obligation_id }` | econ §7.5 |
-| 23 | `DefaultObligation { obligation_id }` | econ §7.5 |
-| 24 | `EstablishRoute { from, to }` | econ §5.6 |
-| 25 | `JoinCaravan { caravan: GroupId }` | econ §5.6 |
-| 26 | `TransferObligation { obligation_id, target_sel }` | econ §12.1 |
-
-Existing `ModifyStanding` evolves to carry `{ a_sel, b_sel, delta }`.
+The promised `ModifyStanding` evolution to `{ a_sel, b_sel, delta }`
+(three-party standing writes) is also `reserved` — the shipped variant
+6 still carries only `{ delta: i16 }` and writes the symmetric edge
+between caster and cast target.
 
 Proxy types: `VoxelMaskId`, `StructureId`, `MaterialId` are `NonZeroU16` / `u8`.
 
@@ -1774,23 +2055,87 @@ Material catalog is in `.sim`; referenced by `MaterialId(u8)` index.
 
 ### 22.4 Event additions
 
-| Event | Fields | Replayable |
-|---|---|---|
-| `EffectVoxelsPlaced` | cast_id, origin, mask, material, count, lifetime, tick | yes, bulk |
-| `EffectVoxelsHarvested` | cast_id, origin, mask, drop, count, tick | yes, bulk |
-| `EffectVoxelsTransformed` | cast_id, origin, mask, from, to, count, lifetime, tick | yes, bulk |
-| `EffectStructurePlaced` | cast_id, origin, structure, rotation, count, lifetime, tick | yes, bulk |
-| `EffectVoxelDamage` | cast_id, damage_amount, remaining_hp, tick | yes |
-| `EffectVoxelReverted` | cast_id, count, tick | yes |
-| `EffectBeliefCleared` | observer, subject, cast_id, tick | yes |
-| `EffectBeliefPlanted` | observer, subject, fields, cast_id, tick | yes |
-| `EffectBeliefRefreshed` | observer, subject, cast_id, tick | yes |
-| `EffectQuestBeliefCleared` | observer, quest, cast_id, tick | yes |
-| `EffectQuestBeliefPlanted` | observer, quest, fields, cast_id, tick | yes |
-| `EffectQuestBeliefRefreshed` | observer, quest, cast_id, tick | yes |
+> **Spec audit (2026-05-08) — STATUS-FLIP + UNDOCUMENTED:** The events
+> below were the design proposal. The engine actually shipped a
+> different set under `EventKindId` in
+> `crates/engine/src/cascade/handler.rs` (chronicle ordinals 26–76).
+> The voxel / belief shapes documented below are NOT the shipped shapes —
+> the shipped variants carry caster + target slots + packed payload
+> words, not symbolic `cast_id, origin, mask, …` fields.
 
-Schema hash covers all new events, `EffectOp` ordinals, selector enums
-(`PairSelector`, `SubjectSel`, `AgentSel`, field masks), registry
+#### 22.4.1 Shipped chronicle events (source of truth: `crates/engine/src/cascade/handler.rs::EventKindId`)
+
+| Ordinal | Event | EffectOp source | Status |
+|---|---|---|---|
+| 26 | `EffectDamageApplied` | `Damage` (0) | `runs-today` |
+| 27 | `EffectHealApplied` | `Heal` (1) | `runs-today` |
+| 28 | `EffectShieldApplied` | `Shield` (2) | `runs-today` |
+| 29 | `EffectStunApplied` | `Stun` (3) | `runs-today` |
+| 30 | `EffectSlowApplied` | `Slow` (4) | `runs-today` |
+| 31 | `EffectGoldTransfer` | `TransferGold` (5) | `runs-today` |
+| 32 | `EffectStandingDelta` | `ModifyStanding` (6) | `runs-today` |
+| 33 | `CastDepthExceeded` | (cascade depth bound) | `runs-today` |
+| 34 | `EngagementCommitted` | (mask trigger) | `runs-today` |
+| 35 | `EngagementBroken` | (mask trigger) | `runs-today` |
+| 36 | `FearSpread` | `AgentDied` fan-out | `runs-today` |
+| 37 | `PackAssist` | `EngagementCommitted` fan-out | `runs-today` |
+| 38 | `RallyCall` | wounded-victim fan-out | `runs-today` |
+| 39 | `EffectSelfDamageApplied` | `SelfDamage` (17) | `runs-today` |
+| 40 | `EffectLifeStealApplied` | `LifeSteal` (18) | `runs-today` |
+| 41 | `EffectDamageModifyApplied` | `DamageModify` (19) | `runs-today` |
+| 42 | `EffectExecuteApplied` | `Execute` (16) | `runs-today` |
+| 43 | `EffectRootApplied` | `Root` (8) | `runs-today` |
+| 44 | `EffectSilenceApplied` | `Silence` (9) | `runs-today` |
+| 45 | `EffectFearApplied` | `Fear` (10) | `runs-today` |
+| 46 | `EffectTauntApplied` | `Taunt` (11) | `runs-today` |
+| 47 | `EffectDashApplied` | `Dash` (12) | `runs-today` |
+| 48 | `EffectBlinkApplied` | `Blink` (13) | `runs-today` |
+| 49 | `EffectKnockbackApplied` | `Knockback` (14) | `runs-today` |
+| 50 | `EffectPullApplied` | `Pull` (15) | `runs-today` |
+| 51 | `EffectDamageOverTimeApplied` | `DamageOverTime` (20) | `runs-today` |
+| 52 | `EffectHealOverTimeApplied` | `HealOverTime` (21) | `runs-today` |
+| 53 | `EffectTimedShieldApplied` | `TimedShield` (22) | `runs-today` |
+| 54 | `EffectStealthApplied` | `Stealth` (27) | `runs-today` |
+| 55 | `EffectCharmApplied` | `Charm` (28) | `runs-today` |
+| 56 | `EffectGroundedApplied` | `Grounded` (29) | `runs-today` |
+| 57 | `EffectSuppressApplied` | `Suppress` (30) | `runs-today` |
+| 58 | `EffectBuffApplied` | `Buff` (23) | `runs-today` |
+| 59 | `EffectHarvestApplied` | `Harvest` (25) | `runs-today` |
+| 60 | `EffectPlaceVoxelApplied` | `PlaceVoxel` (26) | `runs-today` |
+| 61 | `EffectReflectApplied` | `Reflect` (31) | `runs-today` |
+| 62 | `EffectSummonApplied` | `Summon` (24) | `runs-today` |
+| 63 | `EffectPlantBeliefApplied` | `PlantBelief` (32) | `runs-today` |
+| 64 | `EffectObserveApplied` | `Observe` (33) | `runs-today` |
+| 65 | `EffectScryApplied` | `Scry` (34) | `runs-today` |
+| 66 | `EffectRevealApplied` | `Reveal` (35) | `runs-today` |
+| 67 | `EffectDisguiseApplied` | `Disguise` (36) | `runs-today` |
+| 68 | `EffectDecoyApplied` | `Decoy` (37) | `runs-today` |
+| 69 | `EffectEraseBeliefApplied` | `EraseBelief` (38) | `runs-today` |
+| 70 | `EffectTravelToApplied` | `TravelTo` (39) | `runs-today` |
+| 71 | `EffectRecipeApplied` | `Recipe` (40) | `runs-today` |
+| 72 | `EffectWearToolApplied` | `WearTool` (41) | `runs-today` |
+| 73 | `EffectProposeApplied` | `Propose` (42) | `runs-today` |
+| 74 | `EffectAnnounceApplied` | `Announce` (43) | `runs-today` |
+| 75 | `EffectGainSkillApplied` | `GainSkill` (44) | `runs-today` |
+| 76 | `EffectCreateObligationApplied` | `CreateObligation` (45) | `runs-today` |
+| 128 | `ChronicleEntry` | `chronicle <event> { ... }` records | `runs-today` |
+
+Slots 23–24 retired in task 143 along with `StunExpired` / `SlowExpired`
+(stun/slow expiry is now a synthetic boundary read off
+`stun_expires_at_tick` / `slow_expires_at_tick`).
+
+#### 22.4.2 Reserved (planned / not shipped)
+
+The original event-shape proposals — `EffectVoxelsPlaced`,
+`EffectVoxelsHarvested`, `EffectVoxelsTransformed`,
+`EffectStructurePlaced`, `EffectVoxelDamage`, `EffectVoxelReverted`,
+`EffectBeliefCleared`, `EffectBeliefPlanted` (with selector enums),
+`EffectBeliefRefreshed`, `EffectQuestBelief{Cleared,Planted,Refreshed}` —
+are all `reserved`. The shipped Wave 3 ToM events use the much simpler
+`subject_idx: u32 + payload bits` shape; the area-stamp voxel events
+are deferred until the voxel-mask registry lands.
+
+Schema hash covers all new events, `EffectOp` ordinals, registry
 layouts.
 
 ### 22.5 Side state
@@ -1830,19 +2175,31 @@ ticket (when opened). Construct IDs reference sections above.
 | `target: ally` / `self_aoe` / `ground` / `direction` | `planned` |
 | `target: vector` / `global` | `reserved` |
 | `range:`, `cooldown:`, `hint:` | `runs-today` |
-| `cast:`, `charges:`, `unstoppable`, `hint: heal` | `planned` |
+| `hint: heal` / `hint: buff` (variants 4, 5) | `runs-today` |
+| `cast:`, `charges:`, `unstoppable` | `planned` |
 | `cost:`, `zone_tag:`, `toggle`, `form:`, `swap_form:`, `recast`, `morph` | `reserved` |
 | Combat effects (`damage`, `heal`, `shield`, `stun`, `slow`) | `runs-today` |
-| Movement verbs (§8.3) | `planned` except `swap` (`reserved`) |
-| Control verbs (§8.2) | `planned` except `charm`+ → `reserved` |
-| Buff / debuff verbs (§8.4) | `planned` except `reflect`/`blind` (`reserved`) |
-| Advanced verbs (§8.5) | `reserved` except `execute`, `self_damage`, `lifesteal`, `damage_modify` (`planned`) |
+| `damage <a> for <d>` / `heal <a> for <d>` / `shield <a> for <d>` (DoT/HoT/TimedShield, variants 20–22) | `runs-today` |
+| Movement verbs (`dash` / `blink` / `knockback` / `pull`) | `runs-today` |
+| `dash to_target` (∞-distance sentinel) | `runs-today` |
+| `dash to_position`, `swap` | `reserved` |
+| `travel_to` (Lift A multi-tick) | `runs-today` |
+| Control verbs (`root` / `silence` / `fear` / `taunt` / `charm` / `grounded` / `suppress`) | `runs-today` |
+| Control verbs (`polymorph` / `banish` / `confuse`) | `reserved` |
+| Buff / debuff verbs (`buff` / `damage_modify` / `lifesteal` / `reflect`) | `runs-today` |
+| `debuff` (negative-magnitude Buff), `blind` | `planned` / `reserved` |
+| Advanced verbs (`execute` / `self_damage` / `summon` / `stealth`) | `runs-today` (some lower-only — apply handlers per fixture) |
+| Other advanced verbs (§8.5) | `reserved` |
+| ToM verbs (`plant_belief` / `observe` / `scry` / `reveal` / `disguise` / `decoy` / `erase_belief`) | `runs-today` |
+| Production / consent (`cast_recipe` / `wear_tool` / `propose` / `announce` / `gain_skill` / `create_obligation`) | `runs-today` |
+| World primitives (`harvest` / `mine` / `place_voxel`) | `runs-today` |
 | Tags: fixed 6 enum | `runs-today` |
 | Tags: open-set mapping | `planned` |
 | Scaling: stat terms | `planned` |
 | Conditions: physical atoms | mixed `runs-today` / `planned` |
 | Delivery: `Instant` | `runs-today` |
 | Delivery: all other methods | `planned` or `reserved` |
+| Lexical: hex literals (`0xFF`) + integer suffixes (`32u8`) | `runs-today` (PR #38, 2026-05-08) |
 
 ### 23.2 Shapes & volumes (§9)
 
@@ -1896,17 +2253,41 @@ ticket (when opened). Construct IDs reference sections above.
 
 ### 23.6 IR & events
 
+> **Spec audit (2026-05-08) — STATUS-FLIP:** The ordinal claims below
+> were the design proposal. The shipped engine ships variants 8–11 as
+> `Root`/`Silence`/`Fear`/`Taunt`, 12–15 as movement, 16–17 as
+> `Execute`/`SelfDamage`, 18–19 as `LifeSteal`/`DamageModify`, 20–22 as
+> over-time triplet, 23 as `Buff`, 24 as `Summon`, 25–26 as
+> `Harvest`/`PlaceVoxel`, 27 as `Stealth`, 28–31 as
+> `Charm`/`Grounded`/`Suppress`/`Reflect`, 32–38 as the seven ToM verbs,
+> 39 as `TravelTo`, and 40–45 as Lifts B/C/D. The voxel-area /
+> EmitEvent / GroupStanding / quest-belief proposals are all
+> `reserved` (no engine variant). See §22.2 for the full reconciliation.
+
 | Construct | Status |
 |---|---|
-| `EffectOp` variants 8–11 (voxel) | `planned` |
-| `EffectOp` variants 12–14 (TOM writes) | `planned` |
-| `EffectOp` variant 15 (`EmitEvent`) | `planned` |
-| `EffectOp` variant 16 (`ModifyGroupStanding`) | `reserved` |
-| `PairSelector` / `SubjectSel` / `AgentSel` enums | `planned` |
+| `EffectOp` 8–11 (Root/Silence/Fear/Taunt — Wave 2) | `runs-today` |
+| `EffectOp` 12–15 (Dash/Blink/Knockback/Pull) | `runs-today` |
+| `EffectOp` 16–17 (Execute/SelfDamage) | `runs-today` |
+| `EffectOp` 18–19 (LifeSteal/DamageModify) | `runs-today` |
+| `EffectOp` 20–22 (DoT/HoT/TimedShield) | `runs-today` |
+| `EffectOp` 23–24 (Buff/Summon) | `runs-today` |
+| `EffectOp` 25–26 (Harvest/PlaceVoxel — single-cell) | `runs-today` |
+| `EffectOp` 27 (Stealth) | `runs-today` |
+| `EffectOp` 28–31 (Charm/Grounded/Suppress/Reflect) | `runs-today` |
+| `EffectOp` 32–38 (ToM verbs) | `runs-today` |
+| `EffectOp` 39 (TravelTo — Lift A) | `runs-today` |
+| `EffectOp` 40–45 (Recipe/WearTool/Propose/Announce/GainSkill/CreateObligation — Lifts B/C/D) | `runs-today` |
+| `EffectOp` voxel-area ops (`PlaceVoxels`/`HarvestVoxels`/`TransformVoxels`/`PlaceStructure`) | `reserved` |
+| `EffectOp` `EmitEvent` / `ModifyGroupStanding` / quest-belief shapes | `reserved` |
+| `PairSelector` / `SubjectSel` / `AgentSel` enums | `reserved` (shipped ToM uses `subject_idx: u32`) |
+| `ModifyStanding { a_sel, b_sel, delta }` selector evolution | `reserved` (variant 6 still `{ delta: i16 }`) |
 | Voxel mask registry + schema hash | `planned` |
 | Structure registry + schema hash | `planned` |
-| Bulk events (voxel, structure) | `planned` |
-| Belief events (agent + quest) | `reserved` |
+| Chronicle events 26–76 (per §22.4.1) | `runs-today` |
+| Bulk events (area-stamp voxel, structure) | `reserved` |
+| Belief events (agent — `EffectPlantBeliefApplied=63` … `EffectEraseBeliefApplied=69`) | `runs-today` |
+| Quest-belief events | `reserved` |
 | Communication attribution fields (`real_caster`, `forger_id`) | `reserved` |
 
 ### 23.7 Budget & determinism
