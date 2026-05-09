@@ -21,6 +21,7 @@ build = "build.rs"
 
 [dependencies]
 engine = { path = "../engine" }
+engine_voxel = { path = "../engine_voxel" }
 wgpu = "=26.0.1"
 bytemuck = { version = "1.16", features = ["derive"] }
 glam = "0.29"

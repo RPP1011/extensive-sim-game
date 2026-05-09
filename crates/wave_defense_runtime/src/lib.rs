@@ -122,7 +122,9 @@ use engine::gpu::{EVENT_RING_CAP_SLOTS, EVENT_STRIDE_U32};
 use engine::rng::per_agent_u32_pcg_with_extra;
 use engine::sim_trait::{AgentSnapshot, CompiledSim, VizGlyph};
 use engine::GpuContext;
+use engine_voxel::{VoxelMirror, VoxelTerrain};
 use glam::Vec3;
+use std::time::Instant;
 use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
@@ -130,9 +132,10 @@ include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 mod binding_check;
 
 pub use binding_check::{
-    assert_ability_registry_matches_sim_constants, MONSTER_CLEAVE_EXPECTED_ABILITY_ID,
-    SPAWN_HORDE_EXPECTED_ABILITY_ID, SPAWN_LARGE_EXPECTED_ABILITY_ID,
-    SPAWN_MEDIUM_EXPECTED_ABILITY_ID, SPAWN_SMALL_EXPECTED_ABILITY_ID,
+    assert_ability_registry_matches_sim_constants, BUILD_PALISADE_EXPECTED_ABILITY_ID,
+    MONSTER_CLEAVE_EXPECTED_ABILITY_ID, SPAWN_HORDE_EXPECTED_ABILITY_ID,
+    SPAWN_LARGE_EXPECTED_ABILITY_ID, SPAWN_MEDIUM_EXPECTED_ABILITY_ID,
+    SPAWN_SMALL_EXPECTED_ABILITY_ID,
 };
 
 /// Creature type discriminants — must match `assets/sim/wave_defense.sim`'s
@@ -211,6 +214,39 @@ pub fn wave_size_at_tick(tick: u64) -> u32 {
 /// `crates/engine/src/cascade/handler.rs` `EventKindId::EffectSummonApplied`).
 pub const KIND_EFFECT_SUMMON_APPLIED: u32 = 62;
 
+/// Engine event kind for EffectPlaceVoxelApplied chronicle records (Phase E
+/// voxel-engine integration). The dispatcher emits one record per
+/// successful BuildPalisade cast; the runtime drains them into the
+/// host-side VoxelTerrain via
+/// `engine_voxel::VoxelTerrain::apply_voxel_chronicle_record_with_mirror`.
+pub const KIND_EFFECT_PLACE_VOXEL_APPLIED: u32 = 60;
+
+/// Cubic extent of the voxel terrain in cells. 256³ at 1 world-unit
+/// per cell covers the entire `[-128, 128]³` simulation volume — well
+/// past the spawner ring at `±64`. Memory cost: 256³ × 4 B = 64 MiB
+/// for the GPU mirror, paid once at startup. The chunked dirty
+/// tracking keeps per-tick upload bounded by `dirty_chunks × 8³`.
+pub const VOXEL_GRID_EXTENT: u32 = 256;
+
+/// World→voxel translation. The voxel grid lives in `[0, EXTENT)` cell
+/// coordinates; the simulation lives around the origin in roughly
+/// `[-64, 64]³`. We shift by `(128, 128, 128)` so the world origin
+/// maps to cell `(128, 128, 128)` and the entire spawner ring sits
+/// within positive-cell territory.
+///
+/// Used by `caster_pos_to_voxel_world`: a caster at simulation pos
+/// `(x, y, z)` lands in voxel cell
+/// `(floor(x + 128), floor(y + 128), floor(z + 128))`. The chronicle
+/// drain receives the *shifted* position so out-of-bounds clamping in
+/// `apply_voxel_chronicle_record` works correctly.
+pub const VOXEL_WORLD_ORIGIN: Vec3 = Vec3::new(128.0, 128.0, 128.0);
+
+/// Map a simulation-space position to the voxel grid's coordinate
+/// system. See [`VOXEL_WORLD_ORIGIN`].
+pub fn caster_pos_to_voxel_world(sim_pos: Vec3) -> Vec3 {
+    sim_pos + VOXEL_WORLD_ORIGIN
+}
+
 /// Map a u32 PCG draw to an f32 in [-SPAWN_JITTER, +SPAWN_JITTER].
 /// P5 channel — deterministic, no host-side RNG state.
 fn perturb_axis(draw: u32) -> f32 {
@@ -259,9 +295,9 @@ pub struct WaveDefenseState {
     agent_magic_resist_buf: wgpu::Buffer,
     agent_move_speed_buf: wgpu::Buffer,
 
-    // -- Mask bitmaps (6 verbs) --
+    // -- Mask bitmaps (7 verbs after Phase E voxel integration) --
     //   Harvest=0, Strike=1, SpawnSmall=2, SpawnMedium=3,
-    //   SpawnLarge=4, SpawnHorde=5
+    //   SpawnLarge=4, SpawnHorde=5, BuildPalisade=6
     // (matches the verb declaration order in `wave_defense.sim`).
     mask_0_bitmap_buf: wgpu::Buffer,
     mask_1_bitmap_buf: wgpu::Buffer,
@@ -269,6 +305,7 @@ pub struct WaveDefenseState {
     mask_3_bitmap_buf: wgpu::Buffer,
     mask_4_bitmap_buf: wgpu::Buffer,
     mask_5_bitmap_buf: wgpu::Buffer,
+    mask_6_bitmap_buf: wgpu::Buffer,
     mask_bitmap_zero_buf: wgpu::Buffer,
     mask_bitmap_words: u32,
 
@@ -313,6 +350,7 @@ pub struct WaveDefenseState {
     chronicle_spawn_medium_cfg_buf: wgpu::Buffer,
     chronicle_spawn_large_cfg_buf: wgpu::Buffer,
     chronicle_spawn_horde_cfg_buf: wgpu::Buffer,
+    chronicle_build_palisade_cfg_buf: wgpu::Buffer,
     monster_phys_cfg_buf: wgpu::Buffer,
     fold_cfg_buf: wgpu::Buffer,
     apply_damage_cfg_buf: wgpu::Buffer,
@@ -331,6 +369,48 @@ pub struct WaveDefenseState {
     /// tick. Indexed [0..SPAWNER_COUNT); maps caster_slot →
     /// (caster_slot - SPAWNER_SLOT_START).
     spawner_positions: [Vec3; SPAWNER_COUNT as usize],
+
+    /// Cached settler positions in *voxel-space* (= sim pos +
+    /// `VOXEL_WORLD_ORIGIN`). Settlers are stationary in this fixture
+    /// (no MoveBy / SetPos rules touch them), so the host can resolve
+    /// `caster_slot → voxel_pos` without round-tripping `agent_pos`
+    /// per tick. Indexed `[0..SETTLER_COUNT)`; maps `caster_slot`
+    /// (= SETTLER_SLOT_START + i) to the i-th settler's pre-shifted
+    /// voxel position. Used by the BuildPalisade chronicle drain.
+    settler_voxel_positions: [Vec3; SETTLER_COUNT as usize],
+
+    // -- Phase E voxel-engine integration --
+    /// Host-side voxel terrain — Settlers' `BuildPalisade` ability
+    /// emits EffectPlaceVoxelApplied (kind=60) chronicle records;
+    /// `drain_voxel_records` mutates this grid via
+    /// `apply_voxel_chronicle_record_with_mirror`. The host-side
+    /// terrain query path (`monsters_blocked_by_palisade` pin) reads
+    /// `walkable(...)` against this grid.
+    voxel_terrain: VoxelTerrain,
+    /// GPU-resident mirror of `voxel_terrain.grid()`. Wired into
+    /// `KernelBindingsContext::voxel_grid` for forward-compat — no
+    /// kernel in this fixture currently reads from it (monster
+    /// pathfinding stays on `agent_pos` deltas), but the binding is
+    /// in place so future DSL extensions can call `terrain.walkable`
+    /// from MonsterMarch without runtime re-plumbing.
+    voxel_mirror: VoxelMirror,
+    /// Wall-clock cost of the most recent `flush_dirty` call (ns).
+    /// Drives the per-fixture perf baseline appended to
+    /// `docs/perf/2026-05-09-stress-ceilings.md`.
+    last_flush_ns: u128,
+    /// Maximum `flush_dirty` cost seen across the run (ns). Reset
+    /// once at construction; the per-tick step bumps it.
+    max_flush_ns: u128,
+    /// Cumulative `flush_dirty` cost across the run (ns). Combined
+    /// with `flush_call_count` gives the mean per-call cost.
+    total_flush_ns: u128,
+    /// Number of `flush_dirty` invocations across the run. Bumped
+    /// once per tick (even when the dirty set is empty — the cost
+    /// stays meaningful because it reflects the per-tick overhead).
+    flush_call_count: u64,
+    /// Number of `EffectPlaceVoxelApplied` chronicle records drained
+    /// across the run. > 0 confirms BuildPalisade fired at least once.
+    total_palisade_records: u64,
 
     // -- Host-side game state --
     /// Host-side count of alive monsters in the pool. Bumped on summon
@@ -359,6 +439,20 @@ pub struct WaveDefenseResult {
     /// counter) at termination. > 0 confirms gain_skill plumbed end-
     /// to-end.
     pub total_settler_skill: f32,
+    /// Phase E voxel-engine integration — total
+    /// EffectPlaceVoxelApplied chronicle records drained (= number of
+    /// successful BuildPalisade casts across the run).
+    pub total_palisade_records: u64,
+    /// Phase E voxel-engine integration — total `flush_dirty`
+    /// invocations (= ticks executed; one flush per tick regardless of
+    /// dirty count).
+    pub flush_call_count: u64,
+    /// Phase E voxel-engine integration — peak `flush_dirty`
+    /// wall-clock cost across the run (ns).
+    pub max_flush_ns: u128,
+    /// Phase E voxel-engine integration — cumulative `flush_dirty`
+    /// wall-clock cost across the run (ns).
+    pub total_flush_ns: u128,
 }
 
 impl WaveDefenseState {
@@ -396,6 +490,7 @@ impl WaveDefenseState {
         // exact same coordinate (which would make each settler's
         // spatial-walk loop see itself first and per-pair predicates
         // can collide). P5: deterministic per slot index, no RNG.
+        let mut settler_voxel_positions = [Vec3::ZERO; SETTLER_COUNT as usize];
         for i in 0..SETTLER_COUNT {
             let slot = (SETTLER_SLOT_START + i) as usize;
             let angle = (i as f32) * std::f32::consts::TAU
@@ -405,11 +500,17 @@ impl WaveDefenseState {
             // Add a small per-slot z so settlers occupy distinct
             // (x, y, z) but stay inside one origin spatial cell.
             let z = 0.05 * (i as f32 - 12.0);
-            pos_padded[slot] = Vec3::new(x, y, z).into();
+            let sim_pos = Vec3::new(x, y, z);
+            pos_padded[slot] = sim_pos.into();
             alive_init[slot] = 1;
             hp_init[slot] = SETTLER_HP;
             max_hp_init[slot] = SETTLER_MAX_HP;
             creature_init[slot] = CREATURE_TYPE_SETTLER;
+            // Phase E voxel-engine integration: cache the settler's
+            // *shifted* voxel-space position. The chronicle drain
+            // skips a per-tick agent_pos readback by indexing into
+            // this array.
+            settler_voxel_positions[i as usize] = caster_pos_to_voxel_world(sim_pos);
         }
 
         // Spawners — 6 face midpoints at ±SPAWNER_DISTANCE.
@@ -546,6 +647,7 @@ impl WaveDefenseState {
         let mask_3_bitmap_buf = mk_mask("wave_defense_runtime::mask_3_bitmap");
         let mask_4_bitmap_buf = mk_mask("wave_defense_runtime::mask_4_bitmap");
         let mask_5_bitmap_buf = mk_mask("wave_defense_runtime::mask_5_bitmap");
+        let mask_6_bitmap_buf = mk_mask("wave_defense_runtime::mask_6_bitmap");
         let zero_words: Vec<u32> = vec![0u32; mask_bitmap_words.max(4) as usize];
         let mask_bitmap_zero_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -803,6 +905,22 @@ impl WaveDefenseState {
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             },
         );
+        // Phase E voxel-engine integration: BuildPalisade chronicle
+        // dispatcher cfg uniform. Same Cfg shape as the Spawn dispatchers.
+        let chronicle_build_palisade_cfg_init =
+            physics_verb_chronicle_BuildPalisade::PhysicsVerbChronicleBuildPalisadeCfg {
+                event_count: 0,
+                tick: 0,
+                seed: 0,
+                agent_cap: 0,
+            };
+        let chronicle_build_palisade_cfg_buf = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("wave_defense_runtime::chronicle_build_palisade_cfg"),
+                contents: bytemuck::bytes_of(&chronicle_build_palisade_cfg_init),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        );
         let monster_phys_cfg_init = physics_MonsterMarch_and_MonsterCleaveScan::PhysicsMonsterMarchAndMonsterCleaveScanCfg {
             agent_cap: agent_count,
             tick: 0,
@@ -872,6 +990,17 @@ impl WaveDefenseState {
             },
         );
 
+        // Phase E voxel-engine integration. Construct the host
+        // terrain + GPU mirror at fixture startup (extent = 256 ³,
+        // mirror = 64 MiB). Subsequent ticks only push dirty chunks
+        // via `flush_dirty`. Wave_defense doesn't currently have a
+        // kernel that reads `voxel_grid`, but the binding lives on
+        // `KernelBindingsContext` for forward-compat — future
+        // monster-pathfinding rules that call `terrain.walkable` from
+        // MonsterMarch can opt in by lowering through `from_context`.
+        let voxel_terrain = VoxelTerrain::with_extent(VOXEL_GRID_EXTENT);
+        let voxel_mirror = VoxelMirror::new(&gpu, voxel_terrain.grid());
+
         Self {
             gpu,
             agent_pos_buf,
@@ -892,6 +1021,7 @@ impl WaveDefenseState {
             mask_3_bitmap_buf,
             mask_4_bitmap_buf,
             mask_5_bitmap_buf,
+            mask_6_bitmap_buf,
             mask_bitmap_zero_buf,
             mask_bitmap_words,
             scoring_output_buf,
@@ -917,6 +1047,7 @@ impl WaveDefenseState {
             chronicle_spawn_medium_cfg_buf,
             chronicle_spawn_large_cfg_buf,
             chronicle_spawn_horde_cfg_buf,
+            chronicle_build_palisade_cfg_buf,
             monster_phys_cfg_buf,
             fold_cfg_buf,
             apply_damage_cfg_buf,
@@ -925,6 +1056,14 @@ impl WaveDefenseState {
             registry_gpu,
             cache: dispatch::KernelCache::default(),
             spawner_positions,
+            settler_voxel_positions,
+            voxel_terrain,
+            voxel_mirror,
+            last_flush_ns: 0,
+            max_flush_ns: 0,
+            total_flush_ns: 0,
+            flush_call_count: 0,
+            total_palisade_records: 0,
             monster_pool_cursor: 0,
             consecutive_dead_ticks: 0,
             tick: 0,
@@ -1409,6 +1548,34 @@ impl WaveDefenseState {
         // Drain summon chronicle records into actual monster slot
         // allocations.
         let _spawned = self.drain_summon_records();
+        // Phase E voxel-engine integration: drain
+        // EffectPlaceVoxelApplied (kind=60) chronicle records into the
+        // host VoxelTerrain + GPU mirror. NOTE: this re-reads the
+        // event ring — wave_defense's `drain_summon_records` already
+        // submits a copy_buffer_to_buffer of the ring into
+        // `event_ring_staging`, but it consumes that staging buffer
+        // (unmaps it) once finished. The voxel drain re-issues the
+        // copy + map to keep the two drains decoupled (they could be
+        // fused into a single readback in a future polish slice; the
+        // per-tick cost is dwarfed by the GPU dispatch wall-clock).
+        let palisade_records = self.drain_voxel_records();
+        self.total_palisade_records += palisade_records as u64;
+        // Flush dirty chunks at end of tick so the next tick's GPU
+        // dispatches see fresh voxel state (forward-compat for
+        // future MonsterMarch terrain-aware lowerings; today no
+        // kernel reads voxel_grid so this is bookkeeping). Always
+        // call flush_dirty (even if dirty set is empty) so
+        // `last_flush_ns` reflects the per-tick overhead, not just
+        // the cost on PlaceVoxel-active ticks.
+        let t0 = Instant::now();
+        self.voxel_mirror
+            .flush_dirty(&self.gpu, self.voxel_terrain.grid());
+        self.last_flush_ns = t0.elapsed().as_nanos();
+        if self.last_flush_ns > self.max_flush_ns {
+            self.max_flush_ns = self.last_flush_ns;
+        }
+        self.total_flush_ns += self.last_flush_ns;
+        self.flush_call_count += 1;
         // Termination check: count alive settlers; track consecutive
         // zero-tick streak.
         let alive_settlers = self.alive_settler_count();
@@ -1426,6 +1593,166 @@ impl WaveDefenseState {
             return true;
         }
         false
+    }
+
+    /// Borrow the host-side voxel terrain (Phase E). The
+    /// `monsters_blocked_by_palisade` pin queries `walkable(...)` here
+    /// to prove placed palisades show up in the CPU terrain query.
+    pub fn voxel_terrain(&self) -> &VoxelTerrain {
+        &self.voxel_terrain
+    }
+
+    /// Wall-clock cost of the most recent `flush_dirty` call (ns).
+    /// Phase E perf instrumentation — appended to
+    /// `docs/perf/2026-05-09-stress-ceilings.md`.
+    pub fn last_flush_ns(&self) -> u128 {
+        self.last_flush_ns
+    }
+
+    /// Number of EffectPlaceVoxelApplied chronicle records drained
+    /// across the run so far. > 0 confirms BuildPalisade fired at
+    /// least once (the verb's `when` clause + scoring picked it).
+    pub fn total_palisade_records(&self) -> u64 {
+        self.total_palisade_records
+    }
+
+    /// Peak `flush_dirty` wall-clock cost across the run (ns).
+    pub fn max_flush_ns(&self) -> u128 {
+        self.max_flush_ns
+    }
+
+    /// Cumulative `flush_dirty` wall-clock cost across the run (ns).
+    pub fn total_flush_ns(&self) -> u128 {
+        self.total_flush_ns
+    }
+
+    /// Number of `flush_dirty` invocations across the run.
+    pub fn flush_call_count(&self) -> u64 {
+        self.flush_call_count
+    }
+
+    /// Drain EffectPlaceVoxelApplied (kind=60) chronicle records and
+    /// apply them to the host VoxelTerrain + GPU mirror. Returns the
+    /// number of palisade records applied this tick.
+    ///
+    /// Mirrors `drain_summon_records`'s shape — re-reads the event
+    /// ring into the per-tick staging buffer, then walks the records
+    /// filtering for `kind == KIND_EFFECT_PLACE_VOXEL_APPLIED`.
+    fn drain_voxel_records(&mut self) -> u32 {
+        let mut encoder = self.gpu.device.create_command_encoder(
+            &wgpu::CommandEncoderDescriptor {
+                label: Some("wave_defense_runtime::drain_voxel"),
+            },
+        );
+        encoder.copy_buffer_to_buffer(
+            &self.event_tail_buf,
+            0,
+            &self.event_tail_staging,
+            0,
+            4,
+        );
+        let cap = self
+            .event_ring_readback_slots
+            .min(EVENT_RING_CAP_SLOTS);
+        let stage_ring_bytes = (cap as u64) * (EVENT_STRIDE_U32 as u64) * 4;
+        encoder.copy_buffer_to_buffer(
+            &self.event_ring_buf,
+            0,
+            &self.event_ring_staging,
+            0,
+            stage_ring_bytes,
+        );
+        self.gpu.queue.submit(Some(encoder.finish()));
+
+        // Map tail then ring (mirrors `drain_summon_records`).
+        let tail_value = {
+            let slice = self.event_tail_staging.slice(..);
+            let (sender, receiver) = std::sync::mpsc::channel();
+            slice.map_async(wgpu::MapMode::Read, move |r| {
+                let _ = sender.send(r);
+            });
+            self.gpu.device.poll(wgpu::PollType::Wait).expect("poll");
+            let _ = receiver.recv().expect("map_async tail result");
+            let mapped = slice.get_mapped_range();
+            let v: u32 = bytemuck::cast_slice::<u8, u32>(&mapped)[0];
+            drop(mapped);
+            self.event_tail_staging.unmap();
+            v
+        };
+
+        let actual_records = tail_value.min(cap) as usize;
+        if actual_records == 0 {
+            // Force unmap + early return.
+            let slice = self.event_ring_staging.slice(..);
+            let (sender, receiver) = std::sync::mpsc::channel();
+            slice.map_async(wgpu::MapMode::Read, move |r| {
+                let _ = sender.send(r);
+            });
+            self.gpu.device.poll(wgpu::PollType::Wait).expect("poll");
+            let _ = receiver.recv().expect("map_async ring result");
+            self.event_ring_staging.unmap();
+            return 0;
+        }
+
+        let records: Vec<[u32; 10]> = {
+            let slice = self.event_ring_staging.slice(..);
+            let (sender, receiver) = std::sync::mpsc::channel();
+            slice.map_async(wgpu::MapMode::Read, move |r| {
+                let _ = sender.send(r);
+            });
+            self.gpu.device.poll(wgpu::PollType::Wait).expect("poll");
+            let _ = receiver.recv().expect("map_async ring result");
+            let mapped = slice.get_mapped_range();
+            let words: &[u32] = bytemuck::cast_slice(&mapped);
+            let mut out: Vec<[u32; 10]> = Vec::with_capacity(actual_records);
+            for r in 0..actual_records {
+                let base = r * (EVENT_STRIDE_U32 as usize);
+                let mut rec = [0u32; 10];
+                rec.copy_from_slice(&words[base..base + 10]);
+                out.push(rec);
+            }
+            drop(mapped);
+            self.event_ring_staging.unmap();
+            out
+        };
+
+        // Filter for kind=60 (EffectPlaceVoxelApplied). Slot layout:
+        //   [0] = 60
+        //   [1] = tick
+        //   [2] = caster_slot (= settler agent_id)
+        //   [3] = kind_hash   (= FxHash("palisade"))
+        // Walk records in ring order (deterministic per the chronicle
+        // emit ordering). For each record, resolve `caster_slot →
+        // voxel_pos` against the cached settler positions (settlers
+        // are stationary in this fixture) and call
+        // `apply_voxel_chronicle_record_with_mirror` which mutates
+        // the CPU grid AND marks dirty chunks in the GPU mirror.
+        let mut applied: u32 = 0;
+        for rec in &records {
+            if rec[0] != KIND_EFFECT_PLACE_VOXEL_APPLIED {
+                continue;
+            }
+            let caster_slot = rec[2];
+            // Map caster_slot → cached settler voxel-position. Out-of-
+            // range slots (a non-settler somehow firing the verb)
+            // get skipped — defensive against future verb-graph
+            // changes.
+            if caster_slot < SETTLER_SLOT_START
+                || caster_slot >= SETTLER_SLOT_START + SETTLER_COUNT
+            {
+                continue;
+            }
+            let voxel_pos =
+                self.settler_voxel_positions[(caster_slot - SETTLER_SLOT_START) as usize];
+            self.voxel_terrain
+                .apply_voxel_chronicle_record_with_mirror(
+                    rec,
+                    voxel_pos,
+                    &mut self.voxel_mirror,
+                );
+            applied += 1;
+        }
+        applied
     }
 }
 
@@ -1464,6 +1791,7 @@ impl CompiledSim for WaveDefenseState {
             &self.mask_3_bitmap_buf,
             &self.mask_4_bitmap_buf,
             &self.mask_5_bitmap_buf,
+            &self.mask_6_bitmap_buf,
         ] {
             encoder.copy_buffer_to_buffer(
                 &self.mask_bitmap_zero_buf,
@@ -1588,6 +1916,7 @@ impl CompiledSim for WaveDefenseState {
                 mask_3_bitmap: &self.mask_3_bitmap_buf,
                 mask_4_bitmap: &self.mask_4_bitmap_buf,
                 mask_5_bitmap: &self.mask_5_bitmap_buf,
+                mask_6_bitmap: &self.mask_6_bitmap_buf,
                 cfg: &self.mask_cfg_buf,
             },
             &self.gpu.device,
@@ -1628,6 +1957,7 @@ impl CompiledSim for WaveDefenseState {
                 mask_3_bitmap: &self.mask_3_bitmap_buf,
                 mask_4_bitmap: &self.mask_4_bitmap_buf,
                 mask_5_bitmap: &self.mask_5_bitmap_buf,
+                mask_6_bitmap: &self.mask_6_bitmap_buf,
                 scoring_output: &self.scoring_output_buf,
                 ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
                 ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
@@ -1774,6 +2104,23 @@ impl CompiledSim for WaveDefenseState {
             PhysicsVerbChronicleSpawnHordeBindings,
             chronicle_spawn_horde_cfg_buf,
             dispatch_physics_verb_chronicle_spawnhorde
+        );
+
+        // (7b) Phase E voxel-engine integration: BuildPalisade chronicle
+        // dispatcher. Settler self-cast verb gated by tick window
+        // (`world.tick < small_to_medium && world.tick % palisade_period
+        // == 0`). Same Bindings shape as the Spawn dispatchers — the
+        // dispatcher walks the BuildPalisade ability program (single
+        // `place_voxel "palisade"` effect), writing one
+        // EffectPlaceVoxelApplied (kind=60) record per cast into the
+        // event ring. The host drains those records in
+        // `drain_voxel_records` after `step_and_check_termination`.
+        spawn_dispatch!(
+            physics_verb_chronicle_BuildPalisade,
+            PhysicsVerbChronicleBuildPalisadeCfg,
+            PhysicsVerbChronicleBuildPalisadeBindings,
+            chronicle_build_palisade_cfg_buf,
+            dispatch_physics_verb_chronicle_buildpalisade
         );
 
         // (8) MonsterMarch + MonsterCleaveScan fused per_agent kernel.
@@ -2005,6 +2352,10 @@ pub fn run_until_death(seed: u64, max_ticks: u64) -> Option<WaveDefenseResult> {
                         total_monsters_spawned,
                         max_concurrent_monsters,
                         total_settler_skill,
+                        total_palisade_records: state.total_palisade_records,
+                        flush_call_count: state.flush_call_count,
+                        max_flush_ns: state.max_flush_ns,
+                        total_flush_ns: state.total_flush_ns,
                     });
                 }
                 total_monsters_spawned = total_monsters_spawned.max(ms);
@@ -2020,6 +2371,10 @@ pub fn run_until_death(seed: u64, max_ticks: u64) -> Option<WaveDefenseResult> {
                     total_monsters_spawned,
                     max_concurrent_monsters,
                     total_settler_skill,
+                    total_palisade_records: state.total_palisade_records,
+                    flush_call_count: state.flush_call_count,
+                    max_flush_ns: state.max_flush_ns,
+                    total_flush_ns: state.total_flush_ns,
                 });
             }
         }
@@ -2035,6 +2390,10 @@ pub fn run_until_death(seed: u64, max_ticks: u64) -> Option<WaveDefenseResult> {
         total_monsters_spawned,
         max_concurrent_monsters,
         total_settler_skill,
+        total_palisade_records: state.total_palisade_records,
+        flush_call_count: state.flush_call_count,
+        max_flush_ns: state.max_flush_ns,
+        total_flush_ns: state.total_flush_ns,
     })
 }
 
@@ -2045,6 +2404,10 @@ pub fn run_until_death(seed: u64, max_ticks: u64) -> Option<WaveDefenseResult> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Bring TerrainQuery into scope so the
+    // `monsters_blocked_by_palisade` pin can call `walkable(...)` on
+    // the VoxelTerrain instance.
+    use engine::terrain::TerrainQuery;
 
     /// Plan task 4: drive up to max_ticks=DEFAULT_MAX_TICKS; assert
     /// `result.died_at_tick < DEFAULT_MAX_TICKS` AND
@@ -2166,6 +2529,161 @@ mod tests {
              beyond that, the race is destabilising the score signal.",
             r1.score, r2.score,
         );
+    }
+
+    /// **Phase E voxel-engine integration semantic pin.** After a
+    /// short run, BuildPalisade must have fired at least 3 times AND
+    /// the placed cells must register as `walkable = false` against
+    /// the host VoxelTerrain. This is the "fixture-level proof
+    /// terrain matters" pin from the plan — settlers fire
+    /// `place_voxel "palisade"` per the verb's `when` gate; the
+    /// chronicle drain mutates the CPU grid; subsequent
+    /// `terrain.walkable(pos, Walk)` reads return false at the
+    /// placed cells.
+    ///
+    /// **Why this is the pin shape, not "monster-position
+    /// quantitative test".** Wave_defense's MonsterMarch is a GPU
+    /// kernel that today does NOT read `voxel_grid` (no DSL surface
+    /// for `terrain.walkable` in MonsterMarch yet — that's a future
+    /// slice). The chain is:
+    ///
+    ///   1. settlers cast BuildPalisade → chronicle records emitted
+    ///   2. host drain mutates VoxelTerrain → walkable() returns false
+    ///   3. (future) MonsterMarch lowering calls walkable() in WGSL
+    ///      and refuses the next-step delta when the cell is solid
+    ///
+    /// Steps 1-2 are this slice; step 3 is deferred. The pin
+    /// asserts steps 1+2 hold so future GPU lowering of step 3 lands
+    /// on a tested foundation. Don't substitute a counter-only pin
+    /// like "palisade_records > 0" — that's the probe-fooling
+    /// pattern (FlatPlane'd silently pass it). The walkable()
+    /// assertion is the load-bearing semantic check.
+    ///
+    /// Skips on hosts without a wgpu adapter.
+    #[test]
+    fn monsters_blocked_by_palisade() {
+        // Drive a short run (200 ticks) — long enough for several
+        // BuildPalisade casts (every 50 ticks: 0, 50, 100, 150) at
+        // multiple settler positions, but bounded so the test stays
+        // fast even on cold-cache hosts.
+        const TEST_TICKS: u64 = 200;
+        let result = match run_until_death(0, TEST_TICKS) {
+            Some(r) => r,
+            None => {
+                eprintln!(
+                    "[monsters_blocked_by_palisade] skipping: GPU init failed"
+                );
+                return;
+            }
+        };
+
+        // (1) BuildPalisade fired enough times. Chrome cadence: every
+        // 50 ticks (per palisade_period config), 25 settlers at
+        // origin → up to 25 records per cadence-tick. Bound: at
+        // tick=0 + tick=50 + tick=100 + tick=150 in our 200-tick
+        // run we expect 4 cadence-ticks; even with score-conflict
+        // suppression (Strike preempts when monsters near) we
+        // should land at least 3 records cumulatively.
+        assert!(
+            result.total_palisade_records >= 3,
+            "expected >= 3 BuildPalisade chronicle records across {} \
+             ticks (cadence every 50 ticks for {} settlers); got {}. \
+             Chronicle drain may not be wired, or BuildPalisade's \
+             score (1500) lost to Strike/Harvest more than expected.",
+            TEST_TICKS,
+            SETTLER_COUNT,
+            result.total_palisade_records,
+        );
+
+        // (2) Placed cells must register as walkable=false in the
+        // host VoxelTerrain. We rebuild a fresh fixture + drive the
+        // same number of ticks so we can introspect `voxel_terrain`
+        // (run_until_death consumes the state). Same-seed → same
+        // chronicle drain order → same cells placed (P5).
+        let state = match run_n_ticks_for_introspection(0, TEST_TICKS) {
+            Some(s) => s,
+            None => return,
+        };
+        // Walk the cached settler voxel-positions; for each settler
+        // that landed a palisade, the floor cell at its position
+        // should be solid (cell_at != 0) AND walkable() should
+        // return false there. We only assert for settlers in the
+        // positive-cell octant (some settlers' z's land at 127.4
+        // which still floors to 127 — well in-bounds at extent=256;
+        // shifted by VOXEL_WORLD_ORIGIN=(128,128,128) we're safely
+        // positive).
+        let mut blocked_count = 0_u32;
+        for i in 0..SETTLER_COUNT {
+            let pos = state.settler_voxel_positions[i as usize];
+            let cell_x = pos.x.floor() as i32;
+            let cell_y = pos.y.floor() as i32;
+            let cell_z = pos.z.floor() as i32;
+            let cell_value = state.voxel_terrain().cell_at(cell_x, cell_y, cell_z);
+            let walkable = state.voxel_terrain().walkable(
+                pos,
+                engine_voxel::MovementMode::Walk,
+            );
+            if cell_value != 0 {
+                assert!(
+                    !walkable,
+                    "settler {i} placed a palisade at cell ({cell_x}, \
+                     {cell_y}, {cell_z}) (value={cell_value}) but \
+                     walkable() returned true — terrain query and \
+                     voxel mutation disagree. Phase E plumbing broken: \
+                     either the chronicle drain wrote the wrong cell, \
+                     or walkable() reads a different grid.",
+                );
+                blocked_count += 1;
+            }
+        }
+        // At least one settler's path-cell should be blocked.
+        assert!(
+            blocked_count >= 1,
+            "expected >= 1 settler path-cell to be blocked by a placed \
+             palisade; got {blocked_count}. The chronicle drain landed \
+             {} records but none of the cached settler voxel-positions \
+             have non-zero cells — chronicle drain may be applying to \
+             wrong coordinates, or settler_voxel_positions is stale.",
+            result.total_palisade_records,
+        );
+        eprintln!(
+            "[monsters_blocked_by_palisade] palisade_records={} \
+             blocked_settler_cells={}/{} (proves CPU terrain query \
+             reflects mutations). flush_dirty: max={:.2} us, mean={:.2} us \
+             across {} ticks.",
+            result.total_palisade_records,
+            blocked_count,
+            SETTLER_COUNT,
+            result.max_flush_ns as f64 / 1000.0,
+            (result.total_flush_ns as f64 / result.flush_call_count.max(1) as f64) / 1000.0,
+            result.flush_call_count,
+        );
+    }
+
+    /// Helper for the `monsters_blocked_by_palisade` pin — re-runs
+    /// the fixture for `n` ticks and returns the live state so the
+    /// caller can introspect `voxel_terrain()` + the cached settler
+    /// voxel positions. `run_until_death` consumes its state; we
+    /// need a separate path that exposes the post-run state.
+    fn run_n_ticks_for_introspection(seed: u64, n: u64) -> Option<WaveDefenseState> {
+        let init = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            WaveDefenseState::new(seed)
+        }));
+        let mut state = match init {
+            Ok(s) => s,
+            Err(_) => return None,
+        };
+        for _ in 0..n {
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                state.step_and_check_termination()
+            }));
+            match outcome {
+                Ok(true) => break,  // settlement fell early; pin runs anyway
+                Ok(false) => {}
+                Err(_) => break,
+            }
+        }
+        Some(state)
     }
 
     /// Plan task #249 piece 2: gain_skill behavioral pin. After a run

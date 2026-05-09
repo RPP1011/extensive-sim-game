@@ -2721,6 +2721,7 @@ dependencies = [
  "engine_voxel",
  "glam",
  "pollster",
+ "sha2",
  "wgpu",
 ]
 
@@ -2858,6 +2859,7 @@ dependencies = [
  "dsl_ast",
  "dsl_compiler",
  "engine",
+ "engine_voxel",
  "glam",
  "pollster",
  "wgpu",

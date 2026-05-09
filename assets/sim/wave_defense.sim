@@ -119,6 +119,12 @@ config combat {
   // Wave spawning tuning.
   wave_period: u32 = 30,
 
+  // Phase E voxel-engine integration: settler BuildPalisade firing
+  // cadence. Set to 50 so settlers periodically reinforce the
+  // settlement during the early game without saturating the chronicle
+  // ring (25 settlers × 1 record / 50 ticks = 0.5 records/tick avg).
+  palisade_period: u32 = 50,
+
   // Wave-tier thresholds — in ticks. SpawnSmall fires while
   // `world.tick < small_to_medium`, SpawnMedium on
   // `[small_to_medium..medium_to_large)`, SpawnLarge on
@@ -195,12 +201,14 @@ verb Strike(self, target: Agent) =
 // ramping (Path B from Task #249) — no compiler extension; rides
 // the compound `world.tick >= L && world.tick < H` predicate.
 //
-// AbilityId binding (alphabetised registry slot order):
-//   MonsterCleave  → 1
-//   SpawnHorde     → 2
-//   SpawnLarge     → 3
-//   SpawnMedium    → 4
-//   SpawnSmall     → 5
+// AbilityId binding (alphabetised registry slot order — Phase E voxel
+// integration added BuildPalisade as slot 1):
+//   BuildPalisade  → 1   (settler self-cast; `place_voxel "palisade"`)
+//   MonsterCleave  → 2
+//   SpawnHorde     → 3
+//   SpawnLarge     → 4
+//   SpawnMedium    → 5
+//   SpawnSmall     → 6
 //
 // The dispatcher writes EffectSummonApplied chronicle records (kind=62)
 // into the event ring. The runtime drains those records after each
@@ -214,7 +222,7 @@ verb SpawnSmall(self, target: Agent) =
         && self.creature_type == config.combat.type_spawner
         && (world.tick < config.combat.small_to_medium)
         && (world.tick % config.combat.wave_period == 0))
-  apply_ability 5 by self target self
+  apply_ability 6 by self target self
   score 500.0
 
 verb SpawnMedium(self, target: Agent) =
@@ -225,7 +233,7 @@ verb SpawnMedium(self, target: Agent) =
         && (world.tick >= config.combat.small_to_medium)
         && (world.tick < config.combat.medium_to_large)
         && (world.tick % config.combat.wave_period == 0))
-  apply_ability 4 by self target self
+  apply_ability 5 by self target self
   score 500.0
 
 verb SpawnLarge(self, target: Agent) =
@@ -236,7 +244,7 @@ verb SpawnLarge(self, target: Agent) =
         && (world.tick >= config.combat.medium_to_large)
         && (world.tick < config.combat.large_to_horde)
         && (world.tick % config.combat.wave_period == 0))
-  apply_ability 3 by self target self
+  apply_ability 4 by self target self
   score 500.0
 
 verb SpawnHorde(self, target: Agent) =
@@ -246,8 +254,32 @@ verb SpawnHorde(self, target: Agent) =
         && self.creature_type == config.combat.type_spawner
         && (world.tick >= config.combat.large_to_horde)
         && (world.tick % config.combat.wave_period == 0))
-  apply_ability 2 by self target self
+  apply_ability 3 by self target self
   score 500.0
+
+// BuildPalisade — Phase E voxel-engine integration. Settlers self-cast
+// `place_voxel "palisade"` every `palisade_period` ticks (50) during
+// the early game so the wave_defense fixture exercises real voxel
+// terrain mutation (vs. the FlatPlane stub). The dispatcher writes
+// EffectPlaceVoxelApplied (kind=60) chronicle records; the runtime
+// drains them into `engine_voxel::VoxelTerrain`'s CPU grid AND marks
+// dirty chunks in the GPU mirror.
+//
+// `apply_ability 1 by self target self` resolves to the BuildPalisade
+// ability slot in the registry (alphabetised — BuildPalisade is the
+// first .ability file by name now). The verb's `when` clause limits
+// firing to settlers in the early game (tick < small_to_medium so
+// palisades land before the wave-pressure ramps); after the early
+// game settlers focus on Strike/Harvest as before.
+verb BuildPalisade(self, target: Agent) =
+  action BuildPalisadeAction
+  when (self.alive
+        && target == self
+        && self.creature_type == config.combat.type_settler
+        && (world.tick < config.combat.small_to_medium)
+        && (world.tick % config.combat.palisade_period == 0))
+  apply_ability 1 by self target self
+  score 1500.0
 
 // ---------------------------------------------------------------------
 // MonsterMarch — per_agent physics. Each alive monster steps toward

@@ -23,10 +23,18 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-// Task #249 polish slice: 5 abilities (was 2 in foundation slice).
-// MonsterCleave + 4 tier-keyed Spawn abilities for wave-size ramping.
-// Alphabetised — registry slot order matches.
+// Phase E voxel-engine integration: 6 abilities (was 5 in #249 polish).
+// BuildPalisade (settler `place_voxel "palisade"`) added at slot 1
+// (alphabetised filenames — `B` sorts before `M`).
+// Registry slots:
+//   BuildPalisade  → 1
+//   MonsterCleave  → 2
+//   SpawnHorde     → 3
+//   SpawnLarge     → 4
+//   SpawnMedium    → 5
+//   SpawnSmall     → 6
 const ABILITY_NAMES: &[&str] = &[
+    "BuildPalisade.ability",
     "MonsterCleave.ability",
     "SpawnHorde.ability",
     "SpawnLarge.ability",

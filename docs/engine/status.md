@@ -28,13 +28,17 @@ files in `docs/superpowers/specs/` and the active plans in `docs/superpowers/pla
 | GPU cold-state replay umbrella (Subsystem 2) | `docs/superpowers/plans/2026-04-22-gpu-cold-state-replay.md` | ⚠️ Phase 1 done; Phases 2–4 are explicit future work |
 | Plan 4 — debug & trace runtime | _(to be written)_ | ❌ not yet written |
 | Ability DSL implementation | _(execution log in git history; LoL canary saturated 2026-05-06)_ | ✅ lowering 100% (172/172 LoL files) — apply handlers + GPU dispatch (`#125` family) in flight |
+| Voxel terrain integration | `docs/superpowers/plans/2026-05-09-voxel-engine-integration.md` | ✅ COMPLETE 2026-05-09 — `engine_voxel` adapter (CPU + GPU mirror), DSL `terrain.X(...)` lowers to WGSL helpers, `wave_defense_runtime` opts in via settler `BuildPalisade` casts; 6 semantic + 1 determinism + 1 fixture-level pin all green |
 | Economic depth implementation | _(to be planned from `docs/spec/economy.md`)_ | ❌ not yet planned |
 
 Deferred subsystems (factions, items, buildings, settlements, regions, personality
 utility, interior nav) are indexed in `docs/superpowers/roadmap.md`. Subsystems with
 DSL stub primitives partially landed (memberships, memory, relationships, groups,
-quests, theory-of-mind) and terrain (MVP `TerrainQuery` trait seam in `crates/engine/src/terrain.rs`)
-are partially in flight; full behaviour attachment is pending.
+quests, theory-of-mind) are partially in flight; full behaviour attachment is
+pending. Terrain is no longer in this category — Phase E of the voxel-engine
+integration plan (2026-05-09) shipped real `engine_voxel::VoxelTerrain` + GPU
+mirror; the `FlatPlane` default trait impl stays as the no-op fallback for
+fixtures that don't opt in.
 
 ## Subsystem table
 

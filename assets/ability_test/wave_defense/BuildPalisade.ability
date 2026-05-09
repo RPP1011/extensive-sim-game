@@ -1,0 +1,31 @@
+// wave_defense Phase E (voxel-engine integration) — settler self-cast
+// `place_voxel` ability driving the EffectPlaceVoxelApplied (kind=60)
+// chronicle producer.
+//
+// Lowers to:
+//   AbilityProgram {
+//     gate: { cooldown_ticks: 5 },
+//     effects: [EffectOp::PlaceVoxel { kind_hash: FxHash("palisade") }],
+//   }
+//
+// Settlers fire BuildPalisade every 50 ticks (gated by the verb's
+// `when` clause in wave_defense.sim) to deposit defensive palisade
+// voxels at their position. The runtime drains kind=60 chronicle
+// records into `engine_voxel::VoxelTerrain`, which both the host CPU
+// terrain queries AND the GPU mirror see — proving Phase E's "real
+// fixture uses voxel terrain" goal.
+//
+// `kind_hash = FxHash("palisade")`: distinct from voxel_probe's
+// "test_voxel" so the two fixtures' material codes don't collide
+// in any cross-fixture inspection.
+//
+// `cooldown: 500ms` (= 5 ticks) is informational only — the .sim
+// verb's `when` clause carries the load-bearing tick-window gate.
+
+ability BuildPalisade {
+    target: self
+    cooldown: 500ms
+    hint: utility
+
+    place_voxel "palisade"
+}
