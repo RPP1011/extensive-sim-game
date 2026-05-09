@@ -54,7 +54,9 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 /// Discriminant value the WGSL emits for the first-declared entity
 /// (`Wolf`). Matches the `creature_type == Wolf` lowering — entity
@@ -169,6 +171,12 @@ pub struct PredatorPreyRealState {
     sheepgraze_cfg_buf: wgpu::Buffer,
     energydecay_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
 
@@ -478,6 +486,12 @@ impl PredatorPreyRealState {
         let starved_total_cfg_buf =
             make_view_cfg("predator_prey_real_runtime::starved_total_cfg");
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&engine::ability::AbilityRegistry::new()),
+            &gpu,
+            "predator_prey_real_runtime",
+        );
+
         Self {
             gpu,
             agent_pos_buf,
@@ -502,6 +516,7 @@ impl PredatorPreyRealState {
             sheepgraze_cfg_buf,
             energydecay_cfg_buf,
             seed_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             tick: 0,
             agent_count: SLOT_CAP,
@@ -924,11 +939,32 @@ impl CompiledSim for PredatorPreyRealState {
             bytemuck::bytes_of(&wolfhunt_cfg),
         );
 
-        let count_b = spatial_build_hash_count::SpatialBuildHashCountBindings {
-            agent_pos: &self.agent_pos_buf,
+        // Shared once per tick; each non-fold dispatch below adds only
+        // its fixture-specific extras struct. Standard SoA columns
+        // (pos/hp/alive) flow through ctx.state; agent_hunger and
+        // agent_creature_type are not standard so they ride extras.
+        let agent_buffers = AgentBuffers {
+            pos_buf: Some(&self.agent_pos_buf),
+            hp_buf: Some(&self.agent_hp_buf),
+            alive_buf: Some(&self.agent_alive_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
+        let count_extras = spatial_build_hash_count::SpatialBuildHashCountExtras {
             spatial_grid_offsets: &self.spatial_grid_offsets,
             cfg: &self.wolfhunt_cfg_buf,
         };
+        let count_b =
+            spatial_build_hash_count::SpatialBuildHashCountBindings::from_context_with_extras(
+                &ctx,
+                &count_extras,
+            );
         dispatch::dispatch_spatial_build_hash_count(
             &mut self.cache,
             &count_b,
@@ -936,12 +972,17 @@ impl CompiledSim for PredatorPreyRealState {
             &mut encoder,
             SLOT_CAP,
         );
-        let scan_local_b = spatial_build_hash_scan_local::SpatialBuildHashScanLocalBindings {
+        let scan_local_extras = spatial_build_hash_scan_local::SpatialBuildHashScanLocalExtras {
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
             spatial_chunk_sums: &self.spatial_chunk_sums,
             cfg: &self.wolfhunt_cfg_buf,
         };
+        let scan_local_b =
+            spatial_build_hash_scan_local::SpatialBuildHashScanLocalBindings::from_context_with_extras(
+                &ctx,
+                &scan_local_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scan_local(
             &mut self.cache,
             &scan_local_b,
@@ -949,10 +990,15 @@ impl CompiledSim for PredatorPreyRealState {
             &mut encoder,
             SLOT_CAP,
         );
-        let scan_carry_b = spatial_build_hash_scan_carry::SpatialBuildHashScanCarryBindings {
+        let scan_carry_extras = spatial_build_hash_scan_carry::SpatialBuildHashScanCarryExtras {
             spatial_chunk_sums: &self.spatial_chunk_sums,
             cfg: &self.wolfhunt_cfg_buf,
         };
+        let scan_carry_b =
+            spatial_build_hash_scan_carry::SpatialBuildHashScanCarryBindings::from_context_with_extras(
+                &ctx,
+                &scan_carry_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scan_carry(
             &mut self.cache,
             &scan_carry_b,
@@ -960,12 +1006,17 @@ impl CompiledSim for PredatorPreyRealState {
             &mut encoder,
             SLOT_CAP,
         );
-        let scan_add_b = spatial_build_hash_scan_add::SpatialBuildHashScanAddBindings {
+        let scan_add_extras = spatial_build_hash_scan_add::SpatialBuildHashScanAddExtras {
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
             spatial_chunk_sums: &self.spatial_chunk_sums,
             cfg: &self.wolfhunt_cfg_buf,
         };
+        let scan_add_b =
+            spatial_build_hash_scan_add::SpatialBuildHashScanAddBindings::from_context_with_extras(
+                &ctx,
+                &scan_add_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scan_add(
             &mut self.cache,
             &scan_add_b,
@@ -973,13 +1024,17 @@ impl CompiledSim for PredatorPreyRealState {
             &mut encoder,
             SLOT_CAP,
         );
-        let scatter_b = spatial_build_hash_scatter::SpatialBuildHashScatterBindings {
-            agent_pos: &self.agent_pos_buf,
+        let scatter_extras = spatial_build_hash_scatter::SpatialBuildHashScatterExtras {
             spatial_grid_cells: &self.spatial_grid_cells,
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
             cfg: &self.wolfhunt_cfg_buf,
         };
+        let scatter_b =
+            spatial_build_hash_scatter::SpatialBuildHashScatterBindings::from_context_with_extras(
+                &ctx,
+                &scatter_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scatter(
             &mut self.cache,
             &scatter_b,
@@ -989,17 +1044,17 @@ impl CompiledSim for PredatorPreyRealState {
         );
 
         // (3) WolfHunt — body-form spatial walk. Emits Damaged events.
-        let wolfhunt_b = physics_WolfHunt::PhysicsWolfHuntBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_pos: &self.agent_pos_buf,
-            agent_alive: &self.agent_alive_buf,
+        let wolfhunt_extras = physics_WolfHunt::PhysicsWolfHuntExtras {
             agent_creature_type: &self.agent_creature_type_buf,
             spatial_grid_cells: &self.spatial_grid_cells,
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
             cfg: &self.wolfhunt_cfg_buf,
         };
+        let wolfhunt_b = physics_WolfHunt::PhysicsWolfHuntBindings::from_context_with_extras(
+            &ctx,
+            &wolfhunt_extras,
+        );
         dispatch::dispatch_physics_wolfhunt(
             &mut self.cache,
             &wolfhunt_b,
@@ -1022,14 +1077,14 @@ impl CompiledSim for PredatorPreyRealState {
             0,
             bytemuck::bytes_of(&applykill_cfg),
         );
-        let applykill_b = physics_ApplyKill::PhysicsApplyKillBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp: &self.agent_hp_buf,
-            agent_alive: &self.agent_alive_buf,
+        let applykill_extras = physics_ApplyKill::PhysicsApplyKillExtras {
             agent_hunger: &self.agent_hunger_buf,
             cfg: &self.applykill_cfg_buf,
         };
+        let applykill_b = physics_ApplyKill::PhysicsApplyKillBindings::from_context_with_extras(
+            &ctx,
+            &applykill_extras,
+        );
         dispatch::dispatch_physics_applykill(
             &mut self.cache,
             &applykill_b,
@@ -1050,12 +1105,15 @@ impl CompiledSim for PredatorPreyRealState {
             0,
             bytemuck::bytes_of(&sheepgraze_cfg),
         );
-        let sheepgraze_b = physics_SheepGraze::PhysicsSheepGrazeBindings {
-            agent_alive: &self.agent_alive_buf,
+        let sheepgraze_extras = physics_SheepGraze::PhysicsSheepGrazeExtras {
             agent_hunger: &self.agent_hunger_buf,
             agent_creature_type: &self.agent_creature_type_buf,
             cfg: &self.sheepgraze_cfg_buf,
         };
+        let sheepgraze_b = physics_SheepGraze::PhysicsSheepGrazeBindings::from_context_with_extras(
+            &ctx,
+            &sheepgraze_extras,
+        );
         dispatch::dispatch_physics_sheepgraze(
             &mut self.cache,
             &sheepgraze_b,
@@ -1076,13 +1134,15 @@ impl CompiledSim for PredatorPreyRealState {
             0,
             bytemuck::bytes_of(&energydecay_cfg),
         );
-        let energydecay_b = physics_EnergyDecay::PhysicsEnergyDecayBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_alive: &self.agent_alive_buf,
+        let energydecay_extras = physics_EnergyDecay::PhysicsEnergyDecayExtras {
             agent_hunger: &self.agent_hunger_buf,
             cfg: &self.energydecay_cfg_buf,
         };
+        let energydecay_b =
+            physics_EnergyDecay::PhysicsEnergyDecayBindings::from_context_with_extras(
+                &ctx,
+                &energydecay_extras,
+            );
         dispatch::dispatch_physics_energydecay(
             &mut self.cache,
             &energydecay_b,
@@ -1101,12 +1161,14 @@ impl CompiledSim for PredatorPreyRealState {
         self.gpu
             .queue
             .write_buffer(&self.seed_cfg_buf, 0, bytemuck::bytes_of(&seed_cfg));
-        let seed_b = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.seed_cfg_buf,
         };
+        let seed_b = seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+            &ctx,
+            &seed_extras,
+        );
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache,
             &seed_b,

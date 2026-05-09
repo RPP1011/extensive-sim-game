@@ -21,7 +21,9 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 /// Per-fixture state for the stdlib math probe. Owns:
 ///   - Agent SoA (alive only — pos/vel are declaration-only here)
@@ -52,6 +54,12 @@ pub struct StdlibMathProbeState {
     // -- Per-kernel cfg uniforms --
     physics_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
 
@@ -144,6 +152,12 @@ impl StdlibMathProbeState {
             },
         );
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&engine::ability::AbilityRegistry::new()),
+            &gpu,
+            "stdlib_math_probe_runtime",
+        );
+
         Self {
             gpu,
             agent_alive_buf,
@@ -153,6 +167,7 @@ impl StdlibMathProbeState {
             sampled_count_cfg_buf,
             physics_cfg_buf,
             seed_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             tick: 0,
             agent_count,
@@ -197,6 +212,14 @@ impl CompiledSim for StdlibMathProbeState {
         self.event_ring
             .clear_ring_headers_in(&self.gpu, &mut encoder, self.agent_count);
 
+        // Shared once per tick; rebuilt around `note_emits` because it
+        // borrows `self.event_ring` immutably.
+        let agent_buffers = AgentBuffers {
+            alive_buf: Some(&self.agent_alive_buf),
+            pos_buf: Some(&self.agent_pos_buf),
+            ..Default::default()
+        };
+
         // (2) physics_SampleAndBucket — reads agent_alive. For each
         // alive agent: runs the math/rng `let` chain, computes the
         // bucket via `rng.action() % 4u`, and emits Sampled{ agent,
@@ -210,20 +233,29 @@ impl CompiledSim for StdlibMathProbeState {
         self.gpu
             .queue
             .write_buffer(&self.physics_cfg_buf, 0, bytemuck::bytes_of(&physics_cfg));
-        let physics_bindings = physics_SampleAndBucket::PhysicsSampleAndBucketBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_pos: &self.agent_pos_buf,
-            agent_alive: &self.agent_alive_buf,
-            cfg: &self.physics_cfg_buf,
-        };
-        dispatch::dispatch_physics_sampleandbucket(
-            &mut self.cache,
-            &physics_bindings,
-            &self.gpu.device,
-            &mut encoder,
-            self.agent_count,
-        );
+        {
+            let ctx = KernelBindingsContext {
+                state: &agent_buffers,
+                event_ring: &self.event_ring,
+                registry: &self.registry_gpu,
+                voxel_grid: None,
+            };
+            let physics_extras = physics_SampleAndBucket::PhysicsSampleAndBucketExtras {
+                cfg: &self.physics_cfg_buf,
+            };
+            let physics_bindings =
+                physics_SampleAndBucket::PhysicsSampleAndBucketBindings::from_context_with_extras(
+                    &ctx,
+                    &physics_extras,
+                );
+            dispatch::dispatch_physics_sampleandbucket(
+                &mut self.cache,
+                &physics_bindings,
+                &self.gpu.device,
+                &mut encoder,
+                self.agent_count,
+            );
+        }
         // Producer upper bound: at most one Sampled per agent per
         // tick. Records the bound on the host-side ring estimator so
         // downstream consumers can size `event_count` from
@@ -241,19 +273,30 @@ impl CompiledSim for StdlibMathProbeState {
         self.gpu
             .queue
             .write_buffer(&self.seed_cfg_buf, 0, bytemuck::bytes_of(&seed_cfg));
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            indirect_args_0: self.event_ring.indirect_args_0(),
-            cfg: &self.seed_cfg_buf,
-        };
-        dispatch::dispatch_seed_indirect_0(
-            &mut self.cache,
-            &seed_bindings,
-            &self.gpu.device,
-            &mut encoder,
-            self.agent_count,
-        );
+        {
+            let ctx = KernelBindingsContext {
+                state: &agent_buffers,
+                event_ring: &self.event_ring,
+                registry: &self.registry_gpu,
+                voxel_grid: None,
+            };
+            let seed_extras = seed_indirect_0::SeedIndirect0Extras {
+                indirect_args_0: self.event_ring.indirect_args_0(),
+                cfg: &self.seed_cfg_buf,
+            };
+            let seed_bindings =
+                seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+                    &ctx,
+                    &seed_extras,
+                );
+            dispatch::dispatch_seed_indirect_0(
+                &mut self.cache,
+                &seed_bindings,
+                &self.gpu.device,
+                &mut encoder,
+                self.agent_count,
+            );
+        }
 
         // (4) fold_sampled_count — per-handler tag-filter on Sampled
         // (kind = 1u), atomic RMW into per-agent primary view
