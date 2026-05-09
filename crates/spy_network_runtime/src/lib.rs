@@ -116,6 +116,7 @@ pub struct SpyNetworkState {
     // BGL contract demands the bindings exist.
     agent_max_hp_buf: wgpu::Buffer,
     agent_attack_damage_buf: wgpu::Buffer,
+    agent_ability_power_buf: wgpu::Buffer,
     agent_armor_buf: wgpu::Buffer,
     agent_magic_resist_buf: wgpu::Buffer,
     agent_move_speed_buf: wgpu::Buffer,
@@ -277,6 +278,8 @@ impl SpyNetworkState {
         };
         let agent_attack_damage_buf =
             mk_stat("spy_network_runtime::agent_attack_damage");
+        let agent_ability_power_buf =
+            mk_stat("spy_network_runtime::agent_ability_power");
         let agent_armor_buf = mk_stat("spy_network_runtime::agent_armor");
         let agent_magic_resist_buf = mk_stat("spy_network_runtime::agent_magic_resist");
         let agent_move_speed_buf = mk_stat("spy_network_runtime::agent_move_speed");
@@ -455,6 +458,7 @@ impl SpyNetworkState {
             agent_disguise_fake_type_buf,
             agent_max_hp_buf,
             agent_attack_damage_buf,
+            agent_ability_power_buf,
             agent_armor_buf,
             agent_magic_resist_buf,
             agent_move_speed_buf,
@@ -670,6 +674,7 @@ impl CompiledSim for SpyNetworkState {
             agent_armor: &self.agent_armor_buf,
             agent_magic_resist: &self.agent_magic_resist_buf,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_mana: &self.agent_mana_buf,
             agent_creature_type: &self.agent_creature_type_buf,
             mask_0_bitmap: &self.mask_0_bitmap_buf,
@@ -715,6 +720,7 @@ impl CompiledSim for SpyNetworkState {
                 agent_armor: &self.agent_armor_buf,
                 agent_magic_resist: &self.agent_magic_resist_buf,
                 agent_attack_damage: &self.agent_attack_damage_buf,
+                agent_ability_power: &self.agent_ability_power_buf,
                 agent_mana: &self.agent_mana_buf,
                 ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
                 ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
@@ -761,6 +767,7 @@ impl CompiledSim for SpyNetworkState {
             agent_armor: &self.agent_armor_buf,
             agent_magic_resist: &self.agent_magic_resist_buf,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_mana: &self.agent_mana_buf,
             ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
             ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
@@ -807,6 +814,7 @@ impl CompiledSim for SpyNetworkState {
             agent_armor: &self.agent_armor_buf,
             agent_magic_resist: &self.agent_magic_resist_buf,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_mana: &self.agent_mana_buf,
             ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
             ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,

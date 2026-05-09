@@ -128,6 +128,7 @@ pub struct ApplyAbilityVerbSmokeState {
     // `scale_bonus` switch. All zero — verb-smoke program has no
     // scaling slots so `scale_bonus = 0.0`.
     agent_attack_damage_buf: wgpu::Buffer,
+    agent_ability_power_buf: wgpu::Buffer,
     agent_max_hp_buf: wgpu::Buffer,
     agent_hp_buf: wgpu::Buffer,
     agent_armor_buf: wgpu::Buffer,
@@ -218,6 +219,7 @@ impl ApplyAbilityVerbSmokeState {
             })
         };
         let agent_attack_damage_buf = mk_stat("apply_ability_verb_smoke_runtime::agent_attack_damage");
+        let agent_ability_power_buf = mk_stat("apply_ability_verb_smoke_runtime::agent_ability_power");
         let agent_max_hp_buf        = mk_stat("apply_ability_verb_smoke_runtime::agent_max_hp");
         let agent_hp_buf            = mk_stat("apply_ability_verb_smoke_runtime::agent_hp");
         let agent_armor_buf         = mk_stat("apply_ability_verb_smoke_runtime::agent_armor");
@@ -286,6 +288,7 @@ impl ApplyAbilityVerbSmokeState {
             gpu,
             agent_level_buf,
             agent_attack_damage_buf,
+            agent_ability_power_buf,
             agent_max_hp_buf,
             agent_hp_buf,
             agent_armor_buf,
@@ -382,6 +385,7 @@ impl ApplyAbilityVerbSmokeState {
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             ability_registry_chances:           &self.registry_gpu.chances,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_hp:            &self.agent_hp_buf,
             agent_armor:         &self.agent_armor_buf,
