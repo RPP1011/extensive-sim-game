@@ -70,7 +70,7 @@
 
 use crate::ast::*;
 use crate::error::ParseError;
-use crate::tokens::{is_ident_cont, is_ident_start, Cursor};
+use crate::tokens::{consume_int_suffix, is_ident_cont, is_ident_start, Cursor};
 
 type PResult<T> = Result<T, ParseErr>;
 
@@ -2221,11 +2221,44 @@ fn peek_number_or_sign(c: &Cursor) -> bool {
 /// the .sim parser. Returns `(value, is_float)`. Accepts a leading `-`,
 /// digits with `_` separators, optional fractional part, optional
 /// exponent.
+///
+/// Surface forms (task #225 added hex + suffixes — 2026-05-08):
+/// - Decimal: `123`, `1_000_000`, `1.5`, `2.5e-3`
+/// - Hex: `0xFF`, `0xDEAD_BEEF` (any case, `_` separators allowed)
+/// - Integer suffix: trailing `(u|i)(8|16|32|64)?` is consumed and
+///   discarded — purely informational at this stage; lower assigns the
+///   real type from the verb signature.
 fn number_literal(c: &mut Cursor) -> PResult<(f64, bool)> {
     c.skip_ws();
     let start = c.pos;
-    if c.starts_with_char('-') {
+    let negative = c.starts_with_char('-');
+    if negative {
         c.bump(1);
+    }
+    // Hex literal: `0x…`. Lex digits + `_`; no fractional / exponent.
+    // Integer suffix still allowed at the tail.
+    if c.starts_with("0x") || c.starts_with("0X") {
+        c.bump(2);
+        let digits_start = c.pos;
+        while let Some(ch) = c.peek_char() {
+            if ch.is_ascii_hexdigit() || ch == '_' { c.bump(1); } else { break; }
+        }
+        let raw = c.src[digits_start..c.pos].replace('_', "");
+        if raw.is_empty() {
+            return Err(ParseErr::at(
+                Span::new(start, c.pos),
+                "expected hex digits after `0x`",
+            ));
+        }
+        let v = u64::from_str_radix(&raw, 16).map_err(|_| {
+            ParseErr::at(
+                Span::new(start, c.pos),
+                format!("invalid hex literal `0x{raw}`"),
+            )
+        })?;
+        consume_int_suffix(c);
+        let signed = if negative { -(v as f64) } else { v as f64 };
+        return Ok((signed, false));
     }
     while let Some(ch) = c.peek_char() {
         if ch.is_ascii_digit() || ch == '_' {
@@ -2273,6 +2306,7 @@ fn number_literal(c: &mut Cursor) -> PResult<(f64, bool)> {
     let v = raw.parse::<f64>().map_err(|_| {
         ParseErr::at(Span::new(start, c.pos), format!("invalid numeric literal `{raw}`"))
     })?;
+    if !is_float { consume_int_suffix(c); }
     Ok((v, is_float))
 }
 

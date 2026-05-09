@@ -565,3 +565,27 @@ fn lowers_reveal() {
         ref other => panic!("expected Reveal; got {other:?}"),
     }
 }
+
+// ---------------------------------------------------------------------------
+// Task #225 — hex literals + integer suffixes in lexer (2026-05-08).
+// End-to-end coverage: a `decoy 5 0x0BC614E` ability lowers to the SAME
+// `EffectOp::Decoy` as the existing decimal-form test, proving the new
+// hex-literal lex round-trips through the full parse + lower pipeline.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lower_decoy_hex_literal() {
+    let src = "ability Bait { target: enemy cooldown: 1s decoy 5 0x0BC614E }";
+    let file = parse_ability_file(src).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("decoy must lower");
+    assert_eq!(prog.effects.len(), 1);
+    match prog.effects[0] {
+        EffectOp::Decoy { subject_idx, fake_pos } => {
+            assert_eq!(subject_idx, 5);
+            // 0x0BC614E == 12_345_678 — same value as the decimal-form
+            // `lower_decoy_two_args` test in `src/ability_lower.rs`.
+            assert_eq!(fake_pos, 12_345_678);
+        }
+        ref other => panic!("expected EffectOp::Decoy; got {other:?}"),
+    }
+}
