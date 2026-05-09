@@ -23,8 +23,16 @@ engine_voxel = { path = "../engine_voxel" }
 wave_defense_runtime = { path = "../wave_defense_runtime" }
 
 # voxel_engine with app-harness pulls winit + egui transitively.
-voxel_engine = { git = "https://github.com/RPP1011/voxel_engine", rev = "a2324b63f32d93eec699c01c7309a63168d1a6bb", features = ["app-harness"] }
+voxel_engine = { git = "https://github.com/RPP1011/voxel_engine", rev = "68842aa4be54d3cb387bf0a7d3fb69d9ffe3d326", features = ["app-harness"] }
 
 glam = "0.29"
 anyhow = "1"
 winit = "0.30"
+# Bridge types for the egui overlay path (vk::CommandPool needed
+# in viewer_window's Gfx struct for egui's texture-upload pool).
+# Must match voxel_engine's ash version.
+ash = "0.38"
+# egui re-exported via voxel_engine's app-harness — depend on the
+# matching version directly so HUD code can build egui widgets.
+egui = "0.33"
+egui_plot = "0.33"

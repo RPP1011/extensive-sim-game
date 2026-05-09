@@ -28,6 +28,7 @@ use voxel_engine::camera::OrbitCamera;
 use voxel_engine::render::{RendererConfig, VoxelRenderer};
 use voxel_engine::scene::config::SceneConfig;
 use voxel_engine::scene::Scene;
+use voxel_engine::ui::EguiState;
 use voxel_engine::vulkan::instance::VulkanContext;
 use voxel_engine::vulkan::swapchain::SwapchainContext;
 use winit::application::ApplicationHandler;
@@ -75,6 +76,12 @@ struct Gfx {
     /// after `app.setup()` populates the snapshot — first refresh
     /// happens before the first render so the grid isn't empty.
     bridge: VoxelBridge,
+    /// Phase C: HUD/plot overlay via egui-ash. Painted on top of
+    /// the swapchain image after the voxel present_blit.
+    egui: EguiState,
+    /// One-shot command pool for egui's texture-upload submits
+    /// (font atlas, etc.). Outlives every frame.
+    egui_command_pool: ash::vk::CommandPool,
 }
 
 impl ApplicationHandler for WindowedViewer {
@@ -97,6 +104,33 @@ impl ApplicationHandler for WindowedViewer {
             .expect("SwapchainContext::new failed");
         let renderer = VoxelRenderer::new(&ctx, WINDOW_W, WINDOW_H)
             .expect("VoxelRenderer::new failed");
+
+        // egui state: framebuffers cover the swapchain image views;
+        // texture-upload command pool is a one-shot transient
+        // pool on the graphics queue (egui-ash-renderer submits its
+        // own staging copies for font atlas uploads).
+        let egui = EguiState::new(
+            &ctx,
+            swapchain.surface_format(),
+            swapchain.image_views(),
+            ash::vk::Extent2D {
+                width: WINDOW_W,
+                height: WINDOW_H,
+            },
+            &window,
+        )
+        .expect("EguiState::new failed");
+        let gq = ctx.graphics_queue().expect("graphics queue");
+        let egui_command_pool = unsafe {
+            ctx.device()
+                .create_command_pool(
+                    &ash::vk::CommandPoolCreateInfo::default()
+                        .flags(ash::vk::CommandPoolCreateFlags::TRANSIENT)
+                        .queue_family_index(gq.family_index),
+                    None,
+                )
+                .expect("egui texture-upload command pool")
+        };
 
         // Setup primes ViewerApp's snapshot caches via
         // refresh_snapshot — needed before the first bridge.refresh
@@ -131,6 +165,8 @@ impl ApplicationHandler for WindowedViewer {
             swapchain,
             renderer,
             bridge,
+            egui,
+            egui_command_pool,
         });
     }
 
@@ -150,6 +186,15 @@ impl ApplicationHandler for WindowedViewer {
         _id: WindowId,
         event: WindowEvent,
     ) {
+        // Route every WindowEvent through egui first. egui returns
+        // EventResponse.consumed=true for events it handled (mouse
+        // clicks on egui widgets, text input into egui textfields,
+        // etc.) — once we add interactive panels we'll skip our own
+        // handling for consumed events. Phase C just paints; nothing
+        // to skip yet.
+        if let Some(gfx) = self.gfx.as_mut() {
+            let _ = gfx.egui.handle_window_event(&gfx.window, &event);
+        }
         match event {
             WindowEvent::CloseRequested => {
                 eprintln!(
@@ -167,6 +212,12 @@ impl ApplicationHandler for WindowedViewer {
                 if let Some(mut gfx) = self.gfx.take() {
                     let _ = unsafe { gfx.ctx.device().device_wait_idle() };
                     gfx.bridge.destroy(&gfx.ctx);
+                    unsafe {
+                        gfx.ctx
+                            .device()
+                            .destroy_command_pool(gfx.egui_command_pool, None);
+                    }
+                    gfx.egui.destroy(&gfx.ctx);
                     gfx.swapchain.destroy(&gfx.ctx);
                     gfx.renderer.destroy(&gfx.ctx);
                     // ctx + window drop here naturally.
@@ -194,6 +245,7 @@ impl ApplicationHandler for WindowedViewer {
                 // Build the title before re-borrowing `self.gfx` mutably
                 // (winit's set_title is borrow-conservative).
                 let title = self.title_for_tick(self.app.sim_tick());
+                let hud_state = HudState::from_app(&self.app);
                 if let Some(gfx) = self.gfx.as_mut() {
                     gfx.window.set_title(&title);
 
@@ -210,13 +262,29 @@ impl ApplicationHandler for WindowedViewer {
                         eprintln!("[viewer_window] render_frame_gpu failed: {e}");
                         return;
                     }
-                    if let Err(e) = gfx.swapchain.present_blit(
-                        &gfx.ctx,
+
+                    // Run egui for the frame (panels + plots), then
+                    // present_blit_with_overlay paints the result
+                    // on top of the swapchain image after the voxel
+                    // blit.
+                    gfx.egui.run(&gfx.window, |ctx| paint_hud(ctx, &hud_state));
+                    let gq = gfx.ctx.graphics_queue().expect("graphics queue");
+                    let egui_pool = gfx.egui_command_pool;
+                    let ctx_ref = &gfx.ctx;
+                    let egui_ref = &mut gfx.egui;
+                    if let Err(e) = gfx.swapchain.present_blit_with_overlay(
+                        ctx_ref,
                         gfx.renderer.light_output_image(),
                         WINDOW_W,
                         WINDOW_H,
+                        ash::vk::Semaphore::null(),
+                        |cmd_buf, image_index| {
+                            egui_ref.cmd_paint(ctx_ref, cmd_buf, image_index, gq.queue, egui_pool)
+                        },
                     ) {
-                        eprintln!("[viewer_window] present_blit failed: {e}");
+                        eprintln!(
+                            "[viewer_window] present_blit_with_overlay failed: {e}"
+                        );
                         return;
                     }
                     // about_to_wait handles the next request_redraw —
@@ -275,4 +343,42 @@ fn main() {
 #[allow(dead_code)]
 fn _phase_b_marker() -> RendererConfig {
     RendererConfig::default()
+}
+
+/// Snapshot of sim state captured per frame, handed to the egui
+/// paint closure. Decoupled from `ViewerApp` so the closure doesn't
+/// need to borrow the app while gfx is borrowed mutably.
+struct HudState {
+    tick: u64,
+    settlers: u32,
+    monsters: u32,
+    score: f32,
+}
+
+impl HudState {
+    fn from_app(app: &ViewerApp) -> Self {
+        Self {
+            tick: app.sim_tick(),
+            settlers: app.alive_settlers(),
+            monsters: app.alive_monsters(),
+            score: app.score(),
+        }
+    }
+}
+
+/// Per-frame egui paint. Top-left stats panel + a placeholder for
+/// future plots. Future phases will add: alive-count line plot,
+/// per-rule fire counts, click-to-inspect side panel, chronicle
+/// scroll.
+fn paint_hud(ctx: &egui::Context, state: &HudState) {
+    egui::Window::new("sim")
+        .anchor(egui::Align2::LEFT_TOP, egui::vec2(8.0, 8.0))
+        .resizable(false)
+        .collapsible(false)
+        .show(ctx, |ui| {
+            ui.label(format!("tick   {}", state.tick));
+            ui.label(format!("settlers  {}", state.settlers));
+            ui.label(format!("monsters  {}", state.monsters));
+            ui.label(format!("score   {:.1}", state.score));
+        });
 }
