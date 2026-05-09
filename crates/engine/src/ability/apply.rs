@@ -122,11 +122,14 @@ pub enum ApplyEvent {
     /// `summon "<template>" [N] [for <duration>]` — caster spawns
     /// `count` minions of `template_hash` for `lifetime_ticks`. The
     /// template hash is the FxHash of the template ident from the
-    /// .ability source (deferred resolution — apply handlers map the
-    /// hash to a spawner via a registry follow-up). Captured here so
-    /// downstream sims can drain the event when the spawner wires up;
-    /// no runtime sim consumes it today (deferred infra mirroring the
-    /// CastAbility/TransferGold/ModifyStanding fall-through pattern).
+    /// .ability source (deferred resolution — per-template stat
+    /// lookup against a `SummonTemplateRegistry` is still pending).
+    /// Per-fixture sims drain this via `apply_summon_event_to_state`
+    /// (Task #232 wired the multi-spawn allocator — `count = N`
+    /// allocates N slots from `SimState`'s pool, deterministic via
+    /// linear pool alloc). The `template_hash` rides through to each
+    /// `SummonedAgent` so a future registry-aware re-stat pass can
+    /// look up per-template HP / creature_type / abilities.
     Summon         { source: AgentId, template_hash: u32, count: u8, lifetime_ticks: u32 },
     /// `harvest "<kind>" [<amount>]` — caster gathers `amount` units of
     /// the named resource. `kind_hash` is the FxHash of the resource
@@ -1399,6 +1402,92 @@ pub fn apply_program_aoe_hull_filter(
     apply_program_aoe_sphere_filter(center, radius, candidates)
 }
 
+/// One spawned summon: the freshly-allocated `agent_id` plus the
+/// absolute tick at which it expires. The expiry tick = `cast_tick +
+/// lifetime_ticks` (q8/q16-free — straight u64 add). Returned to the
+/// caller because today there is no `summon_expires_at_tick` column on
+/// the SimState SoA — adding one would bump the schema hash and the
+/// task scope (Task #232) explicitly forbids that. Per-fixture sims
+/// that need the expiry can plumb this list into their own
+/// despawn-on-tick scheduler. Sims that just want the spawn (and don't
+/// care about despawn) can ignore the `expires_at_tick` field.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct SummonedAgent {
+    pub agent_id: AgentId,
+    pub template_hash: u32,
+    pub expires_at_tick: u64,
+}
+
+/// Drain ONE `ApplyEvent::Summon` event into `state` by allocating
+/// `count` fresh agent slots from the pool. Each spawned slot:
+///
+/// * gets its own `AgentId` from the deterministic linear pool
+///   (`AgentSlotPool::alloc()` — freelist-first, then `next_raw++`),
+/// * shares the same `template_hash` and the same absolute
+///   `expires_at_tick = cast_tick + lifetime_ticks`,
+/// * is positioned at the source caster's current position; falls back
+///   to `Vec3::ZERO` if the caster slot is past the SoA cap (defensive
+///   — should never happen for a well-formed cast).
+///
+/// Pass anything other than `ApplyEvent::Summon` and the call is a
+/// no-op (returns empty). This keeps the call site uniform — drain a
+/// stream of `ApplyEvent`s, route each one to its consumer, ignore the
+/// non-Summon variants here.
+///
+/// The returned `SmallVec<SummonedAgent>` is in allocation order
+/// (slot N then slot N+1 …). The caller plumbs the despawn schedule
+/// (or any other per-summon bookkeeping) into their own sim — there
+/// is no `summon_expires_at_tick` column on the SimState SoA today,
+/// and adding one would bump the schema hash.
+///
+/// **Cap behavior — defensive truncate.** If the agent pool runs out of
+/// free slots before `count` allocations complete, the loop stops at
+/// the first `None` from `state.spawn_agent`. Callers can detect a
+/// partial fill via `returned.len() < event.count as usize`. We choose
+/// truncate-and-return over panic because a summon-cast is a routine
+/// in-sim verb — the dispatcher must not crash a tick because a
+/// fixture undersized its `agent_cap`.
+///
+/// **Determinism (P5).** No RNG draws — slot order is determined by
+/// the pool's freelist + next_raw counter, both deterministic
+/// functions of prior tick state.
+///
+/// **Cross-backend parity (P3).** CPU-side state mutator only; the GPU
+/// dispatcher does not allocate agent slots (only writes chronicle
+/// records into the event ring). Sims that want CPU-equivalent summon
+/// spawning under GPU dispatch drain `EffectSummonApplied` chronicle
+/// records on the CPU after the GPU pass and call this for each —
+/// same allocation order both ways because the chronicle records emit
+/// in deterministic iteration order on both backends.
+///
+/// **What this is NOT.** Ignores `template_hash` for stat lookup —
+/// every spawned slot uses `AgentSpawn::default()`. Per-template stat
+/// resolution against a `SummonTemplateRegistry` is deferred (the
+/// registry doesn't exist in-engine yet). The hash still rides on each
+/// `SummonedAgent` so a future re-stat pass can look it up.
+pub fn apply_summon_event_to_state(
+    state:     &mut crate::state::SimState,
+    event:     &ApplyEvent,
+    cast_tick: u64,
+) -> SmallVec<[SummonedAgent; 4]> {
+    use crate::state::AgentSpawn;
+
+    let &ApplyEvent::Summon { source, template_hash, count, lifetime_ticks } = event else {
+        return SmallVec::new();
+    };
+
+    let mut out: SmallVec<[SummonedAgent; 4]> = SmallVec::new();
+    let expires_at_tick = cast_tick.saturating_add(lifetime_ticks as u64);
+    let spawn_pos = state.agent_pos(source).unwrap_or(glam::Vec3::ZERO);
+
+    for _ in 0..(count as usize) {
+        let spec = AgentSpawn { pos: spawn_pos, ..AgentSpawn::default() };
+        let Some(agent_id) = state.spawn_agent(spec) else { break }; // pool exhausted
+        out.push(SummonedAgent { agent_id, template_hash, expires_at_tick });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1651,6 +1740,134 @@ mod tests {
             ApplyEvent::Summon { source, template_hash, count, lifetime_ticks }
             if source == caster() && template_hash == 0xDEADBEEF && count == 3 && lifetime_ticks == 80
         ));
+    }
+
+    // -- Task #232 — Summon multi-spawn allocation honors `count`. -----------
+    //
+    // Pre-task #232 the (deferred) consumer wrote ONE slot per cast and
+    // ignored `count`. These tests pin the new shape: the consumer
+    // allocates exactly `count` slots from the pool, deterministic via
+    // linear pool alloc, every spawned slot carries the same
+    // template_hash + same expires_at_tick, and the truncate-on-pool-
+    // exhaustion path returns `< count` without panicking.
+
+    fn summon_event(source: AgentId, template_hash: u32, count: u8, lifetime_ticks: u32) -> ApplyEvent {
+        ApplyEvent::Summon { source, template_hash, count, lifetime_ticks }
+    }
+
+    #[test]
+    fn apply_summon_event_allocates_count_slots() {
+        // Pre-task #232 the (deferred) consumer allocated ONE slot per
+        // cast and ignored `count`. After: `count = N` allocates N
+        // slots, each with its own AgentId, sharing template_hash and
+        // expires_at_tick. With one pre-spawned caster (slot 0), the
+        // pool's `next_raw` hands out 2, 3, 4, 5 contiguously.
+        use crate::state::{AgentSpawn, SimState};
+
+        let mut state = SimState::new(16, 0xCAFE);
+        let caster_id = state
+            .spawn_agent(AgentSpawn::default())
+            .expect("caster spawn must succeed (cap=16, freshly built)");
+
+        let summoned = apply_summon_event_to_state(
+            &mut state,
+            &summon_event(caster_id, 0xDEADBEEF, 4, 100),
+            /* cast_tick */ 50,
+        );
+
+        assert_eq!(summoned.len(), 4, "count=4 must allocate 4 slots");
+        let mut seen: Vec<AgentId> = Vec::new();
+        for s in summoned.iter() {
+            assert!(!seen.contains(&s.agent_id), "duplicate agent_id");
+            seen.push(s.agent_id);
+            assert_eq!(s.template_hash, 0xDEADBEEF);
+            assert_eq!(s.expires_at_tick, 150);
+            assert!(state.agent_alive(s.agent_id));
+        }
+    }
+
+    #[test]
+    fn apply_summon_event_with_count_one_allocates_one() {
+        use crate::state::{AgentSpawn, SimState};
+
+        let mut state = SimState::new(8, 0xCAFE);
+        let caster_id = state.spawn_agent(AgentSpawn::default()).unwrap();
+        let summoned = apply_summon_event_to_state(&mut state, &summon_event(caster_id, 0xCAFE, 1, 60), 10);
+        assert_eq!(summoned.len(), 1);
+        assert_eq!(summoned[0].expires_at_tick, 70);
+    }
+
+    #[test]
+    fn apply_summon_event_with_count_zero_allocates_none() {
+        // count=0: no-op. Must not panic and must not advance the pool.
+        use crate::state::{AgentSpawn, SimState};
+
+        let mut state = SimState::new(8, 0xCAFE);
+        let caster_id = state.spawn_agent(AgentSpawn::default()).unwrap();
+        let pool_before = state.agents_alive().count();
+        let summoned = apply_summon_event_to_state(&mut state, &summon_event(caster_id, 0xCAFE, 0, 60), 10);
+        assert!(summoned.is_empty());
+        assert_eq!(state.agents_alive().count(), pool_before);
+    }
+
+    #[test]
+    fn apply_summon_event_truncates_on_pool_exhaustion() {
+        // cap=4, caster takes slot 0, summon count=10 → only 3 free
+        // slots remain. Loop stops at 3 returns instead of panicking.
+        use crate::state::{AgentSpawn, SimState};
+
+        let mut state = SimState::new(4, 0xCAFE);
+        let caster_id = state.spawn_agent(AgentSpawn::default()).unwrap();
+        let summoned = apply_summon_event_to_state(&mut state, &summon_event(caster_id, 0xC0FFEE, 10, 30), 0);
+        assert_eq!(summoned.len(), 3);
+        for s in summoned.iter() {
+            assert_ne!(s.agent_id, caster_id);
+            assert!(state.agent_alive(s.agent_id));
+        }
+    }
+
+    #[test]
+    fn apply_summon_event_is_deterministic_across_runs() {
+        // P5: identical inputs → identical AgentId vector.
+        use crate::state::{AgentSpawn, SimState};
+
+        fn run() -> Vec<u32> {
+            let mut state = SimState::new(16, 0xCAFE);
+            let caster_id = state.spawn_agent(AgentSpawn::default()).unwrap();
+            let s = apply_summon_event_to_state(&mut state, &summon_event(caster_id, 0xDEADBEEF, 3, 80), 5);
+            s.iter().map(|x| x.agent_id.raw()).collect()
+        }
+        assert_eq!(run(), run());
+    }
+
+    #[test]
+    fn apply_summon_event_positions_at_caster() {
+        use crate::state::{AgentSpawn, SimState};
+        use glam::Vec3;
+
+        let mut state = SimState::new(8, 0xCAFE);
+        let caster_id = state.spawn_agent(AgentSpawn::default()).unwrap();
+        let here = Vec3::new(7.0, 0.0, -3.5);
+        state.set_agent_pos(caster_id, here);
+        let summoned = apply_summon_event_to_state(&mut state, &summon_event(caster_id, 0x1234, 3, 40), 0);
+        for s in summoned.iter() {
+            assert_eq!(state.agent_pos(s.agent_id).unwrap(), here);
+        }
+    }
+
+    #[test]
+    fn apply_summon_event_ignores_non_summon_variant() {
+        // Non-Summon variants are a no-op so callers can route a
+        // mixed ApplyEvent stream through the consumer uniformly.
+        use crate::state::{AgentSpawn, SimState};
+
+        let mut state = SimState::new(8, 0xCAFE);
+        let caster_id = state.spawn_agent(AgentSpawn::default()).unwrap();
+        let pool_before = state.agents_alive().count();
+        let event = ApplyEvent::Damage { source: caster_id, target: caster_id, amount: 1.0 };
+        let summoned = apply_summon_event_to_state(&mut state, &event, 0);
+        assert!(summoned.is_empty());
+        assert_eq!(state.agents_alive().count(), pool_before);
     }
 
     // -- Wave 1.5#9 nested-effect dispatch ----------------------------------
