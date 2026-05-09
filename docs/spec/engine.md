@@ -11,6 +11,28 @@ Companion to `dsl.md` (language reference + compiler contract), `state.md` (fiel
 
 ---
 
+## Audit 2026-05-08 — drift vs current implementation
+
+A spec sweep against `crates/engine/src/state/mod.rs`, `crates/engine/src/cascade/handler.rs`, `crates/engine/src/schema_hash.rs`, `crates/engine/.schema_hash`, and `crates/dsl_compiler/src/cg/emit/wgsl_body.rs` (current HEAD `fbaa7eca`). Inline `> ⚠️ Audit 2026-05-08:` callouts at affected sections point back here. **No prose was rewritten — additive only.**
+
+Drift items (severity tags: `[CRITICAL]` ≫ `[STALE]` > `[MISSING]` > `[UNDOCUMENTED]` > `[STATUS-FLIP]`):
+
+| § | Title | Severity | What spec says | What code does |
+|---|---|---|---|---|
+| §3 | SoA shape contract | `[UNDOCUMENTED]` | Hot fields enumerated; cold fields enumerated for Wave 1 layout | `SimState` (state/mod.rs ~L33–L188) carries new cold field `cold_beliefs: Vec<BoundedMap<AgentId, BeliefState, 8>>` (Wave 3 ToM Phase 2, gated by `theory-of-mind` feature) plus `ability_cooldowns` per-agent slot grid. Belief state is stored as a `BoundedMap` per observer, **not** as flat 6-column SoA. |
+| §3 | SoA shape contract | `[MISSING]` | Spec lists no Lift A / B / C / D SoA columns | EffectOps `TravelTo`, `Disguise`, `Decoy`, `EraseBelief`, `Recipe`, `WearTool`, `Propose`, `Announce`, `GainSkill`, `CreateObligation` all reserve SoA columns in their dispatcher doc-comments (`busy_until_tick`, `travel_dest_{x,y,z}`, `disguise_expires_at_tick`, `disguise_fake_type`, etc.) — but the columns themselves are **not yet allocated** in `SimState`. Foundation merges land the chronicle event ordinal + dispatcher only; consumer rules + their SoA writes are subsequent slices. |
+| §5 | Cascade primitive — event log | `[STALE]` | Spec implies a small Wave 1 event-kind set | `EventKindId` (cascade/handler.rs ~L25) populates ordinals **0..22, 25..76, plus 128 `ChronicleEntry`** today. Effect chronicle catalogue (26..76) was added through Wave 1.5 → Wave 3 ToM Phases 1–4 → Lifts A–D. Spec catalog is silent on the new ordinals. |
+| §4.5 / §10.2 | AOE / multi-target apply | `[STATUS-FLIP]` | §4.5 describes only single-target Attack/Cast and 3D-distance `apply_announce` (Path A). §10.2 lists `AgentAttacked` etc. without AOE shape coverage. | AOE Path B is the production AOE path today: `apply_ability` shader (wgsl_body.rs ~L1785, L2131+) walks 12 `ShapeKind` variants (Circle=0, Cone=1, Line=2, Ring=3, Spread=4, Box=5, Sphere=6, Column=7, Wall=8, Cylinder=9, Dome=10, Hull=11) via a 27-cell spatial walk and per-arm chronicle emit. Path A is no longer the only AOE story. |
+| §4.7 / §6 | View fold + reduction determinism | `[UNDOCUMENTED]` | "Sort events by their stable per-tick sequence number before reduction" | The Spread arm (wgsl_body.rs ~L2808) keeps the lowest-K AgentIds via a workgroup-shared **bitonic sort over a 256-slot private array, sort key = AgentId ascending** (PR #39, 2026-05-08). The general principle is "sort-by-AgentId for AOE multi-target reduction"; this AgentId-tie-break convention is not yet stated in §6. |
+| §8 | Schema hash | `[STALE]` | Spec gives a fingerprint sketch but no concrete baseline value | `crates/engine/.schema_hash` is currently `f3687ae266720af11ae945c44410a8e6df7066b6644301bcc0347986b5fff1b4`. Spec should either pin the baseline or explicitly punt to the file (currently neither). The hash bumped through Wave 1.5+ effect ordinals, ToM Phases 1–4, and Lifts A–D since the spec was last touched. |
+| §8 | Schema hash | `[UNDOCUMENTED]` | Inputs sketch lists 7 categories | Actual `schema_hash()` (schema_hash.rs) feeds `RngPurpose` discriminants (P5 closed-set), the `engine_gpu_rules/.schema_hash` cross-crate hash, snapshot/observation-packer/probe-harness format strings, the full `EffectOp` packed catalogue (46 variants), and `ShapeKind` ordinals. Spec sketch is partial. |
+| §10.1 | Mirror table | `[MISSING]` | Theory-of-Mind row absent | `cold_beliefs` per-observer `BoundedMap<AgentId, BeliefState, 8>` is host-only today (`#[cfg(feature = "theory-of-mind")]`). Mirror table should reflect this. |
+| §12.5 | Key constants | `[STALE]` | `MAX_EFFECTS = 8` | `MAX_EFFECTS_PER_PROGRAM = 6` in `crates/engine/src/ability/program.rs:28`. |
+
+No `[CRITICAL]` items found. The spec contracts (SoA-vs-event split, mask discipline, six-phase pipeline, P11 reduction story, RNG keying) are all coherent with the implementation; drift is concentrated in the *catalogue* surfaces (event ordinals, effect ordinals, shape ordinals, schema-hash baseline, future-SoA columns).
+
+---
+
 ## 1. Scope
 
 The engine is a Rust library crate (`crates/engine/`) that provides runtime primitives the compiler targets, plus the two concrete backends.
@@ -98,6 +120,8 @@ The GPU backend exposes two execution modes:
 ## 3. SimState shape contract
 
 Both backends expose the **same public SimState API**: `agent_pos(id) -> Option<Vec3>`, `set_agent_hp(id, hp)`, `agents_alive() -> impl Iterator<AgentId>`, etc. Callers don't know or care where the data lives. For the field catalog, see `state.md`.
+
+> ⚠️ Audit 2026-05-08: live `SimState` adds `cold_beliefs: Vec<BoundedMap<AgentId, BeliefState, 8>>` (Wave 3 ToM Phase 2, gated by the `theory-of-mind` feature) and `ability_cooldowns: Vec<[u32; MAX_ABILITIES]>` per-agent slot grid. Belief state is **per-observer `BoundedMap`**, not a flat 6-column SoA per (observer, target) pair — comment-shape descriptions in `cascade/handler.rs` and `ability/apply.rs` that say "6 BeliefState SoA columns" describe the *future-shape* the consumer rules will read once SoA-flattening lands. Same caveat applies to the Lift A–D SoA columns (`busy_until_tick`, `travel_dest_{x,y,z}`, `disguise_expires_at_tick`, `disguise_fake_type`, recipe / wear / propose / announce / gain_skill / create_obligation cells): the chronicle event ordinals (`EventKindId` 67–76) and `EffectOp` dispatchers exist, but the consumer-side SoA columns themselves are *not yet allocated* in `SimState`. Foundation merges land the dispatcher; SoA wiring lands in subsequent slices.
 
 ### SerialBackend residency
 
@@ -278,6 +302,8 @@ The apply kernel's job: read `scratch.actions` FieldHandle, filter by MicroKind,
 
 **Distance semantics:** 3D Euclidean across both backends. Agents at different elevations are evaluated by full 3D distance, not planar (XZ-only). Confirmed 2026-04-26 (status.md Q#1 resolved).
 
+> ⚠️ Audit 2026-05-08: §4.5 covers single-target Attack/Cast and the 3D-distance Announce broadcast (Path A) only. The compiler-emitted **AOE Path B** is the production multi-target apply today — see the new `apply_ability` shader (`crates/dsl_compiler/src/cg/emit/wgsl_body.rs` ~L1785, L2131+) which lowers all 12 `ShapeKind` variants (Circle=0, Cone=1, Line=2, Ring=3, Spread=4, Box=5, Sphere=6, Column=7, Wall=8, Cylinder=9, Dome=10, Hull=11) via a 27-cell spatial walk with per-arm chronicle emit. AOE Path B is currently described in `dsl.md` rather than here; engine.md should adopt it in a follow-up pass.
+
 ### 4.6 Cascade dispatch (phase 4, continued)
 
 Cascade is GPU-dispatchable, with Serial as the reference.
@@ -363,6 +389,8 @@ Cascade handlers declare a lane: `Validation | Effect | Reaction | Audit`. Lanes
 
 The `EventRing` abstraction is backend-local in storage but identical in contract.
 
+> ⚠️ Audit 2026-05-08: `EventKindId` (`crates/engine/src/cascade/handler.rs` ~L25) is now populated at ordinals **0..22, 25..76, plus 128 `ChronicleEntry`**. Effect ordinals **26..38** landed in Wave 1.5+, **39..62** added the extended status / movement / pet / DoT / HoT family, **63..66** were Wave 3 ToM Phases 1–3 (`PlantBelief`, `Observe`, `Scry`, `Reveal`), **67..69** were ToM Phase 4 (`Disguise`, `Decoy`, `EraseBelief`), and **70..76** are Lifts A–D (`TravelTo`, `Recipe`, `WearTool`, `Propose`, `Announce`, `GainSkill`, `CreateObligation`). The full enum is the schema-hash input — see §8.
+
 **Serial:** `VecDeque<Entry>` with fixed capacity. `push(event) -> EventId` monotonic. `replayable_sha256()` iterates host entries and hashes.
 
 **GPU:** GPU-resident ring buffer + atomic append counter. At phase-4 end, the host drains the GPU ring to its host mirror. The **replayable-hash is always computed on the host mirror** — both backends emit the same byte-packed representation. Events are sorted by their stable per-tick sequence number before hashing.
@@ -398,6 +426,8 @@ Implementation obligations:
 - Float reductions are either integer-fixed-point OR sorted-key to avoid associativity drift.
 - GPU atomic ops in kernels are commutative-and-associative by construction OR must sort before reduction.
 - The `replayable_sha256()` result is computed from events downloaded to host regardless of backend.
+
+> ⚠️ Audit 2026-05-08: AOE multi-target reductions (Spread arm in `wgsl_body.rs` ~L2808) use **AgentId-ascending sort** as the canonical reduction-determinism key, implemented today as a workgroup-shared **bitonic sort over a 256-slot private array** (PR #39, 2026-05-08). AgentIds are unique by construction so no secondary tie-break key is needed. This is the standing convention for "lowest-K" multi-target reductions on GPU; see constitution P11 for the principle.
 
 **Batch GPU path determinism:** Non-deterministic in event order by design. Atomic tail racing inside the resident cascade does not serialise. Statistical parity (alive counts, event multisets, conservation laws) is the contract for batch mode. Determinism tests run against `SerialBackend` and the GPU sync path only.
 
@@ -496,6 +526,8 @@ The GPU schema surface additionally includes:
 - View storage layouts for `@symmetric_pair_topk` and `@per_entity_ring` annotated views.
 
 CI fence: changes to any of the above bump `crates/engine/.schema_hash`. Drift fails parity tests at startup.
+
+> ⚠️ Audit 2026-05-08: current baseline is `f3687ae266720af11ae945c44410a8e6df7066b6644301bcc0347986b5fff1b4` (`crates/engine/.schema_hash`, HEAD `fbaa7eca`). The hash bumped through Wave 1.5+ effect ordinals, ToM Phases 1–4, and Lifts A–D. Actual `schema_hash()` (`crates/engine/src/schema_hash.rs`) feeds inputs the §8 sketch omits: `RngPurpose` discriminants (P5 closed-set, currently `Action=1, Sample=2, Shuffle=3, Conception=4, Uniform=5, Gauss=6, Coin=7, UniformInt=8, GaussB=9, Chance=10`), the `engine_gpu_rules/.schema_hash` cross-crate hash, snapshot/observation-packer/probe-harness format strings, the full `EffectOp` packed catalogue (46 variants, ordinal 0..45), and `ShapeKind` ordinals (12 variants, 0..11). The pinned baseline auto-bumps per layout change — treat the value above as a snapshot, not a contract; the contract is "the file in tree matches what `schema_hash()` produces at startup".
 
 ---
 
@@ -632,6 +664,8 @@ pub struct GpuBackend {
 | Cold-state (gold, standing, memory) | `SimState.cold_*` | Side buffers (§10.2) | Upload at init; snapshot reads back |
 | Event ring | Caller-provided | `event_ring_buf` | Sync: populated each tick. Batch: only via snapshot |
 | Chronicle | (CPU `Vec`) | `chronicle_ring_buf` | Sync: drained per call. Batch: snapshot watermark |
+
+> ⚠️ Audit 2026-05-08: Theory-of-Mind `cold_beliefs` (per-observer `BoundedMap<AgentId, BeliefState, 8>`, gated by `theory-of-mind` feature) is **host-only** today — no GPU mirror. Upcoming Lift A–D SoA columns (`busy_until_tick`, `travel_dest_*`, `disguise_*`, recipe / wear / propose / announce / skill / obligation cells) are not yet allocated and therefore not yet mirrored either; this row will need updates as each consumer rule lands.
 
 Tick advance: the seed-indirect kernel runs once per tick and appends `atomicAdd(&sim_cfg.tick, 1u)` at end-of-tick. CPU `state.tick` is stale across the whole batch by design.
 
@@ -920,6 +954,8 @@ step_batch(n)
 | `PAYLOAD_WORDS` (per event) | 8 |
 | `K` (spatial query cap) | 32 |
 | `FOLD_WORKGROUP_SIZE` | 64 |
+
+> ⚠️ Audit 2026-05-08: actual constant is `MAX_EFFECTS_PER_PROGRAM = 6` (`crates/engine/src/ability/program.rs:28`). The packed registry stride uses 6, not 8.
 
 ### 12.6 DSL → WGSL lowering
 
