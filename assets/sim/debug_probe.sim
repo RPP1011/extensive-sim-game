@@ -1,0 +1,54 @@
+// debug_probe — fixture for the Compiler Debug Mode (Phase 2)
+// `DebugWgslFlags` end-to-end exercise (task #242). Opts in to ALL 3
+// instrumentation axes:
+//
+//   - event_kind_histogram: every chronicle producer site bumps
+//     event_kind_counts[<kind>]. The fixture's per-tick ApplyAbility
+//     dispatcher fires Pulse → emits EffectDamageApplied (kind=26)
+//     per alive agent.
+//   - mask_hit_rate: the verb's mask kernel bumps mask_total /
+//     mask_passed per candidate. Single self-target verb, so the
+//     mask is PerAgent and per-tick visits = agent_count.
+//   - score_kernel_visits: scoring kernel bumps
+//     score_kernel_visits[agent_id] per visit. Self-target verb, so
+//     each alive agent visits the row exactly once per tick.
+//
+// Per-tick chain: clear → mask_verb_Pulse → scoring → chronicle
+// dispatcher (apply_ability 1 by self target self) → consumer
+// (ApplyDamageFromChronicle reads agents.hp(actor) — no-op so HP
+// doesn't drift across ticks). Mirrors stress_agent_count.sim's shape
+// but uses Damage (kind=26) instead of SelfDamage so the
+// instrumentation surface lines up with the cast_density fixture's
+// dominant kind for cross-check.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Pulsed {
+  actor: AgentId,
+}
+
+@replayable @gpu_amenable
+event EffectDamageApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+entity Combatant : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+verb Pulse(self) =
+  action PulseAction
+  when self.alive
+  apply_ability 1 by self target self
+  score 1.0
+
+@phase(post)
+physics ApplyDamageFromChronicle {
+  on EffectDamageApplied { actor: a, target: _, amount: _ } {
+    let _ = agents.hp(a);
+  }
+}

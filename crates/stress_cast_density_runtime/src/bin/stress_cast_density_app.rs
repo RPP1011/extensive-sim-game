@@ -79,6 +79,28 @@ fn main() {
                             wall_ns,
                         );
                     }
+                    // Phase 2 debug: per-EventKindId histogram. One
+                    // record per non-zero kind, every 10 ticks. Lets
+                    // the harness attribute the per-tick chronicle ring
+                    // tail back to the dominant event kind without
+                    // lugging 129 zeros through every tick.
+                    let nonzero: Vec<(usize, u32)> = tick
+                        .event_kind_histogram
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, &c)| (c > 0).then_some((i, c)))
+                        .collect();
+                    if !nonzero.is_empty() {
+                        let entries: Vec<String> = nonzero
+                            .iter()
+                            .map(|(k, c)| format!("{{\"kind\":{},\"count\":{}}}", k, c))
+                            .collect();
+                        println!(
+                            "{{\"tick\":{},\"event_kind_histogram\":[{}]}}",
+                            tick.tick,
+                            entries.join(","),
+                        );
+                    }
                 }
             }
             let median_us = metrics.median_us();

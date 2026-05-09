@@ -478,8 +478,12 @@ pub fn kernel_topology_to_spec_and_body(
     let mut typed_bindings: Vec<TypedBinding> = dedup.into_values().collect();
     typed_bindings.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
 
-    // 8. Assign slots — data bindings 0..N, cfg uniform at slot N.
-    let mut bindings: Vec<KernelBinding> = Vec::with_capacity(typed_bindings.len() + 1);
+    // 8. Assign slots — data bindings 0..N. The cfg uniform is appended
+    //    at slot N AFTER the body has been composed (so any debug-mode
+    //    Phase 2 instrumentation buffers — event_kind_counts, mask_total
+    //    /passed, score_kernel_visits — can be inserted ahead of cfg
+    //    when their respective WGSL refs appear in the kernel body).
+    let mut bindings: Vec<KernelBinding> = Vec::with_capacity(typed_bindings.len() + 4);
     for (slot, tb) in typed_bindings.into_iter().enumerate() {
         bindings.push(KernelBinding {
             slot: slot as u32,
@@ -489,14 +493,6 @@ pub fn kernel_topology_to_spec_and_body(
             bg_source: tb.bg_source,
         });
     }
-    let cfg_slot = bindings.len() as u32;
-    bindings.push(KernelBinding {
-        slot: cfg_slot,
-        name: "cfg".into(),
-        access: AccessMode::Uniform,
-        wgsl_ty: cfg_struct.clone(),
-        bg_source: BgSource::Cfg,
-    });
 
     // 9. Build the cfg struct decl + cfg-construction expression — per
     //    classified kind. ViewFold is handled above; ALL PerEvent-
@@ -612,6 +608,49 @@ pub fn kernel_topology_to_spec_and_body(
     ctx.alive_atomic_writes.set(prior_alive_cas);
     ctx.event_ring_atomic_loads.set(prior_atomic_loads);
     let wgsl_body = wgsl_body_result?;
+
+    // 10b. Compiler debug mode Phase 2 (DebugWgslFlags) — when the body
+    //      references one of the instrumentation counter buffers, append
+    //      a matching binding so the WGSL emit + Rust `Bindings` struct
+    //      surface the slot the runtime fills. Substring scan against
+    //      the body text mirrors the prelude-injection convention in
+    //      `compose_wgsl_file` — the names live in the compiler-owned
+    //      namespace (`event_kind_counts` / `mask_total` / `mask_passed`
+    //      / `score_kernel_visits`), so DSL-author identifier collisions
+    //      are not a concern.
+    let mut push_debug_binding = |name: &str| {
+        let slot = bindings.len() as u32;
+        bindings.push(KernelBinding {
+            slot,
+            name: name.into(),
+            access: AccessMode::AtomicStorage,
+            wgsl_ty: "u32".into(),
+            bg_source: BgSource::External(name.into()),
+        });
+    };
+    let dbg = prog.debug_wgsl;
+    for (gate, name) in [
+        (dbg.event_kind_histogram, "event_kind_counts"),
+        (dbg.mask_hit_rate,        "mask_total"),
+        (dbg.mask_hit_rate,        "mask_passed"),
+        (dbg.score_kernel_visits,  "score_kernel_visits"),
+    ] {
+        if gate && wgsl_body.contains(name) {
+            push_debug_binding(name);
+        }
+    }
+
+    // 10c. Push the cfg uniform LAST so its slot lands after every data
+    //      binding (including any Phase 2 debug instrumentation buffers
+    //      added in 10b above).
+    let cfg_slot = bindings.len() as u32;
+    bindings.push(KernelBinding {
+        slot: cfg_slot,
+        name: "cfg".into(),
+        access: AccessMode::Uniform,
+        wgsl_ty: cfg_struct.clone(),
+        bg_source: BgSource::Cfg,
+    });
 
     let spec = KernelSpec {
         name,

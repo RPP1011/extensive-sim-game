@@ -1,27 +1,27 @@
-//! `stress_agent_count_runtime` build script. Mirrors
-//! `spy_network_runtime/build.rs`'s shape — lowers
-//! `assets/sim/stress_agent_count.sim` through the DSL compiler
-//! pipeline (parse → resolve → CG lower → schedule → emit). Resulting
-//! WGSL + Rust files land in OUT_DIR/<kernel>.{wgsl,rs} and are
-//! concatenated into `OUT_DIR/generated.rs` for `include!` into
-//! `src/lib.rs`.
+//! `debug_probe_runtime` build script. Mirrors
+//! `stress_agent_count_runtime/build.rs`'s shape but opts in to ALL 3
+//! Phase 2 `DebugWgslFlags` axes (event_kind_histogram +
+//! mask_hit_rate + score_kernel_visits) so the synthesised kernels
+//! carry every compiler-emitted instrumentation surface — exercises
+//! the BGL fanout end-to-end at runtime.
 
 use std::env;
 use std::fs;
 use std::path::PathBuf;
 
 fn main() {
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let manifest_dir =
+        PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir
         .parent()
         .and_then(|p| p.parent())
-        .expect("workspace root above crates/stress_agent_count_runtime");
-    let sim_path = workspace_root.join("assets/sim/stress_agent_count.sim");
+        .expect("workspace root above crates/debug_probe_runtime");
+    let sim_path = workspace_root.join("assets/sim/debug_probe.sim");
 
     println!("cargo:rerun-if-changed={}", sim_path.display());
     println!("cargo:rerun-if-changed=build.rs");
 
-    let corpus_dir = workspace_root.join("assets/ability_test/stress_agent_count");
+    let corpus_dir = workspace_root.join("assets/ability_test/debug_probe");
     println!(
         "cargo:rerun-if-changed={}",
         corpus_dir.join("Pulse.ability").display(),
@@ -29,36 +29,27 @@ fn main() {
 
     let src = fs::read_to_string(&sim_path)
         .unwrap_or_else(|e| panic!("read {}: {e}", sim_path.display()));
-    let program = dsl_compiler::parse(&src).expect("parse stress_agent_count.sim");
-    let comp = dsl_ast::resolve::resolve(program).expect("resolve stress_agent_count.sim");
-    // D3 — per-kernel GPU timestamps + memory-traffic accounting via
-    // the compiler-emitted `DebugTimings`. The runtime opts in via
-    // `dispatch::record_<name>_timing` helpers per tick; falls back to
-    // the plain `dispatch_<name>` path when `DebugTimings::new`
-    // returns None (adapter without TIMESTAMP_QUERY — P10).
-    //
-    // Phase 2 debug instrumentation:
-    //   - event_kind_histogram — per-EventKindId chronicle counter,
-    //     bound to the scoring + chronicle producer kernels via the
-    //     compiler-emitted `event_kind_counts` external.
-    //   - score_kernel_visits — per-agent argmax visit counter, bound
-    //     to the scoring kernel. At 200k agents we want to know if
-    //     the per-agent visit distribution is uniform (= scoring is
-    //     load-balanced) or some agents pile up.
+    let program = dsl_compiler::parse(&src).expect("parse debug_probe.sim");
+    let comp = dsl_ast::resolve::resolve(program).expect("resolve debug_probe.sim");
+    // Phase 2 (compiler debug mode) — opt in to ALL 3 WGSL atomic-
+    // counter axes. The compiler-emitted dispatcher / mask / scoring
+    // kernels add `atomicAdd(&event_kind_counts[...], 1u)` /
+    // `atomicAdd(&mask_total[...], 1u)` /
+    // `atomicAdd(&mask_passed[...], 1u)` /
+    // `atomicAdd(&score_kernel_visits[...], 1u)` calls inline; the
+    // BGL composer surfaces matching `event_kind_counts` /
+    // `mask_total` / `mask_passed` / `score_kernel_visits` bindings
+    // on the kernels' `Bindings` structs which the runtime fills with
+    // its own buffers.
     let opts = dsl_compiler::cg::lower::LowerOpts {
-        debug: dsl_compiler::cg::lower::DebugDepth::Kernel,
-        debug_wgsl: dsl_compiler::cg::lower::DebugWgslFlags {
-            event_kind_histogram: true,
-            score_kernel_visits: true,
-            ..dsl_compiler::cg::lower::DebugWgslFlags::NONE
-        },
+        debug_wgsl: dsl_compiler::cg::lower::DebugWgslFlags::ALL,
         ..dsl_compiler::cg::lower::LowerOpts::default()
     };
     let cg = match dsl_compiler::cg::lower::lower_compilation_to_cg_with_opts(&comp, opts) {
         Ok(p) => p,
         Err(o) => {
             for d in &o.diagnostics {
-                println!("cargo:warning=[stress_agent_count lower diag] {d}");
+                println!("cargo:warning=[debug_probe lower diag] {d}");
             }
             o.program
         }
@@ -67,21 +58,16 @@ fn main() {
         &cg,
         dsl_compiler::cg::schedule::ScheduleStrategy::Default,
     );
-    let artifacts = dsl_compiler::cg::emit::emit_cg_program_with_debug(
-        &schedule_result.schedule,
-        &cg,
-        opts.debug,
-    )
-    .expect("emit stress_agent_count CG program");
+    let artifacts = dsl_compiler::cg::emit::emit_cg_program(&schedule_result.schedule, &cg)
+        .expect("emit debug_probe CG program");
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
 
     println!(
-        "cargo:warning=[stress_agent_count emit-stats] {} kernels, schedule has {} stages",
+        "cargo:warning=[debug_probe emit-stats] {} kernels, schedule has {} stages",
         artifacts.kernel_index.len(),
         schedule_result.schedule.stages.len(),
     );
-    let mut total_dispatcher_bytes: usize = 0;
     for kernel_name in &artifacts.kernel_index {
         let key = format!("{kernel_name}.wgsl");
         let body = match artifacts.wgsl_files.get(&key) {
@@ -89,19 +75,11 @@ fn main() {
             None => continue,
         };
         let bytes = body.len();
-        total_dispatcher_bytes += bytes;
         let bindings = body.matches("@binding(").count();
         println!(
-            "cargo:warning=[stress_agent_count emit-stats]   {kernel_name}: {bytes} B, {bindings} bindings",
+            "cargo:warning=[debug_probe emit-stats]   {kernel_name}: {bytes} B, {bindings} bindings",
         );
     }
-    // Emit the dispatcher kernel total via a stamp file so the runtime
-    // can read it back without re-parsing the WGSL files at runtime.
-    fs::write(
-        out_dir.join("dispatcher_total_bytes.txt"),
-        total_dispatcher_bytes.to_string(),
-    )
-    .expect("write dispatcher_total_bytes.txt");
 
     for (name, body) in &artifacts.wgsl_files {
         fs::write(out_dir.join(name), body)
@@ -110,8 +88,8 @@ fn main() {
 
     let mut generated = String::new();
     generated.push_str(
-        "// AUTO-CONCATENATED from compiler-emitted artifacts by stress_agent_count_runtime/build.rs.\n\
-         // Do not edit. Regenerate by editing assets/sim/stress_agent_count.sim and rebuilding.\n\n",
+        "// AUTO-CONCATENATED from compiler-emitted artifacts by debug_probe_runtime/build.rs.\n\
+         // Do not edit. Regenerate by editing assets/sim/debug_probe.sim and rebuilding.\n\n",
     );
     let mut wrap_module = |name: &str, content: &str| {
         generated.push_str(

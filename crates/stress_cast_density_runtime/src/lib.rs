@@ -65,6 +65,13 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
+/// Slot count for the WGSL `event_kind_counts: array<atomic<u32>>`
+/// instrumentation buffer. Sized for `EventKindId::ChronicleEntry =
+/// 128 + 1` so every emitted EventKind discriminant has a dedicated
+/// counter slot. See `crates/engine/src/cascade/handler.rs` —
+/// `EventKindId` enum.
+pub const N_EVENT_KIND_SLOTS: usize = 129;
+
 // -- Ring + AOE constants -------------------------------------------------
 
 /// The chronicle ring's per-dispatch slot cap. Pinned by `if (_slot <
@@ -161,6 +168,12 @@ pub struct TickMetric {
     /// GPU work for the tick (excludes host-side encoder build +
     /// queue submit + device.poll wait).
     pub kernel_timings: Vec<(String, u64)>,
+    /// Phase 2 debug instrumentation: per-EventKindId histogram for
+    /// this tick. Index `k` = number of times the dispatcher's
+    /// compiler-emitted `atomicAdd(&event_kind_counts[k], 1u)` site
+    /// fired for `EventKindId(k)`. Sum across all slots equals the
+    /// chronicle ring's per-tick high-water mark.
+    pub event_kind_histogram: [u32; N_EVENT_KIND_SLOTS],
 }
 
 /// Aggregated stress metrics returned by `run_stress`.
@@ -249,6 +262,13 @@ pub struct StressCastDensityState {
     physics_cfg_buf: wgpu::Buffer,
     consumer_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
+
+    // -- Phase 2 debug instrumentation: per-EventKindId histogram. The
+    //    dispatcher kernel atomicAdds &event_kind_counts[<kind>] at every
+    //    chronicle producer site. Reset to zero each tick so per-tick
+    //    histograms don't accumulate across the run. --
+    event_kind_counts_buf: wgpu::Buffer,
+    event_kind_counts_zero_buf: wgpu::Buffer,
 
     cache: dispatch::KernelCache,
 
@@ -459,6 +479,28 @@ impl StressCastDensityState {
             },
         );
 
+        // Phase 2 debug instrumentation buffer (event_kind_counts).
+        // Sized to N_EVENT_KIND_SLOTS u32 atomics. Init zero. The
+        // matching zero buffer is COPY_SRC only — driven into
+        // event_kind_counts at the start of each tick to clear it.
+        let zeros_kind: Vec<u32> = vec![0u32; N_EVENT_KIND_SLOTS];
+        let event_kind_counts_buf = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("stress_cast_density::event_kind_counts"),
+                contents: bytemuck::cast_slice(&zeros_kind),
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+            },
+        );
+        let event_kind_counts_zero_buf = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("stress_cast_density::event_kind_counts_zero"),
+                contents: bytemuck::cast_slice(&zeros_kind),
+                usage: wgpu::BufferUsages::COPY_SRC,
+            },
+        );
+
         // D3 timing instrumentation — initialised before moving `gpu`.
         let debug_timings = dispatch::DebugTimings::new(&gpu);
 
@@ -486,6 +528,8 @@ impl StressCastDensityState {
             physics_cfg_buf,
             consumer_cfg_buf,
             seed_cfg_buf,
+            event_kind_counts_buf,
+            event_kind_counts_zero_buf,
             cache: dispatch::KernelCache::default(),
             debug_timings,
             last_kernel_timings: Vec::new(),
@@ -527,6 +571,15 @@ impl StressCastDensityState {
                 label: Some("stress_cast_density::step::dispatch"),
             });
         encoder.copy_buffer_to_buffer(&self.event_tail_zero, 0, &self.event_tail_buf, 0, 4);
+        // Phase 2 debug: clear the per-kind histogram so the readback
+        // captures THIS tick's counts, not accumulated.
+        encoder.copy_buffer_to_buffer(
+            &self.event_kind_counts_zero_buf,
+            0,
+            &self.event_kind_counts_buf,
+            0,
+            (N_EVENT_KIND_SLOTS as u64) * 4,
+        );
 
         let dispatch_bindings =
             physics_DispatchAoePulse::PhysicsDispatchAoePulseBindings {
@@ -562,6 +615,7 @@ impl StressCastDensityState {
                 ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
                 ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
                 ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
+                event_kind_counts: &self.event_kind_counts_buf,
                 cfg: &self.physics_cfg_buf,
             };
         if let Some(t) = self.debug_timings.as_ref() {
@@ -718,6 +772,46 @@ impl StressCastDensityState {
         self.n_agents
     }
 
+    /// Read back the per-EventKindId histogram populated by the
+    /// dispatcher's compiler-emitted `atomicAdd(&event_kind_counts[k],
+    /// 1u)` instrumentation. Indices are `EventKindId` discriminants;
+    /// the slot count matches [`N_EVENT_KIND_SLOTS`]. Resets to zero
+    /// at the start of every `step()` call, so this returns the most
+    /// recent tick's histogram only.
+    pub fn read_event_kind_histogram(&self) -> [u32; N_EVENT_KIND_SLOTS] {
+        let bytes = (N_EVENT_KIND_SLOTS as u64) * 4;
+        let staging = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("stress_cast_density::event_kind_counts_staging"),
+            size: bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self
+            .gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("stress_cast_density::read_event_kind_histogram"),
+            });
+        encoder.copy_buffer_to_buffer(&self.event_kind_counts_buf, 0, &staging, 0, bytes);
+        self.gpu.queue.submit(Some(encoder.finish()));
+        let slice = staging.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |res| {
+            res.expect("event_kind_counts_staging map_async failed");
+        });
+        self.gpu
+            .device
+            .poll(wgpu::PollType::Wait)
+            .expect("device poll failed during event_kind_counts readback");
+        let mut out = [0u32; N_EVENT_KIND_SLOTS];
+        {
+            let view = slice.get_mapped_range();
+            let words: &[u32] = bytemuck::cast_slice(&view);
+            out.copy_from_slice(&words[..N_EVENT_KIND_SLOTS]);
+        }
+        staging.unmap();
+        out
+    }
+
     /// Read back the chronicle ring contents (first `n_records`
     /// records). Used by the behavioral pin test to verify
     /// EffectDamageApplied (kind=26) records were actually written.
@@ -828,6 +922,7 @@ pub fn run_stress(agent_cap: u32, tick_budget: u32) -> Option<StressMetrics> {
             .iter()
             .map(|k| (k.kernel.clone(), k.wall_ns))
             .collect();
+        let event_kind_histogram = state.read_event_kind_histogram();
         per_tick.push(TickMetric {
             tick,
             wall_clock_us: step_us,
@@ -835,6 +930,7 @@ pub fn run_stress(agent_cap: u32, tick_budget: u32) -> Option<StressMetrics> {
             ring_overflowed: overflowed,
             spread_sort_us: step_us,
             kernel_timings,
+            event_kind_histogram,
         });
     }
     Some(StressMetrics {
