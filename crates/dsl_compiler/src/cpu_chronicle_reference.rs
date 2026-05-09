@@ -724,6 +724,38 @@ pub fn apply_event_to_chronicle_record(
             rec[5] = 0;
             Some(rec)
         }
+        // Lift D — GainSkill. Chronicle kind 75. payload_a packs
+        // (skill_id | amount_q8 << 8). payload_b = 0. Self-cast:
+        // target = caster.
+        //   slot 2 = caster_slot (the agent gaining skill)
+        //   slot 3 = caster_slot (target = caster — skill grows on
+        //                          the caster's per-agent SoA cell)
+        //   slot 4 = packed (amount_q8 << 8 | skill_id)
+        //   slot 5 = 0
+        ApplyEvent::GainSkill { source: _, skill_id, amount_q8 } => {
+            let packed = (skill_id as u32) | ((amount_q8 as u32) << 8);
+            rec[0] = 75;
+            rec[2] = caster_id;
+            rec[3] = caster_id;
+            rec[4] = packed;
+            rec[5] = 0;
+            Some(rec)
+        }
+        // Lift D — CreateObligation. Chronicle kind 76. payload_a
+        // packs (obligation_id | kind << 16). payload_b = 0.
+        //   slot 2 = caster_slot (creditor / claimant)
+        //   slot 3 = target_slot (debtor / promisor)
+        //   slot 4 = packed (kind << 16 | obligation_id)
+        //   slot 5 = 0
+        ApplyEvent::CreateObligation { source: _, target: _, obligation_id, kind } => {
+            let packed = (obligation_id as u32) | ((kind as u32) << 16);
+            rec[0] = 76;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            rec[4] = packed;
+            rec[5] = 0;
+            Some(rec)
+        }
         // After the slice γ closer (Summon → kind 62), every
         // `ApplyEvent` variant has a chronicle counterpart — no
         // fallback `_ => None` arm needed. The closed-set match
@@ -1532,6 +1564,8 @@ mod tests {
                 41 => ApplyEvent::WearTool       { source: aid(1), tool_kind: 3, amount: 64 },
                 42 => ApplyEvent::Propose        { source: aid(1), target: aid(2), contract_kind: 1, expires_at_tick: 0 },
                 43 => ApplyEvent::Announce       { source: aid(1), announcement_kind: 7, radius_q8: 896 },
+                44 => ApplyEvent::GainSkill      { source: aid(1), skill_id: 2, amount_q8: 64 },
+                45 => ApplyEvent::CreateObligation { source: aid(1), target: aid(2), obligation_id: 17, kind: 0 },
                 _ => panic!("unexpected effect_kind in table"),
             }
         };

@@ -357,7 +357,24 @@ pub enum EventKindId {
     // See `docs/spec/economy.md §6` (observer fan-out) + §7 (contracts).
     EffectProposeApplied  = 73,
     EffectAnnounceApplied = 74,
-    // Slots 75-127 reserved for replayable event variants added in later tasks.
+    // Lift D — knowledge / skills + obligation registry. Two chronicle
+    // records per cast pair:
+    //   * `EffectGainSkillApplied` (kind=75) — fires when an
+    //     `EffectOp::GainSkill` (op#44) slot fires. Per-fixture consumer
+    //     reads the per-agent per-skill SoA column for `skill_id` and
+    //     adds `amount_q8 / 256.0`, clamped to [0.0, 1.0]. SHAPE:
+    //     4-payload-word record (caster + caster + packed
+    //     (amount_q8 << 8) | skill_id + 0).
+    //   * `EffectCreateObligationApplied` (kind=76) — fires when an
+    //     `EffectOp::CreateObligation` (op#45) slot fires. Per-fixture
+    //     consumer registers the obligation in the AggregatePool and
+    //     updates per-agent debtor / creditor indices. SHAPE: 4-payload-
+    //     word record (caster + target + packed (kind << 16) |
+    //     obligation_id + 0).
+    // See `docs/spec/economy.md §7` (obligations) + §8 (skills).
+    EffectGainSkillApplied         = 75,
+    EffectCreateObligationApplied  = 76,
+    // Slots 77-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 

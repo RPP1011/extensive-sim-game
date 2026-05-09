@@ -1153,6 +1153,19 @@ fn pack_effect(op: EffectOp) -> (u32, u32, u32) {
         // `(payload_a >> 8) & 0xFFFF` (radius_q8).
         EffectOp::Announce { announcement_kind, radius_q8 } =>
             (43, (announcement_kind as u32) | ((radius_q8 as u32) << 8), 0),
+        // Lift D — `gain_skill <skill_id> <amount_q8>`. payload_a's low
+        // 8 bits = skill_id ordinal; next 16 bits = amount_q8. payload_b
+        // = 0. Consumer unpacks via `payload_a & 0xFF` (skill_id) and
+        // `(payload_a >> 8) & 0xFFFF` (amount_q8).
+        EffectOp::GainSkill { skill_id, amount_q8 } =>
+            (44, (skill_id as u32) | ((amount_q8 as u32) << 8), 0),
+        // Lift D — `create_obligation <obligation_id> <kind>`. payload_a's
+        // low 16 bits = obligation_id (registry index); next 8 bits =
+        // kind (variant tag — Debt/Future/Insurance/Retainer/Service).
+        // payload_b = 0. Consumer unpacks via `payload_a & 0xFFFF`
+        // (obligation_id) and `(payload_a >> 16) & 0xFF` (kind).
+        EffectOp::CreateObligation { obligation_id, kind } =>
+            (45, (obligation_id as u32) | ((kind as u32) << 16), 0),
     }
 }
 

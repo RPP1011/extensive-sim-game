@@ -793,6 +793,57 @@ pub enum EffectOp {
     /// and emits per-observer perception events. See
     /// `docs/spec/economy.md §6`.
     Announce { announcement_kind: u8, radius_q8: u16 } = 43,
+
+    // --- Lift D — knowledge / skills + obligation registry ---
+    //
+    // `gain_skill <skill_id> <amount>` — caster's skill in `skill_id`
+    // (u8 ordinal indexing the per-fixture SkillRegistry — Blacksmithing,
+    // Diplomacy, Cartography, …) increases by `amount` (q8 fraction —
+    // 256 = full skill mastery). Self-cast (target = caster). The
+    // dispatcher writes a chronicle record (kind=75); the per-fixture
+    // consumer reads the per-agent SoA skill column for `skill_id` and
+    // bumps it (clamped to [0.0, 1.0] — recipes / mask gates that use
+    // the value will see the new level on the next tick). See
+    // `docs/spec/economy.md §8` for the skill model.
+    //
+    // `create_obligation <obligation_id> <kind>` — caster creates a
+    // persistent obligation in the per-fixture ObligationRegistry. The
+    // `obligation_id` (u16) is the registry slot; `kind` (u8 ordinal —
+    // Debt, Future, Insurance, Retainer, Service) tags the variant.
+    // Cast target is the obligated party (the debtor / promisor / …).
+    // The dispatcher writes a chronicle record (kind=76); the per-
+    // fixture consumer registers the obligation in the AggregatePool
+    // and updates per-agent debtor/creditor indices. The `discharge`
+    // and `default` companion verbs (and the obligation TERMS body —
+    // principal, due_tick, collateral, …) ship in a follow-up slice;
+    // this slice ships only the registry write primitive. See
+    // `docs/spec/economy.md §7` for the obligation model.
+    //
+    // SHAPE NOTE: both variants pack tight under P4. GainSkill is 1 + 2
+    // = 3 bytes payload + 1B tag = 4B. CreateObligation is 2 + 1 = 3
+    // bytes payload + 1B tag = 4B. Well under the ≤16B EffectOp
+    // ceiling.
+    //
+    // The packed effect-kind ordinals are 44 (GainSkill) and 45
+    // (CreateObligation), contiguous with Announce=43. The chronicle
+    // EventKindIds are 75 and 76, contiguous with
+    // EffectAnnounceApplied=74.
+    /// `gain_skill <skill_id> <amount>` — caster's per-skill SoA cell
+    /// for `skill_id` (u8 ordinal into SkillRegistry) increases by
+    /// `amount_q8` (q8 fraction — 256 = full mastery). Self-cast. The
+    /// per-fixture consumer clamps the result to [0.0, 1.0]. See
+    /// `docs/spec/economy.md §8`.
+    GainSkill { skill_id: u8, amount_q8: u16 } = 44,
+
+    /// `create_obligation <obligation_id> <kind>` — caster registers
+    /// a persistent obligation between caster and the cast target.
+    /// `obligation_id` (u16) is the slot in the per-fixture
+    /// ObligationRegistry; `kind` (u8 ordinal — Debt=0, Future=1,
+    /// Insurance=2, Retainer=3, Service=4) tags the variant. The full
+    /// terms (principal, due_tick, collateral, …) live in the registry
+    /// entry — this verb just creates the record; discharge / default
+    /// companion verbs ship later. See `docs/spec/economy.md §7`.
+    CreateObligation { obligation_id: u16, kind: u8 } = 45,
 }
 
 /// Stat targeted by `buff`. Vocabulary is small today (just the two

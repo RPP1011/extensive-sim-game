@@ -269,6 +269,25 @@ pub enum ApplyEvent {
     /// Pairs with `EventKindId::EffectAnnounceApplied = 74`. See
     /// `docs/spec/economy.md §6`.
     Announce       { source: AgentId, announcement_kind: u8, radius_q8: u16 },
+    /// Lift D — `gain_skill <skill_id> <amount>` self-cast skill
+    /// growth. Caster's per-skill SoA cell for `skill_id` (u8 ordinal
+    /// into SkillRegistry) increases by `amount_q8` (q8 fraction —
+    /// 256 = full mastery). The downstream consumer rule clamps the
+    /// result to [0.0, 1.0]. Pairs with
+    /// `EventKindId::EffectGainSkillApplied = 75`. See
+    /// `docs/spec/economy.md §8`.
+    GainSkill      { source: AgentId, skill_id: u8, amount_q8: u16 },
+    /// Lift D — `create_obligation <obligation_id> <kind>` registry
+    /// write. Caster registers a persistent obligation between caster
+    /// (creditor / claimant) and target (debtor / promisor) in the
+    /// per-fixture ObligationRegistry. `obligation_id` is the registry
+    /// slot; `kind` tags the variant (Debt=0, Future=1, Insurance=2,
+    /// Retainer=3, Service=4). The downstream consumer registers the
+    /// obligation in the AggregatePool and updates per-agent debtor /
+    /// creditor indices. Pairs with
+    /// `EventKindId::EffectCreateObligationApplied = 76`. See
+    /// `docs/spec/economy.md §7`.
+    CreateObligation { source: AgentId, target: AgentId, obligation_id: u16, kind: u8 },
 }
 
 /// Inline budget — most abilities have ≤4 effects (P4 says
@@ -578,6 +597,19 @@ fn push_effect_event(
         // originate from the caster's location.
         EffectOp::Announce { announcement_kind, radius_q8 } =>
             out.push(ApplyEvent::Announce { source: caster, announcement_kind, radius_q8 }),
+        // Lift D — gain_skill. Self-cast skill growth. The dispatcher
+        // emits one ApplyEvent::GainSkill per cast; a per-fixture
+        // consumer reads the per-agent per-skill SoA column for
+        // `skill_id` and adds `amount_q8 / 256.0`, clamped to [0,1].
+        EffectOp::GainSkill { skill_id, amount_q8 } =>
+            out.push(ApplyEvent::GainSkill { source: caster, skill_id, amount_q8 }),
+        // Lift D — create_obligation. Registry write between caster
+        // (creditor / claimant) and target (debtor / promisor). The
+        // dispatcher emits one ApplyEvent::CreateObligation per cast;
+        // the per-fixture consumer registers the obligation in the
+        // AggregatePool and updates per-agent debtor / creditor indices.
+        EffectOp::CreateObligation { obligation_id, kind } =>
+            out.push(ApplyEvent::CreateObligation { source: caster, target, obligation_id, kind }),
         // CastAbility is recursive (needs cascade-style
         // re-dispatch); deferred to slice δ. Skip for now.
         EffectOp::CastAbility { .. } => {}

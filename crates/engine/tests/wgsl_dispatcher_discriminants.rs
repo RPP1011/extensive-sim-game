@@ -462,6 +462,26 @@ fn announce_packs_to_discriminant_43_matching_wgsl_dispatcher() {
     );
 }
 
+// Lift D — `gain_skill` self-cast skill growth verb.
+#[test]
+fn gain_skill_packs_to_discriminant_44_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::GainSkill { skill_id: 2, amount_q8: 64 }),
+        44,
+        "GainSkill discriminant — WGSL dispatcher arm `kind == 44u` depends on this"
+    );
+}
+
+// Lift D — `create_obligation` registry write verb.
+#[test]
+fn create_obligation_packs_to_discriminant_45_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::CreateObligation { obligation_id: 17, kind: 0 }),
+        45,
+        "CreateObligation discriminant — WGSL dispatcher arm `kind == 45u` depends on this"
+    );
+}
+
 #[test]
 fn empty_sentinel_byte_matches_wgsl_dispatcher() {
     // The dispatcher loop's `if (kind == 0xFFu) { continue; }` early-out
