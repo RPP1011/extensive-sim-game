@@ -3352,6 +3352,14 @@ pub(crate) const EFFECT_KIND_TO_EVENT_KIND_ID: &[(u32, u32)] = &[
     // a per-tick travel kernel interpolates `pos` toward the destination
     // over `eta_ticks` ticks.
     (39, 70), // EffectOp::TravelTo    → EventKindId::EffectTravelToApplied
+    // Lift B — items / inventory + production / recipes. Dispatcher
+    // writes one chronicle record per cast for each verb. Per-fixture
+    // consumer rules read `RecipeRegistry[recipe_id]` (Recipe) or look
+    // up the caster's tool of `tool_kind` (WearTool) and emit the
+    // inventory / wear deltas. See `docs/spec/economy.md §4.1` (recipes)
+    // + §4.3 (capital goods).
+    (40, 71), // EffectOp::Recipe      → EventKindId::EffectRecipeApplied
+    (41, 72), // EffectOp::WearTool    → EventKindId::EffectWearToolApplied
 ];
 
 /// Look up the runtime `EventKindId` for an `EffectOp` discriminant.
@@ -3483,6 +3491,10 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain EraseBelief=38");
     let travel_to_event_id = event_kind_id_for_effect_kind(39)
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain TravelTo=39");
+    let recipe_event_id = event_kind_id_for_effect_kind(40)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Recipe=40");
+    let wear_tool_event_id = event_kind_id_for_effect_kind(41)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain WearTool=41");
 
     let i4  = indent;                   // arm `if`/`else if` lines
     let i8  = format!("{i4}    ");      // body of arm
@@ -4305,6 +4317,56 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {travel_to_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // Recipe = 40 → 71 (Lift B production verb)
+    s.push_str(&format!("{i4}}} else if (kind == 40u) {{\n"));
+    s.push_str(&format!("{i8}// Recipe = 40 → EventKindId::EffectRecipeApplied = 71\n"));
+    s.push_str(&format!("{i8}// payload_a low 16 bits = recipe_id (registry index); next 8 bits =\n"));
+    s.push_str(&format!("{i8}// target_tool slot (0xFF sentinel = no tool target). payload_b = 0.\n"));
+    s.push_str(&format!("{i8}// The consumer unpacks via:\n"));
+    s.push_str(&format!("{i8}//   recipe_id   = payload_a & 0xFFFFu;\n"));
+    s.push_str(&format!("{i8}//   target_tool = (payload_a >> 16u) & 0xFFu;\n"));
+    s.push_str(&format!("{i8}// then reads `RecipeRegistry[recipe_id]`, validates the caster's\n"));
+    s.push_str(&format!("{i8}// inventory + (optionally) the `target_tool` slot, and emits the\n"));
+    s.push_str(&format!("{i8}// ingredient/output inventory deltas. Self-cast: recipes act on\n"));
+    s.push_str(&format!("{i8}// the caster's inventory (`target_slot == caster_slot`).\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectRecipeApplied (caster_slot + caster_slot + packed_recipe + 0)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {recipe_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // WearTool = 41 → 72 (Lift B capital-goods wear)
+    s.push_str(&format!("{i4}}} else if (kind == 41u) {{\n"));
+    s.push_str(&format!("{i8}// WearTool = 41 → EventKindId::EffectWearToolApplied = 72\n"));
+    s.push_str(&format!("{i8}// payload_a low 8 bits = tool_kind ordinal; next 16 bits = amount\n"));
+    s.push_str(&format!("{i8}// (q8 fraction-of-durability). payload_b = 0. The consumer unpacks\n"));
+    s.push_str(&format!("{i8}// via:\n"));
+    s.push_str(&format!("{i8}//   tool_kind = payload_a & 0xFFu;\n"));
+    s.push_str(&format!("{i8}//   amount    = (payload_a >> 8u) & 0xFFFFu;\n"));
+    s.push_str(&format!("{i8}// then looks up the caster's owned tool of `tool_kind` and bumps\n"));
+    s.push_str(&format!("{i8}// its wear cell by `amount`; at `wear >= durability` flips the\n"));
+    s.push_str(&format!("{i8}// broken bit. Self-cast: wear acts on the caster's owned tool\n"));
+    s.push_str(&format!("{i8}// (`target_slot == caster_slot`).\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectWearToolApplied (caster_slot + caster_slot + packed_wear + 0)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {wear_tool_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (caster_slot));\n"));
@@ -7450,7 +7512,9 @@ mod tests {
                 37 => EffectOp::Decoy       { subject_idx: 4, fake_pos: 0xDEADBEEF },
                 38 => EffectOp::EraseBelief { subject_idx: 4, fields: 0b00111111 },
                 39 => EffectOp::TravelTo    { dest_x_q8: 1280, dest_y_q8: 1280, eta_ticks: 50 },
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35/36/37/38/39"),
+                40 => EffectOp::Recipe      { recipe_id: 42, target_tool: 0xFF },
+                41 => EffectOp::WearTool    { tool_kind: 3, amount: 64 },
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35/36/37/38/39/40/41"),
             }
         };
 
@@ -7497,7 +7561,9 @@ mod tests {
                 37 => EngineEventKindId::EffectDecoyApplied           as u32,
                 38 => EngineEventKindId::EffectEraseBeliefApplied     as u32,
                 39 => EngineEventKindId::EffectTravelToApplied        as u32,
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35/36/37/38/39"),
+                40 => EngineEventKindId::EffectRecipeApplied          as u32,
+                41 => EngineEventKindId::EffectWearToolApplied        as u32,
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35/36/37/38/39/40/41"),
             }
         };
 
@@ -7629,9 +7695,14 @@ mod tests {
         // EffectTravelToApplied=70 records that a downstream consumer
         // rule turns into `busy_until_tick` + `travel_dest_{x,y,z}` SoA
         // updates plus a per-tick interpolation kernel).
+        // + Recipe + WearTool (Lift B — items / inventory + production /
+        // recipes; dispatcher writes EffectRecipeApplied=71 +
+        // EffectWearToolApplied=72 records that per-fixture consumer
+        // rules turn into inventory ingredient/output deltas + tool wear
+        // increments. See `docs/spec/economy.md §4.1` + §4.3).
         assert_eq!(
-            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 39,
-            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 39 \
+            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 41,
+            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 41 \
              chronicle-bearing variants today; if you added or removed an \
              entry, update this assertion (and the slice γ wire-up that \
              consumes the new entry)"

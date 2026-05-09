@@ -422,6 +422,26 @@ fn travel_to_packs_to_discriminant_39_matching_wgsl_dispatcher() {
     );
 }
 
+// Lift B — `cast_recipe` production-recipe verb.
+#[test]
+fn recipe_packs_to_discriminant_40_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::Recipe { recipe_id: 7, target_tool: 0xFF }),
+        40,
+        "Recipe discriminant — WGSL dispatcher arm `kind == 40u` depends on this"
+    );
+}
+
+// Lift B — `wear_tool` capital-goods wear verb.
+#[test]
+fn wear_tool_packs_to_discriminant_41_matching_wgsl_dispatcher() {
+    assert_eq!(
+        pack_one(EffectOp::WearTool { tool_kind: 4, amount: 64 }),
+        41,
+        "WearTool discriminant — WGSL dispatcher arm `kind == 41u` depends on this"
+    );
+}
+
 #[test]
 fn empty_sentinel_byte_matches_wgsl_dispatcher() {
     // The dispatcher loop's `if (kind == 0xFFu) { continue; }` early-out

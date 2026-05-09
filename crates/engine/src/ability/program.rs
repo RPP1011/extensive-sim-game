@@ -701,6 +701,49 @@ pub enum EffectOp {
     /// and the per-tick travel kernel interpolates `pos` toward the
     /// destination.
     TravelTo { dest_x_q8: i16, dest_y_q8: i16, eta_ticks: u32 } = 39,
+
+    // --- Lift B — items / inventory + production / recipes ---
+    //
+    // `cast_recipe <recipe_id> [target <tool_slot>]` — caster begins a
+    // production cast that consumes inputs and produces outputs per the
+    // per-fixture `RecipeRegistry`. The dispatcher writes a chronicle
+    // record (kind=71). The downstream consumer rule reads `recipe_id`
+    // out of the registry, validates the caster's inventory + tool
+    // ownership, and emits the actual ingredient/output deltas. See
+    // economy.md §4.1 for the recipe shape.
+    //
+    // `wear_tool <tool_kind> <amount>` — increment wear on a tool of
+    // the given kind owned by the caster. Recipes typically pair with
+    // a `wear_tool` step so capital goods depreciate as they're used.
+    // The dispatcher writes a chronicle record (kind=72). The downstream
+    // consumer rule looks up the tool via `tool_kind` (Forge, Anvil,
+    // Loom, …) and increments its `wear` cell; at `wear >= durability`
+    // the consumer flips the broken bit so future recipes gating on it
+    // fail. See economy.md §4.3 for the capital-goods model.
+    //
+    // SHAPE NOTE: both variants pack tight under P4. Recipe is 2 + 1 = 3
+    // bytes payload + 1B tag = 4B. WearTool is 1 + 2 = 3 bytes payload +
+    // 1B tag = 4B. Well under the ≤16B EffectOp ceiling.
+    //
+    // The packed effect-kind ordinals are 40 (Recipe) and 41 (WearTool),
+    // contiguous with TravelTo=39. The chronicle EventKindIds are 71 and
+    // 72, contiguous with EffectTravelToApplied=70.
+    /// `cast_recipe <recipe_id> [target <tool_slot>]` — caster fires a
+    /// production recipe by id. `recipe_id` indexes into the per-fixture
+    /// `RecipeRegistry`. `target_tool` is a slot id pointing at a
+    /// specific Tool entity to use (or `0xFF` sentinel for "no tool
+    /// target", e.g. recipes that don't require a tool or that auto-
+    /// select an owned-nearest tool). On consume, the consumer rule
+    /// reads the registry entry, validates inputs/skill/tool, and emits
+    /// the inventory deltas. See `docs/spec/economy.md §4.1`.
+    Recipe { recipe_id: u16, target_tool: u8 } = 40,
+
+    /// `wear_tool <tool_kind> <amount>` — increment wear on a tool of
+    /// the given `tool_kind` owned by the caster. `amount` is in q8
+    /// fixed-point fraction-of-durability (256 = 1.0). At
+    /// `wear >= durability` the consumer flips the tool's broken bit;
+    /// recipes gating on it then fail. See `docs/spec/economy.md §4.3`.
+    WearTool { tool_kind: u8, amount: u16 } = 41,
 }
 
 /// Stat targeted by `buff`. Vocabulary is small today (just the two

@@ -321,7 +321,24 @@ pub enum EventKindId {
     //            consumer sign-extends each i16 half via bit shifts.
     //   slot 5 = eta_ticks (u32)
     EffectTravelToApplied = 70,
-    // Slots 71-127 reserved for replayable event variants added in later tasks.
+    // Lift B — items / inventory + production / recipes. Two
+    // chronicle records per cast pair:
+    //   * `EffectRecipeApplied` (kind=71) — fires when an
+    //     `EffectOp::Recipe` (op#40) slot fires. Per-fixture consumer
+    //     rules read `RecipeRegistry[recipe_id]`, validate the caster's
+    //     inventory + tool ownership, and emit ingredient/output deltas.
+    //     SHAPE: 4-payload-word record (caster + caster + packed
+    //     (target_tool << 16) | recipe_id + 0).
+    //   * `EffectWearToolApplied` (kind=72) — fires when an
+    //     `EffectOp::WearTool` (op#41) slot fires. Per-fixture consumer
+    //     rules look up the caster's tool of `tool_kind` and bump its
+    //     wear cell by `amount` (q8 fraction-of-durability). SHAPE:
+    //     4-payload-word record (caster + caster + packed (amount << 8)
+    //     | tool_kind + 0).
+    // See `docs/spec/economy.md §4.1` (recipes) + §4.3 (capital goods).
+    EffectRecipeApplied   = 71,
+    EffectWearToolApplied = 72,
+    // Slots 73-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 

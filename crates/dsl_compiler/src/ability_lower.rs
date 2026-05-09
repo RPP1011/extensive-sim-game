@@ -355,7 +355,7 @@ impl std::fmt::Display for LowerError {
             LowerError::UnknownEffectVerb { verb, suggestion, .. } => {
                 write!(
                     f,
-                    "unknown effect verb '{verb}'; valid verbs at this stage: damage / heal / shield / stun / slow / transfer_gold / modify_standing / cast / root / silence / fear / taunt / dash / blink / knockback / pull / execute / self_damage / lifesteal / damage_modify / summon / reveal / erase_belief / decoy"
+                    "unknown effect verb '{verb}'; valid verbs at this stage: damage / heal / shield / stun / slow / transfer_gold / modify_standing / cast / root / silence / fear / taunt / dash / blink / knockback / pull / execute / self_damage / lifesteal / damage_modify / summon / reveal / erase_belief / decoy / cast_recipe / wear_tool"
                 )?;
                 if let Some(s) = suggestion {
                     write!(f, " (did you mean '{s}'?)")?;
@@ -1843,6 +1843,58 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             require_arity(stmt, 2)?;
             Ok(EffectOp::Decoy { subject_idx, fake_pos })
         }
+        // Lift B — `cast_recipe <recipe_id> [target <tool_slot>]`. Caster
+        // fires a production recipe by id. The `recipe_id` (u16) indexes
+        // into the per-fixture `RecipeRegistry`. The optional `target
+        // <tool_slot>` keyword pair binds a specific Tool entity slot
+        // (u8) to the cast — `0xFF` is the "no tool target" sentinel
+        // applied when the keyword is absent. See `docs/spec/economy.md`
+        // §4.1. Engine ordinal 40, chronicle event 71.
+        "cast_recipe" => {
+            let recipe_id_f = require_number_arg(stmt, 0)?;
+            let recipe_id = recipe_id_f
+                .round()
+                .clamp(0.0, u16::MAX as f32) as u16;
+            // Optional `target <tool_slot>` modifier — present iff arity
+            // is 3 (positional id + `target` ident + positional slot).
+            // Default sentinel 0xFF means "no tool target".
+            let target_tool = if stmt.args.len() >= 3 {
+                let kw = require_name_arg(stmt, 1)?;
+                if kw != "target" {
+                    return Err(LowerError::EffectArgMismatch {
+                        verb:     "cast_recipe".to_string(),
+                        expected: 3,
+                        got:      stmt.args.len(),
+                        span:     stmt.span,
+                    });
+                }
+                let slot_f = require_number_arg(stmt, 2)?;
+                require_arity(stmt, 3)?;
+                slot_f.round().clamp(0.0, u8::MAX as f32) as u8
+            } else {
+                require_arity(stmt, 1)?;
+                0xFFu8
+            };
+            Ok(EffectOp::Recipe { recipe_id, target_tool })
+        }
+        // Lift B — `wear_tool <tool_kind> <amount>`. Caster bumps wear
+        // on a tool of `tool_kind` (u8 ordinal — Forge, Anvil, Loom, …)
+        // by `amount` (u16, q8 fraction-of-durability — 256 = 1.0).
+        // Recipes typically pair with a `wear_tool` step so capital
+        // goods depreciate in use. See `docs/spec/economy.md` §4.3.
+        // Engine ordinal 41, chronicle event 72.
+        "wear_tool" => {
+            let tool_kind_f = require_number_arg(stmt, 0)?;
+            let amount_f = require_number_arg(stmt, 1)?;
+            require_arity(stmt, 2)?;
+            let tool_kind = tool_kind_f
+                .round()
+                .clamp(0.0, u8::MAX as f32) as u8;
+            let amount = amount_f
+                .round()
+                .clamp(0.0, u16::MAX as f32) as u16;
+            Ok(EffectOp::WearTool { tool_kind, amount })
+        }
         _ => Err(LowerError::UnknownEffectVerb {
             verb:       stmt.verb.clone(),
             span:       stmt.span,
@@ -2342,6 +2394,60 @@ mod tests {
                 assert_eq!(fake_pos, 12_345_678);
             }
             ref other => panic!("expected EffectOp::Decoy; got {other:?}"),
+        }
+    }
+
+    /// Lift B — `cast_recipe <recipe_id>` (no tool target) lowers to
+    /// `EffectOp::Recipe { recipe_id, target_tool: 0xFF }`. The 0xFF
+    /// sentinel signals "no specific tool slot bound to this cast".
+    #[test]
+    fn lower_cast_recipe_no_tool() {
+        let src = "ability ForgeIron { target: self cooldown: 5s cast_recipe 7 }";
+        let file = parse_ability_file(src).expect("parser");
+        let prog = lower_ability_decl(&file.abilities[0]).expect("cast_recipe must lower");
+        assert_eq!(prog.effects.len(), 1);
+        match prog.effects[0] {
+            EffectOp::Recipe { recipe_id, target_tool } => {
+                assert_eq!(recipe_id, 7);
+                assert_eq!(target_tool, 0xFF);
+            }
+            ref other => panic!("expected EffectOp::Recipe; got {other:?}"),
+        }
+    }
+
+    /// Lift B — `cast_recipe <recipe_id> target <tool_slot>` binds a
+    /// specific tool slot to the cast. Both numbers clamp into their
+    /// respective integer widths (u16 + u8).
+    #[test]
+    fn lower_cast_recipe_with_tool_target() {
+        let src = "ability ForgeSword { target: self cooldown: 5s cast_recipe 12 target 3 }";
+        let file = parse_ability_file(src).expect("parser");
+        let prog = lower_ability_decl(&file.abilities[0]).expect("cast_recipe must lower");
+        assert_eq!(prog.effects.len(), 1);
+        match prog.effects[0] {
+            EffectOp::Recipe { recipe_id, target_tool } => {
+                assert_eq!(recipe_id, 12);
+                assert_eq!(target_tool, 3);
+            }
+            ref other => panic!("expected EffectOp::Recipe; got {other:?}"),
+        }
+    }
+
+    /// Lift B — `wear_tool <tool_kind> <amount>` lowers to
+    /// `EffectOp::WearTool { tool_kind: u8, amount: u16 }`. Amount is
+    /// q8 fraction-of-durability (256 = 1.0 of full durability).
+    #[test]
+    fn lower_wear_tool_two_args() {
+        let src = "ability HammerSwing { target: self cooldown: 1s wear_tool 4 64 }";
+        let file = parse_ability_file(src).expect("parser");
+        let prog = lower_ability_decl(&file.abilities[0]).expect("wear_tool must lower");
+        assert_eq!(prog.effects.len(), 1);
+        match prog.effects[0] {
+            EffectOp::WearTool { tool_kind, amount } => {
+                assert_eq!(tool_kind, 4);
+                assert_eq!(amount, 64);
+            }
+            ref other => panic!("expected EffectOp::WearTool; got {other:?}"),
         }
     }
 }

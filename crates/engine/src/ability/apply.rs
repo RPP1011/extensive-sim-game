@@ -236,6 +236,21 @@ pub enum ApplyEvent {
     /// interpolates `pos` toward the destination. Pairs with
     /// `EventKindId::EffectTravelToApplied = 70`.
     TravelTo       { source: AgentId, dest_x: f32, dest_y: f32, eta_ticks: u32 },
+    /// Lift B — `cast_recipe <recipe_id> [target <tool_slot>]` production
+    /// recipe. Caster fires a recipe by id; the per-fixture
+    /// `RecipeRegistry` describes inputs/outputs/tool/skill. The
+    /// downstream consumer rule reads the registry, validates inventory
+    /// + tool ownership, and emits ingredient/output deltas. Pairs with
+    /// `EventKindId::EffectRecipeApplied = 71`. See
+    /// `docs/spec/economy.md §4.1`.
+    Recipe         { source: AgentId, recipe_id: u16, target_tool: u8 },
+    /// Lift B — `wear_tool <tool_kind> <amount>` capital-goods wear
+    /// step. Increments wear on a tool of `tool_kind` owned by the
+    /// caster by `amount` (q8 fixed-point fraction-of-durability). At
+    /// `wear >= durability` the consumer flips the tool's broken bit.
+    /// Pairs with `EventKindId::EffectWearToolApplied = 72`. See
+    /// `docs/spec/economy.md §4.3`.
+    WearTool       { source: AgentId, tool_kind: u8, amount: u16 },
 }
 
 /// Inline budget — most abilities have ≤4 effects (P4 says
@@ -517,6 +532,20 @@ fn push_effect_event(
             let dest_y = dest_y_q8 as f32 / 256.0;
             out.push(ApplyEvent::TravelTo { source: caster, dest_x, dest_y, eta_ticks });
         }
+        // Lift B — production recipe. The dispatcher emits one
+        // ApplyEvent::Recipe per cast; a downstream consumer rule reads
+        // the per-fixture `RecipeRegistry[recipe_id]`, validates the
+        // caster's inventory + (optionally) the `target_tool` slot, and
+        // emits the ingredient/output inventory deltas. Self-cast:
+        // recipes act on the caster's inventory.
+        EffectOp::Recipe { recipe_id, target_tool } =>
+            out.push(ApplyEvent::Recipe { source: caster, recipe_id, target_tool }),
+        // Lift B — capital-goods wear. The dispatcher emits one
+        // ApplyEvent::WearTool per cast; a downstream consumer rule
+        // looks up the caster's owned tool of `tool_kind` and bumps
+        // its wear cell by `amount` (q8 fraction-of-durability).
+        EffectOp::WearTool { tool_kind, amount } =>
+            out.push(ApplyEvent::WearTool { source: caster, tool_kind, amount }),
         // CastAbility is recursive (needs cascade-style
         // re-dispatch); deferred to slice δ. Skip for now.
         EffectOp::CastAbility { .. } => {}
