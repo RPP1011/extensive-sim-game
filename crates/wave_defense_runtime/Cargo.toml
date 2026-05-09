@@ -1,0 +1,37 @@
+[package]
+name = "wave_defense_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/wave_defense.sim` — Stress
+# Fixture C (task #243). A settlement (1 node + 25 settlers) is
+# overwhelmed by infinitely-ramping monster waves spawned by spawners
+# at map edges. Score = resource accumulated before settlement falls.
+#
+# Mirrors `tower_defense_runtime` (CPU-side wave management +
+# per_agent monster march), `spy_network_runtime` (creature_type-gated
+# verbs), and `duel_25v25_runtime` (AOE Cleave via apply_ability
+# inside spatial walk). The `.ability` corpus under
+# `assets/ability_test/wave_defense/` is registry-binding-check
+# material — only MonsterCleave (AOE damage) and SpawnWave (summon
+# monsters) ride the apply_ability dispatcher; Strike + Harvest emit
+# their chronicle events directly via `emit` from the verb body
+# (matches tower_defense's verb pattern).
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }
+
+[[bin]]
+name = "wave_defense_app"
+path = "src/bin/wave_defense_app.rs"

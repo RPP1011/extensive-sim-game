@@ -1,0 +1,31 @@
+// wave_defense stress fixture (task #243): monster AOE attack.
+//
+// `damage <amount> in spread(radius, max_targets)` lowers via the
+// `damage` arm + Spread area shape (ShapeKind=4). The runtime opts
+// into AOE Path B via `LowerOpts.aoe_dispatch=true` so the apply_ability
+// dispatcher walks the 27-cell neighborhood of the cast center,
+// collects in-radius candidates (capped at the bitonic-sort scratch's
+// 256-slot ceiling), bitonic-sorts by AgentId ascending, and emits one
+// EffectDamageApplied chronicle record per kept slot.
+//
+// The .sim's MonsterCleaveScan @phase(per_agent) physics rule iterates
+// each monster's nearby spatial neighbors and dispatches
+// `apply_ability 1 by self target other` for each settler candidate;
+// the dispatcher walks Spread from `agent_pos[other]` (= the picked
+// settler's pos) — friendly-fire to other settlers in radius is by
+// design (matches duel_25v25's Cleave behavior).
+//
+// `cooldown: 500ms` (5 ticks) matches the .sim's
+// `monster_cooldown` config value so the cooldown gate stays in the
+// per-rule `where` clause and the registry's program.cooldown_ticks
+// field is informational only (today's GPU dispatcher does not consult
+// it — same caveat as duel_25v25's Strike).
+
+ability MonsterCleave {
+    target: enemy
+    range: 6.0
+    cooldown: 500ms
+    hint: damage
+
+    damage 10.0 in spread(8.0, 16) [PHYSICAL: 100]
+}
