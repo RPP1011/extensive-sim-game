@@ -19,7 +19,8 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libudev-dev pkg-config
+          sudo apt-get install -y libasound2-dev libudev-dev pkg-config \
+            mesa-vulkan-drivers vulkan-tools
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -37,7 +38,15 @@ jobs:
       - name: cargo check
         run: cargo check --workspace --lib --bins
 
+      # Lavapipe (Mesa software vulkan) provides a wgpu-compatible
+      # adapter on GPU-less CI runners. Without VK_ICD_FILENAMES wgpu
+      # falls through to NoAdapter; with it, kernels run on CPU at
+      # ~10x slower than a real GPU. RUST_MIN_STACK is required by
+      # AOE Path B's naga validator (see project_aoe_gotchas memory).
       - name: cargo test (unit + integration)
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          RUST_MIN_STACK: "33554432"
         run: cargo test --workspace --lib --tests -- --test-threads=1
 
   architecture-guards:
@@ -84,7 +93,8 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libudev-dev pkg-config
+          sudo apt-get install -y libasound2-dev libudev-dev pkg-config \
+            mesa-vulkan-drivers vulkan-tools
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -102,9 +112,10 @@ jobs:
       # Post-wolf-sim-wipe (2026-05-02), `tactical_sim` no longer exists.
       # The closest semantic determinism pin is wave_defense's
       # `same_seed_same_death_tick` — same world seed must reproduce the
-      # exact death tick across reruns. RUST_MIN_STACK is required by
-      # the AOE Path B naga validator (see project_aoe_gotchas memory).
+      # exact death tick across reruns. Lavapipe + RUST_MIN_STACK
+      # rationale matches the Check & Test job above.
       - name: Run wave_defense determinism pin (release)
         env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
           RUST_MIN_STACK: "33554432"
         run: cargo test -p wave_defense_runtime --release same_seed_same_death_tick -- --test-threads=1
