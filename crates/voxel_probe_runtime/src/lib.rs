@@ -1305,4 +1305,511 @@ fn cs_voxel_readback(@builtin(global_invocation_id) gid: vec3<u32>) {
             last_us = state.last_flush_ns() as f64 / 1000.0,
         );
     }
+
+    // -----------------------------------------------------------------
+    // Phase D semantic pin — gpu_terrain_query_matches_cpu.
+    //
+    // Catches CPU/GPU semantic divergence in the terrain-query helpers:
+    // a chronicle drain mutates the host VoxelGrid AND the GPU mirror,
+    // but the WGSL `voxel_line_of_sight` helper computes a different
+    // answer than the CPU `TerrainQuery::line_of_sight` (different DDA
+    // step order, different OOB defaults, different cell-floor
+    // semantics). The pin dispatches a tiny GPU compute kernel that
+    // calls the SAME helper text the compiler emits into production
+    // kernels, then compares its output to the CPU oracle.
+    //
+    // **Implementation choice — test-inline WGSL.** The plan
+    // (`docs/superpowers/plans/2026-05-09-voxel-engine-integration.md`,
+    // Phase D §4) explicitly allows this trade-off: compiler-emit-via-
+    // fixture would require a fresh `.sim` file + `.ability` corpus +
+    // matching runtime crate to compile a kernel that calls
+    // `terrain.line_of_sight`, all to test what is fundamentally a
+    // helper-math identity. The inline WGSL below is a verbatim copy of
+    // the `voxel_line_of_sight` body the compiler emits into
+    // `compose_wgsl_file` (see
+    // `dsl_compiler::cg::emit::program::VOXEL_GRID_WGSL_PRELUDE`); a
+    // sister text-equality pin in `dsl_compiler` keeps the helper text
+    // pinned so this test's local copy can't drift undetected.
+    //
+    // The fixture mutates the voxel grid via the existing chronicle
+    // drain (place at tick 0, harvest at tick 5) and adds a few
+    // hand-set cells via `set_cell` so the LOS rays have varied
+    // obstructions to traverse.
+    // -----------------------------------------------------------------
+
+    /// Verbatim copy of the `voxel_line_of_sight` helper body the
+    /// compiler injects into kernels that call `terrain.line_of_sight`
+    /// (see `dsl_compiler::cg::emit::program::VOXEL_GRID_WGSL_PRELUDE`).
+    /// Wrapped in a one-shot compute kernel that reads N (from, to)
+    /// pairs from a buffer and writes per-pair bool results back.
+    ///
+    /// Drift between this string and the compiler's helper would
+    /// silently invalidate the divergence pin — the WGSL-prelude pin in
+    /// `dsl_compiler::cg::emit::program::voxel_grid_wgsl_prelude_emits_voxel_at_helper`
+    /// keeps the load-bearing `voxel_at` index formula + helper symbols
+    /// pinned so a rename surfaces upstream rather than here.
+    const LOS_PROBE_WGSL: &str = r#"
+struct LosCfg {
+    n: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+@group(0) @binding(0) var<storage, read> voxel_grid: array<u32>;
+@group(0) @binding(1) var<storage, read> los_inputs: array<vec4<f32>>;
+@group(0) @binding(2) var<storage, read_write> los_results: array<u32>;
+@group(0) @binding(3) var<uniform> cfg: LosCfg;
+
+// Verbatim copy of the helper bodies emitted by the compiler. See
+// `dsl_compiler::cg::emit::program::VOXEL_GRID_WGSL_PRELUDE`. Drift
+// between this string and the compiler's helper would silently
+// invalidate the divergence pin — keep them in lock-step.
+fn voxel_grid_dim() -> u32 {
+    return u32(round(pow(f32(arrayLength(&voxel_grid)), 1.0 / 3.0)));
+}
+
+fn voxel_at(x: i32, y: i32, z: i32) -> u32 {
+    if (x < 0 || y < 0 || z < 0) {
+        return 0u;
+    }
+    let dim: u32 = voxel_grid_dim();
+    let ux: u32 = u32(x);
+    let uy: u32 = u32(y);
+    let uz: u32 = u32(z);
+    if (ux >= dim || uy >= dim || uz >= dim) {
+        return 0u;
+    }
+    let idx: u32 = uz * dim * dim + uy * dim + ux;
+    return voxel_grid[idx];
+}
+
+fn voxel_line_of_sight(seg_from: vec3<f32>, seg_to: vec3<f32>) -> bool {
+    let delta: vec3<f32> = seg_to - seg_from;
+    let length_sq: f32 = dot(delta, delta);
+    if (length_sq < 1.0e-12) {
+        return true;
+    }
+    let length: f32 = sqrt(length_sq);
+    let dir: vec3<f32> = delta / length;
+
+    var cx: i32 = i32(floor(seg_from.x));
+    var cy: i32 = i32(floor(seg_from.y));
+    var cz: i32 = i32(floor(seg_from.z));
+
+    let step_x: i32 = select(select(0, -1, dir.x < 0.0), 1, dir.x > 0.0);
+    let step_y: i32 = select(select(0, -1, dir.y < 0.0), 1, dir.y > 0.0);
+    let step_z: i32 = select(select(0, -1, dir.z < 0.0), 1, dir.z > 0.0);
+
+    let inv_dx: f32 = select(1.0e30, 1.0 / dir.x, abs(dir.x) > 1.0e-20);
+    let inv_dy: f32 = select(1.0e30, 1.0 / dir.y, abs(dir.y) > 1.0e-20);
+    let inv_dz: f32 = select(1.0e30, 1.0 / dir.z, abs(dir.z) > 1.0e-20);
+
+    var t_max_x: f32 = 1.0e30;
+    if (step_x > 0) {
+        t_max_x = (f32(cx + 1) - seg_from.x) * inv_dx;
+    } else if (step_x < 0) {
+        t_max_x = (seg_from.x - f32(cx)) * (-inv_dx);
+    }
+    var t_max_y: f32 = 1.0e30;
+    if (step_y > 0) {
+        t_max_y = (f32(cy + 1) - seg_from.y) * inv_dy;
+    } else if (step_y < 0) {
+        t_max_y = (seg_from.y - f32(cy)) * (-inv_dy);
+    }
+    var t_max_z: f32 = 1.0e30;
+    if (step_z > 0) {
+        t_max_z = (f32(cz + 1) - seg_from.z) * inv_dz;
+    } else if (step_z < 0) {
+        t_max_z = (seg_from.z - f32(cz)) * (-inv_dz);
+    }
+
+    let t_delta_x: f32 = select(1.0e30, abs(inv_dx), step_x != 0);
+    let t_delta_y: f32 = select(1.0e30, abs(inv_dy), step_y != 0);
+    let t_delta_z: f32 = select(1.0e30, abs(inv_dz), step_z != 0);
+
+    if (voxel_at(cx, cy, cz) != 0u) {
+        return false;
+    }
+
+    let max_steps: u32 = 3u * voxel_grid_dim();
+    var i: u32 = 0u;
+    loop {
+        if (i >= max_steps) {
+            break;
+        }
+        var t_next: f32;
+        if (t_max_x <= t_max_y && t_max_x <= t_max_z) {
+            cx = cx + step_x;
+            t_next = t_max_x;
+            t_max_x = t_max_x + t_delta_x;
+        } else if (t_max_y <= t_max_z) {
+            cy = cy + step_y;
+            t_next = t_max_y;
+            t_max_y = t_max_y + t_delta_y;
+        } else {
+            cz = cz + step_z;
+            t_next = t_max_z;
+            t_max_z = t_max_z + t_delta_z;
+        }
+        if (t_next > length) {
+            return true;
+        }
+        if (voxel_at(cx, cy, cz) != 0u) {
+            return false;
+        }
+        i = i + 1u;
+    }
+    return true;
+}
+
+@compute @workgroup_size(64)
+fn cs_los_probe(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= cfg.n) {
+        return;
+    }
+    // los_inputs is laid out as pairs of vec4<f32> — even index = from
+    // (xyz + pad), odd index = to.
+    let from_v: vec4<f32> = los_inputs[i * 2u];
+    let to_v: vec4<f32>   = los_inputs[i * 2u + 1u];
+    let seg_from = vec3<f32>(from_v.x, from_v.y, from_v.z);
+    let seg_to   = vec3<f32>(to_v.x,   to_v.y,   to_v.z);
+    let clear: bool = voxel_line_of_sight(seg_from, seg_to);
+    los_results[i] = select(0u, 1u, clear);
+}
+"#;
+
+    #[repr(C)]
+    #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+    struct LosCfg {
+        n: u32,
+        _pad0: u32,
+        _pad1: u32,
+        _pad2: u32,
+    }
+
+    /// Dispatch the inline LOS-probe kernel against `state.mirror()` for
+    /// `pairs.len()` (from, to) segments. Returns the per-pair bool
+    /// (1 = clear, 0 = blocked) the GPU computed.
+    fn gpu_line_of_sight_batch(
+        state: &VoxelProbeState,
+        pairs: &[(Vec3, Vec3)],
+    ) -> Vec<bool> {
+        let gpu = &state.gpu;
+        let mirror = state.mirror();
+        let n = pairs.len() as u32;
+
+        // Pack each pair as two vec4<f32> (xyz + 0.0 pad). Even slot =
+        // from, odd slot = to. Pad to at least 32 bytes (= 2 vec4) so
+        // wgpu doesn't reject a tiny buffer for empty input.
+        let mut packed: Vec<f32> = Vec::with_capacity((pairs.len() * 8).max(8));
+        for (from, to) in pairs {
+            packed.extend_from_slice(&[from.x, from.y, from.z, 0.0]);
+            packed.extend_from_slice(&[to.x, to.y, to.z, 0.0]);
+        }
+        while packed.len() < 8 {
+            packed.push(0.0);
+        }
+
+        let inputs_buf = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("voxel_probe::los_inputs"),
+                contents: bytemuck::cast_slice(&packed),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            },
+        );
+        let results_bytes = ((n as u64) * 4).max(16);
+        let results_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("voxel_probe::los_results"),
+            size: results_bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let cfg = LosCfg {
+            n,
+            _pad0: 0,
+            _pad1: 0,
+            _pad2: 0,
+        };
+        let cfg_buf = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("voxel_probe::los_cfg"),
+                contents: bytemuck::bytes_of(&cfg),
+                usage: wgpu::BufferUsages::UNIFORM,
+            },
+        );
+        let staging = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("voxel_probe::los_results_staging"),
+            size: results_bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let shader = gpu
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("voxel_probe::los_probe_shader"),
+                source: wgpu::ShaderSource::Wgsl(LOS_PROBE_WGSL.into()),
+            });
+        let bgl = gpu
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("voxel_probe::los_probe_bgl"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+        let pl = gpu
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("voxel_probe::los_probe_pl"),
+                bind_group_layouts: &[&bgl],
+                push_constant_ranges: &[],
+            });
+        let pipeline = gpu
+            .device
+            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("voxel_probe::los_probe_pipeline"),
+                layout: Some(&pl),
+                module: &shader,
+                entry_point: Some("cs_los_probe"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
+        let bg = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("voxel_probe::los_probe_bg"),
+            layout: &bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: mirror.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: inputs_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: results_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: cfg_buf.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("voxel_probe::los_probe_encoder"),
+            });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("voxel_probe::los_probe_pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            let groups = (n + 63) / 64;
+            pass.dispatch_workgroups(groups.max(1), 1, 1);
+        }
+        encoder.copy_buffer_to_buffer(&results_buf, 0, &staging, 0, results_bytes);
+        gpu.queue.submit(Some(encoder.finish()));
+
+        let slice = staging.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = sender.send(r);
+        });
+        gpu.device.poll(wgpu::PollType::Wait).expect("poll");
+        receiver
+            .recv()
+            .expect("los_probe map result")
+            .expect("los_probe map ok");
+        let mapped = slice.get_mapped_range();
+        let words: &[u32] = bytemuck::cast_slice(&mapped);
+        let out: Vec<bool> = words[..n as usize].iter().map(|&w| w != 0).collect();
+        drop(mapped);
+        staging.unmap();
+        out
+    }
+
+    /// **Phase D semantic pin** — `gpu_terrain_query_matches_cpu`. The
+    /// load-bearing CPU/GPU divergence catcher for terrain-query
+    /// helpers: place a deterministic mix of voxels (~10 cells across
+    /// the 16³ extent), then sample 5-10 (from, to) segments through
+    /// the populated region. For each segment, compare the GPU helper's
+    /// `voxel_line_of_sight(from, to)` answer to the CPU oracle's
+    /// `terrain.line_of_sight(from, to)`. CPU != GPU at any segment
+    /// fails the pin.
+    ///
+    /// Failure modes this catches:
+    ///   - GPU `voxel_at` index formula drifts from
+    ///     `VoxelGrid::index = z*H*W + y*W + x`.
+    ///   - DDA step direction signs disagree (CPU uses
+    ///     voxel_engine's raymarcher; GPU uses the inline helper).
+    ///   - OOB defaults diverge (one returns false, the other true).
+    ///
+    /// Don't substitute "GPU returns at least one true and one false"
+    /// — that pin passes for any helper that produces mixed output
+    /// regardless of cell-level correctness.
+    #[test]
+    fn gpu_terrain_query_matches_cpu() {
+        let mut state = match VoxelProbeState::try_new(0) {
+            Some(s) => s,
+            None => {
+                eprintln!(
+                    "[voxel_probe gpu_terrain_query_matches_cpu] skipping: \
+                     no wgpu adapter available on this host."
+                );
+                return;
+            }
+        };
+        // Drive a few ticks so the chronicle drain populates a couple
+        // of cells (place at tick 0 lifts cell (0,0,0); harvest at
+        // tick 5 clears it again).
+        for _ in 0..3 {
+            state.step();
+        }
+        // Plus deterministic hand-set cells across the 16³ extent so
+        // the LOS rays have varied obstructions to traverse. Spread
+        // across multiple z-rows + xy quadrants to exercise all three
+        // DDA step directions.
+        {
+            let g = &mut state.terrain;
+            // Wall-like cluster around y=5 covering x ∈ [3, 7].
+            g.set_cell(3, 5, 5, 1);
+            g.set_cell(4, 5, 5, 1);
+            g.set_cell(5, 5, 5, 1);
+            g.set_cell(6, 5, 5, 1);
+            g.set_cell(7, 5, 5, 1);
+            // Vertical pillar at (10, 10).
+            g.set_cell(10, 10, 4, 1);
+            g.set_cell(10, 10, 5, 1);
+            g.set_cell(10, 10, 6, 1);
+            // Stray cells at corners.
+            g.set_cell(2, 12, 8, 1);
+            g.set_cell(14, 2, 12, 1);
+        }
+        // Dirty those cells in the mirror so the GPU sees them.
+        for (x, y, z) in [
+            (3, 5, 5),
+            (4, 5, 5),
+            (5, 5, 5),
+            (6, 5, 5),
+            (7, 5, 5),
+            (10, 10, 4),
+            (10, 10, 5),
+            (10, 10, 6),
+            (2, 12, 8),
+            (14, 2, 12),
+        ] {
+            state.mirror.mark_dirty(glam::IVec3::new(x, y, z));
+        }
+        state
+            .mirror
+            .flush_dirty(&state.gpu, state.terrain.grid());
+
+        // 8 deterministic (from, to) pairs spanning blocked + clear
+        // cases through the populated region. Mix axis-aligned with
+        // diagonals so the DDA exercises all three step directions.
+        let pairs: Vec<(Vec3, Vec3)> = vec![
+            // Crosses the x-row wall at y=5.5, z=5.5 → blocked.
+            (Vec3::new(0.5, 5.5, 5.5), Vec3::new(15.5, 5.5, 5.5)),
+            // Parallel ray at y=8.5 — no obstruction → clear.
+            (Vec3::new(0.5, 8.5, 5.5), Vec3::new(15.5, 8.5, 5.5)),
+            // Through the (10,10,*) pillar at z=5 → blocked.
+            (Vec3::new(0.5, 10.5, 5.5), Vec3::new(15.5, 10.5, 5.5)),
+            // Vertical ray clear of any cells → clear.
+            (Vec3::new(1.5, 1.5, 0.5), Vec3::new(1.5, 1.5, 15.5)),
+            // Diagonal from origin to corner → may or may not hit
+            // (depends on placed cells); include for parity.
+            (Vec3::new(0.5, 0.5, 0.5), Vec3::new(15.5, 15.5, 15.5)),
+            // Short segment within an empty region → clear.
+            (Vec3::new(13.5, 13.5, 1.5), Vec3::new(13.5, 13.5, 3.5)),
+            // Through the (2,12,8) stray cell along z → blocked.
+            (Vec3::new(2.5, 12.5, 0.5), Vec3::new(2.5, 12.5, 15.5)),
+            // Through the (14,2,12) stray cell along x → blocked.
+            (Vec3::new(0.5, 2.5, 12.5), Vec3::new(15.5, 2.5, 12.5)),
+        ];
+
+        let cpu_results: Vec<bool> = pairs
+            .iter()
+            .map(|(from, to)| state.terrain().line_of_sight(*from, *to))
+            .collect();
+        let gpu_results = gpu_line_of_sight_batch(&state, &pairs);
+
+        let mut diffs = Vec::new();
+        for (i, ((from, to), (cpu, gpu))) in pairs
+            .iter()
+            .zip(cpu_results.iter().zip(gpu_results.iter()))
+            .enumerate()
+        {
+            if cpu != gpu {
+                diffs.push(format!(
+                    "  pair[{i}]: from=({:.1},{:.1},{:.1}) to=({:.1},{:.1},{:.1}) \
+                     CPU={cpu} GPU={gpu}",
+                    from.x, from.y, from.z, to.x, to.y, to.z
+                ));
+            }
+        }
+        assert!(
+            diffs.is_empty(),
+            "CPU/GPU terrain-query divergence on {n}/{tot} segments:\n{lines}\n\
+             Either the GPU `voxel_line_of_sight` helper diverges from \
+             voxel_engine's `ray_cast_grid` (DDA step direction, OOB \
+             defaults, cell-floor semantics) OR the GPU mirror's cell \
+             contents differ from the host VoxelGrid. The \
+             cpu_gpu_voxel_state_matches pin catches the latter; this \
+             pin catches the former.",
+            n = diffs.len(),
+            tot = pairs.len(),
+            lines = diffs.join("\n"),
+        );
+        eprintln!(
+            "[voxel_probe] gpu_terrain_query_matches_cpu: {n} segments \
+             agreed (CPU == GPU). cpu={cpu_results:?}",
+            n = pairs.len()
+        );
+    }
 }

@@ -1518,6 +1518,95 @@ fn populate_namespace_registry(ctx: &mut LoweringCtx<'_>) {
     );
     registry.namespaces.insert(NamespaceId::Quests, quests);
 
+    // -- terrain namespace --
+    //
+    // Voxel-engine integration Phase D
+    // (`docs/superpowers/plans/2026-05-09-voxel-engine-integration.md`).
+    // The DSL surface for `terrain.line_of_sight` was registered at
+    // resolve-time (Task 81) but never lowered; Phase D adds the WGSL
+    // emit. The three methods below all read the `voxel_grid` storage
+    // binding (Phase C's GPU mirror) via the helper functions emitted
+    // by `VOXEL_GRID_TERRAIN_WGSL_PRELUDE`.
+    //
+    // # Helper signature
+    //
+    // The WGSL helpers `voxel_line_of_sight` / `voxel_height_at` /
+    // `voxel_walkable` reference the `voxel_grid` module-scope storage
+    // binding directly (no `ptr<storage, ...>` parameter — WGSL
+    // function pointers to runtime-sized arrays don't work cleanly).
+    // The kernel composer (`emit::kernel`) substring-checks for
+    // `voxel_at(` / `voxel_line_of_sight(` etc. in the body and
+    // synthesizes a `voxel_grid` binding when found.
+    //
+    // The grid extent is hardcoded to `engine_voxel::DEFAULT_EXTENT`
+    // (256³) for the helper math today — fixtures using smaller
+    // extents (e.g. voxel_probe at 16³) write to the matching
+    // sub-region; reads outside the active extent return 0 (air),
+    // which is the same default the FlatPlane backend produces.
+    // A future helper revision could read extent from a uniform if a
+    // fixture needs distinct grid sizes.
+    let mut terrain = NamespaceDef {
+        name: "terrain".to_string(),
+        ..NamespaceDef::default()
+    };
+    // `terrain.line_of_sight(from: vec3, to: vec3) -> bool` — Amanatides-Woo
+    // DDA over the voxel mirror. Returns `true` (clear) when no solid
+    // voxel lies on the segment from→to. Out-of-bounds endpoints fall
+    // back to `true` (matches the `FlatPlane` default + the helper's
+    // P10 "no runtime panic" stance).
+    terrain.methods.insert(
+        "line_of_sight".to_string(),
+        MethodDef {
+            return_ty: CgTy::Bool,
+            arg_tys: vec![CgTy::Vec3F32, CgTy::Vec3F32],
+            wgsl_fn_name: "terrain_line_of_sight".to_string(),
+            // `from` / `to` are reserved keywords in some WGSL
+            // implementations (naga rejects `from` outright), so use
+            // `seg_from` / `seg_to` for the parameter names.
+            wgsl_stub:
+                "fn terrain_line_of_sight(seg_from: vec3<f32>, seg_to: vec3<f32>) -> bool {\n    \
+                 return voxel_line_of_sight(seg_from, seg_to);\n\
+                 }"
+                .to_string(),
+        },
+    );
+    // `terrain.height_at(x: f32, y: f32) -> f32` — top face of the
+    // highest occupied cell in column (floor(x), floor(y)). Empty
+    // column or out-of-bounds returns 0.0.
+    terrain.methods.insert(
+        "height_at".to_string(),
+        MethodDef {
+            return_ty: CgTy::F32,
+            arg_tys: vec![CgTy::F32, CgTy::F32],
+            wgsl_fn_name: "terrain_height_at".to_string(),
+            wgsl_stub:
+                "fn terrain_height_at(x: f32, y: f32) -> f32 {\n    \
+                 return voxel_height_at(x, y);\n\
+                 }"
+                .to_string(),
+        },
+    );
+    // `terrain.walkable(pos: vec3, mode: u32) -> bool` — `mode`
+    // mirrors `engine::state::agent::MovementMode`'s ordinal
+    // (Walk=0, Climb=1, Swim=2, Fly=3, Fall=4). Fly/Fall always
+    // return true; the rest check the cell at `floor(pos)` and
+    // return false when solid. Out-of-bounds returns true (FlatPlane
+    // parity + P10).
+    terrain.methods.insert(
+        "walkable".to_string(),
+        MethodDef {
+            return_ty: CgTy::Bool,
+            arg_tys: vec![CgTy::Vec3F32, CgTy::U32],
+            wgsl_fn_name: "terrain_walkable".to_string(),
+            wgsl_stub:
+                "fn terrain_walkable(pos: vec3<f32>, mode: u32) -> bool {\n    \
+                 return voxel_walkable(pos, mode);\n\
+                 }"
+                .to_string(),
+        },
+    );
+    registry.namespaces.insert(NamespaceId::Terrain, terrain);
+
     ctx.namespace_registry = registry;
 }
 
