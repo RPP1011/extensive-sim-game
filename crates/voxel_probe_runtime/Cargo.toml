@@ -1,0 +1,32 @@
+[package]
+name = "voxel_probe_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/voxel_probe.sim` — Phase B
+# of the voxel-engine integration plan
+# (`docs/superpowers/plans/2026-05-09-voxel-engine-integration.md`).
+#
+# Drives the GPU `apply_ability` dispatcher that emits
+# EffectPlaceVoxelApplied (kind=60) and EffectHarvestApplied (kind=59)
+# chronicle records, then drains them on the host into the
+# `engine_voxel::VoxelTerrain` adapter. The two semantic behavioral
+# pins (`placed_voxel_changes_height_at`,
+# `harvested_voxel_disappears`) read back through `state.terrain.height_at`
+# — they fail on the FlatPlane default and only pass once Phase A's
+# adapter + this crate's chronicle drain are wired correctly.
+
+[dependencies]
+engine = { path = "../engine" }
+engine_voxel = { path = "../engine_voxel" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

@@ -91,7 +91,15 @@ impl EventRing {
         let ring = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("{label}::event_ring")),
             size: event_ring_bytes,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            // COPY_SRC added 2026-05-09 (Phase B voxel integration,
+            // task #251) so per-fixture host-side chronicle drains can
+            // `copy_buffer_to_buffer(ring, …)` into their staging
+            // buffers without rolling a parallel ring like wave_defense.
+            // wave_defense's hand-rolled buffer pre-dates this and
+            // stays as-is for now (Phase E may converge them).
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
         let tail = gpu.device.create_buffer(&wgpu::BufferDescriptor {

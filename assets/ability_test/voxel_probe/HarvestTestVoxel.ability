@@ -1,0 +1,29 @@
+// voxel_probe Phase B fixture — single self-cast `harvest` ability
+// driving the EffectHarvestApplied (kind=59) chronicle producer.
+//
+// Lowers to:
+//   AbilityProgram {
+//     gate: { cooldown_ticks: 1 },
+//     effects: [EffectOp::Harvest { kind_hash: FxHash("test_voxel"), amount: 1 }],
+//   }
+//
+// The dispatcher writes one chronicle record per cast at slots:
+//   slot[0] = 59         (EventKindId::EffectHarvestApplied)
+//   slot[2] = caster_slot
+//   slot[3] = kind_hash  (matches PlaceTestVoxel — same "test_voxel" string)
+//   slot[4] = amount     (= 1)
+//
+// Phase B's host-side drain in voxel_probe_runtime decodes those slots
+// and clears matching cells around the caster via
+// `engine_voxel::VoxelTerrain::apply_voxel_chronicle_record`. The
+// "matching" check uses the kind_hash low byte as the material code,
+// so PlaceTestVoxel + HarvestTestVoxel paired with the same
+// "test_voxel" string close the loop deterministically.
+
+ability HarvestTestVoxel {
+    target: self
+    cooldown: 100ms
+    hint: utility
+
+    harvest "test_voxel" 1
+}

@@ -1,0 +1,25 @@
+// voxel_probe Phase B fixture — single self-cast `place_voxel` ability
+// driving the EffectPlaceVoxelApplied (kind=60) chronicle producer.
+//
+// Lowers to:
+//   AbilityProgram {
+//     gate: { cooldown_ticks: 1 },
+//     effects: [EffectOp::PlaceVoxel { kind_hash: FxHash("test_voxel") }],
+//   }
+//
+// The dispatcher writes one chronicle record per cast at slots:
+//   slot[0] = 60         (EventKindId::EffectPlaceVoxelApplied)
+//   slot[2] = caster_slot
+//   slot[3] = kind_hash
+//
+// Phase B's host-side drain in voxel_probe_runtime decodes those slots
+// and writes a non-zero voxel cell at the caster's position via
+// `engine_voxel::VoxelTerrain::apply_voxel_chronicle_record`.
+
+ability PlaceTestVoxel {
+    target: self
+    cooldown: 100ms
+    hint: utility
+
+    place_voxel "test_voxel"
+}
