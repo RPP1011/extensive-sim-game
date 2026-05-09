@@ -1,0 +1,26 @@
+// wave_defense stress fixture (task #243): early-wave spawn (count=8).
+//
+// One of four wave-size-tier abilities (SpawnSmall=8, SpawnMedium=16,
+// SpawnLarge=32, SpawnHorde=64) that ramp the wave size as `world.tick`
+// crosses tier thresholds. Path B from the plan: tick-windowed `when`
+// gates on the per-tier verbs in `wave_defense.sim` pick exactly one
+// spawn verb per spawner per `wave_period`, so the dispatched
+// `apply_ability N` literal varies with tick — no DSL extension
+// needed. See the SpawnSmall verb in wave_defense.sim for the gate.
+//
+// Per `apply_summon_event_to_state`, count=8 packs into the
+// EffectSummonApplied chronicle record's slot[4] (count widened from
+// u8). The runtime drains the records and allocates 8 monster slots
+// per cast at the spawner's pos.
+//
+// `cooldown: 3s` (= 30 ticks) matches the .sim's `wave_period` config
+// value so the cooldown gate stays in the verb's `when` clause and the
+// registry's program.cooldown_ticks field is informational only.
+
+ability SpawnSmall {
+    target: self
+    cooldown: 3s
+    hint: utility
+
+    summon "monster" 8 [UTILITY: 100]
+}

@@ -4,9 +4,14 @@
 //! program landed at the expected AbilityId slot. Drift surfaces here
 //! at startup rather than as silent wrong-slot dispatch downstream.
 //!
-//! Slot pinning order (alphabetised filenames in `names`):
+//! Slot pinning order (alphabetised filenames in `names`) — Task #249
+//! polish slice expanded the corpus from 2 → 5 abilities to support
+//! tick-windowed wave-size ramping (Path B):
 //!   MonsterCleave  → AbilityId(1)   (MonsterCleaveScan dispatches `apply_ability 1`)
-//!   SpawnWave      → AbilityId(2)   (SpawnWave verb dispatches `apply_ability 2`)
+//!   SpawnHorde     → AbilityId(2)   (SpawnHorde verb dispatches `apply_ability 2`; count=64)
+//!   SpawnLarge     → AbilityId(3)   (SpawnLarge verb dispatches `apply_ability 3`; count=32)
+//!   SpawnMedium    → AbilityId(4)   (SpawnMedium verb dispatches `apply_ability 4`; count=16)
+//!   SpawnSmall     → AbilityId(5)   (SpawnSmall verb dispatches `apply_ability 5`; count=8)
 //!
 //! Each .sim verb body's `apply_ability N by self target X` literal
 //! must agree with these constants — drift surfaces as silent
@@ -17,7 +22,10 @@ use std::path::PathBuf;
 use engine::ability::AbilityId;
 
 pub const MONSTER_CLEAVE_EXPECTED_ABILITY_ID: u32 = 1;
-pub const SPAWN_WAVE_EXPECTED_ABILITY_ID: u32 = 2;
+pub const SPAWN_HORDE_EXPECTED_ABILITY_ID: u32 = 2;
+pub const SPAWN_LARGE_EXPECTED_ABILITY_ID: u32 = 3;
+pub const SPAWN_MEDIUM_EXPECTED_ABILITY_ID: u32 = 4;
+pub const SPAWN_SMALL_EXPECTED_ABILITY_ID: u32 = 5;
 
 /// Read + parse + build the AbilityRegistry over every .ability file
 /// under `assets/ability_test/wave_defense/`. Mirrors
@@ -44,8 +52,15 @@ pub(crate) fn build_wave_defense_registry()
     };
 
     // Source-order names list — also the registry's slot order.
-    // MonsterCleave + SpawnWave alphabetised → (1, 2) AbilityIds.
-    let names = ["MonsterCleave.ability", "SpawnWave.ability"];
+    // Alphabetised: MonsterCleave + SpawnHorde + SpawnLarge +
+    // SpawnMedium + SpawnSmall → AbilityIds (1, 2, 3, 4, 5).
+    let names = [
+        "MonsterCleave.ability",
+        "SpawnHorde.ability",
+        "SpawnLarge.ability",
+        "SpawnMedium.ability",
+        "SpawnSmall.ability",
+    ];
     let files: Vec<(String, _)> = names
         .iter()
         .map(|name| {
@@ -63,27 +78,22 @@ pub(crate) fn build_wave_defense_registry()
 pub fn assert_ability_registry_matches_sim_constants() {
     let built = build_wave_defense_registry();
 
-    let cleave_id = *built
-        .names
-        .get("MonsterCleave")
-        .expect("MonsterCleave registered in name table");
-    assert_eq!(
-        cleave_id,
-        AbilityId::new(MONSTER_CLEAVE_EXPECTED_ABILITY_ID).expect("non-zero AbilityId"),
-        "MonsterCleave's AbilityId drifted from slot {} — re-check the \
-         `names` literal in `build_wave_defense_registry()`.",
-        MONSTER_CLEAVE_EXPECTED_ABILITY_ID,
-    );
+    let assert_slot = |name: &str, expected: u32| {
+        let id = *built
+            .names
+            .get(name)
+            .unwrap_or_else(|| panic!("{name} registered in name table"));
+        assert_eq!(
+            id,
+            AbilityId::new(expected).expect("non-zero AbilityId"),
+            "{name}'s AbilityId drifted from slot {expected} — re-check the \
+             `names` literal in `build_wave_defense_registry()`.",
+        );
+    };
 
-    let spawn_id = *built
-        .names
-        .get("SpawnWave")
-        .expect("SpawnWave registered in name table");
-    assert_eq!(
-        spawn_id,
-        AbilityId::new(SPAWN_WAVE_EXPECTED_ABILITY_ID).expect("non-zero AbilityId"),
-        "SpawnWave's AbilityId drifted from slot {} — re-check the \
-         `names` literal in `build_wave_defense_registry()`.",
-        SPAWN_WAVE_EXPECTED_ABILITY_ID,
-    );
+    assert_slot("MonsterCleave", MONSTER_CLEAVE_EXPECTED_ABILITY_ID);
+    assert_slot("SpawnHorde",    SPAWN_HORDE_EXPECTED_ABILITY_ID);
+    assert_slot("SpawnLarge",    SPAWN_LARGE_EXPECTED_ABILITY_ID);
+    assert_slot("SpawnMedium",   SPAWN_MEDIUM_EXPECTED_ABILITY_ID);
+    assert_slot("SpawnSmall",    SPAWN_SMALL_EXPECTED_ABILITY_ID);
 }

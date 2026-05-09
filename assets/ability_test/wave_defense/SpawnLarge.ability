@@ -1,0 +1,14 @@
+// wave_defense stress fixture (task #243): late-wave spawn (count=32).
+//
+// One of four wave-size-tier abilities (SpawnSmall=8, SpawnMedium=16,
+// SpawnLarge=32, SpawnHorde=64). See SpawnSmall.ability for the
+// shared rationale and the wave_defense.sim SpawnLarge verb for the
+// tick-window gate (`world.tick >= 2500 && world.tick < 4000`).
+
+ability SpawnLarge {
+    target: self
+    cooldown: 3s
+    hint: utility
+
+    summon "monster" 32 [UTILITY: 100]
+}

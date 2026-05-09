@@ -1,0 +1,14 @@
+// wave_defense stress fixture (task #243): end-game spawn (count=64).
+//
+// One of four wave-size-tier abilities (SpawnSmall=8, SpawnMedium=16,
+// SpawnLarge=32, SpawnHorde=64). See SpawnSmall.ability for the
+// shared rationale and the wave_defense.sim SpawnHorde verb for the
+// tick-window gate (`world.tick >= 4000`).
+
+ability SpawnHorde {
+    target: self
+    cooldown: 3s
+    hint: utility
+
+    summon "monster" 64 [UTILITY: 100]
+}
