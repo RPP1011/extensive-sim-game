@@ -156,16 +156,20 @@ impl ApplicationHandler for WindowedViewer {
                     "[viewer_window] CloseRequested — exit at tick={}",
                     self.app.sim_tick(),
                 );
-                // Best-effort cleanup of the bridge's GPU texture
-                // before VulkanContext drops. voxel_engine's
-                // SwapchainContext + VoxelRenderer don't have Drop
-                // impls so they'll still leak (and may still segfault
-                // when ctx.drop calls device.destroy_device with
-                // live image handles). Filed as a follow-up; this
-                // covers the bridge's own VRAM at least.
-                if let Some(gfx) = self.gfx.take() {
+                // Full cleanup before VulkanContext drops. Each
+                // owned Vulkan resource has a `destroy(ctx)` method
+                // (no Drop impls upstream — they all want the
+                // VulkanContext, which Rust's Drop signature can't
+                // pass). Order: wait_idle → bridge → swapchain →
+                // renderer → drop ctx implicitly. wait_idle ensures
+                // no in-flight commands are still touching these
+                // resources when we destroy them.
+                if let Some(mut gfx) = self.gfx.take() {
                     let _ = unsafe { gfx.ctx.device().device_wait_idle() };
                     gfx.bridge.destroy(&gfx.ctx);
+                    gfx.swapchain.destroy(&gfx.ctx);
+                    gfx.renderer.destroy(&gfx.ctx);
+                    // ctx + window drop here naturally.
                 }
                 event_loop.exit();
             }

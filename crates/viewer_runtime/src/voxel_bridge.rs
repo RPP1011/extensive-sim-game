@@ -203,22 +203,34 @@ impl VoxelBridge {
     /// Build the renderer object tuple for this bridge's texture.
     /// Single object — per-cell colours come from `palette_tex`
     /// inside the fragment shader, not this tuple's `palette_color`.
-    /// We pass `[1, 1, 1, 0.5]` so the shader's `roughness =
-    /// max(palette_color.a, 0.04)` (gbuffer.frag:200) gets a
-    /// medium-roughness surface, which reads as matte in the
-    /// deferred lighting.
+    ///
+    /// `palette_color.a` doubles as a debug-mode selector in the
+    /// shader (gbuffer.frag:114-118): values > 3.5 enable
+    /// normal_debug — white = camera-facing surface hit, hot pink
+    /// = back-face hit. Toggle via `VIEWER_DEBUG_NORMALS=1` env
+    /// var to triage the "no forward faces" issue: white-only
+    /// means the lighting is dim but front faces are being hit
+    /// correctly; pink-only means the DDA is consistently
+    /// back-face hitting and the upstream shader needs fixing.
     pub fn render_object(
         &self,
     ) -> Option<(
         &GpuVoxelTexture,
-        [f32; 4], // RGBA — only .a is used (as roughness)
+        [f32; 4], // RGBA — .a feeds roughness OR debug-mode selector
         [f32; 3], // world-space lower corner
         [f32; 3], // world-space dims
     )> {
+        let alpha = if std::env::var("VIEWER_DEBUG_NORMALS").is_ok() {
+            4.0 // > 3.5 → normal_debug mode in gbuffer.frag
+        } else {
+            0.5 // medium roughness for matte appearance
+        };
         let world_extent = self.grid_dim as f32 * self.cell_size;
         let dims = [world_extent; 3];
         let pos: [f32; 3] = self.world_origin.into();
-        self.gpu_tex.as_ref().map(|t| (t, [1.0, 1.0, 1.0, 0.5], pos, dims))
+        self.gpu_tex
+            .as_ref()
+            .map(|t| (t, [1.0, 1.0, 1.0, alpha], pos, dims))
     }
 
     /// Drop the GPU texture explicitly. winit's run_app doesn't

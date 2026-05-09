@@ -1049,7 +1049,7 @@ dependencies = [
  "bytemuck",
  "engine",
  "glam",
- "voxel_engine 0.1.0",
+ "voxel_engine",
  "wgpu",
 ]
 
@@ -3472,7 +3472,7 @@ dependencies = [
  "engine",
  "engine_voxel",
  "glam",
- "voxel_engine 0.1.0 (git+https://github.com/RPP1011/voxel_engine?rev=02d21a2866f53603ce89c5708c4a10e771e19bf8)",
+ "voxel_engine",
  "wave_defense_runtime",
  "winit",
 ]
@@ -3506,24 +3506,7 @@ dependencies = [
 [[package]]
 name = "voxel_engine"
 version = "0.1.0"
-dependencies = [
- "anyhow",
- "ash",
- "ash-window",
- "bytemuck",
- "dot_vox",
- "glam",
- "gpu-allocator",
- "log",
- "raw-window-handle",
- "shaderc",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "voxel_engine"
-version = "0.1.0"
-source = "git+https://github.com/RPP1011/voxel_engine?rev=02d21a2866f53603ce89c5708c4a10e771e19bf8#02d21a2866f53603ce89c5708c4a10e771e19bf8"
+source = "git+https://github.com/RPP1011/voxel_engine?rev=a2324b63f32d93eec699c01c7309a63168d1a6bb#a2324b63f32d93eec699c01c7309a63168d1a6bb"
 dependencies = [
  "anyhow",
  "ash",

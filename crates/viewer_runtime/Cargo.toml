@@ -23,7 +23,7 @@ engine_voxel = { path = "../engine_voxel" }
 wave_defense_runtime = { path = "../wave_defense_runtime" }
 
 # voxel_engine with app-harness pulls winit + egui transitively.
-voxel_engine = { git = "https://github.com/RPP1011/voxel_engine", rev = "02d21a2866f53603ce89c5708c4a10e771e19bf8", features = ["app-harness"] }
+voxel_engine = { git = "https://github.com/RPP1011/voxel_engine", rev = "a2324b63f32d93eec699c01c7309a63168d1a6bb", features = ["app-harness"] }
 
 glam = "0.29"
 anyhow = "1"
