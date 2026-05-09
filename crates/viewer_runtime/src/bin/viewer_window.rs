@@ -49,13 +49,11 @@ const VOXEL_GRID_DIM: u32 = 128;
 /// spawners at radius 60); 128 covers it with 1 unit per cell.
 const VOXEL_WORLD_EXTENT: f32 = 128.0;
 
-/// Top-down observer camera. Positioned high on the +Y axis
-/// looking straight down at world origin, so the contested
-/// objective sits dead-centre and the X/Z plane covers the full
-/// view. 60 units up frames the ±60 spawn extent comfortably.
-/// FreeCamera takes (eye_position, look_at_target).
+/// Top-down observer camera. boss_fight has 6 stationary agents
+/// in a ±16-unit window; 35 units up frames them tightly without
+/// wasting screen real estate.
 fn observer_camera() -> FreeCamera {
-    FreeCamera::new(glam::Vec3::new(0.0, 60.0, 0.0), glam::Vec3::ZERO)
+    FreeCamera::new(glam::Vec3::new(0.0, 35.0, 0.0), glam::Vec3::ZERO)
 }
 
 struct WindowedViewer {
@@ -300,14 +298,16 @@ impl ApplicationHandler for WindowedViewer {
 
 impl WindowedViewer {
     fn title_for_tick(&self, tick: u64) -> String {
+        let (bhp, bmax) = self.app.boss_hp();
         format!(
-            "viewer_window — seed={} tick={} red={} blue={} (R:{} B:{})",
+            "viewer_window — seed={} tick={} boss {:.0}/{:.0}  party {}  ({:.0}/{:.0})",
             self.seed,
             tick,
-            self.app.red_alive(),
-            self.app.blue_alive(),
-            self.app.red_score(),
-            self.app.blue_score(),
+            bhp,
+            bmax,
+            self.app.party_alive_count(),
+            self.app.party_total_hp(),
+            self.app.party_max_total_hp(),
         )
     }
 }
@@ -353,59 +353,135 @@ fn _phase_b_marker() -> RendererConfig {
 /// need to borrow the app while gfx is borrowed mutably.
 struct HudState {
     tick: u64,
-    red_alive: u32,
-    blue_alive: u32,
-    red_score: u32,
-    blue_score: u32,
-    control_label: &'static str,
-    winner: Option<u8>,
+    boss_alive: bool,
+    boss_hp: f32,
+    boss_max_hp: f32,
+    party: Vec<UnitHud>,
+    party_total_hp: f32,
+    party_max_total_hp: f32,
+    party_alive: u32,
+    terminated_at_tick: Option<u64>,
+}
+
+struct UnitHud {
+    slot: usize,
+    alive: bool,
+    hp: f32,
+    max_hp: f32,
+    stunned: bool,
 }
 
 impl HudState {
     fn from_app(app: &ViewerApp) -> Self {
-        let obj = app.objective_state();
+        let (bhp, bmax) = app.boss_hp();
+        let mut party = Vec::with_capacity(5);
+        // Party = slots 1..=5 (heroes). Slot 0 is the boss.
+        let alive = app.alive();
+        let hp = app.hp();
+        let max = app.max_hp();
+        for slot in 1..alive.len() {
+            party.push(UnitHud {
+                slot,
+                alive: alive[slot] != 0,
+                hp: hp[slot],
+                max_hp: max[slot],
+                stunned: app.is_stunned(slot),
+            });
+        }
         Self {
             tick: app.sim_tick(),
-            red_alive: app.red_alive(),
-            blue_alive: app.blue_alive(),
-            red_score: app.red_score(),
-            blue_score: app.blue_score(),
-            control_label: obj.control_label(),
-            winner: app.winner(),
+            boss_alive: app.boss_alive(),
+            boss_hp: bhp,
+            boss_max_hp: bmax,
+            party,
+            party_total_hp: app.party_total_hp(),
+            party_max_total_hp: app.party_max_total_hp(),
+            party_alive: app.party_alive_count(),
+            terminated_at_tick: app.terminated_at_tick,
         }
     }
 }
 
-/// Per-frame egui paint. Top-left stats panel.
+const HERO_COLOR: egui::Color32 = egui::Color32::from_rgb(60, 130, 220);
+const BOSS_COLOR: egui::Color32 = egui::Color32::from_rgb(220, 60, 60);
+const STUN_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 215, 80);
+
+fn hp_bar(ui: &mut egui::Ui, label: &str, hp: f32, max_hp: f32, color: egui::Color32) {
+    let frac = if max_hp > 0.0 { (hp / max_hp).clamp(0.0, 1.0) } else { 0.0 };
+    ui.horizontal(|ui| {
+        ui.add_sized([72.0, 16.0], egui::Label::new(label));
+        let (rect, _resp) = ui.allocate_exact_size(egui::vec2(120.0, 14.0), egui::Sense::hover());
+        let painter = ui.painter();
+        // Background
+        painter.rect_filled(rect, 2.0, egui::Color32::from_rgb(40, 40, 40));
+        // Filled portion
+        let mut fill_rect = rect;
+        fill_rect.set_width(rect.width() * frac);
+        painter.rect_filled(fill_rect, 2.0, color);
+        // HP text on top
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            format!("{:.0}/{:.0}", hp, max_hp),
+            egui::FontId::monospace(11.0),
+            egui::Color32::WHITE,
+        );
+    });
+}
+
+/// Per-frame egui paint. Top-left "Boss + Party" panel.
 fn paint_hud(ctx: &egui::Context, state: &HudState) {
-    egui::Window::new("sim")
+    egui::Window::new("boss fight")
         .anchor(egui::Align2::LEFT_TOP, egui::vec2(8.0, 8.0))
         .resizable(false)
         .collapsible(false)
         .show(ctx, |ui| {
-            ui.label(format!("tick      {}", state.tick));
+            ui.label(format!("tick   {}", state.tick));
+            ui.separator();
+            ui.colored_label(BOSS_COLOR, "BOSS");
+            if state.boss_alive {
+                hp_bar(ui, "hp", state.boss_hp, state.boss_max_hp, BOSS_COLOR);
+            } else {
+                ui.colored_label(egui::Color32::DARK_GRAY, "  defeated");
+            }
             ui.separator();
             ui.colored_label(
-                egui::Color32::from_rgb(220, 60, 60),
-                format!("red    alive {:>2}  score {}", state.red_alive, state.red_score),
-            );
-            ui.colored_label(
-                egui::Color32::from_rgb(60, 120, 220),
+                HERO_COLOR,
                 format!(
-                    "blue   alive {:>2}  score {}",
-                    state.blue_alive, state.blue_score
+                    "PARTY  ({} alive  {:.0}/{:.0} hp)",
+                    state.party_alive, state.party_total_hp, state.party_max_total_hp,
                 ),
             );
-            ui.separator();
-            ui.label(format!("control: {}", state.control_label));
-            if let Some(w) = state.winner {
-                let (color, label) = match w {
-                    0 => (egui::Color32::from_rgb(220, 60, 60), "RED WINS"),
-                    1 => (egui::Color32::from_rgb(60, 120, 220), "BLUE WINS"),
-                    _ => (egui::Color32::WHITE, "draw"),
-                };
+            for unit in &state.party {
+                let label = format!("hero {}", unit.slot);
+                if !unit.alive {
+                    ui.horizontal(|ui| {
+                        ui.add_sized(
+                            [72.0, 16.0],
+                            egui::Label::new(egui::RichText::new(&label).color(egui::Color32::DARK_GRAY)),
+                        );
+                        ui.colored_label(egui::Color32::DARK_GRAY, "  KO");
+                    });
+                } else {
+                    let color = if unit.stunned { STUN_COLOR } else { HERO_COLOR };
+                    hp_bar(ui, &label, unit.hp, unit.max_hp, color);
+                    if unit.stunned {
+                        ui.horizontal(|ui| {
+                            ui.add_sized([72.0, 12.0], egui::Label::new(""));
+                            ui.colored_label(STUN_COLOR, "  ⚡ stunned");
+                        });
+                    }
+                }
+            }
+            if let Some(t) = state.terminated_at_tick {
                 ui.separator();
-                ui.colored_label(color, label);
+                let label = if state.boss_alive {
+                    "PARTY WIPED"
+                } else {
+                    "BOSS DEFEATED"
+                };
+                let color = if state.boss_alive { BOSS_COLOR } else { HERO_COLOR };
+                ui.colored_label(color, format!("{}  (tick {})", label, t));
             }
         });
 }

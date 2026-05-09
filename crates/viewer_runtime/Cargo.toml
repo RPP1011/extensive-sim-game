@@ -20,14 +20,15 @@ edition = "2021"
 [dependencies]
 engine = { path = "../engine" }
 engine_voxel = { path = "../engine_voxel" }
-# Pilot fixture for the windowed viewer. Swapped from
-# wave_defense_runtime (which made monsters get attrited from
-# range and never threatened the settlement under current tuning,
-# making the visualisation static-looking) to objective_capture_10v10
-# — two 10-agent factions contesting a single objective at origin
-# with real movement, combat, and win/loss conditions. ~20 agents
-# total stays well under the bridge's 256³ scaling ceiling.
-objective_capture_10v10_runtime = { path = "../objective_capture_10v10_runtime" }
+# Pilot fixture for the windowed viewer. boss_fight has 6 stationary
+# agents (1 Boss + 5 Heroes) trading abilities (BossStrike,
+# BossSelfHeal, HeroAttack, HeroStun, HeroHeal). No per-agent
+# movement — the viewer assigns a fixed semicircle layout in
+# `lib.rs::HERO_POSITIONS`. Visual interest comes from per-tick
+# HP swings as abilities land + stun status; viewer paints cubes
+# tinted by HP fraction so you can see who's about to die at a
+# glance.
+boss_fight_runtime = { path = "../boss_fight_runtime" }
 
 # voxel_engine with app-harness pulls winit + egui transitively.
 voxel_engine = { git = "https://github.com/RPP1011/voxel_engine", rev = "601721faa455815503a33ecb95c8c72727350b15", features = ["app-harness"] }

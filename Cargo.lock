@@ -4065,12 +4065,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ash",
+ "boss_fight_runtime",
  "egui 0.33.3",
  "egui_plot",
  "engine",
  "engine_voxel",
  "glam",
- "objective_capture_10v10_runtime",
  "voxel_engine",
  "winit",
 ]
