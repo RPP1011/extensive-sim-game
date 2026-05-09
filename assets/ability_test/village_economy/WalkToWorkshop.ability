@@ -1,0 +1,20 @@
+// village_economy noncombat acceptance: Lift A travel verb. Caster
+// walks to the workshop tile (5, 5) over 5s = 50 ticks. The
+// chronicle record (kind=70) lands once per cast; the per-fixture
+// consumer rule in `village_economy.sim` drains it and bumps the
+// agent's per-agent travel-completed counter (re-purposed
+// `disguise_expires_at_tick` SoA cell) so the runtime test can pin
+// "at least one travel landed".
+//
+// `travel_to <x> <y> for <duration>` lowers via the `travel_to` arm of
+// `dsl_compiler::ability_lower::lower_effect_stmt` to `EffectOp::TravelTo
+// { dest_x_q8, dest_y_q8, eta_ticks }`. The destination is q8-packed
+// into payload_a; eta_ticks lands in payload_b.
+
+ability WalkToWorkshop {
+    target: self
+    cooldown: 10s
+    hint: utility
+
+    travel_to 5 5 for 5s [UTILITY: 100]
+}

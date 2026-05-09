@@ -1,0 +1,32 @@
+// village_economy noncombat acceptance: bilateral consent + obligation
+// pair. The dispatcher walks the program and writes:
+//   * EffectProposeApplied         (kind=73) — Lift C: caster offers a
+//                                   bilateral agreement of kind=4
+//                                   (Service) to the cast target;
+//                                   expires_at_tick=200 (test horizon).
+//   * EffectCreateObligationApplied (kind=76) — Lift D: caster registers
+//                                   obligation slot id=1, kind=0
+//                                   (Debt) against the cast target.
+//
+// Together this pair pins the consent + persistent-record surfaces:
+// caster proposes a service deal AND records the implied debt in one
+// cast. In the full economy these would split (a target-side accept
+// gate would materialize the debt only after acceptance), but for the
+// foundation acceptance fixture both records flow through the same
+// cast — exercising the lift surface end-to-end without yet shipping
+// the accept / decline / discharge companion verbs.
+//
+// `target: enemy` is the only non-self ability target in this fixture
+// (recipes/wear/skills/announces are all self-cast). The runtime test
+// pins this by checking that obligation/proposal records carry distinct
+// caster_slot != target_slot.
+
+ability OfferDeal {
+    target: enemy
+    range: 100.0
+    cooldown: 5s
+    hint: utility
+
+    propose 4 expires_at 200 [UTILITY: 100]
+    create_obligation 1 0 [UTILITY: 100]
+}

@@ -1,0 +1,46 @@
+// village_economy noncombat acceptance: composite production verb that
+// exercises four lift primitives in a single ability program (under the
+// MAX_EFFECTS_PER_PROGRAM=6 ceiling).
+//
+// Per cast the dispatcher walks the program and writes one chronicle
+// record per non-empty effect slot:
+//   * EffectRecipeApplied   (kind=71) — Lift B: blacksmith fires recipe
+//                           id=1 (ForgeIron) with no specific tool slot
+//                           (sentinel 0xFF; consumer reads the
+//                           caster's owned forge from inventory).
+//   * EffectWearToolApplied (kind=72) — Lift B: bumps wear on the
+//                           caster's tool of kind=0 (Forge) by 50/256
+//                           = ~0.20 per cast. After ~5 casts the forge
+//                           is worn.
+//   * EffectGainSkillApplied (kind=75) — Lift D: caster gains 25/256
+//                           ≈ 0.10 mastery in skill_id=0
+//                           (Blacksmithing).
+//   * EffectAnnounceApplied (kind=74) — Lift C: caster broadcasts
+//                           announcement_kind=0 ("forge complete")
+//                           within radius 3.0 cells. Per-fixture
+//                           consumer fires the village's "skilled
+//                           agent finished a recipe" chronicle pin.
+//
+// Three of the four belong to the "skill / knowledge / market" lift
+// surfaces; the fourth (recipe) is the production primitive itself.
+// Together with WalkToWorkshop's travel_to (Lift A) they pin "all
+// four lift A-D primitives plus their consumer counters work end-to-
+// end in one runtime tick" — the architectural goal of this fixture.
+//
+// NOTE: cast_recipe / wear_tool / gain_skill / announce all lower via
+// the matching arms of `dsl_compiler::ability_lower::lower_effect_stmt`.
+// `target: self` keeps the dispatcher's actor==target slot binding for
+// the self-cast effects (recipe / wear_tool / gain_skill / announce
+// are all caster-self-origin per the dispatcher arm comments in
+// `crates/dsl_compiler/src/cpu_chronicle_reference.rs:658-743`).
+
+ability ForgeIron {
+    target: self
+    cooldown: 1s
+    hint: utility
+
+    cast_recipe 1 [UTILITY: 100]
+    wear_tool 0 50 [UTILITY: 100]
+    gain_skill 0 25 [UTILITY: 100]
+    announce 0 radius 3 [UTILITY: 100]
+}

@@ -205,6 +205,38 @@ pub const ENGINE_EVENT_KIND_IDS: &[(&str, u32)] = &[
     ("EffectDisguiseApplied",    67),
     ("EffectDecoyApplied",       68),
     ("EffectEraseBeliefApplied", 69),
+    // Lift A — multi-tick procedure: TravelTo. Dispatcher writes one
+    // chronicle record (kind=70) per cast. Payload layout: actor (slot 2)
+    // = caster, target (slot 3) = caster (self-cast); slot 4 packs
+    // (dest_y_q8 << 16) | (dest_x_q8 & 0xFFFF) — sign-extend each i16
+    // half via bit shifts; slot 5 = eta_ticks. The downstream consumer
+    // rule sets `busy_until_tick = world.tick + eta_ticks` and
+    // populates `travel_dest_{x,y,z}` SoA cells.
+    ("EffectTravelToApplied", 70),
+    // Lift B — items / inventory + production / recipes. Two chronicle
+    // events per cast pair:
+    //   * Recipe (kind=71): slot 4 packs (target_tool << 16) | recipe_id;
+    //     slot 5 = 0. Self-cast: target = caster (recipes act on the
+    //     caster's inventory).
+    //   * WearTool (kind=72): slot 4 packs (amount << 8) | tool_kind;
+    //     slot 5 = 0. Self-cast: target = caster (wear acts on the
+    //     caster's owned tool).
+    ("EffectRecipeApplied",   71),
+    ("EffectWearToolApplied", 72),
+    // Lift C — bilateral consent + observer fan-out:
+    //   * Propose (kind=73): slot 4 = contract_kind (low byte); slot 5 =
+    //     expires_at_tick (0 = no expiry). target = recipient.
+    //   * Announce (kind=74): slot 4 packs (radius_q8 << 8) |
+    //     announcement_kind; slot 5 = 0. Self-origin: target = caster.
+    ("EffectProposeApplied",  73),
+    ("EffectAnnounceApplied", 74),
+    // Lift D — knowledge / skills + obligation registry:
+    //   * GainSkill (kind=75): slot 4 packs (amount_q8 << 8) | skill_id;
+    //     slot 5 = 0. Self-cast: target = caster.
+    //   * CreateObligation (kind=76): slot 4 packs (kind << 16) |
+    //     obligation_id; slot 5 = 0. target = debtor / promisor.
+    ("EffectGainSkillApplied",        75),
+    ("EffectCreateObligationApplied", 76),
 ];
 
 /// Look up the engine-defined `EventKindId` discriminant for an
@@ -264,6 +296,13 @@ mod tests {
         assert_eq!(engine_event_kind_id_for_name("EffectDisguiseApplied"), Some(67));
         assert_eq!(engine_event_kind_id_for_name("EffectDecoyApplied"), Some(68));
         assert_eq!(engine_event_kind_id_for_name("EffectEraseBeliefApplied"), Some(69));
+        assert_eq!(engine_event_kind_id_for_name("EffectTravelToApplied"), Some(70));
+        assert_eq!(engine_event_kind_id_for_name("EffectRecipeApplied"), Some(71));
+        assert_eq!(engine_event_kind_id_for_name("EffectWearToolApplied"), Some(72));
+        assert_eq!(engine_event_kind_id_for_name("EffectProposeApplied"), Some(73));
+        assert_eq!(engine_event_kind_id_for_name("EffectAnnounceApplied"), Some(74));
+        assert_eq!(engine_event_kind_id_for_name("EffectGainSkillApplied"), Some(75));
+        assert_eq!(engine_event_kind_id_for_name("EffectCreateObligationApplied"), Some(76));
     }
 
     #[test]
