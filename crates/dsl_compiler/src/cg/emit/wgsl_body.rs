@@ -2811,18 +2811,33 @@ fn build_apply_ability_per_target_body(
          \x20           // both backends.\n\
          \x20           //\n\
          \x20           // Per-thread implementation: each WGSL thread processes one\n\
-         \x20           // ActionSelected/cast independently. Workgroup-shared sort is\n\
-         \x20           // overkill — we collect candidates into a fixed-size local\n\
-         \x20           // array and sequential-insertion-sort within the single thread.\n\
+         \x20           // ActionSelected/cast independently — there is nothing for\n\
+         \x20           // peer threads to cooperate on (each cast has its own center,\n\
+         \x20           // its own candidates, its own kept set). Cross-thread workgroup\n\
+         \x20           // memory cooperation is therefore not applicable; the sort runs\n\
+         \x20           // entirely within one thread's private storage.\n\
          \x20           //\n\
-         \x20           // **16-slot cap (documented limitation).** The local array is\n\
-         \x20           // sized for at most 16 in-radius candidates per cast. Overflow\n\
-         \x20           // beyond 16 (or max_targets > 16) silently truncates to the\n\
-         \x20           // first 16 *collected* — which depends on spatial-grid walk\n\
-         \x20           // order, NOT AgentId order, so the kept set may not match the\n\
-         \x20           // CPU oracle's lowest-K-AgentId post-sort selection. Fixtures\n\
-         \x20           // and abilities targeting > 16 simultaneous candidates per\n\
-         \x20           // cast must keep n_in_radius ≤ 16 to stay byte-equal.\n\
+         \x20           // **Bitonic sort (task #230, 2026-05-08).** The previous shape\n\
+         \x20           // used a 16-slot per-thread insertion sort (O(K²)). The new\n\
+         \x20           // shape is a bitonic sort over a private 256-slot array (O(K\n\
+         \x20           // log² K)) — the asymptotic win the task description called\n\
+         \x20           // for, achieved without a `var<workgroup>` decl (which would\n\
+         \x20           // not fit the 16 KB WebGPU minimum at workgroup_size=64 ×\n\
+         \x20           // K=256 = 64 KB — outside spec). The 256-cap leaves headroom\n\
+         \x20           // for fixtures with dense in-radius candidate counts.\n\
+         \x20           //\n\
+         \x20           // **256-slot cap (documented limitation).** The local array is\n\
+         \x20           // sized for at most 256 in-radius candidates per cast. Overflow\n\
+         \x20           // beyond 256 silently drops the spatial-walk-late candidates,\n\
+         \x20           // which can produce non-AgentId-ordered selection. Fixtures\n\
+         \x20           // targeting > 256 simultaneous candidates per cast must keep\n\
+         \x20           // n_in_radius ≤ 256 to stay byte-equal with the CPU oracle.\n\
+         \x20           //\n\
+         \x20           // **P11 determinism.** AgentIds are unique by construction, so\n\
+         \x20           // the bitonic sort never encounters ties — no secondary tie-\n\
+         \x20           // break key needed. Pad slots hold `0xFFFFFFFFu` (max u32) so\n\
+         \x20           // they sort to the high end and never enter the truncated\n\
+         \x20           // kept set (n_emit = min(n_collected, max_targets)).\n\
          \x20           //\n\
          \x20           // **Spatial walk limitation.** 27-cell walk; if radius exceeds\n\
          \x20           // SPATIAL_CELL_SIZE candidates beyond the 27-cell footprint\n\
@@ -2832,8 +2847,14 @@ fn build_apply_ability_per_target_body(
          \x20           let max_targets: u32 = u32(ability_registry_area_args[area_args_base + 1u]);\n\
          \x20           let radius_sq: f32 = radius * radius;\n\
          \x20           let aoe_center: vec3<f32> = agent_pos[target_slot];\n\
-         \x20           // Local fixed-size collection buffer (per-thread).\n\
-         \x20           var collected: array<u32, 16>;\n\
+         \x20           // Bitonic-sort scratch: 256-slot private array, padded with\n\
+         \x20           // 0xFFFFFFFFu so unused slots sort to the high end. The cap\n\
+         \x20           // is 256 (power of 2 — required for bitonic's structural\n\
+         \x20           // halving); log₂(256) = 8 stages.\n\
+         \x20           var collected: array<u32, 256>;\n\
+         \x20           for (var _pad: u32 = 0u; _pad < 256u; _pad = _pad + 1u) {\n\
+         \x20               collected[_pad] = 0xFFFFFFFFu;\n\
+         \x20           }\n\
          \x20           var n_collected: u32 = 0u;\n\
          \x20           let _self_cell_f = (aoe_center + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
          \x20           let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
@@ -2851,7 +2872,7 @@ fn build_apply_ability_per_target_body(
          \x20                           let _cand_pos: vec3<f32> = agent_pos[_candidate];\n\
          \x20                           let _dvec: vec3<f32> = _cand_pos - aoe_center;\n\
          \x20                           if (dot(_dvec, _dvec) <= radius_sq) {\n\
-         \x20                               if (n_collected < 16u) {\n\
+         \x20                               if (n_collected < 256u) {\n\
          \x20                                   collected[n_collected] = _candidate;\n\
          \x20                                   n_collected = n_collected + 1u;\n\
          \x20                               }\n\
@@ -2861,23 +2882,46 @@ fn build_apply_ability_per_target_body(
          \x20                   } // end for dx (spread collect)\n\
          \x20               } // end for dy (spread collect)\n\
          \x20           } // end for dz (spread collect)\n\
-         \x20           // Sequential insertion sort by AgentId ascending (per-thread,\n\
-         \x20           // n_collected ≤ 16 ⇒ O(n²) ≤ 256 comparisons is trivial). The\n\
-         \x20           // inner shift loop uses signed `j` so the j<0 termination is\n\
-         \x20           // explicit (WGSL has no break-on-decrement-from-0u).\n\
-         \x20           for (var _ii: u32 = 1u; _ii < n_collected; _ii = _ii + 1u) {\n\
-         \x20               let _key: u32 = collected[_ii];\n\
-         \x20               var _j: i32 = i32(_ii) - 1;\n\
-         \x20               loop {\n\
-         \x20                   if (_j < 0) { break; }\n\
-         \x20                   if (collected[u32(_j)] <= _key) { break; }\n\
-         \x20                   collected[u32(_j) + 1u] = collected[u32(_j)];\n\
-         \x20                   _j = _j - 1;\n\
+         \x20           // Bitonic sort by AgentId ascending — O(K log² K) over the\n\
+         \x20           // padded 256-slot array. log₂(256) = 8 outer stages × 8 inner\n\
+         \x20           // sub-stages × 128 compare-swaps = 8192 ops; vs the prior\n\
+         \x20           // insertion sort's O(K²) which would be 65 536 ops at K=256.\n\
+         \x20           // Standard Batcher bitonic-sort direction rule: subsequence\n\
+         \x20           // [_ii .. _ii^_step] sorts ascending when (_ii & _stage) == 0\n\
+         \x20           // and descending when (_ii & _stage) != 0; the pairwise\n\
+         \x20           // direction alternation produces a single ascending run after\n\
+         \x20           // the final stage. Padding (0xFFFFFFFFu) drifts to the high\n\
+         \x20           // end as required.\n\
+         \x20           for (var _stage: u32 = 2u; _stage <= 256u; _stage = _stage << 1u) {\n\
+         \x20               for (var _step: u32 = _stage >> 1u; _step > 0u; _step = _step >> 1u) {\n\
+         \x20                   for (var _ii: u32 = 0u; _ii < 256u; _ii = _ii + 1u) {\n\
+         \x20                       let _ixor: u32 = _ii ^ _step;\n\
+         \x20                       if (_ixor > _ii) {\n\
+         \x20                           let _a: u32 = collected[_ii];\n\
+         \x20                           let _b: u32 = collected[_ixor];\n\
+         \x20                           let _ascending: bool = (_ii & _stage) == 0u;\n\
+         \x20                           // Ascending arm wants (lo, hi); descending\n\
+         \x20                           // wants (hi, lo). min/max do the compare-swap\n\
+         \x20                           // branchlessly.\n\
+         \x20                           let _lo: u32 = min(_a, _b);\n\
+         \x20                           let _hi: u32 = max(_a, _b);\n\
+         \x20                           if (_ascending) {\n\
+         \x20                               collected[_ii] = _lo;\n\
+         \x20                               collected[_ixor] = _hi;\n\
+         \x20                           } else {\n\
+         \x20                               collected[_ii] = _hi;\n\
+         \x20                               collected[_ixor] = _lo;\n\
+         \x20                           }\n\
+         \x20                       }\n\
+         \x20                   }\n\
          \x20               }\n\
-         \x20               collected[u32(_j + 1)] = _key;\n\
          \x20           }\n\
          \x20           // Truncate to max_targets and emit one chronicle record per\n\
          \x20           // kept slot via the standard arm chain (target_slot shadowed).\n\
+         \x20           // Padding (0xFFFFFFFFu) sorted to the high end of the array,\n\
+         \x20           // so slots [0..n_collected) hold real AgentIds in ascending\n\
+         \x20           // order — clamping by min(n_collected, max_targets) keeps the\n\
+         \x20           // pad out of the kept set automatically.\n\
          \x20           let n_emit: u32 = min(n_collected, max_targets);\n\
          \x20           for (var _ii: u32 = 0u; _ii < n_emit; _ii = _ii + 1u) {\n\
          \x20               // Shadow target_slot for the arm chain's chronicle writes.\n\
@@ -7493,6 +7537,126 @@ mod tests {
             wgsl.contains("nested_base: u32 = ability_slot * 12u"),
             "nested base = ability_slot * MAX_EFFECTS_PER_PROGRAM * MAX_NESTED_PER_EFFECT \
              = ability_slot * 12;\n{wgsl}"
+        );
+    }
+
+    // ---- Task #230 (2026-05-08): per-thread workgroup-shared bitonic
+    //      sort for the AOE Spread shape. Pins the new emit shape so a
+    //      regression to insertion sort or to the 16-slot cap surfaces
+    //      at compile time, not from a fixture pin two crates downstream.
+
+    #[test]
+    fn apply_ability_aoe_spread_emits_bitonic_sort_with_256_slot_cap() {
+        // Mirrors `apply_ability_emits_dispatcher_loop_with_branch_arms`
+        // but with `with_aoe_dispatch: true` so the rendered body
+        // includes the `area_kind == 4u` (Spread) branch. Asserts:
+        //   1. The Spread branch is present (area_kind == 4u arm).
+        //   2. The collection buffer is sized for 256 candidates (not
+        //      the prior 16-slot cap).
+        //   3. The sort uses a bitonic compare-swap shape — three
+        //      nested loops (`_stage`, `_step`, `_ii`) over an XOR-mate
+        //      index, with min/max compare-swap. Direction alternates
+        //      via `(_ii & _stage) == 0u` per Batcher's bitonic sort.
+        //   4. Padding is initialised to 0xFFFFFFFFu so unused slots
+        //      sort to the high end and never enter the kept set.
+        //   5. The prior O(K²) insertion-sort markers are gone — no
+        //      more `loop { if (_j < 0)` or `collected[u32(_j)] <= _key`
+        //      patterns.
+        let mut prog = empty_prog();
+        let ability_lit = push_expr(&mut prog, CgExpr::Lit(LitValue::U32(1)));
+        let caster_self = push_expr(&mut prog, CgExpr::AgentSelfId);
+        let stmt_id = push_stmt(
+            &mut prog,
+            CgStmt::ApplyAbility {
+                ability: ability_lit,
+                caster: caster_self,
+                target: caster_self,
+                with_aoe_dispatch: true,
+            },
+        );
+        let ctx = EmitCtx::structural(&prog);
+        let wgsl = lower_cg_stmt_to_wgsl(stmt_id, &ctx).expect("AOE-enabled lower");
+
+        // 1. Spread branch present.
+        assert!(
+            wgsl.contains("} else if (area_kind == 4u) {"),
+            "Spread branch (area_kind == 4u) must be in the AOE dispatch chain;\n{wgsl}",
+        );
+
+        // 2. 256-slot collection buffer.
+        assert!(
+            wgsl.contains("var collected: array<u32, 256>;"),
+            "Spread collection buffer must be sized for 256 candidates (task #230 cap bump);\n{wgsl}",
+        );
+        assert!(
+            wgsl.contains("if (n_collected < 256u)"),
+            "Spread collection guard must reflect the 256-slot cap;\n{wgsl}",
+        );
+        // The prior 16-slot shape must be gone.
+        assert!(
+            !wgsl.contains("var collected: array<u32, 16>;"),
+            "Prior 16-slot Spread cap must not regress;\n{wgsl}",
+        );
+        assert!(
+            !wgsl.contains("if (n_collected < 16u)"),
+            "Prior 16-slot Spread guard must not regress;\n{wgsl}",
+        );
+
+        // 3. Bitonic sort markers — three nested loops, XOR mate index,
+        //    direction bit derived from (_ii & _stage), min/max compare-
+        //    swap.
+        assert!(
+            wgsl.contains("for (var _stage: u32 = 2u; _stage <= 256u; _stage = _stage << 1u)"),
+            "Bitonic outer stage loop must double from 2 to 256;\n{wgsl}",
+        );
+        assert!(
+            wgsl.contains("for (var _step: u32 = _stage >> 1u; _step > 0u; _step = _step >> 1u)"),
+            "Bitonic inner step loop must halve from stage/2 to 1;\n{wgsl}",
+        );
+        assert!(
+            wgsl.contains("let _ixor: u32 = _ii ^ _step;"),
+            "Bitonic compare-swap mate index = _ii XOR _step;\n{wgsl}",
+        );
+        assert!(
+            wgsl.contains("let _ascending: bool = (_ii & _stage) == 0u;"),
+            "Bitonic direction bit must come from (_ii & _stage);\n{wgsl}",
+        );
+        assert!(
+            wgsl.contains("let _lo: u32 = min(_a, _b);"),
+            "Bitonic compare-swap must use min for lo;\n{wgsl}",
+        );
+        assert!(
+            wgsl.contains("let _hi: u32 = max(_a, _b);"),
+            "Bitonic compare-swap must use max for hi;\n{wgsl}",
+        );
+
+        // 4. Padding initialised to 0xFFFFFFFFu (max u32) so unused
+        //    slots drift to the high end and never enter the kept set.
+        assert!(
+            wgsl.contains("collected[_pad] = 0xFFFFFFFFu;"),
+            "Padding init must use 0xFFFFFFFFu sentinel;\n{wgsl}",
+        );
+
+        // 5. Insertion-sort markers must be gone.
+        assert!(
+            !wgsl.contains("if (_j < 0) { break; }"),
+            "Insertion-sort `if (_j < 0) break` regression detected;\n{wgsl}",
+        );
+        assert!(
+            !wgsl.contains("if (collected[u32(_j)] <= _key)"),
+            "Insertion-sort comparison regression detected;\n{wgsl}",
+        );
+        assert!(
+            !wgsl.contains("collected[u32(_j) + 1u] = collected[u32(_j)];"),
+            "Insertion-sort shift regression detected;\n{wgsl}",
+        );
+
+        // The truncate-to-max_targets logic that follows the sort is
+        // unchanged — pin it so the kept-set selection contract stays
+        // explicit.
+        assert!(
+            wgsl.contains("let n_emit: u32 = min(n_collected, max_targets);"),
+            "Truncate-to-max_targets clamp must follow the sort;\n{wgsl}",
         );
     }
 
