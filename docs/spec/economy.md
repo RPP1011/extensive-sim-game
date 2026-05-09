@@ -1,11 +1,154 @@
 # Economic Depth Design — Beyond X4
 
-> ❌ **Audit 2026-04-26 — entirely unimplemented:** All three phases (Phase 1 Foundation, Phase 2 Behavioral depth, Phase 3 Emergent macro) have **0 of ~80 spec deliverables landed in the engine crate.** Only a thin economic substrate exists: `Inventory.{gold: i32, commodities: [u16; 8]}` (anonymous slots, not `CommodityRegistry`), `EffectOp::TransferGold` (variant 5), `EffectOp::ModifyStanding` (variant 6), `Quest`+`Bid` macro frame, `standing(a,b)` view, stub IDs (`AuctionId`, `SettlementId`, `ItemId`), `Creditor` stub, `MentorLink` stub, `GroupRole::Apprentice`, `Capabilities.can_trade`.
+> ⚠️ **Spec audit (2026-05-08) — Lifts A–D foundation slices shipped.** Six new
+> `EffectOp` variants landed since the 2026-04-26 audit below, plus matching DSL
+> lowering arms and chronicle event kinds. The "0 of ~80 spec deliverables"
+> framing in the older callout is now outdated for the recipe / contract / skill
+> primitive layer:
 >
-> The largest single gap is `EffectOp::Recipe` (variant 17) + `RecipeRegistry` + `CommodityRegistry` — the "recipes-as-abilities" anchor (§3) that unblocks all downstream dims. Until that lands, production graph, ingredient chains, component assembly, three-party standing, obligations, property/inheritance, routes/caravans, skills, preferences, beliefs, banking — none are expressible.
+> | Lift | Commit | EffectOp variants | DSL verbs | Chronicle event kinds |
+> |---|---|---|---|---|
+> | A — multi-tick procedures | `7bb0929c` | `TravelTo` (39) | `travel_to` | 70 |
+> | B — items + recipes | `28c30b9f` | `Recipe` (40), `WearTool` (41) | `cast_recipe`, `wear_tool` | 71, 72 |
+> | C — bilateral consent + observer fan-out | `9d0cf91e` | `Propose` (42), `Announce` (43) | `propose`, `announce` | 73, 74 |
+> | D — knowledge / obligations | `b821f3fc` | `GainSkill` (44), `CreateObligation` (45) | `gain_skill`, `create_obligation` | 75, 76 |
+>
+> Each foundation slice ships the engine `EffectOp` discriminant + payload
+> packing + DSL lowering arm + chronicle dispatcher record only. The
+> per-fixture consumer rules (RecipeRegistry, ContractRegistry,
+> ObligationRegistry, SkillRegistry, ToolKindRegistry, CommodityRegistry, Tool /
+> Component / Property / Obligation entities, the `apply.rs` mutation handlers)
+> are NOT yet wired — they're future per-fixture work tracked as TODO comments
+> in `crates/engine/src/cascade/handler.rs` and `crates/engine/src/ability/apply.rs`.
+> Status tables in §4.8 / §5.6 / §6.5 / §7.5 / §8.8 / §17.1 are flipped to
+> `shipped (foundation)` for primitives that crossed this boundary; everything
+> else stays `planned`.
+>
+> One **CRITICAL** ordinal-drift item (C1 below) — every spec ordinal in the
+> 17–26 range is wrong; actual ordinals are 39–45. See the "Drift items
+> 2026-05-08" subsection immediately below for the full mapping.
+
+> ❌ **Audit 2026-04-26 — entirely unimplemented (now partially superseded by Lifts A–D, see callout above):** All three phases (Phase 1 Foundation, Phase 2 Behavioral depth, Phase 3 Emergent macro) had **0 of ~80 spec deliverables landed in the engine crate.** Only a thin economic substrate existed: `Inventory.{gold: i32, commodities: [u16; 8]}` (anonymous slots, not `CommodityRegistry`), `EffectOp::TransferGold` (variant 5), `EffectOp::ModifyStanding` (variant 6), `Quest`+`Bid` macro frame, `standing(a,b)` view, stub IDs (`AuctionId`, `SettlementId`, `ItemId`), `Creditor` stub, `MentorLink` stub, `GroupRole::Apprentice`, `Capabilities.can_trade`.
+>
+> The largest single gap was `EffectOp::Recipe` (variant 17 per the older spec) + `RecipeRegistry` + `CommodityRegistry` — the "recipes-as-abilities" anchor (§3). The `EffectOp::Recipe` foundation half landed in Lift B (commit `28c30b9f`, 2026-05-08) at engine ordinal **40** (not 17 — see CRITICAL ordinal drift in the 2026-05-08 callout above), but the `RecipeRegistry` + `CommodityRegistry` consumer side is still per-fixture work. Production graph, ingredient chains, component assembly, three-party standing, property/inheritance, routes/caravans, preferences, beliefs, banking — none are end-to-end expressible until the consumer-side registries land.
 >
 > Old `npc_economy_plan.md` work (8-commodity production system) lived in a `src/world_sim/` branch that is **not present in the current codebase tree** — the spec §21.3–21.4 explicitly reshapes that design (settlements as views, production as recipes-as-abilities). Only `Inventory.{gold, commodities}` shape carries forward.
 > See `docs/superpowers/notes/2026-04-26-audit-economy.md` for the per-dim deliverable inventory and the proposed Plan A–I decomposition.
+
+---
+
+## Drift items 2026-05-08
+
+Read-only summary against `crates/engine/src/ability/program.rs::EffectOp`
+(variants 0–45 today), `crates/dsl_compiler/src/ability_lower.rs::lower_effect_stmt`,
+and `crates/dsl_compiler/src/cpu_chronicle_reference.rs`. Severity tags per the
+2026-05-08 audit convention:
+
+| Tag | Meaning | Count |
+|---|---|---|
+| `[CRITICAL]` | silently miscompiles | **1** |
+| `[STATUS-FLIP]` | planned → shipped (foundation) | **9** |
+| `[UNDOCUMENTED]` | impl has feature spec doesn't describe | **3** |
+| `[MISSING]` | spec describes feature with no impl | **0 new** (the bulk of §4–§13 stays `planned`) |
+| `[STALE]` | spec describes deprecated/removed surface | **2** |
+
+### CRITICAL items
+
+**C1. EffectOp ordinal drift** — §3 IR snippet, §4.8 first row, §6.5 rows for
+variants 19–20, §7.5 rows for variants 21–23, §5.6 rows for variants 24–25, §12.2
+row for variant 26, and §17.1 ordinal column 17–26 ALL use stale variant numbers.
+Actual shipped ordinals (per `EffectOp` discriminants in `program.rs`):
+
+| Spec says | Code says | Variant |
+|---|---|---|
+| 17 | **40** | `Recipe` |
+| 18 | **41** | `WearTool` |
+| 19 | (not landed) | `TransferProperty` |
+| 20 | (not landed) | `ForcibleTransfer` |
+| 21 | **45** | `CreateObligation` |
+| 22 | (not landed) | `DischargeObligation` |
+| 23 | (not landed) | `DefaultObligation` |
+| 24 | (not landed) | `EstablishRoute` |
+| 25 | (not landed) | `JoinCaravan` |
+| 26 | (not landed) | `TransferObligation` |
+
+Discriminants 17–38 are now occupied by verbs added in interleaving waves
+(SelfDamage=17, LifeSteal=18, DamageModify=19, DamageOverTime=20, HealOverTime=21,
+TimedShield=22, Buff=23, Summon=24, Harvest=25, PlaceVoxel=26, Stealth=27,
+Charm=28, Grounded=29, Suppress=30, Reflect=31, PlantBelief=32, Observe=33,
+Scry=34, Reveal=35, Disguise=36, Decoy=37, EraseBelief=38). Lift A took 39
+(TravelTo); Lifts B/C/D took 40/41/42/43/44/45. The remaining-planned economy
+variants will land at 46+ (`TransferProperty` next at 46, `ForcibleTransfer` at
+47, etc.). All §4.8 / §6.5 / §7.5 / §17.1 ordinal columns and the §3 lowered-IR
+snippet are factually wrong as of this audit but kept as-is to avoid an audit
+PR re-numbering everything; the corrected ordinals appear inline as `(spec
+variant 17 → actual variant 40)` annotations below. **A focused follow-up
+slice should renumber the spec to match landed ordinals + reserve a contiguous
+range for the remaining planned variants.**
+
+### STATUS-FLIP items (planned → shipped (foundation))
+
+| ID | Section | Construct | Was | Now |
+|---|---|---|---|---|
+| F1 | §4.8 | `EffectOp::Recipe` (variant 40, was spec'd as 17) | planned | shipped (foundation) |
+| F2 | §4.8 | `EffectOp::WearTool` (variant 41, was spec'd as 18) | planned | shipped (foundation) |
+| F3 | §5.6 | (Lift A foundation) `travel_to` multi-tick procedure infrastructure | n/a (spec did not have Lift A) | shipped (foundation) — see §5.6 callout |
+| F4 | §6 | `Propose` (variant 42) — bilateral-consent foundation | not in spec until Lift C; called out as observer fan-out | shipped (foundation) — see §6 / §7 callouts |
+| F5 | §6 | `Announce` (variant 43) — observer fan-out foundation | implicit only ("Communicate / Announce machinery" in §5.1) | shipped (foundation) — see §6 callout |
+| F6 | §7.5 | `EffectOp::CreateObligation` (variant 45, was spec'd as 21) | planned | shipped (foundation) |
+| F7 | §8.8 | `EffectOp::GainSkill` (variant 44) — practice / observation skill bumps | implicit ("each successful cast updates skills" in §8.2) | shipped (foundation) — primitive verb landed; the per-fixture consumer that translates §8.2's per-tick rules into `gain_skill` events is per-fixture work |
+| F8 | §17.1 | `Recipe` row (variant 17 → 40) | planned | shipped (foundation) |
+| F9 | §17.1 | `WearTool`, `CreateObligation` rows | planned | shipped (foundation) |
+
+### UNDOCUMENTED items
+
+**U1. `propose` / `announce` are observer/consent primitives — not just helpers
+to existing macro actions.** §5.4 mentions "existing `Communicate / Announce`
+machinery" and §6.3 describes a reactive-passive cascade for theft observers,
+but there's no §-level entry for the observer fan-out shape (`announce
+<announcement_kind> radius <radius_q8>`) or the bilateral-consent shape
+(`propose <contract_kind> [expires_at <tick>]`). Both verbs are now in the
+DSL surface and chronicle dispatcher; the per-fixture consumer rules that turn
+the chronicle records into per-observer perception events / per-target
+proposal-registry inserts are deferred. Recommended: add `### 6.6 Observer
+fan-out (announce)` and `### 7.6 Bilateral consent (propose)` subsections
+in a follow-up slice. See callouts inline at §6 and §7.
+
+**U2. Lift A — multi-tick procedure foundation.** `EffectOp::TravelTo`
+(variant 39) ships a generalizable "begin a multi-tick action; SoA cell
+`busy_until_tick` blocks subsequent casts" primitive that economy.md §3
+implies via `cast: 400ms` but never names. The spec's `cast_ticks: 4` field
+on `Gate` is the same primitive — `travel_to` exposes the primitive directly
+as a verb. Recommended: add `### 4.9 Multi-tick procedures (cast_ticks /
+travel_to)` to economy.md or cross-reference to ability.md's gate semantics.
+Inline callout added at §3.
+
+**U3. `gain_skill` as a verb is more general than §8.2's "practice /
+observation / book / decay" cascade rules.** §8.2 frames skill acquisition as
+runtime cascade rules driven by `RecipeCast` / `RecipeCompleted` events. The
+landed `gain_skill <skill_id> <amount>` verb is a generic skill-bump primitive
+that any ability author can compose into a recipe (e.g., a one-shot
+"Spar" ability that bumps the caster's combat skill without producing
+output). The spec doesn't acknowledge this authorial flexibility. Inline
+callout added at §8.2.
+
+### STALE items
+
+**S1. §3 IR snippet shows `Recipe { recipe: 42, target_tool_sel:
+ToolSel::OwnedNearest }` and uses surface verbs `consume`, `produce`,
+`require_skill`, `require_tool`, `wear_tool`.** None of these surface verbs
+exist in `ability_lower.rs::lower_effect_stmt` today. The actually-landed
+surface is `cast_recipe <recipe_id> [target <tool_slot>]` + `wear_tool
+<tool_kind> <amount>` — both lowered with raw u16/u8 ordinals (no
+`ToolSel` enum exists). The spec's richer surface (`consume iron_ingot 2` /
+`produce sword quality(...)`) is the per-fixture RecipeRegistry's authoring
+shape for recipe ENTRIES, not the ability-DSL's call-site shape — the call
+site is just `cast_recipe 42` once the registry entry is declared. Inline
+callout added at §3.
+
+**S2. §4.1 `RecipeEntry` Rust shape with `inputs: SmallVec<[(CommodityId, u16); 4]>` etc. is the per-fixture RecipeRegistry's row shape, not an `EffectOp` payload.** The actual `EffectOp::Recipe` payload is `{ recipe_id: u16, target_tool: u8 }` — a registry indirection ID + optional tool-slot pointer. The richer fields in §4.1 (inputs / outputs / quality_formula / skill_id / tool_kind / duration_ticks) live in the per-fixture `RecipeRegistry[recipe_id]` lookup, not in the EffectOp. This is a deliberate design choice (matches the spec's "mirrors how voxel ops use a mask registry" line in §4.1) but the §4.1 prose currently reads as if the EffectOp itself carries the rich shape. Inline callout added at §4.1.
+
+---
 
 > **Status:** Design spec (2026-04-24). Companion to `spec/ability.md`
 > (the action grammar). This doc owns the *system* design — supply chains,
@@ -111,6 +254,23 @@ without explicit scripting.
 
 ## §3 The recipe-as-ability anchor
 
+> **Spec audit (2026-05-08, S1 / S2):** the lowered IR snippet below shows
+> `Recipe { recipe: 42, target_tool_sel: ToolSel::OwnedNearest }` and surface
+> verbs `consume` / `produce` / `require_skill` / `require_tool` / `wear_tool`.
+> The actually-landed `.ability` surface (Lift B, commit `28c30b9f`) is
+> `cast_recipe <recipe_id> [target <tool_slot>]` + `wear_tool <tool_kind>
+> <amount>`, both lowered with raw u16/u8 ordinals — no `ToolSel` enum exists.
+> The richer authoring shape (`consume iron_ingot 2`, `produce sword
+> quality(...)`, `require_skill blacksmithing >= 0.4`, `require_tool forge`)
+> describes the per-fixture **RecipeRegistry entry** that recipe id 42 indexes
+> into, NOT the call-site DSL surface. Once the registry entry is authored
+> (per-fixture work, deferred), call sites stay terse — `cast_recipe 42` —
+> and the registry consumer reads the inputs/outputs/quality formula. The
+> example below should be read as a forward-looking sketch of what the
+> per-fixture authoring layer will eventually compose down into. Actual
+> shipped IR ordinal is `Recipe = 40` (not 17 — see CRITICAL ordinal drift
+> C1 above).
+
 Recipes are abilities. Every production / contract / trade act is an
 `AbilityProgram` composed of `EffectOp` primitives via the ability DSL.
 
@@ -175,6 +335,19 @@ and component-based assembly.
 ### 4.1 Recipe shape (2A)
 
 **Decision:** single `EffectOp::Recipe` variant + recipe registry indirection.
+
+> **Spec audit (2026-05-08, S2):** the `RecipeEntry` Rust shape below is the
+> per-fixture **RecipeRegistry row shape**, NOT the `EffectOp` payload. The
+> actually-landed `EffectOp::Recipe` payload is the much-thinner `{ recipe_id:
+> u16, target_tool: u8 }` (3-byte payload + 1-byte tag = 4B; see
+> `crates/engine/src/ability/program.rs::EffectOp::Recipe`). The rich
+> inputs/outputs/quality_formula/skill_id/tool_kind/duration_ticks fields live
+> in the per-fixture `RecipeRegistry[recipe_id]` lookup that the per-fixture
+> consumer rule reads when it processes the chronicle event. This split is
+> the same pattern voxel ops use with the mask registry — the spec's prose
+> below is correct about the design but reads as if the EffectOp itself
+> carries the rich shape. Status: shipped (foundation) for the EffectOp
+> + chronicle dispatcher; per-fixture RecipeRegistry consumer NOT yet wired.
 
 A `Recipe` carries inputs, outputs, quality formula, skill, tool, and
 duration in one entry. Mirrors how voxel ops use a mask registry. Keeps
@@ -287,16 +460,16 @@ emerge naturally as the supply graph rewards specialization.
 
 | Construct | Type | Status |
 |---|---|---|
-| `EffectOp::Recipe { recipe, target_tool_sel }` (variant 17) | new | planned |
-| `EffectOp::WearTool { tool_kind, amount }` (variant 18) | new | planned |
+| `EffectOp::Recipe { recipe_id: u16, target_tool: u8 }` (actual variant **40**, spec'd as 17 — see C1) | new | **shipped (foundation)** — engine variant + DSL `cast_recipe` arm + chronicle event 71. Per-fixture RecipeRegistry consumer that reads inputs/outputs/quality formula NOT wired. |
+| `EffectOp::WearTool { tool_kind: u8, amount: u16 }` (actual variant **41**, spec'd as 18 — see C1) | new | **shipped (foundation)** — engine variant + DSL `wear_tool` arm + chronicle event 72. Per-fixture Tool wear consumer that flips the broken bit at `wear >= durability` NOT wired. |
 | `Gate.require_skill: Option<(SkillId, f32)>` | extension | planned |
 | `Gate.require_tool: Option<ToolKindId>` | extension | planned |
 | `entity Tool : Item { kind, quality, wear, durability, owner }` | new | planned |
 | `entity Component : Item { kind, quality, wear, durability }` | new | planned |
 | `entity ResourceNode { kind, location, remaining, capacity, regen_rate }` | new | planned |
-| `RecipeRegistry`, `ToolKindRegistry`, `CommodityRegistry`, `SkillRegistry`, `ComponentKindRegistry` | new | planned |
+| `RecipeRegistry`, `ToolKindRegistry`, `CommodityRegistry`, `SkillRegistry`, `ComponentKindRegistry` | new | planned (per-fixture; referenced as TODO in `crates/engine/src/cascade/handler.rs` and `crates/engine/src/ability/apply.rs`) |
 | Material `decay_rate` property | extension | planned |
-| Events: `RecipeCast`, `RecipeCompleted`, `ToolWornOut`, `ProductionStalled`, `ResourceDepleted`, `ResourceRegenerated` | new | planned |
+| Events: `RecipeCast`, `RecipeCompleted`, `ToolWornOut`, `ProductionStalled`, `ResourceDepleted`, `ResourceRegenerated` | new | partial — chronicle event kinds 71 (`EffectRecipeApplied`) and 72 (`EffectWearToolApplied`) shipped per Lift B; high-level domain events (`RecipeCompleted` with computed quality, `ToolWornOut` on durability cross, `ProductionStalled`, depletion events) still planned (per-fixture cascade work) |
 | Condition atoms: `has_inputs(recipe)`, `has_tool(kind)`, `has_skill(skill, threshold)`, `shortage_blocking(commodity)`, `commodity_demand_above(c, threshold)`, `component_quality_below(item, kind, threshold)` | new | planned |
 
 ---
@@ -373,12 +546,24 @@ splits + service-auction escorts.
 
 ### 5.6 Geography-aware ability extensions (9F)
 
+> **Spec audit (2026-05-08, F3 / U2):** Lift A (commit `7bb0929c`) shipped a
+> generalizable multi-tick procedure foundation via `EffectOp::TravelTo`
+> (variant 39) + DSL `travel_to <dest_x> <dest_y> for <duration>` arm +
+> chronicle event 70. The companion per-tick travel kernel (interpolate
+> `pos` toward destination, snap on `world.tick == busy_until_tick`) is
+> per-fixture work. This is the foundation §5 implicitly assumed without
+> ever spec'ing — a "MoveToward already exists" line in §5.2 hand-waves
+> over the multi-tick state machine. The `travel_to` verb makes the
+> procedure call a first-class authoring surface; `Caravan` formation
+> (§5.4) and route traversal (§5.3) eventually compose it.
+
 | Construct | Status |
 |---|---|
+| `EffectOp::TravelTo { dest_x_q8, dest_y_q8, eta_ticks }` (variant **39**, Lift A) | **shipped (foundation)** — engine variant + DSL `travel_to` arm + chronicle event 70. Per-tick interpolation kernel + `busy_until_tick` SoA cell are per-fixture work. |
 | Gate predicates: `require_terrain <kind>`, `require_in_settlement_cluster`, `require_on_route(<id>)` | planned |
 | Condition atoms: `at_settlement_cluster(<sid>)`, `distance_to_cluster(<sid>) <op> N`, `on_route(<rid>)`, `route_safety_above(<rid>, X)`, `region_price_above(<commodity>, X)`, `inventory_weight_above(X)` | planned |
-| `EffectOp::EstablishRoute { from, to }` (variant 24) | planned |
-| `EffectOp::JoinCaravan { caravan: GroupId }` (variant 25) | planned |
+| `EffectOp::EstablishRoute { from, to }` (spec'd as variant 24 — actual ordinal will be 46+ when landed; see C1) | planned |
+| `EffectOp::JoinCaravan { caravan: GroupId }` (spec'd as variant 25 — actual ordinal will be 46+; see C1) | planned |
 | Passive triggers: `on_arrived_at(<sid>)`, `on_route_traversed(<rid>)`, `on_bandit_encounter` | planned |
 
 ---
@@ -564,10 +749,25 @@ DF-grade dynamics.
 
 ### 6.5 IR additions for Dim 6
 
+> **Spec audit (2026-05-08, F4 / F5):** Lift C (commit `9d0cf91e`) shipped two
+> observer-fan-out + bilateral-consent foundation primitives that this section
+> implicitly relies on for §6.3's reactive-passive cascade — `EffectOp::Announce`
+> (variant **43**, DSL `announce <kind> radius <n>`, chronicle event 74)
+> broadcasts a public event to all agents within a radius (the substrate for
+> §6.3's "witnesses similarly carry `on_witnessed_demand_of_ally`" pattern), and
+> `EffectOp::Propose` (variant **42**, DSL `propose <contract_kind> [expires_at
+> <tick>]`, chronicle event 73) registers a bilateral proposal in a per-fixture
+> ContractRegistry (the substrate for §7's contract-creation flow). Both ship
+> the chronicle dispatcher record only; per-fixture observer / contract
+> consumer rules are deferred. The §6.3 passive-cascade machinery still
+> requires the per-fixture observer-fan-out consumer to be wired before
+> witnesses actually receive the event.
+
 | Construct | Status |
 |---|---|
-| `EffectOp::TransferProperty { property_id, target_sel }` (variant 19) | planned |
-| `EffectOp::ForcibleTransfer { subject, target_sel, contest_kind, detection_threshold }` (variant 20) | planned |
+| `EffectOp::TransferProperty { property_id, target_sel }` (spec'd as variant 19 — actual ordinal will be 46+; see C1) | planned |
+| `EffectOp::ForcibleTransfer { subject, target_sel, contest_kind, detection_threshold }` (spec'd as variant 20 — actual ordinal will be 46+; see C1) | planned |
+| `EffectOp::Announce { announcement_kind: u8, radius_q8: u16 }` (actual variant **43**, Lift C) | **shipped (foundation)** — engine variant + DSL `announce` arm + chronicle event 74. Per-fixture spatial-hash walk + per-observer perception emission NOT wired. |
 | `ContestKind` enum (Stealth, OpenPower, Authority) | planned |
 | `entity Property { kind, owner, location }` | planned |
 | `Will` per-agent side state | planned |
@@ -648,16 +848,30 @@ collateralized debts.
 
 ### 7.5 IR additions for Dim 1
 
+> **Spec audit (2026-05-08, F4 / F6):** Lift C (commit `9d0cf91e`) shipped
+> `EffectOp::Propose` (variant 42) — the bilateral-consent foundation that
+> §7.4's `PostQuest{kind: BorrowGold, …}` flow eventually composes. Lift D
+> (commit `b821f3fc`) shipped `EffectOp::CreateObligation` (variant 45) — the
+> registry-write primitive for §7.1's obligation entity. Both ship the
+> chronicle dispatcher record only; the per-fixture ContractRegistry +
+> ObligationRegistry consumers (which would actually register the proposal /
+> obligation, validate kind-specific terms, update per-agent debtor/creditor
+> indices, fire ObligationCreated events, and run the §7.2 default-cascade)
+> are NOT yet wired. Discharge / Default companion verbs (variants 22 / 23
+> in spec; will land at 46+ when implemented per C1) ship in a follow-up
+> slice.
+
 | Construct | Status |
 |---|---|
-| `entity Obligation { kind, parties, terms, status, created_tick }` | planned |
-| `EffectOp::CreateObligation { kind, parties, terms }` (variant 21) | planned |
-| `EffectOp::DischargeObligation { obligation_id }` (variant 22) | planned |
-| `EffectOp::DefaultObligation { obligation_id }` (variant 23) | planned |
-| Per-agent obligation indices | planned |
-| Events: `ObligationCreated`, `ObligationDischarged`, `ObligationDefaulted`, `ContractInsuranceClaimed` | planned |
+| `entity Obligation { kind, parties, terms, status, created_tick }` | planned (per-fixture ObligationRegistry row shape) |
+| `EffectOp::Propose { contract_kind: u8, expires_at_tick: u32 }` (actual variant **42**, Lift C) | **shipped (foundation)** — engine variant + DSL `propose` arm + chronicle event 73. Per-fixture ContractRegistry consumer + companion accept/decline verbs NOT yet wired. |
+| `EffectOp::CreateObligation { obligation_id: u16, kind: u8 }` (actual variant **45**, spec'd as 21 — see C1) | **shipped (foundation)** — engine variant + DSL `create_obligation` arm + chronicle event 76. Per-fixture ObligationRegistry consumer + per-agent debtor/creditor indices NOT yet wired. Note the actual payload is `(obligation_id, kind)` — terms (`principal`, `due_tick`, `collateral`, …) live in the registry entry per the §4.1 / S2 indirection pattern. |
+| `EffectOp::DischargeObligation { obligation_id }` (spec'd as variant 22 — actual ordinal will be 46+; see C1) | planned |
+| `EffectOp::DefaultObligation { obligation_id }` (spec'd as variant 23 — actual ordinal will be 46+; see C1) | planned |
+| Per-agent obligation indices (`obligations_owed_by_me`, `obligations_owed_to_me`) | planned |
+| Events: `ObligationCreated`, `ObligationDischarged`, `ObligationDefaulted`, `ContractInsuranceClaimed` | partial — chronicle event kind 76 (`EffectCreateObligationApplied`) shipped; high-level domain events still planned |
 | Condition atoms: `has_obligation_to(target)`, `owes_total_above(X)`, `obligation_due_within(<dur>)`, `creditor_count`, `debtor_count` | planned |
-| New ability hint: `AbilityHint::Financial` | planned |
+| New ability hint: `AbilityHint::Financial` | planned (current `AbilityHint` enum has Damage/Defense/CrowdControl/Utility/Heal/Buff = 0..5; adding Financial bumps schema hash) |
 
 ---
 
@@ -687,6 +901,18 @@ transfer matrix.
 - **Apprenticeship:** mentor-apprentice relationship multiplies observation rate by 5×.
 - **Books:** reading a `Document` carrying recipe data confers a one-shot bump (`+0.05` capped).
 - **Disuse-decay:** unused skills decay slowly (`skills[recipe] *= 0.999` per 100 ticks since last use).
+
+> **Spec audit (2026-05-08, U3):** the four cascade-driven mechanics above
+> are framed as system-emitted skill bumps. The actually-landed `gain_skill
+> <skill_id> <amount>` verb (Lift D, variant 44) is also available as a
+> **first-class authoring primitive** — any ability author can compose
+> `gain_skill 5 12` (skill_id 5, +12 q8 = +0.047 of mastery) into an
+> ability's effect list. This makes the per-fixture cascade rules above
+> trivial to write (each is a `physics @phase(post)` rule that emits a
+> `gain_skill` chronicle event in response to `RecipeCast` /
+> `EffectAnnounceApplied` / etc.) and also lets author-driven mechanics
+> like a one-shot "Spar with master" ability bump combat skill without
+> needing a recipe in the registry.
 
 ### 8.3 Wage formation (3C)
 
@@ -735,12 +961,13 @@ transfer matrix.
 
 | Construct | Status |
 |---|---|
-| `Agent.skills: SortedVec<(RecipeId, f32), 16>` | planned |
+| `EffectOp::GainSkill { skill_id: u8, amount_q8: u16 }` (actual variant **44**, Lift D) | **shipped (foundation)** — engine variant + DSL `gain_skill` arm + chronicle event 75. Per-fixture per-skill SoA column + clamp-to-[0.0, 1.0] consumer NOT yet wired. |
+| `Agent.skills: SortedVec<(RecipeId, f32), 16>` | planned (per-fixture; the GainSkill consumer reads `skill_id` from a per-fixture SkillRegistry rather than RecipeId — the spec's per-recipe shape is one possible per-fixture layout) |
 | Compile-time `RecipeTransferMatrix` | planned |
 | Gate predicate: `require_skill <recipe, threshold>` | planned (already in §4.8) |
-| Skill-update cascade rules: practice / observation / book / decay | planned |
-| `Apprenticeship` as `(InviteToGroup{kind: Family, role: Apprentice}, Obligation{kind: Service})` composite | planned |
-| Events: `SkillRaised`, `ApprenticeshipBegun`, `ApprenticeshipCompleted`, `MassQuit` | planned |
+| Skill-update cascade rules: practice / observation / book / decay | planned (per-fixture rules that emit `gain_skill` chronicle events in response to `RecipeCast` / `Announce` / etc. — see §8.2 audit callout) |
+| `Apprenticeship` as `(InviteToGroup{kind: Family, role: Apprentice}, Obligation{kind: Service})` composite | planned (composes `propose` (variant 42, shipped) + `create_obligation` (variant 45, shipped) + group-membership machinery) |
+| Events: `SkillRaised`, `ApprenticeshipBegun`, `ApprenticeshipCompleted`, `MassQuit` | partial — chronicle event kind 75 (`EffectGainSkillApplied`) shipped; high-level domain events still planned |
 | Condition atoms: `target_skill_above(target, recipe, threshold)`, `is_apprentice_of(target)`, `is_master_of(target)` | planned |
 
 ---
@@ -984,8 +1211,8 @@ Single new primitive: transferable obligations.
 
 | Construct | Status |
 |---|---|
-| `Obligation.transferable: bool` field | planned |
-| `EffectOp::TransferObligation { obligation_id, target_sel }` (variant 26) | planned |
+| `Obligation.transferable: bool` field | planned (per-fixture ObligationRegistry row extension) |
+| `EffectOp::TransferObligation { obligation_id, target_sel }` (spec'd as variant 26 — actual ordinal will be 46+ when landed; see C1) | planned |
 | Verification harness: bank formation, mutual-aid pool, futures speculation | planned |
 
 ---
@@ -1153,21 +1380,32 @@ Net new constructs across all dimensions, organized by IR layer.
 
 ### 17.1 New `EffectOp` variants
 
-Continuing from ability DSL spec §22 (which ended at variant 16). Economic
-ops occupy variants 17+:
+> **Spec audit (2026-05-08, C1):** the "spec ord" column below was authored
+> when the next-free `EffectOp` discriminant was 17 (combat verbs ended at
+> Cast=7, control verbs at Taunt=11). Variants 17–38 have since been consumed
+> by interleaved combat / movement / ToM / multi-tick verbs (see C1 in the
+> Drift items section above). The "actual ord" column reflects the
+> `crates/engine/src/ability/program.rs::EffectOp` discriminants today (Lifts
+> A–D), with `(planned 46+)` for variants that have not yet landed and will
+> be assigned the next free ordinals when they do. The schema-hash test in
+> `crates/engine/tests/schema_hash.rs` pins the actual ordinals.
 
-| Ord | Variant | Phase | Status |
-|---|---|---|---|
-| 17 | `Recipe { recipe, target_tool_sel }` | 1 | planned |
-| 18 | `WearTool { tool_kind, amount }` | 1 | planned |
-| 19 | `TransferProperty { property_id, target_sel }` | 1 | planned |
-| 20 | `ForcibleTransfer { commodity_or_item, target_sel, detection_threshold }` | 1 | planned |
-| 21 | `CreateObligation { kind, parties, terms }` | 1 | planned |
-| 22 | `DischargeObligation { obligation_id }` | 1 | planned |
-| 23 | `DefaultObligation { obligation_id }` | 1 | planned |
-| 24 | `EstablishRoute { from, to }` | 1 | planned |
-| 25 | `JoinCaravan { caravan: GroupId }` | 1 | planned |
-| 26 | `TransferObligation { obligation_id, target_sel }` | 3 | planned |
+| Spec ord | Actual ord | Variant | Phase | Status |
+|---|---|---|---|---|
+| 17 | **40** | `Recipe { recipe_id: u16, target_tool: u8 }` | 1 | **shipped (foundation)** |
+| 18 | **41** | `WearTool { tool_kind: u8, amount: u16 }` | 1 | **shipped (foundation)** |
+| 19 | (planned 46+) | `TransferProperty { property_id, target_sel }` | 1 | planned |
+| 20 | (planned 46+) | `ForcibleTransfer { commodity_or_item, target_sel, contest_kind, detection_threshold }` | 1 | planned |
+| 21 | **45** | `CreateObligation { obligation_id: u16, kind: u8 }` (terms in registry per S2) | 1 | **shipped (foundation)** |
+| 22 | (planned 46+) | `DischargeObligation { obligation_id }` | 1 | planned |
+| 23 | (planned 46+) | `DefaultObligation { obligation_id }` | 1 | planned |
+| 24 | (planned 46+) | `EstablishRoute { from, to }` | 1 | planned |
+| 25 | (planned 46+) | `JoinCaravan { caravan: GroupId }` | 1 | planned |
+| 26 | (planned 46+) | `TransferObligation { obligation_id, target_sel }` | 3 | planned |
+| (added Lift A) | **39** | `TravelTo { dest_x_q8: i16, dest_y_q8: i16, eta_ticks: u32 }` | 1 | **shipped (foundation)** |
+| (added Lift C) | **42** | `Propose { contract_kind: u8, expires_at_tick: u32 }` | 1 | **shipped (foundation)** |
+| (added Lift C) | **43** | `Announce { announcement_kind: u8, radius_q8: u16 }` | 1 | **shipped (foundation)** |
+| (added Lift D) | **44** | `GainSkill { skill_id: u8, amount_q8: u16 }` | 2 | **shipped (foundation)** |
 
 ### 17.2 New entities
 
@@ -1207,11 +1445,22 @@ ops occupy variants 17+:
 
 ### 17.5 New events
 
+> **Spec audit (2026-05-08):** the chronicle dispatcher now ships these
+> low-level `Effect*Applied` event kinds for the Lift A–D verbs (per
+> `crates/dsl_compiler/src/cpu_chronicle_reference.rs`):
+> 70 `EffectTravelToApplied`, 71 `EffectRecipeApplied`, 72 `EffectWearToolApplied`,
+> 73 `EffectProposeApplied`, 74 `EffectAnnounceApplied`, 75 `EffectGainSkillApplied`,
+> 76 `EffectCreateObligationApplied`. The high-level domain events listed in the
+> table below (`RecipeCompleted` with computed output quality, `ToolWornOut`
+> on durability cross, `ProductionStalled`, etc.) are per-fixture cascade
+> work — they require the consumer rules that read the registry entries and
+> emit the higher-level event in response to the low-level one.
+
 | Event | Phase | Replayable |
 |---|---|---|
-| `RecipeCast { recipe, agent, tick }` | 1 | yes |
-| `RecipeCompleted { recipe, agent, output_quality, tick }` | 1 | yes |
-| `ToolWornOut { tool, owner, tick }` | 1 | yes |
+| `RecipeCast { recipe, agent, tick }` | 1 | partial — chronicle kind 71 (`EffectRecipeApplied`) shipped; per-fixture promotion to `RecipeCast` event with full payload pending |
+| `RecipeCompleted { recipe, agent, output_quality, tick }` | 1 | planned (per-fixture; quality formula consumer reads RecipeRegistry[recipe_id]) |
+| `ToolWornOut { tool, owner, tick }` | 1 | planned (per-fixture; chronicle kind 72 (`EffectWearToolApplied`) shipped, but per-Tool durability-cross detection consumer not wired) |
 | `ProductionStalled { recipe, agent, reason, tick }` | 1 | yes |
 | `ResourceDepleted { node_id, tick }` | 1 | yes |
 | `ResourceRegenerated { node_id, amount, tick }` | 1 | yes |
@@ -1219,9 +1468,9 @@ ops occupy variants 17+:
 | `EffectStolen { thief, victim, item, tick, observed }` | 1 | yes |
 | `EffectBequest { from, heir, item, tick }` | 1 | yes |
 | `EffectInheritanceResolved { decedent, items, tick }` | 1 | yes |
-| `ObligationCreated { kind, parties, terms, tick }` | 1 | yes |
-| `ObligationDischarged { obligation, tick }` | 1 | yes |
-| `ObligationDefaulted { obligation, tick }` | 1 | yes |
+| `ObligationCreated { kind, parties, terms, tick }` | 1 | partial — chronicle kind 76 (`EffectCreateObligationApplied`) shipped; per-fixture promotion to `ObligationCreated` with full registry payload pending |
+| `ObligationDischarged { obligation, tick }` | 1 | planned (DischargeObligation EffectOp not yet landed; see C1) |
+| `ObligationDefaulted { obligation, tick }` | 1 | planned (DefaultObligation EffectOp not yet landed; see C1) |
 | `ContractInsuranceClaimed { obligation, tick }` | 1 | yes |
 | `SkillRaised { agent, recipe, new_value, tick }` | 2 | yes (sampled) |
 | `ApprenticeshipBegun { master, apprentice, term, tick }` | 2 | yes |
@@ -1271,17 +1520,18 @@ ops occupy variants 17+:
 
 ## §18 Capability status matrix (consolidated)
 
-By dimension and phase. Mostly `planned` (engine work); a few `runs-today`.
+By dimension and phase. Mostly `planned` (engine work); a few `runs-today`;
+six primitives now `shipped (foundation)` per the 2026-05-08 audit (Lifts A–D).
 
 | Dim | Phase | Status |
 |---|---|---|
-| 2 — Supply chains | 1 | planned (extends existing 8-commodity system) |
-| 9 — Geography | 1 | planned |
-| 6 — Wealth & property | 1 | planned (existing gold + items; new property registry) |
-| 1 — Contracts | 1 | planned |
-| 3 — Labor & skills | 2 | planned |
+| 2 — Supply chains | 1 | partial — `Recipe` + `WearTool` EffectOps shipped (foundation, Lift B); RecipeRegistry / Tool entity / quality-formula consumers pending. Extends existing 8-commodity inventory. |
+| 9 — Geography | 1 | partial — `TravelTo` multi-tick procedure shipped (foundation, Lift A); regional pricing / route registry / caravan / bandit machinery pending. |
+| 6 — Wealth & property | 1 | partial — `Announce` observer fan-out shipped (foundation, Lift C; substrate for §6.3 witness cascade); property registry / forcible-transfer / inheritance pending. Existing gold + items unchanged. |
+| 1 — Contracts | 1 | partial — `Propose` (Lift C) + `CreateObligation` (Lift D) EffectOps shipped (foundation); ContractRegistry / ObligationRegistry / Discharge / Default verbs pending. |
+| 3 — Labor & skills | 2 | partial — `GainSkill` EffectOp shipped (foundation, Lift D); per-skill SoA + practice/observation cascade rules pending. |
 | 5 — Preferences | 2 | planned |
-| 4 — Information & trust | 2 | planned |
+| 4 — Information & trust | 2 | planned (note: ToM belief verbs `plant_belief` / `observe` / `scry` / `reveal` / `disguise` / `decoy` / `erase_belief` already shipped per spec/ability.md Wave 3 phases 1/3/3.5/4 — variants 32–38) |
 | 7 — Market structure | 3 | mostly emergent + new `on_observe_item` trigger |
 | 8 — Financial instruments | 3 | mostly emergent + `TransferObligation` + `transferable` flag |
 | 10 — Macro dynamics | 3 | entirely emergent |
