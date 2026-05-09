@@ -353,6 +353,17 @@ pub fn emit_cg_program_with_debug(
         bound_target_exprs: std::cell::RefCell::new(std::collections::HashSet::new()),
         event_ring_atomic_loads: std::cell::Cell::new(false),
         alive_atomic_writes: std::cell::Cell::new(false),
+        // f32 RMW (task #244): per-kernel bitset of upgraded f32 SoA
+        // fields. Set by the kernel emit before each kernel's body
+        // emit; restored on exit. Default 0 (no upgrades) preserves
+        // the existing per-stmt emit shape verbatim.
+        f32_atomic_field_writes: std::cell::Cell::new(0),
+        // f32 RMW (task #244): set of LocalIds whose Let stmt should
+        // emit as `local_N = V;` (assignment to a var declared above
+        // the active CAS loop). Populated only inside
+        // `lower_cg_stmt_list_to_wgsl` for the duration of a CAS-loop
+        // body emit; restored on exit.
+        var_promoted_locals: std::cell::RefCell::new(std::collections::HashSet::new()),
         // 2026-05-09 (Compiler debug mode Phase 2): mirror the
         // program-level WGSL instrumentation bitset onto the emit
         // context. Default `DebugWgslFlags::NONE` preserves the

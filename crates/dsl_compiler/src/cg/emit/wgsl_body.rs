@@ -77,7 +77,7 @@ use crate::cg::lower::driver::DebugWgslFlags;
 use crate::cg::op::EventKindId;
 use crate::cg::program::CgProgram;
 use crate::cg::stmt::{
-    CgMatchArm, CgStmt, CgStmtId, CgStmtListId, EventField, MatchArmBinding, StmtArena,
+    CgMatchArm, CgStmt, CgStmtId, CgStmtListId, EventField, LocalId, MatchArmBinding, StmtArena,
     StmtListArena,
 };
 
@@ -227,6 +227,60 @@ pub struct EmitCtx<'a> {
     /// (detected by [`crate::cg::emit::kernel`]), restored on exit.
     pub alive_atomic_writes: std::cell::Cell<bool>,
 
+    /// Bitset of [`AgentFieldId`] f32 fields that have been upgraded to
+    /// `array<atomic<u32>>` in the active kernel because the kernel body
+    /// contains an `Assign(AgentField{f32, …}, …)` (chronicle-consumer
+    /// RMW write — `agents.set_<f>(t, agents.<f>(t) ± x)` and friends).
+    ///
+    /// When a bit is set:
+    ///   - Reads of `Read(AgentField{f, target})` for `f` in the bitset
+    ///     lower as `bitcast<f32>(atomicLoad(&agent_<f>[<idx>]))` instead
+    ///     of plain `agent_<f>[<idx>]` (the binding declaration only
+    ///     accepts atomic accesses).
+    ///   - Writes of `Assign(AgentField{f, target}, value)` lower as a
+    ///     CAS loop on `bitcast<u32>(value)` — see
+    ///     `lower_cg_stmt_list_to_wgsl` for the full transform (which
+    ///     also `var`-promotes any preceding Lets that read the upgraded
+    ///     field so the loop body sees a fresh snapshot each iteration).
+    ///
+    /// Bit indices are produced by [`f32_field_atomic_bit`]; only f32-
+    /// typed fields receive a bit. Default 0 (no upgrades) preserves
+    /// the existing plain-RMW shape verbatim for kernels whose bodies
+    /// don't write any f32 SoA column.
+    ///
+    /// **P5 (deterministic / replay-equivalent) fix.** Without the CAS,
+    /// N chronicle events targeting the same agent slot in one dispatch
+    /// raced on the f32 RMW: only one write landed, last-writer-wins on
+    /// f32 RMW, and the same seed produced different results across
+    /// reruns (observed in `wave_defense`'s `physics_ApplyDamage` where
+    /// AOE cleave dispatched many Damaged events at one settler in one
+    /// tick).
+    pub f32_atomic_field_writes: std::cell::Cell<u64>,
+
+    /// Set of [`LocalId`]s that have been var-promoted for the active
+    /// CAS-loop emit. A var-promoted local emits as `local_N = <value>;`
+    /// (assignment to a previously-declared `var local_N: T;`) instead
+    /// of the default `let local_N: T = <value>;`. Used by the f32 RMW
+    /// upgrade in [`lower_cg_stmt_list_to_wgsl`] to:
+    ///   1. Declare `var local_N: T;` once BEFORE the CAS loop, so the
+    ///      post-Assign suffix stmts can reference `local_N` after the
+    ///      loop exits.
+    ///   2. Re-execute the chain Lets INSIDE the loop body as
+    ///      assignments — each iteration re-reads the upgraded field
+    ///      via `atomicLoad` (per the
+    ///      [`f32_atomic_field_writes`](Self::f32_atomic_field_writes)
+    ///      gate) and re-derives every dependent local. After the CAS
+    ///      succeeds, `local_N` holds the committed snapshot the
+    ///      successful write was computed against — so post-Assign
+    ///      conditional checks (e.g. `if (old_hp > 0.0 && new_hp <=
+    ///      0.0)`) reflect the actual transition that won the CAS,
+    ///      not a stale read from before contention.
+    ///
+    /// Populated only during the CAS-loop emit pre-pass; restored to
+    /// its prior contents on emit return. Default empty preserves the
+    /// existing per-stmt emit shape verbatim.
+    pub var_promoted_locals: std::cell::RefCell<std::collections::HashSet<LocalId>>,
+
     /// 2026-05-09 (Compiler debug mode Phase 2): WGSL-side
     /// atomic-counter instrumentation bitset, mirrored from
     /// [`crate::cg::program::CgProgram::debug_wgsl`] at EmitCtx
@@ -260,6 +314,8 @@ impl<'a> EmitCtx<'a> {
             bound_target_exprs: std::cell::RefCell::new(std::collections::HashSet::new()),
             event_ring_atomic_loads: std::cell::Cell::new(false),
             alive_atomic_writes: std::cell::Cell::new(false),
+            f32_atomic_field_writes: std::cell::Cell::new(0),
+            var_promoted_locals: std::cell::RefCell::new(std::collections::HashSet::new()),
             // 2026-05-09 (Compiler debug mode Phase 2): mirror the
             // program-level WGSL instrumentation bitset so emit
             // functions can gate their atomic-counter additions on
@@ -368,6 +424,196 @@ pub(crate) fn stmt_list_contains_set_alive_false(
         }
     }
     false
+}
+
+/// Map an [`AgentFieldId`] of [`AgentFieldTy::F32`] to a stable bit
+/// index in `[0..64)` for use in [`EmitCtx::f32_atomic_field_writes`]
+/// bitsets. Returns `None` for non-f32 fields.
+///
+/// The mapping is **stable across compiler runs** — the variant order
+/// in the match arm is the source of truth. Adding a new f32 variant
+/// to `AgentFieldId` requires appending a new arm here (the match is
+/// exhaustive over the f32 subset). Total f32 fields today: 28 (well
+/// under the u64 capacity).
+///
+/// Used by:
+///   - [`stmt_is_f32_agent_field_assign`] — to test if a stmt's target
+///     field is f32 (and thus eligible for the RMW upgrade).
+///   - [`stmt_list_collect_f32_atomic_writes`] — to OR each found
+///     write's bit into the per-kernel bitset.
+///   - The kernel-emit binding upgrade (in `cg/emit/kernel.rs`) — to
+///     decide which `agent_<f>` binding lines to declare as
+///     `array<atomic<u32>>`.
+///   - The Read / Assign arms of the per-stmt lowering — to gate the
+///     `bitcast<f32>(atomicLoad(…))` and CAS-loop emit shapes.
+pub(crate) fn f32_field_atomic_bit(field: AgentFieldId) -> Option<u8> {
+    use AgentFieldId::*;
+    let bit = match field {
+        Hp => 0,
+        MaxHp => 1,
+        ShieldHp => 2,
+        Armor => 3,
+        MagicResist => 4,
+        AttackDamage => 5,
+        AbilityPower => 6,
+        AttackRange => 7,
+        Mana => 8,
+        MaxMana => 9,
+        MoveSpeed => 10,
+        MoveSpeedMult => 11,
+        Hunger => 12,
+        Thirst => 13,
+        RestTimer => 14,
+        Safety => 15,
+        Shelter => 16,
+        Social => 17,
+        Purpose => 18,
+        Esteem => 19,
+        RiskTolerance => 20,
+        SocialDrive => 21,
+        Ambition => 22,
+        Altruism => 23,
+        Curiosity => 24,
+        TravelDestX => 25,
+        TravelDestY => 26,
+        TravelDestZ => 27,
+        // Non-f32 fields — no bit. Pos / Vel are vec3 (handled
+        // separately, vec3 atomics aren't supported by WGSL anyway);
+        // u32 / Bool / I16 / EnumU8 / OptAgentId / OptEnumU32 don't
+        // need the f32 RMW upgrade (their writes already lower
+        // through the appropriate scalar atomics or skip the upgrade
+        // because they aren't part of the f32 RMW race class).
+        _ => return None,
+    };
+    Some(bit)
+}
+
+/// True when `stmt` is `Assign(AgentField{f32, …}, …)` — the f32 RMW
+/// pattern targeted by the [`EmitCtx::f32_atomic_field_writes`]
+/// upgrade. Returns the field id when matched, so callers can OR its
+/// [`f32_field_atomic_bit`] into the per-kernel bitset.
+///
+/// Note that this matches **any** assign to an f32 SoA column, not
+/// just `agents.set_<f>(t, agents.<f>(t) ± x)` shapes — a literal
+/// `agents.set_hp(t, 5.0)` write is still racy under N events targeting
+/// one slot, so the safe choice is to treat every f32 SoA write as
+/// needing the CAS upgrade. The CAS loop body still terminates in
+/// O(retries-until-no-contention) which is bounded by the number of
+/// concurrent threads in the dispatch — typically tiny.
+pub(crate) fn stmt_is_f32_agent_field_assign(
+    _prog: &CgProgram,
+    stmt: &CgStmt,
+) -> Option<AgentFieldId> {
+    let CgStmt::Assign { target, .. } = stmt else {
+        return None;
+    };
+    let DataHandle::AgentField { field, .. } = target else {
+        return None;
+    };
+    if !matches!(field.ty(), AgentFieldTy::F32) {
+        return None;
+    }
+    Some(*field)
+}
+
+/// True when `expr_id` (or any descendant CgExpr) reads the upgraded
+/// f32 field `field` OR a `ReadLocal(L)` for `L in chain_locals`.
+/// Used by [`lower_cg_stmt_list_to_wgsl`]'s f32 RMW pre-pass to
+/// decide which Lets need to re-execute INSIDE the CAS loop (those
+/// whose value-expression is "tainted" by the upgraded field, so a
+/// CAS retry needs to recompute against the latest snapshot). Lets
+/// not in the chain stay as ordinary outside-loop bindings.
+///
+/// Walks the expression arena recursively, descending through every
+/// arm of every variant. Detection is structural — a transitive
+/// dependency through a `ReadLocal(L)` is captured because earlier
+/// chain-membership decisions populated `chain_locals` (forward
+/// walk over the residual stmt list).
+fn expr_depends_on_upgraded_field(
+    expr_id: CgExprId,
+    field: AgentFieldId,
+    chain_locals: &std::collections::HashSet<LocalId>,
+    prog: &CgProgram,
+) -> bool {
+    let Some(node) = <CgProgram as ExprArena>::get(prog, expr_id) else {
+        return false;
+    };
+    match node {
+        CgExpr::Read(DataHandle::AgentField { field: f, .. }) => *f == field,
+        CgExpr::Read(_) => false,
+        CgExpr::ReadLocal { local, .. } => chain_locals.contains(local),
+        CgExpr::Lit(_)
+        | CgExpr::AgentSelfId
+        | CgExpr::PerPairCandidateId
+        | CgExpr::EventField { .. }
+        | CgExpr::Rng { .. }
+        | CgExpr::NamespaceField { .. } => false,
+        CgExpr::Unary { arg, .. } => {
+            expr_depends_on_upgraded_field(*arg, field, chain_locals, prog)
+        }
+        CgExpr::Binary { lhs, rhs, .. } => {
+            expr_depends_on_upgraded_field(*lhs, field, chain_locals, prog)
+                || expr_depends_on_upgraded_field(*rhs, field, chain_locals, prog)
+        }
+        CgExpr::Builtin { args, .. } => args
+            .iter()
+            .any(|a| expr_depends_on_upgraded_field(*a, field, chain_locals, prog)),
+        CgExpr::Select { cond, then, else_, .. } => {
+            expr_depends_on_upgraded_field(*cond, field, chain_locals, prog)
+                || expr_depends_on_upgraded_field(*then, field, chain_locals, prog)
+                || expr_depends_on_upgraded_field(*else_, field, chain_locals, prog)
+        }
+        CgExpr::NamespaceCall { args, .. } => args
+            .iter()
+            .any(|a| expr_depends_on_upgraded_field(*a, field, chain_locals, prog)),
+    }
+}
+
+/// Recursive walk: collect the set of f32 [`AgentFieldId`]s assigned
+/// inside the stmt list named by `list_id`. Returns a u64 bitset keyed
+/// by [`f32_field_atomic_bit`]. Descends through `If` / `Match` /
+/// `ForEachNeighborBody` / `ForEachAgentBody` so an f32 RMW write
+/// hidden inside a nested arm still triggers the binding upgrade.
+///
+/// Called once per kernel by the kernel emit (in `cg/emit/kernel.rs`)
+/// to decide which `agent_<f>` bindings need the AtomicStorage upgrade
+/// for THIS kernel.
+pub(crate) fn stmt_list_collect_f32_atomic_writes(
+    prog: &CgProgram,
+    list_id: CgStmtListId,
+) -> u64 {
+    let mut bits = 0u64;
+    let Some(list) = <CgProgram as StmtListArena>::get(prog, list_id) else {
+        return 0;
+    };
+    for stmt_id in &list.stmts {
+        let Some(stmt) = <CgProgram as StmtArena>::get(prog, *stmt_id) else {
+            continue;
+        };
+        if let Some(field) = stmt_is_f32_agent_field_assign(prog, stmt) {
+            if let Some(bit) = f32_field_atomic_bit(field) {
+                bits |= 1u64 << bit;
+            }
+        }
+        match stmt {
+            CgStmt::If { then, else_, .. } => {
+                bits |= stmt_list_collect_f32_atomic_writes(prog, *then);
+                if let Some(e) = else_ {
+                    bits |= stmt_list_collect_f32_atomic_writes(prog, *e);
+                }
+            }
+            CgStmt::Match { arms, .. } => {
+                for arm in arms {
+                    bits |= stmt_list_collect_f32_atomic_writes(prog, arm.body);
+                }
+            }
+            CgStmt::ForEachNeighborBody { body, .. } => {
+                bits |= stmt_list_collect_f32_atomic_writes(prog, *body);
+            }
+            _ => {}
+        }
+    }
+    bits
 }
 
 // ---------------------------------------------------------------------------
@@ -498,6 +744,48 @@ fn agent_field_access(field: AgentFieldId, target: &AgentRef) -> String {
         AgentFieldTy::Bool => format!("({raw} != 0u)"),
         _ => raw,
     }
+}
+
+/// Render an [`AgentField`] read with the [`EmitCtx`] atomic-upgrade
+/// gates applied. Wraps [`agent_field_access`]'s plain indexed form
+/// in `bitcast<f32>(atomicLoad(&agent_<f>[<idx>]))` when the f32 RMW
+/// upgrade applies to `field` in the active kernel
+/// (`ctx.f32_atomic_field_writes` bit set). Otherwise returns the
+/// plain form unchanged.
+///
+/// The wrapper exists so the per-stmt and per-expr emit paths share
+/// one decision point — extending the gate (e.g. adding a u32 RMW
+/// upgrade later) requires editing only this helper, not every read
+/// site. See [`f32_field_atomic_bit`] for the bit mapping.
+fn agent_field_read_wgsl(field: AgentFieldId, target: &AgentRef, ctx: &EmitCtx) -> String {
+    if matches!(field.ty(), AgentFieldTy::F32) {
+        if let Some(bit) = f32_field_atomic_bit(field) {
+            if (ctx.f32_atomic_field_writes.get() >> bit) & 1 == 1 {
+                let lhs = agent_field_access_lvalue(field, target);
+                return format!("bitcast<f32>(atomicLoad(&{lhs}))");
+            }
+        }
+    }
+    agent_field_access(field, target)
+}
+
+/// Render `agent_<field>[<idx>]` (or its `bitcast<f32>(atomicLoad(…))`
+/// equivalent) as the value-side of an apply-ability dispatcher case,
+/// e.g. `agent_hp[caster_slot]` becomes
+/// `bitcast<f32>(atomicLoad(&agent_hp[caster_slot]))` when the active
+/// kernel upgraded `agent_hp` to `array<atomic<u32>>`. Used by the
+/// dispatcher template emit (`build_apply_ability_per_target_body`'s
+/// caller) to keep stat-dispatch reads valid against atomic-typed
+/// bindings. The `idx_var` is the WGSL identifier (`caster_slot`,
+/// `pred_agent`, etc.) — passed verbatim into the indexed access.
+fn dispatcher_f32_field_read(field: AgentFieldId, idx_var: &str, ctx: &EmitCtx) -> String {
+    let snake = field.snake();
+    if let Some(bit) = f32_field_atomic_bit(field) {
+        if (ctx.f32_atomic_field_writes.get() >> bit) & 1 == 1 {
+            return format!("bitcast<f32>(atomicLoad(&agent_{snake}[{idx_var}]))");
+        }
+    }
+    format!("agent_{snake}[{idx_var}]")
 }
 
 /// Raw indexed access — no bool coercion. Used as the LHS of an
@@ -987,7 +1275,7 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
                             .borrow_mut()
                             .insert(*target_expr_id);
                     }
-                    return Ok(agent_field_access(*field, target));
+                    return Ok(agent_field_read_wgsl(*field, target, ctx));
                 }
                 // Tile-walk substitution: when the tiled-MoveBoid emit
                 // path is active and we're inside its inner cell-walk
@@ -1023,7 +1311,7 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
                         }
                     }
                 }
-                return Ok(agent_field_access(*field, target));
+                return Ok(agent_field_read_wgsl(*field, target, ctx));
             }
             // Item / Group fields: emit `<entity_snake>_<field>[<idx>]`.
             // The binding name is sourced from the program's
@@ -1640,6 +1928,59 @@ fn lower_cg_stmt_body_to_wgsl(
                         stmt_id.0, idx,
                     ));
                 }
+                // f32 RMW atomic CAS loop. When the active kernel
+                // upgraded `agent_<f>` to `array<atomic<u32>>` because
+                // its body contains an `Assign(AgentField{f32, …}, …)`
+                // (chronicle-consumer RMW write), every such Assign
+                // lowers to a CAS loop on `bitcast<u32>(value)`.
+                // ReadLocal substitution via `EmitCtx::inline_locals`
+                // (populated by `lower_cg_stmt_list_to_wgsl` before the
+                // loop emit) inlines any preceding Lets that read the
+                // same field, so each loop iteration recomputes the
+                // value-chain against the latest `atomicLoad`. The CAS
+                // succeeds only when no other thread interfered between
+                // the snapshot and the write — guaranteeing the final
+                // SoA value reflects every concurrent decrement /
+                // increment for the same target slot. P5 fix.
+                //
+                // P11 caveat: float associativity / commutativity is
+                // broken only by floating-point rounding, so the order
+                // of contributions can change the low-order bits of the
+                // final value across re-runs. For typical HP-drain
+                // magnitudes the rounding error is well below 1 unit;
+                // strict bit-equal cross-run determinism would require a
+                // chronicle pre-sort step (deferred to a separate
+                // slice). The wave_defense `same_seed_same_death_tick`
+                // pin holds because the death tick is robust to
+                // sub-unit float drift — the alive_cas (above)
+                // serializes the kill transition, so the chronicle
+                // record's `tick` is deterministic.
+                let is_f32_atomic_rmw = matches!(field.ty(), AgentFieldTy::F32)
+                    && f32_field_atomic_bit(*field).map_or(false, |bit| {
+                        (ctx.f32_atomic_field_writes.get() >> bit) & 1 == 1
+                    });
+                if is_f32_atomic_rmw {
+                    let idx = match agent_ref {
+                        AgentRef::Self_ => "agent_id".to_string(),
+                        AgentRef::EventTarget => "event_target_id".to_string(),
+                        AgentRef::Actor => "actor_id".to_string(),
+                        AgentRef::PerPairCandidate => "per_pair_candidate".to_string(),
+                        AgentRef::Target(id) => format!("target_expr_{}", id.0),
+                    };
+                    let snake = field.snake();
+                    return Ok(format!(
+                        "loop {{\n\
+                         \x20   let _old_bits_{sid} = atomicLoad(&agent_{snake}[{idx}]);\n\
+                         \x20   let _new_bits_{sid} = bitcast<u32>({rhs});\n\
+                         \x20   let _r_{sid} = atomicCompareExchangeWeak(&agent_{snake}[{idx}], _old_bits_{sid}, _new_bits_{sid});\n\
+                         \x20   if (_r_{sid}.exchanged) {{ break; }}\n\
+                         }}",
+                        sid = stmt_id.0,
+                        snake = snake,
+                        idx = idx,
+                        rhs = rhs,
+                    ));
+                }
                 // LHS uses the raw indexed access (no `(x != 0u)`
                 // coercion — that wrapper is not a valid lvalue). For
                 // bool fields the RHS must be coerced to u32 since
@@ -1711,6 +2052,15 @@ fn lower_cg_stmt_body_to_wgsl(
                         ctx.view_target_locals.borrow_mut().push(local.0);
                     }
                 }
+            }
+            // Var-promotion: when `local` has been var-declared above
+            // an enclosing CAS-loop body (the f32 RMW upgrade —
+            // [`EmitCtx::var_promoted_locals`]), emit the binding as
+            // an assignment (`local_N = v;`) instead of the default
+            // `let local_N: T = v;`. The var declaration was emitted
+            // by the surrounding `lower_cg_stmt_list_to_wgsl` pre-pass.
+            if ctx.var_promoted_locals.borrow().contains(local) {
+                return Ok(format!("local_{} = {};", local.0, v));
             }
             Ok(format!(
                 "let local_{}: {} = {};",
@@ -1946,6 +2296,28 @@ fn lower_cg_stmt_body_to_wgsl(
             // `{}` block scope to re-declare the fresh `kind` /
             // `payload_a` / `payload_b` locals from the nested SoA
             // columns.
+            // Atomic-aware case-line builders — when the active kernel
+            // upgraded one or more f32 SoA columns to atomic, the
+            // dispatcher's stat-dispatch reads must wrap in
+            // `bitcast<f32>(atomicLoad(…))`. `dispatcher_f32_field_read`
+            // does that conditionally. P5 fix (task #244).
+            let stat_case_0 = dispatcher_f32_field_read(AgentFieldId::AttackDamage, "caster_slot", ctx);
+            let stat_case_1 = dispatcher_f32_field_read(AgentFieldId::AbilityPower, "caster_slot", ctx);
+            let stat_case_2 = dispatcher_f32_field_read(AgentFieldId::MaxHp, "caster_slot", ctx);
+            let stat_case_3 = dispatcher_f32_field_read(AgentFieldId::Hp, "caster_slot", ctx);
+            let stat_case_4 = dispatcher_f32_field_read(AgentFieldId::Armor, "caster_slot", ctx);
+            let stat_case_5 = dispatcher_f32_field_read(AgentFieldId::MagicResist, "caster_slot", ctx);
+            let stat_case_6 = dispatcher_f32_field_read(AgentFieldId::MoveSpeed, "caster_slot", ctx);
+            let stat_case_7 = dispatcher_f32_field_read(AgentFieldId::Mana, "caster_slot", ctx);
+            let pred_case_0 = dispatcher_f32_field_read(AgentFieldId::AttackDamage, "pred_agent", ctx);
+            let pred_case_1 = dispatcher_f32_field_read(AgentFieldId::AbilityPower, "pred_agent", ctx);
+            let pred_case_2 = dispatcher_f32_field_read(AgentFieldId::MaxHp, "pred_agent", ctx);
+            let pred_case_3 = dispatcher_f32_field_read(AgentFieldId::Hp, "pred_agent", ctx);
+            let pred_case_4 = dispatcher_f32_field_read(AgentFieldId::Armor, "pred_agent", ctx);
+            let pred_case_5 = dispatcher_f32_field_read(AgentFieldId::MagicResist, "pred_agent", ctx);
+            let pred_case_6 = dispatcher_f32_field_read(AgentFieldId::MoveSpeed, "pred_agent", ctx);
+            let pred_case_7 = dispatcher_f32_field_read(AgentFieldId::Mana, "pred_agent", ctx);
+
             let body = format!(
                 "// #136 apply_ability dispatcher (slice β step 2)\n\
                  // Wave 1.5#4 GPU wire-up: per-effect slot reads\n\
@@ -1999,14 +2371,14 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20// Mirrors `CasterStats::get` in engine/src/ability/program.rs.\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20var stat_v: f32 = 0.0;\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20switch (s_tag) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 0u: {{ stat_v = agent_attack_damage[caster_slot]; }}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 1u: {{ stat_v = agent_ability_power[caster_slot]; }}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 2u: {{ stat_v = agent_max_hp[caster_slot]; }}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 3u: {{ stat_v = agent_hp[caster_slot]; }}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 4u: {{ stat_v = agent_armor[caster_slot]; }}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 5u: {{ stat_v = agent_magic_resist[caster_slot]; }}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 6u: {{ stat_v = agent_move_speed[caster_slot]; }}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 7u: {{ stat_v = agent_mana[caster_slot]; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 0u: {{ stat_v = {stat_case_0}; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 1u: {{ stat_v = {stat_case_1}; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 2u: {{ stat_v = {stat_case_2}; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 3u: {{ stat_v = {stat_case_3}; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 4u: {{ stat_v = {stat_case_4}; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 5u: {{ stat_v = {stat_case_5}; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 6u: {{ stat_v = {stat_case_6}; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 7u: {{ stat_v = {stat_case_7}; }}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20default: {{ stat_v = 0.0; }}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20scale_bonus = scale_bonus + s_pct * stat_v;\n\
@@ -2049,14 +2421,14 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20if (pn_binder == 1u) {{ pred_agent = target_slot; }}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20var pred_lhs: f32 = 0.0;\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20switch (pred_field) {{\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 0u: {{ pred_lhs = agent_attack_damage[pred_agent]; }}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 1u: {{ pred_lhs = agent_ability_power[pred_agent]; }}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 2u: {{ pred_lhs = agent_max_hp[pred_agent]; }}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 3u: {{ pred_lhs = agent_hp[pred_agent]; }}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 4u: {{ pred_lhs = agent_armor[pred_agent]; }}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 5u: {{ pred_lhs = agent_magic_resist[pred_agent]; }}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 6u: {{ pred_lhs = agent_move_speed[pred_agent]; }}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 7u: {{ pred_lhs = agent_mana[pred_agent]; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 0u: {{ pred_lhs = {pred_case_0}; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 1u: {{ pred_lhs = {pred_case_1}; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 2u: {{ pred_lhs = {pred_case_2}; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 3u: {{ pred_lhs = {pred_case_3}; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 4u: {{ pred_lhs = {pred_case_4}; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 5u: {{ pred_lhs = {pred_case_5}; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 6u: {{ pred_lhs = {pred_case_6}; }}\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 7u: {{ pred_lhs = {pred_case_7}; }}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20default: {{ pred_lhs = 0.0; }}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20}}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20var atom_v: bool = false;\n\
@@ -4868,6 +5240,92 @@ pub fn lower_cg_stmt_list_to_wgsl(
     for (_radius, folds) in &hoistable {
         parts.push(emit_fused_for_each_neighbor(folds, ctx)?);
     }
+    // f32 RMW CAS-loop pre-pass: when the active kernel upgraded an
+    // f32 SoA column to `array<atomic<u32>>` (because the body
+    // contains an `Assign(AgentField{f32, …}, …)` chronicle-consumer
+    // RMW write), identify the FIRST such Assign in the residual list
+    // and var-promote every Let in the prefix so the CAS-loop body
+    // can re-execute the chain each iteration. Lets in the prefix
+    // emit as `var local_N: T;` declarations BEFORE the loop and as
+    // `local_N = V;` assignments INSIDE the loop. After the loop
+    // exits, `local_N` holds the snapshot the successful CAS was
+    // computed against — so post-Assign conditional checks (e.g.
+    // `if (old_hp > 0.0 && new_hp <= 0.0)`) reflect the actual
+    // transition that won the CAS, not a stale read from before
+    // contention.
+    //
+    // Today this handles a SINGLE upgraded RMW Assign per stmt list
+    // (the canonical chronicle-consumer shape). Multiple upgraded
+    // RMW Assigns in one list are not yet collapsed into a single
+    // CAS loop — they fall back to the per-stmt CAS-loop emit for
+    // each, which is correct but doesn't amortise the snapshot
+    // across writes. No production fixture exercises that shape today.
+    let f32_rmw_idx_and_id: Option<(usize, AgentFieldId)> = if ctx.f32_atomic_field_writes.get() != 0 {
+        residual.iter().enumerate().find_map(|(pos, &idx)| {
+            let stmt_id = list.stmts[idx];
+            let stmt_node = <CgProgram as StmtArena>::get(ctx.prog, stmt_id)?;
+            stmt_is_f32_agent_field_assign(ctx.prog, stmt_node).and_then(|field| {
+                let bit = f32_field_atomic_bit(field)?;
+                if (ctx.f32_atomic_field_writes.get() >> bit) & 1 == 1 {
+                    Some((pos, field))
+                } else {
+                    None
+                }
+            })
+        })
+    } else {
+        None
+    };
+
+    // Snapshot the var-promoted set so any locals we promote here
+    // don't leak into a sibling stmt list (e.g. an else branch).
+    let saved_var_promoted = ctx.var_promoted_locals.borrow().clone();
+
+    // If we found an upgraded RMW Assign, identify the chain of
+    // preceding Let stmts whose value-expression depends (directly or
+    // transitively) on a Read of the upgraded f32 field. Those
+    // Lets must re-execute INSIDE the CAS loop so retries see fresh
+    // `atomicLoad` snapshots; we mark their locals for var-promotion
+    // and accumulate `var local_N: T;` declarations to emit before
+    // the loop block.
+    //
+    // Lets whose value-expression does NOT depend on the upgraded
+    // field (e.g. event-payload reads `local_5 = atomicLoad(
+    // &event_ring[…])` for the target slot) are NOT promoted —
+    // var-promoting them would defer their first assignment to inside
+    // the loop body, but stmts EARLIER in the residual list (e.g. a
+    // hoisted `target_expr_<N> = local_5` index binding pushed via
+    // `pending_target_lets`) reference them BEFORE the loop. Such
+    // Lets stay as ordinary `let` bindings outside the loop and are
+    // read normally inside the loop.
+    //
+    // Chain analysis is forward over the residual stmts: walk in
+    // source order; for each Let with `value` containing
+    // `Read(AgentField{upgraded_f, …})` OR a `ReadLocal(L)` for
+    // `L in chain_set`, add the let's local to `chain_set` AND
+    // record its (local, ty) for var declaration. Non-Let stmts
+    // (e.g. ForEachNeighborBody) before the Assign are emitted
+    // normally — they run once outside the loop.
+    let mut var_decls: Vec<(LocalId, CgTy)> = Vec::new();
+    let mut chain_locals: std::collections::HashSet<LocalId> = std::collections::HashSet::new();
+    if let Some((rmw_pos, field)) = f32_rmw_idx_and_id {
+        for pos in 0..rmw_pos {
+            let stmt_id = list.stmts[residual[pos]];
+            if let Some(CgStmt::Let { local, value, ty }) =
+                <CgProgram as StmtArena>::get(ctx.prog, stmt_id)
+            {
+                if expr_depends_on_upgraded_field(*value, field, &chain_locals, ctx.prog) {
+                    chain_locals.insert(*local);
+                    var_decls.push((*local, *ty));
+                }
+            }
+        }
+        let mut promoted = ctx.var_promoted_locals.borrow_mut();
+        for (lid, _) in &var_decls {
+            promoted.insert(*lid);
+        }
+    }
+
     // Then the residual stmts (everything not hoisted) in their
     // original order. Each is emitted via the per-stmt path which
     // handles its own (non-fused) ForEachNeighbor singleton case.
@@ -4886,9 +5344,20 @@ pub fn lower_cg_stmt_list_to_wgsl(
     // the rewrite-the-Assign and wrap-the-tail steps must agree on
     // the same flag, hence the shared `EmitCtx::alive_atomic_writes`
     // gate.
+    //
+    // f32 RMW wrap: when `f32_rmw_idx_and_id` matched, the prefix
+    // Lets + the upgraded Assign are gathered into `cas_loop_body`
+    // (the prefix Lets emit as var-assignments per the var-promotion
+    // above; the Assign emits as the CAS-attempt-and-break per the
+    // f32 RMW arm in `lower_cg_stmt_body_to_wgsl`). The loop block
+    // is added to `parts` once after walking the prefix. Suffix
+    // stmts then emit normally (var-promoted locals are visible via
+    // the outer-scope var declarations).
     let mut wrap_open: Option<u32> = None;
     let mut wrapped: Vec<String> = Vec::new();
-    for idx in residual {
+    let mut cas_loop_body: Vec<String> = Vec::new();
+    let mut cas_loop_parts_idx: Option<usize> = None;
+    for (pos, &idx) in residual.iter().enumerate() {
         let stmt_id = list.stmts[idx];
         let stmt_node = <CgProgram as StmtArena>::get(ctx.prog, stmt_id).ok_or(
             EmitError::StmtIdOutOfRange {
@@ -4899,6 +5368,81 @@ pub fn lower_cg_stmt_list_to_wgsl(
         let is_alive_cas_site = ctx.alive_atomic_writes.get()
             && stmt_is_set_alive_false(ctx.prog, stmt_node);
         let stmt_wgsl = lower_cg_stmt_to_wgsl(stmt_id, ctx)?;
+
+        // f32 RMW handling — collect chain-dependent Let stmts before
+        // the upgraded RMW Assign into the CAS loop body, emit the
+        // loop block once at the position of the Assign. Lets that
+        // don't depend on the upgraded field (per `chain_locals` /
+        // `var_promoted_locals`) flow through the normal path so they
+        // run once outside the loop — this matters for index-binding
+        // lets like the event-payload `target_slot` extraction whose
+        // value is referenced by hoisted `target_expr_<N>: u32 = …`
+        // bindings emitted BEFORE the loop block.
+        if let Some((rmw_pos, _)) = f32_rmw_idx_and_id {
+            if pos < rmw_pos {
+                // Is this a Let whose local was marked as a chain
+                // member?
+                let stmt_node_check = <CgProgram as StmtArena>::get(ctx.prog, stmt_id);
+                let is_chain_let = matches!(
+                    stmt_node_check,
+                    Some(CgStmt::Let { local, .. }) if chain_locals.contains(local),
+                );
+                if is_chain_let {
+                    cas_loop_body.push(stmt_wgsl);
+                    continue;
+                }
+                // Non-chain prefix stmt — emit normally below.
+            }
+            if pos == rmw_pos {
+                // The upgraded Assign — its lowered WGSL is already
+                // the full `loop { … }` body (per the f32 RMW arm in
+                // `lower_cg_stmt_body_to_wgsl`). We rewrite it here:
+                // the body of THAT loop becomes the CAS attempt; the
+                // prefix Lets we collected above prepend it. Note
+                // the Assign-arm's lowered fragment is itself a
+                // `loop { let _old_bits …; let _new_bits …; CAS;
+                // break; }` shape; we splice the prefix Lets into
+                // that loop's body just before the `_new_bits`
+                // computation so each iteration re-derives the
+                // chain.
+                //
+                // Simplest mechanical splice: the Assign-arm emits
+                // `loop {\n    let _old_bits_<sid> = …;\n    let
+                // _new_bits_<sid> = …;\n    let _r_<sid> = …;\n
+                // if (_r_<sid>.exchanged) { break; }\n}` — we
+                // string-insert the prefix Lets between the
+                // `_old_bits` line and the `_new_bits` line. The
+                // marker is the literal `let _new_bits_<sid>`.
+                let marker = format!("let _new_bits_{}", stmt_id.0);
+                let prefix_block = if cas_loop_body.is_empty() {
+                    String::new()
+                } else {
+                    let inner = cas_loop_body.join("\n");
+                    format!("{}\n", indent_block(&inner, 1))
+                };
+                let composed = if let Some(at) = stmt_wgsl.find(&marker) {
+                    let (head, tail) = stmt_wgsl.split_at(at);
+                    format!("{}{}{}", head, prefix_block, tail)
+                } else {
+                    // Defensive: if the marker isn't found (the
+                    // Assign-arm emit shape changed), fall back to
+                    // emitting prefix + assign without splicing.
+                    // The CAS still works but the prefix Lets won't
+                    // recompute per iteration — same race the
+                    // upgrade aims to fix. The assert tells the
+                    // builder to update this splice if the shape
+                    // ever drifts.
+                    debug_assert!(false, "f32 RMW splice marker not found in Assign emit");
+                    format!("{}\n{}", prefix_block.trim_end(), stmt_wgsl)
+                };
+                cas_loop_parts_idx = Some(parts.len());
+                parts.push(composed);
+                continue;
+            }
+            // pos > rmw_pos — suffix stmt, falls through to the
+            // normal alive_cas + plain-push path below.
+        }
+
         if is_alive_cas_site {
             // The Assign-arm above already emitted the CAS
             // let-binding under the name `_alive_cas_<stmt_id>`. Push
@@ -4922,6 +5466,26 @@ pub fn lower_cg_stmt_list_to_wgsl(
             indent_block(&inner, 1),
         ));
     }
+    // Prepend var declarations for the f32 RMW chain (must precede
+    // the CAS loop in the WGSL block scope so the loop body's
+    // `local_N = V;` assignments resolve, AND the suffix `if`'s
+    // `local_N` reads see the post-loop committed values). Inserted
+    // at the position the CAS loop occupies in `parts` so anything
+    // emitted before the chain (e.g. fold hoists, non-chain prefix
+    // stmts) keeps its source order.
+    if let Some(idx) = cas_loop_parts_idx {
+        if !var_decls.is_empty() {
+            let decls: String = var_decls
+                .iter()
+                .map(|(lid, ty)| format!("var local_{}: {};", lid.0, cg_ty_to_wgsl(*ty)))
+                .collect::<Vec<_>>()
+                .join("\n");
+            parts.insert(idx, decls);
+        }
+    }
+    // Restore the var-promotion set so promotions made here don't
+    // leak into sibling stmt lists.
+    ctx.var_promoted_locals.replace(saved_var_promoted);
     // Restore the outer scope's view-fold target-locals capture so a
     // nested stmt list (e.g. an If branch inside a fold body) can't
     // permanently reset it for the surrounding handler.
