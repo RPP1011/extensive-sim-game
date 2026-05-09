@@ -46,15 +46,15 @@ fn agent_voxel_grid(material_index: u8) -> VoxelGrid {
 /// is just the indirection.
 fn creature_material_index(creature_type: u32) -> u8 {
     // Ordinals from `assets/sim/wave_defense.sim::config.combat`:
-    //   type_node=0, type_settler=1, type_monster=2, type_spawner=3.
-    // Map directly to material ids 1..=4 so the palette can be a small
-    // hand-authored table; index 0 is air per voxel_engine convention.
+    //   type_node=1, type_settler=2, type_monster=3, type_spawner=4.
+    // Material id 0 is air per voxel_engine convention; 1..=4 map to
+    // the corresponding palette entries built in `build_palette`.
     match creature_type {
-        0 => 1, // node
-        1 => 2, // settler
-        2 => 3, // monster
-        3 => 4, // spawner
-        _ => 5, // unknown — distinct colour to surface bugs
+        1 => 1, // node    → gold
+        2 => 2, // settler → blue
+        3 => 3, // monster → red
+        4 => 4, // spawner → purple
+        _ => 5, // unknown / unpopulated slot → magenta (surface bugs)
     }
 }
 

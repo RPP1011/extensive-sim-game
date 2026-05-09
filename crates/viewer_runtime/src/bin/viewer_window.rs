@@ -182,13 +182,12 @@ impl ApplicationHandler for WindowedViewer {
                 if let Some(gfx) = self.gfx.as_mut() {
                     gfx.window.set_title(&title);
 
-                    // Single-object scene: the world-grid texture
-                    // covering the whole scene at world origin. Phase
-                    // B paints agents into it; Phase C will add a
-                    // separate object for static voxel terrain
-                    // (palisades) once those land.
-                    let world_object = gfx.bridge.render_object();
-                    let objects = [world_object];
+                    // One render object per creature_type — voxel_engine
+                    // renders each as a single colour (per-cell palette
+                    // indices are treated as binary occupancy). Phase
+                    // C will add a separate object for static voxel
+                    // terrain (palisades) once those land.
+                    let objects = gfx.bridge.render_objects();
                     if let Err(e) = gfx
                         .renderer
                         .render_frame_gpu(&gfx.ctx, &self.camera, &objects)
