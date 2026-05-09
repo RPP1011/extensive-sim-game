@@ -93,6 +93,30 @@ fn main() {
                     peak_mem_mb,
                     DISPATCHER_KERNEL_BYTES,
                 );
+                // Compiler debug mode (D3) per-kernel breakdown — one
+                // NDJSON line per kernel, every 10 ticks. Empty when
+                // the adapter doesn't expose TIMESTAMP_QUERY (the
+                // sim still runs; we just don't emit per-kernel
+                // attribution lines on that host).
+                if tick_idx % 10 == 0 {
+                    for k in state.last_kernel_timings() {
+                        emit_per_kernel(
+                            &mut stdout,
+                            tick_idx as u64,
+                            &k.kernel,
+                            k.wall_ns,
+                            // Per-kernel host↔GPU bytes accounting
+                            // requires runtime-side wiring against
+                            // MemTrafficTable; leave at 0 for now —
+                            // the per-tick wall times are the
+                            // dominant attribution surface. Phase 1
+                            // ships the slot; later subagents wire
+                            // the byte counts.
+                            0,
+                            0,
+                        );
+                    }
+                }
             }
             Err(payload) => {
                 let msg = panic_payload_msg(payload.as_ref());
@@ -126,6 +150,33 @@ fn emit_per_tick(
     let line = format!(
         "{{\"agent_cap\": {}, \"tick\": {}, \"wall_clock_us\": {}, \"peak_mem_mb\": {}, \"dispatcher_kernel_bytes\": {}}}\n",
         agent_cap, tick, wall_us, peak_mem_mb, dispatcher_kernel_bytes,
+    );
+    let _ = w.write_all(line.as_bytes());
+    let _ = w.flush();
+}
+
+/// Per-kernel breakdown line emitted from the compiler debug-mode
+/// (D3) instrumentation surface. Format matches the plan doc:
+///
+/// ```json
+/// {"tick": 10, "kernel": "mask_pulse", "wall_ns": 12345,
+///  "host_to_gpu_bytes": 4096, "gpu_to_host_bytes": 0}
+/// ```
+fn emit_per_kernel(
+    w: &mut impl Write,
+    tick: u64,
+    kernel: &str,
+    wall_ns: u64,
+    host_to_gpu_bytes: u64,
+    gpu_to_host_bytes: u64,
+) {
+    let line = format!(
+        "{{\"tick\": {}, \"kernel\": \"{}\", \"wall_ns\": {}, \"host_to_gpu_bytes\": {}, \"gpu_to_host_bytes\": {}}}\n",
+        tick,
+        json_escape(kernel),
+        wall_ns,
+        host_to_gpu_bytes,
+        gpu_to_host_bytes,
     );
     let _ = w.write_all(line.as_bytes());
     let _ = w.flush();

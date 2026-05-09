@@ -45,7 +45,11 @@ fn main() {
     // spatial-build phases don't fire.
     let cg = match dsl_compiler::cg::lower::lower_compilation_to_cg_with_opts(
         &comp,
-        dsl_compiler::cg::lower::LowerOpts { aoe_dispatch: true, belief_state: false },
+        dsl_compiler::cg::lower::LowerOpts {
+            aoe_dispatch: true,
+            belief_state: false,
+            ..dsl_compiler::cg::lower::LowerOpts::default()
+        },
     ) {
         Ok(p) => p,
         Err(o) => {

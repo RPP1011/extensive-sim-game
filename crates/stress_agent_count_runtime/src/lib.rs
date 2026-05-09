@@ -77,6 +77,7 @@ pub struct StressAgentCountState {
     // scale on any stat, so the values are dead reads.
     agent_max_hp_buf: wgpu::Buffer,
     agent_attack_damage_buf: wgpu::Buffer,
+    agent_ability_power_buf: wgpu::Buffer,
     agent_armor_buf: wgpu::Buffer,
     agent_magic_resist_buf: wgpu::Buffer,
     agent_move_speed_buf: wgpu::Buffer,
@@ -104,6 +105,18 @@ pub struct StressAgentCountState {
     registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
+
+    /// D3 compiler-debug-mode instrumentation. `Some` when the
+    /// adapter exposes `wgpu::Features::TIMESTAMP_QUERY`; otherwise
+    /// `None` and the per-tick chain falls back to the plain
+    /// `dispatch_<name>` helpers (P10 — no panic on adapters without
+    /// timestamp support).
+    debug_timings: Option<dispatch::DebugTimings>,
+    /// Per-kernel last-completed-tick timings, refreshed after each
+    /// `step()` when `debug_timings.is_some()`. Owned here so the
+    /// driver binary can read them via [`Self::last_kernel_timings`]
+    /// without re-mapping the readback buffer.
+    last_kernel_timings: Vec<dispatch::KernelTiming>,
 
     tick: u64,
     agent_count: u32,
@@ -173,6 +186,7 @@ impl StressAgentCountState {
             })
         };
         let agent_attack_damage_buf = mk_stat("stress_agent_count::agent_attack_damage");
+        let agent_ability_power_buf = mk_stat("stress_agent_count::agent_ability_power");
         let agent_armor_buf = mk_stat("stress_agent_count::agent_armor");
         let agent_magic_resist_buf = mk_stat("stress_agent_count::agent_magic_resist");
         let agent_move_speed_buf = mk_stat("stress_agent_count::agent_move_speed");
@@ -282,6 +296,12 @@ impl StressAgentCountState {
             positions_host.push(Vec3::new(fx, fy, fz));
         }
 
+        // Construct compiler-debug-mode (D3) timing instrumentation
+        // before moving `gpu` into Self. None on adapters without
+        // TIMESTAMP_QUERY (the per-tick path falls back to plain
+        // dispatch_<name> in that case — see fn step()).
+        let debug_timings = dispatch::DebugTimings::new(&gpu);
+
         Self {
             gpu,
             agent_hp_buf,
@@ -289,6 +309,7 @@ impl StressAgentCountState {
             agent_mana_buf,
             agent_max_hp_buf,
             agent_attack_damage_buf,
+            agent_ability_power_buf,
             agent_armor_buf,
             agent_magic_resist_buf,
             agent_move_speed_buf,
@@ -304,6 +325,8 @@ impl StressAgentCountState {
             seed_cfg_buf,
             registry_gpu,
             cache: dispatch::KernelCache::default(),
+            debug_timings,
+            last_kernel_timings: Vec::new(),
             tick: 0,
             agent_count,
             seed,
@@ -356,6 +379,16 @@ impl StressAgentCountState {
     }
 }
 
+impl StressAgentCountState {
+    /// Last-tick per-kernel GPU wall times (via the compiler-emitted D3
+    /// `DebugTimings` instrumentation). Empty when the host adapter
+    /// doesn't expose `wgpu::Features::TIMESTAMP_QUERY` — the per-tick
+    /// chain still runs, just without per-kernel attribution.
+    pub fn last_kernel_timings(&self) -> &[dispatch::KernelTiming] {
+        &self.last_kernel_timings
+    }
+}
+
 impl CompiledSim for StressAgentCountState {
     fn step(&mut self) {
         let mut encoder = self.gpu.device.create_command_encoder(
@@ -363,6 +396,10 @@ impl CompiledSim for StressAgentCountState {
                 label: Some("stress_agent_count::step"),
             },
         );
+
+        if let Some(t) = self.debug_timings.as_ref() {
+            t.begin_tick();
+        }
 
         // (1) Per-tick clears.
         self.event_ring.clear_tail_in(&mut encoder);
@@ -411,13 +448,24 @@ impl CompiledSim for StressAgentCountState {
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             cfg: &self.mask_cfg_buf,
         };
-        dispatch::dispatch_mask_verb_pulse(
-            &mut self.cache,
-            &mask_bindings,
-            &self.gpu.device,
-            &mut encoder,
-            self.agent_count,
-        );
+        if let Some(t) = self.debug_timings.as_ref() {
+            dispatch::record_mask_verb_pulse_timing(
+                &mut self.cache,
+                t,
+                &mask_bindings,
+                &self.gpu.device,
+                &mut encoder,
+                self.agent_count,
+            );
+        } else {
+            dispatch::dispatch_mask_verb_pulse(
+                &mut self.cache,
+                &mask_bindings,
+                &self.gpu.device,
+                &mut encoder,
+                self.agent_count,
+            );
+        }
 
         // (3) Scoring — argmax over the single Pulse row.
         let scoring_cfg = scoring::ScoringCfg {
@@ -440,6 +488,7 @@ impl CompiledSim for StressAgentCountState {
             agent_armor: &self.agent_armor_buf,
             agent_magic_resist: &self.agent_magic_resist_buf,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_mana: &self.agent_mana_buf,
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
@@ -449,13 +498,24 @@ impl CompiledSim for StressAgentCountState {
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             cfg: &self.scoring_cfg_buf,
         };
-        dispatch::dispatch_scoring(
-            &mut self.cache,
-            &scoring_bindings,
-            &self.gpu.device,
-            &mut encoder,
-            self.agent_count,
-        );
+        if let Some(t) = self.debug_timings.as_ref() {
+            dispatch::record_scoring_timing(
+                &mut self.cache,
+                t,
+                &scoring_bindings,
+                &self.gpu.device,
+                &mut encoder,
+                self.agent_count,
+            );
+        } else {
+            dispatch::dispatch_scoring(
+                &mut self.cache,
+                &scoring_bindings,
+                &self.gpu.device,
+                &mut encoder,
+                self.agent_count,
+            );
+        }
 
         // (4) Fused chronicle dispatcher + ApplyPulseFromChronicle
         //     consumer (PerEvent kernel). Walks ActionSelected entries,
@@ -483,6 +543,7 @@ impl CompiledSim for StressAgentCountState {
             agent_armor: &self.agent_armor_buf,
             agent_magic_resist: &self.agent_magic_resist_buf,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_mana: &self.agent_mana_buf,
             ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
             ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
@@ -499,13 +560,24 @@ impl CompiledSim for StressAgentCountState {
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             cfg: &self.chronicle_cfg_buf,
         };
-        dispatch::dispatch_physics_applypulsefromchronicle_and_verb_chronicle_pulse(
-            &mut self.cache,
-            &chronicle_bindings,
-            &self.gpu.device,
-            &mut encoder,
-            event_count_estimate,
-        );
+        if let Some(t) = self.debug_timings.as_ref() {
+            dispatch::record_physics_applypulsefromchronicle_and_verb_chronicle_pulse_timing(
+                &mut self.cache,
+                t,
+                &chronicle_bindings,
+                &self.gpu.device,
+                &mut encoder,
+                event_count_estimate,
+            );
+        } else {
+            dispatch::dispatch_physics_applypulsefromchronicle_and_verb_chronicle_pulse(
+                &mut self.cache,
+                &chronicle_bindings,
+                &self.gpu.device,
+                &mut encoder,
+                event_count_estimate,
+            );
+        }
 
         // (5) seed_indirect_0 — keeps args buffer warm.
         let seed_cfg = seed_indirect_0::SeedIndirect0Cfg {
@@ -525,13 +597,31 @@ impl CompiledSim for StressAgentCountState {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.seed_cfg_buf,
         };
-        dispatch::dispatch_seed_indirect_0(
-            &mut self.cache,
-            &seed_bindings,
-            &self.gpu.device,
-            &mut encoder,
-            self.agent_count,
-        );
+        if let Some(t) = self.debug_timings.as_ref() {
+            dispatch::record_seed_indirect_0_timing(
+                &mut self.cache,
+                t,
+                &seed_bindings,
+                &self.gpu.device,
+                &mut encoder,
+                self.agent_count,
+            );
+        } else {
+            dispatch::dispatch_seed_indirect_0(
+                &mut self.cache,
+                &seed_bindings,
+                &self.gpu.device,
+                &mut encoder,
+                self.agent_count,
+            );
+        }
+
+        // D3 timestamp resolve — must run BEFORE queue.submit so the
+        // resolve_query_set + copy_buffer_to_buffer commands are part
+        // of the same submission as the bracketed dispatches.
+        if let Some(t) = self.debug_timings.as_ref() {
+            t.finalise_tick(&mut encoder);
+        }
 
         self.gpu.queue.submit(Some(encoder.finish()));
         // Wait for GPU work to complete so per-tick wall-clock
@@ -542,6 +632,15 @@ impl CompiledSim for StressAgentCountState {
             .device
             .poll(wgpu::PollType::Wait)
             .expect("poll after step submit");
+
+        // D3 timing readback — runs after the poll(Wait) so the
+        // GPU-side timestamps have actually flushed. `read_kernel_timings`
+        // returns an empty vec on adapters without TIMESTAMP_QUERY,
+        // which is fine — `last_kernel_timings` then stays at `[]`.
+        if let Some(t) = self.debug_timings.as_ref() {
+            self.last_kernel_timings = t.read_kernel_timings_with(&self.gpu.device);
+        }
+
         self.tick += 1;
     }
 

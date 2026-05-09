@@ -65,6 +65,21 @@ fn main() {
                     tick.ring_overflowed,
                     tick.spread_sort_us,
                 );
+                // Compiler debug mode (D3) per-kernel breakdown — one
+                // NDJSON line per kernel, every 10 ticks. Empty when
+                // the adapter doesn't expose TIMESTAMP_QUERY (the
+                // kernel_timings vec is empty in that case).
+                if tick.tick % 10 == 0 {
+                    for (kernel, wall_ns) in &tick.kernel_timings {
+                        println!(
+                            "{{\"tick\":{},\"kernel\":\"{}\",\"wall_ns\":{},\
+                              \"host_to_gpu_bytes\":0,\"gpu_to_host_bytes\":0}}",
+                            tick.tick,
+                            kernel.replace('\\', "\\\\").replace('"', "\\\""),
+                            wall_ns,
+                        );
+                    }
+                }
             }
             let median_us = metrics.median_us();
             let p99_us = metrics.p99_us();

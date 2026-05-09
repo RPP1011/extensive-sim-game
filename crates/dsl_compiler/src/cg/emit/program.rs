@@ -323,6 +323,21 @@ pub fn emit_cg_program(
     schedule: &ComputeSchedule,
     prog: &CgProgram,
 ) -> Result<EmittedArtifacts, ProgramEmitError> {
+    emit_cg_program_with_debug(schedule, prog, crate::cg::lower::DebugDepth::Off)
+}
+
+/// Same as [`emit_cg_program`] but threads the compiler-debug-mode
+/// level through to `synthesize_dispatch`, which gates the emitted
+/// `DebugTimings` / `MemDelta` / `KERNEL_DSL_SOURCE_MAP` surface.
+///
+/// Per-fixture build.rs scripts that want per-kernel attribution
+/// invoke this directly; everything else routes through
+/// `emit_cg_program` (`DebugDepth::Off`).
+pub fn emit_cg_program_with_debug(
+    schedule: &ComputeSchedule,
+    prog: &CgProgram,
+    debug: crate::cg::lower::DebugDepth,
+) -> Result<EmittedArtifacts, ProgramEmitError> {
     let mut wgsl_files: BTreeMap<String, String> = BTreeMap::new();
     let mut rust_files: BTreeMap<String, String> = BTreeMap::new();
     let mut kernel_index: Vec<String> = Vec::new();
@@ -390,9 +405,27 @@ pub fn emit_cg_program(
         "schedule.rs".to_string(),
         super::cross_cutting::synthesize_schedule(schedule, prog),
     );
+    // Build the optional .sim source-loc map (D4 only). For Phase 1
+    // we surface the source span of the originating physics rule /
+    // mask / view (whichever the kernel ultimately lowers from). The
+    // emit walks `kernel_index` in order, asks the topology for its
+    // primary op id, and reads `prog.ops[op].span`. Kernels with no
+    // single-op origin (e.g. fused multi-op chronicle dispatchers)
+    // surface as a sentinel `("", 0, 0)` — the runtime treats
+    // missing entries as "compiler couldn't trace this kernel back
+    // to a single .sim span" without panicking.
+    let dsl_source_map = if debug.emits_source_map() {
+        build_dsl_source_map(schedule, prog, &kernel_index)
+    } else {
+        Vec::new()
+    };
     rust_files.insert(
         "dispatch.rs".to_string(),
-        super::cross_cutting::synthesize_dispatch(&kernel_index),
+        super::cross_cutting::synthesize_dispatch_with_debug(
+            &kernel_index,
+            debug,
+            &dsl_source_map,
+        ),
     );
 
     Ok(EmittedArtifacts {
@@ -400,6 +433,57 @@ pub fn emit_cg_program(
         rust_files,
         kernel_index,
     })
+}
+
+/// Build the D4 source-map vec — one `(kernel_name, file, line_start,
+/// line_end)` entry per kernel in `kernel_index`. The current Span IR
+/// only carries byte offsets (no file path, no line numbers), so for
+/// Phase 1 we surface the `(byte_start, byte_end)` of the originating
+/// op's span in the `line_start` / `line_end` slots and stamp the
+/// file as `(unknown).sim` (the schedule doesn't pin the source file
+/// today). Per-fixture build.rs scripts that want the real `.sim`
+/// path can post-process the emitted dispatch.rs via a
+/// `KERNEL_DSL_SOURCE_MAP_OVERRIDE` const — left to a follow-up.
+///
+/// Kernels with multiple originating ops surface the FIRST op's span
+/// (consistent with the schedule's classify-on-first-op convention).
+/// Kernels with no resolvable op (`Indirect.consumers` for
+/// example) emit the producer op's span.
+fn build_dsl_source_map(
+    schedule: &ComputeSchedule,
+    prog: &CgProgram,
+    kernel_index: &[String],
+) -> Vec<(String, String, u32, u32)> {
+    use crate::cg::schedule::synthesis::KernelTopology;
+    // Walk the schedule in the same order kernel_index was built so
+    // each `kernel_index[i]` lines up with the i'th visited topology.
+    let mut entries: Vec<(String, String, u32, u32)> =
+        Vec::with_capacity(kernel_index.len());
+    let mut idx = 0usize;
+    for stage in &schedule.stages {
+        for topology in &stage.kernels {
+            if idx >= kernel_index.len() {
+                break;
+            }
+            let primary_op = match topology {
+                KernelTopology::Fused { ops, .. } => ops.first().copied(),
+                KernelTopology::Split { op, .. } => Some(*op),
+                KernelTopology::Indirect { producer, .. } => Some(*producer),
+            };
+            let (start, end) = primary_op
+                .and_then(|op_id| prog.ops.get(op_id.0 as usize).map(|op| op.span))
+                .map(|s| (s.start as u32, s.end as u32))
+                .unwrap_or((0, 0));
+            entries.push((
+                kernel_index[idx].clone(),
+                "(unknown).sim".to_string(),
+                start,
+                end,
+            ));
+            idx += 1;
+        }
+    }
+    entries
 }
 
 // ---------------------------------------------------------------------------

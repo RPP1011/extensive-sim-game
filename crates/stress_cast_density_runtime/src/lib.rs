@@ -136,7 +136,7 @@ fn perturb_axis(draw: u32, half_extent: f32) -> f32 {
 
 /// Per-tick metric record. The driver bin emits one of these per tick
 /// as NDJSON.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct TickMetric {
     pub tick: u32,
     /// Total wall clock for the per-tick step (encoder build + GPU work
@@ -154,6 +154,13 @@ pub struct TickMetric {
     /// sort, so this is the canonical "spread sort us" the plan
     /// asks for at sweep summary time.
     pub spread_sort_us: u64,
+    /// D3 compiler-debug-mode per-kernel GPU wall times (ns) for this
+    /// tick. Empty when the host adapter doesn't expose
+    /// `wgpu::Features::TIMESTAMP_QUERY`. Each `(name, ns)` pair maps
+    /// to a single emitted kernel; sum across the vec gives total
+    /// GPU work for the tick (excludes host-side encoder build +
+    /// queue submit + device.poll wait).
+    pub kernel_timings: Vec<(String, u64)>,
 }
 
 /// Aggregated stress metrics returned by `run_stress`.
@@ -215,6 +222,7 @@ pub struct StressCastDensityState {
     agent_hp_buf: wgpu::Buffer,
     agent_max_hp_buf: wgpu::Buffer,
     agent_attack_damage_buf: wgpu::Buffer,
+    agent_ability_power_buf: wgpu::Buffer,
     agent_armor_buf: wgpu::Buffer,
     agent_magic_resist_buf: wgpu::Buffer,
     agent_move_speed_buf: wgpu::Buffer,
@@ -243,6 +251,15 @@ pub struct StressCastDensityState {
     seed_cfg_buf: wgpu::Buffer,
 
     cache: dispatch::KernelCache,
+
+    /// D3 compiler-debug-mode instrumentation. `Some` when the
+    /// adapter exposes `wgpu::Features::TIMESTAMP_QUERY`. Falls back
+    /// to plain `dispatch_<name>` per tick when None (P10 — sim
+    /// still runs without per-kernel attribution).
+    debug_timings: Option<dispatch::DebugTimings>,
+    /// Per-kernel last-completed-tick timings, refreshed after each
+    /// `step()` when `debug_timings.is_some()`.
+    last_kernel_timings: Vec<dispatch::KernelTiming>,
 
     n_agents: u32,
 }
@@ -315,6 +332,7 @@ impl StressCastDensityState {
         let agent_hp_buf = mk_stat("stress_cast_density::agent_hp");
         let agent_max_hp_buf = mk_stat("stress_cast_density::agent_max_hp");
         let agent_attack_damage_buf = mk_stat("stress_cast_density::agent_attack_damage");
+        let agent_ability_power_buf = mk_stat("stress_cast_density::agent_ability_power");
         let agent_armor_buf = mk_stat("stress_cast_density::agent_armor");
         let agent_magic_resist_buf = mk_stat("stress_cast_density::agent_magic_resist");
         let agent_move_speed_buf = mk_stat("stress_cast_density::agent_move_speed");
@@ -441,6 +459,9 @@ impl StressCastDensityState {
             },
         );
 
+        // D3 timing instrumentation — initialised before moving `gpu`.
+        let debug_timings = dispatch::DebugTimings::new(&gpu);
+
         Some(Self {
             gpu,
             agent_alive_buf,
@@ -449,6 +470,7 @@ impl StressCastDensityState {
             agent_hp_buf,
             agent_max_hp_buf,
             agent_attack_damage_buf,
+            agent_ability_power_buf,
             agent_armor_buf,
             agent_magic_resist_buf,
             agent_move_speed_buf,
@@ -465,14 +487,26 @@ impl StressCastDensityState {
             consumer_cfg_buf,
             seed_cfg_buf,
             cache: dispatch::KernelCache::default(),
+            debug_timings,
+            last_kernel_timings: Vec::new(),
             n_agents,
         })
+    }
+
+    /// Last-tick per-kernel GPU wall times (via the compiler-emitted D3
+    /// `DebugTimings` instrumentation). Empty when the host adapter
+    /// doesn't expose `wgpu::Features::TIMESTAMP_QUERY`.
+    pub fn last_kernel_timings(&self) -> &[dispatch::KernelTiming] {
+        &self.last_kernel_timings
     }
 
     /// Encode + dispatch one tick. Returns the `event_tail` value
     /// observed after the dispatcher runs (this is the per-tick
     /// chronicle ring high-water).
     pub fn step(&mut self, tick: u32) -> u32 {
+        if let Some(t) = self.debug_timings.as_ref() {
+            t.begin_tick();
+        }
         // -- Stage 1: dispatch the cast-density dispatcher --
         let physics_cfg = physics_DispatchAoePulse::PhysicsDispatchAoePulseCfg {
             agent_cap: self.n_agents,
@@ -507,6 +541,7 @@ impl StressCastDensityState {
                 agent_armor: &self.agent_armor_buf,
                 agent_magic_resist: &self.agent_magic_resist_buf,
                 agent_attack_damage: &self.agent_attack_damage_buf,
+                agent_ability_power: &self.agent_ability_power_buf,
                 agent_mana: &self.agent_mana_buf,
                 spatial_grid_cells: &self.spatial_grid_cells_buf,
                 spatial_grid_starts: &self.spatial_grid_starts_buf,
@@ -529,13 +564,24 @@ impl StressCastDensityState {
                 ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
                 cfg: &self.physics_cfg_buf,
             };
-        dispatch::dispatch_physics_dispatchaoepulse(
-            &mut self.cache,
-            &dispatch_bindings,
-            &self.gpu.device,
-            &mut encoder,
-            self.n_agents,
-        );
+        if let Some(t) = self.debug_timings.as_ref() {
+            dispatch::record_physics_dispatchaoepulse_timing(
+                &mut self.cache,
+                t,
+                &dispatch_bindings,
+                &self.gpu.device,
+                &mut encoder,
+                self.n_agents,
+            );
+        } else {
+            dispatch::dispatch_physics_dispatchaoepulse(
+                &mut self.cache,
+                &dispatch_bindings,
+                &self.gpu.device,
+                &mut encoder,
+                self.n_agents,
+            );
+        }
 
         // Copy event_tail to staging for readback in the same submit so
         // we don't need a second encoder.
@@ -607,31 +653,63 @@ impl StressCastDensityState {
         // Consumer dispatch sized by the cap'd ring slot count so the
         // workgroup grid never exceeds the ring's actual data range.
         let consumer_workgroups = tail.min(RING_SLOT_CAP).max(self.n_agents);
-        dispatch::dispatch_physics_applydamagefromchronicle(
-            &mut self.cache,
-            &consumer_bindings,
-            &self.gpu.device,
-            &mut encoder2,
-            consumer_workgroups,
-        );
+        if let Some(t) = self.debug_timings.as_ref() {
+            dispatch::record_physics_applydamagefromchronicle_timing(
+                &mut self.cache,
+                t,
+                &consumer_bindings,
+                &self.gpu.device,
+                &mut encoder2,
+                consumer_workgroups,
+            );
+        } else {
+            dispatch::dispatch_physics_applydamagefromchronicle(
+                &mut self.cache,
+                &consumer_bindings,
+                &self.gpu.device,
+                &mut encoder2,
+                consumer_workgroups,
+            );
+        }
         let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
             event_ring: &self.event_ring_buf,
             event_tail: &self.event_tail_buf,
             indirect_args_0: &self.indirect_args_buf,
             cfg: &self.seed_cfg_buf,
         };
-        dispatch::dispatch_seed_indirect_0(
-            &mut self.cache,
-            &seed_bindings,
-            &self.gpu.device,
-            &mut encoder2,
-            self.n_agents,
-        );
+        if let Some(t) = self.debug_timings.as_ref() {
+            dispatch::record_seed_indirect_0_timing(
+                &mut self.cache,
+                t,
+                &seed_bindings,
+                &self.gpu.device,
+                &mut encoder2,
+                self.n_agents,
+            );
+        } else {
+            dispatch::dispatch_seed_indirect_0(
+                &mut self.cache,
+                &seed_bindings,
+                &self.gpu.device,
+                &mut encoder2,
+                self.n_agents,
+            );
+        }
+        // D3 timestamp resolve must run BEFORE encoder2.finish so the
+        // resolve_query_set + readback-copy land in the same submission
+        // as the bracketed dispatches.
+        if let Some(t) = self.debug_timings.as_ref() {
+            t.finalise_tick(&mut encoder2);
+        }
         self.gpu.queue.submit(Some(encoder2.finish()));
         self.gpu
             .device
             .poll(wgpu::PollType::Wait)
             .expect("device poll failed after consumer dispatch");
+
+        if let Some(t) = self.debug_timings.as_ref() {
+            self.last_kernel_timings = t.read_kernel_timings_with(&self.gpu.device);
+        }
 
         tail
     }
@@ -745,12 +823,18 @@ pub fn run_stress(agent_cap: u32, tick_budget: u32) -> Option<StressMetrics> {
         // sort) is the dominant cost in `step()`, so the two columns
         // line up by construction; both are emitted in the per-tick
         // NDJSON to match the plan's metric inventory.
+        let kernel_timings: Vec<(String, u64)> = state
+            .last_kernel_timings()
+            .iter()
+            .map(|k| (k.kernel.clone(), k.wall_ns))
+            .collect();
         per_tick.push(TickMetric {
             tick,
             wall_clock_us: step_us,
             ring_high_water: tail,
             ring_overflowed: overflowed,
             spread_sort_us: step_us,
+            kernel_timings,
         });
     }
     Some(StressMetrics {

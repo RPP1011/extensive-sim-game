@@ -205,6 +205,111 @@ pub struct LowerOpts {
     /// stubs stay no-ops and the BGL composer surfaces zero
     /// belief-state bindings. Today only `tom_probe_runtime` opts in.
     pub belief_state: bool,
+    /// 2026-05-09 (compiler debug mode Phase 1): graduated GPU /
+    /// memory-traffic / DSL-source-map instrumentation level. See
+    /// [`DebugDepth`] for the per-level semantics.
+    ///
+    /// `DebugDepth::Off` (the default) emits zero instrumentation —
+    /// every `dispatch_<kernel>` helper records a plain
+    /// `kernel.record(...)` call against the caller's encoder, with
+    /// no `write_timestamp` / `QuerySet` / readback overhead. Higher
+    /// levels surface compiler-emitted helpers (`DebugTimings`,
+    /// `dispatch::record_<name>_timing`, `KERNEL_DSL_SOURCE_MAP`)
+    /// that per-fixture runtimes opt into for per-kernel attribution.
+    ///
+    /// **P2 (schema hash) compatibility**: `LowerOpts` is compile-time
+    /// configuration consumed only by the lowering driver + emit
+    /// passes; it does NOT participate in the SoA / event / mask
+    /// schema-hash inputs. Toggling `debug` between runs leaves the
+    /// schema hash unchanged.
+    pub debug: DebugDepth,
+}
+
+/// Compiler debug-mode level — graduated GPU + memory + DSL-source
+/// instrumentation, GCC `-O0..-O3`-style.
+///
+/// Each level **strictly supersets** the previous (D2 includes D1's
+/// timestamps, D3 includes D2's memory traffic, etc.). The numeric
+/// representation lets per-runtime `build.rs` scripts opt in via
+/// either Rust enum syntax (`DebugDepth::Kernel`) or a numeric ladder
+/// (`3.into()`).
+///
+/// **Level semantics**:
+///
+/// - `D0 = Off` — zero instrumentation; the default. Every
+///   `dispatch_<kernel>` helper is a plain `kernel.record(...)` call.
+/// - `D1 = Stage` — per-stage GPU timestamps (mask, scoring,
+///   dispatcher, fold, consumer). Adds a `DebugTimings` struct +
+///   `record_<name>_timing` helpers; per-fixture runtimes call them
+///   in lieu of `dispatch_<name>`.
+/// - `D2 = StageMemory` — D1 + per-stage host↔GPU memory traffic
+///   accounting. Adds a `MemDelta` struct + `memory_traffic()`
+///   accessor.
+/// - `D3 = Kernel` — D2 + per-WGSL-kernel granularity (one timestamp
+///   slot per kernel rather than coarse stage groupings). The
+///   `kernel_timings()` accessor returns one entry per kernel.
+/// - `D4 = DslMapped` — D3 + each kernel timing annotated with its
+///   `.sim` source location via the emitted `KERNEL_DSL_SOURCE_MAP`
+///   table. Read via `dsl_source_map()`.
+///
+/// **P10 (no runtime panic) compatibility**: per-fixture runtimes
+/// that opt in MUST gate the timing-helper calls on
+/// `GpuContext::supports_timestamp_query()`; adapters that don't
+/// expose `wgpu::Features::TIMESTAMP_QUERY` should fall back to the
+/// non-instrumented dispatch path with an empty timings vec rather
+/// than panicking.
+#[repr(u8)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DebugDepth {
+    /// D0 — no instrumentation, zero overhead. Default.
+    #[default]
+    Off = 0,
+    /// D1 — per-stage GPU timestamps (mask, scoring, dispatcher, fold,
+    /// consumer).
+    Stage = 1,
+    /// D2 — D1 + per-stage host↔GPU memory traffic.
+    StageMemory = 2,
+    /// D3 — D2 + per-WGSL-kernel timestamp granularity.
+    Kernel = 3,
+    /// D4 — D3 + each timestamp annotated with `.sim` source location.
+    DslMapped = 4,
+}
+
+impl From<u8> for DebugDepth {
+    /// GCC `-O3`-style numeric ladder. Values above 4 saturate to D4
+    /// rather than panicking — keeps build.rs scripts robust against
+    /// bumping past the highest defined level.
+    fn from(v: u8) -> Self {
+        match v {
+            0 => Self::Off,
+            1 => Self::Stage,
+            2 => Self::StageMemory,
+            3 => Self::Kernel,
+            _ => Self::DslMapped,
+        }
+    }
+}
+
+impl DebugDepth {
+    /// True iff the level emits per-kernel timestamp instrumentation
+    /// (D1 and above).
+    pub fn emits_timestamps(self) -> bool {
+        self >= DebugDepth::Stage
+    }
+    /// True iff the level emits memory-traffic accounting (D2+).
+    pub fn emits_memory_traffic(self) -> bool {
+        self >= DebugDepth::StageMemory
+    }
+    /// True iff the level emits one timestamp per kernel rather than
+    /// per stage (D3+).
+    pub fn per_kernel_granularity(self) -> bool {
+        self >= DebugDepth::Kernel
+    }
+    /// True iff the level emits the `KERNEL_DSL_SOURCE_MAP` table
+    /// (D4 only).
+    pub fn emits_source_map(self) -> bool {
+        self >= DebugDepth::DslMapped
+    }
 }
 
 /// Backward-compat shorthand for [`lower_compilation_to_cg_with_opts`]

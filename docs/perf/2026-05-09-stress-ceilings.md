@@ -90,3 +90,97 @@ So the ring first overflows somewhere in `[480, 500]` at this density seed (`POS
 ## Cross-fixture takeaway
 
 Both fixtures point at the same hard ceiling: the **chronicle event ring (65536 slots, ~60k effective clamp)**. Fixture A hits it via fixed clamp at high agent counts; Fixture B trips it directly at agent_cap ≈ 500 because every cast emits up to 256 records into the same ring. The next perf slice with leverage is raising this cap — option 1 (1M slots, ~40 MB GPU memory) defers saturation 16×; option 2 (per-event-kind fanout) decouples kinds; option 3 (multi-tick spread) is behaviorally lossless but biggest engineering surface.
+
+## Per-kernel attribution (D3 timing breakdown)
+
+Re-run after task #240 (compiler debug mode Phase 1) wired the
+compiler-emitted `DebugTimings` instrumentation through both stress
+runtimes. Per-tick NDJSON now carries one extra line per kernel,
+every 10 ticks, of the form:
+
+```json
+{"tick":10,"kernel":"physics_DispatchAoePulse","wall_ns":3156992,
+ "host_to_gpu_bytes":0,"gpu_to_host_bytes":0}
+```
+
+Sweeps at the original cap range. Times are GPU-side wall (resolved
+via `wgpu::QuerySet`-based `write_timestamp` pairs bracketing each
+emitted kernel's `record(...)`); they exclude host encoder build,
+queue submit, and `device.poll(Wait)` overhead. Numbers below are the
+steady-state tick (post-warmup) median per kernel.
+
+### Fixture A (stress_agent_count) per-kernel breakdown
+
+Run host: same as above. Steady-state tick (tick=10):
+
+| agent_cap | mask_verb_Pulse | scoring | physics_chronicle_dispatcher | seed_indirect_0 | total GPU ns | host wall_clock_us |
+|-----------|-----------------|---------|------------------------------|-----------------|--------------|---------------------|
+| 50 000    | 12 288 ns       | 16 384  | 24 576 ns                    | 9 216 ns        | ~62 464      | ~849                |
+| 200 000   | 15 360 ns       | 36 864  | 26 624 ns                    | 10 240 ns       | ~89 088      | ~570                |
+
+(`physics_chronicle_dispatcher` is the long-named `physics_ApplyPulseFromChronicle_and_verb_chronicle_Pulse` kernel — fused chronicle dispatcher + post-phase consumer.)
+
+**Findings:**
+
+- **The chronicle dispatcher dominates the GPU side at low agent
+  counts** (~40% of ~62 µs GPU time at cap=50k). At cap=200k the
+  scoring kernel overtakes it (37 µs vs 27 µs), which **refutes the
+  earlier hypothesis** that the chronicle pass was the GPU bottleneck
+  across the whole range. The chronicle pass is in fact O(min(events,
+  60 000)) — its cap clamps at the 60k event_count limit, so it stops
+  growing past ~15k agents. Scoring is O(agent_cap), so it overtakes
+  the chronicle pass at high counts.
+- **Host wall time dwarfs GPU time** by 10-20× across the entire
+  range (e.g. 570 µs host vs ~89 µs GPU at cap=200k). The bottleneck
+  for further headroom is host-side encoder building +
+  `device.poll(Wait)`, not GPU work. Bypassing the
+  `device.poll(Wait)` would let consecutive ticks overlap on the GPU
+  but breaks the deterministic per-tick metric path.
+- **Optimization priority shift**: Fixture A's findings now point at
+  *host* perf (encoder + poll) as the next stride, not the chronicle
+  dispatcher kernel. The dispatcher's 132 KB WGSL emit is fine —
+  smaller GPU footprint won't move host wall time.
+
+### Fixture B (stress_cast_density) per-kernel breakdown
+
+Steady-state tick (tick=10):
+
+| agent_cap | physics_DispatchAoePulse (Spread + sort) | physics_ApplyDamageFromChronicle | seed_indirect_0 | total GPU ns | host wall_clock_us |
+|-----------|------------------------------------------|----------------------------------|-----------------|--------------|---------------------|
+| 1 000     | 3 156 992 ns (3.16 ms)                   | 11 264 ns                        | 9 216 ns        | ~3 177 472   | ~3 461              |
+| 4 000     | 4 317 184 ns (4.32 ms)                   | 26 624 ns                        | 10 240 ns       | ~4 354 048   | ~4 635              |
+| 8 000     | 5 681 152 ns (5.68 ms)                   | 27 648 ns                        | 9 216 ns        | ~5 718 016   | ~6 074              |
+
+**Findings:**
+
+- **`physics_DispatchAoePulse` accounts for >99% of GPU time at every
+  cap.** At cap=1000 it's 3.16 ms (out of 3.18 ms total GPU); at
+  cap=8000 it's 5.68 ms (out of 5.72 ms). The kernel contains the
+  Spread bitonic sort + the per-cast 27-cell walk + the chronicle
+  append — the previous "the 16ms median tick goes mostly to spread
+  sort" hypothesis is **confirmed**, with the further refinement
+  that at this scale the WGSL kernel emit's 1.6 MB (! — see
+  cast_density emit-stats) puts the bulk of GPU time on this single
+  kernel.
+- **The consumer + plumbing kernels (`physics_ApplyDamageFromChronicle`
+  + `seed_indirect_0`) are negligible** — combined ~30 µs across all
+  caps (vs the dispatcher's 3-6 ms). Future cast-density perf work
+  should NOT spend cycles on the consumer arm; the dispatcher is the
+  only kernel worth optimizing.
+- **Sort vs walk attribution requires further instrumentation**.
+  D3 attributes per *kernel*, not per WGSL function within a kernel.
+  Splitting the dispatcher into separate "27-cell walk" + "bitonic
+  sort" kernels (or wiring intra-kernel timestamps) is the next
+  attribution wave. Phase 1 leaves the surface in place; the actual
+  sort-vs-walk split is a Phase 2 follow-up.
+
+### Optimization priority shift (changed by D3 instrumentation)
+
+- Fixture A: **was** "the chronicle dispatcher is the bottleneck →
+  shrink WGSL". **now**: "host wall time dominates GPU time 10-20× →
+  the next perf wave is host-side overlap, not GPU codegen."
+- Fixture B: **was** "the 16ms median is mostly spread sort
+  (assumption)". **now**: "the dispatcher is 99% of GPU time at every
+  cap (confirmed); within the dispatcher we still don't know the
+  walk-vs-sort split — Phase 2 instrumentation needed to break that
+  out."

@@ -92,7 +92,9 @@ pub use kernel::{
 pub use invariants::{emit_cg_program_with_invariants, synthesize_invariants};
 pub use metrics::{emit_cg_program_with_invariants_and_metrics, synthesize_metrics};
 pub use probes::{emit_cg_program_with_invariants_metrics_and_probes, synthesize_probes};
-pub use program::{emit_cg_program, EmittedArtifacts, ProgramEmitError};
+pub use program::{
+    emit_cg_program, emit_cg_program_with_debug, EmittedArtifacts, ProgramEmitError,
+};
 pub use wgsl_body::{
     lower_cg_expr_to_wgsl, lower_cg_stmt_list_to_wgsl, lower_cg_stmt_to_wgsl, EmitCtx, EmitError,
     HandleNamingStrategy,
