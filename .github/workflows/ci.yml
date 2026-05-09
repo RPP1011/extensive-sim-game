@@ -25,15 +25,15 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      # Swatinem/rust-cache instead of actions/cache@v4: the latter
+      # restores target/ with the cache-extraction mtime (newer than
+      # source mtimes from actions/checkout), which makes cargo treat
+      # cached crates as up-to-date even when their source has changed.
+      # Symptom: edits to engine src/ silently get ignored; tests link
+      # against stale rlibs. Swatinem/rust-cache normalises mtimes and
+      # is the de-facto standard for cargo workspaces on GH Actions.
       - name: Cache cargo registry & build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+        uses: Swatinem/rust-cache@v2
 
       - name: cargo check
         run: cargo check --workspace --lib --bins
@@ -57,15 +57,15 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # Swatinem/rust-cache instead of actions/cache@v4: the latter
+      # restores target/ with the cache-extraction mtime (newer than
+      # source mtimes from actions/checkout), which makes cargo treat
+      # cached crates as up-to-date even when their source has changed.
+      # Symptom: edits to engine src/ silently get ignored; tests link
+      # against stale rlibs. Swatinem/rust-cache normalises mtimes and
+      # is the de-facto standard for cargo workspaces on GH Actions.
       - name: Cache cargo registry & build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+        uses: Swatinem/rust-cache@v2
 
       - name: Install ast-grep
         uses: taiki-e/install-action@v2
@@ -99,15 +99,15 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      # Swatinem/rust-cache instead of actions/cache@v4: the latter
+      # restores target/ with the cache-extraction mtime (newer than
+      # source mtimes from actions/checkout), which makes cargo treat
+      # cached crates as up-to-date even when their source has changed.
+      # Symptom: edits to engine src/ silently get ignored; tests link
+      # against stale rlibs. Swatinem/rust-cache normalises mtimes and
+      # is the de-facto standard for cargo workspaces on GH Actions.
       - name: Cache cargo registry & build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+        uses: Swatinem/rust-cache@v2
 
       # Post-wolf-sim-wipe (2026-05-02), `tactical_sim` no longer exists.
       # The closest semantic determinism pin is wave_defense's
