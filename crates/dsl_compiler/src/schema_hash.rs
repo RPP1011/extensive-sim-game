@@ -549,6 +549,19 @@ fn hash_stmt(h: &mut Sha256, s: &IrStmt) {
                 hash_stmt(h, s);
             }
         }
+        IrStmt::ForEachAgent { binder_name, body, .. } => {
+            // Discriminant 0x19 — pinned at the next free byte after
+            // ApplyAbility (0x18). The shape is binder + body; there's
+            // no `iter` / `filter` / `else_body`, so the encoding is
+            // strictly shorter than For (0x13).
+            h.update([0x19u8]);
+            h.update(binder_name.as_bytes());
+            h.update([0u8]);
+            h.update(&(body.len() as u32).to_le_bytes());
+            for s in body {
+                hash_stmt(h, s);
+            }
+        }
         IrStmt::Match { scrutinee, arms, .. } => {
             h.update([0x14u8]);
             hash_expr(h, scrutinee);

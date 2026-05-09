@@ -447,6 +447,18 @@ pub enum IrStmt {
         body: Vec<IrStmt>,
         span: Span,
     },
+    /// `for_each_agent <binder> { <body> }` — body-shape primitive that
+    /// walks every alive agent slot in deterministic linear order
+    /// (slot 0 → slot agent_cap-1). Resolved sibling of `Stmt::ForEachAgent`.
+    /// Lowering produces a `CgStmt::ForEachAgentBody` and (for per-agent
+    /// rules) retags dispatch to `OneShot` so a single thread executes the
+    /// linear scan once per tick.
+    ForEachAgent {
+        binder: LocalRef,
+        binder_name: String,
+        body: Vec<IrStmt>,
+        span: Span,
+    },
     If {
         cond: IrExprNode,
         then_body: Vec<IrStmt>,

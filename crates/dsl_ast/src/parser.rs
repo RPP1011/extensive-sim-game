@@ -1883,6 +1883,31 @@ fn parse_stmt(c: &mut Cursor) -> PResult<Stmt> {
     {
         return Ok(Stmt::ApplyAbility(parse_apply_ability_stmt(c)?));
     }
+    // `for_each_agent <binder> { <body> }` — body-shape primitive that
+    // walks every alive agent slot in deterministic linear order. Must
+    // be checked BEFORE `for ` (the keyword `for_each_agent` shares the
+    // `for` prefix; without the longest-match-first ordering the bare
+    // `for` arm would consume `for` and then choke on `_each_agent`).
+    if c.starts_with("for_each_agent ")
+        || c.starts_with("for_each_agent\t")
+        || c.starts_with("for_each_agent\n")
+    {
+        c.bump("for_each_agent".len());
+        c.skip_ws();
+        let binder = ident(c)?;
+        c.skip_ws();
+        expect_char(c, '{')
+            .map_err(|e| e.with_context("parsing `for_each_agent` body `{`"))?;
+        let body = parse_stmt_block_until_close(c)?;
+        c.skip_ws();
+        expect_char(c, '}')
+            .map_err(|e| e.with_context("parsing `for_each_agent` body `}`"))?;
+        return Ok(Stmt::ForEachAgent {
+            binder,
+            body,
+            span: Span::new(start, c.pos),
+        });
+    }
     if c.starts_with("for ") {
         c.bump("for".len());
         c.skip_ws();

@@ -673,6 +673,27 @@ pub enum Stmt {
     Emit(EmitStmt),
     /// `for x in <iter> { <body> }` or `for x in <iter> where <filter> { <body> }`.
     For { binder: String, iter: Expr, filter: Option<Expr>, body: Vec<Stmt>, span: Span },
+    /// `for_each_agent <binder> { <body> }` — the body executes once per alive
+    /// agent slot in deterministic linear order (slot 0 → slot agent_cap-1).
+    /// `<binder>` is the per-iteration variable bound to the visited slot's
+    /// `AgentId`. Reads of `<binder>` and `<binder>.<field>` inside the body
+    /// resolve to the candidate-side AgentRef just like the per-pair body
+    /// forms (`for x in spatial.…`).
+    ///
+    /// Source-level shape:
+    ///
+    /// ```text
+    /// for_each_agent a {
+    ///   agents.set_mana(a, agents.mana(a) + 1.0)
+    /// }
+    /// ```
+    ///
+    /// Lowers to `IrStmt::ForEachAgent` → `CgStmt::ForEachAgentBody` →
+    /// a per-thread linear scan in WGSL. The containing per-agent rule
+    /// retags its dispatch to `OneShot` so a single thread executes the
+    /// scan once per tick (otherwise N threads each scan all N slots,
+    /// producing O(N²) writes per tick — pathological).
+    ForEachAgent { binder: String, body: Vec<Stmt>, span: Span },
     /// `if <cond> { <body> } else { <body> }` / `match <scrut> { ... }`.
     If { cond: Expr, then_body: Vec<Stmt>, else_body: Option<Vec<Stmt>>, span: Span },
     Match { scrutinee: Expr, arms: Vec<MatchArm>, span: Span },

@@ -1047,6 +1047,9 @@ fn collect_emits_in_list(
             CgStmt::ForEachNeighborBody { body, .. } => {
                 collect_emits_in_list(*body, prog, registry, out);
             }
+            CgStmt::ForEachAgentBody { body, .. } => {
+                collect_emits_in_list(*body, prog, registry, out);
+            }
             CgStmt::Assign { .. }
             | CgStmt::Let { .. }
             | CgStmt::ForEachAgent { .. }

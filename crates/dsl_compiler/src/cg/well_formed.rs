@@ -479,11 +479,16 @@ fn allowed_shapes_for_kind(kind: &ComputeOpKind) -> &'static [DispatchShapeLabel
         // emit-time check, deferred until the second per-agent sweep
         // arrives).
         // PhysicsRule allows PerCell too (the tiled-MoveBoid kernel
-        // shape introduced for boids' spatial-walk optimization).
+        // shape introduced for boids' spatial-walk optimization). And
+        // OneShot — the auto-retag landed for per-agent rules whose
+        // body contains a `for_each_agent` body-shape primitive (Task
+        // #229): a single thread serialises the linear scan over
+        // alive agent slots, replacing the per-thread dispatch.
         ComputeOpKind::PhysicsRule { .. } => &[
             DispatchShapeLabel::PerEvent,
             DispatchShapeLabel::PerAgent,
             DispatchShapeLabel::PerCell,
+            DispatchShapeLabel::OneShot,
         ],
         ComputeOpKind::ViewFold { .. } => &[DispatchShapeLabel::PerEvent],
         // Per-tick anchor multiplication runs one thread per slot.
@@ -1013,6 +1018,18 @@ fn walk_body_expr_subtrees(
                     );
                 }
             }
+            CgStmt::ForEachAgentBody { body, .. } => {
+                if body.0 < list_arena_len {
+                    walk_body_expr_subtrees(
+                        *body,
+                        op_id,
+                        prog,
+                        expr_arena_len,
+                        list_arena_len,
+                        errors,
+                    );
+                }
+            }
             CgStmt::ApplyAbility { ability, caster, target, with_aoe_dispatch: _ } => {
                 // Slice ε: validate all three operands' expr-id
                 // subtrees. A malformed caster/target operand
@@ -1134,7 +1151,8 @@ fn walk_list_id_ranges(
                     }
                 }
             }
-            CgStmt::ForEachNeighborBody { body, .. } => {
+            CgStmt::ForEachNeighborBody { body, .. }
+            | CgStmt::ForEachAgentBody { body, .. } => {
                 if body.0 >= list_arena_len {
                     errors.push(CgError::StmtListIdOutOfRange {
                         op: op_id,
@@ -1609,7 +1627,7 @@ fn type_check_list(
                     }
                 }
             }
-            CgStmt::ForEachNeighborBody { .. } => {
+            CgStmt::ForEachNeighborBody { .. } | CgStmt::ForEachAgentBody { .. } => {
                 // No directly-embedded expressions to type-check —
                 // the body's stmts are walked via the parallel
                 // `walk_body_expr_subtrees` pass which descends into
@@ -1793,13 +1811,17 @@ fn p6_walk_list(
                 // (they're lowered as `Read(AgentField)` reads only);
                 // the statements carry no nested stmt-list to walk.
             }
-            CgStmt::ForEachNeighborBody { body, .. } => {
-                // Body-form spatial walk: descend into the nested
-                // stmt list to police any `Assign { target:
-                // AgentField, .. }` smuggled inside the body. Per-
-                // pair physics rules emit through `Emit` (the P6
-                // mutation channel); a body-direct AgentField write
-                // would skip the channel — surface as P6Violation.
+            CgStmt::ForEachNeighborBody { body, .. }
+            | CgStmt::ForEachAgentBody { body, .. } => {
+                // Body-form unbounded walk over alive agent slots —
+                // descend into the nested stmt list to police any
+                // `Assign { target: AgentField, .. }` smuggled inside
+                // the body. The same rationale as `ForEachNeighborBody`
+                // applies: per-rule physics writes flow through the
+                // declared `Assign` surface; a body-direct AgentField
+                // write inside an iter-body context still goes through
+                // the same well_formed pass and either lands or
+                // surfaces as a P6Violation depending on the kind_label.
                 p6_walk_list(*body, op_id, kind_label, prog, errors);
             }
             CgStmt::If { then, else_, .. } => {
@@ -1898,7 +1920,8 @@ fn event_field_scope_walk_list(
                     errors,
                 );
             }
-            CgStmt::ForEachNeighborBody { body, .. } => {
+            CgStmt::ForEachNeighborBody { body, .. }
+            | CgStmt::ForEachAgentBody { body, .. } => {
                 event_field_scope_walk_list(*body, op_id, kind_label, shape_label, prog, errors);
             }
             CgStmt::Emit { fields, .. } => {
@@ -2095,7 +2118,8 @@ fn match_uniqueness_walk_list(
             | CgStmt::ApplyAbility { .. } => {
                 // Leaves — no nested bodies to descend into.
             }
-            CgStmt::ForEachNeighborBody { body, .. } => {
+            CgStmt::ForEachNeighborBody { body, .. }
+            | CgStmt::ForEachAgentBody { body, .. } => {
                 match_uniqueness_walk_list(*body, op, op_id, prog, errors);
             }
             CgStmt::If { then, else_, .. } => {
@@ -2626,7 +2650,8 @@ fn collect_emit_kinds_in_list(
                     collect_emit_kinds_in_list(arm.body, prog, out, wildcard);
                 }
             }
-            CgStmt::ForEachNeighborBody { body, .. } => {
+            CgStmt::ForEachNeighborBody { body, .. }
+            | CgStmt::ForEachAgentBody { body, .. } => {
                 collect_emit_kinds_in_list(*body, prog, out, wildcard);
             }
             CgStmt::ApplyAbility { .. } => {

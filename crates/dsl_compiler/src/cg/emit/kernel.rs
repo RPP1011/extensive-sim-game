@@ -2302,6 +2302,7 @@ fn stmt_list_has_emit(list_id: crate::cg::stmt::CgStmtListId, prog: &CgProgram) 
                 arms.iter().any(|arm| stmt_list_has_emit(arm.body, prog))
             }
             CgStmt::ForEachNeighborBody { body, .. } => stmt_list_has_emit(*body, prog),
+            CgStmt::ForEachAgentBody { body, .. } => stmt_list_has_emit(*body, prog),
             CgStmt::Assign { .. }
             | CgStmt::Let { .. }
             | CgStmt::ForEachAgent { .. }

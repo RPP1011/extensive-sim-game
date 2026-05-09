@@ -1,0 +1,56 @@
+// for_each_agent_probe — minimal end-to-end fixture for the
+// `for_each_agent <binder>` body-shape primitive (Task #229).
+//
+// SHAPE: a single per-agent physics rule whose body is just a
+// `for_each_agent` block. Each tick the body walks every alive agent
+// slot in linear order (slot 0 → slot agent_cap-1) and bumps the
+// candidate's `mana` by +1. The containing per-agent rule's dispatch
+// is auto-retagged to OneShot by the lowering (see
+// `list_contains_for_each_agent_body` in
+// `crates/dsl_compiler/src/cg/lower/physics.rs`) so a single thread
+// serialises the scan — without that retag, every per-agent thread
+// would run the same scan and produce O(N²) increments per tick.
+//
+// PROBE FOCUS — the body-shape primitive itself:
+//
+//   1. Parser accepts `for_each_agent <ident> { <body> }`
+//   2. Resolver binds `<ident>` in the inner scope so reads resolve
+//   3. Lowering emits `CgStmt::ForEachAgentBody` and retags the
+//      surrounding per-agent rule to `DispatchShape::OneShot`
+//   4. WGSL emit produces the linear-scan loop with an
+//      `agent_alive[i] != 0u` gate
+//
+// FULL FIRE prediction (analytical):
+//
+//   With AGENT_COUNT=8 and TICKS=10 (default in the runtime), every
+//   alive agent's mana is incremented exactly once per tick via the
+//   linear scan. So:
+//
+//     mana[N] = 10  for every alive slot N in 0..AGENT_COUNT
+//
+//   This is the behavioural pin that proves the body actually runs
+//   per-agent — if the loop didn't fire, mana stays at the initial
+//   value (0); if it fired but the alive gate didn't apply, dead
+//   slots would also bump.
+
+event Tick { }
+
+entity Probe : Agent {
+  pos:      vec3,
+  mana:     f32,
+  max_mana: f32,
+}
+
+// Per-agent rule whose body is just the `for_each_agent` body-shape.
+// The lowering recognises this and retags the dispatch to OneShot
+// (see `lower_one_handler` in
+// `crates/dsl_compiler/src/cg/lower/physics.rs`). No `where` clause —
+// the rule is unconditional; the alive gate lives inside the WGSL
+// emit's per-iteration `if (agent_alive[i] != 0u)` check.
+physics BumpAllMana @phase(per_agent) {
+  on Tick {} {
+    for_each_agent slot {
+      agents.set_mana(slot, agents.mana(slot) + 1.0)
+    }
+  }
+}

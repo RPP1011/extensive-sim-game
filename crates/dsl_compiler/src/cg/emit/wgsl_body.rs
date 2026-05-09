@@ -1710,6 +1710,9 @@ fn lower_cg_stmt_body_to_wgsl(
             body,
             radius_cells,
         } => emit_for_each_neighbor_body(*body, *radius_cells, ctx),
+        CgStmt::ForEachAgentBody { binder: _, body } => {
+            emit_for_each_agent_body(*body, ctx)
+        }
         CgStmt::ForEachAgent {
             acc_local,
             acc_ty,
@@ -5078,6 +5081,54 @@ fn emit_fused_for_each_neighbor(
         );
         Ok(body)
     }
+}
+
+/// Emit a per-slot body block for [`CgStmt::ForEachAgentBody`] —
+/// the source-level `for_each_agent <binder> { … }` body-shape
+/// primitive.
+///
+/// Walks every alive agent slot in deterministic linear order
+/// (`0..agent_cap`). The body executes once per `agent_alive[i] != 0u`
+/// candidate; each candidate slot id is bound to `per_pair_candidate`
+/// (matching the existing pair-bound emit convention) so the body's
+/// `agent_<field>[per_pair_candidate]` accesses (lowered via
+/// [`AgentRef::PerPairCandidate`]) resolve against the global SoA
+/// buffers without inventing a parallel naming scheme.
+///
+/// # Iteration-order contract (P3, P11)
+///
+/// Linear scan from slot 0 to slot `agent_cap - 1`, identical on CPU
+/// and GPU backends. Bodies that perform sibling-slot writes commit in
+/// slot-id order; the surrounding rule retags its dispatch to
+/// `OneShot` (see `lower_one_handler` in `cg::lower::physics`) so a
+/// single thread serialises the entire scan.
+///
+/// # P5 RNG note
+///
+/// Per-rule RNG draws inside the body must continue to flow through
+/// `per_agent_u32(seed, agent_id, tick, purpose)` — the iteration
+/// index `per_pair_candidate` is the candidate slot id and is the
+/// correct value to thread as `agent_id` for per-candidate draws.
+fn emit_for_each_agent_body(
+    body_list: crate::cg::stmt::CgStmtListId,
+    ctx: &EmitCtx,
+) -> Result<String, EmitError> {
+    let body_wgsl = lower_cg_stmt_list_to_wgsl(body_list, ctx)?;
+    // Indent the body so it nests under the per-iteration alive guard
+    // (one outer loop level + one if-guard level → two indents = 8
+    // spaces).
+    let indented_body = indent_block(&body_wgsl, 2);
+    let out = format!(
+        "{{\n\
+         \x20   for (var per_pair_candidate: u32 = 0u; per_pair_candidate < cfg.agent_cap; per_pair_candidate = per_pair_candidate + 1u) {{\n\
+         \x20       if (agent_alive[per_pair_candidate] != 0u) {{\n\
+         {indented_body}\n\
+         \x20       }}\n\
+         \x20   }}\n\
+         }}",
+        indented_body = indented_body,
+    );
+    Ok(out)
 }
 
 /// Emit a per-candidate body block for [`CgStmt::ForEachNeighborBody`].
