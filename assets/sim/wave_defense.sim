@@ -1,0 +1,276 @@
+// wave_defense — Stress Fixture C (task #243).
+//
+// A settlement (1 node + 25 settlers in a tight ring around origin) is
+// overwhelmed by infinitely-ramping monster waves spawned by spawners
+// at map edges. Score = resource accumulated before settlement falls.
+// Every run ends in death; the score is the engine's perf signature.
+//
+// FOUNDATION SLICE — 4 creature types + 5 verbs/physics rules,
+// EVERYTHING lives in the .sim:
+//   - Harvest        (settler → node, per-pair scored, single-target)
+//   - Strike         (settler → monster, per-pair scored, single-target damage)
+//   - SpawnWave      (spawner → self, summon "monster" count=N every wave_period)
+//   - MonsterMarch   (monster physics, per_agent — interpolates pos toward origin)
+//   - MonsterCleaveScan (monster physics, per_agent → spatial.nearby walk →
+//                     apply_ability 1 [MonsterCleave AOE Spread])
+//   - HarvestApply, ApplyDamageFromChronicle, ApplyDamage (chronicle consumers)
+//
+// CREATURE TYPE TABLE (creature_type discriminant):
+//   1 = Node     (1 agent at origin; receives Harvest, never moves/casts)
+//   2 = Settler  (25 agents tight ring around origin; harvest + strike)
+//   3 = Monster  (variable count; spawned by spawners, march, AOE cleave)
+//   4 = Spawner  (6 agents at face midpoints ±64; cast SpawnWave each cadence)
+//
+// SOA RE-PURPOSE TABLE (mirrors spy_network's mana → suspicion):
+//   * agents.mana(node_slot) → resource_yielded counter (the score)
+//   * agents.creature_type   → discriminant (1=node, 2=settler, 3=monster, 4=spawner)
+//   * agents.hp / agents.alive → standard combat
+//
+// WAVE-SIZE PLUMBING — TASK #243 DECISION:
+//   The plan offered three plumbing options for tick-scaled wave size.
+//   We ship option (C — constant wave_size) per the foundation-slice
+//   charter. The SpawnWave ability summons a fixed `summon "monster" N`
+//   each wave; with 6 spawners + N monsters per wave_period ticks,
+//   monster pressure is constant per wave_period (= 6N monsters / period).
+//   Tick-keyed escalation (`wave_size = base + (tick / wave_period) *
+//   wave_growth`) is DEFERRED — it would need either a small DSL
+//   extension to plumb cfg-uniform reads into `summon count`, or
+//   multiple Spawn-N abilities cycled host-side. The foundation slice
+//   prioritises shipping a deterministic CPU/GPU spawning pipeline
+//   end-to-end; the escalator is an ergonomics layer on top, not a
+//   correctness gate. The constant-wave-size run still terminates
+//   (settlers die under sustained pressure), and the score still
+//   discriminates engine-level perf changes. SLICE END.
+//
+// HOST RESPONSIBILITIES (per the plan, P3 cross-backend):
+//   The GPU's SpawnWave dispatcher writes EffectSummonApplied chronicle
+//   records (kind=62) into the event ring. The runtime drains those
+//   records each tick and calls `apply_summon_event_to_state` (engine
+//   primitive) to allocate monster slots — this is the canonical
+//   GPU-dispatch + CPU-side-state-mutation split per
+//   `engine::ability::apply.rs::apply_summon_event_to_state`'s docs.
+//   Same allocation order both ways → P5 determinism preserved.
+//
+// TERMINATION (host-side per plan): host counts alive settlers each tick.
+// When count hits 0 for 10 consecutive ticks → terminate. Score =
+// `agents.mana(node_slot)` at termination.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Defeated {
+  combatant: AgentId,
+}
+
+// Engine-aliased event (kind=26). Written by the apply_ability dispatcher
+// when EffectOp::Damage (kind=0) fires from MonsterCleave's program.
+// Consumer ApplyDamageFromChronicle re-emits Damaged so the unchanged
+// ApplyDamage rule drains hp.
+@replayable @gpu_amenable
+event EffectDamageApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Per-fixture event for harvest yields. Per-tick a settler in range of
+// the node emits one ResourceYielded; the consumer adds yield_amount
+// to the node's mana SoA (= resource_yielded counter = the score).
+@replayable @gpu_amenable
+event ResourceYielded {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+entity Combatant : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config combat {
+  // Creature type discriminants — must match the runtime's seed
+  // assignments (CREATURE_TYPE_NODE / SETTLER / MONSTER / SPAWNER in
+  // crates/wave_defense_runtime/src/lib.rs).
+  type_node:    u32 = 1,
+  type_settler: u32 = 2,
+  type_monster: u32 = 3,
+  type_spawner: u32 = 4,
+
+  // Settler combat tuning. Tuned for the foundation slice's death
+  // window (200 < died_at_tick < 2000): single-target damage modest
+  // enough that settlers can't out-pace the 32-monsters-per-spatial-
+  // cell density; weak enough that monsters eventually overwhelm
+  // (settlers' inability to kill faster than spawners spawn means
+  // the cleave volume on settlers ramps over time).
+  strike_damage:   f32 = 2.0,
+  strike_range:    f32 = 3.0,
+  strike_cooldown: u32 = 8,
+
+  // Settler harvest tuning.
+  harvest_amount:   f32 = 1.0,
+  harvest_range:    f32 = 4.0,
+  harvest_cooldown: u32 = 2,
+
+  // Monster combat tuning.
+  monster_speed:    f32 = 1.5,
+  monster_melee:    f32 = 3.0,
+  monster_cooldown: u32 = 4,
+
+  // Wave spawning tuning.
+  wave_period: u32 = 30,
+}
+
+// ---------------------------------------------------------------------
+// Spatial-grid neighbour filter — used by monster cleave physics (per
+// duel_25v25's pattern). Body-side creature_type check filters
+// non-settler candidates.
+@spatial(radius = 6.0, kind = [Agent])
+spatial_query nearby(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// ---------------------------------------------------------------------
+// Harvest — settler-on-node. Per-pair scoring with sentinel for
+// non-node candidates (mirrors spy_network's per-candidate-sentinel
+// shape). The argmax gate ensures the cast lands on the node, not a
+// monster slot that happens to be in range.
+verb Harvest(self, target: Agent) =
+  action HarvestAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && self.creature_type == config.combat.type_settler
+        && target.creature_type == config.combat.type_node
+        && distance(self.pos, target.pos) < config.combat.harvest_range
+        && (world.tick % config.combat.harvest_cooldown == 0))
+  emit ResourceYielded { source: self, target: target, amount: config.combat.harvest_amount }
+  score (if (target.creature_type == config.combat.type_node) {
+    1000.0 - distance(self.pos, target.pos)
+  } else {
+    -1000000000.0
+  })
+
+// Strike — settler-on-monster. Per-pair scoring; prefer nearest
+// monster (range - distance gives higher score for closer targets).
+// Strike's base score (2000) DOMINATES Harvest's (~999) so when a
+// monster is in range the settler defends instead of harvesting.
+// Without this priority Strike never fires (Harvest's gate stays open
+// every harvest_cooldown tick and Strike's score is the smaller of the
+// two; argmax picks Harvest forever, settlers never defend).
+verb Strike(self, target: Agent) =
+  action StrikeAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && self.creature_type == config.combat.type_settler
+        && target.creature_type == config.combat.type_monster
+        && distance(self.pos, target.pos) < config.combat.strike_range
+        && (world.tick % config.combat.strike_cooldown == 0))
+  emit Damaged { source: self, target: target, amount: config.combat.strike_damage }
+  score (if (target.creature_type == config.combat.type_monster) {
+    2000.0 - distance(self.pos, target.pos)
+  } else {
+    -1000000000.0
+  })
+
+// SpawnWave — spawner self-cast every wave_period ticks. Dispatches
+// `apply_ability 2` (SpawnWave = AbilityId(2) per the alphabetised
+// names list MonsterCleave=1, SpawnWave=2 in
+// `crates/wave_defense_runtime/src/binding_check.rs`). The ability
+// program declares `summon "monster" <count>` (literal count baked
+// into AbilityProgram.effects[0].EffectOp::Summon).
+//
+// The dispatcher writes EffectSummonApplied chronicle records
+// (kind=62) into the event ring. The runtime drains those records
+// after each step() and calls `apply_summon_event_to_state` to
+// allocate monster agent slots at the spawner's pos (P3 cross-backend
+// boundary — GPU produces chronicle, CPU mutates pool state).
+verb SpawnWave(self, target: Agent) =
+  action SpawnAction
+  when (self.alive
+        && target == self
+        && self.creature_type == config.combat.type_spawner
+        && (world.tick % config.combat.wave_period == 0))
+  apply_ability 2 by self target self
+  score 500.0
+
+// ---------------------------------------------------------------------
+// MonsterMarch — per_agent physics. Each alive monster steps toward
+// origin. Mirrors tower_defense's MarchEnemies. Once close enough
+// (within monster_melee), MonsterCleaveScan engages.
+physics MonsterMarch @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && self.creature_type == config.combat.type_monster) {
+    let origin = vec3(0.0, 0.0, 0.0);
+    let to_origin = origin - self.pos;
+    let dist = distance(self.pos, origin);
+    if (dist > config.combat.monster_melee) {
+      let step = to_origin * (config.combat.monster_speed / dist);
+      let new_pos = self.pos + step;
+      agents.set_pos(self, new_pos);
+    }
+  }
+}
+
+// MonsterCleaveScan — per_agent physics. Each alive monster scans its
+// 27-cell neighborhood and dispatches AOE Cleave (apply_ability 1 =
+// MonsterCleave) against each settler in range. Mirrors
+// duel_25v25's ScanAndCleave shape. AOE Path B (aoe_dispatch=true in
+// LowerOpts) walks the spread radius from the cast center and writes
+// one EffectDamageApplied per in-radius settler candidate.
+physics MonsterCleaveScan @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && self.creature_type == config.combat.type_monster
+                    && (world.tick % config.combat.monster_cooldown == 0)) {
+    for other in spatial.nearby(self) {
+      if (other.creature_type == config.combat.type_settler
+          && other.alive) {
+        apply_ability 1 by self target other
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------
+// HarvestApply — chronicle consumer. Per ResourceYielded event, bump
+// the target node's mana SoA (= resource_yielded counter = score).
+@phase(post)
+physics HarvestApply {
+  on ResourceYielded { source: _, target: t, amount: a } {
+    let prev = agents.mana(t);
+    agents.set_mana(t, prev + a);
+  }
+}
+
+// ApplyDamageFromChronicle — re-emits Damaged from EffectDamageApplied
+// (kind=26 from MonsterCleave's dispatcher). Mirrors duel_25v25's
+// shape verbatim.
+@phase(post)
+physics ApplyDamageFromChronicle {
+  on EffectDamageApplied { actor: a, target: t, amount: amt } {
+    emit Damaged { source: a, target: t, amount: amt }
+  }
+}
+
+// ApplyDamage — chronicle physics. On each Damaged event, decrement
+// target HP, set alive=false on HP<=0, emit Defeated. Same shape as
+// duel_25v25's ApplyDamage.
+@phase(post)
+physics ApplyDamage {
+  on Damaged { source: _, target: t, amount: a } {
+    let old_hp = agents.hp(t);
+    let new_hp = old_hp - a;
+    agents.set_hp(t, new_hp);
+    if (old_hp > 0.0 && new_hp <= 0.0) {
+      agents.set_alive(t, false);
+      emit Defeated { combatant: t }
+    }
+  }
+}
