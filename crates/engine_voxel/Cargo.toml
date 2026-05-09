@@ -1,0 +1,25 @@
+[package]
+name = "engine_voxel"
+version = "0.1.0"
+edition = "2021"
+
+# Adapter crate: bridges `~/Projects/voxel_engine` to the sim engine via the
+# `TerrainQuery` seam. Phase A (Task #250) ships the CPU-side skeleton —
+# `VoxelTerrain` wraps `voxel_engine::voxel::grid::VoxelGrid` and implements
+# the 3 trait methods. Phases B-E follow:
+#   B — chronicle event consumer (place_voxel / harvest events mutate state)
+#   C — wgpu storage-buffer mirror for GPU kernel reads
+#   D — DSL → WGSL emit for terrain queries
+#   E — production fixture opt-in + determinism pin
+#
+# voxel_engine is a path dep; we touch only `voxel::grid` + `voxel::raycast`
+# in this phase. The `default = []` feature set on voxel_engine means
+# `winit`/`egui` are NOT pulled. Vulkan deps (ash + gpu-allocator) and the
+# `shaderc` build-dep ARE unconditional in voxel_engine — they get compiled
+# whether or not we use them. Sim engine consumers without voxel terrain
+# simply don't depend on this crate, so they don't pay that cost.
+
+[dependencies]
+engine = { path = "../engine" }
+voxel_engine = { path = "/home/ricky/Projects/voxel_engine", default-features = false }
+glam = "0.29"
