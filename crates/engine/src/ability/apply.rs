@@ -251,6 +251,24 @@ pub enum ApplyEvent {
     /// Pairs with `EventKindId::EffectWearToolApplied = 72`. See
     /// `docs/spec/economy.md §4.3`.
     WearTool       { source: AgentId, tool_kind: u8, amount: u16 },
+    /// Lift C — `propose <contract_kind> [expires_at <tick>]` bilateral
+    /// consent offer. Caster offers a contract of `contract_kind` to
+    /// `target`. The downstream consumer rule registers the proposal in
+    /// a per-fixture ContractRegistry keyed on (caster, target,
+    /// contract_kind), to be resolved when the target later fires the
+    /// companion accept / decline verb. `expires_at_tick` is the wall-
+    /// clock tick the proposal auto-cancels (`0` sentinel = no expiry).
+    /// Pairs with `EventKindId::EffectProposeApplied = 73`. See
+    /// `docs/spec/economy.md §7`.
+    Propose        { source: AgentId, target: AgentId, contract_kind: u8, expires_at_tick: u32 },
+    /// Lift C — `announce <announcement_kind> radius <radius_cells>`
+    /// public broadcast. Caster announces an event of
+    /// `announcement_kind` to all agents within `radius_q8` cells (q8
+    /// fixed-point — 256 = 1.0 cell). The downstream consumer rule
+    /// walks the spatial hash and emits per-observer perception events.
+    /// Pairs with `EventKindId::EffectAnnounceApplied = 74`. See
+    /// `docs/spec/economy.md §6`.
+    Announce       { source: AgentId, announcement_kind: u8, radius_q8: u16 },
 }
 
 /// Inline budget — most abilities have ≤4 effects (P4 says
@@ -546,6 +564,20 @@ fn push_effect_event(
         // its wear cell by `amount` (q8 fraction-of-durability).
         EffectOp::WearTool { tool_kind, amount } =>
             out.push(ApplyEvent::WearTool { source: caster, tool_kind, amount }),
+        // Lift C — bilateral-consent proposal. The dispatcher emits one
+        // ApplyEvent::Propose per cast; a downstream consumer rule
+        // registers the proposal in a per-fixture ContractRegistry
+        // keyed on (caster, target, contract_kind). The companion
+        // accept / decline verbs ship in a follow-up slice.
+        EffectOp::Propose { contract_kind, expires_at_tick } =>
+            out.push(ApplyEvent::Propose { source: caster, target, contract_kind, expires_at_tick }),
+        // Lift C — observer fan-out announcement. The dispatcher emits
+        // one ApplyEvent::Announce per cast; a downstream consumer rule
+        // walks the spatial-hash within `radius_q8` of the caster and
+        // emits per-observer perception events. Self-cast: announcements
+        // originate from the caster's location.
+        EffectOp::Announce { announcement_kind, radius_q8 } =>
+            out.push(ApplyEvent::Announce { source: caster, announcement_kind, radius_q8 }),
         // CastAbility is recursive (needs cascade-style
         // re-dispatch); deferred to slice δ. Skip for now.
         EffectOp::CastAbility { .. } => {}

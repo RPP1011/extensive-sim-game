@@ -744,6 +744,55 @@ pub enum EffectOp {
     /// `wear >= durability` the consumer flips the tool's broken bit;
     /// recipes gating on it then fail. See `docs/spec/economy.md §4.3`.
     WearTool { tool_kind: u8, amount: u16 } = 41,
+
+    // --- Lift C — bilateral consent + observer fan-out ---
+    //
+    // `propose <contract_kind> [expires_at <tick>]` — caster offers a
+    // bilateral agreement of `contract_kind` to the cast target. The
+    // dispatcher writes a chronicle record (kind=73). The downstream
+    // consumer rule registers the proposal in a per-fixture
+    // ContractRegistry keyed on (caster, target, contract_kind), to be
+    // resolved when the target later fires the companion accept /
+    // decline verb (separate slice). `expires_at_tick` is the wall-
+    // clock tick at which the proposal auto-cancels — `0` is the
+    // sentinel "no expiry". See `docs/spec/economy.md §7` for the
+    // bilateral-consent model.
+    //
+    // `announce <announcement_kind> radius <radius_cells>` — caster
+    // broadcasts a public event of `announcement_kind` to all agents
+    // within `radius_q8` cells (q8 fixed-point — 256 = 1.0 cell). The
+    // dispatcher writes a chronicle record (kind=74); the per-fixture
+    // consumer rule walks the spatial-hash within the radius and emits
+    // per-observer perception events (memory entries, belief updates,
+    // standing deltas, …). Used for performances, ceremonies, public
+    // declarations — anything where "who saw this" matters. See
+    // `docs/spec/economy.md §6` for the observer model.
+    //
+    // SHAPE NOTE: both variants pack tight under P4. Propose is 1 + 4 =
+    // 5 bytes payload + 1B tag = 6B. Announce is 1 + 2 = 3 bytes
+    // payload + 1B tag = 4B. Well under the ≤16B EffectOp ceiling.
+    //
+    // The packed effect-kind ordinals are 42 (Propose) and 43 (Announce),
+    // contiguous with WearTool=41. The chronicle EventKindIds are 73 and
+    // 74, contiguous with EffectWearToolApplied=72.
+    /// `propose <contract_kind> [expires_at <tick>]` — caster offers a
+    /// bilateral agreement of `contract_kind` (u8 ordinal — Marriage,
+    /// Partnership, Service, …) to the cast target. `expires_at_tick`
+    /// is the wall-clock tick at which the proposal auto-cancels (`0`
+    /// sentinel = no expiry; the proposal remains open until target
+    /// accepts / declines or caster cancels). The companion accept /
+    /// decline verbs ship in a follow-up slice. See
+    /// `docs/spec/economy.md §7`.
+    Propose { contract_kind: u8, expires_at_tick: u32 } = 42,
+
+    /// `announce <announcement_kind> radius <radius_cells>` — caster
+    /// broadcasts a public event of `announcement_kind` (u8 ordinal —
+    /// Performance, Ceremony, Declaration, …) to all agents within
+    /// `radius_q8` cells (q8 fixed-point fraction of cells — 256 =
+    /// 1.0 cell). The downstream consumer rule walks the spatial hash
+    /// and emits per-observer perception events. See
+    /// `docs/spec/economy.md §6`.
+    Announce { announcement_kind: u8, radius_q8: u16 } = 43,
 }
 
 /// Stat targeted by `buff`. Vocabulary is small today (just the two

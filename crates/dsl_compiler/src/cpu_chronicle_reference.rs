@@ -692,6 +692,38 @@ pub fn apply_event_to_chronicle_record(
             rec[5] = 0;
             Some(rec)
         }
+        // Lift C — Propose. Chronicle kind 73. payload_a = contract_kind
+        // (low byte). payload_b = expires_at_tick (0 = no expiry).
+        // target = the agent the proposal is offered to.
+        //   slot 2 = caster_slot (proposer)
+        //   slot 3 = target_slot (recipient)
+        //   slot 4 = contract_kind (low byte; high bits zero)
+        //   slot 5 = expires_at_tick
+        ApplyEvent::Propose { source: _, target: _, contract_kind, expires_at_tick } => {
+            rec[0] = 73;
+            rec[2] = caster_id;
+            rec[3] = target_id;
+            rec[4] = contract_kind as u32;
+            rec[5] = expires_at_tick;
+            Some(rec)
+        }
+        // Lift C — Announce. Chronicle kind 74. payload_a packs
+        // (announcement_kind | radius_q8 << 8). payload_b = 0. Self-
+        // origin: target = caster.
+        //   slot 2 = caster_slot (announcer / origin cell)
+        //   slot 3 = caster_slot (target = caster — announcements
+        //                          radiate from the caster's cell)
+        //   slot 4 = packed (radius_q8 << 8 | announcement_kind)
+        //   slot 5 = 0
+        ApplyEvent::Announce { source: _, announcement_kind, radius_q8 } => {
+            let packed = (announcement_kind as u32) | ((radius_q8 as u32) << 8);
+            rec[0] = 74;
+            rec[2] = caster_id;
+            rec[3] = caster_id;
+            rec[4] = packed;
+            rec[5] = 0;
+            Some(rec)
+        }
         // After the slice γ closer (Summon → kind 62), every
         // `ApplyEvent` variant has a chronicle counterpart — no
         // fallback `_ => None` arm needed. The closed-set match
@@ -1498,6 +1530,8 @@ mod tests {
                 39 => ApplyEvent::TravelTo       { source: aid(1), dest_x: 5.0, dest_y: 5.0, eta_ticks: 50 },
                 40 => ApplyEvent::Recipe         { source: aid(1), recipe_id: 42, target_tool: 0xFF },
                 41 => ApplyEvent::WearTool       { source: aid(1), tool_kind: 3, amount: 64 },
+                42 => ApplyEvent::Propose        { source: aid(1), target: aid(2), contract_kind: 1, expires_at_tick: 0 },
+                43 => ApplyEvent::Announce       { source: aid(1), announcement_kind: 7, radius_q8: 896 },
                 _ => panic!("unexpected effect_kind in table"),
             }
         };

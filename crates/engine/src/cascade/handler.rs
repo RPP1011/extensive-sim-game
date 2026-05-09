@@ -338,7 +338,26 @@ pub enum EventKindId {
     // See `docs/spec/economy.md §4.1` (recipes) + §4.3 (capital goods).
     EffectRecipeApplied   = 71,
     EffectWearToolApplied = 72,
-    // Slots 73-127 reserved for replayable event variants added in later tasks.
+    // Lift C — bilateral consent + observer fan-out. Two chronicle
+    // records per cast pair:
+    //   * `EffectProposeApplied` (kind=73) — fires when an
+    //     `EffectOp::Propose` (op#42) slot fires. Per-fixture consumer
+    //     rules register the proposal in a ContractRegistry keyed on
+    //     (caster, target, contract_kind), to be resolved when the
+    //     target later fires the companion accept / decline verb
+    //     (separate slice). SHAPE: 5-payload-word record (caster +
+    //     target + packed contract_kind in low 8 bits + expires_at_tick
+    //     u32 in payload_b).
+    //   * `EffectAnnounceApplied` (kind=74) — fires when an
+    //     `EffectOp::Announce` (op#43) slot fires. Per-fixture consumer
+    //     rules walk the spatial hash within `radius_q8` of the caster
+    //     and emit per-observer perception events. SHAPE: 4-payload-word
+    //     record (caster + caster + packed (radius_q8 << 8) |
+    //     announcement_kind + 0).
+    // See `docs/spec/economy.md §6` (observer fan-out) + §7 (contracts).
+    EffectProposeApplied  = 73,
+    EffectAnnounceApplied = 74,
+    // Slots 75-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 

@@ -355,7 +355,7 @@ impl std::fmt::Display for LowerError {
             LowerError::UnknownEffectVerb { verb, suggestion, .. } => {
                 write!(
                     f,
-                    "unknown effect verb '{verb}'; valid verbs at this stage: damage / heal / shield / stun / slow / transfer_gold / modify_standing / cast / root / silence / fear / taunt / dash / blink / knockback / pull / execute / self_damage / lifesteal / damage_modify / summon / reveal / erase_belief / decoy / cast_recipe / wear_tool"
+                    "unknown effect verb '{verb}'; valid verbs at this stage: damage / heal / shield / stun / slow / transfer_gold / modify_standing / cast / root / silence / fear / taunt / dash / blink / knockback / pull / execute / self_damage / lifesteal / damage_modify / summon / reveal / erase_belief / decoy / cast_recipe / wear_tool / propose / announce"
                 )?;
                 if let Some(s) = suggestion {
                     write!(f, " (did you mean '{s}'?)")?;
@@ -1895,6 +1895,74 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
                 .clamp(0.0, u16::MAX as f32) as u16;
             Ok(EffectOp::WearTool { tool_kind, amount })
         }
+        // Lift C — `propose <contract_kind> [expires_at <tick>]`. Caster
+        // offers a bilateral agreement of `contract_kind` (u8 ordinal —
+        // Marriage, Partnership, Service, …) to the cast target. The
+        // optional `expires_at <tick>` keyword pair sets the wall-clock
+        // tick at which the proposal auto-cancels; absent → 0 sentinel
+        // (proposal stays open until target accepts/declines or caster
+        // cancels). The companion accept / decline verbs ship in a
+        // follow-up slice. See `docs/spec/economy.md` §7. Engine
+        // ordinal 42, chronicle event 73.
+        "propose" => {
+            let contract_kind_f = require_number_arg(stmt, 0)?;
+            let contract_kind = contract_kind_f
+                .round()
+                .clamp(0.0, u8::MAX as f32) as u8;
+            // Optional `expires_at <tick>` modifier — present iff arity
+            // is 3 (positional kind + `expires_at` ident + positional tick).
+            // Absent means 0 sentinel ("no expiry").
+            let expires_at_tick = if stmt.args.len() >= 3 {
+                let kw = require_name_arg(stmt, 1)?;
+                if kw != "expires_at" {
+                    return Err(LowerError::EffectArgMismatch {
+                        verb:     "propose".to_string(),
+                        expected: 3,
+                        got:      stmt.args.len(),
+                        span:     stmt.span,
+                    });
+                }
+                let tick_f = require_number_arg(stmt, 2)?;
+                require_arity(stmt, 3)?;
+                tick_f.round().clamp(0.0, u32::MAX as f32) as u32
+            } else {
+                require_arity(stmt, 1)?;
+                0u32
+            };
+            Ok(EffectOp::Propose { contract_kind, expires_at_tick })
+        }
+        // Lift C — `announce <announcement_kind> radius <radius_cells>`.
+        // Caster broadcasts a public event of `announcement_kind` (u8)
+        // to all agents within `radius_cells` cells. The `radius`
+        // keyword is required — announcements without a fan-out radius
+        // are meaningless. Storage is q8 fixed-point: 256 = 1.0 cell;
+        // the per-fixture consumer divides by 256 to walk the spatial-
+        // hash. See `docs/spec/economy.md` §6. Engine ordinal 43,
+        // chronicle event 74.
+        "announce" => {
+            let announcement_kind_f = require_number_arg(stmt, 0)?;
+            let kw = require_name_arg(stmt, 1)?;
+            if kw != "radius" {
+                return Err(LowerError::EffectArgMismatch {
+                    verb:     "announce".to_string(),
+                    expected: 3,
+                    got:      stmt.args.len(),
+                    span:     stmt.span,
+                });
+            }
+            let radius_f = require_number_arg(stmt, 2)?;
+            require_arity(stmt, 3)?;
+            let announcement_kind = announcement_kind_f
+                .round()
+                .clamp(0.0, u8::MAX as f32) as u8;
+            // q8 packing: multiply cells × 256, clamp into u16 (max
+            // ~256 cells of fan-out, which already covers the spatial-
+            // hash diameter of every existing fixture).
+            let radius_q8 = (radius_f * 256.0)
+                .round()
+                .clamp(0.0, u16::MAX as f32) as u16;
+            Ok(EffectOp::Announce { announcement_kind, radius_q8 })
+        }
         _ => Err(LowerError::UnknownEffectVerb {
             verb:       stmt.verb.clone(),
             span:       stmt.span,
@@ -2448,6 +2516,60 @@ mod tests {
                 assert_eq!(amount, 64);
             }
             ref other => panic!("expected EffectOp::WearTool; got {other:?}"),
+        }
+    }
+
+    /// Lift C — `propose <contract_kind>` (no expiry) lowers to
+    /// `EffectOp::Propose { contract_kind, expires_at_tick: 0 }`. The
+    /// 0 sentinel signals "proposal stays open until target accepts /
+    /// declines or caster cancels".
+    #[test]
+    fn lower_propose_no_expiry() {
+        let src = "ability OfferMarriage { target: enemy range: 5.0 cooldown: 1s propose 1 }";
+        let file = parse_ability_file(src).expect("parser");
+        let prog = lower_ability_decl(&file.abilities[0]).expect("propose must lower");
+        assert_eq!(prog.effects.len(), 1);
+        match prog.effects[0] {
+            EffectOp::Propose { contract_kind, expires_at_tick } => {
+                assert_eq!(contract_kind, 1);
+                assert_eq!(expires_at_tick, 0);
+            }
+            ref other => panic!("expected EffectOp::Propose; got {other:?}"),
+        }
+    }
+
+    /// Lift C — `propose <contract_kind> expires_at <tick>` binds an
+    /// auto-cancel deadline.
+    #[test]
+    fn lower_propose_with_expiry() {
+        let src = "ability OfferContract { target: enemy range: 5.0 cooldown: 1s propose 2 expires_at 5000 }";
+        let file = parse_ability_file(src).expect("parser");
+        let prog = lower_ability_decl(&file.abilities[0]).expect("propose must lower");
+        assert_eq!(prog.effects.len(), 1);
+        match prog.effects[0] {
+            EffectOp::Propose { contract_kind, expires_at_tick } => {
+                assert_eq!(contract_kind, 2);
+                assert_eq!(expires_at_tick, 5000);
+            }
+            ref other => panic!("expected EffectOp::Propose; got {other:?}"),
+        }
+    }
+
+    /// Lift C — `announce <kind> radius <cells>` lowers to
+    /// `EffectOp::Announce { announcement_kind, radius_q8 }`. Radius is
+    /// stored q8 (cells × 256). 3.5 cells → 896.
+    #[test]
+    fn lower_announce_with_radius() {
+        let src = "ability TownCryer { target: self cooldown: 1s announce 7 radius 3.5 }";
+        let file = parse_ability_file(src).expect("parser");
+        let prog = lower_ability_decl(&file.abilities[0]).expect("announce must lower");
+        assert_eq!(prog.effects.len(), 1);
+        match prog.effects[0] {
+            EffectOp::Announce { announcement_kind, radius_q8 } => {
+                assert_eq!(announcement_kind, 7);
+                assert_eq!(radius_q8, 896);
+            }
+            ref other => panic!("expected EffectOp::Announce; got {other:?}"),
         }
     }
 }
