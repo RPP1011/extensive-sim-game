@@ -3,6 +3,20 @@
 > ⚠️ **Audit 2026-04-26 — scope mismatch:** This catalog covers both per-fight `SimState` (combat engine) **and** the full `WorldState` (campaign / DF-style world sim). The `crates/engine` crate implements only the SoA hot/cold fields under `Agent state`. **Aggregate state (Settlement, RegionState, Faction, GuildState, TradeRoute, ServiceContract, EconomyState, etc.) and World state (VoxelWorld, RegionPlan, NavGrid, FidelityZone, BuildSeed, GroupIndex, etc.) are not implemented in the engine crate** — they live in the `headless_campaign` / `bevy_game` layer (or in legacy worktrees), which the audit did not cover.
 > See `docs/superpowers/notes/2026-04-26-audit-state.md` for the per-section findings (42 ✅ / 18 ⚠️ / 31 ❌ / 7 🤔 / 4 ❓).
 
+> ⚠️ **Audit 2026-05-08 (follow-up):** Two weeks of code work since the
+> 2026-04-26 audit. Rerun against `crates/engine/src/state/mod.rs`,
+> `crates/engine/src/schema_hash.rs`, `crates/engine/.schema_hash`,
+> `crates/dsl_compiler/src/cg/data_handle.rs`, and the chronicle `EventKindId`
+> table. **0 `[CRITICAL]`, 0 `[STATUS-FLIP]`, 5 `[UNDOCUMENTED]`, 0
+> `[MISSING]`, 3 `[STALE]`.** Headlines:
+>
+> - `[UNDOCUMENTED]` Wave 2 piece 1 added `hot_{root,silence,fear,taunt}_expires_at_tick`. Wave 2 piece 4 added `hot_lifesteal_{frac_q8,expires_at_tick}` + `hot_damage_taken_mult_{q8,expires_at_tick}`. Wave 3 ToM Phase 2 added `cold_beliefs: Vec<BoundedMap<AgentId, BeliefState, 8>>` (per-observer, gated by `theory-of-mind` feature). `ability_cooldowns: Vec<[u32; MAX_ABILITIES]>` and `hot_mana` / `hot_max_mana` are also catalog-absent.
+> - `[STALE]` Lift A–D foundation merge (PR #38, commit `7bb0929c`) added `AgentFieldId` variants `BusyUntilTick`, `TravelDestX/Y/Z` and chronicle event ordinals 70–76 (`EffectTravelToApplied=70` … `EffectCreateObligationApplied=76`), but the consumer-side **per-agent SoA columns are not yet allocated** in `SimState`. Doc-comments in `crates/engine/src/cascade/handler.rs` and `crates/engine/src/ability/apply.rs` describe the future-shape (`disguise_expires_at_tick`, `disguise_fake_type`, `busy_until_tick`, `travel_dest_{x,y,z}` columns) — those don't exist in storage today. The catalog correctly omits them.
+> - `[STALE]` ToM `cold_beliefs` is per-observer `BoundedMap`, **not** a flat 6-column SoA. The cascade/apply doc-comments describing "the BeliefState SoA's 6 columns at `[caster_slot * agent_cap + target_slot]`" describe a future-flattened shape that hasn't landed.
+> - `[STALE]` Top-of-file + §Aggregate + §World callouts say missing structs "live in `headless_campaign` / `bevy_game` layer". Neither crate exists in the workspace today — the structs aren't in *any* current crate.
+>
+> See `docs/superpowers/notes/2026-05-08-audit-state-drift.md` for per-item evidence + recommended follow-ups.
+
 Schema-of-record: every SoA field engine code touches, with semantics, writers, and readers.
 
 ## Contents
@@ -43,6 +57,9 @@ Universal entity for any agentic actor (humans, wolves, dragons, goblins). Same 
 **Ground-locked vs volumetric.** Ground-locked types (Human, Elf, Dwarf, Wolf, Goblin) get a post-movement `@phase(post)` cascade snapping `pos.z = surface_height(pos.xy) + creature_height/2` outdoors or `floor_height(pos, building) + creature_height/2` when `inside_building_id` is set. Volumetric types (Dragon, Fish, Bat) skip the snap. `creature_height` derived from `creature_type` config.
 
 #### Combat/Vitality
+
+> ⚠️ **Audit 2026-05-08:** engine-side SoA also carries `hot_mana` / `hot_max_mana` (`state/mod.rs:63-64`, both `Vec<f32>`, init 0.0) which this catalog does not name. Read by the ability cast-gate when `EffectOp` consumers honour the ability's `cost`. See `docs/superpowers/notes/2026-05-08-audit-state-drift.md` U5.
+
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
 | hp | f32 | Current health | apply_flat (healing/damage), work (eat restores), resting | death check, threat urgency, combat eval |
@@ -87,6 +104,8 @@ Agent → group association.
 
 > 🤔 **Audit 2026-04-26 (spec mismatch):** Spec catalogs `remaining_ms: u32`; implementation stores **absolute expiry tick** in `hot_stun_expires_at_tick` / `hot_slow_expires_at_tick` (Task 143). Per-kind typed payload (Slow{factor}, Buff/Debuff{stat,factor}) is replaced by an opaque `payload_q8: i16`. SmallVec cap=8 (cold), not Vec.
 > See `docs/superpowers/notes/2026-04-26-audit-state.md` and `docs/superpowers/notes/2026-04-26-audit-language-stdlib.md`.
+
+> ⚠️ **Audit 2026-05-08 (additional hot-SoA storage):** Wave 2 piece 1 added four more hot expiry-tick mirrors paired with `hot_stun_expires_at_tick`: `hot_root_expires_at_tick`, `hot_silence_expires_at_tick`, `hot_fear_expires_at_tick`, `hot_taunt_expires_at_tick` (`state/mod.rs:107-110`, all `Vec<u32>`; `0` = never applied / already elapsed). Wave 2 piece 4 added single-slot buff columns `hot_lifesteal_frac_q8: Vec<i16>` + `hot_lifesteal_expires_at_tick: Vec<u32>` and `hot_damage_taken_mult_q8: Vec<i16>` + `hot_damage_taken_mult_expires_at_tick: Vec<u32>` (`state/mod.rs:125-138`; q8 fixed-point, `256 = 1.0×` identity for the multiplier). Stacking semantics tracked in `MEMORY.md` → `project_buff_stacking_rule.md`. None of these eight columns are named at any §AgentSoA catalog row today. See `docs/superpowers/notes/2026-05-08-audit-state-drift.md` U1 + U2.
 
 Temporary state modifier on an entity.
 
@@ -244,6 +263,8 @@ Directional relationship from one NPC toward another (asymmetric).
 > ⚠️ **Audit 2026-04-26:** Feature-gated stub (`#[cfg(feature = "theory-of-mind")]`). `BeliefState` in `engine_data/src/belief.rs` stores observation data (`last_known_pos`, `last_known_hp`, etc.) — **not** the theory-of-mind personality model. Spec's `traits [f32;5]`, `confidence [f32;5]`, and `observation_count` are absent.
 > See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
 
+> ⚠️ **Audit 2026-05-08 — `cold_beliefs` actual shape:** Wave 3 ToM Phase 2 landed the per-observer storage as `cold_beliefs: Vec<crate::pool::BoundedMap<AgentId, engine_data::belief::BeliefState, 8>>` (`state/mod.rs:175-176`). One `BoundedMap` per observer, keyed on observed `AgentId`, capacity `BELIEFS_PER_AGENT = 8`. Each cell holds 6 fields: `last_known_pos`, `last_known_hp`, `last_known_max_hp`, `last_known_creature_type`, `last_updated_tick`, `confidence` (eviction below `EVICTION_THRESHOLD = 0.05`). **`[STALE]`:** doc-comments in `crates/engine/src/cascade/handler.rs` (~L260) and `crates/engine/src/ability/apply.rs` (~L186, L213-238) describe consumers writing into "the BeliefState SoA's 6 columns at `[caster_slot * agent_cap + target_slot]`" — that's a future-flattened shape; today the storage is the per-observer `BoundedMap` above. See `docs/superpowers/notes/2026-05-08-audit-state-drift.md` U3 + S2 and `engine.md` §Schema-hash audit callout (cross-ref).
+
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
 | traits | [f32; 5] | Estimated [risk_tol, social, ambition, altruism, curiosity] | observe_action (action→trait signal, alpha learning) | compatibility calc with own personality, behavior prediction |
@@ -258,6 +279,10 @@ Directional relationship from one NPC toward another (asymmetric).
 
 > ❌ **Audit 2026-04-26:** `GoalStack` and `Goal` struct are **not implemented** in the engine SoA. `crates/tactical_sim` has a GOAP `Goal` but it is the tactical planner, not the world-sim goal stack with push/pop priority preemption.
 > See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
+
+> ⚠️ **Audit 2026-05-08:** engine SoA carries `ability_cooldowns: Vec<[u32; MAX_ABILITIES]>` (`state/mod.rs:187`) — per-(agent, ability-slot) local cooldown cursor where the value is the absolute tick that ability slot next becomes ready (`0` = ready). Added 2026-04-22 to fix a shared-cursor bug where the single global `hot_cooldown_next_ready_tick` (GCD) gated every ability on an agent. Catalog row absent today. See `docs/superpowers/notes/2026-05-08-audit-state-drift.md` U4.
+
+> ⚠️ **Audit 2026-05-08 (Lift A–D foundation, `[STALE]` future-shape):** PR #38 (commit `7bb0929c`) added `AgentFieldId` variants `BusyUntilTick`, `TravelDestX`, `TravelDestY`, `TravelDestZ` for multi-tick procedures + Travel, plus chronicle event ordinals 70–76 (`EffectTravelToApplied=70`, `EffectRecipeApplied=71`, `EffectWearToolApplied=72`, `EffectProposeApplied=73`, `EffectAnnounceApplied=74`, `EffectGainSkillApplied=75`, `EffectCreateObligationApplied=76`). The same-named per-agent SoA columns (`hot_busy_until_tick`, `hot_travel_dest_{x,y,z}`, `hot_disguise_expires_at_tick`, `hot_disguise_fake_type`, recipe / wear / propose / announce / skill / obligation cells) are **NOT yet allocated** in `SimState` — the foundation slice landed the dispatcher + chronicle-record writer; the consumer-side SoA wiring lands in subsequent slices. Doc-comments in `cascade/handler.rs` and `ability/apply.rs` that describe writing into these columns describe the future-shape, not current storage. See `docs/superpowers/notes/2026-05-08-audit-state-drift.md` S1 and `engine.md` §Cascade pipeline / §Schema-hash audit callouts.
 
 #### Goal
 
@@ -496,6 +521,8 @@ TRANSFORMATIONS:
 
 > ❌ **Audit 2026-04-26:** This entire section is **not implemented in the engine crate**. Only skeletal `Group` (3 fields) and `Quest` (5–6 fields) exist in `crates/engine/src/aggregate/`. Settlement, RegionState, Faction, GuildState, TradeRoute, ServiceContract, EconomyState, ConstructionMemory, full `Group` (~25 fields), full `Quest` (13 fields), QuestPosting, etc. are absent — they live in legacy `headless_campaign` worktrees not in canonical engine.
 > See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
+
+> ⚠️ **Audit 2026-05-08 (`[STALE]` provenance pointer):** Neither `headless_campaign` nor `bevy_game` exists as a workspace crate today (verify via `Cargo.toml`'s `[workspace] members`). Only `SettlementId` (and a few sibling ID types) survives in `crates/engine/src/ids.rs`; the Settlement / RegionState / Faction / GuildState / TradeRoute / EconomyState / etc. *struct* definitions don't live in any current crate. The "lives elsewhere" pointer in the 2026-04-26 callout is no longer accurate — readers shouldn't go looking for these in a sibling crate. Verdict unchanged (still ❌ "not implemented in the engine crate"). See `docs/superpowers/notes/2026-05-08-audit-state-drift.md` S3.
 
 `Group` is the universal social-collective primitive. Settlements, factions, families, guilds, religions, packs, cabals, parties, courts, leagues, monasteries are all `Group` discriminated by `kind`. The Group section at the end gives the canonical shape; per-kind sections describe additional fields.
 
