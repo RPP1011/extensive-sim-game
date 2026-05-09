@@ -55,7 +55,9 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::{AbilityRegistry, PackedAbilityRegistry};
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 /// Per-fixture state for the village day cycle.
 pub struct VillageDayCycleState {
@@ -115,6 +117,12 @@ pub struct VillageDayCycleState {
     apply_eat_cfg_buf: wgpu::Buffer,
     apply_decay_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
 
@@ -321,6 +329,12 @@ impl VillageDayCycleState {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&AbilityRegistry::new()),
+            &gpu,
+            "village_day_cycle_runtime",
+        );
+
         Self {
             gpu,
             agent_alive_buf,
@@ -360,6 +374,7 @@ impl VillageDayCycleState {
             apply_eat_cfg_buf,
             apply_decay_cfg_buf,
             seed_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             tick: 0,
             agent_count,
@@ -494,6 +509,23 @@ impl CompiledSim for VillageDayCycleState {
         // thread per agent. Each row gates on its own phase window
         // (`tick % 100`) plus a per-row cooldown (`tick % {3,4,5,10,2}`).
 
+        // Shared per-tick context — `alive`, `hp`, `mana` are the
+        // standard SoA columns this fixture owns. `event_ring` is
+        // borrowed immutably; safe here because `step()` doesn't call
+        // `note_emits` on the ring.
+        let agent_buffers = AgentBuffers {
+            alive_buf: Some(&self.agent_alive_buf),
+            hp_buf: Some(&self.agent_hp_buf),
+            mana_buf: Some(&self.agent_mana_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
         let mask_cfg_work = mask_verb_WorkHarvest::MaskVerbWorkHarvestCfg {
             agent_cap: self.agent_count, tick, seed: 0, _pad: 0,
         };
@@ -502,11 +534,13 @@ impl CompiledSim for VillageDayCycleState {
         );
         dispatch::dispatch_mask_verb_workharvest(
             &mut self.cache,
-            &mask_verb_WorkHarvest::MaskVerbWorkHarvestBindings {
-                agent_alive: &self.agent_alive_buf,
-                mask_0_bitmap: &self.mask_0_bitmap_buf,
-                cfg: &self.mask_work_cfg_buf,
-            },
+            &mask_verb_WorkHarvest::MaskVerbWorkHarvestBindings::from_context_with_extras(
+                &ctx,
+                &mask_verb_WorkHarvest::MaskVerbWorkHarvestExtras {
+                    mask_0_bitmap: &self.mask_0_bitmap_buf,
+                    cfg: &self.mask_work_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, self.agent_count,
         );
 
@@ -518,12 +552,13 @@ impl CompiledSim for VillageDayCycleState {
         );
         dispatch::dispatch_mask_verb_tradefood(
             &mut self.cache,
-            &mask_verb_TradeFood::MaskVerbTradeFoodBindings {
-                agent_alive: &self.agent_alive_buf,
-                agent_mana: &self.agent_mana_buf,
-                mask_1_bitmap: &self.mask_1_bitmap_buf,
-                cfg: &self.mask_trade_cfg_buf,
-            },
+            &mask_verb_TradeFood::MaskVerbTradeFoodBindings::from_context_with_extras(
+                &ctx,
+                &mask_verb_TradeFood::MaskVerbTradeFoodExtras {
+                    mask_1_bitmap: &self.mask_1_bitmap_buf,
+                    cfg: &self.mask_trade_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, self.agent_count,
         );
 
@@ -535,12 +570,13 @@ impl CompiledSim for VillageDayCycleState {
         );
         dispatch::dispatch_mask_verb_eatfood(
             &mut self.cache,
-            &mask_verb_EatFood::MaskVerbEatFoodBindings {
-                agent_alive: &self.agent_alive_buf,
-                agent_mana: &self.agent_mana_buf,
-                mask_2_bitmap: &self.mask_2_bitmap_buf,
-                cfg: &self.mask_eat_cfg_buf,
-            },
+            &mask_verb_EatFood::MaskVerbEatFoodBindings::from_context_with_extras(
+                &ctx,
+                &mask_verb_EatFood::MaskVerbEatFoodExtras {
+                    mask_2_bitmap: &self.mask_2_bitmap_buf,
+                    cfg: &self.mask_eat_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, self.agent_count,
         );
 
@@ -552,11 +588,13 @@ impl CompiledSim for VillageDayCycleState {
         );
         dispatch::dispatch_mask_verb_rest(
             &mut self.cache,
-            &mask_verb_Rest::MaskVerbRestBindings {
-                agent_alive: &self.agent_alive_buf,
-                mask_3_bitmap: &self.mask_3_bitmap_buf,
-                cfg: &self.mask_rest_cfg_buf,
-            },
+            &mask_verb_Rest::MaskVerbRestBindings::from_context_with_extras(
+                &ctx,
+                &mask_verb_Rest::MaskVerbRestExtras {
+                    mask_3_bitmap: &self.mask_3_bitmap_buf,
+                    cfg: &self.mask_rest_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, self.agent_count,
         );
 
@@ -568,11 +606,13 @@ impl CompiledSim for VillageDayCycleState {
         );
         dispatch::dispatch_mask_verb_drainenergy(
             &mut self.cache,
-            &mask_verb_DrainEnergy::MaskVerbDrainEnergyBindings {
-                agent_alive: &self.agent_alive_buf,
-                mask_4_bitmap: &self.mask_4_bitmap_buf,
-                cfg: &self.mask_drain_cfg_buf,
-            },
+            &mask_verb_DrainEnergy::MaskVerbDrainEnergyBindings::from_context_with_extras(
+                &ctx,
+                &mask_verb_DrainEnergy::MaskVerbDrainEnergyExtras {
+                    mask_4_bitmap: &self.mask_4_bitmap_buf,
+                    cfg: &self.mask_drain_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, self.agent_count,
         );
 
@@ -589,17 +629,18 @@ impl CompiledSim for VillageDayCycleState {
         );
         dispatch::dispatch_scoring(
             &mut self.cache,
-            &scoring::ScoringBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                mask_0_bitmap: &self.mask_0_bitmap_buf,
-                mask_1_bitmap: &self.mask_1_bitmap_buf,
-                mask_2_bitmap: &self.mask_2_bitmap_buf,
-                mask_3_bitmap: &self.mask_3_bitmap_buf,
-                mask_4_bitmap: &self.mask_4_bitmap_buf,
-                scoring_output: &self.scoring_output_buf,
-                cfg: &self.scoring_cfg_buf,
-            },
+            &scoring::ScoringBindings::from_context_with_extras(
+                &ctx,
+                &scoring::ScoringExtras {
+                    mask_0_bitmap: &self.mask_0_bitmap_buf,
+                    mask_1_bitmap: &self.mask_1_bitmap_buf,
+                    mask_2_bitmap: &self.mask_2_bitmap_buf,
+                    mask_3_bitmap: &self.mask_3_bitmap_buf,
+                    mask_4_bitmap: &self.mask_4_bitmap_buf,
+                    scoring_output: &self.scoring_output_buf,
+                    cfg: &self.scoring_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, self.agent_count,
         );
 
@@ -613,11 +654,12 @@ impl CompiledSim for VillageDayCycleState {
         );
         dispatch::dispatch_physics_verb_chronicle_workharvest(
             &mut self.cache,
-            &physics_verb_chronicle_WorkHarvest::PhysicsVerbChronicleWorkHarvestBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                cfg: &self.chronicle_work_cfg_buf,
-            },
+            &physics_verb_chronicle_WorkHarvest::PhysicsVerbChronicleWorkHarvestBindings::from_context_with_extras(
+                &ctx,
+                &physics_verb_chronicle_WorkHarvest::PhysicsVerbChronicleWorkHarvestExtras {
+                    cfg: &self.chronicle_work_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, event_count_estimate,
         );
 
@@ -629,11 +671,12 @@ impl CompiledSim for VillageDayCycleState {
         );
         dispatch::dispatch_physics_verb_chronicle_tradefood(
             &mut self.cache,
-            &physics_verb_chronicle_TradeFood::PhysicsVerbChronicleTradeFoodBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                cfg: &self.chronicle_trade_cfg_buf,
-            },
+            &physics_verb_chronicle_TradeFood::PhysicsVerbChronicleTradeFoodBindings::from_context_with_extras(
+                &ctx,
+                &physics_verb_chronicle_TradeFood::PhysicsVerbChronicleTradeFoodExtras {
+                    cfg: &self.chronicle_trade_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, event_count_estimate,
         );
 
@@ -645,11 +688,12 @@ impl CompiledSim for VillageDayCycleState {
         );
         dispatch::dispatch_physics_verb_chronicle_eatfood(
             &mut self.cache,
-            &physics_verb_chronicle_EatFood::PhysicsVerbChronicleEatFoodBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                cfg: &self.chronicle_eat_cfg_buf,
-            },
+            &physics_verb_chronicle_EatFood::PhysicsVerbChronicleEatFoodBindings::from_context_with_extras(
+                &ctx,
+                &physics_verb_chronicle_EatFood::PhysicsVerbChronicleEatFoodExtras {
+                    cfg: &self.chronicle_eat_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, event_count_estimate,
         );
 
@@ -661,11 +705,12 @@ impl CompiledSim for VillageDayCycleState {
         );
         dispatch::dispatch_physics_verb_chronicle_rest(
             &mut self.cache,
-            &physics_verb_chronicle_Rest::PhysicsVerbChronicleRestBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                cfg: &self.chronicle_rest_cfg_buf,
-            },
+            &physics_verb_chronicle_Rest::PhysicsVerbChronicleRestBindings::from_context_with_extras(
+                &ctx,
+                &physics_verb_chronicle_Rest::PhysicsVerbChronicleRestExtras {
+                    cfg: &self.chronicle_rest_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, event_count_estimate,
         );
 
@@ -677,11 +722,12 @@ impl CompiledSim for VillageDayCycleState {
         );
         dispatch::dispatch_physics_verb_chronicle_drainenergy(
             &mut self.cache,
-            &physics_verb_chronicle_DrainEnergy::PhysicsVerbChronicleDrainEnergyBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                cfg: &self.chronicle_drain_cfg_buf,
-            },
+            &physics_verb_chronicle_DrainEnergy::PhysicsVerbChronicleDrainEnergyBindings::from_context_with_extras(
+                &ctx,
+                &physics_verb_chronicle_DrainEnergy::PhysicsVerbChronicleDrainEnergyExtras {
+                    cfg: &self.chronicle_drain_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, event_count_estimate,
         );
 
@@ -694,12 +740,12 @@ impl CompiledSim for VillageDayCycleState {
         );
         dispatch::dispatch_physics_applywork(
             &mut self.cache,
-            &physics_ApplyWork::PhysicsApplyWorkBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                agent_mana: &self.agent_mana_buf,
-                cfg: &self.apply_work_cfg_buf,
-            },
+            &physics_ApplyWork::PhysicsApplyWorkBindings::from_context_with_extras(
+                &ctx,
+                &physics_ApplyWork::PhysicsApplyWorkExtras {
+                    cfg: &self.apply_work_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, event_count_estimate,
         );
 
@@ -712,13 +758,12 @@ impl CompiledSim for VillageDayCycleState {
         );
         dispatch::dispatch_physics_applytrade(
             &mut self.cache,
-            &physics_ApplyTrade::PhysicsApplyTradeBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                agent_hp: &self.agent_hp_buf,
-                agent_mana: &self.agent_mana_buf,
-                cfg: &self.apply_trade_cfg_buf,
-            },
+            &physics_ApplyTrade::PhysicsApplyTradeBindings::from_context_with_extras(
+                &ctx,
+                &physics_ApplyTrade::PhysicsApplyTradeExtras {
+                    cfg: &self.apply_trade_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, event_count_estimate,
         );
 
@@ -731,13 +776,12 @@ impl CompiledSim for VillageDayCycleState {
         );
         dispatch::dispatch_physics_applyeat(
             &mut self.cache,
-            &physics_ApplyEat::PhysicsApplyEatBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                agent_hp: &self.agent_hp_buf,
-                agent_mana: &self.agent_mana_buf,
-                cfg: &self.apply_eat_cfg_buf,
-            },
+            &physics_ApplyEat::PhysicsApplyEatBindings::from_context_with_extras(
+                &ctx,
+                &physics_ApplyEat::PhysicsApplyEatExtras {
+                    cfg: &self.apply_eat_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, event_count_estimate,
         );
 
@@ -751,13 +795,12 @@ impl CompiledSim for VillageDayCycleState {
         );
         dispatch::dispatch_physics_applyenergydecay(
             &mut self.cache,
-            &physics_ApplyEnergyDecay::PhysicsApplyEnergyDecayBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                agent_hp: &self.agent_hp_buf,
-                agent_alive: &self.agent_alive_buf,
-                cfg: &self.apply_decay_cfg_buf,
-            },
+            &physics_ApplyEnergyDecay::PhysicsApplyEnergyDecayBindings::from_context_with_extras(
+                &ctx,
+                &physics_ApplyEnergyDecay::PhysicsApplyEnergyDecayExtras {
+                    cfg: &self.apply_decay_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, event_count_estimate,
         );
 
@@ -770,12 +813,13 @@ impl CompiledSim for VillageDayCycleState {
         );
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache,
-            &seed_indirect_0::SeedIndirect0Bindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                indirect_args_0: self.event_ring.indirect_args_0(),
-                cfg: &self.seed_cfg_buf,
-            },
+            &seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+                &ctx,
+                &seed_indirect_0::SeedIndirect0Extras {
+                    indirect_args_0: self.event_ring.indirect_args_0(),
+                    cfg: &self.seed_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, self.agent_count,
         );
 

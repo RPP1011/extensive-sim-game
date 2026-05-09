@@ -61,6 +61,8 @@
 //!     from the verb chronicle. Per-slot grows by 1.0 per tick =
 //!     100.0 after 100 ticks.
 
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::{AbilityRegistry, PackedAbilityRegistry};
 use engine::ids::AgentId;
 use engine::rng::per_agent_u32;
 use engine::sim_trait::CompiledSim;
@@ -70,7 +72,7 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -145,6 +147,12 @@ pub struct TradeMarketState {
     // -- hub_volume (f32 no decay) --
     hub_volume: ViewStorage,
     hub_volume_cfg_buf: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
     pos_cache: Vec<Vec3>,
@@ -425,6 +433,12 @@ impl TradeMarketState {
             },
         );
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&AbilityRegistry::new()),
+            &gpu,
+            "trade_market_runtime",
+        );
+
         Self {
             gpu,
             pos_buf,
@@ -455,6 +469,7 @@ impl TradeMarketState {
             trader_volume_decay_cfg_buf,
             hub_volume,
             hub_volume_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             pos_cache: pos_host,
             dirty: false,
@@ -596,14 +611,33 @@ impl CompiledSim for TradeMarketState {
             bytemuck::bytes_of(&physics_cfg),
         );
 
+        // Shared per-tick context — `pos` + `alive` are the standard
+        // SoA columns this fixture owns. `event_ring` is borrowed
+        // immutably; safe here because `step()` doesn't call
+        // `note_emits` on the ring.
+        let agent_buffers = AgentBuffers {
+            pos_buf: Some(&self.pos_buf),
+            alive_buf: Some(&self.alive_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
         // (1) Spatial-hash counting sort (5 phases). Same shape as
         // particle_collision_runtime — sort agents into 27-cell grid
         // for the body-form spatial walk in WanderAndTrade.
-        let count_b = spatial_build_hash_count::SpatialBuildHashCountBindings {
-            agent_pos: &self.pos_buf,
+        let count_extras = spatial_build_hash_count::SpatialBuildHashCountExtras {
             spatial_grid_offsets: &self.spatial_grid_offsets,
             cfg: &self.physics_cfg_buf,
         };
+        let count_b =
+            spatial_build_hash_count::SpatialBuildHashCountBindings::from_context_with_extras(
+                &ctx, &count_extras,
+            );
         dispatch::dispatch_spatial_build_hash_count(
             &mut self.cache,
             &count_b,
@@ -611,13 +645,17 @@ impl CompiledSim for TradeMarketState {
             &mut encoder,
             self.agent_count,
         );
-        let scan_local_b =
-            spatial_build_hash_scan_local::SpatialBuildHashScanLocalBindings {
+        let scan_local_extras =
+            spatial_build_hash_scan_local::SpatialBuildHashScanLocalExtras {
                 spatial_grid_offsets: &self.spatial_grid_offsets,
                 spatial_grid_starts: &self.spatial_grid_starts,
                 spatial_chunk_sums: &self.spatial_chunk_sums,
                 cfg: &self.physics_cfg_buf,
             };
+        let scan_local_b =
+            spatial_build_hash_scan_local::SpatialBuildHashScanLocalBindings::from_context_with_extras(
+                &ctx, &scan_local_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scan_local(
             &mut self.cache,
             &scan_local_b,
@@ -625,11 +663,15 @@ impl CompiledSim for TradeMarketState {
             &mut encoder,
             self.agent_count,
         );
-        let scan_carry_b =
-            spatial_build_hash_scan_carry::SpatialBuildHashScanCarryBindings {
+        let scan_carry_extras =
+            spatial_build_hash_scan_carry::SpatialBuildHashScanCarryExtras {
                 spatial_chunk_sums: &self.spatial_chunk_sums,
                 cfg: &self.physics_cfg_buf,
             };
+        let scan_carry_b =
+            spatial_build_hash_scan_carry::SpatialBuildHashScanCarryBindings::from_context_with_extras(
+                &ctx, &scan_carry_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scan_carry(
             &mut self.cache,
             &scan_carry_b,
@@ -637,12 +679,17 @@ impl CompiledSim for TradeMarketState {
             &mut encoder,
             self.agent_count,
         );
-        let scan_add_b = spatial_build_hash_scan_add::SpatialBuildHashScanAddBindings {
-            spatial_grid_offsets: &self.spatial_grid_offsets,
-            spatial_grid_starts: &self.spatial_grid_starts,
-            spatial_chunk_sums: &self.spatial_chunk_sums,
-            cfg: &self.physics_cfg_buf,
-        };
+        let scan_add_extras =
+            spatial_build_hash_scan_add::SpatialBuildHashScanAddExtras {
+                spatial_grid_offsets: &self.spatial_grid_offsets,
+                spatial_grid_starts: &self.spatial_grid_starts,
+                spatial_chunk_sums: &self.spatial_chunk_sums,
+                cfg: &self.physics_cfg_buf,
+            };
+        let scan_add_b =
+            spatial_build_hash_scan_add::SpatialBuildHashScanAddBindings::from_context_with_extras(
+                &ctx, &scan_add_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scan_add(
             &mut self.cache,
             &scan_add_b,
@@ -650,13 +697,16 @@ impl CompiledSim for TradeMarketState {
             &mut encoder,
             self.agent_count,
         );
-        let scatter_b = spatial_build_hash_scatter::SpatialBuildHashScatterBindings {
-            agent_pos: &self.pos_buf,
+        let scatter_extras = spatial_build_hash_scatter::SpatialBuildHashScatterExtras {
             spatial_grid_cells: &self.spatial_grid_cells,
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
             cfg: &self.physics_cfg_buf,
         };
+        let scatter_b =
+            spatial_build_hash_scatter::SpatialBuildHashScatterBindings::from_context_with_extras(
+                &ctx, &scatter_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scatter(
             &mut self.cache,
             &scatter_b,
@@ -676,11 +726,13 @@ impl CompiledSim for TradeMarketState {
             0,
             bytemuck::bytes_of(&mask_cfg),
         );
-        let mask_b = mask_verb_ExecuteTrade::MaskVerbExecuteTradeBindings {
-            agent_alive: &self.alive_buf,
+        let mask_extras = mask_verb_ExecuteTrade::MaskVerbExecuteTradeExtras {
             mask_0_bitmap: &self.mask_bitmap_buf,
             cfg: &self.mask_cfg_buf,
         };
+        let mask_b = mask_verb_ExecuteTrade::MaskVerbExecuteTradeBindings::from_context_with_extras(
+            &ctx, &mask_extras,
+        );
         dispatch::dispatch_mask_verb_executetrade(
             &mut self.cache,
             &mask_b,
@@ -699,13 +751,14 @@ impl CompiledSim for TradeMarketState {
             0,
             bytemuck::bytes_of(&scoring_cfg),
         );
-        let scoring_b = scoring::ScoringBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let scoring_extras = scoring::ScoringExtras {
             mask_0_bitmap: &self.mask_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
             cfg: &self.scoring_cfg_buf,
         };
+        let scoring_b = scoring::ScoringBindings::from_context_with_extras(
+            &ctx, &scoring_extras,
+        );
         dispatch::dispatch_scoring(
             &mut self.cache,
             &scoring_b,
@@ -731,12 +784,14 @@ impl CompiledSim for TradeMarketState {
             0,
             bytemuck::bytes_of(&chronicle_cfg),
         );
-        let chronicle_b =
-            physics_verb_chronicle_ExecuteTrade::PhysicsVerbChronicleExecuteTradeBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
+        let chronicle_extras =
+            physics_verb_chronicle_ExecuteTrade::PhysicsVerbChronicleExecuteTradeExtras {
                 cfg: &self.chronicle_cfg_buf,
             };
+        let chronicle_b =
+            physics_verb_chronicle_ExecuteTrade::PhysicsVerbChronicleExecuteTradeBindings::from_context_with_extras(
+                &ctx, &chronicle_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_executetrade(
             &mut self.cache,
             &chronicle_b,
@@ -749,17 +804,17 @@ impl CompiledSim for TradeMarketState {
         // walk. Per alive agent: integrate position, then walk the
         // 27-cell neighbourhood; per candidate emit one PriceObserved
         // (kind=2u) AND one PriceGossip (kind=3u).
-        let physics_b = physics_WanderAndTrade::PhysicsWanderAndTradeBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_pos: &self.pos_buf,
-            agent_alive: &self.alive_buf,
+        let physics_extras = physics_WanderAndTrade::PhysicsWanderAndTradeExtras {
             agent_vel: &self.vel_buf,
             spatial_grid_cells: &self.spatial_grid_cells,
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
             cfg: &self.physics_cfg_buf,
         };
+        let physics_b =
+            physics_WanderAndTrade::PhysicsWanderAndTradeBindings::from_context_with_extras(
+                &ctx, &physics_extras,
+            );
         dispatch::dispatch_physics_wanderandtrade(
             &mut self.cache,
             &physics_b,
@@ -769,12 +824,13 @@ impl CompiledSim for TradeMarketState {
         );
 
         // (5) seed_indirect_0 — keeps indirect-args buffer warm.
-        let seed_b = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.physics_cfg_buf,
         };
+        let seed_b = seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+            &ctx, &seed_extras,
+        );
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache,
             &seed_b,
@@ -848,10 +904,13 @@ impl CompiledSim for TradeMarketState {
             0,
             bytemuck::bytes_of(&tv_decay_cfg),
         );
-        let tv_decay_b = decay_trader_volume::DecayTraderVolumeBindings {
+        let tv_decay_extras = decay_trader_volume::DecayTraderVolumeExtras {
             view_storage_primary: self.trader_volume.primary(),
             cfg: &self.trader_volume_decay_cfg_buf,
         };
+        let tv_decay_b = decay_trader_volume::DecayTraderVolumeBindings::from_context_with_extras(
+            &ctx, &tv_decay_extras,
+        );
         dispatch::dispatch_decay_trader_volume(
             &mut self.cache,
             &tv_decay_b,

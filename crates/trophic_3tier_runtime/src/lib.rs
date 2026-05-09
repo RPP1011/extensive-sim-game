@@ -61,7 +61,9 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::{AbilityRegistry, PackedAbilityRegistry};
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 /// Discriminant for the first-declared entity (Grass).
 pub const CT_GRASS: u32 = 0;
@@ -176,6 +178,12 @@ pub struct Trophic3TierState {
     applystrike_cfg_buf: wgpu::Buffer,
     energydecay_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
 
@@ -475,6 +483,12 @@ impl Trophic3TierState {
             make_view_cfg("trophic_3tier_runtime::prey_killed_total_cfg");
         let starved_total_cfg_buf = make_view_cfg("trophic_3tier_runtime::starved_total_cfg");
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&AbilityRegistry::new()),
+            &gpu,
+            "trophic_3tier_runtime",
+        );
+
         Self {
             gpu,
             agent_pos_buf,
@@ -500,6 +514,7 @@ impl Trophic3TierState {
             applystrike_cfg_buf,
             energydecay_cfg_buf,
             seed_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             tick: 0,
             agent_count: SLOT_CAP,
@@ -914,64 +929,100 @@ impl CompiledSim for Trophic3TierState {
             bytemuck::bytes_of(&grass_eat_cfg),
         );
 
-        let count_b = spatial_build_hash_count::SpatialBuildHashCountBindings {
-            agent_pos: &self.agent_pos_buf,
+        // Shared per-tick context — `pos`, `hp`, `alive` are the
+        // standard SoA columns this fixture owns. `event_ring` is
+        // borrowed immutably; safe here because `step()` doesn't call
+        // `note_emits` on the ring.
+        let agent_buffers = AgentBuffers {
+            pos_buf: Some(&self.agent_pos_buf),
+            hp_buf: Some(&self.agent_hp_buf),
+            alive_buf: Some(&self.agent_alive_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
+        let count_extras = spatial_build_hash_count::SpatialBuildHashCountExtras {
             spatial_grid_offsets: &self.spatial_grid_offsets,
             cfg: &self.grass_eat_cfg_buf,
         };
+        let count_b =
+            spatial_build_hash_count::SpatialBuildHashCountBindings::from_context_with_extras(
+                &ctx, &count_extras,
+            );
         dispatch::dispatch_spatial_build_hash_count(
             &mut self.cache, &count_b, &self.gpu.device, &mut encoder, SLOT_CAP,
         );
-        let scan_local_b = spatial_build_hash_scan_local::SpatialBuildHashScanLocalBindings {
-            spatial_grid_offsets: &self.spatial_grid_offsets,
-            spatial_grid_starts: &self.spatial_grid_starts,
-            spatial_chunk_sums: &self.spatial_chunk_sums,
-            cfg: &self.grass_eat_cfg_buf,
-        };
+        let scan_local_extras =
+            spatial_build_hash_scan_local::SpatialBuildHashScanLocalExtras {
+                spatial_grid_offsets: &self.spatial_grid_offsets,
+                spatial_grid_starts: &self.spatial_grid_starts,
+                spatial_chunk_sums: &self.spatial_chunk_sums,
+                cfg: &self.grass_eat_cfg_buf,
+            };
+        let scan_local_b =
+            spatial_build_hash_scan_local::SpatialBuildHashScanLocalBindings::from_context_with_extras(
+                &ctx, &scan_local_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scan_local(
             &mut self.cache, &scan_local_b, &self.gpu.device, &mut encoder, SLOT_CAP,
         );
-        let scan_carry_b = spatial_build_hash_scan_carry::SpatialBuildHashScanCarryBindings {
-            spatial_chunk_sums: &self.spatial_chunk_sums,
-            cfg: &self.grass_eat_cfg_buf,
-        };
+        let scan_carry_extras =
+            spatial_build_hash_scan_carry::SpatialBuildHashScanCarryExtras {
+                spatial_chunk_sums: &self.spatial_chunk_sums,
+                cfg: &self.grass_eat_cfg_buf,
+            };
+        let scan_carry_b =
+            spatial_build_hash_scan_carry::SpatialBuildHashScanCarryBindings::from_context_with_extras(
+                &ctx, &scan_carry_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scan_carry(
             &mut self.cache, &scan_carry_b, &self.gpu.device, &mut encoder, SLOT_CAP,
         );
-        let scan_add_b = spatial_build_hash_scan_add::SpatialBuildHashScanAddBindings {
-            spatial_grid_offsets: &self.spatial_grid_offsets,
-            spatial_grid_starts: &self.spatial_grid_starts,
-            spatial_chunk_sums: &self.spatial_chunk_sums,
-            cfg: &self.grass_eat_cfg_buf,
-        };
+        let scan_add_extras =
+            spatial_build_hash_scan_add::SpatialBuildHashScanAddExtras {
+                spatial_grid_offsets: &self.spatial_grid_offsets,
+                spatial_grid_starts: &self.spatial_grid_starts,
+                spatial_chunk_sums: &self.spatial_chunk_sums,
+                cfg: &self.grass_eat_cfg_buf,
+            };
+        let scan_add_b =
+            spatial_build_hash_scan_add::SpatialBuildHashScanAddBindings::from_context_with_extras(
+                &ctx, &scan_add_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scan_add(
             &mut self.cache, &scan_add_b, &self.gpu.device, &mut encoder, SLOT_CAP,
         );
-        let scatter_b = spatial_build_hash_scatter::SpatialBuildHashScatterBindings {
-            agent_pos: &self.agent_pos_buf,
+        let scatter_extras = spatial_build_hash_scatter::SpatialBuildHashScatterExtras {
             spatial_grid_cells: &self.spatial_grid_cells,
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
             cfg: &self.grass_eat_cfg_buf,
         };
+        let scatter_b =
+            spatial_build_hash_scatter::SpatialBuildHashScatterBindings::from_context_with_extras(
+                &ctx, &scatter_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scatter(
             &mut self.cache, &scatter_b, &self.gpu.device, &mut encoder, SLOT_CAP,
         );
 
         // (3) GrassRegrow + HerbivoreEat (fused). Emits Eat events for
         //     herbivore→grass neighbour pairs.
-        let grass_eat_b = physics_GrassRegrow_and_HerbivoreEat::PhysicsGrassRegrowAndHerbivoreEatBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_pos: &self.agent_pos_buf,
-            agent_hp: &self.agent_hp_buf,
-            agent_alive: &self.agent_alive_buf,
+        let grass_eat_extras = physics_GrassRegrow_and_HerbivoreEat::PhysicsGrassRegrowAndHerbivoreEatExtras {
             agent_creature_type: &self.agent_creature_type_buf,
             spatial_grid_cells: &self.spatial_grid_cells,
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
             cfg: &self.grass_eat_cfg_buf,
         };
+        let grass_eat_b = physics_GrassRegrow_and_HerbivoreEat::PhysicsGrassRegrowAndHerbivoreEatBindings::from_context_with_extras(
+            &ctx, &grass_eat_extras,
+        );
         dispatch::dispatch_physics_grassregrow_and_herbivoreeat(
             &mut self.cache, &grass_eat_b, &self.gpu.device, &mut encoder, SLOT_CAP,
         );
@@ -987,14 +1038,13 @@ impl CompiledSim for Trophic3TierState {
         self.gpu.queue.write_buffer(
             &self.applyeat_cfg_buf, 0, bytemuck::bytes_of(&applyeat_cfg),
         );
-        let applyeat_b = physics_ApplyEat::PhysicsApplyEatBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp: &self.agent_hp_buf,
-            agent_alive: &self.agent_alive_buf,
+        let applyeat_extras = physics_ApplyEat::PhysicsApplyEatExtras {
             agent_hunger: &self.agent_hunger_buf,
             cfg: &self.applyeat_cfg_buf,
         };
+        let applyeat_b = physics_ApplyEat::PhysicsApplyEatBindings::from_context_with_extras(
+            &ctx, &applyeat_extras,
+        );
         dispatch::dispatch_physics_applyeat(
             &mut self.cache, &applyeat_b, &self.gpu.device, &mut encoder, event_count_estimate,
         );
@@ -1009,17 +1059,17 @@ impl CompiledSim for Trophic3TierState {
         self.gpu.queue.write_buffer(
             &self.carnhunt_cfg_buf, 0, bytemuck::bytes_of(&carnhunt_cfg),
         );
-        let carnhunt_b = physics_CarnivoreHunt::PhysicsCarnivoreHuntBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_pos: &self.agent_pos_buf,
-            agent_alive: &self.agent_alive_buf,
+        let carnhunt_extras = physics_CarnivoreHunt::PhysicsCarnivoreHuntExtras {
             agent_creature_type: &self.agent_creature_type_buf,
             spatial_grid_cells: &self.spatial_grid_cells,
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
             cfg: &self.carnhunt_cfg_buf,
         };
+        let carnhunt_b =
+            physics_CarnivoreHunt::PhysicsCarnivoreHuntBindings::from_context_with_extras(
+                &ctx, &carnhunt_extras,
+            );
         dispatch::dispatch_physics_carnivorehunt(
             &mut self.cache, &carnhunt_b, &self.gpu.device, &mut encoder, SLOT_CAP,
         );
@@ -1034,14 +1084,14 @@ impl CompiledSim for Trophic3TierState {
         self.gpu.queue.write_buffer(
             &self.applystrike_cfg_buf, 0, bytemuck::bytes_of(&applystrike_cfg),
         );
-        let applystrike_b = physics_ApplyStrike::PhysicsApplyStrikeBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp: &self.agent_hp_buf,
-            agent_alive: &self.agent_alive_buf,
+        let applystrike_extras = physics_ApplyStrike::PhysicsApplyStrikeExtras {
             agent_hunger: &self.agent_hunger_buf,
             cfg: &self.applystrike_cfg_buf,
         };
+        let applystrike_b =
+            physics_ApplyStrike::PhysicsApplyStrikeBindings::from_context_with_extras(
+                &ctx, &applystrike_extras,
+            );
         dispatch::dispatch_physics_applystrike(
             &mut self.cache, &applystrike_b, &self.gpu.device, &mut encoder, event_count_estimate,
         );
@@ -1056,14 +1106,15 @@ impl CompiledSim for Trophic3TierState {
         self.gpu.queue.write_buffer(
             &self.energydecay_cfg_buf, 0, bytemuck::bytes_of(&energydecay_cfg),
         );
-        let energydecay_b = physics_EnergyDecay::PhysicsEnergyDecayBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_alive: &self.agent_alive_buf,
+        let energydecay_extras = physics_EnergyDecay::PhysicsEnergyDecayExtras {
             agent_hunger: &self.agent_hunger_buf,
             agent_creature_type: &self.agent_creature_type_buf,
             cfg: &self.energydecay_cfg_buf,
         };
+        let energydecay_b =
+            physics_EnergyDecay::PhysicsEnergyDecayBindings::from_context_with_extras(
+                &ctx, &energydecay_extras,
+            );
         dispatch::dispatch_physics_energydecay(
             &mut self.cache, &energydecay_b, &self.gpu.device, &mut encoder, SLOT_CAP,
         );
@@ -1076,12 +1127,13 @@ impl CompiledSim for Trophic3TierState {
             _pad: 0,
         };
         self.gpu.queue.write_buffer(&self.seed_cfg_buf, 0, bytemuck::bytes_of(&seed_cfg));
-        let seed_b = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.seed_cfg_buf,
         };
+        let seed_b = seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+            &ctx, &seed_extras,
+        );
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache, &seed_b, &self.gpu.device, &mut encoder, SLOT_CAP,
         );

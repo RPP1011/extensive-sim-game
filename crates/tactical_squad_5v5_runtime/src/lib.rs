@@ -49,7 +49,7 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 mod binding_check;
 
@@ -828,9 +828,29 @@ impl CompiledSim for TacticalSquad5v5State {
         self.gpu.queue.write_buffer(
             &self.mask_cfg_buf, 0, bytemuck::bytes_of(&mask_cfg),
         );
-        let mask_bindings = fused_mask_verb_Strike::FusedMaskVerbStrikeBindings {
-            agent_alive: &self.agent_alive_buf,
-            agent_level: &self.agent_level_buf,
+        // Shared per-tick context — many standard SoA columns. The
+        // `event_ring` is borrowed immutably; safe here because
+        // `step()` doesn't call `note_emits` on the ring.
+        let agent_buffers = AgentBuffers {
+            hp_buf: Some(&self.agent_hp_buf),
+            max_hp_buf: Some(&self.agent_max_hp_buf),
+            alive_buf: Some(&self.agent_alive_buf),
+            mana_buf: Some(&self.agent_mana_buf),
+            level_buf: Some(&self.agent_level_buf),
+            attack_damage_buf: Some(&self.agent_attack_damage_buf),
+            ability_power_buf: Some(&self.agent_ability_power_buf),
+            armor_buf: Some(&self.agent_armor_buf),
+            magic_resist_buf: Some(&self.agent_magic_resist_buf),
+            move_speed_buf: Some(&self.agent_move_speed_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+        let mask_extras = fused_mask_verb_Strike::FusedMaskVerbStrikeExtras {
             agent_creature_type: &self.agent_creature_type_buf,
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             mask_1_bitmap: &self.mask_1_bitmap_buf,
@@ -845,6 +865,10 @@ impl CompiledSim for TacticalSquad5v5State {
             mask_4_bitmap: &self.mask_4_bitmap_buf,
             cfg: &self.mask_cfg_buf,
         };
+        let mask_bindings =
+            fused_mask_verb_Strike::FusedMaskVerbStrikeBindings::from_context_with_extras(
+                &ctx, &mask_extras,
+            );
         // PAIR DISPATCH: agent_count * agent_count = 100 threads (10 × 10).
         // The dispatch helper takes a "logical work count" and
         // computes `(count + 63) / 64` workgroups; passing
@@ -869,15 +893,7 @@ impl CompiledSim for TacticalSquad5v5State {
         self.gpu.queue.write_buffer(
             &self.scoring_cfg_buf, 0, bytemuck::bytes_of(&scoring_cfg),
         );
-        let scoring_bindings = scoring::ScoringBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp: &self.agent_hp_buf,
-            // The score expression `if target.alive { ... } else { ... }`
-            // adds `agent_alive` to the scoring kernel's binding set —
-            // without it the if-branch's `target.alive` predicate has
-            // nothing to read.
-            agent_alive: &self.agent_alive_buf,
+        let scoring_extras = scoring::ScoringExtras {
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             mask_1_bitmap: &self.mask_1_bitmap_buf,
             mask_2_bitmap: &self.mask_2_bitmap_buf,
@@ -891,22 +907,10 @@ impl CompiledSim for TacticalSquad5v5State {
             mask_4_bitmap: &self.mask_4_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
             cfg: &self.scoring_cfg_buf,
-            // Wave 1.5#7 follow-on (predicate-aware scoring,
-            // 2026-05-07): scoring kernel now inlines per-effect when-
-            // predicate eval; same SoA + agent stat columns as the
-            // chronicle dispatcher.
-            ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
-            agent_attack_damage: &self.agent_attack_damage_buf,
-            agent_ability_power: &self.agent_ability_power_buf,
-            agent_max_hp:        &self.agent_max_hp_buf,
-            agent_armor:         &self.agent_armor_buf,
-            agent_magic_resist:  &self.agent_magic_resist_buf,
-            agent_move_speed:    &self.agent_move_speed_buf,
-            agent_mana:          &self.agent_mana_buf,
         };
+        let scoring_bindings = scoring::ScoringBindings::from_context_with_extras(
+            &ctx, &scoring_extras,
+        );
         dispatch::dispatch_scoring(
             &mut self.cache, &scoring_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
@@ -927,32 +931,13 @@ impl CompiledSim for TacticalSquad5v5State {
         self.gpu.queue.write_buffer(
             &self.chronicle_strike_cfg_buf, 0, bytemuck::bytes_of(&strike_cfg),
         );
-        let strike_bindings = physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp:            &self.agent_hp_buf,
-            agent_max_hp:        &self.agent_max_hp_buf,
-            agent_move_speed:    &self.agent_move_speed_buf,
-            agent_armor:         &self.agent_armor_buf,
-            agent_magic_resist:  &self.agent_magic_resist_buf,
-            agent_attack_damage: &self.agent_attack_damage_buf,
-            agent_ability_power: &self.agent_ability_power_buf,
-            agent_mana:          &self.agent_mana_buf,
-            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
-            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
-            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
-            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
-            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
-            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
-            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
-            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
-            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
-            ability_registry_chances:           &self.registry_gpu.chances,
+        let strike_extras = physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeExtras {
             cfg: &self.chronicle_strike_cfg_buf,
         };
+        let strike_bindings =
+            physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeBindings::from_context_with_extras(
+                &ctx, &strike_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_strike(
             &mut self.cache, &strike_bindings, &self.gpu.device, &mut encoder,
             event_count_estimate,
@@ -968,32 +953,13 @@ impl CompiledSim for TacticalSquad5v5State {
         self.gpu.queue.write_buffer(
             &self.chronicle_snipe_cfg_buf, 0, bytemuck::bytes_of(&snipe_cfg),
         );
-        let snipe_bindings = physics_verb_chronicle_Snipe::PhysicsVerbChronicleSnipeBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp:            &self.agent_hp_buf,
-            agent_max_hp:        &self.agent_max_hp_buf,
-            agent_move_speed:    &self.agent_move_speed_buf,
-            agent_armor:         &self.agent_armor_buf,
-            agent_magic_resist:  &self.agent_magic_resist_buf,
-            agent_attack_damage: &self.agent_attack_damage_buf,
-            agent_ability_power: &self.agent_ability_power_buf,
-            agent_mana:          &self.agent_mana_buf,
-            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
-            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
-            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
-            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
-            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
-            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
-            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
-            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
-            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
-            ability_registry_chances:           &self.registry_gpu.chances,
+        let snipe_extras = physics_verb_chronicle_Snipe::PhysicsVerbChronicleSnipeExtras {
             cfg: &self.chronicle_snipe_cfg_buf,
         };
+        let snipe_bindings =
+            physics_verb_chronicle_Snipe::PhysicsVerbChronicleSnipeBindings::from_context_with_extras(
+                &ctx, &snipe_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_snipe(
             &mut self.cache, &snipe_bindings, &self.gpu.device, &mut encoder,
             event_count_estimate,
@@ -1019,32 +985,13 @@ impl CompiledSim for TacticalSquad5v5State {
         self.gpu.queue.write_buffer(
             &self.chronicle_concussive_blow_cfg_buf, 0, bytemuck::bytes_of(&concussive_blow_cfg),
         );
-        let concussive_blow_bindings = physics_verb_chronicle_ConcussiveBlow::PhysicsVerbChronicleConcussiveBlowBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp:            &self.agent_hp_buf,
-            agent_max_hp:        &self.agent_max_hp_buf,
-            agent_move_speed:    &self.agent_move_speed_buf,
-            agent_armor:         &self.agent_armor_buf,
-            agent_magic_resist:  &self.agent_magic_resist_buf,
-            agent_attack_damage: &self.agent_attack_damage_buf,
-            agent_ability_power: &self.agent_ability_power_buf,
-            agent_mana:          &self.agent_mana_buf,
-            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
-            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
-            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
-            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
-            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
-            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
-            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
-            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
-            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
-            ability_registry_chances:           &self.registry_gpu.chances,
+        let concussive_blow_extras = physics_verb_chronicle_ConcussiveBlow::PhysicsVerbChronicleConcussiveBlowExtras {
             cfg: &self.chronicle_concussive_blow_cfg_buf,
         };
+        let concussive_blow_bindings =
+            physics_verb_chronicle_ConcussiveBlow::PhysicsVerbChronicleConcussiveBlowBindings::from_context_with_extras(
+                &ctx, &concussive_blow_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_concussiveblow(
             &mut self.cache, &concussive_blow_bindings, &self.gpu.device, &mut encoder,
             event_count_estimate,
@@ -1062,11 +1009,13 @@ impl CompiledSim for TacticalSquad5v5State {
         self.gpu.queue.write_buffer(
             &self.chronicle_heal_cfg_buf, 0, bytemuck::bytes_of(&heal_cfg),
         );
-        let heal_bindings = physics_verb_chronicle_Heal::PhysicsVerbChronicleHealBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let heal_extras = physics_verb_chronicle_Heal::PhysicsVerbChronicleHealExtras {
             cfg: &self.chronicle_heal_cfg_buf,
         };
+        let heal_bindings =
+            physics_verb_chronicle_Heal::PhysicsVerbChronicleHealBindings::from_context_with_extras(
+                &ctx, &heal_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_heal(
             &mut self.cache, &heal_bindings, &self.gpu.device, &mut encoder,
             event_count_estimate,
@@ -1092,32 +1041,13 @@ impl CompiledSim for TacticalSquad5v5State {
         self.gpu.queue.write_buffer(
             &self.chronicle_squad_heal_cfg_buf, 0, bytemuck::bytes_of(&squad_heal_cfg),
         );
-        let squad_heal_bindings = physics_verb_chronicle_SquadHeal::PhysicsVerbChronicleSquadHealBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp:            &self.agent_hp_buf,
-            agent_max_hp:        &self.agent_max_hp_buf,
-            agent_move_speed:    &self.agent_move_speed_buf,
-            agent_armor:         &self.agent_armor_buf,
-            agent_magic_resist:  &self.agent_magic_resist_buf,
-            agent_attack_damage: &self.agent_attack_damage_buf,
-            agent_ability_power: &self.agent_ability_power_buf,
-            agent_mana:          &self.agent_mana_buf,
-            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
-            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
-            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
-            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
-            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
-            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
-            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
-            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
-            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
-            ability_registry_chances:           &self.registry_gpu.chances,
+        let squad_heal_extras = physics_verb_chronicle_SquadHeal::PhysicsVerbChronicleSquadHealExtras {
             cfg: &self.chronicle_squad_heal_cfg_buf,
         };
+        let squad_heal_bindings =
+            physics_verb_chronicle_SquadHeal::PhysicsVerbChronicleSquadHealBindings::from_context_with_extras(
+                &ctx, &squad_heal_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_squadheal(
             &mut self.cache, &squad_heal_bindings, &self.gpu.device, &mut encoder,
             event_count_estimate,
@@ -1150,15 +1080,15 @@ impl CompiledSim for TacticalSquad5v5State {
             &self.apply_chronicle_cfg_buf, 0,
             bytemuck::bytes_of(&apply_chronicle_cfg),
         );
-        let apply_chronicle_bindings =
-            physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleAndApplyHealFromChronicleBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                agent_hp: &self.agent_hp_buf,
-                agent_max_hp: &self.agent_max_hp_buf,
+        let apply_chronicle_extras =
+            physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleAndApplyHealFromChronicleExtras {
                 agent_stun_expires_at_tick: &self.agent_stun_expires_at_tick_buf,
                 cfg: &self.apply_chronicle_cfg_buf,
             };
+        let apply_chronicle_bindings =
+            physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleAndApplyHealFromChronicleBindings::from_context_with_extras(
+                &ctx, &apply_chronicle_extras,
+            );
         dispatch::dispatch_physics_applydamagefromchronicle_and_applystunfromchronicle_and_applyhealfromchronicle(
             &mut self.cache, &apply_chronicle_bindings,
             &self.gpu.device, &mut encoder, event_count_estimate,
@@ -1172,13 +1102,13 @@ impl CompiledSim for TacticalSquad5v5State {
         self.gpu.queue.write_buffer(
             &self.apply_cfg_buf, 0, bytemuck::bytes_of(&apply_cfg),
         );
-        let apply_bindings = physics_ApplyDamage_and_ApplyHeal::PhysicsApplyDamageAndApplyHealBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp: &self.agent_hp_buf,
-            agent_alive: &self.agent_alive_buf,
+        let apply_extras = physics_ApplyDamage_and_ApplyHeal::PhysicsApplyDamageAndApplyHealExtras {
             cfg: &self.apply_cfg_buf,
         };
+        let apply_bindings =
+            physics_ApplyDamage_and_ApplyHeal::PhysicsApplyDamageAndApplyHealBindings::from_context_with_extras(
+                &ctx, &apply_extras,
+            );
         dispatch::dispatch_physics_applydamage_and_applyheal(
             &mut self.cache, &apply_bindings, &self.gpu.device, &mut encoder,
             event_count_estimate,
@@ -1193,12 +1123,13 @@ impl CompiledSim for TacticalSquad5v5State {
         self.gpu.queue.write_buffer(
             &self.seed_cfg_buf, 0, bytemuck::bytes_of(&seed_cfg),
         );
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.seed_cfg_buf,
         };
+        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+            &ctx, &seed_extras,
+        );
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache, &seed_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,

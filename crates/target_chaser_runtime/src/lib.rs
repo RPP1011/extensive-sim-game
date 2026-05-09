@@ -11,6 +11,9 @@
 //! cross-agent target read actually moves bytes through the SoA
 //! at runtime.
 
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::{AbilityRegistry, PackedAbilityRegistry};
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext};
 use engine::ids::AgentId;
 use engine::rng::per_agent_u32;
 use engine::sim_trait::CompiledSim;
@@ -58,6 +61,17 @@ pub struct TargetChaserState {
     engaged_with_buf: wgpu::Buffer,
     cfg_buf: wgpu::Buffer,
     pos_staging: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::event_ring`] field — this fixture has no
+    /// chronicle events, but the compiler-emitted constructor signature
+    /// requires the context to expose one.
+    event_ring: EventRing,
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
     pos_cache: Vec<Vec3>,
@@ -155,6 +169,13 @@ impl TargetChaserState {
             mapped_at_creation: false,
         });
 
+        let event_ring = EventRing::new(&gpu, "target_chaser_runtime");
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&AbilityRegistry::new()),
+            &gpu,
+            "target_chaser_runtime",
+        );
+
         Self {
             gpu,
             pos_buf,
@@ -163,6 +184,8 @@ impl TargetChaserState {
             engaged_with_buf,
             cfg_buf,
             pos_staging,
+            event_ring,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             pos_cache: pos_host,
             dirty: false,
@@ -220,13 +243,26 @@ impl CompiledSim for TargetChaserState {
                 label: Some("target_chaser_runtime::step"),
             });
 
-        let bindings = physics_ChaseTarget::PhysicsChaseTargetBindings {
-            agent_pos: &self.pos_buf,
-            agent_alive: &self.alive_buf,
+        let agent_buffers = AgentBuffers {
+            pos_buf: Some(&self.pos_buf),
+            alive_buf: Some(&self.alive_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+        let extras = physics_ChaseTarget::PhysicsChaseTargetExtras {
             agent_engaged_with: &self.engaged_with_buf,
             agent_vel: &self.vel_buf,
             cfg: &self.cfg_buf,
         };
+        let bindings =
+            physics_ChaseTarget::PhysicsChaseTargetBindings::from_context_with_extras(
+                &ctx, &extras,
+            );
         dispatch::dispatch_physics_chasetarget(
             &mut self.cache,
             &bindings,
