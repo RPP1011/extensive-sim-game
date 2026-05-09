@@ -2792,16 +2792,21 @@ fn build_apply_ability_per_target_body(
          \x20               } // end for dy (dome walk)\n\
          \x20           } // end for dz (dome walk)\n\
          \x20       } else if (area_kind == 11u) {\n\
-         \x20           // Hull (#181). area_args layout: [radius, _, _, _]. NOTE:\n\
-         \x20           // Hull is a Sphere alias today — spec semantics are not\n\
-         \x20           // nailed down (no doc-comment on `ShapeKind::Hull`, no spec\n\
-         \x20           // text under `dataset/abilities/`). Until refined, Hull\n\
-         \x20           // routes through the same `dist² ≤ radius²` gate as Sphere\n\
-         \x20           // (kind=6). When/if Hull's true semantics land, update both\n\
-         \x20           // this branch and `apply_program_aoe_hull_filter` together.\n\
+         \x20           // Hull (#181). area_args layout: [radius, _, _, _].\n\
+         \x20           //\n\
+         \x20           // **Semantics pinned in Task #231 (2026-05-08).** Hull is\n\
+         \x20           // the **castle-footprint** per ability.md §9.2: a cube of\n\
+         \x20           // half-extent `r` with the 8 corners chamfered off by a\n\
+         \x20           // bevel sphere of radius `r·√2`. In-hull predicate:\n\
+         \x20           //   1. Cube gate:  |dx| ≤ r ∧ |dy| ≤ r ∧ |dz| ≤ r\n\
+         \x20           //   2. Bevel gate: dx² + dy² + dz² ≤ 2·r² (= (r·√2)²)\n\
+         \x20           //\n\
+         \x20           // Distinct from both Sphere(r) (smaller — only within r)\n\
+         \x20           // and Box(r,r,r) (larger — corners up to r·√3 not clipped).\n\
+         \x20           // Mirrors `apply_program_aoe_hull_filter` bit-for-bit.\n\
          \x20           let area_args_base: u32 = (effect_base + i) * 4u;\n\
          \x20           let radius: f32 = ability_registry_area_args[area_args_base + 0u];\n\
-         \x20           let radius_sq: f32 = radius * radius;\n\
+         \x20           let bevel_sq: f32 = 2.0 * radius * radius;\n\
          \x20           let aoe_center: vec3<f32> = agent_pos[target_slot];\n\
          \x20           let _self_cell_f = (aoe_center + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
          \x20           let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
@@ -2818,7 +2823,12 @@ fn build_apply_ability_per_target_body(
          \x20                           let _candidate: u32 = spatial_grid_cells[_i];\n\
          \x20                           let _cand_pos: vec3<f32> = agent_pos[_candidate];\n\
          \x20                           let _dvec: vec3<f32> = _cand_pos - aoe_center;\n\
-         \x20                           if (dot(_dvec, _dvec) > radius_sq) { continue; }\n\
+         \x20                           // Cube gate (half-extent r per axis).\n\
+         \x20                           if (abs(_dvec.x) > radius) { continue; }\n\
+         \x20                           if (abs(_dvec.y) > radius) { continue; }\n\
+         \x20                           if (abs(_dvec.z) > radius) { continue; }\n\
+         \x20                           // Bevel sphere gate (radius r·√2).\n\
+         \x20                           if (dot(_dvec, _dvec) > bevel_sq) { continue; }\n\
          \x20                           let target_slot: u32 = _candidate;\n",
     );
     s.push_str(primary_arm_chain);
