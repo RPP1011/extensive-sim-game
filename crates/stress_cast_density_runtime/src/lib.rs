@@ -215,6 +215,7 @@ pub struct StressCastDensityState {
     agent_hp_buf: wgpu::Buffer,
     agent_max_hp_buf: wgpu::Buffer,
     agent_attack_damage_buf: wgpu::Buffer,
+    agent_ability_power_buf: wgpu::Buffer,
     agent_armor_buf: wgpu::Buffer,
     agent_magic_resist_buf: wgpu::Buffer,
     agent_move_speed_buf: wgpu::Buffer,
@@ -315,6 +316,7 @@ impl StressCastDensityState {
         let agent_hp_buf = mk_stat("stress_cast_density::agent_hp");
         let agent_max_hp_buf = mk_stat("stress_cast_density::agent_max_hp");
         let agent_attack_damage_buf = mk_stat("stress_cast_density::agent_attack_damage");
+        let agent_ability_power_buf = mk_stat("stress_cast_density::agent_ability_power");
         let agent_armor_buf = mk_stat("stress_cast_density::agent_armor");
         let agent_magic_resist_buf = mk_stat("stress_cast_density::agent_magic_resist");
         let agent_move_speed_buf = mk_stat("stress_cast_density::agent_move_speed");
@@ -449,6 +451,7 @@ impl StressCastDensityState {
             agent_hp_buf,
             agent_max_hp_buf,
             agent_attack_damage_buf,
+            agent_ability_power_buf,
             agent_armor_buf,
             agent_magic_resist_buf,
             agent_move_speed_buf,
@@ -507,6 +510,7 @@ impl StressCastDensityState {
                 agent_armor: &self.agent_armor_buf,
                 agent_magic_resist: &self.agent_magic_resist_buf,
                 agent_attack_damage: &self.agent_attack_damage_buf,
+                agent_ability_power: &self.agent_ability_power_buf,
                 agent_mana: &self.agent_mana_buf,
                 spatial_grid_cells: &self.spatial_grid_cells_buf,
                 spatial_grid_starts: &self.spatial_grid_starts_buf,
