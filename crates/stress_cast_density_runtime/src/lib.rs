@@ -58,7 +58,7 @@ use engine::ability::{
     AbilityId, AbilityProgram, AbilityRegistry, AbilityRegistryBuilder, EffectAreaShape, EffectOp,
     Gate, PackedAbilityRegistry, ShapeKind,
 };
-use engine::gpu::{EVENT_RING_CAP_SLOTS, EVENT_STRIDE_U32};
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, EVENT_RING_CAP_SLOTS};
 use engine::rng::per_agent_u32_pcg_with_extra;
 use engine::GpuContext;
 use wgpu::util::DeviceExt;
@@ -249,14 +249,9 @@ pub struct StressCastDensityState {
     // -- Packed AbilityRegistry on GPU --
     registry_gpu: PackedAbilityRegistryGpu,
 
-    // -- Event ring + tail --
-    event_ring_buf: wgpu::Buffer,
-    event_tail_buf: wgpu::Buffer,
+    // -- Event ring + tail (ring/tail/indirect_args/sim_cfg owned by EventRing) --
+    event_ring: EventRing,
     event_tail_staging: wgpu::Buffer,
-    event_tail_zero: wgpu::Buffer,
-
-    // -- Indirect args (seed_indirect_0 fills this) --
-    indirect_args_buf: wgpu::Buffer,
 
     // -- Cfg uniforms --
     physics_cfg_buf: wgpu::Buffer,
@@ -398,42 +393,13 @@ impl StressCastDensityState {
             bytemuck::cast_slice(&grid_starts),
         );
 
-        // -- Event ring + tail --
-        let ring_bytes = (RING_SLOT_CAP as u64) * (EVENT_STRIDE_U32 as u64) * 4;
-        let event_ring_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("stress_cast_density::event_ring"),
-            size: ring_bytes,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let event_tail_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("stress_cast_density::event_tail"),
-            size: 4,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let event_tail_zero = gpu.device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("stress_cast_density::event_tail_zero"),
-                contents: bytemuck::bytes_of(&0u32),
-                usage: wgpu::BufferUsages::COPY_SRC,
-            },
-        );
+        // -- Event ring + tail (shared infrastructure: ring + tail + zero
+        // source + indirect_args + sim_cfg) --
+        let event_ring = EventRing::new(&gpu, "stress_cast_density");
         let event_tail_staging = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("stress_cast_density::event_tail_staging"),
             size: 4,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-
-        let indirect_args_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("stress_cast_density::indirect_args_0"),
-            size: 12,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT,
             mapped_at_creation: false,
         });
 
@@ -520,11 +486,8 @@ impl StressCastDensityState {
             spatial_grid_cells_buf,
             spatial_grid_starts_buf,
             registry_gpu,
-            event_ring_buf,
-            event_tail_buf,
+            event_ring,
             event_tail_staging,
-            event_tail_zero,
-            indirect_args_buf,
             physics_cfg_buf,
             consumer_cfg_buf,
             seed_cfg_buf,
@@ -570,7 +533,7 @@ impl StressCastDensityState {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("stress_cast_density::step::dispatch"),
             });
-        encoder.copy_buffer_to_buffer(&self.event_tail_zero, 0, &self.event_tail_buf, 0, 4);
+        self.event_ring.clear_tail_in(&mut encoder);
         // Phase 2 debug: clear the per-kind histogram so the readback
         // captures THIS tick's counts, not accumulated.
         encoder.copy_buffer_to_buffer(
@@ -581,43 +544,40 @@ impl StressCastDensityState {
             (N_EVENT_KIND_SLOTS as u64) * 4,
         );
 
+        // Shared once per tick: every dispatch below adds only its
+        // fixture-specific `*Extras` (spatial grid, instrumentation,
+        // cfg uniforms, indirect args).
+        let agent_buffers = AgentBuffers {
+            hp_buf: Some(&self.agent_hp_buf),
+            max_hp_buf: Some(&self.agent_max_hp_buf),
+            alive_buf: Some(&self.agent_alive_buf),
+            pos_buf: Some(&self.agent_pos_buf),
+            level_buf: Some(&self.agent_level_buf),
+            move_speed_buf: Some(&self.agent_move_speed_buf),
+            armor_buf: Some(&self.agent_armor_buf),
+            magic_resist_buf: Some(&self.agent_magic_resist_buf),
+            attack_damage_buf: Some(&self.agent_attack_damage_buf),
+            ability_power_buf: Some(&self.agent_ability_power_buf),
+            mana_buf: Some(&self.agent_mana_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+        };
+
+        let dispatch_extras = physics_DispatchAoePulse::PhysicsDispatchAoePulseExtras {
+            spatial_grid_cells: &self.spatial_grid_cells_buf,
+            spatial_grid_starts: &self.spatial_grid_starts_buf,
+            event_kind_counts: &self.event_kind_counts_buf,
+            cfg: &self.physics_cfg_buf,
+        };
         let dispatch_bindings =
-            physics_DispatchAoePulse::PhysicsDispatchAoePulseBindings {
-                event_ring: &self.event_ring_buf,
-                event_tail: &self.event_tail_buf,
-                agent_pos: &self.agent_pos_buf,
-                agent_hp: &self.agent_hp_buf,
-                agent_max_hp: &self.agent_max_hp_buf,
-                agent_alive: &self.agent_alive_buf,
-                agent_level: &self.agent_level_buf,
-                agent_move_speed: &self.agent_move_speed_buf,
-                agent_armor: &self.agent_armor_buf,
-                agent_magic_resist: &self.agent_magic_resist_buf,
-                agent_attack_damage: &self.agent_attack_damage_buf,
-                agent_ability_power: &self.agent_ability_power_buf,
-                agent_mana: &self.agent_mana_buf,
-                spatial_grid_cells: &self.spatial_grid_cells_buf,
-                spatial_grid_starts: &self.spatial_grid_starts_buf,
-                ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
-                ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
-                ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
-                ability_registry_chances: &self.registry_gpu.chances,
-                ability_registry_area_kinds: &self.registry_gpu.area_kinds,
-                ability_registry_area_args: &self.registry_gpu.area_args,
-                ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
-                ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
-                ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
-                ability_registry_nested_effect_payload_a:
-                    &self.registry_gpu.nested_effect_payload_a,
-                ability_registry_nested_effect_payload_b:
-                    &self.registry_gpu.nested_effect_payload_b,
-                ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
-                ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
-                ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
-                ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
-                event_kind_counts: &self.event_kind_counts_buf,
-                cfg: &self.physics_cfg_buf,
-            };
+            physics_DispatchAoePulse::PhysicsDispatchAoePulseBindings::from_context_with_extras(
+                &ctx,
+                &dispatch_extras,
+            );
         if let Some(t) = self.debug_timings.as_ref() {
             dispatch::record_physics_dispatchaoepulse_timing(
                 &mut self.cache,
@@ -640,7 +600,7 @@ impl StressCastDensityState {
         // Copy event_tail to staging for readback in the same submit so
         // we don't need a second encoder.
         encoder.copy_buffer_to_buffer(
-            &self.event_tail_buf,
+            self.event_ring.tail(),
             0,
             &self.event_tail_staging,
             0,
@@ -698,12 +658,14 @@ impl StressCastDensityState {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("stress_cast_density::step::consume_and_seed"),
             });
-        let consumer_bindings =
-            physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleBindings {
-                event_ring: &self.event_ring_buf,
-                event_tail: &self.event_tail_buf,
+        let consumer_extras =
+            physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleExtras {
                 cfg: &self.consumer_cfg_buf,
             };
+        let consumer_bindings = physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleBindings::from_context_with_extras(
+            &ctx,
+            &consumer_extras,
+        );
         // Consumer dispatch sized by the cap'd ring slot count so the
         // workgroup grid never exceeds the ring's actual data range.
         let consumer_workgroups = tail.min(RING_SLOT_CAP).max(self.n_agents);
@@ -725,12 +687,15 @@ impl StressCastDensityState {
                 consumer_workgroups,
             );
         }
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: &self.event_ring_buf,
-            event_tail: &self.event_tail_buf,
-            indirect_args_0: &self.indirect_args_buf,
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
+            indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.seed_cfg_buf,
         };
+        let seed_bindings =
+            seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+                &ctx,
+                &seed_extras,
+            );
         if let Some(t) = self.debug_timings.as_ref() {
             dispatch::record_seed_indirect_0_timing(
                 &mut self.cache,
@@ -808,53 +773,6 @@ impl StressCastDensityState {
             let words: &[u32] = bytemuck::cast_slice(&view);
             out.copy_from_slice(&words[..N_EVENT_KIND_SLOTS]);
         }
-        staging.unmap();
-        out
-    }
-
-    /// Read back the chronicle ring contents (first `n_records`
-    /// records). Used by the behavioral pin test to verify
-    /// EffectDamageApplied (kind=26) records were actually written.
-    pub fn read_event_ring(&self, n_records: u32) -> Vec<[u32; 10]> {
-        let cap = n_records.min(RING_SLOT_CAP);
-        let bytes = (cap as u64) * (EVENT_STRIDE_U32 as u64) * 4;
-        if bytes == 0 {
-            return Vec::new();
-        }
-        let staging = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("stress_cast_density::event_ring_staging"),
-            size: bytes,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        let mut encoder = self
-            .gpu
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("stress_cast_density::read_event_ring"),
-            });
-        encoder.copy_buffer_to_buffer(&self.event_ring_buf, 0, &staging, 0, bytes);
-        self.gpu.queue.submit(Some(encoder.finish()));
-        let slice = staging.slice(..);
-        slice.map_async(wgpu::MapMode::Read, |res| {
-            res.expect("event_ring_staging map_async failed");
-        });
-        self.gpu
-            .device
-            .poll(wgpu::PollType::Wait)
-            .expect("device poll failed during event_ring readback");
-        let out = {
-            let view = slice.get_mapped_range();
-            let words: &[u32] = bytemuck::cast_slice(&view);
-            let mut out: Vec<[u32; 10]> = Vec::with_capacity(cap as usize);
-            for r in 0..(cap as usize) {
-                let base = r * (EVENT_STRIDE_U32 as usize);
-                let mut rec = [0u32; 10];
-                rec.copy_from_slice(&words[base..base + 10]);
-                out.push(rec);
-            }
-            out
-        };
         staging.unmap();
         out
     }
@@ -952,9 +870,9 @@ mod stress_tests {
 
     /// Pin: at agent_cap=10, all agents in single 27-cell, the
     /// dispatcher MUST advance the tick AND walk the Spread sort at
-    /// least once. We verify the latter by reading back the chronicle
-    /// ring and counting `kind == 26` (EffectDamageApplied) records —
-    /// expect ≥ 1.
+    /// least once. We verify the latter via the Phase 2 per-EventKindId
+    /// histogram — slot 26 (`EventKindId::EffectDamageApplied`) must be
+    /// non-zero.
     #[test]
     fn tick_advances_under_max_density() {
         let mut state = match StressCastDensityState::try_new(10) {
@@ -981,17 +899,14 @@ mod stress_tests {
              (the dispatcher did not append any chronicle records)",
         );
 
-        let records = state.read_event_ring(tail.min(RING_SLOT_CAP));
-        let damage_records = records
-            .iter()
-            .filter(|r| r[0] == 26) // EventKindId::EffectDamageApplied = 26
-            .count();
+        // EventKindId::EffectDamageApplied = 26 (see crates/engine/src/cascade/handler.rs).
+        let histogram = state.read_event_kind_histogram();
+        let damage_records = histogram[26];
         assert!(
             damage_records > 0,
-            "expected at least 1 chronicle record with kind=26 \
-             (EffectDamageApplied); saw {} records total of which 0 were \
-             kind=26 — Spread sort path did not emit the expected events",
-            records.len(),
+            "expected event_kind_counts[26] (EffectDamageApplied) > 0; got {} \
+             — Spread sort path did not emit the expected events (tail={})",
+            damage_records, tail,
         );
         eprintln!(
             "[stress_cast_density] tick 0: {} damage records (kind=26) of {} total",
