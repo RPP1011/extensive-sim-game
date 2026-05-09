@@ -189,8 +189,13 @@ impl VoxelBridge {
         Ok(())
     }
 
-    /// Paint a `dim³` block of cells centred on `pos` with the
+    /// Paint a `dim³` block of cells centred-ish on `pos` with the
     /// given material id. Out-of-bounds cells are skipped silently.
+    ///
+    /// X and Z are centred on the cell (half cells on each side);
+    /// Y is shifted up by 1 cell so a sim agent at world y=0 sits
+    /// **on top** of the ground plane (y∈[ground_y, ground_y+dim))
+    /// rather than half-sunk into it (y∈[ground_y-half, ground_y+half)).
     fn splat_at(&mut self, pos: Vec3, material: u8, dim: i32) {
         let Some((cx, cy, cz)) = world_to_cell(
             pos,
@@ -205,7 +210,8 @@ impl VoxelBridge {
             for dy in 0..dim {
                 for dz in 0..dim {
                     let x = cx as i32 + dx - half;
-                    let y = cy as i32 + dy - half;
+                    // Shift Y up by 1 — feet on the ground, not in it.
+                    let y = cy as i32 + dy - half + 1;
                     let z = cz as i32 + dz - half;
                     if x < 0
                         || y < 0
