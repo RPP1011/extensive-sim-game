@@ -28,22 +28,16 @@ fn well_formed_when_lowers_clean() {
 }
 
 #[test]
-fn well_formed_when_else_errors_at_lower() {
-    // Wave 1.5#7 GPU eval (2026-05-07): `else` clause is now rejected
-    // at lower time (deferred — open task #163-followup). Apply
-    // dispatch (CPU + GPU) only consults the `when` branch; accepting
-    // an else silently would misrepresent the gate's semantics.
+fn well_formed_when_else_lowers_to_or() {
+    // Task #228 (PR #51, 2026-05-09) accepted `when X else Y` as parse-
+    // and-lower sugar for `when X || Y` — both branches lower to
+    // identical RPN bytes. Previously this asserted the else clause
+    // errored at lower time; now we assert it lowers cleanly.
     let src = "ability A {
         target: enemy range: 5.0 cooldown: 1s
         taunt 1500ms when target.hp < 50 else target.armor == 0
     }";
-    let err = lower_first(src).expect_err("else clause must error at lower");
-    match err {
-        LowerError::WhenConditionUnsupported { clause, .. } => {
-            assert_eq!(clause, "else");
-        }
-        other => panic!("expected WhenConditionUnsupported{{else}}; got {other:?}"),
-    }
+    lower_first(src).expect("well-formed `when X else Y` must lower (Task #228)");
 }
 
 #[test]
@@ -68,21 +62,25 @@ fn typoed_operator_in_when_is_caught() {
 }
 
 #[test]
-fn malformed_else_clause_errors_as_unsupported_else() {
-    // Wave 1.5#7 GPU eval (2026-05-07): the else clause is now
-    // rejected wholesale at lower time (open task #163-followup), so
-    // any malformed else-text is short-circuited by the
-    // WhenConditionUnsupported{else} arm before the parser sees it.
+fn malformed_else_clause_errors_as_parse_error_with_else_attribution() {
+    // Task #228 (PR #51, 2026-05-09): the else branch now parses and
+    // lowers, so malformed else-text surfaces as WhenConditionParseError
+    // with `clause = "else"` attribution (the parse_when_branch helper
+    // attributes errors to whichever clause they came from).
     let src = "ability A {
         target: enemy range: 5.0 cooldown: 1s
         damage 10 when target.hp < 30 else target.hp ~ 50
     }";
-    let err = lower_first(src).expect_err("else must error at lower");
+    let err = lower_first(src).expect_err("malformed else must error at lower");
     match err {
-        LowerError::WhenConditionUnsupported { clause, .. } => {
+        LowerError::WhenConditionParseError { clause, predicate, .. } => {
             assert_eq!(clause, "else");
+            assert!(
+                predicate.contains("~"),
+                "predicate should preserve the offending text: {predicate}"
+            );
         }
-        other => panic!("expected WhenConditionUnsupported{{else}}; got {other:?}"),
+        other => panic!("expected WhenConditionParseError{{clause:else}}; got {other:?}"),
     }
 }
 
@@ -145,19 +143,22 @@ fn typoed_field_on_self_is_also_caught() {
 }
 
 #[test]
-fn typoed_field_in_else_short_circuits_to_unsupported_else() {
-    // Wave 1.5#7 GPU eval (2026-05-07): else clauses are gated wholesale
-    // at lower time. Field-validation in the else branch never runs.
+fn typoed_field_in_else_surfaces_as_unknown_field() {
+    // Task #228 (PR #51, 2026-05-09): else branches now parse + lower,
+    // so field-validation runs on them too. A typo'd field in the else
+    // branch surfaces as WhenConditionUnknownField, same as in the when
+    // branch.
     let src = "ability A {
         target: enemy range: 5.0 cooldown: 1s
         damage 10 when target.hp < 30 else target.bogus_field == 0
     }";
     let err = lower_first(src).expect_err("typo'd else field must error");
     match err {
-        LowerError::WhenConditionUnsupported { clause, .. } => {
-            assert_eq!(clause, "else");
+        LowerError::WhenConditionUnknownField { binder, field, .. } => {
+            assert_eq!(binder, "target");
+            assert_eq!(field, "bogus_field");
         }
-        other => panic!("expected WhenConditionUnsupported{{else}}; got {other:?}"),
+        other => panic!("expected WhenConditionUnknownField; got {other:?}"),
     }
 }
 
