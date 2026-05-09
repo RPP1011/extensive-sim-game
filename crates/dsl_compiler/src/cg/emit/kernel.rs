@@ -581,6 +581,68 @@ pub fn kernel_topology_to_spec_and_body(
         }
     }
 
+    // f32 RMW atomic-CAS upgrade (P5 fix, task #244): when the kernel
+    // body contains an `Assign(AgentField{f32, …}, …)` chronicle-
+    // consumer write (`agents.set_<f>(t, agents.<f>(t) ± x)` and
+    // friends), upgrade the `agent_<f>` binding to AtomicStorage
+    // (`array<atomic<u32>>`) so the per-stmt Assign emit can lower
+    // the write as a `loop { atomicLoad → atomicCompareExchangeWeak;
+    // break-on-exchanged }` retry loop.
+    //
+    // Without this, N>1 chronicle events targeting one slot in one
+    // dispatch raced on naked f32 RMW: only one write landed, and the
+    // same seed produced different results across re-runs (P5
+    // violation observed in `wave_defense`'s `physics_ApplyDamage`
+    // where AOE cleave dispatched many Damaged events at one settler
+    // in one tick).
+    //
+    // The per-kernel scoping mirrors the alive-CAS upgrade above:
+    // each kernel decides independently. Reads from kernels that
+    // DON'T mutate the field (mask kernels, scoring kernels) keep
+    // the plain `array<f32>` binding because `f32_atomic_writes_bits`
+    // is 0 there — the runtime's single `agent_<f>` buffer is bound
+    // to whichever WGSL type each kernel declares (wgpu doesn't
+    // distinguish atomic vs non-atomic at the BGL layer; both use
+    // `bgl_storage(N, false)`).
+    let f32_atomic_writes_bits = body_ops_collect_f32_atomic_writes(&body_ops, prog);
+    if f32_atomic_writes_bits != 0 {
+        use crate::cg::data_handle::AgentFieldId;
+        // Iterate the bitset and upgrade each matching binding.
+        // Field-id → snake mapping is the inverse of
+        // `f32_field_atomic_bit` in `cg/emit/wgsl_body.rs`; the
+        // `AgentFieldId::snake()` method returns the SoA column name.
+        for field in &[
+            AgentFieldId::Hp, AgentFieldId::MaxHp, AgentFieldId::ShieldHp,
+            AgentFieldId::Armor, AgentFieldId::MagicResist, AgentFieldId::AttackDamage,
+            AgentFieldId::AbilityPower, AgentFieldId::AttackRange, AgentFieldId::Mana,
+            AgentFieldId::MaxMana, AgentFieldId::MoveSpeed, AgentFieldId::MoveSpeedMult,
+            AgentFieldId::Hunger, AgentFieldId::Thirst, AgentFieldId::RestTimer,
+            AgentFieldId::Safety, AgentFieldId::Shelter, AgentFieldId::Social,
+            AgentFieldId::Purpose, AgentFieldId::Esteem, AgentFieldId::RiskTolerance,
+            AgentFieldId::SocialDrive, AgentFieldId::Ambition, AgentFieldId::Altruism,
+            AgentFieldId::Curiosity, AgentFieldId::TravelDestX, AgentFieldId::TravelDestY,
+            AgentFieldId::TravelDestZ,
+        ] {
+            let Some(bit) =
+                crate::cg::emit::wgsl_body::f32_field_atomic_bit(*field)
+            else {
+                continue;
+            };
+            if (f32_atomic_writes_bits >> bit) & 1 != 1 {
+                continue;
+            }
+            let binding_name = format!("agent_{}", field.snake());
+            for binding in bindings.iter_mut() {
+                if binding.name == binding_name
+                    && matches!(binding.access, AccessMode::ReadStorage | AccessMode::ReadWriteStorage)
+                {
+                    binding.access = AccessMode::AtomicStorage;
+                    binding.wgsl_ty = "u32".to_string();
+                }
+            }
+        }
+    }
+
     // 10. Compose the WGSL body — one fragment per op, joined with
     //     blank lines. Computing the body here surfaces any inner-walk
     //     arena failures as typed errors before the spec is returned,
@@ -604,7 +666,16 @@ pub fn kernel_topology_to_spec_and_body(
     // wrap pick the atomicCAS shape; restore on exit so the same
     // EmitCtx instance can drive multiple kernels safely.
     let prior_alive_cas = ctx.alive_atomic_writes.replace(has_alive_cas);
+    // f32 RMW (task #244): stash the per-kernel f32 atomic-write
+    // bitset. The per-stmt Read / Assign arms gate their atomicLoad /
+    // CAS-loop emit shapes on this; the kernel's binding upgrades
+    // above (the `agent_<f>` -> AtomicStorage) and the body emit MUST
+    // agree on which fields are upgraded — both consult this bitset.
+    let prior_f32_atomic_writes = ctx
+        .f32_atomic_field_writes
+        .replace(f32_atomic_writes_bits);
     let wgsl_body_result = build_wgsl_body(&body_ops, &dispatch, prog, ctx);
+    ctx.f32_atomic_field_writes.set(prior_f32_atomic_writes);
     ctx.alive_atomic_writes.set(prior_alive_cas);
     ctx.event_ring_atomic_loads.set(prior_atomic_loads);
     let wgsl_body = wgsl_body_result?;
@@ -2316,6 +2387,33 @@ fn body_ops_have_set_alive_false(body_ops: &[OpId], prog: &CgProgram) -> bool {
         }
     }
     false
+}
+
+/// Walk every body op's statement list and OR up the bitset of
+/// upgraded f32 SoA fields the body assigns to. Bit indices are
+/// produced by [`crate::cg::emit::wgsl_body::f32_field_atomic_bit`].
+/// Each set bit triggers an `agent_<f>` binding upgrade to
+/// `AtomicStorage` (`array<atomic<u32>>`) so the per-stmt Assign
+/// emit can lower the write as a CAS-loop (P5 fix, task #244 —
+/// chronicle-consumer RMW races on naked f32 RMW).
+fn body_ops_collect_f32_atomic_writes(body_ops: &[OpId], prog: &CgProgram) -> u64 {
+    let mut bits = 0u64;
+    for op_id in body_ops {
+        let Ok(op) = resolve_op(prog, *op_id) else {
+            continue;
+        };
+        let body_list = match &op.kind {
+            ComputeOpKind::PhysicsRule { body, .. } => Some(*body),
+            ComputeOpKind::ViewFold { body, .. } => Some(*body),
+            _ => None,
+        };
+        if let Some(list_id) = body_list {
+            bits |= crate::cg::emit::wgsl_body::stmt_list_collect_f32_atomic_writes(
+                prog, list_id,
+            );
+        }
+    }
+    bits
 }
 
 /// Recursive walk: `true` iff the statement list named by `list_id`
@@ -4442,8 +4540,19 @@ mod tests {
         );
 
         let agent = spec.bindings.iter().find(|b| b.name == "agent_hp").unwrap();
-        // Physics rule writes hp → upgraded to read_write.
-        assert!(matches!(agent.access, AccessMode::ReadWriteStorage));
+        // Physics rule writes hp (an f32 SoA column) → upgraded to
+        // AtomicStorage (`array<atomic<u32>>`) by the f32 RMW pass
+        // (task #244 P5 fix). Pre-upgrade was ReadWriteStorage; the
+        // upgrade is unconditional whenever the body assigns to an
+        // f32 AgentField, so that N>1 chronicle events targeting the
+        // same agent slot drive the per-stmt CAS-loop emit instead
+        // of racing on naked f32 RMW.
+        assert!(
+            matches!(agent.access, AccessMode::AtomicStorage),
+            "agent_hp access: {:?}",
+            agent.access,
+        );
+        assert_eq!(agent.wgsl_ty, "u32");
     }
 
     // ---- 4. KernelSpec::validate passes for every shape ----
