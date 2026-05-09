@@ -43,6 +43,10 @@ fn main() {
     // ~agent_cap events per tick instead of agent_cap × ~256.
     let opts = dsl_compiler::cg::lower::LowerOpts {
         aoe_dispatch: true,
+        // D3 — per-kernel GPU timestamps + memory-traffic accounting,
+        // no .sim source-map overhead. See `DebugDepth` for the level
+        // ladder.
+        debug: dsl_compiler::cg::lower::DebugDepth::Kernel,
         ..dsl_compiler::cg::lower::LowerOpts::default()
     };
     let cg = match dsl_compiler::cg::lower::lower_compilation_to_cg_with_opts(&comp, opts) {
@@ -58,8 +62,15 @@ fn main() {
         &cg,
         dsl_compiler::cg::schedule::ScheduleStrategy::Default,
     );
-    let artifacts = dsl_compiler::cg::emit::emit_cg_program(&schedule_result.schedule, &cg)
-        .expect("emit stress_cast_density CG program");
+    // Thread the same debug level into the emit step so the synthesised
+    // dispatch.rs carries `DebugTimings`, `MemTrafficTable`, and the
+    // per-kernel `record_<name>_timing` helpers the driver consumes.
+    let artifacts = dsl_compiler::cg::emit::emit_cg_program_with_debug(
+        &schedule_result.schedule,
+        &cg,
+        opts.debug,
+    )
+    .expect("emit stress_cast_density CG program");
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
 

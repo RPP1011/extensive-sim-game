@@ -43,6 +43,7 @@ fn main() {
         dsl_compiler::cg::lower::LowerOpts {
             aoe_dispatch: false,
             belief_state: true,
+            ..dsl_compiler::cg::lower::LowerOpts::default()
         },
     ) {
         Ok(p) => p,

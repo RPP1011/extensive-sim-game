@@ -44,8 +44,17 @@ fn main() {
         &cg,
         dsl_compiler::cg::schedule::ScheduleStrategy::Default,
     );
-    let artifacts = dsl_compiler::cg::emit::emit_cg_program(&schedule_result.schedule, &cg)
-        .expect("emit stress_agent_count CG program");
+    // D3 — per-kernel GPU timestamps + memory-traffic accounting via
+    // the compiler-emitted `DebugTimings`. The runtime opts in via
+    // `dispatch::record_<name>_timing` helpers per tick; falls back to
+    // the plain `dispatch_<name>` path when `DebugTimings::new`
+    // returns None (adapter without TIMESTAMP_QUERY — P10).
+    let artifacts = dsl_compiler::cg::emit::emit_cg_program_with_debug(
+        &schedule_result.schedule,
+        &cg,
+        dsl_compiler::cg::lower::DebugDepth::Kernel,
+    )
+    .expect("emit stress_agent_count CG program");
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
 

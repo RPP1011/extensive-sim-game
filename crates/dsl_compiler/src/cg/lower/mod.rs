@@ -38,7 +38,10 @@ pub mod spatial;
 pub mod verb_expand;
 pub mod view;
 
-pub use driver::{lower_compilation_to_cg, lower_compilation_to_cg_with_opts, DriverOutcome, LowerOpts};
+pub use driver::{
+    lower_compilation_to_cg, lower_compilation_to_cg_with_opts, DebugDepth, DriverOutcome,
+    LowerOpts,
+};
 pub use error::LoweringError;
 pub use expr::{lower_expr, LoweringCtx};
 pub use mask::lower_mask;
