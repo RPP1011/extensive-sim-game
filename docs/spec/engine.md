@@ -923,6 +923,16 @@ step_batch(n)
 | Inputs | Agent positions; two radii (kin=12m, engagement=2m) |
 | Outputs | Per-agent: nearby agents, kin-species membership, nearest hostile/kin |
 
+### 12.3.1 Per-runtime dispatch construction
+
+Per-runtime `step()` code wires kernel buffers into `<KernelName>Bindings`
+structs the compiler emits into `OUT_DIR/generated.rs`. The convention is
+`Bindings::from_context(&ctx)` — never a hand-written `Bindings { ... }`
+literal — with fixture-specific buffers riding a per-kernel `<KernelName>Extras`
+struct as a trailing argument. Full pattern, naming-convention table, and
+gotchas (`note_emits` ctx-rebuild, empty placeholders for unused shared
+sources): `docs/architecture/runtime-bindings-pattern.md`.
+
 ### 12.4 Buffer ownership
 
 | Buffer | Owner | Size (N=100k) | Purpose |
