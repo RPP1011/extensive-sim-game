@@ -1488,6 +1488,13 @@ impl CgProgramBuilder {
                 // primitive payload.
                 self.check_list_id(*body)
             }
+            CgStmt::ForEachAgentBody { body, .. } => {
+                // Same shape as `ForEachNeighborBody` for arena
+                // validation: the nested body stmt list must exist;
+                // the `binder` LocalId is arena-independent. No spatial
+                // radius payload.
+                self.check_list_id(*body)
+            }
             CgStmt::ApplyAbility { ability, caster, target, with_aoe_dispatch: _ } => {
                 // Slice ε: range-check all 3 expr ids. Each operand
                 // resolves to a CgExprId that must exist in the

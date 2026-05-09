@@ -1865,6 +1865,26 @@ fn resolve_stmt(
                 span: *span,
             })
         }
+        Stmt::ForEachAgent { binder, body, span } => {
+            // Bind the per-iteration variable in a fresh scope; reads of
+            // `<binder>` and `<binder>.<field>` inside the body resolve
+            // through the standard local-binding path. Lowering wires the
+            // binder name into `ctx.fold_binder_name` so the candidate-
+            // side `AgentRef::PerPairCandidate` channel handles those
+            // reads. Iteration order is the deterministic linear scan
+            // `0..agent_cap` (P3 cross-backend parity, P11 reduction
+            // determinism — same on CPU and GPU).
+            scope.push();
+            let local = scope.bind(binder, IrType::Unknown);
+            let body_ir = resolve_stmts(body, scope, symbols)?;
+            scope.pop();
+            Ok(IrStmt::ForEachAgent {
+                binder: local,
+                binder_name: binder.clone(),
+                body: body_ir,
+                span: *span,
+            })
+        }
         Stmt::If { cond, then_body, else_body, span } => {
             let cond = resolve_expr(cond, scope, symbols)?;
             scope.push();
@@ -3329,6 +3349,11 @@ fn validate_fold_stmt(view_name: &str, s: &IrStmt) -> Result<(), ResolveError> {
             offending_construct: "unbounded `for` loop".into(),
             span: *span,
         }),
+        IrStmt::ForEachAgent { span, .. } => Err(ResolveError::UdfInViewFoldBody {
+            view_name: view_name.to_string(),
+            offending_construct: "`for_each_agent` body-shape (only valid in physics)".into(),
+            span: *span,
+        }),
         IrStmt::Emit(IrEmit { span, .. }) => Err(ResolveError::UdfInViewFoldBody {
             view_name: view_name.to_string(),
             offending_construct: "`emit` inside fold body (only physics cascades emit events)"
@@ -3698,6 +3723,17 @@ fn validate_physics_stmt(physics_name: &str, s: &IrStmt) -> Result<(), ResolveEr
             }
             Ok(())
         }
+        IrStmt::ForEachAgent { body, .. } => {
+            // No iter / filter to validate — the iter is implicit
+            // (every alive agent slot in 0..agent_cap order). Recurse
+            // into the body so any per-statement physics constraints
+            // (string literals, unsupported namespaces, etc.) still
+            // surface from inside the for_each_agent block.
+            for bs in body {
+                validate_physics_stmt(physics_name, bs)?;
+            }
+            Ok(())
+        }
         IrStmt::If { cond, then_body, else_body, .. } => {
             validate_physics_expr(physics_name, cond)?;
             for ts in then_body {
@@ -4055,6 +4091,7 @@ fn collect_emitted_events(body: &[IrStmt], out: &mut Vec<String>) {
                 }
             }
             IrStmt::For { body, .. } => collect_emitted_events(body, out),
+            IrStmt::ForEachAgent { body, .. } => collect_emitted_events(body, out),
             IrStmt::If { then_body, else_body, .. } => {
                 collect_emitted_events(then_body, out);
                 if let Some(eb) = else_body {
@@ -4090,7 +4127,7 @@ fn find_emit_span_in_stmts(body: &[IrStmt], target: &str) -> Option<Span> {
             IrStmt::Emit(IrEmit { event_name, span, .. }) if event_name == target => {
                 return Some(*span);
             }
-            IrStmt::For { body, .. } => {
+            IrStmt::For { body, .. } | IrStmt::ForEachAgent { body, .. } => {
                 if let Some(sp) = find_emit_span_in_stmts(body, target) {
                     return Some(sp);
                 }
@@ -4197,6 +4234,7 @@ fn stmt_references_cascade_ceiling(s: &IrStmt) -> bool {
                 || filter.as_ref().is_some_and(expr_references_cascade_ceiling)
                 || stmts_reference_cascade_ceiling(body)
         }
+        IrStmt::ForEachAgent { body, .. } => stmts_reference_cascade_ceiling(body),
         IrStmt::If { cond, then_body, else_body, .. } => {
             expr_references_cascade_ceiling(cond)
                 || stmts_reference_cascade_ceiling(then_body)

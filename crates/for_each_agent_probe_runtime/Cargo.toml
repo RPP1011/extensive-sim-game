@@ -1,0 +1,30 @@
+[package]
+name = "for_each_agent_probe_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/for_each_agent_probe.sim` —
+# end-to-end behavioural pin for the `for_each_agent <binder>`
+# body-shape primitive (Task #229). The fixture's per-agent rule
+# auto-retags to OneShot dispatch (a single thread serialises the
+# linear scan over alive slots); the runtime allocates Mana SoA,
+# steps N ticks, and the in-crate test asserts every slot's mana
+# equals N — proving the per-iteration body actually fires per agent.
+#
+# Mirrors `target_chaser_runtime` shape: single physics rule, no
+# event ring, no view storage. build.rs lowers the .sim through the
+# DSL compiler into `OUT_DIR/generated.rs`; src/lib.rs owns the GPU
+# context, per-buffer storage, kernel cache, and per-tick dispatch.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

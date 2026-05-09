@@ -2643,6 +2643,9 @@ fn list_contains_apply_ability(list_id: CgStmtListId, prog: &CgProgram) -> bool 
             CgStmt::ForEachNeighborBody { body, .. } => {
                 if list_contains_apply_ability(*body, prog) { return true; }
             }
+            CgStmt::ForEachAgentBody { body, .. } => {
+                if list_contains_apply_ability(*body, prog) { return true; }
+            }
             CgStmt::Emit { .. }
             | CgStmt::Assign { .. }
             | CgStmt::Let { .. }
@@ -2685,6 +2688,9 @@ fn list_contains_apply_ability_with_aoe(list_id: CgStmtListId, prog: &CgProgram)
                 }
             }
             CgStmt::ForEachNeighborBody { body, .. } => {
+                if list_contains_apply_ability_with_aoe(*body, prog) { return true; }
+            }
+            CgStmt::ForEachAgentBody { body, .. } => {
                 if list_contains_apply_ability_with_aoe(*body, prog) { return true; }
             }
             CgStmt::Emit { .. }
@@ -2862,6 +2868,7 @@ fn collect_belief_state_setter_writes(
                     walk_expr(*projection, prog, out);
                 }
                 CgStmt::ForEachNeighborBody { body, .. } => walk_list(*body, prog, out),
+                CgStmt::ForEachAgentBody { body, .. } => walk_list(*body, prog, out),
                 CgStmt::Emit { fields, .. } => {
                     for (_, expr_id) in fields {
                         walk_expr(*expr_id, prog, out);
@@ -3012,6 +3019,7 @@ fn collect_belief_state_getter_reads(
                     walk_expr(*projection, prog, out);
                 }
                 CgStmt::ForEachNeighborBody { body, .. } => walk_list(*body, prog, out),
+                CgStmt::ForEachAgentBody { body, .. } => walk_list(*body, prog, out),
                 CgStmt::Emit { fields, .. } => {
                     for (_, expr_id) in fields {
                         walk_expr(*expr_id, prog, out);
@@ -3430,6 +3438,13 @@ fn collect_emits_in_list(list_id: CgStmtListId, prog: &CgProgram, out: &mut Vec<
                 // body — descend into it so the per-pair
                 // `Emit { … }` statements register their event
                 // ring writes via `record_write` upstream.
+                collect_emits_in_list(*body, prog, out);
+            }
+            CgStmt::ForEachAgentBody { body, .. } => {
+                // Body-form unbounded walk over alive agent slots —
+                // same recursion shape as `ForEachNeighborBody` so any
+                // `emit` statements inside the body register their
+                // event ring writes upstream.
                 collect_emits_in_list(*body, prog, out);
             }
             CgStmt::Assign { .. }

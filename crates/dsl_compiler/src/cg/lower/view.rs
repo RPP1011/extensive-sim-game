@@ -626,6 +626,16 @@ fn lower_stmt(
             ast_label: "For",
             span: *span,
         }),
+        IrStmt::ForEachAgent { span, .. } => Err(LoweringError::UnsupportedViewFoldStmt {
+            // The `for_each_agent` body-shape primitive is physics-only.
+            // Resolver-level validation already rejects it for view folds
+            // (see `validate_fold_stmt` in dsl_ast::resolve), but we
+            // surface a typed error here too in case lowering is invoked
+            // through a path that bypasses the resolver guard.
+            view: view_id,
+            ast_label: "ForEachAgent",
+            span: *span,
+        }),
         IrStmt::Match { span, .. } => Err(LoweringError::UnsupportedViewFoldStmt {
             view: view_id,
             ast_label: "Match",

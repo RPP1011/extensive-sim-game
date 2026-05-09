@@ -421,7 +421,18 @@ fn lower_one_handler(
     // can walk the stmt list without further driver work.
     let (on_event, shape) = if per_agent {
         let prog = ctx.builder.program();
-        let shape = if is_tile_eligible_body(body_list_id, prog) {
+        let shape = if list_contains_for_each_agent_body(body_list_id, prog) {
+            // Per-agent rule whose body contains a `for_each_agent`
+            // body-shape primitive: retag to OneShot so a single
+            // thread serialises the linear-scan walk over alive
+            // slots. Without this retag every per-agent thread would
+            // run the same scan independently, producing O(N²)
+            // sibling-slot writes per tick — pathological. The
+            // body-shape's iteration-order contract (P3 / P11) is
+            // single-threaded linear order; OneShot is the cheapest
+            // dispatch that honours it.
+            DispatchShape::OneShot
+        } else if is_tile_eligible_body(body_list_id, prog) {
             DispatchShape::PerCell
         } else {
             DispatchShape::PerAgent
@@ -559,6 +570,19 @@ fn lower_stmt(
             binder_name,
             iter,
             filter.as_ref(),
+            body,
+            *span,
+            ctx,
+        ),
+        IrStmt::ForEachAgent {
+            binder,
+            binder_name,
+            body,
+            span,
+        } => lower_for_each_agent_body(
+            rule_id,
+            *binder,
+            binder_name,
             body,
             *span,
             ctx,
@@ -1171,6 +1195,68 @@ fn lower_for_spatial_body(
     push_stmt(stmt, span, ctx)
 }
 
+/// Lower an `IrStmt::ForEachAgent { binder, body, .. }`
+/// (source: `for_each_agent <binder> { <body> }`) to
+/// [`CgStmt::ForEachAgentBody`]. Mirrors [`lower_for_spatial_body`] in
+/// shape minus the spatial-iter recognition + radius — `for_each_agent`
+/// has no `iter` clause and no `where` filter; the body executes once
+/// per alive agent slot in deterministic linear order
+/// (`0..agent_cap`).
+///
+/// The binder lowers via the same `fold_binder_name` channel as the
+/// spatial-body form: reads of `<binder>` / `<binder>.<field>` inside
+/// the body resolve to [`crate::cg::data_handle::AgentRef::PerPairCandidate`]
+/// / [`crate::cg::expr::CgExpr::PerPairCandidateId`]. The binder's
+/// `LocalRef` is also registered in `ctx.local_ids` (with type
+/// `AgentId`) for defense-in-depth.
+fn lower_for_each_agent_body(
+    rule_id: PhysicsRuleId,
+    binder: dsl_ast::ir::LocalRef,
+    binder_name: &str,
+    body: &[IrStmt],
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<CgStmtId, LoweringError> {
+    // Register the binder in `ctx.local_ids` and record its type as
+    // AgentId. Both registries are scoped to the surrounding op's body
+    // — the resolver scopes the LocalRef numerically per body, so no
+    // restore is needed.
+    let binder_local = ctx.allocate_local(binder);
+    ctx.record_local_ty(binder_local, crate::cg::expr::CgTy::AgentId);
+
+    // Push the source-level binder name onto the fold-binder slot so
+    // body reads of `<binder>` / `<binder>.<field>` resolve to
+    // per-pair candidate. Mirrors `lower_for_spatial_body` —
+    // restored on return so an outer binder isn't shadowed.
+    let prev_binder = ctx.fold_binder_name.replace(binder_name.to_string());
+
+    // Lower the body statements in source order.
+    let body_ids_res = lower_stmt_list(rule_id, body, ctx);
+
+    let body_ids = match body_ids_res {
+        Ok(ids) => ids,
+        Err(e) => {
+            ctx.fold_binder_name = prev_binder;
+            return Err(e);
+        }
+    };
+
+    // Restore prior fold-binder slot before exiting.
+    ctx.fold_binder_name = prev_binder;
+
+    let inner_list = CgStmtList::new(body_ids);
+    let inner_list_id = ctx
+        .builder
+        .add_stmt_list(inner_list)
+        .map_err(|e| LoweringError::BuilderRejected { error: e, span })?;
+
+    let stmt = CgStmt::ForEachAgentBody {
+        binder: binder_local,
+        body: inner_list_id,
+    };
+    push_stmt(stmt, span, ctx)
+}
+
 /// Lower a single match arm. Returns the typed [`CgMatchArm`].
 fn lower_match_arm(
     rule_id: PhysicsRuleId,
@@ -1316,6 +1402,57 @@ fn push_stmt(
         .map_err(|e| LoweringError::BuilderRejected { error: e, span })
 }
 
+/// True iff `list_id`'s tree contains at least one
+/// [`CgStmt::ForEachAgentBody`] anywhere in its statement walk
+/// (including inside `If` arms / `Match` arms / nested body forms).
+/// Used to retag a per-agent rule's dispatch shape to `OneShot` so a
+/// single thread serialises the linear-scan walk over alive agent
+/// slots that the body-shape implies — see the dispatch-decision site
+/// in [`lower_one_handler`] above.
+fn list_contains_for_each_agent_body(
+    list_id: crate::cg::stmt::CgStmtListId,
+    prog: &crate::cg::program::CgProgram,
+) -> bool {
+    let Some(list) = prog.stmt_lists.get(list_id.0 as usize) else {
+        return false;
+    };
+    for stmt_id in &list.stmts {
+        let Some(stmt) = prog.stmts.get(stmt_id.0 as usize) else { continue };
+        match stmt {
+            CgStmt::ForEachAgentBody { .. } => return true,
+            CgStmt::If { then, else_, .. } => {
+                if list_contains_for_each_agent_body(*then, prog) {
+                    return true;
+                }
+                if let Some(else_list) = else_ {
+                    if list_contains_for_each_agent_body(*else_list, prog) {
+                        return true;
+                    }
+                }
+            }
+            CgStmt::Match { arms, .. } => {
+                for arm in arms {
+                    if list_contains_for_each_agent_body(arm.body, prog) {
+                        return true;
+                    }
+                }
+            }
+            CgStmt::ForEachNeighborBody { body, .. } => {
+                if list_contains_for_each_agent_body(*body, prog) {
+                    return true;
+                }
+            }
+            CgStmt::Assign { .. }
+            | CgStmt::Let { .. }
+            | CgStmt::Emit { .. }
+            | CgStmt::ApplyAbility { .. }
+            | CgStmt::ForEachAgent { .. }
+            | CgStmt::ForEachNeighbor { .. } => {}
+        }
+    }
+    false
+}
+
 /// True iff every stmt in `list_id` is "tile-eligible" — meaning the
 /// per-agent kernel can be re-tagged from `DispatchShape::PerAgent` to
 /// `DispatchShape::PerCell` without changing semantics.
@@ -1370,6 +1507,7 @@ fn is_tile_eligible_body(
             }
             CgStmt::ForEachAgent { .. }
             | CgStmt::ForEachNeighborBody { .. }
+            | CgStmt::ForEachAgentBody { .. }
             | CgStmt::If { .. }
             | CgStmt::Match { .. }
             | CgStmt::Emit { .. }
@@ -1380,7 +1518,9 @@ fn is_tile_eligible_body(
                 // body-form spatial walk falls back to the
                 // PerAgent global-memory cell-walk emit. ApplyAbility
                 // (#136) similarly emits to the chronicle ring per
-                // effect — fall back to PerAgent.
+                // effect — fall back to PerAgent. ForEachAgentBody
+                // also disqualifies (it retags to OneShot, not
+                // PerCell).
                 return false;
             }
         }
@@ -2380,6 +2520,7 @@ mod tests {
                 | CgStmt::ForEachAgent { .. }
                 | CgStmt::ForEachNeighbor { .. }
                 | CgStmt::ForEachNeighborBody { .. }
+                | CgStmt::ForEachAgentBody { .. }
                 | CgStmt::ApplyAbility { .. } => {
                     // Other body shapes — not produced by this fixture.
                 }
@@ -2963,5 +3104,121 @@ mod tests {
             }
             other => panic!("expected UnregisteredEventFieldLayout, got {other:?}"),
         }
+    }
+
+    // ---- for_each_agent body-shape primitive (Task #229) ----------------
+
+    /// Build a per-agent physics rule (carries `@phase(per_agent)`)
+    /// whose body is the supplied `IrStmt` sequence. Sibling helper to
+    /// [`rule_with_body`] for tests that need the per-agent dispatch
+    /// path.
+    fn per_agent_rule_with_body(name: &str, body: Vec<IrStmt>) -> PhysicsIR {
+        use dsl_ast::ast::{Annotation, AnnotationArg, AnnotationValue};
+        PhysicsIR {
+            name: name.to_string(),
+            handlers: vec![PhysicsHandlerIR {
+                pattern: IrPhysicsPattern::Kind(IrEventPattern {
+                    name: "Tick".to_string(),
+                    event: None,
+                    bindings: vec![],
+                    span: span(0, 0),
+                }),
+                where_clause: None,
+                body,
+                span: span(0, 0),
+            }],
+            annotations: vec![Annotation {
+                name: "phase".to_string(),
+                args: vec![AnnotationArg {
+                    key: None,
+                    value: AnnotationValue::Ident("per_agent".to_string()),
+                    span: span(0, 0),
+                }],
+                span: span(0, 0),
+            }],
+            cpu_only: false,
+            span: span(0, 0),
+        }
+    }
+
+    #[test]
+    fn for_each_agent_lowers_to_for_each_agent_body_under_one_shot() {
+        // physics BumpMana @phase(per_agent) {
+        //   on Tick {} { for_each_agent slot { /* body */ } }
+        // }
+        //
+        // The `IrStmt::ForEachAgent` arm in `lower_stmt` lowers to
+        // `CgStmt::ForEachAgentBody { binder, body }`; the surrounding
+        // per-agent rule auto-retags from PerAgent to OneShot via
+        // `list_contains_for_each_agent_body` so a single thread
+        // serialises the linear scan over alive slots. The test pins
+        // both ends of that contract.
+        //
+        // The body is intentionally a payload-free Emit to keep the
+        // test focused on the body-shape lowering itself — the same
+        // shape the existing `lowers_for_loop_with_spatial_iter_to_for_each_neighbor_body`
+        // test uses for ForEachNeighborBody.
+        let rule = per_agent_rule_with_body(
+            "BumpMana",
+            vec![IrStmt::ForEachAgent {
+                binder: LocalRef(1),
+                binder_name: "slot".to_string(),
+                body: vec![IrStmt::Emit(IrEmit {
+                    event_name: "Tick".to_string(),
+                    event: None,
+                    fields: vec![],
+                    span: span(20, 40),
+                })],
+                span: span(10, 50),
+            }],
+        );
+
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        ctx.register_event_kind("Tick", EventKindId(7));
+
+        let ops = lower_physics(
+            PhysicsRuleId(0),
+            ReplayabilityFlag::Replayable,
+            &rule,
+            &standard_resolutions(),
+            &mut ctx,
+        )
+        .expect("for_each_agent lowers");
+        assert_eq!(ops.len(), 1);
+
+        let prog = builder.finish();
+        let op = &prog.ops[0];
+        // Per-agent rules whose body contains a ForEachAgentBody
+        // retag dispatch to OneShot — single thread serialises the
+        // linear scan.
+        assert_eq!(
+            op.shape,
+            crate::cg::dispatch::DispatchShape::OneShot,
+            "per-agent rule containing ForEachAgentBody must retag to OneShot"
+        );
+
+        let mut found_for_each_agent_body = false;
+        let mut found_inner_emit = false;
+        for stmt in &prog.stmts {
+            if let CgStmt::ForEachAgentBody { body, .. } = stmt {
+                let inner_list = &prog.stmt_lists[body.0 as usize];
+                for inner_id in &inner_list.stmts {
+                    if let CgStmt::Emit { event, .. } = &prog.stmts[inner_id.0 as usize] {
+                        assert_eq!(*event, EventKindId(7));
+                        found_inner_emit = true;
+                    }
+                }
+                found_for_each_agent_body = true;
+            }
+        }
+        assert!(
+            found_for_each_agent_body,
+            "expected a CgStmt::ForEachAgentBody in the lowered body"
+        );
+        assert!(
+            found_inner_emit,
+            "expected the inner Emit to be the body's only statement"
+        );
     }
 }

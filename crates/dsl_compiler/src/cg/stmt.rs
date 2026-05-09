@@ -395,6 +395,49 @@ pub enum CgStmt {
         radius_cells: u32,
     },
 
+    /// **Unbounded body iteration over every alive agent slot.**
+    /// Lowered from `IrStmt::ForEachAgent { binder, body, .. }`
+    /// (source: `for_each_agent <binder> { <body> }`). The body
+    /// executes once per slot in deterministic linear order
+    /// (`0..agent_cap`).
+    ///
+    /// # WGSL emit shape
+    ///
+    /// ```text
+    /// for (var per_pair_candidate: u32 = 0u; per_pair_candidate < cfg.agent_cap; per_pair_candidate = per_pair_candidate + 1u) {
+    ///     if (agent_alive[per_pair_candidate] != 0u) {
+    ///         <body with binder=per_pair_candidate>
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// # Binder
+    ///
+    /// `binder` is the [`LocalId`] for the source-level
+    /// `for_each_agent <name>` clause. The kernel-side name for the
+    /// candidate slot is `per_pair_candidate` (mirroring
+    /// [`Self::ForEachNeighborBody`]'s convention) so reads of
+    /// `<binder>` and `<binder>.<field>` inside the body lower via
+    /// [`crate::cg::data_handle::AgentRef::PerPairCandidate`] /
+    /// [`crate::cg::expr::CgExpr::PerPairCandidateId`] and resolve to
+    /// the global SoA buffers without inventing a parallel naming scheme.
+    ///
+    /// # Iteration-order contract (P3, P11)
+    ///
+    /// Linear scan from slot 0 to `agent_cap - 1`, identical on CPU and
+    /// GPU backends. Bodies that perform sibling-slot writes (e.g.
+    /// `agents.set_hp(<binder>, …)`) commit in slot-id order; under a
+    /// `OneShot` dispatch (the default retag for per-agent rules whose
+    /// body contains this primitive) a single thread serialises the
+    /// entire scan, eliminating cross-thread races. Per-rule RNG draws
+    /// must continue to flow through `per_agent_u32(seed, agent_id,
+    /// tick, purpose)` (P5) — the iteration index is not a substitute
+    /// for `agent_id` in the RNG key.
+    ForEachAgentBody {
+        binder: LocalId,
+        body: CgStmtListId,
+    },
+
     /// Registry-driven ability dispatch (#125 / #136). Lowered from
     /// `IrStmt::ApplyAbility { ability: <expr> }`. The expression
     /// evaluates to an `AbilityId` (`NonZeroU32`) at runtime; the
@@ -533,6 +576,13 @@ impl fmt::Display for CgStmt {
                     f,
                     "for_each_neighbor_body(binder={}, body=stmts#{}, r={})",
                     binder, body.0, radius_cells
+                )
+            }
+            CgStmt::ForEachAgentBody { binder, body } => {
+                write!(
+                    f,
+                    "for_each_agent_body(binder={}, body=stmts#{})",
+                    binder, body.0
                 )
             }
             CgStmt::ApplyAbility { ability, caster, target, with_aoe_dispatch } => {
@@ -889,6 +939,22 @@ pub fn collect_stmt_dependencies(
             reads.push(DataHandle::AgentField {
                 field: super::data_handle::AgentFieldId::Pos,
                 target: super::data_handle::AgentRef::Self_,
+            });
+        }
+        CgStmt::ForEachAgentBody { body, .. } => {
+            // The body's own statements contribute reads/writes via
+            // the recursive list walk (e.g. an inner `agents.set_*`
+            // surfaces an Assign; an inner `agents.<field>(<binder>)`
+            // surfaces an `AgentField` read). The WGSL emit ALSO reads
+            // `agent_alive[per_pair_candidate]` per iteration to gate
+            // the body — surface that read here so the BGL composer
+            // binds `agent_alive` to the kernel. The PerPairCandidate
+            // target keeps the read distinct from any per-thread
+            // `self.alive` reference inside the body.
+            collect_list_dependencies(*body, exprs, stmts, lists, reads, writes);
+            reads.push(DataHandle::AgentField {
+                field: super::data_handle::AgentFieldId::Alive,
+                target: super::data_handle::AgentRef::PerPairCandidate,
             });
         }
         CgStmt::ApplyAbility { ability, caster, target, with_aoe_dispatch: _ } => {

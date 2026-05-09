@@ -350,6 +350,15 @@ fn exec_stmt<C: CascadeContext>(stmt: &IrStmt, ctx: &mut C, locals: &mut Locals)
             exec_for(binder, iter, filter.as_ref(), body, ctx, locals);
         }
 
+        IrStmt::ForEachAgent { .. } => {
+            // The `for_each_agent` body-shape primitive lowers to a
+            // GPU-only kernel emit (CgStmt::ForEachAgentBody). The
+            // interpreter wolves+humans surface has no agent-cap concept
+            // distinct from the live entity set, so the simplest honest
+            // behaviour is to skip — fixtures that rely on this body-
+            // shape run through the compiled GPU path.
+        }
+
         IrStmt::Match { scrutinee, arms, .. } => {
             exec_match(scrutinee, arms, ctx, locals);
         }
