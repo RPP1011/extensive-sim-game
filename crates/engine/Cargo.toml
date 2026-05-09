@@ -49,10 +49,6 @@ hex = "0.4"
 dsl_ast = { path = "../dsl_ast" }
 dsl_compiler = { path = "../dsl_compiler" }
 
-[[bench]]
-name = "tick_throughput"
-harness = false
-
 [features]
 default = []
 dhat-heap = []
