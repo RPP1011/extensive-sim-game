@@ -511,17 +511,19 @@ pub fn assert_ability_registry_matches_sim_constants() {
         reap.when_per_effect.len(), 1,
         "Reap must have one when slot (parallel to one effect)",
     );
+    let reap_atom = EffectPredicate {
+        binder:  EffectPredicateBinder::Target,
+        field:   ScalingStatRef::Hp.discriminant(),
+        op:      EffectPredicateOp::Lt,
+        literal: 20.0,
+    };
     assert_eq!(
         reap.when_per_effect[0],
         Some(EffectWhenCondition {
             when_cond:     "target.hp < 20".to_string(),
             else_cond:     None,
-            when_compiled: Some(EffectPredicate {
-                binder:  EffectPredicateBinder::Target,
-                field:   ScalingStatRef::Hp.discriminant(),
-                op:      EffectPredicateOp::Lt,
-                literal: 20.0,
-            }),
+            when_compiled: Some(reap_atom),
+            when_compound: Some(engine::ability::program::WhenPredicate::Atom(reap_atom)),
         }),
         "Reap when must be `target.hp < 20` — Wave 1.5#7 GPU eval",
     );

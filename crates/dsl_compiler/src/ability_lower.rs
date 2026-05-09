@@ -90,8 +90,8 @@ use dsl_ast::ast::{
     AbilityDecl, AbilityFile, AbilityHeader, EffectArg, EffectStmt, HintName, Span, TargetMode,
 };
 use engine::ability::program::{
-    AbilityCost, AbilityHint, AbilityProgram, AbilityTag, Area, CostAmount, CostResource, Delivery, EffectAreaShape, EffectOp, EffectPredicate, EffectPredicateBinder, EffectPredicateOp, EffectWhenCondition, MAX_NESTED_PER_EFFECT, TargetModeKind,
-    EffectScaling, Gate, LifetimeMode, ScalingStatRef, ShapeKind, StackingMode, TargetSelector,
+    AbilityCost, AbilityHint, AbilityProgram, AbilityTag, Area, CostAmount, CostResource, Delivery, EffectAreaShape, EffectOp, EffectPredicate, EffectPredicateBinder, EffectPredicateOp, EffectWhenCondition, MAX_NESTED_PER_EFFECT, MAX_PRED_NODES_PER_EFFECT, TargetModeKind,
+    EffectScaling, Gate, LifetimeMode, ScalingStatRef, ShapeKind, StackingMode, TargetSelector, WhenPredicate,
     MAX_EFFECTS_PER_PROGRAM, MAX_SCALINGS_PER_EFFECT, MAX_TAGS_PER_PROGRAM,
 };
 use engine::ability::AbilityId;
@@ -254,12 +254,12 @@ pub enum LowerError {
     },
     /// Wave 1.5#7 GPU eval: a `when <cond>` modifier carried a
     /// construct outside the restricted predicate vocab the
-    /// dispatcher (CPU + GPU) evaluates today. Deferred branches —
-    /// open task #163-followup:
+    /// dispatcher (CPU + GPU) evaluates today. Compound predicates
+    /// (`&&` / `||` / `!`) ARE supported as of task #227. Deferred
+    /// branches — open task #163-followup:
     ///   * `else <cond>` clause
-    ///   * compound predicates (`&&` / `||` / `!`)
     ///   * field-vs-field comparisons (`target.hp < self.hp`)
-    ///   * non-`<binder>.<field> <op> <literal>` shapes
+    ///   * non-`<binder>.<field> <op> <literal>` atom shapes
     /// Authors must restructure the predicate to the supported shape
     /// or wait for the deferred slice. Surfaces with the construct's
     /// name so the diagnostic points at the right thing.
@@ -267,6 +267,19 @@ pub enum LowerError {
         ability: String,
         clause:  &'static str, // "when" or "else"
         reason:  String,
+        span:    Span,
+    },
+    /// Task #227: a compound `when <cond>` tree serialized to more RPN
+    /// nodes than the SoA stride (`MAX_PRED_NODES_PER_EFFECT = 12`)
+    /// can carry. Realistically, this means an author wrote a
+    /// 7-or-more-atom Boolean expression on a single effect; the
+    /// fix is usually to split the predicate across multiple effect
+    /// statements or hoist invariants up to the ability gate.
+    WhenConditionTreeTooLarge {
+        ability: String,
+        clause:  &'static str, // "when"
+        nodes:   usize,
+        max:     usize,
         span:    Span,
     },
     /// Wave 1.5#7 GPU eval: a `when <cond>` predicate referenced an
@@ -409,6 +422,10 @@ impl std::fmt::Display for LowerError {
             LowerError::WhenConditionUnsupportedField { ability, clause, field, .. } => write!(
                 f,
                 "ability `{ability}`'s `{clause}` clause references field `{field}` — outside the GPU-evaluable subset for this slice (supported: attack_damage / ability_power / max_hp / hp / armor / magic_resist / move_speed / mana). Either rephrase or extend the per-stat agent-SoA bindings."
+            ),
+            LowerError::WhenConditionTreeTooLarge { ability, clause, nodes, max, .. } => write!(
+                f,
+                "ability `{ability}`'s `{clause}` clause serializes to {nodes} RPN nodes but the per-effect budget is {max} (MAX_PRED_NODES_PER_EFFECT). Split the predicate across multiple effects or hoist invariants out of the per-effect gate."
             ),
             LowerError::UnknownDeliveryHook { ability, method, hook, .. } => write!(
                 f,
@@ -991,20 +1008,47 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
                     span:    c.span,
                 });
             }
-            // Wave 1.5#7 GPU eval (this slice): extract a structured
-            // EffectPredicate from the parsed expression. Restricted
-            // vocab (form `<binder>.<field> <op> <literal>`); anything
-            // else surfaces WhenConditionUnsupported / -UnsupportedField.
-            let when_compiled = extract_predicate(
+            // Task #227: lower the predicate to a Boolean tree
+            // (`WhenPredicate`) with `EffectPredicate` atoms at the
+            // leaves. The tree handles `&&` / `||` / `!`; the simple
+            // atomic case (no compound combinators) collapses to a
+            // single `WhenPredicate::Atom`. `when_compiled` is also
+            // populated for the simple atomic case so legacy code
+            // paths that only consume single-atom predicates keep
+            // working. Restricted leaf vocab (form
+            // `<binder>.<field> <op> <literal>`); anything else
+            // surfaces WhenConditionUnsupported / -UnsupportedField.
+            let when_compound = extract_when_predicate(
                 &when_expr,
                 &decl.name,
                 "when",
                 c.span,
             )?;
+            // Bound the RPN stride. Counting nodes here gives an early
+            // diagnostic at the author's screen rather than a defensive
+            // truncate at SoA pack time.
+            let node_count = count_rpn_nodes(&when_compound);
+            if node_count > MAX_PRED_NODES_PER_EFFECT {
+                return Err(LowerError::WhenConditionTreeTooLarge {
+                    ability: decl.name.clone(),
+                    clause:  "when",
+                    nodes:   node_count,
+                    max:     MAX_PRED_NODES_PER_EFFECT,
+                    span:    c.span,
+                });
+            }
+            // Mirror simple atoms onto `when_compiled` for legacy
+            // single-atom consumers; compound trees populate only
+            // `when_compound`.
+            let when_compiled = match &when_compound {
+                WhenPredicate::Atom(a) => Some(*a),
+                _ => None,
+            };
             Some(EffectWhenCondition {
                 when_cond:     c.when_cond.clone(),
                 else_cond:     None, // gated above; guaranteed None here
-                when_compiled: Some(when_compiled),
+                when_compiled,
+                when_compound: Some(when_compound),
             })
         } else {
             None
@@ -2194,9 +2238,64 @@ fn summon_template_hash(template: &str) -> u32 {
     ((full >> 32) as u32) ^ (full as u32)
 }
 
-/// Wave 1.5#7 GPU eval: extract a structured [`EffectPredicate`] from
-/// the parsed when-condition expression. Restricted vocab (matched as
-/// a flat top-level binary expression):
+/// Task #227: recursive extraction of a [`WhenPredicate`] tree from
+/// the parsed when-condition expression. Compound combinators
+/// (`&&` / `||` / `!`) lower to `WhenPredicate::And` / `Or` / `Not`;
+/// leaf comparisons lower via [`extract_predicate_atom`] to
+/// `WhenPredicate::Atom`. Parenthesized sub-expressions follow the
+/// parser's precedence (`!` > `&&` > `||`).
+///
+/// Out-of-scope leaf shapes (field-vs-field comparisons,
+/// non-`<binder>.<field> <op> <literal>` shapes) surface as
+/// `WhenConditionUnsupported`. Out-of-vocab agent fields surface as
+/// `WhenConditionUnsupportedField`. Both errors fire from the leaf
+/// extractor — the recursive walk preserves the "fail-at-the-typo"
+/// diagnostic shape.
+fn extract_when_predicate(
+    expr:    &dsl_ast::ast::Expr,
+    ability: &str,
+    clause:  &'static str,
+    span:    Span,
+) -> Result<WhenPredicate, LowerError> {
+    use dsl_ast::ast::{BinOp, ExprKind, UnOp};
+    match &expr.kind {
+        ExprKind::Binary { op: BinOp::And, lhs, rhs } => {
+            let l = extract_when_predicate(lhs, ability, clause, span)?;
+            let r = extract_when_predicate(rhs, ability, clause, span)?;
+            Ok(WhenPredicate::And(Box::new(l), Box::new(r)))
+        }
+        ExprKind::Binary { op: BinOp::Or, lhs, rhs } => {
+            let l = extract_when_predicate(lhs, ability, clause, span)?;
+            let r = extract_when_predicate(rhs, ability, clause, span)?;
+            Ok(WhenPredicate::Or(Box::new(l), Box::new(r)))
+        }
+        ExprKind::Unary { op: UnOp::Not, rhs } => {
+            let inner = extract_when_predicate(rhs, ability, clause, span)?;
+            Ok(WhenPredicate::Not(Box::new(inner)))
+        }
+        // Anything else: try the leaf comparison extractor.
+        _ => extract_predicate_atom(expr, ability, clause, span)
+            .map(WhenPredicate::Atom),
+    }
+}
+
+/// Count the number of RPN nodes a `WhenPredicate` tree serializes
+/// to (atoms + operators). Used by the lower path to surface
+/// `WhenConditionTreeTooLarge` early when the tree exceeds the SoA
+/// stride.
+fn count_rpn_nodes(tree: &WhenPredicate) -> usize {
+    match tree {
+        WhenPredicate::Atom(_) => 1,
+        WhenPredicate::And(l, r) | WhenPredicate::Or(l, r) => {
+            count_rpn_nodes(l) + count_rpn_nodes(r) + 1
+        }
+        WhenPredicate::Not(inner) => count_rpn_nodes(inner) + 1,
+    }
+}
+
+/// Wave 1.5#7 GPU eval: extract a single leaf [`EffectPredicate`]
+/// atom from the parsed when-condition expression. Restricted vocab
+/// (matched as a flat top-level binary expression):
 ///   * Form: `<binder>.<field> <op> <literal>` (or `<literal> <op>
 ///     <binder>.<field>` — flipped via op-flip below).
 ///   * binder ∈ {self, target} → [`EffectPredicateBinder`].
@@ -2207,16 +2306,17 @@ fn summon_template_hash(template: &str) -> u32 {
 ///   * op ∈ {`<`, `<=`, `>`, `>=`, `==`, `!=`} → [`EffectPredicateOp`].
 ///   * literal: `LitFloat` or `LitInt` (int promotes to f32).
 ///
-/// Anything else (compound predicates `&&`/`||`/`!`, field-vs-field
-/// comparisons, non-binary expressions, unsupported ops) surfaces as
-/// `WhenConditionUnsupported`. Out-of-vocab agent fields surface as
+/// Compound combinators (`&&` / `||` / `!`) are handled by
+/// [`extract_when_predicate`] and never reach this path. Field-vs-field
+/// comparisons and non-binary expressions surface as
+/// `WhenConditionUnsupported`; out-of-vocab agent fields surface as
 /// `WhenConditionUnsupportedField`.
 ///
 /// Pre-condition: `first_unknown_agent_field` already rejected any
 /// unknown-to-`AgentFieldId` field — so the field name resolves
 /// through `AgentFieldId::from_snake`. This helper additionally
 /// narrows to the `ScalingStatRef`-shaped subset.
-fn extract_predicate(
+fn extract_predicate_atom(
     expr:    &dsl_ast::ast::Expr,
     ability: &str,
     clause:  &'static str,
@@ -2241,13 +2341,14 @@ fn extract_predicate(
         BinOp::GtEq => EffectPredicateOp::Ge,
         BinOp::Eq   => EffectPredicateOp::Eq,
         BinOp::NotEq=> EffectPredicateOp::Ne,
-        // Compound predicates (`&&`/`||`) and arithmetic ops are out
-        // of scope for the restricted vocab — surface explicitly so
-        // authors get a pointed diagnostic.
+        // Compound predicates (`&&`/`||`) reach this leaf path only
+        // when an author wrote something like `(a && b) < 5` —
+        // structurally invalid as an atom. Surface a pointed
+        // diagnostic.
         BinOp::And | BinOp::Or => return Err(LowerError::WhenConditionUnsupported {
             ability: ability.to_string(),
             clause,
-            reason:  "compound predicates (&&/||) deferred — open task #163-followup".to_string(),
+            reason:  "compound predicate (&&/||) is not a valid leaf comparison — only `<binder>.<field> <op> <literal>` is".to_string(),
             span,
         }),
         _ => return Err(LowerError::WhenConditionUnsupported {

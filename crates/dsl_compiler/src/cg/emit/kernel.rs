@@ -3220,41 +3220,71 @@ fn lower_scoring_argmax_body(
                     "agent_id"
                 };
                 format!(
-                    "    // predicate-aware scoring: read effect slot 0's when_pred_*\n\
+                    "    // predicate-aware scoring: walk effect slot 0's RPN nodes\n\
                      \x20   // for ability_id={ability_id} (1-based), gate utility on result.\n\
+                     \x20   // Task #227 — compound predicates serialize to up to\n\
+                     \x20   // MAX_PRED_NODES_PER_EFFECT (12) RPN nodes per effect slot;\n\
+                     \x20   // each effect's nodes occupy a contiguous stride of 12 in the\n\
+                     \x20   // when_pred_* SoA columns, so the per-ability stride is 6*12=72.\n\
                      \x20   var pred_passes_{i}: bool = true;\n\
                      \x20   {{\n\
                      \x20       let ability_slot_{i}: u32 = {ability_id}u - 1u;\n\
-                     \x20       let effect_base_{i}: u32 = ability_slot_{i} * 6u;\n\
-                     \x20       let pred_binder_{i}: u32 = ability_registry_when_pred_binder[effect_base_{i} + 0u];\n\
-                     \x20       if (pred_binder_{i} != 0xFFu) {{\n\
-                     \x20           let pred_field_{i}: u32   = ability_registry_when_pred_field[effect_base_{i} + 0u];\n\
-                     \x20           let pred_op_{i}: u32      = ability_registry_when_pred_op[effect_base_{i} + 0u];\n\
-                     \x20           let pred_literal_{i}: f32 = ability_registry_when_pred_literal[effect_base_{i} + 0u];\n\
-                     \x20           var pred_agent_{i}: u32 = agent_id;\n\
-                     \x20           if (pred_binder_{i} == 1u) {{ pred_agent_{i} = {target_for_pred}; }}\n\
-                     \x20           var pred_lhs_{i}: f32 = 0.0;\n\
-                     \x20           switch (pred_field_{i}) {{\n\
-                     \x20               case 0u: {{ pred_lhs_{i} = agent_attack_damage[pred_agent_{i}]; }}\n\
-                     \x20               case 1u: {{ pred_lhs_{i} = 0.0; }}\n\
-                     \x20               case 2u: {{ pred_lhs_{i} = agent_max_hp[pred_agent_{i}]; }}\n\
-                     \x20               case 3u: {{ pred_lhs_{i} = agent_hp[pred_agent_{i}]; }}\n\
-                     \x20               case 4u: {{ pred_lhs_{i} = agent_armor[pred_agent_{i}]; }}\n\
-                     \x20               case 5u: {{ pred_lhs_{i} = agent_magic_resist[pred_agent_{i}]; }}\n\
-                     \x20               case 6u: {{ pred_lhs_{i} = agent_move_speed[pred_agent_{i}]; }}\n\
-                     \x20               case 7u: {{ pred_lhs_{i} = agent_mana[pred_agent_{i}]; }}\n\
-                     \x20               default: {{ pred_lhs_{i} = 0.0; }}\n\
-                     \x20           }}\n\
-                     \x20           switch (pred_op_{i}) {{\n\
-                     \x20               case 0u: {{ pred_passes_{i} = pred_lhs_{i} <  pred_literal_{i}; }}\n\
-                     \x20               case 1u: {{ pred_passes_{i} = pred_lhs_{i} <= pred_literal_{i}; }}\n\
-                     \x20               case 2u: {{ pred_passes_{i} = pred_lhs_{i} >  pred_literal_{i}; }}\n\
-                     \x20               case 3u: {{ pred_passes_{i} = pred_lhs_{i} >= pred_literal_{i}; }}\n\
-                     \x20               case 4u: {{ pred_passes_{i} = pred_lhs_{i} == pred_literal_{i}; }}\n\
-                     \x20               case 5u: {{ pred_passes_{i} = pred_lhs_{i} != pred_literal_{i}; }}\n\
-                     \x20               default: {{ pred_passes_{i} = false; }}\n\
+                     \x20       let pred_node_base_{i}: u32 = ability_slot_{i} * 72u + 0u * 12u;\n\
+                     \x20       var pred_stack_{i}: array<bool, 12>;\n\
+                     \x20       var pred_sp_{i}: u32 = 0u;\n\
+                     \x20       for (var pi_{i}: u32 = 0u; pi_{i} < 12u; pi_{i} = pi_{i} + 1u) {{\n\
+                     \x20           let pn_binder_{i}: u32 = ability_registry_when_pred_binder[pred_node_base_{i} + pi_{i}];\n\
+                     \x20           if (pn_binder_{i} == 0xFFu) {{ break; }}\n\
+                     \x20           if (pn_binder_{i} == 0xFEu) {{\n\
+                     \x20               // AND: pop rhs, pop lhs, push (lhs && rhs).\n\
+                     \x20               let r_{i} = pred_stack_{i}[pred_sp_{i} - 1u];\n\
+                     \x20               let l_{i} = pred_stack_{i}[pred_sp_{i} - 2u];\n\
+                     \x20               pred_sp_{i} = pred_sp_{i} - 1u;\n\
+                     \x20               pred_stack_{i}[pred_sp_{i} - 1u] = l_{i} && r_{i};\n\
+                     \x20           }} else if (pn_binder_{i} == 0xFDu) {{\n\
+                     \x20               // OR: pop rhs, pop lhs, push (lhs || rhs).\n\
+                     \x20               let r_{i} = pred_stack_{i}[pred_sp_{i} - 1u];\n\
+                     \x20               let l_{i} = pred_stack_{i}[pred_sp_{i} - 2u];\n\
+                     \x20               pred_sp_{i} = pred_sp_{i} - 1u;\n\
+                     \x20               pred_stack_{i}[pred_sp_{i} - 1u] = l_{i} || r_{i};\n\
+                     \x20           }} else if (pn_binder_{i} == 0xFCu) {{\n\
+                     \x20               // NOT: pop, push !.\n\
+                     \x20               let v_{i} = pred_stack_{i}[pred_sp_{i} - 1u];\n\
+                     \x20               pred_stack_{i}[pred_sp_{i} - 1u] = !v_{i};\n\
+                     \x20           }} else {{\n\
+                     \x20               // Atom: evaluate <binder>.<field> <op> <literal>.\n\
+                     \x20               let pred_field_{i}: u32   = ability_registry_when_pred_field[pred_node_base_{i} + pi_{i}];\n\
+                     \x20               let pred_op_{i}: u32      = ability_registry_when_pred_op[pred_node_base_{i} + pi_{i}];\n\
+                     \x20               let pred_literal_{i}: f32 = ability_registry_when_pred_literal[pred_node_base_{i} + pi_{i}];\n\
+                     \x20               var pred_agent_{i}: u32 = agent_id;\n\
+                     \x20               if (pn_binder_{i} == 1u) {{ pred_agent_{i} = {target_for_pred}; }}\n\
+                     \x20               var pred_lhs_{i}: f32 = 0.0;\n\
+                     \x20               switch (pred_field_{i}) {{\n\
+                     \x20                   case 0u: {{ pred_lhs_{i} = agent_attack_damage[pred_agent_{i}]; }}\n\
+                     \x20                   case 1u: {{ pred_lhs_{i} = 0.0; }}\n\
+                     \x20                   case 2u: {{ pred_lhs_{i} = agent_max_hp[pred_agent_{i}]; }}\n\
+                     \x20                   case 3u: {{ pred_lhs_{i} = agent_hp[pred_agent_{i}]; }}\n\
+                     \x20                   case 4u: {{ pred_lhs_{i} = agent_armor[pred_agent_{i}]; }}\n\
+                     \x20                   case 5u: {{ pred_lhs_{i} = agent_magic_resist[pred_agent_{i}]; }}\n\
+                     \x20                   case 6u: {{ pred_lhs_{i} = agent_move_speed[pred_agent_{i}]; }}\n\
+                     \x20                   case 7u: {{ pred_lhs_{i} = agent_mana[pred_agent_{i}]; }}\n\
+                     \x20                   default: {{ pred_lhs_{i} = 0.0; }}\n\
+                     \x20               }}\n\
+                     \x20               var atom_v_{i}: bool = false;\n\
+                     \x20               switch (pred_op_{i}) {{\n\
+                     \x20                   case 0u: {{ atom_v_{i} = pred_lhs_{i} <  pred_literal_{i}; }}\n\
+                     \x20                   case 1u: {{ atom_v_{i} = pred_lhs_{i} <= pred_literal_{i}; }}\n\
+                     \x20                   case 2u: {{ atom_v_{i} = pred_lhs_{i} >  pred_literal_{i}; }}\n\
+                     \x20                   case 3u: {{ atom_v_{i} = pred_lhs_{i} >= pred_literal_{i}; }}\n\
+                     \x20                   case 4u: {{ atom_v_{i} = pred_lhs_{i} == pred_literal_{i}; }}\n\
+                     \x20                   case 5u: {{ atom_v_{i} = pred_lhs_{i} != pred_literal_{i}; }}\n\
+                     \x20                   default: {{ atom_v_{i} = false; }}\n\
+                     \x20               }}\n\
+                     \x20               pred_stack_{i}[pred_sp_{i}] = atom_v_{i};\n\
+                     \x20               pred_sp_{i} = pred_sp_{i} + 1u;\n\
                      \x20           }}\n\
                      \x20       }}\n\
+                     \x20       if (pred_sp_{i} > 0u) {{ pred_passes_{i} = pred_stack_{i}[0u]; }}\n\
                      \x20   }}\n",
                 )
             });

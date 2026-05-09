@@ -497,43 +497,64 @@ fn apply_ability_smoke_emits_dispatcher_loop_in_kernel_body() {
     );
 }
 
-/// Wave 1.5#7 GPU eval pin: dispatcher emits a when-predicate evaluator
-/// guarded by `if (when_passes)`. Sentinel binder == 0xFFu skips
-/// evaluation; otherwise the predicate compares
-/// `agent_<stat>[caster_or_target_slot] <op> literal`.
+/// Wave 1.5#7 GPU eval pin (updated for task #227 — compound predicates):
+/// dispatcher emits an RPN-walking when-predicate evaluator guarded by
+/// `if (when_passes)`. Each effect slot owns 12 RPN nodes
+/// (MAX_PRED_NODES_PER_EFFECT); per-ability stride is 6*12 = 72.
+/// Operator markers: 0xFE=AND, 0xFD=OR, 0xFC=NOT; sentinel 0xFF
+/// terminates the walk.
 #[test]
 fn dispatcher_emits_when_predicate_eval_block() {
     let path = workspace_path("assets/sim/apply_ability_smoke.sim");
     let art = compile_sim(&path).expect("apply_ability_smoke compiles");
     let body = kernel_body_containing(&art, "DispatchAbility")
         .expect("dispatcher kernel must exist");
-    // Read the binder column at the slot offset.
+    // Per-effect node base = ability_slot * 72 + i * 12.
     assert!(
-        body.contains("ability_registry_when_pred_binder[effect_base + i]"),
-        "expected dispatcher to read when_pred_binder at slot offset; \
+        body.contains("pred_node_base: u32 = ability_slot * 72u + i * 12u"),
+        "expected per-effect RPN base = ability_slot*72 + i*12 \
+         (per-ability stride MAX_EFFECTS_PER_PROGRAM*MAX_PRED_NODES_PER_EFFECT); \
          got body:\n{body}"
     );
-    // Sentinel skip: binder == 0xFFu means no predicate.
+    // Walk the 12-node node array.
     assert!(
-        body.contains("if (pred_binder != 0xFFu)"),
-        "expected dispatcher to skip predicate eval when binder is the \
-         sentinel (0xFFu); got body:\n{body}"
-    );
-    // Per-op switch shape — at least one of the comparison arms.
-    assert!(
-        body.contains("when_passes = pred_lhs <  pred_literal"),
-        "expected when_passes assignment for Lt op (case 0u in switch); \
+        body.contains("for (var pi: u32 = 0u; pi < 12u"),
+        "expected RPN walk loop bounded at MAX_PRED_NODES_PER_EFFECT=12; \
          got body:\n{body}"
     );
+    // End-of-nodes sentinel.
     assert!(
-        body.contains("when_passes = pred_lhs == pred_literal"),
-        "expected when_passes assignment for Eq op (case 4u); got body:\n{body}"
+        body.contains("if (pn_binder == 0xFFu) { break; }"),
+        "expected RPN walk to break on WHEN_PRED_NONE_SENTINEL (0xFFu); \
+         got body:\n{body}"
+    );
+    // Operator markers.
+    assert!(
+        body.contains("if (pn_binder == 0xFEu)"),
+        "expected AND-operator branch (0xFEu); got body:\n{body}"
+    );
+    assert!(
+        body.contains("if (pn_binder == 0xFDu)"),
+        "expected OR-operator branch (0xFDu); got body:\n{body}"
+    );
+    assert!(
+        body.contains("if (pn_binder == 0xFCu)"),
+        "expected NOT-operator branch (0xFCu); got body:\n{body}"
+    );
+    // Atom evaluator's per-op switch shape.
+    assert!(
+        body.contains("atom_v = pred_lhs <  pred_literal"),
+        "expected atom_v assignment for Lt op (case 0u); got body:\n{body}"
+    );
+    assert!(
+        body.contains("atom_v = pred_lhs == pred_literal"),
+        "expected atom_v assignment for Eq op (case 4u); got body:\n{body}"
     );
     // Wraps the chronicle arm chain in `if (when_passes)`.
     assert!(
-        body.contains("if (when_passes)"),
+        body.contains("if (when_passes && chance_passes)"),
         "expected the chronicle arm chain to be wrapped in \
-         `if (when_passes) {{ ... }}`; got body:\n{body}"
+         `if (when_passes && chance_passes) {{ ... }}`; got body:\n{body}"
     );
     // Predicate uses the same agent SoA bindings as the scale_bonus
     // computation — pin agent_hp[pred_agent] so the load-bearing

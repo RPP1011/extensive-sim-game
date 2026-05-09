@@ -81,7 +81,7 @@
 
 use crate::ability::program::{
     AbilityProgram, BuffStat, CasterStats, EffectOp, EffectPredicate,
-    EffectPredicateBinder, EffectPredicateOp, ShapeKind,
+    EffectPredicateBinder, EffectPredicateOp, ShapeKind, WhenPredicate,
 };
 use crate::ids::AgentId;
 use crate::rng::per_agent_u32_pcg_with_extra;
@@ -387,10 +387,8 @@ pub fn apply_program(
         // predicate fails to compile, so this branch is unreachable in
         // practice for `.ability`-sourced programs.
         if let Some(Some(when)) = program.when_per_effect.get(i) {
-            if let Some(pred) = when.when_compiled.as_ref() {
-                if !evaluate_predicate(pred, caster_stats, target_stats) {
-                    continue; // predicate fails — skip primary + nested
-                }
+            if !when_predicate_passes(when, caster_stats, target_stats) {
+                continue; // predicate fails — skip primary + nested
             }
         }
         // -- Wave 1.5#4 scaling — compute additive `Σ percent * stat`
@@ -654,6 +652,75 @@ pub(crate) fn evaluate_predicate(
     }
 }
 
+/// Task #227: evaluate a compound when-predicate tree against the
+/// caster + target stat snapshots. Recursive walk with explicit
+/// short-circuit semantics (left-to-right per the parser's tree shape):
+///
+///   * `Atom(p)` — defers to [`evaluate_predicate`].
+///   * `And(l, r)` — evaluates `l`; if false returns false WITHOUT
+///     evaluating `r`. Mirrors `&&`'s standard short-circuit semantic.
+///   * `Or(l, r)` — evaluates `l`; if true returns true WITHOUT
+///     evaluating `r`. Mirrors `||`'s standard short-circuit semantic.
+///   * `Not(inner)` — boolean negation.
+///
+/// **GPU parity (P3).** The WGSL emit walks the same tree linearized
+/// to RPN postfix; postfix evaluation visits left subtrees before
+/// right subtrees, so the short-circuit ORDER (which atom is read
+/// first) matches between backends. Side effects are nil (atoms read
+/// agent SoA only) so an early-exit difference is invisible — but the
+/// order matches by construction so the contract is robust against
+/// future side-effecting atom variants.
+#[inline]
+pub(crate) fn evaluate_when_tree(
+    tree:   &WhenPredicate,
+    caster: &CasterStats,
+    target: &CasterStats,
+) -> bool {
+    match tree {
+        WhenPredicate::Atom(p) => evaluate_predicate(p, caster, target),
+        WhenPredicate::And(lhs, rhs) => {
+            if !evaluate_when_tree(lhs, caster, target) {
+                return false;
+            }
+            evaluate_when_tree(rhs, caster, target)
+        }
+        WhenPredicate::Or(lhs, rhs) => {
+            if evaluate_when_tree(lhs, caster, target) {
+                return true;
+            }
+            evaluate_when_tree(rhs, caster, target)
+        }
+        WhenPredicate::Not(inner) => !evaluate_when_tree(inner, caster, target),
+    }
+}
+
+/// Task #227: gate one effect slot's primary + nested ops on its
+/// `when <cond>` modifier. Returns `true` if the effect should fire
+/// (no predicate authored, or predicate evaluates to true), `false`
+/// to skip.
+///
+/// Prefers the compound tree (`when_compound`) when populated so
+/// `&&` / `||` / `!` compose correctly; falls back to the single-atom
+/// form (`when_compiled`) for legacy programs / hand-built fixtures
+/// that only set the atomic slot. A slot with neither populated is
+/// treated as fail-closed — the lower path errors loudly when the
+/// predicate fails to compile, so this branch is unreachable for
+/// `.ability`-sourced programs.
+#[inline]
+pub(crate) fn when_predicate_passes(
+    when:          &crate::ability::program::EffectWhenCondition,
+    caster_stats:  &CasterStats,
+    target_stats:  &CasterStats,
+) -> bool {
+    if let Some(tree) = when.when_compound.as_ref() {
+        evaluate_when_tree(tree, caster_stats, target_stats)
+    } else if let Some(pred) = when.when_compiled.as_ref() {
+        evaluate_predicate(pred, caster_stats, target_stats)
+    } else {
+        false
+    }
+}
+
 /// Task #121 (Path A — CPU-only): multi-target AOE dispatch.
 ///
 /// Translate one cast of `program` (caster → primary_target at `tick`)
@@ -743,12 +810,11 @@ pub fn apply_program_aoe(
             }
         }
         // When-predicate gate (slot-keyed against `target_stats` —
-        // primary target's snapshot; per-target eval deferred).
+        // primary target's snapshot; per-target eval deferred). Shared
+        // helper handles both compound trees and legacy single-atom.
         if let Some(Some(when)) = program.when_per_effect.get(i) {
-            if let Some(pred) = when.when_compiled.as_ref() {
-                if !evaluate_predicate(pred, caster_stats, target_stats) {
-                    continue;
-                }
+            if !when_predicate_passes(when, caster_stats, target_stats) {
+                continue;
             }
         }
         // Scaling bonus (same shape as apply_program).
@@ -2022,6 +2088,7 @@ mod tests {
             when_cond:     "<test>".to_string(),
             else_cond:     None,
             when_compiled: Some(pred),
+            when_compound: Some(WhenPredicate::Atom(pred)),
         }));
         p
     }
@@ -2115,6 +2182,125 @@ mod tests {
             &CasterStats::default(), &target_stats,
         );
         assert_eq!(events.len(), 0, "predicate false must skip primary AND nested");
+    }
+
+    /// Task #227 — build a one-effect program with a compound
+    /// when-predicate tree (no `when_compiled` fallback).
+    fn prog_with_when_tree(op: EffectOp, tree: WhenPredicate) -> AbilityProgram {
+        let mut p = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [op],
+        );
+        p.when_per_effect.push(Some(EffectWhenCondition {
+            when_cond:     "<test-tree>".to_string(),
+            else_cond:     None,
+            when_compiled: None,
+            when_compound: Some(tree),
+        }));
+        p
+    }
+
+    #[test]
+    fn apply_program_when_compound_and_short_circuits() {
+        // self.hp < 50 && target.hp < 30 — both must be true to fire.
+        let lhs = EffectPredicate {
+            binder:  EffectPredicateBinder::SelfBinder,
+            field:   ScalingStatRef::Hp.discriminant(),
+            op:      EffectPredicateOp::Lt,
+            literal: 50.0,
+        };
+        let rhs = EffectPredicate {
+            binder:  EffectPredicateBinder::Target,
+            field:   ScalingStatRef::Hp.discriminant(),
+            op:      EffectPredicateOp::Lt,
+            literal: 30.0,
+        };
+        let tree = WhenPredicate::And(
+            Box::new(WhenPredicate::Atom(lhs)),
+            Box::new(WhenPredicate::Atom(rhs)),
+        );
+        let prog = prog_with_when_tree(EffectOp::Damage { amount: 50.0 }, tree);
+
+        // Both true → fires.
+        let s_low = CasterStats { hp: 20.0, ..Default::default() };
+        let t_low = CasterStats { hp: 10.0, ..Default::default() };
+        let evs = apply_program(&prog, caster(), target(), 0, 0xCAFE, &s_low, &t_low);
+        assert_eq!(evs.len(), 1, "self.hp<50 && target.hp<30 (both true) → fires");
+
+        // LHS false → skipped (and RHS short-circuits — but no observable
+        // side effect from RHS atom evaluation).
+        let s_hi = CasterStats { hp: 80.0, ..Default::default() };
+        let evs = apply_program(&prog, caster(), target(), 0, 0xCAFE, &s_hi, &t_low);
+        assert_eq!(evs.len(), 0, "self.hp NOT < 50 → AND fails");
+
+        // LHS true, RHS false → skipped.
+        let t_hi = CasterStats { hp: 50.0, ..Default::default() };
+        let evs = apply_program(&prog, caster(), target(), 0, 0xCAFE, &s_low, &t_hi);
+        assert_eq!(evs.len(), 0, "target.hp NOT < 30 → AND fails");
+    }
+
+    #[test]
+    fn apply_program_when_compound_or_short_circuits() {
+        // self.hp < 50 || target.hp < 30 — fires if EITHER is true.
+        let lhs = EffectPredicate {
+            binder:  EffectPredicateBinder::SelfBinder,
+            field:   ScalingStatRef::Hp.discriminant(),
+            op:      EffectPredicateOp::Lt,
+            literal: 50.0,
+        };
+        let rhs = EffectPredicate {
+            binder:  EffectPredicateBinder::Target,
+            field:   ScalingStatRef::Hp.discriminant(),
+            op:      EffectPredicateOp::Lt,
+            literal: 30.0,
+        };
+        let tree = WhenPredicate::Or(
+            Box::new(WhenPredicate::Atom(lhs)),
+            Box::new(WhenPredicate::Atom(rhs)),
+        );
+        let prog = prog_with_when_tree(EffectOp::Damage { amount: 50.0 }, tree);
+
+        // LHS true → fires (RHS short-circuits).
+        let s_low = CasterStats { hp: 20.0, ..Default::default() };
+        let t_hi  = CasterStats { hp: 50.0, ..Default::default() };
+        let evs = apply_program(&prog, caster(), target(), 0, 0xCAFE, &s_low, &t_hi);
+        assert_eq!(evs.len(), 1, "self.hp<50 (LHS true) → OR fires");
+
+        // LHS false, RHS true → fires.
+        let s_hi  = CasterStats { hp: 80.0, ..Default::default() };
+        let t_low = CasterStats { hp: 10.0, ..Default::default() };
+        let evs = apply_program(&prog, caster(), target(), 0, 0xCAFE, &s_hi, &t_low);
+        assert_eq!(evs.len(), 1, "target.hp<30 (RHS true) → OR fires");
+
+        // Both false → skipped.
+        let evs = apply_program(&prog, caster(), target(), 0, 0xCAFE, &s_hi, &t_hi);
+        assert_eq!(evs.len(), 0, "neither atom true → OR fails");
+    }
+
+    #[test]
+    fn apply_program_when_compound_not_negates() {
+        // !(target.hp > 50) — fires when target.hp <= 50.
+        let inner = EffectPredicate {
+            binder:  EffectPredicateBinder::Target,
+            field:   ScalingStatRef::Hp.discriminant(),
+            op:      EffectPredicateOp::Gt,
+            literal: 50.0,
+        };
+        let tree = WhenPredicate::Not(Box::new(WhenPredicate::Atom(inner)));
+        let prog = prog_with_when_tree(EffectOp::Damage { amount: 50.0 }, tree);
+
+        // target.hp = 30 → !(30 > 50) = !false = true → fires.
+        let t_low = CasterStats { hp: 30.0, ..Default::default() };
+        let evs = apply_program(&prog, caster(), target(), 0, 0xCAFE,
+            &CasterStats::default(), &t_low);
+        assert_eq!(evs.len(), 1, "!(target.hp > 50) with hp=30 → fires");
+
+        // target.hp = 80 → !(80 > 50) = !true = false → skipped.
+        let t_hi = CasterStats { hp: 80.0, ..Default::default() };
+        let evs = apply_program(&prog, caster(), target(), 0, 0xCAFE,
+            &CasterStats::default(), &t_hi);
+        assert_eq!(evs.len(), 0, "!(target.hp > 50) with hp=80 → skipped");
     }
 
     #[test]
