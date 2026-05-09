@@ -1,0 +1,72 @@
+// voxel_probe — Phase B fixture for the voxel-engine integration plan
+// (`docs/superpowers/plans/2026-05-09-voxel-engine-integration.md`).
+//
+// Drives the GPU `apply_ability` dispatcher with two self-cast
+// world-primitive verbs:
+//
+//   1. PlaceTestVoxel (apply_ability 1) — fires once at tick=0.
+//      Dispatcher writes one EffectPlaceVoxelApplied record (kind=60)
+//      with `slot[2]=caster_slot`, `slot[3]=kind_hash("test_voxel")`.
+//
+//   2. HarvestTestVoxel (apply_ability 2) — fires on tick % 10 == 5
+//      (so first at tick=5, then 15, 25, ...). Dispatcher writes one
+//      EffectHarvestApplied record (kind=59) with `slot[2]=caster_slot`,
+//      `slot[3]=kind_hash`, `slot[4]=amount=1`.
+//
+// **Sequential-by-tick design (P5 determinism).** Each tick at most ONE
+// of the two verbs is eligible — Place fires only at tick==0, Harvest
+// only on the % 10 == 5 cadence. This avoids any chronicle-ring
+// contention and gives the behavioral pins clean tick-window contracts:
+//
+//   * tick 0  → Place fires
+//   * tick 5  → Harvest fires (clears the placed voxel)
+//   * tick 10 → no verb fires
+//   * tick 15 → Harvest fires again (no-op, cell already clear)
+//   * ...
+//
+// **One-agent design.** Slot 0 is the lone caster (creature_type=1,
+// "worker"). The runtime constructs the agent at world origin
+// (0.0, 0.0, 0.0); both verbs are self-cast so the dispatcher's
+// `caster_slot` matches `target_slot`, both = 0.
+//
+// **No CPU oracle here.** Phase D will diff CPU↔GPU once the .sim
+// gains a non-trivial verb chain. Phase B is a GPU-only producer +
+// host-side voxel-grid drain pin.
+//
+// AbilityRegistry slot order (alphabetised by file name, matches
+// `voxel_probe_runtime::voxel_probe_constants`):
+//   HarvestTestVoxel.ability → AbilityId 1
+//   PlaceTestVoxel.ability   → AbilityId 2
+//
+// The runtime pins these via `binding_check`-shape constants so a
+// drift in `build_registry`'s ordering surfaces as a panic at fixture
+// construction.
+
+event Tick { }
+
+entity Worker : Agent { }
+
+// NOTE: no top-level `scoring { ... }` block. A `scoring { Name = K }`
+// entry adds a mask-less utility row to the scoring kernel — useful
+// when an action has constant utility and no mask gate, but for
+// mask-gated verbs it forces the argmax to ALWAYS pick that constant-
+// utility action even when the mask doesn't pass. Each verb supplies
+// its score via the `score K` clause in the verb body, gated by the
+// emitted mask row, which is the right shape for tick-windowed verbs
+// like the two below.
+
+// PlaceTestVoxel — fires at tick=0 only. Self-cast. AbilityId 2 (the
+// alphabetised registry slot for `PlaceTestVoxel.ability`).
+verb PlaceTestVoxel(self) =
+  action PlaceTestVoxelAction
+  when (self.alive && world.tick == 0)
+  apply_ability 2 by self target self
+  score 1.0
+
+// HarvestTestVoxel — fires on tick % 10 == 5. Self-cast. AbilityId 1
+// (the alphabetised registry slot for `HarvestTestVoxel.ability`).
+verb HarvestTestVoxel(self) =
+  action HarvestTestVoxelAction
+  when (self.alive && world.tick > 0 && (world.tick % 10 == 5))
+  apply_ability 1 by self target self
+  score 1.0
