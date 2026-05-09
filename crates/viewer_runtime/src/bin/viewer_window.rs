@@ -22,7 +22,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use viewer_runtime::ViewerApp;
+use viewer_runtime::{ViewerApp, VoxelBridge};
 use voxel_engine::app::App as _;
 use voxel_engine::camera::OrbitCamera;
 use voxel_engine::render::{RendererConfig, VoxelRenderer};
@@ -38,6 +38,15 @@ use winit::window::{Window, WindowId};
 const SIM_TICK_PERIOD: Duration = Duration::from_millis(100);
 const WINDOW_W: u32 = 1280;
 const WINDOW_H: u32 = 720;
+
+/// Cell count along each axis of the voxel-bridge grid. 128³ × 1B
+/// per cell = 2 MB of CPU + GPU memory; ~10 µs to upload at PCIe 4.0
+/// bandwidth, called once per fixed-step tick.
+const VOXEL_GRID_DIM: u32 = 128;
+/// World-space length the bridge grid covers along each axis.
+/// Wave_defense uses ±64 around origin (settlers at radius 8,
+/// spawners at radius 60); 128 covers it with 1 unit per cell.
+const VOXEL_WORLD_EXTENT: f32 = 128.0;
 
 /// Camera observer position. Looking at origin from (60, 60, 40) puts
 /// the wave_defense settler ring in the center of the frame with
@@ -62,6 +71,10 @@ struct Gfx {
     ctx: VulkanContext,
     swapchain: SwapchainContext,
     renderer: VoxelRenderer,
+    /// Phase B: world-grid bridge. `Option` because it's allocated
+    /// after `app.setup()` populates the snapshot — first refresh
+    /// happens before the first render so the grid isn't empty.
+    bridge: VoxelBridge,
 }
 
 impl ApplicationHandler for WindowedViewer {
@@ -85,14 +98,27 @@ impl ApplicationHandler for WindowedViewer {
         let renderer = VoxelRenderer::new(&ctx, WINDOW_W, WINDOW_H)
             .expect("VoxelRenderer::new failed");
 
-        // Phase A.5 setup: prime the Scene with whatever Phase A's
-        // ViewerApp wants pre-populated. The Scene currently has no
-        // role in render_frame_gpu (Phase B will bridge), but we keep
-        // the call to validate the data pipeline against a real
-        // Scene allocation.
+        // Setup primes ViewerApp's snapshot caches via
+        // refresh_snapshot — needed before the first bridge.refresh
+        // so the initial paint reflects post-setup state, not
+        // pre-init zeros.
         self.app
             .setup(&mut self.scene)
             .expect("ViewerApp::setup failed");
+
+        // Allocate the world-grid bridge + paint the initial frame
+        // so render_frame_gpu has something to draw before the first
+        // sim tick fires (otherwise the first ~100ms is empty).
+        let mut bridge = VoxelBridge::new(
+            &ctx,
+            self.app.palette(),
+            VOXEL_GRID_DIM,
+            VOXEL_WORLD_EXTENT,
+        )
+        .expect("VoxelBridge::new failed");
+        bridge
+            .refresh(&ctx, &self.app)
+            .expect("VoxelBridge::refresh (initial) failed");
 
         // Kick off the redraw loop. winit 0.30 doesn't send
         // RedrawRequested on its own past the initial expose;
@@ -104,6 +130,7 @@ impl ApplicationHandler for WindowedViewer {
             ctx,
             swapchain,
             renderer,
+            bridge,
         });
     }
 
@@ -135,12 +162,19 @@ impl ApplicationHandler for WindowedViewer {
                 // Catch up on fixed-step sim ticks. If many ticks
                 // elapsed (e.g. window was hidden), bound the catch-up
                 // at 4 to avoid runaway after a long pause — better to
-                // skip than to freeze.
+                // skip than to freeze. Each tick refreshes the voxel
+                // bridge so the rendered cells reflect the new
+                // positions.
                 let mut ticks_this_frame: u32 = 0;
                 while self.last_tick.elapsed() >= SIM_TICK_PERIOD && ticks_this_frame < 4 {
                     self.app.tick(&mut self.scene, 0.1);
                     self.last_tick += SIM_TICK_PERIOD;
                     ticks_this_frame += 1;
+                    if let Some(gfx) = self.gfx.as_mut() {
+                        if let Err(e) = gfx.bridge.refresh(&gfx.ctx, &self.app) {
+                            eprintln!("[viewer_window] VoxelBridge::refresh failed: {e}");
+                        }
+                    }
                 }
                 // Build the title before re-borrowing `self.gfx` mutably
                 // (winit's set_title is borrow-conservative).
@@ -148,14 +182,13 @@ impl ApplicationHandler for WindowedViewer {
                 if let Some(gfx) = self.gfx.as_mut() {
                     gfx.window.set_title(&title);
 
-                    // Empty objects list — Phase B fills this. Renderer
-                    // still produces a sky/sun pass which we present.
-                    let objects: Vec<(
-                        &voxel_engine::vulkan::voxel_gpu::GpuVoxelTexture,
-                        [f32; 4],
-                        [f32; 3],
-                        [f32; 3],
-                    )> = Vec::new();
+                    // Single-object scene: the world-grid texture
+                    // covering the whole scene at world origin. Phase
+                    // B paints agents into it; Phase C will add a
+                    // separate object for static voxel terrain
+                    // (palisades) once those land.
+                    let world_object = gfx.bridge.render_object();
+                    let objects = [world_object];
                     if let Err(e) = gfx
                         .renderer
                         .render_frame_gpu(&gfx.ctx, &self.camera, &objects)

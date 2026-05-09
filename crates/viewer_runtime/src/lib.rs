@@ -28,6 +28,9 @@ use voxel_engine::voxel::material::MaterialPalette;
 
 use wave_defense_runtime::{WaveDefenseState, TOTAL_AGENT_CAPACITY};
 
+pub mod voxel_bridge;
+pub use voxel_bridge::VoxelBridge;
+
 /// Scene representation for one agent — a single-voxel `1×1×1` grid
 /// at the agent's position. The voxel material id (1..=255) is set by
 /// creature type via [`creature_material_index`] so the renderer can
@@ -97,6 +100,18 @@ pub struct ViewerApp {
     /// whether a slot's representation needs to change (e.g. a monster
     /// pool slot transitioning from "empty" to a live creature).
     last_creature_type: Vec<u32>,
+    /// Previous-tick creature_type snapshot, kept around so
+    /// `sync_slot` can detect slot reuse (different material id) even
+    /// after `refresh_snapshot` has overwritten `last_creature_type`
+    /// with the new values.
+    prev_creature_type: Vec<u32>,
+    /// Most recent per-agent position readback. Updated by `setup`
+    /// and `tick`; exposed via [`Self::positions`] so the windowed
+    /// driver's voxel bridge doesn't need to re-readback per frame.
+    last_positions: Vec<Vec3>,
+    /// Most recent per-agent alive readback. Same caching rationale
+    /// as `last_positions`.
+    last_alive: Vec<u32>,
     /// Tick at which the sim last reported termination via
     /// `step_and_check_termination()`. `None` while still running.
     pub terminated_at_tick: Option<u64>,
@@ -111,8 +126,43 @@ impl ViewerApp {
             agent_handles: vec![None; n],
             palette: build_palette(),
             last_creature_type: vec![u32::MAX; n],
+            prev_creature_type: vec![u32::MAX; n],
+            last_positions: vec![Vec3::ZERO; n],
+            last_alive: vec![0; n],
             terminated_at_tick: None,
         }
+    }
+
+    /// Per-agent positions from the most recent `setup`/`tick` call.
+    /// Length = `TOTAL_AGENT_CAPACITY`. Dead slots return whatever
+    /// the SoA happens to hold (filter via [`Self::alive`] first).
+    pub fn positions(&self) -> &[Vec3] {
+        &self.last_positions
+    }
+
+    /// Per-agent alive flags from the most recent `setup`/`tick` call.
+    /// Length = `TOTAL_AGENT_CAPACITY`. `0` = dead, non-zero = alive.
+    pub fn alive(&self) -> &[u32] {
+        &self.last_alive
+    }
+
+    /// Per-agent creature types from the most recent `setup`/`tick`
+    /// call. Length = `TOTAL_AGENT_CAPACITY`. Use
+    /// [`creature_material_index`] to map ordinals to the palette.
+    pub fn creature_types(&self) -> &[u32] {
+        &self.last_creature_type
+    }
+
+    /// The shared palette ([`creature_material_index`] indices).
+    pub fn palette(&self) -> &MaterialPalette {
+        &self.palette
+    }
+
+    /// Public re-export: the same mapping the scene-side
+    /// `agent_voxel_grid` uses, exposed so the windowed driver's
+    /// voxel bridge can paint cells with the same colours.
+    pub fn material_for(&self, creature_type: u32) -> u8 {
+        creature_material_index(creature_type)
     }
 
     /// Current sim tick (delegate; saves callers a re-import).
@@ -141,6 +191,21 @@ impl ViewerApp {
         self.state.read_score()
     }
 
+    /// One GPU readback per per-agent column, written into the
+    /// `last_*` caches. Called from both `setup()` and `tick()` so
+    /// downstream consumers (the windowed driver's voxel bridge)
+    /// can read the cached snapshot without re-issuing GPU work.
+    fn refresh_snapshot(&mut self) {
+        // Roll the previous-tick snapshot forward before overwriting
+        // `last_creature_type` with the new values, so `sync_slot`
+        // can still detect slot reuse via prev != last.
+        self.prev_creature_type
+            .copy_from_slice(&self.last_creature_type);
+        self.last_positions = self.state.read_pos();
+        self.last_alive = self.state.read_alive();
+        self.last_creature_type = self.state.read_creature_type();
+    }
+
     /// Sync one agent slot into the scene. If the slot is alive and
     /// has no entity yet, spawn one; if it already has one, update
     /// the transform; if the creature_type changed (slot reused),
@@ -153,9 +218,7 @@ impl ViewerApp {
         alive: bool,
         creature_type: u32,
     ) {
-        let cached_creature = self.last_creature_type[slot];
-        let creature_changed = cached_creature != creature_type;
-        self.last_creature_type[slot] = creature_type;
+        let creature_changed = self.prev_creature_type[slot] != creature_type;
 
         if !alive {
             // Despawn if previously alive — keeps the scene clean as
@@ -195,19 +258,14 @@ impl ViewerApp {
 
 impl voxel_engine::app::App for ViewerApp {
     fn setup(&mut self, scene: &mut Scene) -> Result<()> {
-        // Pre-populate the scene with whatever agents are already
-        // alive at construction (the node + settler ring + spawner
-        // ring; monster pool slots stay empty until the first wave).
-        let positions = self.state.read_pos();
-        let alive = self.state.read_alive();
-        let creature_types = self.state.read_creature_type();
+        self.refresh_snapshot();
         for slot in 0..(TOTAL_AGENT_CAPACITY as usize) {
             self.sync_slot(
                 scene,
                 slot,
-                positions[slot],
-                alive[slot] != 0,
-                creature_types[slot],
+                self.last_positions[slot],
+                self.last_alive[slot] != 0,
+                self.last_creature_type[slot],
             );
         }
         Ok(())
@@ -225,20 +283,18 @@ impl voxel_engine::app::App for ViewerApp {
             self.terminated_at_tick = Some(self.state.tick());
         }
 
-        // Mirror per-agent state into the scene. Three readbacks per
-        // tick is heavy at 100ms cadence — Phase B will switch to a
-        // single fused readback, but Phase A's correctness gate beats
-        // its perf gate.
-        let positions = self.state.read_pos();
-        let alive = self.state.read_alive();
-        let creature_types = self.state.read_creature_type();
+        // Refresh cached snapshot in one place — three readbacks per
+        // tick is heavy at 100ms cadence; the cache means the
+        // windowed driver's voxel bridge can read positions/alive
+        // without re-issuing the GPU readback per frame.
+        self.refresh_snapshot();
         for slot in 0..(TOTAL_AGENT_CAPACITY as usize) {
             self.sync_slot(
                 scene,
                 slot,
-                positions[slot],
-                alive[slot] != 0,
-                creature_types[slot],
+                self.last_positions[slot],
+                self.last_alive[slot] != 0,
+                self.last_creature_type[slot],
             );
         }
     }
