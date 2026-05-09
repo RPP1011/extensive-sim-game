@@ -40,7 +40,9 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 /// Per-team agent populations. 500 + 500 = 1000.
 pub const PER_TEAM: u32 = 500;
@@ -82,6 +84,13 @@ pub struct Megaswarm1000State {
     event_ring: EventRing,
     damage_dealt: ViewStorage,
     damage_dealt_cfg_buf: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one (no kernel here touches any
+    /// `ability_registry_*` field).
+    registry_gpu: PackedAbilityRegistryGpu,
 
     // -- Per-kernel cfg uniforms --
     mask_cfg_buf: wgpu::Buffer,
@@ -241,6 +250,12 @@ impl Megaswarm1000State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&engine::ability::AbilityRegistry::new()),
+            &gpu,
+            "megaswarm_1000",
+        );
+
         Self {
             gpu,
             agent_hp_buf,
@@ -255,6 +270,7 @@ impl Megaswarm1000State {
             event_ring,
             damage_dealt,
             damage_dealt_cfg_buf,
+            registry_gpu,
             mask_cfg_buf,
             scoring_cfg_buf,
             chronicle_red_strike_cfg_buf,
@@ -431,6 +447,21 @@ impl CompiledSim for Megaswarm1000State {
             0, scoring_output_bytes.max(16),
         );
 
+        // Shared once per tick; each non-fold dispatch below adds only
+        // its fixture-specific `*Extras`.
+        let agent_buffers = AgentBuffers {
+            hp_buf: Some(&self.agent_hp_buf),
+            alive_buf: Some(&self.agent_alive_buf),
+            level_buf: Some(&self.agent_level_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
         // (2) Mask round — fused PerPair kernel writes BOTH mask
         // bitmaps (RedStrike → mask_0, BlueStrike → mask_1).
         // Dispatches `agent_cap × agent_cap` threads
@@ -443,13 +474,15 @@ impl CompiledSim for Megaswarm1000State {
         self.gpu.queue.write_buffer(
             &self.mask_cfg_buf, 0, bytemuck::bytes_of(&mask_cfg),
         );
-        let mask_bindings = fused_mask_verb_RedStrike::FusedMaskVerbRedStrikeBindings {
-            agent_alive: &self.agent_alive_buf,
-            agent_level: &self.agent_level_buf,
+        let mask_extras = fused_mask_verb_RedStrike::FusedMaskVerbRedStrikeExtras {
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             mask_1_bitmap: &self.mask_1_bitmap_buf,
             cfg: &self.mask_cfg_buf,
         };
+        let mask_bindings =
+            fused_mask_verb_RedStrike::FusedMaskVerbRedStrikeBindings::from_context_with_extras(
+                &ctx, &mask_extras,
+            );
         dispatch::dispatch_fused_mask_verb_redstrike(
             &mut self.cache, &mask_bindings, &self.gpu.device, &mut encoder,
             self.agent_count * self.agent_count,
@@ -466,16 +499,14 @@ impl CompiledSim for Megaswarm1000State {
         self.gpu.queue.write_buffer(
             &self.scoring_cfg_buf, 0, bytemuck::bytes_of(&scoring_cfg),
         );
-        let scoring_bindings = scoring::ScoringBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp: &self.agent_hp_buf,
-            agent_level: &self.agent_level_buf,
+        let scoring_extras = scoring::ScoringExtras {
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             mask_1_bitmap: &self.mask_1_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
             cfg: &self.scoring_cfg_buf,
         };
+        let scoring_bindings =
+            scoring::ScoringBindings::from_context_with_extras(&ctx, &scoring_extras);
         dispatch::dispatch_scoring(
             &mut self.cache, &scoring_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
@@ -489,11 +520,14 @@ impl CompiledSim for Megaswarm1000State {
         self.gpu.queue.write_buffer(
             &self.chronicle_red_strike_cfg_buf, 0, bytemuck::bytes_of(&red_strike_cfg),
         );
-        let red_strike_bindings = physics_verb_chronicle_RedStrike::PhysicsVerbChronicleRedStrikeBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            cfg: &self.chronicle_red_strike_cfg_buf,
-        };
+        let red_strike_extras =
+            physics_verb_chronicle_RedStrike::PhysicsVerbChronicleRedStrikeExtras {
+                cfg: &self.chronicle_red_strike_cfg_buf,
+            };
+        let red_strike_bindings =
+            physics_verb_chronicle_RedStrike::PhysicsVerbChronicleRedStrikeBindings::from_context_with_extras(
+                &ctx, &red_strike_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_redstrike(
             &mut self.cache, &red_strike_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
@@ -507,11 +541,14 @@ impl CompiledSim for Megaswarm1000State {
         self.gpu.queue.write_buffer(
             &self.chronicle_blue_strike_cfg_buf, 0, bytemuck::bytes_of(&blue_strike_cfg),
         );
-        let blue_strike_bindings = physics_verb_chronicle_BlueStrike::PhysicsVerbChronicleBlueStrikeBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            cfg: &self.chronicle_blue_strike_cfg_buf,
-        };
+        let blue_strike_extras =
+            physics_verb_chronicle_BlueStrike::PhysicsVerbChronicleBlueStrikeExtras {
+                cfg: &self.chronicle_blue_strike_cfg_buf,
+            };
+        let blue_strike_bindings =
+            physics_verb_chronicle_BlueStrike::PhysicsVerbChronicleBlueStrikeBindings::from_context_with_extras(
+                &ctx, &blue_strike_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_bluestrike(
             &mut self.cache, &blue_strike_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
@@ -526,13 +563,13 @@ impl CompiledSim for Megaswarm1000State {
         self.gpu.queue.write_buffer(
             &self.apply_cfg_buf, 0, bytemuck::bytes_of(&apply_cfg),
         );
-        let apply_bindings = physics_ApplyDamage::PhysicsApplyDamageBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp: &self.agent_hp_buf,
-            agent_alive: &self.agent_alive_buf,
+        let apply_extras = physics_ApplyDamage::PhysicsApplyDamageExtras {
             cfg: &self.apply_cfg_buf,
         };
+        let apply_bindings =
+            physics_ApplyDamage::PhysicsApplyDamageBindings::from_context_with_extras(
+                &ctx, &apply_extras,
+            );
         dispatch::dispatch_physics_applydamage(
             &mut self.cache, &apply_bindings, &self.gpu.device, &mut encoder,
             event_count_estimate,
@@ -547,12 +584,12 @@ impl CompiledSim for Megaswarm1000State {
         self.gpu.queue.write_buffer(
             &self.seed_cfg_buf, 0, bytemuck::bytes_of(&seed_cfg),
         );
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.seed_cfg_buf,
         };
+        let seed_bindings =
+            seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(&ctx, &seed_extras);
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache, &seed_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,

@@ -15,7 +15,9 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -75,6 +77,13 @@ pub struct ParticleCollisionState {
     /// Pre-allocated zero buffer used as the COPY_SRC for the per-tick
     /// offsets clear.
     spatial_offsets_zero: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one (no kernel here touches any
+    /// `ability_registry_*` field).
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
     pos_cache: Vec<Vec3>,
@@ -216,6 +225,12 @@ impl ParticleCollisionState {
                 usage: wgpu::BufferUsages::COPY_SRC,
             });
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&engine::ability::AbilityRegistry::new()),
+            &gpu,
+            "particle_collision_runtime",
+        );
+
         Self {
             gpu,
             pos_buf,
@@ -230,6 +245,7 @@ impl ParticleCollisionState {
             spatial_grid_starts,
             spatial_chunk_sums,
             spatial_offsets_zero,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             pos_cache: pos_host,
             dirty: false,
@@ -318,15 +334,31 @@ impl CompiledSim for ParticleCollisionState {
             offsets_size,
         );
 
+        // Shared once per tick; each non-fold dispatch below adds only
+        // its fixture-specific `*Extras`.
+        let agent_buffers = AgentBuffers {
+            pos_buf: Some(&self.pos_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
         // (1) Spatial-hash counting sort (5 phases). Required input
         // for the body-form spatial walk emitted into MoveParticle.
         // Same layout as boids — see boids_runtime::step for the
         // fixture-agnostic narrative.
-        let count_b = spatial_build_hash_count::SpatialBuildHashCountBindings {
-            agent_pos: &self.pos_buf,
+        let count_extras = spatial_build_hash_count::SpatialBuildHashCountExtras {
             spatial_grid_offsets: &self.spatial_grid_offsets,
             cfg: &self.cfg_buf,
         };
+        let count_b =
+            spatial_build_hash_count::SpatialBuildHashCountBindings::from_context_with_extras(
+                &ctx, &count_extras,
+            );
         dispatch::dispatch_spatial_build_hash_count(
             &mut self.cache,
             &count_b,
@@ -334,12 +366,17 @@ impl CompiledSim for ParticleCollisionState {
             &mut encoder,
             self.agent_count,
         );
-        let scan_local_b = spatial_build_hash_scan_local::SpatialBuildHashScanLocalBindings {
-            spatial_grid_offsets: &self.spatial_grid_offsets,
-            spatial_grid_starts: &self.spatial_grid_starts,
-            spatial_chunk_sums: &self.spatial_chunk_sums,
-            cfg: &self.cfg_buf,
-        };
+        let scan_local_extras =
+            spatial_build_hash_scan_local::SpatialBuildHashScanLocalExtras {
+                spatial_grid_offsets: &self.spatial_grid_offsets,
+                spatial_grid_starts: &self.spatial_grid_starts,
+                spatial_chunk_sums: &self.spatial_chunk_sums,
+                cfg: &self.cfg_buf,
+            };
+        let scan_local_b =
+            spatial_build_hash_scan_local::SpatialBuildHashScanLocalBindings::from_context_with_extras(
+                &ctx, &scan_local_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scan_local(
             &mut self.cache,
             &scan_local_b,
@@ -347,10 +384,15 @@ impl CompiledSim for ParticleCollisionState {
             &mut encoder,
             self.agent_count,
         );
-        let scan_carry_b = spatial_build_hash_scan_carry::SpatialBuildHashScanCarryBindings {
-            spatial_chunk_sums: &self.spatial_chunk_sums,
-            cfg: &self.cfg_buf,
-        };
+        let scan_carry_extras =
+            spatial_build_hash_scan_carry::SpatialBuildHashScanCarryExtras {
+                spatial_chunk_sums: &self.spatial_chunk_sums,
+                cfg: &self.cfg_buf,
+            };
+        let scan_carry_b =
+            spatial_build_hash_scan_carry::SpatialBuildHashScanCarryBindings::from_context_with_extras(
+                &ctx, &scan_carry_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scan_carry(
             &mut self.cache,
             &scan_carry_b,
@@ -358,12 +400,17 @@ impl CompiledSim for ParticleCollisionState {
             &mut encoder,
             self.agent_count,
         );
-        let scan_add_b = spatial_build_hash_scan_add::SpatialBuildHashScanAddBindings {
-            spatial_grid_offsets: &self.spatial_grid_offsets,
-            spatial_grid_starts: &self.spatial_grid_starts,
-            spatial_chunk_sums: &self.spatial_chunk_sums,
-            cfg: &self.cfg_buf,
-        };
+        let scan_add_extras =
+            spatial_build_hash_scan_add::SpatialBuildHashScanAddExtras {
+                spatial_grid_offsets: &self.spatial_grid_offsets,
+                spatial_grid_starts: &self.spatial_grid_starts,
+                spatial_chunk_sums: &self.spatial_chunk_sums,
+                cfg: &self.cfg_buf,
+            };
+        let scan_add_b =
+            spatial_build_hash_scan_add::SpatialBuildHashScanAddBindings::from_context_with_extras(
+                &ctx, &scan_add_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scan_add(
             &mut self.cache,
             &scan_add_b,
@@ -371,13 +418,16 @@ impl CompiledSim for ParticleCollisionState {
             &mut encoder,
             self.agent_count,
         );
-        let scatter_b = spatial_build_hash_scatter::SpatialBuildHashScatterBindings {
-            agent_pos: &self.pos_buf,
+        let scatter_extras = spatial_build_hash_scatter::SpatialBuildHashScatterExtras {
             spatial_grid_cells: &self.spatial_grid_cells,
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
             cfg: &self.cfg_buf,
         };
+        let scatter_b =
+            spatial_build_hash_scatter::SpatialBuildHashScatterBindings::from_context_with_extras(
+                &ctx, &scatter_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scatter(
             &mut self.cache,
             &scatter_b,
@@ -392,16 +442,17 @@ impl CompiledSim for ParticleCollisionState {
         // physics rule both reads it (for the walk's self-cell
         // computation) and writes the integrated position before the
         // walk.
-        let bindings = physics_MoveParticle::PhysicsMoveParticleBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_pos: &self.pos_buf,
+        let mp_extras = physics_MoveParticle::PhysicsMoveParticleExtras {
             agent_vel: &self.vel_buf,
             spatial_grid_cells: &self.spatial_grid_cells,
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
             cfg: &self.cfg_buf,
         };
+        let bindings =
+            physics_MoveParticle::PhysicsMoveParticleBindings::from_context_with_extras(
+                &ctx, &mp_extras,
+            );
         dispatch::dispatch_physics_moveparticle(
             &mut self.cache,
             &bindings,
@@ -411,12 +462,12 @@ impl CompiledSim for ParticleCollisionState {
         );
 
         // (3) seed_indirect_0 — keeps indirect-args buffer warm.
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.cfg_buf,
         };
+        let seed_bindings =
+            seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(&ctx, &seed_extras);
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache,
             &seed_bindings,

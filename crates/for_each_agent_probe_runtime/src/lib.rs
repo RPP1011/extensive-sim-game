@@ -29,6 +29,9 @@
 //! (init: 0). Dead slots stay at their initial value. The harness
 //! test (`tests/probe.rs`) uses this exact contract.
 
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext};
 use engine::sim_trait::CompiledSim;
 use engine::GpuContext;
 use glam::Vec3;
@@ -60,6 +63,18 @@ pub struct ForEachAgentProbeState {
     sim_cfg_buf: wgpu::Buffer,
     /// Per-kernel cfg uniform — `agent_cap`, `tick`, `seed`, `_pad`.
     physics_cfg_buf: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::event_ring`] field — this fixture has no
+    /// emitted events, but the compiler-emitted `from_context_with_extras`
+    /// constructor signature requires the context to expose one.
+    event_ring: EventRing,
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one (the `FusedBumpAllMana` kernel never
+    /// touches any `ability_registry_*` field).
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
     tick: u64,
@@ -115,12 +130,21 @@ impl ForEachAgentProbeState {
             },
         );
 
+        let event_ring = EventRing::new(&gpu, "for_each_agent_probe_runtime");
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&engine::ability::AbilityRegistry::new()),
+            &gpu,
+            "for_each_agent_probe_runtime",
+        );
+
         Self {
             gpu,
             agent_alive_buf,
             agent_mana_buf,
             sim_cfg_buf,
             physics_cfg_buf,
+            event_ring,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             tick: 0,
             agent_count,
@@ -205,12 +229,24 @@ impl CompiledSim for ForEachAgentProbeState {
             .queue
             .write_buffer(&self.physics_cfg_buf, 0, bytemuck::bytes_of(&physics_cfg));
 
-        let bindings = fused_BumpAllMana::FusedBumpAllManaBindings {
-            agent_alive: &self.agent_alive_buf,
-            agent_mana: &self.agent_mana_buf,
+        let agent_buffers = AgentBuffers {
+            alive_buf: Some(&self.agent_alive_buf),
+            mana_buf: Some(&self.agent_mana_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+        let extras = fused_BumpAllMana::FusedBumpAllManaExtras {
             sim_cfg: &self.sim_cfg_buf,
             cfg: &self.physics_cfg_buf,
         };
+        let bindings = fused_BumpAllMana::FusedBumpAllManaBindings::from_context_with_extras(
+            &ctx, &extras,
+        );
         dispatch::dispatch_fused_bumpallmana(
             &mut self.cache,
             &bindings,

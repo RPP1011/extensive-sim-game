@@ -42,7 +42,9 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 pub const ADVENTURER_COUNT: u32 = 30;
 pub const MONSTER_COUNT: u32 = 5;
@@ -121,6 +123,13 @@ pub struct MultiZoneWorldState {
     chronicle_trade_cfg_buf: wgpu::Buffer,
     chronicle_strike_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one (no kernel here touches any
+    /// `ability_registry_*` field).
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
 
@@ -352,6 +361,12 @@ impl MultiZoneWorldState {
         let gold_earned_total_cfg_buf = mk_view_cfg("multi_zone_world_runtime::gold_earned_total_cfg");
         let damage_dealt_cfg_buf = mk_view_cfg("multi_zone_world_runtime::damage_dealt_cfg");
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&engine::ability::AbilityRegistry::new()),
+            &gpu,
+            "multi_zone_world_runtime",
+        );
+
         Self {
             gpu,
             agent_hp_buf,
@@ -378,6 +393,7 @@ impl MultiZoneWorldState {
             chronicle_trade_cfg_buf,
             chronicle_strike_cfg_buf,
             seed_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             tick: 0,
             agent_count,
@@ -713,6 +729,22 @@ impl CompiledSim for MultiZoneWorldState {
             0, scoring_output_bytes.max(16),
         );
 
+        // Shared once per tick; each non-fold dispatch below adds only
+        // its fixture-specific `*Extras`.
+        let agent_buffers = AgentBuffers {
+            hp_buf: Some(&self.agent_hp_buf),
+            alive_buf: Some(&self.agent_alive_buf),
+            mana_buf: Some(&self.agent_mana_buf),
+            level_buf: Some(&self.agent_level_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
         // (2) Mask round.
         let mask_cfg = fused_mask_verb_GatherWood::FusedMaskVerbGatherWoodCfg {
             agent_cap: self.agent_count,
@@ -722,15 +754,16 @@ impl CompiledSim for MultiZoneWorldState {
         self.gpu.queue.write_buffer(
             &self.mask_cfg_buf, 0, bytemuck::bytes_of(&mask_cfg),
         );
-        let mask_bindings = fused_mask_verb_GatherWood::FusedMaskVerbGatherWoodBindings {
-            agent_alive: &self.agent_alive_buf,
-            agent_level: &self.agent_level_buf,
-            agent_mana: &self.agent_mana_buf,
+        let mask_extras = fused_mask_verb_GatherWood::FusedMaskVerbGatherWoodExtras {
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             mask_1_bitmap: &self.mask_1_bitmap_buf,
             mask_2_bitmap: &self.mask_2_bitmap_buf,
             cfg: &self.mask_cfg_buf,
         };
+        let mask_bindings =
+            fused_mask_verb_GatherWood::FusedMaskVerbGatherWoodBindings::from_context_with_extras(
+                &ctx, &mask_extras,
+            );
         dispatch::dispatch_fused_mask_verb_gatherwood(
             &mut self.cache, &mask_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
@@ -745,15 +778,15 @@ impl CompiledSim for MultiZoneWorldState {
         self.gpu.queue.write_buffer(
             &self.scoring_cfg_buf, 0, bytemuck::bytes_of(&scoring_cfg),
         );
-        let scoring_bindings = scoring::ScoringBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let scoring_extras = scoring::ScoringExtras {
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             mask_1_bitmap: &self.mask_1_bitmap_buf,
             mask_2_bitmap: &self.mask_2_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
             cfg: &self.scoring_cfg_buf,
         };
+        let scoring_bindings =
+            scoring::ScoringBindings::from_context_with_extras(&ctx, &scoring_extras);
         dispatch::dispatch_scoring(
             &mut self.cache, &scoring_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
@@ -768,11 +801,14 @@ impl CompiledSim for MultiZoneWorldState {
             event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(&self.chronicle_gather_cfg_buf, 0, bytemuck::bytes_of(&cg));
-        let cb = physics_verb_chronicle_GatherWood::PhysicsVerbChronicleGatherWoodBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            cfg: &self.chronicle_gather_cfg_buf,
-        };
+        let cb_extras =
+            physics_verb_chronicle_GatherWood::PhysicsVerbChronicleGatherWoodExtras {
+                cfg: &self.chronicle_gather_cfg_buf,
+            };
+        let cb =
+            physics_verb_chronicle_GatherWood::PhysicsVerbChronicleGatherWoodBindings::from_context_with_extras(
+                &ctx, &cb_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_gatherwood(
             &mut self.cache, &cb, &self.gpu.device, &mut encoder, self.agent_count,
         );
@@ -782,11 +818,14 @@ impl CompiledSim for MultiZoneWorldState {
             event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(&self.chronicle_trade_cfg_buf, 0, bytemuck::bytes_of(&cg));
-        let cb = physics_verb_chronicle_TradeWoodForGold::PhysicsVerbChronicleTradeWoodForGoldBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            cfg: &self.chronicle_trade_cfg_buf,
-        };
+        let cb_extras =
+            physics_verb_chronicle_TradeWoodForGold::PhysicsVerbChronicleTradeWoodForGoldExtras {
+                cfg: &self.chronicle_trade_cfg_buf,
+            };
+        let cb =
+            physics_verb_chronicle_TradeWoodForGold::PhysicsVerbChronicleTradeWoodForGoldBindings::from_context_with_extras(
+                &ctx, &cb_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_tradewoodforgold(
             &mut self.cache, &cb, &self.gpu.device, &mut encoder, self.agent_count,
         );
@@ -796,11 +835,14 @@ impl CompiledSim for MultiZoneWorldState {
             event_count: self.agent_count, tick: self.tick as u32, seed: 0, agent_cap: 0,
         };
         self.gpu.queue.write_buffer(&self.chronicle_strike_cfg_buf, 0, bytemuck::bytes_of(&cg));
-        let cb = physics_verb_chronicle_DungeonStrike::PhysicsVerbChronicleDungeonStrikeBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            cfg: &self.chronicle_strike_cfg_buf,
-        };
+        let cb_extras =
+            physics_verb_chronicle_DungeonStrike::PhysicsVerbChronicleDungeonStrikeExtras {
+                cfg: &self.chronicle_strike_cfg_buf,
+            };
+        let cb =
+            physics_verb_chronicle_DungeonStrike::PhysicsVerbChronicleDungeonStrikeBindings::from_context_with_extras(
+                &ctx, &cb_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_dungeonstrike(
             &mut self.cache, &cb, &self.gpu.device, &mut encoder, self.agent_count,
         );
@@ -814,12 +856,12 @@ impl CompiledSim for MultiZoneWorldState {
             seed: 0, _pad: 0,
         };
         self.gpu.queue.write_buffer(&self.seed_cfg_buf, 0, bytemuck::bytes_of(&seed_cfg));
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.seed_cfg_buf,
         };
+        let seed_bindings =
+            seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(&ctx, &seed_extras);
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache, &seed_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
