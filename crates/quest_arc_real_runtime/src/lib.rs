@@ -44,7 +44,9 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 /// Per-fixture state for the quest arc.
 pub struct QuestArcRealState {
@@ -90,6 +92,12 @@ pub struct QuestArcRealState {
     apply_stage_cfg_buf: wgpu::Buffer,
     apply_complete_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
 
@@ -264,6 +272,12 @@ impl QuestArcRealState {
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&engine::ability::AbilityRegistry::new()),
+            &gpu,
+            "quest_arc_real_runtime",
+        );
+
         Self {
             gpu,
             agent_alive_buf,
@@ -297,6 +311,7 @@ impl QuestArcRealState {
             apply_stage_cfg_buf,
             apply_complete_cfg_buf,
             seed_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             tick: 0,
             agent_count,
@@ -366,6 +381,20 @@ impl CompiledSim for QuestArcRealState {
             0, scoring_output_bytes.max(16),
         );
 
+        // Shared once per tick; each non-fold dispatch below adds only
+        // its fixture-specific extras struct.
+        let agent_buffers = AgentBuffers {
+            alive_buf: Some(&self.agent_alive_buf),
+            mana_buf: Some(&self.agent_mana_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
         // (2) Mask round — 5 PerPair kernels, one per verb. Each
         // writes its own mask_<N>_bitmap. mask_k=1u (TODO task-5.7
         // in the compiler), so the per-pair grid degenerates to one
@@ -382,12 +411,13 @@ impl CompiledSim for QuestArcRealState {
         );
         dispatch::dispatch_mask_verb_acceptquest(
             &mut self.cache,
-            &mask_verb_AcceptQuest::MaskVerbAcceptQuestBindings {
-                agent_alive: &self.agent_alive_buf,
-                agent_mana: &self.agent_mana_buf,
-                mask_0_bitmap: &self.mask_0_bitmap_buf,
-                cfg: &self.mask_accept_cfg_buf,
-            },
+            &mask_verb_AcceptQuest::MaskVerbAcceptQuestBindings::from_context_with_extras(
+                &ctx,
+                &mask_verb_AcceptQuest::MaskVerbAcceptQuestExtras {
+                    mask_0_bitmap: &self.mask_0_bitmap_buf,
+                    cfg: &self.mask_accept_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, self.agent_count,
         );
 
@@ -399,12 +429,13 @@ impl CompiledSim for QuestArcRealState {
         );
         dispatch::dispatch_mask_verb_huntmonster(
             &mut self.cache,
-            &mask_verb_HuntMonster::MaskVerbHuntMonsterBindings {
-                agent_alive: &self.agent_alive_buf,
-                agent_mana: &self.agent_mana_buf,
-                mask_1_bitmap: &self.mask_1_bitmap_buf,
-                cfg: &self.mask_hunt_cfg_buf,
-            },
+            &mask_verb_HuntMonster::MaskVerbHuntMonsterBindings::from_context_with_extras(
+                &ctx,
+                &mask_verb_HuntMonster::MaskVerbHuntMonsterExtras {
+                    mask_1_bitmap: &self.mask_1_bitmap_buf,
+                    cfg: &self.mask_hunt_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, self.agent_count,
         );
 
@@ -416,12 +447,13 @@ impl CompiledSim for QuestArcRealState {
         );
         dispatch::dispatch_mask_verb_collectitem(
             &mut self.cache,
-            &mask_verb_CollectItem::MaskVerbCollectItemBindings {
-                agent_alive: &self.agent_alive_buf,
-                agent_mana: &self.agent_mana_buf,
-                mask_2_bitmap: &self.mask_2_bitmap_buf,
-                cfg: &self.mask_collect_cfg_buf,
-            },
+            &mask_verb_CollectItem::MaskVerbCollectItemBindings::from_context_with_extras(
+                &ctx,
+                &mask_verb_CollectItem::MaskVerbCollectItemExtras {
+                    mask_2_bitmap: &self.mask_2_bitmap_buf,
+                    cfg: &self.mask_collect_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, self.agent_count,
         );
 
@@ -433,12 +465,13 @@ impl CompiledSim for QuestArcRealState {
         );
         dispatch::dispatch_mask_verb_returnhome(
             &mut self.cache,
-            &mask_verb_ReturnHome::MaskVerbReturnHomeBindings {
-                agent_alive: &self.agent_alive_buf,
-                agent_mana: &self.agent_mana_buf,
-                mask_3_bitmap: &self.mask_3_bitmap_buf,
-                cfg: &self.mask_return_cfg_buf,
-            },
+            &mask_verb_ReturnHome::MaskVerbReturnHomeBindings::from_context_with_extras(
+                &ctx,
+                &mask_verb_ReturnHome::MaskVerbReturnHomeExtras {
+                    mask_3_bitmap: &self.mask_3_bitmap_buf,
+                    cfg: &self.mask_return_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, self.agent_count,
         );
 
@@ -450,12 +483,13 @@ impl CompiledSim for QuestArcRealState {
         );
         dispatch::dispatch_mask_verb_completequest(
             &mut self.cache,
-            &mask_verb_CompleteQuest::MaskVerbCompleteQuestBindings {
-                agent_alive: &self.agent_alive_buf,
-                agent_mana: &self.agent_mana_buf,
-                mask_4_bitmap: &self.mask_4_bitmap_buf,
-                cfg: &self.mask_complete_cfg_buf,
-            },
+            &mask_verb_CompleteQuest::MaskVerbCompleteQuestBindings::from_context_with_extras(
+                &ctx,
+                &mask_verb_CompleteQuest::MaskVerbCompleteQuestExtras {
+                    mask_4_bitmap: &self.mask_4_bitmap_buf,
+                    cfg: &self.mask_complete_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, self.agent_count,
         );
 
@@ -470,17 +504,18 @@ impl CompiledSim for QuestArcRealState {
         );
         dispatch::dispatch_scoring(
             &mut self.cache,
-            &scoring::ScoringBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                mask_0_bitmap: &self.mask_0_bitmap_buf,
-                mask_1_bitmap: &self.mask_1_bitmap_buf,
-                mask_2_bitmap: &self.mask_2_bitmap_buf,
-                mask_3_bitmap: &self.mask_3_bitmap_buf,
-                mask_4_bitmap: &self.mask_4_bitmap_buf,
-                scoring_output: &self.scoring_output_buf,
-                cfg: &self.scoring_cfg_buf,
-            },
+            &scoring::ScoringBindings::from_context_with_extras(
+                &ctx,
+                &scoring::ScoringExtras {
+                    mask_0_bitmap: &self.mask_0_bitmap_buf,
+                    mask_1_bitmap: &self.mask_1_bitmap_buf,
+                    mask_2_bitmap: &self.mask_2_bitmap_buf,
+                    mask_3_bitmap: &self.mask_3_bitmap_buf,
+                    mask_4_bitmap: &self.mask_4_bitmap_buf,
+                    scoring_output: &self.scoring_output_buf,
+                    cfg: &self.scoring_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, self.agent_count,
         );
 
@@ -494,11 +529,12 @@ impl CompiledSim for QuestArcRealState {
         );
         dispatch::dispatch_physics_verb_chronicle_acceptquest(
             &mut self.cache,
-            &physics_verb_chronicle_AcceptQuest::PhysicsVerbChronicleAcceptQuestBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                cfg: &self.chronicle_accept_cfg_buf,
-            },
+            &physics_verb_chronicle_AcceptQuest::PhysicsVerbChronicleAcceptQuestBindings::from_context_with_extras(
+                &ctx,
+                &physics_verb_chronicle_AcceptQuest::PhysicsVerbChronicleAcceptQuestExtras {
+                    cfg: &self.chronicle_accept_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, event_count_estimate,
         );
 
@@ -510,11 +546,12 @@ impl CompiledSim for QuestArcRealState {
         );
         dispatch::dispatch_physics_verb_chronicle_huntmonster(
             &mut self.cache,
-            &physics_verb_chronicle_HuntMonster::PhysicsVerbChronicleHuntMonsterBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                cfg: &self.chronicle_hunt_cfg_buf,
-            },
+            &physics_verb_chronicle_HuntMonster::PhysicsVerbChronicleHuntMonsterBindings::from_context_with_extras(
+                &ctx,
+                &physics_verb_chronicle_HuntMonster::PhysicsVerbChronicleHuntMonsterExtras {
+                    cfg: &self.chronicle_hunt_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, event_count_estimate,
         );
 
@@ -526,11 +563,12 @@ impl CompiledSim for QuestArcRealState {
         );
         dispatch::dispatch_physics_verb_chronicle_collectitem(
             &mut self.cache,
-            &physics_verb_chronicle_CollectItem::PhysicsVerbChronicleCollectItemBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                cfg: &self.chronicle_collect_cfg_buf,
-            },
+            &physics_verb_chronicle_CollectItem::PhysicsVerbChronicleCollectItemBindings::from_context_with_extras(
+                &ctx,
+                &physics_verb_chronicle_CollectItem::PhysicsVerbChronicleCollectItemExtras {
+                    cfg: &self.chronicle_collect_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, event_count_estimate,
         );
 
@@ -542,11 +580,12 @@ impl CompiledSim for QuestArcRealState {
         );
         dispatch::dispatch_physics_verb_chronicle_returnhome(
             &mut self.cache,
-            &physics_verb_chronicle_ReturnHome::PhysicsVerbChronicleReturnHomeBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                cfg: &self.chronicle_return_cfg_buf,
-            },
+            &physics_verb_chronicle_ReturnHome::PhysicsVerbChronicleReturnHomeBindings::from_context_with_extras(
+                &ctx,
+                &physics_verb_chronicle_ReturnHome::PhysicsVerbChronicleReturnHomeExtras {
+                    cfg: &self.chronicle_return_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, event_count_estimate,
         );
 
@@ -558,11 +597,12 @@ impl CompiledSim for QuestArcRealState {
         );
         dispatch::dispatch_physics_verb_chronicle_completequest(
             &mut self.cache,
-            &physics_verb_chronicle_CompleteQuest::PhysicsVerbChronicleCompleteQuestBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                cfg: &self.chronicle_complete_cfg_buf,
-            },
+            &physics_verb_chronicle_CompleteQuest::PhysicsVerbChronicleCompleteQuestBindings::from_context_with_extras(
+                &ctx,
+                &physics_verb_chronicle_CompleteQuest::PhysicsVerbChronicleCompleteQuestExtras {
+                    cfg: &self.chronicle_complete_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, event_count_estimate,
         );
 
@@ -577,12 +617,12 @@ impl CompiledSim for QuestArcRealState {
         );
         dispatch::dispatch_physics_applystageadvance(
             &mut self.cache,
-            &physics_ApplyStageAdvance::PhysicsApplyStageAdvanceBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                agent_mana: &self.agent_mana_buf,
-                cfg: &self.apply_stage_cfg_buf,
-            },
+            &physics_ApplyStageAdvance::PhysicsApplyStageAdvanceBindings::from_context_with_extras(
+                &ctx,
+                &physics_ApplyStageAdvance::PhysicsApplyStageAdvanceExtras {
+                    cfg: &self.apply_stage_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, event_count_estimate,
         );
 
@@ -596,12 +636,12 @@ impl CompiledSim for QuestArcRealState {
         );
         dispatch::dispatch_physics_applyquestcompleted(
             &mut self.cache,
-            &physics_ApplyQuestCompleted::PhysicsApplyQuestCompletedBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                agent_mana: &self.agent_mana_buf,
-                cfg: &self.apply_complete_cfg_buf,
-            },
+            &physics_ApplyQuestCompleted::PhysicsApplyQuestCompletedBindings::from_context_with_extras(
+                &ctx,
+                &physics_ApplyQuestCompleted::PhysicsApplyQuestCompletedExtras {
+                    cfg: &self.apply_complete_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, event_count_estimate,
         );
 
@@ -614,12 +654,13 @@ impl CompiledSim for QuestArcRealState {
         );
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache,
-            &seed_indirect_0::SeedIndirect0Bindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                indirect_args_0: self.event_ring.indirect_args_0(),
-                cfg: &self.seed_cfg_buf,
-            },
+            &seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+                &ctx,
+                &seed_indirect_0::SeedIndirect0Extras {
+                    indirect_args_0: self.event_ring.indirect_args_0(),
+                    cfg: &self.seed_cfg_buf,
+                },
+            ),
             &self.gpu.device, &mut encoder, self.agent_count,
         );
 

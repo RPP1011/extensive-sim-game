@@ -57,7 +57,9 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::EventRing;
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext};
 
 /// Per-fixture state for the quest probe. Owns:
 ///   - Agent SoA (`alive` only — the producer rule reads no other field)
@@ -90,6 +92,12 @@ pub struct QuestProbeState {
     // -- Per-kernel cfg uniforms --
     physics_cfg_buf: wgpu::Buffer,
     fold_cfg_buf: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
 
@@ -171,6 +179,12 @@ impl QuestProbeState {
             },
         );
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&engine::ability::AbilityRegistry::new()),
+            &gpu,
+            "quest_probe_runtime",
+        );
+
         Self {
             gpu,
             agent_alive_buf,
@@ -181,6 +195,7 @@ impl QuestProbeState {
             progress_dirty: false,
             physics_cfg_buf,
             fold_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             tick: 0,
             agent_count,
@@ -246,6 +261,19 @@ impl CompiledSim for QuestProbeState {
         // (1) Per-tick clear of event_tail.
         self.event_ring.clear_tail_in(&mut encoder);
 
+        // Shared once per tick; the only non-fold dispatch consumes
+        // this immediately.
+        let agent_buffers = AgentBuffers {
+            alive_buf: Some(&self.agent_alive_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
         // (2) physics_ProgressAndComplete — per-Adventurer; emits
         // one `ProgressTick { agent: self, quest: 0 }` per tick when
         // `self.alive`. No agent SoA reads beyond `alive`.
@@ -259,13 +287,15 @@ impl CompiledSim for QuestProbeState {
         self.gpu
             .queue
             .write_buffer(&self.physics_cfg_buf, 0, bytemuck::bytes_of(&physics_cfg));
-        let physics_bindings =
-            physics_ProgressAndComplete::PhysicsProgressAndCompleteBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                agent_alive: &self.agent_alive_buf,
+        let physics_extras =
+            physics_ProgressAndComplete::PhysicsProgressAndCompleteExtras {
                 cfg: &self.physics_cfg_buf,
             };
+        let physics_bindings =
+            physics_ProgressAndComplete::PhysicsProgressAndCompleteBindings::from_context_with_extras(
+                &ctx,
+                &physics_extras,
+            );
         dispatch::dispatch_physics_progressandcomplete(
             &mut self.cache,
             &physics_bindings,

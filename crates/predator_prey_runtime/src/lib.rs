@@ -32,7 +32,9 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 /// 16-byte WGSL `vec3<f32>` interop type. Same shape as the one in
 /// `boids_runtime`; duplicated here rather than re-exported to keep
@@ -116,6 +118,12 @@ pub struct PredatorPreyState {
     /// Wolf (odd → Wolf) at init time.
     hare_count: u32,
     wolf_count: u32,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
 
@@ -318,6 +326,12 @@ impl PredatorPreyState {
             },
         );
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&engine::ability::AbilityRegistry::new()),
+            &gpu,
+            "predator_prey_runtime",
+        );
+
         Self {
             gpu,
             pos_buf,
@@ -334,6 +348,7 @@ impl PredatorPreyState {
             predator_focus,
             predator_focus_cfg_buf,
             predator_focus_decay_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             pos_cache: pos_host,
             dirty: false,
@@ -502,14 +517,33 @@ impl CompiledSim for PredatorPreyState {
         // fold dispatch.
         self.event_ring.clear_tail_in(&mut encoder);
 
+        // Shared once per tick; each non-fold dispatch below adds only
+        // its fixture-specific extras struct. `agent_pos` is a standard
+        // SoA column; `agent_vel` and `agent_creature_type` are not, so
+        // they flow through extras.
+        let agent_buffers = AgentBuffers {
+            pos_buf: Some(&self.pos_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
         // (1) MoveHare — no event_ring/event_tail bindings (Hares
         // don't emit). Reads creature_type, pos, vel; writes pos.
-        let hare_bindings = physics_MoveHare::PhysicsMoveHareBindings {
-            agent_pos: &self.pos_buf,
+        let hare_extras = physics_MoveHare::PhysicsMoveHareExtras {
             agent_creature_type: &self.creature_type_buf,
             agent_vel: &self.vel_buf,
             cfg: &self.cfg_buf,
         };
+        let hare_bindings =
+            physics_MoveHare::PhysicsMoveHareBindings::from_context_with_extras(
+                &ctx,
+                &hare_extras,
+            );
         dispatch::dispatch_physics_movehare(
             &mut self.cache,
             &hare_bindings,
@@ -521,14 +555,16 @@ impl CompiledSim for PredatorPreyState {
         // (2) MoveWolf — same shape as MoveHare PLUS event_ring +
         // event_tail bindings (the body's `emit Killed { … }` writes
         // to those via atomicAdd-to-tail + atomicStore-to-ring).
-        let wolf_bindings = physics_MoveWolf::PhysicsMoveWolfBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_pos: &self.pos_buf,
+        let wolf_extras = physics_MoveWolf::PhysicsMoveWolfExtras {
             agent_creature_type: &self.creature_type_buf,
             agent_vel: &self.vel_buf,
             cfg: &self.cfg_buf,
         };
+        let wolf_bindings =
+            physics_MoveWolf::PhysicsMoveWolfBindings::from_context_with_extras(
+                &ctx,
+                &wolf_extras,
+            );
         dispatch::dispatch_physics_movewolf(
             &mut self.cache,
             &wolf_bindings,
@@ -544,12 +580,14 @@ impl CompiledSim for PredatorPreyState {
         // so this write currently runs but isn't consumed; left in
         // the chain so the args buffer is kept warm for the
         // future indirect-dispatch wire-up.
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.cfg_buf,
         };
+        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+            &ctx,
+            &seed_extras,
+        );
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache,
             &seed_bindings,
@@ -613,10 +651,15 @@ impl CompiledSim for PredatorPreyState {
             0,
             bytemuck::bytes_of(&kc_decay_cfg),
         );
-        let kc_decay_bindings = decay_kill_count::DecayKillCountBindings {
+        let kc_decay_extras = decay_kill_count::DecayKillCountExtras {
             view_storage_primary: self.kill_count.primary(),
             cfg: &self.kill_count_decay_cfg_buf,
         };
+        let kc_decay_bindings =
+            decay_kill_count::DecayKillCountBindings::from_context_with_extras(
+                &ctx,
+                &kc_decay_extras,
+            );
         dispatch::dispatch_decay_kill_count(
             &mut self.cache,
             &kc_decay_bindings,
@@ -658,10 +701,15 @@ impl CompiledSim for PredatorPreyState {
             0,
             bytemuck::bytes_of(&pf_decay_cfg),
         );
-        let pf_decay_bindings = decay_predator_focus::DecayPredatorFocusBindings {
+        let pf_decay_extras = decay_predator_focus::DecayPredatorFocusExtras {
             view_storage_primary: self.predator_focus.primary(),
             cfg: &self.predator_focus_decay_cfg_buf,
         };
+        let pf_decay_bindings =
+            decay_predator_focus::DecayPredatorFocusBindings::from_context_with_extras(
+                &ctx,
+                &pf_decay_extras,
+            );
         // pair_map decay: dispatch covers `slot_count` (= agent_cap²)
         // threads — one per (k1, k2) slot — so the anchor multiplier
         // touches every pair, not just the diagonal `agent_cap` slots.

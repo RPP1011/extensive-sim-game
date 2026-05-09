@@ -15,7 +15,9 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -65,6 +67,12 @@ pub struct SwarmStormState {
     /// rate (0.85) before the per-event fold lands. The kernel reads
     /// `cfg.agent_cap` for the early-return.
     recent_pulse_intensity_decay_cfg_buf: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
     pos_cache: Vec<Vec3>,
@@ -208,6 +216,12 @@ impl SwarmStormState {
             },
         );
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&engine::ability::AbilityRegistry::new()),
+            &gpu,
+            "swarm_storm_runtime",
+        );
+
         Self {
             gpu,
             pos_buf,
@@ -221,6 +235,7 @@ impl SwarmStormState {
             recent_pulse_intensity,
             recent_pulse_intensity_cfg_buf,
             recent_pulse_intensity_decay_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             pos_cache: pos_host,
             dirty: false,
@@ -296,15 +311,31 @@ impl CompiledSim for SwarmStormState {
 
         self.event_ring.clear_tail_in(&mut encoder);
 
+        // Shared once per tick; each non-fold dispatch below adds only
+        // its fixture-specific extras struct. `agent_vel` is not a
+        // standard SoA column so it flows through extras as
+        // `agent_vel`.
+        let agent_buffers = AgentBuffers {
+            pos_buf: Some(&self.pos_buf),
+            alive_buf: Some(&self.alive_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
         // (1) PulseAndDrift — emits 4 Pulse events per alive agent.
-        let bindings = physics_PulseAndDrift::PhysicsPulseAndDriftBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_pos: &self.pos_buf,
-            agent_alive: &self.alive_buf,
+        let extras = physics_PulseAndDrift::PhysicsPulseAndDriftExtras {
             agent_vel: &self.vel_buf,
             cfg: &self.cfg_buf,
         };
+        let bindings = physics_PulseAndDrift::PhysicsPulseAndDriftBindings::from_context_with_extras(
+            &ctx,
+            &extras,
+        );
         dispatch::dispatch_physics_pulseanddrift(
             &mut self.cache,
             &bindings,
@@ -313,12 +344,14 @@ impl CompiledSim for SwarmStormState {
             self.agent_count,
         );
 
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.cfg_buf,
         };
+        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+            &ctx,
+            &seed_extras,
+        );
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache,
             &seed_bindings,
@@ -401,11 +434,16 @@ impl CompiledSim for SwarmStormState {
             0,
             bytemuck::bytes_of(&rpi_decay_cfg),
         );
-        let rpi_decay_bindings =
-            decay_recent_pulse_intensity::DecayRecentPulseIntensityBindings {
+        let rpi_decay_extras =
+            decay_recent_pulse_intensity::DecayRecentPulseIntensityExtras {
                 view_storage_primary: self.recent_pulse_intensity.primary(),
                 cfg: &self.recent_pulse_intensity_decay_cfg_buf,
             };
+        let rpi_decay_bindings =
+            decay_recent_pulse_intensity::DecayRecentPulseIntensityBindings::from_context_with_extras(
+                &ctx,
+                &rpi_decay_extras,
+            );
         dispatch::dispatch_decay_recent_pulse_intensity(
             &mut self.cache,
             &rpi_decay_bindings,
