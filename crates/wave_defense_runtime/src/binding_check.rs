@@ -4,14 +4,14 @@
 //! program landed at the expected AbilityId slot. Drift surfaces here
 //! at startup rather than as silent wrong-slot dispatch downstream.
 //!
-//! Slot pinning order (alphabetised filenames in `names`) — Task #249
-//! polish slice expanded the corpus from 2 → 5 abilities to support
-//! tick-windowed wave-size ramping (Path B):
-//!   MonsterCleave  → AbilityId(1)   (MonsterCleaveScan dispatches `apply_ability 1`)
-//!   SpawnHorde     → AbilityId(2)   (SpawnHorde verb dispatches `apply_ability 2`; count=64)
-//!   SpawnLarge     → AbilityId(3)   (SpawnLarge verb dispatches `apply_ability 3`; count=32)
-//!   SpawnMedium    → AbilityId(4)   (SpawnMedium verb dispatches `apply_ability 4`; count=16)
-//!   SpawnSmall     → AbilityId(5)   (SpawnSmall verb dispatches `apply_ability 5`; count=8)
+//! Slot pinning order (alphabetised filenames in `names`) — Phase E
+//! voxel-engine integration added BuildPalisade as a 6th ability:
+//!   BuildPalisade  → AbilityId(1)   (BuildPalisade verb dispatches `apply_ability 1`; place_voxel "palisade")
+//!   MonsterCleave  → AbilityId(2)   (MonsterCleaveScan dispatches `apply_ability 2`)
+//!   SpawnHorde     → AbilityId(3)   (SpawnHorde verb dispatches `apply_ability 3`; count=64)
+//!   SpawnLarge     → AbilityId(4)   (SpawnLarge verb dispatches `apply_ability 4`; count=32)
+//!   SpawnMedium    → AbilityId(5)   (SpawnMedium verb dispatches `apply_ability 5`; count=16)
+//!   SpawnSmall     → AbilityId(6)   (SpawnSmall verb dispatches `apply_ability 6`; count=8)
 //!
 //! Each .sim verb body's `apply_ability N by self target X` literal
 //! must agree with these constants — drift surfaces as silent
@@ -21,11 +21,12 @@ use std::path::PathBuf;
 
 use engine::ability::AbilityId;
 
-pub const MONSTER_CLEAVE_EXPECTED_ABILITY_ID: u32 = 1;
-pub const SPAWN_HORDE_EXPECTED_ABILITY_ID: u32 = 2;
-pub const SPAWN_LARGE_EXPECTED_ABILITY_ID: u32 = 3;
-pub const SPAWN_MEDIUM_EXPECTED_ABILITY_ID: u32 = 4;
-pub const SPAWN_SMALL_EXPECTED_ABILITY_ID: u32 = 5;
+pub const BUILD_PALISADE_EXPECTED_ABILITY_ID: u32 = 1;
+pub const MONSTER_CLEAVE_EXPECTED_ABILITY_ID: u32 = 2;
+pub const SPAWN_HORDE_EXPECTED_ABILITY_ID: u32 = 3;
+pub const SPAWN_LARGE_EXPECTED_ABILITY_ID: u32 = 4;
+pub const SPAWN_MEDIUM_EXPECTED_ABILITY_ID: u32 = 5;
+pub const SPAWN_SMALL_EXPECTED_ABILITY_ID: u32 = 6;
 
 /// Read + parse + build the AbilityRegistry over every .ability file
 /// under `assets/ability_test/wave_defense/`. Mirrors
@@ -52,9 +53,10 @@ pub(crate) fn build_wave_defense_registry()
     };
 
     // Source-order names list — also the registry's slot order.
-    // Alphabetised: MonsterCleave + SpawnHorde + SpawnLarge +
-    // SpawnMedium + SpawnSmall → AbilityIds (1, 2, 3, 4, 5).
+    // Alphabetised: BuildPalisade + MonsterCleave + SpawnHorde +
+    // SpawnLarge + SpawnMedium + SpawnSmall → AbilityIds (1, 2, 3, 4, 5, 6).
     let names = [
+        "BuildPalisade.ability",
         "MonsterCleave.ability",
         "SpawnHorde.ability",
         "SpawnLarge.ability",
@@ -91,6 +93,7 @@ pub fn assert_ability_registry_matches_sim_constants() {
         );
     };
 
+    assert_slot("BuildPalisade", BUILD_PALISADE_EXPECTED_ABILITY_ID);
     assert_slot("MonsterCleave", MONSTER_CLEAVE_EXPECTED_ABILITY_ID);
     assert_slot("SpawnHorde",    SPAWN_HORDE_EXPECTED_ABILITY_ID);
     assert_slot("SpawnLarge",    SPAWN_LARGE_EXPECTED_ABILITY_ID);

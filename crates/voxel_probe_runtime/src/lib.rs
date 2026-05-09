@@ -1337,6 +1337,114 @@ fn cs_voxel_readback(@builtin(global_invocation_id) gid: vec3<u32>) {
     // obstructions to traverse.
     // -----------------------------------------------------------------
 
+    // -----------------------------------------------------------------
+    // Phase E semantic pin — same_seed_same_voxel_world.
+    //
+    // The load-bearing P5 determinism pin for the voxel adapter: build
+    // two fixture instances with the same seed, drive each for N
+    // ticks, then hash the CPU-side VoxelGrid contents (every cell at
+    // every (x, y, z) in the 16³ extent — total 4096 bytes). The
+    // hashes MUST match. A failure means non-deterministic ordering
+    // crept in somewhere — most likely a HashMap iteration in the
+    // chronicle drain, or BTreeSet → HashSet substitution in the
+    // mirror's dirty tracking.
+    //
+    // This is the cross-cutting risk #2 from the plan
+    // (`docs/superpowers/plans/2026-05-09-voxel-engine-integration.md`):
+    // "voxel_engine's chunks may iterate by HashMap. Verify in Phase
+    // A; replace with BTreeMap or sort keys at boundary. P5 violation
+    // risk if missed. The same_seed_same_voxel_world pin in Phase E
+    // catches it."
+    //
+    // The hash is computed by walking cells in ascending (z, y, x)
+    // order — deterministic regardless of any internal storage
+    // ordering. Two same-seed runs with different internal iteration
+    // would still produce different VoxelGrid contents at the *same*
+    // (x, y, z) and the hash would diverge.
+    //
+    // Don't substitute "both runs return non-zero counts" — that's
+    // the probe-fooling pattern; same-seed runs that diverge in cell
+    // *placement* would still pass a counter-based pin.
+    // -----------------------------------------------------------------
+
+    /// Walk the voxel grid in ascending (z, y, x) order and SHA-256
+    /// the byte stream. Used by `same_seed_same_voxel_world` to
+    /// compare two same-seed runs at byte granularity. The walk
+    /// order is independent of the underlying storage's internal
+    /// iteration — a HashMap-backed grid that produces the same
+    /// cells at the same coordinates would still hash identically.
+    fn hash_voxel_world(state: &VoxelProbeState) -> [u8; 32] {
+        use sha2::{Digest, Sha256};
+        let extent = state.terrain().extent() as i32;
+        let mut hasher = Sha256::new();
+        for z in 0..extent {
+            for y in 0..extent {
+                for x in 0..extent {
+                    let v = state.terrain().cell_at(x, y, z);
+                    hasher.update(&[v]);
+                }
+            }
+        }
+        hasher.finalize().into()
+    }
+
+    /// **Phase E semantic pin.** Two same-seed runs of the
+    /// voxel_probe fixture must produce byte-identical VoxelGrid
+    /// state after `N` ticks. Catches HashMap-derived non-determinism
+    /// in the chronicle drain or mirror, and any future RNG-keyed
+    /// voxel mutation that fails to use `per_agent_u32(...)` keying.
+    ///
+    /// The fixture's chronicle drain is purely a function of the
+    /// chronicle records (deterministic per the GPU dispatcher's
+    /// per-tick output) and the agent SoA (initialised
+    /// deterministically per seed). The voxel grid mutation order is
+    /// driven by the ring-slot ordering the dispatcher writes
+    /// (deterministic per GPU spec) → applied via
+    /// `apply_voxel_chronicle_record_with_mirror` in the order
+    /// records arrive. As long as every step of that pipeline is
+    /// deterministic, the final grid state hashes identically.
+    #[test]
+    fn same_seed_same_voxel_world() {
+        const N: u64 = 50;
+        let mut state_a = match VoxelProbeState::try_new(0xC0FFEE) {
+            Some(s) => s,
+            None => {
+                eprintln!(
+                    "[same_seed_same_voxel_world] skipping: no wgpu \
+                     adapter available on this host."
+                );
+                return;
+            }
+        };
+        let mut state_b = match VoxelProbeState::try_new(0xC0FFEE) {
+            Some(s) => s,
+            None => return,
+        };
+        for _ in 0..N {
+            state_a.step();
+        }
+        for _ in 0..N {
+            state_b.step();
+        }
+        let hash_a = hash_voxel_world(&state_a);
+        let hash_b = hash_voxel_world(&state_b);
+        assert_eq!(
+            hash_a, hash_b,
+            "same-seed runs produced different VoxelGrid hashes after \
+             {N} ticks: a={:02x?} b={:02x?}. Non-determinism crept in — \
+             most likely a HashMap iteration order leak in the \
+             chronicle drain, or BTreeSet → HashSet substitution in \
+             VoxelMirror::dirty_chunks. Re-audit voxel_engine \
+             dependencies for HashMap usage at the adapter boundary.",
+            hash_a, hash_b,
+        );
+        eprintln!(
+            "[voxel_probe] same_seed_same_voxel_world: hash={:02x?} \
+             (matched across two seed=0xC0FFEE runs of {N} ticks)",
+            &hash_a[..8]
+        );
+    }
+
     /// Verbatim copy of the `voxel_line_of_sight` helper body the
     /// compiler injects into kernels that call `terrain.line_of_sight`
     /// (see `dsl_compiler::cg::emit::program::VOXEL_GRID_WGSL_PRELUDE`).

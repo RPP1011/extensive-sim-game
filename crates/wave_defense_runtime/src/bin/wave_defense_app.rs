@@ -28,7 +28,9 @@
 use std::io::Write;
 use std::panic::AssertUnwindSafe;
 
-use wave_defense_runtime::{wave_size_at_tick, WaveDefenseState, DEFAULT_MAX_TICKS};
+use wave_defense_runtime::{
+    wave_size_at_tick, WaveDefenseState, DEFAULT_MAX_TICKS,
+};
 
 const TICK_SAMPLE_PERIOD: u64 = 50;
 
@@ -119,6 +121,21 @@ fn main() {
     let final_score = std::panic::catch_unwind(AssertUnwindSafe(|| state.read_score()))
         .unwrap_or(last_score);
     emit_summary(&mut stdout, died_at_tick, final_score, max_wave_size, panic_msg);
+
+    // Phase E voxel-engine integration — print the per-tick
+    // `flush_dirty` perf summary to stderr so the perf doc author
+    // can read it from `tail -10`'s combined stdout/stderr without
+    // polluting the NDJSON stdout stream. Mean cost = total / count.
+    let flush_calls = state.flush_call_count();
+    let max_us = state.max_flush_ns() as f64 / 1000.0;
+    let total_us = state.total_flush_ns() as f64 / 1000.0;
+    let mean_us = total_us / (flush_calls.max(1) as f64);
+    eprintln!(
+        "[wave_defense_app voxel-perf] palisade_records={} \
+         flush_call_count={flush_calls} flush_dirty: max={max_us:.2} us, \
+         mean={mean_us:.2} us, total={total_us:.2} us across {flush_calls} ticks",
+        state.total_palisade_records(),
+    );
 }
 
 fn emit_per_tick(

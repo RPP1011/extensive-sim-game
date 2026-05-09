@@ -272,3 +272,94 @@ qualifies; the metric will become more interesting on fixtures with
 multi-faction predicates or per-pair candidate masks where the
 hit rate distinguishes "predicate filtered useful candidates" from
 "every candidate trivially passes."
+
+## Voxel mirror upload cost — wave_defense baseline
+
+Phase E of the voxel-engine integration plan
+(`docs/superpowers/plans/2026-05-09-voxel-engine-integration.md`)
+opted `wave_defense_runtime` into `engine_voxel::VoxelTerrain` +
+`VoxelMirror`. Settlers self-cast a new `BuildPalisade` ability
+(`place_voxel "palisade"`) every `palisade_period = 50` ticks during
+the early game (tick < 1000); the chronicle drain mutates the host
+VoxelTerrain AND marks dirty chunks in the GPU mirror; end-of-tick
+`flush_dirty(...)` re-uploads the dirty chunks.
+
+Run host: same as fixtures A/B above (Linux x86_64, wgpu adapter
+selected by `Backends::all`). Command:
+`RUST_MIN_STACK=33554432 cargo run --release --bin wave_defense_app -- 0`.
+
+| Metric                                          | Value                  |
+|-------------------------------------------------|------------------------|
+| Mirror buffer size (256³ × 4 B)                 | 64 MiB (alloc once)    |
+| Mirror chunk dim                                | 8³ cells = 2 KiB / chunk |
+| Run length                                      | 361 ticks              |
+| died_at_tick                                    | 360                    |
+| Score (= node mana)                             | 3350                   |
+| `BuildPalisade` chronicle records drained total | 175                    |
+| `flush_dirty` invocations                       | 361 (1 per tick)       |
+| `flush_dirty` median (per-tick)                 | 5.83 µs (mean, see below) |
+| `flush_dirty` p99 / max                         | 325.42 µs              |
+| `flush_dirty` total wall-clock                  | 2.10 ms across 361 ticks |
+| Per-tick mean overhead                          | 5.83 µs                |
+
+(Mean reported in lieu of true median because the per-tick perf is
+captured as `total_flush_ns / flush_call_count`; per-tick samples
+aren't streamed individually. The max captures the warmup tick where
+the host writes the first dirty chunks AND the once-only WGSL
+pipeline-cache cost on first dispatch — same artifact as cast_density
+fixture B's first-tick spike.)
+
+### Comparison vs. Phase C voxel_probe baseline
+
+Phase C's `voxel_probe_runtime::cpu_gpu_voxel_state_matches` pin
+reported `flush_dirty: max=162 µs, mean=11.46 µs` on the same host
+across 30 ticks (16³ extent). Wave_defense's numbers per the table:
+
+| Fixture                  | Extent   | Run length | Per-tick mean (µs) | Per-tick max (µs) |
+|--------------------------|----------|------------|--------------------|--------------------|
+| voxel_probe (Phase C)    | 16³      | 30 ticks   | 11.46              | 162                |
+| wave_defense (Phase E)   | 256³     | 361 ticks  | 5.83               | 325                |
+
+**Findings:**
+
+- **Per-tick mean dropped 50% (11.46 µs → 5.83 µs)** despite the 16×
+  extent jump (256³ vs 16³). The per-tick cost is dominated by the
+  empty-dirty-set fast-path (`if dirty_chunks.is_empty() { return; }`
+  in `VoxelMirror::flush_dirty`); wave_defense's BuildPalisade fires
+  only every 50 ticks, so 49/50 ticks return immediately. voxel_probe
+  fires every tick (PlaceTestVoxel at tick=0, Harvest at tick%10==5),
+  so the empty-dirty-set fast path engages less often.
+- **Per-tick max grew 2× (162 µs → 325 µs)** — expected from the
+  larger 64 MiB GPU buffer; first-tick allocation + initial whole-
+  buffer upload take longer at 256³ than 16³. Steady-state ticks
+  (where only the touched 8³ chunks re-upload) are unchanged in
+  cost regardless of total buffer size.
+- **Total per-run cost is 2.10 ms** across 361 ticks — well below the
+  plan's 1 ms/tick threshold for triggering a follow-up GPU↔GPU
+  interop investigation. CPU-mirror-then-upload is viable for
+  wave_defense's PlaceVoxel cadence (175 records over 360 ticks =
+  0.49 records/tick avg, 25 settlers × 1 record / 50 ticks =
+  0.5 records/tick theoretical).
+- **No GPU-interop follow-up filed.** The cross-cutting risk #1 in
+  the voxel-engine integration plan (`Phase E records the actual
+  cost; if it exceeds 1 ms/tick at the production-fixture rate,
+  that's the trigger to revisit GPU↔GPU interop`) does NOT trip at
+  wave_defense's cadence. A future PlaceVoxel-heavy fixture (e.g.
+  fire-spreads-every-tick at 1000+ records/tick) would re-trigger
+  the question — but the current fixture has plenty of headroom.
+
+### Next stride opportunities (not blocking this slice)
+
+- Stream per-tick `flush_dirty` samples to the existing NDJSON
+  output so the perf doc gets true median + p99 instead of mean
+  derived from totals.
+- Bench a hypothetical "every settler builds every tick" path
+  (palisade_period=1) to find the actual upper-bound on per-tick
+  mirror upload cost before GPU↔GPU interop becomes the obvious
+  next stride.
+- Wire `terrain.walkable(...)` lowering into `MonsterMarch` so
+  monsters actually pathfind around palisades — Phase E ships the
+  voxel terrain but doesn't yet make the GPU sim consume it
+  (the `monsters_blocked_by_palisade` pin proves the host CPU
+  query reflects mutations; the GPU sim consumption is the next
+  slice).

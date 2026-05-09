@@ -27,6 +27,13 @@ pollster = "0.4"
 dsl_ast = { path = "../dsl_ast" }
 dsl_compiler = { path = "../dsl_compiler" }
 
+[dev-dependencies]
+# Phase E `same_seed_same_voxel_world` pin: SHA-256 the byte-cast
+# voxel grid contents to compare two same-seed runs at byte
+# granularity. sha2 is already a transitive dep through the engine
+# crate; pinning here makes the test's intent explicit.
+sha2 = "0.10"
+
 [build-dependencies]
 dsl_ast = { path = "../dsl_ast" }
 dsl_compiler = { path = "../dsl_compiler" }
