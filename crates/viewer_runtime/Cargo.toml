@@ -1,0 +1,30 @@
+[package]
+name = "viewer_runtime"
+version = "0.1.0"
+edition = "2021"
+
+# Phase A of the viewer-runtime plan: stand up a real-time visual
+# viewer atop the deterministic sim by reusing voxel_engine's renderer
+# and Scene. Pilot fixture is wave_defense (palisades + monsters +
+# settlers makes "looks like a game" the easiest to read).
+#
+# This crate is the *presentation* seam — it depends on voxel_engine
+# with the `app-harness` feature (winit + egui). The sim itself stays
+# in the runtime crate (wave_defense_runtime); this crate just reads
+# its snapshots and mirrors agent positions into the renderer's Scene.
+#
+# voxel_engine is pulled here separately from engine_voxel's path dep;
+# Cargo unifies the dep at the same git rev so we don't get two
+# versions of voxel_engine in the dep graph.
+
+[dependencies]
+engine = { path = "../engine" }
+engine_voxel = { path = "../engine_voxel" }
+wave_defense_runtime = { path = "../wave_defense_runtime" }
+
+# voxel_engine with app-harness pulls winit + egui transitively.
+voxel_engine = { git = "https://github.com/RPP1011/voxel_engine", rev = "02d21a2866f53603ce89c5708c4a10e771e19bf8", features = ["app-harness"] }
+
+glam = "0.29"
+anyhow = "1"
+winit = "0.30"
