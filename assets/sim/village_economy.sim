@@ -263,27 +263,26 @@ verb OfferDeal(self, target: Agent) =
 // busy_until_tick are deferred per P1 — the chronicle record landing
 // is the behavioral pin.
 //
-// SCHEDULING NOTE: the compiler fuses FoldTravel with the
+// SCHEDULING NOTE: pre-Task #235 the compiler fused FoldTravel with the
 // verb_chronicle_WalkToWorkshop dispatcher into ONE PerEvent kernel.
-// Within a single kernel pass, FoldTravel's read can't see the
-// kind=70 records the dispatcher will write later in the same pass
+// Within a single kernel pass, FoldTravel's read couldn't see the
+// kind=70 records the dispatcher would write later in the same pass
 // (no within-kernel barrier between producer + consumer threads on
-// the GPU). The runtime works around this by DISPATCHING THE FUSED
-// KERNEL TWICE PER TICK — first pass writes the chronicle records,
-// second pass folds them. This double-counts the OTHER FoldX rules
-// (FoldRecipe, FoldWear, FoldSkill, FoldAnnounce — all of which
-// consume kinds emitted by ForgeIron's separate chronicle kernel),
-// but the behavioral pin only checks > 0 so the doubled counters
-// stay correct-by-direction.
+// the GPU). The runtime worked around this by dispatching the fused
+// kernel TWICE per tick.
 //
-// ROOT CAUSE: the `producer_consumer_event_witness` analyzer rule
-// (cg/schedule/fusion.rs Rule 4) only recognises explicit `Emit`
-// statements as event-ring writes — `ApplyAbility` synthesizes the
-// events at runtime but the static analyzer pushes a placeholder
-// `EventKindId(0)` instead of the real emitted kinds (see
-// fusion.rs::collect_emits_in_list ApplyAbility arm). Until that
-// analyzer learns to enumerate ApplyAbility's dispatched kinds via
-// the AbilityRegistry, the runtime double-dispatch stands.
+// Task #235 (`fix(compiler): fusion analyzer enumerates ApplyAbility
+// chronicle writes`) fixed the root cause: the
+// `producer_consumer_event_witness` analyzer rule (cg/schedule/
+// fusion.rs Rule 4) now consults the build-time AbilityRegistry to
+// resolve `apply_ability <literal>` to the chronicle event kinds the
+// WGSL dispatcher will write (kind=70 for TravelTo, etc.). The
+// analyzer also walks every member of the in-progress fusion group
+// (not just the tail) so the producer/consumer relationship between
+// FoldTravel (added first) and verb_chronicle_WalkToWorkshop (added
+// last) gets caught. With the fix, WalkToWorkshop dispatches as its
+// own kernel BEFORE the fold pass and the per-kernel barrier makes
+// the kind=70 records visible to FoldTravel.
 @phase(post)
 physics FoldTravel {
   on EffectTravelToApplied { actor: a, target: _, dest_packed: _, eta_ticks: _ } {

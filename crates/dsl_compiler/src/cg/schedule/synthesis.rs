@@ -65,13 +65,15 @@
 
 use std::fmt;
 
+use engine::ability::AbilityRegistry;
+
 use crate::cg::data_handle::EventRingId;
 use crate::cg::dispatch::DispatchShape;
 use crate::cg::op::{ComputeOpKind, OpId, PlumbingKind};
 use crate::cg::program::CgProgram;
 
 use super::fusion::{FusibilityClass, FusionDiagnostic, FusionGroup};
-use super::strategy::{fusion_decisions_with_strategy, ScheduleStrategy};
+use super::strategy::{fusion_decisions_with_strategy_and_registry, ScheduleStrategy};
 use super::topology::dependency_graph;
 
 // ---------------------------------------------------------------------------
@@ -398,9 +400,31 @@ pub fn synthesize_schedule(
     prog: &CgProgram,
     strategy: ScheduleStrategy,
 ) -> ScheduleSynthesisResult {
+    synthesize_schedule_with_registry(prog, strategy, None)
+}
+
+/// Registry-aware variant of [`synthesize_schedule`]. When `registry`
+/// is `Some`, the underlying fusion analyzer (rule 4 — producer/consumer
+/// event-ring split) sees the real `EventKindId`s that
+/// `CgStmt::ApplyAbility` will dispatch into the chronicle ring at
+/// runtime, instead of the historic `EventKindId(0)` placeholder. Same-
+/// tick consumers (`physics on EffectXApplied { ... }`,
+/// `view_fold on EffectYApplied { ... }`) split out of the dispatcher
+/// kernel into their own PerEvent kernels so a per-tick GPU dispatch
+/// barrier sits between the producer write and the consumer read.
+///
+/// When `None`, the analyzer falls back to the placeholder semantics —
+/// preserves the pre-#235 behaviour for build sites that don't yet
+/// thread the registry through. See [`super::fusion::collect_emits_in_list`]
+/// for the upstream resolution logic.
+pub fn synthesize_schedule_with_registry(
+    prog: &CgProgram,
+    strategy: ScheduleStrategy,
+    registry: Option<&AbilityRegistry>,
+) -> ScheduleSynthesisResult {
     let deps = dependency_graph(prog);
     let (groups, fusion_diagnostics) =
-        fusion_decisions_with_strategy(prog, &deps, strategy);
+        fusion_decisions_with_strategy_and_registry(prog, &deps, strategy, registry);
 
     let mut stages: Vec<ComputeStage> = Vec::with_capacity(groups.len());
     let mut schedule_diagnostics: Vec<ScheduleDiagnostic> = Vec::new();

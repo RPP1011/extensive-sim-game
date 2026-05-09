@@ -27,7 +27,9 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
     let corpus_dir = workspace_root.join("assets/ability_test/village_economy");
-    for name in ["ForgeIron.ability", "OfferDeal.ability", "WalkToWorkshop.ability"] {
+    const ABILITY_NAMES: &[&str] =
+        &["ForgeIron.ability", "OfferDeal.ability", "WalkToWorkshop.ability"];
+    for name in ABILITY_NAMES {
         println!("cargo:rerun-if-changed={}", corpus_dir.join(name).display());
     }
 
@@ -44,9 +46,32 @@ fn main() {
             o.program
         }
     };
-    let schedule_result = dsl_compiler::cg::schedule::synthesize_schedule(
+
+    // Task #235 — build the AbilityRegistry at build time so the
+    // schedule synthesizer's fusion analyzer can resolve every
+    // `apply_ability <literal>` to the chronicle event kinds the WGSL
+    // dispatcher will write. This unfuses FoldTravel from
+    // verb_chronicle_WalkToWorkshop (rule 4 — producer/consumer event-
+    // ring split) so the runtime no longer needs to dispatch the fused
+    // kernel twice as a barrier workaround.
+    let ability_files: Vec<(String, _)> = ABILITY_NAMES
+        .iter()
+        .map(|name| {
+            let path = corpus_dir.join(name);
+            let src = fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+            let parsed = dsl_ast::parse_ability_file(&src)
+                .unwrap_or_else(|e| panic!("parse {name}: {e:?}"));
+            (name.to_string(), parsed)
+        })
+        .collect();
+    let built_registry = dsl_compiler::ability_registry::build_registry(&ability_files)
+        .expect("build village_economy AbilityRegistry");
+
+    let schedule_result = dsl_compiler::cg::schedule::synthesize_schedule_with_registry(
         &cg,
         dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+        Some(&built_registry.registry),
     );
     let artifacts = dsl_compiler::cg::emit::emit_cg_program(&schedule_result.schedule, &cg)
         .expect("emit village_economy CG program");

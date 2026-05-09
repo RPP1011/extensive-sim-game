@@ -33,14 +33,16 @@ pub mod synthesis;
 pub mod topology;
 
 pub use fusion::{
-    dispatch_shape_key, fusion_candidates, fusion_decisions, DispatchShapeKey, FusibilityClass,
-    FusionDiagnostic, FusionDiagnosticKind, FusionGroup,
+    dispatch_shape_key, fusion_candidates, fusion_candidates_with_registry, fusion_decisions,
+    fusion_decisions_with_registry, DispatchShapeKey, FusibilityClass, FusionDiagnostic,
+    FusionDiagnosticKind, FusionGroup,
 };
 pub use strategy::{
-    fusion_candidates_with_strategy, fusion_decisions_with_strategy, ScheduleStrategy,
+    fusion_candidates_with_strategy, fusion_decisions_with_strategy,
+    fusion_decisions_with_strategy_and_registry, ScheduleStrategy,
 };
 pub use synthesis::{
-    synthesize_schedule, ComputeSchedule, ComputeStage, KernelTopology, ScheduleDiagnostic,
-    ScheduleDiagnosticKind, ScheduleSynthesisResult,
+    synthesize_schedule, synthesize_schedule_with_registry, ComputeSchedule, ComputeStage,
+    KernelTopology, ScheduleDiagnostic, ScheduleDiagnosticKind, ScheduleSynthesisResult,
 };
 pub use topology::{dependency_graph, topological_sort, CycleError, DepGraph};
