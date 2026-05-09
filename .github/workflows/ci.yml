@@ -22,14 +22,6 @@ jobs:
           sudo apt-get install -y libasound2-dev libudev-dev pkg-config \
             mesa-vulkan-drivers vulkan-tools libvulkan1
 
-      - name: Verify lavapipe is loadable (debug)
-        run: |
-          echo "--- ICD files in /usr/share/vulkan/icd.d/ ---"
-          ls -la /usr/share/vulkan/icd.d/ 2>&1 || true
-          echo "--- vulkaninfo --summary ---"
-          VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json \
-            vulkaninfo --summary 2>&1 | head -40 || true
-
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
@@ -53,7 +45,7 @@ jobs:
       # AOE Path B's naga validator (see project_aoe_gotchas memory).
       - name: cargo test (unit + integration)
         env:
-          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
           RUST_MIN_STACK: "33554432"
         run: cargo test --workspace --lib --tests -- --test-threads=1
 
@@ -124,6 +116,6 @@ jobs:
       # rationale matches the Check & Test job above.
       - name: Run wave_defense determinism pin (release)
         env:
-          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
           RUST_MIN_STACK: "33554432"
         run: cargo test -p wave_defense_runtime --release same_seed_same_death_tick -- --test-threads=1
