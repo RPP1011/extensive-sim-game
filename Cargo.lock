@@ -538,6 +538,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "debug_probe_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "dhat"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

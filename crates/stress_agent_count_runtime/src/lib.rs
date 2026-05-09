@@ -57,6 +57,12 @@ pub const DISPATCHER_KERNEL_BYTES: usize = include!(concat!(
     "/dispatcher_total_bytes.txt"
 ));
 
+/// Slot count for the WGSL `event_kind_counts: array<atomic<u32>>`
+/// instrumentation buffer. Sized for `EventKindId::ChronicleEntry =
+/// 128 + 1` so every emitted EventKind discriminant has a dedicated
+/// counter slot. See `crates/engine/src/cascade/handler.rs`.
+pub const N_EVENT_KIND_SLOTS: usize = 129;
+
 /// Seed used by all stress runs. Per the plan doc P5 compliance:
 /// pseudo-hex `0x5tre55_aa` doesn't fit in a real u64 hex literal so
 /// we use the closest sensible interpretation.
@@ -103,6 +109,21 @@ pub struct StressAgentCountState {
     /// Packed AbilityRegistry uploaded once at construction. Holds the
     /// Pulse program (single EffectOp::SelfDamage{0.0}) at AbilityId(1).
     registry_gpu: PackedAbilityRegistryGpu,
+
+    // -- Phase 2 debug instrumentation buffers. Compiler-emitted
+    //    `atomicAdd` sites in the chronicle producer + scoring
+    //    kernels accumulate into these per-tick. Reset to zero at
+    //    the start of each step() so the readback captures the
+    //    most-recent-tick histogram only. --
+    /// Per-EventKindId chronicle counter (sized N_EVENT_KIND_SLOTS).
+    event_kind_counts_buf: wgpu::Buffer,
+    /// Per-agent argmax visit counter (sized agent_count). Bound to
+    /// the scoring kernel.
+    score_kernel_visits_buf: wgpu::Buffer,
+    /// Zero-source for the per-tick reset of `event_kind_counts`.
+    event_kind_counts_zero_buf: wgpu::Buffer,
+    /// Zero-source for the per-tick reset of `score_kernel_visits`.
+    score_kernel_visits_zero_buf: wgpu::Buffer,
 
     cache: dispatch::KernelCache,
 
@@ -296,6 +317,46 @@ impl StressAgentCountState {
             positions_host.push(Vec3::new(fx, fy, fz));
         }
 
+        // Phase 2 debug instrumentation buffers: per-EventKindId
+        // histogram + per-agent score_kernel_visits. Init zero. The
+        // matching zero-source buffers are COPY_SRC only — driven into
+        // the per-tick destinations at the start of each step() so the
+        // histograms capture this tick's counts only.
+        let zeros_kind: Vec<u32> = vec![0u32; N_EVENT_KIND_SLOTS];
+        let event_kind_counts_buf = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("stress_agent_count::event_kind_counts"),
+                contents: bytemuck::cast_slice(&zeros_kind),
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+            },
+        );
+        let event_kind_counts_zero_buf = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("stress_agent_count::event_kind_counts_zero"),
+                contents: bytemuck::cast_slice(&zeros_kind),
+                usage: wgpu::BufferUsages::COPY_SRC,
+            },
+        );
+        let zeros_per_agent: Vec<u32> = vec![0u32; n];
+        let score_kernel_visits_buf = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("stress_agent_count::score_kernel_visits"),
+                contents: bytemuck::cast_slice(&zeros_per_agent),
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+            },
+        );
+        let score_kernel_visits_zero_buf = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("stress_agent_count::score_kernel_visits_zero"),
+                contents: bytemuck::cast_slice(&zeros_per_agent),
+                usage: wgpu::BufferUsages::COPY_SRC,
+            },
+        );
+
         // Construct compiler-debug-mode (D3) timing instrumentation
         // before moving `gpu` into Self. None on adapters without
         // TIMESTAMP_QUERY (the per-tick path falls back to plain
@@ -324,6 +385,10 @@ impl StressAgentCountState {
             chronicle_cfg_buf,
             seed_cfg_buf,
             registry_gpu,
+            event_kind_counts_buf,
+            score_kernel_visits_buf,
+            event_kind_counts_zero_buf,
+            score_kernel_visits_zero_buf,
             cache: dispatch::KernelCache::default(),
             debug_timings,
             last_kernel_timings: Vec::new(),
@@ -344,6 +409,67 @@ impl StressAgentCountState {
 
     pub fn seed(&self) -> u64 {
         self.seed
+    }
+
+    /// Read the per-EventKindId histogram populated by the chronicle
+    /// kernel's compiler-emitted `atomicAdd(&event_kind_counts[k], 1u)`
+    /// instrumentation. Reset to zero at the start of every step(), so
+    /// this returns the most recent tick's histogram only.
+    pub fn read_event_kind_histogram(&self) -> [u32; N_EVENT_KIND_SLOTS] {
+        let v = self.read_u32_slice(
+            &self.event_kind_counts_buf,
+            N_EVENT_KIND_SLOTS,
+            "event_kind_counts",
+        );
+        let mut out = [0u32; N_EVENT_KIND_SLOTS];
+        out.copy_from_slice(&v);
+        out
+    }
+
+    /// Read the per-agent score_kernel_visits histogram populated by
+    /// the scoring kernel. Index = AgentId (0..agent_count); value =
+    /// number of times the scoring kernel visited the agent's row this
+    /// tick. Pulse is self-target, so the per-agent visit count is
+    /// equal to the number of mask rows the agent qualifies for (= 1
+    /// for every alive agent in this fixture). Useful at 200k for
+    /// surfacing surprising load-imbalance.
+    pub fn read_score_kernel_visits(&self) -> Vec<u32> {
+        self.read_u32_slice(
+            &self.score_kernel_visits_buf,
+            self.agent_count as usize,
+            "score_kernel_visits",
+        )
+    }
+
+    fn read_u32_slice(&self, buf: &wgpu::Buffer, len: usize, label: &str) -> Vec<u32> {
+        let bytes = (len as u64) * 4;
+        let staging = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("stress_agent_count::{label}_staging")),
+            size: bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self.gpu.device.create_command_encoder(
+            &wgpu::CommandEncoderDescriptor {
+                label: Some("stress_agent_count::read_u32_slice"),
+            },
+        );
+        encoder.copy_buffer_to_buffer(buf, 0, &staging, 0, bytes);
+        self.gpu.queue.submit(Some(encoder.finish()));
+        let slice = staging.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = sender.send(r);
+        });
+        self.gpu.device.poll(wgpu::PollType::Wait).expect("poll");
+        let _ = receiver.recv().expect("map_async result");
+        let v: Vec<u32> = {
+            let mapped = slice.get_mapped_range();
+            let words: &[u32] = bytemuck::cast_slice(&mapped);
+            words[..len].to_vec()
+        };
+        staging.unmap();
+        v
     }
 
     /// Snapshot of the chronicle event ring's tail value (= total
@@ -428,6 +554,24 @@ impl CompiledSim for StressAgentCountState {
             0,
             scoring_output_bytes.max(16),
         );
+        // Phase 2 debug: clear the per-tick instrumentation counters
+        // so the readback captures THIS tick's totals only. Without
+        // this, every tick's atomicAdd accumulates onto the prior
+        // tick's totals.
+        encoder.copy_buffer_to_buffer(
+            &self.event_kind_counts_zero_buf,
+            0,
+            &self.event_kind_counts_buf,
+            0,
+            (N_EVENT_KIND_SLOTS as u64) * 4,
+        );
+        encoder.copy_buffer_to_buffer(
+            &self.score_kernel_visits_zero_buf,
+            0,
+            &self.score_kernel_visits_buf,
+            0,
+            (self.agent_count as u64) * 4,
+        );
 
         // (2) Mask round — single PerAgent kernel, dispatches
         //     `agent_cap` threads (no per-pair fan-out — Pulse is
@@ -496,6 +640,7 @@ impl CompiledSim for StressAgentCountState {
             ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
             ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
+            score_kernel_visits: &self.score_kernel_visits_buf,
             cfg: &self.scoring_cfg_buf,
         };
         if let Some(t) = self.debug_timings.as_ref() {
@@ -558,6 +703,7 @@ impl CompiledSim for StressAgentCountState {
             ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
             ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
+            event_kind_counts: &self.event_kind_counts_buf,
             cfg: &self.chronicle_cfg_buf,
         };
         if let Some(t) = self.debug_timings.as_ref() {

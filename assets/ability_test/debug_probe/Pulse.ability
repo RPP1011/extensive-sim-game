@@ -1,0 +1,18 @@
+// debug_probe fixture — single self-target ability used to drive the
+// `apply_ability` dispatcher emit path. Lowers to:
+//   AbilityProgram {
+//     gate: { cooldown_ticks: 1 },
+//     effects: [EffectOp::Damage { amount: 0.0 }],
+//   }
+//
+// `damage 0.0` (NOT `self_damage`) so the dispatcher emits
+// EffectDamageApplied (kind=26) — the same kind cast_density saturates
+// on, giving us a cross-fixture cross-check on the
+// event_kind_histogram instrumentation.
+
+ability Pulse {
+    target: self
+    cooldown: 100ms
+    hint: utility
+    damage 0.0
+}

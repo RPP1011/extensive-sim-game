@@ -116,6 +116,59 @@ fn main() {
                             0,
                         );
                     }
+                    // Phase 2 debug: per-EventKindId histogram —
+                    // confirms which kinds dominate at the active
+                    // agent_cap (hypothesis: ~50% AcionSelected
+                    // (kind=24) + ~50% EffectSelfDamageApplied
+                    // (kind=39)).
+                    let hist = state.read_event_kind_histogram();
+                    let nonzero: Vec<(usize, u32)> = hist
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, &c)| (c > 0).then_some((i, c)))
+                        .collect();
+                    if !nonzero.is_empty() {
+                        let entries: Vec<String> = nonzero
+                            .iter()
+                            .map(|(k, c)| format!("{{\"kind\":{},\"count\":{}}}", k, c))
+                            .collect();
+                        let line = format!(
+                            "{{\"tick\":{},\"event_kind_histogram\":[{}]}}\n",
+                            tick_idx, entries.join(","),
+                        );
+                        let _ = stdout.write_all(line.as_bytes());
+                    }
+                    // Phase 2 debug: per-agent score_kernel_visits
+                    // distribution. We summarise as (min, max, mean)
+                    // rather than dumping all 200k slots — the
+                    // hypothesis is uniform = 1 visit/agent; surprise
+                    // would be max ≫ mean (some agents pile up).
+                    let visits = state.read_score_kernel_visits();
+                    if !visits.is_empty() {
+                        let mut min = u32::MAX;
+                        let mut max = 0u32;
+                        let mut sum: u64 = 0;
+                        let mut nonzero_count = 0u64;
+                        for &v in &visits {
+                            min = min.min(v);
+                            max = max.max(v);
+                            sum += v as u64;
+                            if v > 0 {
+                                nonzero_count += 1;
+                            }
+                        }
+                        let mean = (sum as f64) / (visits.len() as f64);
+                        let line = format!(
+                            "{{\"tick\":{},\"score_kernel_visits\":\
+                              {{\"min\":{},\"max\":{},\"mean\":{:.3},\
+                              \"sum\":{},\"nonzero_count\":{},\
+                              \"agent_count\":{}}}}}\n",
+                            tick_idx, min, max, mean, sum, nonzero_count,
+                            visits.len(),
+                        );
+                        let _ = stdout.write_all(line.as_bytes());
+                    }
+                    let _ = stdout.flush();
                 }
             }
             Err(payload) => {

@@ -184,3 +184,91 @@ Steady-state tick (tick=10):
   cap (confirmed); within the dispatcher we still don't know the
   walk-vs-sort split — Phase 2 instrumentation needed to break that
   out."
+
+---
+
+## WGSL-side instrumentation findings (Phase 2 wiring)
+
+Task #242 wired the compiler-emitted `DebugWgslFlags` atomic-counter
+buffers into both stress fixtures + a new `debug_probe_runtime` smoke
+fixture. Each per-tick step now allocates / clears / binds 1-3
+atomic<u32> instrumentation buffers (event_kind_counts,
+mask_total/passed, score_kernel_visits) so the runtime can attribute
+where the work goes WITHOUT re-running with the previous binary
++ guesswork.
+
+### cast_density: per-EventKindId histogram of the 1M-slot ring
+
+Hypothesis (Phase 1): `EffectDamageApplied (kind=26)` is the sole
+dominating kind. **Confirmed.** Histogram entries at every sweep cap:
+
+| agent_cap | ring_high_water | non-zero kinds                |
+|-----------|-----------------|--------------------------------|
+| 500       |          66 298 | `[(26, 66298)]`                |
+| 1 000     |         225 841 | `[(26, 225841)]`               |
+| 4 000     |       1 024 000 | `[(26, 1024000)]`              |
+| 16 000    |       4 096 000 | `[(26, 4096000)]` (overflows)  |
+| 64 000    |      16 384 000 | `[(26, 16384000)]` (overflows) |
+
+Every non-zero slot at every cap is exactly `kind=26`. The Spread
+shape's per-cast bitonic-sort path emits one EffectDamageApplied per
+in-radius candidate; no other producer sites fire in this fixture's
+schedule. The `physics_DispatchAoePulse` kernel is the sole user of
+the 1 048 576-slot ring; the consumer arm is no-op so no Damaged /
+Defeated / etc. events compete for slots.
+
+**Implication for ring-budget tuning**: any future per-kind partition
+of the chronicle ring (e.g. kind-class shards) wouldn't help this
+fixture — 100% of the traffic is kind 26. Bandwidth tuning has to
+attack either the per-cast cardinality (currently 256 candidates) or
+the per-event payload shape, NOT the ring layout.
+
+### agent_count: per-agent score_kernel_visits at 200k
+
+Hypothesis: scoring is uniform across agents (each alive agent
+visits its row exactly once). **Confirmed.** At
+`stress_agent_count_app 200000 2`:
+
+```
+{"tick":0,"score_kernel_visits":{"min":1,"max":1,"mean":1.000,
+                                  "sum":200000,"nonzero_count":200000,
+                                  "agent_count":200000}}
+```
+
+Every one of the 200 000 agents hit the scoring kernel exactly 1
+time per tick. No load imbalance. The Pulse verb is self-target with
+a single mask row, so each agent argmaxes over a 1-row ballot —
+the per-agent visit count is structurally fixed at 1. No surprise:
+the scoring kernel is load-balanced by construction in this fixture.
+
+The same fixture's event_kind_histogram shows kind=39
+(EffectSelfDamageApplied) dominating, expected since Pulse uses
+`self_damage 0.0`. (At agent_cap=200k the chronicle producer's
+dispatch grid is capped at 60 000 by the runtime-side
+`event_count_estimate.min(60_000)` — the 60k figure in the histogram
+is the dispatched producer thread count, not the per-agent fire
+count, and reflects the existing runtime cap rather than an
+instrumentation bug.)
+
+### debug_probe: mask_hit_rate at agent_cap=100
+
+The `debug_probe_runtime`'s behavioral pin
+(`viz_tests::all_three_axes_record_nonzero_data`) confirms all 3
+axes record non-zero data after one tick at agent_cap=100:
+
+```
+[debug_probe] event_kind_histogram nonzero: [(26, 100)]
+[debug_probe] mask_hit_rate: [MaskHitStats { mask_id: 0, total: 100,
+                                              passed: 100 }]
+[debug_probe] score_kernel_visits: 100 of 100 agents non-zero,
+                                    min=1 max=1
+```
+
+`mask_hit_rate` reports `passed/total = 100/100 = 100%` for mask 0
+(the Pulse verb's `when self.alive` predicate). Every alive agent
+satisfies the mask — there's no wasted candidate-evaluation work. As
+expected for a single-mask self-target verb where every agent
+qualifies; the metric will become more interesting on fixtures with
+multi-faction predicates or per-pair candidate masks where the
+hit rate distinguishes "predicate filtered useful candidates" from
+"every candidate trivially passes."

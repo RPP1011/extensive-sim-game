@@ -47,6 +47,14 @@ fn main() {
         // no .sim source-map overhead. See `DebugDepth` for the level
         // ladder.
         debug: dsl_compiler::cg::lower::DebugDepth::Kernel,
+        // Phase 2 (compiler debug mode): per-EventKindId histogram.
+        // Lets the driver bin attribute the chronicle ring's high-water
+        // back to the dominant event kind (hypothesised: kind=26
+        // EffectDamageApplied at saturation).
+        debug_wgsl: dsl_compiler::cg::lower::DebugWgslFlags {
+            event_kind_histogram: true,
+            ..dsl_compiler::cg::lower::DebugWgslFlags::NONE
+        },
         ..dsl_compiler::cg::lower::LowerOpts::default()
     };
     let cg = match dsl_compiler::cg::lower::lower_compilation_to_cg_with_opts(&comp, opts) {
