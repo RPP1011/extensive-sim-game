@@ -30,7 +30,9 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -105,6 +107,13 @@ pub struct BarteringState {
     /// Per-receiver Trade counter. No @decay → has_anchor=false.
     trade_count: ViewStorage,
     trade_count_cfg_buf: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one (no kernel here touches any
+    /// `ability_registry_*` field).
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
     pos_cache: Vec<Vec3>,
@@ -242,6 +251,12 @@ impl BarteringState {
             },
         );
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&engine::ability::AbilityRegistry::new()),
+            &gpu,
+            "bartering_runtime",
+        );
+
         Self {
             gpu,
             pos_buf,
@@ -255,6 +270,7 @@ impl BarteringState {
             event_ring,
             trade_count,
             trade_count_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             pos_cache: pos_host,
             dirty: false,
@@ -318,18 +334,32 @@ impl CompiledSim for BarteringState {
 
         self.event_ring.clear_tail_in(&mut encoder);
 
+        // Shared once per tick; each non-fold dispatch below adds only
+        // its fixture-specific `*Extras`.
+        let agent_buffers = AgentBuffers {
+            pos_buf: Some(&self.pos_buf),
+            alive_buf: Some(&self.alive_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
         // (1) IdleDrift — emits 1 Trade event per alive agent.
-        let bindings = physics_IdleDrift::PhysicsIdleDriftBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_pos: &self.pos_buf,
-            agent_alive: &self.alive_buf,
+        let extras = physics_IdleDrift::PhysicsIdleDriftExtras {
             agent_engaged_with: &self.engaged_with_buf,
             agent_vel: &self.vel_buf,
             coin_weight: &self.coin_weight_buf,
             caravan_size: &self.caravan_size_buf,
             cfg: &self.cfg_buf,
         };
+        let bindings =
+            physics_IdleDrift::PhysicsIdleDriftBindings::from_context_with_extras(
+                &ctx, &extras,
+            );
         dispatch::dispatch_physics_idledrift(
             &mut self.cache,
             &bindings,
@@ -338,12 +368,14 @@ impl CompiledSim for BarteringState {
             self.agent_count,
         );
 
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.cfg_buf,
         };
+        let seed_bindings =
+            seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+                &ctx, &seed_extras,
+            );
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache,
             &seed_bindings,

@@ -25,7 +25,9 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 /// 16-byte WGSL `vec3<f32>` interop. Same shape as the sibling
 /// runtimes use; duplicated here to keep each fixture-runtime crate
@@ -98,6 +100,13 @@ pub struct AuctionState {
     faction_pressure: ViewStorage,
     faction_pressure_cfg_buf: wgpu::Buffer,
     faction_pressure_decay_cfg_buf: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one (no kernel here touches any
+    /// `ability_registry_*` field).
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
     pos_cache: Vec<Vec3>,
@@ -284,6 +293,12 @@ impl AuctionState {
             },
         );
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&engine::ability::AbilityRegistry::new()),
+            &gpu,
+            "auction_runtime",
+        );
+
         Self {
             gpu,
             pos_buf,
@@ -300,6 +315,7 @@ impl AuctionState {
             faction_pressure,
             faction_pressure_cfg_buf,
             faction_pressure_decay_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             pos_cache: pos_host,
             dirty: false,
@@ -392,17 +408,31 @@ impl CompiledSim for AuctionState {
         // read back to size the fold dispatch.
         self.event_ring.clear_tail_in(&mut encoder);
 
+        // Shared once per tick; each non-fold dispatch below adds only
+        // its fixture-specific `*Extras`.
+        let agent_buffers = AgentBuffers {
+            pos_buf: Some(&self.pos_buf),
+            alive_buf: Some(&self.alive_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
         // (1) WanderAndBid — emits 1 Bid event per alive Trader per
         // tick AND calls auctions.place_bid(self, self, amount)
         // (B1 stub `return true`).
-        let bindings = physics_WanderAndBid::PhysicsWanderAndBidBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_pos: &self.pos_buf,
-            agent_alive: &self.alive_buf,
+        let extras = physics_WanderAndBid::PhysicsWanderAndBidExtras {
             agent_vel: &self.vel_buf,
             cfg: &self.cfg_buf,
         };
+        let bindings =
+            physics_WanderAndBid::PhysicsWanderAndBidBindings::from_context_with_extras(
+                &ctx, &extras,
+            );
         dispatch::dispatch_physics_wanderandbid(
             &mut self.cache,
             &bindings,
@@ -413,12 +443,14 @@ impl CompiledSim for AuctionState {
 
         // (2) seed_indirect_0 — keeps the indirect-args buffer warm
         // for the eventual `dispatch_workgroups_indirect` wire-up.
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.cfg_buf,
         };
+        let seed_bindings =
+            seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+                &ctx, &seed_extras,
+            );
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache,
             &seed_bindings,
@@ -444,11 +476,15 @@ impl CompiledSim for AuctionState {
             0,
             bytemuck::bytes_of(&ba_decay_cfg),
         );
+        let ba_decay_extras = decay_bid_activity::DecayBidActivityExtras {
+            view_storage_primary: self.bid_activity.primary(),
+            cfg: &self.bid_activity_decay_cfg_buf,
+        };
         let ba_decay_bindings =
-            decay_bid_activity::DecayBidActivityBindings {
-                view_storage_primary: self.bid_activity.primary(),
-                cfg: &self.bid_activity_decay_cfg_buf,
-            };
+            decay_bid_activity::DecayBidActivityBindings::from_context_with_extras(
+                &ctx,
+                &ba_decay_extras,
+            );
         dispatch::dispatch_decay_bid_activity(
             &mut self.cache,
             &ba_decay_bindings,
@@ -532,10 +568,15 @@ impl CompiledSim for AuctionState {
             0,
             bytemuck::bytes_of(&fp_decay_cfg),
         );
-        let fp_decay_bindings = decay_faction_pressure::DecayFactionPressureBindings {
+        let fp_decay_extras = decay_faction_pressure::DecayFactionPressureExtras {
             view_storage_primary: self.faction_pressure.primary(),
             cfg: &self.faction_pressure_decay_cfg_buf,
         };
+        let fp_decay_bindings =
+            decay_faction_pressure::DecayFactionPressureBindings::from_context_with_extras(
+                &ctx,
+                &fp_decay_extras,
+            );
         dispatch::dispatch_decay_faction_pressure(
             &mut self.cache,
             &fp_decay_bindings,

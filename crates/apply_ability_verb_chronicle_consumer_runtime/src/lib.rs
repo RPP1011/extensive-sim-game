@@ -73,6 +73,7 @@ use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
 use engine::ability::{
     AbilityId, AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate, PackedAbilityRegistry,
 };
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext};
 use engine::GpuContext;
 use wgpu::util::DeviceExt;
 
@@ -83,11 +84,9 @@ include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 /// and the engine's `EVENT_STRIDE_U32`. Pinned at 10 (header 2 + payload 8).
 pub const CHRONICLE_STRIDE_U32: u32 = 10;
 
-/// Default ring slot capacity — generous for the smoke fixture (we
-/// emit n_agents seeded ActionSelected + n_agents damage on dispatch 1
-/// + n_agents MORE damage on dispatch 2, then garbage-collect on the
-/// next tick).
-const RING_SLOTS: u32 = 256;
+// Ring capacity now comes from the shared `EventRing` infrastructure
+// (1 M slots) — the per-tick smoke records are bounded by `n_agents`,
+// well below the cap.
 
 /// EventKindId for `ActionSelected` in this fixture's .sim-local
 /// declaration order. The fixture declares:
@@ -143,12 +142,13 @@ pub struct ApplyAbilityVerbChronicleConsumerState {
     // -- Packed AbilityRegistry on GPU --
     registry_gpu: PackedAbilityRegistryGpu,
 
-    // -- Event ring + tail --
-    event_ring_buf: wgpu::Buffer,
-    event_tail_buf: wgpu::Buffer,
+    // -- Event ring + tail (shared `EventRing` so the compiler-emitted
+    //    `Bindings::from_context_with_extras` constructor can resolve
+    //    `event_ring` / `event_tail` through the standard
+    //    `KernelBindingsContext`). --
+    event_ring: EventRing,
+    /// Staging buffer for `event_tail` host readback (4 bytes).
     event_tail_staging: wgpu::Buffer,
-    /// Pre-built zero buffer for per-tick `event_tail = 0` clears.
-    event_tail_zero: wgpu::Buffer,
 
     // -- Cfg uniform --
     physics_cfg_buf: wgpu::Buffer,
@@ -251,37 +251,11 @@ impl ApplyAbilityVerbChronicleConsumerState {
         let agent_move_speed_buf    = mk_stat("apply_ability_verb_chronicle_consumer::agent_move_speed");
         let agent_mana_buf          = mk_stat("apply_ability_verb_chronicle_consumer::agent_mana");
 
-        // -- Event ring + tail (atomic-typed u32 storage).
-        let ring_bytes = (RING_SLOTS as u64) * (CHRONICLE_STRIDE_U32 as u64) * 4;
-        let event_ring_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(
-                "apply_ability_verb_chronicle_consumer::event_ring",
-            ),
-            size: ring_bytes,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let event_tail_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(
-                "apply_ability_verb_chronicle_consumer::event_tail",
-            ),
-            size: 4,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let event_tail_zero = gpu
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(
-                    "apply_ability_verb_chronicle_consumer::event_tail_zero",
-                ),
-                contents: bytemuck::bytes_of(&0u32),
-                usage: wgpu::BufferUsages::COPY_SRC,
-            });
+        // -- Event ring + tail. Standard `EventRing` so the compiler-
+        //    emitted `Bindings::from_context_with_extras` constructor
+        //    can resolve the `event_ring` / `event_tail` bindings via
+        //    `KernelBindingsContext::event_ring`.
+        let event_ring = EventRing::new(&gpu, "apply_ability_verb_chronicle_consumer");
         let event_tail_staging = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(
                 "apply_ability_verb_chronicle_consumer::event_tail_staging",
@@ -321,10 +295,8 @@ impl ApplyAbilityVerbChronicleConsumerState {
             agent_move_speed_buf,
             agent_mana_buf,
             registry_gpu,
-            event_ring_buf,
-            event_tail_buf,
+            event_ring,
             event_tail_staging,
-            event_tail_zero,
             physics_cfg_buf,
             cache: dispatch::KernelCache::default(),
             n_agents,
@@ -382,7 +354,7 @@ impl ApplyAbilityVerbChronicleConsumerState {
         }
         self.gpu
             .queue
-            .write_buffer(&self.event_ring_buf, 0, bytemuck::cast_slice(&seeded));
+            .write_buffer(self.event_ring.ring(), 0, bytemuck::cast_slice(&seeded));
 
         let mut encoder1 =
             self.gpu
@@ -394,21 +366,15 @@ impl ApplyAbilityVerbChronicleConsumerState {
                 });
 
         // Clear event_tail to 0 first, then write n_agents below.
-        encoder1.copy_buffer_to_buffer(
-            &self.event_tail_zero,
-            0,
-            &self.event_tail_buf,
-            0,
-            4,
-        );
+        self.event_ring.clear_tail_in(&mut encoder1);
         // event_tail = n_agents — dispatcher's atomicAdd starts allocating
         // slots from n_agents upward, leaving the seeded ActionSelected
         // entries intact. (Submit + write_buffer between submit calls is
-        // also valid; we use copy_buffer_to_buffer earlier and then write
+        // also valid; we use clear_tail_in() earlier and then write
         // n_agents directly.)
         self.gpu.queue.submit(Some(encoder1.finish()));
         self.gpu.queue.write_buffer(
-            &self.event_tail_buf,
+            self.event_ring.tail(),
             0,
             bytemuck::bytes_of(&self.n_agents),
         );
@@ -422,33 +388,30 @@ impl ApplyAbilityVerbChronicleConsumerState {
                         "apply_ability_verb_chronicle_consumer::step::stage1_dispatch",
                     ),
                 });
-        let bindings = physics_ApplyChronicleDamage_and_verb_chronicle_Cast::PhysicsApplyChronicleDamageAndVerbChronicleCastBindings {
-            event_ring: &self.event_ring_buf,
-            event_tail: &self.event_tail_buf,
-            agent_hp: &self.agent_hp_buf,
-            agent_level: &self.agent_level_buf,
-            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
-            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
-            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
-            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
-            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
-            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
-            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
-            ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
-            ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
-            ability_registry_chances:           &self.registry_gpu.chances,
-            agent_attack_damage: &self.agent_attack_damage_buf,
-            agent_ability_power: &self.agent_ability_power_buf,
-            agent_max_hp:        &self.agent_max_hp_buf,
-            agent_armor:         &self.agent_armor_buf,
-            agent_magic_resist:  &self.agent_magic_resist_buf,
-            agent_move_speed:    &self.agent_move_speed_buf,
-            agent_mana:          &self.agent_mana_buf,
+        let agent_buffers = AgentBuffers {
+            level_buf: Some(&self.agent_level_buf),
+            attack_damage_buf: Some(&self.agent_attack_damage_buf),
+            ability_power_buf: Some(&self.agent_ability_power_buf),
+            max_hp_buf: Some(&self.agent_max_hp_buf),
+            hp_buf: Some(&self.agent_hp_buf),
+            armor_buf: Some(&self.agent_armor_buf),
+            magic_resist_buf: Some(&self.agent_magic_resist_buf),
+            move_speed_buf: Some(&self.agent_move_speed_buf),
+            mana_buf: Some(&self.agent_mana_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+        let extras = physics_ApplyChronicleDamage_and_verb_chronicle_Cast::PhysicsApplyChronicleDamageAndVerbChronicleCastExtras {
             cfg: &self.physics_cfg_buf,
         };
+        let bindings = physics_ApplyChronicleDamage_and_verb_chronicle_Cast::PhysicsApplyChronicleDamageAndVerbChronicleCastBindings::from_context_with_extras(
+            &ctx, &extras,
+        );
         dispatch::dispatch_physics_applychronicledamage_and_verb_chronicle_cast(
             &mut self.cache,
             &bindings,
@@ -458,7 +421,7 @@ impl ApplyAbilityVerbChronicleConsumerState {
         );
         // Copy tail to staging in the same submit.
         encoder2.copy_buffer_to_buffer(
-            &self.event_tail_buf,
+            self.event_ring.tail(),
             0,
             &self.event_tail_staging,
             0,
@@ -513,33 +476,30 @@ impl ApplyAbilityVerbChronicleConsumerState {
                     ),
                 });
         // Re-bind (Bindings borrows are short-lived; ok to rebuild).
-        let bindings2 = physics_ApplyChronicleDamage_and_verb_chronicle_Cast::PhysicsApplyChronicleDamageAndVerbChronicleCastBindings {
-            event_ring: &self.event_ring_buf,
-            event_tail: &self.event_tail_buf,
-            agent_hp: &self.agent_hp_buf,
-            agent_level: &self.agent_level_buf,
-            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
-            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
-            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
-            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
-            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
-            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
-            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
-            ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
-            ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
-            ability_registry_chances:           &self.registry_gpu.chances,
-            agent_attack_damage: &self.agent_attack_damage_buf,
-            agent_ability_power: &self.agent_ability_power_buf,
-            agent_max_hp:        &self.agent_max_hp_buf,
-            agent_armor:         &self.agent_armor_buf,
-            agent_magic_resist:  &self.agent_magic_resist_buf,
-            agent_move_speed:    &self.agent_move_speed_buf,
-            agent_mana:          &self.agent_mana_buf,
+        let agent_buffers2 = AgentBuffers {
+            level_buf: Some(&self.agent_level_buf),
+            attack_damage_buf: Some(&self.agent_attack_damage_buf),
+            ability_power_buf: Some(&self.agent_ability_power_buf),
+            max_hp_buf: Some(&self.agent_max_hp_buf),
+            hp_buf: Some(&self.agent_hp_buf),
+            armor_buf: Some(&self.agent_armor_buf),
+            magic_resist_buf: Some(&self.agent_magic_resist_buf),
+            move_speed_buf: Some(&self.agent_move_speed_buf),
+            mana_buf: Some(&self.agent_mana_buf),
+            ..Default::default()
+        };
+        let ctx2 = KernelBindingsContext {
+            state: &agent_buffers2,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+        let extras2 = physics_ApplyChronicleDamage_and_verb_chronicle_Cast::PhysicsApplyChronicleDamageAndVerbChronicleCastExtras {
             cfg: &self.physics_cfg_buf,
         };
+        let bindings2 = physics_ApplyChronicleDamage_and_verb_chronicle_Cast::PhysicsApplyChronicleDamageAndVerbChronicleCastBindings::from_context_with_extras(
+            &ctx2, &extras2,
+        );
         // Workgroup count covers `tail` invocations (one per slot).
         dispatch::dispatch_physics_applychronicledamage_and_verb_chronicle_cast(
             &mut self.cache,

@@ -49,6 +49,7 @@ use engine::ability::{
     AbilityId, AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate, PackedAbilityRegistry,
 };
 use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext};
 use engine::GpuContext;
 use wgpu::util::DeviceExt;
 
@@ -60,9 +61,9 @@ include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 /// payload 8).
 pub const CHRONICLE_STRIDE_U32: u32 = 10;
 
-/// Default ring slot capacity. We only need a few records per tick for
-/// the smoke loop (one per agent), so 256 slots is plenty.
-const RING_SLOTS: u32 = 256;
+// Ring capacity now comes from the shared `EventRing` infrastructure
+// (1 M slots) — the per-tick smoke records are bounded by `n_agents`,
+// well below the cap.
 
 /// Per-fixture state for the chronicle-consumer closed-loop demo.
 /// Owns:
@@ -108,15 +109,13 @@ pub struct ApplyAbilityChronicleConsumerState {
     // -- Packed AbilityRegistry on GPU --
     registry_gpu: PackedAbilityRegistryGpu,
 
-    // -- Event ring + tail --
-    event_ring_buf: wgpu::Buffer,
-    event_tail_buf: wgpu::Buffer,
+    // -- Event ring + tail (shared `EventRing` so the compiler-emitted
+    //    `Bindings::from_context_with_extras` constructor can resolve
+    //    `event_ring` / `event_tail` through the standard
+    //    `KernelBindingsContext`). --
+    event_ring: EventRing,
+    /// Staging buffer for `event_tail` host readback (4 bytes).
     event_tail_staging: wgpu::Buffer,
-    /// Pre-built zero buffer for per-tick `event_tail = 0` clears.
-    event_tail_zero: wgpu::Buffer,
-
-    // -- Indirect args (for seed_indirect_0) --
-    indirect_args_buf: wgpu::Buffer,
 
     // -- Cfg uniforms --
     physics_cfg_buf: wgpu::Buffer,
@@ -248,31 +247,11 @@ impl ApplyAbilityChronicleConsumerState {
         let agent_move_speed_buf    = mk_stat("apply_ability_chronicle_consumer::agent_move_speed");
         let agent_mana_buf          = mk_stat("apply_ability_chronicle_consumer::agent_mana");
 
-        // -- Event ring + tail. Both atomic-typed for the producer's
-        //    atomicAdd / atomicStore.
-        let ring_bytes = (RING_SLOTS as u64) * (CHRONICLE_STRIDE_U32 as u64) * 4;
-        let event_ring_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("apply_ability_chronicle_consumer::event_ring"),
-            size: ring_bytes,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let event_tail_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("apply_ability_chronicle_consumer::event_tail"),
-            size: 4,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let event_tail_zero =
-            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("apply_ability_chronicle_consumer::event_tail_zero"),
-                contents: bytemuck::bytes_of(&0u32),
-                usage: wgpu::BufferUsages::COPY_SRC,
-            });
+        // -- Event ring + tail. Standard `EventRing` so the compiler-
+        //    emitted `Bindings::from_context_with_extras` constructor
+        //    can resolve the `event_ring` / `event_tail` bindings via
+        //    `KernelBindingsContext::event_ring`.
+        let event_ring = EventRing::new(&gpu, "apply_ability_chronicle_consumer");
         let event_tail_staging = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("apply_ability_chronicle_consumer::event_tail_staging"),
             size: 4,
@@ -280,15 +259,7 @@ impl ApplyAbilityChronicleConsumerState {
             mapped_at_creation: false,
         });
 
-        // -- Indirect args buffer (3 u32s: x,y,z workgroup counts).
-        //    seed_indirect_0 writes into it; we never read it on the
-        //    host (the consumer dispatches directly anyway).
-        let indirect_args_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("apply_ability_chronicle_consumer::indirect_args_0"),
-            size: 12,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT,
-            mapped_at_creation: false,
-        });
+        // -- Indirect args: provided by `EventRing::indirect_args_0()`.
 
         // -- Cfg uniforms. Three different cfg structs across the
         //    three kernels we drive each tick. Values are seeded once
@@ -349,11 +320,8 @@ impl ApplyAbilityChronicleConsumerState {
             agent_move_speed_buf,
             agent_mana_buf,
             registry_gpu,
-            event_ring_buf,
-            event_tail_buf,
+            event_ring,
             event_tail_staging,
-            event_tail_zero,
-            indirect_args_buf,
             physics_cfg_buf,
             consumer_cfg_buf,
             seed_cfg_buf,
@@ -408,38 +376,39 @@ impl ApplyAbilityChronicleConsumerState {
                 });
 
         // 1. Clear event_tail to 0 so the dispatcher's atomicAdd starts at 0.
-        encoder.copy_buffer_to_buffer(&self.event_tail_zero, 0, &self.event_tail_buf, 0, 4);
+        self.event_ring.clear_tail_in(&mut encoder);
+
+        // Shared per-tick context — each non-fold dispatch below adds
+        // only its fixture-specific `*Extras`.
+        let agent_buffers = AgentBuffers {
+            alive_buf: Some(&self.agent_alive_buf),
+            level_buf: Some(&self.agent_level_buf),
+            attack_damage_buf: Some(&self.agent_attack_damage_buf),
+            ability_power_buf: Some(&self.agent_ability_power_buf),
+            max_hp_buf: Some(&self.agent_max_hp_buf),
+            hp_buf: Some(&self.agent_hp_buf),
+            armor_buf: Some(&self.agent_armor_buf),
+            magic_resist_buf: Some(&self.agent_magic_resist_buf),
+            move_speed_buf: Some(&self.agent_move_speed_buf),
+            mana_buf: Some(&self.agent_mana_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
 
         // 2. Dispatch the apply_ability dispatcher.
-        let dispatch_bindings =
-            physics_DispatchAbility::PhysicsDispatchAbilityBindings {
-                event_ring: &self.event_ring_buf,
-                event_tail: &self.event_tail_buf,
-                agent_alive: &self.agent_alive_buf,
-                agent_level: &self.agent_level_buf,
-                ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
-                ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
-                ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
-                ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
-                ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
-                ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
-                ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
-                ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
-                ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
-                ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
-                ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
-                ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
-                ability_registry_chances:           &self.registry_gpu.chances,
-                agent_attack_damage: &self.agent_attack_damage_buf,
-                agent_ability_power: &self.agent_ability_power_buf,
-                agent_max_hp:        &self.agent_max_hp_buf,
-                agent_hp:            &self.agent_hp_buf,
-                agent_armor:         &self.agent_armor_buf,
-                agent_magic_resist:  &self.agent_magic_resist_buf,
-                agent_move_speed:    &self.agent_move_speed_buf,
-                agent_mana:          &self.agent_mana_buf,
+        let dispatch_extras =
+            physics_DispatchAbility::PhysicsDispatchAbilityExtras {
                 cfg: &self.physics_cfg_buf,
             };
+        let dispatch_bindings =
+            physics_DispatchAbility::PhysicsDispatchAbilityBindings::from_context_with_extras(
+                &ctx, &dispatch_extras,
+            );
         dispatch::dispatch_physics_dispatchability(
             &mut self.cache,
             &dispatch_bindings,
@@ -451,12 +420,14 @@ impl ApplyAbilityChronicleConsumerState {
         // 3. Dispatch the seed_indirect_0 plumbing kernel (fills
         //    indirect_args_0 — unused in our direct-dispatch path,
         //    but the schedule lists it and a future runtime may use it).
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: &self.event_ring_buf,
-            event_tail: &self.event_tail_buf,
-            indirect_args_0: &self.indirect_args_buf,
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
+            indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.seed_cfg_buf,
         };
+        let seed_bindings =
+            seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+                &ctx, &seed_extras,
+            );
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache,
             &seed_bindings,
@@ -466,7 +437,7 @@ impl ApplyAbilityChronicleConsumerState {
         );
 
         // 4. Copy tail to staging so we can read it back below.
-        encoder.copy_buffer_to_buffer(&self.event_tail_buf, 0, &self.event_tail_staging, 0, 4);
+        encoder.copy_buffer_to_buffer(self.event_ring.tail(), 0, &self.event_tail_staging, 0, 4);
 
         self.gpu.queue.submit(Some(encoder.finish()));
 
@@ -507,13 +478,37 @@ impl ApplyAbilityChronicleConsumerState {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("apply_ability_chronicle_consumer::step::consume"),
                 });
-        let consumer_bindings =
-            physics_ApplyChronicleDamage::PhysicsApplyChronicleDamageBindings {
-                event_ring: &self.event_ring_buf,
-                event_tail: &self.event_tail_buf,
-                agent_hp: &self.agent_hp_buf,
+        // Rebuild the per-tick context for stage 3 — no encoder change,
+        // just the same shared sources the dispatch stage used. Cheaper
+        // than threading a `&KernelBindingsContext` across the host
+        // readback of `tail` (which moves `&self` through map_async).
+        let agent_buffers = AgentBuffers {
+            alive_buf: Some(&self.agent_alive_buf),
+            level_buf: Some(&self.agent_level_buf),
+            attack_damage_buf: Some(&self.agent_attack_damage_buf),
+            ability_power_buf: Some(&self.agent_ability_power_buf),
+            max_hp_buf: Some(&self.agent_max_hp_buf),
+            hp_buf: Some(&self.agent_hp_buf),
+            armor_buf: Some(&self.agent_armor_buf),
+            magic_resist_buf: Some(&self.agent_magic_resist_buf),
+            move_speed_buf: Some(&self.agent_move_speed_buf),
+            mana_buf: Some(&self.agent_mana_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+        let consumer_extras =
+            physics_ApplyChronicleDamage::PhysicsApplyChronicleDamageExtras {
                 cfg: &self.consumer_cfg_buf,
             };
+        let consumer_bindings =
+            physics_ApplyChronicleDamage::PhysicsApplyChronicleDamageBindings::from_context_with_extras(
+                &ctx, &consumer_extras,
+            );
         // Dispatch enough workgroups to cover `tail` records. The
         // kernel's record() helper uses `(agent_cap+63)/64` workgroups,
         // so passing `n_agents` works as long as event_count <= n_agents

@@ -64,7 +64,9 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -136,6 +138,13 @@ pub struct AbilitiesProbeState {
     seed_cfg_buf: wgpu::Buffer,
     #[allow(dead_code)]
     snapshot_cfg_buf: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities (the .sim only declares verbs/predicates), but the
+    /// compiler-emitted constructor signature requires the context to
+    /// expose one (no kernel here touches any `ability_registry_*` field).
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
 
@@ -312,6 +321,12 @@ impl AbilitiesProbeState {
             },
         );
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&engine::ability::AbilityRegistry::new()),
+            &gpu,
+            "abilities_runtime",
+        );
+
         Self {
             gpu,
             agent_alive_buf,
@@ -331,6 +346,7 @@ impl AbilitiesProbeState {
             chronicle_heal_cfg_buf,
             seed_cfg_buf,
             snapshot_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             tick: 0,
             agent_count,
@@ -398,6 +414,19 @@ impl CompiledSim for AbilitiesProbeState {
             mask_bytes.max(4),
         );
 
+        // Shared once per tick; each non-fold dispatch below adds only
+        // its fixture-specific `*Extras`.
+        let agent_buffers = AgentBuffers {
+            alive_buf: Some(&self.agent_alive_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
         // (2) Mask round — `fused_mask_verb_Strike` runs both
         // mask predicates (mask_0 + mask_1) in one PerAgent pass.
         // Both predicates are `self.alive` so every alive slot's
@@ -410,12 +439,15 @@ impl CompiledSim for AbilitiesProbeState {
         self.gpu
             .queue
             .write_buffer(&self.mask_cfg_buf, 0, bytemuck::bytes_of(&mask_cfg));
-        let mask_bindings = fused_mask_verb_Strike::FusedMaskVerbStrikeBindings {
-            agent_alive: &self.agent_alive_buf,
+        let mask_extras = fused_mask_verb_Strike::FusedMaskVerbStrikeExtras {
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             mask_1_bitmap: &self.mask_1_bitmap_buf,
             cfg: &self.mask_cfg_buf,
         };
+        let mask_bindings =
+            fused_mask_verb_Strike::FusedMaskVerbStrikeBindings::from_context_with_extras(
+                &ctx, &mask_extras,
+            );
         dispatch::dispatch_fused_mask_verb_strike(
             &mut self.cache,
             &mask_bindings,
@@ -438,14 +470,14 @@ impl CompiledSim for AbilitiesProbeState {
             0,
             bytemuck::bytes_of(&scoring_cfg),
         );
-        let scoring_bindings = scoring::ScoringBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let scoring_extras = scoring::ScoringExtras {
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             mask_1_bitmap: &self.mask_1_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
             cfg: &self.scoring_cfg_buf,
         };
+        let scoring_bindings =
+            scoring::ScoringBindings::from_context_with_extras(&ctx, &scoring_extras);
         dispatch::dispatch_scoring(
             &mut self.cache,
             &scoring_bindings,
@@ -473,12 +505,14 @@ impl CompiledSim for AbilitiesProbeState {
             0,
             bytemuck::bytes_of(&strike_chronicle_cfg),
         );
-        let strike_chronicle_bindings =
-            physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
+        let strike_chronicle_extras =
+            physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeExtras {
                 cfg: &self.chronicle_strike_cfg_buf,
             };
+        let strike_chronicle_bindings =
+            physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeBindings::from_context_with_extras(
+                &ctx, &strike_chronicle_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_strike(
             &mut self.cache,
             &strike_chronicle_bindings,
@@ -504,12 +538,14 @@ impl CompiledSim for AbilitiesProbeState {
             0,
             bytemuck::bytes_of(&chronicle_cfg),
         );
-        let chronicle_bindings =
-            physics_verb_chronicle_Heal::PhysicsVerbChronicleHealBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
+        let chronicle_extras =
+            physics_verb_chronicle_Heal::PhysicsVerbChronicleHealExtras {
                 cfg: &self.chronicle_heal_cfg_buf,
             };
+        let chronicle_bindings =
+            physics_verb_chronicle_Heal::PhysicsVerbChronicleHealBindings::from_context_with_extras(
+                &ctx, &chronicle_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_heal(
             &mut self.cache,
             &chronicle_bindings,
@@ -528,12 +564,14 @@ impl CompiledSim for AbilitiesProbeState {
         self.gpu
             .queue
             .write_buffer(&self.seed_cfg_buf, 0, bytemuck::bytes_of(&seed_cfg));
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.seed_cfg_buf,
         };
+        let seed_bindings =
+            seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+                &ctx, &seed_extras,
+            );
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache,
             &seed_bindings,
