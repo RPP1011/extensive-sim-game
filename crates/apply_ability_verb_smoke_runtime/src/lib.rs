@@ -76,6 +76,7 @@ use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
 use engine::ability::{
     AbilityId, AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate, PackedAbilityRegistry,
 };
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext};
 use engine::GpuContext;
 use wgpu::util::DeviceExt;
 
@@ -141,10 +142,15 @@ pub struct ApplyAbilityVerbSmokeState {
     // columns regardless — wasted bytes are bounded by registry size). --
     registry_gpu: PackedAbilityRegistryGpu,
 
-    // -- Event ring + tail --
-    event_ring_buf: wgpu::Buffer,
-    event_tail_buf: wgpu::Buffer,
+    // -- Event ring + tail (shared `EventRing` so the compiler-emitted
+    //    `Bindings::from_context_with_extras` constructor can resolve
+    //    `event_ring` / `event_tail` through the standard
+    //    `KernelBindingsContext`). --
+    event_ring: EventRing,
+    /// Staging buffer for `read_event_ring` host readback. Sized
+    /// to the smoke fixture's worst-case readback window.
     event_ring_staging: wgpu::Buffer,
+    /// Staging buffer for `read_event_tail` host readback (4 bytes).
     event_tail_staging: wgpu::Buffer,
 
     // -- Cfg uniform --
@@ -227,34 +233,15 @@ impl ApplyAbilityVerbSmokeState {
         let agent_move_speed_buf    = mk_stat("apply_ability_verb_smoke_runtime::agent_move_speed");
         let agent_mana_buf          = mk_stat("apply_ability_verb_smoke_runtime::agent_mana");
 
-        // -- Event ring + tail. The kernel binds both as
-        //    `array<atomic<u32>>` so we tag them STORAGE (the dispatcher
-        //    reads via atomicLoad and writes via atomicAdd / atomicStore).
-        //    COPY_SRC needed for readback into the staging buffer;
-        //    COPY_DST needed to seed the synthetic ActionSelected
-        //    records before each dispatch.
-        let ring_bytes = (RING_SLOTS as u64) * (CHRONICLE_STRIDE_U32 as u64) * 4;
-        let event_ring_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("apply_ability_verb_smoke_runtime::event_ring"),
-            size: ring_bytes,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let event_tail_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("apply_ability_verb_smoke_runtime::event_tail"),
-            size: 4,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        // Staging buffers for host readback.
+        // -- Event ring + tail. Standard `EventRing` so the compiler-
+        //    emitted `Bindings::from_context_with_extras` constructor
+        //    can resolve the `event_ring` / `event_tail` bindings via
+        //    `KernelBindingsContext::event_ring`.
+        let event_ring = EventRing::new(&gpu, "apply_ability_verb_smoke_runtime");
+        let staging_bytes = (RING_SLOTS as u64) * (CHRONICLE_STRIDE_U32 as u64) * 4;
         let event_ring_staging = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("apply_ability_verb_smoke_runtime::event_ring_staging"),
-            size: ring_bytes,
+            size: staging_bytes,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
@@ -296,8 +283,7 @@ impl ApplyAbilityVerbSmokeState {
             agent_move_speed_buf,
             agent_mana_buf,
             registry_gpu,
-            event_ring_buf,
-            event_tail_buf,
+            event_ring,
             event_ring_staging,
             event_tail_staging,
             physics_cfg_buf,
@@ -350,12 +336,12 @@ impl ApplyAbilityVerbSmokeState {
         }
         self.gpu
             .queue
-            .write_buffer(&self.event_ring_buf, 0, bytemuck::cast_slice(&seeded));
+            .write_buffer(self.event_ring.ring(), 0, bytemuck::cast_slice(&seeded));
 
         // event_tail = n_agents — chronicle's atomicAdd starts allocating
         // slots from `n_agents` upward, leaving the seeded records intact.
         self.gpu.queue.write_buffer(
-            &self.event_tail_buf,
+            self.event_ring.tail(),
             0,
             bytemuck::bytes_of(&self.n_agents),
         );
@@ -367,33 +353,31 @@ impl ApplyAbilityVerbSmokeState {
                 label: Some("apply_ability_verb_smoke_runtime::step"),
             });
 
-        let bindings = physics_verb_chronicle_Cast::PhysicsVerbChronicleCastBindings {
-            event_ring: &self.event_ring_buf,
-            event_tail: &self.event_tail_buf,
-            agent_level: &self.agent_level_buf,
-            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
-            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
-            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
-            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
-            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
-            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
-            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
-            ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
-            ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
-            ability_registry_chances:           &self.registry_gpu.chances,
-            agent_attack_damage: &self.agent_attack_damage_buf,
-            agent_ability_power: &self.agent_ability_power_buf,
-            agent_max_hp:        &self.agent_max_hp_buf,
-            agent_hp:            &self.agent_hp_buf,
-            agent_armor:         &self.agent_armor_buf,
-            agent_magic_resist:  &self.agent_magic_resist_buf,
-            agent_move_speed:    &self.agent_move_speed_buf,
-            agent_mana:          &self.agent_mana_buf,
+        let agent_buffers = AgentBuffers {
+            level_buf: Some(&self.agent_level_buf),
+            attack_damage_buf: Some(&self.agent_attack_damage_buf),
+            ability_power_buf: Some(&self.agent_ability_power_buf),
+            max_hp_buf: Some(&self.agent_max_hp_buf),
+            hp_buf: Some(&self.agent_hp_buf),
+            armor_buf: Some(&self.agent_armor_buf),
+            magic_resist_buf: Some(&self.agent_magic_resist_buf),
+            move_speed_buf: Some(&self.agent_move_speed_buf),
+            mana_buf: Some(&self.agent_mana_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+        let extras = physics_verb_chronicle_Cast::PhysicsVerbChronicleCastExtras {
             cfg: &self.physics_cfg_buf,
         };
+        let bindings =
+            physics_verb_chronicle_Cast::PhysicsVerbChronicleCastBindings::from_context_with_extras(
+                &ctx, &extras,
+            );
         // The dispatch helper takes `agent_cap` but uses it solely for
         // the workgroup count `(N + 63) / 64`. For the PerEvent shape
         // here we pass `event_count` (= n_agents), so the kernel
@@ -419,7 +403,7 @@ impl ApplyAbilityVerbSmokeState {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("apply_ability_verb_smoke_runtime::read_event_tail"),
             });
-        encoder.copy_buffer_to_buffer(&self.event_tail_buf, 0, &self.event_tail_staging, 0, 4);
+        encoder.copy_buffer_to_buffer(self.event_ring.tail(), 0, &self.event_tail_staging, 0, 4);
         self.gpu.queue.submit(Some(encoder.finish()));
 
         let slice = self.event_tail_staging.slice(..);
@@ -443,11 +427,13 @@ impl ApplyAbilityVerbSmokeState {
     /// Block on the GPU and read back the first `n_records` records
     /// from `event_ring`. Each record is 10 u32 words.
     pub fn read_event_ring(&self, n_records: u32) -> Vec<[u32; 10]> {
-        // Always copy back the full ring buffer; the host filters by
-        // n_records below. (Partial mapping in wgpu requires aligned
-        // offsets — easier to just blit the full ring for the smoke
-        // test.)
-        let total_bytes = (RING_SLOTS as u64) * (CHRONICLE_STRIDE_U32 as u64) * 4;
+        // Copy only the bytes covering `n_records` (capped at the
+        // staging buffer size).
+        let want_bytes =
+            (n_records as u64).max(1) * (CHRONICLE_STRIDE_U32 as u64) * 4;
+        let staging_cap_bytes =
+            (RING_SLOTS as u64) * (CHRONICLE_STRIDE_U32 as u64) * 4;
+        let copy_bytes = want_bytes.min(staging_cap_bytes);
         let mut encoder = self
             .gpu
             .device
@@ -455,11 +441,11 @@ impl ApplyAbilityVerbSmokeState {
                 label: Some("apply_ability_verb_smoke_runtime::read_event_ring"),
             });
         encoder.copy_buffer_to_buffer(
-            &self.event_ring_buf,
+            self.event_ring.ring(),
             0,
             &self.event_ring_staging,
             0,
-            total_bytes,
+            copy_bytes,
         );
         self.gpu.queue.submit(Some(encoder.finish()));
 

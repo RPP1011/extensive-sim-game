@@ -49,6 +49,9 @@
 //! trait, switching to a future fixture's runtime is a one-line
 //! Cargo.toml package alias change.
 
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext};
 use engine::ids::AgentId;
 use engine::rng::per_agent_u32;
 use engine::sim_trait::{AgentSnapshot, CompiledSim, VizGlyph};
@@ -134,6 +137,18 @@ pub struct BoidsState {
     /// Allocated once at construction; cheaper than rebuilding a
     /// `vec![0u32; num_cells]` host array every tick.
     spatial_offsets_zero: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::event_ring`] field — boids has no
+    /// emitted events, but the compiler-emitted `from_context_with_extras`
+    /// constructor signature requires the context to expose one.
+    event_ring: EventRing,
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one (no kernel here touches any
+    /// `ability_registry_*` field).
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
 
@@ -583,6 +598,13 @@ impl BoidsState {
             None
         };
 
+        let event_ring = EventRing::new(&gpu, "boids_runtime");
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&engine::ability::AbilityRegistry::new()),
+            &gpu,
+            "boids_runtime",
+        );
+
         Self {
             gpu,
             pos_buf,
@@ -594,6 +616,8 @@ impl BoidsState {
             spatial_grid_starts,
             spatial_chunk_sums,
             spatial_offsets_zero,
+            event_ring,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             pos_cache: pos_host,
             dirty: false,
@@ -790,6 +814,19 @@ impl CompiledSim for BoidsState {
             encoder.write_timestamp(&t.query_set, 1);
         }
 
+        // Shared once per tick; each non-fold dispatch below adds only
+        // its fixture-specific `*Extras`.
+        let agent_buffers = AgentBuffers {
+            pos_buf: Some(&self.pos_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
         // (2) Five-kernel real counting sort:
         //     2a. BuildHashCount      — per-agent atomicAdd into offsets
         //     2b. BuildHashScanLocal  — workgroup-local Hillis-Steele
@@ -813,11 +850,14 @@ impl CompiledSim for BoidsState {
         // against one another (same encoder + adjacent compute
         // passes). After the scatter, `cells` holds every agent id
         // grouped by cell, with no per-cell capacity cap.
-        let count_bindings = spatial_build_hash_count::SpatialBuildHashCountBindings {
-            agent_pos: &self.pos_buf,
+        let count_extras = spatial_build_hash_count::SpatialBuildHashCountExtras {
             spatial_grid_offsets: &self.spatial_grid_offsets,
             cfg: &self.cfg_buf,
         };
+        let count_bindings =
+            spatial_build_hash_count::SpatialBuildHashCountBindings::from_context_with_extras(
+                &ctx, &count_extras,
+            );
         dispatch::dispatch_spatial_build_hash_count(
             &mut self.cache,
             &count_bindings,
@@ -825,13 +865,17 @@ impl CompiledSim for BoidsState {
             &mut encoder,
             self.agent_count,
         );
-        let scan_local_bindings =
-            spatial_build_hash_scan_local::SpatialBuildHashScanLocalBindings {
+        let scan_local_extras =
+            spatial_build_hash_scan_local::SpatialBuildHashScanLocalExtras {
                 spatial_grid_offsets: &self.spatial_grid_offsets,
                 spatial_grid_starts: &self.spatial_grid_starts,
                 spatial_chunk_sums: &self.spatial_chunk_sums,
                 cfg: &self.cfg_buf,
             };
+        let scan_local_bindings =
+            spatial_build_hash_scan_local::SpatialBuildHashScanLocalBindings::from_context_with_extras(
+                &ctx, &scan_local_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scan_local(
             &mut self.cache,
             &scan_local_bindings,
@@ -839,11 +883,15 @@ impl CompiledSim for BoidsState {
             &mut encoder,
             self.agent_count,
         );
-        let scan_carry_bindings =
-            spatial_build_hash_scan_carry::SpatialBuildHashScanCarryBindings {
+        let scan_carry_extras =
+            spatial_build_hash_scan_carry::SpatialBuildHashScanCarryExtras {
                 spatial_chunk_sums: &self.spatial_chunk_sums,
                 cfg: &self.cfg_buf,
             };
+        let scan_carry_bindings =
+            spatial_build_hash_scan_carry::SpatialBuildHashScanCarryBindings::from_context_with_extras(
+                &ctx, &scan_carry_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scan_carry(
             &mut self.cache,
             &scan_carry_bindings,
@@ -851,13 +899,17 @@ impl CompiledSim for BoidsState {
             &mut encoder,
             self.agent_count,
         );
-        let scan_add_bindings =
-            spatial_build_hash_scan_add::SpatialBuildHashScanAddBindings {
+        let scan_add_extras =
+            spatial_build_hash_scan_add::SpatialBuildHashScanAddExtras {
                 spatial_grid_offsets: &self.spatial_grid_offsets,
                 spatial_grid_starts: &self.spatial_grid_starts,
                 spatial_chunk_sums: &self.spatial_chunk_sums,
                 cfg: &self.cfg_buf,
             };
+        let scan_add_bindings =
+            spatial_build_hash_scan_add::SpatialBuildHashScanAddBindings::from_context_with_extras(
+                &ctx, &scan_add_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scan_add(
             &mut self.cache,
             &scan_add_bindings,
@@ -865,13 +917,16 @@ impl CompiledSim for BoidsState {
             &mut encoder,
             self.agent_count,
         );
-        let scatter_bindings = spatial_build_hash_scatter::SpatialBuildHashScatterBindings {
-            agent_pos: &self.pos_buf,
+        let scatter_extras = spatial_build_hash_scatter::SpatialBuildHashScatterExtras {
             spatial_grid_cells: &self.spatial_grid_cells,
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
             cfg: &self.cfg_buf,
         };
+        let scatter_bindings =
+            spatial_build_hash_scatter::SpatialBuildHashScatterBindings::from_context_with_extras(
+                &ctx, &scatter_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scatter(
             &mut self.cache,
             &scatter_bindings,
@@ -938,14 +993,16 @@ impl CompiledSim for BoidsState {
         // (3) Physics MoveBoid dispatch — reads agent_pos / agent_vel
         //     + the spatial grid (cells, offsets, starts), writes new
         //     positions/velocities.
-        let bindings = physics_MoveBoid::PhysicsMoveBoidBindings {
-            agent_pos: &self.pos_buf,
+        let extras = physics_MoveBoid::PhysicsMoveBoidExtras {
             agent_vel: &self.vel_buf,
             spatial_grid_cells: &self.spatial_grid_cells,
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
             cfg: &self.cfg_buf,
         };
+        let bindings = physics_MoveBoid::PhysicsMoveBoidBindings::from_context_with_extras(
+            &ctx, &extras,
+        );
         dispatch::dispatch_physics_moveboid(
             &mut self.cache,
             &bindings,
