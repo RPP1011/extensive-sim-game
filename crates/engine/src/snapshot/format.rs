@@ -461,6 +461,9 @@ fn write_state(w: &mut W, state: &SimState) {
     for &v in state.hot_max_mana() {
         w.f32(v);
     }
+    for &v in state.hot_ability_power() {
+        w.f32(v);
+    }
     for &v in state.hot_hunger() {
         w.f32(v);
     }
@@ -661,6 +664,7 @@ fn read_state(
     read_f32_slice(r, cap_usize, "hot_attack_range", state.hot_attack_range_mut_slice())?;
     read_f32_slice(r, cap_usize, "hot_mana", state.hot_mana_mut_slice())?;
     read_f32_slice(r, cap_usize, "hot_max_mana", state.hot_max_mana_mut_slice())?;
+    read_f32_slice(r, cap_usize, "hot_ability_power", state.hot_ability_power_mut_slice())?;
     read_f32_slice(r, cap_usize, "hot_hunger", state.hot_hunger_mut_slice())?;
     read_f32_slice(r, cap_usize, "hot_thirst", state.hot_thirst_mut_slice())?;
     read_f32_slice(r, cap_usize, "hot_rest_timer", state.hot_rest_timer_mut_slice())?;
