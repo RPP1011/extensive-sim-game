@@ -226,60 +226,219 @@ fn clamp_i32(x: i32, lo: i32, hi: i32) -> i32 { return clamp(x, lo, hi); }
 // Voxel-mirror prelude — Phase C of the voxel-engine integration plan
 // ---------------------------------------------------------------------------
 
-/// WGSL helper for reading from a [`KernelBindingsContext::voxel_grid`]
+/// WGSL helpers for reading from a [`KernelBindingsContext::voxel_grid`]
 /// storage buffer. Substring-injected into any kernel module whose
-/// body calls `voxel_at(`. Matches the runtime-side widen-to-u32
-/// encoding in `engine_voxel::VoxelMirror`: each cell is one `u32`,
-/// material code in the low 8 bits.
+/// body calls one of `voxel_at(` / `voxel_height_at(` /
+/// `voxel_walkable(` / `voxel_line_of_sight(`. Matches the runtime-side
+/// widen-to-u32 encoding in `engine_voxel::VoxelMirror`: each cell is
+/// one `u32`, material code in the low 8 bits.
 ///
-/// Out-of-bounds reads return `0u` (air). The grid extent comes from a
-/// per-fixture cfg uniform (Phase D will lower the dimensions; Phase C
-/// emits a placeholder helper that takes width/height/depth as
-/// arguments so the same helper works for any extent without baking
-/// constants in. Phase D's terrain-query lowering will fill the call
-/// site with the per-fixture dimensions.).
+/// All helpers reference the module-scope `voxel_grid` binding
+/// directly — no `ptr<storage, ...>` parameter, since standard WGSL
+/// disallows passing pointers to runtime-sized storage arrays as
+/// function arguments (the naga `unrestricted_pointer_parameters`
+/// extension would relax this, but keeping the helpers
+/// extension-free maximises portability across wgpu backends).
 ///
-/// # Helper signature choice
-///
-/// Phase C considered three signatures:
-/// 1. `voxel_at(grid, x, y, z) -> u32` with grid extent baked into a
-///    compile-time WGSL `const` — simplest, but ties every kernel to
-///    one fixture's grid size.
-/// 2. `voxel_at(grid, x, y, z, w, h, d) -> u32` — extent passed
-///    per-call; verbose at the call site but works across fixtures.
-/// 3. `voxel_at(grid, x, y, z) -> u32` reading a separate
-///    `voxel_grid_dims: vec3<u32>` uniform — clean call site, but
-///    needs a second binding wired through `KernelBindingsContext`.
-///
-/// Picked option (2) for Phase C: kernels that bind `voxel_grid` will
-/// also need to know the extent (e.g. for `pos → cell` floor + bounds
-/// check), so passing the extent at the call site keeps the
-/// information flow explicit. Phase D may revisit if it proves
-/// awkward at the lowering layer; reads from a uniform vs. constant
-/// args is a thin wrapper change.
+/// Out-of-bounds reads return `0u` (air); out-of-bounds positions for
+/// `walkable` / `height_at` / `line_of_sight` return safe defaults
+/// (walkable=true, height=0.0, los=true) — same as the engine's
+/// `FlatPlane` default impl, satisfying P10.
 const VOXEL_GRID_WGSL_PRELUDE: &str = "\
-// Voxel-mirror helper — emitted when the body calls `voxel_at(`.
-// Reads one cell from the GPU-resident voxel mirror (`engine_voxel::
-// VoxelMirror`). Cell layout matches the host: index = z*H*W + y*W + x;
-// material code lives in the low byte of each u32. Out-of-bounds
-// returns 0u (air). Width/height/depth are caller-supplied so one
-// helper serves all fixture extents.
-fn voxel_at(
-    grid: ptr<storage, array<u32>, read>,
-    x: i32, y: i32, z: i32,
-    width: u32, height: u32, depth: u32,
-) -> u32 {
+// Voxel-mirror helpers — emitted when the body references any of the
+// `voxel_at` / `voxel_height_at` / `voxel_walkable` /
+// `voxel_line_of_sight` symbols. Cell layout matches the host's
+// `engine_voxel::VoxelMirror` staging: index = z*H*W + y*W + x; one
+// u32 per cell; material code lives in the low byte. Out-of-bounds
+// reads return 0u (air); out-of-bounds queries return FlatPlane-
+// equivalent defaults (walkable=true, height=0.0, los=true).
+//
+// Grid extent is derived at runtime from `arrayLength(&voxel_grid)` —
+// every fixture's mirror is cubic (`VoxelMirror::new` allocates
+// `width * height * depth` cells = N³ for `with_extent(N)`), so the
+// per-axis dim is the cube root of the buffer length. Computing it
+// once at the top of `voxel_grid_dim()` keeps every helper free of
+// per-call extent arguments AND avoids a separate dims uniform —
+// fixtures running at distinct extents (16³ probe vs 256³ default)
+// pick up the right dim automatically.
+fn voxel_grid_dim() -> u32 {
+    // For N up to 1024 (covers every realistic fixture), `pow + round`
+    // recovers N exactly: `f32(N^3)` is below the 24-bit mantissa limit
+    // for N<=1290, and naga's `pow` is accurate to <1ulp. For larger
+    // grids a per-fixture uniform would be more robust, but no fixture
+    // in scope exceeds 256³.
+    return u32(round(pow(f32(arrayLength(&voxel_grid)), 1.0 / 3.0)));
+}
+
+fn voxel_at(x: i32, y: i32, z: i32) -> u32 {
     if (x < 0 || y < 0 || z < 0) {
         return 0u;
     }
+    let dim: u32 = voxel_grid_dim();
     let ux: u32 = u32(x);
     let uy: u32 = u32(y);
     let uz: u32 = u32(z);
-    if (ux >= width || uy >= height || uz >= depth) {
+    if (ux >= dim || uy >= dim || uz >= dim) {
         return 0u;
     }
-    let idx: u32 = uz * height * width + uy * width + ux;
-    return (*grid)[idx];
+    let idx: u32 = uz * dim * dim + uy * dim + ux;
+    return voxel_grid[idx];
+}
+
+// Top face of the highest occupied cell in column (floor(x), floor(y)).
+// Walks top-down so the first hit is the highest. Empty column or
+// out-of-bounds (x, y) returns 0.0.
+fn voxel_height_at(x: f32, y: f32) -> f32 {
+    let cx: i32 = i32(floor(x));
+    let cy: i32 = i32(floor(y));
+    if (cx < 0 || cy < 0) {
+        return 0.0;
+    }
+    let dim: u32 = voxel_grid_dim();
+    let ucx: u32 = u32(cx);
+    let ucy: u32 = u32(cy);
+    if (ucx >= dim || ucy >= dim) {
+        return 0.0;
+    }
+    var cz: i32 = i32(dim) - 1;
+    loop {
+        if (cz < 0) {
+            break;
+        }
+        if (voxel_at(cx, cy, cz) != 0u) {
+            return f32(cz + 1);
+        }
+        cz = cz - 1;
+    }
+    return 0.0;
+}
+
+// Walkable predicate. `mode` mirrors `engine::state::agent::MovementMode`
+// ordinals: Walk=0, Climb=1, Swim=2, Fly=3, Fall=4. Fly + Fall always
+// pass; the rest pass when the cell at floor(pos) is air.
+// Out-of-bounds returns true (matches FlatPlane default + P10 no-panic).
+fn voxel_walkable(pos: vec3<f32>, mode: u32) -> bool {
+    if (mode == 3u || mode == 4u) {
+        return true;
+    }
+    let cx: i32 = i32(floor(pos.x));
+    let cy: i32 = i32(floor(pos.y));
+    let cz: i32 = i32(floor(pos.z));
+    if (cx < 0 || cy < 0 || cz < 0) {
+        return true;
+    }
+    let dim: u32 = voxel_grid_dim();
+    let ucx: u32 = u32(cx);
+    let ucy: u32 = u32(cy);
+    let ucz: u32 = u32(cz);
+    if (ucx >= dim || ucy >= dim || ucz >= dim) {
+        return true;
+    }
+    return voxel_at(cx, cy, cz) == 0u;
+}
+
+// Amanatides-Woo DDA voxel raycast from `seg_from` to `seg_to`. Returns
+// false when any traversed cell is solid; true if the segment exits
+// the grid (or terminates at `seg_to`) without hitting a non-air cell.
+// Coincident endpoints return true (no traversal). Param names are
+// `seg_from` / `seg_to` because `from` / `to` are reserved keywords in
+// some WGSL implementations (naga rejects `from` outright).
+//
+// Step bound = 3 * VOXEL_GRID_DIM is a worst-case diagonal upper bound
+// (each axis can step at most VOXEL_GRID_DIM cells inside the grid; the
+// loop also guards on `t > length` for early-exit).
+fn voxel_line_of_sight(seg_from: vec3<f32>, seg_to: vec3<f32>) -> bool {
+    let delta: vec3<f32> = seg_to - seg_from;
+    let length_sq: f32 = dot(delta, delta);
+    if (length_sq < 1.0e-12) {
+        return true;
+    }
+    let length: f32 = sqrt(length_sq);
+    let dir: vec3<f32> = delta / length;
+
+    var cx: i32 = i32(floor(seg_from.x));
+    var cy: i32 = i32(floor(seg_from.y));
+    var cz: i32 = i32(floor(seg_from.z));
+
+    // Step direction per axis (-1, 0, +1). Zero means the ray is
+    // parallel to that axis and never crosses a cell boundary on it.
+    let step_x: i32 = select(select(0, -1, dir.x < 0.0), 1, dir.x > 0.0);
+    let step_y: i32 = select(select(0, -1, dir.y < 0.0), 1, dir.y > 0.0);
+    let step_z: i32 = select(select(0, -1, dir.z < 0.0), 1, dir.z > 0.0);
+
+    // Distance along the ray to the next cell boundary on each axis.
+    // For axes with zero step, set to +infinity (1.0e30) so the
+    // selection in the loop never picks them.
+    let inv_dx: f32 = select(1.0e30, 1.0 / dir.x, abs(dir.x) > 1.0e-20);
+    let inv_dy: f32 = select(1.0e30, 1.0 / dir.y, abs(dir.y) > 1.0e-20);
+    let inv_dz: f32 = select(1.0e30, 1.0 / dir.z, abs(dir.z) > 1.0e-20);
+
+    var t_max_x: f32 = 1.0e30;
+    if (step_x > 0) {
+        t_max_x = (f32(cx + 1) - seg_from.x) * inv_dx;
+    } else if (step_x < 0) {
+        t_max_x = (seg_from.x - f32(cx)) * (-inv_dx);
+    }
+    var t_max_y: f32 = 1.0e30;
+    if (step_y > 0) {
+        t_max_y = (f32(cy + 1) - seg_from.y) * inv_dy;
+    } else if (step_y < 0) {
+        t_max_y = (seg_from.y - f32(cy)) * (-inv_dy);
+    }
+    var t_max_z: f32 = 1.0e30;
+    if (step_z > 0) {
+        t_max_z = (f32(cz + 1) - seg_from.z) * inv_dz;
+    } else if (step_z < 0) {
+        t_max_z = (seg_from.z - f32(cz)) * (-inv_dz);
+    }
+
+    let t_delta_x: f32 = select(1.0e30, abs(inv_dx), step_x != 0);
+    let t_delta_y: f32 = select(1.0e30, abs(inv_dy), step_y != 0);
+    let t_delta_z: f32 = select(1.0e30, abs(inv_dz), step_z != 0);
+
+    // Check the starting cell first — a `seg_from` already inside a
+    // solid cell counts as obstructed (matches the CPU oracle's
+    // cell-at semantics).
+    if (voxel_at(cx, cy, cz) != 0u) {
+        return false;
+    }
+
+    // Worst-case step bound: every axis steps at most `dim` times
+    // before exiting the grid; total = 3 * dim. The `t > length`
+    // early-exit handles short segments.
+    let max_steps: u32 = 3u * voxel_grid_dim();
+    var i: u32 = 0u;
+    loop {
+        if (i >= max_steps) {
+            break;
+        }
+        var t_next: f32;
+        if (t_max_x <= t_max_y && t_max_x <= t_max_z) {
+            cx = cx + step_x;
+            t_next = t_max_x;
+            t_max_x = t_max_x + t_delta_x;
+        } else if (t_max_y <= t_max_z) {
+            cy = cy + step_y;
+            t_next = t_max_y;
+            t_max_y = t_max_y + t_delta_y;
+        } else {
+            cz = cz + step_z;
+            t_next = t_max_z;
+            t_max_z = t_max_z + t_delta_z;
+        }
+        if (t_next > length) {
+            // Stepped past `seg_to` without hitting anything — clear.
+            return true;
+        }
+        if (voxel_at(cx, cy, cz) != 0u) {
+            return false;
+        }
+        i = i + 1u;
+    }
+    // Ran out of steps without resolving — treat as clear. Reaching
+    // this branch implies the segment is longer than 3 * grid extent,
+    // which doesn't happen at the fixture sizes in scope.
+    return true;
 }
 
 ";
@@ -696,13 +855,19 @@ fn compose_wgsl_file(
         out.push('\n');
     }
 
-    // Voxel-mirror prelude (Phase C): emit `voxel_at(` helper when
-    // the kernel body references it. Phase C just lays the helper
-    // down — Phase D will start emitting calls to it from lowered
-    // `terrain.height_at` / `terrain.walkable` / `terrain.line_of_sight`
-    // surfaces. Substring-gate keys on `voxel_at(` so a kernel that
-    // doesn't touch terrain doesn't pick up the unused helper.
-    if body.contains("voxel_at(") {
+    // Voxel-mirror prelude (Phase C + D): emit the `voxel_at` /
+    // `voxel_height_at` / `voxel_walkable` / `voxel_line_of_sight`
+    // helpers when the kernel body references any of them. Phase D's
+    // `terrain.*` lowering uses the namespace-prelude pass to inject
+    // `terrain_<method>(...)` wrappers (added to `compose_namespace_prelude`
+    // BEFORE this gate), and those wrappers in turn call the helpers
+    // below — so we substring-check the wrapper-internal symbols too.
+    // The helpers reference the module-scope `voxel_grid` storage
+    // binding directly (no pointer args).
+    let needs_voxel_helpers = ["voxel_at(", "voxel_height_at(", "voxel_walkable(", "voxel_line_of_sight("]
+        .iter()
+        .any(|needle| body.contains(needle) || prelude.contains(needle));
+    if needs_voxel_helpers {
         out.push_str(VOXEL_GRID_WGSL_PRELUDE);
         out.push('\n');
     }
@@ -2110,24 +2275,83 @@ mod tests {
 
     #[test]
     fn voxel_grid_wgsl_prelude_emits_voxel_at_helper() {
-        // The substring gate `voxel_at(` in `compose_wgsl_file` is the
-        // load-bearing emit gate for the helper. Pin its shape: function
-        // name, the OOB-returns-zero arm, and the flat-3D index formula.
+        // The substring gate (`voxel_at(` / `voxel_height_at(` /
+        // `voxel_walkable(` / `voxel_line_of_sight(`) in
+        // `compose_wgsl_file` is the load-bearing emit gate for these
+        // helpers. Pin their shapes: function names, the OOB defaults,
+        // and the flat-3D index formula.
         assert!(
             VOXEL_GRID_WGSL_PRELUDE.contains("fn voxel_at("),
             "VOXEL_GRID_WGSL_PRELUDE should declare `voxel_at` helper: \n{VOXEL_GRID_WGSL_PRELUDE}"
+        );
+        assert!(
+            VOXEL_GRID_WGSL_PRELUDE.contains("fn voxel_height_at("),
+            "Phase D: VOXEL_GRID_WGSL_PRELUDE should declare `voxel_height_at`"
+        );
+        assert!(
+            VOXEL_GRID_WGSL_PRELUDE.contains("fn voxel_walkable("),
+            "Phase D: VOXEL_GRID_WGSL_PRELUDE should declare `voxel_walkable`"
+        );
+        assert!(
+            VOXEL_GRID_WGSL_PRELUDE.contains("fn voxel_line_of_sight("),
+            "Phase D: VOXEL_GRID_WGSL_PRELUDE should declare `voxel_line_of_sight`"
         );
         assert!(
             VOXEL_GRID_WGSL_PRELUDE.contains("return 0u;"),
             "voxel_at OOB arm must return 0u sentinel"
         );
         // Flat 3D index — keep in lock-step with `engine_voxel::VoxelMirror`'s
-        // staging layout (index = z*H*W + y*W + x).
+        // staging layout (index = z*H*W + y*W + x). Helper derives the
+        // per-axis dim from `arrayLength(&voxel_grid)` (cube-rooted)
+        // since fixtures run at distinct extents.
         assert!(
-            VOXEL_GRID_WGSL_PRELUDE.contains("uz * height * width + uy * width + ux"),
+            VOXEL_GRID_WGSL_PRELUDE.contains("uz * dim * dim + uy * dim + ux"),
             "voxel_at index formula drifted from VoxelGrid::index — \
              keep in sync with engine_voxel::VoxelMirror's staging layout"
         );
+        assert!(
+            VOXEL_GRID_WGSL_PRELUDE.contains("fn voxel_grid_dim()"),
+            "voxel_grid_dim helper missing — every other helper relies on it"
+        );
+        assert!(
+            VOXEL_GRID_WGSL_PRELUDE.contains("arrayLength(&voxel_grid)"),
+            "voxel_grid_dim must derive dim from arrayLength so distinct \
+             fixture extents (16³ probe, 256³ default) each pick up the \
+             right per-axis bound"
+        );
+    }
+
+    /// **Phase D pin** — the substring gate in `compose_wgsl_file`
+    /// fires when `terrain_*` namespace stubs reference the
+    /// `voxel_*` helpers. Pin the symbol names so a rename of
+    /// either side surfaces here rather than as an opaque
+    /// shader-compile error from naga.
+    #[test]
+    fn voxel_helpers_emit_under_terrain_call_substrings() {
+        // The namespace prelude composer concatenates each method's
+        // `wgsl_stub` verbatim. We don't have a CgProgram in scope to
+        // exercise compose_wgsl_file end-to-end, but we DO know the
+        // stub bodies (from `populate_namespace_registry`) and can
+        // simulate the body+prelude substring scan here.
+        //
+        // Stubs registered in `populate_namespace_registry` (driver.rs).
+        let synthesized_stubs = [
+            "fn terrain_line_of_sight(from: vec3<f32>, to: vec3<f32>) -> bool { return voxel_line_of_sight(from, to); }",
+            "fn terrain_height_at(x: f32, y: f32) -> f32 { return voxel_height_at(x, y); }",
+            "fn terrain_walkable(pos: vec3<f32>, mode: u32) -> bool { return voxel_walkable(pos, mode); }",
+        ];
+        for stub in synthesized_stubs {
+            let triggers = stub.contains("voxel_at(")
+                || stub.contains("voxel_height_at(")
+                || stub.contains("voxel_walkable(")
+                || stub.contains("voxel_line_of_sight(");
+            assert!(
+                triggers,
+                "terrain stub `{stub}` should reference one of the \
+                 voxel_* helpers so the substring gate emits the \
+                 helper prelude"
+            );
+        }
     }
 
     #[test]

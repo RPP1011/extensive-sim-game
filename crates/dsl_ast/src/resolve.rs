@@ -399,14 +399,17 @@ mod stdlib {
             (NamespaceId::Abilities, "on_cooldown") => Some((1, IrType::Bool)),
             (NamespaceId::Abilities, "hostile_only") => Some((1, IrType::Bool)),
             (NamespaceId::Abilities, "range") => Some((1, IrType::F32)),
-            // Terrain seam — MVP Task 81. Sole method:
-            // `terrain.line_of_sight(from: vec3, to: vec3) -> bool`.
-            // Routes to `SimState.terrain.line_of_sight(from, to)` at
-            // emit time. The `height_at` / `walkable` surface on
-            // `TerrainQuery` is intentionally not exposed to the DSL at
-            // this slice — the smallest possible method set the
-            // height-bonus scoring gate needs.
+            // Terrain seam — MVP Task 81 + voxel-engine integration
+            // Phase D (`docs/superpowers/plans/2026-05-09-voxel-engine-integration.md`).
+            // Three methods:
+            // - `terrain.line_of_sight(from: vec3, to: vec3) -> bool`
+            // - `terrain.height_at(x: f32, y: f32) -> f32`
+            // - `terrain.walkable(pos: vec3, mode: u32) -> bool`
+            // All three lower to WGSL helpers that read the
+            // `voxel_grid` storage binding (Phase C's GPU mirror).
             (NamespaceId::Terrain, "line_of_sight") => Some((2, IrType::Bool)),
+            (NamespaceId::Terrain, "height_at") => Some((2, IrType::F32)),
+            (NamespaceId::Terrain, "walkable") => Some((2, IrType::Bool)),
             // Engagement accessor — wraps `state.agent_engaged_with(id)`,
             // returning `Option<AgentId>` so the mask predicate can
             // compare against `None` (the engagement-lock clause in

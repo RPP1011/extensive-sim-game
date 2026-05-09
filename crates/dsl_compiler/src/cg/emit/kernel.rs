@@ -711,6 +711,41 @@ pub fn kernel_topology_to_spec_and_body(
         }
     }
 
+    // 10b'. Voxel-engine integration Phase D: when the body lowered a
+    //      `terrain.*` namespace call (any of `terrain_line_of_sight(`,
+    //      `terrain_height_at(`, `terrain_walkable(`), synthesize a
+    //      `voxel_grid` binding so the WGSL emit + Rust `Bindings`
+    //      struct surface the slot the runtime fills via
+    //      `KernelBindingsContext::voxel_grid`. Mirrors the debug-binding
+    //      pattern above (substring-gated synthesis off the body text).
+    //
+    //      The compiler-emitted `from_context()` constructor routes the
+    //      binding through `BindingSource::VoxelGrid → ctx.voxel_grid.expect(...)`
+    //      (see `program::classify_binding` + `render_from_context_expr`),
+    //      so the runtime contract is: any kernel whose body calls a
+    //      terrain method MUST be dispatched through a context with
+    //      `voxel_grid: Some(...)` set.
+    //
+    //      Substring scan on `terrain_*(` rather than `voxel_*(`
+    //      because the DSL-author surface is `terrain.*`; the
+    //      `voxel_*` helpers are an internal lowering artifact and
+    //      may grow / rename. Body text only contains the terrain_*
+    //      calls; the voxel_* prelude is added later by compose_wgsl_file
+    //      (see the substring gate around `voxel_at(`).
+    if wgsl_body.contains("terrain_line_of_sight(")
+        || wgsl_body.contains("terrain_height_at(")
+        || wgsl_body.contains("terrain_walkable(")
+    {
+        let slot = bindings.len() as u32;
+        bindings.push(KernelBinding {
+            slot,
+            name: "voxel_grid".into(),
+            access: AccessMode::ReadStorage,
+            wgsl_ty: "array<u32>".into(),
+            bg_source: BgSource::External("voxel_grid".into()),
+        });
+    }
+
     // 10c. Push the cfg uniform LAST so its slot lands after every data
     //      binding (including any Phase 2 debug instrumentation buffers
     //      added in 10b above).

@@ -931,4 +931,88 @@ mod tests {
         assert_eq!(a, b, "cells inside one chunk should match");
         assert_ne!(a, c, "cell on chunk boundary should land in next chunk");
     }
+
+    // ---------------------------------------------------------------
+    // Phase D semantic pins — the FlatPlane killers for `walkable`
+    // and `line_of_sight` per the voxel-engine integration plan
+    // (`docs/superpowers/plans/2026-05-09-voxel-engine-integration.md`).
+    // The CPU-side equivalents live here so they exercise the
+    // `TerrainQuery` impl directly; the GPU equivalent (the
+    // `gpu_terrain_query_matches_cpu` divergence pin) lives in
+    // `voxel_probe_runtime` since it needs a wgpu device.
+    //
+    // Don't substitute counter-based pins (e.g. "voxel count > 0")
+    // for these — that's the probe-fooling pattern the plan calls
+    // out by name. Each pin asserts an algebraic property
+    // (place-then-walk-into → blocked; place-then-look-through →
+    // obstructed) that FlatPlane silently passes.
+    // ---------------------------------------------------------------
+
+    /// **Phase D semantic pin #1.** A cell with a placed solid voxel
+    /// must report `walkable = false` for ground-bound movement modes
+    /// (Walk / Climb / Swim) and `walkable = true` for Fly/Fall.
+    /// FlatPlane returns true for both → fails.
+    #[test]
+    fn solid_voxel_blocks_walkable() {
+        let mut t = VoxelTerrain::with_extent(16);
+        // Place a solid voxel at integer cell (5, 5, 5).
+        t.set_cell(5, 5, 5, 1);
+        // World-space pos inside that cell — floor((5.5,5.5,5.5)) =
+        // (5,5,5). Walk + Climb + Swim all gate on the cell being air.
+        let pos = Vec3::new(5.5, 5.5, 5.5);
+        assert!(
+            !t.walkable(pos, MovementMode::Walk),
+            "solid voxel at (5,5,5) must block Walk; FlatPlane returns true"
+        );
+        assert!(
+            !t.walkable(pos, MovementMode::Climb),
+            "solid voxel at (5,5,5) must block Climb"
+        );
+        assert!(
+            !t.walkable(pos, MovementMode::Swim),
+            "solid voxel at (5,5,5) must block Swim"
+        );
+        // Fly/Fall always pass (per the doc-comment contract).
+        assert!(
+            t.walkable(pos, MovementMode::Fly),
+            "solid voxel at (5,5,5) must NOT block Fly"
+        );
+        assert!(
+            t.walkable(pos, MovementMode::Fall),
+            "solid voxel at (5,5,5) must NOT block Fall"
+        );
+    }
+
+    /// **Phase D semantic pin #2.** A solid voxel between two endpoints
+    /// must obstruct line-of-sight; a parallel ray that doesn't cross
+    /// any solid cell must be clear. FlatPlane returns true for both →
+    /// fails.
+    #[test]
+    fn voxel_blocks_line_of_sight() {
+        let mut t = VoxelTerrain::with_extent(16);
+        t.set_cell(5, 5, 5, 1);
+        // Segment crosses cell (5,5,5) → must be obstructed. Use the
+        // cell's mid-line (z = 5.5) so the DDA actually traverses it
+        // even with floating-point quantisation at cell faces.
+        let blocked = t.line_of_sight(
+            Vec3::new(0.0, 5.5, 5.5),
+            Vec3::new(10.0, 5.5, 5.5),
+        );
+        assert!(
+            !blocked,
+            "ray (0,5.5,5.5) → (10,5.5,5.5) crosses solid cell (5,5,5) — \
+             must be obstructed; FlatPlane returns true"
+        );
+        // Parallel ray on a different y-row — column (0..10, 10, 5) is
+        // entirely empty; LOS must be clear.
+        let clear = t.line_of_sight(
+            Vec3::new(0.0, 10.5, 5.5),
+            Vec3::new(10.0, 10.5, 5.5),
+        );
+        assert!(
+            clear,
+            "ray (0,10.5,5.5) → (10,10.5,5.5) doesn't cross any solid \
+             cell — must be clear"
+        );
+    }
 }
