@@ -1126,6 +1126,19 @@ fn pack_effect(op: EffectOp) -> (u32, u32, u32) {
             let hi = ((dest_y_q8 as u16) as u32) << 16;
             (39, hi | lo, eta_ticks)
         }
+        // Lift B — `cast_recipe <recipe_id> [target <tool_slot>]`. payload_a's
+        // low 16 bits = recipe_id (registry index); next 8 bits = target_tool
+        // (0xFF sentinel = no tool target). payload_b = 0. The consumer
+        // unpacks via `payload_a & 0xFFFF` (recipe_id) and
+        // `(payload_a >> 16) & 0xFF` (target_tool).
+        EffectOp::Recipe { recipe_id, target_tool } =>
+            (40, (recipe_id as u32) | ((target_tool as u32) << 16), 0),
+        // Lift B — `wear_tool <tool_kind> <amount>`. payload_a's low byte =
+        // tool_kind ordinal; next 16 bits = amount (q8 fraction-of-durability).
+        // payload_b = 0. The consumer unpacks via `payload_a & 0xFF`
+        // (tool_kind) and `(payload_a >> 8) & 0xFFFF` (amount).
+        EffectOp::WearTool { tool_kind, amount } =>
+            (41, (tool_kind as u32) | ((amount as u32) << 8), 0),
     }
 }
 

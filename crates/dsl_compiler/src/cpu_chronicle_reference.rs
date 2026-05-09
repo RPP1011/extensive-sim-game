@@ -655,6 +655,43 @@ pub fn apply_event_to_chronicle_record(
             rec[5] = eta_ticks;
             Some(rec)
         }
+        // --- Recipe = 40 → EventKindId::EffectRecipeApplied = 71.
+        // Lift B production verb. payload_a packs
+        // (target_tool << 16) | recipe_id. payload_b = 0. The dispatcher
+        // writes:
+        //   slot 2 = caster_slot (the producer)
+        //   slot 3 = caster_slot (target = caster — recipes act on the
+        //                          caster's inventory)
+        //   slot 4 = packed (target_tool hi << 16 | recipe_id lo &
+        //                    0xFFFF)
+        //   slot 5 = 0
+        ApplyEvent::Recipe { source: _, recipe_id, target_tool } => {
+            let packed = (recipe_id as u32) | ((target_tool as u32) << 16);
+            rec[0] = 71;
+            rec[2] = caster_id;
+            rec[3] = caster_id;
+            rec[4] = packed;
+            rec[5] = 0;
+            Some(rec)
+        }
+        // --- WearTool = 41 → EventKindId::EffectWearToolApplied = 72.
+        // Lift B capital-goods wear. payload_a packs
+        // (amount << 8) | tool_kind. payload_b = 0. The dispatcher
+        // writes:
+        //   slot 2 = caster_slot (the tool's owner)
+        //   slot 3 = caster_slot (target = caster — wear acts on the
+        //                          caster's owned tool)
+        //   slot 4 = packed (amount hi << 8 | tool_kind lo & 0xFF)
+        //   slot 5 = 0
+        ApplyEvent::WearTool { source: _, tool_kind, amount } => {
+            let packed = (tool_kind as u32) | ((amount as u32) << 8);
+            rec[0] = 72;
+            rec[2] = caster_id;
+            rec[3] = caster_id;
+            rec[4] = packed;
+            rec[5] = 0;
+            Some(rec)
+        }
         // After the slice γ closer (Summon → kind 62), every
         // `ApplyEvent` variant has a chronicle counterpart — no
         // fallback `_ => None` arm needed. The closed-set match
@@ -1459,6 +1496,8 @@ mod tests {
                 37 => ApplyEvent::Decoy          { source: aid(1), target: aid(2), subject_idx: 4, fake_pos: 0xDEADBEEF },
                 38 => ApplyEvent::EraseBelief    { source: aid(1), target: aid(2), subject_idx: 4, fields: 0b00111111 },
                 39 => ApplyEvent::TravelTo       { source: aid(1), dest_x: 5.0, dest_y: 5.0, eta_ticks: 50 },
+                40 => ApplyEvent::Recipe         { source: aid(1), recipe_id: 42, target_tool: 0xFF },
+                41 => ApplyEvent::WearTool       { source: aid(1), tool_kind: 3, amount: 64 },
                 _ => panic!("unexpected effect_kind in table"),
             }
         };
@@ -1558,5 +1597,76 @@ mod tests {
         // → 0x0100): 0xFF000100.
         assert_eq!(rec[4], 0xFF00_0100, "q8 negative coord packs with sign bits intact");
         assert_eq!(rec[5], 25);
+    }
+
+    // Lift B — `cast_recipe` chronicle record. Self-cast: target slot ==
+    // caster slot. payload_a packs (target_tool << 16) | recipe_id;
+    // payload_b = 0. recipe_id=42 (0x002A), target_tool=0xFF →
+    // packed = 0x00FF_002A.
+    #[test]
+    fn recipe_chronicle_record_uses_kind_71_and_packs_recipe_id() {
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::Recipe { source: aid(1), recipe_id: 42, target_tool: 0xFF },
+            /*tick*/ 100,
+            /*caster_id*/ 7, /*target_id*/ 7,
+        )
+        .expect("Recipe has chronicle counterpart");
+        assert_eq!(rec[0], 71, "EffectRecipeApplied kind tag");
+        assert_eq!(rec[1], 100, "tick");
+        assert_eq!(rec[2], 7, "caster slot — self-cast (recipe acts on caster's inventory)");
+        assert_eq!(rec[3], 7, "target slot == caster slot for self-cast recipe");
+        assert_eq!(rec[4], 0x00FF_002A, "packed (target_tool << 16) | recipe_id");
+        assert_eq!(rec[5], 0, "payload_b unused");
+    }
+
+    // Lift B — `cast_recipe` with explicit target tool slot (not the
+    // 0xFF sentinel). recipe_id=7 (0x0007), target_tool=3 → packed =
+    // 0x0003_0007. Pins the target_tool packing position.
+    #[test]
+    fn recipe_chronicle_packs_explicit_target_tool() {
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::Recipe { source: aid(1), recipe_id: 7, target_tool: 3 },
+            /*tick*/ 50,
+            /*caster_id*/ 4, /*target_id*/ 4,
+        )
+        .expect("Recipe has chronicle counterpart");
+        assert_eq!(rec[0], 71);
+        assert_eq!(rec[4], 0x0003_0007, "target_tool packs into bits 16..24");
+    }
+
+    // Lift B — `wear_tool` chronicle record. Self-cast: target slot ==
+    // caster slot. payload_a packs (amount << 8) | tool_kind;
+    // payload_b = 0. tool_kind=3 (0x03), amount=64 (0x40) →
+    // packed = (64 << 8) | 3 = 0x0000_4003.
+    #[test]
+    fn wear_tool_chronicle_record_uses_kind_72_and_packs_amount() {
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::WearTool { source: aid(1), tool_kind: 3, amount: 64 },
+            /*tick*/ 100,
+            /*caster_id*/ 5, /*target_id*/ 5,
+        )
+        .expect("WearTool has chronicle counterpart");
+        assert_eq!(rec[0], 72, "EffectWearToolApplied kind tag");
+        assert_eq!(rec[1], 100, "tick");
+        assert_eq!(rec[2], 5, "caster slot — self-cast (wear acts on caster's tool)");
+        assert_eq!(rec[3], 5, "target slot == caster slot for self-cast wear");
+        assert_eq!(rec[4], 0x0000_4003, "packed (amount << 8) | tool_kind");
+        assert_eq!(rec[5], 0, "payload_b unused");
+    }
+
+    // Lift B — `wear_tool` with the maximal amount (u16::MAX = 0xFFFF).
+    // tool_kind=1, amount=0xFFFF → packed = (0xFFFF << 8) | 1 =
+    // 0x00FF_FF01. Pins the amount packing position so a future widening
+    // surfaces here.
+    #[test]
+    fn wear_tool_chronicle_packs_max_amount() {
+        let rec = apply_event_to_chronicle_record(
+            ApplyEvent::WearTool { source: aid(1), tool_kind: 1, amount: 0xFFFF },
+            /*tick*/ 25,
+            /*caster_id*/ 9, /*target_id*/ 9,
+        )
+        .expect("WearTool has chronicle counterpart");
+        assert_eq!(rec[0], 72);
+        assert_eq!(rec[4], 0x00FF_FF01, "amount fills bits 8..24, tool_kind in bits 0..8");
     }
 }
