@@ -43,7 +43,7 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 mod binding_check;
 
@@ -740,6 +740,28 @@ impl CompiledSim for Duel25v25State {
             offsets_size,
         );
 
+        // Shared once per tick; each dispatch below adds only its
+        // fixture-specific `*Extras` (spatial-grid buffers, fixture cfg
+        // uniforms, indirect args, etc.).
+        let agent_buffers = AgentBuffers {
+            pos_buf: Some(&self.agent_pos_buf),
+            hp_buf: Some(&self.agent_hp_buf),
+            max_hp_buf: Some(&self.agent_max_hp_buf),
+            alive_buf: Some(&self.agent_alive_buf),
+            move_speed_buf: Some(&self.agent_move_speed_buf),
+            armor_buf: Some(&self.agent_armor_buf),
+            magic_resist_buf: Some(&self.agent_magic_resist_buf),
+            attack_damage_buf: Some(&self.agent_attack_damage_buf),
+            ability_power_buf: Some(&self.agent_ability_power_buf),
+            mana_buf: Some(&self.agent_mana_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+        };
+
         // (2) Spatial-hash counting sort (5 phases). Mirrors
         // particle_collision_runtime; required input for ScanAndStrike's
         // body-form spatial walk.
@@ -753,11 +775,14 @@ impl CompiledSim for Duel25v25State {
             .queue
             .write_buffer(&self.scan_cfg_buf, 0, bytemuck::bytes_of(&scan_cfg));
 
-        let count_b = spatial_build_hash_count::SpatialBuildHashCountBindings {
-            agent_pos: &self.agent_pos_buf,
+        let count_extras = spatial_build_hash_count::SpatialBuildHashCountExtras {
             spatial_grid_offsets: &self.spatial_grid_offsets,
             cfg: &self.scan_cfg_buf,
         };
+        let count_b = spatial_build_hash_count::SpatialBuildHashCountBindings::from_context_with_extras(
+            &ctx,
+            &count_extras,
+        );
         dispatch::dispatch_spatial_build_hash_count(
             &mut self.cache,
             &count_b,
@@ -765,12 +790,16 @@ impl CompiledSim for Duel25v25State {
             &mut encoder,
             self.agent_count,
         );
-        let scan_local_b = spatial_build_hash_scan_local::SpatialBuildHashScanLocalBindings {
+        let scan_local_extras = spatial_build_hash_scan_local::SpatialBuildHashScanLocalExtras {
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
             spatial_chunk_sums: &self.spatial_chunk_sums,
             cfg: &self.scan_cfg_buf,
         };
+        let scan_local_b = spatial_build_hash_scan_local::SpatialBuildHashScanLocalBindings::from_context_with_extras(
+            &ctx,
+            &scan_local_extras,
+        );
         dispatch::dispatch_spatial_build_hash_scan_local(
             &mut self.cache,
             &scan_local_b,
@@ -778,10 +807,14 @@ impl CompiledSim for Duel25v25State {
             &mut encoder,
             self.agent_count,
         );
-        let scan_carry_b = spatial_build_hash_scan_carry::SpatialBuildHashScanCarryBindings {
+        let scan_carry_extras = spatial_build_hash_scan_carry::SpatialBuildHashScanCarryExtras {
             spatial_chunk_sums: &self.spatial_chunk_sums,
             cfg: &self.scan_cfg_buf,
         };
+        let scan_carry_b = spatial_build_hash_scan_carry::SpatialBuildHashScanCarryBindings::from_context_with_extras(
+            &ctx,
+            &scan_carry_extras,
+        );
         dispatch::dispatch_spatial_build_hash_scan_carry(
             &mut self.cache,
             &scan_carry_b,
@@ -789,12 +822,16 @@ impl CompiledSim for Duel25v25State {
             &mut encoder,
             self.agent_count,
         );
-        let scan_add_b = spatial_build_hash_scan_add::SpatialBuildHashScanAddBindings {
+        let scan_add_extras = spatial_build_hash_scan_add::SpatialBuildHashScanAddExtras {
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
             spatial_chunk_sums: &self.spatial_chunk_sums,
             cfg: &self.scan_cfg_buf,
         };
+        let scan_add_b = spatial_build_hash_scan_add::SpatialBuildHashScanAddBindings::from_context_with_extras(
+            &ctx,
+            &scan_add_extras,
+        );
         dispatch::dispatch_spatial_build_hash_scan_add(
             &mut self.cache,
             &scan_add_b,
@@ -802,13 +839,16 @@ impl CompiledSim for Duel25v25State {
             &mut encoder,
             self.agent_count,
         );
-        let scatter_b = spatial_build_hash_scatter::SpatialBuildHashScatterBindings {
-            agent_pos: &self.agent_pos_buf,
+        let scatter_extras = spatial_build_hash_scatter::SpatialBuildHashScatterExtras {
             spatial_grid_cells: &self.spatial_grid_cells,
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
             cfg: &self.scan_cfg_buf,
         };
+        let scatter_b = spatial_build_hash_scatter::SpatialBuildHashScatterBindings::from_context_with_extras(
+            &ctx,
+            &scatter_extras,
+        );
         dispatch::dispatch_spatial_build_hash_scatter(
             &mut self.cache,
             &scatter_b,
@@ -825,47 +865,24 @@ impl CompiledSim for Duel25v25State {
         // (engine kind=26). The new ApplyDamageFromChronicle kernel
         // below re-emits those as Damaged so the existing ApplyDamage
         // cascade keeps working unchanged.
-        let scan_bindings = physics_ScanAndStrike::PhysicsScanAndStrikeBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_pos: &self.agent_pos_buf,
-            agent_hp: &self.agent_hp_buf,
-            agent_max_hp: &self.agent_max_hp_buf,
-            agent_alive: &self.agent_alive_buf,
-            agent_move_speed: &self.agent_move_speed_buf,
-            agent_armor: &self.agent_armor_buf,
-            agent_magic_resist: &self.agent_magic_resist_buf,
-            agent_attack_damage: &self.agent_attack_damage_buf,
-            agent_ability_power: &self.agent_ability_power_buf,
-            agent_mana: &self.agent_mana_buf,
+        // AOE Cleave (Path B production proof, 2026-05-07) — both
+        // ScanAndStrike and ScanAndCleave opt into the AOE dispatcher
+        // via `LowerOpts { aoe_dispatch: true }`. Strike has empty
+        // `per_effect_areas` so the dispatcher reads sentinel 0xFFu
+        // and falls through to the single-target chain; Cleave reads
+        // `Circle = 0u` and runs the 27-cell walk. Both kernels bind
+        // the same registry SoA columns (routed via `ctx.registry`).
+        let scan_extras = physics_ScanAndStrike::PhysicsScanAndStrikeExtras {
             agent_creature_type: &self.agent_creature_type_buf,
             spatial_grid_cells: &self.spatial_grid_cells,
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
-            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
-            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
-            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
-            // AOE Cleave (Path B production proof, 2026-05-07) — opt
-            // both ScanAndStrike and ScanAndCleave into the AOE
-            // dispatcher via `LowerOpts { aoe_dispatch: true }`. Strike
-            // has empty `per_effect_areas` so the dispatcher reads
-            // sentinel 0xFFu and falls through to the single-target
-            // chain; Cleave reads `Circle = 0u` and runs the 27-cell
-            // walk. Both kernels bind the same registry SoA columns.
-            ability_registry_area_kinds: &self.registry_gpu.area_kinds,
-            ability_registry_area_args: &self.registry_gpu.area_args,
-            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
-            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
-            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
-            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
-            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
-            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
-            ability_registry_chances:           &self.registry_gpu.chances,
             cfg: &self.scan_cfg_buf,
         };
+        let scan_bindings = physics_ScanAndStrike::PhysicsScanAndStrikeBindings::from_context_with_extras(
+            &ctx,
+            &scan_extras,
+        );
         dispatch::dispatch_physics_scanandstrike(
             &mut self.cache,
             &scan_bindings,
@@ -897,40 +914,17 @@ impl CompiledSim for Duel25v25State {
         self.gpu
             .queue
             .write_buffer(&self.cleave_cfg_buf, 0, bytemuck::bytes_of(&cleave_cfg));
-        let cleave_bindings = physics_ScanAndCleave::PhysicsScanAndCleaveBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_pos: &self.agent_pos_buf,
-            agent_hp: &self.agent_hp_buf,
-            agent_max_hp: &self.agent_max_hp_buf,
-            agent_alive: &self.agent_alive_buf,
-            agent_move_speed: &self.agent_move_speed_buf,
-            agent_armor: &self.agent_armor_buf,
-            agent_magic_resist: &self.agent_magic_resist_buf,
-            agent_attack_damage: &self.agent_attack_damage_buf,
-            agent_ability_power: &self.agent_ability_power_buf,
-            agent_mana: &self.agent_mana_buf,
+        let cleave_extras = physics_ScanAndCleave::PhysicsScanAndCleaveExtras {
             agent_creature_type: &self.agent_creature_type_buf,
             spatial_grid_cells: &self.spatial_grid_cells,
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
-            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
-            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
-            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
-            ability_registry_area_kinds: &self.registry_gpu.area_kinds,
-            ability_registry_area_args: &self.registry_gpu.area_args,
-            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
-            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
-            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
-            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
-            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
-            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
-            ability_registry_chances:           &self.registry_gpu.chances,
             cfg: &self.cleave_cfg_buf,
         };
+        let cleave_bindings = physics_ScanAndCleave::PhysicsScanAndCleaveBindings::from_context_with_extras(
+            &ctx,
+            &cleave_extras,
+        );
         dispatch::dispatch_physics_scanandcleave(
             &mut self.cache,
             &cleave_bindings,
@@ -969,40 +963,17 @@ impl CompiledSim for Duel25v25State {
             0,
             bytemuck::bytes_of(&concussive_cfg),
         );
-        let concussive_bindings = physics_ScanAndConcussiveCleave::PhysicsScanAndConcussiveCleaveBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_pos: &self.agent_pos_buf,
-            agent_hp: &self.agent_hp_buf,
-            agent_max_hp: &self.agent_max_hp_buf,
-            agent_alive: &self.agent_alive_buf,
-            agent_move_speed: &self.agent_move_speed_buf,
-            agent_armor: &self.agent_armor_buf,
-            agent_magic_resist: &self.agent_magic_resist_buf,
-            agent_attack_damage: &self.agent_attack_damage_buf,
-            agent_ability_power: &self.agent_ability_power_buf,
-            agent_mana: &self.agent_mana_buf,
+        let concussive_extras = physics_ScanAndConcussiveCleave::PhysicsScanAndConcussiveCleaveExtras {
             agent_creature_type: &self.agent_creature_type_buf,
             spatial_grid_cells: &self.spatial_grid_cells,
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
-            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
-            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
-            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
-            ability_registry_area_kinds: &self.registry_gpu.area_kinds,
-            ability_registry_area_args: &self.registry_gpu.area_args,
-            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
-            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
-            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
-            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
-            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
-            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
-            ability_registry_chances:           &self.registry_gpu.chances,
             cfg: &self.concussive_cfg_buf,
         };
+        let concussive_bindings = physics_ScanAndConcussiveCleave::PhysicsScanAndConcussiveCleaveBindings::from_context_with_extras(
+            &ctx,
+            &concussive_extras,
+        );
         dispatch::dispatch_physics_scanandconcussivecleave(
             &mut self.cache,
             &concussive_bindings,
@@ -1036,40 +1007,17 @@ impl CompiledSim for Duel25v25State {
         self.gpu
             .queue
             .write_buffer(&self.heal_cfg_buf, 0, bytemuck::bytes_of(&heal_cfg));
-        let heal_bindings = physics_ScanAndHeal::PhysicsScanAndHealBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_pos: &self.agent_pos_buf,
-            agent_hp: &self.agent_hp_buf,
-            agent_max_hp: &self.agent_max_hp_buf,
-            agent_alive: &self.agent_alive_buf,
-            agent_move_speed: &self.agent_move_speed_buf,
-            agent_armor: &self.agent_armor_buf,
-            agent_magic_resist: &self.agent_magic_resist_buf,
-            agent_attack_damage: &self.agent_attack_damage_buf,
-            agent_ability_power: &self.agent_ability_power_buf,
-            agent_mana: &self.agent_mana_buf,
+        let heal_extras = physics_ScanAndHeal::PhysicsScanAndHealExtras {
             agent_creature_type: &self.agent_creature_type_buf,
             spatial_grid_cells: &self.spatial_grid_cells,
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
-            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
-            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
-            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
-            ability_registry_area_kinds: &self.registry_gpu.area_kinds,
-            ability_registry_area_args: &self.registry_gpu.area_args,
-            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
-            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
-            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
-            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
-            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
-            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
-            ability_registry_chances:           &self.registry_gpu.chances,
             cfg: &self.heal_cfg_buf,
         };
+        let heal_bindings = physics_ScanAndHeal::PhysicsScanAndHealBindings::from_context_with_extras(
+            &ctx,
+            &heal_extras,
+        );
         dispatch::dispatch_physics_scanandheal(
             &mut self.cache,
             &heal_bindings,
@@ -1106,15 +1054,16 @@ impl CompiledSim for Duel25v25State {
             0,
             bytemuck::bytes_of(&apply_chronicle_cfg),
         );
-        let apply_chronicle_bindings =
-            physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleAndApplyHealFromChronicleBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                agent_hp: &self.agent_hp_buf,
-                agent_max_hp: &self.agent_max_hp_buf,
+        let apply_chronicle_extras =
+            physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleAndApplyHealFromChronicleExtras {
                 agent_stun_expires_at_tick: &self.agent_stun_expires_at_tick_buf,
                 cfg: &self.apply_chronicle_cfg_buf,
             };
+        let apply_chronicle_bindings =
+            physics_ApplyDamageFromChronicle_and_ApplyStunFromChronicle_and_ApplyHealFromChronicle::PhysicsApplyDamageFromChronicleAndApplyStunFromChronicleAndApplyHealFromChronicleBindings::from_context_with_extras(
+                &ctx,
+                &apply_chronicle_extras,
+            );
         dispatch::dispatch_physics_applydamagefromchronicle_and_applystunfromchronicle_and_applyhealfromchronicle(
             &mut self.cache,
             &apply_chronicle_bindings,
@@ -1138,13 +1087,13 @@ impl CompiledSim for Duel25v25State {
         self.gpu
             .queue
             .write_buffer(&self.apply_cfg_buf, 0, bytemuck::bytes_of(&apply_cfg));
-        let apply_bindings = physics_ApplyDamage::PhysicsApplyDamageBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp: &self.agent_hp_buf,
-            agent_alive: &self.agent_alive_buf,
+        let apply_extras = physics_ApplyDamage::PhysicsApplyDamageExtras {
             cfg: &self.apply_cfg_buf,
         };
+        let apply_bindings = physics_ApplyDamage::PhysicsApplyDamageBindings::from_context_with_extras(
+            &ctx,
+            &apply_extras,
+        );
         dispatch::dispatch_physics_applydamage(
             &mut self.cache,
             &apply_bindings,
@@ -1163,12 +1112,14 @@ impl CompiledSim for Duel25v25State {
         self.gpu
             .queue
             .write_buffer(&self.seed_cfg_buf, 0, bytemuck::bytes_of(&seed_cfg));
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.seed_cfg_buf,
         };
+        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+            &ctx,
+            &seed_extras,
+        );
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache,
             &seed_bindings,
