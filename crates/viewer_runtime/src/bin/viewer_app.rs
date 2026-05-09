@@ -16,8 +16,11 @@ use viewer_runtime::ViewerApp;
 use voxel_engine::app::App;
 use voxel_engine::scene::config::SceneConfig;
 use voxel_engine::scene::Scene;
-use wave_defense_runtime::DEFAULT_MAX_TICKS;
 
+/// objective_capture's natural episode length is short — Red/Blue
+/// usually decide it within a few hundred ticks. 2000 is a safe
+/// upper bound that lets a long stalemate play out.
+const DEFAULT_MAX_TICKS: u64 = 2000;
 const TICK_LOG_PERIOD: u64 = 50;
 
 fn main() {

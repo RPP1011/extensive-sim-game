@@ -4070,8 +4070,8 @@ dependencies = [
  "engine",
  "engine_voxel",
  "glam",
+ "objective_capture_10v10_runtime",
  "voxel_engine",
- "wave_defense_runtime",
  "winit",
 ]
 

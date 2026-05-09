@@ -299,12 +299,13 @@ impl ApplicationHandler for WindowedViewer {
 impl WindowedViewer {
     fn title_for_tick(&self, tick: u64) -> String {
         format!(
-            "viewer_window — seed={} tick={} settlers={} monsters={} score={:.1}",
+            "viewer_window — seed={} tick={} red={} blue={} (R:{} B:{})",
             self.seed,
             tick,
-            self.app.alive_settlers(),
-            self.app.alive_monsters(),
-            self.app.score(),
+            self.app.red_alive(),
+            self.app.blue_alive(),
+            self.app.red_score(),
+            self.app.blue_score(),
         )
     }
 }
@@ -350,35 +351,59 @@ fn _phase_b_marker() -> RendererConfig {
 /// need to borrow the app while gfx is borrowed mutably.
 struct HudState {
     tick: u64,
-    settlers: u32,
-    monsters: u32,
-    score: f32,
+    red_alive: u32,
+    blue_alive: u32,
+    red_score: u32,
+    blue_score: u32,
+    control_label: &'static str,
+    winner: Option<u8>,
 }
 
 impl HudState {
     fn from_app(app: &ViewerApp) -> Self {
+        let obj = app.objective_state();
         Self {
             tick: app.sim_tick(),
-            settlers: app.alive_settlers(),
-            monsters: app.alive_monsters(),
-            score: app.score(),
+            red_alive: app.red_alive(),
+            blue_alive: app.blue_alive(),
+            red_score: app.red_score(),
+            blue_score: app.blue_score(),
+            control_label: obj.control_label(),
+            winner: app.winner(),
         }
     }
 }
 
-/// Per-frame egui paint. Top-left stats panel + a placeholder for
-/// future plots. Future phases will add: alive-count line plot,
-/// per-rule fire counts, click-to-inspect side panel, chronicle
-/// scroll.
+/// Per-frame egui paint. Top-left stats panel.
 fn paint_hud(ctx: &egui::Context, state: &HudState) {
     egui::Window::new("sim")
         .anchor(egui::Align2::LEFT_TOP, egui::vec2(8.0, 8.0))
         .resizable(false)
         .collapsible(false)
         .show(ctx, |ui| {
-            ui.label(format!("tick   {}", state.tick));
-            ui.label(format!("settlers  {}", state.settlers));
-            ui.label(format!("monsters  {}", state.monsters));
-            ui.label(format!("score   {:.1}", state.score));
+            ui.label(format!("tick      {}", state.tick));
+            ui.separator();
+            ui.colored_label(
+                egui::Color32::from_rgb(220, 60, 60),
+                format!("red    alive {:>2}  score {}", state.red_alive, state.red_score),
+            );
+            ui.colored_label(
+                egui::Color32::from_rgb(60, 120, 220),
+                format!(
+                    "blue   alive {:>2}  score {}",
+                    state.blue_alive, state.blue_score
+                ),
+            );
+            ui.separator();
+            ui.label(format!("control: {}", state.control_label));
+            if let Some(w) = state.winner {
+                let (color, label) = match w {
+                    0 => (egui::Color32::from_rgb(220, 60, 60), "RED WINS"),
+                    1 => (egui::Color32::from_rgb(60, 120, 220), "BLUE WINS"),
+                    _ => (egui::Color32::WHITE, "draw"),
+                };
+                ui.separator();
+                ui.colored_label(color, label);
+            }
         });
 }

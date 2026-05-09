@@ -20,7 +20,14 @@ edition = "2021"
 [dependencies]
 engine = { path = "../engine" }
 engine_voxel = { path = "../engine_voxel" }
-wave_defense_runtime = { path = "../wave_defense_runtime" }
+# Pilot fixture for the windowed viewer. Swapped from
+# wave_defense_runtime (which made monsters get attrited from
+# range and never threatened the settlement under current tuning,
+# making the visualisation static-looking) to objective_capture_10v10
+# — two 10-agent factions contesting a single objective at origin
+# with real movement, combat, and win/loss conditions. ~20 agents
+# total stays well under the bridge's 256³ scaling ceiling.
+objective_capture_10v10_runtime = { path = "../objective_capture_10v10_runtime" }
 
 # voxel_engine with app-harness pulls winit + egui transitively.
 voxel_engine = { git = "https://github.com/RPP1011/voxel_engine", rev = "68842aa4be54d3cb387bf0a7d3fb69d9ffe3d326", features = ["app-harness"] }

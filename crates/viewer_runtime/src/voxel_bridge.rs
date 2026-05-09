@@ -119,72 +119,33 @@ impl VoxelBridge {
         self.last_frame_cells.clear();
 
         // Paint this frame: each agent's discretised position gets
-        // a cell with material_id == creature_type ordinal (1..=4
-        // under `creature_material_index`). Multiple agents
-        // discretising to the same cell are last-writer-wins.
+        // a `AGENT_SPLAT_DIM³` block of cells with material id ==
+        // app.materials()[slot]. Bigger splat than a single cell
+        // gives voxel_engine's mip-skip + DDA enough surface that
+        // an entity is reliably hit (single-cell entities slip
+        // through mip3 jump-skip in many ray directions).
         //
-        // Paint in REVERSE priority order so important entities win
-        // cell collisions: monsters (low) → spawners → settlers →
-        // node (high). Without this, monsters reaching origin
-        // overwrite the settler ring, making the defenders
-        // invisible exactly when the player most wants to see
-        // them. Material ids 1..=4 map node/settler/spawner/monster.
+        // Multiple agents discretising to overlapping splats are
+        // last-writer-wins. We paint a stationary objective
+        // marker LAST so it's never obscured by an agent that
+        // happens to stand on top of it.
+        const AGENT_SPLAT_DIM: i32 = 2;
         let positions = app.positions();
         let alive = app.alive();
-        let creature_types = app.creature_types();
-        // Priority order (low → high): monster=3, spawner=4,
-        // settler=2, node=1. Paint sequentially so the high-priority
-        // pass overwrites earlier ones in the same cell.
-        //
-        // Each agent paints a `AGENT_SPLAT_DIM³` block of cells
-        // centred on its discretised position — gives the
-        // renderer's mip-skip + DDA more surface to find an entity
-        // (single-cell entities slip through the mip3 jump-skip in
-        // many fragment-ray directions; a 2×2×2 splat is reliably
-        // hit). The blocks DO overlap when agents are within
-        // SPLAT_DIM cells of each other (settlers @ radius 8 have
-        // ~2-unit spacing, so adjacent settlers blend into a ring
-        // at SPLAT_DIM=2 — acceptable for the pilot).
-        const AGENT_SPLAT_DIM: i32 = 2;
-        const PAINT_ORDER: [u32; 4] = [3, 4, 2, 1];
-        for &target_type in PAINT_ORDER.iter() {
-            for slot in 0..positions.len() {
-                if alive[slot] == 0 || creature_types[slot] != target_type {
-                    continue;
-                }
-                let Some((cx, cy, cz)) = world_to_cell(
-                    positions[slot],
-                    self.world_origin,
-                    self.cell_size,
-                    self.grid_dim,
-                ) else {
-                    continue;
-                };
-                let material = app.material_for(target_type);
-                let half = AGENT_SPLAT_DIM / 2;
-                for dx in 0..AGENT_SPLAT_DIM {
-                    for dy in 0..AGENT_SPLAT_DIM {
-                        for dz in 0..AGENT_SPLAT_DIM {
-                            let x = cx as i32 + dx - half;
-                            let y = cy as i32 + dy - half;
-                            let z = cz as i32 + dz - half;
-                            if x < 0
-                                || y < 0
-                                || z < 0
-                                || x >= self.grid_dim as i32
-                                || y >= self.grid_dim as i32
-                                || z >= self.grid_dim as i32
-                            {
-                                continue;
-                            }
-                            let (x, y, z) = (x as u32, y as u32, z as u32);
-                            self.cpu_grid.set(x, y, z, material);
-                            self.last_frame_cells.push((x, y, z));
-                        }
-                    }
-                }
+        let materials = app.materials();
+        for slot in 0..positions.len() {
+            if alive[slot] == 0 {
+                continue;
             }
+            self.splat_at(positions[slot], materials[slot], AGENT_SPLAT_DIM);
         }
+        // Objective marker — painted after all agents so it stays
+        // visible even when an agent stands on top of it.
+        self.splat_at(
+            crate::objective_world_position(),
+            crate::objective_material(),
+            AGENT_SPLAT_DIM + 1,
+        );
 
         // Destroy + recreate the GPU texture so mip1/mip2/mip3 get
         // regenerated. `upload_grid_to_gpu` is the only API in
@@ -198,6 +159,41 @@ impl VoxelBridge {
         let new_tex = upload_grid_to_gpu(ctx, &mut self.alloc, &self.cpu_grid, &self.palette_rgba)?;
         self.gpu_tex = Some(new_tex);
         Ok(())
+    }
+
+    /// Paint a `dim³` block of cells centred on `pos` with the
+    /// given material id. Out-of-bounds cells are skipped silently.
+    fn splat_at(&mut self, pos: Vec3, material: u8, dim: i32) {
+        let Some((cx, cy, cz)) = world_to_cell(
+            pos,
+            self.world_origin,
+            self.cell_size,
+            self.grid_dim,
+        ) else {
+            return;
+        };
+        let half = dim / 2;
+        for dx in 0..dim {
+            for dy in 0..dim {
+                for dz in 0..dim {
+                    let x = cx as i32 + dx - half;
+                    let y = cy as i32 + dy - half;
+                    let z = cz as i32 + dz - half;
+                    if x < 0
+                        || y < 0
+                        || z < 0
+                        || x >= self.grid_dim as i32
+                        || y >= self.grid_dim as i32
+                        || z >= self.grid_dim as i32
+                    {
+                        continue;
+                    }
+                    let (x, y, z) = (x as u32, y as u32, z as u32);
+                    self.cpu_grid.set(x, y, z, material);
+                    self.last_frame_cells.push((x, y, z));
+                }
+            }
+        }
     }
 
     /// Build the renderer object tuple for this bridge's texture.
