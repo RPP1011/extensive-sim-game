@@ -122,24 +122,68 @@ impl VoxelBridge {
         // a cell with material_id == creature_type ordinal (1..=4
         // under `creature_material_index`). Multiple agents
         // discretising to the same cell are last-writer-wins.
+        //
+        // Paint in REVERSE priority order so important entities win
+        // cell collisions: monsters (low) → spawners → settlers →
+        // node (high). Without this, monsters reaching origin
+        // overwrite the settler ring, making the defenders
+        // invisible exactly when the player most wants to see
+        // them. Material ids 1..=4 map node/settler/spawner/monster.
         let positions = app.positions();
         let alive = app.alive();
         let creature_types = app.creature_types();
-        for slot in 0..positions.len() {
-            if alive[slot] == 0 {
-                continue;
+        // Priority order (low → high): monster=3, spawner=4,
+        // settler=2, node=1. Paint sequentially so the high-priority
+        // pass overwrites earlier ones in the same cell.
+        //
+        // Each agent paints a `AGENT_SPLAT_DIM³` block of cells
+        // centred on its discretised position — gives the
+        // renderer's mip-skip + DDA more surface to find an entity
+        // (single-cell entities slip through the mip3 jump-skip in
+        // many fragment-ray directions; a 2×2×2 splat is reliably
+        // hit). The blocks DO overlap when agents are within
+        // SPLAT_DIM cells of each other (settlers @ radius 8 have
+        // ~2-unit spacing, so adjacent settlers blend into a ring
+        // at SPLAT_DIM=2 — acceptable for the pilot).
+        const AGENT_SPLAT_DIM: i32 = 2;
+        const PAINT_ORDER: [u32; 4] = [3, 4, 2, 1];
+        for &target_type in PAINT_ORDER.iter() {
+            for slot in 0..positions.len() {
+                if alive[slot] == 0 || creature_types[slot] != target_type {
+                    continue;
+                }
+                let Some((cx, cy, cz)) = world_to_cell(
+                    positions[slot],
+                    self.world_origin,
+                    self.cell_size,
+                    self.grid_dim,
+                ) else {
+                    continue;
+                };
+                let material = app.material_for(target_type);
+                let half = AGENT_SPLAT_DIM / 2;
+                for dx in 0..AGENT_SPLAT_DIM {
+                    for dy in 0..AGENT_SPLAT_DIM {
+                        for dz in 0..AGENT_SPLAT_DIM {
+                            let x = cx as i32 + dx - half;
+                            let y = cy as i32 + dy - half;
+                            let z = cz as i32 + dz - half;
+                            if x < 0
+                                || y < 0
+                                || z < 0
+                                || x >= self.grid_dim as i32
+                                || y >= self.grid_dim as i32
+                                || z >= self.grid_dim as i32
+                            {
+                                continue;
+                            }
+                            let (x, y, z) = (x as u32, y as u32, z as u32);
+                            self.cpu_grid.set(x, y, z, material);
+                            self.last_frame_cells.push((x, y, z));
+                        }
+                    }
+                }
             }
-            let Some((x, y, z)) = world_to_cell(
-                positions[slot],
-                self.world_origin,
-                self.cell_size,
-                self.grid_dim,
-            ) else {
-                continue;
-            };
-            let material = app.material_for(creature_types[slot]);
-            self.cpu_grid.set(x, y, z, material);
-            self.last_frame_cells.push((x, y, z));
         }
 
         // Destroy + recreate the GPU texture so mip1/mip2/mip3 get
