@@ -1585,6 +1585,35 @@ mod tests {
     }
 
     #[test]
+    fn apply_strike_with_ability_power_scaling_doubles_base_damage() {
+        // Mirrors the AD-scaling test above for the new SoA AbilityPower
+        // column (Task #233 / `hot_ability_power`). Damage 30 + 100% AP;
+        // caster has 30 AP ⇒ emit 30 + 30 = 60 (double the base). Pre-
+        // this-slice the dispatcher's `agent_stat()` switch returned 0.0
+        // for ScalingStatRef::AbilityPower (placeholder, no SoA slot),
+        // so a `+ 100% AP` scaling contributed nothing — this test pins
+        // the column-backed read.
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 30.0 }],
+        );
+        prog.scalings_per_effect.push(smallvec![EffectScaling {
+            stat_ref: ScalingStatRef::AbilityPower,
+            percent:  1.00,
+        }]);
+        let stats = CasterStats { ability_power: 30.0, ..Default::default() };
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &stats, &CasterStats::default());
+        assert_eq!(events.len(), 1);
+        match events[0] {
+            ApplyEvent::Damage { amount, .. } => {
+                assert!((amount - 60.0).abs() < 1e-5, "expected 60.0 (30 base + 100% of 30 AP), got {amount}");
+            }
+            other => panic!("expected Damage, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn apply_skipped_effect_doesnt_scale() {
         // chance=0 gates the effect out — no event emitted, scaling math
         // must not run (and certainly must not produce a side-effect).

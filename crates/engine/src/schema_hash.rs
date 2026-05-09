@@ -14,7 +14,7 @@ pub fn schema_hash() -> [u8; 32] {
     h.update(b"SimState:SoA{");
     h.update(b"hot_pos=vec3,hot_hp=f32,hot_max_hp=f32,hot_alive=bool,hot_movement_mode=u8,");
     h.update(b"hot_level=u32,hot_move_speed=f32,hot_move_speed_mult=f32,");
-    h.update(b"hot_shield_hp=f32,hot_armor=f32,hot_magic_resist=f32,hot_attack_damage=f32,hot_attack_range=f32,hot_mana=f32,hot_max_mana=f32,");
+    h.update(b"hot_shield_hp=f32,hot_armor=f32,hot_magic_resist=f32,hot_attack_damage=f32,hot_attack_range=f32,hot_mana=f32,hot_max_mana=f32,hot_ability_power=f32,");
     h.update(b"hot_hunger=f32,hot_thirst=f32,hot_rest_timer=f32,");
     h.update(b"hot_safety=f32,hot_shelter=f32,hot_social=f32,hot_purpose=f32,hot_esteem=f32,");
     h.update(b"hot_risk_tolerance=f32,hot_social_drive=f32,hot_ambition=f32,hot_altruism=f32,hot_curiosity=f32,");

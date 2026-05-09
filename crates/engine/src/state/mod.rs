@@ -62,6 +62,23 @@ pub struct SimState {
     hot_attack_range:   Vec<f32>,
     hot_mana:           Vec<f32>,
     hot_max_mana:       Vec<f32>,
+    /// Per-agent ability-power scalar (the AP scaling source for
+    /// `+ N% ability_power` ability scalings). Defaults to 0.0 — the
+    /// pre-existing placeholder behavior — so fixtures that don't set
+    /// AP through `set_agent_ability_power` stay bit-identical to
+    /// before this column landed. Callers (items / class / level
+    /// follow-ups) write here to make AP actually scale ability
+    /// magnitudes through `CasterStats::ability_power`.
+    ///
+    /// Mirrors `hot_attack_damage` shape (f32 per slot). Read by
+    /// `SimState::caster_stats(agent_id)` which projects the SoA into
+    /// the `CasterStats` snapshot threaded into `apply_program`.
+    /// The GPU dispatcher's per-stat switch keeps the 0.0 stub for
+    /// the AbilityPower tag (no per-runtime `agent_ability_power`
+    /// binding yet); P3 cross-backend parity holds because every
+    /// production caller threads `CasterStats::default()` /
+    /// SoA-default-zero values through the apply path today.
+    hot_ability_power:  Vec<f32>,
     // Physiological needs (engine MVP, used by Plan 1 Eat/Drink/Rest)
     hot_hunger:         Vec<f32>,
     hot_thirst:         Vec<f32>,
@@ -290,6 +307,10 @@ impl SimState {
             hot_attack_range:    vec![default_attack_range; cap],
             hot_mana:            vec![0.0; cap],
             hot_max_mana:        vec![0.0; cap],
+            // AP defaults to 0.0 — matches the pre-this-slice placeholder
+            // (CPU oracle and GPU dispatcher both read 0.0 for AbilityPower
+            // before this column landed).
+            hot_ability_power:   vec![0.0; cap],
             hot_hunger:          vec![1.0; cap],
             hot_thirst:          vec![1.0; cap],
             hot_rest_timer:      vec![1.0; cap],
@@ -401,6 +422,9 @@ impl SimState {
         self.hot_attack_range[slot]    = self.config.combat.attack_range;
         self.hot_mana[slot]            = 0.0;
         self.hot_max_mana[slot]        = 0.0;
+        // Recycled slot starts with no AP — items / class follow-ups
+        // re-seed via `set_agent_ability_power` after spawn.
+        self.hot_ability_power[slot]   = 0.0;
         self.hot_hunger[slot]          = 1.0;
         self.hot_thirst[slot]          = 1.0;
         self.hot_rest_timer[slot]      = 1.0;
@@ -551,6 +575,12 @@ impl SimState {
     }
     pub fn agent_max_mana(&self, id: AgentId) -> Option<f32> {
         self.hot_max_mana.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+    /// Per-agent ability-power scalar (the AP source for `+ N%
+    /// ability_power` ability scalings). Defaults to 0.0; callers
+    /// (items / class follow-ups) write via [`Self::set_agent_ability_power`].
+    pub fn agent_ability_power(&self, id: AgentId) -> Option<f32> {
+        self.hot_ability_power.get(AgentSlotPool::slot_of_agent(id)).copied()
     }
 
     // Status effects (Task C).
@@ -1202,6 +1232,41 @@ impl SimState {
             *s = v;
         }
     }
+    /// Set the per-agent ability-power scalar. No-op for unknown ids.
+    /// Items / class follow-ups call this after spawn / on level-up to
+    /// drive `+ N% ability_power` ability scalings through
+    /// [`Self::caster_stats`] → `apply_program`.
+    pub fn set_agent_ability_power(&mut self, id: AgentId, v: f32) {
+        if let Some(s) = self.hot_ability_power.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+
+    /// Project an agent's per-stat hot SoA into the [`CasterStats`]
+    /// snapshot threaded into [`crate::ability::apply::apply_program`].
+    /// Returns `None` for unknown ids; otherwise pulls each of the 8
+    /// fields parallel to `ScalingStatRef`'s vocabulary directly from
+    /// the matching hot column. The previously-placeholder
+    /// `ability_power` field now reads the real `hot_ability_power`
+    /// SoA value (was hard-wired to 0.0 before this slice).
+    ///
+    /// Callers (cast-site dispatchers, follow-up plans wiring real AP
+    /// scaling) prefer this over hand-building `CasterStats { … }` so
+    /// that adding a new field to the struct surfaces here as a single
+    /// point of update.
+    pub fn caster_stats(&self, id: AgentId) -> Option<crate::ability::program::CasterStats> {
+        let slot = AgentSlotPool::slot_of_agent(id);
+        Some(crate::ability::program::CasterStats {
+            attack_damage: *self.hot_attack_damage.get(slot)?,
+            ability_power: *self.hot_ability_power.get(slot)?,
+            max_hp:        *self.hot_max_hp.get(slot)?,
+            hp:            *self.hot_hp.get(slot)?,
+            armor:         *self.hot_armor.get(slot)?,
+            magic_resist:  *self.hot_magic_resist.get(slot)?,
+            move_speed:    *self.hot_move_speed.get(slot)?,
+            mana:          *self.hot_mana.get(slot)?,
+        })
+    }
 
     pub fn agent_cap(&self) -> u32 {
         self.pool.alive.len() as u32
@@ -1248,6 +1313,7 @@ impl SimState {
     #[doc(hidden)] pub fn hot_attack_range_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_attack_range }
     #[doc(hidden)] pub fn hot_mana_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_mana }
     #[doc(hidden)] pub fn hot_max_mana_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_max_mana }
+    #[doc(hidden)] pub fn hot_ability_power_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_ability_power }
     #[doc(hidden)] pub fn hot_hunger_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_hunger }
     #[doc(hidden)] pub fn hot_thirst_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_thirst }
     #[doc(hidden)] pub fn hot_rest_timer_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_rest_timer }
@@ -1393,6 +1459,13 @@ impl SimState {
     }
     pub fn hot_max_mana(&self) -> &[f32] {
         &self.hot_max_mana
+    }
+    /// Per-agent ability-power scalar (the AP source for `+ N%
+    /// ability_power` ability scalings). Read by snapshot serialization
+    /// + by [`Self::caster_stats`] when projecting agent SoA into the
+    /// [`crate::ability::program::CasterStats`] snapshot.
+    pub fn hot_ability_power(&self) -> &[f32] {
+        &self.hot_ability_power
     }
     pub fn cold_status_effects(&self) -> &[SmallVec<[StatusEffect; 8]>] {
         &self.cold_status_effects
