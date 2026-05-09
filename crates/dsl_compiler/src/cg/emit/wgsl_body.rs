@@ -3346,6 +3346,12 @@ pub(crate) const EFFECT_KIND_TO_EVENT_KIND_ID: &[(u32, u32)] = &[
     (36, 67), // EffectOp::Disguise    → EventKindId::EffectDisguiseApplied
     (37, 68), // EffectOp::Decoy       → EventKindId::EffectDecoyApplied
     (38, 69), // EffectOp::EraseBelief → EventKindId::EffectEraseBeliefApplied
+    // Lift A — multi-tick travel. Dispatcher writes one chronicle
+    // record per cast (kind=70). The downstream consumer rule sets
+    // `busy_until_tick` and populates `travel_dest_{x,y,z}` SoA cells;
+    // a per-tick travel kernel interpolates `pos` toward the destination
+    // over `eta_ticks` ticks.
+    (39, 70), // EffectOp::TravelTo    → EventKindId::EffectTravelToApplied
 ];
 
 /// Look up the runtime `EventKindId` for an `EffectOp` discriminant.
@@ -3475,6 +3481,8 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Decoy=37");
     let erase_belief_event_id = event_kind_id_for_effect_kind(38)
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain EraseBelief=38");
+    let travel_to_event_id = event_kind_id_for_effect_kind(39)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain TravelTo=39");
 
     let i4  = indent;                   // arm `if`/`else if` lines
     let i8  = format!("{i4}    ");      // body of arm
@@ -4273,6 +4281,33 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // TravelTo = 39 → 70 (Lift A multi-tick travel)
+    s.push_str(&format!("{i4}}} else if (kind == 39u) {{\n"));
+    s.push_str(&format!("{i8}// TravelTo = 39 → EventKindId::EffectTravelToApplied = 70\n"));
+    s.push_str(&format!("{i8}// payload_a packs (dest_y_q8 << 16) | (dest_x_q8 & 0xFFFF) —\n"));
+    s.push_str(&format!("{i8}// the consumer sign-extends each half via:\n"));
+    s.push_str(&format!("{i8}//   dest_x = f32(bitcast<i32>(payload_a << 16u) >> 16u) / 256.0;\n"));
+    s.push_str(&format!("{i8}//   dest_y = f32(bitcast<i32>(payload_a) >> 16u)        / 256.0;\n"));
+    s.push_str(&format!("{i8}// payload_b = eta_ticks (u32). The downstream consumer rule sets\n"));
+    s.push_str(&format!("{i8}// `busy_until_tick = world.tick + eta_ticks` and populates the\n"));
+    s.push_str(&format!("{i8}// per-agent `travel_dest_{{x,y,z}}` SoA cells; a per-tick travel\n"));
+    s.push_str(&format!("{i8}// interpolation kernel walks `pos` toward the destination over\n"));
+    s.push_str(&format!("{i8}// `eta_ticks` ticks. Travel is self-cast: `target_slot ==\n"));
+    s.push_str(&format!("{i8}// caster_slot` by convention (the dispatcher emits the same slot\n"));
+    s.push_str(&format!("{i8}// in both fields for shape-uniformity).\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectTravelToApplied (caster_slot + caster_slot + packed_dest + eta_ticks)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {travel_to_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (caster_slot));\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
     s.push_str(&format!("{i12}}}\n"));
@@ -7414,7 +7449,8 @@ mod tests {
                 36 => EffectOp::Disguise    { fake_type: 7, duration_ticks: 200 },
                 37 => EffectOp::Decoy       { subject_idx: 4, fake_pos: 0xDEADBEEF },
                 38 => EffectOp::EraseBelief { subject_idx: 4, fields: 0b00111111 },
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35/36/37/38"),
+                39 => EffectOp::TravelTo    { dest_x_q8: 1280, dest_y_q8: 1280, eta_ticks: 50 },
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35/36/37/38/39"),
             }
         };
 
@@ -7460,7 +7496,8 @@ mod tests {
                 36 => EngineEventKindId::EffectDisguiseApplied        as u32,
                 37 => EngineEventKindId::EffectDecoyApplied           as u32,
                 38 => EngineEventKindId::EffectEraseBeliefApplied     as u32,
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35/36/37/38"),
+                39 => EngineEventKindId::EffectTravelToApplied        as u32,
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35/36/37/38/39"),
             }
         };
 
@@ -7588,9 +7625,13 @@ mod tests {
         // entry) or a variant lost its chronicle counterpart (in which
         // case the map drops an entry). Pin the count so the gap between
         // source-of-truths is loud.
+        // + TravelTo (Lift A — multi-tick travel verb; dispatcher writes
+        // EffectTravelToApplied=70 records that a downstream consumer
+        // rule turns into `busy_until_tick` + `travel_dest_{x,y,z}` SoA
+        // updates plus a per-tick interpolation kernel).
         assert_eq!(
-            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 38,
-            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 38 \
+            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 39,
+            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 39 \
              chronicle-bearing variants today; if you added or removed an \
              entry, update this assertion (and the slice γ wire-up that \
              consumes the new entry)"

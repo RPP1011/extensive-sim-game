@@ -1113,6 +1113,19 @@ fn pack_effect(op: EffectOp) -> (u32, u32, u32) {
         // 1 = type, 2 = tick, 3 = confidence, 4 = suspicion, 5 = flags).
         EffectOp::EraseBelief { subject_idx, fields } =>
             (38, subject_idx, fields as u32),
+        // Lift A — `travel_to <x> <y> for <duration>`. payload_a packs
+        // (dest_y_q8 << 16) | (dest_x_q8 & 0xFFFF) so the consumer
+        // sign-extends each i16 half via `bitcast<i32>(payload_a << 16) >>
+        // 16` (low 16 bits = dest_x_q8) and `bitcast<i32>(payload_a) >>
+        // 16` (high 16 bits = dest_y_q8). payload_b = eta_ticks (u32).
+        // The signed widen below uses `as u16 as u32` to zero-extend the
+        // bit pattern (sign info preserved in the i16 bit pattern); the
+        // GPU consumer recovers the i16 via the same shift trick.
+        EffectOp::TravelTo { dest_x_q8, dest_y_q8, eta_ticks } => {
+            let lo = (dest_x_q8 as u16) as u32;
+            let hi = ((dest_y_q8 as u16) as u32) << 16;
+            (39, hi | lo, eta_ticks)
+        }
     }
 }
 

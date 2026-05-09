@@ -228,6 +228,14 @@ pub enum ApplyEvent {
     /// confidence, 4 = suspicion, 5 = flags). Pairs with
     /// `EventKindId::EffectEraseBeliefApplied = 69`.
     EraseBelief    { source: AgentId, target: AgentId, subject_idx: u32, fields: u8 },
+    /// Lift A — `travel_to <x> <y> for <duration>` multi-tick travel
+    /// procedure. Caster initiates a multi-tick walk to the destination
+    /// `(dest_x, dest_y)` (z = 0 implied). The downstream consumer rule
+    /// sets `busy_until_tick = world.tick + eta_ticks` and populates
+    /// `travel_dest_{x,y,z}` SoA cells; a per-tick travel kernel
+    /// interpolates `pos` toward the destination. Pairs with
+    /// `EventKindId::EffectTravelToApplied = 70`.
+    TravelTo       { source: AgentId, dest_x: f32, dest_y: f32, eta_ticks: u32 },
 }
 
 /// Inline budget — most abilities have ≤4 effects (P4 says
@@ -498,6 +506,17 @@ fn push_effect_event(
             out.push(ApplyEvent::Decoy { source: caster, target, subject_idx, fake_pos }),
         EffectOp::EraseBelief { subject_idx, fields } =>
             out.push(ApplyEvent::EraseBelief { source: caster, target, subject_idx, fields }),
+        // Lift A — multi-tick travel. The dispatcher emits a single
+        // ApplyEvent::TravelTo per cast; a downstream consumer rule sets
+        // `busy_until_tick` and populates `travel_dest_{x,y,z}` SoA
+        // cells. The per-tick interpolation kernel reads those cells to
+        // walk `pos` toward the destination over `eta_ticks` ticks. q8
+        // packing decodes via `dest_x_q8 as f32 / 256.0`.
+        EffectOp::TravelTo { dest_x_q8, dest_y_q8, eta_ticks } => {
+            let dest_x = dest_x_q8 as f32 / 256.0;
+            let dest_y = dest_y_q8 as f32 / 256.0;
+            out.push(ApplyEvent::TravelTo { source: caster, dest_x, dest_y, eta_ticks });
+        }
         // CastAbility is recursive (needs cascade-style
         // re-dispatch); deferred to slice δ. Skip for now.
         EffectOp::CastAbility { .. } => {}

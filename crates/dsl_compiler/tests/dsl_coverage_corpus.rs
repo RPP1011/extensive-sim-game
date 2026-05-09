@@ -323,6 +323,7 @@ fn effect_op_label(op: &EffectOp) -> &'static str {
         EffectOp::Disguise        { .. } => "Disguise",
         EffectOp::Decoy           { .. } => "Decoy",
         EffectOp::EraseBelief     { .. } => "EraseBelief",
+        EffectOp::TravelTo        { .. } => "TravelTo",
     }
 }
 
