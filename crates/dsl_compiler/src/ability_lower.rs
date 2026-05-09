@@ -355,7 +355,7 @@ impl std::fmt::Display for LowerError {
             LowerError::UnknownEffectVerb { verb, suggestion, .. } => {
                 write!(
                     f,
-                    "unknown effect verb '{verb}'; valid verbs at this stage: damage / heal / shield / stun / slow / transfer_gold / modify_standing / cast / root / silence / fear / taunt / dash / blink / knockback / pull / execute / self_damage / lifesteal / damage_modify / summon"
+                    "unknown effect verb '{verb}'; valid verbs at this stage: damage / heal / shield / stun / slow / transfer_gold / modify_standing / cast / root / silence / fear / taunt / dash / blink / knockback / pull / execute / self_damage / lifesteal / damage_modify / summon / reveal"
                 )?;
                 if let Some(s) = suggestion {
                     write!(f, " (did you mean '{s}'?)")?;
@@ -1726,11 +1726,7 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
         }
         // Wave 3 ToM Phase 4 — `disguise <fake_type> for <duration>`
         // (spy_network surface). Mirrors `stun`'s shape: one positional
-        // arg + duration-bearing `for` modifier. The positional is a u8
-        // ordinal naming the creature_type the caster publicly poses as
-        // (e.g. `disguise 3 for 20s` for commoner). Apply handlers write
-        // `disguise_fake_type` + `disguise_expires_at_tick` SoA cells;
-        // observers see the fake type until the tick budget elapses.
+        // arg + duration-bearing `for` modifier.
         "disguise" => {
             let fake_type = require_number_arg(stmt, 0)?
                 .round()
@@ -1741,6 +1737,14 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
                 fake_type,
                 duration_ticks: duration_to_ticks(dur),
             })
+        }
+        // Wave 3 ToM Phase 3.5 — `reveal <subject_idx>` one-to-many
+        // belief broadcast. The dispatcher resolves caster; the consumer
+        // iterates all observers.
+        "reveal" => {
+            let raw = require_number_arg(stmt, 0)?;
+            require_arity(stmt, 1)?;
+            Ok(EffectOp::Reveal { subject_idx: raw.round() as u32 })
         }
         _ => Err(LowerError::UnknownEffectVerb {
             verb:       stmt.verb.clone(),

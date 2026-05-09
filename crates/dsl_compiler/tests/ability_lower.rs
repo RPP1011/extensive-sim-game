@@ -449,25 +449,35 @@ ability TooMany {
 
 // ---------------------------------------------------------------------------
 // Wave 3 ToM Phase 4 — `disguise <fake_type> for <duration>` (spy_network).
-// Mirrors the `stun for <duration>` lowering shape but carries a u8
-// ordinal positional naming the creature_type the caster publicly poses
-// as. The `for`-modifier is the duration source (extract_duration's
-// stun-shape is_duration_bearing_verb path).
 // ---------------------------------------------------------------------------
 
 #[test]
 fn lower_disguise_for_duration() {
-    // commoner=3 per `assets/sim/spy_network.sim`'s creature_type table;
-    // 10s @ 100ms/tick = 100 ticks.
     let src = "ability Spy { target: self cooldown: 20s disguise 3 for 10s }";
     let file = parse_ability_file(src).expect("parser");
     let prog = lower_ability_decl(&file.abilities[0]).expect("disguise must lower");
     assert_eq!(prog.effects.len(), 1);
     match &prog.effects[0] {
         EffectOp::Disguise { fake_type, duration_ticks } => {
-            assert_eq!(*fake_type, 3, "fake_type ordinal mirrors creature_type=3 (commoner)");
-            assert_eq!(*duration_ticks, 100, "10s @ 100ms/tick = 100 ticks");
+            assert_eq!(*fake_type, 3);
+            assert_eq!(*duration_ticks, 100);
         }
-        other => panic!("expected Disguise(fake_type=3, ticks=100); got {other:?}"),
+        other => panic!("expected Disguise; got {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Wave 3 ToM Phase 3.5 — `reveal <subject_idx>` belief broadcast.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lowers_reveal() {
+    let src = "ability Reveal { target: self cooldown: 1s reveal 5 }";
+    let file = parse_ability_file(src).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+    assert_eq!(prog.effects.len(), 1);
+    match prog.effects[0] {
+        EffectOp::Reveal { subject_idx } => assert_eq!(subject_idx, 5),
+        ref other => panic!("expected Reveal; got {other:?}"),
     }
 }
