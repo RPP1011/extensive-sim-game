@@ -52,7 +52,9 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 /// Per-fixture state for the diplomacy probe. Owns:
 ///   - Diplomat SoA (alive only — pos/vel are declaration-only here)
@@ -108,6 +110,12 @@ pub struct DiplomacyProbeState {
     chronicle_propose_cfg_buf: wgpu::Buffer,
     chronicle_betray_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
 
@@ -324,6 +332,12 @@ impl DiplomacyProbeState {
             },
         );
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&engine::ability::AbilityRegistry::new()),
+            &gpu,
+            "diplomacy_probe_runtime",
+        );
+
         Self {
             gpu,
             agent_alive_buf,
@@ -348,6 +362,7 @@ impl DiplomacyProbeState {
             chronicle_propose_cfg_buf,
             chronicle_betray_cfg_buf,
             seed_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             tick: 0,
             agent_count,
@@ -441,6 +456,16 @@ impl CompiledSim for DiplomacyProbeState {
             mask_bytes.max(4),
         );
 
+        // Shared agent buffer aggregate — `alive` is the only standard
+        // SoA column this fixture owns. The `KernelBindingsContext` is
+        // rebuilt before each `note_emits` boundary because the compiler-
+        // emitted constructors borrow `self.event_ring` immutably and
+        // `note_emits` requires `&mut self.event_ring`.
+        let agent_buffers = AgentBuffers {
+            alive_buf: Some(&self.agent_alive_buf),
+            ..Default::default()
+        };
+
         // (2) ObserveAndAct — per-Diplomat; emits one Observed event
         // per tick into the ring (kind 1u). observer == target == self
         // placeholder routing (real spatial broadcast is a follow-up).
@@ -454,19 +479,29 @@ impl CompiledSim for DiplomacyProbeState {
             0,
             bytemuck::bytes_of(&observe_cfg),
         );
-        let observe_bindings = physics_ObserveAndAct::PhysicsObserveAndActBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_alive: &self.agent_alive_buf,
-            cfg: &self.observe_cfg_buf,
-        };
-        dispatch::dispatch_physics_observeandact(
-            &mut self.cache,
-            &observe_bindings,
-            &self.gpu.device,
-            &mut encoder,
-            self.agent_count,
-        );
+        {
+            let ctx = KernelBindingsContext {
+                state: &agent_buffers,
+                event_ring: &self.event_ring,
+                registry: &self.registry_gpu,
+                voxel_grid: None,
+            };
+            let observe_extras = physics_ObserveAndAct::PhysicsObserveAndActExtras {
+                cfg: &self.observe_cfg_buf,
+            };
+            let observe_bindings =
+                physics_ObserveAndAct::PhysicsObserveAndActBindings::from_context_with_extras(
+                    &ctx,
+                    &observe_extras,
+                );
+            dispatch::dispatch_physics_observeandact(
+                &mut self.cache,
+                &observe_bindings,
+                &self.gpu.device,
+                &mut encoder,
+                self.agent_count,
+            );
+        }
         // ObserveAndAct's emit-Observed body adds one slot per alive
         // agent (worst case: all alive). The host-side EventRing tail
         // estimate tracks this so downstream chronicle / fold dispatches
@@ -488,48 +523,61 @@ impl CompiledSim for DiplomacyProbeState {
         self.gpu
             .queue
             .write_buffer(&self.mask_cfg_buf, 0, bytemuck::bytes_of(&mask_cfg));
-        let mask_bindings =
-            fused_mask_verb_ProposeAlliance::FusedMaskVerbProposeAllianceBindings {
+        {
+            let ctx = KernelBindingsContext {
+                state: &agent_buffers,
+                event_ring: &self.event_ring,
+                registry: &self.registry_gpu,
+                voxel_grid: None,
+            };
+            let mask_extras =
+                fused_mask_verb_ProposeAlliance::FusedMaskVerbProposeAllianceExtras {
+                    mask_0_bitmap: &self.mask_0_bitmap_buf,
+                    mask_1_bitmap: &self.mask_1_bitmap_buf,
+                    cfg: &self.mask_cfg_buf,
+                };
+            let mask_bindings =
+                fused_mask_verb_ProposeAlliance::FusedMaskVerbProposeAllianceBindings::from_context_with_extras(
+                    &ctx,
+                    &mask_extras,
+                );
+            dispatch::dispatch_fused_mask_verb_proposealliance(
+                &mut self.cache,
+                &mask_bindings,
+                &self.gpu.device,
+                &mut encoder,
+                self.agent_count,
+            );
+
+            // (4) Scoring — argmax over the 2 competing rows. Mask gates
+            // filter out masked-out rows, so whichever verb's predicate
+            // is true wins. Emits one ActionSelected (kind 4u) per agent.
+            let scoring_cfg = scoring::ScoringCfg {
+                agent_cap: self.agent_count,
+                tick: self.tick as u32,
+                seed: 0, _pad: 0,
+            };
+            self.gpu.queue.write_buffer(
+                &self.scoring_cfg_buf,
+                0,
+                bytemuck::bytes_of(&scoring_cfg),
+            );
+            let scoring_extras = scoring::ScoringExtras {
                 mask_0_bitmap: &self.mask_0_bitmap_buf,
                 mask_1_bitmap: &self.mask_1_bitmap_buf,
-                cfg: &self.mask_cfg_buf,
+                scoring_output: &self.scoring_output_buf,
+                cfg: &self.scoring_cfg_buf,
             };
-        dispatch::dispatch_fused_mask_verb_proposealliance(
-            &mut self.cache,
-            &mask_bindings,
-            &self.gpu.device,
-            &mut encoder,
-            self.agent_count,
-        );
-
-        // (4) Scoring — argmax over the 2 competing rows. Mask gates
-        // filter out masked-out rows, so whichever verb's predicate
-        // is true wins. Emits one ActionSelected (kind 4u) per agent.
-        let scoring_cfg = scoring::ScoringCfg {
-            agent_cap: self.agent_count,
-            tick: self.tick as u32,
-            seed: 0, _pad: 0,
-        };
-        self.gpu.queue.write_buffer(
-            &self.scoring_cfg_buf,
-            0,
-            bytemuck::bytes_of(&scoring_cfg),
-        );
-        let scoring_bindings = scoring::ScoringBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            mask_0_bitmap: &self.mask_0_bitmap_buf,
-            mask_1_bitmap: &self.mask_1_bitmap_buf,
-            scoring_output: &self.scoring_output_buf,
-            cfg: &self.scoring_cfg_buf,
-        };
-        dispatch::dispatch_scoring(
-            &mut self.cache,
-            &scoring_bindings,
-            &self.gpu.device,
-            &mut encoder,
-            self.agent_count,
-        );
+            let scoring_bindings =
+                scoring::ScoringBindings::from_context_with_extras(&ctx, &scoring_extras);
+            dispatch::dispatch_scoring(
+                &mut self.cache,
+                &scoring_bindings,
+                &self.gpu.device,
+                &mut encoder,
+                self.agent_count,
+            );
+        }
 
         // (4b) Note that the scoring kernel emits one ActionSelected
         // per agent into the ring; bump the host-side EventRing tail
@@ -563,19 +611,30 @@ impl CompiledSim for DiplomacyProbeState {
             0,
             bytemuck::bytes_of(&propose_chronicle_cfg),
         );
-        let propose_chronicle_bindings =
-            physics_verb_chronicle_ProposeAlliance::PhysicsVerbChronicleProposeAllianceBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                cfg: &self.chronicle_propose_cfg_buf,
+        {
+            let ctx = KernelBindingsContext {
+                state: &agent_buffers,
+                event_ring: &self.event_ring,
+                registry: &self.registry_gpu,
+                voxel_grid: None,
             };
-        dispatch::dispatch_physics_verb_chronicle_proposealliance(
-            &mut self.cache,
-            &propose_chronicle_bindings,
-            &self.gpu.device,
-            &mut encoder,
-            self.agent_count.saturating_mul(2),
-        );
+            let propose_chronicle_extras =
+                physics_verb_chronicle_ProposeAlliance::PhysicsVerbChronicleProposeAllianceExtras {
+                    cfg: &self.chronicle_propose_cfg_buf,
+                };
+            let propose_chronicle_bindings =
+                physics_verb_chronicle_ProposeAlliance::PhysicsVerbChronicleProposeAllianceBindings::from_context_with_extras(
+                    &ctx,
+                    &propose_chronicle_extras,
+                );
+            dispatch::dispatch_physics_verb_chronicle_proposealliance(
+                &mut self.cache,
+                &propose_chronicle_bindings,
+                &self.gpu.device,
+                &mut encoder,
+                self.agent_count.saturating_mul(2),
+            );
+        }
         // The ProposeAlliance chronicle's gate-passes slots produce
         // up to one AllianceProposed event per agent (whichever
         // ActionSelected matched `action_id == 0u`). Bump the tail
@@ -600,19 +659,30 @@ impl CompiledSim for DiplomacyProbeState {
             0,
             bytemuck::bytes_of(&betray_chronicle_cfg),
         );
-        let betray_chronicle_bindings =
-            physics_verb_chronicle_Betray::PhysicsVerbChronicleBetrayBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                cfg: &self.chronicle_betray_cfg_buf,
+        {
+            let ctx = KernelBindingsContext {
+                state: &agent_buffers,
+                event_ring: &self.event_ring,
+                registry: &self.registry_gpu,
+                voxel_grid: None,
             };
-        dispatch::dispatch_physics_verb_chronicle_betray(
-            &mut self.cache,
-            &betray_chronicle_bindings,
-            &self.gpu.device,
-            &mut encoder,
-            self.agent_count.saturating_mul(2),
-        );
+            let betray_chronicle_extras =
+                physics_verb_chronicle_Betray::PhysicsVerbChronicleBetrayExtras {
+                    cfg: &self.chronicle_betray_cfg_buf,
+                };
+            let betray_chronicle_bindings =
+                physics_verb_chronicle_Betray::PhysicsVerbChronicleBetrayBindings::from_context_with_extras(
+                    &ctx,
+                    &betray_chronicle_extras,
+                );
+            dispatch::dispatch_physics_verb_chronicle_betray(
+                &mut self.cache,
+                &betray_chronicle_bindings,
+                &self.gpu.device,
+                &mut encoder,
+                self.agent_count.saturating_mul(2),
+            );
+        }
         // Betray chronicle's gate-passes slots produce up to one
         // Betrayed event per agent. Tail estimate after this round
         // covers everything the folds will see (Observed +
@@ -628,19 +698,29 @@ impl CompiledSim for DiplomacyProbeState {
         self.gpu
             .queue
             .write_buffer(&self.seed_cfg_buf, 0, bytemuck::bytes_of(&seed_cfg));
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            indirect_args_0: self.event_ring.indirect_args_0(),
-            cfg: &self.seed_cfg_buf,
-        };
-        dispatch::dispatch_seed_indirect_0(
-            &mut self.cache,
-            &seed_bindings,
-            &self.gpu.device,
-            &mut encoder,
-            self.agent_count,
-        );
+        {
+            let ctx = KernelBindingsContext {
+                state: &agent_buffers,
+                event_ring: &self.event_ring,
+                registry: &self.registry_gpu,
+                voxel_grid: None,
+            };
+            let seed_extras = seed_indirect_0::SeedIndirect0Extras {
+                indirect_args_0: self.event_ring.indirect_args_0(),
+                cfg: &self.seed_cfg_buf,
+            };
+            let seed_bindings = seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+                &ctx,
+                &seed_extras,
+            );
+            dispatch::dispatch_seed_indirect_0(
+                &mut self.cache,
+                &seed_bindings,
+                &self.gpu.device,
+                &mut encoder,
+                self.agent_count,
+            );
+        }
 
         // (8-10) Three folds reading the SAME ring, partitioned by
         // per-handler tag filter (kind 1u/2u/3u). event_count sourced

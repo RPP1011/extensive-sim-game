@@ -87,7 +87,7 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 mod binding_check;
 
@@ -1061,6 +1061,30 @@ impl CompiledSim for DuelAbilitiesState {
             0, scoring_output_bytes.max(16),
         );
 
+        // Shared once per tick; each non-fold dispatch below adds only
+        // its fixture-specific extras struct. Fold kernels still build
+        // hand-written `Bindings { ... }` literals — the compiler
+        // doesn't emit `from_context` constructors for them.
+        let agent_buffers = AgentBuffers {
+            hp_buf: Some(&self.agent_hp_buf),
+            alive_buf: Some(&self.agent_alive_buf),
+            mana_buf: Some(&self.agent_mana_buf),
+            attack_damage_buf: Some(&self.agent_attack_damage_buf),
+            ability_power_buf: Some(&self.agent_ability_power_buf),
+            max_hp_buf: Some(&self.agent_max_hp_buf),
+            armor_buf: Some(&self.agent_armor_buf),
+            magic_resist_buf: Some(&self.agent_magic_resist_buf),
+            move_speed_buf: Some(&self.agent_move_speed_buf),
+            shield_hp_buf: Some(&self.agent_shield_hp_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
         // (2) Mask round.
         let mask_cfg = fused_mask_verb_Strike::FusedMaskVerbStrikeCfg {
             agent_cap: self.agent_count,
@@ -1080,9 +1104,7 @@ impl CompiledSim for DuelAbilitiesState {
         // `agents.stun_expires_at_tick(self) <= world.tick`. This is
         // the FIRST status-SoA field bound to the mask kernel — the
         // previous fixture had only purely-functional reads (hp, alive).
-        let mask_bindings = fused_mask_verb_Strike::FusedMaskVerbStrikeBindings {
-            agent_hp: &self.agent_hp_buf,
-            agent_alive: &self.agent_alive_buf,
+        let mask_extras = fused_mask_verb_Strike::FusedMaskVerbStrikeExtras {
             agent_stun_expires_at_tick: &self.agent_stun_expires_at_tick_buf,
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             mask_1_bitmap: &self.mask_1_bitmap_buf,
@@ -1094,6 +1116,11 @@ impl CompiledSim for DuelAbilitiesState {
             mask_7_bitmap: &self.mask_7_bitmap_buf,
             cfg: &self.mask_cfg_buf,
         };
+        let mask_bindings =
+            fused_mask_verb_Strike::FusedMaskVerbStrikeBindings::from_context_with_extras(
+                &ctx,
+                &mask_extras,
+            );
         dispatch::dispatch_fused_mask_verb_strike(
             &mut self.cache, &mask_bindings, &self.gpu.device, &mut encoder,
             self.agent_count * self.agent_count,
@@ -1114,10 +1141,7 @@ impl CompiledSim for DuelAbilitiesState {
         // agent_hp[candidate]. Without that pair iteration the
         // best_target slot stays at the 0xFFFFFFFF sentinel and the
         // chronicle's emitted Damaged event addresses an OOB slot.
-        let scoring_bindings = scoring::ScoringBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp: &self.agent_hp_buf,
+        let scoring_extras = scoring::ScoringExtras {
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             mask_1_bitmap: &self.mask_1_bitmap_buf,
             mask_2_bitmap: &self.mask_2_bitmap_buf,
@@ -1128,23 +1152,9 @@ impl CompiledSim for DuelAbilitiesState {
             mask_7_bitmap: &self.mask_7_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
             cfg: &self.scoring_cfg_buf,
-            // Wave 1.5#7 follow-on (predicate-aware scoring,
-            // 2026-05-07): the scoring kernel's per-row body inlines a
-            // predicate-eval gate using the same registry SoA columns
-            // and agent stat columns the chronicle dispatcher uses.
-            // See `cg::lower::driver::wire_scoring_predicate_reads`.
-            ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
-            agent_attack_damage: &self.agent_attack_damage_buf,
-            agent_ability_power: &self.agent_ability_power_buf,
-            agent_max_hp:        &self.agent_max_hp_buf,
-            agent_armor:         &self.agent_armor_buf,
-            agent_magic_resist:  &self.agent_magic_resist_buf,
-            agent_move_speed:    &self.agent_move_speed_buf,
-            agent_mana:          &self.agent_mana_buf,
         };
+        let scoring_bindings =
+            scoring::ScoringBindings::from_context_with_extras(&ctx, &scoring_extras);
         dispatch::dispatch_scoring(
             &mut self.cache, &scoring_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
@@ -1169,32 +1179,14 @@ impl CompiledSim for DuelAbilitiesState {
         self.gpu.queue.write_buffer(
             &self.chronicle_shieldup_cfg_buf, 0, bytemuck::bytes_of(&shieldup_cfg),
         );
-        let shieldup_bindings = physics_verb_chronicle_ShieldUp::PhysicsVerbChronicleShieldUpBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
-            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
-            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
-            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
-            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
-            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
-            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
-            ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
-            ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
-            ability_registry_chances:           &self.registry_gpu.chances,
-            agent_attack_damage: &self.agent_attack_damage_buf,
-            agent_ability_power: &self.agent_ability_power_buf,
-            agent_max_hp:        &self.agent_max_hp_buf,
-            agent_hp:            &self.agent_hp_buf,
-            agent_armor:         &self.agent_armor_buf,
-            agent_magic_resist:  &self.agent_magic_resist_buf,
-            agent_move_speed:    &self.agent_move_speed_buf,
-            agent_mana:          &self.agent_mana_buf,
+        let shieldup_extras = physics_verb_chronicle_ShieldUp::PhysicsVerbChronicleShieldUpExtras {
             cfg: &self.chronicle_shieldup_cfg_buf,
         };
+        let shieldup_bindings =
+            physics_verb_chronicle_ShieldUp::PhysicsVerbChronicleShieldUpBindings::from_context_with_extras(
+                &ctx,
+                &shieldup_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_shieldup(
             &mut self.cache, &shieldup_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
@@ -1211,32 +1203,14 @@ impl CompiledSim for DuelAbilitiesState {
         self.gpu.queue.write_buffer(
             &self.chronicle_mend_cfg_buf, 0, bytemuck::bytes_of(&mend_cfg),
         );
-        let mend_bindings = physics_verb_chronicle_Mend::PhysicsVerbChronicleMendBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
-            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
-            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
-            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
-            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
-            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
-            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
-            ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
-            ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
-            ability_registry_chances:           &self.registry_gpu.chances,
-            agent_attack_damage: &self.agent_attack_damage_buf,
-            agent_ability_power: &self.agent_ability_power_buf,
-            agent_max_hp:        &self.agent_max_hp_buf,
-            agent_hp:            &self.agent_hp_buf,
-            agent_armor:         &self.agent_armor_buf,
-            agent_magic_resist:  &self.agent_magic_resist_buf,
-            agent_move_speed:    &self.agent_move_speed_buf,
-            agent_mana:          &self.agent_mana_buf,
+        let mend_extras = physics_verb_chronicle_Mend::PhysicsVerbChronicleMendExtras {
             cfg: &self.chronicle_mend_cfg_buf,
         };
+        let mend_bindings =
+            physics_verb_chronicle_Mend::PhysicsVerbChronicleMendBindings::from_context_with_extras(
+                &ctx,
+                &mend_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_mend(
             &mut self.cache, &mend_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
@@ -1257,32 +1231,14 @@ impl CompiledSim for DuelAbilitiesState {
         self.gpu.queue.write_buffer(
             &self.chronicle_bleed_cfg_buf, 0, bytemuck::bytes_of(&bleed_cfg),
         );
-        let bleed_bindings = physics_verb_chronicle_Bleed::PhysicsVerbChronicleBleedBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
-            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
-            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
-            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
-            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
-            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
-            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
-            ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
-            ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
-            ability_registry_chances:           &self.registry_gpu.chances,
-            agent_attack_damage: &self.agent_attack_damage_buf,
-            agent_ability_power: &self.agent_ability_power_buf,
-            agent_max_hp:        &self.agent_max_hp_buf,
-            agent_hp:            &self.agent_hp_buf,
-            agent_armor:         &self.agent_armor_buf,
-            agent_magic_resist:  &self.agent_magic_resist_buf,
-            agent_move_speed:    &self.agent_move_speed_buf,
-            agent_mana:          &self.agent_mana_buf,
+        let bleed_extras = physics_verb_chronicle_Bleed::PhysicsVerbChronicleBleedExtras {
             cfg: &self.chronicle_bleed_cfg_buf,
         };
+        let bleed_bindings =
+            physics_verb_chronicle_Bleed::PhysicsVerbChronicleBleedBindings::from_context_with_extras(
+                &ctx,
+                &bleed_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_bleed(
             &mut self.cache, &bleed_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
@@ -1303,32 +1259,14 @@ impl CompiledSim for DuelAbilitiesState {
         self.gpu.queue.write_buffer(
             &self.chronicle_reap_cfg_buf, 0, bytemuck::bytes_of(&reap_cfg),
         );
-        let reap_bindings = physics_verb_chronicle_Reap::PhysicsVerbChronicleReapBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
-            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
-            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
-            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
-            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
-            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
-            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
-            ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
-            ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
-            ability_registry_chances:           &self.registry_gpu.chances,
-            agent_attack_damage: &self.agent_attack_damage_buf,
-            agent_ability_power: &self.agent_ability_power_buf,
-            agent_max_hp:        &self.agent_max_hp_buf,
-            agent_hp:            &self.agent_hp_buf,
-            agent_armor:         &self.agent_armor_buf,
-            agent_magic_resist:  &self.agent_magic_resist_buf,
-            agent_move_speed:    &self.agent_move_speed_buf,
-            agent_mana:          &self.agent_mana_buf,
+        let reap_extras = physics_verb_chronicle_Reap::PhysicsVerbChronicleReapExtras {
             cfg: &self.chronicle_reap_cfg_buf,
         };
+        let reap_bindings =
+            physics_verb_chronicle_Reap::PhysicsVerbChronicleReapBindings::from_context_with_extras(
+                &ctx,
+                &reap_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_reap(
             &mut self.cache, &reap_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
@@ -1351,32 +1289,14 @@ impl CompiledSim for DuelAbilitiesState {
         self.gpu.queue.write_buffer(
             &self.chronicle_vampirize_cfg_buf, 0, bytemuck::bytes_of(&vampirize_cfg),
         );
-        let vampirize_bindings = physics_verb_chronicle_Vampirize::PhysicsVerbChronicleVampirizeBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
-            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
-            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
-            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
-            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
-            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
-            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
-            ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
-            ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
-            ability_registry_chances:           &self.registry_gpu.chances,
-            agent_attack_damage: &self.agent_attack_damage_buf,
-            agent_ability_power: &self.agent_ability_power_buf,
-            agent_max_hp:        &self.agent_max_hp_buf,
-            agent_hp:            &self.agent_hp_buf,
-            agent_armor:         &self.agent_armor_buf,
-            agent_magic_resist:  &self.agent_magic_resist_buf,
-            agent_move_speed:    &self.agent_move_speed_buf,
-            agent_mana:          &self.agent_mana_buf,
+        let vampirize_extras = physics_verb_chronicle_Vampirize::PhysicsVerbChronicleVampirizeExtras {
             cfg: &self.chronicle_vampirize_cfg_buf,
         };
+        let vampirize_bindings =
+            physics_verb_chronicle_Vampirize::PhysicsVerbChronicleVampirizeBindings::from_context_with_extras(
+                &ctx,
+                &vampirize_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_vampirize(
             &mut self.cache, &vampirize_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
@@ -1399,32 +1319,14 @@ impl CompiledSim for DuelAbilitiesState {
         self.gpu.queue.write_buffer(
             &self.chronicle_fortify_cfg_buf, 0, bytemuck::bytes_of(&fortify_cfg),
         );
-        let fortify_bindings = physics_verb_chronicle_Fortify::PhysicsVerbChronicleFortifyBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
-            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
-            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
-            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
-            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
-            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
-            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
-            ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
-            ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
-            ability_registry_chances:           &self.registry_gpu.chances,
-            agent_attack_damage: &self.agent_attack_damage_buf,
-            agent_ability_power: &self.agent_ability_power_buf,
-            agent_max_hp:        &self.agent_max_hp_buf,
-            agent_hp:            &self.agent_hp_buf,
-            agent_armor:         &self.agent_armor_buf,
-            agent_magic_resist:  &self.agent_magic_resist_buf,
-            agent_move_speed:    &self.agent_move_speed_buf,
-            agent_mana:          &self.agent_mana_buf,
+        let fortify_extras = physics_verb_chronicle_Fortify::PhysicsVerbChronicleFortifyExtras {
             cfg: &self.chronicle_fortify_cfg_buf,
         };
+        let fortify_bindings =
+            physics_verb_chronicle_Fortify::PhysicsVerbChronicleFortifyBindings::from_context_with_extras(
+                &ctx,
+                &fortify_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_fortify(
             &mut self.cache, &fortify_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
@@ -1447,32 +1349,14 @@ impl CompiledSim for DuelAbilitiesState {
         self.gpu.queue.write_buffer(
             &self.chronicle_daze_cfg_buf, 0, bytemuck::bytes_of(&daze_cfg),
         );
-        let daze_bindings = physics_verb_chronicle_Daze::PhysicsVerbChronicleDazeBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
-            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
-            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
-            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
-            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
-            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
-            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
-            ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
-            ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
-            ability_registry_chances:           &self.registry_gpu.chances,
-            agent_attack_damage: &self.agent_attack_damage_buf,
-            agent_ability_power: &self.agent_ability_power_buf,
-            agent_max_hp:        &self.agent_max_hp_buf,
-            agent_hp:            &self.agent_hp_buf,
-            agent_armor:         &self.agent_armor_buf,
-            agent_magic_resist:  &self.agent_magic_resist_buf,
-            agent_move_speed:    &self.agent_move_speed_buf,
-            agent_mana:          &self.agent_mana_buf,
+        let daze_extras = physics_verb_chronicle_Daze::PhysicsVerbChronicleDazeExtras {
             cfg: &self.chronicle_daze_cfg_buf,
         };
+        let daze_bindings =
+            physics_verb_chronicle_Daze::PhysicsVerbChronicleDazeBindings::from_context_with_extras(
+                &ctx,
+                &daze_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_daze(
             &mut self.cache, &daze_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
@@ -1500,11 +1384,15 @@ impl CompiledSim for DuelAbilitiesState {
             &self.apply_shield_from_chronicle_cfg_buf, 0,
             bytemuck::bytes_of(&apply_shield_from_chronicle_cfg),
         );
-        let apply_shield_from_chronicle_bindings = physics_ApplyShieldFromChronicle::PhysicsApplyShieldFromChronicleBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            cfg: &self.apply_shield_from_chronicle_cfg_buf,
-        };
+        let apply_shield_from_chronicle_extras =
+            physics_ApplyShieldFromChronicle::PhysicsApplyShieldFromChronicleExtras {
+                cfg: &self.apply_shield_from_chronicle_cfg_buf,
+            };
+        let apply_shield_from_chronicle_bindings =
+            physics_ApplyShieldFromChronicle::PhysicsApplyShieldFromChronicleBindings::from_context_with_extras(
+                &ctx,
+                &apply_shield_from_chronicle_extras,
+            );
         dispatch::dispatch_physics_applyshieldfromchronicle(
             &mut self.cache, &apply_shield_from_chronicle_bindings,
             &self.gpu.device, &mut encoder, max_slots_per_tick,
@@ -1525,11 +1413,15 @@ impl CompiledSim for DuelAbilitiesState {
             &self.apply_heal_from_chronicle_cfg_buf, 0,
             bytemuck::bytes_of(&apply_heal_from_chronicle_cfg),
         );
-        let apply_heal_from_chronicle_bindings = physics_ApplyHealFromChronicle::PhysicsApplyHealFromChronicleBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            cfg: &self.apply_heal_from_chronicle_cfg_buf,
-        };
+        let apply_heal_from_chronicle_extras =
+            physics_ApplyHealFromChronicle::PhysicsApplyHealFromChronicleExtras {
+                cfg: &self.apply_heal_from_chronicle_cfg_buf,
+            };
+        let apply_heal_from_chronicle_bindings =
+            physics_ApplyHealFromChronicle::PhysicsApplyHealFromChronicleBindings::from_context_with_extras(
+                &ctx,
+                &apply_heal_from_chronicle_extras,
+            );
         dispatch::dispatch_physics_applyhealfromchronicle(
             &mut self.cache, &apply_heal_from_chronicle_bindings,
             &self.gpu.device, &mut encoder, max_slots_per_tick,
@@ -1558,11 +1450,15 @@ impl CompiledSim for DuelAbilitiesState {
             &self.apply_stun_from_chronicle_cfg_buf, 0,
             bytemuck::bytes_of(&apply_stun_from_chronicle_cfg),
         );
-        let apply_stun_from_chronicle_bindings = physics_ApplyStunFromChronicle::PhysicsApplyStunFromChronicleBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            cfg: &self.apply_stun_from_chronicle_cfg_buf,
-        };
+        let apply_stun_from_chronicle_extras =
+            physics_ApplyStunFromChronicle::PhysicsApplyStunFromChronicleExtras {
+                cfg: &self.apply_stun_from_chronicle_cfg_buf,
+            };
+        let apply_stun_from_chronicle_bindings =
+            physics_ApplyStunFromChronicle::PhysicsApplyStunFromChronicleBindings::from_context_with_extras(
+                &ctx,
+                &apply_stun_from_chronicle_extras,
+            );
         dispatch::dispatch_physics_applystunfromchronicle(
             &mut self.cache, &apply_stun_from_chronicle_bindings,
             &self.gpu.device, &mut encoder, max_slots_per_tick,
@@ -1593,11 +1489,15 @@ impl CompiledSim for DuelAbilitiesState {
             &self.apply_damage_from_self_damage_chronicle_cfg_buf, 0,
             bytemuck::bytes_of(&apply_damage_from_self_damage_chronicle_cfg),
         );
-        let apply_damage_from_self_damage_chronicle_bindings = physics_ApplyDamageFromSelfDamageChronicle::PhysicsApplyDamageFromSelfDamageChronicleBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            cfg: &self.apply_damage_from_self_damage_chronicle_cfg_buf,
-        };
+        let apply_damage_from_self_damage_chronicle_extras =
+            physics_ApplyDamageFromSelfDamageChronicle::PhysicsApplyDamageFromSelfDamageChronicleExtras {
+                cfg: &self.apply_damage_from_self_damage_chronicle_cfg_buf,
+            };
+        let apply_damage_from_self_damage_chronicle_bindings =
+            physics_ApplyDamageFromSelfDamageChronicle::PhysicsApplyDamageFromSelfDamageChronicleBindings::from_context_with_extras(
+                &ctx,
+                &apply_damage_from_self_damage_chronicle_extras,
+            );
         dispatch::dispatch_physics_applydamagefromselfdamagechronicle(
             &mut self.cache, &apply_damage_from_self_damage_chronicle_bindings,
             &self.gpu.device, &mut encoder, max_slots_per_tick,
@@ -1628,11 +1528,15 @@ impl CompiledSim for DuelAbilitiesState {
             &self.apply_lifesteal_from_chronicle_cfg_buf, 0,
             bytemuck::bytes_of(&apply_lifesteal_from_chronicle_cfg),
         );
-        let apply_lifesteal_from_chronicle_bindings = physics_ApplyLifestealFromChronicle::PhysicsApplyLifestealFromChronicleBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            cfg: &self.apply_lifesteal_from_chronicle_cfg_buf,
-        };
+        let apply_lifesteal_from_chronicle_extras =
+            physics_ApplyLifestealFromChronicle::PhysicsApplyLifestealFromChronicleExtras {
+                cfg: &self.apply_lifesteal_from_chronicle_cfg_buf,
+            };
+        let apply_lifesteal_from_chronicle_bindings =
+            physics_ApplyLifestealFromChronicle::PhysicsApplyLifestealFromChronicleBindings::from_context_with_extras(
+                &ctx,
+                &apply_lifesteal_from_chronicle_extras,
+            );
         dispatch::dispatch_physics_applylifestealfromchronicle(
             &mut self.cache, &apply_lifesteal_from_chronicle_bindings,
             &self.gpu.device, &mut encoder, max_slots_per_tick,
@@ -1664,11 +1568,15 @@ impl CompiledSim for DuelAbilitiesState {
             &self.apply_damagemod_from_chronicle_cfg_buf, 0,
             bytemuck::bytes_of(&apply_damagemod_from_chronicle_cfg),
         );
-        let apply_damagemod_from_chronicle_bindings = physics_ApplyDamageModFromChronicle::PhysicsApplyDamageModFromChronicleBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            cfg: &self.apply_damagemod_from_chronicle_cfg_buf,
-        };
+        let apply_damagemod_from_chronicle_extras =
+            physics_ApplyDamageModFromChronicle::PhysicsApplyDamageModFromChronicleExtras {
+                cfg: &self.apply_damagemod_from_chronicle_cfg_buf,
+            };
+        let apply_damagemod_from_chronicle_bindings =
+            physics_ApplyDamageModFromChronicle::PhysicsApplyDamageModFromChronicleBindings::from_context_with_extras(
+                &ctx,
+                &apply_damagemod_from_chronicle_extras,
+            );
         dispatch::dispatch_physics_applydamagemodfromchronicle(
             &mut self.cache, &apply_damagemod_from_chronicle_bindings,
             &self.gpu.device, &mut encoder, max_slots_per_tick,
@@ -1705,11 +1613,15 @@ impl CompiledSim for DuelAbilitiesState {
             &self.apply_execute_from_chronicle_cfg_buf, 0,
             bytemuck::bytes_of(&apply_execute_from_chronicle_cfg),
         );
-        let apply_execute_from_chronicle_bindings = physics_ApplyExecuteFromChronicle::PhysicsApplyExecuteFromChronicleBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            cfg: &self.apply_execute_from_chronicle_cfg_buf,
-        };
+        let apply_execute_from_chronicle_extras =
+            physics_ApplyExecuteFromChronicle::PhysicsApplyExecuteFromChronicleExtras {
+                cfg: &self.apply_execute_from_chronicle_cfg_buf,
+            };
+        let apply_execute_from_chronicle_bindings =
+            physics_ApplyExecuteFromChronicle::PhysicsApplyExecuteFromChronicleBindings::from_context_with_extras(
+                &ctx,
+                &apply_execute_from_chronicle_extras,
+            );
         dispatch::dispatch_physics_applyexecutefromchronicle(
             &mut self.cache, &apply_execute_from_chronicle_bindings,
             &self.gpu.device, &mut encoder, max_slots_per_tick,
@@ -1752,39 +1664,18 @@ impl CompiledSim for DuelAbilitiesState {
         // apply_ability dispatcher arm (verb_chronicle_Strike) walks
         // the registry to expand `apply_ability 1 by self target target`
         // into chronicle EffectDamageApplied writes.
-        let apply_heal_bindings = physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_ApplyDamageModActivation_and_ApplyStun_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndApplyDamageModActivationAndApplyStunAndVerbChronicleStrikeBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp: &self.agent_hp_buf,
-            agent_alive: &self.agent_alive_buf,
-            agent_shield_hp: &self.agent_shield_hp_buf,
+        let apply_heal_extras = physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_ApplyDamageModActivation_and_ApplyStun_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndApplyDamageModActivationAndApplyStunAndVerbChronicleStrikeExtras {
             agent_stun_expires_at_tick: &self.agent_stun_expires_at_tick_buf,
             agent_lifesteal_frac_q8: &self.agent_lifesteal_frac_q8_buf,
             agent_lifesteal_expires_at_tick: &self.agent_lifesteal_expires_at_tick_buf,
             agent_damage_taken_mult_q8: &self.agent_damage_taken_mult_q8_buf,
             agent_damage_taken_mult_expires_at_tick: &self.agent_damage_taken_mult_expires_at_tick_buf,
-            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
-            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
-            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
-            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
-            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
-            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
-            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
-            ability_registry_scaling_percents:  &self.registry_gpu.scaling_percents,
-            ability_registry_when_pred_binder:  &self.registry_gpu.when_pred_binder,
-            ability_registry_when_pred_field:   &self.registry_gpu.when_pred_field,
-            ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
-            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
-            ability_registry_chances:           &self.registry_gpu.chances,
-            agent_attack_damage: &self.agent_attack_damage_buf,
-            agent_ability_power: &self.agent_ability_power_buf,
-            agent_max_hp:        &self.agent_max_hp_buf,
-            agent_armor:         &self.agent_armor_buf,
-            agent_magic_resist:  &self.agent_magic_resist_buf,
-            agent_move_speed:    &self.agent_move_speed_buf,
-            agent_mana:          &self.agent_mana_buf,
             cfg: &self.chronicle_strike_cfg_buf,
         };
+        let apply_heal_bindings = physics_ApplyHeal_and_ApplyShield_and_ApplyDefeat_and_ApplyLifestealActivation_and_ApplyDamageModActivation_and_ApplyStun_and_verb_chronicle_Strike::PhysicsApplyHealAndApplyShieldAndApplyDefeatAndApplyLifestealActivationAndApplyDamageModActivationAndApplyStunAndVerbChronicleStrikeBindings::from_context_with_extras(
+            &ctx,
+            &apply_heal_extras,
+        );
         dispatch::dispatch_physics_applyheal_and_applyshield_and_applydefeat_and_applylifestealactivation_and_applydamagemodactivation_and_applystun_and_verb_chronicle_strike(
             &mut self.cache, &apply_heal_bindings, &self.gpu.device, &mut encoder,
             event_count_estimate,
@@ -1810,11 +1701,15 @@ impl CompiledSim for DuelAbilitiesState {
             &self.apply_damage_from_chronicle_cfg_buf, 0,
             bytemuck::bytes_of(&apply_damage_from_chronicle_cfg),
         );
-        let apply_damage_from_chronicle_bindings = physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            cfg: &self.apply_damage_from_chronicle_cfg_buf,
-        };
+        let apply_damage_from_chronicle_extras =
+            physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleExtras {
+                cfg: &self.apply_damage_from_chronicle_cfg_buf,
+            };
+        let apply_damage_from_chronicle_bindings =
+            physics_ApplyDamageFromChronicle::PhysicsApplyDamageFromChronicleBindings::from_context_with_extras(
+                &ctx,
+                &apply_damage_from_chronicle_extras,
+            );
         dispatch::dispatch_physics_applydamagefromchronicle(
             &mut self.cache, &apply_damage_from_chronicle_bindings,
             &self.gpu.device, &mut encoder, event_count_estimate,
@@ -1844,18 +1739,18 @@ impl CompiledSim for DuelAbilitiesState {
         self.gpu.queue.write_buffer(
             &self.apply_damage_cfg_buf, 0, bytemuck::bytes_of(&apply_damage_cfg),
         );
-        let apply_damage_bindings = physics_ApplyDamage::PhysicsApplyDamageBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp: &self.agent_hp_buf,
-            agent_alive: &self.agent_alive_buf,
-            agent_shield_hp: &self.agent_shield_hp_buf,
+        let apply_damage_extras = physics_ApplyDamage::PhysicsApplyDamageExtras {
             agent_lifesteal_frac_q8: &self.agent_lifesteal_frac_q8_buf,
             agent_lifesteal_expires_at_tick: &self.agent_lifesteal_expires_at_tick_buf,
             agent_damage_taken_mult_q8: &self.agent_damage_taken_mult_q8_buf,
             agent_damage_taken_mult_expires_at_tick: &self.agent_damage_taken_mult_expires_at_tick_buf,
             cfg: &self.apply_damage_cfg_buf,
         };
+        let apply_damage_bindings =
+            physics_ApplyDamage::PhysicsApplyDamageBindings::from_context_with_extras(
+                &ctx,
+                &apply_damage_extras,
+            );
         dispatch::dispatch_physics_applydamage(
             &mut self.cache, &apply_damage_bindings, &self.gpu.device, &mut encoder,
             event_count_estimate,
@@ -1870,12 +1765,14 @@ impl CompiledSim for DuelAbilitiesState {
         self.gpu.queue.write_buffer(
             &self.seed_cfg_buf, 0, bytemuck::bytes_of(&seed_cfg),
         );
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.seed_cfg_buf,
         };
+        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+            &ctx,
+            &seed_extras,
+        );
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache, &seed_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,

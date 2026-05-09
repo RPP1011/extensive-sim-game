@@ -32,6 +32,8 @@
 //!   BOTH PlantEaten and HerbivoreEaten emits — see the GAP note at
 //!   the top of `ecosystem_app.rs` for details.
 
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
 use engine::ids::AgentId;
 use engine::rng::per_agent_u32;
 use engine::sim_trait::{AgentSnapshot, CompiledSim, VizGlyph};
@@ -41,7 +43,7 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 /// 16-byte WGSL `vec3<f32>` interop. Same shape as the predator_prey /
 /// swarm_storm runtimes use; duplicated here to keep each fixture-
@@ -118,6 +120,12 @@ pub struct EcosystemState {
     plant_count: u32,
     herbivore_count: u32,
     carnivore_count: u32,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
     pos_cache: Vec<Vec3>,
@@ -340,6 +348,12 @@ impl EcosystemState {
             },
         );
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&engine::ability::AbilityRegistry::new()),
+            &gpu,
+            "ecosystem_runtime",
+        );
+
         Self {
             gpu,
             pos_buf,
@@ -360,6 +374,7 @@ impl EcosystemState {
             plant_count,
             herbivore_count,
             carnivore_count,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             pos_cache: pos_host,
             dirty: false,
@@ -506,14 +521,32 @@ impl CompiledSim for EcosystemState {
         // fold dispatch.
         self.event_ring.clear_tail_in(&mut encoder);
 
+        // Shared once per tick; each non-fold dispatch below adds only
+        // its fixture-specific extras struct. (Fold kernels still build
+        // hand-written `Bindings { ... }` literals — the compiler
+        // doesn't emit `from_context` constructors for them.)
+        let agent_buffers = AgentBuffers {
+            pos_buf: Some(&self.pos_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
         // (1) MovePlant — no event_ring/event_tail bindings (Plants
         // don't emit). Reads creature_type, pos, vel; writes pos.
-        let plant_bindings = physics_MovePlant::PhysicsMovePlantBindings {
-            agent_pos: &self.pos_buf,
+        let plant_extras = physics_MovePlant::PhysicsMovePlantExtras {
             agent_creature_type: &self.creature_type_buf,
             agent_vel: &self.vel_buf,
             cfg: &self.cfg_buf,
         };
+        let plant_bindings =
+            physics_MovePlant::PhysicsMovePlantBindings::from_context_with_extras(
+                &ctx, &plant_extras,
+            );
         dispatch::dispatch_physics_moveplant(
             &mut self.cache,
             &plant_bindings,
@@ -525,14 +558,15 @@ impl CompiledSim for EcosystemState {
         // (2) MoveHerbivore — emits `PlantEaten { plant: self, by: self,
         // pos }` (kind tag = 1u in the WGSL emit body). Bindings include
         // event_ring + event_tail.
-        let herb_bindings = physics_MoveHerbivore::PhysicsMoveHerbivoreBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_pos: &self.pos_buf,
+        let herb_extras = physics_MoveHerbivore::PhysicsMoveHerbivoreExtras {
             agent_creature_type: &self.creature_type_buf,
             agent_vel: &self.vel_buf,
             cfg: &self.cfg_buf,
         };
+        let herb_bindings =
+            physics_MoveHerbivore::PhysicsMoveHerbivoreBindings::from_context_with_extras(
+                &ctx, &herb_extras,
+            );
         dispatch::dispatch_physics_moveherbivore(
             &mut self.cache,
             &herb_bindings,
@@ -543,14 +577,15 @@ impl CompiledSim for EcosystemState {
 
         // (3) MoveCarnivore — emits `HerbivoreEaten { prey: self, by:
         // self, pos }` (kind tag = 2u). Same shared ring / tail.
-        let carn_bindings = physics_MoveCarnivore::PhysicsMoveCarnivoreBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_pos: &self.pos_buf,
+        let carn_extras = physics_MoveCarnivore::PhysicsMoveCarnivoreExtras {
             agent_creature_type: &self.creature_type_buf,
             agent_vel: &self.vel_buf,
             cfg: &self.cfg_buf,
         };
+        let carn_bindings =
+            physics_MoveCarnivore::PhysicsMoveCarnivoreBindings::from_context_with_extras(
+                &ctx, &carn_extras,
+            );
         dispatch::dispatch_physics_movecarnivore(
             &mut self.cache,
             &carn_bindings,
@@ -561,12 +596,14 @@ impl CompiledSim for EcosystemState {
 
         // (4) seed_indirect_0 — keeps the indirect-args buffer warm
         // for the eventual dispatch_workgroups_indirect wire-up.
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.cfg_buf,
         };
+        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+            &ctx,
+            &seed_extras,
+        );
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache,
             &seed_bindings,
@@ -594,10 +631,15 @@ impl CompiledSim for EcosystemState {
             0,
             bytemuck::bytes_of(&rb_decay_cfg),
         );
-        let rb_decay_bindings = decay_recent_browse::DecayRecentBrowseBindings {
+        let rb_decay_extras = decay_recent_browse::DecayRecentBrowseExtras {
             view_storage_primary: self.recent_browse.primary(),
             cfg: &self.recent_browse_decay_cfg_buf,
         };
+        let rb_decay_bindings =
+            decay_recent_browse::DecayRecentBrowseBindings::from_context_with_extras(
+                &ctx,
+                &rb_decay_extras,
+            );
         dispatch::dispatch_decay_recent_browse(
             &mut self.cache,
             &rb_decay_bindings,
@@ -652,10 +694,15 @@ impl CompiledSim for EcosystemState {
             0,
             bytemuck::bytes_of(&pp_decay_cfg),
         );
-        let pp_decay_bindings = decay_predator_pressure::DecayPredatorPressureBindings {
+        let pp_decay_extras = decay_predator_pressure::DecayPredatorPressureExtras {
             view_storage_primary: self.predator_pressure.primary(),
             cfg: &self.predator_pressure_decay_cfg_buf,
         };
+        let pp_decay_bindings =
+            decay_predator_pressure::DecayPredatorPressureBindings::from_context_with_extras(
+                &ctx,
+                &pp_decay_extras,
+            );
         dispatch::dispatch_decay_predator_pressure(
             &mut self.cache,
             &pp_decay_bindings,
@@ -703,10 +750,15 @@ impl CompiledSim for EcosystemState {
             0,
             bytemuck::bytes_of(&plp_decay_cfg),
         );
-        let plp_decay_bindings = decay_plant_pressure::DecayPlantPressureBindings {
+        let plp_decay_extras = decay_plant_pressure::DecayPlantPressureExtras {
             view_storage_primary: self.plant_pressure.primary(),
             cfg: &self.plant_pressure_decay_cfg_buf,
         };
+        let plp_decay_bindings =
+            decay_plant_pressure::DecayPlantPressureBindings::from_context_with_extras(
+                &ctx,
+                &plp_decay_extras,
+            );
         dispatch::dispatch_decay_plant_pressure(
             &mut self.cache,
             &plp_decay_bindings,

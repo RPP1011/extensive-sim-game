@@ -46,7 +46,9 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 /// Per-fixture state for the cooldown probe. Owns:
 ///   - Agent SoA (alive + cooldown_next_ready_tick — two buffers)
@@ -74,6 +76,12 @@ pub struct CooldownProbeState {
     // -- Per-kernel cfg uniforms --
     physics_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
 
@@ -158,6 +166,12 @@ impl CooldownProbeState {
             },
         );
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&engine::ability::AbilityRegistry::new()),
+            &gpu,
+            "cooldown_probe_runtime",
+        );
+
         Self {
             gpu,
             agent_alive_buf,
@@ -167,6 +181,7 @@ impl CooldownProbeState {
             activations_cfg_buf,
             physics_cfg_buf,
             seed_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             tick: 0,
             agent_count,
@@ -205,6 +220,19 @@ impl CompiledSim for CooldownProbeState {
         // (1) Per-tick clear of event_tail.
         self.event_ring.clear_tail_in(&mut encoder);
 
+        // Shared once per tick; each dispatch below adds only its
+        // fixture-specific extras struct.
+        let agent_buffers = AgentBuffers {
+            alive_buf: Some(&self.agent_alive_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
         // (2) physics_CheckAndCast — reads agent_alive + agent_cooldown_
         // next_ready_tick. For each alive agent: if `tick >= ready_at`,
         // emits ActivationLogged{ caster=self, activated=1.0 } into the
@@ -217,13 +245,15 @@ impl CompiledSim for CooldownProbeState {
         self.gpu
             .queue
             .write_buffer(&self.physics_cfg_buf, 0, bytemuck::bytes_of(&physics_cfg));
-        let physics_bindings = physics_CheckAndCast::PhysicsCheckAndCastBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_alive: &self.agent_alive_buf,
+        let physics_extras = physics_CheckAndCast::PhysicsCheckAndCastExtras {
             agent_cooldown_next_ready_tick: &self.agent_cooldown_next_ready_tick_buf,
             cfg: &self.physics_cfg_buf,
         };
+        let physics_bindings =
+            physics_CheckAndCast::PhysicsCheckAndCastBindings::from_context_with_extras(
+                &ctx,
+                &physics_extras,
+            );
         dispatch::dispatch_physics_checkandcast(
             &mut self.cache,
             &physics_bindings,
@@ -243,12 +273,14 @@ impl CompiledSim for CooldownProbeState {
         self.gpu
             .queue
             .write_buffer(&self.seed_cfg_buf, 0, bytemuck::bytes_of(&seed_cfg));
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.seed_cfg_buf,
         };
+        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+            &ctx,
+            &seed_extras,
+        );
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache,
             &seed_bindings,
