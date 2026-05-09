@@ -565,6 +565,7 @@ impl StressCastDensityState {
             state: &agent_buffers,
             event_ring: &self.event_ring,
             registry: &self.registry_gpu,
+            voxel_grid: None,
         };
 
         let dispatch_extras = physics_DispatchAoePulse::PhysicsDispatchAoePulseExtras {

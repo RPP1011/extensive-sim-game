@@ -566,6 +566,7 @@ impl CompiledSim for VillageEconomyState {
             state: &agent_buffers,
             event_ring: &self.event_ring,
             registry: &self.registry_gpu,
+            voxel_grid: None,
         };
 
         // (2) Mask round — fused PerPair kernel writes all 3 mask bitmaps.

@@ -640,6 +640,7 @@ impl CompiledSim for SpyNetworkState {
             state: &agent_buffers,
             event_ring: &self.event_ring,
             registry: &self.registry_gpu,
+            voxel_grid: None,
         };
 
         // (2) Mask round — fused PerPair kernel writes all 3 mask bitmaps.

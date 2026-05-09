@@ -497,6 +497,7 @@ impl CompiledSim for DebugProbeState {
             state: &agent_buffers,
             event_ring: &self.event_ring,
             registry: &self.registry_gpu,
+            voxel_grid: None,
         };
 
         // (2) Mask round.

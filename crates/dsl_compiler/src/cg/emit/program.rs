@@ -223,6 +223,68 @@ fn clamp_i32(x: i32, lo: i32, hi: i32) -> i32 { return clamp(x, lo, hi); }
 ";
 
 // ---------------------------------------------------------------------------
+// Voxel-mirror prelude — Phase C of the voxel-engine integration plan
+// ---------------------------------------------------------------------------
+
+/// WGSL helper for reading from a [`KernelBindingsContext::voxel_grid`]
+/// storage buffer. Substring-injected into any kernel module whose
+/// body calls `voxel_at(`. Matches the runtime-side widen-to-u32
+/// encoding in `engine_voxel::VoxelMirror`: each cell is one `u32`,
+/// material code in the low 8 bits.
+///
+/// Out-of-bounds reads return `0u` (air). The grid extent comes from a
+/// per-fixture cfg uniform (Phase D will lower the dimensions; Phase C
+/// emits a placeholder helper that takes width/height/depth as
+/// arguments so the same helper works for any extent without baking
+/// constants in. Phase D's terrain-query lowering will fill the call
+/// site with the per-fixture dimensions.).
+///
+/// # Helper signature choice
+///
+/// Phase C considered three signatures:
+/// 1. `voxel_at(grid, x, y, z) -> u32` with grid extent baked into a
+///    compile-time WGSL `const` — simplest, but ties every kernel to
+///    one fixture's grid size.
+/// 2. `voxel_at(grid, x, y, z, w, h, d) -> u32` — extent passed
+///    per-call; verbose at the call site but works across fixtures.
+/// 3. `voxel_at(grid, x, y, z) -> u32` reading a separate
+///    `voxel_grid_dims: vec3<u32>` uniform — clean call site, but
+///    needs a second binding wired through `KernelBindingsContext`.
+///
+/// Picked option (2) for Phase C: kernels that bind `voxel_grid` will
+/// also need to know the extent (e.g. for `pos → cell` floor + bounds
+/// check), so passing the extent at the call site keeps the
+/// information flow explicit. Phase D may revisit if it proves
+/// awkward at the lowering layer; reads from a uniform vs. constant
+/// args is a thin wrapper change.
+const VOXEL_GRID_WGSL_PRELUDE: &str = "\
+// Voxel-mirror helper — emitted when the body calls `voxel_at(`.
+// Reads one cell from the GPU-resident voxel mirror (`engine_voxel::
+// VoxelMirror`). Cell layout matches the host: index = z*H*W + y*W + x;
+// material code lives in the low byte of each u32. Out-of-bounds
+// returns 0u (air). Width/height/depth are caller-supplied so one
+// helper serves all fixture extents.
+fn voxel_at(
+    grid: ptr<storage, array<u32>, read>,
+    x: i32, y: i32, z: i32,
+    width: u32, height: u32, depth: u32,
+) -> u32 {
+    if (x < 0 || y < 0 || z < 0) {
+        return 0u;
+    }
+    let ux: u32 = u32(x);
+    let uy: u32 = u32(y);
+    let uz: u32 = u32(z);
+    if (ux >= width || uy >= height || uz >= depth) {
+        return 0u;
+    }
+    let idx: u32 = uz * height * width + uy * width + ux;
+    return (*grid)[idx];
+}
+
+";
+
+// ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
@@ -634,6 +696,17 @@ fn compose_wgsl_file(
         out.push('\n');
     }
 
+    // Voxel-mirror prelude (Phase C): emit `voxel_at(` helper when
+    // the kernel body references it. Phase C just lays the helper
+    // down — Phase D will start emitting calls to it from lowered
+    // `terrain.height_at` / `terrain.walkable` / `terrain.line_of_sight`
+    // surfaces. Substring-gate keys on `voxel_at(` so a kernel that
+    // doesn't touch terrain doesn't pick up the unused helper.
+    if body.contains("voxel_at(") {
+        out.push_str(VOXEL_GRID_WGSL_PRELUDE);
+        out.push('\n');
+    }
+
     // PerCell topologies (today only the tiled-MoveBoid kernel)
     // need module-level `var<workgroup>` declarations for the
     // cooperative tile arrays — they're shared across all lanes of
@@ -966,6 +1039,7 @@ fn compose_rust_module_file(spec: &KernelSpec, topology: &KernelTopology) -> Str
 /// | `agent_<col>` where col is in   | `BindingSource::AgentBuffer(col)` |
 /// |   `engine::gpu::AgentBuffers::STANDARD_COLUMNS` |                  |
 /// | `ability_registry_<col>`        | `BindingSource::Registry(col)`    |
+/// | `voxel_grid` (Phase C)          | `BindingSource::VoxelGrid`        |
 /// | `cfg`                           | `BindingSource::Cfg`              |
 /// | (anything else)                 | `BindingSource::Extras`           |
 ///
@@ -979,6 +1053,11 @@ enum BindingSource<'a> {
     EventRingTail,
     AgentBuffer(&'a str),
     Registry(&'a str),
+    /// Phase C — `voxel_grid` resolves to
+    /// `ctx.voxel_grid.expect("kernel binds voxel_grid but the runtime
+    /// didn't supply ctx.voxel_grid")`. Optional on the context so
+    /// non-voxel fixtures don't pay the buffer alloc.
+    VoxelGrid,
     Cfg,
     Extras,
 }
@@ -1013,6 +1092,9 @@ fn classify_binding(name: &str) -> BindingSource<'_> {
     if name == "cfg" {
         return BindingSource::Cfg;
     }
+    if name == "voxel_grid" {
+        return BindingSource::VoxelGrid;
+    }
     if let Some(col) = name.strip_prefix("ability_registry_") {
         return BindingSource::Registry(col);
     }
@@ -1036,6 +1118,7 @@ fn render_from_context_expr(src: &BindingSource<'_>, name: &str) -> String {
             "ctx.state.{col}_buf.expect(\"kernel binds agent_{col} but the runtime didn't supply ctx.state.{col}_buf\")"
         ),
         BindingSource::Registry(col) => format!("&ctx.registry.{col}"),
+        BindingSource::VoxelGrid => "ctx.voxel_grid.expect(\"kernel binds voxel_grid but the runtime didn't supply ctx.voxel_grid\")".to_string(),
         BindingSource::Cfg => "extras.cfg".to_string(),
         BindingSource::Extras => format!("extras.{name}"),
     }
@@ -2005,6 +2088,46 @@ mod tests {
     #[test]
     fn classify_binding_routes_cfg_to_extras_arm() {
         assert_eq!(classify_binding("cfg"), BindingSource::Cfg);
+    }
+
+    #[test]
+    fn classify_binding_routes_voxel_grid_to_voxel_grid_source() {
+        assert_eq!(classify_binding("voxel_grid"), BindingSource::VoxelGrid);
+    }
+
+    #[test]
+    fn from_context_expr_for_voxel_grid_unwraps_optional() {
+        // The compiler-emitted from_context body for a kernel binding
+        // `voxel_grid` must `.expect(...)` the optional ctx field so a
+        // runtime that forgot to wire the mirror surfaces the missing
+        // buffer as a clear runtime error rather than a borrow-of-None.
+        let expr = render_from_context_expr(&BindingSource::VoxelGrid, "voxel_grid");
+        assert!(
+            expr.contains("ctx.voxel_grid.expect("),
+            "voxel_grid expr should unwrap the optional context field: {expr}"
+        );
+    }
+
+    #[test]
+    fn voxel_grid_wgsl_prelude_emits_voxel_at_helper() {
+        // The substring gate `voxel_at(` in `compose_wgsl_file` is the
+        // load-bearing emit gate for the helper. Pin its shape: function
+        // name, the OOB-returns-zero arm, and the flat-3D index formula.
+        assert!(
+            VOXEL_GRID_WGSL_PRELUDE.contains("fn voxel_at("),
+            "VOXEL_GRID_WGSL_PRELUDE should declare `voxel_at` helper: \n{VOXEL_GRID_WGSL_PRELUDE}"
+        );
+        assert!(
+            VOXEL_GRID_WGSL_PRELUDE.contains("return 0u;"),
+            "voxel_at OOB arm must return 0u sentinel"
+        );
+        // Flat 3D index — keep in lock-step with `engine_voxel::VoxelMirror`'s
+        // staging layout (index = z*H*W + y*W + x).
+        assert!(
+            VOXEL_GRID_WGSL_PRELUDE.contains("uz * height * width + uy * width + ux"),
+            "voxel_at index formula drifted from VoxelGrid::index — \
+             keep in sync with engine_voxel::VoxelMirror's staging layout"
+        );
     }
 
     #[test]

@@ -32,6 +32,7 @@
 //! | `event_tail`                    | `ctx.event_ring` | `ctx.event_ring.tail()`                  |
 //! | `agent_<col>` (standard SoA)    | `ctx.state`      | `ctx.state.<col>_buf`                    |
 //! | `ability_registry_<col>`        | `ctx.registry`   | `&ctx.registry.<col>`                    |
+//! | `voxel_grid` (Phase C)          | `ctx.voxel_grid` | `ctx.voxel_grid.expect(...)`             |
 //! | (anything else)                 | `extras`         | `extras.<name>`                          |
 //!
 //! The "anything else" bucket catches per-fixture mask bitmaps,
@@ -159,6 +160,15 @@ pub struct KernelBindingsContext<'a> {
     /// Packed AbilityRegistry uploaded to GPU — `ability_registry_<col>`
     /// bindings.
     pub registry: &'a crate::ability::registry_gpu::PackedAbilityRegistryGpu,
+    /// **Phase C** — optional GPU-resident voxel grid mirror. Resolves
+    /// the `voxel_grid` binding name. `None` for runtimes that don't
+    /// use voxel terrain (most fixtures today); the compiler-emitted
+    /// `from_context` / `from_context_with_extras` bodies `.expect(...)`
+    /// unwrap when a kernel actually binds `voxel_grid`, so leaving
+    /// this `None` is safe for fixtures that don't lower terrain
+    /// queries to GPU. Future fixtures opt in by passing
+    /// `Some(mirror.buffer())`.
+    pub voxel_grid: Option<&'a wgpu::Buffer>,
 }
 
 #[cfg(test)]
