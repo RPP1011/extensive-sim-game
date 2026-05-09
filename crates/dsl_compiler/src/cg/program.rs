@@ -996,6 +996,20 @@ pub struct CgProgram {
     /// table is a zero-cost surface for the P6 check that doesn't
     /// touch the fusion / emit pipeline.
     pub post_phase_physics_rules: std::collections::BTreeSet<u32>,
+    /// 2026-05-09 (Compiler debug mode Phase 2): WGSL-side atomic
+    /// counter instrumentation bitset, plumbed in from
+    /// [`super::lower::driver::LowerOpts::debug_wgsl`]. Read by the
+    /// emit layer ([`super::emit::wgsl_body::EmitCtx::debug_wgsl`])
+    /// to gate per-kernel atomic-counter `atomicAdd` calls. Default
+    /// [`super::lower::driver::DebugWgslFlags::NONE`] preserves the
+    /// existing emit shape for every non-opt-in fixture.
+    ///
+    /// `#[serde(skip)]`: this is build-time configuration, not part
+    /// of the program's logical contract. Round-tripping a CgProgram
+    /// through serde drops the flag back to `NONE` (i.e. the bake
+    /// channel always emits the production shape).
+    #[serde(skip)]
+    pub debug_wgsl: super::lower::driver::DebugWgslFlags,
 }
 
 impl CgProgram {

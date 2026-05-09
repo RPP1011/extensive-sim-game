@@ -223,6 +223,26 @@ pub struct LowerOpts {
     /// schema-hash inputs. Toggling `debug` between runs leaves the
     /// schema hash unchanged.
     pub debug: DebugDepth,
+    /// 2026-05-09 (Compiler debug mode Phase 2): WGSL-side atomic
+    /// counter instrumentation. Independently selectable per axis
+    /// (event-kind histograms, mask hit-rate, scoring kernel visits).
+    /// When the bitset is `NONE`, the WGSL emit + BGL composer behave
+    /// exactly as before; when any flag is set, the affected emit
+    /// sites add parallel `atomicAdd` calls onto per-flag counter
+    /// buffers.
+    ///
+    /// Orthogonal to [`Self::debug`]: Phase 1 owns host-side
+    /// timestamps + memory traffic + DSL source mapping; Phase 2 owns
+    /// WGSL-side atomic counters. Two completely separate fields,
+    /// two completely separate code paths.
+    ///
+    /// Default `NONE` preserves the existing emit shape for every
+    /// non-opt-in fixture (every production runtime today). The
+    /// per-runtime BGL fanout (extra bindings on the ~11 runtimes
+    /// that bind agent SoA columns) is deferred to a follow-up
+    /// slice that lands an opt-in `*_debug_runtime` fixture; today
+    /// no runtime opts in.
+    pub debug_wgsl: DebugWgslFlags,
 }
 
 /// Compiler debug-mode level — graduated GPU + memory + DSL-source
@@ -309,6 +329,92 @@ impl DebugDepth {
     /// (D4 only).
     pub fn emits_source_map(self) -> bool {
         self >= DebugDepth::DslMapped
+    }
+}
+
+/// WGSL-side atomic-counter instrumentation bitset (Compiler debug
+/// mode Phase 2). Each axis is independently selectable; when an
+/// axis is set, the affected WGSL emit sites add a parallel
+/// `atomicAdd` call onto a per-axis counter buffer that the runtime
+/// reads back via the per-runtime debug API (deferred — needs
+/// opt-in `*_debug_runtime` fixture).
+///
+/// # Constitution alignment
+///
+/// - **P1 Compiler-First.** The atomic counters are emitted by the
+///   compiler, not hand-written in any `*.wgsl` file under
+///   `engine_gpu_rules/src/`.
+/// - **P2 Schema-Hash.** The bitset is compile-time configuration
+///   threaded through [`LowerOpts`]. The atomic counter buffers are
+///   extra GPU-side state, NOT part of the SoA / event contract —
+///   the schema hash stays unchanged.
+/// - **P3 Cross-Backend Parity.** GPU-only. The CPU backend can
+///   ignore [`Self`] entirely and return zero counters from the
+///   runtime API.
+/// - **P5 Determinism.** Atomic counters are observation-only and
+///   don't change RNG draws or sim state.
+/// - **P11 Reduction Determinism.** Atomic increments are
+///   commutative — order doesn't matter for COUNTS (only for sums of
+///   floats). Final values are deterministic regardless of work-item
+///   order.
+///
+/// Default [`Self::NONE`] preserves the existing emit shape.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct DebugWgslFlags {
+    /// Per-`EventKindId` histogram: at every chronicle producer
+    /// (`atomicAdd(&event_tail[0], 1u)` site emitted by the dispatcher
+    /// + emit lowerings), bump
+    /// `event_kind_counts[<statically-known kind>]` by 1. Total over
+    /// all entries equals the chronicle ring high-water mark for the
+    /// tick.
+    pub event_kind_histogram: bool,
+    /// Per-mask-kernel pass/total counter pair. Inside each
+    /// `MaskPredicate` body, `atomicAdd(&mask_total[<mask_id>], 1u)`
+    /// runs once per candidate visit; `atomicAdd(&mask_passed[<mask_id>], 1u)`
+    /// runs once per candidate that satisfies the predicate. Hit rate
+    /// = passed/total.
+    pub mask_hit_rate: bool,
+    /// Per-agent scoring kernel visit count. Bumps
+    /// `score_kernel_visits[agent_id]` per *kernel visit* — semantics
+    /// differ across row shapes:
+    ///
+    /// - **Pair-field rows** (target ≠ self): one increment per
+    ///   *candidate* considered in the inner loop. So for an agent
+    ///   that argmaxes over 200 in-radius candidates this tick, the
+    ///   counter rises by 200.
+    /// - **Self-only rows** (target = self): one increment per *row
+    ///   visit* — the kernel runs once per agent per row, so the
+    ///   counter rises by N for an agent visited across N rows.
+    ///
+    /// Renamed from `scoring_candidate_count` (2026-05-09 review): the
+    /// asymmetry across row types makes "candidates" misleading on
+    /// self-only rows where the kernel doesn't iterate. "Kernel visits"
+    /// matches the actual work counted.
+    pub score_kernel_visits: bool,
+}
+
+impl DebugWgslFlags {
+    /// All-axes-off bitset. Identical to [`Self::default()`] but
+    /// usable in `const` contexts.
+    pub const NONE: Self = Self {
+        event_kind_histogram: false,
+        mask_hit_rate: false,
+        score_kernel_visits: false,
+    };
+
+    /// All-axes-on bitset. Useful for top-down debugging and tests
+    /// that want to exercise every counter path.
+    pub const ALL: Self = Self {
+        event_kind_histogram: true,
+        mask_hit_rate: true,
+        score_kernel_visits: true,
+    };
+
+    /// `true` when at least one axis is enabled. Used by the BGL
+    /// composer follow-up (deferred) to decide whether to surface
+    /// the new instrumentation buffer bindings.
+    pub fn any(&self) -> bool {
+        self.event_kind_histogram || self.mask_hit_rate || self.score_kernel_visits
     }
 }
 
@@ -693,6 +799,12 @@ pub fn lower_compilation_to_cg_with_opts(
     // `view_signatures` was set on the builder's program BEFORE the
     // cycle gate (above); `finish()` preserves it. No re-snapshot
     // needed here.
+    // 2026-05-09 (Compiler debug mode Phase 2): persist the WGSL
+    // instrumentation bitset onto the program so the emit layer can
+    // read it via `EmitCtx::debug_wgsl`. This is the single channel
+    // by which a per-runtime build.rs opt-in (`LowerOpts {
+    // debug_wgsl: ... }`) reaches `wgsl_body.rs`.
+    prog.debug_wgsl = opts.debug_wgsl;
 
     if diagnostics.is_empty() {
         Ok(prog)
@@ -4189,5 +4301,53 @@ mod tests {
                 "agents.{method} should take (observer, subject, value)",
             );
         }
+    }
+
+    // ---- Compiler debug mode Phase 2 (DebugWgslFlags) plumbing ----
+
+    /// `DebugWgslFlags::NONE` is the default; `any()` is `false`.
+    /// `ALL` flips every axis; `any()` is `true`.
+    #[test]
+    fn debug_wgsl_flags_default_and_const_any() {
+        assert_eq!(DebugWgslFlags::default(), DebugWgslFlags::NONE);
+        assert!(!DebugWgslFlags::NONE.any());
+        assert!(DebugWgslFlags::ALL.any());
+        assert!(DebugWgslFlags::ALL.event_kind_histogram);
+        assert!(DebugWgslFlags::ALL.mask_hit_rate);
+        assert!(DebugWgslFlags::ALL.score_kernel_visits);
+    }
+
+    /// `LowerOpts::default()` carries `DebugWgslFlags::NONE` and
+    /// `DebugDepth::Off` — every existing fixture's
+    /// `lower_compilation_to_cg(comp)` call inherits the
+    /// zero-overhead shape.
+    #[test]
+    fn lower_opts_default_carries_off_and_none() {
+        let opts = LowerOpts::default();
+        assert_eq!(opts.debug, DebugDepth::Off);
+        assert_eq!(opts.debug_wgsl, DebugWgslFlags::NONE);
+        // Pre-existing fields preserve their defaults.
+        assert!(!opts.aoe_dispatch);
+        assert!(!opts.belief_state);
+    }
+
+    /// `LowerOpts.debug_wgsl` is plumbed through the driver onto
+    /// the resulting `CgProgram.debug_wgsl`. The emit layer reads
+    /// from the program's field via `EmitCtx::structural`.
+    #[test]
+    fn lower_opts_debug_wgsl_threads_to_cg_program() {
+        let comp = Compilation::default();
+        let opts = LowerOpts {
+            debug_wgsl: DebugWgslFlags {
+                event_kind_histogram: true,
+                ..DebugWgslFlags::NONE
+            },
+            ..LowerOpts::default()
+        };
+        let prog = lower_compilation_to_cg_with_opts(&comp, opts)
+            .expect("empty Compilation lowers cleanly");
+        assert!(prog.debug_wgsl.event_kind_histogram);
+        assert!(!prog.debug_wgsl.mask_hit_rate);
+        assert!(!prog.debug_wgsl.score_kernel_visits);
     }
 }
