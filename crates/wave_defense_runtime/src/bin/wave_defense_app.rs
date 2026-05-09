@@ -28,7 +28,7 @@
 use std::io::Write;
 use std::panic::AssertUnwindSafe;
 
-use wave_defense_runtime::{WaveDefenseState, DEFAULT_MAX_TICKS, WAVE_SIZE};
+use wave_defense_runtime::{wave_size_at_tick, WaveDefenseState, DEFAULT_MAX_TICKS};
 
 const TICK_SAMPLE_PERIOD: u64 = 50;
 
@@ -58,7 +58,7 @@ fn main() {
         Err(payload) => {
             let msg = panic_payload_msg(payload.as_ref());
             eprintln!("[wave_defense_app] PANIC at construction: {msg}");
-            emit_summary(&mut stdout, 0, 0.0, WAVE_SIZE, Some(msg));
+            emit_summary(&mut stdout, 0, 0.0, wave_size_at_tick(0), Some(msg));
             return;
         }
     };
@@ -67,7 +67,7 @@ fn main() {
     let mut last_alive_settlers: u32 = 0;
     let mut last_alive_monsters: u32 = 0;
     let mut last_score: f32 = 0.0;
-    let wave_size: u32 = WAVE_SIZE; // constant per Task #243 deferral
+    let mut max_wave_size: u32 = 0;
 
     let mut died_at_tick: u64 = max_ticks;
     let mut panic_msg: Option<String> = None;
@@ -97,6 +97,8 @@ fn main() {
             last_alive_monsters = state.alive_monster_count();
             last_score = state.read_score();
         }
+        let wave_size = wave_size_at_tick(t);
+        max_wave_size = max_wave_size.max(wave_size);
         emit_per_tick(
             &mut stdout,
             t,
@@ -116,7 +118,7 @@ fn main() {
     // termination case AND the panic break).
     let final_score = std::panic::catch_unwind(AssertUnwindSafe(|| state.read_score()))
         .unwrap_or(last_score);
-    emit_summary(&mut stdout, died_at_tick, final_score, wave_size, panic_msg);
+    emit_summary(&mut stdout, died_at_tick, final_score, max_wave_size, panic_msg);
 }
 
 fn emit_per_tick(

@@ -23,7 +23,16 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-const ABILITY_NAMES: &[&str] = &["MonsterCleave.ability", "SpawnWave.ability"];
+// Task #249 polish slice: 5 abilities (was 2 in foundation slice).
+// MonsterCleave + 4 tier-keyed Spawn abilities for wave-size ramping.
+// Alphabetised — registry slot order matches.
+const ABILITY_NAMES: &[&str] = &[
+    "MonsterCleave.ability",
+    "SpawnHorde.ability",
+    "SpawnLarge.ability",
+    "SpawnMedium.ability",
+    "SpawnSmall.ability",
+];
 
 fn main() {
     let manifest_dir =

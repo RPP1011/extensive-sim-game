@@ -5,45 +5,37 @@
 // at map edges. Score = resource accumulated before settlement falls.
 // Every run ends in death; the score is the engine's perf signature.
 //
-// FOUNDATION SLICE — 4 creature types + 5 verbs/physics rules,
-// EVERYTHING lives in the .sim:
-//   - Harvest        (settler → node, per-pair scored, single-target)
-//   - Strike         (settler → monster, per-pair scored, single-target damage)
-//   - SpawnWave      (spawner → self, summon "monster" count=N every wave_period)
-//   - MonsterMarch   (monster physics, per_agent — interpolates pos toward origin)
-//   - MonsterCleaveScan (monster physics, per_agent → spatial.nearby walk →
-//                     apply_ability 1 [MonsterCleave AOE Spread])
-//   - HarvestApply, ApplyDamageFromChronicle, ApplyDamage (chronicle consumers)
+// POLISH SLICE — wave-size ramping + gain_skill (Task #249).
+//   - Wave-size ramping (Path B): the previous single SpawnWave verb
+//     was split into 4 tier-keyed verbs (SpawnSmall=8, SpawnMedium=16,
+//     SpawnLarge=32, SpawnHorde=64) gated by `world.tick` windows.
+//     Pure DSL — no compiler extension needed; rides the just-shipped
+//     compound predicates (`world.tick >= L && world.tick < H`).
+//   - gain_skill: settlers accumulate "veteran defender" skill on each
+//     Strike via the SkillFromStrike consumer rule. The skill counter
+//     repurposes `agents.shield_hp` (no engine SoA column added; same
+//     re-purpose precedent as `mana → resource_yielded` and
+//     spy_network's `mana → suspicion`). Skill accumulation per Strike
+//     proves the gain_skill bookkeeping plumbs through the Damaged →
+//     SkillFromStrike chain. Damage-scaled-by-skill is deferred to a
+//     follow-up — the verb body's `emit Damaged { amount: ... }`
+//     expression layer does not yet support `agents.shield_hp(self)`
+//     reads (no precedent in any sim's verb body emit field today).
 //
 // CREATURE TYPE TABLE (creature_type discriminant):
 //   1 = Node     (1 agent at origin; receives Harvest, never moves/casts)
 //   2 = Settler  (25 agents tight ring around origin; harvest + strike)
 //   3 = Monster  (variable count; spawned by spawners, march, AOE cleave)
-//   4 = Spawner  (6 agents at face midpoints ±64; cast SpawnWave each cadence)
+//   4 = Spawner  (6 agents at face midpoints ±64; cast Spawn each cadence)
 //
 // SOA RE-PURPOSE TABLE (mirrors spy_network's mana → suspicion):
 //   * agents.mana(node_slot) → resource_yielded counter (the score)
+//   * agents.shield_hp(settler) → veteran-defender skill counter
 //   * agents.creature_type   → discriminant (1=node, 2=settler, 3=monster, 4=spawner)
 //   * agents.hp / agents.alive → standard combat
 //
-// WAVE-SIZE PLUMBING — TASK #243 DECISION:
-//   The plan offered three plumbing options for tick-scaled wave size.
-//   We ship option (C — constant wave_size) per the foundation-slice
-//   charter. The SpawnWave ability summons a fixed `summon "monster" N`
-//   each wave; with 6 spawners + N monsters per wave_period ticks,
-//   monster pressure is constant per wave_period (= 6N monsters / period).
-//   Tick-keyed escalation (`wave_size = base + (tick / wave_period) *
-//   wave_growth`) is DEFERRED — it would need either a small DSL
-//   extension to plumb cfg-uniform reads into `summon count`, or
-//   multiple Spawn-N abilities cycled host-side. The foundation slice
-//   prioritises shipping a deterministic CPU/GPU spawning pipeline
-//   end-to-end; the escalator is an ergonomics layer on top, not a
-//   correctness gate. The constant-wave-size run still terminates
-//   (settlers die under sustained pressure), and the score still
-//   discriminates engine-level perf changes. SLICE END.
-//
 // HOST RESPONSIBILITIES (per the plan, P3 cross-backend):
-//   The GPU's SpawnWave dispatcher writes EffectSummonApplied chronicle
+//   The GPU's Spawn* dispatcher writes EffectSummonApplied chronicle
 //   records (kind=62) into the event ring. The runtime drains those
 //   records each tick and calls `apply_summon_event_to_state` (engine
 //   primitive) to allocate monster slots — this is the canonical
@@ -126,6 +118,22 @@ config combat {
 
   // Wave spawning tuning.
   wave_period: u32 = 30,
+
+  // Wave-tier thresholds — in ticks. SpawnSmall fires while
+  // `world.tick < small_to_medium`, SpawnMedium on
+  // `[small_to_medium..medium_to_large)`, SpawnLarge on
+  // `[medium_to_large..large_to_horde)`, SpawnHorde on
+  // `>= large_to_horde`. Tuned so each tier gets meaningful airtime
+  // before the next escalation kicks in.
+  small_to_medium: u32 = 1000,
+  medium_to_large: u32 = 2500,
+  large_to_horde:  u32 = 4000,
+
+  // gain_skill bookkeeping: each settler's Strike bumps
+  // agents.shield_hp(self) by skill_per_strike (capped at
+  // skill_cap). Repurposed shield_hp SoA (no engine column added).
+  skill_per_strike: f32 = 1.0,
+  skill_cap:        f32 = 256.0,
 }
 
 // ---------------------------------------------------------------------
@@ -180,23 +188,63 @@ verb Strike(self, target: Agent) =
     -1000000000.0
   })
 
-// SpawnWave — spawner self-cast every wave_period ticks. Dispatches
-// `apply_ability 2` (SpawnWave = AbilityId(2) per the alphabetised
-// names list MonsterCleave=1, SpawnWave=2 in
-// `crates/wave_defense_runtime/src/binding_check.rs`). The ability
-// program declares `summon "monster" <count>` (literal count baked
-// into AbilityProgram.effects[0].EffectOp::Summon).
+// SpawnSmall / SpawnMedium / SpawnLarge / SpawnHorde — spawner
+// self-cast every wave_period ticks, partitioned by tick window.
+// Each verb dispatches a different `apply_ability N` literal whose
+// summon count differs (8, 16, 32, 64 monsters/wave). Pure DSL
+// ramping (Path B from Task #249) — no compiler extension; rides
+// the compound `world.tick >= L && world.tick < H` predicate.
 //
-// The dispatcher writes EffectSummonApplied chronicle records
-// (kind=62) into the event ring. The runtime drains those records
-// after each step() and calls `apply_summon_event_to_state` to
-// allocate monster agent slots at the spawner's pos (P3 cross-backend
-// boundary — GPU produces chronicle, CPU mutates pool state).
-verb SpawnWave(self, target: Agent) =
-  action SpawnAction
+// AbilityId binding (alphabetised registry slot order):
+//   MonsterCleave  → 1
+//   SpawnHorde     → 2
+//   SpawnLarge     → 3
+//   SpawnMedium    → 4
+//   SpawnSmall     → 5
+//
+// The dispatcher writes EffectSummonApplied chronicle records (kind=62)
+// into the event ring. The runtime drains those records after each
+// step() and calls `apply_summon_event_to_state` to allocate monster
+// agent slots at the spawner's pos (P3 cross-backend boundary — GPU
+// produces chronicle, CPU mutates pool state).
+verb SpawnSmall(self, target: Agent) =
+  action SpawnSmallAction
   when (self.alive
         && target == self
         && self.creature_type == config.combat.type_spawner
+        && (world.tick < config.combat.small_to_medium)
+        && (world.tick % config.combat.wave_period == 0))
+  apply_ability 5 by self target self
+  score 500.0
+
+verb SpawnMedium(self, target: Agent) =
+  action SpawnMediumAction
+  when (self.alive
+        && target == self
+        && self.creature_type == config.combat.type_spawner
+        && (world.tick >= config.combat.small_to_medium)
+        && (world.tick < config.combat.medium_to_large)
+        && (world.tick % config.combat.wave_period == 0))
+  apply_ability 4 by self target self
+  score 500.0
+
+verb SpawnLarge(self, target: Agent) =
+  action SpawnLargeAction
+  when (self.alive
+        && target == self
+        && self.creature_type == config.combat.type_spawner
+        && (world.tick >= config.combat.medium_to_large)
+        && (world.tick < config.combat.large_to_horde)
+        && (world.tick % config.combat.wave_period == 0))
+  apply_ability 3 by self target self
+  score 500.0
+
+verb SpawnHorde(self, target: Agent) =
+  action SpawnHordeAction
+  when (self.alive
+        && target == self
+        && self.creature_type == config.combat.type_spawner
+        && (world.tick >= config.combat.large_to_horde)
         && (world.tick % config.combat.wave_period == 0))
   apply_ability 2 by self target self
   score 500.0
@@ -271,6 +319,41 @@ physics ApplyDamage {
     if (old_hp > 0.0 && new_hp <= 0.0) {
       agents.set_alive(t, false);
       emit Defeated { combatant: t }
+    }
+  }
+}
+
+// SkillFromStrike — gain_skill bookkeeping (Task #249 Lift D
+// integration, simplified). On each Damaged event whose source is a
+// settler, bump the source's `agents.shield_hp` by `skill_per_strike`
+// (capped at `skill_cap`). The shield_hp SoA is repurposed as the
+// "veteran defender" skill counter; this avoids adding a new engine
+// SoA column (schema-hash invariant, P2). Monsters' Damaged events
+// (re-emitted from EffectDamageApplied via ApplyDamageFromChronicle)
+// trip the inner gate's `creature_type != type_settler` branch and
+// no shield_hp write fires for them.
+//
+// NOTE: damage-scaled-by-skill is deferred to a follow-up — the
+// verb body's `emit Damaged { amount: ... }` expression layer does
+// not yet support `agents.shield_hp(self)` reads (no precedent in
+// any sim's verb body emit field). For now, skill accumulates but
+// does not influence damage output. The test
+// `settler_skill_accumulates_on_strike` pins the accumulation
+// behavior; downstream "veteran damage" can swap to apply_ability +
+// per-effect scaling once the emit-arithmetic gap lands.
+@phase(post)
+physics SkillFromStrike {
+  on Damaged { source: s, target: _, amount: _ } {
+    let ct = agents.creature_type(s);
+    if (ct == config.combat.type_settler) {
+      let prev = agents.shield_hp(s);
+      let bumped = prev + config.combat.skill_per_strike;
+      let clamped = if (bumped > config.combat.skill_cap) {
+        config.combat.skill_cap
+      } else {
+        bumped
+      };
+      agents.set_shield_hp(s, clamped);
     }
   }
 }

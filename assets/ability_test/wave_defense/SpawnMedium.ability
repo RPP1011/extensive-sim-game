@@ -1,0 +1,14 @@
+// wave_defense stress fixture (task #243): mid-wave spawn (count=16).
+//
+// One of four wave-size-tier abilities (SpawnSmall=8, SpawnMedium=16,
+// SpawnLarge=32, SpawnHorde=64). See SpawnSmall.ability for the
+// shared rationale and the wave_defense.sim SpawnMedium verb for the
+// tick-window gate (`world.tick >= 1000 && world.tick < 2500`).
+
+ability SpawnMedium {
+    target: self
+    cooldown: 3s
+    hint: utility
+
+    summon "monster" 16 [UTILITY: 100]
+}
