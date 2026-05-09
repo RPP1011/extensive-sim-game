@@ -127,6 +127,20 @@ impl ViewerApp {
         self.agent_handles.iter().filter(|h| h.is_some()).count()
     }
 
+    /// Sim-state accessors used by the windowed driver's title bar.
+    /// Delegate to the underlying [`WaveDefenseState`]. Each one
+    /// triggers a small GPU readback per call — fine for once-per-tick
+    /// title-bar refresh, not for hot loops.
+    pub fn alive_settlers(&self) -> u32 {
+        self.state.alive_settler_count()
+    }
+    pub fn alive_monsters(&self) -> u32 {
+        self.state.alive_monster_count()
+    }
+    pub fn score(&self) -> f32 {
+        self.state.read_score()
+    }
+
     /// Sync one agent slot into the scene. If the slot is alive and
     /// has no entity yet, spawn one; if it already has one, update
     /// the transform; if the creature_type changed (slot reused),
