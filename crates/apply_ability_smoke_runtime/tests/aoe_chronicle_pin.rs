@@ -620,9 +620,15 @@ fn aoe_line_degenerate_under_self_cast_emits_no_records() {
 #[test]
 fn aoe_spread_truncates_to_max_targets_on_gpu() {
     // #183 (Wave 1.6 GPU emit): Spread is now implemented on GPU via
-    // per-thread Circle collection + sequential insertion sort by
-    // AgentId + truncate to max_targets. P11 requires the kept set to
-    // be the lowest-K AgentIds across both backends.
+    // per-thread Circle collection + bitonic sort by AgentId + truncate
+    // to max_targets. P11 requires the kept set to be the lowest-K
+    // AgentIds across both backends.
+    //
+    // (Task #230, 2026-05-08) Sort upgraded from per-thread O(K²)
+    // insertion sort over a 16-slot array to a per-thread O(K log² K)
+    // bitonic sort over a 256-slot array. Behaviour unchanged for
+    // fixtures with ≤16 in-radius candidates; the cap bump makes
+    // larger Spread casts byte-equal across backends too.
     //
     // Fixture: 4-agent row (x=0, 1.5, 3.0, 4.5). Spread(r=2, max=2)
     // from caster slot 0 (self-cast → aoe_center=(0,0,0)). In-radius
@@ -694,6 +700,94 @@ fn aoe_spread_truncates_to_max_targets_on_gpu() {
     assert_eq!(records[1][3], 1, "Spread record 1 target must be slot 1 (next AgentId in-radius)");
     assert_eq!(records[0][4], 15.0_f32.to_bits(), "Spread record 0 payload_a (15.0)");
     assert_eq!(records[1][4], 15.0_f32.to_bits(), "Spread record 1 payload_a (15.0)");
+}
+
+#[test]
+fn aoe_spread_sort_is_deterministic_across_runs() {
+    // Task #230 determinism pin (2026-05-08). Bitonic sorts are
+    // deterministic for a fixed input — but the GPU's atomicAdd ring
+    // claim does NOT preserve emission order across casts. P11 is
+    // satisfied here by the sort itself: regardless of which workgroup
+    // / thread schedule runs first, the per-cast bitonic sort over the
+    // collected AgentId set produces an identical AgentId-ascending
+    // sequence, and `truncate(max_targets)` selects the same lowest-K
+    // ids deterministically.
+    //
+    // This test runs the same Spread cast across two fresh GPU states
+    // (independent device + queue + buffers) and asserts every
+    // chronicle record word is bit-identical post-sort. Without P11
+    // this would be flaky on hardware whose dispatch order varies
+    // between launches.
+    let mut pick_few = AbilityProgram::new_single_target(
+        5.0,
+        Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
+        [EffectOp::Damage { amount: 7.0 }],
+    );
+    pick_few.per_effect_areas.push(Some(EffectAreaShape {
+        kind: ShapeKind::Spread,
+        args: [3.5, 3.0, 0.0, 0.0],
+    }));
+
+    let mut builder = AbilityRegistryBuilder::new();
+    let pick_few_id = builder.register(pick_few);
+    let registry = builder.build();
+
+    const N_AGENTS: u32 = 6;
+    let levels: Vec<u32> = vec![pick_few_id.raw(); N_AGENTS as usize];
+    let stats: Vec<PerAgentStats> = vec![PerAgentStats::default(); N_AGENTS as usize];
+
+    // 5 agents inside r=3.5 (slots 0..=4), one outside (slot 5 at
+    // x=4.0). max_targets=3 ⇒ pick the lowest-AgentId 3 in-radius
+    // (slots 0, 1, 2). The bitonic sort must produce the same
+    // canonical AgentId-ascending output on every run.
+    let positions: [[f32; 3]; 6] = [
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [2.0, 0.0, 0.0],
+        [3.0, 0.0, 0.0],
+        [3.4, 0.0, 0.0],
+        [4.0, 0.0, 0.0],
+    ];
+    let alive: [u32; 6] = [1, 0, 0, 0, 0, 0];
+
+    let run_once = || -> Option<Vec<[u32; 10]>> {
+        let mut state = ApplyAbilitySmokeState::try_new_with_registry(
+            N_AGENTS,
+            &registry,
+            &levels,
+            &stats,
+        )?;
+        state.set_agent_alive(&alive);
+        state.set_agent_positions(&positions);
+        state.step(0);
+        let tail = state.read_event_tail();
+        let mut records = state.read_event_ring(tail);
+        // P11 canonicalisation — order of atomic-claim slots is
+        // schedule-dependent; the *contents* are not.
+        records.sort_by_key(|r| r[3]);
+        Some(records)
+    };
+
+    let Some(run_a) = run_once() else {
+        eprintln!("[aoe_chronicle_pin] skipping spread determinism test: no wgpu adapter available.");
+        return;
+    };
+    let run_b = run_once().expect("second run must also succeed once first did");
+
+    assert_eq!(
+        run_a.len(), 3,
+        "Spread(r=3.5, max=3) over 5 in-radius agents must emit exactly 3 records (lowest-AgentId 3 kept after bitonic sort)",
+    );
+    assert_eq!(
+        run_a, run_b,
+        "Spread bitonic-sort kept set must be byte-identical across independent GPU runs (P11). Run A:\n{run_a:?}\nRun B:\n{run_b:?}",
+    );
+    // Spot-check the slot ids: 0, 1, 2.
+    let target_slots: Vec<u32> = run_a.iter().map(|r| r[3]).collect();
+    assert_eq!(
+        target_slots, vec![0, 1, 2],
+        "Bitonic sort must keep lowest-AgentId 3 in-radius slots (0, 1, 2) — got {target_slots:?}",
+    );
 }
 
 #[test]
