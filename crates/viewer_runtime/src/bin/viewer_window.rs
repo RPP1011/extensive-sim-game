@@ -94,12 +94,27 @@ impl ApplicationHandler for WindowedViewer {
             .setup(&mut self.scene)
             .expect("ViewerApp::setup failed");
 
+        // Kick off the redraw loop. winit 0.30 doesn't send
+        // RedrawRequested on its own past the initial expose;
+        // about_to_wait below keeps it pumping.
+        window.request_redraw();
+
         self.gfx = Some(Gfx {
             window,
             ctx,
             swapchain,
             renderer,
         });
+    }
+
+    /// Drive continuous animation. winit calls about_to_wait whenever
+    /// the event queue drains; without an explicit request_redraw
+    /// here, RedrawRequested fires only on OS-driven invalidation
+    /// (resize, expose) and the title bar / sim tick freeze.
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(gfx) = self.gfx.as_ref() {
+            gfx.window.request_redraw();
+        }
     }
 
     fn window_event(
@@ -157,7 +172,8 @@ impl ApplicationHandler for WindowedViewer {
                         eprintln!("[viewer_window] present_blit failed: {e}");
                         return;
                     }
-                    gfx.window.request_redraw();
+                    // about_to_wait handles the next request_redraw —
+                    // no need to schedule it again here.
                 }
             }
             _ => {}
