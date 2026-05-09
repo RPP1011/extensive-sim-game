@@ -51,6 +51,8 @@
 //! After step(), CPU-side `process_births()` reads eat_count + alive,
 //! flips dead Ant slots back to alive=1 with reset state.
 
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
 use engine::sim_trait::{AgentSnapshot, CompiledSim, VizGlyph};
 use engine::GpuContext;
 use glam::Vec3;
@@ -58,7 +60,7 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 /// Discriminant value the WGSL emits for the first-declared entity
 /// (`Ant`). Matches the `creature_type == Ant` lowering — entity
@@ -154,6 +156,12 @@ pub struct ForagingRealState {
     applyeat_cfg_buf: wgpu::Buffer,
     energydecay_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
 
@@ -425,6 +433,12 @@ impl ForagingRealState {
         let starved_count_cfg_buf = make_view_cfg("foraging_real_runtime::starved_count_cfg");
         let depleted_count_cfg_buf = make_view_cfg("foraging_real_runtime::depleted_count_cfg");
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&engine::ability::AbilityRegistry::new()),
+            &gpu,
+            "foraging_real_runtime",
+        );
+
         Self {
             gpu,
             agent_pos_buf,
@@ -450,6 +464,7 @@ impl ForagingRealState {
             applyeat_cfg_buf,
             energydecay_cfg_buf,
             seed_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             tick: 0,
             agent_count: SLOT_CAP,
@@ -743,11 +758,32 @@ impl CompiledSim for ForagingRealState {
             .queue
             .write_buffer(&self.antfeed_cfg_buf, 0, bytemuck::bytes_of(&antfeed_cfg));
 
-        let count_b = spatial_build_hash_count::SpatialBuildHashCountBindings {
-            agent_pos: &self.agent_pos_buf,
+        // Shared once per tick; each non-fold dispatch below adds only
+        // its fixture-specific extras struct. Fold kernels still build
+        // hand-written `Bindings { ... }` literals — the compiler
+        // doesn't emit `from_context` constructors for them.
+        let agent_buffers = AgentBuffers {
+            pos_buf: Some(&self.agent_pos_buf),
+            hp_buf: Some(&self.agent_hp_buf),
+            alive_buf: Some(&self.agent_alive_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
+        let count_extras = spatial_build_hash_count::SpatialBuildHashCountExtras {
             spatial_grid_offsets: &self.spatial_grid_offsets,
             cfg: &self.antfeed_cfg_buf,
         };
+        let count_b =
+            spatial_build_hash_count::SpatialBuildHashCountBindings::from_context_with_extras(
+                &ctx,
+                &count_extras,
+            );
         dispatch::dispatch_spatial_build_hash_count(
             &mut self.cache,
             &count_b,
@@ -755,12 +791,17 @@ impl CompiledSim for ForagingRealState {
             &mut encoder,
             SLOT_CAP,
         );
-        let scan_local_b = spatial_build_hash_scan_local::SpatialBuildHashScanLocalBindings {
+        let scan_local_extras = spatial_build_hash_scan_local::SpatialBuildHashScanLocalExtras {
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
             spatial_chunk_sums: &self.spatial_chunk_sums,
             cfg: &self.antfeed_cfg_buf,
         };
+        let scan_local_b =
+            spatial_build_hash_scan_local::SpatialBuildHashScanLocalBindings::from_context_with_extras(
+                &ctx,
+                &scan_local_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scan_local(
             &mut self.cache,
             &scan_local_b,
@@ -768,10 +809,15 @@ impl CompiledSim for ForagingRealState {
             &mut encoder,
             SLOT_CAP,
         );
-        let scan_carry_b = spatial_build_hash_scan_carry::SpatialBuildHashScanCarryBindings {
+        let scan_carry_extras = spatial_build_hash_scan_carry::SpatialBuildHashScanCarryExtras {
             spatial_chunk_sums: &self.spatial_chunk_sums,
             cfg: &self.antfeed_cfg_buf,
         };
+        let scan_carry_b =
+            spatial_build_hash_scan_carry::SpatialBuildHashScanCarryBindings::from_context_with_extras(
+                &ctx,
+                &scan_carry_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scan_carry(
             &mut self.cache,
             &scan_carry_b,
@@ -779,12 +825,17 @@ impl CompiledSim for ForagingRealState {
             &mut encoder,
             SLOT_CAP,
         );
-        let scan_add_b = spatial_build_hash_scan_add::SpatialBuildHashScanAddBindings {
+        let scan_add_extras = spatial_build_hash_scan_add::SpatialBuildHashScanAddExtras {
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
             spatial_chunk_sums: &self.spatial_chunk_sums,
             cfg: &self.antfeed_cfg_buf,
         };
+        let scan_add_b =
+            spatial_build_hash_scan_add::SpatialBuildHashScanAddBindings::from_context_with_extras(
+                &ctx,
+                &scan_add_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scan_add(
             &mut self.cache,
             &scan_add_b,
@@ -792,13 +843,17 @@ impl CompiledSim for ForagingRealState {
             &mut encoder,
             SLOT_CAP,
         );
-        let scatter_b = spatial_build_hash_scatter::SpatialBuildHashScatterBindings {
-            agent_pos: &self.agent_pos_buf,
+        let scatter_extras = spatial_build_hash_scatter::SpatialBuildHashScatterExtras {
             spatial_grid_cells: &self.spatial_grid_cells,
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
             cfg: &self.antfeed_cfg_buf,
         };
+        let scatter_b =
+            spatial_build_hash_scatter::SpatialBuildHashScatterBindings::from_context_with_extras(
+                &ctx,
+                &scatter_extras,
+            );
         dispatch::dispatch_spatial_build_hash_scatter(
             &mut self.cache,
             &scatter_b,
@@ -813,17 +868,17 @@ impl CompiledSim for ForagingRealState {
         // the body doesn't reference `self.pos`; the binding is
         // surfaced via the Pos read added to
         // `collect_stmt_dependencies` for `ForEachNeighborBody`.
-        let antfeed_b = physics_AntFeed::PhysicsAntFeedBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_pos: &self.agent_pos_buf,
-            agent_alive: &self.agent_alive_buf,
+        let antfeed_extras = physics_AntFeed::PhysicsAntFeedExtras {
             agent_creature_type: &self.agent_creature_type_buf,
             spatial_grid_cells: &self.spatial_grid_cells,
             spatial_grid_offsets: &self.spatial_grid_offsets,
             spatial_grid_starts: &self.spatial_grid_starts,
             cfg: &self.antfeed_cfg_buf,
         };
+        let antfeed_b = physics_AntFeed::PhysicsAntFeedBindings::from_context_with_extras(
+            &ctx,
+            &antfeed_extras,
+        );
         dispatch::dispatch_physics_antfeed(
             &mut self.cache,
             &antfeed_b,
@@ -844,14 +899,14 @@ impl CompiledSim for ForagingRealState {
         self.gpu
             .queue
             .write_buffer(&self.applyeat_cfg_buf, 0, bytemuck::bytes_of(&applyeat_cfg));
-        let applyeat_b = physics_ApplyEat::PhysicsApplyEatBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp: &self.agent_hp_buf,
-            agent_alive: &self.agent_alive_buf,
+        let applyeat_extras = physics_ApplyEat::PhysicsApplyEatExtras {
             agent_hunger: &self.agent_hunger_buf,
             cfg: &self.applyeat_cfg_buf,
         };
+        let applyeat_b = physics_ApplyEat::PhysicsApplyEatBindings::from_context_with_extras(
+            &ctx,
+            &applyeat_extras,
+        );
         dispatch::dispatch_physics_applyeat(
             &mut self.cache,
             &applyeat_b,
@@ -872,14 +927,16 @@ impl CompiledSim for ForagingRealState {
             0,
             bytemuck::bytes_of(&energydecay_cfg),
         );
-        let energydecay_b = physics_EnergyDecay::PhysicsEnergyDecayBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_alive: &self.agent_alive_buf,
+        let energydecay_extras = physics_EnergyDecay::PhysicsEnergyDecayExtras {
             agent_hunger: &self.agent_hunger_buf,
             agent_creature_type: &self.agent_creature_type_buf,
             cfg: &self.energydecay_cfg_buf,
         };
+        let energydecay_b =
+            physics_EnergyDecay::PhysicsEnergyDecayBindings::from_context_with_extras(
+                &ctx,
+                &energydecay_extras,
+            );
         dispatch::dispatch_physics_energydecay(
             &mut self.cache,
             &energydecay_b,
@@ -898,12 +955,14 @@ impl CompiledSim for ForagingRealState {
         self.gpu
             .queue
             .write_buffer(&self.seed_cfg_buf, 0, bytemuck::bytes_of(&seed_cfg));
-        let seed_b = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.seed_cfg_buf,
         };
+        let seed_b = seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+            &ctx,
+            &seed_extras,
+        );
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache,
             &seed_b,

@@ -55,7 +55,9 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 /// Per-fixture state for the duel.
 pub struct Duel1v1State {
@@ -107,6 +109,12 @@ pub struct Duel1v1State {
     chronicle_heal_cfg_buf: wgpu::Buffer,
     apply_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — duel_1v1's verbs use
+    /// inline emit, not the packed-ability path, but the compiler-emitted
+    /// constructor signature requires the context to expose one.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
 
@@ -281,6 +289,12 @@ impl Duel1v1State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&engine::ability::AbilityRegistry::new()),
+            &gpu,
+            "duel_1v1_runtime",
+        );
+
         Self {
             gpu,
             agent_hp_buf,
@@ -305,6 +319,7 @@ impl Duel1v1State {
             chronicle_heal_cfg_buf,
             apply_cfg_buf,
             seed_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             tick: 0,
             agent_count,
@@ -463,15 +478,35 @@ impl CompiledSim for Duel1v1State {
         self.gpu.queue.write_buffer(
             &self.mask_cfg_buf, 0, bytemuck::bytes_of(&mask_cfg),
         );
-        let mask_bindings = fused_mask_verb_Strike::FusedMaskVerbStrikeBindings {
-            agent_hp: &self.agent_hp_buf,
-            agent_alive: &self.agent_alive_buf,
-            agent_mana: &self.agent_mana_buf,
+
+        // Shared once per tick; each non-fold dispatch below adds only
+        // its fixture-specific extras struct. Fold kernels still use
+        // hand-written `Bindings { ... }` literals — the compiler
+        // doesn't emit `from_context` constructors for them.
+        let agent_buffers = AgentBuffers {
+            hp_buf: Some(&self.agent_hp_buf),
+            alive_buf: Some(&self.agent_alive_buf),
+            mana_buf: Some(&self.agent_mana_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
+        let mask_extras = fused_mask_verb_Strike::FusedMaskVerbStrikeExtras {
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             mask_1_bitmap: &self.mask_1_bitmap_buf,
             mask_2_bitmap: &self.mask_2_bitmap_buf,
             cfg: &self.mask_cfg_buf,
         };
+        let mask_bindings =
+            fused_mask_verb_Strike::FusedMaskVerbStrikeBindings::from_context_with_extras(
+                &ctx,
+                &mask_extras,
+            );
         // PerPair mask kernel dispatches `agent_cap × agent_cap`
         // threads — every (actor, candidate) pair. The per-mask
         // body alias `mask_<ID>_k = cfg.agent_cap` (compiler change
@@ -495,16 +530,15 @@ impl CompiledSim for Duel1v1State {
         self.gpu.queue.write_buffer(
             &self.scoring_cfg_buf, 0, bytemuck::bytes_of(&scoring_cfg),
         );
-        let scoring_bindings = scoring::ScoringBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp: &self.agent_hp_buf,
+        let scoring_extras = scoring::ScoringExtras {
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             mask_1_bitmap: &self.mask_1_bitmap_buf,
             mask_2_bitmap: &self.mask_2_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
             cfg: &self.scoring_cfg_buf,
         };
+        let scoring_bindings =
+            scoring::ScoringBindings::from_context_with_extras(&ctx, &scoring_extras);
         dispatch::dispatch_scoring(
             &mut self.cache, &scoring_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
@@ -517,11 +551,14 @@ impl CompiledSim for Duel1v1State {
         self.gpu.queue.write_buffer(
             &self.chronicle_strike_cfg_buf, 0, bytemuck::bytes_of(&strike_cfg),
         );
-        let strike_bindings = physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let strike_extras = physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeExtras {
             cfg: &self.chronicle_strike_cfg_buf,
         };
+        let strike_bindings =
+            physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeBindings::from_context_with_extras(
+                &ctx,
+                &strike_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_strike(
             &mut self.cache, &strike_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
@@ -534,11 +571,14 @@ impl CompiledSim for Duel1v1State {
         self.gpu.queue.write_buffer(
             &self.chronicle_spell_cfg_buf, 0, bytemuck::bytes_of(&spell_cfg),
         );
-        let spell_bindings = physics_verb_chronicle_Spell::PhysicsVerbChronicleSpellBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let spell_extras = physics_verb_chronicle_Spell::PhysicsVerbChronicleSpellExtras {
             cfg: &self.chronicle_spell_cfg_buf,
         };
+        let spell_bindings =
+            physics_verb_chronicle_Spell::PhysicsVerbChronicleSpellBindings::from_context_with_extras(
+                &ctx,
+                &spell_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_spell(
             &mut self.cache, &spell_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
@@ -551,11 +591,14 @@ impl CompiledSim for Duel1v1State {
         self.gpu.queue.write_buffer(
             &self.chronicle_heal_cfg_buf, 0, bytemuck::bytes_of(&heal_cfg),
         );
-        let heal_bindings = physics_verb_chronicle_Heal::PhysicsVerbChronicleHealBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let heal_extras = physics_verb_chronicle_Heal::PhysicsVerbChronicleHealExtras {
             cfg: &self.chronicle_heal_cfg_buf,
         };
+        let heal_bindings =
+            physics_verb_chronicle_Heal::PhysicsVerbChronicleHealBindings::from_context_with_extras(
+                &ctx,
+                &heal_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_heal(
             &mut self.cache, &heal_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
@@ -575,13 +618,14 @@ impl CompiledSim for Duel1v1State {
         self.gpu.queue.write_buffer(
             &self.apply_cfg_buf, 0, bytemuck::bytes_of(&apply_cfg),
         );
-        let apply_bindings = physics_ApplyDamage_and_ApplyHeal::PhysicsApplyDamageAndApplyHealBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp: &self.agent_hp_buf,
-            agent_alive: &self.agent_alive_buf,
+        let apply_extras = physics_ApplyDamage_and_ApplyHeal::PhysicsApplyDamageAndApplyHealExtras {
             cfg: &self.apply_cfg_buf,
         };
+        let apply_bindings =
+            physics_ApplyDamage_and_ApplyHeal::PhysicsApplyDamageAndApplyHealBindings::from_context_with_extras(
+                &ctx,
+                &apply_extras,
+            );
         dispatch::dispatch_physics_applydamage_and_applyheal(
             &mut self.cache, &apply_bindings, &self.gpu.device, &mut encoder,
             event_count_estimate,
@@ -596,12 +640,14 @@ impl CompiledSim for Duel1v1State {
         self.gpu.queue.write_buffer(
             &self.seed_cfg_buf, 0, bytemuck::bytes_of(&seed_cfg),
         );
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.seed_cfg_buf,
         };
+        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+            &ctx,
+            &seed_extras,
+        );
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache, &seed_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,

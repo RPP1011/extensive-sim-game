@@ -18,6 +18,9 @@
 //!     chronicle (the duel_1v1 path)
 //!   - Per-team alive readback: count slots with hp > 0 per team
 
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext};
 use engine::ids::AgentId;
 use engine::rng::per_agent_u32;
 use engine::sim_trait::CompiledSim;
@@ -69,6 +72,17 @@ pub struct FlockingSkirmishState {
     creature_type_buf: wgpu::Buffer,
     cfg_buf: wgpu::Buffer,
     pos_staging: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::event_ring`] field — this fixture has no
+    /// emitted events, but the compiler-emitted constructor signature
+    /// requires the context to expose one.
+    event_ring: EventRing,
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     /// Number of agents initialised as Red (creature_type = 0). Slots
     /// `[0..red_count)`. Set at construction; immutable thereafter.
@@ -213,6 +227,13 @@ impl FlockingSkirmishState {
             mapped_at_creation: false,
         });
 
+        let event_ring = EventRing::new(&gpu, "flocking_skirmish_runtime");
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&engine::ability::AbilityRegistry::new()),
+            &gpu,
+            "flocking_skirmish_runtime",
+        );
+
         Self {
             gpu,
             pos_buf,
@@ -221,6 +242,8 @@ impl FlockingSkirmishState {
             creature_type_buf,
             cfg_buf,
             pos_staging,
+            event_ring,
+            registry_gpu,
             red_count,
             blue_count,
             cache: dispatch::KernelCache::default(),
@@ -318,16 +341,31 @@ impl CompiledSim for FlockingSkirmishState {
         };
         self.gpu.queue.write_buffer(&self.cfg_buf, 0, bytemuck::bytes_of(&cfg));
 
+        // Shared once per tick; each per-team kernel adds only its
+        // fixture-specific extras (creature_type, vel, cfg).
+        let agent_buffers = AgentBuffers {
+            pos_buf: Some(&self.pos_buf),
+            hp_buf: Some(&self.hp_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
         // (1) MoveRed — gated on creature_type == 0 inside the kernel.
         // Reads agent_pos, agent_vel, agent_hp, agent_creature_type;
         // writes pos, vel, hp.
-        let red_bindings = physics_MoveRed::PhysicsMoveRedBindings {
-            agent_pos: &self.pos_buf,
+        let red_extras = physics_MoveRed::PhysicsMoveRedExtras {
             agent_creature_type: &self.creature_type_buf,
             agent_vel: &self.vel_buf,
-            agent_hp: &self.hp_buf,
             cfg: &self.cfg_buf,
         };
+        let red_bindings = physics_MoveRed::PhysicsMoveRedBindings::from_context_with_extras(
+            &ctx, &red_extras,
+        );
         dispatch::dispatch_physics_movered(
             &mut self.cache,
             &red_bindings,
@@ -338,13 +376,14 @@ impl CompiledSim for FlockingSkirmishState {
 
         // (2) MoveBlue — gated on creature_type == 1. Same shape as
         // MoveRed; same buffer set.
-        let blue_bindings = physics_MoveBlue::PhysicsMoveBlueBindings {
-            agent_pos: &self.pos_buf,
+        let blue_extras = physics_MoveBlue::PhysicsMoveBlueExtras {
             agent_creature_type: &self.creature_type_buf,
             agent_vel: &self.vel_buf,
-            agent_hp: &self.hp_buf,
             cfg: &self.cfg_buf,
         };
+        let blue_bindings = physics_MoveBlue::PhysicsMoveBlueBindings::from_context_with_extras(
+            &ctx, &blue_extras,
+        );
         dispatch::dispatch_physics_moveblue(
             &mut self.cache,
             &blue_bindings,
