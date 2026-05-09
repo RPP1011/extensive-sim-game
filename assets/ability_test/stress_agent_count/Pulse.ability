@@ -1,0 +1,16 @@
+// stress_agent_count fixture — single self-target ability used to keep
+// the `apply_ability` dispatcher arm warm. Lowers to:
+//   AbilityProgram {
+//     gate: { cooldown_ticks: 1 },
+//     effects: [EffectOp::SelfDamage { amount: 0.0 }],
+//   }
+//
+// Magnitude is 0 so HP never changes — cascade is invariant for any
+// tick budget, isolating per-tick wall-clock from cascade churn.
+
+ability Pulse {
+    target: self
+    cooldown: 100ms
+    hint: utility
+    self_damage 0.0
+}

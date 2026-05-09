@@ -1,0 +1,71 @@
+// stress_agent_count — Fixture A from
+// `docs/superpowers/plans/2026-05-09-stress-test-runtime-ceilings.md`.
+//
+// One-shot characterization fixture for the agent-count ceiling.
+// Drives the standard mask → score → chronicle → consume per-tick chain
+// at variable agent_cap (1k → 200k) so the harness can record
+// per-tick wall_clock + peak GPU mem + dispatcher kernel size, and pin
+// the ceiling on the first cap that panics or OOMs.
+//
+// Verb shape: a single self-target Pulse that always passes its
+// when-clause for alive agents. The verb body dispatches `apply_ability
+// 1 by self target self`; the only ability registered (Pulse) has a
+// single `EffectOp::SelfDamage { amount: 0.0 }` so the dispatcher
+// writes one EffectSelfDamageApplied chronicle record per alive agent
+// per tick (kind=39). The post-phase consumer is a no-op read of
+// `agents.hp(actor)` — present only to force the consumer kernel to
+// compile + dispatch (otherwise the chronicle records have nowhere to
+// land in the per-tick chain and the dispatcher kernel can be
+// dead-code-eliminated).
+//
+// `self_damage 0.0` keeps every agent's HP unchanged across the run so
+// the cascade never converges (no agents die, the population stays
+// constant for the entire tick budget). This isolates the *cost* of
+// the per-tick chain at a given agent_cap from any cascade-driven
+// shrinking that would muddy the wall-clock readings.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Pulsed {
+  actor: AgentId,
+}
+
+@replayable @gpu_amenable
+event EffectSelfDamageApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+entity Combatant : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config combat {
+  cooldown_pulse: u32 = 1,
+}
+
+// Pulse — every alive agent fires once per tick. Self-targeted so the
+// scoring kernel binds best_target = caster_slot. The verb body
+// dispatches `apply_ability 1 by self target self`; the dispatcher
+// walks Pulse's program (a single EffectOp::SelfDamage { amount: 0.0 })
+// and writes one EffectSelfDamageApplied chronicle record (kind=39)
+// per cast.
+verb Pulse(self) =
+  action PulseAction
+  when self.alive
+  apply_ability 1 by self target self
+  score 1.0
+
+// Post-phase consumer — no-op read of `agents.hp(actor)` for the
+// emitted chronicle record. Forces the chronicle dispatcher's emit
+// path to run (without a consumer the dispatcher kernel can be
+// dead-code-eliminated upstream).
+@phase(post)
+physics ApplyPulseFromChronicle {
+  on EffectSelfDamageApplied { actor: a, target: _, amount: _ } {
+    let _ = agents.hp(a);
+  }
+}
