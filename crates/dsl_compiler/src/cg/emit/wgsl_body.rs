@@ -73,6 +73,7 @@ use crate::cg::data_handle::{
     RngPurpose, SpatialStorageKind, ViewStorageSlot,
 };
 use crate::cg::expr::{BinaryOp, BuiltinId, CgExpr, CgTy, ExprArena, LitValue, NumericTy, UnaryOp};
+use crate::cg::lower::driver::DebugWgslFlags;
 use crate::cg::op::EventKindId;
 use crate::cg::program::CgProgram;
 use crate::cg::stmt::{
@@ -225,6 +226,24 @@ pub struct EmitCtx<'a> {
     /// `Assign(AgentField::Alive, _, Lit(Bool(false)))` pattern
     /// (detected by [`crate::cg::emit::kernel`]), restored on exit.
     pub alive_atomic_writes: std::cell::Cell<bool>,
+
+    /// 2026-05-09 (Compiler debug mode Phase 2): WGSL-side
+    /// atomic-counter instrumentation bitset, mirrored from
+    /// [`crate::cg::program::CgProgram::debug_wgsl`] at EmitCtx
+    /// construction time. When [`Self::debug_wgsl.event_kind_histogram`]
+    /// is set, the chronicle-append skeleton (and dispatcher arm
+    /// chain) bumps `event_kind_counts[<kind>]` alongside the existing
+    /// `atomicAdd(&event_tail[0], 1u)`. When `mask_hit_rate` is set,
+    /// every MaskPredicate body bumps `mask_total[<mask_id>]` per
+    /// candidate visit and `mask_passed[<mask_id>]` per pass. When
+    /// `score_kernel_visits` is set, every scoring argmax row
+    /// bumps `score_kernel_visits[agent_id]` per candidate considered.
+    /// Default [`crate::cg::lower::driver::DebugWgslFlags::NONE`]
+    /// preserves the existing emit shape verbatim.
+    ///
+    /// Read-only on `&EmitCtx` — the gate is checked in the same
+    /// emit functions that emit the chronicle/mask/scoring bodies.
+    pub debug_wgsl: DebugWgslFlags,
 }
 
 impl<'a> EmitCtx<'a> {
@@ -241,6 +260,13 @@ impl<'a> EmitCtx<'a> {
             bound_target_exprs: std::cell::RefCell::new(std::collections::HashSet::new()),
             event_ring_atomic_loads: std::cell::Cell::new(false),
             alive_atomic_writes: std::cell::Cell::new(false),
+            // 2026-05-09 (Compiler debug mode Phase 2): mirror the
+            // program-level WGSL instrumentation bitset so emit
+            // functions can gate their atomic-counter additions on
+            // a single pure read of `ctx.debug_wgsl`. Default
+            // `DebugWgslFlags::NONE` (when no opts threaded) leaves
+            // the existing emit shape unchanged.
+            debug_wgsl: prog.debug_wgsl,
         }
     }
 
@@ -1893,8 +1919,10 @@ fn lower_cg_stmt_body_to_wgsl(
             } else {
                 ("        ",         "            ")
             };
-            let primary_arm_chain = emit_chronicle_arm_chain(primary_indent, "scale_bonus");
-            let nested_arm_chain  = emit_chronicle_arm_chain(nested_indent,  "nested_scale_bonus");
+            let primary_arm_chain =
+                emit_chronicle_arm_chain(primary_indent, "scale_bonus", ctx.debug_wgsl);
+            let nested_arm_chain =
+                emit_chronicle_arm_chain(nested_indent, "nested_scale_bonus", ctx.debug_wgsl);
             // Engine pins MAX_EFFECTS_PER_PROGRAM = 6 + EFFECT_KIND_EMPTY = 0xFFu
             // (see crates/engine/src/ability/program.rs:28 +
             // crates/engine/src/ability/packed.rs). Inlining the
@@ -3131,6 +3159,7 @@ fn lower_emit_to_wgsl(
         stride,
         fields.len(),
         &field_writes,
+        ctx.debug_wgsl,
     ))
 }
 
@@ -3167,17 +3196,39 @@ fn lower_emit_to_wgsl(
 ///
 /// `field_count` is purely cosmetic — used in the header comment for
 /// frame-capture readability.
+///
+/// `debug_wgsl` (Compiler debug mode Phase 2): when
+/// [`crate::cg::lower::driver::DebugWgslFlags::event_kind_histogram`]
+/// is set, emits a parallel `atomicAdd(&event_kind_counts[<event_id>], 1u)`
+/// alongside the existing tail bump. The counter buffer must be
+/// declared by the kernel's BGL synthesis when any chronicle producer
+/// in the kernel body has the flag set; the BGL fanout is deferred to
+/// the per-runtime opt-in slice (no production runtime opts in
+/// today). Default [`crate::cg::lower::driver::DebugWgslFlags::NONE`]
+/// emits the existing skeleton verbatim — bit-for-bit identical to
+/// the prior shape.
 pub(crate) fn emit_chronicle_append_skeleton(
     event_id: u32,
     buf: &str,
     stride: u32,
     field_count: usize,
     field_writes: &[String],
+    debug_wgsl: DebugWgslFlags,
 ) -> String {
     let mut out = String::new();
     out.push_str(&format!("// emit event#{event_id} ({field_count} fields)\n"));
     out.push_str("{\n");
     out.push_str("    let slot = atomicAdd(&event_tail[0], 1u);\n");
+    if debug_wgsl.event_kind_histogram {
+        // Phase 2 debug instrumentation: bump the per-kind histogram
+        // alongside the ring's tail counter. The increment is
+        // observation-only (P5) and the atomic is commutative so
+        // counts remain deterministic across thread orderings (P11).
+        out.push_str(&format!(
+            "    // debug_wgsl.event_kind_histogram: per-kind chronicle counter\n\
+             \x20   atomicAdd(&event_kind_counts[{event_id}u], 1u);\n"
+        ));
+    }
     out.push_str(&format!(
         "    if (slot < {}u) {{\n",
         DEFAULT_EVENT_RING_CAP_SLOTS
@@ -3527,7 +3578,11 @@ pub(crate) fn event_kind_id_for_effect_kind(effect_kind: u32) -> Option<u32> {
 /// drift surfaces there. The chain is structurally identical to
 /// `pack_effect`'s variant ordering in
 /// `crates/engine/src/ability/packed.rs`.
-fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
+fn emit_chronicle_arm_chain(
+    indent: &str,
+    scale_bonus_var: &str,
+    debug_wgsl: DebugWgslFlags,
+) -> String {
     let damage_event_id = event_kind_id_for_effect_kind(0)
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Damage=0");
     let heal_event_id = event_kind_id_for_effect_kind(1)
@@ -3626,6 +3681,27 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
 
     let mut s = String::new();
 
+    // Compiler debug mode Phase 2: per-arm helper that emits the
+    // event-kind histogram bump just below the slot acquisition. Empty
+    // when `event_kind_histogram=false` so the existing arm-chain
+    // shape is bit-for-bit unchanged for non-opt-in fixtures.
+    //
+    // Each arm's `<kind>_event_id` is statically known at emit time
+    // (resolved via `event_kind_id_for_effect_kind` above), so the
+    // bump targets a known index in `event_kind_counts`. The atomic
+    // is commutative + thread-order-independent (P11) so counts are
+    // deterministic across launches.
+    let hist_bump = |event_id: u32| -> String {
+        if debug_wgsl.event_kind_histogram {
+            format!(
+                "{i12}// debug_wgsl.event_kind_histogram: per-kind chronicle counter\n\
+                 {i12}atomicAdd(&event_kind_counts[{event_id}u], 1u);\n"
+            )
+        } else {
+            String::new()
+        }
+    };
+
     // Damage = 0 → 26
     s.push_str(&format!("{i4}// Damage = 0 → EventKindId::EffectDamageApplied = 26\n"));
     s.push_str(&format!("{i4}if (kind == 0u) {{\n"));
@@ -3633,6 +3709,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectDamageApplied (caster_slot + target_slot)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(damage_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {damage_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -3649,6 +3726,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectHealApplied (caster_slot + target_slot)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(heal_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {heal_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -3665,6 +3743,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectShieldApplied (caster_slot + target_slot)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(shield_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {shield_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -3682,6 +3761,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectStunApplied (caster_slot + target_slot)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(stun_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {stun_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -3701,6 +3781,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectSlowApplied (caster_slot + target_slot)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(slow_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {slow_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -3724,6 +3805,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectRootApplied (caster_slot + target_slot)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(root_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {root_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -3741,6 +3823,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectSilenceApplied (caster_slot + target_slot)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(silence_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {silence_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -3758,6 +3841,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectFearApplied (caster_slot + target_slot)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(fear_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {fear_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -3775,6 +3859,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectTauntApplied (caster_slot + target_slot)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(taunt_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {taunt_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -3803,6 +3888,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectDashApplied (caster_slot + distance)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(dash_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {dash_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -3819,6 +3905,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectBlinkApplied (caster_slot + distance)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(blink_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {blink_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -3835,6 +3922,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectKnockbackApplied (caster_slot + target_slot + distance)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(knockback_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {knockback_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -3852,6 +3940,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectPullApplied (caster_slot + target_slot + distance)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(pull_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {pull_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -3885,6 +3974,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectStealthApplied (caster_slot + duration_ticks)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(stealth_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {stealth_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -3900,6 +3990,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectCharmApplied (caster_slot + target_slot + duration_ticks)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(charm_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {charm_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -3916,6 +4007,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectGroundedApplied (caster_slot + target_slot + duration_ticks)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(grounded_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {grounded_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -3932,6 +4024,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectSuppressApplied (caster_slot + target_slot + duration_ticks)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(suppress_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {suppress_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -3953,6 +4046,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectGoldTransfer (caster_slot + target_slot)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(transfer_gold_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {transfer_gold_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -3970,6 +4064,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectStandingDelta (caster_slot + target_slot)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(modify_standing_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {modify_standing_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -3993,6 +4088,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectExecuteApplied (caster_slot + target_slot)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(execute_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {execute_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4013,6 +4109,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectSelfDamageApplied (caster_slot for both actor + target)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(self_damage_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {self_damage_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4034,6 +4131,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectLifeStealApplied (caster_slot + target_slot)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(life_steal_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {life_steal_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4056,6 +4154,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectDamageModifyApplied (caster_slot + target_slot)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(damage_modify_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {damage_modify_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4092,6 +4191,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectDamageOverTimeApplied (caster_slot + target_slot + amount + duration)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(damage_over_time_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {damage_over_time_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4111,6 +4211,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectHealOverTimeApplied (caster_slot + target_slot + amount + duration)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(heal_over_time_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {heal_over_time_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4130,6 +4231,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectTimedShieldApplied (caster_slot + target_slot + amount + duration)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(timed_shield_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {timed_shield_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4172,6 +4274,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectBuffApplied (caster_slot + target_slot + payload_a + payload_b)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(buff_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {buff_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4198,6 +4301,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectSummonApplied (caster_slot + template_hash + count + lifetime_ticks)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(summon_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {summon_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4217,6 +4321,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectHarvestApplied (caster_slot + kind_hash + amount)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(harvest_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {harvest_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4235,6 +4340,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectPlaceVoxelApplied (caster_slot + kind_hash)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(place_voxel_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {place_voxel_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4252,6 +4358,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectReflectApplied (caster_slot + target_slot + duration + fraction_q8)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(reflect_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {reflect_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4279,6 +4386,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectPlantBeliefApplied (caster_slot + target_slot + subject_idx + fact_bit_mask)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(plant_belief_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {plant_belief_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4303,6 +4411,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectObserveApplied (caster_slot + target_slot + target_observer)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(observe_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {observe_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4326,6 +4435,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectScryApplied (caster_slot + target_slot + target_observer + subject_idx)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(scry_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {scry_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4347,6 +4457,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectRevealApplied (caster_slot + target_slot + subject_idx)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(reveal_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {reveal_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4369,6 +4480,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectDisguiseApplied (caster_slot + target_slot + packed_payload_a)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(disguise_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {disguise_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4390,6 +4502,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectDecoyApplied (caster_slot + target_slot + subject_idx + fake_pos)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(decoy_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {decoy_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4411,6 +4524,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectEraseBeliefApplied (caster_slot + target_slot + subject_idx + fields)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(erase_belief_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {erase_belief_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4438,6 +4552,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectTravelToApplied (caster_slot + caster_slot + packed_dest + eta_ticks)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(travel_to_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {travel_to_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4463,6 +4578,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectRecipeApplied (caster_slot + caster_slot + packed_recipe + 0)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(recipe_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {recipe_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4488,6 +4604,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectWearToolApplied (caster_slot + caster_slot + packed_wear + 0)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(wear_tool_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {wear_tool_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4509,6 +4626,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectProposeApplied (caster_slot + target_slot + payload_a + payload_b)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(propose_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {propose_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4531,6 +4649,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectAnnounceApplied (caster_slot + caster_slot + payload_a + 0)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(announce_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {announce_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4552,6 +4671,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectGainSkillApplied (caster_slot + caster_slot + payload_a + 0)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(gain_skill_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {gain_skill_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -4574,6 +4694,7 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i8}// chronicle: emit EffectCreateObligationApplied (caster_slot + target_slot + payload_a + 0)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(create_obligation_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {create_obligation_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
@@ -7780,6 +7901,7 @@ mod tests {
             /*stride*/ 4,
             /*field_count*/ 2,
             &field_writes,
+            DebugWgslFlags::NONE,
         );
 
         // Header comment carries event id + field count for capture
@@ -7814,10 +7936,63 @@ mod tests {
         // the standard layout's header) have zero declared fields.
         // The skeleton must still emit the slot acquisition + tag/tick
         // header writes, just with no field-write lines.
-        let wgsl = emit_chronicle_append_skeleton(2, "ring", 2, 0, &[]);
+        let wgsl = emit_chronicle_append_skeleton(
+            2,
+            "ring",
+            2,
+            0,
+            &[],
+            DebugWgslFlags::NONE,
+        );
         assert!(wgsl.contains("atomicAdd(&event_tail[0], 1u);"));
         assert!(wgsl.contains("atomicStore(&ring[slot * 2u + 0u], 2u);"));
         assert!(wgsl.contains("atomicStore(&ring[slot * 2u + 1u], tick);"));
+    }
+
+    // ---- Compiler debug mode Phase 2 (DebugWgslFlags) ----
+
+    /// `event_kind_histogram=true` emits a parallel
+    /// `atomicAdd(&event_kind_counts[<kind>], 1u)` alongside the
+    /// existing `event_tail` bump. Default `NONE` does NOT emit it.
+    #[test]
+    fn chronicle_skeleton_emits_event_kind_histogram_when_flag_set() {
+        // Default `NONE` — the histogram increment must NOT appear.
+        let baseline = emit_chronicle_append_skeleton(
+            27,
+            "my_ring",
+            4,
+            0,
+            &[],
+            DebugWgslFlags::NONE,
+        );
+        assert!(
+            !baseline.contains("event_kind_counts"),
+            "DebugWgslFlags::NONE must not emit histogram counter;\n{baseline}"
+        );
+
+        // With the flag set — the per-kind atomicAdd must appear,
+        // referencing the same event_id (27) the rest of the skeleton
+        // bakes into the tag store.
+        let flagged = emit_chronicle_append_skeleton(
+            27,
+            "my_ring",
+            4,
+            0,
+            &[],
+            crate::cg::lower::driver::DebugWgslFlags {
+                event_kind_histogram: true,
+                ..crate::cg::lower::driver::DebugWgslFlags::NONE
+            },
+        );
+        assert!(
+            flagged.contains("atomicAdd(&event_kind_counts[27u], 1u);"),
+            "event_kind_histogram=true must emit per-kind atomicAdd;\n{flagged}"
+        );
+        // The existing `event_tail` bump is preserved verbatim.
+        assert!(
+            flagged.contains("let slot = atomicAdd(&event_tail[0], 1u);"),
+            "event_tail bump must remain;\n{flagged}"
+        );
     }
 
     // ---- EFFECT_KIND_TO_EVENT_KIND_ID — slice γ pre-fact pin.

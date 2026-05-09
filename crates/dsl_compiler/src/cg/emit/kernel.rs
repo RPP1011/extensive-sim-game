@@ -96,6 +96,7 @@ use crate::cg::data_handle::{
     SpatialStorageKind, ViewStorageSlot,
 };
 use crate::cg::dispatch::DispatchShape;
+use crate::cg::lower::driver::DebugWgslFlags;
 use crate::cg::op::{
     ComputeOp, ComputeOpKind, OpId, PlumbingKind, ReplayabilityFlag, ScoringId, ScoringRowOp,
     SpatialQueryKind,
@@ -2965,11 +2966,13 @@ fn lower_op_body(
                     *mask,
                     &lets_prefix,
                     &predicate_wgsl,
+                    ctx.debug_wgsl,
                 )),
                 DispatchShape::PerPair { .. } => Ok(mask_predicate_per_pair_body_with_prefix(
                     *mask,
                     &lets_prefix,
                     &predicate_wgsl,
+                    ctx.debug_wgsl,
                 )),
                 DispatchShape::PerEvent { .. }
                 | DispatchShape::OneShot
@@ -3290,6 +3293,21 @@ fn lower_scoring_argmax_body(
                 )
             });
 
+        // Compiler debug mode Phase 2: per-agent scoring candidate
+        // count. Bumped once per row body entry — for pair-field rows
+        // this lands inside the inner candidate loop so each candidate
+        // visit increments the counter; for self-only rows it bumps
+        // once per agent per row (effectively a per-action visit
+        // count, which is what `score_kernel_visits` measures).
+        // Default `NONE` keeps the body unchanged.
+        let score_cand_bump = if ctx.debug_wgsl.score_kernel_visits {
+            "    // debug_wgsl.score_kernel_visits: per-agent histogram\n\
+             \x20   atomicAdd(&score_kernel_visits[agent_id], 1u);\n"
+                .to_string()
+        } else {
+            String::new()
+        };
+
         match row.guard {
             Some(guard_id) => {
                 let guard_wgsl = lower_cg_expr_to_wgsl(guard_id, ctx)?;
@@ -3299,6 +3317,7 @@ fn lower_scoring_argmax_body(
                     out.push_str(open);
                 }
                 out.push_str(&loop_open);
+                out.push_str(&score_cand_bump);
                 if let Some(gate) = &predicate_gate {
                     out.push_str(gate);
                 }
@@ -3327,6 +3346,7 @@ fn lower_scoring_argmax_body(
                     out.push_str(open);
                 }
                 out.push_str(&loop_open);
+                out.push_str(&score_cand_bump);
                 if let Some(gate) = &predicate_gate {
                     out.push_str(gate);
                 }
@@ -3602,6 +3622,23 @@ fn find_action_selected_kind(
 // ---------------------------------------------------------------------------
 
 /// PerAgent dispatch — `agent_id` is bound by the
+/// Compiler debug mode Phase 2 (`mask_hit_rate`): produce
+/// `(<total>, <passed>)` per-mask atomic-counter bumps. PerAgent and
+/// PerPair shapes share the increments verbatim — `mask_total[id]`
+/// pre-predicate, `mask_passed[id]` inside the if-true branch — so a
+/// shared helper keeps the two body templates from drifting on
+/// counter shape. Empty strings when the flag is off; the templates
+/// splice them as no-ops, preserving the existing emit shape.
+fn mask_hit_rate_bumps(mask: MaskId, debug_wgsl: DebugWgslFlags) -> (String, String) {
+    if !debug_wgsl.mask_hit_rate {
+        return (String::new(), String::new());
+    }
+    (
+        format!("    atomicAdd(&mask_total[{0}u], 1u);\n", mask.0),
+        format!("    atomicAdd(&mask_passed[{0}u], 1u);\n", mask.0),
+    )
+}
+
 /// `thread_indexing_preamble`. Each mask op uses per-id-suffixed
 /// locals (`mask_<ID>_word`, `mask_<ID>_bit`) so a Fused kernel with
 /// multiple `MaskPredicate` ops doesn't redeclare `word`/`bit`.
@@ -3617,11 +3654,15 @@ fn mask_predicate_per_agent_body_with_prefix(
     mask: MaskId,
     prefix: &str,
     predicate_wgsl: &str,
+    debug_wgsl: DebugWgslFlags,
 ) -> String {
+    let (total_bump, passed_bump) = mask_hit_rate_bumps(mask, debug_wgsl);
     format!(
         "{prefix}\
+         {total_bump}\
          let mask_{0}_value: bool = {1};\n\
          if (mask_{0}_value) {{\n\
+         {passed_bump}\
          \x20   let mask_{0}_word = agent_id >> 5u;\n\
          \x20   let mask_{0}_bit  = 1u << (agent_id & 31u);\n\
          \x20   atomicOr(&mask_{0}_bitmap[mask_{0}_word], mask_{0}_bit);\n\
@@ -3672,7 +3713,9 @@ fn mask_predicate_per_pair_body_with_prefix(
     mask: MaskId,
     prefix: &str,
     predicate_wgsl: &str,
+    debug_wgsl: DebugWgslFlags,
 ) -> String {
+    let (total_bump, passed_bump) = mask_hit_rate_bumps(mask, debug_wgsl);
     format!(
         "// PerPair MaskPredicate — derive (agent, cand) from `pair`.\n\
          let mask_{0}_k = cfg.agent_cap; // pair-field predicate: visit every (actor, candidate) pair.\n\
@@ -3683,8 +3726,10 @@ fn mask_predicate_per_pair_body_with_prefix(
          let per_pair_candidate = mask_{0}_cand;\n\
          \n\
          {prefix}\
+         {total_bump}\
          let mask_{0}_value: bool = {1};\n\
          if (mask_{0}_value) {{\n\
+         {passed_bump}\
          \x20   let mask_{0}_word = mask_{0}_agent >> 5u;\n\
          \x20   let mask_{0}_bit  = 1u << (mask_{0}_agent & 31u);\n\
          \x20   atomicOr(&mask_{0}_bitmap[mask_{0}_word], mask_{0}_bit);\n\
@@ -4564,6 +4609,93 @@ mod tests {
         );
     }
 
+    /// Compiler debug mode Phase 2: when `mask_hit_rate=true`, the
+    /// PerAgent body emits `atomicAdd(&mask_total[<id>], 1u)` before
+    /// the predicate evaluation and `atomicAdd(&mask_passed[<id>], 1u)`
+    /// inside the if-true branch. Default `NONE` does NOT emit them.
+    #[test]
+    fn mask_predicate_per_agent_body_emits_hit_rate_when_flag_set() {
+        let mut prog = CgProgram::default();
+        prog.debug_wgsl = DebugWgslFlags {
+            mask_hit_rate: true,
+            ..DebugWgslFlags::NONE
+        };
+        let lit_true = push_expr(&mut prog, CgExpr::Lit(LitValue::Bool(true)));
+        let kind = ComputeOpKind::MaskPredicate {
+            mask: MaskId(9),
+            predicate: lit_true,
+        };
+        let op = ComputeOp::new(
+            OpId(0),
+            kind,
+            DispatchShape::PerAgent,
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let op_id = push_op(&mut prog, op);
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: DispatchShape::PerAgent,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let (_spec, body) =
+            kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
+        assert!(
+            body.contains("atomicAdd(&mask_total[9u], 1u);"),
+            "mask_hit_rate=true must bump mask_total per visit;\nbody: {body}"
+        );
+        assert!(
+            body.contains("atomicAdd(&mask_passed[9u], 1u);"),
+            "mask_hit_rate=true must bump mask_passed on hit;\nbody: {body}"
+        );
+        // Still emits the existing atomicOr — flag is additive only.
+        assert!(
+            body.contains("atomicOr(&mask_9_bitmap[mask_9_word], mask_9_bit);"),
+            "existing atomicOr must remain;\nbody: {body}"
+        );
+    }
+
+    /// Default `NONE` keeps the body bit-for-bit free of any
+    /// `mask_total` / `mask_passed` references.
+    #[test]
+    fn mask_predicate_per_agent_body_omits_hit_rate_when_flag_not_set() {
+        let mut prog = CgProgram::default();
+        // Explicit NONE — equivalent to default but pinned for clarity.
+        prog.debug_wgsl = DebugWgslFlags::NONE;
+        let lit_true = push_expr(&mut prog, CgExpr::Lit(LitValue::Bool(true)));
+        let kind = ComputeOpKind::MaskPredicate {
+            mask: MaskId(11),
+            predicate: lit_true,
+        };
+        let op = ComputeOp::new(
+            OpId(0),
+            kind,
+            DispatchShape::PerAgent,
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let op_id = push_op(&mut prog, op);
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: DispatchShape::PerAgent,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let (_spec, body) =
+            kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
+        assert!(
+            !body.contains("mask_total"),
+            "DebugWgslFlags::NONE must not emit mask_total;\nbody: {body}"
+        );
+        assert!(
+            !body.contains("mask_passed"),
+            "DebugWgslFlags::NONE must not emit mask_passed;\nbody: {body}"
+        );
+    }
+
 
     #[test]
     fn mask_predicate_under_unsupported_dispatch_shape_errors() {
@@ -4715,6 +4847,89 @@ mod tests {
         assert!(
             !body.contains("TODO(task-4.x): scoring_argmax"),
             "body still has placeholder: {body}"
+        );
+    }
+
+    /// Compiler debug mode Phase 2: when
+    /// `score_kernel_visits=true`, the per-row body bumps
+    /// `score_kernel_visits[agent_id]` once per visit. Default `NONE`
+    /// does NOT emit it.
+    #[test]
+    fn scoring_argmax_emits_candidate_count_when_flag_set() {
+        let mut prog = CgProgram::default();
+        prog.debug_wgsl = DebugWgslFlags {
+            score_kernel_visits: true,
+            ..DebugWgslFlags::NONE
+        };
+        let utility = push_expr(&mut prog, CgExpr::Lit(LitValue::F32(2.5)));
+        let kind = ComputeOpKind::ScoringArgmax {
+            scoring: ScoringId(7),
+            rows: vec![ScoringRowOp {
+                action: ActionId(3),
+                utility,
+                target: None,
+                guard: None,
+            }],
+        };
+        let probe = ComputeOp::new(
+            OpId(0),
+            kind,
+            DispatchShape::PerAgent,
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let op_id = push_op(&mut prog, probe);
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: DispatchShape::PerAgent,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let (_spec, body) =
+            kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
+        assert!(
+            body.contains("atomicAdd(&score_kernel_visits[agent_id], 1u);"),
+            "score_kernel_visits=true must bump per-agent counter;\nbody: {body}"
+        );
+    }
+
+    /// Default `NONE` keeps the body free of any
+    /// `score_kernel_visits` references.
+    #[test]
+    fn scoring_argmax_omits_candidate_count_when_flag_not_set() {
+        let mut prog = CgProgram::default();
+        prog.debug_wgsl = DebugWgslFlags::NONE;
+        let utility = push_expr(&mut prog, CgExpr::Lit(LitValue::F32(2.5)));
+        let kind = ComputeOpKind::ScoringArgmax {
+            scoring: ScoringId(7),
+            rows: vec![ScoringRowOp {
+                action: ActionId(3),
+                utility,
+                target: None,
+                guard: None,
+            }],
+        };
+        let probe = ComputeOp::new(
+            OpId(0),
+            kind,
+            DispatchShape::PerAgent,
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let op_id = push_op(&mut prog, probe);
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: DispatchShape::PerAgent,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let (_spec, body) =
+            kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
+        assert!(
+            !body.contains("score_kernel_visits"),
+            "DebugWgslFlags::NONE must not emit score_kernel_visits;\nbody: {body}"
         );
     }
 

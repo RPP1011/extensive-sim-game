@@ -39,8 +39,8 @@ pub mod verb_expand;
 pub mod view;
 
 pub use driver::{
-    lower_compilation_to_cg, lower_compilation_to_cg_with_opts, DebugDepth, DriverOutcome,
-    LowerOpts,
+    lower_compilation_to_cg, lower_compilation_to_cg_with_opts, DebugDepth, DebugWgslFlags,
+    DriverOutcome, LowerOpts,
 };
 pub use error::LoweringError;
 pub use expr::{lower_expr, LoweringCtx};

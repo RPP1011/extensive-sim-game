@@ -169,6 +169,9 @@ fn scoring_kernel_emits_action_selected_when_verb_present() {
             bound_target_exprs: std::cell::RefCell::new(std::collections::HashSet::new()),
             event_ring_atomic_loads: std::cell::Cell::new(false),
             alive_atomic_writes: std::cell::Cell::new(false),
+            // Compiler debug mode Phase 2: mirror the program-level
+            // bitset (default `NONE`); test fixtures here don't opt in.
+            debug_wgsl: prog.debug_wgsl,
         }
     }
 
