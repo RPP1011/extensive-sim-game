@@ -59,7 +59,9 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 /// Per-fixture state for the pair-scoring probe. Owns the agent SoA,
 /// the event ring, the view storage, the per-mask bitmap, the
@@ -107,6 +109,13 @@ pub struct PairScoringProbeState {
     scoring_cfg_buf: wgpu::Buffer,
     chronicle_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one (no kernel here touches any
+    /// `ability_registry_*` field).
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
 
@@ -226,6 +235,12 @@ impl PairScoringProbeState {
             },
         );
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&engine::ability::AbilityRegistry::new()),
+            &gpu,
+            "pair_scoring_probe_runtime",
+        );
+
         Self {
             gpu,
             agent_alive_buf,
@@ -241,6 +256,7 @@ impl PairScoringProbeState {
             scoring_cfg_buf,
             chronicle_cfg_buf,
             seed_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             tick: 0,
             agent_count,
@@ -354,10 +370,26 @@ impl CompiledSim for PairScoringProbeState {
             0,
             bytemuck::bytes_of(&mask_cfg),
         );
-        let mask_bindings = mask_verb_Heal::MaskVerbHealBindings {
+        // Shared once per tick; each non-fold dispatch below adds only
+        // its fixture-specific `*Extras`. `agent_alive_buf` lives on
+        // the runtime but no kernel here actually binds `agent_alive`,
+        // so it stays absent from `agent_buffers`.
+        let agent_buffers = AgentBuffers::default();
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
+        let mask_extras = mask_verb_Heal::MaskVerbHealExtras {
             mask_0_bitmap: &self.mask_bitmap_buf,
             cfg: &self.mask_cfg_buf,
         };
+        let mask_bindings =
+            mask_verb_Heal::MaskVerbHealBindings::from_context_with_extras(
+                &ctx, &mask_extras,
+            );
         dispatch::dispatch_mask_verb_heal(
             &mut self.cache,
             &mask_bindings,
@@ -380,15 +412,14 @@ impl CompiledSim for PairScoringProbeState {
             0,
             bytemuck::bytes_of(&scoring_cfg),
         );
-        let scoring_bindings = scoring::ScoringBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_cooldown_next_ready_tick: &self
-                .agent_cooldown_next_ready_tick_buf,
+        let scoring_extras = scoring::ScoringExtras {
+            agent_cooldown_next_ready_tick: &self.agent_cooldown_next_ready_tick_buf,
             mask_0_bitmap: &self.mask_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
             cfg: &self.scoring_cfg_buf,
         };
+        let scoring_bindings =
+            scoring::ScoringBindings::from_context_with_extras(&ctx, &scoring_extras);
         dispatch::dispatch_scoring(
             &mut self.cache,
             &scoring_bindings,
@@ -416,12 +447,14 @@ impl CompiledSim for PairScoringProbeState {
             0,
             bytemuck::bytes_of(&chronicle_cfg),
         );
-        let chronicle_bindings =
-            physics_verb_chronicle_Heal::PhysicsVerbChronicleHealBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
+        let chronicle_extras =
+            physics_verb_chronicle_Heal::PhysicsVerbChronicleHealExtras {
                 cfg: &self.chronicle_cfg_buf,
             };
+        let chronicle_bindings =
+            physics_verb_chronicle_Heal::PhysicsVerbChronicleHealBindings::from_context_with_extras(
+                &ctx, &chronicle_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_heal(
             &mut self.cache,
             &chronicle_bindings,
@@ -441,12 +474,12 @@ impl CompiledSim for PairScoringProbeState {
         self.gpu
             .queue
             .write_buffer(&self.seed_cfg_buf, 0, bytemuck::bytes_of(&seed_cfg));
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.seed_cfg_buf,
         };
+        let seed_bindings =
+            seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(&ctx, &seed_extras);
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache,
             &seed_bindings,
