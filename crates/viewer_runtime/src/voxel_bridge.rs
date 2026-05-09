@@ -91,7 +91,22 @@ impl VoxelBridge {
     ) -> Result<Self> {
         let cell_size = world_extent / grid_dim as f32;
         let world_origin = Vec3::splat(-world_extent * 0.5);
-        let cpu_grid = VoxelGrid::new(grid_dim, grid_dim, grid_dim);
+        let mut cpu_grid = VoxelGrid::new(grid_dim, grid_dim, grid_dim);
+
+        // Paint the ground plane once. World y=0 lands at cell
+        // y=`grid_dim/2` after the centred origin offset; one cell
+        // thick covers world y ∈ [0, cell_size). Cells at this y
+        // for every (x, z) get the GROUND_MATERIAL id. Painted
+        // before any agent splat, then never cleared — the per-tick
+        // refresh's `last_frame_cells` only tracks agent paints, so
+        // the ground stays put.
+        let ground_y = grid_dim / 2;
+        for x in 0..grid_dim {
+            for z in 0..grid_dim {
+                cpu_grid.set(x, ground_y, z, crate::GROUND_MATERIAL);
+            }
+        }
+
         let mut alloc = VulkanAllocator::new(ctx)?;
         let palette_rgba = palette.to_rgba();
         let gpu_tex = upload_grid_to_gpu(ctx, &mut alloc, &cpu_grid, &palette_rgba)?;
@@ -112,11 +127,24 @@ impl VoxelBridge {
     /// the load-bearing reason this isn't an in-place
     /// `update_subregion`).
     pub fn refresh(&mut self, ctx: &VulkanContext, app: &ViewerApp) -> Result<()> {
-        // Sparse clear of last frame's painted cells.
+        // Sparse clear of last frame's painted cells. Some of these
+        // may be on the ground plane (an agent splat that overlapped
+        // y=ground_y). The re-paint loop right after restores the
+        // ground layer, so the visual effect is "agents leave footprints
+        // → ground heals next tick".
         for &(x, y, z) in &self.last_frame_cells {
             self.cpu_grid.set(x, y, z, 0);
         }
         self.last_frame_cells.clear();
+
+        // Re-paint the ground layer. Cheap (grid_dim² writes; already
+        // dominated by the per-tick GPU re-upload of the full grid).
+        let ground_y = self.grid_dim / 2;
+        for x in 0..self.grid_dim {
+            for z in 0..self.grid_dim {
+                self.cpu_grid.set(x, ground_y, z, crate::GROUND_MATERIAL);
+            }
+        }
 
         // Paint this frame: each agent's discretised position gets
         // a `AGENT_SPLAT_DIM³` block of cells with material id ==

@@ -65,9 +65,13 @@ fn build_palette() -> MaterialPalette {
     p.set(1, palette_entry(220, 60, 60)); // Red team
     p.set(2, palette_entry(60, 120, 220)); // Blue team
     p.set(3, palette_entry(255, 215, 0)); // objective — gold
+    p.set(GROUND_MATERIAL, palette_entry(90, 80, 70)); // muted brown — ground
     p.set(UNKNOWN_MATERIAL, palette_entry(255, 0, 255)); // magenta — surface bugs
     p
 }
+
+/// Material id for the ground plane (painted once at construction).
+pub const GROUND_MATERIAL: u8 = 4;
 
 fn palette_entry(r: u8, g: u8, b: u8) -> voxel_engine::voxel::material::PaletteEntry {
     voxel_engine::voxel::material::PaletteEntry {
@@ -191,15 +195,19 @@ impl ViewerApp {
     }
 
     fn refresh_snapshot(&mut self) {
-        // Host-side state — no GPU readback required (objective_capture
-        // mirrors most state to host fields). Still consult
-        // `read_gpu_alive` for the GPU-canonical alive bits in case
-        // host_alive drifts.
+        // Host-side state — no GPU readback required.
+        // **Axis swap**: sim is Z-up (movement on XY plane, Z is
+        // vertical), voxel_engine is Y-up (sun_dir.y dominant,
+        // hemisphere ambient keyed on normal.y). Without the swap
+        // the renderer treats the sim's ground plane as a wall.
+        // Swap (sim.x, sim.y, sim.z) → (voxel.x, voxel.z, voxel.y)
+        // so vertical lines up across both worlds.
         let host_pos = self.state.positions();
         let host_alive = self.state.host_alive();
         let host_teams = self.state.teams();
         for slot in 0..self.last_positions.len() {
-            self.last_positions[slot] = host_pos[slot];
+            let s = host_pos[slot];
+            self.last_positions[slot] = Vec3::new(s.x, s.z, s.y);
             self.last_alive[slot] = if host_alive[slot] { 1 } else { 0 };
             self.last_material[slot] = team_material_index(host_teams[slot]);
         }
@@ -281,9 +289,10 @@ impl voxel_engine::app::App for ViewerApp {
 
 /// Constant exposed so the bridge / window driver can place a
 /// stationary marker at the objective without needing to import
-/// the runtime crate themselves.
+/// the runtime crate themselves. Same Y/Z axis swap as agent
+/// positions so the marker lands on the rendered ground plane.
 pub fn objective_world_position() -> Vec3 {
-    OBJECTIVE_POS
+    Vec3::new(OBJECTIVE_POS.x, OBJECTIVE_POS.z, OBJECTIVE_POS.y)
 }
 
 /// Material id used for the objective marker — distinct from any
