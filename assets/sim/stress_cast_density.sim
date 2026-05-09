@@ -1,0 +1,64 @@
+// stress_cast_density — Fixture B for the 2026-05-09 stress test
+// (task #238). Drives the apply_ability dispatcher at maximum AOE
+// candidate density so we can measure:
+//
+//   1. The chronicle ring high-water + first overflow (`if (_slot <
+//      65536u)` cap in `crates/dsl_compiler/src/cg/emit/wgsl_body.rs` —
+//      events past slot 65535 are silently dropped).
+//   2. The per-cast Spread bitonic-sort wall time (256-slot scratch +
+//      log²(256) = 64 stages — the dominant per-thread cost when every
+//      candidate falls inside the radius).
+//
+// Per-tick chain mirrors `apply_ability_smoke.sim`'s shape: a
+// PerAgent physics rule whose body is `apply_ability ...`. The
+// dispatcher expands the per-effect AOE shape (Spread(1.5, 256)) at
+// emit time — see `else if (area_kind == 4u)` in
+// `crates/dsl_compiler/src/cg/emit/wgsl_body.rs`. We deliberately use
+// the PerAgent shape (not a verb-body) because the verb-body path
+// does NOT yet wire the AOE walk into the synthesised
+// `verb_chronicle_<Name>` handler.
+//
+// All agents are seeded inside a single 27-cell hash bin (positions
+// within ~[-1.5, 1.5]³ around the world origin) so every spread walk
+// collects every other agent — driving the WGSL collect+sort path to
+// its 256-slot cap. Per cast: up to 256 EffectDamageApplied chronicle
+// records. Per tick: agent_cap × ~256 events. The driver records the
+// agent_cap at which the dispatch first overflows the 65 536-slot ring
+// header.
+//
+// `EffectDamageApplied` is engine-aliased (kind=26) — the dispatcher
+// writes records with that fixed discriminant per
+// `dsl_ast::engine_events::engine_event_kind_id_for_name`. The
+// downstream consumer reads it directly via `if (kind == 26u)` in the
+// emitted PerEvent kernel.
+//
+// The post-phase consumer is a no-op that just forces the
+// `EffectDamageApplied` record-handling path through the schedule so
+// any consumer-side wiring regression surfaces alongside the dispatch
+// metrics.
+//
+// P5 reminder: positional perturbation on the host side flows through
+// `per_agent_u32(seed=0x5tre55_bb, agent_id, 0, purpose=0)` — the .sim
+// itself does not RNG.
+
+event Tick { }
+
+event EffectDamageApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+entity Combatant : Agent { }
+
+physics DispatchAoePulse @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    apply_ability agents.level(self) by self target self
+  }
+}
+
+@phase(post)
+physics ApplyDamageFromChronicle {
+  on EffectDamageApplied { actor: _, target: _, amount: _ } {
+  }
+}

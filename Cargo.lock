@@ -2086,6 +2086,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "stress_cast_density_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "swarm_storm_runtime"
 version = "0.1.0"
 dependencies = [
