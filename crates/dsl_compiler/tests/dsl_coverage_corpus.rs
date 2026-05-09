@@ -324,6 +324,12 @@ fn effect_op_label(op: &EffectOp) -> &'static str {
         EffectOp::Decoy           { .. } => "Decoy",
         EffectOp::EraseBelief     { .. } => "EraseBelief",
         EffectOp::TravelTo        { .. } => "TravelTo",
+        EffectOp::Recipe          { .. } => "Recipe",
+        EffectOp::WearTool        { .. } => "WearTool",
+        EffectOp::Propose         { .. } => "Propose",
+        EffectOp::Announce        { .. } => "Announce",
+        EffectOp::GainSkill       { .. } => "GainSkill",
+        EffectOp::CreateObligation { .. } => "CreateObligation",
     }
 }
 
