@@ -355,7 +355,7 @@ impl std::fmt::Display for LowerError {
             LowerError::UnknownEffectVerb { verb, suggestion, .. } => {
                 write!(
                     f,
-                    "unknown effect verb '{verb}'; valid verbs at this stage: damage / heal / shield / stun / slow / transfer_gold / modify_standing / cast / root / silence / fear / taunt / dash / blink / knockback / pull / execute / self_damage / lifesteal / damage_modify / summon / reveal / erase_belief"
+                    "unknown effect verb '{verb}'; valid verbs at this stage: damage / heal / shield / stun / slow / transfer_gold / modify_standing / cast / root / silence / fear / taunt / dash / blink / knockback / pull / execute / self_damage / lifesteal / damage_modify / summon / reveal / erase_belief / decoy"
                 )?;
                 if let Some(s) = suggestion {
                     write!(f, " (did you mean '{s}'?)")?;
@@ -1531,7 +1531,6 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             // accepts both). Preserve the sign.
             Ok(EffectOp::TransferGold { amount: amt.round() as i32 })
         }
-<<<<<<< HEAD
         "scry" => {
             // `scry <target_observer> <subject_idx>` — Wave 3 ToM Phase
             // 3.5. Two positional integer args; no duration (one-shot
@@ -1757,6 +1756,19 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             let raw = require_number_arg(stmt, 0)?;
             require_arity(stmt, 1)?;
             Ok(EffectOp::Reveal { subject_idx: raw.round() as u32 })
+        }
+        // Wave 3 ToM Phase 4 — `decoy <subject_idx> <fake_pos>`. Caster
+        // plants a full BeliefState row in the cast target's belief map
+        // about a third-party agent slot. `fake_pos` is a packed u32
+        // (fake_pos_x i8, fake_pos_y i8, fake_pos_z i8, fake_type u8)
+        // per engine spec. Engine ordinal 37, chronicle event 68.
+        "decoy" => {
+            let subject_idx = require_number_arg(stmt, 0)?
+                .round().clamp(0.0, u32::MAX as f32) as u32;
+            let fake_pos = require_number_arg(stmt, 1)?
+                .round().clamp(0.0, u32::MAX as f32) as u32;
+            require_arity(stmt, 2)?;
+            Ok(EffectOp::Decoy { subject_idx, fake_pos })
         }
         _ => Err(LowerError::UnknownEffectVerb {
             verb:       stmt.verb.clone(),
@@ -2230,6 +2242,26 @@ mod tests {
                 assert_eq!(fact_bit, 3);
             }
             ref other => panic!("expected PlantBelief; got {other:?}"),
+        }
+    }
+
+    /// `decoy <subject_idx> <fake_pos>` lowers to `EffectOp::Decoy`.
+    /// The packed `fake_pos` value sits under 2^24 so it round-trips
+    /// through the parser's f32 numeric storage exactly — values above
+    /// the f32 mantissa boundary would need a hex-literal lex extension
+    /// to surface the high bits cleanly.
+    #[test]
+    fn lower_decoy_two_args() {
+        let src = "ability Bait { target: enemy cooldown: 1s decoy 5 12345678 }";
+        let file = parse_ability_file(src).expect("parser");
+        let prog = lower_ability_decl(&file.abilities[0]).expect("decoy must lower");
+        assert_eq!(prog.effects.len(), 1);
+        match prog.effects[0] {
+            EffectOp::Decoy { subject_idx, fake_pos } => {
+                assert_eq!(subject_idx, 5);
+                assert_eq!(fake_pos, 12_345_678);
+            }
+            ref other => panic!("expected EffectOp::Decoy; got {other:?}"),
         }
     }
 }
