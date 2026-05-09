@@ -846,9 +846,9 @@ pub fn apply_program_aoe(
                         || shape.kind == ShapeKind::Ring
                         || shape.kind == ShapeKind::Line
                         // #181 AOE Path B remaining shapes: Spread, Column,
-                        // Wall, Cylinder, Dome, Hull. Hull is a Sphere alias
-                        // (no separate filter helper today; see
-                        // `apply_program_aoe_sphere_filter` doc).
+                        // Wall, Cylinder, Dome, Hull. Hull semantics pinned
+                        // in Task #231 — castle-footprint (cube ∩ bevel
+                        // sphere); see `apply_program_aoe_hull_filter`.
                         || shape.kind == ShapeKind::Spread
                         || shape.kind == ShapeKind::Column
                         || shape.kind == ShapeKind::Wall
@@ -1438,34 +1438,61 @@ pub fn apply_program_aoe_dome_filter(
     hits
 }
 
-/// CPU-side hull-filter oracle for AOE Path B Hull (#181). The Hull
-/// shape's spec semantics are not nailed down today — the only place
-/// it's mentioned in the codebase is `ShapeKind::Hull = 11` in
-/// `program.rs` (no doc-comment, no spec text under
-/// `dataset/abilities/`). Without a spec, we ship Hull as an **alias to
-/// Sphere** (3D `dist² ≤ radius²`) so author intent matching the most
-/// common reading ("hull around me") works, and a future spec change
-/// can refine the gate without an API break (the args slot already
-/// reserves 4 f32, only `args[0]` is consumed today).
-///
-/// **NOTE: Hull is a Sphere alias.** When/if the spec defines Hull as
-/// a distinct shape (convex hull around an entity group? equipment-
-/// blob hitbox? something else), update both this filter and the GPU
-/// branch in `wgsl_body.rs` together.
+/// CPU-side hull-filter oracle for AOE Path B Hull (#181, semantics
+/// pinned in Task #231 — 2026-05-08). Hull is a **castle-footprint**
+/// per `docs/spec/ability.md` §9.2: a cube of half-extent `r` with its
+/// 8 corners chamfered off by a `r·√2` bevel sphere. Mirrors the GPU
+/// kernel's WGSL math bit-for-bit.
 ///
 /// Inputs:
 ///   * `center` — explicit cast target's position.
-///   * `radius` — `args[0]` (sphere radius).
+///   * `radius` — `args[0]` (cube half-extent; bevel sphere radius is
+///     `radius·√2`, derived — not a separate arg).
 ///   * `candidates` — slice of `(AgentId, position)` pairs.
 ///
 /// Output: in-hull `AgentId`s sorted ascending by raw id (P11).
+///
+/// In-hull predicate (per candidate, identical to the WGSL kernel):
+///   1. **Cube gate**: `|dx| ≤ r ∧ |dy| ≤ r ∧ |dz| ≤ r` (axis-aligned
+///      cube of half-extent `r`).
+///   2. **Bevel sphere gate**: `dx² + dy² + dz² ≤ 2·r²` (sphere of
+///      radius `r·√2` clips off the 8 cube corners). Uses `2.0 * r²`
+///      directly (avoids the `(r * sqrt2)²` round-trip — bit-equal
+///      across backends).
+///
+/// **Geometric distinctness from Sphere & Box.** Hull is a strict
+/// superset of `sphere(r)` (a candidate at `(r, 0, 0)` is in-hull —
+/// face-center, dist=r — but in-sphere only at the boundary), and a
+/// strict subset of `box(r, r, r)` (a candidate at `(r, r, r)` —
+/// corner, dist=r·√3 — is in-box but out-of-hull because the bevel
+/// gate `r·√3 > r·√2` clips it). Edge midpoints (e.g. `(r, r, 0)`,
+/// dist=r·√2) sit exactly on the bevel boundary (inclusive `≤`).
+///
+/// **P11.** Both backends evaluate the predicate identically (same f32
+/// ops in the same order: subtract, abs, dot, two compare branches).
+/// The final sort makes the post-filter set deterministic.
 pub fn apply_program_aoe_hull_filter(
     center:     glam::Vec3,
     radius:     f32,
     candidates: &[(AgentId, glam::Vec3)],
 ) -> Vec<AgentId> {
-    // Hull is a Sphere alias today (see doc-comment NOTE above).
-    apply_program_aoe_sphere_filter(center, radius, candidates)
+    let bevel_sq = 2.0 * radius * radius;
+    let mut hits: Vec<AgentId> = Vec::with_capacity(candidates.len());
+    for &(id, cand_pos) in candidates {
+        let dvec = cand_pos - center;
+        // Cube gate (half-extent r on each axis).
+        if dvec.x.abs() > radius || dvec.y.abs() > radius || dvec.z.abs() > radius {
+            continue;
+        }
+        // Bevel sphere gate (radius r·√2 — clips corners).
+        if dvec.dot(dvec) > bevel_sq {
+            continue;
+        }
+        hits.push(id);
+    }
+    // P11 reduction-determinism: sort ascending by raw AgentId.
+    hits.sort_by_key(|id| id.raw());
+    hits
 }
 
 /// One spawned summon: the freshly-allocated `agent_id` plus the
@@ -3199,20 +3226,45 @@ mod tests {
     }
 
     #[test]
-    fn aoe_hull_filter_aliases_sphere() {
-        // Hull is a Sphere alias today (see filter doc-comment NOTE).
-        // Pin equivalence so any future spec change surfaces.
+    fn aoe_hull_filter_castle_footprint_distinct_from_sphere_and_box() {
+        // Task #231: Hull = cube(half-extent r) ∩ sphere(r·√2). Pin the
+        // distinctness from both Sphere and Box so the alias regression
+        // never silently re-lands.
+        //
+        // r = 2.0 → bevel sphere radius = 2·√2 ≈ 2.828.
+        // - face center (2, 0, 0) dist=2.0  : in-cube, in-bevel → IN
+        // - edge mid    (2, 2, 0) dist=2·√2 : in-cube, on-bevel → IN (≤)
+        // - corner      (2, 2, 2) dist=2·√3 : in-cube, out-bevel → OUT (corner clipped)
+        // - sphere out  (3, 0, 0) dist=3.0  : OUT (cube fails on x)
+        // - bevel out   (1.5,1.5,1.5) d=√6.75≈2.598 : in-cube, in-bevel → IN
         let center = glam::Vec3::new(0.0, 0.0, 0.0);
         let candidates = vec![
-            (agent_n(1), glam::Vec3::new(0.0, 0.0, 0.0)),
-            (agent_n(2), glam::Vec3::new(1.0, 1.0, 1.0)),
-            (agent_n(3), glam::Vec3::new(0.0, 0.0, 2.001)),
+            (agent_n(1), glam::Vec3::new(2.0, 0.0, 0.0)),    // face center: IN
+            (agent_n(2), glam::Vec3::new(2.0, 2.0, 0.0)),    // edge mid (boundary): IN
+            (agent_n(3), glam::Vec3::new(2.0, 2.0, 2.0)),    // corner: OUT (bevel clip)
+            (agent_n(4), glam::Vec3::new(3.0, 0.0, 0.0)),    // outside cube: OUT
+            (agent_n(5), glam::Vec3::new(1.5, 1.5, 1.5)),    // interior: IN
         ];
         let hull_hits = apply_program_aoe_hull_filter(center, 2.0, &candidates);
-        let sphere_hits = apply_program_aoe_sphere_filter(center, 2.0, &candidates);
         assert_eq!(
+            hull_hits,
+            vec![agent_n(1), agent_n(2), agent_n(5)],
+            "hull(r=2) castle footprint: face/edge/interior IN; corner+outside OUT; got {hull_hits:?}"
+        );
+
+        // Distinctness pin: Hull must differ from BOTH Sphere(r) and
+        // Box(r,r,r) on this candidate set.
+        let sphere_hits = apply_program_aoe_sphere_filter(center, 2.0, &candidates);
+        // Sphere(r=2): face center (d=2.0) IN, edge mid (d=2·√2≈2.83) OUT, etc.
+        assert_ne!(
             hull_hits, sphere_hits,
-            "hull must alias sphere today; got hull={hull_hits:?} sphere={sphere_hits:?}"
+            "Hull must differ from Sphere — Hull is no longer a Sphere alias"
+        );
+        let box_hits = apply_program_aoe_box_filter(center, 2.0, 2.0, 2.0, &candidates);
+        // Box(r,r,r): includes corner (2,2,2) — Hull excludes it.
+        assert_ne!(
+            hull_hits, box_hits,
+            "Hull must differ from Box — bevel clips the corners"
         );
     }
 

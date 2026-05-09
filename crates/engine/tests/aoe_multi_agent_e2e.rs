@@ -1023,9 +1023,13 @@ fn aoe_dome_above_plane_only_three_agent_fixture() {
 }
 
 #[test]
-fn aoe_hull_aliases_sphere_three_agent_fixture() {
-    // Hull(r=1.5) — Sphere alias today. Three agents in a row at x=0,
-    // 1, 2: hits ids[0] (d=0) + ids[1] (d=1); ids[2] (d=2 > 1.5) OUT.
+fn aoe_hull_castle_footprint_three_agent_fixture() {
+    // Task #231: Hull(r=1.5) is a castle-footprint — cube(half-extent
+    // 1.5) ∩ sphere(1.5·√2 ≈ 2.121). Three agents in a row at x=0, 1,
+    // 2: hits ids[0] (in cube + bevel) + ids[1] (d=1, in cube + bevel);
+    // ids[2] (x=2 > cube half-extent 1.5) OUT — same victim set as the
+    // prior Sphere alias for THIS axis-aligned row, but the hull and
+    // sphere filters are NOT identical (see distinctness pin below).
     let mut state = SimState::new(8, 0xCAFE);
     let ids = spawn_row(&mut state, 3);
 
@@ -1048,16 +1052,42 @@ fn aoe_hull_aliases_sphere_three_agent_fixture() {
     assert_eq!(
         aoe_targets,
         vec![ids[0], ids[1]],
-        "hull(r=1.5) aliases sphere — hits ids[0..=1]; got {aoe_targets:?}"
+        "hull(r=1.5) castle footprint — hits ids[0..=1]; got {aoe_targets:?}"
     );
 
-    // Also validate the alias against the sphere filter directly.
-    let sphere_targets = apply_program_aoe_sphere_filter(center, 1.5, &candidates);
-    assert_eq!(
-        sphere_targets, aoe_targets,
-        "hull must match sphere result today (alias semantics); \
-         hull={aoe_targets:?} sphere={sphere_targets:?}"
+    // Distinctness pin: synthetic candidate at the cube corner (1.5,
+    // 1.5, 1.5), dist=1.5·√3 ≈ 2.598 > bevel 1.5·√2 ≈ 2.121 — Hull
+    // OUT, Box IN. Exercises the bevel clip that distinguishes Hull
+    // from Box.
+    let synthetic_corner = (
+        AgentId::new(99).unwrap(),
+        center + glam::Vec3::new(1.5, 1.5, 1.5),
     );
+    let mut candidates_with_corner = candidates.clone();
+    candidates_with_corner.push(synthetic_corner);
+    let hull_with_corner = apply_program_aoe_hull_filter(center, 1.5, &candidates_with_corner);
+    let box_with_corner = apply_program_aoe_box_filter(center, 1.5, 1.5, 1.5, &candidates_with_corner);
+    assert!(!hull_with_corner.contains(&synthetic_corner.0),
+        "Hull must clip the cube corner (bevel sphere); got {hull_with_corner:?}");
+    assert!(box_with_corner.contains(&synthetic_corner.0),
+        "Box must include the cube corner; got {box_with_corner:?}");
+
+    // Distinctness pin: synthetic candidate at face-center (1.5, 0, 0),
+    // dist=1.5 — Hull IN (in cube + bevel), Sphere with the SAME radius
+    // also IN — but at edge midpoint (1.5, 1.5, 0), dist=1.5·√2 ≈ 2.121
+    // > sphere radius 1.5 — Hull IN (on bevel boundary), Sphere OUT.
+    let synthetic_edge = (
+        AgentId::new(98).unwrap(),
+        center + glam::Vec3::new(1.5, 1.5, 0.0),
+    );
+    let mut candidates_with_edge = candidates.clone();
+    candidates_with_edge.push(synthetic_edge);
+    let hull_with_edge = apply_program_aoe_hull_filter(center, 1.5, &candidates_with_edge);
+    let sphere_with_edge = apply_program_aoe_sphere_filter(center, 1.5, &candidates_with_edge);
+    assert!(hull_with_edge.contains(&synthetic_edge.0),
+        "Hull must include the edge midpoint (on bevel); got {hull_with_edge:?}");
+    assert!(!sphere_with_edge.contains(&synthetic_edge.0),
+        "Sphere(r=1.5) must exclude the edge midpoint (d=2.12 > 1.5); got {sphere_with_edge:?}");
 
     let events = apply_program_aoe(
         &prog, ids[0], ids[0], &aoe_targets, 0, 0xCAFE,

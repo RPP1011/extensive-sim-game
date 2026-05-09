@@ -915,12 +915,16 @@ fn build_sweep() -> Vec<(&'static str, AbilityProgram, CasterStats)> {
         CasterStats::default(),
     ));
 
-    // 42. Bulwark-shape — `Damage(5) in hull(2)` (#181 AOE Path B Hull).
-    //     **Hull is a Sphere alias today** (no spec semantics defined —
-    //     see `apply_program_aoe_hull_filter` doc-comment NOTE). With
-    //     radius=2, behaves identically to BlastSphere: under the 4-agent
-    //     row, hits slot 0 + slot 1. Pin the alias so a future spec
-    //     change surfaces here. Both backends emit 2 chronicle records.
+    // 42. Bulwark-shape — `Damage(5) in hull(2)` (#181 AOE Path B Hull;
+    //     semantics pinned in Task #231). Hull = castle-footprint:
+    //     cube(half-extent r) ∩ sphere(r·√2). With r=2 on the 4-agent
+    //     row at x={0, 1.5, 3.0, 4.5}, the cube gate `|dx| ≤ 2` keeps
+    //     slots 0+1 only (slots 2+3 are outside the cube). Bevel gate
+    //     non-binding for axis-aligned candidates. Both backends emit
+    //     2 chronicle records — the predicate runs identically on each
+    //     side. (Distinctness from Sphere/Box is pinned in the engine
+    //     unit tests; this entry exercises the dispatch + chronicle
+    //     write path through the GPU sweep.)
     let mut bulwark = AbilityProgram::new_single_target(
         5.0,
         Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
