@@ -2,23 +2,22 @@
 // commoner for the test horizon. The verb body in
 // `assets/sim/spy_network.sim` does NOT use apply_ability dispatch —
 // it emits the engine-aliased `EffectDisguiseApplied` chronicle
-// (kind=67) directly. The ability lowers via the existing surface
-// vocabulary (`damage 0`) purely so the registry-binding check has
-// a slot to pin; the real semantics live in the .sim verb body
-// (which mirrors tom_probe.sim's ApplyDisguise consumer rule).
+// (kind=67) directly. The .ability slot below pins the registry
+// binding for the verb dispatch; the real chronicle write still
+// lives in the .sim verb body (mirroring tom_probe.sim's
+// ApplyDisguise consumer rule).
 //
-// `damage 0` is intentional: the .ability lowering doesn't ship a
-// surface verb for `disguise <fake_type> for <duration>` (the
-// `EffectOp::Disguise` engine variant exists with full GPU dispatcher
-// support, but `dsl_compiler::ability_lower::lower_effect_stmt` has
-// no `"disguise"` arm). Per the task constraints, no new lowering
-// surface — the .ability file declares the slot, the .sim verb does
-// the real chronicle write.
+// Wave 3 ToM Phase 4 added the `disguise <fake_type> for <duration>`
+// surface arm to `dsl_compiler::ability_lower::lower_effect_stmt`,
+// so the slot now pins to the matching `EffectOp::Disguise` variant.
+// `fake_type=3` mirrors the creature_type ordinal for commoner per
+// `assets/sim/spy_network.sim` (type_spy=1, type_noble=2, commoner=3);
+// `for 20s` matches the test horizon in the .sim's duration constant.
 
 ability Disguise {
     target: self
     cooldown: 20s
     hint: utility
 
-    damage 0 [UTILITY: 100]
+    disguise 3 for 20s [UTILITY: 100]
 }
