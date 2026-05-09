@@ -1047,12 +1047,14 @@ fn aoe_dome_includes_y_zero_plane_on_gpu() {
 }
 
 #[test]
-fn aoe_hull_aliases_sphere_on_gpu() {
-    // #181 Hull — Sphere alias today (no spec semantics; see
-    // `apply_program_aoe_hull_filter` doc-comment NOTE). Fixture: 4-
-    // agent row. Hull(r=2): same gate as Sphere (3D dist² ≤ radius²).
-    // Hits slot 0 + slot 1. Expected: 2 chronicle records. Pin the
-    // alias so a future spec change surfaces here.
+fn aoe_hull_castle_footprint_on_gpu() {
+    // #181 Hull — castle footprint (Task #231): cube(half-extent r) ∩
+    // sphere(r·√2). Fixture: 4-agent row at x={0,1.5,3.0,4.5}. With
+    // r=2: cube gate `|dx| ≤ 2` keeps slots 0+1 only (slots 2/3 have
+    // x=3.0/4.5 > 2.0). Bevel gate is non-binding for axis-aligned
+    // candidates (d=1.5 < 2·√2). Expected: 2 chronicle records (slot
+    // 0 + slot 1). The CPU oracle and GPU branch must agree byte-
+    // wise — pinned via this end-to-end test.
     let mut bulwark = AbilityProgram::new_single_target(
         5.0,
         Gate { cooldown_ticks: 30, hostile_only: true, line_of_sight: false },
@@ -1098,7 +1100,7 @@ fn aoe_hull_aliases_sphere_on_gpu() {
     let tail = state.read_event_tail();
     assert_eq!(
         tail, 2,
-        "Hull(r=2) aliases Sphere — hits slots 0 + 1. Got tail={tail}",
+        "Hull(r=2) castle footprint — cube gate keeps slots 0+1 (x=0, 1.5; x=3.0+ outside cube). Got tail={tail}",
     );
     let mut records = state.read_event_ring(tail);
     records.sort_by_key(|r| (r[3], r[0]));

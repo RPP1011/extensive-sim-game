@@ -1002,6 +1002,22 @@ Thickness override: `circle(3.0) thickness 2` → 2-voxel-thick disc.
 | `dome` | `dome(r)` | Hemisphere | `planned` |
 | `hull` | `hull(r)` | Castle-footprint (cuboid w/ beveled corners) | `planned` |
 
+**`hull(r)` predicate (pinned 2026-05-08, Task #231):** intersection of an
+axis-aligned cube of half-extent `r` with a sphere of radius `r·√2`. A
+candidate is in-hull when **both** gates hold:
+
+1. `|dx| ≤ r ∧ |dy| ≤ r ∧ |dz| ≤ r`  (cube of half-extent `r`)
+2. `dx² + dy² + dz² ≤ 2·r²`           (bevel sphere — `r·√2` radius)
+
+Geometric meaning: a cube with its 8 corners chamfered off. The face
+centers (`dist = r`) are in, the edge midpoints (`dist = r·√2`) are on
+the bevel boundary (inclusive), the corners (`dist = r·√3`) are clipped.
+This produces a victim set strictly between `sphere(r)` (smaller — only
+within `r`) and `box(r, r, r)` (larger — includes corners up to `r·√3`).
+Was previously aliased to Sphere; both backends now implement the
+distinct predicate (CPU oracle: `apply_program_aoe_hull_filter`; GPU:
+`area_kind == 11u` branch in `wgsl_body.rs`).
+
 ### 9.3 Orientation
 
 - Default: inferred from caster → cast direction. For `target: ground`,
