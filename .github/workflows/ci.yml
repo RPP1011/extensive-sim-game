@@ -20,7 +20,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libudev-dev pkg-config \
-            mesa-vulkan-drivers vulkan-tools
+            mesa-vulkan-drivers vulkan-tools libvulkan1
+
+      - name: Verify lavapipe is loadable (debug)
+        run: |
+          echo "--- ICD files in /usr/share/vulkan/icd.d/ ---"
+          ls -la /usr/share/vulkan/icd.d/ 2>&1 || true
+          echo "--- vulkaninfo --summary ---"
+          VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json \
+            vulkaninfo --summary 2>&1 | head -40 || true
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
