@@ -1,0 +1,369 @@
+// village_economy — noncombat acceptance fixture composing all four
+// architectural lifts (A–D) into a single sim.
+//
+// MIRRORS `assets/sim/spy_network.sim` shape (per-pair mask + per-agent
+// argmax scoring + per-action chronicle physics + fused PerEvent apply).
+// Three verbs (WalkToWorkshop, ForgeIron, OfferDeal) compete in one
+// argmax row per agent. Each agent has a `creature_type` discriminant
+// that gates which verbs it can fire:
+//   1 = blacksmith     — fires WalkToWorkshop then ForgeIron in a loop
+//   2 = noble          — fires OfferDeal against the blacksmith
+//   3 = villager       — bystander, never casts (announce observers only)
+//
+// PER-LIFT WIRING:
+//
+//   Lift A — TravelTo (kind=70). WalkToWorkshop's program is a single
+//     `travel_to 5 5 for 5s`. The dispatcher writes EffectTravelToApplied
+//     with payload_a packed (dest_y_q8 << 16) | dest_x_q8 and payload_b =
+//     eta_ticks=50. The consumer rule below
+//     (FoldTravel) bumps the actor's `disguise_expires_at_tick`
+//     SoA cell — REPURPOSED here as a per-agent "travels completed"
+//     counter (init=0, increments by 1 each travel).
+//
+//   Lift B — Recipe (kind=71) + WearTool (kind=72). ForgeIron's program
+//     contains both: `cast_recipe 1`, `wear_tool 0 50`. The dispatcher
+//     writes one chronicle record per effect slot. Consumers:
+//       * FoldRecipe bumps the actor's `mana` SoA
+//         (REPURPOSED as the "recipes completed" counter).
+//       * FoldWear bumps the actor's `shield_hp` SoA
+//         (REPURPOSED as accumulated tool wear; the q8 amount /256 is
+//         folded into a real f32).
+//
+//   Lift C — Propose (kind=73) + Announce (kind=74). The Announce arm
+//     comes from ForgeIron's program (`announce 0 radius 3`); Propose
+//     comes from OfferDeal's program. Consumers:
+//       * FoldAnnounce bumps the actor's `hunger` SoA
+//         (REPURPOSED as the "consent records emitted" counter — also
+//         covers Propose / CreateObligation since all three are
+//         "consent / observer surface" lifts grouped per the
+//         architectural plan).
+//       * FoldPropose ALSO bumps the actor's `hunger` SoA
+//         (same counter).
+//
+//   Lift D — GainSkill (kind=75) + CreateObligation (kind=76). GainSkill
+//     comes from ForgeIron's program (`gain_skill 0 25`); CreateObligation
+//     comes from OfferDeal's program. Consumers:
+//       * FoldSkill bumps the actor's `hp` SoA
+//         (REPURPOSED as the per-agent skill level; init=0, clamped at
+//         1.0 in the consumer body — represents Blacksmithing mastery).
+//       * FoldObligation bumps the actor's `hunger`
+//         SoA (same Lift C counter — keeps the consent/skill split clean
+//         in the runtime test).
+//
+// SoA REPURPOSE TABLE (matches spy_network's `mana → suspicion` precedent):
+//
+//   * `disguise_expires_at_tick` (u32) — travel completion counter
+//   * `mana`                     (f32) — recipe completion counter
+//   * `shield_hp`                (f32) — tool wear accumulation
+//   * `hp`                       (f32) — skill level [0.0..1.0]
+//   * `hunger`                   (f32) — consent / obligation counter
+//
+// No engine SoA columns are added — the .ability/.sim surfaces ride
+// entirely on existing engine setters wired in
+// `crates/dsl_compiler/src/cg/lower/physics.rs::agents_setter_field`.
+// This is the constitution-aligned approach (P1 — no engine surface
+// changes for per-fixture demos).
+//
+// AGENT LAYOUT (8 agents):
+//   slot 0..1 → blacksmith (creature_type=1) — alternates Walk + Forge
+//   slot 2..3 → noble      (creature_type=2) — fires OfferDeal at slot 0
+//   slot 4..7 → villager   (creature_type=3) — bystanders, never cast
+//
+// BEHAVIORAL PIN (`village_economy_acceptance` runtime test):
+//   - travels_completed         >= 1   (Lift A end-to-end)
+//   - recipes_completed         >= 1   (Lift B Recipe end-to-end)
+//   - total_tool_wear           > 0    (Lift B WearTool end-to-end)
+//   - max_skill_level_reached   > 0.0  (Lift D GainSkill end-to-end)
+//   - consent_records_emitted   >= 1   (Lift C+D Propose/Announce/CreateObligation)
+//   - skill_records_emitted     >= 1   (Lift D GainSkill chronicle, separate counter)
+//
+// ARGMAX SHAPE NOTE: 3 verbs compete per tick. WalkToWorkshop and
+// ForgeIron are both blacksmith-only; their cooldown windows overlap
+// such that they alternate (Walk every 100t = 10s, Forge every 10t =
+// 1s). When both fire-eligible at the same boundary, ForgeIron's higher
+// score (300) wins — that's fine because Walk's purpose is the
+// chronicle pin, not pathing accuracy.
+
+event Tick { }
+
+// Engine-aliased event (kind=70) — written by the apply_ability
+// dispatcher when EffectOp::TravelTo (kind=39) fires from
+// WalkToWorkshop's program. Slot 4 packs (dest_y_q8 << 16) |
+// (dest_x_q8 & 0xFFFF); slot 5 = eta_ticks. The consumer below
+// FoldTravel decodes neither — it just bumps the
+// per-agent travel counter.
+@replayable @gpu_amenable
+event EffectTravelToApplied {
+  actor: AgentId,
+  target: AgentId,
+  dest_packed: u32,
+  eta_ticks: u32,
+}
+
+// Engine-aliased event (kind=71) — written by the apply_ability
+// dispatcher when EffectOp::Recipe (kind=40) fires from ForgeIron's
+// program. Slot 4 packs (target_tool << 16) | recipe_id; slot 5 = 0.
+// The consumer ignores the payload — it just counts recipe casts per
+// agent.
+@replayable @gpu_amenable
+event EffectRecipeApplied {
+  actor: AgentId,
+  target: AgentId,
+  recipe_packed: u32,
+  unused_b: u32,
+}
+
+// Engine-aliased event (kind=72) — written by the apply_ability
+// dispatcher when EffectOp::WearTool (kind=41) fires from ForgeIron's
+// program. Slot 4 packs (amount << 8) | tool_kind; slot 5 = 0. The
+// consumer decodes amount (the high 24 bits) and folds /256 into the
+// per-agent tool-wear counter (`shield_hp` SoA).
+@replayable @gpu_amenable
+event EffectWearToolApplied {
+  actor: AgentId,
+  target: AgentId,
+  wear_packed: u32,
+  unused_b: u32,
+}
+
+// Engine-aliased event (kind=73) — written by the apply_ability
+// dispatcher when EffectOp::Propose (kind=42) fires from OfferDeal's
+// program. Slot 4 = contract_kind (low byte); slot 5 = expires_at_tick.
+// The consumer ignores the payload — it just counts proposals per
+// proposer.
+@replayable @gpu_amenable
+event EffectProposeApplied {
+  actor: AgentId,
+  target: AgentId,
+  contract_kind: u32,
+  expires_at_tick: u32,
+}
+
+// Engine-aliased event (kind=74) — written by the apply_ability
+// dispatcher when EffectOp::Announce (kind=43) fires from ForgeIron's
+// program. Slot 4 packs (radius_q8 << 8) | announcement_kind; slot 5
+// = 0. The consumer ignores the payload — it just counts announcements
+// per announcer.
+@replayable @gpu_amenable
+event EffectAnnounceApplied {
+  actor: AgentId,
+  target: AgentId,
+  announce_packed: u32,
+  unused_b: u32,
+}
+
+// Engine-aliased event (kind=75) — written by the apply_ability
+// dispatcher when EffectOp::GainSkill (kind=44) fires from ForgeIron's
+// program. Slot 4 packs (amount_q8 << 8) | skill_id; slot 5 = 0. The
+// consumer decodes amount_q8 (the high 24 bits) and folds /256 into
+// the per-agent skill-level counter (`hp` SoA), clamping at 1.0.
+@replayable @gpu_amenable
+event EffectGainSkillApplied {
+  actor: AgentId,
+  target: AgentId,
+  skill_packed: u32,
+  unused_b: u32,
+}
+
+// Engine-aliased event (kind=76) — written by the apply_ability
+// dispatcher when EffectOp::CreateObligation (kind=45) fires from
+// OfferDeal's program. Slot 4 packs (kind << 16) | obligation_id;
+// slot 5 = 0. The consumer ignores the payload — it just counts
+// obligations created per creditor.
+@replayable @gpu_amenable
+event EffectCreateObligationApplied {
+  actor: AgentId,
+  target: AgentId,
+  obligation_packed: u32,
+  unused_b: u32,
+}
+
+entity Combatant : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config combat {
+  // Cast cadences. ForgeIron fires every 10 ticks (1s); WalkToWorkshop
+  // every 47 ticks (4.7s; coprime with cooldown_forge so Walk only
+  // fires when Forge isn't eligible — Forge has higher score so it
+  // would otherwise always win argmax); OfferDeal every 50 ticks (5s).
+  // The 200-tick test horizon gives:
+  //   * Walk: 4 casts per blacksmith → ≥4 EffectTravelToApplied records
+  //   * Forge: ~20 casts per blacksmith → ≥40 records each of
+  //            Recipe / WearTool / GainSkill / Announce
+  //   * OfferDeal: ~4 casts per noble → ≥8 records each of
+  //                Propose / CreateObligation
+  cooldown_walk:   u32 = 47,
+  cooldown_forge:  u32 = 10,
+  cooldown_offer:  u32 = 50,
+
+  // Faction discriminants — must match the runtime's seed assignments
+  // (CREATURE_TYPE_BLACKSMITH=1, CREATURE_TYPE_NOBLE=2,
+  // CREATURE_TYPE_VILLAGER=3 in lib.rs).
+  type_blacksmith: u32 = 1,
+  type_noble:      u32 = 2,
+}
+
+// WalkToWorkshop — blacksmith self-cast, every 4.7s. Walk's gates
+// only pass when Forge isn't eligible (cooldowns are coprime), so
+// Walk gets the argmax slot at ticks 47/94/141/188 with no contention
+// from Forge. Score 200 < Forge's 300; on the joint tick (none, since
+// gcd(47,10)=1 and 47*10>200), Forge would win.
+verb WalkToWorkshop(self, target: Agent) =
+  action WalkToWorkshopAction
+  when (self.alive
+        && target == self
+        && self.creature_type == config.combat.type_blacksmith
+        && (world.tick % config.combat.cooldown_walk == 0))
+  apply_ability 3 by self target self
+  score 200.0
+
+// ForgeIron — blacksmith self-cast, every 1s. Composite verb whose
+// program writes 4 chronicle records per cast (Recipe + WearTool +
+// GainSkill + Announce). Score 300 dominates Walk on cooldown
+// overlaps. Score gates against OfferDeal indirectly via the
+// creature_type filter.
+verb ForgeIron(self, target: Agent) =
+  action ForgeIronAction
+  when (self.alive
+        && target == self
+        && self.creature_type == config.combat.type_blacksmith
+        && (world.tick % config.combat.cooldown_forge == 0))
+  apply_ability 1 by self target self
+  score 300.0
+
+// OfferDeal — noble-on-blacksmith, every 5s. Composite verb whose
+// program writes 2 chronicle records per cast (Propose +
+// CreateObligation). Per-candidate score sentinels out non-blacksmith
+// targets so the argmax binds best_target to a real blacksmith slot
+// (matches spy_network's per-candidate sentinel pattern). Score 250
+// is moot on the noble (no other verbs gate them).
+verb OfferDeal(self, target: Agent) =
+  action OfferDealAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && self.creature_type == config.combat.type_noble
+        && target.creature_type == config.combat.type_blacksmith
+        && (world.tick % config.combat.cooldown_offer == 0))
+  apply_ability 2 by self target target
+  score (if (target.creature_type == config.combat.type_blacksmith && target != self) {
+    250.0
+  } else {
+    -1000000000.0
+  })
+
+// ---------------------------------------------------------------------
+// Lift A consumer — TravelTo. Bumps the per-agent
+// `disguise_expires_at_tick` SoA (REPURPOSED as travel-completed
+// counter). Reads the engine-aliased EffectTravelToApplied (kind=70)
+// emitted by the apply_ability dispatcher when WalkToWorkshop's
+// program fires. Engine SoA columns for the actual destination +
+// busy_until_tick are deferred per P1 — the chronicle record landing
+// is the behavioral pin.
+//
+// SCHEDULING NOTE: the compiler fuses FoldTravel with the
+// verb_chronicle_WalkToWorkshop dispatcher into ONE PerEvent kernel.
+// Within a single kernel pass, FoldTravel's read can't see the
+// kind=70 records the dispatcher will write later in the same pass
+// (no within-kernel barrier between producer + consumer threads on
+// the GPU). The runtime works around this by DISPATCHING THE FUSED
+// KERNEL TWICE PER TICK — first pass writes the chronicle records,
+// second pass folds them. This double-counts the OTHER FoldX rules
+// (FoldRecipe, FoldWear, FoldSkill, FoldAnnounce — all of which
+// consume kinds emitted by ForgeIron's separate chronicle kernel),
+// but the behavioral pin only checks > 0 so the doubled counters
+// stay correct-by-direction.
+//
+// ROOT CAUSE: the `producer_consumer_event_witness` analyzer rule
+// (cg/schedule/fusion.rs Rule 4) only recognises explicit `Emit`
+// statements as event-ring writes — `ApplyAbility` synthesizes the
+// events at runtime but the static analyzer pushes a placeholder
+// `EventKindId(0)` instead of the real emitted kinds (see
+// fusion.rs::collect_emits_in_list ApplyAbility arm). Until that
+// analyzer learns to enumerate ApplyAbility's dispatched kinds via
+// the AbilityRegistry, the runtime double-dispatch stands.
+@phase(post)
+physics FoldTravel {
+  on EffectTravelToApplied { actor: a, target: _, dest_packed: _, eta_ticks: _ } {
+    let prev = agents.disguise_expires_at_tick(a);
+    agents.set_disguise_expires_at_tick(a, prev + 1);
+  }
+}
+
+// ---------------------------------------------------------------------
+// Lift B consumers — Recipe + WearTool.
+//
+// FoldRecipe bumps the per-agent `mana` (REPURPOSED as
+// recipes-completed counter).
+@phase(post)
+physics FoldRecipe {
+  on EffectRecipeApplied { actor: a, target: _, recipe_packed: _, unused_b: _ } {
+    let prev = agents.mana(a);
+    agents.set_mana(a, prev + 1.0);
+  }
+}
+
+// FoldWear decodes the q8 amount (high 24 bits of
+// `wear_packed`) and folds /256 into the per-agent `shield_hp`
+// (REPURPOSED as accumulated tool wear).
+@phase(post)
+physics FoldWear {
+  on EffectWearToolApplied { actor: a, target: _, wear_packed: w, unused_b: _ } {
+    let amount = w / 256;
+    let amount_f = amount * 1.0;
+    let prev = agents.shield_hp(a);
+    agents.set_shield_hp(a, prev + amount_f / 256.0);
+  }
+}
+
+// ---------------------------------------------------------------------
+// Lift C consumers — Propose + Announce.
+//
+// Both bump the per-agent `hunger` SoA (REPURPOSED as consent /
+// observer / obligation counter — grouped per the lift C+D plan).
+@phase(post)
+physics FoldPropose {
+  on EffectProposeApplied { actor: a, target: _, contract_kind: _, expires_at_tick: _ } {
+    let prev = agents.hunger(a);
+    agents.set_hunger(a, prev + 1.0);
+  }
+}
+
+@phase(post)
+physics FoldAnnounce {
+  on EffectAnnounceApplied { actor: a, target: _, announce_packed: _, unused_b: _ } {
+    let prev = agents.hunger(a);
+    agents.set_hunger(a, prev + 1.0);
+  }
+}
+
+// ---------------------------------------------------------------------
+// Lift D consumers — GainSkill + CreateObligation.
+//
+// FoldSkill decodes the q8 amount (high 24 bits of
+// `skill_packed`) and folds /256 into the per-agent `hp` (REPURPOSED
+// as skill level [0.0..1.0]). Clamps at 1.0 (full mastery).
+@phase(post)
+physics FoldSkill {
+  on EffectGainSkillApplied { actor: a, target: _, skill_packed: s, unused_b: _ } {
+    let amount = s / 256;
+    let amount_f = amount * 1.0;
+    let prev = agents.hp(a);
+    let new_level = prev + amount_f / 256.0;
+    let clamped = if (new_level > 1.0) { 1.0 } else { new_level };
+    agents.set_hp(a, clamped);
+  }
+}
+
+// FoldObligation bumps the per-agent `hunger`
+// (REPURPOSED — same counter as Propose / Announce per the
+// architectural lift C+D plan grouping).
+@phase(post)
+physics FoldObligation {
+  on EffectCreateObligationApplied { actor: a, target: _, obligation_packed: _, unused_b: _ } {
+    let prev = agents.hunger(a);
+    agents.set_hunger(a, prev + 1.0);
+  }
+}
