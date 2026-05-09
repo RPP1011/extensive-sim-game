@@ -3368,6 +3368,14 @@ pub(crate) const EFFECT_KIND_TO_EVENT_KIND_ID: &[(u32, u32)] = &[
     // §7 (contracts).
     (42, 73), // EffectOp::Propose     → EventKindId::EffectProposeApplied
     (43, 74), // EffectOp::Announce    → EventKindId::EffectAnnounceApplied
+    // Lift D — knowledge / skills + obligation registry. Self-cast
+    // skill growth + persistent agent-to-agent obligation registration.
+    // The packed effect-kind ordinals (GainSkill=44, CreateObligation=45)
+    // come from `pack_effect` in `crates/engine/src/ability/packed.rs`;
+    // the dispatcher arm bodies for these in `emit_chronicle_arm_chain`
+    // (below) match these ordinals via `kind == 44u..=45u`.
+    (44, 75), // EffectOp::GainSkill        → EventKindId::EffectGainSkillApplied
+    (45, 76), // EffectOp::CreateObligation → EventKindId::EffectCreateObligationApplied
 ];
 
 /// Look up the runtime `EventKindId` for an `EffectOp` discriminant.
@@ -3507,6 +3515,10 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Propose=42");
     let announce_event_id = event_kind_id_for_effect_kind(43)
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Announce=43");
+    let gain_skill_event_id = event_kind_id_for_effect_kind(44)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain GainSkill=44");
+    let create_obligation_event_id = event_kind_id_for_effect_kind(45)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain CreateObligation=45");
 
     let i4  = indent;                   // arm `if`/`else if` lines
     let i8  = format!("{i4}    ");      // body of arm
@@ -4425,6 +4437,49 @@ fn emit_chronicle_arm_chain(indent: &str, scale_bonus_var: &str) -> String {
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // GainSkill = 44 → 75 (Lift D self-cast skill growth)
+    s.push_str(&format!("{i4}}} else if (kind == 44u) {{\n"));
+    s.push_str(&format!("{i8}// GainSkill = 44 → EventKindId::EffectGainSkillApplied = 75\n"));
+    s.push_str(&format!("{i8}// payload_a low 8 bits = skill_id; next 16 bits = amount_q8\n"));
+    s.push_str(&format!("{i8}// (q8 fraction-of-mastery — 256 = full mastery). payload_b = 0.\n"));
+    s.push_str(&format!("{i8}// Self-cast: target = caster (skill grows on the caster's per-\n"));
+    s.push_str(&format!("{i8}// agent SoA cell). The consumer adds amount_q8 / 256.0 to the\n"));
+    s.push_str(&format!("{i8}// per-agent per-skill cell, clamped to [0.0, 1.0].\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectGainSkillApplied (caster_slot + caster_slot + payload_a + 0)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {gain_skill_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // CreateObligation = 45 → 76 (Lift D obligation registry write)
+    s.push_str(&format!("{i4}}} else if (kind == 45u) {{\n"));
+    s.push_str(&format!("{i8}// CreateObligation = 45 → EventKindId::EffectCreateObligationApplied = 76\n"));
+    s.push_str(&format!("{i8}// payload_a low 16 bits = obligation_id (registry slot); next 8\n"));
+    s.push_str(&format!("{i8}// bits = kind (Debt=0, Future=1, Insurance=2, Retainer=3,\n"));
+    s.push_str(&format!("{i8}// Service=4). payload_b = 0. caster = creditor / claimant;\n"));
+    s.push_str(&format!("{i8}// target = debtor / promisor. The consumer registers the\n"));
+    s.push_str(&format!("{i8}// obligation in the AggregatePool and updates per-agent debtor /\n"));
+    s.push_str(&format!("{i8}// creditor indices.\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectCreateObligationApplied (caster_slot + target_slot + payload_a + 0)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&format!("{i12}if (_slot < 65536u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {create_obligation_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
     s.push_str(&format!("{i12}}}\n"));
@@ -7571,7 +7626,9 @@ mod tests {
                 41 => EffectOp::WearTool    { tool_kind: 3, amount: 64 },
                 42 => EffectOp::Propose     { contract_kind: 1, expires_at_tick: 0 },
                 43 => EffectOp::Announce    { announcement_kind: 7, radius_q8: 896 },
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35/36/37/38/39/40/41/42/43"),
+                44 => EffectOp::GainSkill   { skill_id: 2, amount_q8: 64 },
+                45 => EffectOp::CreateObligation { obligation_id: 17, kind: 0 },
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35/36/37/38/39/40/41/42/43/44/45"),
             }
         };
 
@@ -7622,7 +7679,9 @@ mod tests {
                 41 => EngineEventKindId::EffectWearToolApplied        as u32,
                 42 => EngineEventKindId::EffectProposeApplied         as u32,
                 43 => EngineEventKindId::EffectAnnounceApplied        as u32,
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35/36/37/38/39/40/41/42/43"),
+                44 => EngineEventKindId::EffectGainSkillApplied        as u32,
+                45 => EngineEventKindId::EffectCreateObligationApplied as u32,
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35/36/37/38/39/40/41/42/43/44/45"),
             }
         };
 
@@ -7764,9 +7823,14 @@ mod tests {
         // EffectAnnounceApplied=74 records that per-fixture consumer
         // rules turn into ContractRegistry registrations + spatial-hash
         // observer broadcasts. See `docs/spec/economy.md §6` + §7).
+        // + GainSkill + CreateObligation (Lift D — knowledge / skills +
+        // obligation registry; dispatcher writes EffectGainSkillApplied=75
+        // + EffectCreateObligationApplied=76 records that per-fixture
+        // consumer rules turn into per-agent skill SoA bumps + obligation
+        // pool registrations. See `docs/spec/economy.md §7` + §8).
         assert_eq!(
-            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 43,
-            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 43 \
+            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 45,
+            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 45 \
              chronicle-bearing variants today; if you added or removed an \
              entry, update this assertion (and the slice γ wire-up that \
              consumes the new entry)"

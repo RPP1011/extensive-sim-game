@@ -355,7 +355,7 @@ impl std::fmt::Display for LowerError {
             LowerError::UnknownEffectVerb { verb, suggestion, .. } => {
                 write!(
                     f,
-                    "unknown effect verb '{verb}'; valid verbs at this stage: damage / heal / shield / stun / slow / transfer_gold / modify_standing / cast / root / silence / fear / taunt / dash / blink / knockback / pull / execute / self_damage / lifesteal / damage_modify / summon / reveal / erase_belief / decoy / cast_recipe / wear_tool / propose / announce"
+                    "unknown effect verb '{verb}'; valid verbs at this stage: damage / heal / shield / stun / slow / transfer_gold / modify_standing / cast / root / silence / fear / taunt / dash / blink / knockback / pull / execute / self_damage / lifesteal / damage_modify / summon / reveal / erase_belief / decoy / cast_recipe / wear_tool / propose / announce / gain_skill / create_obligation"
                 )?;
                 if let Some(s) = suggestion {
                     write!(f, " (did you mean '{s}'?)")?;
@@ -1931,6 +1931,46 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             };
             Ok(EffectOp::Propose { contract_kind, expires_at_tick })
         }
+        // Lift D — `gain_skill <skill_id> <amount>`. Self-cast skill
+        // growth. The `skill_id` (u8 ordinal) indexes the per-fixture
+        // SkillRegistry; `amount` is q8 fraction-of-mastery (256 = full
+        // mastery, but the consumer clamps the per-skill cell to
+        // [0.0, 1.0]). See `docs/spec/economy.md` §8. Engine ordinal 44,
+        // chronicle event 75.
+        "gain_skill" => {
+            let skill_id_f = require_number_arg(stmt, 0)?;
+            let amount_f = require_number_arg(stmt, 1)?;
+            require_arity(stmt, 2)?;
+            let skill_id = skill_id_f
+                .round()
+                .clamp(0.0, u8::MAX as f32) as u8;
+            let amount_q8 = amount_f
+                .round()
+                .clamp(0.0, u16::MAX as f32) as u16;
+            Ok(EffectOp::GainSkill { skill_id, amount_q8 })
+        }
+        // Lift D — `create_obligation <obligation_id> <kind>`. Caster
+        // (creditor / claimant) registers a persistent obligation
+        // against the cast target (debtor / promisor). The
+        // `obligation_id` (u16) is the slot in the per-fixture
+        // ObligationRegistry; `kind` (u8) tags the variant — Debt=0,
+        // Future=1, Insurance=2, Retainer=3, Service=4. The full TERMS
+        // (principal, due_tick, collateral, …) live in the registry
+        // entry; the discharge / default companion verbs ship later.
+        // See `docs/spec/economy.md` §7. Engine ordinal 45, chronicle
+        // event 76.
+        "create_obligation" => {
+            let obligation_id_f = require_number_arg(stmt, 0)?;
+            let kind_f = require_number_arg(stmt, 1)?;
+            require_arity(stmt, 2)?;
+            let obligation_id = obligation_id_f
+                .round()
+                .clamp(0.0, u16::MAX as f32) as u16;
+            let kind = kind_f
+                .round()
+                .clamp(0.0, u8::MAX as f32) as u8;
+            Ok(EffectOp::CreateObligation { obligation_id, kind })
+        }
         // Lift C — `announce <announcement_kind> radius <radius_cells>`.
         // Caster broadcasts a public event of `announcement_kind` (u8)
         // to all agents within `radius_cells` cells. The `radius`
@@ -2570,6 +2610,42 @@ mod tests {
                 assert_eq!(radius_q8, 896);
             }
             ref other => panic!("expected EffectOp::Announce; got {other:?}"),
+        }
+    }
+
+    /// Lift D — `gain_skill <skill_id> <amount>` lowers to
+    /// `EffectOp::GainSkill { skill_id, amount_q8 }`. Self-cast skill
+    /// growth — q8 amount (256 = full mastery, but consumer clamps).
+    #[test]
+    fn lower_gain_skill_two_args() {
+        let src = "ability Practice { target: self cooldown: 1s gain_skill 3 32 }";
+        let file = parse_ability_file(src).expect("parser");
+        let prog = lower_ability_decl(&file.abilities[0]).expect("gain_skill must lower");
+        assert_eq!(prog.effects.len(), 1);
+        match prog.effects[0] {
+            EffectOp::GainSkill { skill_id, amount_q8 } => {
+                assert_eq!(skill_id, 3);
+                assert_eq!(amount_q8, 32);
+            }
+            ref other => panic!("expected EffectOp::GainSkill; got {other:?}"),
+        }
+    }
+
+    /// Lift D — `create_obligation <obligation_id> <kind>` lowers to
+    /// `EffectOp::CreateObligation`. The u16 obligation_id round-trips
+    /// through the f32 parser path (under 2^24).
+    #[test]
+    fn lower_create_obligation_two_args() {
+        let src = "ability Lend { target: enemy range: 5.0 cooldown: 1s create_obligation 17 0 }";
+        let file = parse_ability_file(src).expect("parser");
+        let prog = lower_ability_decl(&file.abilities[0]).expect("create_obligation must lower");
+        assert_eq!(prog.effects.len(), 1);
+        match prog.effects[0] {
+            EffectOp::CreateObligation { obligation_id, kind } => {
+                assert_eq!(obligation_id, 17);
+                assert_eq!(kind, 0);
+            }
+            ref other => panic!("expected EffectOp::CreateObligation; got {other:?}"),
         }
     }
 }
