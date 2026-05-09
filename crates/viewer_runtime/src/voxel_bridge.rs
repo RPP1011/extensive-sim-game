@@ -175,6 +175,24 @@ impl VoxelBridge {
             AGENT_SPLAT_DIM + 1,
         );
 
+        // Effect flashes — paint a wider disc one cell above each
+        // affected agent. Painted last so the halo always sits on
+        // top of the agent + ground in the top-down view. Disc
+        // dim=4 (vs agent splat dim=2) gives a visible halo around
+        // the agent's body.
+        for marker in app.effects() {
+            if marker.slot >= positions.len() || alive[marker.slot] == 0 {
+                continue;
+            }
+            let agent_pos = positions[marker.slot];
+            let halo_pos = Vec3::new(
+                agent_pos.x,
+                agent_pos.y + self.cell_size,
+                agent_pos.z,
+            );
+            self.splat_at(halo_pos, marker.kind.material(), 4);
+        }
+
         // Destroy + recreate the GPU texture so mip1/mip2/mip3 get
         // regenerated. `upload_grid_to_gpu` is the only API in
         // voxel_engine that runs mip generation; `update_subregion`

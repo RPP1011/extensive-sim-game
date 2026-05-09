@@ -69,7 +69,44 @@ fn material_for(creature_type: u32, hp_fraction: f32) -> u8 {
 const HP_BUCKETS: u8 = 4;
 const STUN_MATERIAL: u8 = 1 + 3 * HP_BUCKETS; // single shade for stunned overlay
 const GROUND_MATERIAL: u8 = STUN_MATERIAL + 1;
-const UNKNOWN_MATERIAL: u8 = GROUND_MATERIAL + 1;
+/// Effect flash materials — used for the ability splats that
+/// hover above an agent for `EFFECT_DURATION_TICKS` after the
+/// matching event fires.
+pub const EFFECT_DAMAGE_MATERIAL: u8 = STUN_MATERIAL + 2;
+pub const EFFECT_HEAL_MATERIAL: u8 = STUN_MATERIAL + 3;
+pub const EFFECT_STUN_MATERIAL: u8 = STUN_MATERIAL + 4;
+const UNKNOWN_MATERIAL: u8 = STUN_MATERIAL + 5;
+
+/// How many fixed-step ticks an ability flash stays visible.
+/// 3 ticks = 300ms — long enough to register, short enough to
+/// not mask the underlying agent state.
+pub const EFFECT_DURATION_TICKS: u64 = 3;
+
+/// Source of an effect flash — drives the colour material.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EffectKind {
+    Damage,
+    Heal,
+    Stun,
+}
+
+impl EffectKind {
+    pub fn material(self) -> u8 {
+        match self {
+            EffectKind::Damage => EFFECT_DAMAGE_MATERIAL,
+            EffectKind::Heal => EFFECT_HEAL_MATERIAL,
+            EffectKind::Stun => EFFECT_STUN_MATERIAL,
+        }
+    }
+}
+
+/// A short-lived flash placed at an agent's position.
+#[derive(Debug, Clone, Copy)]
+pub struct EffectMarker {
+    pub slot: usize,
+    pub kind: EffectKind,
+    pub expires_at_tick: u64,
+}
 
 fn build_palette() -> MaterialPalette {
     let mut p = MaterialPalette::new();
@@ -82,6 +119,9 @@ fn build_palette() -> MaterialPalette {
     fill_role_buckets(&mut p, 1 + 2 * HP_BUCKETS, unk_base);
     p.set(STUN_MATERIAL, palette_entry(255, 215, 80)); // stun glow — yellow
     p.set(GROUND_MATERIAL, palette_entry(90, 80, 70));
+    p.set(EFFECT_DAMAGE_MATERIAL, palette_entry(255, 80, 80)); // damage flash — bright red
+    p.set(EFFECT_HEAL_MATERIAL, palette_entry(80, 255, 120));  // heal flash — bright green
+    p.set(EFFECT_STUN_MATERIAL, palette_entry(255, 240, 60));  // stun pulse — bright yellow
     p.set(UNKNOWN_MATERIAL, palette_entry(255, 0, 255));
     p
 }
@@ -122,6 +162,16 @@ pub struct ViewerApp {
     last_creature_type: Vec<u32>,
     last_stun_expires: Vec<u32>,
     last_material: Vec<u8>,
+    /// Per-slot HP from the previous tick — diffed against the
+    /// current readback to detect damage / heal events without
+    /// any sim-side instrumentation.
+    prev_hp: Vec<f32>,
+    /// Per-slot stun expiry from the previous tick — used to
+    /// detect a fresh stun (expiry rose past current tick).
+    prev_stun_expires: Vec<u32>,
+    /// Active effect flashes, painted by the bridge for
+    /// `EFFECT_DURATION_TICKS` ticks then removed.
+    effects: Vec<EffectMarker>,
     pub terminated_at_tick: Option<u64>,
 }
 
@@ -150,8 +200,18 @@ impl ViewerApp {
             last_creature_type: vec![0; n],
             last_stun_expires: vec![0; n],
             last_material: vec![UNKNOWN_MATERIAL; n],
+            prev_hp: vec![0.0; n],
+            prev_stun_expires: vec![0; n],
+            effects: Vec::with_capacity(32),
             terminated_at_tick: None,
         }
+    }
+
+    /// Active effect flashes (damage / heal / stun pulses).
+    /// Painted by the bridge each frame; cleared automatically as
+    /// `expires_at_tick` passes.
+    pub fn effects(&self) -> &[EffectMarker] {
+        &self.effects
     }
 
     pub fn sim_tick(&self) -> u64 {
@@ -229,11 +289,11 @@ impl ViewerApp {
         let alive = self.state.read_alive();
         let creature_type = self.state.read_creature_type();
         let stun_exp = self.state.read_stun_expires_at_tick();
-        // BossFightState doesn't currently expose read_max_hp.
-        // Heroes start at HERO_HP, boss at BOSS_HP — pin once at
-        // first refresh from those constants. Cheap proxy: max_hp
-        // = the highest HP we've ever observed for the slot, with
-        // a 1.0 floor so divide-by-zero is impossible.
+        let now = self.state.tick();
+        // Roll previous → current cache.
+        self.prev_hp.copy_from_slice(&self.last_hp);
+        self.prev_stun_expires.copy_from_slice(&self.last_stun_expires);
+
         for slot in 0..(AGENT_COUNT as usize) {
             self.last_hp[slot] = hp.get(slot).copied().unwrap_or(0.0);
             self.last_alive[slot] = alive.get(slot).copied().unwrap_or(0);
@@ -250,6 +310,47 @@ impl ViewerApp {
             }
             self.last_material[slot] = mat;
         }
+
+        // Effect detection: compare per-slot HP delta + stun
+        // transition. Damage/heal threshold is 0.001 to ignore
+        // float noise. Push one marker per slot per tick.
+        let expires = now + EFFECT_DURATION_TICKS;
+        for slot in 0..(AGENT_COUNT as usize) {
+            // Skip slots that just died this tick — the despawn
+            // handles the visual; a damage flash on top of empty
+            // space looks weird.
+            if self.last_alive[slot] == 0 {
+                continue;
+            }
+            let dhp = self.last_hp[slot] - self.prev_hp[slot];
+            if dhp < -0.001 {
+                self.effects.push(EffectMarker {
+                    slot,
+                    kind: EffectKind::Damage,
+                    expires_at_tick: expires,
+                });
+            } else if dhp > 0.001 {
+                self.effects.push(EffectMarker {
+                    slot,
+                    kind: EffectKind::Heal,
+                    expires_at_tick: expires,
+                });
+            }
+            // New stun: prev expiry was in the past, current is
+            // in the future.
+            let was_stunned = (self.prev_stun_expires[slot] as u64) > now.saturating_sub(1);
+            let is_stunned_now = (self.last_stun_expires[slot] as u64) > now;
+            if !was_stunned && is_stunned_now {
+                self.effects.push(EffectMarker {
+                    slot,
+                    kind: EffectKind::Stun,
+                    expires_at_tick: expires,
+                });
+            }
+        }
+
+        // Prune expired effects.
+        self.effects.retain(|m| m.expires_at_tick > now);
     }
 
     fn sync_slot(
