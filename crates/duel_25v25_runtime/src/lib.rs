@@ -760,6 +760,7 @@ impl CompiledSim for Duel25v25State {
             state: &agent_buffers,
             event_ring: &self.event_ring,
             registry: &self.registry_gpu,
+            voxel_grid: None,
         };
 
         // (2) Spatial-hash counting sort (5 phases). Mirrors

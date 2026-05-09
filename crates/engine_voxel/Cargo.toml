@@ -23,3 +23,8 @@ edition = "2021"
 engine = { path = "../engine" }
 voxel_engine = { path = "/home/ricky/Projects/voxel_engine", default-features = false }
 glam = "0.29"
+# Phase C — GPU-resident voxel mirror needs `wgpu::Buffer` + `bytemuck`
+# slice casts. wgpu version pinned to match `engine`'s `=26.0.1` so we
+# don't accidentally pull two wgpu versions into the dep graph.
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }

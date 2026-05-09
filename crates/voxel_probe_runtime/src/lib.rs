@@ -53,9 +53,10 @@ use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, EVENT_RING_CAP
 use engine::state::SimState;
 use engine::terrain::TerrainQuery;
 use engine::GpuContext;
-use engine_voxel::VoxelTerrain;
+use engine_voxel::{VoxelMirror, VoxelTerrain};
 use glam::Vec3;
 use std::sync::Arc;
+use std::time::Instant;
 use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
@@ -87,6 +88,19 @@ pub struct VoxelProbeState {
     #[allow(dead_code)]
     state: SimState,
     terrain: VoxelTerrain,
+    /// Phase C — GPU-resident mirror of `terrain.grid()`. Updated
+    /// per-tick via `mark_dirty` (during chronicle drain) followed by
+    /// a single `flush_dirty` at end of tick. The buffer is wired
+    /// into `KernelBindingsContext::voxel_grid` so future kernels
+    /// (Phase D's terrain query lowerings) can read voxel state
+    /// without a CPU↔GPU round-trip.
+    mirror: VoxelMirror,
+    /// Wall-clock cost of the most recent `flush_dirty` call (in
+    /// nanoseconds). Exposed via [`Self::last_flush_ns`] so the
+    /// behavioral pin tests + Phase E benchmarks can baseline the
+    /// per-tick upload overhead at the fixture's typical mutation
+    /// rate. Zero before the first tick.
+    last_flush_ns: u128,
 
     // -- Agent SoA (GPU-side) --
     agent_hp_buf: wgpu::Buffer,
@@ -176,9 +190,19 @@ impl VoxelProbeState {
         // stays simple). Drain path mutates `terrain` directly; the
         // engine-side Arc is a second instance held for future passes
         // that walk terrain through the SimState seam.
+        //
+        // Extent picked at 16³ for Phase C: the GPU mirror buffer is
+        // `16 * 16 * 16 * 4 = 16 KiB`, two orders of magnitude smaller
+        // than the 64 MiB the 256³ default would allocate. The fixture
+        // only writes near the world origin, so 16³ is plenty of room
+        // and keeps the mirror cheap on hosts without dedicated VRAM.
+        const PROBE_EXTENT: u32 = 16;
         let mut state = SimState::new(agent_count, seed);
-        let terrain = VoxelTerrain::new();
-        state.terrain = Arc::new(VoxelTerrain::new());
+        let terrain = VoxelTerrain::with_extent(PROBE_EXTENT);
+        state.terrain = Arc::new(VoxelTerrain::with_extent(PROBE_EXTENT));
+        // Allocate the GPU mirror once at construction time; subsequent
+        // ticks only push dirty chunks via `flush_dirty`.
+        let mirror = VoxelMirror::new(&gpu, terrain.grid());
 
         // Spawn the lone agent at world origin so `caster_pos` is
         // pin-load-bearing.
@@ -372,6 +396,8 @@ impl VoxelProbeState {
             gpu,
             state,
             terrain,
+            mirror,
+            last_flush_ns: 0,
             agent_hp_buf,
             agent_alive_buf,
             agent_mana_buf,
@@ -427,13 +453,43 @@ impl VoxelProbeState {
     }
 
     /// Drive one tick of the GPU pipeline + host-side voxel drain.
+    ///
+    /// Per-tick chain:
+    ///   1. GPU dispatches (mask → scoring → chronicle dispatchers).
+    ///   2. Host drain — applies chronicle records to the CPU
+    ///      `VoxelTerrain` AND marks each touched chunk in `mirror`.
+    ///   3. `mirror.flush_dirty(...)` — pushes dirty chunks to GPU
+    ///      so the *next* tick's kernels see fresh voxel state.
     pub fn step(&mut self) {
         self.run_gpu_tick();
         let drained = self.drain_voxel_records();
         // Drained returns just for telemetry; the chronicle records
-        // are applied in-place to `self.terrain`.
+        // are applied in-place to `self.terrain` (and dirty chunks
+        // marked in `self.mirror`).
         let _ = drained;
+        // Flush the mirror at end of tick so the next tick's GPU
+        // dispatches see the freshly-mutated voxel state.
+        let t0 = Instant::now();
+        self.mirror
+            .flush_dirty(&self.gpu, self.terrain.grid());
+        self.last_flush_ns = t0.elapsed().as_nanos();
         self.tick += 1;
+    }
+
+    /// Wall-clock cost of the most recent `flush_dirty` call, in
+    /// nanoseconds. Zero before the first tick. Used by the Phase C
+    /// behavioral pin tests to baseline per-tick upload overhead so
+    /// Phase E can decide whether the CPU-mirror's per-mutation cost
+    /// is the bottleneck (per the cross-cutting risk #1 in the plan).
+    pub fn last_flush_ns(&self) -> u128 {
+        self.last_flush_ns
+    }
+
+    /// Borrow the GPU-resident voxel mirror — used by the Phase C
+    /// `cpu_gpu_voxel_state_matches` pin to read cells back through
+    /// the GPU compute path.
+    pub fn mirror(&self) -> &VoxelMirror {
+        &self.mirror
     }
 
     /// Drive one tick of GPU dispatches end-to-end. Encodes per-tick
@@ -482,10 +538,14 @@ impl VoxelProbeState {
             move_speed_buf: Some(&self.agent_move_speed_buf),
             ..Default::default()
         };
+        // No kernel in this fixture binds `voxel_grid` yet; the wire-up
+        // is forward-compat for Phase D, when terrain-query lowerings
+        // start emitting that binding.
         let ctx = KernelBindingsContext {
             state: &agent_buffers,
             event_ring: &self.event_ring,
             registry: &self.registry_gpu,
+            voxel_grid: Some(self.mirror.buffer()),
         };
 
         // (2) Mask round (fused PerAgent — both verbs are self-cast).
@@ -742,8 +802,11 @@ impl VoxelProbeState {
             // and the position is cached at construction. Multi-agent
             // fixtures resolve caster_slot → pos against the agent SoA
             // here.
-            self.terrain
-                .apply_voxel_chronicle_record(rec, self.caster_pos);
+            self.terrain.apply_voxel_chronicle_record_with_mirror(
+                rec,
+                self.caster_pos,
+                &mut self.mirror,
+            );
             applied += 1;
         }
         applied
@@ -895,5 +958,351 @@ mod voxel_pins {
              chronicle record didn't translate into a VoxelGrid clear.",
         );
         eprintln!("[voxel_probe] post-harvest height_at(0,0) = {h}");
+    }
+
+    // -----------------------------------------------------------------
+    // Phase C semantic pin — CPU/GPU mirror divergence catcher.
+    // -----------------------------------------------------------------
+
+    /// Tiny standalone compute kernel that reads N cells from the
+    /// `voxel_grid` storage buffer and writes their `u32` values into
+    /// a readback buffer. Used by `cpu_gpu_voxel_state_matches` to
+    /// compare GPU-side vs. CPU-side reads at the same cells.
+    ///
+    /// Mirrors the layout of `engine_voxel::VoxelMirror`'s staging
+    /// (`index = z*H*W + y*W + x`). Width/height/depth come from a
+    /// small uniform; cell indices come from a separate input buffer.
+    /// Out-of-bounds returns 0u (matches the planned WGSL `voxel_at`
+    /// helper's contract — Phase D will lower terrain queries to call
+    /// that helper from kernel bodies).
+    const READBACK_WGSL: &str = r#"
+struct DimsCfg {
+    width: u32,
+    height: u32,
+    depth: u32,
+    n: u32,
+};
+@group(0) @binding(0) var<storage, read> voxel_grid: array<u32>;
+@group(0) @binding(1) var<storage, read> probe_cells: array<u32>;
+@group(0) @binding(2) var<storage, read_write> probe_results: array<u32>;
+@group(0) @binding(3) var<uniform> cfg: DimsCfg;
+
+fn voxel_at(x: i32, y: i32, z: i32) -> u32 {
+    if (x < 0 || y < 0 || z < 0) {
+        return 0u;
+    }
+    let ux: u32 = u32(x);
+    let uy: u32 = u32(y);
+    let uz: u32 = u32(z);
+    if (ux >= cfg.width || uy >= cfg.height || uz >= cfg.depth) {
+        return 0u;
+    }
+    let idx: u32 = uz * cfg.height * cfg.width + uy * cfg.width + ux;
+    return voxel_grid[idx];
+}
+
+@compute @workgroup_size(64)
+fn cs_voxel_readback(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= cfg.n) {
+        return;
+    }
+    let x = i32(probe_cells[i * 3u + 0u]);
+    let y = i32(probe_cells[i * 3u + 1u]);
+    let z = i32(probe_cells[i * 3u + 2u]);
+    probe_results[i] = voxel_at(x, y, z);
+}
+"#;
+
+    #[repr(C)]
+    #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+    struct DimsCfg {
+        width: u32,
+        height: u32,
+        depth: u32,
+        n: u32,
+    }
+
+    /// Read N cells from the GPU mirror via a one-shot compute
+    /// dispatch. Returns the values the GPU sees at each (x, y, z).
+    /// Used by the divergence pin — caller compares element-by-element
+    /// to `terrain.cell_at(x, y, z)`.
+    fn gpu_read_cells(
+        state: &VoxelProbeState,
+        cells: &[(i32, i32, i32)],
+    ) -> Vec<u32> {
+        let gpu = &state.gpu;
+        let mirror = state.mirror();
+        let (w, h, d) = mirror.dimensions();
+        let n = cells.len() as u32;
+
+        // Pack cells as u32 triples (positive cells only — the test
+        // chooses non-negative coords; negative-bound testing happens
+        // in the engine_voxel unit tests). The shader receives them as
+        // i32 by cast; the buffer storage is u32.
+        let mut packed: Vec<u32> = Vec::with_capacity((n as usize) * 3);
+        for (x, y, z) in cells {
+            packed.push(*x as u32);
+            packed.push(*y as u32);
+            packed.push(*z as u32);
+        }
+        // Pad to at least 12 bytes so wgpu doesn't reject a tiny buffer.
+        while packed.len() < 4 {
+            packed.push(0);
+        }
+
+        let cells_buf = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("voxel_probe::probe_cells"),
+                contents: bytemuck::cast_slice(&packed),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            },
+        );
+        let results_bytes = ((n as u64) * 4).max(16);
+        let results_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("voxel_probe::probe_results"),
+            size: results_bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let cfg = DimsCfg {
+            width: w,
+            height: h,
+            depth: d,
+            n,
+        };
+        let cfg_buf = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("voxel_probe::probe_cfg"),
+                contents: bytemuck::bytes_of(&cfg),
+                usage: wgpu::BufferUsages::UNIFORM,
+            },
+        );
+        let staging = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("voxel_probe::probe_results_staging"),
+            size: results_bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let shader = gpu
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("voxel_probe::readback_shader"),
+                source: wgpu::ShaderSource::Wgsl(READBACK_WGSL.into()),
+            });
+        let bgl = gpu
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("voxel_probe::readback_bgl"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+        let pl = gpu
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("voxel_probe::readback_pl"),
+                bind_group_layouts: &[&bgl],
+                push_constant_ranges: &[],
+            });
+        let pipeline = gpu
+            .device
+            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("voxel_probe::readback_pipeline"),
+                layout: Some(&pl),
+                module: &shader,
+                entry_point: Some("cs_voxel_readback"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
+        let bg = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("voxel_probe::readback_bg"),
+            layout: &bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: mirror.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: cells_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: results_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: cfg_buf.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("voxel_probe::readback_encoder"),
+            });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("voxel_probe::readback_pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            // Workgroup size = 64; one thread per cell.
+            let groups = (n + 63) / 64;
+            pass.dispatch_workgroups(groups.max(1), 1, 1);
+        }
+        encoder.copy_buffer_to_buffer(&results_buf, 0, &staging, 0, results_bytes);
+        gpu.queue.submit(Some(encoder.finish()));
+
+        let slice = staging.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = sender.send(r);
+        });
+        gpu.device.poll(wgpu::PollType::Wait).expect("poll");
+        receiver
+            .recv()
+            .expect("readback map result")
+            .expect("readback map ok");
+        let mapped = slice.get_mapped_range();
+        let words: &[u32] = bytemuck::cast_slice(&mapped);
+        let out: Vec<u32> = words[..n as usize].to_vec();
+        drop(mapped);
+        staging.unmap();
+        out
+    }
+
+    /// **Phase C semantic pin.** Catches CPU/GPU mirror divergence —
+    /// the failure mode where a chronicle record mutates the host
+    /// `VoxelGrid` but the corresponding GPU buffer slot stays stale
+    /// (or vice versa). Drives 30 ticks (multiple place + harvest
+    /// cycles), then samples a deterministic set of cells across the
+    /// 16³ extent and asserts CPU == GPU at every sampled cell.
+    ///
+    /// Failure modes this catches:
+    ///   - `apply_voxel_chronicle_record_with_mirror` writes the grid
+    ///     but forgets to call `mark_dirty`.
+    ///   - `flush_dirty` skips a chunk (off-by-one in the BTreeSet
+    ///     drain or chunk-bounds calculation).
+    ///   - The cell-to-flat-index encoding diverges between
+    ///     `VoxelGrid::index` (host) and `voxel_at` (GPU).
+    ///
+    /// Don't substitute "voxel_count_on_gpu > 0" — that pin passes
+    /// for any non-empty mirror state regardless of which cells are
+    /// populated.
+    #[test]
+    fn cpu_gpu_voxel_state_matches() {
+        let mut state = match VoxelProbeState::try_new(0) {
+            Some(s) => s,
+            None => {
+                eprintln!(
+                    "[voxel_probe cpu_gpu_voxel_state_matches] skipping: \
+                     no wgpu adapter available on this host."
+                );
+                return;
+            }
+        };
+        // 30 ticks covers 3 full Place→Harvest cycles (Place at 0,
+        // Harvest at 5/15/25) so the mirror sees both writes and
+        // clears. Track per-tick flush cost so the eprintln below can
+        // report the max-tick cost (rather than just the last) — the
+        // last tick is usually zero-work and not interesting.
+        let mut max_flush_ns: u128 = 0;
+        let mut total_flush_ns: u128 = 0;
+        for _ in 0..30 {
+            state.step();
+            let f = state.last_flush_ns();
+            if f > max_flush_ns {
+                max_flush_ns = f;
+            }
+            total_flush_ns += f;
+        }
+
+        // Sample 10 cells deterministically across the 16³ extent.
+        // Mix in the cells the fixture actually mutates (origin,
+        // and the harvest-radius neighborhood) plus a few that
+        // should always be air.
+        let probes: Vec<(i32, i32, i32)> = vec![
+            (0, 0, 0),    // place + harvest target
+            (1, 0, 0),    // adjacent — air after fixture wraps up
+            (0, 1, 0),
+            (0, 0, 1),
+            (3, 3, 3),   // far from probe — should be air
+            (5, 5, 5),
+            (15, 15, 15),// corner — should be air
+            (8, 4, 2),
+            (2, 8, 4),
+            (4, 2, 8),
+        ];
+
+        let gpu_values = gpu_read_cells(&state, &probes);
+        for (i, (x, y, z)) in probes.iter().enumerate() {
+            let cpu_val = state.terrain().cell_at(*x, *y, *z) as u32;
+            let gpu_val = gpu_values[i];
+            assert_eq!(
+                cpu_val, gpu_val,
+                "CPU/GPU mirror divergence at cell ({x}, {y}, {z}): \
+                 CPU={cpu_val}, GPU={gpu_val}. Either the chronicle \
+                 consumer wrote to the host VoxelGrid without marking \
+                 the chunk dirty, or `flush_dirty` skipped the chunk, \
+                 or the cell→flat-index encoding diverges between host \
+                 (z*H*W + y*W + x) and the WGSL `voxel_at` helper."
+            );
+        }
+        eprintln!(
+            "[voxel_probe] cpu_gpu_voxel_state_matches: {n} cells matched. \
+             Mirror buffer = {bytes} B ({kib:.1} KiB). \
+             Per-tick flush_dirty: max = {max_us:.2} us, mean = {mean_us:.2} us \
+             across 30 ticks (last_tick = {last_us:.2} us).",
+            n = probes.len(),
+            bytes = state.mirror().buffer_bytes(),
+            kib = state.mirror().buffer_bytes() as f64 / 1024.0,
+            max_us = max_flush_ns as f64 / 1000.0,
+            mean_us = (total_flush_ns as f64 / 30.0) / 1000.0,
+            last_us = state.last_flush_ns() as f64 / 1000.0,
+        );
     }
 }

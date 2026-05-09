@@ -1,7 +1,16 @@
 //! Voxel-engine adapter — bridges `~/Projects/voxel_engine` to the sim
-//! engine via the `TerrainQuery` seam. **Phases A + B** of the 5-phase
-//! voxel integration plan
+//! engine via the `TerrainQuery` seam. **Phases A + B + C** of the
+//! 5-phase voxel integration plan
 //! (`docs/superpowers/plans/2026-05-09-voxel-engine-integration.md`).
+//!
+//! Phase C adds [`VoxelMirror`] — a `wgpu::Buffer` mirror of the host
+//! `VoxelGrid` that GPU kernels can read directly via the new optional
+//! `voxel_grid` field on `KernelBindingsContext`. The runtime calls
+//! [`VoxelTerrain::apply_voxel_chronicle_record_with_mirror`] per
+//! drained record (instead of the bare `apply_voxel_chronicle_record`),
+//! which mutates the CPU grid AND marks the touched chunks dirty in
+//! the mirror. At end of tick the runtime calls
+//! [`VoxelMirror::flush_dirty`] to push the dirty chunks to GPU.
 //!
 //! # What this crate does today
 //!
@@ -81,11 +90,15 @@
 //! affected.
 
 use engine::terrain::TerrainQuery;
-use glam::Vec3;
-use voxel_engine::voxel::grid::VoxelGrid;
+use engine::GpuContext;
+use glam::{IVec3, Vec3};
+use std::collections::BTreeSet;
 use voxel_engine::voxel::raycast::ray_cast_grid;
 
 pub use engine::state::agent::MovementMode;
+/// Re-export so per-runtime crates can pass `&VoxelGrid` to mirror
+/// methods without taking a direct dependency on `voxel_engine`.
+pub use voxel_engine::voxel::grid::VoxelGrid;
 
 /// Default grid extent in voxel cells. 256³ cells (= 256 world-unit
 /// cube) is enough for the Phase B `voxel_probe` fixture and the
@@ -153,6 +166,16 @@ impl VoxelTerrain {
     #[doc(hidden)]
     pub fn set_cell(&mut self, x: u32, y: u32, z: u32, value: u8) {
         self.grid.set(x, y, z, value);
+    }
+
+    /// Borrow the underlying `voxel_engine::voxel::grid::VoxelGrid` —
+    /// used by [`VoxelMirror::new`] and [`VoxelMirror::flush_dirty`]
+    /// to read the current cell values during construction + per-tick
+    /// upload. Public because per-runtime `VoxelMirror` lives outside
+    /// `VoxelTerrain` (the runtime owns both, mirror lifetime tracks
+    /// the wgpu device).
+    pub fn grid(&self) -> &VoxelGrid {
+        &self.grid
     }
 
     /// Drain a single chronicle record into the voxel world.
@@ -351,6 +374,279 @@ impl TerrainQuery for VoxelTerrain {
             // compare directly to `length`.
             Some(h) => h.t > length,
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase C — GPU-resident voxel mirror
+// ---------------------------------------------------------------------------
+
+/// Side-length in cells of one mirror chunk. Each chunk's worth of
+/// cells is the smallest unit of mirror upload — when any cell in a
+/// chunk is dirtied, the next `flush_dirty` re-uploads the whole chunk
+/// to GPU. Picked to keep `Queue::write_buffer` calls cheap (one chunk
+/// = `8³ = 512` cells = 2 KB) while still bounding upload churn for
+/// scattered single-cell mutations.
+pub const MIRROR_CHUNK_DIM: u32 = 8;
+
+/// Identifier for a chunk in the mirror, in chunk-coordinates (cell
+/// coords / `MIRROR_CHUNK_DIM`). Stored in a [`BTreeSet`] so iteration
+/// order is deterministic — load-bearing for P5 (same chronicle drain
+/// → same dirty set → same upload sequence → same GPU state).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ChunkCoord {
+    pub cx: u32,
+    pub cy: u32,
+    pub cz: u32,
+}
+
+/// GPU-resident mirror of a [`VoxelTerrain`]'s underlying [`VoxelGrid`].
+///
+/// # Layout
+///
+/// One u32 per cell, flat 3D ordering: `index = z*H*W + y*W + x`
+/// (matches `VoxelGrid::index`). The cell's material code lives in the
+/// low 8 bits; upper 24 bits are reserved for future flags (e.g.
+/// per-cell health for destructibles). Total mirror size at the
+/// fixture's grid extent is `width * height * depth * 4` bytes:
+///
+/// - 16³ extent → 16 KB
+/// - 64³ extent → 1 MB
+/// - 256³ extent (DEFAULT) → 64 MB
+///
+/// The 256³ default is overkill for the Phase C voxel_probe pin (the
+/// fixture only writes near origin); fixtures that opt in at smaller
+/// extents (e.g. `with_extent(16)` for the pin tests) pay 16 KB.
+///
+/// # Dirty tracking
+///
+/// `mark_dirty(cell)` records the containing chunk in a `BTreeSet`
+/// (P5: deterministic iteration order). `flush_dirty` walks the set
+/// in ascending `(cz, cy, cx)` order and uploads each chunk's slice
+/// of the host-side `u32` staging via `Queue::write_buffer`. The
+/// staging vec is kept in lock-step with the host `VoxelGrid` so the
+/// flush is a pure cell→u32 widen + slice copy. Empty dirty set →
+/// zero `write_buffer` calls (cheap no-op).
+pub struct VoxelMirror {
+    buffer: wgpu::Buffer,
+    /// Host-side staging for the GPU buffer's contents — one u32 per
+    /// cell, in the same flat ordering. Updated in lock-step with the
+    /// CPU-side `VoxelGrid` so `flush_dirty` does not need to re-read
+    /// the grid (decoupled from `VoxelTerrain`'s lifetime).
+    staging: Vec<u32>,
+    /// Chunks dirtied since the last `flush_dirty`. BTreeSet so the
+    /// drain order is deterministic across runs.
+    dirty_chunks: BTreeSet<ChunkCoord>,
+    width: u32,
+    height: u32,
+    depth: u32,
+}
+
+impl VoxelMirror {
+    /// Allocate a mirror sized to `grid`'s dimensions and initialize
+    /// from grid contents (whole-buffer write at construction time).
+    /// All subsequent updates flow through `mark_dirty` + `flush_dirty`.
+    pub fn new(gpu: &GpuContext, grid: &VoxelGrid) -> Self {
+        let (width, height, depth) = grid.dimensions();
+        let cell_count = (width as usize) * (height as usize) * (depth as usize);
+        // Widen the u8 grid to u32 for the GPU mirror. WGSL has no
+        // native u8 storage type, so the buffer is `array<u32>` and the
+        // material code lives in the low byte; upper bits stay zero.
+        let staging: Vec<u32> = grid.data().iter().map(|&b| b as u32).collect();
+        debug_assert_eq!(staging.len(), cell_count);
+        let bytes = (cell_count * 4) as u64;
+        let buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("engine_voxel::VoxelMirror::buffer"),
+            // Always allocate at least 16 bytes so wgpu doesn't reject
+            // a zero-sized storage buffer for tiny test fixtures.
+            size: bytes.max(16),
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        // Initial whole-buffer upload — even if empty, doing this once
+        // means future flushes never have to special-case "first write".
+        if cell_count > 0 {
+            gpu.queue.write_buffer(&buffer, 0, bytemuck::cast_slice(&staging));
+        }
+        Self {
+            buffer,
+            staging,
+            dirty_chunks: BTreeSet::new(),
+            width,
+            height,
+            depth,
+        }
+    }
+
+    /// Borrow the underlying storage buffer — pass to
+    /// `KernelBindingsContext::voxel_grid`.
+    pub fn buffer(&self) -> &wgpu::Buffer {
+        &self.buffer
+    }
+
+    /// Cubic dimensions of the mirror (cells along each axis). Matches
+    /// the wrapped `VoxelGrid`'s dimensions at construction time.
+    pub fn dimensions(&self) -> (u32, u32, u32) {
+        (self.width, self.height, self.depth)
+    }
+
+    /// Total mirror byte size = `width * height * depth * 4`. Useful
+    /// for the per-fixture allocation bookkeeping.
+    pub fn buffer_bytes(&self) -> u64 {
+        (self.width as u64) * (self.height as u64) * (self.depth as u64) * 4
+    }
+
+    /// Number of dirty chunks pending flush. Mostly diagnostic — the
+    /// runtime calls `flush_dirty` unconditionally each tick.
+    pub fn dirty_chunk_count(&self) -> usize {
+        self.dirty_chunks.len()
+    }
+
+    /// Map a cell coordinate to its containing chunk and mark the
+    /// chunk as dirty. Out-of-bounds cells are silently ignored
+    /// (matches `VoxelGrid::set` semantics — no panic).
+    ///
+    /// The runtime calls this from `apply_voxel_chronicle_record` (via
+    /// the wrapper on `VoxelTerrain`) immediately after the grid has
+    /// been mutated. Subsequent `flush_dirty` re-uploads the chunk's
+    /// 8³ neighbourhood from the host `VoxelGrid`.
+    pub fn mark_dirty(&mut self, cell: IVec3) {
+        if cell.x < 0 || cell.y < 0 || cell.z < 0 {
+            return;
+        }
+        let (x, y, z) = (cell.x as u32, cell.y as u32, cell.z as u32);
+        if x >= self.width || y >= self.height || z >= self.depth {
+            return;
+        }
+        self.dirty_chunks.insert(ChunkCoord {
+            cx: x / MIRROR_CHUNK_DIM,
+            cy: y / MIRROR_CHUNK_DIM,
+            cz: z / MIRROR_CHUNK_DIM,
+        });
+    }
+
+    /// Re-upload every dirty chunk to GPU and clear the dirty set.
+    ///
+    /// Reads each chunk's current state from the wrapped `grid`, widens
+    /// each `u8` material code to `u32` in the host staging vec, then
+    /// issues one `Queue::write_buffer` per dirty chunk. Drain order is
+    /// `BTreeSet` ascending — same chronicle input → same drain order →
+    /// same upload sequence → same final GPU state (P5 / P11).
+    ///
+    /// Empty dirty set → zero queue submits (P10: no panic on empty).
+    pub fn flush_dirty(&mut self, gpu: &GpuContext, grid: &VoxelGrid) {
+        if self.dirty_chunks.is_empty() {
+            return;
+        }
+        // Take ownership of the dirty set so the per-chunk loop can
+        // mutate `self.staging` without re-borrowing `self.dirty_chunks`.
+        // `BTreeSet::into_iter` is already ascending, so the drained
+        // sequence is the deterministic upload order.
+        let drained = std::mem::take(&mut self.dirty_chunks);
+        let (w, h, d) = (self.width, self.height, self.depth);
+        for chunk in drained {
+            // Chunk's cell-coord AABB, clipped to the grid extent.
+            let x_lo = chunk.cx * MIRROR_CHUNK_DIM;
+            let y_lo = chunk.cy * MIRROR_CHUNK_DIM;
+            let z_lo = chunk.cz * MIRROR_CHUNK_DIM;
+            let x_hi = (x_lo + MIRROR_CHUNK_DIM).min(w);
+            let y_hi = (y_lo + MIRROR_CHUNK_DIM).min(h);
+            let z_hi = (z_lo + MIRROR_CHUNK_DIM).min(d);
+            // Refresh staging from the grid for every cell in this
+            // chunk, then upload one row at a time. Per-row uploads
+            // (rather than per-cell) trade a few `write_buffer` calls
+            // for contiguous-byte transfers; per-chunk single upload
+            // would require a temporary contiguous buffer because
+            // chunks aren't laid out contiguously in flat-3D order.
+            for z in z_lo..z_hi {
+                for y in y_lo..y_hi {
+                    let row_start = ((z as usize) * (h as usize) + y as usize)
+                        * (w as usize)
+                        + x_lo as usize;
+                    let row_len = (x_hi - x_lo) as usize;
+                    // Refresh staging from grid for this row.
+                    for x in x_lo..x_hi {
+                        let v = grid.get(x, y, z).unwrap_or(0);
+                        self.staging[row_start + (x - x_lo) as usize] = v as u32;
+                    }
+                    let byte_offset = (row_start as u64) * 4;
+                    let row_bytes = bytemuck::cast_slice(
+                        &self.staging[row_start..row_start + row_len],
+                    );
+                    gpu.queue.write_buffer(&self.buffer, byte_offset, row_bytes);
+                }
+            }
+        }
+    }
+}
+
+impl VoxelTerrain {
+    /// Map a world-space caster position to the cell that
+    /// `apply_voxel_chronicle_record` writes for `EffectPlaceVoxelApplied`
+    /// (kind=60). Used by the runtime's drain path to feed
+    /// `VoxelMirror::mark_dirty` the same cell the grid mutation hit.
+    pub fn place_cell_from_caster(caster_pos: Vec3) -> IVec3 {
+        IVec3::new(
+            caster_pos.x.floor() as i32,
+            caster_pos.y.floor() as i32,
+            caster_pos.z.floor() as i32,
+        )
+    }
+
+    /// Same as [`apply_voxel_chronicle_record`] but additionally marks
+    /// every cell touched by the record as dirty in `mirror`. The
+    /// runtime calls this when a mirror is wired; the original
+    /// `apply_voxel_chronicle_record` stays as the CPU-only entry.
+    ///
+    /// The mark-dirty pass walks the same neighborhood the consumer
+    /// scans — for kind=60 (place) that's the single caster cell; for
+    /// kind=59 (harvest) it's the `HARVEST_RADIUS`-cube. Marking the
+    /// whole cube (rather than just the cells the consumer actually
+    /// cleared) is a slight over-mark but keeps the consumer + mirror
+    /// in lock-step: the consumer's `target_value` filter can no-op
+    /// most of the cube, and the mirror just re-uploads the chunks
+    /// containing those cells (which were already going to be
+    /// re-uploaded if any one of them was a real clear).
+    pub fn apply_voxel_chronicle_record_with_mirror(
+        &mut self,
+        rec: &[u32],
+        caster_pos: Vec3,
+        mirror: &mut VoxelMirror,
+    ) -> Option<()> {
+        // `?` short-circuits when the inner consumer rejects the record
+        // (unknown kind tag or `rec.len() < 5`); after the `?`, rec[0]
+        // is guaranteed to be one of the recognised voxel-mutating kinds.
+        let result = self.apply_voxel_chronicle_record(rec, caster_pos)?;
+        match rec[0] {
+            60 => {
+                let cell = Self::place_cell_from_caster(caster_pos);
+                mirror.mark_dirty(cell);
+            }
+            59 => {
+                // Mark every cell in the `HARVEST_RADIUS` cube so any
+                // chunk that might contain a cleared cell is in the
+                // dirty set. See the kind=59 arm in
+                // `apply_voxel_chronicle_record` — `HARVEST_RADIUS=3`
+                // is the magic number; mirroring it here would split
+                // the source-of-truth, so we re-derive it from the
+                // same ascending z/y/x walk.
+                const HARVEST_RADIUS: i32 = 3;
+                let cx = caster_pos.x.floor() as i32;
+                let cy = caster_pos.y.floor() as i32;
+                let cz = caster_pos.z.floor() as i32;
+                for dz in -HARVEST_RADIUS..=HARVEST_RADIUS {
+                    for dy in -HARVEST_RADIUS..=HARVEST_RADIUS {
+                        for dx in -HARVEST_RADIUS..=HARVEST_RADIUS {
+                            mirror.mark_dirty(IVec3::new(cx + dx, cy + dy, cz + dz));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        Some(result)
     }
 }
 
@@ -574,5 +870,65 @@ mod tests {
         assert_eq!(t.height_at(0.0, 0.0), 0.0);
         assert!(t.walkable(Vec3::ZERO, MovementMode::Walk));
         assert!(t.line_of_sight(Vec3::ZERO, Vec3::ONE));
+    }
+
+    // ---------------------------------------------------------------
+    // Phase C — VoxelMirror tests that don't need a GPU.
+    //
+    // These cover the chunk-coord math + dirty-set ordering. The
+    // load-bearing CPU/GPU divergence pin lives in
+    // `voxel_probe_runtime::voxel_pins::cpu_gpu_voxel_state_matches`
+    // since it requires a wgpu device.
+    // ---------------------------------------------------------------
+
+    /// Helper for the chunk-coord tests below — there's no public
+    /// constructor that doesn't need a GPU, so we exercise the
+    /// `BTreeSet` math directly.
+    fn chunk_for(cell: IVec3) -> Option<ChunkCoord> {
+        if cell.x < 0 || cell.y < 0 || cell.z < 0 {
+            return None;
+        }
+        Some(ChunkCoord {
+            cx: (cell.x as u32) / MIRROR_CHUNK_DIM,
+            cy: (cell.y as u32) / MIRROR_CHUNK_DIM,
+            cz: (cell.z as u32) / MIRROR_CHUNK_DIM,
+        })
+    }
+
+    #[test]
+    fn chunk_coord_orders_by_z_then_y_then_x() {
+        // BTreeSet drain order is the load-bearing P5 invariant —
+        // same chronicle drain → same dirty set → same upload
+        // sequence → same final GPU state. The struct's derived
+        // `Ord` orders fields lexicographically: (cx, cy, cz). Pin
+        // that ordering so a future `#[derive]` reorder doesn't
+        // silently change upload order.
+        let a = ChunkCoord { cx: 0, cy: 0, cz: 0 };
+        let b = ChunkCoord { cx: 1, cy: 0, cz: 0 };
+        let c = ChunkCoord { cx: 0, cy: 1, cz: 0 };
+        let d = ChunkCoord { cx: 0, cy: 0, cz: 1 };
+        let mut set = BTreeSet::new();
+        set.insert(d);
+        set.insert(c);
+        set.insert(b);
+        set.insert(a);
+        let drained: Vec<ChunkCoord> = set.into_iter().collect();
+        // (0,0,0), (1,0,0), (0,1,0), (0,0,1) sort with cx outer-most:
+        // (0,0,0) < (0,0,1) < (0,1,0) < (1,0,0)
+        assert_eq!(drained, vec![a, d, c, b]);
+    }
+
+    #[test]
+    fn chunk_for_groups_cells_by_dim() {
+        // Two cells in the same MIRROR_CHUNK_DIM cube map to the same
+        // ChunkCoord. Two cells across the boundary land in different
+        // chunks. (Pin the boundary semantics so a knob change to
+        // MIRROR_CHUNK_DIM surfaces here.)
+        let dim = MIRROR_CHUNK_DIM as i32;
+        let a = chunk_for(IVec3::new(0, 0, 0)).unwrap();
+        let b = chunk_for(IVec3::new(dim - 1, dim - 1, dim - 1)).unwrap();
+        let c = chunk_for(IVec3::new(dim, 0, 0)).unwrap();
+        assert_eq!(a, b, "cells inside one chunk should match");
+        assert_ne!(a, c, "cell on chunk boundary should land in next chunk");
     }
 }
