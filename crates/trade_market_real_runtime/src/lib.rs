@@ -55,6 +55,8 @@
 //! the seller writes in the chronicle. Same shape as duel_1v1's
 //! deferred "cycle in read/write graph" warning.
 
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::{AbilityRegistry, PackedAbilityRegistry};
 use engine::sim_trait::CompiledSim;
 use engine::GpuContext;
 use glam::Vec3;
@@ -62,7 +64,7 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 pub const NUM_TRADERS: u32 = 50;
 pub const NUM_GOODS: u32 = 10;
@@ -127,6 +129,12 @@ pub struct TradeMarketRealState {
     chronicle_buy_cfg_buf: wgpu::Buffer,
     apply_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
 
@@ -333,6 +341,12 @@ impl TradeMarketRealState {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&AbilityRegistry::new()),
+            &gpu,
+            "trade_market_real_runtime",
+        );
+
         Self {
             gpu,
             agent_hp_buf,
@@ -355,6 +369,7 @@ impl TradeMarketRealState {
             chronicle_buy_cfg_buf,
             apply_cfg_buf,
             seed_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             tick: 0,
             agent_count,
@@ -499,14 +514,31 @@ impl CompiledSim for TradeMarketRealState {
         self.gpu.queue.write_buffer(
             &self.mask_cfg_buf, 0, bytemuck::bytes_of(&mask_cfg),
         );
-        let mask_bindings = mask_verb_Buy::MaskVerbBuyBindings {
-            agent_hp: &self.agent_hp_buf,
-            agent_alive: &self.agent_alive_buf,
-            agent_mana: &self.agent_mana_buf,
+        // Shared per-tick context — `hp`, `alive`, `mana` are the
+        // standard SoA columns this fixture owns. `event_ring` is
+        // borrowed immutably; safe here because `step()` doesn't call
+        // `note_emits` on the ring.
+        let agent_buffers = AgentBuffers {
+            hp_buf: Some(&self.agent_hp_buf),
+            alive_buf: Some(&self.agent_alive_buf),
+            mana_buf: Some(&self.agent_mana_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+        let mask_extras = mask_verb_Buy::MaskVerbBuyExtras {
             trade_good_base_price: &self.trade_good_base_price_buf,
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             cfg: &self.mask_cfg_buf,
         };
+        let mask_bindings =
+            mask_verb_Buy::MaskVerbBuyBindings::from_context_with_extras(
+                &ctx, &mask_extras,
+            );
         // PerPair dispatch: (agent, candidate) pairs. Today the mask
         // kernel hardcodes mask_k=1u (TODO task-5.7), so only cand=0
         // is checked. For the trade market this means the mask
@@ -593,15 +625,14 @@ impl CompiledSim for TradeMarketRealState {
         self.gpu.queue.write_buffer(
             &self.scoring_cfg_buf, 0, bytemuck::bytes_of(&scoring_cfg),
         );
-        let scoring_bindings = scoring::ScoringBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp: &self.agent_hp_buf,
-            agent_mana: &self.agent_mana_buf,
+        let scoring_extras = scoring::ScoringExtras {
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
             cfg: &self.scoring_cfg_buf,
         };
+        let scoring_bindings = scoring::ScoringBindings::from_context_with_extras(
+            &ctx, &scoring_extras,
+        );
         dispatch::dispatch_scoring(
             &mut self.cache, &scoring_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
@@ -615,12 +646,13 @@ impl CompiledSim for TradeMarketRealState {
         self.gpu.queue.write_buffer(
             &self.chronicle_buy_cfg_buf, 0, bytemuck::bytes_of(&chronicle_cfg),
         );
-        let chronicle_bindings = physics_verb_chronicle_Buy::PhysicsVerbChronicleBuyBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp: &self.agent_hp_buf,
+        let chronicle_extras = physics_verb_chronicle_Buy::PhysicsVerbChronicleBuyExtras {
             cfg: &self.chronicle_buy_cfg_buf,
         };
+        let chronicle_bindings =
+            physics_verb_chronicle_Buy::PhysicsVerbChronicleBuyBindings::from_context_with_extras(
+                &ctx, &chronicle_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_buy(
             &mut self.cache, &chronicle_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
@@ -636,14 +668,12 @@ impl CompiledSim for TradeMarketRealState {
         self.gpu.queue.write_buffer(
             &self.apply_cfg_buf, 0, bytemuck::bytes_of(&apply_cfg),
         );
-        let apply_bindings = physics_ApplyTrade::PhysicsApplyTradeBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp: &self.agent_hp_buf,
-            agent_alive: &self.agent_alive_buf,
-            agent_mana: &self.agent_mana_buf,
+        let apply_extras = physics_ApplyTrade::PhysicsApplyTradeExtras {
             cfg: &self.apply_cfg_buf,
         };
+        let apply_bindings = physics_ApplyTrade::PhysicsApplyTradeBindings::from_context_with_extras(
+            &ctx, &apply_extras,
+        );
         dispatch::dispatch_physics_applytrade(
             &mut self.cache, &apply_bindings, &self.gpu.device, &mut encoder,
             event_count_estimate,
@@ -657,12 +687,13 @@ impl CompiledSim for TradeMarketRealState {
         self.gpu.queue.write_buffer(
             &self.seed_cfg_buf, 0, bytemuck::bytes_of(&seed_cfg),
         );
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.seed_cfg_buf,
         };
+        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+            &ctx, &seed_extras,
+        );
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache, &seed_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,

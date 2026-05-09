@@ -45,6 +45,8 @@
 //! Observable: with `faith_step = 1.0`, every alive slot's faith
 //! value should equal the tick count (e.g. `100.0` after 100 ticks).
 
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::{AbilityRegistry, PackedAbilityRegistry};
 use engine::sim_trait::CompiledSim;
 use engine::GpuContext;
 use glam::Vec3;
@@ -52,7 +54,7 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -111,6 +113,12 @@ pub struct VerbProbeState {
     seed_cfg_buf: wgpu::Buffer,
     #[allow(dead_code)]
     snapshot_cfg_buf: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
 
@@ -223,6 +231,12 @@ impl VerbProbeState {
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&AbilityRegistry::new()),
+            &gpu,
+            "verb_probe_runtime",
+        );
+
         Self {
             gpu,
             agent_alive_buf,
@@ -238,6 +252,7 @@ impl VerbProbeState {
             chronicle_cfg_buf,
             seed_cfg_buf,
             snapshot_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             tick: 0,
             agent_count,
@@ -286,6 +301,21 @@ impl CompiledSim for VerbProbeState {
             mask_bytes.max(4),
         );
 
+        // Shared per-tick context — `alive` is the only standard SoA
+        // column this fixture owns. `event_ring` is borrowed
+        // immutably; safe here because `step()` doesn't call
+        // `note_emits` on the ring.
+        let agent_buffers = AgentBuffers {
+            alive_buf: Some(&self.agent_alive_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
         // (2) mask_verb_Pray — reads agent_alive, atomicOrs into
         // mask_0_bitmap.
         let mask_cfg = mask_verb_Pray::MaskVerbPrayCfg {
@@ -298,11 +328,14 @@ impl CompiledSim for VerbProbeState {
             0,
             bytemuck::bytes_of(&mask_cfg),
         );
-        let mask_bindings = mask_verb_Pray::MaskVerbPrayBindings {
-            agent_alive: &self.agent_alive_buf,
+        let mask_extras = mask_verb_Pray::MaskVerbPrayExtras {
             mask_0_bitmap: &self.mask_bitmap_buf,
             cfg: &self.mask_cfg_buf,
         };
+        let mask_bindings =
+            mask_verb_Pray::MaskVerbPrayBindings::from_context_with_extras(
+                &ctx, &mask_extras,
+            );
         dispatch::dispatch_mask_verb_pray(
             &mut self.cache,
             &mask_bindings,
@@ -323,13 +356,13 @@ impl CompiledSim for VerbProbeState {
             0,
             bytemuck::bytes_of(&scoring_cfg),
         );
-        let scoring_bindings = scoring::ScoringBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let scoring_extras = scoring::ScoringExtras {
             mask_0_bitmap: &self.mask_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
             cfg: &self.scoring_cfg_buf,
         };
+        let scoring_bindings =
+            scoring::ScoringBindings::from_context_with_extras(&ctx, &scoring_extras);
         dispatch::dispatch_scoring(
             &mut self.cache,
             &scoring_bindings,
@@ -366,12 +399,14 @@ impl CompiledSim for VerbProbeState {
             0,
             bytemuck::bytes_of(&chronicle_cfg),
         );
-        let chronicle_bindings =
-            physics_verb_chronicle_Pray::PhysicsVerbChroniclePrayBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
+        let chronicle_extras =
+            physics_verb_chronicle_Pray::PhysicsVerbChroniclePrayExtras {
                 cfg: &self.chronicle_cfg_buf,
             };
+        let chronicle_bindings =
+            physics_verb_chronicle_Pray::PhysicsVerbChroniclePrayBindings::from_context_with_extras(
+                &ctx, &chronicle_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_pray(
             &mut self.cache,
             &chronicle_bindings,
@@ -392,12 +427,13 @@ impl CompiledSim for VerbProbeState {
             0,
             bytemuck::bytes_of(&seed_cfg),
         );
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.seed_cfg_buf,
         };
+        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+            &ctx, &seed_extras,
+        );
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache,
             &seed_bindings,

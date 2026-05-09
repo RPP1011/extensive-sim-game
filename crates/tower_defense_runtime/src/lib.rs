@@ -54,7 +54,9 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::{AbilityRegistry, PackedAbilityRegistry};
+use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
 
 // ---- Slot layout constants (wired into both DSL semantics and
 //      runtime initialization). The .sim's mana role-bands depend on
@@ -153,6 +155,12 @@ pub struct TowerDefenseState {
     apply_damage_cfg_buf: wgpu::Buffer,
     march_enemies_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
 
@@ -379,6 +387,12 @@ impl TowerDefenseState {
             },
         );
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&AbilityRegistry::new()),
+            &gpu,
+            "tower_defense_runtime",
+        );
+
         Self {
             gpu,
             agent_pos_buf,
@@ -401,6 +415,7 @@ impl TowerDefenseState {
             apply_damage_cfg_buf,
             march_enemies_cfg_buf,
             seed_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             base_hp: BASE_HP,
             last_base_damage_total: 0.0,
@@ -621,13 +636,31 @@ impl CompiledSim for TowerDefenseState {
         self.gpu.queue.write_buffer(
             &self.mask_cfg_buf, 0, bytemuck::bytes_of(&mask_cfg),
         );
-        let mask_bindings = mask_verb_Shoot::MaskVerbShootBindings {
-            agent_pos: &self.agent_pos_buf,
-            agent_alive: &self.agent_alive_buf,
-            agent_mana: &self.agent_mana_buf,
+        // Shared per-tick context — `pos`, `alive`, `hp`, `mana` are
+        // the standard SoA columns this fixture owns. `event_ring` is
+        // borrowed immutably; safe here because `step()` doesn't call
+        // `note_emits` on the ring.
+        let agent_buffers = AgentBuffers {
+            pos_buf: Some(&self.agent_pos_buf),
+            alive_buf: Some(&self.agent_alive_buf),
+            hp_buf: Some(&self.agent_hp_buf),
+            mana_buf: Some(&self.agent_mana_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+        let mask_extras = mask_verb_Shoot::MaskVerbShootExtras {
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             cfg: &self.mask_cfg_buf,
         };
+        let mask_bindings =
+            mask_verb_Shoot::MaskVerbShootBindings::from_context_with_extras(
+                &ctx, &mask_extras,
+            );
         // GAP WORKAROUND (compiler kernel.rs:3243): the PerPair mask
         // body emits `let mask_0_k = cfg.agent_cap;` (was `1u`), so
         // each thread visits one (agent, candidate) pair. We must
@@ -655,14 +688,14 @@ impl CompiledSim for TowerDefenseState {
         self.gpu.queue.write_buffer(
             &self.scoring_cfg_buf, 0, bytemuck::bytes_of(&scoring_cfg),
         );
-        let scoring_bindings = scoring::ScoringBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_pos: &self.agent_pos_buf,
+        let scoring_extras = scoring::ScoringExtras {
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
             cfg: &self.scoring_cfg_buf,
         };
+        let scoring_bindings = scoring::ScoringBindings::from_context_with_extras(
+            &ctx, &scoring_extras,
+        );
         dispatch::dispatch_scoring(
             &mut self.cache, &scoring_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
@@ -675,11 +708,13 @@ impl CompiledSim for TowerDefenseState {
         self.gpu.queue.write_buffer(
             &self.chronicle_shoot_cfg_buf, 0, bytemuck::bytes_of(&shoot_cfg),
         );
-        let shoot_bindings = physics_verb_chronicle_Shoot::PhysicsVerbChronicleShootBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let shoot_extras = physics_verb_chronicle_Shoot::PhysicsVerbChronicleShootExtras {
             cfg: &self.chronicle_shoot_cfg_buf,
         };
+        let shoot_bindings =
+            physics_verb_chronicle_Shoot::PhysicsVerbChronicleShootBindings::from_context_with_extras(
+                &ctx, &shoot_extras,
+            );
         dispatch::dispatch_physics_verb_chronicle_shoot(
             &mut self.cache, &shoot_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
@@ -693,14 +728,13 @@ impl CompiledSim for TowerDefenseState {
         self.gpu.queue.write_buffer(
             &self.march_enemies_cfg_buf, 0, bytemuck::bytes_of(&march_cfg),
         );
-        let march_bindings = physics_MarchEnemies::PhysicsMarchEnemiesBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_pos: &self.agent_pos_buf,
-            agent_alive: &self.agent_alive_buf,
-            agent_mana: &self.agent_mana_buf,
+        let march_extras = physics_MarchEnemies::PhysicsMarchEnemiesExtras {
             cfg: &self.march_enemies_cfg_buf,
         };
+        let march_bindings =
+            physics_MarchEnemies::PhysicsMarchEnemiesBindings::from_context_with_extras(
+                &ctx, &march_extras,
+            );
         dispatch::dispatch_physics_marchenemies(
             &mut self.cache, &march_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,
@@ -714,13 +748,12 @@ impl CompiledSim for TowerDefenseState {
         self.gpu.queue.write_buffer(
             &self.apply_damage_cfg_buf, 0, bytemuck::bytes_of(&apply_cfg),
         );
-        let apply_bindings = physics_ApplyDamage::PhysicsApplyDamageBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            agent_hp: &self.agent_hp_buf,
-            agent_alive: &self.agent_alive_buf,
+        let apply_extras = physics_ApplyDamage::PhysicsApplyDamageExtras {
             cfg: &self.apply_damage_cfg_buf,
         };
+        let apply_bindings = physics_ApplyDamage::PhysicsApplyDamageBindings::from_context_with_extras(
+            &ctx, &apply_extras,
+        );
         dispatch::dispatch_physics_applydamage(
             &mut self.cache, &apply_bindings, &self.gpu.device, &mut encoder,
             event_count_estimate,
@@ -733,12 +766,13 @@ impl CompiledSim for TowerDefenseState {
         self.gpu.queue.write_buffer(
             &self.seed_cfg_buf, 0, bytemuck::bytes_of(&seed_cfg),
         );
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
             indirect_args_0: self.event_ring.indirect_args_0(),
             cfg: &self.seed_cfg_buf,
         };
+        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
+            &ctx, &seed_extras,
+        );
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache, &seed_bindings, &self.gpu.device, &mut encoder,
             self.agent_count,

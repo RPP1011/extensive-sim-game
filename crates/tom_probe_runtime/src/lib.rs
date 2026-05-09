@@ -59,6 +59,8 @@
 //! every alive Knower; every off-diagonal `beliefs_flags(i, j != i)
 //! = 0u`.
 
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::{AbilityRegistry, PackedAbilityRegistry};
 use engine::sim_trait::CompiledSim;
 use engine::GpuContext;
 use glam::Vec3;
@@ -66,7 +68,10 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{bgl_storage, bgl_uniform, EventRing, EVENT_STRIDE_U32};
+use engine::gpu::{
+    bgl_storage, bgl_uniform, AgentBuffers, EventRing, KernelBindingsContext,
+    EVENT_STRIDE_U32,
+};
 
 /// Chronicle record stride in u32 words. Matches
 /// `engine::gpu::EVENT_STRIDE_U32` and
@@ -246,6 +251,12 @@ pub struct TomProbeState {
     /// consumer (`physics_ApplyDisguise`). Reads `cfg.tick` so the
     /// rule's `world.tick + duration` math lands at the right epoch.
     apply_disguise_cfg_buf: wgpu::Buffer,
+
+    /// Empty placeholder for the shared
+    /// [`KernelBindingsContext::registry`] field — this fixture has no
+    /// abilities, but the compiler-emitted constructor signature requires
+    /// the context to expose one.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
 
@@ -453,6 +464,12 @@ impl TomProbeState {
             "tom_probe_runtime::physics_ApplyDisguise_cfg",
         );
 
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &PackedAbilityRegistry::pack(&AbilityRegistry::new()),
+            &gpu,
+            "tom_probe_runtime",
+        );
+
         Self {
             gpu,
             agent_alive_buf,
@@ -505,6 +522,7 @@ impl TomProbeState {
             apply_decoy_cfg_buf,
             apply_erase_belief_cfg_buf,
             apply_disguise_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             decay_gpu,
             tick: 0,
@@ -905,20 +923,31 @@ impl TomProbeState {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("tom_probe_runtime::observe::encoder"),
                 });
+        let agent_buffers = AgentBuffers {
+            pos_buf: Some(&self.agent_pos_buf),
+            alive_buf: Some(&self.agent_alive_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+        let extras = physics_ApplyObserveBeliefUpdate::PhysicsApplyObserveBeliefUpdateExtras {
+            agent_disguise_expires_at_tick: &self.agent_disguise_expires_at_tick_buf,
+            agent_disguise_fake_type: &self.agent_disguise_fake_type_buf,
+            agent_creature_type: &self.agent_creature_type_buf,
+            beliefs_pos: &self.beliefs_pos_primary,
+            beliefs_type: &self.beliefs_type_primary,
+            beliefs_tick: &self.beliefs_tick_primary,
+            beliefs_confidence: &self.beliefs_confidence_primary,
+            cfg: &self.apply_observe_cfg_buf,
+        };
         let bindings =
-            physics_ApplyObserveBeliefUpdate::PhysicsApplyObserveBeliefUpdateBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                agent_pos: &self.agent_pos_buf,
-                agent_creature_type: &self.agent_creature_type_buf,
-                agent_disguise_expires_at_tick: &self.agent_disguise_expires_at_tick_buf,
-                agent_disguise_fake_type: &self.agent_disguise_fake_type_buf,
-                beliefs_pos: &self.beliefs_pos_primary,
-                beliefs_type: &self.beliefs_type_primary,
-                beliefs_tick: &self.beliefs_tick_primary,
-                beliefs_confidence: &self.beliefs_confidence_primary,
-                cfg: &self.apply_observe_cfg_buf,
-            };
+            physics_ApplyObserveBeliefUpdate::PhysicsApplyObserveBeliefUpdateBindings::from_context_with_extras(
+                &ctx, &extras,
+            );
         dispatch::dispatch_physics_applyobservebeliefupdate(
             &mut self.cache,
             &bindings,
@@ -979,9 +1008,17 @@ impl TomProbeState {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("tom_probe_runtime::scry::encoder"),
                 });
-        let bindings = physics_ApplyScryBeliefUpdate::PhysicsApplyScryBeliefUpdateBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let agent_buffers = AgentBuffers {
+            alive_buf: Some(&self.agent_alive_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+        let extras = physics_ApplyScryBeliefUpdate::PhysicsApplyScryBeliefUpdateExtras {
             beliefs_pos: &self.beliefs_pos_primary,
             beliefs_type: &self.beliefs_type_primary,
             beliefs_tick: &self.beliefs_tick_primary,
@@ -990,6 +1027,10 @@ impl TomProbeState {
             beliefs_flags: &self.beliefs_flags_primary,
             cfg: &self.apply_scry_cfg_buf,
         };
+        let bindings =
+            physics_ApplyScryBeliefUpdate::PhysicsApplyScryBeliefUpdateBindings::from_context_with_extras(
+                &ctx, &extras,
+            );
         dispatch::dispatch_physics_applyscrybeliefupdate(
             &mut self.cache,
             &bindings,
@@ -1057,9 +1098,17 @@ impl TomProbeState {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("tom_probe_runtime::reveal::encoder"),
                 });
-        let bindings = physics_ApplyRevealBeliefUpdate::PhysicsApplyRevealBeliefUpdateBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let agent_buffers = AgentBuffers {
+            alive_buf: Some(&self.agent_alive_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+        let extras = physics_ApplyRevealBeliefUpdate::PhysicsApplyRevealBeliefUpdateExtras {
             beliefs_pos: &self.beliefs_pos_primary,
             beliefs_type: &self.beliefs_type_primary,
             beliefs_tick: &self.beliefs_tick_primary,
@@ -1068,6 +1117,10 @@ impl TomProbeState {
             beliefs_flags: &self.beliefs_flags_primary,
             cfg: &self.apply_reveal_cfg_buf,
         };
+        let bindings =
+            physics_ApplyRevealBeliefUpdate::PhysicsApplyRevealBeliefUpdateBindings::from_context_with_extras(
+                &ctx, &extras,
+            );
         dispatch::dispatch_physics_applyrevealbeliefupdate(
             &mut self.cache,
             &bindings,
@@ -1136,15 +1189,27 @@ impl TomProbeState {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("tom_probe_runtime::decoy::encoder"),
                 });
-        let bindings = physics_ApplyDecoyBeliefUpdate::PhysicsApplyDecoyBeliefUpdateBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let agent_buffers = AgentBuffers {
+            alive_buf: Some(&self.agent_alive_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+        let extras = physics_ApplyDecoyBeliefUpdate::PhysicsApplyDecoyBeliefUpdateExtras {
             beliefs_pos: &self.beliefs_pos_primary,
             beliefs_type: &self.beliefs_type_primary,
             beliefs_tick: &self.beliefs_tick_primary,
             beliefs_confidence: &self.beliefs_confidence_primary,
             cfg: &self.apply_decoy_cfg_buf,
         };
+        let bindings =
+            physics_ApplyDecoyBeliefUpdate::PhysicsApplyDecoyBeliefUpdateBindings::from_context_with_extras(
+                &ctx, &extras,
+            );
         dispatch::dispatch_physics_applydecoybeliefupdate(
             &mut self.cache,
             &bindings,
@@ -1208,9 +1273,17 @@ impl TomProbeState {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("tom_probe_runtime::erase_belief::encoder"),
                 });
-        let bindings = physics_ApplyEraseBeliefUpdate_and_ApplyDisguise::PhysicsApplyEraseBeliefUpdateAndApplyDisguiseBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let agent_buffers = AgentBuffers {
+            alive_buf: Some(&self.agent_alive_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+        let extras = physics_ApplyEraseBeliefUpdate_and_ApplyDisguise::PhysicsApplyEraseBeliefUpdateAndApplyDisguiseExtras {
             agent_disguise_expires_at_tick: &self.agent_disguise_expires_at_tick_buf,
             agent_disguise_fake_type: &self.agent_disguise_fake_type_buf,
             beliefs_pos: &self.beliefs_pos_primary,
@@ -1221,6 +1294,9 @@ impl TomProbeState {
             beliefs_flags: &self.beliefs_flags_primary,
             cfg: &self.apply_erase_belief_cfg_buf,
         };
+        let bindings = physics_ApplyEraseBeliefUpdate_and_ApplyDisguise::PhysicsApplyEraseBeliefUpdateAndApplyDisguiseBindings::from_context_with_extras(
+            &ctx, &extras,
+        );
         dispatch::dispatch_physics_applyerasebeliefupdate_and_applydisguise(
             &mut self.cache,
             &bindings,
@@ -1284,9 +1360,17 @@ impl TomProbeState {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("tom_probe_runtime::disguise::encoder"),
                 });
-        let bindings = physics_ApplyEraseBeliefUpdate_and_ApplyDisguise::PhysicsApplyEraseBeliefUpdateAndApplyDisguiseBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
+        let agent_buffers = AgentBuffers {
+            alive_buf: Some(&self.agent_alive_buf),
+            ..Default::default()
+        };
+        let ctx = KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+        let extras = physics_ApplyEraseBeliefUpdate_and_ApplyDisguise::PhysicsApplyEraseBeliefUpdateAndApplyDisguiseExtras {
             agent_disguise_expires_at_tick: &self.agent_disguise_expires_at_tick_buf,
             agent_disguise_fake_type: &self.agent_disguise_fake_type_buf,
             beliefs_pos: &self.beliefs_pos_primary,
@@ -1297,6 +1381,9 @@ impl TomProbeState {
             beliefs_flags: &self.beliefs_flags_primary,
             cfg: &self.apply_disguise_cfg_buf,
         };
+        let bindings = physics_ApplyEraseBeliefUpdate_and_ApplyDisguise::PhysicsApplyEraseBeliefUpdateAndApplyDisguiseBindings::from_context_with_extras(
+            &ctx, &extras,
+        );
         dispatch::dispatch_physics_applyerasebeliefupdate_and_applydisguise(
             &mut self.cache,
             &bindings,
@@ -1480,20 +1567,35 @@ impl CompiledSim for TomProbeState {
             0,
             bytemuck::bytes_of(&physics_cfg),
         );
-        let physics_bindings =
-            physics_WhatIBelieve::PhysicsWhatIBelieveBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                agent_alive: &self.agent_alive_buf,
+        // The physics_bindings/`ctx` are constructed in a fresh scope
+        // so `ctx`'s immutable borrow of `self.event_ring` ends before
+        // `self.event_ring.note_emits()` (mutable borrow) below.
+        {
+            let agent_buffers = AgentBuffers {
+                alive_buf: Some(&self.agent_alive_buf),
+                ..Default::default()
+            };
+            let ctx = KernelBindingsContext {
+                state: &agent_buffers,
+                event_ring: &self.event_ring,
+                registry: &self.registry_gpu,
+                voxel_grid: None,
+            };
+            let physics_extras = physics_WhatIBelieve::PhysicsWhatIBelieveExtras {
                 cfg: &self.physics_cfg_buf,
             };
-        dispatch::dispatch_physics_whatibelieve(
-            &mut self.cache,
-            &physics_bindings,
-            &self.gpu.device,
-            &mut encoder,
-            self.agent_count,
-        );
+            let physics_bindings =
+                physics_WhatIBelieve::PhysicsWhatIBelieveBindings::from_context_with_extras(
+                    &ctx, &physics_extras,
+                );
+            dispatch::dispatch_physics_whatibelieve(
+                &mut self.cache,
+                &physics_bindings,
+                &self.gpu.device,
+                &mut encoder,
+                self.agent_count,
+            );
+        }
         self.event_ring.note_emits(self.agent_count);
 
         // (3) fold_beliefs_flags — folds BeliefAcquired into flags.
