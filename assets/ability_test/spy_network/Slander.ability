@@ -1,15 +1,22 @@
-// spy_network acceptance: noble-on-noble suspicion bump. The verb
-// body in `assets/sim/spy_network.sim` emits a custom Slandered event
-// drained by an ApplySlander physics rule that bumps the target's
-// `mana` SoA column (re-purposed as the per-agent suspicion counter).
+// spy_network acceptance: noble-on-noble suspicion bump. The verb body
+// in `assets/sim/spy_network.sim` dispatches via `apply_ability 2 by
+// self target target`; the dispatcher walks this program's effects and
+// writes an EffectPlantBeliefApplied chronicle record (kind=63) per
+// cast. A `physics @phase(post)` consumer in spy_network.sim drains
+// that record and bumps the victim's `mana` SoA column (re-purposed as
+// the per-agent suspicion counter).
 //
-// `modify_standing -10` is the closest existing surface vocabulary
-// for "lower target's social standing". It lowers cleanly via
-// `dsl_compiler::ability_lower::lower_effect_stmt`'s "modify_standing"
-// arm to `EffectOp::ModifyStanding { delta: -10 }`. Like the other
-// .ability files in this fixture, the lowered EffectOp is metadata —
-// the actual chronicle write happens in the .sim verb body, not via
-// apply_ability dispatch.
+// `plant_belief 0 0` lowers via the `plant_belief` arm of
+// `dsl_compiler::ability_lower::lower_effect_stmt` to
+// `EffectOp::PlantBelief { subject_idx: 0, fact_bit: 0 }`. The literal
+// subject_idx and fact_bit are token-data placeholders — spy_network's
+// suspicion gate fires on cast count (consumer counts EffectPlantBeliefApplied
+// records targeting each victim), not on the specific (subject, bit)
+// the chronicle carries. The bit-flag primitive is the right shape:
+// the engine's PlantBelief variant takes literal subject_idx + fact_bit
+// (compile-time fields baked into the AbilityProgram), and the
+// dispatcher records the cast's `target` as the chronicle's
+// `target_slot` — that's the victim the consumer increments.
 
 ability Slander {
     target: enemy
@@ -17,5 +24,5 @@ ability Slander {
     cooldown: 1s
     hint: utility
 
-    modify_standing -10 [UTILITY: 100]
+    plant_belief 0 0 [UTILITY: 100]
 }

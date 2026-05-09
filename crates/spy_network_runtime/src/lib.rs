@@ -3,27 +3,33 @@
 //!
 //! ## Per-tick chain
 //!
-//! Mirrors `duel_1v1_runtime`'s shape but at N=10 with three verbs:
+//! Mirrors `duel_abilities_runtime`'s shape at N=10 with three verbs.
+//! Post-rewrite (2026-05-07) every verb body dispatches via
+//! `apply_ability N by self target X` instead of inlining `emit
+//! ChronicleEvent { ... }`, so the per-tick chain runs the full
+//! ability-registry-driven dispatcher → consumer pipeline:
 //!
 //!   1. Per-tick clears (event_tail, ring headers, mask bitmaps,
 //!      scoring_output)
-//!   2. fused_mask_verb_Disguise — PerPair, writes mask_0 (Disguise,
-//!      gate `creature_type==spy`), mask_1 (Slander, gate
-//!      `creature_type==noble && target.creature_type==noble`),
-//!      mask_2 (Strike, same noble-on-noble gate + suspicion threshold)
-//!   3. scoring — PerAgent argmax over 3 rows; emits ActionSelected
-//!   4. physics_verb_chronicle_Disguise — gates action_id==0u, emits
-//!      EffectDisguiseApplied (engine kind=67)
-//!   5. physics_verb_chronicle_Slander — gates action_id==1u, emits
-//!      Slandered{source, target, amount}
-//!   6. physics_verb_chronicle_Strike — gates action_id==2u, emits
-//!      Damaged{source, target, amount}
-//!   7. physics_ApplySlander_and_ApplyDamage_and_ApplyDisguise — fused
-//!      PerEvent kernel; ApplySlander adds 50.0 to target's mana,
-//!      ApplyDamage subtracts hp + flips alive on hp<=0, ApplyDisguise
-//!      writes the per-agent disguise SoA
-//!   8. seed_indirect_0
-//!   9. fold_damage_dealt
+//!   2. fused_mask_verb_Disguise — PerPair, writes mask_0 (Disguise),
+//!      mask_1 (Slander), mask_2 (Strike).
+//!   3. scoring — PerAgent argmax over 3 rows; emits ActionSelected.
+//!   4. physics_verb_chronicle_Disguise — gates action_id==0u, walks
+//!      Disguise's program from the ability registry, writes
+//!      EffectDisguiseApplied chronicle records (kind=67).
+//!   5. physics_verb_chronicle_Slander — gates action_id==1u, walks
+//!      Slander's program, writes EffectPlantBeliefApplied (kind=63).
+//!   6. physics_verb_chronicle_Strike — gates action_id==2u, walks
+//!      Strike's program, writes EffectDamageApplied (kind=26).
+//!   7. physics_ApplyDamageFromChronicle_and_ApplySlanderFromChronicle
+//!      — consumes EffectDamageApplied + EffectPlantBeliefApplied;
+//!      re-emits Damaged for kind=26 and bumps target's mana for
+//!      kind=63.
+//!   8. physics_ApplyDamage_and_ApplyDisguiseFromChronicle — consumes
+//!      Damaged (drains hp + emits Defeated on hp<=0) and
+//!      EffectDisguiseApplied (writes per-agent disguise SoA).
+//!   9. seed_indirect_0
+//!  10. fold_damage_dealt
 //!
 //! ## Faction layout (10 agents)
 //!
@@ -35,18 +41,29 @@
 //!
 //! `viz_tests::noble_dies_after_slander_cascade` — at least one noble
 //! flips alive=0 within 200 ticks. Slander piles on every 10 ticks
-//! (each ordered noble pair); strike fires after 2 slanders against
+//! (each ordered noble pair); Strike fires after 2 slanders against
 //! the same target accumulate ≥100.0 mana (= suspicion).
 //!
 //! ## `mana` re-purpose
 //!
 //! The per-agent f32 `mana` SoA column is re-purposed as the slander
-//! counter. Init = 0; ApplySlander adds 50 per cast; Strike's `when`
-//! clause gates on `target.mana >= 100`. No verb in this fixture uses
-//! mana for its original combat-resource role.
+//! counter. Init = 0; ApplySlanderFromChronicle adds 50 per cast;
+//! Strike's `when` clause gates on `target.mana >= 100`. No verb in
+//! this fixture uses mana for its original combat-resource role.
+//!
+//! ## AbilityRegistry
+//!
+//! The runtime builds + uploads the spy_network ability registry once
+//! at construction. The chronicle kernels read `effect_kinds` /
+//! `effect_payload_a` / `effect_payload_b` etc. to walk each program's
+//! effects when their gated action fires. Registry contents are pinned
+//! by `binding_check::assert_ability_registry_matches_sim_constants`
+//! — drift surfaces as a panic before any GPU work runs.
 
 use engine::sim_trait::{AgentSnapshot, CompiledSim, VizGlyph};
 use engine::GpuContext;
+use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
+use engine::ability::PackedAbilityRegistry;
 use glam::Vec3;
 use wgpu::util::DeviceExt;
 
@@ -78,19 +95,30 @@ pub struct SpyNetworkState {
     agent_hp_buf: wgpu::Buffer,
     agent_alive_buf: wgpu::Buffer,
     /// Re-purposed as the per-agent slander counter. Init=0; bumped by
-    /// ApplySlander; read by Strike's gate (`target.mana >= 100.0`).
+    /// ApplySlanderFromChronicle; read by Strike's gate
+    /// (`target.mana >= 100.0`) and Slander's per-candidate score.
     agent_mana_buf: wgpu::Buffer,
     /// Faction discriminant (1=spy, 2=noble, 3=commoner). Bound by the
-    /// fused mask kernel; the verb gates compare against the
-    /// config.combat.type_* literals.
+    /// fused mask kernel and scoring; the verb gates compare against
+    /// the config.combat.type_* literals.
     agent_creature_type_buf: wgpu::Buffer,
-    /// Wave 3 ToM Phase 5 — per-agent disguise SoA. Init=0; ApplyDisguise
+    /// Per-agent disguise SoA. Init=0; ApplyDisguiseFromChronicle
     /// writes both columns from chronicle records produced by Disguise's
-    /// emit. Subsequent observers (or runtime readback) consult these
-    /// columns to substitute fake_type for true creature_type while
-    /// `disguise_expires_at_tick > world.tick`.
+    /// dispatcher arm. Subsequent observers (or runtime readback)
+    /// consult these columns to substitute fake_type for true
+    /// creature_type while `disguise_expires_at_tick > world.tick`.
     agent_disguise_expires_at_tick_buf: wgpu::Buffer,
     agent_disguise_fake_type_buf: wgpu::Buffer,
+
+    // -- Stat columns the chronicle dispatchers + scoring kernel both
+    // bind. Init zeros; spy_network's verbs don't scale on any of
+    // these (no `+ N% stat` modifiers in the .ability files), but the
+    // BGL contract demands the bindings exist.
+    agent_max_hp_buf: wgpu::Buffer,
+    agent_attack_damage_buf: wgpu::Buffer,
+    agent_armor_buf: wgpu::Buffer,
+    agent_magic_resist_buf: wgpu::Buffer,
+    agent_move_speed_buf: wgpu::Buffer,
 
     // -- Mask bitmaps (Disguise=0, Slander=1, Strike=2) --
     mask_0_bitmap_buf: wgpu::Buffer,
@@ -114,8 +142,17 @@ pub struct SpyNetworkState {
     chronicle_disguise_cfg_buf: wgpu::Buffer,
     chronicle_slander_cfg_buf: wgpu::Buffer,
     chronicle_strike_cfg_buf: wgpu::Buffer,
-    apply_cfg_buf: wgpu::Buffer,
+    apply_dmgchron_slander_cfg_buf: wgpu::Buffer,
+    apply_dmg_disguise_cfg_buf: wgpu::Buffer,
     seed_cfg_buf: wgpu::Buffer,
+
+    /// Packed AbilityRegistry uploaded to the GPU. The chronicle
+    /// dispatcher kernels (Disguise / Slander / Strike) bind
+    /// `effect_kinds` / `effect_payload_a` / `effect_payload_b` etc. to
+    /// walk each program's effects. Built once at construction from the
+    /// `.ability` corpus via `binding_check::build_spy_network_registry`,
+    /// then uploaded to GPU storage buffers.
+    registry_gpu: PackedAbilityRegistryGpu,
 
     cache: dispatch::KernelCache,
 
@@ -138,11 +175,23 @@ impl SpyNetworkState {
 
         let gpu = GpuContext::new_blocking().expect("init wgpu adapter + device");
 
+        // Build the AbilityRegistry from the .ability corpus and upload
+        // it to GPU storage buffers. The chronicle dispatcher kernels
+        // bind the effect_kinds + payload columns to walk each program
+        // when its gated action_id fires.
+        let built_registry = binding_check::build_spy_network_registry();
+        let packed = PackedAbilityRegistry::pack(&built_registry.registry);
+        let registry_gpu = PackedAbilityRegistryGpu::upload(
+            &packed,
+            &gpu,
+            "spy_network_runtime",
+        );
+
         // Agent SoA — HP=50.0 (lower than 1v1's 100 so 2 strikes finish a
         // noble), alive=1, mana=0 (= zero suspicion at start). Faction
         // discriminants split by slot index.
         let n = agent_count as usize;
-        let mut hp_init = vec![50.0_f32; n];
+        let hp_init = vec![50.0_f32; n];
         let alive_init = vec![1u32; n];
         let mana_init = vec![0.0_f32; n];
         let mut creature_init = vec![0u32; n];
@@ -154,10 +203,6 @@ impl SpyNetworkState {
                 _ => CREATURE_TYPE_COMMONER,
             };
         }
-        // Quick HP guard: noble HP needs to be drainable. Nobles share
-        // hp_init=50 with everyone else; spies and commoners are not
-        // targeted so their HP never drops.
-        let _ = &mut hp_init;
 
         let agent_hp_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("spy_network_runtime::agent_hp"),
@@ -189,9 +234,9 @@ impl SpyNetworkState {
                     | wgpu::BufferUsages::COPY_SRC,
             });
 
-        // Disguise SoA — init=0 for both columns. ApplyDisguise writes
-        // `expires_at_tick = world.tick + duration`, `fake_type` from
-        // the chronicle payload's low byte.
+        // Disguise SoA — init=0 for both columns. ApplyDisguiseFromChronicle
+        // writes `expires_at_tick = world.tick + duration`, `fake_type`
+        // from the chronicle payload's low byte.
         let zero_u32 = vec![0u32; n];
         let agent_disguise_expires_at_tick_buf =
             gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -209,6 +254,32 @@ impl SpyNetworkState {
                     | wgpu::BufferUsages::COPY_DST
                     | wgpu::BufferUsages::COPY_SRC,
             });
+
+        // Stat columns the chronicle dispatchers + scoring kernel both
+        // bind. spy_network's verbs don't scale on any of these (no
+        // `+ N% stat` in the .ability files); init zero. The mock_max_hp
+        // matters slightly for downstream eval predicates that may peek
+        // at it — set to the same 50.0 the actual hp seeds, just so
+        // any %max_hp-style read is sensible if a future verb adds one.
+        let max_hp_init = vec![50.0_f32; n];
+        let agent_max_hp_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("spy_network_runtime::agent_max_hp"),
+            contents: bytemuck::cast_slice(&max_hp_init),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+        let zeros_f32 = vec![0.0_f32; n];
+        let mk_stat = |label: &'static str| -> wgpu::Buffer {
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: bytemuck::cast_slice(&zeros_f32),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            })
+        };
+        let agent_attack_damage_buf =
+            mk_stat("spy_network_runtime::agent_attack_damage");
+        let agent_armor_buf = mk_stat("spy_network_runtime::agent_armor");
+        let agent_magic_resist_buf = mk_stat("spy_network_runtime::agent_magic_resist");
+        let agent_move_speed_buf = mk_stat("spy_network_runtime::agent_move_speed");
 
         // Three mask bitmaps — one per verb, cleared each tick.
         let mask_bitmap_words = (agent_count + 31) / 32;
@@ -324,17 +395,32 @@ impl SpyNetworkState {
                 contents: bytemuck::bytes_of(&chronicle_strike_cfg_init),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
-        let apply_cfg_init = physics_ApplySlander_and_ApplyDamage_and_ApplyDisguise::PhysicsApplySlanderAndApplyDamageAndApplyDisguiseCfg {
-            event_count: 0,
-            tick: 0,
-            seed: 0,
-            agent_cap: 0,
-        };
-        let apply_cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("spy_network_runtime::apply_cfg"),
-            contents: bytemuck::bytes_of(&apply_cfg_init),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let apply_dmgchron_slander_cfg_init =
+            physics_ApplyDamageFromChronicle_and_ApplySlanderFromChronicle::PhysicsApplyDamageFromChronicleAndApplySlanderFromChronicleCfg {
+                event_count: 0,
+                tick: 0,
+                seed: 0,
+                agent_cap: 0,
+            };
+        let apply_dmgchron_slander_cfg_buf =
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("spy_network_runtime::apply_dmgchron_slander_cfg"),
+                contents: bytemuck::bytes_of(&apply_dmgchron_slander_cfg_init),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+        let apply_dmg_disguise_cfg_init =
+            physics_ApplyDamage_and_ApplyDisguiseFromChronicle::PhysicsApplyDamageAndApplyDisguiseFromChronicleCfg {
+                event_count: 0,
+                tick: 0,
+                seed: 0,
+                agent_cap: 0,
+            };
+        let apply_dmg_disguise_cfg_buf =
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("spy_network_runtime::apply_dmg_disguise_cfg"),
+                contents: bytemuck::bytes_of(&apply_dmg_disguise_cfg_init),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
         let seed_cfg_init = seed_indirect_0::SeedIndirect0Cfg {
             agent_cap: agent_count,
             tick: 0,
@@ -367,6 +453,11 @@ impl SpyNetworkState {
             agent_creature_type_buf,
             agent_disguise_expires_at_tick_buf,
             agent_disguise_fake_type_buf,
+            agent_max_hp_buf,
+            agent_attack_damage_buf,
+            agent_armor_buf,
+            agent_magic_resist_buf,
+            agent_move_speed_buf,
             mask_0_bitmap_buf,
             mask_1_bitmap_buf,
             mask_2_bitmap_buf,
@@ -382,8 +473,10 @@ impl SpyNetworkState {
             chronicle_disguise_cfg_buf,
             chronicle_slander_cfg_buf,
             chronicle_strike_cfg_buf,
-            apply_cfg_buf,
+            apply_dmgchron_slander_cfg_buf,
+            apply_dmg_disguise_cfg_buf,
             seed_cfg_buf,
+            registry_gpu,
             cache: dispatch::KernelCache::default(),
             tick: 0,
             agent_count,
@@ -553,7 +646,10 @@ impl CompiledSim for SpyNetworkState {
             self.agent_count * self.agent_count,
         );
 
-        // (3) Scoring — argmax over 3 rows.
+        // (3) Scoring — argmax over 3 rows. Binds the full agent SoA +
+        // ability_registry when_pred_* columns for the predicate-aware
+        // gating path (the chronicle dispatcher and scoring share these
+        // bindings — see `cg::lower::driver::wire_scoring_predicate_reads`).
         let scoring_cfg = scoring::ScoringCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
@@ -568,12 +664,22 @@ impl CompiledSim for SpyNetworkState {
         let scoring_bindings = scoring::ScoringBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
+            agent_hp: &self.agent_hp_buf,
+            agent_max_hp: &self.agent_max_hp_buf,
+            agent_move_speed: &self.agent_move_speed_buf,
+            agent_armor: &self.agent_armor_buf,
+            agent_magic_resist: &self.agent_magic_resist_buf,
+            agent_attack_damage: &self.agent_attack_damage_buf,
             agent_mana: &self.agent_mana_buf,
             agent_creature_type: &self.agent_creature_type_buf,
             mask_0_bitmap: &self.mask_0_bitmap_buf,
             mask_1_bitmap: &self.mask_1_bitmap_buf,
             mask_2_bitmap: &self.mask_2_bitmap_buf,
             scoring_output: &self.scoring_output_buf,
+            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             cfg: &self.scoring_cfg_buf,
         };
         dispatch::dispatch_scoring(
@@ -584,8 +690,9 @@ impl CompiledSim for SpyNetworkState {
             self.agent_count,
         );
 
-        // (4) Disguise chronicle — gates action_id==0u, emits
-        // EffectDisguiseApplied.
+        // (4) Disguise chronicle — gates action_id==0u; walks Disguise's
+        // program from the ability registry; emits EffectDisguiseApplied
+        // (kind=67).
         let disguise_cfg =
             physics_verb_chronicle_Disguise::PhysicsVerbChronicleDisguiseCfg {
                 event_count: self.agent_count,
@@ -602,6 +709,26 @@ impl CompiledSim for SpyNetworkState {
             physics_verb_chronicle_Disguise::PhysicsVerbChronicleDisguiseBindings {
                 event_ring: self.event_ring.ring(),
                 event_tail: self.event_ring.tail(),
+                agent_hp: &self.agent_hp_buf,
+                agent_max_hp: &self.agent_max_hp_buf,
+                agent_move_speed: &self.agent_move_speed_buf,
+                agent_armor: &self.agent_armor_buf,
+                agent_magic_resist: &self.agent_magic_resist_buf,
+                agent_attack_damage: &self.agent_attack_damage_buf,
+                agent_mana: &self.agent_mana_buf,
+                ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+                ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+                ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+                ability_registry_chances: &self.registry_gpu.chances,
+                ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+                ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
+                ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+                ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+                ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+                ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
+                ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
+                ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
+                ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
                 cfg: &self.chronicle_disguise_cfg_buf,
             };
         dispatch::dispatch_physics_verb_chronicle_disguise(
@@ -612,7 +739,8 @@ impl CompiledSim for SpyNetworkState {
             self.agent_count,
         );
 
-        // (5) Slander chronicle — gates action_id==1u, emits Slandered.
+        // (5) Slander chronicle — gates action_id==1u; walks Slander's
+        // program; emits EffectPlantBeliefApplied (kind=63).
         let slander_cfg = physics_verb_chronicle_Slander::PhysicsVerbChronicleSlanderCfg {
             event_count: self.agent_count,
             tick: self.tick as u32,
@@ -627,6 +755,26 @@ impl CompiledSim for SpyNetworkState {
         let slander_bindings = physics_verb_chronicle_Slander::PhysicsVerbChronicleSlanderBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
+            agent_hp: &self.agent_hp_buf,
+            agent_max_hp: &self.agent_max_hp_buf,
+            agent_move_speed: &self.agent_move_speed_buf,
+            agent_armor: &self.agent_armor_buf,
+            agent_magic_resist: &self.agent_magic_resist_buf,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_mana: &self.agent_mana_buf,
+            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+            ability_registry_chances: &self.registry_gpu.chances,
+            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
+            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             cfg: &self.chronicle_slander_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_slander(
@@ -637,7 +785,8 @@ impl CompiledSim for SpyNetworkState {
             self.agent_count,
         );
 
-        // (6) Strike chronicle — gates action_id==2u, emits Damaged.
+        // (6) Strike chronicle — gates action_id==2u; walks Strike's
+        // program; emits EffectDamageApplied (kind=26).
         let strike_cfg = physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeCfg {
             event_count: self.agent_count,
             tick: self.tick as u32,
@@ -652,6 +801,26 @@ impl CompiledSim for SpyNetworkState {
         let strike_bindings = physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
+            agent_hp: &self.agent_hp_buf,
+            agent_max_hp: &self.agent_max_hp_buf,
+            agent_move_speed: &self.agent_move_speed_buf,
+            agent_armor: &self.agent_armor_buf,
+            agent_magic_resist: &self.agent_magic_resist_buf,
+            agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_mana: &self.agent_mana_buf,
+            ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
+            ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
+            ability_registry_effect_payload_b: &self.registry_gpu.effect_payload_b,
+            ability_registry_chances: &self.registry_gpu.chances,
+            ability_registry_scaling_stat_refs: &self.registry_gpu.scaling_stat_refs,
+            ability_registry_scaling_percents: &self.registry_gpu.scaling_percents,
+            ability_registry_nested_effect_kinds: &self.registry_gpu.nested_effect_kinds,
+            ability_registry_nested_effect_payload_a: &self.registry_gpu.nested_effect_payload_a,
+            ability_registry_nested_effect_payload_b: &self.registry_gpu.nested_effect_payload_b,
+            ability_registry_when_pred_binder: &self.registry_gpu.when_pred_binder,
+            ability_registry_when_pred_field: &self.registry_gpu.when_pred_field,
+            ability_registry_when_pred_op: &self.registry_gpu.when_pred_op,
+            ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             cfg: &self.chronicle_strike_cfg_buf,
         };
         dispatch::dispatch_physics_verb_chronicle_strike(
@@ -662,39 +831,69 @@ impl CompiledSim for SpyNetworkState {
             self.agent_count,
         );
 
-        // (7) ApplySlander_and_ApplyDamage_and_ApplyDisguise — fused
-        // PerEvent kernel.
+        // (7) ApplyDamageFromChronicle + ApplySlanderFromChronicle
+        // (fused PerEvent kernel). Drains EffectDamageApplied (kind=26)
+        // → emits Damaged events; drains EffectPlantBeliefApplied
+        // (kind=63) → bumps target's mana SoA.
         let event_count_estimate = self.agent_count * 4;
-        let apply_cfg = physics_ApplySlander_and_ApplyDamage_and_ApplyDisguise::PhysicsApplySlanderAndApplyDamageAndApplyDisguiseCfg {
+        let dmgchron_slander_cfg = physics_ApplyDamageFromChronicle_and_ApplySlanderFromChronicle::PhysicsApplyDamageFromChronicleAndApplySlanderFromChronicleCfg {
             event_count: event_count_estimate,
             tick: self.tick as u32,
             seed: 0,
             agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
-            &self.apply_cfg_buf,
+            &self.apply_dmgchron_slander_cfg_buf,
             0,
-            bytemuck::bytes_of(&apply_cfg),
+            bytemuck::bytes_of(&dmgchron_slander_cfg),
         );
-        let apply_bindings = physics_ApplySlander_and_ApplyDamage_and_ApplyDisguise::PhysicsApplySlanderAndApplyDamageAndApplyDisguiseBindings {
+        let dmgchron_slander_bindings = physics_ApplyDamageFromChronicle_and_ApplySlanderFromChronicle::PhysicsApplyDamageFromChronicleAndApplySlanderFromChronicleBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
-            agent_hp: &self.agent_hp_buf,
-            agent_alive: &self.agent_alive_buf,
             agent_mana: &self.agent_mana_buf,
-            agent_disguise_expires_at_tick: &self.agent_disguise_expires_at_tick_buf,
-            agent_disguise_fake_type: &self.agent_disguise_fake_type_buf,
-            cfg: &self.apply_cfg_buf,
+            cfg: &self.apply_dmgchron_slander_cfg_buf,
         };
-        dispatch::dispatch_physics_applyslander_and_applydamage_and_applydisguise(
+        dispatch::dispatch_physics_applydamagefromchronicle_and_applyslanderfromchronicle(
             &mut self.cache,
-            &apply_bindings,
+            &dmgchron_slander_bindings,
             &self.gpu.device,
             &mut encoder,
             event_count_estimate,
         );
 
-        // (8) seed_indirect_0 — keeps args buffer warm.
+        // (8) ApplyDamage + ApplyDisguiseFromChronicle (fused PerEvent
+        // kernel). Drains Damaged (kind=1) → updates hp + emits
+        // Defeated; drains EffectDisguiseApplied (kind=67) → unpacks
+        // (duration<<8 | fake_type) and writes per-agent disguise SoA.
+        let dmg_disguise_cfg = physics_ApplyDamage_and_ApplyDisguiseFromChronicle::PhysicsApplyDamageAndApplyDisguiseFromChronicleCfg {
+            event_count: event_count_estimate,
+            tick: self.tick as u32,
+            seed: 0,
+            agent_cap: 0,
+        };
+        self.gpu.queue.write_buffer(
+            &self.apply_dmg_disguise_cfg_buf,
+            0,
+            bytemuck::bytes_of(&dmg_disguise_cfg),
+        );
+        let dmg_disguise_bindings = physics_ApplyDamage_and_ApplyDisguiseFromChronicle::PhysicsApplyDamageAndApplyDisguiseFromChronicleBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            agent_hp: &self.agent_hp_buf,
+            agent_alive: &self.agent_alive_buf,
+            agent_disguise_expires_at_tick: &self.agent_disguise_expires_at_tick_buf,
+            agent_disguise_fake_type: &self.agent_disguise_fake_type_buf,
+            cfg: &self.apply_dmg_disguise_cfg_buf,
+        };
+        dispatch::dispatch_physics_applydamage_and_applydisguisefromchronicle(
+            &mut self.cache,
+            &dmg_disguise_bindings,
+            &self.gpu.device,
+            &mut encoder,
+            event_count_estimate,
+        );
+
+        // (9) seed_indirect_0 — keeps args buffer warm.
         let seed_cfg = seed_indirect_0::SeedIndirect0Cfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
@@ -720,7 +919,7 @@ impl CompiledSim for SpyNetworkState {
             self.agent_count,
         );
 
-        // (9) fold_damage_dealt — RMW per Damaged event.
+        // (10) fold_damage_dealt — RMW per Damaged event.
         let damage_cfg = fold_damage_dealt::FoldDamageDealtCfg {
             event_count: event_count_estimate,
             tick: self.tick as u32,
@@ -897,7 +1096,7 @@ mod viz_tests {
 
         // Pin 3: at least one spy fired Disguise (its disguise SoA entry
         // has `expires_at_tick > 0`). Exercises the EffectDisguiseApplied
-        // chronicle + ApplyDisguise consumer end-to-end.
+        // chronicle + ApplyDisguiseFromChronicle consumer end-to-end.
         let disguise_expires = state.read_disguise_expires_at_tick();
         let disguise_fake_type = state.read_disguise_fake_type();
         let disguised_spies: Vec<usize> = (0..10)

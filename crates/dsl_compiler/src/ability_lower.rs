@@ -1607,6 +1607,25 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             let clamped = delta.round().clamp(i16::MIN as f32, i16::MAX as f32) as i16;
             Ok(EffectOp::ModifyStanding { delta: clamped })
         }
+        // Wave 3 ToM Phase 4 — `disguise <fake_type:int> for <duration>`.
+        // Caster publicly poses as `fake_type` (a creature_type ordinal,
+        // u8) for `duration_ticks`. The duration MUST come from the
+        // `for` modifier (positional duration form is not accepted —
+        // mirrors `stealth`'s shape). The `is_duration_bearing_verb`
+        // short-circuit covers the modifier path; positional fake_type
+        // is read here as the sole positional arg.
+        "disguise" => {
+            let fake_type_f = require_number_arg(stmt, 0)?;
+            let fake_type = fake_type_f
+                .round()
+                .clamp(0.0, u8::MAX as f32) as u8;
+            let (dur, arity) = extract_duration(stmt, 1, 2)?;
+            require_arity(stmt, arity)?;
+            Ok(EffectOp::Disguise {
+                fake_type,
+                duration_ticks: duration_to_ticks(dur),
+            })
+        }
         "summon" => {
             // `summon "<template>" [<count:int>] [for <duration>]` —
             // LoL corpus form. All 17 .ability sites in the LoL hero
@@ -1734,20 +1753,6 @@ fn lower_effect_stmt(stmt: &EffectStmt) -> Result<EffectOp, LowerError> {
             require_arity(stmt, 1)?;
             let target_observer = id_f.round().clamp(0.0, u8::MAX as f32) as u8;
             Ok(EffectOp::Observe { target_observer })
-        }
-        // Wave 3 ToM Phase 4 — `disguise <fake_type> for <duration>`
-        // (spy_network surface). Mirrors `stun`'s shape: one positional
-        // arg + duration-bearing `for` modifier.
-        "disguise" => {
-            let fake_type = require_number_arg(stmt, 0)?
-                .round()
-                .clamp(0.0, u8::MAX as f32) as u8;
-            let (dur, arity) = extract_duration(stmt, 1, 2)?;
-            require_arity(stmt, arity)?;
-            Ok(EffectOp::Disguise {
-                fake_type,
-                duration_ticks: duration_to_ticks(dur),
-            })
         }
         // Wave 3 ToM Phase 3.5 — `reveal <subject_idx>` one-to-many
         // belief broadcast. The dispatcher resolves caster; the consumer
@@ -1916,7 +1921,9 @@ fn is_duration_bearing_verb(verb: &str) -> bool {
         // reflect has lifesteal-shape (fraction + duration).
         | "charm" | "grounded" | "suppress" | "reflect"
         // Wave 3 ToM Phase 4 — `disguise <fake_type> for <duration>`
-        // (spy_network surface). Stun-shape with a u8 ordinal positional.
+        // (spy_network surface). Self-cast deception verb. The
+        // `fake_type` ordinal is the single positional arg; the
+        // duration comes from `for`.
         | "disguise"
     )
 }
