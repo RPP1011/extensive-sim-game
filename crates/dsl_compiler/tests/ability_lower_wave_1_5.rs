@@ -928,16 +928,29 @@ fn lower_when_predicate_else_clause_errors() {
 }
 
 #[test]
-fn lower_when_predicate_compound_and_errors() {
+fn lower_when_predicate_compound_and_succeeds() {
+    // Task #227: compound predicates (`&&` / `||` / `!`) now lower to
+    // a Boolean tree. The atomic case still mirrors onto
+    // `when_compiled` for legacy single-atom consumers.
     use dsl_ast::parse_ability_file;
-    use dsl_compiler::ability_lower::{lower_ability_decl, LowerError};
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::WhenPredicate;
     let file = parse_ability_file(
         "ability X { target: enemy cooldown: 1s damage 50 when target.hp < 30 && target.hp > 0 }"
     ).expect("parser");
-    let err = lower_ability_decl(&file.abilities[0]).unwrap_err();
+    let prog = lower_ability_decl(&file.abilities[0])
+        .expect("compound when must lower (task #227)");
+    let cond = prog.when_per_effect[0].as_ref().expect("slot populated");
+    let tree = cond.when_compound.as_ref().expect("compound tree populated");
+    match tree {
+        WhenPredicate::And(_, _) => {}
+        other => panic!("expected WhenPredicate::And, got {other:?}"),
+    }
+    // Compound trees do NOT populate `when_compiled` (only simple
+    // atoms do — for legacy backwards-compat).
     assert!(
-        matches!(err, LowerError::WhenConditionUnsupported { clause: "when", .. }),
-        "expected WhenConditionUnsupported{{clause:\"when\"}} for compound predicate, got {err:?}",
+        cond.when_compiled.is_none(),
+        "compound predicate should leave `when_compiled = None`",
     );
 }
 
@@ -973,5 +986,113 @@ fn lower_when_predicate_unsupported_gpu_field_errors() {
     assert!(
         matches!(&err, LowerError::WhenConditionUnsupportedField { field, .. } if field == "hunger"),
         "expected WhenConditionUnsupportedField{{field:\"hunger\"}}, got {err:?}",
+    );
+}
+
+// Task #227 — additional compound when-predicate tests.
+//
+// Compound predicates (`&&` / `||` / `!`) lower to a Boolean tree
+// whose leaves are `EffectPredicate` atoms. These tests pin the tree
+// shape produced by the lowering pass.
+
+#[test]
+fn lower_when_predicate_compound_or_succeeds() {
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::WhenPredicate;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 when target.hp < 30 || target.armor < 5 }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("compound `||` must lower");
+    let cond = prog.when_per_effect[0].as_ref().expect("slot populated");
+    let tree = cond.when_compound.as_ref().expect("tree populated");
+    match tree {
+        WhenPredicate::Or(_, _) => {}
+        other => panic!("expected WhenPredicate::Or, got {other:?}"),
+    }
+}
+
+#[test]
+fn lower_when_predicate_compound_not_succeeds() {
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::WhenPredicate;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 when !(target.hp > 50) }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("unary `!` must lower");
+    let cond = prog.when_per_effect[0].as_ref().expect("slot populated");
+    let tree = cond.when_compound.as_ref().expect("tree populated");
+    match tree {
+        WhenPredicate::Not(inner) => {
+            // Inner must be the leaf comparison.
+            assert!(matches!(inner.as_ref(), WhenPredicate::Atom(_)));
+        }
+        other => panic!("expected WhenPredicate::Not, got {other:?}"),
+    }
+}
+
+#[test]
+fn lower_when_predicate_parens_and_precedence() {
+    // `A && (B || C)` lowers to And(Atom A, Or(Atom B, Atom C)).
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::WhenPredicate;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 when target.hp < 30 && (target.armor < 5 || target.magic_resist < 5) }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("parens must lower");
+    let cond = prog.when_per_effect[0].as_ref().expect("slot populated");
+    let tree = cond.when_compound.as_ref().expect("tree populated");
+    match tree {
+        WhenPredicate::And(lhs, rhs) => {
+            assert!(matches!(lhs.as_ref(), WhenPredicate::Atom(_)),
+                "lhs must be a leaf atom (target.hp < 30)");
+            assert!(matches!(rhs.as_ref(), WhenPredicate::Or(_, _)),
+                "rhs must be a paren-grouped Or (armor || magic_resist)");
+        }
+        other => panic!("expected WhenPredicate::And, got {other:?}"),
+    }
+}
+
+#[test]
+fn lower_when_predicate_atomic_still_populates_when_compiled() {
+    // Regression: simple atomic `when` must keep populating
+    // `when_compiled` for legacy consumers. Compound trees populate
+    // only `when_compound`.
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::{
+        EffectPredicateBinder, EffectPredicateOp, ScalingStatRef, WhenPredicate,
+    };
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 when target.hp < 30 }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("atomic must lower");
+    let cond = prog.when_per_effect[0].as_ref().expect("slot populated");
+    let pred = cond.when_compiled.as_ref().expect("when_compiled populated");
+    assert_eq!(pred.binder, EffectPredicateBinder::Target);
+    assert_eq!(pred.field, ScalingStatRef::Hp.discriminant());
+    assert_eq!(pred.op, EffectPredicateOp::Lt);
+    let tree = cond.when_compound.as_ref().expect("when_compound populated");
+    assert!(matches!(tree, WhenPredicate::Atom(_)));
+}
+
+#[test]
+fn lower_when_predicate_tree_too_large_errors() {
+    // 7 atoms with 6 ANDs serializes to 13 RPN nodes, one over the
+    // MAX_PRED_NODES_PER_EFFECT=12 budget. Must error loudly so authors
+    // get a pointed diagnostic at compile time rather than a defensive
+    // truncate at SoA-pack time.
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::{lower_ability_decl, LowerError};
+    let src = "ability X { target: enemy cooldown: 1s damage 50 when \
+        target.hp < 90 && target.hp < 80 && target.hp < 70 && target.hp < 60 && \
+        target.hp < 50 && target.hp < 40 && target.hp < 30 }";
+    let file = parse_ability_file(src).expect("parser");
+    let err = lower_ability_decl(&file.abilities[0]).unwrap_err();
+    assert!(
+        matches!(err, LowerError::WhenConditionTreeTooLarge { .. }),
+        "expected WhenConditionTreeTooLarge, got {err:?}",
     );
 }

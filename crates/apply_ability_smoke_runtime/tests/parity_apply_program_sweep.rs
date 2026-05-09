@@ -227,15 +227,17 @@ fn build_sweep() -> Vec<(&'static str, AbilityProgram, CasterStats)> {
         Gate { cooldown_ticks: 20, hostile_only: true, line_of_sight: false },
         [EffectOp::Execute { hp_threshold: 20.0 }],
     );
+    let reap_atom = EffectPredicate {
+        binder:  EffectPredicateBinder::Target,
+        field:   ScalingStatRef::Hp.discriminant(),
+        op:      EffectPredicateOp::Lt,
+        literal: 20.0,
+    };
     reap.when_per_effect.push(Some(EffectWhenCondition {
         when_cond:     "target.hp < 20".to_string(),
         else_cond:     None,
-        when_compiled: Some(EffectPredicate {
-            binder:  EffectPredicateBinder::Target,
-            field:   ScalingStatRef::Hp.discriminant(),
-            op:      EffectPredicateOp::Lt,
-            literal: 20.0,
-        }),
+        when_compiled: Some(reap_atom),
+        when_compound: Some(engine::ability::program::WhenPredicate::Atom(reap_atom)),
     }));
     out.push((
         "Reap",

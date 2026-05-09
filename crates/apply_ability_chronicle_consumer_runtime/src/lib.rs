@@ -678,15 +678,17 @@ mod closed_loop_tests {
             Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
             [EffectOp::Damage { amount: 50.0 }],
         );
+        let test_atom = EffectPredicate {
+            binder:  EffectPredicateBinder::Target,
+            field:   ScalingStatRef::Hp.discriminant(),
+            op:      EffectPredicateOp::Lt,
+            literal: 20.0,
+        };
         prog.when_per_effect.push(Some(EffectWhenCondition {
             when_cond:     "target.hp < 20".to_string(),
             else_cond:     None,
-            when_compiled: Some(EffectPredicate {
-                binder:  EffectPredicateBinder::Target,
-                field:   ScalingStatRef::Hp.discriminant(),
-                op:      EffectPredicateOp::Lt,
-                literal: 20.0,
-            }),
+            when_compiled: Some(test_atom),
+            when_compound: Some(engine::ability::program::WhenPredicate::Atom(test_atom)),
         }));
 
         let mut state = match ApplyAbilityChronicleConsumerState::try_new_with_program(

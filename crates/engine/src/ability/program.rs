@@ -1225,21 +1225,64 @@ pub enum CostAmount {
 
 /// Per-effect conditional gate from the `when <cond> [else <cond>]`
 /// modifier (spec §6.1 slot 7). The verbatim `when_cond` source text is
-/// retained for diagnostics; `when_compiled` carries the structured
-/// predicate apply / GPU dispatch evaluates at runtime.
+/// retained for diagnostics; `when_compiled` / `when_compound` carry the
+/// structured predicate the apply / GPU dispatch evaluates at runtime.
 ///
 /// `when_cond` is the always-required positive predicate (verbatim source).
 /// `else_cond` is the optional fallback — REJECTED at lower time today
-/// (deferred — open task #163-followup). `when_compiled` is the lowered
-/// structured form, populated when the predicate matches the restricted
-/// vocab in [`EffectPredicate`]; `None` indicates lower-time rejection
-/// fell back to a "no compiled predicate" state.
+/// (deferred — open task #163-followup).
+///
+/// `when_compiled` is the lowered structured form for the
+/// **single-atom** restricted vocab in [`EffectPredicate`]; `None`
+/// indicates either lower-time rejection or a compound predicate (in
+/// which case `when_compound` is populated instead). For the simple
+/// atomic case, this slot stays populated for backwards compatibility
+/// with code paths that only consume single-atom predicates.
+///
+/// `when_compound` is the Boolean-tree form for compound predicates
+/// (`&&` / `||` / `!`). When `Some(_)`, the apply path evaluates the
+/// tree (whose leaves are [`EffectPredicate`] atoms). For the simple
+/// atomic case, both `when_compiled = Some(atom)` and
+/// `when_compound = Some(WhenPredicate::Atom(atom))` are populated so
+/// either evaluator yields the same result.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EffectWhenCondition {
     pub when_cond: String,
     pub else_cond: Option<String>,
     pub when_compiled: Option<EffectPredicate>,
+    pub when_compound: Option<WhenPredicate>,
 }
+
+/// Boolean tree of [`EffectPredicate`] atoms — the lowered form of a
+/// `when <cond>` clause that may contain `&&` / `||` / `!`. Leaves are
+/// `Atom`; interior nodes carry `And` / `Or` (binary, left-to-right
+/// short-circuit) / `Not` (unary).
+///
+/// **Evaluation order.** `And` evaluates LHS first, then RHS only when
+/// LHS is true; `Or` evaluates LHS first, then RHS only when LHS is
+/// false. This matches the parser's natural left-to-right tree shape
+/// (precedence: `!` > `&&` > `||`) and is required for cross-backend
+/// parity (P3) — the GPU evaluator must walk the same RPN postfix
+/// linearization, which preserves left-to-right traversal.
+///
+/// **GPU encoding.** The tree is serialized into a fixed-stride RPN
+/// (postfix) array of nodes per effect slot — see
+/// `WhenPredicateNode` and `MAX_PRED_NODES_PER_EFFECT`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum WhenPredicate {
+    Atom(EffectPredicate),
+    And(Box<WhenPredicate>, Box<WhenPredicate>),
+    Or (Box<WhenPredicate>, Box<WhenPredicate>),
+    Not(Box<WhenPredicate>),
+}
+
+/// Maximum number of RPN nodes per per-effect when-predicate. Bounds
+/// the SoA stride for the four `when_pred_*` columns at
+/// `MAX_EFFECTS_PER_PROGRAM * MAX_PRED_NODES_PER_EFFECT`. A balanced
+/// tree of 6 atoms with binary operators serializes to 11 RPN nodes
+/// (6 atoms + 5 operators); 12 leaves headroom for one Not. Richer
+/// combinators error at lower time with `WhenConditionTreeTooLarge`.
+pub const MAX_PRED_NODES_PER_EFFECT: usize = 12;
 
 /// Predicate binder — `self` or `target` from the source-form
 /// `<binder>.<field> <op> <literal>`. Numeric discriminants pinned for
@@ -1514,13 +1557,14 @@ pub struct AbilityProgram {
     /// [else <cond>]`. `None` for effects that didn't carry the
     /// modifier — apply handlers should treat the slot as "no gate"
     /// (the effect always passes the conditional check). The predicate
-    /// body is stored as verbatim source text; downstream apply
-    /// handlers parse + evaluate it (deferred infrastructure). Index
-    /// parallel to `effects`; a populated `when_per_effect` slice is
-    /// either empty (no effect carried the modifier) or has one slot
-    /// per effect (`None` for the unmarked ones). Not GPU-packed —
-    /// `String` payload is CPU-only metadata for now; the SoA packer
-    /// in `PackedAbilityRegistry` skips this column.
+    /// body is stored as verbatim source text; structured forms live in
+    /// `when_compiled` (single-atom) and `when_compound` (Boolean
+    /// tree). Index parallel to `effects`; a populated
+    /// `when_per_effect` slice is either empty (no effect carried the
+    /// modifier) or has one slot per effect (`None` for the unmarked
+    /// ones). The structured forms ARE GPU-packed (the four
+    /// `when_pred_*` SoA columns store the RPN linearization of
+    /// `when_compound`); the verbatim `when_cond` text is CPU-only.
     pub when_per_effect: SmallVec<[Option<EffectWhenCondition>; MAX_EFFECTS_PER_PROGRAM]>,
     /// Wave 1.5#9: per-effect nested follow-up effects from
     /// `<outer_verb> <args> { <inner_stmt>; <inner_stmt>; ... }`.

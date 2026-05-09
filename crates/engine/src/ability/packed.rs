@@ -40,8 +40,8 @@
 
 use super::program::{
     Area, Delivery, EffectAreaShape, EffectOp, EffectPredicate, EffectScaling, LifetimeMode,
-    MAX_EFFECTS_PER_PROGRAM, MAX_NESTED_PER_EFFECT, MAX_SCALINGS_PER_EFFECT,
-    MAX_TAGS_PER_PROGRAM, StackingMode, TargetSelector,
+    MAX_EFFECTS_PER_PROGRAM, MAX_NESTED_PER_EFFECT, MAX_PRED_NODES_PER_EFFECT,
+    MAX_SCALINGS_PER_EFFECT, MAX_TAGS_PER_PROGRAM, StackingMode, TargetSelector, WhenPredicate,
 };
 use super::{AbilityProgram, AbilityRegistry, AbilityTag};
 
@@ -119,13 +119,32 @@ pub const SHAPE_KIND_NONE_SENTINEL: u8 = 0xFF;
 pub const SCALING_STAT_NONE_SENTINEL: u8 = 0xFF;
 
 /// Sentinel for the `when_pred_binder` column when a per-effect
-/// when-predicate slot is unused (the effect carried no `when <cond>`
-/// modifier, OR the modifier failed to compile). Distinct from any
+/// when-predicate node slot is unused (the effect carried no
+/// `when <cond>` modifier, OR the slot index exceeds the number of
+/// RPN nodes the predicate's tree serializes to). Distinct from any
 /// `EffectPredicateBinder` discriminant (0 = self, 1 = target).
 /// Companion `when_pred_field`, `when_pred_op`, `when_pred_literal`
 /// slots store zero whenever the binder is the sentinel — they are
 /// ONLY meaningful when `when_pred_binder[i] != WHEN_PRED_NONE_SENTINEL`.
 pub const WHEN_PRED_NONE_SENTINEL: u8 = 0xFF;
+
+/// Operator-node sentinels for the `when_pred_binder` column. Compound
+/// predicates serialize their Boolean tree to fixed-stride RPN nodes;
+/// each node's `binder` slot encodes either an atom (0 / 1) or one of
+/// these operator markers. Distinct from `EffectPredicateBinder`
+/// discriminants (0..=1) and from `WHEN_PRED_NONE_SENTINEL` (0xFF).
+///
+/// RPN evaluator: scan nodes left-to-right with a 1-bit boolean stack
+/// (max depth = `MAX_PRED_NODES_PER_EFFECT / 2 + 1`):
+///   - Atom binder (0 / 1): evaluate the atom and push.
+///   - `WHEN_PRED_OP_NOT_SENTINEL` (0xFC): pop, push !.
+///   - `WHEN_PRED_OP_AND_SENTINEL` (0xFE): pop rhs, pop lhs, push (lhs && rhs).
+///   - `WHEN_PRED_OP_OR_SENTINEL`  (0xFD): pop rhs, pop lhs, push (lhs || rhs).
+///   - `WHEN_PRED_NONE_SENTINEL` (0xFF): end of nodes; result = top of stack
+///     (or `true` if stack empty — i.e. no predicate at all).
+pub const WHEN_PRED_OP_AND_SENTINEL: u8 = 0xFE;
+pub const WHEN_PRED_OP_OR_SENTINEL : u8 = 0xFD;
+pub const WHEN_PRED_OP_NOT_SENTINEL: u8 = 0xFC;
 
 // Compile-time guard: `MAX_TAGS_PER_PROGRAM` and `NUM_ABILITY_TAGS` must
 // stay aligned. Both are derived from `AbilityTag::COUNT` today; a future
@@ -331,45 +350,48 @@ pub struct PackedAbilityRegistry {
     /// `nested_effect_kinds`.
     pub nested_effect_payload_b: Vec<u32>,
 
-    // -- When-predicate rows (flat, stride = MAX_EFFECTS_PER_PROGRAM = 6).
+    // -- When-predicate rows (flat, stride = MAX_EFFECTS_PER_PROGRAM
+    //    × MAX_PRED_NODES_PER_EFFECT).
     //
-    // Wave 1.5#7 GPU eval: per-effect `when <binder>.<field> <op>
-    // <literal>` predicate. The dispatcher reads the four columns at
-    // each slot, evaluates the predicate against the appropriate
-    // agent SoA stat, and gates the chronicle write (primary AND
-    // nested) on the result. The sentinel `WHEN_PRED_NONE_SENTINEL`
-    // (0xFF) on `when_pred_binder` marks slots without a predicate;
-    // the dispatcher skips evaluation and fires the effect
-    // unconditionally for sentinel slots.
+    // Each effect slot stores up to MAX_PRED_NODES_PER_EFFECT RPN
+    // (postfix) nodes. The dispatcher walks node 0..N at runtime,
+    // pushing booleans onto a small stack per atom and applying
+    // operators per `WHEN_PRED_OP_*_SENTINEL` markers. The first
+    // sentinel `WHEN_PRED_NONE_SENTINEL` (0xFF) terminates the walk;
+    // an empty walk evaluates to `true` (no predicate authored).
+    //
+    // For backwards compatibility, the simple atomic case
+    // `when self.field <op> literal` produces a single Atom node at
+    // index 0 — node 1..N stay at the none-sentinel.
 
-    /// Per-effect predicate binder discriminant
-    /// (`EffectPredicateBinder as u8`: 0 = self, 1 = target), or
-    /// `WHEN_PRED_NONE_SENTINEL` (0xFF) when the source effect has no
-    /// `when <cond>` modifier. Apply handlers should treat the sentinel
-    /// as "no predicate — fire unconditionally".
-    /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM`.
+    /// Per-effect predicate node binder column. Each slot holds either
+    /// an `EffectPredicateBinder as u8` (0 = self, 1 = target) for an
+    /// atom, one of the operator sentinels (`WHEN_PRED_OP_AND_SENTINEL`
+    /// 0xFE, `WHEN_PRED_OP_OR_SENTINEL` 0xFD,
+    /// `WHEN_PRED_OP_NOT_SENTINEL` 0xFC), or
+    /// `WHEN_PRED_NONE_SENTINEL` (0xFF) for an unused / past-end node.
+    /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM
+    /// * MAX_PRED_NODES_PER_EFFECT`.
     pub when_pred_binder: Vec<u8>,
 
-    /// Per-effect predicate field discriminant — `ScalingStatRef as u8`
-    /// (0..=7 maps to AttackDamage / AbilityPower / MaxHp / Hp / Armor
-    /// / MagicResist / MoveSpeed / Mana). Only meaningful when
-    /// `when_pred_binder[i] != WHEN_PRED_NONE_SENTINEL`; `0` for sentinel
-    /// slots so the column is dense.
-    /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM`.
+    /// Per-effect predicate node field discriminant — `ScalingStatRef
+    /// as u8` (0..=7 maps to AttackDamage / AbilityPower / MaxHp / Hp /
+    /// Armor / MagicResist / MoveSpeed / Mana). Only meaningful for
+    /// atom nodes (binder ∈ 0..=1); `0` for operator / none nodes so
+    /// the column stays dense.
+    /// Length: matches `when_pred_binder`.
     pub when_pred_field: Vec<u8>,
 
-    /// Per-effect predicate comparison op discriminant
+    /// Per-effect predicate node comparison op discriminant
     /// (`EffectPredicateOp as u8`: 0=Lt, 1=Le, 2=Gt, 3=Ge, 4=Eq, 5=Ne).
-    /// Only meaningful when `when_pred_binder[i] != WHEN_PRED_NONE_SENTINEL`;
-    /// `0` for sentinel slots.
-    /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM`.
+    /// Only meaningful for atom nodes; `0` for operator / none nodes.
+    /// Length: matches `when_pred_binder`.
     pub when_pred_op: Vec<u8>,
 
-    /// Per-effect predicate literal RHS — f32 value the LHS stat is
-    /// compared against. Only meaningful when
-    /// `when_pred_binder[i] != WHEN_PRED_NONE_SENTINEL`; `0.0` for
-    /// sentinel slots.
-    /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM`.
+    /// Per-effect predicate node literal RHS — f32 value the atom's
+    /// LHS stat is compared against. Only meaningful for atom nodes;
+    /// `0.0` for operator / none nodes.
+    /// Length: matches `when_pred_binder`.
     pub when_pred_literal: Vec<f32>,
 }
 
@@ -454,10 +476,11 @@ impl PackedAbilityRegistry {
         // without a `when <cond>` modifier all share a single resting
         // state (sentinel = no predicate; dispatcher fires
         // unconditionally). Field/op/literal stay at zero for sentinel
-        // slots — the dispatcher only reads them when binder is not
-        // the sentinel. Per-effect overrides land in
+        // slots. Each effect carries up to MAX_PRED_NODES_PER_EFFECT
+        // RPN nodes; per-effect overrides land in
         // `pack_program_when_predicates`.
-        let when_pred_total = n * MAX_EFFECTS_PER_PROGRAM;
+        let when_pred_total =
+            n * MAX_EFFECTS_PER_PROGRAM * MAX_PRED_NODES_PER_EFFECT;
         let mut when_pred_binder  = vec![WHEN_PRED_NONE_SENTINEL; when_pred_total];
         let mut when_pred_field   = vec![0_u8;  when_pred_total];
         let mut when_pred_op      = vec![0_u8;  when_pred_total];
@@ -863,13 +886,17 @@ fn pack_program_nested(
 /// Wave 1.5#7 GPU eval: splat one program's per-effect when-predicates
 /// into the row-major `when_pred_*` buffers. Slots already pre-filled
 /// (binder=`WHEN_PRED_NONE_SENTINEL`, field/op=0, literal=0.0); only
-/// effects with a compiled predicate (`when_compiled = Some(_)`)
-/// overwrite. `program.when_per_effect` is index-parallel to
-/// `program.effects` when populated; an empty `when_per_effect` slice
-/// (or per-slot `None`) means no predicate authored — every slot stays
-/// at the sentinel. Slots whose `when_compiled` is `None` (predicate
-/// failed to compile — shouldn't happen for `.ability`-sourced
-/// programs, but defensive for hand-built) also stay at the sentinel.
+/// effects with a compiled predicate (`when_compound = Some(_)`)
+/// overwrite their nodes. The tree is serialized to RPN postfix nodes
+/// (max `MAX_PRED_NODES_PER_EFFECT`); the first `WHEN_PRED_NONE_SENTINEL`
+/// past the last node terminates the dispatcher's RPN walk.
+///
+/// `program.when_per_effect` is index-parallel to `program.effects`
+/// when populated; an empty `when_per_effect` slice (or per-slot
+/// `None`) means no predicate authored — every node stays at the
+/// sentinel. A slot with neither `when_compound` nor `when_compiled`
+/// (lower-time rejection — shouldn't happen for `.ability`-sourced
+/// programs, but defensive for hand-built) also stays at the sentinel.
 fn pack_program_when_predicates(
     program:           &AbilityProgram,
     slot:              usize,
@@ -878,23 +905,89 @@ fn pack_program_when_predicates(
     when_pred_op:      &mut [u8],
     when_pred_literal: &mut [f32],
 ) {
-    let base = slot * MAX_EFFECTS_PER_PROGRAM;
+    let stride_per_effect = MAX_PRED_NODES_PER_EFFECT;
+    let base = slot * MAX_EFFECTS_PER_PROGRAM * stride_per_effect;
     for (i, when) in program.when_per_effect.iter().enumerate() {
         // Defensive bounds parallel to the other per-effect packers.
         if i >= MAX_EFFECTS_PER_PROGRAM {
             break;
         }
         if let Some(w) = when {
-            if let Some(pred) = w.when_compiled.as_ref() {
-                // Bind through the named type so `EffectPredicate`
-                // import is genuinely used at lib level (parallel to
-                // the other pack_program_* helpers' typed binds).
-                let p: EffectPredicate = *pred;
-                when_pred_binder[base + i]  = p.binder as u8;
-                when_pred_field[base + i]   = p.field;
-                when_pred_op[base + i]      = p.op as u8;
-                when_pred_literal[base + i] = p.literal;
+            // Prefer the compound tree when populated; fall back to
+            // single-atom for legacy paths that only set `when_compiled`.
+            let mut nodes: Vec<PackedNode> = Vec::new();
+            if let Some(tree) = w.when_compound.as_ref() {
+                serialize_tree_to_rpn(tree, &mut nodes);
+            } else if let Some(atom) = w.when_compiled.as_ref() {
+                nodes.push(PackedNode::Atom(*atom));
             }
+            // The lower path errors loudly with
+            // `WhenConditionTreeTooLarge` for trees that don't fit the
+            // SoA stride, so this arm is unreachable for
+            // `.ability`-sourced programs. Defensive: drop the nodes
+            // (slot stays at the none-sentinel — dispatcher fires
+            // unconditionally) rather than overflowing the buffer.
+            if nodes.len() > stride_per_effect {
+                nodes.clear();
+            }
+            let effect_base = base + i * stride_per_effect;
+            for (n, node) in nodes.iter().enumerate() {
+                let off = effect_base + n;
+                match node {
+                    PackedNode::Atom(p) => {
+                        // Bind through the named type so `EffectPredicate`
+                        // import is genuinely used at lib level
+                        // (parallel to the other pack_program_*
+                        // helpers' typed binds).
+                        let p: EffectPredicate = *p;
+                        when_pred_binder[off]  = p.binder as u8;
+                        when_pred_field[off]   = p.field;
+                        when_pred_op[off]      = p.op as u8;
+                        when_pred_literal[off] = p.literal;
+                    }
+                    PackedNode::And => {
+                        when_pred_binder[off]  = WHEN_PRED_OP_AND_SENTINEL;
+                    }
+                    PackedNode::Or => {
+                        when_pred_binder[off]  = WHEN_PRED_OP_OR_SENTINEL;
+                    }
+                    PackedNode::Not => {
+                        when_pred_binder[off]  = WHEN_PRED_OP_NOT_SENTINEL;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Internal helper for tree → RPN linearization.
+enum PackedNode {
+    Atom(EffectPredicate),
+    And,
+    Or,
+    Not,
+}
+
+/// Serialize a `WhenPredicate` tree to RPN postfix order.
+/// Left-to-right traversal preserves the parser's precedence so the
+/// runtime evaluator's left-to-right RPN walk matches the author's
+/// short-circuit expectations (P3 — same eval order on both backends).
+fn serialize_tree_to_rpn(tree: &WhenPredicate, out: &mut Vec<PackedNode>) {
+    match tree {
+        WhenPredicate::Atom(a) => out.push(PackedNode::Atom(*a)),
+        WhenPredicate::And(lhs, rhs) => {
+            serialize_tree_to_rpn(lhs, out);
+            serialize_tree_to_rpn(rhs, out);
+            out.push(PackedNode::And);
+        }
+        WhenPredicate::Or(lhs, rhs) => {
+            serialize_tree_to_rpn(lhs, out);
+            serialize_tree_to_rpn(rhs, out);
+            out.push(PackedNode::Or);
+        }
+        WhenPredicate::Not(inner) => {
+            serialize_tree_to_rpn(inner, out);
+            out.push(PackedNode::Not);
         }
     }
 }

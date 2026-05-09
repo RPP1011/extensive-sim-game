@@ -153,6 +153,70 @@ fn parses_when_with_parens_in_cond() {
     assert_eq!(cond.when_cond, "(target.hp < 30 or target.shield_hp == 0)");
 }
 
+// Task #227 — compound predicates (`&&` / `||` / `!`). These verify
+// the parser captures the verbatim source text correctly; structured
+// extraction lives in dsl_compiler's lowering pass.
+
+#[test]
+fn parses_when_with_and() {
+    let src = "ability X { target: enemy cooldown: 1s damage 50 when target.hp < 30 && self.attack_damage > 5 }";
+    let file = parse_ability_file(src).expect("must parse");
+    let cond = file.abilities[0].effects[0].condition.as_ref().unwrap();
+    assert_eq!(
+        cond.when_cond,
+        "target.hp < 30 && self.attack_damage > 5",
+        "compound `&&` predicate must capture verbatim",
+    );
+}
+
+#[test]
+fn parses_when_with_or() {
+    let src = "ability X { target: enemy cooldown: 1s damage 50 when target.hp < 30 || target.armor < 5 }";
+    let file = parse_ability_file(src).expect("must parse");
+    let cond = file.abilities[0].effects[0].condition.as_ref().unwrap();
+    assert_eq!(
+        cond.when_cond,
+        "target.hp < 30 || target.armor < 5",
+        "compound `||` predicate must capture verbatim",
+    );
+}
+
+#[test]
+fn parses_when_with_not() {
+    let src = "ability X { target: enemy cooldown: 1s damage 50 when !(target.hp > 50) }";
+    let file = parse_ability_file(src).expect("must parse");
+    let cond = file.abilities[0].effects[0].condition.as_ref().unwrap();
+    assert_eq!(
+        cond.when_cond,
+        "!(target.hp > 50)",
+        "unary `!` predicate must capture verbatim",
+    );
+}
+
+#[test]
+fn parses_when_with_parens_and_precedence() {
+    // Parens group disjunct so the conjunct binds tightly:
+    //     A && (B || C)  =  And(Atom A, Or(Atom B, Atom C))
+    let src = "ability X { target: enemy cooldown: 1s damage 50 when target.hp < 30 && (target.armor < 5 || target.magic_resist < 5) }";
+    let file = parse_ability_file(src).expect("must parse");
+    let cond = file.abilities[0].effects[0].condition.as_ref().unwrap();
+    assert_eq!(
+        cond.when_cond,
+        "target.hp < 30 && (target.armor < 5 || target.magic_resist < 5)",
+        "parenthesised compound predicate must capture verbatim",
+    );
+}
+
+#[test]
+fn parses_when_existing_atomic_still_works() {
+    // Regression: single-atom `when` (no compound combinator) must
+    // continue to parse as before.
+    let src = "ability X { target: enemy cooldown: 1s damage 50 when target.hp < 30 }";
+    let file = parse_ability_file(src).expect("must parse");
+    let cond = file.abilities[0].effects[0].condition.as_ref().unwrap();
+    assert_eq!(cond.when_cond, "target.hp < 30");
+}
+
 // ---------------------------------------------------------------------------
 // 5. `chance N%`
 // ---------------------------------------------------------------------------
