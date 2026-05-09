@@ -4,6 +4,19 @@ Canonical specification for the World Sim DSL. Merges the former `language.md` (
 
 For runtime contract (backends, tick pipeline, cascade, determinism), see `engine.md`. For field catalog, see `state.md`.
 
+> **Spec scope reminder.** This file owns the **`.sim`** DSL. The **`.ability`**
+> DSL (per-ability files: effect verbs `damage` / `heal` / `stealth` / `disguise`
+> / `plant_belief` / `observe` / `scry` / `reveal` / `decoy` / `erase_belief` /
+> `travel_to` / `cast_recipe` / `wear_tool`, etc.) is owned by
+> `docs/spec/ability.md` + `docs/spec/ability_dsl_unified.md`. Cross-references
+> to `EffectOp` and ability-cast plumbing here describe `.sim`-side glue, not
+> the `.ability` surface itself.
+>
+> **Spec audit (2026-05-08):** see `docs/superpowers/notes/2026-05-08-audit-dsl-drift.md`
+> for a per-section drift inventory against `crates/dsl_ast/` + `crates/dsl_compiler/`.
+> Net: 0 critical, 0 missing, 8 undocumented (recent ToM / `apply_ability` /
+> lexer surfaces), 1 stale (a cross-spec pointer in `ability.md`, not `dsl.md`).
+
 ---
 
 ## 1. Overview
@@ -29,7 +42,10 @@ For a complete DSL program, all four artefacts are produced from the same DSL so
 
 - **`entity`** — parameterization of one of the three predefined root kinds (Agent, Item, Group).
 - **`event`** — typed, append-only records. The universal state-mutation channel.
+- **`event_tag`** — compile-time field-shape contract that subsequent `event` decls can claim membership in. Parser-accepted (`crates/dsl_ast/src/parser.rs::event_tag_decl`); zero shipped uses in `assets/sim/` today (see `2026-05-08-audit-dsl-drift.md` U8).
+- **`enum`** — top-level enumeration declaration. Parser-accepted (`crates/dsl_ast/src/parser.rs::enum_decl`); typically used inline inside `entity` field types instead. Not given a dedicated §2.x section yet (audit U1).
 - **`view`** — pure or event-folded derivations. Eager (`@materialized`) or lazy.
+- **`query`** — top-level `query <name>(...) { ... }` declaration. Parsed as `Decl::Query` but silently dropped after parsing (see §2.3 audit callout). Not enumerated separately at §2.x — audit U6.
 - **`physics`** cascade rule — phase-tagged transforms from events to events.
 - **`mask`** — per-action validity predicates.
 - **`verb`** — composition sugar that bundles mask + cascade + scoring into a named gameplay action.
@@ -37,6 +53,7 @@ For a complete DSL program, all four artefacts are produced from the same DSL so
 - **`invariant`** — static, runtime, or debug-only predicates over state.
 - **`probe`** — named scenario + behavioral assertion evaluated against seeded trajectories.
 - **`metric`** — runtime observability declaration.
+- **`config`** — top-level config block (`config <name> { <field>: <type> = <default>, ... }`). Used by `assets/sim/auction_market.sim`, `abilities_probe.sim`, `dungeon_crawl.sim`, `particle_collision_min.sim`, `bartering.sim`. Not given a dedicated §2.x section yet (audit U1).
 - **`spatial_query`** — named per-pair candidate filter referenced by mask `from`-clauses and physics fold-iter sources via `spatial.<name>(...)` (§2.12).
 
 ---
