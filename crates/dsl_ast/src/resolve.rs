@@ -86,6 +86,14 @@ mod stdlib {
         symbols.builtins.insert("saturating_add".into(), Builtin::SaturatingAdd);
         // Vec3 constructor. Three-arg call returning Vec3F32; operands are F32.
         symbols.builtins.insert("vec3".into(), Builtin::Vec3);
+        // Explicit numeric casts: `f32(x)` / `u32(x)` / `i32(x)`. The
+        // names overlap with the type-name entries in `stdlib_types`;
+        // resolution disambiguates structurally — `f32` as a *call*
+        // target resolves to the builtin (here), `f32` as a bare type
+        // position resolves through `stdlib_types`.
+        symbols.builtins.insert("f32".into(), Builtin::F32Cast);
+        symbols.builtins.insert("u32".into(), Builtin::U32Cast);
+        symbols.builtins.insert("i32".into(), Builtin::I32Cast);
 
         // Typed namespaces. Each has its own field / method schema below.
         for (name, id) in [

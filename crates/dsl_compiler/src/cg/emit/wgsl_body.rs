@@ -810,6 +810,11 @@ fn builtin_name(id: BuiltinId) -> String {
         // pins the source type for typing); WGSL infers the source
         // from the argument's type.
         AsF32(_) => "f32".to_string(),
+        // Sibling explicit casts to `u32` / `i32`. WGSL has native
+        // `u32(...)` / `i32(...)` constructors; same emit-as-is
+        // treatment as `AsF32`.
+        AsU32(_) => "u32".to_string(),
+        AsI32(_) => "i32".to_string(),
     }
 }
 

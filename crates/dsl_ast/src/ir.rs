@@ -1163,6 +1163,21 @@ pub enum Builtin {
     /// All three operands are F32; result is Vec3F32. The lone vec3
     /// literal form supported by the DSL today.
     Vec3,
+    /// `f32(x)` — explicit cast of a numeric scalar to `f32`. Source
+    /// must be `i32` or `u32`; a same-type cast is rejected at lowering
+    /// so authors can't accidentally mask a type-inference mistake.
+    /// Lowers to `BuiltinId::AsF32(<src>)` which emits WGSL `f32(<arg>)`.
+    F32Cast,
+    /// `u32(x)` — explicit cast of a numeric scalar to `u32`. Source
+    /// must be `f32` (lossy truncation toward zero) or `i32` (lossy
+    /// when negative). Lowers to `BuiltinId::AsU32(<src>)` which emits
+    /// WGSL `u32(<arg>)`.
+    U32Cast,
+    /// `i32(x)` — explicit cast of a numeric scalar to `i32`. Source
+    /// must be `f32` (truncation toward zero) or `u32` (high bit may
+    /// flip sign). Lowers to `BuiltinId::AsI32(<src>)` which emits
+    /// WGSL `i32(<arg>)`.
+    I32Cast,
 }
 
 impl Builtin {
@@ -1189,6 +1204,9 @@ impl Builtin {
             Builtin::Sqrt => "sqrt",
             Builtin::SaturatingAdd => "saturating_add",
             Builtin::Vec3 => "vec3",
+            Builtin::F32Cast => "f32",
+            Builtin::U32Cast => "u32",
+            Builtin::I32Cast => "i32",
         }
     }
 
@@ -1200,6 +1218,7 @@ impl Builtin {
             Builtin::Entity => Some(1),
             Builtin::Clamp => Some(3),
             Builtin::Vec3 => Some(3),
+            Builtin::F32Cast | Builtin::U32Cast | Builtin::I32Cast => Some(1),
             Builtin::Abs
             | Builtin::Floor
             | Builtin::Ceil

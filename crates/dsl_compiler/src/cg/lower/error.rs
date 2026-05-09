@@ -206,6 +206,37 @@ pub enum LoweringError {
         span: Span,
     },
 
+    /// `vec3(...)` was called with a non-`f32` component. The Vec3
+    /// constructor requires strict `f32` typing on every component.
+    /// Distinct from [`Self::IllTypedExpression`] so the diagnostic
+    /// can name the offending component index and suggest the
+    /// `f32(...)` cast or float-literal form (`1.0` instead of `1`).
+    Vec3RequiresF32 {
+        component_index: u8,
+        got: CgTy,
+        span: Span,
+    },
+
+    /// An explicit numeric cast (`f32(x)` / `u32(x)` / `i32(x)`) was
+    /// applied to a value already of the target type. Disallowed so a
+    /// no-op cast doesn't sneak in silently — typical author error is
+    /// forgetting whether the source is signed or unsigned.
+    CastNoOp {
+        target: CgTy,
+        span: Span,
+    },
+
+    /// An explicit numeric cast (`f32(x)` / `u32(x)` / `i32(x)`) was
+    /// applied to a non-numeric value (e.g. `f32(true)` or
+    /// `u32(some_vec3)`). The DSL surface only supports scalar
+    /// numeric conversions; casting from booleans / aggregate types
+    /// is intentionally out of scope.
+    CastNonNumericOperand {
+        target: CgTy,
+        got: CgTy,
+        span: Span,
+    },
+
     /// A `Local` reference whose name isn't `self` (the only local the
     /// expression lowering binds to a CG concept today). Other locals —
     /// `target`, event-pattern bindings, fold binders — light up as the
@@ -1014,6 +1045,27 @@ impl fmt::Display for LoweringError {
                 span.end,
                 operand_index,
                 got
+            ),
+            LoweringError::Vec3RequiresF32 {
+                component_index,
+                got,
+                span,
+            } => write!(
+                f,
+                "lowering: vec3(...) at {}..{} component[{}] is `{}`, expected `f32` — \
+                 wrap with `f32(...)` or use a float literal (e.g. `1.0` instead of `1`)",
+                span.start, span.end, component_index, got
+            ),
+            LoweringError::CastNoOp { target, span } => write!(
+                f,
+                "lowering: explicit `{}(...)` cast at {}..{} is a no-op (operand is already `{}`); \
+                 remove the cast",
+                target, span.start, span.end, target
+            ),
+            LoweringError::CastNonNumericOperand { target, got, span } => write!(
+                f,
+                "lowering: explicit `{}(...)` cast at {}..{} requires a numeric operand, got `{}`",
+                target, span.start, span.end, got
             ),
             LoweringError::UnsupportedLocalBinding { name, span } => write!(
                 f,
