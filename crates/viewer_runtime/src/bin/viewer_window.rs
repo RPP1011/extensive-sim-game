@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 
 use viewer_runtime::{ViewerApp, VoxelBridge};
 use voxel_engine::app::App as _;
-use voxel_engine::camera::OrbitCamera;
+use voxel_engine::camera::FreeCamera;
 use voxel_engine::render::{RendererConfig, VoxelRenderer};
 use voxel_engine::scene::config::SceneConfig;
 use voxel_engine::scene::Scene;
@@ -49,18 +49,20 @@ const VOXEL_GRID_DIM: u32 = 128;
 /// spawners at radius 60); 128 covers it with 1 unit per cell.
 const VOXEL_WORLD_EXTENT: f32 = 128.0;
 
-/// Camera observer position. Looking at origin from (60, 60, 40) puts
-/// the wave_defense settler ring in the center of the frame with
-/// monsters approaching from outside the ring visible at the edges.
-fn observer_camera() -> OrbitCamera {
-    OrbitCamera::new(glam::Vec3::ZERO, 80.0)
+/// Top-down observer camera. Positioned high on the +Y axis
+/// looking straight down at world origin, so the contested
+/// objective sits dead-centre and the X/Z plane covers the full
+/// view. 60 units up frames the ±60 spawn extent comfortably.
+/// FreeCamera takes (eye_position, look_at_target).
+fn observer_camera() -> FreeCamera {
+    FreeCamera::new(glam::Vec3::new(0.0, 60.0, 0.0), glam::Vec3::ZERO)
 }
 
 struct WindowedViewer {
     seed: u64,
     app: ViewerApp,
     scene: Scene,
-    camera: OrbitCamera,
+    camera: FreeCamera,
     last_tick: Instant,
     /// Constructed lazily on first `resumed()` — winit 0.30 doesn't
     /// give a window until the event loop is running.
