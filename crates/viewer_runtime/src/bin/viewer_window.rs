@@ -156,6 +156,17 @@ impl ApplicationHandler for WindowedViewer {
                     "[viewer_window] CloseRequested — exit at tick={}",
                     self.app.sim_tick(),
                 );
+                // Best-effort cleanup of the bridge's GPU texture
+                // before VulkanContext drops. voxel_engine's
+                // SwapchainContext + VoxelRenderer don't have Drop
+                // impls so they'll still leak (and may still segfault
+                // when ctx.drop calls device.destroy_device with
+                // live image handles). Filed as a follow-up; this
+                // covers the bridge's own VRAM at least.
+                if let Some(gfx) = self.gfx.take() {
+                    let _ = unsafe { gfx.ctx.device().device_wait_idle() };
+                    gfx.bridge.destroy(&gfx.ctx);
+                }
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
@@ -182,12 +193,12 @@ impl ApplicationHandler for WindowedViewer {
                 if let Some(gfx) = self.gfx.as_mut() {
                     gfx.window.set_title(&title);
 
-                    // One render object per creature_type — voxel_engine
-                    // renders each as a single colour (per-cell palette
-                    // indices are treated as binary occupancy). Phase
-                    // C will add a separate object for static voxel
-                    // terrain (palisades) once those land.
-                    let objects = gfx.bridge.render_objects();
+                    // Single render object — voxel_engine's fragment
+                    // shader resolves per-cell colour through
+                    // `palette_tex[voxel_id]`, so all four
+                    // creature types render with their distinct
+                    // palette colours from one draw.
+                    let objects: Vec<_> = gfx.bridge.render_object().into_iter().collect();
                     if let Err(e) = gfx
                         .renderer
                         .render_frame_gpu(&gfx.ctx, &self.camera, &objects)
