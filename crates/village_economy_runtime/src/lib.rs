@@ -125,6 +125,7 @@ pub struct VillageEconomyState {
     // -- Stat columns (BGL contract requires; init zero) --
     agent_max_hp_buf: wgpu::Buffer,
     agent_attack_damage_buf: wgpu::Buffer,
+    agent_ability_power_buf: wgpu::Buffer,
     agent_armor_buf: wgpu::Buffer,
     agent_magic_resist_buf: wgpu::Buffer,
     agent_move_speed_buf: wgpu::Buffer,
@@ -233,6 +234,8 @@ impl VillageEconomyState {
         let agent_max_hp_buf = mk_storage_f32("village_economy::agent_max_hp", &zero_f32);
         let agent_attack_damage_buf =
             mk_storage_f32("village_economy::agent_attack_damage", &zero_f32);
+        let agent_ability_power_buf =
+            mk_storage_f32("village_economy::agent_ability_power", &zero_f32);
         let agent_armor_buf = mk_storage_f32("village_economy::agent_armor", &zero_f32);
         let agent_magic_resist_buf =
             mk_storage_f32("village_economy::agent_magic_resist", &zero_f32);
@@ -375,6 +378,7 @@ impl VillageEconomyState {
             agent_creature_type_buf,
             agent_max_hp_buf,
             agent_attack_damage_buf,
+            agent_ability_power_buf,
             agent_armor_buf,
             agent_magic_resist_buf,
             agent_move_speed_buf,
@@ -590,6 +594,7 @@ impl CompiledSim for VillageEconomyState {
             agent_armor: &self.agent_armor_buf,
             agent_magic_resist: &self.agent_magic_resist_buf,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_mana: &self.agent_mana_buf,
             agent_creature_type: &self.agent_creature_type_buf,
             mask_0_bitmap: &self.mask_0_bitmap_buf,
@@ -634,6 +639,7 @@ impl CompiledSim for VillageEconomyState {
                 agent_armor: &self.agent_armor_buf,
                 agent_magic_resist: &self.agent_magic_resist_buf,
                 agent_attack_damage: &self.agent_attack_damage_buf,
+                agent_ability_power: &self.agent_ability_power_buf,
                 agent_mana: &self.agent_mana_buf,
                 ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
                 ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
@@ -682,6 +688,7 @@ impl CompiledSim for VillageEconomyState {
                 agent_armor: &self.agent_armor_buf,
                 agent_magic_resist: &self.agent_magic_resist_buf,
                 agent_attack_damage: &self.agent_attack_damage_buf,
+                agent_ability_power: &self.agent_ability_power_buf,
                 agent_mana: &self.agent_mana_buf,
                 ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
                 ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
@@ -734,6 +741,7 @@ impl CompiledSim for VillageEconomyState {
                 agent_armor: &self.agent_armor_buf,
                 agent_magic_resist: &self.agent_magic_resist_buf,
                 agent_attack_damage: &self.agent_attack_damage_buf,
+                agent_ability_power: &self.agent_ability_power_buf,
                 agent_mana: &self.agent_mana_buf,
                 ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
                 ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,

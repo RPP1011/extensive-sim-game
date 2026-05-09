@@ -1927,8 +1927,7 @@ fn lower_cg_stmt_body_to_wgsl(
                  // CPU oracle in `engine::ability::apply::apply_program`\n\
                  // (sums `inner.iter().map(|s| s.percent * stats.get(s.stat_ref))`\n\
                  // — same iteration order j=0 then j=1 per P11 reduction\n\
-                 // ordering). AbilityPower(tag=1) returns 0.0 — no agent\n\
-                 // SoA slot for it today (LoL-only stat).\n\
+                 // ordering).\n\
                  {{\n\
                  \x20\x20\x20\x20let ability_id__u32: u32 = u32({ability_wgsl});\n\
                  \x20\x20\x20\x20let caster_slot: u32 = u32({caster_wgsl});\n\
@@ -1973,7 +1972,7 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20var stat_v: f32 = 0.0;\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20switch (s_tag) {{\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 0u: {{ stat_v = agent_attack_damage[caster_slot]; }}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 1u: {{ stat_v = 0.0; }} // AbilityPower — no agent SoA slot\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 1u: {{ stat_v = agent_ability_power[caster_slot]; }}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 2u: {{ stat_v = agent_max_hp[caster_slot]; }}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 3u: {{ stat_v = agent_hp[caster_slot]; }}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 4u: {{ stat_v = agent_armor[caster_slot]; }}\n\
@@ -2023,7 +2022,7 @@ fn lower_cg_stmt_body_to_wgsl(
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20var pred_lhs: f32 = 0.0;\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20switch (pred_field) {{\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 0u: {{ pred_lhs = agent_attack_damage[pred_agent]; }}\n\
-                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 1u: {{ pred_lhs = 0.0; }} // AbilityPower — no agent SoA slot\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 1u: {{ pred_lhs = agent_ability_power[pred_agent]; }}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 2u: {{ pred_lhs = agent_max_hp[pred_agent]; }}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 3u: {{ pred_lhs = agent_hp[pred_agent]; }}\n\
                  \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20case 4u: {{ pred_lhs = agent_armor[pred_agent]; }}\n\

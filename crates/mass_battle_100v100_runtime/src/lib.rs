@@ -106,6 +106,8 @@ pub struct MassBattle100v100State {
     /// program actually scales. Mirrors duel_25v25_runtime exactly.
     #[allow(dead_code)]
     agent_attack_damage_buf: wgpu::Buffer,
+    #[allow(dead_code)]
+    agent_ability_power_buf: wgpu::Buffer,
     agent_max_hp_buf: wgpu::Buffer,
     #[allow(dead_code)]
     agent_armor_buf: wgpu::Buffer,
@@ -343,6 +345,8 @@ impl MassBattle100v100State {
         };
         let agent_attack_damage_buf =
             mk_zero_stat("mass_battle_100v100::agent_attack_damage");
+        let agent_ability_power_buf =
+            mk_zero_stat("mass_battle_100v100::agent_ability_power");
         let agent_armor_buf = mk_zero_stat("mass_battle_100v100::agent_armor");
         let agent_magic_resist_buf =
             mk_zero_stat("mass_battle_100v100::agent_magic_resist");
@@ -571,6 +575,7 @@ impl MassBattle100v100State {
             agent_alive_buf,
             agent_level_buf,
             agent_attack_damage_buf,
+            agent_ability_power_buf,
             agent_max_hp_buf,
             agent_armor_buf,
             agent_magic_resist_buf,
@@ -812,6 +817,7 @@ impl CompiledSim for MassBattle100v100State {
             ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_armor:         &self.agent_armor_buf,
             agent_magic_resist:  &self.agent_magic_resist_buf,
@@ -846,6 +852,7 @@ impl CompiledSim for MassBattle100v100State {
             agent_armor: &self.agent_armor_buf,
             agent_magic_resist: &self.agent_magic_resist_buf,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_mana: &self.agent_mana_buf,
             ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
             ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
@@ -887,6 +894,7 @@ impl CompiledSim for MassBattle100v100State {
             agent_armor: &self.agent_armor_buf,
             agent_magic_resist: &self.agent_magic_resist_buf,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_mana: &self.agent_mana_buf,
             ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
             ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
@@ -937,6 +945,7 @@ impl CompiledSim for MassBattle100v100State {
             agent_armor: &self.agent_armor_buf,
             agent_magic_resist: &self.agent_magic_resist_buf,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_mana: &self.agent_mana_buf,
             ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
             ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
@@ -988,6 +997,7 @@ impl CompiledSim for MassBattle100v100State {
             agent_armor: &self.agent_armor_buf,
             agent_magic_resist: &self.agent_magic_resist_buf,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_mana: &self.agent_mana_buf,
             ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
             ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,

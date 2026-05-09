@@ -54,6 +54,8 @@ pub struct BossFightState {
     /// exactly — the same five-column shape.
     #[allow(dead_code)]
     agent_attack_damage_buf: wgpu::Buffer,
+    #[allow(dead_code)]
+    agent_ability_power_buf: wgpu::Buffer,
     agent_max_hp_buf: wgpu::Buffer,
     #[allow(dead_code)]
     agent_armor_buf: wgpu::Buffer,
@@ -256,6 +258,8 @@ impl BossFightState {
         };
         let agent_attack_damage_buf =
             mk_zero_stat("boss_fight_runtime::agent_attack_damage");
+        let agent_ability_power_buf =
+            mk_zero_stat("boss_fight_runtime::agent_ability_power");
         let agent_armor_buf = mk_zero_stat("boss_fight_runtime::agent_armor");
         let agent_magic_resist_buf =
             mk_zero_stat("boss_fight_runtime::agent_magic_resist");
@@ -486,6 +490,7 @@ impl BossFightState {
             agent_alive_buf,
             agent_creature_type_buf,
             agent_attack_damage_buf,
+            agent_ability_power_buf,
             agent_max_hp_buf,
             agent_armor_buf,
             agent_magic_resist_buf,
@@ -738,6 +743,7 @@ impl CompiledSim for BossFightState {
             ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_hp:            &self.agent_hp_buf,
             agent_armor:         &self.agent_armor_buf,
@@ -779,6 +785,7 @@ impl CompiledSim for BossFightState {
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             ability_registry_chances:           &self.registry_gpu.chances,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_max_hp: &self.agent_max_hp_buf,
             agent_hp: &self.agent_hp_buf,
             agent_armor: &self.agent_armor_buf,
@@ -838,6 +845,7 @@ impl CompiledSim for BossFightState {
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             ability_registry_chances:           &self.registry_gpu.chances,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_max_hp: &self.agent_max_hp_buf,
             agent_hp: &self.agent_hp_buf,
             agent_armor: &self.agent_armor_buf,
@@ -888,6 +896,7 @@ impl CompiledSim for BossFightState {
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             ability_registry_chances:           &self.registry_gpu.chances,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_max_hp: &self.agent_max_hp_buf,
             agent_hp: &self.agent_hp_buf,
             agent_armor: &self.agent_armor_buf,
@@ -940,6 +949,7 @@ impl CompiledSim for BossFightState {
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             ability_registry_chances:           &self.registry_gpu.chances,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_max_hp: &self.agent_max_hp_buf,
             agent_hp: &self.agent_hp_buf,
             agent_armor: &self.agent_armor_buf,

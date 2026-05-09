@@ -2525,6 +2525,24 @@ fn apply_emit_destination_rings(ops: &mut [ComputeOp], pairs: &[(usize, EventRin
     }
 }
 
+/// Agent SoA stat columns the dispatcher's `agent_stat()` switch reads
+/// at `caster_slot` (or `pred_agent` for predicate eval) for the
+/// `scale_bonus` computation and per-effect predicate atoms. Mirrors
+/// the `ScalingStatRef` → `AgentFieldId` mapping in
+/// `engine::ability::program::CasterStats::get`:
+///   AttackDamage(0), AbilityPower(1), MaxHp(2), Hp(3), Armor(4),
+///   MagicResist(5), MoveSpeed(6), Mana(7).
+const APPLY_ABILITY_AGENT_STAT_FIELDS: &[crate::cg::data_handle::AgentFieldId] = &[
+    crate::cg::data_handle::AgentFieldId::AttackDamage,
+    crate::cg::data_handle::AgentFieldId::AbilityPower,
+    crate::cg::data_handle::AgentFieldId::MaxHp,
+    crate::cg::data_handle::AgentFieldId::Hp,
+    crate::cg::data_handle::AgentFieldId::Armor,
+    crate::cg::data_handle::AgentFieldId::MagicResist,
+    crate::cg::data_handle::AgentFieldId::MoveSpeed,
+    crate::cg::data_handle::AgentFieldId::Mana,
+];
+
 /// Walk every op's body for [`CgStmt::ApplyAbility`] and record reads
 /// on the three [`DataHandle::AbilityRegistryColumn`] handles the
 /// dispatcher accesses. Without this, the BGL composer never
@@ -2539,7 +2557,7 @@ fn apply_emit_destination_rings(ops: &mut [ComputeOp], pairs: &[(usize, EventRin
 /// surrounding kernel's binding set, but neither stmt carries the
 /// handles directly in its IR shape.
 fn wire_ability_registry_column_reads(prog: &CgProgram, ops: &mut [ComputeOp]) {
-    use crate::cg::data_handle::{AbilityRegistryColumn, AgentFieldId, AgentRef};
+    use crate::cg::data_handle::{AbilityRegistryColumn, AgentRef};
     use crate::cg::op::ComputeOpKind;
     // Mirror the dispatcher's emit (`cg::emit::wgsl_body`):
     // it reads `effect_kinds`, `effect_payload_a`, `effect_payload_b`
@@ -2572,24 +2590,6 @@ fn wire_ability_registry_column_reads(prog: &CgProgram, ops: &mut [ComputeOp]) {
         AbilityRegistryColumn::Chances,
     ];
 
-    // Agent SoA stat columns the dispatcher's `agent_stat()` switch
-    // reads at `caster_slot` for the scale_bonus computation. Mirrors
-    // `ScalingStatRef` → `AgentFieldId` mapping in the dispatcher's
-    // emit (and in `engine::ability::program::CasterStats::get`):
-    //   AttackDamage(0) → AttackDamage, AbilityPower(1) → no SoA slot
-    //   (returns 0.0 — LoL-only stat), MaxHp(2) → MaxHp, Hp(3) → Hp,
-    //   Armor(4) → Armor, MagicResist(5) → MagicResist, MoveSpeed(6)
-    //   → MoveSpeed, Mana(7) → Mana.
-    const AGENT_STAT_FIELDS: &[AgentFieldId] = &[
-        AgentFieldId::AttackDamage,
-        AgentFieldId::MaxHp,
-        AgentFieldId::Hp,
-        AgentFieldId::Armor,
-        AgentFieldId::MagicResist,
-        AgentFieldId::MoveSpeed,
-        AgentFieldId::Mana,
-    ];
-
     for (op_index, op) in ops.iter_mut().enumerate() {
         let snapshot_op = match prog.ops.get(op_index) {
             Some(o) => o,
@@ -2609,7 +2609,7 @@ fn wire_ability_registry_column_reads(prog: &CgProgram, ops: &mut [ComputeOp]) {
         for column in COLUMNS {
             op.record_read(DataHandle::AbilityRegistryColumn { column: *column });
         }
-        for field in AGENT_STAT_FIELDS {
+        for field in APPLY_ABILITY_AGENT_STAT_FIELDS {
             op.record_read(DataHandle::AgentField {
                 field:  *field,
                 target: AgentRef::Self_,
@@ -3206,26 +3206,13 @@ fn wire_scoring_mask_reads(prog: &CgProgram, ops: &mut [ComputeOp]) {
 /// closes the BGL composer gap created by the scoring kernel emit
 /// referencing identifiers not surfaced through any `CgExpr` node.
 fn wire_scoring_predicate_reads(prog: &CgProgram, ops: &mut [ComputeOp]) {
-    use crate::cg::data_handle::{AbilityRegistryColumn, AgentFieldId, AgentRef};
+    use crate::cg::data_handle::{AbilityRegistryColumn, AgentRef};
     // Same column set the dispatcher consumes for predicate eval.
-    // Agent stat fields mirror the seven slots
-    // `engine::ability::program::CasterStats::get` reads (AbilityPower
-    // returns 0.0 — no agent SoA slot, kept symmetric with the
-    // dispatcher emit).
     const COLUMNS: &[AbilityRegistryColumn] = &[
         AbilityRegistryColumn::WhenPredBinder,
         AbilityRegistryColumn::WhenPredField,
         AbilityRegistryColumn::WhenPredOp,
         AbilityRegistryColumn::WhenPredLiteral,
-    ];
-    const AGENT_STAT_FIELDS: &[AgentFieldId] = &[
-        AgentFieldId::AttackDamage,
-        AgentFieldId::MaxHp,
-        AgentFieldId::Hp,
-        AgentFieldId::Armor,
-        AgentFieldId::MagicResist,
-        AgentFieldId::MoveSpeed,
-        AgentFieldId::Mana,
     ];
 
     // Skip if no verb→ability mapping exists in the program (no
@@ -3262,7 +3249,7 @@ fn wire_scoring_predicate_reads(prog: &CgProgram, ops: &mut [ComputeOp]) {
         // where `pred_agent` is computed from caster_slot /
         // per_pair_candidate. Mirrors the dispatcher's `Self_`-only
         // recording in `wire_ability_registry_column_reads`.
-        for field in AGENT_STAT_FIELDS {
+        for field in APPLY_ABILITY_AGENT_STAT_FIELDS {
             op.record_read(DataHandle::AgentField {
                 field: *field,
                 target: AgentRef::Self_,

@@ -106,6 +106,8 @@ pub struct TacticalSquad5v5State {
     /// + duel_25v25_runtime exactly — the same five-column shape.
     #[allow(dead_code)]
     agent_attack_damage_buf: wgpu::Buffer,
+    #[allow(dead_code)]
+    agent_ability_power_buf: wgpu::Buffer,
     agent_max_hp_buf: wgpu::Buffer,
     #[allow(dead_code)]
     agent_armor_buf: wgpu::Buffer,
@@ -358,6 +360,8 @@ impl TacticalSquad5v5State {
         };
         let agent_attack_damage_buf =
             mk_zero_stat("tactical_squad_5v5_runtime::agent_attack_damage");
+        let agent_ability_power_buf =
+            mk_zero_stat("tactical_squad_5v5_runtime::agent_ability_power");
         let agent_armor_buf = mk_zero_stat("tactical_squad_5v5_runtime::agent_armor");
         let agent_magic_resist_buf =
             mk_zero_stat("tactical_squad_5v5_runtime::agent_magic_resist");
@@ -587,6 +591,7 @@ impl TacticalSquad5v5State {
             agent_creature_type_buf,
             agent_level_buf,
             agent_attack_damage_buf,
+            agent_ability_power_buf,
             agent_max_hp_buf,
             agent_armor_buf,
             agent_magic_resist_buf,
@@ -895,6 +900,7 @@ impl CompiledSim for TacticalSquad5v5State {
             ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_armor:         &self.agent_armor_buf,
             agent_magic_resist:  &self.agent_magic_resist_buf,
@@ -930,6 +936,7 @@ impl CompiledSim for TacticalSquad5v5State {
             agent_armor:         &self.agent_armor_buf,
             agent_magic_resist:  &self.agent_magic_resist_buf,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_mana:          &self.agent_mana_buf,
             ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
             ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
@@ -970,6 +977,7 @@ impl CompiledSim for TacticalSquad5v5State {
             agent_armor:         &self.agent_armor_buf,
             agent_magic_resist:  &self.agent_magic_resist_buf,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_mana:          &self.agent_mana_buf,
             ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
             ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
@@ -1020,6 +1028,7 @@ impl CompiledSim for TacticalSquad5v5State {
             agent_armor:         &self.agent_armor_buf,
             agent_magic_resist:  &self.agent_magic_resist_buf,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_mana:          &self.agent_mana_buf,
             ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
             ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,
@@ -1092,6 +1101,7 @@ impl CompiledSim for TacticalSquad5v5State {
             agent_armor:         &self.agent_armor_buf,
             agent_magic_resist:  &self.agent_magic_resist_buf,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_mana:          &self.agent_mana_buf,
             ability_registry_effect_kinds: &self.registry_gpu.effect_kinds,
             ability_registry_effect_payload_a: &self.registry_gpu.effect_payload_a,

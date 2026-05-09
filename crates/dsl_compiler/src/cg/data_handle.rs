@@ -178,6 +178,7 @@ pub enum AgentFieldId {
     Armor,
     MagicResist,
     AttackDamage,
+    AbilityPower,
     AttackRange,
     Mana,
     MaxMana,
@@ -283,10 +284,10 @@ impl AgentFieldId {
         use AgentFieldId::*;
         match self {
             // f32 — vitals + scalar combat stats + needs + personality
-            Hp | MaxHp | ShieldHp | Armor | MagicResist | AttackDamage | AttackRange | Mana
-            | MaxMana | MoveSpeed | MoveSpeedMult | Hunger | Thirst | RestTimer | Safety
-            | Shelter | Social | Purpose | Esteem | RiskTolerance | SocialDrive | Ambition
-            | Altruism | Curiosity => AgentFieldTy::F32,
+            Hp | MaxHp | ShieldHp | Armor | MagicResist | AttackDamage | AbilityPower
+            | AttackRange | Mana | MaxMana | MoveSpeed | MoveSpeedMult | Hunger | Thirst
+            | RestTimer | Safety | Shelter | Social | Purpose | Esteem | RiskTolerance
+            | SocialDrive | Ambition | Altruism | Curiosity => AgentFieldTy::F32,
 
             // u32 — monotonic counters + tick stamps + level
             Level | StunExpiresAtTick | SlowExpiresAtTick | CooldownNextReadyTick
@@ -346,6 +347,7 @@ impl AgentFieldId {
             Armor => "armor",
             MagicResist => "magic_resist",
             AttackDamage => "attack_damage",
+            AbilityPower => "ability_power",
             AttackRange => "attack_range",
             Mana => "mana",
             MaxMana => "max_mana",
@@ -415,6 +417,7 @@ impl AgentFieldId {
             Armor,
             MagicResist,
             AttackDamage,
+            AbilityPower,
             AttackRange,
             Mana,
             MaxMana,
@@ -496,6 +499,7 @@ impl AgentFieldId {
             "armor" => Armor,
             "magic_resist" => MagicResist,
             "attack_damage" => AttackDamage,
+            "ability_power" => AbilityPower,
             "attack_range" => AttackRange,
             "mana" => Mana,
             "max_mana" => MaxMana,
@@ -1579,6 +1583,7 @@ mod tests {
             AgentFieldId::Armor,
             AgentFieldId::MagicResist,
             AgentFieldId::AttackDamage,
+            AgentFieldId::AbilityPower,
             AgentFieldId::AttackRange,
             AgentFieldId::Mana,
             AgentFieldId::MaxMana,
@@ -1642,6 +1647,7 @@ mod tests {
             AgentFieldId::Armor,
             AgentFieldId::MagicResist,
             AgentFieldId::AttackDamage,
+            AgentFieldId::AbilityPower,
             AgentFieldId::AttackRange,
             AgentFieldId::Mana,
             AgentFieldId::MaxMana,
@@ -1975,10 +1981,10 @@ mod tests {
         // + 4 control statuses Wave 2 piece 1 + 4 buff multipliers Wave
         // 2 piece 4 + 2 Disguise SoA columns Wave 3 ToM Phase 5 + 4
         // Lift A multi-tick procedure columns: BusyUntilTick +
-        // TravelDestX/Y/Z); if a new variant lands and `all_variants`
-        // isn't updated, this assertion fails before the round-trip loop
-        // above can.
-        assert_eq!(all.len(), 53);
+        // TravelDestX/Y/Z + AbilityPower); if a new variant lands and
+        // `all_variants` isn't updated, this assertion fails before the
+        // round-trip loop above can.
+        assert_eq!(all.len(), 54);
     }
 
     #[test]

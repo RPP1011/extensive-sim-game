@@ -149,6 +149,7 @@ pub struct DuelAbilitiesState {
     /// (attack_damage / armor / magic_resist / move_speed) are
     /// 0-initialized — duel_abilities verbs scale only on max_hp today.
     agent_attack_damage_buf: wgpu::Buffer,
+    agent_ability_power_buf: wgpu::Buffer,
     agent_max_hp_buf: wgpu::Buffer,
     agent_armor_buf: wgpu::Buffer,
     agent_magic_resist_buf: wgpu::Buffer,
@@ -426,6 +427,7 @@ impl DuelAbilitiesState {
             })
         };
         let agent_attack_damage_buf = mk_stat("duel_abilities_runtime::agent_attack_damage");
+        let agent_ability_power_buf = mk_stat("duel_abilities_runtime::agent_ability_power");
         let agent_armor_buf         = mk_stat("duel_abilities_runtime::agent_armor");
         let agent_magic_resist_buf  = mk_stat("duel_abilities_runtime::agent_magic_resist");
         let agent_move_speed_buf    = mk_stat("duel_abilities_runtime::agent_move_speed");
@@ -775,6 +777,7 @@ impl DuelAbilitiesState {
             agent_damage_taken_mult_expires_at_tick_buf,
             agent_stun_expires_at_tick_buf,
             agent_attack_damage_buf,
+            agent_ability_power_buf,
             agent_max_hp_buf,
             agent_armor_buf,
             agent_magic_resist_buf,
@@ -1135,6 +1138,7 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_when_pred_op:      &self.registry_gpu.when_pred_op,
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_armor:         &self.agent_armor_buf,
             agent_magic_resist:  &self.agent_magic_resist_buf,
@@ -1182,6 +1186,7 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             ability_registry_chances:           &self.registry_gpu.chances,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_hp:            &self.agent_hp_buf,
             agent_armor:         &self.agent_armor_buf,
@@ -1223,6 +1228,7 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             ability_registry_chances:           &self.registry_gpu.chances,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_hp:            &self.agent_hp_buf,
             agent_armor:         &self.agent_armor_buf,
@@ -1268,6 +1274,7 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             ability_registry_chances:           &self.registry_gpu.chances,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_hp:            &self.agent_hp_buf,
             agent_armor:         &self.agent_armor_buf,
@@ -1313,6 +1320,7 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             ability_registry_chances:           &self.registry_gpu.chances,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_hp:            &self.agent_hp_buf,
             agent_armor:         &self.agent_armor_buf,
@@ -1360,6 +1368,7 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             ability_registry_chances:           &self.registry_gpu.chances,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_hp:            &self.agent_hp_buf,
             agent_armor:         &self.agent_armor_buf,
@@ -1407,6 +1416,7 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             ability_registry_chances:           &self.registry_gpu.chances,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_hp:            &self.agent_hp_buf,
             agent_armor:         &self.agent_armor_buf,
@@ -1454,6 +1464,7 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             ability_registry_chances:           &self.registry_gpu.chances,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_hp:            &self.agent_hp_buf,
             agent_armor:         &self.agent_armor_buf,
@@ -1766,6 +1777,7 @@ impl CompiledSim for DuelAbilitiesState {
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             ability_registry_chances:           &self.registry_gpu.chances,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_armor:         &self.agent_armor_buf,
             agent_magic_resist:  &self.agent_magic_resist_buf,

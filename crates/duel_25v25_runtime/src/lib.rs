@@ -83,6 +83,8 @@ pub struct Duel25v25State {
     /// + duel_abilities_runtime exactly — the same five-column shape.
     #[allow(dead_code)]
     agent_attack_damage_buf: wgpu::Buffer,
+    #[allow(dead_code)]
+    agent_ability_power_buf: wgpu::Buffer,
     agent_max_hp_buf: wgpu::Buffer,
     #[allow(dead_code)]
     agent_armor_buf: wgpu::Buffer,
@@ -301,6 +303,8 @@ impl Duel25v25State {
         };
         let agent_attack_damage_buf =
             mk_zero_stat("duel_25v25_runtime::agent_attack_damage");
+        let agent_ability_power_buf =
+            mk_zero_stat("duel_25v25_runtime::agent_ability_power");
         let agent_armor_buf = mk_zero_stat("duel_25v25_runtime::agent_armor");
         let agent_magic_resist_buf =
             mk_zero_stat("duel_25v25_runtime::agent_magic_resist");
@@ -525,6 +529,7 @@ impl Duel25v25State {
             agent_alive_buf,
             agent_creature_type_buf,
             agent_attack_damage_buf,
+            agent_ability_power_buf,
             agent_max_hp_buf,
             agent_armor_buf,
             agent_magic_resist_buf,
@@ -831,6 +836,7 @@ impl CompiledSim for Duel25v25State {
             agent_armor: &self.agent_armor_buf,
             agent_magic_resist: &self.agent_magic_resist_buf,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_mana: &self.agent_mana_buf,
             agent_creature_type: &self.agent_creature_type_buf,
             spatial_grid_cells: &self.spatial_grid_cells,
@@ -902,6 +908,7 @@ impl CompiledSim for Duel25v25State {
             agent_armor: &self.agent_armor_buf,
             agent_magic_resist: &self.agent_magic_resist_buf,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_mana: &self.agent_mana_buf,
             agent_creature_type: &self.agent_creature_type_buf,
             spatial_grid_cells: &self.spatial_grid_cells,
@@ -973,6 +980,7 @@ impl CompiledSim for Duel25v25State {
             agent_armor: &self.agent_armor_buf,
             agent_magic_resist: &self.agent_magic_resist_buf,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_mana: &self.agent_mana_buf,
             agent_creature_type: &self.agent_creature_type_buf,
             spatial_grid_cells: &self.spatial_grid_cells,
@@ -1039,6 +1047,7 @@ impl CompiledSim for Duel25v25State {
             agent_armor: &self.agent_armor_buf,
             agent_magic_resist: &self.agent_magic_resist_buf,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_mana: &self.agent_mana_buf,
             agent_creature_type: &self.agent_creature_type_buf,
             spatial_grid_cells: &self.spatial_grid_cells,

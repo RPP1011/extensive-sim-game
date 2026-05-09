@@ -145,6 +145,7 @@ pub struct ApplyAbilitySmokeState {
     // (Damage 30 with no scaling slots) writes zero scale_bonus
     // regardless. Real fixtures (Bleed-style +5% MaxHp) populate these.
     agent_attack_damage_buf: wgpu::Buffer,
+    agent_ability_power_buf: wgpu::Buffer,
     agent_max_hp_buf: wgpu::Buffer,
     agent_hp_buf: wgpu::Buffer,
     agent_armor_buf: wgpu::Buffer,
@@ -379,6 +380,8 @@ impl ApplyAbilitySmokeState {
         };
         let agent_attack_damage_buf =
             mk_stat_col("apply_ability_smoke_runtime::agent_attack_damage", |s| s.attack_damage);
+        let agent_ability_power_buf =
+            mk_stat_col("apply_ability_smoke_runtime::agent_ability_power", |s| s.ability_power);
         let agent_max_hp_buf        =
             mk_stat_col("apply_ability_smoke_runtime::agent_max_hp",        |s| s.max_hp);
         let agent_hp_buf            =
@@ -408,17 +411,6 @@ impl ApplyAbilitySmokeState {
                 contents: bytemuck::cast_slice(&engaged_with_init),
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             });
-        // NOTE: AbilityPower has no per-agent SoA column on the GPU
-        // (the dispatcher's `agent_stat()` switch returns 0.0 for
-        // ScalingStatRef::AbilityPower). The CPU oracle's
-        // `CasterStats::ability_power` field is therefore intentionally
-        // unread by the GPU side — sweep test pins this gap by including
-        // a Heal ability with `+ N% AbilityPower` scaling that must
-        // produce the same `scale_bonus = 0.0` on both backends (CPU
-        // multiplies by `caster_stats.ability_power = 0.0` from the
-        // PerAgentStats default; GPU returns 0.0 from the AbilityPower
-        // case unconditionally).
-
         // -- Event ring + tail. The kernel binds both as
         //    `array<atomic<u32>>` so we tag them STORAGE (the dispatcher
         //    writes via atomicAdd / atomicStore). COPY_SRC needed for
@@ -485,6 +477,7 @@ impl ApplyAbilitySmokeState {
             agent_level_buf,
             agent_pos_buf,
             agent_attack_damage_buf,
+            agent_ability_power_buf,
             agent_max_hp_buf,
             agent_hp_buf,
             agent_armor_buf,
@@ -715,6 +708,7 @@ impl ApplyAbilitySmokeState {
             spatial_grid_cells:  &self.spatial_grid_cells_buf,
             spatial_grid_starts: &self.spatial_grid_starts_buf,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_hp:            &self.agent_hp_buf,
             agent_armor:         &self.agent_armor_buf,
@@ -801,6 +795,7 @@ impl ApplyAbilitySmokeState {
                 spatial_grid_cells:  &self.spatial_grid_cells_buf,
                 spatial_grid_starts: &self.spatial_grid_starts_buf,
                 agent_attack_damage: &self.agent_attack_damage_buf,
+                agent_ability_power: &self.agent_ability_power_buf,
                 agent_max_hp:        &self.agent_max_hp_buf,
                 agent_hp:            &self.agent_hp_buf,
                 agent_armor:         &self.agent_armor_buf,

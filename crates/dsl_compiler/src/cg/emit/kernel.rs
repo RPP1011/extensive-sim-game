@@ -3262,7 +3262,7 @@ fn lower_scoring_argmax_body(
                      \x20               var pred_lhs_{i}: f32 = 0.0;\n\
                      \x20               switch (pred_field_{i}) {{\n\
                      \x20                   case 0u: {{ pred_lhs_{i} = agent_attack_damage[pred_agent_{i}]; }}\n\
-                     \x20                   case 1u: {{ pred_lhs_{i} = 0.0; }}\n\
+                     \x20                   case 1u: {{ pred_lhs_{i} = agent_ability_power[pred_agent_{i}]; }}\n\
                      \x20                   case 2u: {{ pred_lhs_{i} = agent_max_hp[pred_agent_{i}]; }}\n\
                      \x20                   case 3u: {{ pred_lhs_{i} = agent_hp[pred_agent_{i}]; }}\n\
                      \x20                   case 4u: {{ pred_lhs_{i} = agent_armor[pred_agent_{i}]; }}\n\

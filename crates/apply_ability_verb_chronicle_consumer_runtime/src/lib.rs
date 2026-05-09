@@ -133,6 +133,7 @@ pub struct ApplyAbilityVerbChronicleConsumerState {
     // `scale_bonus` switch. All zero — verb-chronicle-consumer's
     // program (Damage 30) has no scaling slots.
     agent_attack_damage_buf: wgpu::Buffer,
+    agent_ability_power_buf: wgpu::Buffer,
     agent_max_hp_buf: wgpu::Buffer,
     agent_armor_buf: wgpu::Buffer,
     agent_magic_resist_buf: wgpu::Buffer,
@@ -243,6 +244,7 @@ impl ApplyAbilityVerbChronicleConsumerState {
             })
         };
         let agent_attack_damage_buf = mk_stat("apply_ability_verb_chronicle_consumer::agent_attack_damage");
+        let agent_ability_power_buf = mk_stat("apply_ability_verb_chronicle_consumer::agent_ability_power");
         let agent_max_hp_buf        = mk_stat("apply_ability_verb_chronicle_consumer::agent_max_hp");
         let agent_armor_buf         = mk_stat("apply_ability_verb_chronicle_consumer::agent_armor");
         let agent_magic_resist_buf  = mk_stat("apply_ability_verb_chronicle_consumer::agent_magic_resist");
@@ -312,6 +314,7 @@ impl ApplyAbilityVerbChronicleConsumerState {
             agent_hp_buf,
             agent_hp_staging,
             agent_attack_damage_buf,
+            agent_ability_power_buf,
             agent_max_hp_buf,
             agent_armor_buf,
             agent_magic_resist_buf,
@@ -438,6 +441,7 @@ impl ApplyAbilityVerbChronicleConsumerState {
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             ability_registry_chances:           &self.registry_gpu.chances,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_armor:         &self.agent_armor_buf,
             agent_magic_resist:  &self.agent_magic_resist_buf,
@@ -528,6 +532,7 @@ impl ApplyAbilityVerbChronicleConsumerState {
             ability_registry_when_pred_literal: &self.registry_gpu.when_pred_literal,
             ability_registry_chances:           &self.registry_gpu.chances,
             agent_attack_damage: &self.agent_attack_damage_buf,
+            agent_ability_power: &self.agent_ability_power_buf,
             agent_max_hp:        &self.agent_max_hp_buf,
             agent_armor:         &self.agent_armor_buf,
             agent_magic_resist:  &self.agent_magic_resist_buf,
