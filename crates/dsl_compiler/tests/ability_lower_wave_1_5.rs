@@ -914,17 +914,78 @@ fn lower_when_predicate_literal_lhs_flips_op() {
 }
 
 #[test]
-fn lower_when_predicate_else_clause_errors() {
+fn lower_when_predicate_else_clause_lowers_to_or() {
+    // Task #228: `when A else B` is sugar for `when A || B` — both
+    // branches yield the same effect application. The lower path
+    // wraps the two branches as `Or(then, else)` so the existing
+    // CPU + GPU evaluators handle it transparently. Source text for
+    // both branches is preserved on the slot for future
+    // branch-distinguishing extensions.
     use dsl_ast::parse_ability_file;
-    use dsl_compiler::ability_lower::{lower_ability_decl, LowerError};
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::program::WhenPredicate;
     let file = parse_ability_file(
         "ability X { target: enemy cooldown: 1s damage 50 when target.hp < 30 else target.hp > 70 }"
     ).expect("parser");
-    let err = lower_ability_decl(&file.abilities[0]).unwrap_err();
-    assert!(
-        matches!(err, LowerError::WhenConditionUnsupported { clause: "else", .. }),
-        "expected WhenConditionUnsupported{{clause:\"else\"}}, got {err:?}",
-    );
+    let prog = lower_ability_decl(&file.abilities[0])
+        .expect("`when X else Y` must lower (task #228)");
+    let cond = prog.when_per_effect[0].as_ref().expect("slot populated");
+    // Source text for both branches preserved verbatim.
+    assert_eq!(cond.when_cond, "target.hp < 30");
+    assert_eq!(cond.else_cond.as_deref(), Some("target.hp > 70"));
+    // Lowered tree is Or(then, else) — execution semantics match
+    // `when A || B`.
+    let tree = cond.when_compound.as_ref().expect("compound tree populated");
+    match tree {
+        WhenPredicate::Or(lhs, rhs) => {
+            assert!(matches!(lhs.as_ref(), WhenPredicate::Atom(_)),
+                "lhs must be the `when` branch atom (target.hp < 30)");
+            assert!(matches!(rhs.as_ref(), WhenPredicate::Atom(_)),
+                "rhs must be the `else` branch atom (target.hp > 70)");
+        }
+        other => panic!("expected WhenPredicate::Or, got {other:?}"),
+    }
+    // Compound trees do not populate the legacy single-atom slot.
+    assert!(cond.when_compiled.is_none(),
+        "Or(then, else) is compound — `when_compiled` should be None");
+}
+
+#[test]
+fn lower_when_else_packs_identically_to_or() {
+    // Task #228: `when A else B` and `when A || B` must produce
+    // identical packed RPN bytes — they share the same lowered tree
+    // shape (`Or(then, else)`) and pack via the same `0xFD` OR
+    // sentinel. This is the brief's core invariant: per-effect `else`
+    // is parser-and-lower sugar with zero IR / schema-hash impact.
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::packed::PackedAbilityRegistry;
+    use engine::ability::AbilityRegistryBuilder;
+    let with_else = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 when target.hp < 30 else target.armor < 5 }"
+    ).expect("parser");
+    let with_or = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 when target.hp < 30 || target.armor < 5 }"
+    ).expect("parser");
+    let prog_else = lower_ability_decl(&with_else.abilities[0]).expect("else lowers");
+    let prog_or   = lower_ability_decl(&with_or.abilities[0]).expect("or lowers");
+    let mut b_else = AbilityRegistryBuilder::new();
+    b_else.register(prog_else);
+    let mut b_or = AbilityRegistryBuilder::new();
+    b_or.register(prog_or);
+    // Pack both and compare the four `when_pred_*` SoA columns
+    // (binder / field / op / literal). These columns ARE the RPN
+    // encoding — identical bytes prove cross-backend parity.
+    let packed_else = PackedAbilityRegistry::pack(&b_else.build());
+    let packed_or   = PackedAbilityRegistry::pack(&b_or.build());
+    assert_eq!(packed_else.when_pred_binder, packed_or.when_pred_binder,
+        "`when A else B` and `when A || B` must pack to identical RPN binder bytes");
+    assert_eq!(packed_else.when_pred_field, packed_or.when_pred_field,
+        "`when A else B` and `when A || B` must pack to identical RPN field bytes");
+    assert_eq!(packed_else.when_pred_op, packed_or.when_pred_op,
+        "`when A else B` and `when A || B` must pack to identical RPN op bytes");
+    assert_eq!(packed_else.when_pred_literal, packed_or.when_pred_literal,
+        "`when A else B` and `when A || B` must pack to identical RPN literal bytes");
 }
 
 #[test]
@@ -1095,4 +1156,37 @@ fn lower_when_predicate_tree_too_large_errors() {
         matches!(err, LowerError::WhenConditionTreeTooLarge { .. }),
         "expected WhenConditionTreeTooLarge, got {err:?}",
     );
+}
+
+#[test]
+fn lower_when_else_else_branch_only_match_fires_effect() {
+    // Task #228 behavioral end-to-end: parse `when A else B`, lower,
+    // then apply with stats that satisfy ONLY the else branch. The
+    // effect must fire — confirms `else` is wired into the runtime
+    // evaluator, not just parsed into source-text.
+    //
+    // Predicate: `when target.hp < 30 else target.hp > 70` with a
+    // target at hp = 80 → only the else branch is true → fires.
+    use dsl_ast::parse_ability_file;
+    use dsl_compiler::ability_lower::lower_ability_decl;
+    use engine::ability::apply::apply_program;
+    use engine::ability::program::CasterStats;
+    use engine::ids::AgentId;
+    let file = parse_ability_file(
+        "ability X { target: enemy cooldown: 1s damage 50 when target.hp < 30 else target.hp > 70 }"
+    ).expect("parser");
+    let prog = lower_ability_decl(&file.abilities[0]).expect("lower");
+    let caster = AgentId::new(1).unwrap();
+    let target = AgentId::new(2).unwrap();
+    let target_hi = CasterStats { hp: 80.0, ..Default::default() };
+    let evs = apply_program(&prog, caster, target, 0, 0xCAFE,
+        &CasterStats::default(), &target_hi);
+    assert_eq!(evs.len(), 1,
+        "target.hp=80 satisfies else branch (>70) — effect must fire");
+    // Sanity: middle band where neither branch holds → effect skipped.
+    let target_mid = CasterStats { hp: 50.0, ..Default::default() };
+    let evs = apply_program(&prog, caster, target, 0, 0xCAFE,
+        &CasterStats::default(), &target_mid);
+    assert_eq!(evs.len(), 0,
+        "target.hp=50 satisfies neither branch — effect must skip");
 }

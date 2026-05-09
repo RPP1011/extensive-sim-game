@@ -217,6 +217,44 @@ fn parses_when_existing_atomic_still_works() {
     assert_eq!(cond.when_cond, "target.hp < 30");
 }
 
+// Task #228 — `when A else B` per-effect predicate clause. The `else`
+// branch is a full condition expression (no leading `when`); both
+// branches are captured verbatim so lowering can re-parse them through
+// the same predicate vocabulary as the `when` branch.
+
+#[test]
+fn when_else_parses_simple_atoms() {
+    let src = "ability X { target: enemy cooldown: 1s damage 50 when target.hp < 30 else target.hp > 70 }";
+    let file = parse_ability_file(src).expect("must parse");
+    let cond = file.abilities[0].effects[0].condition.as_ref().unwrap();
+    assert_eq!(cond.when_cond, "target.hp < 30");
+    assert_eq!(cond.else_cond.as_deref(), Some("target.hp > 70"));
+}
+
+#[test]
+fn when_else_with_compound_left_branch() {
+    // `when A && B else C` — left branch is compound, right is atom.
+    let src = "ability X { target: enemy cooldown: 1s damage 50 when target.hp < 30 && target.armor < 5 else target.magic_resist < 5 }";
+    let file = parse_ability_file(src).expect("must parse");
+    let cond = file.abilities[0].effects[0].condition.as_ref().unwrap();
+    assert_eq!(cond.when_cond, "target.hp < 30 && target.armor < 5");
+    assert_eq!(cond.else_cond.as_deref(), Some("target.magic_resist < 5"));
+}
+
+#[test]
+fn when_else_with_compound_right_branch() {
+    // `when A else B || C` — left branch is atom, right branch is
+    // compound. The else body extends to end-of-statement (`}` here).
+    let src = "ability X { target: enemy cooldown: 1s damage 50 when target.hp < 30 else target.armor < 5 || target.magic_resist < 5 }";
+    let file = parse_ability_file(src).expect("must parse");
+    let cond = file.abilities[0].effects[0].condition.as_ref().unwrap();
+    assert_eq!(cond.when_cond, "target.hp < 30");
+    assert_eq!(
+        cond.else_cond.as_deref(),
+        Some("target.armor < 5 || target.magic_resist < 5"),
+    );
+}
+
 // ---------------------------------------------------------------------------
 // 5. `chance N%`
 // ---------------------------------------------------------------------------

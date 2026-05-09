@@ -975,39 +975,6 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
         // (`target.htp` for `target.hp`) that the syntax check
         // alone misses.
         let when = if let Some(c) = stmt.condition.as_ref() {
-            let when_expr = match dsl_ast::parser::parse_expression(&c.when_cond) {
-                Ok(e) => e,
-                Err(e) => {
-                    return Err(LowerError::WhenConditionParseError {
-                        ability:   decl.name.clone(),
-                        clause:    "when",
-                        predicate: c.when_cond.clone(),
-                        reason:    e.message.clone(),
-                        span:      c.span,
-                    });
-                }
-            };
-            if let Some((binder, field)) = first_unknown_agent_field(&when_expr) {
-                return Err(LowerError::WhenConditionUnknownField {
-                    ability: decl.name.clone(),
-                    clause:  "when",
-                    binder,
-                    field,
-                    span:    c.span,
-                });
-            }
-            // Wave 1.5#7 GPU eval (this slice): reject `else <cond>`
-            // at lower time. The CPU + GPU evaluators ignore else_cond
-            // — accepting it silently would misrepresent the gate's
-            // semantics. Open task #163-followup.
-            if c.else_cond.is_some() {
-                return Err(LowerError::WhenConditionUnsupported {
-                    ability: decl.name.clone(),
-                    clause:  "else",
-                    reason:  "deferred — open task #163-followup".to_string(),
-                    span:    c.span,
-                });
-            }
             // Task #227: lower the predicate to a Boolean tree
             // (`WhenPredicate`) with `EffectPredicate` atoms at the
             // leaves. The tree handles `&&` / `||` / `!`; the simple
@@ -1018,12 +985,26 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
             // working. Restricted leaf vocab (form
             // `<binder>.<field> <op> <literal>`); anything else
             // surfaces WhenConditionUnsupported / -UnsupportedField.
-            let when_compound = extract_when_predicate(
-                &when_expr,
-                &decl.name,
-                "when",
-                c.span,
+            let when_then = parse_when_branch(
+                &c.when_cond, "when", &decl.name, c.span,
             )?;
+            // Task #228: optional `else <cond>` branch — semantically
+            // equivalent to `when X || Y` for this slice. The
+            // structural distinction (which branch matched) lives at
+            // the source-text layer (`EffectWhenCondition::else_cond`
+            // is preserved verbatim below) so future extensions can
+            // light up branch-distinguishing semantics without an IR
+            // bump. Combining via `Or` lets the existing RPN encoding
+            // and both backend evaluators handle it transparently —
+            // no new sentinels, no schema bump.
+            let when_compound = if let Some(else_text) = c.else_cond.as_ref() {
+                let when_else = parse_when_branch(
+                    else_text, "else", &decl.name, c.span,
+                )?;
+                WhenPredicate::Or(Box::new(when_then), Box::new(when_else))
+            } else {
+                when_then
+            };
             // Bound the RPN stride. Counting nodes here gives an early
             // diagnostic at the author's screen rather than a defensive
             // truncate at SoA pack time.
@@ -1046,7 +1027,11 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
             };
             Some(EffectWhenCondition {
                 when_cond:     c.when_cond.clone(),
-                else_cond:     None, // gated above; guaranteed None here
+                // Task #228: preserve verbatim else-branch source text
+                // so future extensions can recover which branch
+                // matched. The lowered `when_compound` already encodes
+                // both branches as `Or(then, else)` for execution.
+                else_cond:     c.else_cond.clone(),
                 when_compiled,
                 when_compound: Some(when_compound),
             })
@@ -2236,6 +2221,40 @@ fn summon_template_hash(template: &str) -> u32 {
     // mixes bits well; this is a pure compaction step.
     let full = h.finish();
     ((full >> 32) as u32) ^ (full as u32)
+}
+
+/// Task #228: parse + validate one branch of a per-effect predicate
+/// clause (the `when` body or the optional `else` body) and lower it
+/// to a [`WhenPredicate`] tree. Re-parses the verbatim source slice
+/// the AST captured (since Wave 1.5's parser stops at the next
+/// modifier keyword without validating the predicate grammar), then
+/// runs the same vocabulary check the legacy `when` path uses, so the
+/// `else` branch surfaces typos with a `clause: "else"` diagnostic.
+fn parse_when_branch(
+    source:  &str,
+    clause:  &'static str,
+    ability: &str,
+    span:    Span,
+) -> Result<WhenPredicate, LowerError> {
+    let expr = dsl_ast::parser::parse_expression(source).map_err(|e| {
+        LowerError::WhenConditionParseError {
+            ability:   ability.to_string(),
+            clause,
+            predicate: source.to_string(),
+            reason:    e.message.clone(),
+            span,
+        }
+    })?;
+    if let Some((binder, field)) = first_unknown_agent_field(&expr) {
+        return Err(LowerError::WhenConditionUnknownField {
+            ability: ability.to_string(),
+            clause,
+            binder,
+            field,
+            span,
+        });
+    }
+    extract_when_predicate(&expr, ability, clause, span)
 }
 
 /// Task #227: recursive extraction of a [`WhenPredicate`] tree from
