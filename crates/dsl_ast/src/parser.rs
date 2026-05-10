@@ -2036,8 +2036,10 @@ fn parse_stmt(c: &mut Cursor) -> PResult<Stmt> {
     if starts_with_keyword(c, "beliefs") && is_belief_observe_stmt(c) {
         return Ok(Stmt::BeliefObserve(parse_belief_observe_stmt(c)?));
     }
-    if c.starts_with("self") {
-        // Check for `self += / -= / *= / |=` operators.
+    if starts_with_keyword(c, "self") {
+        // Check for `self += / -= / *= / |=` operators, OR
+        // `self.append( field: expr, ... )` (Plan G G3b/G3c — struct
+        // ring append).
         let save = c.pos;
         c.bump("self".len());
         c.skip_ws();
@@ -2050,6 +2052,56 @@ fn parse_stmt(c: &mut Cursor) -> PResult<Stmt> {
                 let value = parse_expr(c)?;
                 return Ok(Stmt::SelfUpdate { op: op.to_string(), value, span: Span::new(start, c.pos) });
             }
+        }
+        // `self.append(...)` — struct-payload ring append. Each arg is
+        // a `name: <expr>` pair; the name list defines the per-cell
+        // struct layout in declaration order.
+        if c.starts_with_char('.') {
+            let dot_save = c.pos;
+            c.bump(1);
+            c.skip_ws();
+            if starts_with_keyword(c, "append") {
+                c.bump("append".len());
+                c.skip_ws();
+                expect_char(c, '(')
+                    .map_err(|e| e.with_context("parsing `self.append(` open paren"))?;
+                let mut fields: Vec<FieldInit> = Vec::new();
+                loop {
+                    c.skip_ws();
+                    if c.starts_with_char(')') {
+                        c.bump(1);
+                        break;
+                    }
+                    let fstart = c.pos;
+                    let name = ident(c)
+                        .map_err(|e| e.with_context("parsing self.append field name"))?;
+                    c.skip_ws();
+                    expect_char(c, ':').map_err(|e| {
+                        e.with_context("parsing `:` after self.append field name")
+                    })?;
+                    c.skip_ws();
+                    let value = parse_expr(c)?;
+                    fields.push(FieldInit { name, value, span: Span::new(fstart, c.pos) });
+                    c.skip_ws();
+                    if c.starts_with_char(',') {
+                        c.bump(1);
+                        continue;
+                    }
+                    if c.starts_with_char(')') {
+                        c.bump(1);
+                        break;
+                    }
+                    return Err(ParseErr::at(
+                        here(c),
+                        "expected `,` or `)` in self.append(...)",
+                    ));
+                }
+                return Ok(Stmt::SelfAppend {
+                    fields,
+                    span: Span::new(start, c.pos),
+                });
+            }
+            c.pos = dot_save;
         }
         c.pos = save;
     }

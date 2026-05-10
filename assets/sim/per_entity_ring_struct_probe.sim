@@ -1,0 +1,79 @@
+// per_entity_ring_struct_probe — Plan G G3b/G3c smoke fixture.
+//
+// Lights up the struct-payload extension to the existing-but-unused
+// `@per_entity_ring(K = N)` view shape. Sibling to G3a's
+// `per_entity_ring_probe.sim` (which exercises the SCALAR ring-append
+// path with a single-f32 payload); this fixture exercises the struct-
+// cell ring-append path where each cell holds a multi-field struct
+// `(timestamp: u32, amount: f32)`.
+//
+// Also smoke-tests Plan G G3c (multi-statement view fold body) by
+// admitting an intermediate `let` binding before the `self.append(...)`
+// — the Let admission is required for the struct-cell shape to compose
+// with future fixtures that derive a per-cell field from prior locals
+// (cursor offsets, q8 packing, ...).
+//
+// Shape: per-agent ring of K = 4 cells. Each Damaged event appends one
+// cell; the cell's first field is the tick at which the event landed,
+// the second is the damage amount. The cursor allocation +
+// per-target stride logic is identical to G3a's scalar shape; only the
+// per-field payload writes differ.
+//
+// **Behavioural pin (target shape — runtime not built yet).**
+//
+//   AGENT_COUNT=2, INITIAL_HP=200.0
+//   Tick 0: scripted Damaged{target=0, amount=10}.
+//     Ring[0] = [(t=0, a=10), (?, ?), (?, ?), (?, ?)].
+//   Tick 1: scripted Damaged{target=0, amount=20}.
+//     Ring[0] = [(t=0, a=10), (t=1, a=20), (?, ?), (?, ?)].
+//   ... (struct-cell layout matches G3a's slot wraparound semantics —
+//   K=4 cells, FIFO with cursor mod K)
+//
+// MVP scope:
+//   * Two-field struct payload (`timestamp: u32, amount: f32`). Future
+//     fixtures (the threats view) extend this to ~8 fields.
+//   * `let` admission: the body's `let now = ...` binding flows
+//     through the new G3c Let arm in `view::lower_stmt`.
+//   * Single-handler fold (Damaged only). Multi-handler folds are out
+//     of scope for this slice.
+
+event Tick { }
+event Damaged { source: AgentId, target: AgentId, amount: f32 }
+
+entity Subject : Agent { }
+
+config inject {
+  inject_at_tick: u32 = 0,
+  inject_base:    f32 = 10.0,
+  inject_step:    f32 = 10.0,
+  target_slot:    u32 = 0,
+}
+
+@phase(per_agent)
+physics InjectDamage {
+  on Tick {} where (self.alive && world.tick >= config.inject.inject_at_tick) {
+    emit Damaged {
+      source: self,
+      target: self,
+      amount: config.inject.inject_base + ((world.tick - config.inject.inject_at_tick) * 1.0) * config.inject.inject_step,
+    }
+  }
+}
+
+// G3b/G3c's view-under-test. Per-target ring of K=4 cells, each
+// storing a `(timestamp: u32, amount: f32)` pair. The fold body
+// derives `now` via a Let (G3c admission), then appends the struct
+// cell via `self.append(...)` (G3b/G3c new shape).
+//
+// Note: `self.append(...)` is the new struct-payload primitive. The
+// scalar-payload `self += <expr>` shape (per_entity_ring_probe.sim)
+// stays in place for views that only need a single per-cell value.
+@materialized(on_event = [Damaged])
+@per_entity_ring(K = 4)
+view recent_damage_records(target: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: _, target: t, amount: a } {
+    let now = world.tick
+    self.append(timestamp: now, amount: a)
+  }
+}

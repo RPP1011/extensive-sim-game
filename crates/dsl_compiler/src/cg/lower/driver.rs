@@ -2967,7 +2967,8 @@ fn list_contains_apply_ability(list_id: CgStmtListId, prog: &CgProgram) -> bool 
             | CgStmt::Assign { .. }
             | CgStmt::Let { .. }
             | CgStmt::ForEachAgent { .. }
-            | CgStmt::ForEachNeighbor { .. } => {}
+            | CgStmt::ForEachNeighbor { .. }
+            | CgStmt::ViewStorageAppend { .. } => {}
         }
     }
     false
@@ -3014,7 +3015,8 @@ fn list_contains_apply_ability_with_aoe(list_id: CgStmtListId, prog: &CgProgram)
             | CgStmt::Assign { .. }
             | CgStmt::Let { .. }
             | CgStmt::ForEachAgent { .. }
-            | CgStmt::ForEachNeighbor { .. } => {}
+            | CgStmt::ForEachNeighbor { .. }
+            | CgStmt::ViewStorageAppend { .. } => {}
         }
     }
     false
@@ -3195,6 +3197,15 @@ fn collect_belief_state_setter_writes(
                     walk_expr(*caster, prog, out);
                     walk_expr(*target, prog, out);
                 }
+                CgStmt::ViewStorageAppend { fields, .. } => {
+                    // Plan G G3b/G3c — each field's bound expression
+                    // could carry an embedded BeliefState column read
+                    // (e.g. `last_known_hp` lookup as a struct-cell
+                    // value). Walk every field expr just like Emit.
+                    for (_, expr_id) in fields {
+                        walk_expr(*expr_id, prog, out);
+                    }
+                }
             }
         }
     }
@@ -3345,6 +3356,11 @@ fn collect_belief_state_getter_reads(
                 CgStmt::ApplyAbility { caster, target, .. } => {
                     walk_expr(*caster, prog, out);
                     walk_expr(*target, prog, out);
+                }
+                CgStmt::ViewStorageAppend { fields, .. } => {
+                    for (_, expr_id) in fields {
+                        walk_expr(*expr_id, prog, out);
+                    }
                 }
             }
         }
@@ -3754,7 +3770,12 @@ fn collect_emits_in_list(list_id: CgStmtListId, prog: &CgProgram, out: &mut Vec<
             CgStmt::Assign { .. }
             | CgStmt::Let { .. }
             | CgStmt::ForEachAgent { .. }
-            | CgStmt::ForEachNeighbor { .. } => {}
+            | CgStmt::ForEachNeighbor { .. }
+            | CgStmt::ViewStorageAppend { .. } => {
+                // Plan G G3b/G3c — view-storage append writes to the
+                // per-entity ring's primary + cursors slots, NOT to an
+                // event ring. No emit-destination contribution.
+            }
             CgStmt::ApplyAbility { .. } => {
                 // #136 slice β step 4: ApplyAbility's WGSL dispatcher
                 // (cg/emit/wgsl_body.rs) atomic-appends to the

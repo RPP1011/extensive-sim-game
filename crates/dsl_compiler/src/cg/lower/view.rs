@@ -667,11 +667,107 @@ fn lower_stmt(
             };
             push_assign(target, value_id, *span, ctx)
         }
-        IrStmt::Let { span, .. } => Err(LoweringError::UnsupportedViewFoldStmt {
-            view: view_id,
-            ast_label: "Let",
-            span: *span,
-        }),
+        IrStmt::Let {
+            local,
+            value,
+            span,
+            ..
+        } => {
+            // Plan G G3c — admit `let <name> = <expr>;` inside fold
+            // bodies. Mirrors the physics-side `lower_let` shape: the
+            // bound expression lowers via `lower_expr`, the LocalRef →
+            // LocalId mapping is allocated (or reused if pre-registered),
+            // and the binding's CG type is recorded so later reads
+            // (`IrExpr::Local(local_ref, _)`) resolve through
+            // `CgExpr::ReadLocal`. This unblocks multi-statement view
+            // bodies that compute an intermediate value before
+            // appending to the per-entity ring (e.g. derive a
+            // `cursor_idx` or pre-format a struct field).
+            let value_id = lower_expr(value, ctx)?;
+            let value_ty = super::expr::typecheck_node(ctx, value_id, value.span)?;
+            let local_id = match ctx.local_ids.get(local).copied() {
+                Some(id) => id,
+                None => ctx.allocate_local(*local),
+            };
+            ctx.record_local_ty(local_id, value_ty);
+            ctx.builder
+                .add_stmt(CgStmt::Let {
+                    local: local_id,
+                    value: value_id,
+                    ty: value_ty,
+                })
+                .map_err(|e| LoweringError::BuilderRejected {
+                    error: e,
+                    span: *span,
+                })
+        }
+        IrStmt::SelfAppend { fields, span } => {
+            // Plan G G3b/G3c — struct-payload ring append. Lower each
+            // field's bound expression, capture its CgTy, then register
+            // the per-cell struct layout on the program builder. The
+            // struct layout is implied by the field-name list +
+            // per-field types; subsequent SelfAppend statements in the
+            // same view body must declare the same field count (a
+            // future extension permits the resolver to enforce
+            // identical name/type tuples — today only count is checked
+            // structurally).
+            //
+            // Storage-hint gate: only `@per_entity_ring(...)` carries
+            // the cursor counter that allocates ring slots. Other
+            // hints surface as
+            // [`LoweringError::SelfAppendRequiresPerEntityRing`].
+            if !matches!(hint, StorageHint::PerEntityRing { .. }) {
+                return Err(LoweringError::SelfAppendRequiresPerEntityRing {
+                    view: view_id,
+                    hint_label: storage_hint_label(hint),
+                    span: *span,
+                });
+            }
+            let mut lowered_fields: Vec<(String, CgExprId)> = Vec::with_capacity(fields.len());
+            let mut layout_fields: Vec<crate::cg::program::ViewLayoutField> =
+                Vec::with_capacity(fields.len());
+            for field in fields {
+                let expr_id = lower_expr(&field.value, ctx)?;
+                let ty = super::expr::typecheck_node(ctx, expr_id, field.value.span)?;
+                lowered_fields.push((field.name.clone(), expr_id));
+                layout_fields.push(crate::cg::program::ViewLayoutField {
+                    name: field.name.clone(),
+                    ty,
+                });
+            }
+            let new_layout = crate::cg::program::ViewLayout {
+                fields: layout_fields,
+            };
+            // Conflict gate: a re-register with a different field count
+            // surfaces as a typed defect. Equal layouts (re-register
+            // with the same shape) silently no-op — the second
+            // SelfAppend in a multi-statement body might want to write
+            // the same cell shape under different conditions.
+            let prior_count = ctx.builder.view_layout(view_id).map(|l| l.fields.len());
+            match prior_count {
+                Some(n) if n != new_layout.fields.len() => {
+                    return Err(LoweringError::ConflictingViewLayout {
+                        view: view_id,
+                        prior_field_count: n,
+                        new_field_count: new_layout.fields.len(),
+                        span: *span,
+                    });
+                }
+                Some(_) => {} // matching layout — no re-register needed
+                None => {
+                    ctx.builder.register_view_layout(view_id, new_layout);
+                }
+            }
+            ctx.builder
+                .add_stmt(CgStmt::ViewStorageAppend {
+                    view: view_id,
+                    fields: lowered_fields,
+                })
+                .map_err(|e| LoweringError::BuilderRejected {
+                    error: e,
+                    span: *span,
+                })
+        }
         IrStmt::If { span, .. } => Err(LoweringError::UnsupportedViewFoldStmt {
             view: view_id,
             ast_label: "If",
@@ -1465,9 +1561,17 @@ mod tests {
     // ---- Negative: unsupported fold-body statement form -----------------
 
     #[test]
-    fn rejects_let_in_fold_body() {
-        // A `let` statement in a fold body — the resolver permits
-        // `Let`, but Task 2.3's `lower_stmt` defers it.
+    fn admits_let_in_fold_body() {
+        // Plan G G3c — `let` statements are admitted inside fold
+        // bodies (lifted from the previous "Unsupported(Let)" gate).
+        // The let lowers via the same path as physics: allocate a
+        // LocalId for the AST LocalRef, lower the bound value, record
+        // the binding's CgTy on the lowering context, then push a
+        // `CgStmt::Let { local, value, ty }` into the builder. The
+        // builder's lowered stmt list contains both the Let and any
+        // subsequent statements (here a follow-up SelfUpdate so the
+        // body has a final fold-body shape that emits a Primary
+        // write).
         let handler = FoldHandlerIR {
             pattern: IrEventPattern {
                 name: "AgentAttacked".to_string(),
@@ -1475,12 +1579,19 @@ mod tests {
                 bindings: vec![],
                 span: span(0, 0),
             },
-            body: vec![IrStmt::Let {
-                name: "tmp".to_string(),
-                local: dsl_ast::ir::LocalRef(0),
-                value: lit_f32(1.0),
-                span: span(7, 14),
-            }],
+            body: vec![
+                IrStmt::Let {
+                    name: "tmp".to_string(),
+                    local: dsl_ast::ir::LocalRef(0),
+                    value: lit_f32(1.0),
+                    span: span(7, 14),
+                },
+                IrStmt::SelfUpdate {
+                    op: "+=".to_string(),
+                    value: lit_f32(2.0),
+                    span: span(15, 25),
+                },
+            ],
             span: span(0, 0),
         };
         let view = fold_view(
@@ -1491,7 +1602,7 @@ mod tests {
 
         let mut builder = CgProgramBuilder::new();
         let mut ctx = LoweringCtx::new(&mut builder);
-        let err = lower_view(
+        let ops = lower_view(
             ViewId(0),
             &view,
             &[HandlerResolution {
@@ -1500,22 +1611,22 @@ mod tests {
             }],
             &mut ctx,
         )
-        .expect_err("Let unsupported in fold body");
-        match err {
-            LoweringError::UnsupportedViewFoldStmt {
-                view,
-                ast_label,
-                span,
-            } => {
-                assert_eq!(view, ViewId(0));
-                assert_eq!(ast_label, "Let");
-                assert_eq!(span.start, 7);
-                assert_eq!(span.end, 14);
-            }
-            other => panic!("expected UnsupportedViewFoldStmt(Let), got {other:?}"),
-        }
+        .expect("Let now lowers cleanly inside fold body");
+        assert_eq!(ops.len(), 1);
         let prog = builder.finish();
-        assert!(prog.ops.is_empty());
+        // The body list contains 2 stmts: a Let and an Assign.
+        let op = &prog.ops[0];
+        match &op.kind {
+            ComputeOpKind::ViewFold { body, .. } => {
+                let list = &prog.stmt_lists[body.0 as usize];
+                assert_eq!(list.stmts.len(), 2);
+                let let_stmt = &prog.stmts[list.stmts[0].0 as usize];
+                let assign_stmt = &prog.stmts[list.stmts[1].0 as usize];
+                assert!(matches!(let_stmt, CgStmt::Let { .. }));
+                assert!(matches!(assign_stmt, CgStmt::Assign { .. }));
+            }
+            other => panic!("unexpected kind: {other:?}"),
+        }
     }
 
     #[test]

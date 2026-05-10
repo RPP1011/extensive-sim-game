@@ -373,6 +373,15 @@ fn exec_stmt<C: CascadeContext>(stmt: &IrStmt, ctx: &mut C, locals: &mut Locals)
              see docs/superpowers/notes/2026-04-22-wolves-humans-interp-coverage.md §3"
         ),
 
+        IrStmt::SelfAppend { .. } => {
+            // Plan G G3b/G3c — `self.append(...)` is a view-fold-body
+            // primitive (struct ring append). Physics rules don't have
+            // a `self` cell to ring-append into; the resolver normally
+            // separates view bodies from physics bodies, so this arm is
+            // structurally unreachable from valid sources. Silently
+            // skip to keep the interpreter total over the IR.
+        }
+
         IrStmt::BeliefObserve { .. } => {
             // Theory-of-Mind belief-observe statements are not evaluated by
             // the wolves+humans interpreter path. This variant was added on

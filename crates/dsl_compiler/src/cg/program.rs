@@ -432,6 +432,73 @@ pub enum ViewFoldOp {
     Or,
 }
 
+// ---------------------------------------------------------------------------
+// Plan G G3b — per-view struct-cell layout for PerEntityRing folds whose
+// body uses `self.append(...)` instead of `self += <expr>`.
+// ---------------------------------------------------------------------------
+
+/// Single field inside a struct-cell `ViewLayout`.
+///
+/// `name` is the source-level field identifier (`"timestamp"`,
+/// `"amount"`, …); preserved verbatim for diagnostics and emit so
+/// per-field stores carry their source name in WGSL comments.
+///
+/// `ty` is the CG-typed scalar type the field stores. Today every
+/// field rounds to a 4-byte `u32` slot (the per-field WGSL store is
+/// `view_storage_primary[ring_idx * field_count + field_idx] = bits`,
+/// where bits is the `bitcast<u32>(...)` of the field's value). This
+/// matches the alignment rule pinned in the threats-view design doc:
+/// "round each field to its own size's alignment; total padded to 4
+/// bytes". A future widening (i64 / f64 fields, bit-packed sub-32-bit
+/// fields) extends the per-field stride; today every field is one
+/// 32-bit word so the layout's total stride equals `field_count`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ViewLayoutField {
+    /// Source-level field name. Carried for diagnostics + emit
+    /// comments.
+    pub name: String,
+    /// CG-typed scalar type. Sub-32-bit widths still occupy a full
+    /// 32-bit slot today (no bit-packing).
+    pub ty: super::expr::CgTy,
+}
+
+/// Per-cell struct layout for a `@per_entity_ring(K = N)` view whose
+/// fold body uses `self.append(field1: expr1, field2: expr2, ...)`
+/// instead of the scalar `self += <expr>` shape.
+///
+/// `fields` carries one entry per source-level append field in
+/// declaration order. The cell's total width in u32 words equals
+/// `fields.len()` under today's all-fields-are-32-bit rule (see
+/// [`ViewLayoutField::ty`] notes); the per-runtime
+/// `view_storage_primary` allocation grows from `agent_count * K * 4`
+/// (scalar) to `agent_count * K * fields.len() * 4` (struct).
+///
+/// Populated by the view-body lowerer the first time it lowers a
+/// `IrStmt::SelfAppend` for a given view. Conflicting layouts (two
+/// `SelfAppend` statements with different field lists in the same
+/// view body) surface as a typed lowering error.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewLayout {
+    pub fields: Vec<ViewLayoutField>,
+}
+
+impl ViewLayout {
+    /// Total stride per cell, in u32 words. Today each field occupies
+    /// one 32-bit slot regardless of `ty` (see
+    /// [`ViewLayoutField::ty`]); `field_count` is therefore both the
+    /// number of fields AND the cell's u32 stride.
+    pub fn cell_stride_u32(&self) -> u32 {
+        self.fields.len() as u32
+    }
+
+    /// Total size per cell in bytes — `cell_stride_u32() * 4`. Used by
+    /// per-runtime crates to compute the `view_storage_primary` buffer
+    /// size: `agent_count * K * cell_size_bytes()`.
+    pub fn cell_size_bytes(&self) -> u32 {
+        self.cell_stride_u32() * 4
+    }
+}
+
 /// CG-side storage-hint enum mirroring the discriminator subset of
 /// [`dsl_ast::ir::StorageHint`] that the WGSL emit + dispatch sizing
 /// path actually consults. Decoupled from the AST type so the cg crate
@@ -955,6 +1022,19 @@ pub struct CgProgram {
     /// [`super::lower::expr::LoweringCtx::view_signatures`]). Empty
     /// for programs that don't have materialized views.
     pub view_signatures: BTreeMap<u32, ViewSignature>,
+    /// Plan G G3b — per-view struct-cell layout for PerEntityRing folds
+    /// whose body uses `self.append(field1: expr, field2: expr, ...)`.
+    /// Keyed on `ViewId.0`. Empty for fixtures that don't author the
+    /// struct-payload shape; existing scalar-payload PerEntityRing
+    /// fixtures (per_entity_ring_probe.sim) and every other storage
+    /// hint stay unaffected. Consulted by the WGSL emit
+    /// (`build_view_fold_ring_append_body`) to decide between the
+    /// single-field ring-append shape and the per-field struct-cell
+    /// shape, AND by per-runtime build.rs scripts to size the
+    /// `view_storage_primary` allocation
+    /// (`agent_count * K * cell_size_bytes()`).
+    #[serde(default)]
+    pub view_layouts: BTreeMap<u32, ViewLayout>,
     /// Per-`ConfigConstId` literal default value, harvested from the
     /// resolved DSL `config <block> { <field>: <ty> = <default>, ... }`
     /// declarations by the driver's `populate_config_consts`. Populated
@@ -1549,6 +1629,16 @@ impl CgProgramBuilder {
                 self.check_expr_id(*caster)?;
                 self.check_expr_id(*target)
             }
+            CgStmt::ViewStorageAppend { fields, .. } => {
+                // Plan G G3b/G3c — every per-field expression id must
+                // already exist in the arena. The `view` payload is a
+                // typed [`ViewId`] (arena-independent — the view name
+                // table validates ids on intern, not here).
+                for (_, expr_id) in fields {
+                    self.check_expr_id(*expr_id)?;
+                }
+                Ok(())
+            }
         }
     }
 
@@ -1677,6 +1767,27 @@ impl CgProgramBuilder {
     /// fold-body `Assign(ViewStorage{Primary}, scalar)` shapes.
     pub fn set_view_signatures(&mut self, sigs: BTreeMap<u32, ViewSignature>) {
         self.inner.view_signatures = sigs;
+    }
+
+    /// Plan G G3b — register the per-view struct-cell layout for a
+    /// `@per_entity_ring(...)` fold whose body uses `self.append(...)`.
+    /// Idempotent within a single lowering pass: a re-register with an
+    /// equal layout is a no-op; a re-register with a *different* layout
+    /// returns the prior entry so the caller can surface a typed
+    /// "conflicting struct-cell layout" defect.
+    pub fn register_view_layout(
+        &mut self,
+        view_id: super::data_handle::ViewId,
+        layout: ViewLayout,
+    ) -> Option<ViewLayout> {
+        self.inner.view_layouts.insert(view_id.0, layout)
+    }
+
+    /// Plan G G3b — read the registered struct-cell layout for a view,
+    /// if any. Returns `None` for views without a registered layout
+    /// (every scalar-payload view today).
+    pub fn view_layout(&self, view_id: super::data_handle::ViewId) -> Option<&ViewLayout> {
+        self.inner.view_layouts.get(&view_id.0)
     }
 
     /// Append-only seam for post-construction registry-resolved bindings

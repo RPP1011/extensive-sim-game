@@ -1960,6 +1960,24 @@ fn resolve_stmt(
             let value = resolve_expr(value, scope, symbols)?;
             Ok(IrStmt::SelfUpdate { op: op.clone(), value, span: *span })
         }
+        Stmt::SelfAppend { fields, span } => {
+            // Plan G G3b/G3c — resolve each `field: <expr>` binding.
+            // The field name list is preserved verbatim; the per-cell
+            // struct layout is inferred from these names + the
+            // resolved expression types at lowering time.
+            let resolved: Vec<IrFieldInit> = fields
+                .iter()
+                .map(|f| {
+                    let value = resolve_expr(&f.value, scope, symbols)?;
+                    Ok::<_, ResolveError>(IrFieldInit {
+                        name: f.name.clone(),
+                        value,
+                        span: f.span,
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(IrStmt::SelfAppend { fields: resolved, span: *span })
+        }
         Stmt::Expr(e) => Ok(IrStmt::Expr(resolve_expr(e, scope, symbols)?)),
         Stmt::BeliefObserve(b) => {
             // Validate that each assigned field is a known BeliefState field.
@@ -3385,6 +3403,16 @@ fn validate_fold_stmt(view_name: &str, s: &IrStmt) -> Result<(), ResolveError> {
             }
             validate_fold_expr(view_name, value)
         }
+        IrStmt::SelfAppend { fields, .. } => {
+            // Plan G G3b/G3c — struct ring append. Each field's bound
+            // expression must be a fold-legal expression (no Emit, no
+            // ApplyAbility, etc.); validate per-field. The per-cell
+            // struct layout is inferred at lowering time.
+            for f in fields {
+                validate_fold_expr(view_name, &f.value)?;
+            }
+            Ok(())
+        }
         IrStmt::If { cond, then_body, else_body, .. } => {
             validate_fold_expr(view_name, cond)?;
             for ts in then_body {
@@ -3815,6 +3843,17 @@ fn validate_physics_stmt(physics_name: &str, s: &IrStmt) -> Result<(), ResolveEr
             Ok(())
         }
         IrStmt::SelfUpdate { value, .. } => validate_physics_expr(physics_name, value),
+        IrStmt::SelfAppend { fields, .. } => {
+            // Plan G G3b/G3c — physics rules don't have a `self` cell to
+            // ring-append into; the resolver normally rejects this via
+            // the fold-vs-physics body separation, but defensively
+            // validate the bound exprs here so synthetic ASTs still get
+            // surfaced cleanly.
+            for f in fields {
+                validate_physics_expr(physics_name, &f.value)?;
+            }
+            Ok(())
+        }
         IrStmt::Expr(e) => validate_physics_expr(physics_name, e),
         IrStmt::ApplyAbility { ability, caster, target, .. } => {
             // Slice ε: validate the new optional caster/target operands
@@ -4164,6 +4203,7 @@ fn collect_emitted_events(body: &[IrStmt], out: &mut Vec<String>) {
             }
             IrStmt::Let { .. }
             | IrStmt::SelfUpdate { .. }
+            | IrStmt::SelfAppend { .. }
             | IrStmt::Expr(_)
             | IrStmt::BeliefObserve { .. }
             | IrStmt::ApplyAbility { .. } => {}
@@ -4306,6 +4346,9 @@ fn stmt_references_cascade_ceiling(s: &IrStmt) -> bool {
                 || arms.iter().any(|a| stmts_reference_cascade_ceiling(&a.body))
         }
         IrStmt::SelfUpdate { value, .. } => expr_references_cascade_ceiling(value),
+        IrStmt::SelfAppend { fields, .. } => {
+            fields.iter().any(|f| expr_references_cascade_ceiling(&f.value))
+        }
         IrStmt::Expr(e) => expr_references_cascade_ceiling(e),
         IrStmt::BeliefObserve { observer, target, fields, .. } => {
             expr_references_cascade_ceiling(observer)

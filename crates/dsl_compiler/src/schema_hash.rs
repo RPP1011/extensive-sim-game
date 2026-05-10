@@ -612,6 +612,21 @@ fn hash_stmt(h: &mut Sha256, s: &IrStmt) {
                 None    => { h.update([0x00u8]); }
             }
         }
+        IrStmt::SelfAppend { fields, .. } => {
+            // Plan G G3b/G3c — discriminant 0x1A (next free after
+            // ForEachAgent's 0x19). The struct-cell layout is implied
+            // by the field-name list + bound-expr types; encode names
+            // verbatim + the per-field bound expressions in declaration
+            // order so reordering or rebinding is a hash-affecting
+            // change.
+            h.update([0x1Au8]);
+            h.update(&(fields.len() as u32).to_le_bytes());
+            for f in fields {
+                h.update(f.name.as_bytes());
+                h.update([0u8]);
+                hash_expr(h, &f.value);
+            }
+        }
     }
 }
 

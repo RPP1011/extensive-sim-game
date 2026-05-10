@@ -750,6 +750,30 @@ pub enum LoweringError {
         span: Span,
     },
 
+    /// Plan G G3b/G3c — `self.append(...)` declared in a view fold
+    /// body but the view's storage hint is not
+    /// `@per_entity_ring(...)`. The struct-cell ring-append shape only
+    /// makes sense for a per-entity ring; other hints (PairMap,
+    /// PerEntityTopK, SymmetricPairTopK, LazyCached) have no cursor
+    /// counter to allocate ring slots through.
+    SelfAppendRequiresPerEntityRing {
+        view: ViewId,
+        hint_label: &'static str,
+        span: Span,
+    },
+
+    /// Plan G G3b/G3c — two `self.append(...)` statements in the same
+    /// view body declare different field lists. Today the per-cell
+    /// struct layout is implied by the first SelfAppend's field list;
+    /// a second SelfAppend with a different shape would mean the cell
+    /// has two layouts simultaneously, which is incoherent.
+    ConflictingViewLayout {
+        view: ViewId,
+        prior_field_count: usize,
+        new_field_count: usize,
+        span: Span,
+    },
+
     // -- Driver pass (Task 2.8) ------------------------------------------
 
     /// A view fold-handler or physics-rule kind-pattern names an
@@ -1205,6 +1229,25 @@ impl fmt::Display for LoweringError {
                 f,
                 "view #{} self-update operator {} not supported by CG IR; only += is lowered today",
                 view.0, op_label
+            ),
+            LoweringError::SelfAppendRequiresPerEntityRing {
+                view,
+                hint_label,
+                span,
+            } => write!(
+                f,
+                "view#{} at {}..{} uses `self.append(...)` but the storage hint is `{}`; struct-cell ring append requires `@per_entity_ring(...)`",
+                view.0, span.start, span.end, hint_label
+            ),
+            LoweringError::ConflictingViewLayout {
+                view,
+                prior_field_count,
+                new_field_count,
+                span,
+            } => write!(
+                f,
+                "view#{} at {}..{} declares conflicting `self.append(...)` field counts ({} vs {}); a single view's struct-cell layout must be uniform across all SelfAppend statements",
+                view.0, span.start, span.end, prior_field_count, new_field_count
             ),
 
             // -- Physics pass -----------------------------------------

@@ -1060,7 +1060,12 @@ fn collect_emits_in_list(
             CgStmt::Assign { .. }
             | CgStmt::Let { .. }
             | CgStmt::ForEachAgent { .. }
-            | CgStmt::ForEachNeighbor { .. } => {}
+            | CgStmt::ForEachNeighbor { .. }
+            | CgStmt::ViewStorageAppend { .. } => {
+                // Plan G G3b/G3c — view-storage append writes to the
+                // per-entity ring's primary + cursors slots, not to an
+                // event ring. No emit-destination contribution.
+            }
             CgStmt::ApplyAbility { ability, .. } => {
                 push_apply_ability_event_kinds(*ability, prog, registry, out);
             }

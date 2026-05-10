@@ -2471,6 +2471,20 @@ fn lower_cg_stmt_body_to_wgsl(
             );
             Ok(body)
         }
+        CgStmt::ViewStorageAppend { .. } => {
+            // Plan G G3b/G3c — struct-payload ring append. The actual
+            // WGSL is hand-synthesised by `build_view_fold_ring_append_body`
+            // in `cg/emit/kernel.rs` from the registered `ViewLayout` +
+            // the storage hint's K. The generic stmt → wgsl walker is
+            // bypassed entirely for PerEntityRing fold bodies (the
+            // kernel composer special-cases the body), so this arm is
+            // structurally unreachable in production. Emit an empty
+            // placeholder so a synthetic IR walking through the generic
+            // path still produces parseable WGSL.
+            Ok(String::from(
+                "    // ViewStorageAppend — handled by ring-append emit at kernel.rs\n",
+            ))
+        }
     }
 }
 
