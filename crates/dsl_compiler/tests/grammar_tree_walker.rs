@@ -254,6 +254,102 @@ fn walker_multi_effect_body_parses_and_lowers() {
     try_pipeline(text).unwrap_or_else(|e| panic!("multi-effect body must lower: {e}"));
 }
 
+/// One program-shape sample. `body` is everything between the
+/// outer `ability X { … }` braces. Covers Plan G's `cast { } effect { }`
+/// shape and `deliver <method>` blocks — structural surfaces that
+/// the verb / header / modifier sweeps don't reach.
+struct ProgramShapeProbe {
+    label: &'static str,
+    body: &'static str,
+}
+
+const PROGRAM_SHAPES: &[ProgramShapeProbe] = &[
+    // Plan G — cast { duration } effect { ... } minimal shape.
+    ProgramShapeProbe {
+        label: "cast_effect_minimal",
+        body: "target: enemy\n    range: 30\n    cast { duration: 3t }\n    effect { damage 25 }",
+    },
+    // Plan G — cast block with telegraph + interrupts.
+    ProgramShapeProbe {
+        label: "cast_with_telegraph_and_interrupts",
+        body: "target: enemy\n    \
+               cast { duration: 3t; telegraph: line(self.pos, target.pos, width: 2); interrupts: standard }\n    \
+               effect { damage 25 }",
+    },
+    // Plan G — explicit interrupt subset.
+    ProgramShapeProbe {
+        label: "cast_interrupts_subset",
+        body: "target: enemy\n    \
+               cast { duration: 1t; interrupts: { damage, stun } }\n    \
+               effect { damage 1 }",
+    },
+    // deliver projectile — corpus-canonical (Aatrox.InfernalChains shape).
+    ProgramShapeProbe {
+        label: "deliver_projectile_with_hook",
+        body: "target: direction\n    range: 8.0\n    \
+               deliver projectile { speed: 18.0 } {\n        \
+                   on_hit {\n            damage 7\n            slow 0.3 for 2s\n        }\n    }",
+    },
+    // deliver channel — multi-tick channel (Akshan shape).
+    ProgramShapeProbe {
+        label: "deliver_channel_with_on_tick",
+        body: "target: ground\n    range: 10.0\n    \
+               deliver channel { duration: 2s, tick: 500ms } {\n        \
+                   on_tick {\n            heal 5\n        }\n    }",
+    },
+];
+
+fn synthesize_program_shape_ability(probe: &ProgramShapeProbe) -> String {
+    format!(
+        "ability TreeWalkerProgramShape_{label} {{\n    {body}\n}}\n",
+        label = probe.label,
+        body = probe.body,
+    )
+}
+
+#[test]
+fn walker_each_program_shape_parses_and_lowers() {
+    let mut failures: Vec<(String, String)> = Vec::new();
+    for probe in PROGRAM_SHAPES {
+        let text = synthesize_program_shape_ability(probe);
+        if let Err(stage) = try_pipeline(&text) {
+            failures.push((probe.label.to_string(), format!("{stage}\n--- source ---\n{text}")));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{}/{} program shapes failed parse/lower:\n\n{}",
+        failures.len(),
+        PROGRAM_SHAPES.len(),
+        failures
+            .iter()
+            .map(|(p, msg)| format!("[{p}] {msg}"))
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+    );
+}
+
+/// Negative pin: `morph { } into <Other>` parses (the surface is in
+/// the AST since Wave 1.4 for spec coverage) but lowering surfaces
+/// `MorphBlockNotImplemented`. Documents the parse-vs-lower boundary
+/// — when morph lowering lands, this test will start failing and
+/// signal the author to flip the assertion to `is_ok()` and add a
+/// positive-shape probe.
+#[test]
+fn walker_morph_block_surfaces_not_implemented() {
+    let text = "ability TreeWalkerMorphBlock {\n    \
+                target: self\n    \
+                morph { damage 5 } into OtherForm\n}\n";
+    let parsed = parse_ability_file(text).expect("morph block parses");
+    let err = lower_ability_decl(&parsed.abilities[0])
+        .expect_err("morph block must surface NotImplemented today");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("MorphBlockNotImplemented"),
+        "expected MorphBlockNotImplemented, got: {msg}",
+    );
+}
+
 /// Negative pin: dotted refs (`self.hp`) in scaling position parse
 /// (the `parse_stat_ref` cursor accepts dotted segments) but lower
 /// rejects them — `ScalingStatRef::parse` only knows flat names like
