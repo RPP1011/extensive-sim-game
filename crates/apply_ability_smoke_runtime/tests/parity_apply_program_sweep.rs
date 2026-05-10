@@ -1084,6 +1084,36 @@ fn build_sweep() -> Vec<(&'static str, AbilityProgram, CasterStats)> {
         CasterStats::default(),
     ));
 
+    // 48. Firebolt-shape — Plan G G2.3 deferred-cast initiation.
+    //     Caster begins a 3-tick cast at the target. The dispatcher
+    //     writes a 5-payload-word chronicle record (kind=77) with
+    //     payload_a packing (ability_id=7 in low 16 bits |
+    //     duration_ticks=30 in high 16 bits) and payload_b packing
+    //     (target_x_q8=256 in low 16 bits | target_y_q8=-512 in high
+    //     16 bits, both u16-reinterpreted). The chronicle's actor +
+    //     target slots are the runtime caster + target. Both backends
+    //     emit byte-equal records via the parity sweep's sort + memcmp
+    //     pin. This entry extends the matrix to 48 abilities and
+    //     locks in Plan G's CastBegin (variant 46) cross-backend
+    //     parity. The downstream busy SoA write + deferred resolution
+    //     are per-fixture sim concerns (firebolt_probe.sim) — not in
+    //     scope for the apply_program parity sweep.
+    out.push((
+        "FireboltCastBegin",
+        AbilityProgram::new_single_target(
+            8.0,
+            Gate { cooldown_ticks: 50, hostile_only: true, line_of_sight: false },
+            [EffectOp::CastBegin {
+                ability_id:     7,
+                duration_ticks: 30,
+                target_slot:    0,
+                target_x_q8:    256,
+                target_y_q8:    -512,
+            }],
+        ),
+        CasterStats::default(),
+    ));
+
     out
 }
 
