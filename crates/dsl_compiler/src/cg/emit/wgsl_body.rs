@@ -1097,6 +1097,17 @@ fn unary_op_shape(op: UnaryOp) -> UnaryShape {
 
 /// WGSL function name for a [`BuiltinId`]. View calls embed the view
 /// id structurally so each view's getter has a stable, distinct name.
+///
+/// Plan G G3f note: the four `Builtin::Threats*` AST variants do NOT
+/// produce a `BuiltinId::Threats*` here. They lower at the CG layer
+/// (`cg/lower/expr.rs::lower_builtin_call`) to direct
+/// `CgExpr::Lit(...)` sentinels (`false` / `0.0` / `AgentId(0)` /
+/// `vec3(0,0,0)`) — the threats materialised view (G3g, future) wires
+/// the per-cell walk via the view-call infrastructure; it does not
+/// add new [`BuiltinId`] variants. TODO(g3g): once the threats view
+/// declares its kernels, the four scoring primitives can rewrite to
+/// `BuiltinId::ViewCall { view: <threats view id> }` (with extra
+/// per-method aggregation glue) without touching this module.
 fn builtin_name(id: BuiltinId) -> String {
     use BuiltinId::*;
     match id {

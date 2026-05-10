@@ -41,7 +41,8 @@
 use super::program::{
     Area, Delivery, EffectAreaShape, EffectOp, EffectPredicate, EffectScaling, LifetimeMode,
     MAX_EFFECTS_PER_PROGRAM, MAX_NESTED_PER_EFFECT, MAX_PRED_NODES_PER_EFFECT,
-    MAX_SCALINGS_PER_EFFECT, MAX_TAGS_PER_PROGRAM, StackingMode, TargetSelector, WhenPredicate,
+    MAX_SCALINGS_PER_EFFECT, MAX_TAGS_PER_PROGRAM, StackingMode, TargetSelector,
+    TELEGRAPH_KIND_NONE, WhenPredicate,
 };
 use super::{AbilityProgram, AbilityRegistry, AbilityTag};
 
@@ -393,6 +394,44 @@ pub struct PackedAbilityRegistry {
     /// `0.0` for operator / none nodes.
     /// Length: matches `when_pred_binder`.
     pub when_pred_literal: Vec<f32>,
+
+    // -- Telegraph metadata (per-ability, NOT per-effect). Plan G G3e
+    //    (2026-05-09). The threats fold (G3g, future) reads
+    //    `(busy_with_ability_id ⇒ telegraph_kind)` to project the
+    //    right zone shape around the caster. Encoded as a u8
+    //    discriminant + 4×f32 params per ability — distinct from the
+    //    per-effect `area_kinds` / `area_args` columns (which describe
+    //    EFFECT shapes, not the cast{}-block telegraph projection).
+    //
+    //    Two shapes today:
+    //    * `TelegraphKind::Circle` (= 1): `params[0] = radius`.
+    //    * `TelegraphKind::Line`   (= 2): `params[0] = width`.
+    //    `TELEGRAPH_KIND_NONE` (= 0) marks abilities without a
+    //    telegraph (no cast{} block, or cast{} omitted the field);
+    //    companion `telegraph_params` slot is `[0.0; 4]`.
+
+    /// Per-ability telegraph shape discriminant — one byte per
+    /// ability. `TELEGRAPH_KIND_NONE` (= 0) for abilities without a
+    /// `cast { telegraph: <shape>(...) }` declaration; otherwise
+    /// `TelegraphKind as u8` (1 = Circle, 2 = Line). Read by the
+    /// threats fold (G3g) to dispatch the per-shape projection
+    /// kernel; companion `telegraph_params` slot carries the
+    /// shape-specific f32 args.
+    /// Length: `n_abilities`.
+    pub telegraph_kind: Vec<u8>,
+
+    /// Per-ability telegraph shape params — 4×f32 per ability.
+    /// Layout per `telegraph_kind[i]`:
+    /// * `TELEGRAPH_KIND_NONE` (0): `[0.0; 4]` (sentinel — no
+    ///   telegraph; threats fold's per-cell walk skips this slot).
+    /// * `TelegraphKind::Circle` (1): `[radius, 0, 0, 0]` in world
+    ///   units.
+    /// * `TelegraphKind::Line` (2): `[width, 0, 0, 0]` in world
+    ///   units.
+    /// Trailing slots zero-padded; future shapes (cone, ring) can
+    /// consume them without a column-shape change.
+    /// Length: `n_abilities`.
+    pub telegraph_params: Vec<[f32; 4]>,
 }
 
 impl PackedAbilityRegistry {
@@ -486,6 +525,15 @@ impl PackedAbilityRegistry {
         let mut when_pred_op      = vec![0_u8;  when_pred_total];
         let mut when_pred_literal = vec![0.0_f32; when_pred_total];
 
+        // Telegraph metadata (Plan G G3e). One slot per ability;
+        // pre-fill with the none-sentinel + zero params so abilities
+        // without a `cast { telegraph: <shape>(...) }` declaration
+        // share a single resting state. The per-program copy below
+        // overwrites only the slots whose source program populated
+        // the telegraph fields.
+        let mut telegraph_kind = vec![TELEGRAPH_KIND_NONE; n];
+        let mut telegraph_params = vec![[0.0_f32; 4]; n];
+
         for slot in 0..n {
             // `AbilityId` is 1-based; the registry's `get` accepts an id,
             // so reconstruct it from the slot. The registry guarantees
@@ -538,6 +586,13 @@ impl PackedAbilityRegistry {
                 &mut when_pred_op,
                 &mut when_pred_literal,
             );
+            // Telegraph metadata (Plan G G3e) — straight per-ability
+            // copy. Programs without a telegraph carry the
+            // `TELEGRAPH_KIND_NONE` sentinel + `[0.0; 4]` params (the
+            // pre-fill value), so this assignment is a no-op for the
+            // vast majority of abilities.
+            telegraph_kind[slot] = program.telegraph_kind;
+            telegraph_params[slot] = program.telegraph_params;
         }
 
         Self {
@@ -566,6 +621,8 @@ impl PackedAbilityRegistry {
             when_pred_field,
             when_pred_op,
             when_pred_literal,
+            telegraph_kind,
+            telegraph_params,
         }
     }
 
@@ -1324,6 +1381,8 @@ mod tests {
         assert!(p.nested_effect_kinds.is_empty());
         assert!(p.nested_effect_payload_a.is_empty());
         assert!(p.nested_effect_payload_b.is_empty());
+        assert!(p.telegraph_kind.is_empty());
+        assert!(p.telegraph_params.is_empty());
     }
 
     #[test]
@@ -2596,5 +2655,60 @@ mod tests {
         assert_eq!(p.nested_effect_payload_a[1], 20);
         // i16(-64) → i32(-64) → as u32 = 0xFFFF_FFC0 (sign-widened).
         assert_eq!(p.nested_effect_payload_b[1], 0xFFFF_FFC0);
+    }
+
+    /// Plan G G3e — telegraph metadata column packs the per-program
+    /// `(telegraph_kind, telegraph_params)` pair through the SoA.
+    /// Three abilities exercise the three states: no telegraph
+    /// (sentinel + zeros), circle (kind=1, radius in params[0]),
+    /// line (kind=2, width in params[0]). Asserts every slot of every
+    /// column so a future layout drift surfaces here before the
+    /// schema-hash test.
+    #[test]
+    fn pack_telegraph_metadata_column() {
+        use crate::ability::program::{TELEGRAPH_KIND_NONE, TelegraphKind};
+
+        // Slot 0: no telegraph — convenience constructor leaves
+        // telegraph_kind at the none-sentinel and params at zero.
+        let plain = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 10.0 }],
+        );
+        // Slot 1: circle telegraph with radius 4.0.
+        let mut circle = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 10.0 }],
+        );
+        circle.telegraph_kind = TelegraphKind::Circle.discriminant();
+        circle.telegraph_params = [4.0, 0.0, 0.0, 0.0];
+        // Slot 2: line telegraph with width 2.5.
+        let mut line = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 10.0 }],
+        );
+        line.telegraph_kind = TelegraphKind::Line.discriminant();
+        line.telegraph_params = [2.5, 0.0, 0.0, 0.0];
+
+        let reg = build(vec![plain, circle, line]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // Three abilities → three slots in each per-ability column.
+        assert_eq!(p.telegraph_kind.len(), 3);
+        assert_eq!(p.telegraph_params.len(), 3);
+
+        // Slot 0: sentinel + zeros.
+        assert_eq!(p.telegraph_kind[0], TELEGRAPH_KIND_NONE);
+        assert_eq!(p.telegraph_params[0], [0.0; 4]);
+        // Slot 1: Circle (1) with radius 4.0 in params[0].
+        assert_eq!(p.telegraph_kind[1], TelegraphKind::Circle.discriminant());
+        assert_eq!(p.telegraph_kind[1], 1);
+        assert_eq!(p.telegraph_params[1], [4.0, 0.0, 0.0, 0.0]);
+        // Slot 2: Line (2) with width 2.5 in params[0].
+        assert_eq!(p.telegraph_kind[2], TelegraphKind::Line.discriminant());
+        assert_eq!(p.telegraph_kind[2], 2);
+        assert_eq!(p.telegraph_params[2], [2.5, 0.0, 0.0, 0.0]);
     }
 }

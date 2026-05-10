@@ -161,6 +161,16 @@ mod stdlib {
             // distinct from the legacy collection accessor `quests`.
             // See `docs/superpowers/roadmap.md:811-872`.
             ("quest", NamespaceId::Quest),
+            // Plan G G3f (2026-05-09) — Threats scoring primitives.
+            // Methods (`in_zone`, `intensity_at`, `nearest`,
+            // `dir_away_from_nearest`) dispatch directly to
+            // `Builtin::Threats*` variants in `resolve_call` — bypasses
+            // the generic `NamespaceCall` route so the lowering pass
+            // sees a single closed-set Builtin enum to dispatch on.
+            // The threats materialised view (G3g, future) wires the
+            // per-cell walk; today's lowering emits sentinel values.
+            // See `docs/plans/g3_threats_view_design.md`.
+            ("threats", NamespaceId::Threats),
         ] {
             symbols.stdlib_namespaces.insert(name.to_string(), id);
         }
@@ -563,8 +573,35 @@ mod stdlib {
             // `party_near_destination(party, q)` — spatial gate on the
             // party's centroid vs `quest.destination`.
             (NamespaceId::Quest, "party_near_destination") => Some((2, IrType::Bool)),
+            // -------------------------------------------------------------
+            // Plan G G3f (2026-05-09) — Threats scoring primitives.
+            // Each method dispatches to a `Builtin::Threats*` variant
+            // in `resolve_call`; the entries here document the typed
+            // signature for 1b consumers (and future tooling that
+            // wants to advertise the `threats.*` surface). Arity 1 in
+            // every case — single agent / position arg.
+            // See `docs/plans/g3_threats_view_design.md`.
+            // -------------------------------------------------------------
+            (NamespaceId::Threats, "in_zone") => Some((1, IrType::Bool)),
+            (NamespaceId::Threats, "intensity_at") => Some((1, IrType::F32)),
+            (NamespaceId::Threats, "nearest") => Some((1, IrType::AgentId)),
+            (NamespaceId::Threats, "dir_away_from_nearest") => Some((1, IrType::Vec3)),
             _ => None,
         }
+    }
+}
+
+/// Plan G G3f — map a `threats.<method>` name to the corresponding
+/// `Builtin::Threats*` variant. Returns `None` for unknown methods so
+/// `resolve_call` can fall through to the generic `NamespaceCall`
+/// route (which 1b surfaces as an unknown-method diagnostic).
+fn threats_method_builtin(method: &str) -> Option<Builtin> {
+    match method {
+        "in_zone" => Some(Builtin::ThreatsInZone),
+        "intensity_at" => Some(Builtin::ThreatsIntensityAt),
+        "nearest" => Some(Builtin::ThreatsNearest),
+        "dir_away_from_nearest" => Some(Builtin::ThreatsDirAwayFromNearest),
+        _ => None,
     }
 }
 
@@ -2399,6 +2436,17 @@ fn resolve_call(
                             return Ok(IrExpr::ViewCall(*view_ref, ir_args));
                         }
                     }
+                    // Plan G G3f — `threats.<method>(...)` dispatches
+                    // to `Builtin::Threats*` so the lowering sees a
+                    // closed-set enum to dispatch on. Unknown methods
+                    // on the threats namespace fall through to the
+                    // generic NamespaceCall route below — 1b surfaces
+                    // the typo.
+                    if *ns == NamespaceId::Threats {
+                        if let Some(b) = threats_method_builtin(method) {
+                            return Ok(IrExpr::BuiltinCall(b, ir_args));
+                        }
+                    }
                     // `spatial.<name>(...)` — Phase 7 Task 4. Reject the
                     // call eagerly when no `spatial_query <name>`
                     // declaration backs it; lowering (Task 5) needs a
@@ -2473,6 +2521,13 @@ fn resolve_call(
                             method: method.to_string(),
                             args: ir_args,
                         });
+                    }
+                    // Plan G G3f — `threats::<method>(...)` mirrors
+                    // the dotted form: dispatch to `Builtin::Threats*`.
+                    if *ns == NamespaceId::Threats {
+                        if let Some(b) = threats_method_builtin(method) {
+                            return Ok(IrExpr::BuiltinCall(b, ir_args));
+                        }
                     }
                     let _ = stdlib::method_sig(*ns, method);
                     return Ok(IrExpr::NamespaceCall {

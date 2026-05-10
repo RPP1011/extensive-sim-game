@@ -1202,6 +1202,51 @@ pub struct EffectAreaShape {
     pub args: [f32; 4],
 }
 
+/// Plan G G3e — projected telegraph zone shape declared on a
+/// `cast { telegraph: <shape>(...) }` block. Today the threats fold
+/// (G3g) reads `(busy_with_ability_id ⇒ telegraph_kind)` to project
+/// the right zone around the caster. Two shapes for MVP:
+///
+/// * `Circle` — `circle(self.pos, radius: R)` projects a disc of
+///   radius `R` (in q8 world units; param[0]).
+/// * `Line` — `line(self.pos, target.pos, width: W)` projects a band
+///   of width `W` between caster and target (param[0]).
+///
+/// `None` is encoded as the dedicated [`TELEGRAPH_KIND_NONE`] sentinel
+/// in the packed registry; the enum itself only carries the two
+/// projected shapes (no `None` variant — sentinel handles the absence
+/// case in the column).
+///
+/// Numeric discriminants are pinned for `PackedAbilityRegistry`
+/// packing; ordinals match the per-fixture WGSL switch the threats
+/// fold will emit (G3g).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum TelegraphKind {
+    /// `circle(self.pos, radius: R)` — disc of radius `R` centred on
+    /// the caster's pos. `params[0] = radius` in world units; remaining
+    /// params zero-padded.
+    Circle = 1,
+    /// `line(self.pos, target.pos, width: W)` — band of width `W`
+    /// between caster and target. `params[0] = width`; remaining
+    /// params zero-padded.
+    Line = 2,
+}
+
+impl TelegraphKind {
+    /// Stable u8 discriminant matching the `#[repr(u8)]` ordinal.
+    /// `None` (no telegraph) is encoded as [`TELEGRAPH_KIND_NONE`]
+    /// in the packed column — distinct from any variant ordinal.
+    #[inline]
+    pub fn discriminant(self) -> u8 { self as u8 }
+}
+
+/// Sentinel for the packed `telegraph_kind` column when the ability
+/// has no `telegraph:` field on its `cast{}` block (or has no `cast{}`
+/// block at all). Distinct from any [`TelegraphKind`] discriminant
+/// (1..=2 today).
+pub const TELEGRAPH_KIND_NONE: u8 = 0;
+
 /// `target: <mode>` header (spec §4.3). The eight modes the spec
 /// table lists, captured here so apply handlers know how to bind the
 /// cast's target arity (single agent, ground point, direction vector,
@@ -1702,6 +1747,26 @@ pub struct AbilityProgram {
     /// for pure-utility casts (a 3-tick stand still that just blocks
     /// the agent without doing anything on resolve).
     pub pending_program: SmallVec<[EffectOp; MAX_EFFECTS_PER_PROGRAM]>,
+    /// Plan G G3e (2026-05-09) — projected telegraph zone shape
+    /// discriminant, parsed from `cast { telegraph: <shape>(...) }`
+    /// at lowering time. [`TELEGRAPH_KIND_NONE`] (= 0) when the ability
+    /// has no telegraph (no cast{} block, or cast{} omits the field);
+    /// otherwise [`TelegraphKind::discriminant`] for the parsed shape.
+    /// Companion [`telegraph_params`] carries shape-specific f32s.
+    ///
+    /// Pinned at the program level (not per-effect) — telegraph is a
+    /// caster-side projection on the cast{} block, not on the resolution
+    /// effects. Read by the threats fold (G3g) via the packed
+    /// `telegraph_kind` SoA column.
+    pub telegraph_kind: u8,
+    /// Plan G G3e (2026-05-09) — telegraph shape parameters, layout
+    /// per-shape:
+    /// * `TelegraphKind::Circle`: `[radius, 0, 0, 0]` (world units).
+    /// * `TelegraphKind::Line`:   `[width,  0, 0, 0]` (world units).
+    /// Slots beyond the shape's arity are zero-padded; the entire
+    /// array is `[0.0; 4]` when [`telegraph_kind`] is
+    /// [`TELEGRAPH_KIND_NONE`].
+    pub telegraph_params: [f32; 4],
 }
 
 impl AbilityProgram {
@@ -1749,6 +1814,12 @@ impl AbilityProgram {
             // immediate-cast programs. Plan G `cast{}` programs build
             // through the lowering path, which populates this slot.
             pending_program:     SmallVec::new(),
+            // None by default — convenience constructor builds plain
+            // immediate abilities with no telegraph. Plan G G3e
+            // populates these fields from `CastSpec.telegraph` at
+            // lowering time.
+            telegraph_kind:      TELEGRAPH_KIND_NONE,
+            telegraph_params:    [0.0; 4],
         }
     }
 
