@@ -458,4 +458,109 @@ mod ring_lifecycle_tests {
         assert_eq!(cursors[0], 5, "agent0 cursor after 5 events");
         assert_eq!(cursors[1], 5, "agent1 cursor after 5 events");
     }
+
+    /// Plan G G3a-step-3 hardening — verify the cursor wraps cleanly
+    /// after multiple full revolutions. After 8 ticks, cursor=8 and
+    /// 8 % 4 == 0 again, so slot 0 receives tick-7's amount = 80.0
+    /// (NOT 10.0 from tick 0 nor 50.0 from tick 4).
+    ///
+    /// Sequence (one event per agent per tick, amount = 10 + tick*10):
+    ///   t=0: cursor=0, slot 0 ← 10
+    ///   t=1: cursor=1, slot 1 ← 20
+    ///   t=2: cursor=2, slot 2 ← 30
+    ///   t=3: cursor=3, slot 3 ← 40
+    ///   t=4: cursor=4, slot 0 ← 50 (1st wrap)
+    ///   t=5: cursor=5, slot 1 ← 60
+    ///   t=6: cursor=6, slot 2 ← 70
+    ///   t=7: cursor=7, slot 3 ← 80
+    /// → ring[0] = [50, 60, 70, 80]; cursors[0] = 8.
+    ///
+    /// One more tick (8) wraps again:
+    ///   t=8: cursor=8, slot 0 ← 90 (2nd wrap)
+    /// → ring[0] = [90, 60, 70, 80]; cursors[0] = 9.
+    ///
+    /// This pin guards against a regression where the modulo is
+    /// computed wrong (e.g. `cursor / K` instead of `cursor % K`)
+    /// — the failure pattern would be slot 0 staying at 50 / never
+    /// getting tick-8's value.
+    #[test]
+    fn ring_wraps_cleanly_after_two_full_revolutions() {
+        const N: u32 = 2;
+        let mut state = match PerEntityRingProbeState::try_new(0xDEAD, N) {
+            Some(s) => s,
+            None => {
+                eprintln!(
+                    "[per_entity_ring_probe] skipping multi-wrap pin: no wgpu adapter."
+                );
+                return;
+            }
+        };
+        // 8 ticks → cursor=8 → ring just wrapped once (slot 0 = tick-4's 50,
+        // slot 1 = tick-5's 60, slot 2 = tick-6's 70, slot 3 = tick-7's 80).
+        for _ in 0..8 {
+            state.step();
+        }
+        let r = state.read_ring();
+        for (slot, expected) in [(0_usize, 50.0_f32), (1, 60.0), (2, 70.0), (3, 80.0)] {
+            assert!((r[slot] - expected).abs() < 1e-3,
+                "after 8 ticks (1st full wrap): agent0 slot{slot} = {} (expected {expected})",
+                r[slot]);
+        }
+        let cursors = state.read_cursors();
+        assert_eq!(cursors[0], 8, "agent0 cursor after 8 events");
+
+        // Tick 8 → 2nd wrap, slot 0 ← 90.
+        state.step();
+        let r = state.read_ring();
+        assert!((r[0] - 90.0).abs() < 1e-3,
+            "after 9 ticks (2nd wrap): agent0 slot0 = {} (expected 90 = tick-8's amount)",
+            r[0]);
+        // Slots 1-3 still hold tick 5/6/7 amounts.
+        assert!((r[1] - 60.0).abs() < 1e-3);
+        assert!((r[2] - 70.0).abs() < 1e-3);
+        assert!((r[3] - 80.0).abs() < 1e-3);
+        let cursors = state.read_cursors();
+        assert_eq!(cursors[0], 9, "agent0 cursor after 9 events");
+    }
+
+    /// Plan G G3a-step-3 hardening — agent rings are independent.
+    /// Both agents emit Damaged{target=self} per tick (per the .sim's
+    /// InjectDamage rule's `target: self`), so each maintains its
+    /// OWN cursor + ring. No cross-agent interference.
+    ///
+    /// Pin: after 4 ticks, agent0's ring AND agent1's ring both
+    /// contain [10, 20, 30, 40] (identical sequences but stored
+    /// in disjoint memory regions).
+    #[test]
+    fn agent_rings_are_independent() {
+        const N: u32 = 2;
+        let mut state = match PerEntityRingProbeState::try_new(0xBEEF, N) {
+            Some(s) => s,
+            None => {
+                eprintln!("[per_entity_ring_probe] skipping independence pin: no wgpu adapter.");
+                return;
+            }
+        };
+        for _ in 0..4 {
+            state.step();
+        }
+        let r = state.read_ring();
+        // Layout: [a0_s0, a0_s1, a0_s2, a0_s3, a1_s0, a1_s1, a1_s2, a1_s3].
+        let agent0_ring = &r[0..4];
+        let agent1_ring = &r[4..8];
+        let expected = [10.0_f32, 20.0, 30.0, 40.0];
+        for (i, e) in expected.iter().enumerate() {
+            assert!((agent0_ring[i] - e).abs() < 1e-3,
+                "agent0 slot{i} = {} (expected {e})", agent0_ring[i]);
+            assert!((agent1_ring[i] - e).abs() < 1e-3,
+                "agent1 slot{i} = {} (expected {e})", agent1_ring[i]);
+        }
+        // Cursor independence — both agents at exactly 4. The buffer
+        // is floor-sized at 16 bytes (= 4 u32) so it may report extra
+        // trailing zeros for tiny agent_counts; only the first
+        // `agent_count` slots are semantically meaningful.
+        let cursors = state.read_cursors();
+        assert_eq!(&cursors[..N as usize], &[4, 4],
+            "cursors must increment per-agent independently; got {cursors:?}");
+    }
 }
