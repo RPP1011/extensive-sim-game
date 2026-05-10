@@ -350,7 +350,102 @@ fn walker_morph_block_surfaces_not_implemented() {
     );
 }
 
-/// Negative pin: dotted refs (`self.hp`) in scaling position parse
+/// One Plan G interrupt-set sample. Each shape goes inside an
+/// otherwise-minimal cast block; all should parse cleanly. Sourced
+/// from the parser-side test fixtures in
+/// `crates/dsl_ast/tests/ability_parser_plan_g.rs`.
+struct InterruptSetProbe {
+    label: &'static str,
+    interrupts: &'static str,
+}
+
+const INTERRUPT_SETS: &[InterruptSetProbe] = &[
+    InterruptSetProbe { label: "standard", interrupts: "interrupts: standard" },
+    InterruptSetProbe { label: "none", interrupts: "interrupts: none" },
+    InterruptSetProbe { label: "explicit_subset", interrupts: "interrupts: { damage, stun }" },
+    InterruptSetProbe { label: "standard_plus_set", interrupts: "interrupts: standard + { movement }" },
+    InterruptSetProbe { label: "standard_minus_set", interrupts: "interrupts: standard - { damage }" },
+];
+
+#[test]
+fn walker_each_interrupt_set_parses_and_lowers() {
+    let mut failures: Vec<(String, String)> = Vec::new();
+    for probe in INTERRUPT_SETS {
+        let text = format!(
+            "ability TreeWalkerInterruptSet_{label} {{\n    \
+             target: enemy\n    \
+             cast {{ duration: 2t; {interrupts} }}\n    \
+             effect {{ damage 5 }}\n}}\n",
+            label = probe.label,
+            interrupts = probe.interrupts,
+        );
+        if let Err(stage) = try_pipeline(&text) {
+            failures.push((probe.label.to_string(), format!("{stage}\n--- source ---\n{text}")));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{}/{} interrupt-set shapes failed parse/lower:\n\n{}",
+        failures.len(),
+        INTERRUPT_SETS.len(),
+        failures
+            .iter()
+            .map(|(p, msg)| format!("[{p}] {msg}"))
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+    );
+}
+
+/// Multi-step program: `cast { } effect { } cast { } effect { }`
+/// chains. Plan G's program shape allows any interleaving; the
+/// minimal verb sweep covered the single cast+effect pair, this
+/// covers the multi-stage shape (two casts back-to-back, separated
+/// by a per-stage effect). Catches lowering arms that assume
+/// at most one Cast step per program.
+#[test]
+fn walker_multi_step_cast_program_parses_and_lowers() {
+    let text = "ability TreeWalkerMultiCastProgram {\n    \
+                target: enemy\n    \
+                cast { duration: 2t }\n    \
+                effect { damage 10 }\n    \
+                cast { duration: 1t }\n    \
+                effect { heal 5 }\n}\n";
+    try_pipeline(text)
+        .unwrap_or_else(|e| panic!("multi-step cast/effect program must lower: {e}\n--- source ---\n{text}"));
+}
+
+/// Negative pin: top-level `passive <Name> { ... }` blocks parse
+/// (the parser has had this since Wave 1.1 for spec coverage of the
+/// 172-file LoL corpus) but the lowerer surfaces
+/// `PassiveBlockNotImplemented`. Same kind of grammar-vs-lowering
+/// boundary documentation as the morph pin: when passive-trigger
+/// dispatch lands, this test trips and the author flips it to a
+/// positive shape probe.
+#[test]
+fn walker_passive_block_surfaces_not_implemented() {
+    let text = "passive TreeWalkerPassiveBlock {\n    \
+                trigger: periodic(5s)\n    \
+                cooldown: 5s\n\n    \
+                heal 5\n}\n";
+    let parsed = parse_ability_file(text).expect("passive block parses");
+    // The passive ends up in `parsed.passives`, not `parsed.abilities`.
+    // Lowering returns Ok with the passive in `skipped` (soft fail —
+    // the file is otherwise valid; lowering just skips passives).
+    let outcome = dsl_compiler::ability_lower::lower_ability_file(&parsed)
+        .expect("file lowering returns Ok with passives in skipped");
+    assert!(
+        outcome.programs.is_empty(),
+        "passive-only file should produce zero ability programs; got {} programs",
+        outcome.programs.len(),
+    );
+    let msg = format!("{:?}", outcome.skipped);
+    assert!(
+        msg.contains("PassiveBlockNotImplemented"),
+        "expected PassiveBlockNotImplemented in skipped, got: {msg}",
+    );
+}
+
+/// Negative pin: `self.hp` in scaling position parse
 /// (the `parse_stat_ref` cursor accepts dotted segments) but lower
 /// rejects them — `ScalingStatRef::parse` only knows flat names like
 /// `AP`, `AD`, `hp`. Documents the grammar-vs-lowering boundary so a
