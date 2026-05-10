@@ -1,0 +1,89 @@
+// per_entity_ring_probe — Plan G G3a smoke fixture.
+//
+// Lights up the existing-but-unused `@per_entity_ring(K = N)` view
+// shape (declared in `dsl_ast::ir::StorageHint::PerEntityRing`,
+// resolved at `dsl_ast::resolve` line ~3105, but no `.sim` exercises
+// it today and the WGSL emit at
+// `crates/dsl_compiler/src/cg/emit/kernel.rs:2186` explicitly TODOs
+// the ring-append primitive).
+//
+// Goal: a minimal scalar-payload ring view that proves the storage +
+// fold dispatch + ring-append WGSL pattern end-to-end. The threats
+// view (G3b-h) builds on the same shape with a struct payload and a
+// PerAgentEventScan dispatch. By isolating the ring-append primitive
+// in this fixture, we close one design gap at a time on a runnable
+// surface instead of speculating across all of them at once.
+//
+// Shape: per-agent ring of K = 4 recent damage amounts. Each agent
+// (Subject) keeps the last 4 Damaged-event amounts that named it as
+// target. The fold appends one f32 per Damaged event; the ring is
+// FIFO with cursor mod K, so the 5th damage event overwrites the
+// 1st cell.
+//
+// **Behavioural pin (target shape — runtime not built yet).**
+//
+//   AGENT_COUNT=2, INITIAL_HP=200.0
+//   Tick 0: scripted Damaged{target=0, amount=10}. Ring[0] = [10, 0, 0, 0].
+//   Tick 1: scripted Damaged{target=0, amount=20}. Ring[0] = [10, 20, 0, 0].
+//   Tick 2: scripted Damaged{target=0, amount=30}. Ring[0] = [10, 20, 30, 0].
+//   Tick 3: scripted Damaged{target=0, amount=40}. Ring[0] = [10, 20, 30, 40].
+//   Tick 4: scripted Damaged{target=0, amount=50}. Ring[0] = [50, 20, 30, 40]
+//                                                    (50 overwrote slot 0 —
+//                                                     cursor wrapped).
+//
+//   Agent 1 receives nothing → Ring[1] = [0, 0, 0, 0] throughout.
+//
+// MVP scope:
+//   * Scalar payload (single f32 per cell). The struct-payload work
+//     for threats lives in G3b.
+//   * Fold body uses `self += amount` syntax — the existing view
+//     fold body grammar. The PerEntityRing storage hint flips the
+//     append-vs-accumulate semantic at emit time (ring-append-
+//     modulo instead of CAS-add).
+//   * `InjectDamage` rule scripts the input — no real damage
+//     attribution, just per-tick emit.
+
+event Tick { }
+event Damaged { source: AgentId, target: AgentId, amount: f32 }
+
+entity Subject : Agent { }
+
+config inject {
+  // Tick at which the burst of test damage events starts. Tests run
+  // for `inject_at_tick + 5` ticks so the ring fills + wraps once.
+  inject_at_tick: u32 = 0,
+  // Per-tick damage delta. Tick N emits amount = base + N * step. With
+  // base=10, step=10, the ring populates [10, 20, 30, 40, 50→slot0]
+  // — distinct values per cell so the wraparound is observable.
+  inject_base:    f32 = 10.0,
+  inject_step:    f32 = 10.0,
+  // Test agent — always slot 0. Slot 1 receives nothing (control).
+  target_slot:    u32 = 0,
+}
+
+// Per-tick damage injector. Always emits to `config.inject.target_slot`
+// (= 0). Skips ticks before `inject_at_tick` so the test can schedule
+// the burst start.
+@phase(per_agent)
+physics InjectDamage {
+  on Tick {} where (self.alive && world.tick >= config.inject.inject_at_tick) {
+    emit Damaged {
+      source: self,
+      target: self,
+      amount: config.inject.inject_base + ((world.tick - config.inject.inject_at_tick) * 1.0) * config.inject.inject_step,
+    }
+  }
+}
+
+// G3a's view-under-test. Per-target ring of K=4 cells, each storing a
+// single f32 amount. The fold body writes `self += amount` — same
+// grammar the existing scalar-accumulator views use; PerEntityRing's
+// emit overrides the semantic to ring-append-modulo (atomicAdd on
+// Cursors slot + indexed write to Primary at `target_slot * K +
+// (idx % K)`).
+@materialized(on_event = [Damaged])
+@per_entity_ring(K = 4)
+view recent_damages(target: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: _, target: t, amount: a } { self += a }
+}
