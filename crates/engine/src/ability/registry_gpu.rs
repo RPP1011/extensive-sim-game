@@ -92,6 +92,22 @@ pub struct PackedAbilityRegistryGpu {
     /// u8 widened to u32 (`EffectPredicateOp` discriminant 0..=5).
     pub when_pred_op:      wgpu::Buffer,
     pub when_pred_literal: wgpu::Buffer,
+
+    // -- Pending-program rows (stride = MAX_EFFECTS_PER_PROGRAM). Plan
+    //    G option D follow-up (2026-05-10) — per-fixture busy-resolution
+    //    kernel reads these to dispatch deferred effects via the
+    //    apply-ability arm chain. `EFFECT_KIND_EMPTY` (0xFF) marks
+    //    empty slots (no pending op).
+    pub pending_effect_kinds:     wgpu::Buffer,
+    pub pending_effect_payload_a: wgpu::Buffer,
+    pub pending_effect_payload_b: wgpu::Buffer,
+
+    // -- Per-ability interrupt-mask column (stride = 1). Plan G G2.5
+    //    follow-up (2026-05-10) — per-fixture interrupt rule reads
+    //    `interrupt_mask[busy_with_ability_id - 1]` to gate per-cast.
+    /// u8 widened to u32. Sentinel `INTERRUPT_MASK_NONE_SENTINEL` (0xFF)
+    /// → no `cast { interrupts: ... }` declaration; cast is uninterruptible.
+    pub interrupt_mask: wgpu::Buffer,
 }
 
 impl PackedAbilityRegistryGpu {
@@ -162,6 +178,12 @@ impl PackedAbilityRegistryGpu {
             when_pred_field:   mk_u32("when_pred_field",   &widen_u8(&packed.when_pred_field)),
             when_pred_op:      mk_u32("when_pred_op",      &widen_u8(&packed.when_pred_op)),
             when_pred_literal: mk_f32("when_pred_literal", &packed.when_pred_literal),
+
+            pending_effect_kinds:     mk_u32("pending_effect_kinds",     &packed.pending_effect_kinds),
+            pending_effect_payload_a: mk_u32("pending_effect_payload_a", &packed.pending_effect_payload_a),
+            pending_effect_payload_b: mk_u32("pending_effect_payload_b", &packed.pending_effect_payload_b),
+
+            interrupt_mask: mk_u32("interrupt_mask", &widen_u8(&packed.interrupt_mask)),
         }
     }
 }
@@ -218,6 +240,8 @@ mod tests {
             &gpu.nested_effect_payload_b,
             &gpu.when_pred_binder, &gpu.when_pred_field,
             &gpu.when_pred_op, &gpu.when_pred_literal,
+            &gpu.pending_effect_kinds, &gpu.pending_effect_payload_a,
+            &gpu.pending_effect_payload_b, &gpu.interrupt_mask,
         );
     }
 }

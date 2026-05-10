@@ -46,6 +46,23 @@ use super::program::{
 };
 use super::{AbilityProgram, AbilityRegistry, AbilityTag};
 
+/// Plan G — pending-program / interrupt-mask SoA bump (2026-05-10).
+///
+/// Sentinel for the per-ability `interrupt_mask` column when the
+/// source program had no `cast { interrupts: <set> }` declaration —
+/// i.e. `cast_interrupt_mask: None`. Distinct from any valid
+/// `InterruptMask` raw value (today: `0..=0x1F`; the `0x00` "none"
+/// mask comes from `interrupts: none` and IS a real value, so the
+/// sentinel uses the high bit pattern instead). Apply / per-fixture
+/// rule consumers should treat the sentinel as "no interrupt
+/// semantics declared" — the cast cannot be interrupted by anything.
+///
+/// Pinned at `0xFF` so the column matches the byte-narrow style of
+/// other sentinels in this module. Future extension (more interrupt
+/// kinds) reserves bits 5..=7 inside the mask byte; the sentinel
+/// stays distinct as long as `InterruptMask::ALL.raw() != 0xFF`.
+pub const INTERRUPT_MASK_NONE_SENTINEL: u8 = 0xFF;
+
 /// Sentinel for the `hints` column when an ability has no `hint:` set.
 /// Distinct from any `AbilityHint` discriminant (0..=3 today). Pinned at
 /// `0xFFFF_FFFF` so a GPU `u32 == HINT_NONE_SENTINEL` test is one cmp.
@@ -432,6 +449,71 @@ pub struct PackedAbilityRegistry {
     /// consume them without a column-shape change.
     /// Length: `n_abilities`.
     pub telegraph_params: Vec<[f32; 4]>,
+
+    // -- Pending-program rows (flat, stride = MAX_EFFECTS_PER_PROGRAM).
+    //    Plan G option D follow-up (2026-05-10): mirrors the primary
+    //    `effect_kinds` / `effect_payload_*` columns, but encodes
+    //    `program.pending_program` instead of `program.effects`. The
+    //    per-fixture busy-resolution kernel reads these rows when
+    //    `agents.busy_until_tick(self) <= world.tick` and dispatches
+    //    each non-sentinel op via the existing apply-ability arm
+    //    chain (Damage / Heal / Stun / etc.).
+    //
+    //    Encoding: identical to `pack_effect` for the primary effects
+    //    — the registry-driven dispatcher reuses one decode path. The
+    //    `EFFECT_KIND_EMPTY` (0xFF) sentinel marks empty slots
+    //    (program had fewer than `MAX_EFFECTS_PER_PROGRAM` pending
+    //    ops, including the common "no pending program at all" case
+    //    where every slot is the sentinel).
+    //
+    //    Modifiers (chance / lifetime / scaling / etc.) are NOT
+    //    packed for pending ops today; the lowering pass drops them
+    //    at parse time the same way it drops nested-op modifiers
+    //    (see `program.nested_per_effect` doc). Adding per-pending
+    //    modifier columns is a future schema bump when the first
+    //    cast{} program needs them.
+
+    /// Per-pending-effect-slot `EffectOp` discriminant, or
+    /// `EFFECT_KIND_EMPTY` (0xFF) when the program had fewer than
+    /// `MAX_EFFECTS_PER_PROGRAM` pending ops (or no pending program
+    /// at all). Same encoding as the primary `effect_kinds` column;
+    /// per-fixture busy-resolution kernels reuse the apply-ability
+    /// arm chain for dispatch.
+    /// Length: `n_abilities * MAX_EFFECTS_PER_PROGRAM`.
+    pub pending_effect_kinds: Vec<u32>,
+
+    /// First payload word per pending-effect slot. Encoding mirrors
+    /// `effect_payload_a` 1:1 per `pack_effect`'s per-kind table.
+    /// `0` for sentinel slots.
+    /// Length: same as `pending_effect_kinds`.
+    pub pending_effect_payload_a: Vec<u32>,
+
+    /// Second payload word per pending-effect slot. Encoding mirrors
+    /// `effect_payload_b` 1:1 per `pack_effect`'s per-kind table.
+    /// `0` for sentinel slots and for kinds that don't use the
+    /// second payload word.
+    /// Length: same as `pending_effect_kinds`.
+    pub pending_effect_payload_b: Vec<u32>,
+
+    // -- Per-ability interrupt-mask column. Plan G G2.5 follow-up
+    //    (2026-05-10): mirrors the program's `cast_interrupt_mask`
+    //    field (`Option<InterruptMask>`), packed as a single u8 per
+    //    ability. The per-fixture interrupt rule consults this via
+    //    `abilities.interrupt_mask(busy_with_ability_id)` when
+    //    deciding whether an incoming Damaged / Stunned / etc. event
+    //    cancels an in-progress cast.
+
+    /// Per-ability interrupt-mask byte. `InterruptMask::raw()` (a
+    /// bitfield over `InterruptKind` discriminants) for abilities
+    /// whose source program declared `cast { interrupts: <set> }`;
+    /// [`INTERRUPT_MASK_NONE_SENTINEL`] (0xFF) for legacy bare-effect
+    /// abilities + cast{} programs that omitted the field. Per-fixture
+    /// rules should treat the sentinel as "no interrupt semantics —
+    /// the cast cannot be interrupted by anything"; for non-sentinel
+    /// values they `mask & (1u << InterruptKind as u8)` to test
+    /// individual kinds.
+    /// Length: `n_abilities`.
+    pub interrupt_mask: Vec<u8>,
 }
 
 impl PackedAbilityRegistry {
@@ -534,6 +616,24 @@ impl PackedAbilityRegistry {
         let mut telegraph_kind = vec![TELEGRAPH_KIND_NONE; n];
         let mut telegraph_params = vec![[0.0_f32; 4]; n];
 
+        // Pending-program (Plan G option D follow-up). Pre-fill kinds
+        // with `EFFECT_KIND_EMPTY` and payloads with `0` so abilities
+        // without a `cast{} effect{}` block share a single resting
+        // state — the per-program copy below overwrites only slots
+        // whose source program populated `pending_program`.
+        let pending_total = n * MAX_EFFECTS_PER_PROGRAM;
+        let mut pending_effect_kinds = vec![EFFECT_KIND_EMPTY; pending_total];
+        let mut pending_effect_payload_a = vec![0_u32; pending_total];
+        let mut pending_effect_payload_b = vec![0_u32; pending_total];
+
+        // Interrupt mask (Plan G G2.5 follow-up). Pre-fill with the
+        // none-sentinel so abilities without a `cast { interrupts: ... }`
+        // declaration (legacy bare-effect + cast{} programs that omitted
+        // the field) share a single resting state. The per-program copy
+        // below overwrites only slots whose source program populated
+        // `cast_interrupt_mask`.
+        let mut interrupt_mask = vec![INTERRUPT_MASK_NONE_SENTINEL; n];
+
         for slot in 0..n {
             // `AbilityId` is 1-based; the registry's `get` accepts an id,
             // so reconstruct it from the slot. The registry guarantees
@@ -593,6 +693,28 @@ impl PackedAbilityRegistry {
             // vast majority of abilities.
             telegraph_kind[slot] = program.telegraph_kind;
             telegraph_params[slot] = program.telegraph_params;
+
+            // Pending-program rows (Plan G option D follow-up). Splat
+            // each `program.pending_program[i]` into the matching
+            // pending-effect slot via `pack_effect` (same encoding as
+            // the primary `effect_kinds` column). Empty programs and
+            // unused tail slots stay at the sentinel pre-fill.
+            pack_program_pending(
+                program,
+                slot,
+                &mut pending_effect_kinds,
+                &mut pending_effect_payload_a,
+                &mut pending_effect_payload_b,
+            );
+
+            // Interrupt mask (Plan G G2.5 follow-up). One byte per
+            // ability: `InterruptMask::raw()` for cast{} programs that
+            // declared `interrupts: <set>`; `INTERRUPT_MASK_NONE_SENTINEL`
+            // for legacy bare-effect + cast{} programs that omitted
+            // the field (the pre-fill value).
+            if let Some(mask) = program.cast_interrupt_mask {
+                interrupt_mask[slot] = mask.raw();
+            }
         }
 
         Self {
@@ -623,6 +745,10 @@ impl PackedAbilityRegistry {
             when_pred_literal,
             telegraph_kind,
             telegraph_params,
+            pending_effect_kinds,
+            pending_effect_payload_a,
+            pending_effect_payload_b,
+            interrupt_mask,
         }
     }
 
@@ -1017,6 +1143,47 @@ fn pack_program_when_predicates(
     }
 }
 
+/// Plan G option D follow-up (2026-05-10): splat one program's
+/// `pending_program` ops into the row-major
+/// `pending_effect_kinds` + `pending_effect_payload_*` buffers. Slots
+/// already pre-filled (`EFFECT_KIND_EMPTY` / `0` / `0`); only authored
+/// entries overwrite. `program.pending_program` is bounded at
+/// `MAX_EFFECTS_PER_PROGRAM` (the same SmallVec cap as `program.effects`);
+/// an empty `pending_program` (the common case for bare-effect programs)
+/// leaves every slot at the sentinel.
+///
+/// Stride is `MAX_EFFECTS_PER_PROGRAM` so a GPU shader addresses slot
+/// `(ability, pending_index)` as
+/// `slot * MAX_EFFECTS_PER_PROGRAM + pending_index`.
+///
+/// Encoding mirrors `pack_effect`'s primary-effect encoding 1:1 — the
+/// busy-resolution kernel reuses the same arm-chain shape for dispatch,
+/// so the payload columns must carry identical semantics per kind
+/// discriminant.
+fn pack_program_pending(
+    program:                    &AbilityProgram,
+    slot:                       usize,
+    pending_effect_kinds:       &mut [u32],
+    pending_effect_payload_a:   &mut [u32],
+    pending_effect_payload_b:   &mut [u32],
+) {
+    let base = slot * MAX_EFFECTS_PER_PROGRAM;
+    for (i, op) in program.pending_program.iter().enumerate() {
+        // Defensive bounds parallel to the other per-effect packers —
+        // the lowering pass enforces
+        // `program.pending_program.len() <= MAX_EFFECTS_PER_PROGRAM`,
+        // but a hand-built program could violate it; clamp instead of
+        // panicking on the startup pack path.
+        if i >= MAX_EFFECTS_PER_PROGRAM {
+            break;
+        }
+        let (kind, a, b) = pack_effect(*op);
+        pending_effect_kinds[base + i]     = kind;
+        pending_effect_payload_a[base + i] = a;
+        pending_effect_payload_b[base + i] = b;
+    }
+}
+
 /// Internal helper for tree → RPN linearization.
 enum PackedNode {
     Atom(EffectPredicate),
@@ -1383,6 +1550,10 @@ mod tests {
         assert!(p.nested_effect_payload_b.is_empty());
         assert!(p.telegraph_kind.is_empty());
         assert!(p.telegraph_params.is_empty());
+        assert!(p.pending_effect_kinds.is_empty());
+        assert!(p.pending_effect_payload_a.is_empty());
+        assert!(p.pending_effect_payload_b.is_empty());
+        assert!(p.interrupt_mask.is_empty());
     }
 
     #[test]
@@ -2710,5 +2881,148 @@ mod tests {
         assert_eq!(p.telegraph_kind[2], TelegraphKind::Line.discriminant());
         assert_eq!(p.telegraph_kind[2], 2);
         assert_eq!(p.telegraph_params[2], [2.5, 0.0, 0.0, 0.0]);
+    }
+
+    // ---- Plan G option D follow-up (2026-05-10) — pending-program +
+    // interrupt-mask SoA bump. The new columns mirror the primary
+    // `effect_*` row layout (stride = MAX_EFFECTS_PER_PROGRAM) plus a
+    // single per-ability mask byte. ----------------------------------
+
+    #[test]
+    fn pack_pending_program_default_all_sentinel() {
+        // Programs with no `cast{} effect{}` block carry an empty
+        // `pending_program` SmallVec; every column slot must be the
+        // empty sentinel + zero payloads. Guards the pre-fill path so
+        // the busy-resolution kernel doesn't need a special
+        // "no-pending" code path.
+        let prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 30.0 }],
+        );
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        assert_eq!(
+            p.pending_effect_kinds.len(),
+            MAX_EFFECTS_PER_PROGRAM,
+            "pending_effect_kinds stride = MAX_EFFECTS_PER_PROGRAM",
+        );
+        for i in 0..MAX_EFFECTS_PER_PROGRAM {
+            assert_eq!(p.pending_effect_kinds[i], EFFECT_KIND_EMPTY,
+                "slot {i}: empty (no pending authored)");
+            assert_eq!(p.pending_effect_payload_a[i], 0);
+            assert_eq!(p.pending_effect_payload_b[i], 0);
+        }
+    }
+
+    #[test]
+    fn pack_pending_program_payload() {
+        // Two pending ops: slot 0 = Damage(25.0), slot 1 = Stun(10).
+        // Asserts both payload columns and the unused tail stays at
+        // sentinel + zeros. Also confirms the encoding mirrors the
+        // primary `pack_effect` table 1:1 — the busy-resolution kernel
+        // reuses the same arm chain for dispatch.
+        use smallvec::SmallVec;
+        let mut prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::CastBegin {
+                ability_id:     1,
+                duration_ticks: 30,
+                target_slot:    0,
+                target_x_q8:    0,
+                target_y_q8:    0,
+            }],
+        );
+        let mut pending: SmallVec<[EffectOp; MAX_EFFECTS_PER_PROGRAM]> = SmallVec::new();
+        pending.push(EffectOp::Damage { amount: 25.0 });
+        pending.push(EffectOp::Stun { duration_ticks: 10 });
+        prog.pending_program = pending;
+
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // Slot 0: Damage(25.0) — discriminant 0, payload_a = bits.
+        assert_eq!(p.pending_effect_kinds[0], 0, "Damage discriminant");
+        assert_eq!(p.pending_effect_payload_a[0], 25.0_f32.to_bits());
+        assert_eq!(p.pending_effect_payload_b[0], 0);
+        // Slot 1: Stun(10) — discriminant 3, payload_a = duration.
+        assert_eq!(p.pending_effect_kinds[1], 3, "Stun discriminant");
+        assert_eq!(p.pending_effect_payload_a[1], 10);
+        assert_eq!(p.pending_effect_payload_b[1], 0);
+        // Slots 2..MAX stay at the empty sentinel.
+        for i in 2..MAX_EFFECTS_PER_PROGRAM {
+            assert_eq!(p.pending_effect_kinds[i], EFFECT_KIND_EMPTY,
+                "slot {i} must stay at EFFECT_KIND_EMPTY");
+            assert_eq!(p.pending_effect_payload_a[i], 0);
+            assert_eq!(p.pending_effect_payload_b[i], 0);
+        }
+    }
+
+    #[test]
+    fn pack_interrupt_mask_default_all_sentinel() {
+        // Programs without a `cast { interrupts: ... }` declaration
+        // (legacy bare-effect path) keep the per-ability mask at the
+        // none-sentinel. Per-fixture rules treat the sentinel as
+        // "cast cannot be interrupted by anything".
+        let prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 30.0 }],
+        );
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        assert_eq!(p.interrupt_mask.len(), 1, "one slot per ability");
+        assert_eq!(p.interrupt_mask[0], INTERRUPT_MASK_NONE_SENTINEL);
+    }
+
+    #[test]
+    fn pack_interrupt_mask_payload() {
+        // Three abilities exercise the three states:
+        // * slot 0: legacy bare-effect (no cast{} → sentinel).
+        // * slot 1: cast{} with `interrupts: standard` (= 0x0F).
+        // * slot 2: cast{} with `interrupts: none` (= 0x00).
+        //
+        // Confirms the column round-trips both real values (including
+        // 0x00, which IS a real value distinct from the sentinel) and
+        // the sentinel for legacy abilities.
+        use crate::ability::interrupt::InterruptMask;
+        let bare = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 10.0 }],
+        );
+        let mut standard = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 10.0 }],
+        );
+        standard.cast_interrupt_mask = Some(InterruptMask::standard());
+        let mut none = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 10.0 }],
+        );
+        none.cast_interrupt_mask = Some(InterruptMask::none());
+
+        let reg = build(vec![bare, standard, none]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        assert_eq!(p.interrupt_mask.len(), 3);
+        // Slot 0: legacy bare-effect → sentinel.
+        assert_eq!(p.interrupt_mask[0], INTERRUPT_MASK_NONE_SENTINEL,
+            "legacy bare-effect ability must carry the none-sentinel");
+        // Slot 1: standard → 0x0F (Damage|Stun|CasterDied|TargetDied).
+        assert_eq!(p.interrupt_mask[1], InterruptMask::standard().raw());
+        assert_eq!(p.interrupt_mask[1], 0b0000_1111);
+        // Slot 2: none → 0x00 (real value distinct from the sentinel).
+        assert_eq!(p.interrupt_mask[2], InterruptMask::none().raw());
+        assert_eq!(p.interrupt_mask[2], 0x00);
+        // Sentinel and `interrupts: none` must stay distinguishable.
+        assert_ne!(p.interrupt_mask[0], p.interrupt_mask[2],
+            "sentinel (no cast{{}}) and `interrupts: none` (real value 0) \
+             must not collapse to the same byte");
     }
 }
