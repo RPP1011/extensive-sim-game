@@ -1099,6 +1099,14 @@ pub enum NamespaceId {
     /// Singular `quest` is distinct from the pre-existing plural
     /// `quests` (legacy collection accessor).
     Quest,
+    /// `threats::*` — Plan G G3f (2026-05-09). Per-agent scoring
+    /// primitives over the threats materialised view (G3g, future).
+    /// Methods `in_zone`, `intensity_at`, `nearest`,
+    /// `dir_away_from_nearest` resolve to the corresponding
+    /// `Builtin::Threats*` variants in the resolver — the threats
+    /// fold's per-cell walk is invisible at the DSL surface.
+    /// See `docs/plans/g3_threats_view_design.md`.
+    Threats,
 }
 
 impl NamespaceId {
@@ -1128,6 +1136,7 @@ impl NamespaceId {
             NamespaceId::TheoryOfMind => "theory_of_mind",
             NamespaceId::Group => "group",
             NamespaceId::Quest => "quest",
+            NamespaceId::Threats => "threats",
         }
     }
 }
@@ -1196,6 +1205,54 @@ pub enum Builtin {
     /// flip sign). Lowers to `BuiltinId::AsI32(<src>)` which emits
     /// WGSL `i32(<arg>)`.
     I32Cast,
+
+    // -- Threats scoring primitives (Plan G G3f, 2026-05-09). --
+    //
+    // Resolved from `threats.<method>(...)` / `threats::<method>(...)`
+    // by the resolver — the `threats` namespace dispatches the four
+    // method names to these `Builtin` variants directly (rather than
+    // routing through `IrExpr::NamespaceCall`) so the lowering pass
+    // sees a single closed-set enum to dispatch on.
+    //
+    // Today's CG lowering emits sentinel values (`false` / `0.0` /
+    // `AgentId(0)` / `vec3(0)`) — the threats materialised view
+    // (G3g, future) wires the per-cell walk over the agent's
+    // threat-zone ring. The Builtin surface is the load-bearing
+    // piece; the WGSL behaviour is downstream.
+    //
+    // Argument shapes per the design doc's "Scoring primitives" table:
+    // * `threats.in_zone(self) -> bool` — any live cell where self.pos
+    //   is in the projected zone.
+    // * `threats.intensity_at(self.pos) -> f32` — sum of (radius -
+    //   distance) over live cells.
+    // * `threats.nearest(self) -> AgentId` — source of the closest
+    //   live zone.
+    // * `threats.dir_away_from_nearest(self) -> Vec3` — unit vector
+    //   from nearest threat's centre toward self.
+
+    /// `threats.in_zone(self) -> bool` — true when the agent's current
+    /// position falls inside any live threat zone. Lowers to a per-
+    /// cell walk over the agent's threat-zone ring (K=4 cells today),
+    /// OR-reducing the per-cell `in_zone` test.
+    ThreatsInZone,
+    /// `threats.intensity_at(pos) -> f32` — sum of `(radius - dist)`
+    /// over every live cell whose zone covers `pos`. Negative
+    /// distances are clamped at zero so distant threats contribute
+    /// nothing. Lowers to a per-cell walk over the agent's threat-
+    /// zone ring with a sum-reduce.
+    ThreatsIntensityAt,
+    /// `threats.nearest(self) -> AgentId` — caster id of the live
+    /// threat zone whose centre is nearest to self.pos. Returns
+    /// `AgentId::SENTINEL` (0) when no threats are active. Lowers to
+    /// a per-cell argmin walk.
+    ThreatsNearest,
+    /// `threats.dir_away_from_nearest(self) -> Vec3` — unit vector
+    /// pointing FROM the nearest live threat zone's centre TO self.
+    /// Returns `Vec3::ZERO` when no threats are active. Lowers to
+    /// the same per-cell argmin walk as `ThreatsNearest`, then
+    /// derives the unit direction from the winning cell's centre +
+    /// self.pos.
+    ThreatsDirAwayFromNearest,
 }
 
 impl Builtin {
@@ -1225,6 +1282,10 @@ impl Builtin {
             Builtin::F32Cast => "f32",
             Builtin::U32Cast => "u32",
             Builtin::I32Cast => "i32",
+            Builtin::ThreatsInZone => "threats.in_zone",
+            Builtin::ThreatsIntensityAt => "threats.intensity_at",
+            Builtin::ThreatsNearest => "threats.nearest",
+            Builtin::ThreatsDirAwayFromNearest => "threats.dir_away_from_nearest",
         }
     }
 
@@ -1246,6 +1307,12 @@ impl Builtin {
             | Builtin::Log10
             | Builtin::Sqrt => Some(1),
             Builtin::SaturatingAdd => Some(2),
+            // Threats scoring primitives — every variant is arity 1
+            // (a single agent / pos arg). See the per-variant doc.
+            Builtin::ThreatsInZone
+            | Builtin::ThreatsIntensityAt
+            | Builtin::ThreatsNearest
+            | Builtin::ThreatsDirAwayFromNearest => Some(1),
             // Quantifiers are parsed as a dedicated AST node, not a call; this
             // entry is for completeness only.
             Builtin::Forall | Builtin::Exists => None,

@@ -93,7 +93,7 @@ use dsl_ast::ast::{
 use engine::ability::interrupt::{InterruptKind, InterruptMask};
 use engine::ability::program::{
     AbilityCost, AbilityHint, AbilityProgram, AbilityTag, Area, CostAmount, CostResource, Delivery, EffectAreaShape, EffectOp, EffectPredicate, EffectPredicateBinder, EffectPredicateOp, EffectWhenCondition, MAX_NESTED_PER_EFFECT, MAX_PRED_NODES_PER_EFFECT, TargetModeKind,
-    EffectScaling, Gate, LifetimeMode, ScalingStatRef, ShapeKind, StackingMode, TargetSelector, WhenPredicate,
+    EffectScaling, Gate, LifetimeMode, ScalingStatRef, ShapeKind, StackingMode, TargetSelector, TelegraphKind, TELEGRAPH_KIND_NONE, WhenPredicate,
     MAX_EFFECTS_PER_PROGRAM, MAX_SCALINGS_PER_EFFECT, MAX_TAGS_PER_PROGRAM,
 };
 use engine::ability::AbilityId;
@@ -133,6 +133,55 @@ fn lower_interrupt_set(set: &InterruptSet) -> InterruptMask {
             m
         }
     }
+}
+
+/// Plan G G3e (2026-05-09) — parse the verbatim telegraph source slice
+/// (e.g. `"circle(self.pos, radius: 4)"` or
+/// `"line(self.pos, target.pos, width: 2)"`) into a `(TelegraphKind,
+/// [f32; 4])` tuple ready for the packed registry's
+/// `telegraph_kind` / `telegraph_params` columns.
+///
+/// MVP scope: recognises only `circle(...)` and `line(...)` shape names
+/// and pulls the single named numeric arg (`radius:` for circles,
+/// `width:` for lines) into `params[0]`. Position arguments
+/// (`self.pos`, `target.pos`) are NOT parsed here — they're implicit
+/// in the threats fold's projection step (centre = caster pos for
+/// circle; endpoints = caster + target pos for line).
+///
+/// Returns `None` for unparseable text (unknown shape, missing named
+/// arg, malformed literal). Caller treats `None` as "no telegraph"
+/// (sentinel + zeros). A future slice could promote this to a typed
+/// `LowerError::UnknownTelegraphShape` once the threats view
+/// (G3g) hard-depends on the metadata.
+fn parse_telegraph_text(text: &str) -> Option<(TelegraphKind, [f32; 4])> {
+    let text = text.trim();
+    let (head, rest) = text.split_once('(')?;
+    let head = head.trim();
+    let rest = rest.strip_suffix(')')?.trim();
+    let kind = match head {
+        "circle" => TelegraphKind::Circle,
+        "line"   => TelegraphKind::Line,
+        _ => return None,
+    };
+    let key = match kind {
+        TelegraphKind::Circle => "radius",
+        TelegraphKind::Line   => "width",
+    };
+    // Find `<key>:` then parse the value up to the next `,` / end.
+    // Args may appear in any order — we only need the named numeric.
+    for arg in rest.split(',') {
+        let arg = arg.trim();
+        if let Some((k, v)) = arg.split_once(':') {
+            if k.trim() == key {
+                if let Ok(n) = v.trim().parse::<f32>() {
+                    let mut params = [0.0_f32; 4];
+                    params[0] = n;
+                    return Some((kind, params));
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Errors surfaced by `lower_ability_decl` / `lower_ability_file`.
@@ -956,6 +1005,13 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     // slots; deferring keeps this slice small.
     let mut pending_effects: SmallVec<[EffectOp; MAX_EFFECTS_PER_PROGRAM]> = SmallVec::new();
     let mut cast_interrupt_mask: Option<InterruptMask> = None;
+    // Plan G G3e (2026-05-09) — telegraph metadata, populated from the
+    // first cast{}'s `telegraph: <shape>(...)` field. Defaults to the
+    // none-sentinel + zero params when no cast{} block (or no telegraph
+    // field) is authored. The threats fold (G3g) reads the packed
+    // companion columns to project per-caster zones.
+    let mut telegraph_kind: u8 = TELEGRAPH_KIND_NONE;
+    let mut telegraph_params: [f32; 4] = [0.0; 4];
     if let Some(steps) = &decl.program {
         for step in steps {
             match step {
@@ -965,9 +1021,20 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
                         // Cast steps. Multi-stage chains are a follow-up.
                         continue;
                     }
-                    let CastSpec { duration_ticks, interrupts, .. } = spec;
+                    let CastSpec { duration_ticks, interrupts, telegraph, .. } = spec;
                     let duration_clamped: u16 = (*duration_ticks).min(u16::MAX as u32) as u16;
                     cast_interrupt_mask = Some(lower_interrupt_set(interrupts));
+                    if let Some(text) = telegraph.as_deref() {
+                        if let Some((kind, params)) = parse_telegraph_text(text) {
+                            telegraph_kind = kind.discriminant();
+                            telegraph_params = params;
+                        }
+                        // Unknown / unparseable shapes silently fall back
+                        // to the none-sentinel — Plan G G3e MVP only
+                        // recognises `circle(...)` + `line(...)`. A
+                        // future slice could surface a typed error here
+                        // when authors typo a shape name.
+                    }
                     effects.push(EffectOp::CastBegin {
                         ability_id:     0,
                         duration_ticks: duration_clamped,
@@ -1325,6 +1392,8 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
         target_mode: lowered_target_mode,
         cast_interrupt_mask,
         pending_program: pending_effects,
+        telegraph_kind,
+        telegraph_params,
     })
 }
 
@@ -3103,5 +3172,60 @@ mod tests {
         assert_eq!(prog.effects.len(), 1);
         assert!(matches!(prog.effects[0], EffectOp::Damage { amount } if (amount - 10.0).abs() < 1e-3),
             "legacy bare-effect path should still emit EffectOp::Damage; got {:?}", prog.effects[0]);
+    }
+
+    /// Plan G G3e — `cast { telegraph: circle(self.pos, radius: R) }`
+    /// populates `telegraph_kind` (= `TelegraphKind::Circle`) and
+    /// `telegraph_params[0] = R` on the lowered program. The packed
+    /// registry's `pack_telegraph_metadata_column` test in
+    /// `engine::ability::packed::tests` then asserts these flow into
+    /// the SoA columns the threats fold (G3g) reads.
+    #[test]
+    fn cast_block_with_circle_telegraph_lowers_to_program_fields() {
+        let src = "ability Firebolt {
+            target: enemy range: 8.0 cooldown: 5s
+            cast { duration: 3t; telegraph: circle(self.pos, radius: 4) }
+            effect { damage 25 }
+        }";
+        let file = parse_ability_file(src).expect("parser");
+        let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+        assert_eq!(prog.telegraph_kind, TelegraphKind::Circle.discriminant(),
+            "circle telegraph should set kind to Circle (= 1)");
+        assert!((prog.telegraph_params[0] - 4.0).abs() < 1e-6,
+            "circle telegraph radius should land in params[0]; got {:?}",
+            prog.telegraph_params);
+        assert_eq!(&prog.telegraph_params[1..], &[0.0, 0.0, 0.0],
+            "trailing params zero-pad");
+    }
+
+    /// Plan G G3e — same as the circle test but for the line shape;
+    /// `width: W` lands in `params[0]`.
+    #[test]
+    fn cast_block_with_line_telegraph_lowers_to_program_fields() {
+        let src = "ability Beam {
+            target: enemy range: 12.0 cooldown: 10s
+            cast { duration: 2t; telegraph: line(self.pos, target.pos, width: 3) }
+            effect { damage 40 }
+        }";
+        let file = parse_ability_file(src).expect("parser");
+        let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+        assert_eq!(prog.telegraph_kind, TelegraphKind::Line.discriminant(),
+            "line telegraph should set kind to Line (= 2)");
+        assert!((prog.telegraph_params[0] - 3.0).abs() < 1e-6,
+            "line telegraph width should land in params[0]; got {:?}",
+            prog.telegraph_params);
+    }
+
+    /// Plan G G3e — abilities with no telegraph (legacy bare-effect or
+    /// cast{} without the field) leave the sentinel + zero defaults.
+    #[test]
+    fn ability_without_telegraph_carries_sentinel_default() {
+        let src = "ability Strike { target: enemy range: 1.5 cooldown: 1s damage 10 }";
+        let file = parse_ability_file(src).expect("parser");
+        let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+        assert_eq!(prog.telegraph_kind, TELEGRAPH_KIND_NONE,
+            "no telegraph → sentinel kind");
+        assert_eq!(prog.telegraph_params, [0.0; 4],
+            "no telegraph → zero params");
     }
 }

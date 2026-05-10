@@ -2074,6 +2074,44 @@ fn lower_builtin_call(
             span,
             ctx,
         ),
+        // Plan G G3f (2026-05-09) — `threats.<method>(...)` scoring
+        // primitives. Today's lowering emits sentinel literals; the
+        // threats materialised view (G3g, future) wires the per-cell
+        // walk that produces the real aggregates. The Builtin surface
+        // is the load-bearing piece for this slice — the WGSL behaviour
+        // is downstream (see `docs/plans/g3_threats_view_design.md`
+        // "Estimated work breakdown" entry G3g).
+        //
+        // Arity / arg lowering already validated + executed above so
+        // any type errors in the arg surface here, even though the
+        // arg id itself is discarded (the stub doesn't consume it).
+        Builtin::ThreatsInZone => {
+            expect_arity(builtin, 1, args.len(), span)?;
+            // Sentinel: `false` — no threat zones today.
+            add(ctx, CgExpr::Lit(LitValue::Bool(false)), span)
+        }
+        Builtin::ThreatsIntensityAt => {
+            expect_arity(builtin, 1, args.len(), span)?;
+            // Sentinel: `0.0` — no intensity contribution today.
+            add(ctx, CgExpr::Lit(LitValue::F32(0.0)), span)
+        }
+        Builtin::ThreatsNearest => {
+            expect_arity(builtin, 1, args.len(), span)?;
+            // Sentinel: `AgentId(0)` (per the doc — "AgentId::SENTINEL"
+            // — slot 0 is the engine-reserved sentinel).
+            add(ctx, CgExpr::Lit(LitValue::AgentId(0)), span)
+        }
+        Builtin::ThreatsDirAwayFromNearest => {
+            expect_arity(builtin, 1, args.len(), span)?;
+            // Sentinel: `vec3(0, 0, 0)` — the zero vector, mirroring
+            // `Vec3::ZERO` in the doc. Scoring expressions that
+            // compose with this will see no displacement contribution.
+            add(
+                ctx,
+                CgExpr::Lit(LitValue::Vec3F32 { x: 0.0, y: 0.0, z: 0.0 }),
+                span,
+            )
+        }
         // Already filtered above.
         Builtin::Forall | Builtin::Exists | Builtin::Count | Builtin::Sum => {
             unreachable!("filtered earlier in lower_builtin_call")
