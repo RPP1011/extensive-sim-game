@@ -1259,6 +1259,17 @@ pub fn pack_effect(op: EffectOp) -> (u32, u32, u32) {
         // (obligation_id) and `(payload_a >> 16) & 0xFF` (kind).
         EffectOp::CreateObligation { obligation_id, kind } =>
             (45, (obligation_id as u32) | ((kind as u32) << 16), 0),
+
+        // Plan G (2026-05-09) — generic deferred cast.
+        // payload_a packs ability_id (low 16 bits) + duration_ticks
+        // (high 16 bits). payload_b = target_slot. The Vec3 q8
+        // target_pos doesn't fit in the (kind, payload_a, payload_b)
+        // u96; the dispatcher writes target_pos to the agent's
+        // BusyTargetPos SoA column directly at the cast site,
+        // bypassing the packed-effect path. Kept in the EffectOp for
+        // type-safety + AST round-trip; ignored here.
+        EffectOp::CastBegin { ability_id, duration_ticks, target_slot, target_pos_q8: _, _pad: _ } =>
+            (46, (ability_id as u32) | ((duration_ticks as u32) << 16), target_slot),
     }
 }
 

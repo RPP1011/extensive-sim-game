@@ -291,6 +291,22 @@ pub enum ApplyEvent {
     /// `EventKindId::EffectCreateObligationApplied = 76`. See
     /// `docs/spec/economy.md §7`.
     CreateObligation { source: AgentId, target: AgentId, obligation_id: u16, kind: u8 },
+
+    // Plan G (2026-05-09) — generic deferred-cast intent. Consumer
+    // sets busy_until_tick + busy_with_ability_id + busy_started_at_tick
+    // + busy_target_slot + busy_target_pos on the source agent's SoA,
+    // emits a CastBegan chronicle event for replay + viewer reads.
+    // The busy-resolution kernel later either dispatches the queued
+    // effect program (CastResolved) or clears state on interrupt
+    // (CastInterrupted). See
+    // `docs/superpowers/plans/2026-05-09-cast-state-and-threat-zones.md`.
+    CastBegin {
+        source: AgentId,
+        ability_id: u16,
+        duration_ticks: u16,
+        target_slot: u32,
+        target_pos_q8: [i16; 3],
+    },
 }
 
 /// Inline budget — most abilities have ≤4 effects (P4 says
@@ -611,6 +627,14 @@ fn push_effect_event(
         // AggregatePool and updates per-agent debtor / creditor indices.
         EffectOp::CreateObligation { obligation_id, kind } =>
             out.push(ApplyEvent::CreateObligation { source: caster, target, obligation_id, kind }),
+        // Plan G — deferred-cast intent. The dispatcher writes one
+        // ApplyEvent::CastBegin per cast initiation; the consumer
+        // sets the busy SoA + emits a CastBegan chronicle event.
+        // `target` here is the resolved target_slot for single-target
+        // casts; AOE / self-cast variants pass u32::MAX (encoded as
+        // AgentId::SENTINEL or similar at the caller).
+        EffectOp::CastBegin { ability_id, duration_ticks, target_slot, target_pos_q8, _pad: _ } =>
+            out.push(ApplyEvent::CastBegin { source: caster, ability_id, duration_ticks, target_slot, target_pos_q8 }),
         // CastAbility is recursive (needs cascade-style
         // re-dispatch); deferred to slice δ. Skip for now.
         EffectOp::CastAbility { .. } => {}

@@ -255,6 +255,33 @@ pub enum AgentFieldId {
     /// Mirror of `TravelDestX`. Lift A.
     TravelDestZ,
 
+    // --- Plan G (2026-05-09) — busy-context fields ---
+    //
+    // Lift A's `BusyUntilTick` is the universal busy GATE; these
+    // four columns are the universal busy CONTEXT — written by every
+    // busy source (TravelTo / Recipe / cast-time abilities) so a
+    // single busy-resolution kernel + a single threats view can
+    // operate uniformly across busy sources without per-source
+    // glue. See `docs/superpowers/plans/2026-05-09-cast-state-and-threat-zones.md`.
+
+    /// `busy_with_ability_id` — which ability id is currently
+    /// occupying this agent. `0` = idle (matches `BusyUntilTick = 0`).
+    /// Read by the busy-resolution kernel + the threats view fold to
+    /// decide whether (and how) to project a threat zone.
+    BusyWithAbilityId,
+    /// `busy_started_at_tick` — tick at which the current busy
+    /// activity began. Used for telegraph progress + threat zone
+    /// duration projection.
+    BusyStartedAtTick,
+    /// `busy_target_slot` — target agent slot for the current busy
+    /// activity. `u32::MAX` = no single target (AOE / self-cast /
+    /// position-target). Used by `target_died` interrupt detection.
+    BusyTargetSlot,
+    /// `busy_target_pos` — target world position (snapshot at busy
+    /// start). Used by line/cone telegraph projection in the threats
+    /// view fold.
+    BusyTargetPos,
+
     // --- Cold SoA: identity and lifecycle ---
     CreatureType,
     SpawnTick,
@@ -295,12 +322,16 @@ impl AgentFieldId {
             | TauntExpiresAtTick | LifestealExpiresAtTick
             | DamageTakenMultExpiresAtTick
             | DisguiseExpiresAtTick | DisguiseFakeType
-            | BusyUntilTick => {
+            | BusyUntilTick
+            | BusyWithAbilityId | BusyStartedAtTick | BusyTargetSlot => {
                 AgentFieldTy::U32
             }
 
             // f32 — Lift A travel destination cells (pending interpolation target)
             TravelDestX | TravelDestY | TravelDestZ => AgentFieldTy::F32,
+
+            // Vec3 — Plan G busy context (target world position)
+            BusyTargetPos => AgentFieldTy::Vec3,
 
             // i16 — q8 fixed-point factors (slow + Wave 2 piece 4 buffs)
             SlowFactorQ8 | LifestealFracQ8 | DamageTakenMultQ8 => AgentFieldTy::I16,
@@ -383,6 +414,10 @@ impl AgentFieldId {
             TravelDestX => "travel_dest_x",
             TravelDestY => "travel_dest_y",
             TravelDestZ => "travel_dest_z",
+            BusyWithAbilityId => "busy_with_ability_id",
+            BusyStartedAtTick => "busy_started_at_tick",
+            BusyTargetSlot => "busy_target_slot",
+            BusyTargetPos => "busy_target_pos",
             CreatureType => "creature_type",
             SpawnTick => "spawn_tick",
             GridId => "grid_id",

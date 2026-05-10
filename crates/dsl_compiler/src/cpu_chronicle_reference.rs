@@ -756,6 +756,15 @@ pub fn apply_event_to_chronicle_record(
             rec[5] = 0;
             Some(rec)
         }
+        // Plan G (2026-05-09) — CastBegin gets its chronicle
+        // EventKindId in the follow-up engine slice (G2.2)
+        // alongside the EventKindId enum extension + schema hash
+        // bump. For now return None so CastBegin doesn't get a
+        // chronicle record from this CPU reference path; the
+        // dispatcher will write the busy SoA columns directly.
+        // Replay determinism is preserved either way (busy state
+        // is in the snapshot).
+        ApplyEvent::CastBegin { .. } => None,
         // After the slice γ closer (Summon → kind 62), every
         // `ApplyEvent` variant has a chronicle counterpart — no
         // fallback `_ => None` arm needed. The closed-set match
