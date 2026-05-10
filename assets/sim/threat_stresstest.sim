@@ -1,0 +1,93 @@
+// threat_stresstest — Plan H — scaling + perf characterization for
+// the Plan G G3 threats infrastructure.
+//
+// Original Plan H design called for a baseline-vs-threat-aware A/B
+// to measure scoring effectiveness. That measurement is blocked
+// today: the `threats.*` Builtin still emits sentinels (the G3f
+// wire-up to actual view storage reads is a follow-up slice). What
+// we CAN measure here is the dispatch + storage cost at scale.
+//
+// **Stresstest shape.**
+//   * 256 agents.
+//   * Cyclic busy pattern: every 8 ticks, ~1/4 of agents become
+//     busy (cycle phase = `tick / 8 % 4`). Cycle gives the threats
+//     fold a varying load: tick 0-7 has 64 busy sources, tick 8-15
+//     has 64 different sources, etc.
+//   * Per-(observer, source) dispatch = 256 × 256 = 65,536 thread
+//     pairs per tick. Busy-filter early-exits ~3/4 of them; the
+//     remaining ~16k pairs each do one CAS-loop add.
+//   * Test asserts: per-tick wall-clock < BUDGET_MS (set per host).
+//
+// What we LEARN from this fixture (in absence of real Builtin reads):
+//   * Whether the 65k-pair dispatch fits a typical-tick budget.
+//   * Whether the busy-filter early-exit is fast enough to dominate
+//     the total kernel time (filter wins ~75% of pairs).
+//   * The threat-count distribution shape — how concentrated the
+//     pair load is per observer.
+//
+// **What this DOESN'T measure** (deferred to a follow-up after
+// threats.* Builtin reads are wired):
+//   * Scoring delta — does the AI actually dodge / re-target when
+//     threats.intensity_at(pos) returns nonzero?
+//   * Comparison vs a baseline ablation that drops the threats
+//     read entirely.
+
+event Tick { }
+event ScriptedCastBegin { source: AgentId, target: AgentId, ability_id: u32 }
+
+entity Subject : Agent { }
+
+config stress {
+  // Cycle period in ticks. Every cycle resets the busy slot
+  // assignment (4 phases per cycle).
+  cycle_period: u32 = 8,
+  // Ability id stamped on busy slots. Any non-zero u32.
+  cast_ability_id: u32 = 1,
+}
+
+// MarkBusyByPhase — every tick, set agent's busy_with_ability_id
+// based on a cycle phase. Phase = (tick / cycle_period) % 4. Each
+// phase activates 1/4 of the agent population:
+//   phase 0: agents [0, 64)
+//   phase 1: agents [64, 128)
+//   phase 2: agents [128, 192)
+//   phase 3: agents [192, 256)
+//
+// MVP: scripted phase activation. A real fixture would have casts
+// triggered by AI scoring, but the threats infrastructure is
+// independent of the producer's identity — what matters for
+// stresstest is the busy-source distribution.
+@phase(per_agent)
+physics MarkBusyByPhase {
+  on Tick {} where (
+    self.alive
+    && (((world.tick / config.stress.cycle_period) % 4) * 64 <= agents.spawn_tick(self))
+    && (agents.spawn_tick(self) < (((world.tick / config.stress.cycle_period) % 4) + 1) * 64)
+  ) {
+    agents.set_busy_with_ability_id(self, config.stress.cast_ability_id);
+  }
+}
+
+// ClearBusyByPhase — at phase boundaries, clear busy state for
+// agents NOT in the current phase. Keeps the busy population
+// bounded to ~64 per tick (one phase active at a time).
+@phase(per_agent)
+physics ClearBusyByPhase {
+  on Tick {} where (
+    self.alive
+    && agents.busy_with_ability_id(self) > 0
+    && !((((world.tick / config.stress.cycle_period) % 4) * 64 <= agents.spawn_tick(self))
+         && (agents.spawn_tick(self) < (((world.tick / config.stress.cycle_period) % 4) + 1) * 64))
+  ) {
+    agents.set_busy_with_ability_id(self, 0);
+  }
+}
+
+// The threats view at scale. Same shape as threats_view_probe.sim
+// but driven by the cyclic busy load.
+@materialized(on_event = [ScriptedCastBegin])
+@dispatch(per_agent_event_scan)
+view threats(observer: Agent) -> f32 {
+  initial: 0.0,
+  on ScriptedCastBegin { source: _, target: _, ability_id: _ } { self += 1.0 }
+}
