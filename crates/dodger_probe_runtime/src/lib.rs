@@ -50,6 +50,17 @@ pub struct DodgerProbeState {
     /// `when (self.alive)` eligibility gate.
     agent_alive_buf: wgpu::Buffer,
 
+    /// Per-agent facing direction (unit vec3 padded to vec4 for std430).
+    /// Together with `agent_pos_buf`, lets a future GPU kernel compute
+    /// per-(observer, source) FOV via `dot((source.pos - observer.pos),
+    /// observer.facing) > 0` and stamp belief bits — closing the
+    /// host-side FOV computation gap. Today the FOV check still runs
+    /// on the host, but `agent_facing` IS GPU-resident so a movement
+    /// consumer kernel could rotate agents per-tick and the visibility
+    /// state would track automatically.
+    agent_facing_buf: wgpu::Buffer,
+    agent_facing_staging: wgpu::Buffer,
+
     /// Per-agent position SoA. Layout `vec3<f32>` padded to vec4 for
     /// std430 (16 bytes per agent — `[x, y, z, _pad]`). Plumbed
     /// through `AgentBuffers::pos_buf` so any future GPU kernel
@@ -165,6 +176,26 @@ impl DodgerProbeState {
             mapped_at_creation: false,
         });
 
+        // agent_facing SoA — same layout as agent_pos. Default seed
+        // is `[1, 0, 0, 0]` (everyone facing +x) so tests that don't
+        // explicitly orient agents see a sane default.
+        let facing_init: Vec<[f32; 4]> =
+            vec![[1.0, 0.0, 0.0, 0.0]; agent_count as usize];
+        let agent_facing_buf =
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("dodger_probe::agent_facing"),
+                contents: bytemuck::cast_slice(&facing_init),
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+            });
+        let agent_facing_staging = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("dodger_probe::agent_facing_staging"),
+            size: pos_bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
         // beliefs_flags — `agent_count * agent_count` u32 cells. The
         // `@belief_gated` annotation on the threats view causes the
         // fold to read this buffer for the source-candidate gate.
@@ -270,6 +301,8 @@ impl DodgerProbeState {
             agent_busy_with_ability_id_buf,
             agent_pos_buf,
             agent_pos_staging,
+            agent_facing_buf,
+            agent_facing_staging,
             beliefs_flags_buf,
             threats,
             mask_0_bitmap_buf,
@@ -335,6 +368,59 @@ impl DodgerProbeState {
             0,
             bytemuck::cast_slice(values),
         );
+    }
+
+    /// Seed per-agent facing directions (unit vec3 padded to vec4).
+    /// Used by the dynamic-FOV pin to rotate agents mid-scenario and
+    /// observe visibility flipping accordingly.
+    pub fn seed_agent_facing(&mut self, values: &[[f32; 4]]) {
+        assert_eq!(
+            values.len(),
+            self.agent_count as usize,
+            "seed_agent_facing: length {} != agent_count {}",
+            values.len(),
+            self.agent_count,
+        );
+        self.gpu.queue.write_buffer(
+            &self.agent_facing_buf,
+            0,
+            bytemuck::cast_slice(values),
+        );
+    }
+
+    /// Block on the GPU and read agent facing directions back.
+    pub fn read_agent_facing(&self) -> Vec<[f32; 4]> {
+        let bytes = ((self.agent_count as u64) * 16).max(16);
+        let mut encoder = self.gpu.device.create_command_encoder(
+            &wgpu::CommandEncoderDescriptor {
+                label: Some("dodger_probe::read_agent_facing"),
+            },
+        );
+        encoder.copy_buffer_to_buffer(
+            &self.agent_facing_buf,
+            0,
+            &self.agent_facing_staging,
+            0,
+            bytes,
+        );
+        self.gpu.queue.submit(Some(encoder.finish()));
+        let slice = self.agent_facing_staging.slice(..bytes);
+        slice.map_async(wgpu::MapMode::Read, |res| {
+            res.expect("agent_facing_staging map_async failed")
+        });
+        self.gpu.device.poll(wgpu::PollType::Wait).expect("device poll");
+        let out = {
+            let view = slice.get_mapped_range();
+            let words: &[f32] = bytemuck::cast_slice(&view);
+            (0..self.agent_count as usize)
+                .map(|i| {
+                    let b = i * 4;
+                    [words[b], words[b + 1], words[b + 2], words[b + 3]]
+                })
+                .collect()
+        };
+        self.agent_facing_staging.unmap();
+        out
     }
 
     /// Block on the GPU and read agent positions back. Layout
@@ -1417,6 +1503,161 @@ mod dodger_behavioural_tests {
         eprintln!(
             "[fov-gpu-pin] PROVEN: same outcomes as the host-tuple version, but agent positions \
              live in GPU SoA — closes the position half of the host-side gap."
+        );
+    }
+
+    /// **Dynamic-FOV pin.** Agent starts facing AWAY from a threat
+    /// (threat is BEHIND), doesn't see it, doesn't dodge. Halfway
+    /// through, the agent rotates 180° to face the threat (now in
+    /// FRONT), starts seeing it, starts dodging. Final position
+    /// shows the agent escapes the corridor — but only because the
+    /// rotation happened in time.
+    ///
+    /// Geometry:
+    ///   - Agent A at (0, 0). Initially facing +x. Projectile P_a
+    ///     comes from x=-10 traveling toward +x.
+    ///     For the first half of ticks, P_a is in A's BACK
+    ///     (dot((-10,0)·(1,0) = -10 < 0) → invisible.
+    ///   - At tick HIT_TICK/2, A rotates to face -x. Now P_a is in
+    ///     A's FRONT (dot((-10,0)·(-1,0) = 10 > 0) → visible.
+    ///   - From the rotation tick onward, A picks Flee → host
+    ///     sidesteps perpendicular each tick.
+    ///
+    /// Pins agent_facing as live GPU SoA (not a host const) and
+    /// proves that mutating facing changes the FOV-gated belief
+    /// state, which propagates through the GPU's belief-gated fold
+    /// to the per-observer scoring decision.
+    #[test]
+    fn dynamic_facing_rotation_changes_fov_belief_then_dodge_state() {
+        const N: u32 = 4;
+        const HIT_TICK: usize = 12;
+        const ROTATE_AT: usize = 6; // halfway
+        const PROJECTILE_CORRIDOR_HALF_WIDTH: f32 = 0.5;
+        const SIDESTEP_SPEED: f32 = 0.2;
+
+        const SOURCE_FOR_A: u32 = 0;
+        const AGENT_A: u32 = 1;
+
+        let projectile_source = (-10.0_f32, 0.0_f32);
+
+        let mut state = match DodgerProbeState::try_new(0xCAFE, N) {
+            Some(s) => s,
+            None => {
+                eprintln!("[dynamic-fov-pin] skipping: no wgpu adapter on host.");
+                return;
+            }
+        };
+
+        // Start: A at origin facing +x; projectile is in A's back.
+        state.seed_agent_pos(&[
+            [0.0, 0.0, 0.0, 0.0], // SOURCE_FOR_A
+            [0.0, 0.0, 0.0, 0.0], // AGENT_A starts at origin
+            [0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0],
+        ]);
+        // Default agent_facing seed in try_new is `[1, 0, 0, 0]`
+        // (everyone faces +x). Confirm via readback for the test
+        // documentation; this also pins the default seed contract.
+        let initial_facing = state.read_agent_facing();
+        assert_eq!(
+            initial_facing[AGENT_A as usize], [1.0, 0.0, 0.0, 0.0],
+            "default agent_facing seed should be +x for every slot"
+        );
+
+        fn is_in_front(observer: (f32, f32), facing: (f32, f32), source: (f32, f32)) -> bool {
+            let dx = source.0 - observer.0;
+            let dy = source.1 - observer.1;
+            (dx * facing.0 + dy * facing.1) > 0.0
+        }
+
+        let cap = (N * N) as usize;
+        let bit = DodgerProbeState::OBSERVED_BUSY_BIT;
+        let mut sidesteps = 0usize;
+        let mut sees_threat_history: Vec<bool> = Vec::with_capacity(HIT_TICK);
+
+        for tick in 0..HIT_TICK {
+            // Rotate A at ROTATE_AT — flip facing from +x to -x.
+            if tick == ROTATE_AT {
+                let mut new_facing = state.read_agent_facing();
+                new_facing[AGENT_A as usize] = [-1.0, 0.0, 0.0, 0.0];
+                state.seed_agent_facing(&new_facing);
+            }
+
+            // Read current facing from GPU + position from GPU.
+            let positions = state.read_agent_pos();
+            let facings = state.read_agent_facing();
+            let a_pos = (positions[AGENT_A as usize][0], positions[AGENT_A as usize][1]);
+            let a_facing =
+                (facings[AGENT_A as usize][0], facings[AGENT_A as usize][1]);
+
+            // FOV check: source visible iff in front hemisphere.
+            let visible = is_in_front(a_pos, a_facing, projectile_source);
+            sees_threat_history.push(visible);
+
+            // Project FOV onto belief grid.
+            let mut beliefs = vec![0u32; cap];
+            if visible {
+                beliefs[(AGENT_A * N + SOURCE_FOR_A) as usize] = bit;
+            }
+            state.seed_beliefs_flags(&beliefs);
+
+            state.step();
+
+            let scoring = state.read_scoring_output();
+            let action = state.chosen_action(&scoring, AGENT_A);
+            if action == FLEE_ACTION_ID {
+                let mut new_pos = positions.clone();
+                new_pos[AGENT_A as usize][1] += SIDESTEP_SPEED;
+                state.seed_agent_pos(&new_pos);
+                sidesteps += 1;
+            }
+        }
+
+        let final_pos = state.read_agent_pos();
+        let final_y = final_pos[AGENT_A as usize][1];
+
+        eprintln!(
+            "[dynamic-fov-pin] sees_threat per tick: {sees_threat_history:?}"
+        );
+        eprintln!(
+            "[dynamic-fov-pin] sidesteps: {sidesteps} (only after rotation at tick {ROTATE_AT}) → final y = {final_y}"
+        );
+
+        // Pin: A did NOT see the threat for the first half (back-facing).
+        for tick in 0..ROTATE_AT {
+            assert!(
+                !sees_threat_history[tick],
+                "tick {tick}: A facing +x should NOT see source at -x; sees = true"
+            );
+        }
+        // Pin: A DID see the threat after rotation.
+        for tick in ROTATE_AT..HIT_TICK {
+            assert!(
+                sees_threat_history[tick],
+                "tick {tick}: A facing -x should see source at -x; sees = false"
+            );
+        }
+        // Pin: sidesteps fired only AFTER rotation. With ROTATE_AT=6
+        // and HIT_TICK=12, expect 6 sidesteps (one per post-rotation tick
+        // where scoring picks Flee).
+        // Note: the rotate-tick's belief update gets applied BEFORE the
+        // step; that step's scoring runs against the freshly-set belief.
+        // So sidesteps fire at ticks ROTATE_AT..HIT_TICK = 6 ticks total.
+        assert_eq!(
+            sidesteps,
+            HIT_TICK - ROTATE_AT,
+            "sidesteps must fire only after rotation: expected {}, got {sidesteps}",
+            HIT_TICK - ROTATE_AT,
+        );
+        // Pin: A escaped the corridor thanks to post-rotation dodging.
+        assert!(
+            final_y > PROJECTILE_CORRIDOR_HALF_WIDTH,
+            "A must escape corridor (y={final_y} > {PROJECTILE_CORRIDOR_HALF_WIDTH})"
+        );
+
+        eprintln!(
+            "[dynamic-fov-pin] PROVEN: facing rotation flipped FOV-gated belief mid-scenario; \
+             dodge state followed; A escaped only because rotation happened in time."
         );
     }
 }
