@@ -56,4 +56,21 @@ fn firebolt_interrupt_probe_sim_lowers_clean() {
         assert!(kernel_names.iter().any(|n| n.contains(expected)),
             "expected kernel containing {expected:?}; got: {kernel_names:?}");
     }
+
+    // Plan G G2.5 mask-aware filter — InterruptCastOnDamage's WGSL
+    // body must contain a mask gate (`(config_<N> % 2u) == 1u` —
+    // bit 0 = Damage in InterruptKind). Without it, the rule treats
+    // ALL damage as interrupting and `interrupts: standard - { damage }`
+    // semantics aren't observable. Greps the emitted WGSL to confirm
+    // the pattern is present.
+    let interrupt_wgsl = artifacts
+        .wgsl_files
+        .iter()
+        .find(|(name, _)| name.contains("InterruptCastOnDamage") && name.ends_with(".wgsl"))
+        .map(|(_, body)| body.as_str())
+        .expect("InterruptCastOnDamage.wgsl must be emitted");
+    assert!(interrupt_wgsl.contains("% 2u"),
+        "InterruptCastOnDamage.wgsl must gate on (config.interrupt.mask % 2) for the Damage bit; \
+         emitted body did not contain `% 2u` (substring match). Body length: {} bytes",
+        interrupt_wgsl.len());
 }
