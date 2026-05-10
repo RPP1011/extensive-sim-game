@@ -409,6 +409,7 @@ enum DispatchShapeLabel {
     PerWord,
     PerCell,
     PerScanChunk,
+    PerAgentEventScan,
 }
 
 impl DispatchShapeLabel {
@@ -421,6 +422,7 @@ impl DispatchShapeLabel {
             DispatchShape::PerWord => DispatchShapeLabel::PerWord,
             DispatchShape::PerCell => DispatchShapeLabel::PerCell,
             DispatchShape::PerScanChunk => DispatchShapeLabel::PerScanChunk,
+            DispatchShape::PerAgentEventScan => DispatchShapeLabel::PerAgentEventScan,
         }
     }
 
@@ -433,6 +435,7 @@ impl DispatchShapeLabel {
             DispatchShapeLabel::PerWord => "per_word",
             DispatchShapeLabel::PerCell => "per_cell",
             DispatchShapeLabel::PerScanChunk => "per_scan_chunk",
+            DispatchShapeLabel::PerAgentEventScan => "per_agent_event_scan",
         }
     }
 }
@@ -490,7 +493,14 @@ fn allowed_shapes_for_kind(kind: &ComputeOpKind) -> &'static [DispatchShapeLabel
             DispatchShapeLabel::PerCell,
             DispatchShapeLabel::OneShot,
         ],
-        ComputeOpKind::ViewFold { .. } => &[DispatchShapeLabel::PerEvent],
+        // ViewFold normally dispatches PerEvent (one thread per event in
+        // the source ring). Plan G G3d adds PerAgentEventScan to admit
+        // per-(observer, busy-source) folds whose source candidate set
+        // is a per-agent SoA column rather than an event ring.
+        ComputeOpKind::ViewFold { .. } => &[
+            DispatchShapeLabel::PerEvent,
+            DispatchShapeLabel::PerAgentEventScan,
+        ],
         // Per-tick anchor multiplication runs one thread per slot.
         ComputeOpKind::ViewDecay { .. } => &[DispatchShapeLabel::PerAgent],
         ComputeOpKind::SpatialQuery { kind } => match kind {

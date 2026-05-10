@@ -91,6 +91,17 @@ pub const PER_WORD_BITS: u32 = 32;
 /// Tracks `MAX_PER_CELL` — must stay in sync. Today both are 32.
 pub const PER_CELL_WORKGROUP_X: u32 = 32;
 
+/// Workgroup x-dim for [`DispatchShape::PerAgentEventScan`]. The shape
+/// dispatches a 2-D `(observer, source_candidate)` grid; we pick an
+/// 8×8 = 64-thread workgroup so the total invocation count matches the
+/// 64-lane pattern every other compute kernel uses (consistent register
+/// pressure + occupancy). The y-dim is pinned to the same value below.
+pub const PER_AGENT_EVENT_SCAN_WORKGROUP_X: u32 = 8;
+
+/// Workgroup y-dim for [`DispatchShape::PerAgentEventScan`]. See
+/// [`PER_AGENT_EVENT_SCAN_WORKGROUP_X`].
+pub const PER_AGENT_EVENT_SCAN_WORKGROUP_Y: u32 = 8;
+
 /// Workgroup x-dim for [`DispatchShape::PerScanChunk`]. The parallel
 /// prefix-scan over `spatial_grid_offsets` partitions `num_cells` into
 /// chunks of this many cells, with one workgroup per chunk and one
@@ -165,6 +176,26 @@ pub enum DispatchShape {
     /// lanes (`chunk_base + lane >= num_cells`) participate with
     /// count = 0 inside the scan and skip their slot writes.
     PerScanChunk,
+
+    /// Per-(observer_agent, source_agent) 2-D dispatch where the source
+    /// candidate set is "all agents with `busy_with_ability_id != 0`"
+    /// (i.e. agents currently mid-cast). Lays out as `gid.x = observer`,
+    /// `gid.y = source_candidate`. The kernel preamble early-exits any
+    /// `(observer, source)` pair where the source is not busy, so the
+    /// fold body only runs for live (observer, busy-caster) pairs.
+    ///
+    /// Workgroup geometry is 8×8 = 64 threads per group; the dispatch
+    /// count is `(ceil(agent_cap / 8), ceil(agent_cap / 8), 1)`. The
+    /// busy-filter is hardcoded to the `busy_with_ability_id` SoA
+    /// column today (added in Plan G G2.1) — future iterations may
+    /// generalise to `(observer, source-with-property)` by carrying a
+    /// predicate filter alongside the variant.
+    ///
+    /// Used by Plan G G3's threats materialised view; see
+    /// `docs/plans/g3_threats_view_design.md` for the full design and
+    /// `assets/sim/per_agent_event_scan_probe.sim` for the smoke
+    /// fixture that exercises the dispatch shape end-to-end.
+    PerAgentEventScan,
 }
 
 /// What drives the per-agent candidate list for a [`DispatchShape::PerPair`]
@@ -220,6 +251,7 @@ impl fmt::Display for DispatchShape {
             DispatchShape::PerWord => f.write_str("per_word"),
             DispatchShape::PerCell => f.write_str("per_cell"),
             DispatchShape::PerScanChunk => f.write_str("per_scan_chunk"),
+            DispatchShape::PerAgentEventScan => f.write_str("per_agent_event_scan"),
         }
     }
 }
@@ -358,6 +390,15 @@ pub enum ThreadIndexing {
     /// memory Hillis-Steele reduction (out-of-range lanes contribute
     /// count = 0 but stay through every barrier).
     PerScanChunkLane,
+    /// `let observer = gid.x; let source_candidate = gid.y; if (observer
+    /// >= cfg.agent_cap || source_candidate >= cfg.agent_cap) { return; }
+    /// if (agent_busy_with_ability_id[source_candidate] == 0u) { return; }`.
+    /// Used by [`DispatchShape::PerAgentEventScan`] to project per-(observer,
+    /// busy-source) work onto a 2-D dispatch. The busy-filter early-exits
+    /// candidates whose `busy_with_ability_id` SoA column is zero (no
+    /// in-flight cast), so non-busy agents do not contribute to the per-
+    /// observer fold body.
+    PerAgentEventScanSlot,
 }
 
 impl fmt::Display for ThreadIndexing {
@@ -372,6 +413,7 @@ impl fmt::Display for ThreadIndexing {
             ThreadIndexing::PerAgentWord => f.write_str("per_agent_word"),
             ThreadIndexing::PerCellWorkgroup => f.write_str("per_cell_workgroup"),
             ThreadIndexing::PerScanChunkLane => f.write_str("per_scan_chunk_lane"),
+            ThreadIndexing::PerAgentEventScanSlot => f.write_str("per_agent_event_scan_slot"),
         }
     }
 }
@@ -398,6 +440,11 @@ impl DispatchShape {
             DispatchShape::PerWord => WorkgroupSize::linear(PER_WORD_WORKGROUP_X),
             DispatchShape::PerCell => WorkgroupSize::linear(PER_CELL_WORKGROUP_X),
             DispatchShape::PerScanChunk => WorkgroupSize::linear(PER_SCAN_CHUNK_WORKGROUP_X),
+            DispatchShape::PerAgentEventScan => WorkgroupSize {
+                x: PER_AGENT_EVENT_SCAN_WORKGROUP_X,
+                y: PER_AGENT_EVENT_SCAN_WORKGROUP_Y,
+                z: 1,
+            },
         }
     }
 
@@ -473,6 +520,17 @@ impl DispatchShape {
                     z: 1,
                 }
             }
+            DispatchShape::PerAgentEventScan => {
+                // 2-D dispatch over `(observer, source_candidate)` pairs.
+                // Each axis is `ceil(agent_cap / workgroup_<axis>)`.
+                // workgroup geometry is 8×8 = 64 threads per group.
+                let wg = self.workgroup_size();
+                DispatchCount::Direct {
+                    x: ctx.agent_cap.div_ceil(wg.x),
+                    y: ctx.agent_cap.div_ceil(wg.y),
+                    z: 1,
+                }
+            }
         }
     }
 
@@ -508,6 +566,7 @@ impl DispatchShape {
             DispatchShape::PerWord => ThreadIndexing::PerAgentWord,
             DispatchShape::PerCell => ThreadIndexing::PerCellWorkgroup,
             DispatchShape::PerScanChunk => ThreadIndexing::PerScanChunkLane,
+            DispatchShape::PerAgentEventScan => ThreadIndexing::PerAgentEventScanSlot,
         }
     }
 }
@@ -950,6 +1009,55 @@ mod tests {
 
             let _idx = s.thread_indexing();
         }
+    }
+
+    // --- PerAgentEventScan -------------------------------------------------
+
+    #[test]
+    fn per_agent_event_scan_display_and_roundtrip() {
+        let s = DispatchShape::PerAgentEventScan;
+        assert_eq!(format!("{}", s), "per_agent_event_scan");
+        assert_roundtrip(&s);
+    }
+
+    #[test]
+    fn workgroup_size_per_agent_event_scan_is_8x8() {
+        let s = DispatchShape::PerAgentEventScan;
+        let wg = s.workgroup_size();
+        assert_eq!(wg.x, 8);
+        assert_eq!(wg.y, 8);
+        assert_eq!(wg.z, 1);
+        assert_eq!(wg.total(), 64, "8x8 should match the 64-thread budget");
+    }
+
+    #[test]
+    fn dispatch_count_per_agent_event_scan_is_2d_grid() {
+        // agent_cap = 200_000, wg = 8 ⇒ 200_000.div_ceil(8) = 25_000 per axis.
+        let count = DispatchShape::PerAgentEventScan
+            .dispatch_count(&DispatchCtx::per_agent(200_000));
+        assert_eq!(
+            count,
+            DispatchCount::Direct {
+                x: 25_000,
+                y: 25_000,
+                z: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn dispatch_count_per_agent_event_scan_zero_cap() {
+        let count =
+            DispatchShape::PerAgentEventScan.dispatch_count(&DispatchCtx::per_agent(0));
+        assert_eq!(count, DispatchCount::Direct { x: 0, y: 0, z: 1 });
+    }
+
+    #[test]
+    fn thread_indexing_per_agent_event_scan() {
+        assert_eq!(
+            DispatchShape::PerAgentEventScan.thread_indexing(),
+            ThreadIndexing::PerAgentEventScanSlot
+        );
     }
 
     #[test]

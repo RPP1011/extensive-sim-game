@@ -286,6 +286,16 @@ pub fn lower_view(
             // populated in Phase 1 (`populate_view_bodies_and_signatures`)
             // — see driver.rs.
 
+            // Plan G G3d — `@dispatch(per_agent_event_scan)` annotation
+            // flips the fold handler's dispatch shape from the default
+            // `PerEvent { source_ring }` to `PerAgentEventScan`. The
+            // annotation is detected up-front so the choice is made once
+            // for the view (every fold handler shares the shape).
+            // Future: if heterogeneous per-handler dispatches arrive,
+            // move the lookup inside `lower_one_handler` and key it on
+            // the handler's own annotations.
+            let dispatch_override = view_dispatch_override(ir);
+
             // B2: when the view carries `@decay(rate, per=tick)`, lower a
             // singleton [`ComputeOpKind::ViewDecay`] op BEFORE any fold
             // handler. The schedule synthesizer keys op ordering on
@@ -306,6 +316,7 @@ pub fn lower_view(
                 ir.decay.as_ref(),
                 handlers,
                 handler_resolutions,
+                dispatch_override,
                 ctx,
             )?;
             op_ids.extend(fold_ids);
@@ -366,6 +377,7 @@ fn lower_fold_handlers(
     decay: Option<&DecayHint>,
     handlers: &[FoldHandlerIR],
     handler_resolutions: &[HandlerResolution],
+    dispatch_override: Option<DispatchShape>,
     ctx: &mut LoweringCtx<'_>,
 ) -> Result<Vec<OpId>, LoweringError> {
     debug_assert_eq!(
@@ -375,10 +387,50 @@ fn lower_fold_handlers(
     );
     let mut op_ids = Vec::with_capacity(handlers.len());
     for (handler, resolution) in handlers.iter().zip(handler_resolutions.iter()) {
-        let op_id = lower_one_handler(view_id, hint, decay, handler, *resolution, ctx)?;
+        let op_id = lower_one_handler(
+            view_id,
+            hint,
+            decay,
+            handler,
+            *resolution,
+            dispatch_override,
+            ctx,
+        )?;
         op_ids.push(op_id);
     }
     Ok(op_ids)
+}
+
+/// Inspect a view's `annotations` for `@dispatch(per_agent_event_scan)`
+/// and produce the overriding [`DispatchShape`] when present. Returns
+/// `None` (default `PerEvent` dispatch) when the annotation is absent
+/// or carries an unrecognised argument.
+///
+/// **Surface today:** the annotation accepts a single positional arg —
+/// the dispatch shape's snake_case label. Only `per_agent_event_scan`
+/// is recognised. Unknown labels fall through to `None` so the resolver
+/// can later land a typed warning without breaking lowering.
+///
+/// **Future:** as more dispatch shapes need annotation surface, lift
+/// the (label → shape) table out of this helper and into a shared
+/// resolver pass, with typed errors for unknown labels.
+fn view_dispatch_override(ir: &dsl_ast::ir::ViewIR) -> Option<DispatchShape> {
+    use dsl_ast::ast::AnnotationValue;
+    let ann = ir.annotations.iter().find(|a| a.name == "dispatch")?;
+    for arg in &ann.args {
+        // Positional arg only — `@dispatch(per_agent_event_scan)`.
+        // Future: support `@dispatch(shape = per_agent_event_scan, ...)`
+        // by also matching `arg.key == Some("shape")`.
+        if arg.key.is_some() {
+            continue;
+        }
+        if let AnnotationValue::Ident(name) = &arg.value {
+            if name == "per_agent_event_scan" {
+                return Some(DispatchShape::PerAgentEventScan);
+            }
+        }
+    }
+    None
 }
 
 /// Lower a view's `@decay(rate, per=tick)` annotation into a
@@ -408,12 +460,19 @@ fn lower_decay_op(
 }
 
 /// Lower a single fold handler to one [`ComputeOpKind::ViewFold`] op.
+///
+/// `dispatch_override` lets the caller swap the default
+/// `DispatchShape::PerEvent { source_ring }` for an alternate shape
+/// (Plan G G3d's `PerAgentEventScan`). When `None` the handler keeps
+/// the legacy per-event ring dispatch — every existing fixture lands
+/// here.
 fn lower_one_handler(
     view_id: ViewId,
     hint: StorageHint,
     decay: Option<&DecayHint>,
     handler: &FoldHandlerIR,
     resolution: HandlerResolution,
+    dispatch_override: Option<DispatchShape>,
     ctx: &mut LoweringCtx<'_>,
 ) -> Result<OpId, LoweringError> {
     // Synthesize a `CgStmt::Let` per fold-handler event-pattern
@@ -459,9 +518,16 @@ fn lower_one_handler(
         on_event: resolution.event_kind,
         body: body_list_id,
     };
-    let shape = DispatchShape::PerEvent {
+    // Default: `PerEvent { source_ring }` — every existing fold view
+    // dispatches one thread per event in the source ring. Plan G G3d's
+    // `@dispatch(per_agent_event_scan)` annotation overrides to the
+    // 2-D `(observer, source_candidate)` shape; the source-ring
+    // identity stays on the resolution but is unused by the
+    // PerAgentEventScan emit (the kernel reads from per-agent SoA
+    // columns, not from an event ring).
+    let shape = dispatch_override.unwrap_or(DispatchShape::PerEvent {
         source_ring: resolution.source_ring,
-    };
+    });
     let op_id = ctx
         .builder
         .add_op(kind, shape, handler.span)

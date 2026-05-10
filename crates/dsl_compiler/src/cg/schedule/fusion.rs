@@ -115,6 +115,12 @@ pub enum DispatchShapeKey {
     /// `scan_shared` array across ops, which the current emit
     /// pipeline does not support.
     PerScanChunk,
+    /// Per-(observer, source) 2-D dispatch (Plan G G3 threats view).
+    /// Sits in its own key class today — the 2-D dispatch geometry +
+    /// busy-filter preamble are structurally distinct from every
+    /// 1-D shape, so fusion would require reconciling the per-thread
+    /// indexing and the early-exit predicate.
+    PerAgentEventScan,
 }
 
 /// Project a [`DispatchShape`] to its [`DispatchShapeKey`]. The
@@ -129,6 +135,7 @@ pub fn dispatch_shape_key(shape: &DispatchShape) -> DispatchShapeKey {
         DispatchShape::PerWord => DispatchShapeKey::PerWord,
         DispatchShape::PerCell => DispatchShapeKey::PerCell,
         DispatchShape::PerScanChunk => DispatchShapeKey::PerScanChunk,
+        DispatchShape::PerAgentEventScan => DispatchShapeKey::PerAgentEventScan,
     }
 }
 
@@ -1267,7 +1274,8 @@ pub(super) fn classify(ops: &[OpId], shape: &DispatchShape) -> FusibilityClass {
         | DispatchShape::OneShot
         | DispatchShape::PerWord
         | DispatchShape::PerCell
-        | DispatchShape::PerScanChunk => {
+        | DispatchShape::PerScanChunk
+        | DispatchShape::PerAgentEventScan => {
             if ops.len() < 2 {
                 FusibilityClass::Split
             } else {

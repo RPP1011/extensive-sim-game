@@ -936,7 +936,15 @@ fn compose_wgsl_file(
         ));
     }
 
-    let workgroup_x = topology_workgroup_size_x(topology);
+    let workgroup = topology_workgroup_size(topology);
+    // 2-D dispatches (today: only PerAgentEventScan) declare both
+    // `(x, y)` on the @workgroup_size annotation; 1-D shapes drop the
+    // y-dim so the WGSL stays unchanged for every existing kernel.
+    let workgroup_attr = if workgroup.y > 1 {
+        format!("@workgroup_size({}, {})", workgroup.x, workgroup.y)
+    } else {
+        format!("@workgroup_size({})", workgroup.x)
+    };
 
     if is_per_cell || is_per_scan_chunk {
         // PerCell + PerScanChunk entry points: take `workgroup_id`
@@ -946,7 +954,7 @@ fn compose_wgsl_file(
         // `thread_indexing_preamble`) reads these to derive its
         // working indices.
         out.push_str(&format!(
-            "@compute @workgroup_size({workgroup_x})\n\
+            "@compute {workgroup_attr}\n\
              fn {entry}(\n\
              \x20   @builtin(workgroup_id) workgroup_id: vec3<u32>,\n\
              \x20   @builtin(local_invocation_id) local_invocation_id: vec3<u32>,\n\
@@ -955,7 +963,7 @@ fn compose_wgsl_file(
         ));
     } else {
         out.push_str(&format!(
-            "@compute @workgroup_size({workgroup_x})\n\
+            "@compute {workgroup_attr}\n\
              fn {entry}(@builtin(global_invocation_id) gid: vec3<u32>) {{\n",
             entry = spec.entry_point
         ));
@@ -1881,6 +1889,21 @@ fn compose_dispatch_call(topology: &KernelTopology) -> String {
                 chunks
             )
         }
+        DispatchShape::PerAgentEventScan => {
+            // 2-D dispatch: ceil(agent_cap / wg.x) by ceil(agent_cap / wg.y).
+            // Inline both axes — every per-(observer, source) pair lands
+            // in exactly one thread, with the busy-filter dropping any
+            // (observer, non-busy-source) combination at the kernel
+            // preamble.
+            let wg = dispatch.workgroup_size();
+            format!(
+                "        pass.dispatch_workgroups((agent_cap + {wg_x_minus_one}u32) / {wg_x}u32, (agent_cap + {wg_y_minus_one}u32) / {wg_y}u32, 1);\n",
+                wg_x = wg.x,
+                wg_x_minus_one = wg.x - 1,
+                wg_y = wg.y,
+                wg_y_minus_one = wg.y - 1,
+            )
+        }
     }
 }
 
@@ -1995,7 +2018,7 @@ pub fn synthesize_lib_rs(kernel_index: &[String]) -> String {
 // Topology → workgroup size
 // ---------------------------------------------------------------------------
 
-/// Pick the `@workgroup_size(x)` value a kernel emitted from `topology`
+/// Pick the `@workgroup_size(...)` value a kernel emitted from `topology`
 /// should declare. Routes through Task 1.4's
 /// [`DispatchShape::workgroup_size`] so the WGSL annotation and the
 /// dispatch-count rule never disagree.
@@ -2004,7 +2027,12 @@ pub fn synthesize_lib_rs(kernel_index: &[String]) -> String {
 /// drives the size — every consumer carries the same `PerEvent` shape,
 /// so picking the first is structural (the well-formed pass already
 /// guards mismatches).
-fn topology_workgroup_size_x(topology: &KernelTopology) -> u32 {
+///
+/// Returns the full [`crate::cg::dispatch::WorkgroupSize`] so 2-D
+/// dispatches (Plan G G3d's `PerAgentEventScan`) can emit
+/// `@workgroup_size(x, y)` without losing the y-dim. Callers that
+/// only care about the x-dim project via `.x`.
+fn topology_workgroup_size(topology: &KernelTopology) -> crate::cg::dispatch::WorkgroupSize {
     let dispatch = match topology {
         KernelTopology::Fused { dispatch, .. } => *dispatch,
         KernelTopology::Split { dispatch, .. } => *dispatch,
@@ -2018,7 +2046,7 @@ fn topology_workgroup_size_x(topology: &KernelTopology) -> u32 {
             }
         }
     };
-    dispatch.workgroup_size().x
+    dispatch.workgroup_size()
 }
 
 // ---------------------------------------------------------------------------

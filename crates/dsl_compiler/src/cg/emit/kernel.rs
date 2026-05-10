@@ -321,10 +321,12 @@ pub fn kernel_topology_to_spec_and_body(
                     .and_then(|sig| sig.storage_hint),
                 _ => None,
             });
-        let bindings = build_view_fold_bindings(view_name, &cfg_struct, storage_hint);
+        let bindings =
+            build_view_fold_bindings(view_name, &cfg_struct, storage_hint, &dispatch);
         let cfg_struct_decl = build_view_fold_cfg_struct_decl(&cfg_struct);
         let cfg_build_expr = build_view_fold_cfg_build_expr(&cfg_struct);
-        let wgsl_body = build_view_fold_wgsl_body(&body_ops, prog, ctx, storage_hint)?;
+        let wgsl_body =
+            build_view_fold_wgsl_body(&body_ops, prog, ctx, storage_hint, &dispatch)?;
         let spec = KernelSpec {
             name,
             pascal,
@@ -2219,6 +2221,7 @@ fn build_view_fold_bindings(
     view_name: &str,
     cfg_struct: &str,
     storage_hint: Option<crate::cg::program::CgStorageHint>,
+    dispatch: &DispatchShape,
 ) -> Vec<KernelBinding> {
     use crate::cg::program::CgStorageHint;
     let accessor = format!("fold_view_{view_name}_handles");
@@ -2235,7 +2238,7 @@ fn build_view_fold_bindings(
     } else {
         (AccessMode::ReadWriteStorage, "array<u32>".to_string())
     };
-    vec![
+    let mut bindings = vec![
         KernelBinding {
             slot: 0,
             name: "event_ring".into(),
@@ -2310,7 +2313,36 @@ fn build_view_fold_bindings(
             wgsl_ty: cfg_struct.to_string(),
             bg_source: BgSource::Cfg,
         },
-    ]
+    ];
+    // Plan G G3d — PerAgentEventScan ViewFolds need the
+    // `busy_with_ability_id` SoA column for the busy-filter early-exit
+    // in the kernel preamble. The runtime side does not yet wire this
+    // column through `KernelBindingsContext::state` (it lives outside
+    // the `STANDARD_COLUMNS` set today), so the binding lands as
+    // `BgSource::Extras` — the per-runtime `from_context_with_extras`
+    // shim must thread the buffer in until the column is promoted to
+    // standard. Other dispatch shapes keep the legacy 7-binding
+    // shape unchanged.
+    if matches!(dispatch, DispatchShape::PerAgentEventScan) {
+        // `BgSource::External` lands the buffer on the per-runtime
+        // `<Pascal>Extras` shim so the runtime side passes
+        // `extras.agent_busy_with_ability_id` into `bind()`. When the
+        // column is later promoted to `STANDARD_COLUMNS`, the
+        // generic-kernel path's `classify_binding` would auto-route it
+        // through `ctx.state.busy_with_ability_id_buf`; this binding
+        // would then collapse to `BgSource::Resident` (or be dropped
+        // entirely if ViewFold's binding builder is taught the same
+        // routing). For G3d's smoke-test scope, the External binding
+        // is sufficient — no per-runtime crate is built.
+        bindings.push(KernelBinding {
+            slot: 7,
+            name: "agent_busy_with_ability_id".into(),
+            access: AccessMode::ReadStorage,
+            wgsl_ty: "array<u32>".into(),
+            bg_source: BgSource::External("agent_busy_with_ability_id".into()),
+        });
+    }
+    bindings
 }
 
 /// Compose the ViewFold-specific WGSL body. Adds the per-kind preamble
@@ -2340,8 +2372,20 @@ fn build_view_fold_wgsl_body(
     prog: &CgProgram,
     ctx: &EmitCtx<'_>,
     storage_hint: Option<crate::cg::program::CgStorageHint>,
+    dispatch: &DispatchShape,
 ) -> Result<String, KernelEmitError> {
     use crate::cg::program::CgStorageHint;
+    // Plan G G3d — PerAgentEventScan dispatches one thread per
+    // `(observer, source_candidate)` pair with a busy-filter early-
+    // exit on the source. The fold body sees both as locals; there is
+    // no event ring to read from, so the standard `event_idx` /
+    // `cfg.event_count` preamble is wrong. Hand-emit the 2-D preamble
+    // here so the kernel composer's `thread_indexing_preamble`
+    // (which is currently bypassed for ViewFold) doesn't have to grow
+    // a ViewFold special-case.
+    if matches!(dispatch, DispatchShape::PerAgentEventScan) {
+        return build_view_fold_per_agent_event_scan_body(body_ops, prog, ctx);
+    }
     // Plan G G3a — PerEntityRing diverts from the generic CgStmt::Assign
     // lowering and emits a hand-written ring-append body. The body
     // hardcodes the well-known event-ring layout
@@ -2475,6 +2519,123 @@ fn build_view_fold_wgsl_body(
         } else {
             out.push_str(&indented);
         }
+        out.push_str("\n    }");
+    }
+
+    Ok(out)
+}
+
+/// Plan G G3d — synthesise the WGSL body for a `PerAgentEventScan`-
+/// dispatched ViewFold.
+///
+/// Diverts from the standard PerEvent preamble (`event_idx`,
+/// `cfg.event_count`, per-event tag check) and emits a 2-D
+/// `(observer, source_candidate)` preamble with a busy-filter
+/// early-exit:
+///
+/// ```wgsl
+/// let observer = gid.x;
+/// let source_candidate = gid.y;
+/// if (observer >= cfg.agent_cap) { return; }
+/// if (source_candidate >= cfg.agent_cap) { return; }
+/// if (agent_busy_with_ability_id[source_candidate] == 0u) { return; }
+/// let tick = cfg.tick;
+/// // <per-op fold body lowers here, with `observer` + `source_candidate`
+/// //  available as locals>
+/// ```
+///
+/// **Cfg shape note.** The standard ViewFold cfg layout is
+/// `{ event_count, tick, second_key_pop, _pad0 }`; PerAgentEventScan
+/// overloads `event_count` to mean `agent_cap` so the bounds check on
+/// `observer` / `source_candidate` reads the right value. The runtime
+/// side populates the field with the agent slot count instead of an
+/// event count when dispatching this shape — until we promote the
+/// rename to a proper cfg-shape variant, the field stays `event_count`
+/// and the kernel reads it as `cfg.agent_cap` via a documented alias.
+///
+/// **MVP scope.** Hardcodes the busy-filter to
+/// `agent_busy_with_ability_id != 0u`. Future iterations may carry a
+/// predicate filter on the dispatch shape so the source candidate set
+/// can be `(observer, source-with-property)` for arbitrary
+/// per-agent properties.
+///
+/// **Body lowering.** Each ViewFold op's body is lowered through the
+/// standard `lower_cg_stmt_list_to_wgsl` path; the body sees both
+/// `observer` and `source_candidate` as in-scope WGSL locals. The
+/// per-op tag guard (PerEvent's `event_ring[...] == kind`) is dropped
+/// — there is no event ring read.
+fn build_view_fold_per_agent_event_scan_body(
+    body_ops: &[OpId],
+    prog: &CgProgram,
+    ctx: &EmitCtx<'_>,
+) -> Result<String, KernelEmitError> {
+    let mut out = String::new();
+    // 2-D dispatch preamble. Mirrors `thread_indexing_preamble`'s
+    // PerAgentEventScan arm; we duplicate inline here because
+    // `build_view_fold_wgsl_body` does not route through that helper
+    // (the ViewFold path has its own preamble structure today).
+    //
+    // Field aliasing: the cfg struct stamped by ViewFold is
+    // `{ event_count, tick, second_key_pop, _pad0 }`; we read
+    // `cfg.event_count` as the agent slot count for the bounds check
+    // on this dispatch shape (the runtime supplies agent_cap there
+    // when issuing the 2-D dispatch). Future cleanup: split the cfg
+    // shape so the field name matches its semantic.
+    out.push_str("    let observer = gid.x;\n");
+    out.push_str("    let source_candidate = gid.y;\n");
+    out.push_str("    if (observer >= cfg.event_count) { return; }\n");
+    out.push_str("    if (source_candidate >= cfg.event_count) { return; }\n");
+    out.push_str(
+        "    if (agent_busy_with_ability_id[source_candidate] == 0u) { return; }\n",
+    );
+    out.push_str("    let tick = cfg.tick;\n\n");
+
+    for (i, op_id) in body_ops.iter().enumerate() {
+        if i > 0 {
+            out.push_str("\n\n");
+        }
+        let op = resolve_op(prog, *op_id)?;
+        let fragment = match &op.kind {
+            ComputeOpKind::ViewFold { body, .. } => {
+                lower_cg_stmt_list_to_wgsl(*body, ctx).map_err(KernelEmitError::from)?
+            }
+            ComputeOpKind::MaskPredicate { .. }
+            | ComputeOpKind::PhysicsRule { .. }
+            | ComputeOpKind::ScoringArgmax { .. }
+            | ComputeOpKind::SpatialQuery { .. }
+            | ComputeOpKind::Plumbing { .. }
+            | ComputeOpKind::ViewDecay { .. } => {
+                // Same structural-unreachable defense as
+                // `build_view_fold_wgsl_body` — the classifier
+                // returns Generic for non-ViewFold ops.
+                "// TODO: non-ViewFold op in PerAgentEventScan ViewFold kernel — \
+                 classifier should have routed through generic path."
+                    .to_string()
+            }
+        };
+        writeln!(
+            out,
+            "    // op#{} ({})",
+            op.id.0,
+            compute_op_kind_short(&op.kind)
+        )
+        .expect("write to String never fails");
+        // Wrap the per-op body in a `{ ... }` scope so multiple ops
+        // in a fused kernel each get their own local-binding scope.
+        let body_indent = 8;
+        let indented = fragment
+            .lines()
+            .map(|l| {
+                if l.is_empty() {
+                    String::new()
+                } else {
+                    format!("{:indent$}{l}", "", indent = body_indent)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        out.push_str("    {\n");
+        out.push_str(&indented);
         out.push_str("\n    }");
     }
 
@@ -3480,10 +3641,13 @@ fn lower_op_body(
                 | DispatchShape::OneShot
                 | DispatchShape::PerWord
                 | DispatchShape::PerCell
-                | DispatchShape::PerScanChunk => Err(KernelEmitError::InvalidDispatchForOpKind {
-                    op_kind: "MaskPredicate",
-                    dispatch: format!("{dispatch}"),
-                }),
+                | DispatchShape::PerScanChunk
+                | DispatchShape::PerAgentEventScan => {
+                    Err(KernelEmitError::InvalidDispatchForOpKind {
+                        op_kind: "MaskPredicate",
+                        dispatch: format!("{dispatch}"),
+                    })
+                }
             }
         }
         ComputeOpKind::PhysicsRule { body, .. } => {
@@ -4639,6 +4803,31 @@ fn thread_indexing_preamble(dispatch: &DispatchShape) -> String {
             // last chunk has out-of-range lanes.
             "let chunk_id = workgroup_id.x;\n\
              let lane = local_invocation_id.x;\n\n"
+                .to_string()
+        }
+        DispatchShape::PerAgentEventScan => {
+            // 2-D dispatch: gid.x = observer agent, gid.y = source
+            // candidate. Bounds-check both axes against agent_cap
+            // (over-dispatched workgroup-rounding lanes outside the
+            // live agent range early-exit). The busy-filter then
+            // skips any source candidate whose `busy_with_ability_id`
+            // SoA column is zero — i.e. agents with no in-flight
+            // cast. The fold body downstream sees both `observer`
+            // and `source_candidate` as locals.
+            //
+            // `tick` + `seed` mirror the PerAgent / PerEvent preamble
+            // shape so any rng.* / world.tick references in the body
+            // resolve cleanly. `agent_busy_with_ability_id` is the
+            // existing per-agent buffer binding (Plan G G2.1) — emit
+            // synthesises the read-only binding under the standard
+            // `agent_<field>` naming convention.
+            "let observer = gid.x;\n\
+             let source_candidate = gid.y;\n\
+             if (observer >= cfg.agent_cap) { return; }\n\
+             if (source_candidate >= cfg.agent_cap) { return; }\n\
+             if (agent_busy_with_ability_id[source_candidate] == 0u) { return; }\n\
+             let tick = cfg.tick;\n\
+             let seed = cfg.seed;\n\n"
                 .to_string()
         }
     }
