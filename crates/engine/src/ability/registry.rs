@@ -36,6 +36,40 @@ impl AbilityRegistry {
     pub fn len(&self) -> usize { self.programs.len() }
     #[inline]
     pub fn is_empty(&self) -> bool { self.programs.is_empty() }
+
+    /// Plan I-step-3 (hot-reload primitive). Produce a NEW registry
+    /// with the program at `id` replaced. Slot ids stay stable
+    /// (`out.get(id)` returns `Some(new_program)`; every other slot
+    /// is cloned through unchanged), preserving the append-only
+    /// contract for live registries that are still in use.
+    ///
+    /// This is the building block hot-reload runtimes call after
+    /// re-parsing a changed `.ability` file: the runtime keeps an
+    /// `Arc<AbilityRegistry>`, builds a fresh registry via this
+    /// method (the old one stays immutable for any in-flight cast
+    /// dispatch), then atomically swaps the Arc. Since the old Arc
+    /// keeps the old registry alive until its references drain, no
+    /// reader sees a torn write — the determinism contract from
+    /// the docstring holds.
+    ///
+    /// Returns `None` if `id` is out of range. The caller should
+    /// surface this as a hot-reload error rather than panicking;
+    /// a stale id usually means the file was renamed or its
+    /// `register()` order changed and the runtime needs to do a
+    /// full rebuild instead of an in-place swap.
+    pub fn with_program_replaced(
+        &self,
+        id: AbilityId,
+        new_program: AbilityProgram,
+    ) -> Option<AbilityRegistry> {
+        let slot = id.slot();
+        if slot >= self.programs.len() {
+            return None;
+        }
+        let mut programs = self.programs.clone();
+        programs[slot] = new_program;
+        Some(AbilityRegistry { programs })
+    }
 }
 
 impl Default for AbilityRegistry {
