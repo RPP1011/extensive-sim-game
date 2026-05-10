@@ -349,4 +349,126 @@ mod decay_lifecycle_tests {
             assert!(v >= 0.0, "decay must not drive value below 0; got {v}");
         }
     }
+
+    /// **Short-vs-long-term threat effectiveness.** Closes the
+    /// "stresstest short and long term threats" half of the
+    /// recurring prompt. Quantifies how `@decay` lets the threat
+    /// system distinguish a one-shot spike from a sustained
+    /// pressure — the property AI scoring needs so a single old
+    /// threat doesn't keep an agent in panic mode forever.
+    ///
+    /// Scenario A (sustained / long-term): busy stays at 1 every
+    /// tick. The view climbs toward the steady-state cap of
+    /// `N / (1 - rate)` and stays there. Mock host-side scoring
+    /// (Flee threshold = 0.5, mirroring `dodger_probe.sim`'s Idle
+    /// baseline) reads each tick → expect ~100% Flee.
+    ///
+    /// Scenario B (spike / short-term): busy=1 at tick 0, then
+    /// cleared. Tick 0 fold spikes the view to N. Subsequent ticks
+    /// run decay only — view drops geometrically toward 0. The
+    /// per-tick "would Flee" answer flips from yes to no when the
+    /// view crosses 0.5. With N=4 and rate=0.9, that crossing is
+    /// at tick log_{0.9}(0.5/4) = ~19.7 → tick 20.
+    ///
+    /// The effectiveness metric IS this transition: a real AI's
+    /// behavior tracks the threat's recency, not just its presence.
+    /// Without decay, both scenarios would be indistinguishable —
+    /// the spike would persist as a static value forever.
+    #[test]
+    fn short_vs_long_term_threat_effectiveness_via_decay() {
+        const N: u32 = 4;
+        const TICKS: usize = 32;
+        const FLEE_THRESHOLD: f32 = 0.5;
+
+        // Helper: per-tick "would the dodger pick Flee" given the view value.
+        // Mirrors dodger_probe.sim's `Flee score (threats.intensity_at(self))`
+        // vs `Idle score 0.5` argmax.
+        fn would_flee(threats: f32) -> bool {
+            threats > FLEE_THRESHOLD
+        }
+
+        // --- Scenario A: sustained busy (long-term threat).
+        let mut state_a = match ThreatsWithDecayProbeState::try_new(0xCAFE, N) {
+            Some(s) => s,
+            None => {
+                eprintln!("[short-vs-long] skipping: no wgpu adapter on host.");
+                return;
+            }
+        };
+        let mut a_per_tick: Vec<f32> = Vec::with_capacity(TICKS);
+        let mut a_flee_per_tick: Vec<bool> = Vec::with_capacity(TICKS);
+        for _ in 0..TICKS {
+            state_a.step();
+            // Read observer 0 — every observer is symmetric here.
+            let v = state_a.read_threats()[0];
+            a_per_tick.push(v);
+            a_flee_per_tick.push(would_flee(v));
+        }
+
+        // --- Scenario B: spike + decay (short-term threat).
+        let mut state_b =
+            ThreatsWithDecayProbeState::try_new(0xCAFE, N).expect("second wgpu state");
+        // Tick 0 — busy=1 (preloaded), fold runs, view = 4.0.
+        state_b.step();
+        // Now clear busy. From here, fold contributes 0 every tick;
+        // only decay runs.
+        state_b.clear_busy();
+        let mut b_per_tick: Vec<f32> = Vec::with_capacity(TICKS);
+        let mut b_flee_per_tick: Vec<bool> = Vec::with_capacity(TICKS);
+        b_per_tick.push(state_b.read_threats()[0]);
+        b_flee_per_tick.push(would_flee(b_per_tick[0]));
+        for _ in 1..TICKS {
+            state_b.step();
+            let v = state_b.read_threats()[0];
+            b_per_tick.push(v);
+            b_flee_per_tick.push(would_flee(v));
+        }
+
+        let a_flees: usize = a_flee_per_tick.iter().filter(|x| **x).count();
+        let b_flees: usize = b_flee_per_tick.iter().filter(|x| **x).count();
+        let a_pct = (a_flees as f64 / TICKS as f64) * 100.0;
+        let b_pct = (b_flees as f64 / TICKS as f64) * 100.0;
+        let b_first_no_flee = b_flee_per_tick.iter().position(|x| !x);
+
+        eprintln!(
+            "[short-vs-long] N={N} TICKS={TICKS} threshold={FLEE_THRESHOLD}"
+        );
+        eprintln!(
+            "[short-vs-long] LONG-TERM (sustained busy):  {a_flees}/{TICKS} ticks would-Flee ({a_pct:.1}%)"
+        );
+        eprintln!(
+            "[short-vs-long] SHORT-TERM (one spike+decay): {b_flees}/{TICKS} ticks would-Flee ({b_pct:.1}%)"
+        );
+        eprintln!(
+            "[short-vs-long]   spike crosses below threshold at tick {:?}",
+            b_first_no_flee
+        );
+        eprintln!(
+            "[short-vs-long]   per-tick view A (long): {a_per_tick:.2?}"
+        );
+        eprintln!(
+            "[short-vs-long]   per-tick view B (short): {b_per_tick:.2?}"
+        );
+
+        // Pin: long-term sustains Flee 100% of ticks.
+        assert_eq!(
+            a_flees, TICKS,
+            "LONG-TERM threat must sustain would-Flee every tick; got {a_flees}/{TICKS}"
+        );
+        // Pin: short-term spike eventually crosses below threshold.
+        // At rate=0.9, view = 4 * 0.9^t. 4 * 0.9^t < 0.5 → t > 19.7.
+        // So tick ~20 is the crossover.
+        let crossover = b_first_no_flee
+            .expect("SHORT-TERM threat must eventually decay below threshold");
+        assert!(
+            (15..=25).contains(&crossover),
+            "decay crossover should be near tick 20 (4 * 0.9^t < 0.5 at t≈19.7); got {crossover}"
+        );
+        // Pin: behavioural delta — long-term keeps fleeing more than short-term.
+        let delta_pp = a_pct - b_pct;
+        assert!(
+            delta_pp >= 30.0,
+            "long-term threat should sustain Flee much more than short-term spike; got delta {delta_pp:.1}pp"
+        );
+    }
 }
