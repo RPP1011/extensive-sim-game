@@ -1068,4 +1068,143 @@ mod dodger_behavioural_tests {
              got delta={escape_delta}, threshold={PROJECTILE_CORRIDOR_HALF_WIDTH}"
         );
     }
+
+    /// **Front-vs-back FOV pin.** Combines the belief gate + the
+    /// sidestep mechanic into one scenario:
+    ///
+    ///   * Agent A at (0, 0), facing +x. Projectile P_a aimed at A
+    ///     from (10, 0) → (-10, 0). Source is in A's FRONT hemisphere
+    ///     (dot((source - A_pos), facing) > 0). A SHOULD see and dodge.
+    ///   * Agent B at (5, 0), facing +x. Projectile P_b aimed at B
+    ///     from (-5, 0) → (15, 0). Source is in B's BACK hemisphere
+    ///     (dot((source - B_pos), facing) < 0). B should NOT see, gets hit.
+    ///
+    /// Per-tick the host computes per-(observer, source) visibility
+    /// from FOV, projects it onto the belief grid (bit 7 set iff
+    /// observer sees the source's projectile), reseeds beliefs, then
+    /// runs the GPU step. The GPU's belief-gated fold reads the new
+    /// beliefs, scoring fires per-observer, sidestep applies for
+    /// any observer whose scoring picks Flee.
+    ///
+    /// Final assertion (positional, like the original sidestep pin):
+    ///   * Agent A's |y| > corridor_half_width → escaped P_a.
+    ///   * Agent B's |y| ≤ corridor_half_width → hit by P_b.
+    ///
+    /// One world, two projectiles, geometry-driven divergent
+    /// outcomes. The belief gate is the load-bearing seam: without
+    /// it, both agents would see both projectiles and both would
+    /// dodge.
+    #[test]
+    fn front_attacker_dodged_back_attacker_hits_via_fov_belief_gate() {
+        const N: u32 = 4;            // Padding (the SCHEDULE kernels assume agent_cap >= a few).
+        const HIT_TICK: usize = 10;
+        const PROJECTILE_CORRIDOR_HALF_WIDTH: f32 = 0.5;
+        const SIDESTEP_SPEED: f32 = 0.1;
+
+        // Slot layout. Slots 0/1 are caster proxies for the two
+        // projectiles; slots 2/3 are agents A and B (the dodgers).
+        const SOURCE_FOR_A: u32 = 0;
+        const SOURCE_FOR_B: u32 = 1;
+        const AGENT_A: u32 = 2;
+        const AGENT_B: u32 = 3;
+        const FACING: (f32, f32) = (1.0, 0.0); // both A and B face +x
+
+        // Per-projectile launch geometry. Source is the spawn point
+        // of the projectile; the corridor centerline is the line
+        // (source -> agent) extended.
+        struct Projectile {
+            source: (f32, f32),
+        }
+        let p_for_a = Projectile { source: (10.0, 0.0) };  // in A's front
+        let p_for_b = Projectile { source: (-5.0, 0.0) };  // in B's back
+
+        let mut state = match DodgerProbeState::try_new(0xCAFE, N) {
+            Some(s) => s,
+            None => {
+                eprintln!("[fov-pin] skipping: no wgpu adapter on host.");
+                return;
+            }
+        };
+
+        // Track agent positions host-side (the runtime doesn't have
+        // position SoA on the dodger fixture; sidestep is host-applied).
+        let mut a_pos: (f32, f32) = (0.0, 0.0);
+        let mut b_pos: (f32, f32) = (5.0, 0.0);
+
+        // Visibility helper: source IS in observer's front hemisphere
+        // iff (source - observer_pos) · facing > 0.
+        fn is_in_front(observer: (f32, f32), facing: (f32, f32), source: (f32, f32)) -> bool {
+            let dx = source.0 - observer.0;
+            let dy = source.1 - observer.1;
+            (dx * facing.0 + dy * facing.1) > 0.0
+        }
+
+        let cap = (N * N) as usize;
+        let bit = DodgerProbeState::OBSERVED_BUSY_BIT;
+
+        let mut a_sidesteps = 0usize;
+        let mut b_sidesteps = 0usize;
+
+        for _tick in 0..HIT_TICK {
+            // Recompute beliefs from FOV. Only set bits for
+            // (agent_A → SOURCE_FOR_A) and (agent_B → SOURCE_FOR_B)
+            // when the corresponding projectile source is in their
+            // front hemisphere. All other cells stay clear.
+            let mut beliefs = vec![0u32; cap];
+            if is_in_front(a_pos, FACING, p_for_a.source) {
+                beliefs[(AGENT_A * N + SOURCE_FOR_A) as usize] = bit;
+            }
+            if is_in_front(b_pos, FACING, p_for_b.source) {
+                beliefs[(AGENT_B * N + SOURCE_FOR_B) as usize] = bit;
+            }
+            state.seed_beliefs_flags(&beliefs);
+
+            state.step();
+
+            let scoring = state.read_scoring_output();
+            let action_a = state.chosen_action(&scoring, AGENT_A);
+            let action_b = state.chosen_action(&scoring, AGENT_B);
+
+            // Sidestep perpendicular to the projectile's line of
+            // travel. Both projectiles travel along y=0, so
+            // perpendicular is +y. Apply only when scoring picks Flee.
+            if action_a == FLEE_ACTION_ID {
+                a_pos.1 += SIDESTEP_SPEED;
+                a_sidesteps += 1;
+            }
+            if action_b == FLEE_ACTION_ID {
+                b_pos.1 += SIDESTEP_SPEED;
+                b_sidesteps += 1;
+            }
+        }
+
+        eprintln!(
+            "[fov-pin] AGENT A (front-attacker visible): {a_sidesteps} sidesteps over {HIT_TICK} ticks → final pos {a_pos:?}"
+        );
+        eprintln!(
+            "[fov-pin] AGENT B (back-attacker invisible): {b_sidesteps} sidesteps over {HIT_TICK} ticks → final pos {b_pos:?}"
+        );
+
+        // Pin: A escaped its corridor.
+        assert!(
+            a_pos.1.abs() > PROJECTILE_CORRIDOR_HALF_WIDTH,
+            "A must escape P_a's corridor (|y|={} > {PROJECTILE_CORRIDOR_HALF_WIDTH}); A took {a_sidesteps} sidesteps",
+            a_pos.1.abs()
+        );
+        // Pin: B was hit (still in its corridor).
+        assert_eq!(
+            b_sidesteps, 0,
+            "B should NOT sidestep — back-attacker is invisible; got {b_sidesteps} sidesteps"
+        );
+        assert!(
+            b_pos.1.abs() <= PROJECTILE_CORRIDOR_HALF_WIDTH,
+            "B must remain in P_b's corridor (|y|={} ≤ {PROJECTILE_CORRIDOR_HALF_WIDTH}); B should be hit",
+            b_pos.1.abs()
+        );
+
+        eprintln!(
+            "[fov-pin] PROVEN: same world, two projectiles, FOV-driven belief gate produces \
+             divergent outcomes — A dodges the front attacker, B is hit by the back attacker."
+        );
+    }
 }
