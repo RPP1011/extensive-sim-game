@@ -1,0 +1,46 @@
+[package]
+name = "viewer_runtime"
+version = "0.1.0"
+edition = "2021"
+
+# Phase A of the viewer-runtime plan: stand up a real-time visual
+# viewer atop the deterministic sim by reusing voxel_engine's renderer
+# and Scene. Pilot fixture is wave_defense (palisades + monsters +
+# settlers makes "looks like a game" the easiest to read).
+#
+# This crate is the *presentation* seam — it depends on voxel_engine
+# with the `app-harness` feature (winit + egui). The sim itself stays
+# in the runtime crate (wave_defense_runtime); this crate just reads
+# its snapshots and mirrors agent positions into the renderer's Scene.
+#
+# voxel_engine is pulled here separately from engine_voxel's path dep;
+# Cargo unifies the dep at the same git rev so we don't get two
+# versions of voxel_engine in the dep graph.
+
+[dependencies]
+engine = { path = "../engine" }
+engine_voxel = { path = "../engine_voxel" }
+# Pilot fixture for the windowed viewer. boss_fight has 6 stationary
+# agents (1 Boss + 5 Heroes) trading abilities (BossStrike,
+# BossSelfHeal, HeroAttack, HeroStun, HeroHeal). No per-agent
+# movement — the viewer assigns a fixed semicircle layout in
+# `lib.rs::HERO_POSITIONS`. Visual interest comes from per-tick
+# HP swings as abilities land + stun status; viewer paints cubes
+# tinted by HP fraction so you can see who's about to die at a
+# glance.
+boss_fight_runtime = { path = "../boss_fight_runtime" }
+
+# voxel_engine with app-harness pulls winit + egui transitively.
+voxel_engine = { git = "https://github.com/RPP1011/voxel_engine", rev = "601721faa455815503a33ecb95c8c72727350b15", features = ["app-harness"] }
+
+glam = "0.29"
+anyhow = "1"
+winit = "0.30"
+# Bridge types for the egui overlay path (vk::CommandPool needed
+# in viewer_window's Gfx struct for egui's texture-upload pool).
+# Must match voxel_engine's ash version.
+ash = "0.38"
+# egui re-exported via voxel_engine's app-harness — depend on the
+# matching version directly so HUD code can build egui widgets.
+egui = "0.33"
+egui_plot = "0.33"

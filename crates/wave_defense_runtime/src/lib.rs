@@ -592,7 +592,8 @@ impl WaveDefenseState {
                 label: Some("wave_defense_runtime::agent_creature_type"),
                 contents: bytemuck::cast_slice(&creature_init),
                 usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_DST,
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
             },
         );
 
@@ -1086,6 +1087,42 @@ impl WaveDefenseState {
     /// Per-agent creature_type readback.
     pub fn read_creature_type(&self) -> Vec<u32> {
         self.read_u32(&self.agent_creature_type_buf, "creature_type")
+    }
+    /// Per-agent position readback. Returns one [`Vec3`] per agent slot
+    /// (length = `TOTAL_AGENT_CAPACITY`); dead slots return whatever
+    /// the SoA happens to hold. Strips the 16-byte WGSL alignment pad
+    /// (`vec3<f32>` is stored as a 4-float `Vec3Padded` in the SoA).
+    pub fn read_pos(&self) -> Vec<Vec3> {
+        let bytes = (TOTAL_AGENT_CAPACITY as u64) * 16;
+        let staging = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wave_defense_runtime::pos_staging"),
+            size: bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self.gpu.device.create_command_encoder(
+            &wgpu::CommandEncoderDescriptor {
+                label: Some("wave_defense_runtime::read_pos"),
+            },
+        );
+        encoder.copy_buffer_to_buffer(&self.agent_pos_buf, 0, &staging, 0, bytes);
+        self.gpu.queue.submit(Some(encoder.finish()));
+        let slice = staging.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = sender.send(r);
+        });
+        self.gpu.device.poll(wgpu::PollType::Wait).expect("poll");
+        let _ = receiver.recv().expect("map_async result");
+        let mapped = slice.get_mapped_range();
+        let padded: &[Vec3Padded] = bytemuck::cast_slice(&mapped);
+        let v: Vec<Vec3> = padded
+            .iter()
+            .map(|p| Vec3::new(p.x, p.y, p.z))
+            .collect();
+        drop(mapped);
+        staging.unmap();
+        v
     }
     /// Resource yielded counter (the score) — `agent_mana[NODE_SLOT]`.
     pub fn read_score(&self) -> f32 {

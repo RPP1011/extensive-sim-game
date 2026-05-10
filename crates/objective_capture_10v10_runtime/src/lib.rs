@@ -490,19 +490,85 @@ impl ObjectiveCapture10v10State {
         }
     }
 
-    /// Move alive agents toward the objective. Snap to objective
-    /// when within one step (avoids overshoot oscillation).
+    /// Move alive agents toward the objective with crowd separation.
+    /// Each agent computes:
+    /// - `to_obj`: unit direction toward the objective.
+    /// - `sep`: sum of normalised away-vectors from any other alive
+    ///   agent within `SEPARATION_RADIUS`, weighted by closeness.
+    /// The two are blended (`SEPARATION_WEIGHT` controls how
+    /// strongly avoidance overrides the goal seek). At the
+    /// objective we snap rather than oscillating.
+    ///
+    /// This is the simplest stable separation rule — a single-pass
+    /// O(N²) over the 20 agents (400 pair checks). Cheap. The
+    /// result is that agents fan out around the objective instead
+    /// of stacking on the same world cell.
     fn host_move_step(&mut self) {
+        // Snapshot positions so per-agent separation reads
+        // pre-step values consistently.
+        let snapshot = self.positions.clone();
+        let alive = self.host_alive.clone();
+
+        const SEPARATION_RADIUS: f32 = 2.5;
+        const SEPARATION_WEIGHT: f32 = 1.4;
+
         for slot in 0..self.agent_count as usize {
-            if !self.host_alive[slot] { continue; }
-            let pos = self.positions[slot];
+            if !alive[slot] {
+                continue;
+            }
+            let pos = snapshot[slot];
+
+            // Goal-seek toward objective.
             let to_obj = OBJECTIVE_POS - pos;
             let len = to_obj.length();
-            if len > MOVE_SPEED {
-                self.positions[slot] = pos + to_obj / len * MOVE_SPEED;
-            } else {
-                self.positions[slot] = OBJECTIVE_POS;
+            if len <= MOVE_SPEED {
+                // Hand-off to snap behaviour — but still nudge by
+                // separation if neighbours are on top so we don't
+                // collapse to a single point.
+                let mut sep = Vec3::ZERO;
+                for other in 0..self.agent_count as usize {
+                    if other == slot || !alive[other] {
+                        continue;
+                    }
+                    let away = pos - snapshot[other];
+                    let d = away.length();
+                    if d > 0.0001 && d < SEPARATION_RADIUS {
+                        sep += away / d * (SEPARATION_RADIUS - d);
+                    }
+                }
+                if sep.length_squared() > 0.0 {
+                    let step = sep.normalize() * MOVE_SPEED;
+                    self.positions[slot] = pos + step;
+                } else {
+                    self.positions[slot] = OBJECTIVE_POS;
+                }
+                continue;
             }
+
+            let goal_dir = to_obj / len;
+
+            // Separation from neighbours within radius.
+            let mut sep = Vec3::ZERO;
+            for other in 0..self.agent_count as usize {
+                if other == slot || !alive[other] {
+                    continue;
+                }
+                let away = pos - snapshot[other];
+                let d = away.length();
+                if d > 0.0001 && d < SEPARATION_RADIUS {
+                    // Inverse-distance weighting: closer neighbours
+                    // push harder.
+                    sep += away / d * (SEPARATION_RADIUS - d);
+                }
+            }
+
+            // Blend: goal direction (always unit) + weighted
+            // separation. Renormalise so step size stays bounded
+            // by MOVE_SPEED.
+            let blended = goal_dir + sep * SEPARATION_WEIGHT;
+            let blen = blended.length();
+            let step_dir = if blen > 0.0001 { blended / blen } else { goal_dir };
+            self.positions[slot] = pos + step_dir * MOVE_SPEED;
         }
     }
 
