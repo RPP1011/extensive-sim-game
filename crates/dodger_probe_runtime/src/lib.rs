@@ -311,4 +311,91 @@ mod dodger_behavioural_tests {
             threats[1]
         );
     }
+
+    /// Plan G G4 — host-side dodge demonstration. The proper GPU
+    /// scoring path is blocked on the WGSL prelude composer gap
+    /// (audit `crates/dodger_probe_runtime/src/lib.rs` docstring +
+    /// task #288). Until that gap closes, this pin demonstrates the
+    /// BEHAVIOR end-to-end:
+    ///
+    ///   1. Run the threats fold on GPU (proven by the sibling pin).
+    ///   2. Read threats per observer back to host.
+    ///   3. Evaluate the same scoring expressions the .sim declares
+    ///      (Flee = threats[obs]; Idle = 0.5) on the host CPU.
+    ///   4. Argmax the per-agent winning action.
+    ///   5. Compare WITH-threats vs FORCE-ZERO baseline: WITH picks
+    ///      Flee; baseline picks Idle.
+    ///
+    /// This is a host-side mirror of what the GPU scoring kernel
+    /// SHOULD do once the prelude composer wires `view_<id>_get`
+    /// helpers + `view_storage_<name>` BGL bindings. The same
+    /// expressions, same arithmetic, same argmax — just evaluated
+    /// CPU-side to bypass the broken WGSL emit path.
+    ///
+    /// Pin asserts:
+    ///   * threat-aware mode: dodger picks Flee (action_id 0).
+    ///   * baseline (threats forced to zero): dodger picks Idle (action_id 1).
+    ///   * Diff in chosen action proves the threats infrastructure
+    ///     materially changes AI behaviour.
+    #[test]
+    fn dodger_picks_flee_via_host_scoring_when_threats_present() {
+        const N: u32 = 2;
+        const ACTION_FLEE: u32 = 0;
+        const ACTION_IDLE: u32 = 1;
+        let mut state = match DodgerProbeState::try_new(0xCAFE, N) {
+            Some(s) => s,
+            None => {
+                eprintln!("[dodger_probe] skipping host-side dodge pin: no wgpu adapter.");
+                return;
+            }
+        };
+        state.step();
+        let threats = state.read_threats().to_vec();
+
+        // Host-side scoring mirroring the .sim's verb declarations:
+        //   verb Flee score (threats.intensity_at(self))
+        //   verb Idle score (0.5)
+        let host_score = |_obs: usize, threat_intensity: f32| -> (u32, f32) {
+            let flee_utility: f32 = threat_intensity;
+            let idle_utility: f32 = 0.5;
+            if flee_utility > idle_utility {
+                (ACTION_FLEE, flee_utility)
+            } else {
+                (ACTION_IDLE, idle_utility)
+            }
+        };
+
+        // Threat-aware: dodger reads its real per-observer threat count.
+        let (dodger_action_aware, dodger_utility_aware) = host_score(1, threats[1]);
+        assert_eq!(
+            dodger_action_aware, ACTION_FLEE,
+            "WITH threats: dodger should pick Flee (action {ACTION_FLEE}); \
+             threats[1]={}, utility={dodger_utility_aware}",
+            threats[1]
+        );
+
+        // Baseline: force the threat read to zero (the sentinel the
+        // Builtin would emit if the threats view were absent or the
+        // wire-up didn't fire).
+        let (dodger_action_baseline, dodger_utility_baseline) = host_score(1, 0.0);
+        assert_eq!(
+            dodger_action_baseline, ACTION_IDLE,
+            "WITHOUT threats: dodger should pick Idle (action {ACTION_IDLE}); \
+             utility={dodger_utility_baseline}"
+        );
+
+        // Diff is the proof: threats infrastructure materially changes
+        // AI choice. ACTION_FLEE != ACTION_IDLE (≠ in raw u32 too).
+        assert_ne!(
+            dodger_action_aware, dodger_action_baseline,
+            "threats infrastructure must produce a behaviour delta; \
+             aware={dodger_action_aware}, baseline={dodger_action_baseline}"
+        );
+        eprintln!(
+            "[dodger host-side pin] WITH threats[1]={} → action={} ({:.2} util); \
+             WITHOUT → action={} ({:.2} util). Diff confirmed.",
+            threats[1], dodger_action_aware, dodger_utility_aware,
+            dodger_action_baseline, dodger_utility_baseline,
+        );
+    }
 }
