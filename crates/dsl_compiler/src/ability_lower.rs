@@ -87,7 +87,8 @@
 //! * P4 (16B EffectOp): no new variants; existing budget intact.
 
 use dsl_ast::ast::{
-    AbilityDecl, AbilityFile, AbilityHeader, EffectArg, EffectStmt, HintName, Span, TargetMode,
+    AbilityDecl, AbilityFile, AbilityHeader, AbilityProgramStep, CastSpec, EffectArg, EffectStmt,
+    HintName, Span, TargetMode,
 };
 use engine::ability::program::{
     AbilityCost, AbilityHint, AbilityProgram, AbilityTag, Area, CostAmount, CostResource, Delivery, EffectAreaShape, EffectOp, EffectPredicate, EffectPredicateBinder, EffectPredicateOp, EffectWhenCondition, MAX_NESTED_PER_EFFECT, MAX_PRED_NODES_PER_EFFECT, TargetModeKind,
@@ -886,6 +887,50 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
         [SmallVec<[EffectScaling; MAX_SCALINGS_PER_EFFECT]>; MAX_EFFECTS_PER_PROGRAM],
     > = SmallVec::new();
     let mut any_scaling = false;
+
+    // Plan G (G2.6, 2026-05-09) — abilities authored with the new
+    // `cast { … } effect { … }` program shape lower into a single
+    // `EffectOp::CastBegin` op at apply time. The parser guarantees
+    // mutual exclusion: when `decl.program` is `Some`, `decl.effects`
+    // is empty, so the legacy effect loop below is a no-op for this
+    // branch. The `Effects(_)` steps inside the program are NOT
+    // emitted here — they fire later via the busy-resolution kernel
+    // (G2.4) when the cast resolves without interruption. For the
+    // MVP slice we emit only the first `Cast` step; multi-stage
+    // programs (cast→effect→cast→effect chains) lower to additional
+    // `CastBegin` ops in a follow-up slice.
+    //
+    // `ability_id` and `target_slot` are placeholders at lowering
+    // time — the apply path overrides them at dispatch via runtime
+    // context (caster/target plumbed by `apply_ability`). The q8
+    // target position fields are likewise zeroed; G2.7 wires the
+    // BusyTargetPos SoA write at the cast site for shape-aware
+    // threats lookup.
+    if let Some(steps) = &decl.program {
+        for step in steps {
+            if let AbilityProgramStep::Cast(spec) = step {
+                let CastSpec { duration_ticks, .. } = spec;
+                let duration_clamped: u16 = (*duration_ticks).min(u16::MAX as u32) as u16;
+                effects.push(EffectOp::CastBegin {
+                    ability_id:     0,
+                    duration_ticks: duration_clamped,
+                    target_slot:    0,
+                    target_x_q8:    0,
+                    target_y_q8:    0,
+                });
+                break;
+            }
+        }
+        if effects.len() > MAX_EFFECTS_PER_PROGRAM {
+            return Err(LowerError::BudgetExceeded {
+                ability: decl.name.clone(),
+                count:   effects.len(),
+                max:     MAX_EFFECTS_PER_PROGRAM,
+                span:    decl.span,
+            });
+        }
+    }
+
     for stmt in &decl.effects {
         // Per-effect tags first — fail fast on unknown tag names so the
         // verb-dispatch error doesn't hide them.
@@ -2767,5 +2812,45 @@ mod tests {
             }
             ref other => panic!("expected EffectOp::CreateObligation; got {other:?}"),
         }
+    }
+
+    /// Plan G G2.6 — `cast { duration: 3t }` lowers into a single
+    /// `EffectOp::CastBegin` with the duration carried through. The
+    /// `Effects(_)` step body would lower later via the busy-resolution
+    /// kernel; here we only assert the parser→IR connection for the
+    /// cast op itself.
+    #[test]
+    fn cast_block_lowers_to_cast_begin() {
+        let src = "ability Firebolt { \
+            target: enemy range: 8.0 cooldown: 5s \
+            cast { duration: 3t interrupts: standard } \
+            effect { damage 25 } \
+        }";
+        let file = parse_ability_file(src).expect("parser");
+        let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+        assert_eq!(prog.effects.len(), 1, "cast{{}} ability should emit exactly one CastBegin op");
+        match prog.effects[0] {
+            EffectOp::CastBegin { ability_id, duration_ticks, target_slot, target_x_q8, target_y_q8 } => {
+                assert_eq!(ability_id, 0, "ability_id placeholder at lowering time");
+                assert_eq!(duration_ticks, 3, "3t cast duration");
+                assert_eq!(target_slot, 0, "target_slot placeholder");
+                assert_eq!(target_x_q8, 0);
+                assert_eq!(target_y_q8, 0);
+            }
+            ref other => panic!("expected EffectOp::CastBegin; got {other:?}"),
+        }
+    }
+
+    /// Legacy abilities (no `cast {`/`effect {` blocks) keep lowering
+    /// the bare effects list. Regression guard so the G2.6 program
+    /// branch never silently swallows the legacy path.
+    #[test]
+    fn bare_effect_ability_still_lowers_legacy_path() {
+        let src = "ability Strike { target: enemy range: 1.5 cooldown: 1s damage 10 }";
+        let file = parse_ability_file(src).expect("parser");
+        let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+        assert_eq!(prog.effects.len(), 1);
+        assert!(matches!(prog.effects[0], EffectOp::Damage { amount } if (amount - 10.0).abs() < 1e-3),
+            "legacy bare-effect path should still emit EffectOp::Damage; got {:?}", prog.effects[0]);
     }
 }

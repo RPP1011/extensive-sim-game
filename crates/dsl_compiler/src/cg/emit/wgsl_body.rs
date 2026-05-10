@@ -5088,13 +5088,12 @@ fn emit_chronicle_arm_chain(
     // CastBegin = 46 → 77 (Plan G generic deferred cast)
     s.push_str(&format!("{i4}}} else if (kind == 46u) {{\n"));
     s.push_str(&format!("{i8}// CastBegin = 46 → EventKindId::EffectCastBeginApplied = 77\n"));
-    s.push_str(&format!("{i8}// payload_a low 16 bits = ability_id; high 16 bits =\n"));
-    s.push_str(&format!("{i8}// duration_ticks. payload_b = target_slot. The Vec3 q8\n"));
-    s.push_str(&format!("{i8}// target_pos doesn't fit in the (caster, target, payload_a,\n"));
-    s.push_str(&format!("{i8}// payload_b) packed slots — it's written to the agent's\n"));
-    s.push_str(&format!("{i8}// BusyTargetPos SoA at the cast site, not via this chronicle\n"));
-    s.push_str(&format!("{i8}// path. The downstream busy-resolution kernel reads both.\n"));
-    s.push_str(&format!("{i8}// chronicle: emit EffectCastBeginApplied (caster_slot + 0 + payload_a + payload_b)\n"));
+    s.push_str(&format!("{i8}// payload_a low 16 bits = ability_id; high 16 bits = duration_ticks.\n"));
+    s.push_str(&format!("{i8}// payload_b = the q8 target position packed as (x_q8 | y_q8 << 16),\n"));
+    s.push_str(&format!("{i8}// or 0 when the EffectOp had no per-op position override.\n"));
+    s.push_str(&format!("{i8}// chronicle target_slot is the runtime resolved target — the\n"));
+    s.push_str(&format!("{i8}// busy-resolution kernel (G2.4) keys the deferred resolve off it.\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectCastBeginApplied (caster_slot + target_slot + payload_a + payload_b)\n"));
     s.push_str(&format!("{i8}{{\n"));
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(cast_begin_event_id));
@@ -5102,7 +5101,7 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {cast_begin_event_id}u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], 0u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
     s.push_str(&format!("{i12}}}\n"));

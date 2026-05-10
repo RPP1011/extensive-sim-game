@@ -1262,14 +1262,16 @@ pub fn pack_effect(op: EffectOp) -> (u32, u32, u32) {
 
         // Plan G (2026-05-09) — generic deferred cast.
         // payload_a packs ability_id (low 16 bits) + duration_ticks
-        // (high 16 bits). payload_b = target_slot. The Vec3 q8
-        // target_pos doesn't fit in the (kind, payload_a, payload_b)
-        // u96; the dispatcher writes target_pos to the agent's
-        // BusyTargetPos SoA column directly at the cast site,
-        // bypassing the packed-effect path. Kept in the EffectOp for
-        // type-safety + AST round-trip; ignored here.
-        EffectOp::CastBegin { ability_id, duration_ticks, target_slot, target_x_q8: _, target_y_q8: _ } =>
-            (46, (ability_id as u32) | ((duration_ticks as u32) << 16), target_slot),
+        // (high 16 bits). payload_b packs the q8 target position
+        // (target_x_q8 in low 16 bits as u16 reinterpret, target_y_q8
+        // high 16 bits) — only meaningful for ground/position-target
+        // casts; agent-target casts pass 0 here and the dispatcher
+        // recovers the live target via the runtime context's
+        // target_slot. The chronicle target_slot field is the runtime
+        // target the busy-resolution kernel keys off.
+        EffectOp::CastBegin { ability_id, duration_ticks, target_slot: _, target_x_q8, target_y_q8 } =>
+            (46, (ability_id as u32) | ((duration_ticks as u32) << 16),
+             ((target_x_q8 as u16) as u32) | (((target_y_q8 as u16) as u32) << 16)),
     }
 }
 

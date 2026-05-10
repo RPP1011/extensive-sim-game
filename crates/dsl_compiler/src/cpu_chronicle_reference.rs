@@ -758,20 +758,19 @@ pub fn apply_event_to_chronicle_record(
         }
         // Plan G (2026-05-09) — CastBegin = 46 → EventKindId::EffectCastBeginApplied = 77.
         // payload_a packs ability_id (low 16 bits) + duration_ticks
-        // (high 16 bits). payload_b = target_slot. The Vec3 q8
-        // target_pos doesn't fit in the chronicle's (kind, payload_a,
-        // payload_b) packed slots — written to the agent's
-        // BusyTargetPos SoA at the cast site, not via this chronicle
-        // path. Mirrors the GPU dispatcher arm in
-        // crates/dsl_compiler/src/cg/emit/wgsl_body.rs (kind == 46u
-        // arm in emit_chronicle_arm_chain).
-        ApplyEvent::CastBegin { source: _, ability_id, duration_ticks, target_slot, target_x_q8: _, target_y_q8: _ } => {
+        // (high 16 bits). payload_b packs the q8 target position
+        // (target_x_q8 low, target_y_q8 high). chronicle target_slot
+        // is the runtime resolved target. Mirrors the GPU dispatcher
+        // arm in crates/dsl_compiler/src/cg/emit/wgsl_body.rs
+        // (kind == 46u arm in emit_chronicle_arm_chain).
+        ApplyEvent::CastBegin { source: _, ability_id, duration_ticks, target_slot, target_x_q8, target_y_q8 } => {
             let payload_a = (ability_id as u32) | ((duration_ticks as u32) << 16);
+            let payload_b = ((target_x_q8 as u16) as u32) | (((target_y_q8 as u16) as u32) << 16);
             rec[0] = 77;
             rec[2] = caster_id;
-            rec[3] = 0;
+            rec[3] = target_slot;
             rec[4] = payload_a;
-            rec[5] = target_slot;
+            rec[5] = payload_b;
             Some(rec)
         }
         // After the slice γ closer (Summon → kind 62), every
