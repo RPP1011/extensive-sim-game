@@ -237,6 +237,21 @@ pub const ENGINE_EVENT_KIND_IDS: &[(&str, u32)] = &[
     //     obligation_id; slot 5 = 0. target = debtor / promisor.
     ("EffectGainSkillApplied",        75),
     ("EffectCreateObligationApplied", 76),
+    // Plan G — deferred-cast lifecycle. Dispatcher writes one chronicle
+    // record (kind=77) per `apply_ability` call that lowers to a
+    // `cast{}` program with `EffectOp::CastBegin`. Payload layout
+    // (mirrored in `cascade::handler` and `cpu_chronicle_reference`):
+    //   * actor (slot 2) = caster slot
+    //   * target (slot 3) = resolved target slot at cast time
+    //   * payload_a (slot 4) low 16 bits = ability_id; high 16 bits =
+    //     duration_ticks
+    //   * payload_b (slot 5) low 16 bits = target_x_q8; high 16 bits =
+    //     target_y_q8
+    // The downstream consumer rule (per-fixture today, e.g.
+    // `firebolt_probe.sim::RecordCastBegin`) writes the four busy SoA
+    // columns: busy_until_tick = world.tick + duration_ticks,
+    // busy_with_ability_id, busy_started_at_tick, busy_target_slot.
+    ("EffectCastBeginApplied", 77),
 ];
 
 /// Look up the engine-defined `EventKindId` discriminant for an
@@ -303,6 +318,7 @@ mod tests {
         assert_eq!(engine_event_kind_id_for_name("EffectAnnounceApplied"), Some(74));
         assert_eq!(engine_event_kind_id_for_name("EffectGainSkillApplied"), Some(75));
         assert_eq!(engine_event_kind_id_for_name("EffectCreateObligationApplied"), Some(76));
+        assert_eq!(engine_event_kind_id_for_name("EffectCastBeginApplied"), Some(77));
     }
 
     #[test]
