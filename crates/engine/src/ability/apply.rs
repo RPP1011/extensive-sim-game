@@ -1693,6 +1693,40 @@ mod tests {
         assert_eq!(a.len(), b.len(), "same inputs → same gate decisions");
     }
 
+    /// Plan G — CastBegin emits exactly one `ApplyEvent::CastBegin`
+    /// carrying the duration / target / packed q8 position. The smoke
+    /// pin: validates the EffectOp → ApplyEvent dispatch arm added
+    /// alongside variant 46. Downstream consumer (writes busy SoA,
+    /// emits `CastBegan` chronicle) lives in the per-fixture sim
+    /// rules; here we only assert the apply layer.
+    #[test]
+    fn cast_begin_emits_apply_event_with_payload() {
+        let prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
+            [EffectOp::CastBegin {
+                ability_id:     7,
+                duration_ticks: 30,
+                target_slot:    11,
+                target_x_q8:    256,  // 1.0 in q8
+                target_y_q8:    -512, // -2.0 in q8
+            }],
+        );
+        let events = apply_program(&prog, caster(), target(), 0, 0xCAFE, &CasterStats::default(), &CasterStats::default());
+        assert_eq!(events.len(), 1, "CastBegin must emit exactly one ApplyEvent");
+        match events[0] {
+            ApplyEvent::CastBegin { source, ability_id, duration_ticks, target_slot, target_x_q8, target_y_q8 } => {
+                assert_eq!(source, caster(), "source must be the caster (runtime context)");
+                assert_eq!(ability_id, 7);
+                assert_eq!(duration_ticks, 30);
+                assert_eq!(target_slot, 11);
+                assert_eq!(target_x_q8, 256);
+                assert_eq!(target_y_q8, -512);
+            }
+            ref other => panic!("expected ApplyEvent::CastBegin; got {other:?}"),
+        }
+    }
+
     #[test]
     fn cast_ability_falls_through() {
         // CastAbility is recursive cascade — out of MVP scope. Apply

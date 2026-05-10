@@ -485,6 +485,10 @@ impl AgentFieldId {
             DisguiseExpiresAtTick,
             DisguiseFakeType,
             BusyUntilTick,
+            BusyWithAbilityId,
+            BusyStartedAtTick,
+            BusyTargetSlot,
+            BusyTargetPos,
             TravelDestX,
             TravelDestY,
             TravelDestZ,
@@ -564,6 +568,10 @@ impl AgentFieldId {
             "disguise_expires_at_tick" => DisguiseExpiresAtTick,
             "disguise_fake_type" => DisguiseFakeType,
             "busy_until_tick" => BusyUntilTick,
+            "busy_with_ability_id" => BusyWithAbilityId,
+            "busy_started_at_tick" => BusyStartedAtTick,
+            "busy_target_slot" => BusyTargetSlot,
+            "busy_target_pos" => BusyTargetPos,
             "travel_dest_x" => TravelDestX,
             "travel_dest_y" => TravelDestY,
             "travel_dest_z" => TravelDestZ,
@@ -2011,15 +2019,17 @@ mod tests {
                 "all_variants entry {v:?} did not round-trip through snake"
             );
         }
-        // A spot-check on count — the enum has 53 variants today (38
+        // A spot-check on count — the enum has 58 variants today (38
         // wolf-sim baseline + Vel added 2026-05-02 for the Boids fixture
         // + 4 control statuses Wave 2 piece 1 + 4 buff multipliers Wave
         // 2 piece 4 + 2 Disguise SoA columns Wave 3 ToM Phase 5 + 4
         // Lift A multi-tick procedure columns: BusyUntilTick +
-        // TravelDestX/Y/Z + AbilityPower); if a new variant lands and
-        // `all_variants` isn't updated, this assertion fails before the
-        // round-trip loop above can.
-        assert_eq!(all.len(), 54);
+        // TravelDestX/Y/Z + AbilityPower + 4 Plan G busy context
+        // columns: BusyWithAbilityId + BusyStartedAtTick + BusyTargetSlot
+        // + BusyTargetPos); if a new variant lands and `all_variants`
+        // isn't updated, this assertion fails before the round-trip loop
+        // above can.
+        assert_eq!(all.len(), 58);
     }
 
     #[test]
