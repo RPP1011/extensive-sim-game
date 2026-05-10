@@ -955,6 +955,24 @@ fn add(
     Ok(id)
 }
 
+/// Plan G G3f wire-up — locate the .sim's `view threats(...)` if any.
+/// Returns the [`ViewId`] of a registered view named "threats" so the
+/// `threats.*` Builtin lowering can route to a typed ViewCall against
+/// it. Returns `None` when no such view exists in the .sim — the
+/// Builtin lowering then falls through to the sentinel literal.
+///
+/// MVP: hardcoded name match against "threats". A future generalization
+/// could let .sim authors annotate any view with `@implements(threats)`
+/// to participate; the convention-over-configuration shape is
+/// sufficient today.
+fn find_threats_view_id(ctx: &LoweringCtx<'_>) -> Option<ViewId> {
+    let interner = &ctx.builder.program().interner;
+    ctx.view_ids
+        .values()
+        .copied()
+        .find(|view_id| interner.get_view_name(*view_id) == Some("threats"))
+}
+
 /// Run [`type_check`] on the node at `id`, surfacing any failure as a
 /// typed [`LoweringError::TypeCheckFailure`]. Defers view-signature
 /// lookup to the in-context map (`ctx.view_signatures`).
@@ -2085,27 +2103,72 @@ fn lower_builtin_call(
         // Arity / arg lowering already validated + executed above so
         // any type errors in the arg surface here, even though the
         // arg id itself is discarded (the stub doesn't consume it).
+        // Plan G G3f wire-up — when the .sim defines a view named
+        // "threats", route the Builtin to a ViewCall against it
+        // (typed read of `view_storage_threats[self_id]`). When no
+        // such view is defined, fall through to the sentinel literal
+        // — graceful degradation so .sim files that don't use the
+        // threats infrastructure still parse + lower without
+        // declaring an unused view.
+        //
+        // The MVP read shape: arg 0 is taken as the agent slot index
+        // (already lowered above into `arg_ids[0]` via the
+        // expect_arity validation pass). For ThreatsIntensityAt the
+        // arg is conceptually a `pos`, but today the threats view is
+        // per-AGENT keyed (scalar f32 count per observer), so we
+        // pass the caller's `self` slot through to the read. When
+        // the threats view grows a position-keyed (struct payload +
+        // per-cell distance) shape (G3 follow-up), the lowering
+        // here updates to actually hash pos → ring slot.
         Builtin::ThreatsInZone => {
             expect_arity(builtin, 1, args.len(), span)?;
-            // Sentinel: `false` — no threat zones today.
-            add(ctx, CgExpr::Lit(LitValue::Bool(false)), span)
+            match find_threats_view_id(ctx) {
+                Some(view_id) => {
+                    let arg_id = lower_expr(&args[0].value, ctx)?;
+                    add(
+                        ctx,
+                        CgExpr::Builtin {
+                            fn_id: BuiltinId::ViewCall { view: view_id },
+                            args: vec![arg_id],
+                            ty: CgTy::Bool,
+                        },
+                        span,
+                    )
+                }
+                None => add(ctx, CgExpr::Lit(LitValue::Bool(false)), span),
+            }
         }
         Builtin::ThreatsIntensityAt => {
             expect_arity(builtin, 1, args.len(), span)?;
-            // Sentinel: `0.0` — no intensity contribution today.
-            add(ctx, CgExpr::Lit(LitValue::F32(0.0)), span)
+            match find_threats_view_id(ctx) {
+                Some(view_id) => {
+                    let arg_id = lower_expr(&args[0].value, ctx)?;
+                    add(
+                        ctx,
+                        CgExpr::Builtin {
+                            fn_id: BuiltinId::ViewCall { view: view_id },
+                            args: vec![arg_id],
+                            ty: CgTy::F32,
+                        },
+                        span,
+                    )
+                }
+                None => add(ctx, CgExpr::Lit(LitValue::F32(0.0)), span),
+            }
         }
         Builtin::ThreatsNearest => {
             expect_arity(builtin, 1, args.len(), span)?;
-            // Sentinel: `AgentId(0)` (per the doc — "AgentId::SENTINEL"
-            // — slot 0 is the engine-reserved sentinel).
+            // Stub: even when the threats view exists, computing
+            // "nearest" needs the per-cell ring walk (G3-follow-up).
+            // Today ViewCall returns the scalar count, not a target
+            // agent id. Until the struct-payload+walk lands, return
+            // sentinel.
             add(ctx, CgExpr::Lit(LitValue::AgentId(0)), span)
         }
         Builtin::ThreatsDirAwayFromNearest => {
             expect_arity(builtin, 1, args.len(), span)?;
-            // Sentinel: `vec3(0, 0, 0)` — the zero vector, mirroring
-            // `Vec3::ZERO` in the doc. Scoring expressions that
-            // compose with this will see no displacement contribution.
+            // Stub: same blocker as ThreatsNearest — needs per-cell
+            // walk over a position-bearing struct payload.
             add(
                 ctx,
                 CgExpr::Lit(LitValue::Vec3F32 { x: 0.0, y: 0.0, z: 0.0 }),
