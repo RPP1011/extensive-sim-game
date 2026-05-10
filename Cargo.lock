@@ -707,6 +707,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "dodger_probe_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "dot_vox"
 version = "5.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

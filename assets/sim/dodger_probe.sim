@@ -1,0 +1,106 @@
+// dodger_probe — Plan G G4 dodging behavioral pin.
+//
+// **The single most important demonstration that the threats
+// infrastructure delivers value: a fixture that proves the AI makes
+// a different decision because it sees threats.**
+//
+// Without this, every other piece of the threats stack (G3a-h, G3f
+// wire-up) is unobserved. With this, we have evidence that scoring
+// functions actually change behavior when threat data is available.
+//
+// ## Composition
+//
+//   * 2 agents (slot 0 = caster, slot 1 = dodger).
+//   * At tick 0, MarkCasterBusy fires per-agent and stamps every
+//     alive slot's `busy_with_ability_id`. The PerAgentEventScan fold
+//     for `view threats` then sees both slots as busy candidates
+//     (the busy-filter passes), so each observer's `threats[obs]`
+//     accumulates +1 per busy candidate.
+//   * Two body-less verbs `Flee` and `Idle` declare opposing scoring
+//     expressions:
+//        - `Flee` scores `threats.intensity_at(self)` — when the
+//          threats view exists, the wire-up at
+//          `crates/dsl_compiler/src/cg/lower/expr.rs::find_threats_view_id`
+//          routes the Builtin to a typed ViewCall against the
+//          `threats` view storage. The scoring kernel reads
+//          `view_storage_threats[self_id]` per tick.
+//        - `Idle` scores constant `0.5` — the baseline.
+//   * Behavioural pin: after tick 0, every observer's threats[obs]
+//     is non-zero (= count of busy candidates), so `Flee` scores
+//     above `0.5` and the per-agent scoring argmax picks `Flee`.
+//     The chosen ActionId is observable via the `scoring_output`
+//     buffer (4 × u32 per agent: `[best_action, best_target,
+//     bitcast<u32>(best_utility), 0]`).
+//
+// ## Negative pin (counterfactual)
+//
+// If the .sim removed the `view threats` declaration, the
+// `find_threats_view_id` lookup would return `None` and the
+// `threats.intensity_at(self)` Builtin would lower to the sentinel
+// literal `0.0`. Then `Flee`'s score (0.0) < `Idle`'s score (0.5),
+// and the argmax would pick `Idle` instead. The runtime test asserts
+// the WITH-threats winning action is `Flee`'s ActionId — which
+// confirms the wire-up is the load-bearing piece.
+//
+// ## Notes
+//
+//   * The view name MUST be exactly `"threats"` — the wire-up keys
+//     on this name (G3f / commit `2dc03b27` PR #101).
+//   * Both agents become busy (the same shape as
+//     `threats_view_probe.sim`) — the simplest selector. Both then
+//     see threats > 0 and both pick `Flee`. The behavioural delta is
+//     between Flee-vs-Idle, not between agents.
+//   * No `@decay` annotation today — Agent B's parallel work adds
+//     that primitive; this fixture stays decay-free so it lowers on
+//     the current main without depending on B.
+
+event Tick { }
+event ScriptedCastBegin { source: AgentId, target: AgentId, ability_id: u32 }
+
+entity Subject : Agent { }
+
+config dodger {
+  cast_ability_id: u32 = 1,
+}
+
+// Stamp `busy_with_ability_id` on every alive agent at tick 0. The
+// PerAgentEventScan dispatch for `view threats` reads this column to
+// busy-filter source candidates; with both slots busy, every observer
+// sees `count = N_busy_sources = 2`.
+@phase(per_agent)
+physics MarkCasterBusy {
+  on Tick {} where (
+    self.alive && world.tick == 0
+  ) {
+    agents.set_busy_with_ability_id(self, config.dodger.cast_ability_id);
+  }
+}
+
+// G3g threats view — same shape as `threats_view_probe.sim`. Per-
+// observer scalar f32 counting busy sources. The `on
+// ScriptedCastBegin` handler is a placeholder; the
+// PerAgentEventScan dispatch shape iterates over (observer, source)
+// pairs directly off agent_cap and the busy-filter on
+// `agent_busy_with_ability_id[source]` decides which pairs accumulate.
+@materialized(on_event = [ScriptedCastBegin])
+@dispatch(per_agent_event_scan)
+view threats(observer: Agent) -> f32 {
+  initial: 0.0,
+  on ScriptedCastBegin { source: _, target: _, ability_id: _ } { self += 1.0 }
+}
+
+// Flee — score peaks when the dodger sees ANY threat. Sources that
+// don't define the `threats` view fall back to a sentinel `0.0`
+// (per the wire-up's None branch in `find_threats_view_id`).
+verb Flee(self) =
+  action FleeAction
+  when (self.alive)
+  score (threats.intensity_at(self))
+
+// Idle — constant baseline 0.5. With threats > 0, Flee outscores
+// Idle and the argmax picks Flee. Without the threats view, Flee's
+// sentinel (0.0) loses to Idle's 0.5 and the argmax picks Idle.
+verb Idle(self) =
+  action IdleAction
+  when (self.alive)
+  score (0.5)

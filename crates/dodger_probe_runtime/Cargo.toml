@@ -1,0 +1,47 @@
+[package]
+name = "dodger_probe_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Plan G G4 — per-fixture runtime for `assets/sim/dodger_probe.sim`.
+#
+# **The single most important demonstration that the threats
+# infrastructure delivers value.** This crate is the runtime side of
+# the dodger fixture; the .sim is the DSL fixture and
+# `crates/dsl_compiler/tests/dodger_probe_lower.rs` is the lowering
+# pin.
+#
+# Behavioural pin:
+#   * 2 agents, both become busy at tick 0 (MarkCasterBusy fires per
+#     alive slot when world.tick == 0).
+#   * The threats view's PerAgentEventScan dispatch runs after, and
+#     sees both candidates as busy. Each observer's threats[obs]
+#     accumulates +1 per busy candidate → threats = [2.0, 2.0] at
+#     tick 0.
+#   * The Flee verb's score is `threats.intensity_at(self)` (= 2.0
+#     for every observer). The Idle verb's score is constant 0.5.
+#     Per-agent argmax picks Flee → scoring_output[obs * 4 + 0] ==
+#     ActionId(Flee) == 0 for every observer.
+#   * The runtime test asserts:
+#       (a) threats[1] > 0.0 (the dodger SAW the threat — the
+#           load-bearing assertion the task spec requires)
+#       (b) scoring_output[1*4+0] == 0u (the dodger picked Flee — the
+#           "AI makes a different decision because it sees threats"
+#           assertion)
+#
+# Build.rs lowers the .sim through the DSL compiler into
+# `OUT_DIR/generated.rs`; src/lib.rs owns the GPU context, per-buffer
+# storage, kernel cache, and per-tick dispatch chain.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }
