@@ -753,6 +753,15 @@ pub fn lower_compilation_to_cg_with_opts(
             // branch. Closes Gap C from `docs/superpowers/notes/
             // 2026-05-04-quest_probe.md`.
             let fold_op = ctx.view_fold_ops.get(view_id).copied();
+            // Mirror the AST-side @belief_gated annotation into the
+            // CG signature so emit can branch the PerAgentEventScan
+            // gate predicate per-view (omniscient vs belief-gated).
+            // ViewId(i) ↔ comp.views[i] (see `populate_views`).
+            let belief_gated = comp
+                .views
+                .get(view_id.0 as usize)
+                .map(|v| v.belief_gated)
+                .unwrap_or(false);
             (
                 view_id.0,
                 crate::cg::program::ViewSignature {
@@ -760,6 +769,7 @@ pub fn lower_compilation_to_cg_with_opts(
                     result: *result,
                     storage_hint,
                     fold_op,
+                    belief_gated,
                 },
             )
         })
@@ -4267,6 +4277,7 @@ mod tests {
             }),
             annotations: Vec::new(),
             decay: None,
+            belief_gated: false,
             span: dsl_ast::ast::Span::dummy(),
         });
 

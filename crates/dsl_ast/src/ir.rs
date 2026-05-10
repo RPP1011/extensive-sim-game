@@ -817,6 +817,18 @@ pub struct ViewIR {
     /// `None` when the view has no decay annotation. Only valid on
     /// `@materialized` views with a `Fold` body — enforced in resolve.
     pub decay: Option<DecayHint>,
+    /// `@belief_gated` annotation present? When `true`, a
+    /// PerAgentEventScan fold's source-candidate gate switches from
+    /// `agent_busy_with_ability_id[source]` (omniscient — every
+    /// observer sees every busy source) to
+    /// `beliefs_flags[observer * agent_cap + source] & (1u << bit)`
+    /// (observation-shaped — only observers whose belief bit is set
+    /// see the source). The bit position is `BELIEF_BIT_OBSERVED_BUSY = 7`
+    /// by convention; chosen to avoid collision with the live
+    /// `physics_WhatIBelieve` self-stamp at bit 0. Opt-in per-view
+    /// so existing fixtures (dodger_probe / threats_view_probe) keep
+    /// the omniscient gate by default.
+    pub belief_gated: bool,
     pub span: Span,
 }
 

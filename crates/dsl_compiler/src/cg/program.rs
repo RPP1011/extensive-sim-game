@@ -419,6 +419,13 @@ pub struct ViewSignature {
     /// probe.md`.
     #[serde(default)]
     pub fold_op: Option<ViewFoldOp>,
+    /// `@belief_gated` — when `true`, the PerAgentEventScan fold's
+    /// source-candidate gate switches from raw busy-state lookup to
+    /// per-(observer, source) belief lookup. Default `false` keeps
+    /// the omniscient gate the existing fixtures depend on.
+    /// Plumbed from `dsl_ast::ir::ViewIR::belief_gated`.
+    #[serde(default)]
+    pub belief_gated: bool,
 }
 
 /// CG-side fold operator — the `self <op> rhs` op recognized by the

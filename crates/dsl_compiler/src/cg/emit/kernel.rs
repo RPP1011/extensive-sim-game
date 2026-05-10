@@ -322,12 +322,26 @@ pub fn kernel_topology_to_spec_and_body(
                     .and_then(|sig| sig.storage_hint),
                 _ => None,
             });
+        // @belief_gated annotation flag — drives PerAgentEventScan
+        // gate predicate swap (omniscient busy → per-(observer,
+        // source) belief lookup) + adds a `beliefs_flags` storage
+        // binding to the BGL when set.
+        let belief_gated: bool = body_ops_resolved
+            .iter()
+            .find_map(|op| match &op.kind {
+                ComputeOpKind::ViewFold { view, .. } => prog
+                    .view_signatures
+                    .get(&view.0)
+                    .map(|sig| sig.belief_gated),
+                _ => None,
+            })
+            .unwrap_or(false);
         let bindings =
-            build_view_fold_bindings(view_name, &cfg_struct, storage_hint, &dispatch);
+            build_view_fold_bindings(view_name, &cfg_struct, storage_hint, &dispatch, belief_gated);
         let cfg_struct_decl = build_view_fold_cfg_struct_decl(&cfg_struct);
         let cfg_build_expr = build_view_fold_cfg_build_expr(&cfg_struct);
         let wgsl_body =
-            build_view_fold_wgsl_body(&body_ops, prog, ctx, storage_hint, &dispatch)?;
+            build_view_fold_wgsl_body(&body_ops, prog, ctx, storage_hint, &dispatch, belief_gated)?;
         let spec = KernelSpec {
             name,
             pascal,
@@ -2274,6 +2288,7 @@ fn build_view_fold_bindings(
     cfg_struct: &str,
     storage_hint: Option<crate::cg::program::CgStorageHint>,
     dispatch: &DispatchShape,
+    belief_gated: bool,
 ) -> Vec<KernelBinding> {
     use crate::cg::program::CgStorageHint;
     let accessor = format!("fold_view_{view_name}_handles");
@@ -2393,6 +2408,20 @@ fn build_view_fold_bindings(
             wgsl_ty: "array<u32>".into(),
             bg_source: BgSource::External("agent_busy_with_ability_id".into()),
         });
+        // @belief_gated — additional binding for the per-(observer,
+        // source) belief flags read in the gate predicate. Sourced via
+        // External so the per-runtime shim passes
+        // `extras.beliefs_flags` (matching the tom_probe runtime's
+        // `beliefs_flags_primary` field naming convention).
+        if belief_gated {
+            bindings.push(KernelBinding {
+                slot: 8,
+                name: "beliefs_flags".into(),
+                access: AccessMode::ReadStorage,
+                wgsl_ty: "array<u32>".into(),
+                bg_source: BgSource::External("beliefs_flags".into()),
+            });
+        }
     }
     bindings
 }
@@ -2425,6 +2454,7 @@ fn build_view_fold_wgsl_body(
     ctx: &EmitCtx<'_>,
     storage_hint: Option<crate::cg::program::CgStorageHint>,
     dispatch: &DispatchShape,
+    belief_gated: bool,
 ) -> Result<String, KernelEmitError> {
     use crate::cg::program::CgStorageHint;
     // Plan G G3d — PerAgentEventScan dispatches one thread per
@@ -2436,7 +2466,7 @@ fn build_view_fold_wgsl_body(
     // (which is currently bypassed for ViewFold) doesn't have to grow
     // a ViewFold special-case.
     if matches!(dispatch, DispatchShape::PerAgentEventScan) {
-        return build_view_fold_per_agent_event_scan_body(body_ops, prog, ctx, storage_hint);
+        return build_view_fold_per_agent_event_scan_body(body_ops, prog, ctx, storage_hint, belief_gated);
     }
     // Plan G G3a — PerEntityRing diverts from the generic CgStmt::Assign
     // lowering and emits a hand-written ring-append body. The body
@@ -2621,6 +2651,7 @@ fn build_view_fold_per_agent_event_scan_body(
     prog: &CgProgram,
     ctx: &EmitCtx<'_>,
     storage_hint: Option<crate::cg::program::CgStorageHint>,
+    belief_gated: bool,
 ) -> Result<String, KernelEmitError> {
     use crate::cg::program::CgStorageHint;
     use crate::cg::stmt::CgStmt;
@@ -2641,9 +2672,28 @@ fn build_view_fold_per_agent_event_scan_body(
     out.push_str("    let source_candidate = gid.y;\n");
     out.push_str("    if (observer >= cfg.event_count) { return; }\n");
     out.push_str("    if (source_candidate >= cfg.event_count) { return; }\n");
-    out.push_str(
-        "    if (agent_busy_with_ability_id[source_candidate] == 0u) { return; }\n",
-    );
+    if belief_gated {
+        // @belief_gated: per-(observer, source) belief lookup gates
+        // the source candidate. Bit 7 is the architectural convention
+        // for "observer believes source is busy" — see
+        // `crates/dsl_compiler/tests/threats_belief_gated_fold.rs`
+        // and `crates/tom_probe_runtime/tests/belief_gated_threat_awareness_gpu.rs`.
+        // The host-side spec uses bit 0; the live tom_probe runtime's
+        // physics_WhatIBelieve self-stamps bit 0 at (self, self), so
+        // we use bit 7 to stay isolated from runtime bookkeeping.
+        out.push_str(
+            "    let belief_cell = beliefs_flags[observer * cfg.event_count + source_candidate];\n",
+        );
+        out.push_str(
+            "    if ((belief_cell & (1u << 7u)) == 0u) { return; }\n",
+        );
+    } else {
+        // Default omniscient gate: every observer sees every busy
+        // source regardless of LOS / detection.
+        out.push_str(
+            "    if (agent_busy_with_ability_id[source_candidate] == 0u) { return; }\n",
+        );
+    }
     out.push_str("    let tick = cfg.tick;\n\n");
 
     // Plan G G3 final composition — when the dispatch is PerAgentEventScan

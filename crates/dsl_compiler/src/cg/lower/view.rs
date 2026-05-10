@@ -1064,6 +1064,7 @@ mod tests {
             annotations: vec![],
             kind: ViewKind::Materialized(hint),
             decay: None,
+            belief_gated: false,
             span: span(0, 0),
         }
     }
@@ -1077,6 +1078,7 @@ mod tests {
             annotations: vec![],
             kind: ViewKind::Lazy,
             decay: None,
+            belief_gated: false,
             span: span(0, 0),
         }
     }

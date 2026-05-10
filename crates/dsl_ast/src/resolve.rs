@@ -931,6 +931,7 @@ fn collect(
                     annotations: d.annotations.clone(),
                     kind: ViewKind::Lazy,
                     decay: None,
+                    belief_gated: d.annotations.iter().any(|a| a.name == "belief_gated"),
                     span: d.span,
                 });
             }

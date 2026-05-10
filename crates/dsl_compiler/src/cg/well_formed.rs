@@ -4697,6 +4697,7 @@ mod tests {
                 result: CgTy::F32,
                 storage_hint: None,
                 fold_op: None,
+                belief_gated: false,
             },
         );
         b.set_view_signatures(sigs);
@@ -4746,6 +4747,7 @@ mod tests {
                 result: CgTy::U32,
                 storage_hint: None,
                 fold_op: None,
+                belief_gated: false,
             },
         );
         b.set_view_signatures(sigs);
@@ -4790,6 +4792,7 @@ mod tests {
                 result: CgTy::I32,
                 storage_hint: None,
                 fold_op: None,
+                belief_gated: false,
             },
         );
         b.set_view_signatures(sigs);
@@ -4834,6 +4837,7 @@ mod tests {
                 result: CgTy::F32,
                 storage_hint: None,
                 fold_op: None,
+                belief_gated: false,
             },
         );
         b.set_view_signatures(sigs);
