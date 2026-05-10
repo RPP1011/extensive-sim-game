@@ -1,0 +1,25 @@
+[package]
+name = "threats_with_decay_probe_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Sibling of threats_view_probe_runtime that exercises the
+# `@decay(rate=R, per=tick)` view annotation. The .sim adds decay
+# to the threats view; the build.rs picks up an extra
+# `decay_threats` kernel that the runtime dispatches before the
+# fold each tick. Behavioural pin in src/lib.rs verifies the
+# steady-state cap (≈ 4 / (1-0.9) = 40) and the decay-only fall
+# back toward 0 once the busy state clears.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

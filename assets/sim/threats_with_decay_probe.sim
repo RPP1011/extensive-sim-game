@@ -1,0 +1,73 @@
+// threats_with_decay_probe — Plan G G3i (decay-enabled threats view).
+//
+// Sibling of `threats_view_probe.sim` that adds `@decay(rate=0.9, per=tick)`
+// to the threats view. Without decay the view is a pure scalar
+// accumulator that grows unboundedly (sum of all per-tick increments
+// over all observed busy sources). With decay, the view's primary
+// storage is multiplied by the decay rate BEFORE the per-tick fold
+// runs, so the value tracks "current threat" rather than "all-time
+// threat sum".
+//
+// **Behavioural shape (target steady-state).**
+//   AGENT_COUNT=4. cast_begin_tick=0. Every alive agent stamps
+//   busy_with_ability_id at tick 0 and stays busy thereafter.
+//   PerAgentEventScan dispatch fires N_busy = 4 increments per
+//   observer per tick.
+//
+//   Tick 0: storage starts at 0. Decay multiplies 0 * 0.9 = 0.
+//           Then physics MarkCasterBusy stamps busy on every agent.
+//           Then fold adds +4 per observer.
+//           threats[obs] = 4.0
+//   Tick 1: Decay: 4 * 0.9 = 3.6. Fold adds +4. threats = 7.6.
+//   Tick 2: Decay: 7.6 * 0.9 = 6.84. Fold adds +4. threats = 10.84.
+//   ... approaches steady-state 4 / (1 - 0.9) = 40.
+//
+//   When the busy state clears (e.g. all sources stop casting),
+//   subsequent ticks add 0 from the fold and the decay drives the
+//   view exponentially back toward 0.
+//
+// This fixture validates the @decay annotation end-to-end:
+//   * resolve.rs lower_decay_hint parses (rate=0.9, per=tick).
+//   * cg/lower/view.rs synthesises a ComputeOpKind::ViewDecay op
+//     with OpId < the fold handlers' OpIds, so Kahn tie-break sorts
+//     it first in the schedule.
+//   * cg/emit/kernel.rs builds the ViewDecay-specific 2-binding
+//     kernel with hand-synthesised WGSL body that does
+//     atomicLoad → multiply → atomicStore on view_storage_primary.
+//   * Per-runtime build.rs picks up an extra `decay_threats` kernel
+//     in the emit-stats list; the dispatch table runs decay before
+//     fold.
+
+event Tick { }
+event CastBeginMarker { source: AgentId, target: AgentId, ability_id: u32 }
+
+entity Subject : Agent { }
+
+config probe {
+  cast_begin_tick: u32 = 0,
+  cast_ability_id: u32 = 7,
+  caster_slot:     u32 = 0,
+}
+
+@phase(per_agent)
+physics MarkCasterBusy {
+  on Tick {} where (
+    self.alive
+    && world.tick == config.probe.cast_begin_tick
+  ) {
+    agents.set_busy_with_ability_id(self, config.probe.cast_ability_id);
+  }
+}
+
+// Decay-enabled threats view. The `@decay(rate=0.9, per=tick)`
+// annotation injects a per-tick anchor multiplication kernel
+// (`decay_threats`) that runs BEFORE the fold each tick. The fold
+// itself stays unchanged: PerAgentEventScan over (observer, source)
+// pairs, busy-filter, += 1.0 on every busy candidate.
+@materialized(on_event = [CastBeginMarker])
+@dispatch(per_agent_event_scan)
+@decay(rate = 0.9, per = tick)
+view threats(observer: Agent) -> f32 {
+  initial: 0.0,
+  on CastBeginMarker { source: _, target: _, ability_id: _ } { self += 1.0 }
+}
