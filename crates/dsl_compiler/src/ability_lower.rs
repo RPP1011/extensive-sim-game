@@ -888,37 +888,69 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     > = SmallVec::new();
     let mut any_scaling = false;
 
-    // Plan G (G2.6, 2026-05-09) — abilities authored with the new
-    // `cast { … } effect { … }` program shape lower into a single
-    // `EffectOp::CastBegin` op at apply time. The parser guarantees
-    // mutual exclusion: when `decl.program` is `Some`, `decl.effects`
-    // is empty, so the legacy effect loop below is a no-op for this
-    // branch. The `Effects(_)` steps inside the program are NOT
-    // emitted here — they fire later via the busy-resolution kernel
-    // (G2.4) when the cast resolves without interruption. For the
-    // MVP slice we emit only the first `Cast` step; multi-stage
-    // programs (cast→effect→cast→effect chains) lower to additional
-    // `CastBegin` ops in a follow-up slice.
+    // Plan G (G2.6 + option D, 2026-05-09) — abilities authored with
+    // the new `cast { … } effect { … }` program shape lower into:
+    //   * `effects`          = a single `EffectOp::CastBegin` op (the
+    //                          IMMEDIATE-cast IR), and
+    //   * `pending_program`  = the lowered op stream from each
+    //                          `Effects(_)` step (the DEFERRED-resolution
+    //                          IR, fired later by the busy-resolution
+    //                          kernel when the cast resolves without
+    //                          interruption).
     //
-    // `ability_id` and `target_slot` are placeholders at lowering
-    // time — the apply path overrides them at dispatch via runtime
-    // context (caster/target plumbed by `apply_ability`). The q8
-    // target position fields are likewise zeroed; G2.7 wires the
-    // BusyTargetPos SoA write at the cast site for shape-aware
-    // threats lookup.
+    // The parser guarantees mutual exclusion: when `decl.program` is
+    // `Some`, `decl.effects` is empty, so the legacy effect loop below
+    // is a no-op for this branch. For the MVP slice we emit only the
+    // first `Cast` step; multi-stage programs
+    // (cast→effect→cast→effect chains) lower to additional `CastBegin`
+    // ops in a follow-up slice.
+    //
+    // `ability_id` and `target_slot` on the CastBegin op are
+    // placeholders at lowering time — the apply path overrides them at
+    // dispatch via runtime context (caster/target plumbed by
+    // `apply_ability`). The q8 target position fields are likewise
+    // zeroed; G2.7 wires the BusyTargetPos SoA write at the cast site
+    // for shape-aware threats lookup.
+    //
+    // **Per-effect modifier slots on pending_program** (chances /
+    // scalings / lifetimes / etc.) are NOT captured today — we emit
+    // bare ops only. The first behavioral pin that exercises a
+    // pending-program with modifiers will land the parallel aggregator
+    // slots; deferring keeps this slice small.
+    let mut pending_effects: SmallVec<[EffectOp; MAX_EFFECTS_PER_PROGRAM]> = SmallVec::new();
     if let Some(steps) = &decl.program {
         for step in steps {
-            if let AbilityProgramStep::Cast(spec) = step {
-                let CastSpec { duration_ticks, .. } = spec;
-                let duration_clamped: u16 = (*duration_ticks).min(u16::MAX as u32) as u16;
-                effects.push(EffectOp::CastBegin {
-                    ability_id:     0,
-                    duration_ticks: duration_clamped,
-                    target_slot:    0,
-                    target_x_q8:    0,
-                    target_y_q8:    0,
-                });
-                break;
+            match step {
+                AbilityProgramStep::Cast(spec) => {
+                    if !effects.is_empty() {
+                        // First-cast-only MVP — silently skip subsequent
+                        // Cast steps. Multi-stage chains are a follow-up.
+                        continue;
+                    }
+                    let CastSpec { duration_ticks, .. } = spec;
+                    let duration_clamped: u16 = (*duration_ticks).min(u16::MAX as u32) as u16;
+                    effects.push(EffectOp::CastBegin {
+                        ability_id:     0,
+                        duration_ticks: duration_clamped,
+                        target_slot:    0,
+                        target_x_q8:    0,
+                        target_y_q8:    0,
+                    });
+                }
+                AbilityProgramStep::Effects(stmts) => {
+                    for stmt in stmts {
+                        if pending_effects.len() >= MAX_EFFECTS_PER_PROGRAM {
+                            return Err(LowerError::BudgetExceeded {
+                                ability: decl.name.clone(),
+                                count:   pending_effects.len() + 1,
+                                max:     MAX_EFFECTS_PER_PROGRAM,
+                                span:    stmt.span,
+                            });
+                        }
+                        let op = lower_effect_stmt(stmt)?;
+                        pending_effects.push(op);
+                    }
+                }
             }
         }
         if effects.len() > MAX_EFFECTS_PER_PROGRAM {
@@ -1252,6 +1284,7 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
         recast: lowered_recast,
         recast_window_ticks: lowered_recast_window_ticks,
         target_mode: lowered_target_mode,
+        pending_program: pending_effects,
     })
 }
 
@@ -2816,9 +2849,9 @@ mod tests {
 
     /// Plan G G2.6 — `cast { duration: 3t }` lowers into a single
     /// `EffectOp::CastBegin` with the duration carried through. The
-    /// `Effects(_)` step body would lower later via the busy-resolution
-    /// kernel; here we only assert the parser→IR connection for the
-    /// cast op itself.
+    /// `Effects(_)` step body lowers into `pending_program` (option D
+    /// deferred-resolution slot) — verified by the
+    /// `cast_block_effects_lower_into_pending_program` test below.
     #[test]
     fn cast_block_lowers_to_cast_begin() {
         let src = "ability Firebolt { \
@@ -2839,6 +2872,57 @@ mod tests {
             }
             ref other => panic!("expected EffectOp::CastBegin; got {other:?}"),
         }
+    }
+
+    /// Plan G option D — the `effect { … }` step body of a cast{}
+    /// program lowers into `pending_program`, NOT into `effects`.
+    /// `effects` carries only the immediate-cast IR (CastBegin); the
+    /// busy-resolution kernel will fire `pending_program` later via
+    /// `apply_pending_program`.
+    #[test]
+    fn cast_block_effects_lower_into_pending_program() {
+        let src = "ability Firebolt { \
+            target: enemy range: 8.0 cooldown: 5s \
+            cast { duration: 3t interrupts: standard } \
+            effect { damage 25 } \
+        }";
+        let file = parse_ability_file(src).expect("parser");
+        let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+        assert_eq!(prog.pending_program.len(), 1,
+            "effect{{}} body should populate pending_program with one op");
+        match prog.pending_program[0] {
+            EffectOp::Damage { amount } => {
+                assert!((amount - 25.0).abs() < 1e-3, "damage amount should round-trip; got {amount}");
+            }
+            ref other => panic!("expected EffectOp::Damage; got {other:?}"),
+        }
+        // Sanity: legacy bare-effect abilities have empty pending_program.
+        let bare_src = "ability Strike { target: enemy range: 1.5 cooldown: 1s damage 10 }";
+        let bare_file = parse_ability_file(bare_src).expect("parser");
+        let bare_prog = lower_ability_decl(&bare_file.abilities[0]).expect("lowering");
+        assert!(bare_prog.pending_program.is_empty(),
+            "bare-effect ability must have empty pending_program");
+    }
+
+    /// Plan G option D — multiple statements inside one `effect{}` block
+    /// lower in order into pending_program, preserving authored order.
+    #[test]
+    fn cast_block_effects_preserve_order() {
+        let src = "ability Combo {
+            target: enemy range: 5.0 cooldown: 8s
+            cast { duration: 5t interrupts: standard }
+            effect {
+                damage 30
+                stun 1s
+            }
+        }";
+        let file = parse_ability_file(src).expect("parser");
+        let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+        assert_eq!(prog.pending_program.len(), 2, "two pending ops expected");
+        assert!(matches!(prog.pending_program[0], EffectOp::Damage { .. }),
+            "first pending op should be Damage; got {:?}", prog.pending_program[0]);
+        assert!(matches!(prog.pending_program[1], EffectOp::Stun { .. }),
+            "second pending op should be Stun; got {:?}", prog.pending_program[1]);
     }
 
     /// Legacy abilities (no `cast {`/`effect {` blocks) keep lowering

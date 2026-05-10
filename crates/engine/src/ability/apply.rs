@@ -452,6 +452,50 @@ pub fn apply_program(
     out
 }
 
+/// Plan G option D — fire the deferred-resolution effects of a
+/// `cast { … } effect { … }` ability program. Called from the
+/// busy-resolution kernel when an agent's
+/// `agents.busy_until_tick(self) <= world.tick` triggers and the
+/// cast was not interrupted.
+///
+/// Reads `program.pending_program` (populated at lowering from the
+/// `effect{}` step bodies) and emits one ApplyEvent per op, using
+/// the same per-EffectOp dispatcher (`push_effect_event`) the
+/// immediate path uses.
+///
+/// **Per-effect modifier slots are intentionally skipped** today
+/// (chance gate, when-predicate, scaling, nested) — the parallel
+/// aggregator slots on AbilityProgram (`pending_chances`, etc.)
+/// land alongside the first behavioural pin that needs them. This
+/// keeps the slice small and proves the deferred-dispatch surface
+/// before adding modifier complexity.
+///
+/// `caster` is the original cast initiator (read from
+/// `agents.busy_with_ability_id` resolution at the kernel site;
+/// the agent that called `apply_ability` originally). `target` is
+/// the resolved target slot at resolution time — for casts that
+/// targeted an agent that died mid-cast, the kernel SHOULD
+/// substitute `AgentId::SENTINEL` (or skip resolution entirely
+/// based on the `interrupts: standard` set's `target_died` flag).
+/// `tick` and `world_seed` follow the same P5 keyed-PCG contract
+/// the immediate path uses (RNG draws are bit-stable across
+/// replay).
+pub fn apply_pending_program(
+    program:      &AbilityProgram,
+    caster:       AgentId,
+    target:       AgentId,
+    _tick:        u64,
+    _world_seed:  u64,
+    _caster_stats: &CasterStats,
+    _target_stats: &CasterStats,
+) -> SmallVec<[ApplyEvent; APPLY_INLINE]> {
+    let mut out: SmallVec<[ApplyEvent; APPLY_INLINE]> = SmallVec::new();
+    for op in program.pending_program.iter() {
+        push_effect_event(&mut out, op, caster, target, 0.0);
+    }
+    out
+}
+
 /// Translate one `EffectOp` into the matching `ApplyEvent` and push
 /// it onto `out`. Shared between the primary-effect dispatch and the
 /// nested-effect dispatch in `apply_program`. `scale_bonus` is added
@@ -1725,6 +1769,73 @@ mod tests {
             }
             ref other => panic!("expected ApplyEvent::CastBegin; got {other:?}"),
         }
+    }
+
+    /// Plan G option D — `apply_pending_program` reads the program's
+    /// `pending_program` slot (the deferred-resolution IR populated at
+    /// lowering from `cast{} effect{}` ability programs) and emits one
+    /// ApplyEvent per op. Mirror of `apply_strike_emits_damage_event`
+    /// but exercising the deferred path.
+    #[test]
+    fn apply_pending_program_emits_deferred_events() {
+        // Build a program with CastBegin in `effects` (the immediate
+        // path) and Damage(25) + Stun(50t) in `pending_program` (the
+        // deferred path). `apply_program` would emit only CastBegin;
+        // `apply_pending_program` must emit only the deferred ops.
+        let mut prog = AbilityProgram::new_single_target(
+            8.0,
+            Gate { cooldown_ticks: 50, hostile_only: true, line_of_sight: false },
+            [EffectOp::CastBegin {
+                ability_id:     0,
+                duration_ticks: 30,
+                target_slot:    0,
+                target_x_q8:    0,
+                target_y_q8:    0,
+            }],
+        );
+        prog.pending_program.push(EffectOp::Damage { amount: 25.0 });
+        prog.pending_program.push(EffectOp::Stun   { duration_ticks: 50 });
+
+        // Immediate path emits only the CastBegin.
+        let immediate = apply_program(
+            &prog, caster(), target(), 0, 0xCAFE,
+            &CasterStats::default(), &CasterStats::default(),
+        );
+        assert_eq!(immediate.len(), 1, "immediate path emits the CastBegin op");
+        assert!(matches!(immediate[0], ApplyEvent::CastBegin { .. }));
+
+        // Deferred path emits the pending ops in order.
+        let deferred = apply_pending_program(
+            &prog, caster(), target(), 30, 0xCAFE,
+            &CasterStats::default(), &CasterStats::default(),
+        );
+        assert_eq!(deferred.len(), 2, "deferred path emits the two pending ops");
+        assert!(matches!(
+            deferred[0],
+            ApplyEvent::Damage { source, target: t, amount }
+            if source == caster() && t == target() && amount == 25.0
+        ));
+        assert!(matches!(deferred[1], ApplyEvent::Stun { .. }));
+    }
+
+    /// Empty `pending_program` — valid shape for pure-utility casts
+    /// (a 3-tick stand still that just blocks the agent without doing
+    /// anything on resolve). `apply_pending_program` returns no events.
+    #[test]
+    fn apply_pending_program_empty_emits_nothing() {
+        let prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 10, hostile_only: false, line_of_sight: false },
+            [EffectOp::CastBegin {
+                ability_id:     0, duration_ticks: 5,
+                target_slot:    0, target_x_q8: 0, target_y_q8: 0,
+            }],
+        );
+        let events = apply_pending_program(
+            &prog, caster(), target(), 5, 0xCAFE,
+            &CasterStats::default(), &CasterStats::default(),
+        );
+        assert_eq!(events.len(), 0, "empty pending_program emits nothing");
     }
 
     #[test]

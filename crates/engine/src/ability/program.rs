@@ -1668,6 +1668,26 @@ pub struct AbilityProgram {
     /// is `Enemy` to match historical `Area::SingleTarget` +
     /// `gate.hostile_only=true` shape.
     pub target_mode: TargetModeKind,
+    /// Plan G (2026-05-09) — deferred-effect resolution for
+    /// `cast { … } effect { … }` ability programs.
+    ///
+    /// `effects` carries the IMMEDIATE-cast IR (today: a single
+    /// `EffectOp::CastBegin` op when the parser produced a `cast{}`
+    /// program). `pending_program` carries the IR that fires LATER —
+    /// when the busy-resolution kernel detects
+    /// `agents.busy_until_tick(self) <= world.tick`, it dispatches
+    /// these ops via `apply_pending_program(...)`. Mirror semantics
+    /// of `effects`: same EffectOp vocabulary, same per-op modifier
+    /// slots later (parallel aggregator slots — `pending_chances`,
+    /// etc. — land alongside the first test that needs them).
+    ///
+    /// Empty for legacy abilities that authored bare effects (no
+    /// `cast{}` block) and for abilities whose cast block has no
+    /// `effect{}` sibling. The busy-resolution kernel treats an
+    /// empty pending_program as "fire nothing on resolve" — useful
+    /// for pure-utility casts (a 3-tick stand still that just blocks
+    /// the agent without doing anything on resolve).
+    pub pending_program: SmallVec<[EffectOp; MAX_EFFECTS_PER_PROGRAM]>,
 }
 
 impl AbilityProgram {
@@ -1707,6 +1727,10 @@ impl AbilityProgram {
             // Default Enemy keeps historical convenience-constructor shape
             // (single-target, hostile_only=true on the gate).
             target_mode:         TargetModeKind::Enemy,
+            // Empty by default — the convenience constructor is for
+            // immediate-cast programs. Plan G `cast{}` programs build
+            // through the lowering path, which populates this slot.
+            pending_program:     SmallVec::new(),
         }
     }
 
