@@ -756,6 +756,23 @@ pub fn apply_event_to_chronicle_record(
             rec[5] = 0;
             Some(rec)
         }
+        // Plan G (2026-05-09) — CastBegin = 46 → EventKindId::EffectCastBeginApplied = 77.
+        // payload_a packs ability_id (low 16 bits) + duration_ticks
+        // (high 16 bits). payload_b packs the q8 target position
+        // (target_x_q8 low, target_y_q8 high). chronicle target_slot
+        // is the runtime resolved target. Mirrors the GPU dispatcher
+        // arm in crates/dsl_compiler/src/cg/emit/wgsl_body.rs
+        // (kind == 46u arm in emit_chronicle_arm_chain).
+        ApplyEvent::CastBegin { source: _, ability_id, duration_ticks, target_slot, target_x_q8, target_y_q8 } => {
+            let payload_a = (ability_id as u32) | ((duration_ticks as u32) << 16);
+            let payload_b = ((target_x_q8 as u16) as u32) | (((target_y_q8 as u16) as u32) << 16);
+            rec[0] = 77;
+            rec[2] = caster_id;
+            rec[3] = target_slot;
+            rec[4] = payload_a;
+            rec[5] = payload_b;
+            Some(rec)
+        }
         // After the slice γ closer (Summon → kind 62), every
         // `ApplyEvent` variant has a chronicle counterpart — no
         // fallback `_ => None` arm needed. The closed-set match
@@ -1566,6 +1583,7 @@ mod tests {
                 43 => ApplyEvent::Announce       { source: aid(1), announcement_kind: 7, radius_q8: 896 },
                 44 => ApplyEvent::GainSkill      { source: aid(1), skill_id: 2, amount_q8: 64 },
                 45 => ApplyEvent::CreateObligation { source: aid(1), target: aid(2), obligation_id: 17, kind: 0 },
+                46 => ApplyEvent::CastBegin       { source: aid(1), ability_id: 1, duration_ticks: 3, target_slot: 0, target_x_q8: 0, target_y_q8: 0 },
                 _ => panic!("unexpected effect_kind in table"),
             }
         };

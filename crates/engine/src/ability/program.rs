@@ -844,6 +844,46 @@ pub enum EffectOp {
     /// entry — this verb just creates the record; discharge / default
     /// companion verbs ship later. See `docs/spec/economy.md §7`.
     CreateObligation { obligation_id: u16, kind: u8 } = 45,
+
+    // Plan G (2026-05-09) — generic deferred-cast EffectOp the
+    // `cast { duration: Nt … } effect { … }` ability program shape
+    // lowers to. Sized to ≤ 16 bytes per P4 by packing target
+    // position as q8 fixed-point coordinates (consistent with
+    // TravelTo's dest_x_q8 / dest_y_q8). See
+    // `docs/superpowers/plans/2026-05-09-cast-state-and-threat-zones.md`.
+    //
+    // The consumer rule (compiler-emitted by Plan G) sets
+    // `busy_until_tick = world.tick + duration_ticks`,
+    // `busy_with_ability_id = ability_id`,
+    // `busy_started_at_tick = world.tick`, and
+    // `busy_target_slot` / `busy_target_pos`. The busy-resolution
+    // kernel + the threats view fold then operate uniformly across
+    // CastBegin / TravelTo / Recipe sources.
+    //
+    // Variant tag = 46. Chronicle EventKindId for the generated
+    // `EffectCastBeginApplied` event is 73 (contiguous with
+    // EffectCreateObligationApplied=72).
+    /// `cast_begin <ability_id> for <duration_ticks> [target <slot>] [at <x,y>]`
+    /// — caster initiates a multi-tick cast. The dispatcher writes
+    /// the per-agent busy SoA columns; resolution at
+    /// `cast_started_at_tick + duration_ticks` fires the queued
+    /// effect program (looked up in the ability registry by id).
+    ///
+    /// Target XY position uses the same q8 fixed-point shape as
+    /// Lift A's TravelTo (per P4 size budget — three axes plus
+    /// padding pushed CastBegin to 20 bytes). For 3D casts that
+    /// need Z, the dispatcher writes BusyTargetPos.z directly to
+    /// the agent's BusyTargetPos SoA at the cast site (z is
+    /// reconstructed there from the caster's current pos.z when
+    /// not specified, matching the threat-zone projection's
+    /// expected behaviour).
+    CastBegin {
+        ability_id: u16,
+        duration_ticks: u16,
+        target_slot: u32,
+        target_x_q8: i16,
+        target_y_q8: i16,
+    } = 46,
 }
 
 /// Stat targeted by `buff`. Vocabulary is small today (just the two
@@ -1628,6 +1668,26 @@ pub struct AbilityProgram {
     /// is `Enemy` to match historical `Area::SingleTarget` +
     /// `gate.hostile_only=true` shape.
     pub target_mode: TargetModeKind,
+    /// Plan G (2026-05-09) — deferred-effect resolution for
+    /// `cast { … } effect { … }` ability programs.
+    ///
+    /// `effects` carries the IMMEDIATE-cast IR (today: a single
+    /// `EffectOp::CastBegin` op when the parser produced a `cast{}`
+    /// program). `pending_program` carries the IR that fires LATER —
+    /// when the busy-resolution kernel detects
+    /// `agents.busy_until_tick(self) <= world.tick`, it dispatches
+    /// these ops via `apply_pending_program(...)`. Mirror semantics
+    /// of `effects`: same EffectOp vocabulary, same per-op modifier
+    /// slots later (parallel aggregator slots — `pending_chances`,
+    /// etc. — land alongside the first test that needs them).
+    ///
+    /// Empty for legacy abilities that authored bare effects (no
+    /// `cast{}` block) and for abilities whose cast block has no
+    /// `effect{}` sibling. The busy-resolution kernel treats an
+    /// empty pending_program as "fire nothing on resolve" — useful
+    /// for pure-utility casts (a 3-tick stand still that just blocks
+    /// the agent without doing anything on resolve).
+    pub pending_program: SmallVec<[EffectOp; MAX_EFFECTS_PER_PROGRAM]>,
 }
 
 impl AbilityProgram {
@@ -1667,6 +1727,10 @@ impl AbilityProgram {
             // Default Enemy keeps historical convenience-constructor shape
             // (single-target, hostile_only=true on the gate).
             target_mode:         TargetModeKind::Enemy,
+            // Empty by default — the convenience constructor is for
+            // immediate-cast programs. Plan G `cast{}` programs build
+            // through the lowering path, which populates this slot.
+            pending_program:     SmallVec::new(),
         }
     }
 

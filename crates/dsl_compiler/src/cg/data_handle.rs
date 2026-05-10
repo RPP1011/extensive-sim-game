@@ -255,6 +255,33 @@ pub enum AgentFieldId {
     /// Mirror of `TravelDestX`. Lift A.
     TravelDestZ,
 
+    // --- Plan G (2026-05-09) — busy-context fields ---
+    //
+    // Lift A's `BusyUntilTick` is the universal busy GATE; these
+    // four columns are the universal busy CONTEXT — written by every
+    // busy source (TravelTo / Recipe / cast-time abilities) so a
+    // single busy-resolution kernel + a single threats view can
+    // operate uniformly across busy sources without per-source
+    // glue. See `docs/superpowers/plans/2026-05-09-cast-state-and-threat-zones.md`.
+
+    /// `busy_with_ability_id` — which ability id is currently
+    /// occupying this agent. `0` = idle (matches `BusyUntilTick = 0`).
+    /// Read by the busy-resolution kernel + the threats view fold to
+    /// decide whether (and how) to project a threat zone.
+    BusyWithAbilityId,
+    /// `busy_started_at_tick` — tick at which the current busy
+    /// activity began. Used for telegraph progress + threat zone
+    /// duration projection.
+    BusyStartedAtTick,
+    /// `busy_target_slot` — target agent slot for the current busy
+    /// activity. `u32::MAX` = no single target (AOE / self-cast /
+    /// position-target). Used by `target_died` interrupt detection.
+    BusyTargetSlot,
+    /// `busy_target_pos` — target world position (snapshot at busy
+    /// start). Used by line/cone telegraph projection in the threats
+    /// view fold.
+    BusyTargetPos,
+
     // --- Cold SoA: identity and lifecycle ---
     CreatureType,
     SpawnTick,
@@ -295,12 +322,16 @@ impl AgentFieldId {
             | TauntExpiresAtTick | LifestealExpiresAtTick
             | DamageTakenMultExpiresAtTick
             | DisguiseExpiresAtTick | DisguiseFakeType
-            | BusyUntilTick => {
+            | BusyUntilTick
+            | BusyWithAbilityId | BusyStartedAtTick | BusyTargetSlot => {
                 AgentFieldTy::U32
             }
 
             // f32 — Lift A travel destination cells (pending interpolation target)
             TravelDestX | TravelDestY | TravelDestZ => AgentFieldTy::F32,
+
+            // Vec3 — Plan G busy context (target world position)
+            BusyTargetPos => AgentFieldTy::Vec3,
 
             // i16 — q8 fixed-point factors (slow + Wave 2 piece 4 buffs)
             SlowFactorQ8 | LifestealFracQ8 | DamageTakenMultQ8 => AgentFieldTy::I16,
@@ -383,6 +414,10 @@ impl AgentFieldId {
             TravelDestX => "travel_dest_x",
             TravelDestY => "travel_dest_y",
             TravelDestZ => "travel_dest_z",
+            BusyWithAbilityId => "busy_with_ability_id",
+            BusyStartedAtTick => "busy_started_at_tick",
+            BusyTargetSlot => "busy_target_slot",
+            BusyTargetPos => "busy_target_pos",
             CreatureType => "creature_type",
             SpawnTick => "spawn_tick",
             GridId => "grid_id",
@@ -450,6 +485,10 @@ impl AgentFieldId {
             DisguiseExpiresAtTick,
             DisguiseFakeType,
             BusyUntilTick,
+            BusyWithAbilityId,
+            BusyStartedAtTick,
+            BusyTargetSlot,
+            BusyTargetPos,
             TravelDestX,
             TravelDestY,
             TravelDestZ,
@@ -529,6 +568,10 @@ impl AgentFieldId {
             "disguise_expires_at_tick" => DisguiseExpiresAtTick,
             "disguise_fake_type" => DisguiseFakeType,
             "busy_until_tick" => BusyUntilTick,
+            "busy_with_ability_id" => BusyWithAbilityId,
+            "busy_started_at_tick" => BusyStartedAtTick,
+            "busy_target_slot" => BusyTargetSlot,
+            "busy_target_pos" => BusyTargetPos,
             "travel_dest_x" => TravelDestX,
             "travel_dest_y" => TravelDestY,
             "travel_dest_z" => TravelDestZ,
@@ -1976,15 +2019,17 @@ mod tests {
                 "all_variants entry {v:?} did not round-trip through snake"
             );
         }
-        // A spot-check on count — the enum has 53 variants today (38
+        // A spot-check on count — the enum has 58 variants today (38
         // wolf-sim baseline + Vel added 2026-05-02 for the Boids fixture
         // + 4 control statuses Wave 2 piece 1 + 4 buff multipliers Wave
         // 2 piece 4 + 2 Disguise SoA columns Wave 3 ToM Phase 5 + 4
         // Lift A multi-tick procedure columns: BusyUntilTick +
-        // TravelDestX/Y/Z + AbilityPower); if a new variant lands and
-        // `all_variants` isn't updated, this assertion fails before the
-        // round-trip loop above can.
-        assert_eq!(all.len(), 54);
+        // TravelDestX/Y/Z + AbilityPower + 4 Plan G busy context
+        // columns: BusyWithAbilityId + BusyStartedAtTick + BusyTargetSlot
+        // + BusyTargetPos); if a new variant lands and `all_variants`
+        // isn't updated, this assertion fails before the round-trip loop
+        // above can.
+        assert_eq!(all.len(), 58);
     }
 
     #[test]

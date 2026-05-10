@@ -262,7 +262,7 @@ fn ingest_program(
                 // counted separately via target_modes
             }
             dsl_ast::ast::AbilityHeader::Range(_)        => { headers.insert("range"); }
-            dsl_ast::ast::AbilityHeader::Cooldown(_)     => { headers.insert("cooldown"); }
+            dsl_ast::ast::AbilityHeader::Cooldown(_, _)     => { headers.insert("cooldown"); }
             dsl_ast::ast::AbilityHeader::Cast(_)         => { headers.insert("cast"); }
             dsl_ast::ast::AbilityHeader::Hint(_)         => { headers.insert("hint"); }
             dsl_ast::ast::AbilityHeader::Cost(_)         => { headers.insert("cost"); }
@@ -330,6 +330,7 @@ fn effect_op_label(op: &EffectOp) -> &'static str {
         EffectOp::Announce        { .. } => "Announce",
         EffectOp::GainSkill       { .. } => "GainSkill",
         EffectOp::CreateObligation { .. } => "CreateObligation",
+        EffectOp::CastBegin       { .. } => "CastBegin",
     }
 }
 

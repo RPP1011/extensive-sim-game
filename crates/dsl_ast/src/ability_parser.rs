@@ -188,6 +188,13 @@ fn ability_decl(c: &mut Cursor) -> PResult<AbilityDecl> {
     let mut effects: Vec<EffectStmt> = Vec::new();
     let mut deliver: Option<DeliverBlock> = None;
     let mut morph:   Option<MorphBlock>   = None;
+    // Plan G — optional cast/effect program. None until we see the
+    // first `cast {` or `effect {` block; then we collect program
+    // steps in source order. If `program` ends up Some(_), the bare
+    // `effects` list MUST be empty (mutual exclusion enforced after
+    // the loop). If it ends up None, the legacy `effects` list
+    // drives lowering and `program` stays None on the AbilityDecl.
+    let mut program: Option<Vec<AbilityProgramStep>> = None;
     loop {
         c.skip_ws();
         if c.starts_with_char('}') {
@@ -258,11 +265,35 @@ fn ability_decl(c: &mut Cursor) -> PResult<AbilityDecl> {
                     e.with_context(format!("parsing `morph` block in ability `{name}`"))
                 })?,
             );
+        } else if let Some(cast_spec) = try_parse_cast_block(c)
+            .map_err(|e| e.with_context(format!("parsing `cast {{` block in ability `{name}`")))?
+        {
+            program
+                .get_or_insert_with(Vec::new)
+                .push(AbilityProgramStep::Cast(cast_spec));
+        } else if let Some(block_effects) = try_parse_effect_block(c)
+            .map_err(|e| e.with_context(format!("parsing `effect {{` block in ability `{name}`")))?
+        {
+            program
+                .get_or_insert_with(Vec::new)
+                .push(AbilityProgramStep::Effects(block_effects));
         } else {
             let effect = parse_effect(c)
                 .map_err(|e| e.with_context(format!("parsing effect in ability `{name}`")))?;
             effects.push(effect);
         }
+    }
+    // Mutual exclusion: an ability uses EITHER the legacy bare-effect
+    // list OR the new program shape, not both. Mixing is a clear
+    // authoring bug and would silently drop one of the lists at
+    // lowering time.
+    if program.is_some() && !effects.is_empty() {
+        return Err(ParseErr::at(
+            Span::new(start, c.pos),
+            format!(
+                "ability `{name}` mixes bare effect statements with `cast {{` / `effect {{` blocks. Use ONE shape: either bare effects (legacy) or the program shape (Plan G)."
+            ),
+        ));
     }
     // Wave 1.2: a body can be empty when `: TemplateName(...)` supplies
     // the effects via expansion (the `{ }` is still required to keep the
@@ -272,6 +303,7 @@ fn ability_decl(c: &mut Cursor) -> PResult<AbilityDecl> {
         && deliver.is_none()
         && morph.is_none()
         && instantiates.is_none()
+        && program.is_none()
     {
         return Err(ParseErr::at(
             Span::new(start, c.pos),
@@ -287,6 +319,7 @@ fn ability_decl(c: &mut Cursor) -> PResult<AbilityDecl> {
         deliver,
         morph,
         instantiates,
+        program,
         span: Span::new(start, c.pos),
     })
 }
@@ -1141,7 +1174,31 @@ fn parse_header(c: &mut Cursor) -> PResult<AbilityHeader> {
         "cooldown" => {
             let d = parse_duration(c)
                 .map_err(|e| e.with_context("parsing `cooldown:` value"))?;
-            AbilityHeader::Cooldown(d)
+            // Plan G — optional `@ phase` qualifier following the
+            // duration: `cooldown: 5s @ resolve`. Defaults to
+            // `None` when absent (lowering treats None as Cast).
+            c.skip_ws();
+            let phase = if c.peek_char() == Some('@') {
+                c.bump_char();
+                c.skip_ws();
+                let phase_start = c.pos;
+                let phase_word = ident(c)
+                    .map_err(|e| e.with_context("parsing `cooldown @` phase qualifier"))?;
+                Some(match phase_word.as_str() {
+                    "cast" => CooldownPhase::Cast,
+                    "resolve" => CooldownPhase::Resolve,
+                    "interrupt" => CooldownPhase::Interrupt,
+                    other => return Err(ParseErr::at(
+                        Span::new(phase_start, phase_start + other.len()),
+                        format!(
+                            "unknown cooldown phase `@ {other}` — expected one of `cast`, `resolve`, `interrupt`"
+                        ),
+                    )),
+                })
+            } else {
+                None
+            };
+            AbilityHeader::Cooldown(d, phase)
         }
         "cast" => {
             let d = parse_duration(c)
@@ -1247,7 +1304,7 @@ fn check_duplicate_header(headers: &[AbilityHeader], new: &AbilityHeader) -> PRe
             (a, b),
             (AbilityHeader::Target(_), AbilityHeader::Target(_))
                 | (AbilityHeader::Range(_), AbilityHeader::Range(_))
-                | (AbilityHeader::Cooldown(_), AbilityHeader::Cooldown(_))
+                | (AbilityHeader::Cooldown(_, _), AbilityHeader::Cooldown(_, _))
                 | (AbilityHeader::Cast(_), AbilityHeader::Cast(_))
                 | (AbilityHeader::Hint(_), AbilityHeader::Hint(_))
                 | (AbilityHeader::Cost(_), AbilityHeader::Cost(_))
@@ -1265,7 +1322,7 @@ fn check_duplicate_header(headers: &[AbilityHeader], new: &AbilityHeader) -> PRe
         let key_with_punct = match new {
             AbilityHeader::Target(_) => "target:",
             AbilityHeader::Range(_) => "range:",
-            AbilityHeader::Cooldown(_) => "cooldown:",
+            AbilityHeader::Cooldown(_, _) => "cooldown:",
             AbilityHeader::Cast(_) => "cast:",
             AbilityHeader::Hint(_) => "hint:",
             AbilityHeader::Cost(_) => "cost:",
@@ -2440,4 +2497,278 @@ fn peek_word_for_error(c: &Cursor) -> String {
         .find(|ch: char| ch.is_whitespace() || ch == '{' || ch == '(' || ch == ';')
         .unwrap_or(rem.len());
     rem[..end].to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Plan G — cast { … } / effect { … } / interrupts: <set syntax>
+// ---------------------------------------------------------------------------
+
+/// Try to parse a `cast { … }` block. Caller must have already
+/// advanced past leading whitespace; this function reads the
+/// `cast` identifier first and returns Ok(None) if the next word
+/// isn't `cast` (so the body parser can try other shapes
+/// without backtracking the cursor).
+fn try_parse_cast_block(c: &mut Cursor) -> PResult<Option<CastSpec>> {
+    let save = c.pos;
+    c.skip_ws();
+    if !is_word_at(c, "cast") {
+        c.pos = save;
+        return Ok(None);
+    }
+    let ident_start = c.pos;
+    let _ = ident(c)?; // consume "cast"
+    c.skip_ws();
+    // Distinguish from `cast: <duration>` header — only `cast {` is
+    // the new program-step block form.
+    if c.peek_char() != Some('{') {
+        c.pos = save;
+        return Ok(None);
+    }
+    c.bump_char(); // consume '{'
+
+    let mut duration_ticks: Option<u32> = None;
+    let mut telegraph: Option<String> = None;
+    let mut interrupts: Option<InterruptSet> = None;
+    let block_start = c.pos;
+
+    loop {
+        c.skip_ws();
+        if c.peek_char() == Some('}') {
+            c.bump_char();
+            break;
+        }
+        if c.eof() {
+            return Err(ParseErr::at(
+                Span::new(block_start, block_start),
+                "unterminated `cast {` block — missing closing `}`".to_string(),
+            ));
+        }
+        let key_start = c.pos;
+        let key = ident(c)
+            .map_err(|e| e.with_context("parsing cast-block field key"))?;
+        c.skip_ws();
+        expect_char(c, ':').map_err(|e| {
+            e.with_context(format!("parsing cast-block field `{key}` (expected `:`)"))
+        })?;
+        c.skip_ws();
+        match key.as_str() {
+            "duration" => {
+                let n = parse_unsigned_int(c)
+                    .map_err(|e| e.with_context("parsing `duration:` value"))?;
+                if c.peek_char() == Some('t') {
+                    c.bump_char();
+                } else {
+                    return Err(ParseErr::at(
+                        here(c),
+                        "expected `t` suffix on `duration:` value (e.g. `3t`)".to_string(),
+                    ));
+                }
+                duration_ticks = Some(n);
+            }
+            "telegraph" => {
+                // Capture opaquely until the next `;` or `}` —
+                // per-shape parsing lands when the threats view
+                // fold needs the shape vocabulary (G3).
+                let s = capture_until(c, &[';', '}']).trim().to_string();
+                telegraph = Some(s);
+            }
+            "interrupts" => {
+                interrupts = Some(parse_interrupt_set(c)?);
+            }
+            other => {
+                return Err(ParseErr::at(
+                    Span::new(key_start, key_start + other.len()),
+                    format!(
+                        "unknown cast-block field `{other}` — supported: \
+                         `duration`, `telegraph`, `interrupts`"
+                    ),
+                ));
+            }
+        }
+        c.skip_ws();
+        // Optional `;` separator between fields.
+        if c.peek_char() == Some(';') {
+            c.bump_char();
+        }
+    }
+
+    let Some(duration_ticks) = duration_ticks else {
+        return Err(ParseErr::at(
+            Span::new(ident_start, c.pos),
+            "`cast {` block requires a `duration:` field".to_string(),
+        ));
+    };
+    let interrupts = interrupts.unwrap_or(InterruptSet::Standard);
+
+    Ok(Some(CastSpec {
+        duration_ticks,
+        telegraph,
+        interrupts,
+        span: Span::new(ident_start, c.pos),
+    }))
+}
+
+/// Try to parse an `effect { … }` block. Returns Ok(None) when
+/// the cursor isn't at `effect {` (caller should fall back to
+/// bare-effect parsing for legacy abilities).
+fn try_parse_effect_block(c: &mut Cursor) -> PResult<Option<Vec<EffectStmt>>> {
+    let save = c.pos;
+    c.skip_ws();
+    if !is_word_at(c, "effect") {
+        c.pos = save;
+        return Ok(None);
+    }
+    let _ = ident(c)?; // consume "effect"
+    c.skip_ws();
+    if c.peek_char() != Some('{') {
+        c.pos = save;
+        return Ok(None);
+    }
+    c.bump_char(); // consume '{'
+
+    let mut effects = Vec::new();
+    loop {
+        c.skip_ws();
+        if c.peek_char() == Some('}') {
+            c.bump_char();
+            break;
+        }
+        if c.eof() {
+            return Err(ParseErr::at(
+                here(c),
+                "unterminated `effect {` block — missing closing `}`".to_string(),
+            ));
+        }
+        let stmt = parse_effect(c)?;
+        effects.push(stmt);
+    }
+    Ok(Some(effects))
+}
+
+/// Parse the right-hand side of `interrupts:` in a cast block.
+///
+/// Grammar:
+/// ```text
+/// interrupts: standard
+/// interrupts: { damage, stun }
+/// interrupts: standard + { movement }
+/// interrupts: standard - { damage }
+/// interrupts: none
+/// ```
+fn parse_interrupt_set(c: &mut Cursor) -> PResult<InterruptSet> {
+    c.skip_ws();
+    // Form 1: bare `none`
+    if is_word_at(c, "none") {
+        let _ = ident(c)?;
+        return Ok(InterruptSet::None);
+    }
+    // Form 2: bare `{ … }` (Subset)
+    if c.peek_char() == Some('{') {
+        let kinds = parse_interrupt_kind_list(c)?;
+        return Ok(InterruptSet::Subset(kinds));
+    }
+    // Form 3+: starts with `standard`
+    let word = ident(c).map_err(|e| {
+        e.with_context("parsing `interrupts:` value (expected `standard`, `none`, or `{`)")
+    })?;
+    if word != "standard" {
+        return Err(ParseErr::at(
+            here(c),
+            format!(
+                "unknown interrupt-set base `{word}` — expected `standard`, `none`, or `{{`"
+            ),
+        ));
+    }
+    c.skip_ws();
+    match c.peek_char() {
+        Some('+') => {
+            c.bump_char();
+            c.skip_ws();
+            let kinds = parse_interrupt_kind_list(c)?;
+            Ok(InterruptSet::StandardPlus(kinds))
+        }
+        Some('-') => {
+            c.bump_char();
+            c.skip_ws();
+            let kinds = parse_interrupt_kind_list(c)?;
+            Ok(InterruptSet::StandardMinus(kinds))
+        }
+        _ => Ok(InterruptSet::Standard),
+    }
+}
+
+/// Parse `{ kind, kind, … }` for the right-hand side of set
+/// operations. Caller supplies the cursor positioned at `{`.
+fn parse_interrupt_kind_list(c: &mut Cursor) -> PResult<Vec<InterruptKind>> {
+    expect_char(c, '{')
+        .map_err(|e| e.with_context("parsing interrupt kind list (expected `{`)"))?;
+    let mut out = Vec::new();
+    loop {
+        c.skip_ws();
+        if c.peek_char() == Some('}') {
+            c.bump_char();
+            break;
+        }
+        if c.eof() {
+            return Err(ParseErr::at(
+                here(c),
+                "unterminated interrupt kind list — missing closing `}`".to_string(),
+            ));
+        }
+        let kw_start = c.pos;
+        let kw = ident(c)
+            .map_err(|e| e.with_context("parsing interrupt kind name"))?;
+        let kind = match kw.as_str() {
+            "damage" => InterruptKind::Damage,
+            "stun" => InterruptKind::Stun,
+            "caster_died" => InterruptKind::CasterDied,
+            "target_died" => InterruptKind::TargetDied,
+            "movement" => InterruptKind::Movement,
+            other => return Err(ParseErr::at(
+                Span::new(kw_start, kw_start + other.len()),
+                format!(
+                    "unknown interrupt kind `{other}` — supported: \
+                     `damage`, `stun`, `caster_died`, `target_died`, `movement`"
+                ),
+            )),
+        };
+        out.push(kind);
+        c.skip_ws();
+        if c.peek_char() == Some(',') {
+            c.bump_char();
+        }
+    }
+    Ok(out)
+}
+
+/// True iff the cursor is positioned at `word` followed by a
+/// non-ident-cont character (so `cast` matches but `casting`
+/// doesn't). Used by `try_parse_*_block` for non-consuming look-
+/// aheads.
+fn is_word_at(c: &Cursor, word: &str) -> bool {
+    if !c.starts_with(word) {
+        return false;
+    }
+    // The byte after the word must not be a continuation
+    // character of an identifier.
+    let next = c.remaining().as_bytes().get(word.len()).copied();
+    match next {
+        Some(b) => !crate::tokens::is_ident_cont(b as char),
+        None => true,
+    }
+}
+
+/// Capture verbatim source text up to but not including any of
+/// the `terminators`. Used for opaque field captures (telegraph
+/// shape, etc.) where the parser doesn't have to know the inner
+/// grammar yet.
+fn capture_until(c: &mut Cursor, terminators: &[char]) -> String {
+    let start = c.pos;
+    while let Some(ch) = c.peek_char() {
+        if terminators.contains(&ch) {
+            break;
+        }
+        c.bump(ch.len_utf8());
+    }
+    c.src[start..c.pos].to_string()
 }

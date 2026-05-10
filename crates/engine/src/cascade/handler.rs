@@ -374,7 +374,24 @@ pub enum EventKindId {
     // See `docs/spec/economy.md §7` (obligations) + §8 (skills).
     EffectGainSkillApplied         = 75,
     EffectCreateObligationApplied  = 76,
-    // Slots 77-127 reserved for replayable event variants added in later tasks.
+    /// Plan G (2026-05-09) — generic deferred-cast intent. Written
+    /// by the dispatcher when an `apply_ability` call resolves to
+    /// `EffectOp::CastBegin`. Consumer sets busy SoA columns + emits
+    /// CastBegan as the public lifecycle event for replay/viewer.
+    EffectCastBeginApplied         = 77,
+    /// Plan G — cast lifecycle event when a multi-tick activity
+    /// initiates. Source of truth for telegraph display + replay.
+    CastBegan                      = 78,
+    /// Plan G — cast lifecycle event when the busy state reaches
+    /// `busy_until_tick` without being interrupted. The dispatched
+    /// resolution effect writes its own per-effect chronicle
+    /// records alongside.
+    CastResolved                   = 79,
+    /// Plan G — cast lifecycle event when an interrupt source
+    /// matches the active cast's interrupt set. Carries the kind
+    /// of interrupt that fired so AI / viewer can react.
+    CastInterrupted                = 80,
+    // Slots 81-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 

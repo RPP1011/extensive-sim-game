@@ -102,7 +102,7 @@ fn decimal_unit_suffix_unaffected_by_int_suffix_lex() {
         .headers
         .iter()
         .find_map(|h| match h {
-            AbilityHeader::Cooldown(d) => Some(d.millis),
+            AbilityHeader::Cooldown(d, _) => Some(d.millis),
             _ => None,
         })
         .expect("cooldown header");

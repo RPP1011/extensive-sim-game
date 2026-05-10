@@ -1,0 +1,186 @@
+// firebolt_probe — Plan G G4 behavioural probe.
+//
+// Closes the cast → busy → resolve loop end-to-end on real GPU. The
+// fixture has 2 agents that each cast Firebolt (a deferred-resolution
+// ability with a 3-tick cast window) at themselves on tick 0. The
+// probe observes:
+//
+//   * Tick 0:    `apply_ability` dispatch writes EffectCastBeginApplied
+//                to event_ring. The CastBegin consumer rule reads it,
+//                sets `agents.busy_until_tick(self) = world.tick + 3`,
+//                and stamps `agents.busy_with_ability_id(self) = 1`.
+//   * Tick 1-2:  Each agent's busy_until_tick is in the future. The
+//                busy-resolution rule does not fire. No damage events.
+//   * Tick 3:    `agents.busy_until_tick(self) == world.tick`. The
+//                busy-resolution rule fires, emits a Damaged event for
+//                each agent (hardcoded amount=25 for the firebolt
+//                fixture; future deferred dispatch via apply_pending_program
+//                will read pending_program from the registry).
+//   * Tick 3:    The chronicle damage consumer reads Damaged and
+//                decrements `agents.hp(self)` by 25.
+//
+// Behavioural pin:
+//
+//   AGENT_COUNT=2, INITIAL_HP=100.0, FIREBOLT_DAMAGE=25.0,
+//   CAST_DURATION_TICKS=3
+//   After 4 ticks: hp[*] = 75.0 (one resolution per agent at tick 3)
+//   After 8 ticks: hp[*] = 75.0 (cast cooldown is 8s = 80t > 8 ticks;
+//                                no second cast)
+//
+// **MVP scope.** This fixture hardcodes the firebolt damage amount in
+// the busy-resolution rule rather than going through registry-based
+// deferred dispatch (apply_pending_program). The registry-based path
+// requires GPU SoA expansion (a `pending_*` column family in
+// PackedAbilityRegistry) which is a follow-up. For the MVP, hardcoded
+// damage proves the busy-state lifecycle works end-to-end.
+//
+// **What this DOES NOT exercise yet.**
+//   * Interrupts (G2.5) — the busy-resolution rule fires unconditionally
+//     when busy_until_tick elapses; an `interrupts: standard` source
+//     (Damaged on caster, etc.) is NOT detected today.
+//   * Multi-cast chains — only one CastBegin per agent per cast.
+//   * Deferred resolution from apply_pending_program — the per-fixture
+//     hardcoded damage IS the deferred fire today.
+
+event Tick { }
+
+// Engine-side chronicle event written by the apply_ability dispatcher
+// when it processes an EffectOp::CastBegin (kind=77 in
+// cascade::handler::EventKindId::EffectCastBeginApplied). Declared
+// here so the CastBegin consumer rule below can pattern-match it.
+//
+// Field layout matches `ApplyEvent::CastBegin`:
+//   * actor          = the caster agent slot
+//   * target         = the resolved target slot at cast time
+//   * ability_id     = which ability is being cast (low 16 bits of
+//                      payload_a in the chronicle row)
+//   * duration_ticks = tick window before resolution (high 16 bits of
+//                      payload_a)
+//   * target_x_q8    = q8 packed position low 16 bits of payload_b
+//   * target_y_q8    = q8 packed position high 16 bits of payload_b
+event EffectCastBeginApplied {
+  actor:          AgentId,
+  target:         AgentId,
+  ability_id:     u16,
+  duration_ticks: u16,
+  target_x_q8:    i16,
+  target_y_q8:    i16,
+}
+
+// Engine-side damage event the busy-resolution rule emits on resolve.
+// Same shape every other apply_ability fixture uses; the chronicle
+// damage consumer below reads it.
+event EffectDamageApplied { actor: AgentId, target: AgentId, amount: f32 }
+
+entity Caster : Agent { }
+
+config firebolt {
+  // Hardcoded damage amount the busy-resolution rule fires. Wires up
+  // to the .ability's `effect { damage 25 }` declaration via convention
+  // (the registry-based deferred-dispatch path replaces this with a
+  // pending_program lookup).
+  damage:         f32 = 25.0,
+  // Hardcoded ability id the dispatcher fires. The runtime registers
+  // Firebolt at AbilityId(1).
+  firebolt_id:    u32 = 1,
+  // Hardcoded cast duration the consumer rule stamps. Wires up to the
+  // CastBegin op's `duration_ticks: 3` field. The chronicle records
+  // the duration in the high 16 bits of payload_a, but the DSL's
+  // PerEvent destructuring lowering today maps each declared field to
+  // one full u32 slot (see
+  // `crates/dsl_compiler/src/cg/lower/driver.rs::cg_ty_for_event_field`),
+  // so multi-field-per-slot engine events can't be unpacked yet. The
+  // cleanest workaround for the firebolt MVP is to hardcode the
+  // duration here in `config.firebolt.cast_duration` (matching the
+  // engine-side `EffectOp::CastBegin { duration_ticks: 3 }`) and
+  // revisit when the compiler grows packed-event-field unpacking.
+  cast_duration:  u32 = 3,
+}
+
+// PerAgent dispatcher — every alive agent casts firebolt at itself
+// on every tick. The runtime initialises each agent's
+// busy_until_tick = 0 and busy_with_ability_id = 0; the dispatcher
+// keeps re-casting until the consumer below stamps busy state. The
+// `where (busy_until_tick == 0)` guard prevents repeat casts during
+// the cast window.
+physics DispatchFirebolt @phase(per_agent) {
+  on Tick {} where (self.alive && agents.busy_until_tick(self) == 0) {
+    apply_ability config.firebolt.firebolt_id by self target self
+  }
+}
+
+// CastBegin consumer — reads each EffectCastBeginApplied chronicle row
+// and stamps the caster's busy SoA fields. Plan G G2.7's per-fixture
+// shape: writes busy_until_tick, busy_with_ability_id,
+// busy_started_at_tick. busy_target_slot / busy_target_pos aren't
+// touched today (this fixture's target is the agent itself; AOE /
+// position-target casts would write the target slot + target_x_q8 /
+// target_y_q8 packed values here once the compiler grows the
+// packed-event-field unpacking the body comment below references).
+@phase(post)
+physics RecordCastBegin {
+  on EffectCastBeginApplied { actor: a, target: _, ability_id: _, duration_ticks: _, target_x_q8: _, target_y_q8: _ } {
+    // Stamp busy state from the per-fixture config rather than the
+    // chronicle-row fields. Reason: the engine packs the four logical
+    // CastBegin payload fields (ability_id u16, duration_ticks u16,
+    // target_x_q8 i16, target_y_q8 i16) into TWO u32 slots in the
+    // chronicle ring (payload_a low/high, payload_b low/high — see
+    // `crates/engine/src/ability/packed.rs::pack_payload` arm 46).
+    // The DSL's PerEvent destructuring today maps each declared field
+    // to one full u32 slot (driver.rs::cg_ty_for_event_field), so a
+    // multi-field-per-slot engine event can't be cleanly unpacked
+    // here. For the firebolt MVP we sidestep the gap by hardcoding
+    // `config.firebolt.cast_duration` (= 3, matching the engine-side
+    // `EffectOp::CastBegin { duration_ticks: 3 }`) and
+    // `config.firebolt.firebolt_id` (= 1, matching the runtime's
+    // single-program registry). The bound `a` (= caster slot at
+    // chronicle slot 2) IS unpacked correctly because slot 2 is a
+    // single u32 — only the high-16-bits-half-slot fields drift.
+    //
+    // When the compiler grows packed-event-field unpacking (low/high
+    // 16-bit slicing keyed off `engine_kind_id`), this rule reverts
+    // to reading `dur` and `aid` from the chronicle row and the
+    // `config.firebolt.cast_duration` knob disappears.
+    agents.set_busy_until_tick(a, world.tick + config.firebolt.cast_duration);
+    agents.set_busy_with_ability_id(a, config.firebolt.firebolt_id);
+    agents.set_busy_started_at_tick(a, world.tick);
+  }
+}
+
+// Busy-resolution rule — Plan G G2.4 in MVP form. Per-agent scan;
+// when `agents.busy_until_tick(self)` elapses (i.e. world.tick has
+// caught up to the stamped resolve tick), fire the deferred damage
+// and clear the busy state.
+//
+// **MVP shortcut.** This rule hardcodes the firebolt damage amount
+// from `config.firebolt.damage` rather than dispatching through
+// `apply_pending_program(prog)` which would read `pending_program`
+// from the GPU registry. The registry-based path requires expanding
+// PackedAbilityRegistry with a pending_* column family — deferred to
+// the next slice once we have multiple deferred-resolution abilities.
+// For the firebolt fixture, hardcoding proves the busy-state
+// lifecycle works.
+//
+// **Why per_agent not on Tick.** The trigger is "this agent's
+// busy_until_tick elapsed", which is a per-agent state read, not an
+// event arrival. Per-agent shape with a `where` clause is the right
+// fit; PerEvent rules dispatch on event kinds (which we'd have if the
+// busy timer was modeled as a queued event, but we model it as a
+// scalar SoA field).
+@phase(per_agent)
+physics ResolveBusy {
+  on Tick {} where (self.alive && agents.busy_until_tick(self) > 0 && world.tick >= agents.busy_until_tick(self)) {
+    emit EffectDamageApplied { actor: self, target: self, amount: config.firebolt.damage }
+    agents.set_busy_until_tick(self, 0);
+    agents.set_busy_with_ability_id(self, 0);
+  }
+}
+
+// Damage consumer — closes the chronicle loop. Same shape as
+// apply_ability_chronicle_consumer.sim's ApplyChronicleDamage rule.
+@phase(post)
+physics ApplyChronicleDamage {
+  on EffectDamageApplied { actor: c, target: t, amount: a } {
+    agents.set_hp(t, agents.hp(t) - a);
+  }
+}
