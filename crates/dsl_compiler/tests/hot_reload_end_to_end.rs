@@ -24,6 +24,7 @@ use dsl_ast::ability_parser::parse_ability_file;
 use dsl_compiler::ability_lower::lower_ability_decl;
 use engine::ability::{
     AbilityId, AbilityProgram, AbilityRegistry, AbilityRegistryBuilder, EffectOp,
+    PackedAbilityRegistry,
 };
 
 fn parse_and_lower_one(src: &str) -> AbilityProgram {
@@ -167,4 +168,63 @@ fn hot_reload_propagates_through_sim_loop() {
         delta, 75.0,
         "hot reload at tick 5 must shift total damage by +75 (5 × (25-10)); got {delta}"
     );
+}
+
+/// **Pack-the-swap pin.** The CPU registry change has to flow all the
+/// way through `PackedAbilityRegistry::pack` to be visible to the GPU
+/// upload step (`PackedAbilityRegistryGpu::upload` reads the packed
+/// columns). This test proves the swap propagates: pack v1, hot-swap,
+/// pack v2, and confirm the byte-level change shows up in the
+/// effect-payload column at the swapped slot.
+///
+/// The columns matter because that's exactly what the GPU upload
+/// would carry over the wire on a hot-reload re-upload — `effect_payload_a`
+/// at slot 0 stride 0 carries `bitcast<u32>(damage_amount)` for the
+/// Damage variant. v1 packs `bitcast<u32>(10.0)`; v2 packs
+/// `bitcast<u32>(25.0)`. They differ → the GPU would see the new
+/// value on the next re-upload.
+#[test]
+fn hot_reload_propagates_through_pack_for_gpu_reupload() {
+    let prog_v1 = parse_and_lower_one(
+        "ability HotReloadGpuPath {\n    target: enemy\n    range: 5.0\n    damage 10\n}\n",
+    );
+    let prog_v2 = parse_and_lower_one(
+        "ability HotReloadGpuPath {\n    target: enemy\n    range: 5.0\n    damage 25\n}\n",
+    );
+
+    let mut builder = AbilityRegistryBuilder::new();
+    let id = builder.register(prog_v1);
+    let registry_v1 = builder.build();
+    let registry_v2 = registry_v1
+        .with_program_replaced(id, prog_v2)
+        .expect("known id");
+
+    let packed_v1 = PackedAbilityRegistry::pack(&registry_v1);
+    let packed_v2 = PackedAbilityRegistry::pack(&registry_v2);
+
+    // Slot 0, effect 0 → effect_payload_a[0]. For Damage{amount},
+    // pack_effect stores `bitcast<u32>(amount)` here. Confirm both
+    // the v1 byte pattern and the v2 byte pattern match the literal
+    // amount, and that they differ (no aliasing through caching).
+    let v1_word = packed_v1.effect_payload_a[0];
+    let v2_word = packed_v2.effect_payload_a[0];
+    assert_eq!(
+        v1_word,
+        f32::to_bits(10.0),
+        "v1 effect_payload_a[0] should be bitcast<u32>(10.0); got 0x{v1_word:08X}"
+    );
+    assert_eq!(
+        v2_word,
+        f32::to_bits(25.0),
+        "v2 effect_payload_a[0] should be bitcast<u32>(25.0); got 0x{v2_word:08X}"
+    );
+    assert_ne!(
+        v1_word, v2_word,
+        "packed bytes MUST change after the swap — otherwise GPU re-upload is a no-op"
+    );
+
+    // Sanity: swap doesn't affect n_abilities or column lengths.
+    assert_eq!(packed_v1.n_abilities, packed_v2.n_abilities);
+    assert_eq!(packed_v1.effect_kinds.len(), packed_v2.effect_kinds.len());
+    assert_eq!(packed_v1.effect_payload_a.len(), packed_v2.effect_payload_a.len());
 }
