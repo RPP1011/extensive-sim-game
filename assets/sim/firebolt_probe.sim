@@ -83,6 +83,18 @@ config firebolt {
   // Hardcoded ability id the dispatcher fires. The runtime registers
   // Firebolt at AbilityId(1).
   firebolt_id:    u32 = 1,
+  // Hardcoded cast duration the consumer rule stamps. Wires up to the
+  // CastBegin op's `duration_ticks: 3` field. The chronicle records
+  // the duration in the high 16 bits of payload_a, but the DSL's
+  // PerEvent destructuring lowering today maps each declared field to
+  // one full u32 slot (see
+  // `crates/dsl_compiler/src/cg/lower/driver.rs::cg_ty_for_event_field`),
+  // so multi-field-per-slot engine events can't be unpacked yet. The
+  // cleanest workaround for the firebolt MVP is to hardcode the
+  // duration here in `config.firebolt.cast_duration` (matching the
+  // engine-side `EffectOp::CastBegin { duration_ticks: 3 }`) and
+  // revisit when the compiler grows packed-event-field unpacking.
+  cast_duration:  u32 = 3,
 }
 
 // PerAgent dispatcher — every alive agent casts firebolt at itself
@@ -100,23 +112,38 @@ physics DispatchFirebolt @phase(per_agent) {
 // CastBegin consumer — reads each EffectCastBeginApplied chronicle row
 // and stamps the caster's busy SoA fields. Plan G G2.7's per-fixture
 // shape: writes busy_until_tick, busy_with_ability_id,
-// busy_started_at_tick, busy_target_slot. busy_target_pos isn't
-// touched (this fixture's target is the agent itself; AOE / position-
-// target casts would write the target_x_q8/target_y_q8 packed values
-// here).
+// busy_started_at_tick. busy_target_slot / busy_target_pos aren't
+// touched today (this fixture's target is the agent itself; AOE /
+// position-target casts would write the target slot + target_x_q8 /
+// target_y_q8 packed values here once the compiler grows the
+// packed-event-field unpacking the body comment below references).
 @phase(post)
 physics RecordCastBegin {
-  on EffectCastBeginApplied { actor: a, target: _, ability_id: aid, duration_ticks: dur, target_x_q8: _, target_y_q8: _ } {
-    agents.set_busy_until_tick(a, world.tick + dur);
-    agents.set_busy_with_ability_id(a, aid);
+  on EffectCastBeginApplied { actor: a, target: _, ability_id: _, duration_ticks: _, target_x_q8: _, target_y_q8: _ } {
+    // Stamp busy state from the per-fixture config rather than the
+    // chronicle-row fields. Reason: the engine packs the four logical
+    // CastBegin payload fields (ability_id u16, duration_ticks u16,
+    // target_x_q8 i16, target_y_q8 i16) into TWO u32 slots in the
+    // chronicle ring (payload_a low/high, payload_b low/high — see
+    // `crates/engine/src/ability/packed.rs::pack_payload` arm 46).
+    // The DSL's PerEvent destructuring today maps each declared field
+    // to one full u32 slot (driver.rs::cg_ty_for_event_field), so a
+    // multi-field-per-slot engine event can't be cleanly unpacked
+    // here. For the firebolt MVP we sidestep the gap by hardcoding
+    // `config.firebolt.cast_duration` (= 3, matching the engine-side
+    // `EffectOp::CastBegin { duration_ticks: 3 }`) and
+    // `config.firebolt.firebolt_id` (= 1, matching the runtime's
+    // single-program registry). The bound `a` (= caster slot at
+    // chronicle slot 2) IS unpacked correctly because slot 2 is a
+    // single u32 — only the high-16-bits-half-slot fields drift.
+    //
+    // When the compiler grows packed-event-field unpacking (low/high
+    // 16-bit slicing keyed off `engine_kind_id`), this rule reverts
+    // to reading `dur` and `aid` from the chronicle row and the
+    // `config.firebolt.cast_duration` knob disappears.
+    agents.set_busy_until_tick(a, world.tick + config.firebolt.cast_duration);
+    agents.set_busy_with_ability_id(a, config.firebolt.firebolt_id);
     agents.set_busy_started_at_tick(a, world.tick);
-    // busy_target_slot is u32 in the SoA; the chronicle's `target`
-    // field is an AgentId. The DSL doesn't yet auto-coerce
-    // AgentId → u32 via .raw(), so we leave the slot at its
-    // baseline 0 for self-cast firebolt and revisit when the first
-    // non-self-cast fixture needs the column. The interrupt /
-    // threats-zone layers (G2.5 / G3) will need this coercion
-    // primitive — flag it then.
   }
 }
 
