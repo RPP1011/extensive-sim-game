@@ -933,6 +933,14 @@ fn agents_setter_field(method: &str) -> Option<&'static AgentFieldId> {
         // event payload (`a` = caster, `t` from packed payload_a).
         "set_disguise_expires_at_tick" => Some(&AgentFieldId::DisguiseExpiresAtTick),
         "set_disguise_fake_type" => Some(&AgentFieldId::DisguiseFakeType),
+        // Plan G G2.7 — busy SoA writes for the cast-state lifecycle.
+        // `set_busy_until_tick` is reused by Lift A (TravelTo) and
+        // Lift B (cast_recipe); the other three were added 2026-05-09
+        // for Plan G's deferred-cast path.
+        "set_busy_until_tick" => Some(&AgentFieldId::BusyUntilTick),
+        "set_busy_with_ability_id" => Some(&AgentFieldId::BusyWithAbilityId),
+        "set_busy_started_at_tick" => Some(&AgentFieldId::BusyStartedAtTick),
+        "set_busy_target_slot" => Some(&AgentFieldId::BusyTargetSlot),
         // foraging_real fixture: per-ant `hunger` is repurposed as
         // an energy counter (decays each tick, reset on Eat). Used
         // by `EnergyDecay` (per_agent: agents.set_hunger(self,
