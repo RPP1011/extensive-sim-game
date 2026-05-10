@@ -287,6 +287,10 @@ fn ability_decl(c: &mut Cursor) -> PResult<AbilityDecl> {
         deliver,
         morph,
         instantiates,
+        // Plan G program block (cast{}/effect{}) lands in a follow-up
+        // parser commit. None for now — every existing .ability still
+        // parses through the legacy effects-list path.
+        program: None,
         span: Span::new(start, c.pos),
     })
 }
@@ -1141,7 +1145,12 @@ fn parse_header(c: &mut Cursor) -> PResult<AbilityHeader> {
         "cooldown" => {
             let d = parse_duration(c)
                 .map_err(|e| e.with_context("parsing `cooldown:` value"))?;
-            AbilityHeader::Cooldown(d)
+            // Plan G `@ phase` qualifier parsing lands in a
+            // follow-up commit. For now, every existing
+            // `cooldown: 5s` parses with phase=None (lowering
+            // treats None and Some(Cast) identically — default
+            // is "starts at cast").
+            AbilityHeader::Cooldown(d, None)
         }
         "cast" => {
             let d = parse_duration(c)
@@ -1247,7 +1256,7 @@ fn check_duplicate_header(headers: &[AbilityHeader], new: &AbilityHeader) -> PRe
             (a, b),
             (AbilityHeader::Target(_), AbilityHeader::Target(_))
                 | (AbilityHeader::Range(_), AbilityHeader::Range(_))
-                | (AbilityHeader::Cooldown(_), AbilityHeader::Cooldown(_))
+                | (AbilityHeader::Cooldown(_, _), AbilityHeader::Cooldown(_, _))
                 | (AbilityHeader::Cast(_), AbilityHeader::Cast(_))
                 | (AbilityHeader::Hint(_), AbilityHeader::Hint(_))
                 | (AbilityHeader::Cost(_), AbilityHeader::Cost(_))
@@ -1265,7 +1274,7 @@ fn check_duplicate_header(headers: &[AbilityHeader], new: &AbilityHeader) -> PRe
         let key_with_punct = match new {
             AbilityHeader::Target(_) => "target:",
             AbilityHeader::Range(_) => "range:",
-            AbilityHeader::Cooldown(_) => "cooldown:",
+            AbilityHeader::Cooldown(_, _) => "cooldown:",
             AbilityHeader::Cast(_) => "cast:",
             AbilityHeader::Hint(_) => "hint:",
             AbilityHeader::Cost(_) => "cost:",

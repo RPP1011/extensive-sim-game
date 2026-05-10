@@ -998,6 +998,19 @@ pub struct AbilityDecl {
     /// the Wave 1 corpus (no instantiation usage). Lowering of a
     /// `Some(_)` value surfaces `TemplateInstantiationNotImplemented`.
     pub instantiates: Option<TemplateInstantiation>,
+    /// Plan G (2026-05-09): optional cast/effect program — a sequence
+    /// of `cast { … } effect { … }` blocks giving the ability
+    /// deferred-resolution semantics with telegraphs, interrupts,
+    /// and threat zones. `None` = legacy single-step ability that
+    /// resolves immediately from the `effects` field above. `Some`
+    /// = the ability uses the new program shape; `effects` is
+    /// empty in that case (the program's `Effects(...)` step
+    /// holds the effect statements instead).
+    ///
+    /// Backwards compat: every existing `.ability` file parses
+    /// with `program: None`. Lowering inspects `program.is_some()`
+    /// to pick the deferred path vs the legacy immediate path.
+    pub program: Option<Vec<AbilityProgramStep>>,
     pub span: Span,
 }
 
@@ -1083,7 +1096,14 @@ pub struct MorphBlock {
 pub enum AbilityHeader {
     Target(TargetMode),
     Range(f32),
-    Cooldown(Duration),
+    /// Cooldown duration. Plan G (2026-05-09) added the optional
+    /// `@ phase` qualifier — when does the cooldown timer start?
+    /// Defaults to `CooldownPhase::Cast` (cast initiation) so
+    /// spam-cancel can't bypass the cooldown gate. `None` (the
+    /// pre-Plan-G shape) means the parser didn't see an explicit
+    /// `@` qualifier; lowering treats `None` and `Some(Cast)`
+    /// identically.
+    Cooldown(Duration, Option<CooldownPhase>),
     Cast(Duration),
     Hint(HintName),
     /// Wave 1.1: resource cost (mana / stamina / hp / gold). Spec §4.2
@@ -1535,4 +1555,146 @@ pub struct StructureDecl {
     /// Wave 2+ — until then this slice is opaque to all consumers.
     pub body_raw: String,
     pub span:     Span,
+}
+
+// =============================================================
+// Plan G — Cast state, interrupts, threat zones (2026-05-09)
+// =============================================================
+//
+// AST types for the new `cast { duration; telegraph; interrupts }`
+// block form, the `interrupts:` set syntax, and the `cooldown @
+// phase` qualifier. The parser additions land in a follow-up
+// commit; this commit defines the types so downstream lowering
+// (Plan G phases G2+) can be sketched against a stable shape.
+//
+// See `docs/superpowers/plans/2026-05-09-cast-state-and-threat-zones.md`.
+
+/// One step of an ability's deferred-resolution program. New
+/// `.ability` files can author a sequence:
+///
+/// ```text
+/// ability Firebolt {
+///     cast { duration: 3t; ... }    // → AbilityProgramStep::Cast(...)
+///     effect { damage 25 in line(...) }   // → AbilityProgramStep::Effects(...)
+/// }
+/// ```
+///
+/// Multi-stage abilities chain `cast` / `effect` / `cast` / `effect`
+/// for telegraph-then-impact-then-recovery sequences. Backwards
+/// compatible: an ability with no `cast` block parses with NO
+/// program steps; the legacy `effects: Vec<EffectStmt>` field on
+/// `AbilityDecl` still drives lowering for that case.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum AbilityProgramStep {
+    /// A windup phase. Sets the agent's busy state for `duration`
+    /// ticks; populates the threat-zone view if `telegraph` is set;
+    /// listens for interrupt sources per the `interrupts` set.
+    Cast(CastSpec),
+    /// A resolution phase — the same effect-statement vocabulary
+    /// the legacy `effects:` field uses. Fires immediately when the
+    /// preceding `cast` (if any) elapses without interruption.
+    Effects(Vec<EffectStmt>),
+}
+
+/// Body of a `cast { … }` block.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CastSpec {
+    /// `duration: 3t` — number of fixed-step sim ticks the cast
+    /// occupies before resolving (or being interrupted). `1t` =
+    /// 100 ms at the standard 10 Hz tick rate.
+    pub duration_ticks: u32,
+    /// `telegraph: line(self.pos, target.pos, width: 2)` — optional
+    /// shape projected into the threats view during the cast. `None`
+    /// = silent cast (no AOE warning visible to AI or viewer).
+    /// Captured opaquely as a verbatim source slice for now;
+    /// per-shape parsing lands in Plan G's lowering phase (G3) when
+    /// the threats view fold needs the shape vocabulary.
+    pub telegraph: Option<String>,
+    /// `interrupts: standard | { … } | none + set ops`. See
+    /// [`InterruptSet`] for the vocabulary.
+    pub interrupts: InterruptSet,
+    pub span: Span,
+}
+
+/// What can interrupt an in-progress cast or busy activity.
+///
+/// Authored at the call-site (per cast block) using a small set
+/// algebra:
+///
+/// - `interrupts: standard`           → [`InterruptSet::Standard`]
+/// - `interrupts: { damage, stun }`   → [`InterruptSet::Subset`]
+/// - `interrupts: standard + { mvmt }`→ [`InterruptSet::StandardPlus`]
+/// - `interrupts: standard - { dmg }` → [`InterruptSet::StandardMinus`]
+/// - `interrupts: none`               → [`InterruptSet::None`]
+///
+/// `standard` is the engine-wide named default declared once via
+/// `set standard = { damage, stun, caster_died, target_died }`
+/// (see [`StandardSetDecl`]). Lowering resolves named sets at
+/// compile time, so the kernel sees a fixed bitmask per ability.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum InterruptSet {
+    /// Resolves to whatever `set standard = { … }` declared.
+    Standard,
+    /// Explicit subset — exactly these kinds, nothing else.
+    Subset(Vec<InterruptKind>),
+    /// `standard + { … }` — standard plus extras.
+    StandardPlus(Vec<InterruptKind>),
+    /// `standard - { … }` — standard minus exclusions.
+    StandardMinus(Vec<InterruptKind>),
+    /// `interrupts: none` — uninterruptible (Bind Soul, etc.).
+    None,
+}
+
+/// Sources that can interrupt a cast / busy activity. The named
+/// `standard` set is `{ Damage, Stun, CasterDied, TargetDied }`
+/// per design 2026-05-09. `Movement` is opt-in only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+pub enum InterruptKind {
+    /// Caster took a `Damaged` event this tick.
+    Damage,
+    /// Caster received an `EffectStunApplied` event this tick.
+    Stun,
+    /// Caster died (`Defeated` event).
+    CasterDied,
+    /// The cast's target died — no-op for AOE / self-cast / position-target casts.
+    TargetDied,
+    /// Caster moved (pre-tick / post-tick `agent_pos` differ).
+    Movement,
+}
+
+/// Phase qualifier on the `cooldown:` header — when does the
+/// cooldown start counting?
+///
+/// ```text
+/// cooldown: 5s              # defaults to `@ cast`
+/// cooldown: 5s @ resolve    # cooldown begins when the cast lands
+/// cooldown: 5s @ interrupt  # only consumed on interrupt (rare)
+/// ```
+///
+/// Default `@ cast` prevents spam-canceling from bypassing the
+/// cooldown gate. `@ resolve` and `@ interrupt` are parsed +
+/// stored but only `@ cast` is implemented in Plan G's MVP; the
+/// other two surface a "phase qualifier not yet supported" error
+/// at lowering until later slices wire them in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum CooldownPhase {
+    /// Cooldown starts when the cast / activity begins.
+    Cast,
+    /// Cooldown starts when the cast resolves successfully.
+    Resolve,
+    /// Cooldown only consumed on interruption.
+    Interrupt,
+}
+
+/// Engine-wide named-set declaration. One `set standard = { … }`
+/// in the engine baseline declares the contents of `standard` for
+/// every ability that references it via [`InterruptSet::Standard`]
+/// / [`InterruptSet::StandardPlus`] / [`InterruptSet::StandardMinus`].
+///
+/// Per-fixture re-declaration is allowed but takes effect only
+/// within that fixture's compilation unit.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct StandardSetDecl {
+    pub members: Vec<InterruptKind>,
+    pub span: Span,
 }

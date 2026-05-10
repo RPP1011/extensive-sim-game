@@ -28,7 +28,7 @@ fn inline_minimal_ability_parses() {
         _ => panic!("expected Range"),
     }
     match a.headers[2] {
-        AbilityHeader::Cooldown(d) => assert_eq!(d.millis, 6_000),
+        AbilityHeader::Cooldown(d, _) => assert_eq!(d.millis, 6_000),
         _ => panic!("expected Cooldown"),
     }
     assert!(matches!(a.headers[3], AbilityHeader::Hint(HintName::Damage)));
@@ -62,7 +62,7 @@ ability ShieldWall {
     assert_eq!(a.name, "ShieldWall");
     assert!(matches!(a.headers[0], AbilityHeader::Target(TargetMode::Self_)));
     match a.headers[1] {
-        AbilityHeader::Cooldown(d) => assert_eq!(d.millis, 15_000),
+        AbilityHeader::Cooldown(d, _) => assert_eq!(d.millis, 15_000),
         _ => panic!("expected Cooldown header at index 1"),
     }
     match a.headers[2] {
@@ -267,7 +267,7 @@ ability DurForms {
     let cd = a
         .headers
         .iter()
-        .find_map(|h| if let AbilityHeader::Cooldown(d) = h { Some(d) } else { None })
+        .find_map(|h| if let AbilityHeader::Cooldown(d, _) = h { Some(d) } else { None })
         .expect("cooldown header");
     assert_eq!(cd.millis, 5_000);
     let cast = a

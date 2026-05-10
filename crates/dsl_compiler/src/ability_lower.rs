@@ -642,7 +642,7 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
                 // its range field.
                 area = Area::SingleTarget { range: *r };
             }
-            AbilityHeader::Cooldown(d) => {
+            AbilityHeader::Cooldown(d, _) => {
                 gate.cooldown_ticks = duration_to_ticks(d.millis);
             }
             AbilityHeader::Cast(_d) => {
