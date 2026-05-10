@@ -1281,10 +1281,10 @@ fn smoke_fixture_explicit_rule_kernel_has_full_dispatcher() {
         .matches("let _slot: u32 = atomicAdd(&event_tail[0], 1u);")
         .count();
     assert_eq!(
-        slot_acquisitions, 90,
-        "DispatchAbilityExplicit kernel must carry all 90 chronicle slot \
-         acquisitions (45 chronicle-bearing variants × {{primary, nested}} \
-         walk); got {slot_acquisitions}\nbody:\n{explicit_body}"
+        slot_acquisitions, 92,
+        "DispatchAbilityExplicit kernel must carry all 92 chronicle slot \
+         acquisitions (46 chronicle-bearing variants × {{primary, nested}} \
+         walk — Plan G added CastBegin=46); got {slot_acquisitions}\nbody:\n{explicit_body}"
     );
 
     // Slice ε surface: explicit `by self target self` lowers to both
@@ -1367,13 +1367,14 @@ fn back_to_back_apply_ability_in_one_rule_emits_two_dispatcher_blocks() {
     // Lift A added 1 arm (TravelTo), bumping 152 → 156. Lift B added
     // 2 arms (Recipe + WearTool), bumping 156 → 164. Lift C added 2
     // arms (Propose + Announce), bumping 164 → 172. Lift D added 2
-    // arms (GainSkill + CreateObligation), bumping 172 → 180.
+    // arms (GainSkill + CreateObligation), bumping 172 → 180. Plan G
+    // added 1 arm (CastBegin), bumping 180 → 184.
     let slot_acquisitions = body
         .matches("let _slot: u32 = atomicAdd(&event_tail[0], 1u);")
         .count();
     assert_eq!(
-        slot_acquisitions, 180,
-        "expected 180 slot acquisitions (45 chronicle arms × 2 statements × \
+        slot_acquisitions, 184,
+        "expected 184 slot acquisitions (46 chronicle arms × 2 statements × \
          {{primary, nested}} walks); got {slot_acquisitions}\nbody:\n{body}"
     );
 
@@ -1444,9 +1445,9 @@ fn back_to_back_apply_ability_with_distinct_operands_each_emit() {
     // ToM Phase 3.5 (Scry + Reveal) + Wave 3 ToM Phase 4 (Disguise +
     // Decoy + EraseBelief) + Lift A (TravelTo) + Lift B (Recipe +
     // WearTool) + Lift C (Propose + Announce) + Lift D (GainSkill +
-    // CreateObligation): 45 chronicle arms × 2 statements ×
-    // {primary, nested} walks = 180.
-    assert_eq!(slot_acquisitions, 180);
+    // CreateObligation) + Plan G (CastBegin): 46 chronicle arms × 2
+    // statements × {primary, nested} walks = 184.
+    assert_eq!(slot_acquisitions, 184);
 
     // Naga validates — different target_slot expressions in the two
     // dispatch blocks shouldn't introduce binding conflicts.

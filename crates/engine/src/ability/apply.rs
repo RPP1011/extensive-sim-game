@@ -305,7 +305,7 @@ pub enum ApplyEvent {
         ability_id: u16,
         duration_ticks: u16,
         target_slot: u32,
-        target_pos_q8: [i16; 3],
+        target_x_q8: i16, target_y_q8: i16,
     },
 }
 
@@ -633,8 +633,8 @@ fn push_effect_event(
         // `target` here is the resolved target_slot for single-target
         // casts; AOE / self-cast variants pass u32::MAX (encoded as
         // AgentId::SENTINEL or similar at the caller).
-        EffectOp::CastBegin { ability_id, duration_ticks, target_slot, target_pos_q8, _pad: _ } =>
-            out.push(ApplyEvent::CastBegin { source: caster, ability_id, duration_ticks, target_slot, target_pos_q8 }),
+        EffectOp::CastBegin { ability_id, duration_ticks, target_slot, target_x_q8, target_y_q8 } =>
+            out.push(ApplyEvent::CastBegin { source: caster, ability_id, duration_ticks, target_slot, target_x_q8, target_y_q8 }),
         // CastAbility is recursive (needs cascade-style
         // re-dispatch); deferred to slice δ. Skip for now.
         EffectOp::CastAbility { .. } => {}

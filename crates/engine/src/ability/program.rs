@@ -863,16 +863,26 @@ pub enum EffectOp {
     // Variant tag = 46. Chronicle EventKindId for the generated
     // `EffectCastBeginApplied` event is 73 (contiguous with
     // EffectCreateObligationApplied=72).
-    /// `cast_begin <ability_id> for <duration_ticks> [target <slot>] [at <pos>]`
+    /// `cast_begin <ability_id> for <duration_ticks> [target <slot>] [at <x,y>]`
     /// — caster initiates a multi-tick cast. The dispatcher writes
-    /// the per-agent busy SoA columns; resolution at `cast_started_at_tick + duration_ticks`
-    /// fires the queued effect program (looked up in the ability registry by id).
+    /// the per-agent busy SoA columns; resolution at
+    /// `cast_started_at_tick + duration_ticks` fires the queued
+    /// effect program (looked up in the ability registry by id).
+    ///
+    /// Target XY position uses the same q8 fixed-point shape as
+    /// Lift A's TravelTo (per P4 size budget — three axes plus
+    /// padding pushed CastBegin to 20 bytes). For 3D casts that
+    /// need Z, the dispatcher writes BusyTargetPos.z directly to
+    /// the agent's BusyTargetPos SoA at the cast site (z is
+    /// reconstructed there from the caster's current pos.z when
+    /// not specified, matching the threat-zone projection's
+    /// expected behaviour).
     CastBegin {
         ability_id: u16,
         duration_ticks: u16,
         target_slot: u32,
-        target_pos_q8: [i16; 3],
-        _pad: [u8; 2],
+        target_x_q8: i16,
+        target_y_q8: i16,
     } = 46,
 }
 

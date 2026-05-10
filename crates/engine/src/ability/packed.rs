@@ -1268,7 +1268,7 @@ pub fn pack_effect(op: EffectOp) -> (u32, u32, u32) {
         // BusyTargetPos SoA column directly at the cast site,
         // bypassing the packed-effect path. Kept in the EffectOp for
         // type-safety + AST round-trip; ignored here.
-        EffectOp::CastBegin { ability_id, duration_ticks, target_slot, target_pos_q8: _, _pad: _ } =>
+        EffectOp::CastBegin { ability_id, duration_ticks, target_slot, target_x_q8: _, target_y_q8: _ } =>
             (46, (ability_id as u32) | ((duration_ticks as u32) << 16), target_slot),
     }
 }

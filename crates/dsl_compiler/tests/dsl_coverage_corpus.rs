@@ -330,6 +330,7 @@ fn effect_op_label(op: &EffectOp) -> &'static str {
         EffectOp::Announce        { .. } => "Announce",
         EffectOp::GainSkill       { .. } => "GainSkill",
         EffectOp::CreateObligation { .. } => "CreateObligation",
+        EffectOp::CastBegin       { .. } => "CastBegin",
     }
 }
 

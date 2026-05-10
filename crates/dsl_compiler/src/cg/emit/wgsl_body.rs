@@ -3898,6 +3898,12 @@ pub(crate) const EFFECT_KIND_TO_EVENT_KIND_ID: &[(u32, u32)] = &[
     // (below) match these ordinals via `kind == 44u..=45u`.
     (44, 75), // EffectOp::GainSkill        → EventKindId::EffectGainSkillApplied
     (45, 76), // EffectOp::CreateObligation → EventKindId::EffectCreateObligationApplied
+    // Plan G (2026-05-09) — generic deferred-cast intent. Dispatcher
+    // writes one chronicle record per cast initiation. Consumer
+    // (compiler-emitted physics_BusyTick kernel, G2.3+) reads the
+    // record + sets per-agent busy SoA + emits CastBegan as the
+    // public lifecycle event.
+    (46, 77), // EffectOp::CastBegin        → EventKindId::EffectCastBeginApplied
 ];
 
 /// Look up the runtime `EventKindId` for an `EffectOp` discriminant.
@@ -4045,6 +4051,8 @@ fn emit_chronicle_arm_chain(
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain GainSkill=44");
     let create_obligation_event_id = event_kind_id_for_effect_kind(45)
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain CreateObligation=45");
+    let cast_begin_event_id = event_kind_id_for_effect_kind(46)
+        .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain CastBegin=46");
 
     let i4  = indent;                   // arm `if`/`else if` lines
     let i8  = format!("{i4}    ");      // body of arm
@@ -5072,6 +5080,29 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i12}}}\n"));
+    s.push_str(&format!("{i8}}}\n"));
+
+    // CastBegin = 46 → 77 (Plan G generic deferred cast)
+    s.push_str(&format!("{i4}}} else if (kind == 46u) {{\n"));
+    s.push_str(&format!("{i8}// CastBegin = 46 → EventKindId::EffectCastBeginApplied = 77\n"));
+    s.push_str(&format!("{i8}// payload_a low 16 bits = ability_id; high 16 bits =\n"));
+    s.push_str(&format!("{i8}// duration_ticks. payload_b = target_slot. The Vec3 q8\n"));
+    s.push_str(&format!("{i8}// target_pos doesn't fit in the (caster, target, payload_a,\n"));
+    s.push_str(&format!("{i8}// payload_b) packed slots — it's written to the agent's\n"));
+    s.push_str(&format!("{i8}// BusyTargetPos SoA at the cast site, not via this chronicle\n"));
+    s.push_str(&format!("{i8}// path. The downstream busy-resolution kernel reads both.\n"));
+    s.push_str(&format!("{i8}// chronicle: emit EffectCastBeginApplied (caster_slot + 0 + payload_a + payload_b)\n"));
+    s.push_str(&format!("{i8}{{\n"));
+    s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
+    s.push_str(&hist_bump(cast_begin_event_id));
+    s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {cast_begin_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], 0u);\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
     s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
     s.push_str(&format!("{i12}}}\n"));
@@ -8634,7 +8665,8 @@ mod tests {
                 43 => EffectOp::Announce    { announcement_kind: 7, radius_q8: 896 },
                 44 => EffectOp::GainSkill   { skill_id: 2, amount_q8: 64 },
                 45 => EffectOp::CreateObligation { obligation_id: 17, kind: 0 },
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35/36/37/38/39/40/41/42/43/44/45"),
+                46 => EffectOp::CastBegin { ability_id: 1, duration_ticks: 3, target_slot: 0, target_x_q8: 0, target_y_q8: 0 },
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35/36/37/38/39/40/41/42/43/44/45/46"),
             }
         };
 
@@ -8687,7 +8719,8 @@ mod tests {
                 43 => EngineEventKindId::EffectAnnounceApplied        as u32,
                 44 => EngineEventKindId::EffectGainSkillApplied        as u32,
                 45 => EngineEventKindId::EffectCreateObligationApplied as u32,
-                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35/36/37/38/39/40/41/42/43/44/45"),
+                46 => EngineEventKindId::EffectCastBeginApplied         as u32,
+                _ => panic!("test only covers chronicle-bearing variants 0..=6 + 8..=15 + 16 + 17 + 18 + 19 + 20..=22 + 27..=30 + 23/24/25/26/31/32/33/34/35/36/37/38/39/40/41/42/43/44/45/46"),
             }
         };
 
@@ -8835,9 +8868,10 @@ mod tests {
         // consumer rules turn into per-agent skill SoA bumps + obligation
         // pool registrations. See `docs/spec/economy.md §7` + §8).
         assert_eq!(
-            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 45,
-            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 45 \
-             chronicle-bearing variants today; if you added or removed an \
+            EFFECT_KIND_TO_EVENT_KIND_ID.len(), 46,
+            "EFFECT_KIND_TO_EVENT_KIND_ID should cover exactly the 46 \
+             chronicle-bearing variants today (Plan G added CastBegin=46 \
+             → EffectCastBeginApplied=77); if you added or removed an \
              entry, update this assertion (and the slice γ wire-up that \
              consumes the new entry)"
         );
