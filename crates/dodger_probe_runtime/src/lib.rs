@@ -711,4 +711,109 @@ mod dodger_behavioural_tests {
             "GPU scoring must produce a behaviour delta when threats are present vs absent",
         );
     }
+
+    /// **Effectiveness report.** Closes the qualitative-vs-quantitative
+    /// gap left by the per-agent dodger pin. Runs N=64 agents over
+    /// M=16 ticks twice — once with threats present, once with the
+    /// busy source forced to zero — and reports the per-condition
+    /// percentage of agents that picked Flee. The delta IS the threat
+    /// system's effectiveness on AI scoring.
+    ///
+    /// Pin shape:
+    ///   * WITH threats: ≥95% of agents (every agent except the
+    ///     warmup tick the fold hasn't populated yet) should pick
+    ///     Flee — every observer sees N busy candidates so Flee's
+    ///     utility (= N) outscores Idle's 0.5.
+    ///   * WITHOUT threats (busy and view forced to zero each tick):
+    ///     0% should pick Flee — every Flee score is 0.0, Idle wins
+    ///     on the 0.5 baseline.
+    ///   * Delta ≥ 95 percentage points → threats infrastructure
+    ///     materially changes ≥95% of decisions.
+    ///
+    /// This is the metric the recurring "report effectiveness of
+    /// threat impact on scoring" prompt asked for. Per-tick log lines
+    /// land in `--nocapture` output for human review.
+    #[test]
+    fn threat_effectiveness_report_with_vs_without_at_population_scale() {
+        const N: u32 = 64;
+        const TICKS: usize = 16;
+
+        // Helper: count how many of the N agents picked Flee.
+        fn flee_count(scoring: &[u32], n: u32) -> u32 {
+            (0..n)
+                .filter(|i| scoring[(*i as usize) * 4] == FLEE_ACTION_ID)
+                .count() as u32
+        }
+
+        // --- Condition A: threats present (default state).
+        let mut state_a = match DodgerProbeState::try_new(0xCAFE, N) {
+            Some(s) => s,
+            None => {
+                eprintln!("[threat-effectiveness] skipping: no wgpu adapter on host.");
+                return;
+            }
+        };
+        let mut flee_a_per_tick: Vec<u32> = Vec::with_capacity(TICKS);
+        for _ in 0..TICKS {
+            state_a.step();
+            let scoring = state_a.read_scoring_output();
+            flee_a_per_tick.push(flee_count(&scoring, N));
+        }
+
+        // --- Condition B: threats forced to zero each tick (baseline).
+        let mut state_b =
+            DodgerProbeState::try_new(0xCAFE, N).expect("second wgpu state");
+        let mut flee_b_per_tick: Vec<u32> = Vec::with_capacity(TICKS);
+        for _ in 0..TICKS {
+            state_b.force_no_threats();
+            state_b.step();
+            let scoring = state_b.read_scoring_output();
+            flee_b_per_tick.push(flee_count(&scoring, N));
+        }
+
+        // --- Aggregate. Skip tick 0 from condition A (warmup — fold
+        // hasn't populated the view yet, so scoring sees zero threats
+        // and picks Idle). The "effectiveness" metric is steady-state
+        // behavior, ticks 1..TICKS.
+        let total_decisions = (TICKS as u32 - 1) * N;
+        let flees_a: u32 = flee_a_per_tick[1..].iter().sum();
+        let flees_b: u32 = flee_b_per_tick.iter().sum();
+        let pct_a = (flees_a as f64 / total_decisions as f64) * 100.0;
+        let pct_b = (flees_b as f64 / (TICKS as u32 * N) as f64) * 100.0;
+        let delta_pp = pct_a - pct_b;
+
+        eprintln!(
+            "[threat-effectiveness] N={N} TICKS={TICKS} → effectiveness report",
+        );
+        eprintln!(
+            "[threat-effectiveness]   WITH threats:    {flees_a}/{total_decisions} flees in steady state ({pct_a:.1}%)"
+        );
+        eprintln!(
+            "[threat-effectiveness]   WITHOUT threats: {flees_b}/{} flees ({pct_b:.1}%)",
+            TICKS as u32 * N
+        );
+        eprintln!(
+            "[threat-effectiveness]   delta:           {delta_pp:.1} percentage points"
+        );
+        eprintln!(
+            "[threat-effectiveness]   per-tick flee counts WITH:    {flee_a_per_tick:?}"
+        );
+        eprintln!(
+            "[threat-effectiveness]   per-tick flee counts WITHOUT: {flee_b_per_tick:?}"
+        );
+
+        assert!(
+            pct_a >= 95.0,
+            "WITH threats: expected ≥95% of agents to pick Flee in steady state; got {pct_a:.1}%"
+        );
+        assert_eq!(
+            flees_b, 0,
+            "WITHOUT threats: NO agent should pick Flee (Flee scores 0.0, Idle wins on 0.5 baseline); got {flees_b}/{}",
+            TICKS as u32 * N,
+        );
+        assert!(
+            delta_pp >= 95.0,
+            "threat infrastructure must shift ≥95 percentage points of decisions; got {delta_pp:.1}pp",
+        );
+    }
 }
