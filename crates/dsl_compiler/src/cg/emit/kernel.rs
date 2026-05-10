@@ -2385,7 +2385,7 @@ fn build_view_fold_wgsl_body(
     // (which is currently bypassed for ViewFold) doesn't have to grow
     // a ViewFold special-case.
     if matches!(dispatch, DispatchShape::PerAgentEventScan) {
-        return build_view_fold_per_agent_event_scan_body(body_ops, prog, ctx);
+        return build_view_fold_per_agent_event_scan_body(body_ops, prog, ctx, storage_hint);
     }
     // Plan G G3a — PerEntityRing diverts from the generic CgStmt::Assign
     // lowering and emits a hand-written ring-append body. The body
@@ -2568,8 +2568,12 @@ fn build_view_fold_wgsl_body(
 fn build_view_fold_per_agent_event_scan_body(
     body_ops: &[OpId],
     prog: &CgProgram,
-    _ctx: &EmitCtx<'_>,
+    ctx: &EmitCtx<'_>,
+    storage_hint: Option<crate::cg::program::CgStorageHint>,
 ) -> Result<String, KernelEmitError> {
+    use crate::cg::program::CgStorageHint;
+    use crate::cg::stmt::CgStmt;
+
     let mut out = String::new();
     // 2-D dispatch preamble. Mirrors `thread_indexing_preamble`'s
     // PerAgentEventScan arm; we duplicate inline here because
@@ -2591,33 +2595,161 @@ fn build_view_fold_per_agent_event_scan_body(
     );
     out.push_str("    let tick = cfg.tick;\n\n");
 
+    // Plan G G3 final composition — when the dispatch is PerAgentEventScan
+    // AND the storage hint is `@per_entity_ring(K = N)` AND the view's
+    // body uses `self.append(...)` (which lowers to a `CgStmt::ViewStorageAppend`
+    // and registers a `ViewLayout`), emit the struct-cell ring-append
+    // keyed on OBSERVER. Sibling to `build_view_fold_ring_append_body`'s
+    // PerEvent struct-payload branch — same per-field store shape, but
+    // (a) the cursor key is `observer` instead of `target_slot` (read
+    // from event ring), and (b) the body's prelude `Let`s lower against
+    // a kernel where both `observer` and `source_candidate` are
+    // available as locals.
+    //
+    // When storage hint is PerEntityRing but no ViewLayout is registered
+    // (i.e. `self += <expr>` instead of `self.append(...)`) the function
+    // falls through to the legacy scalar f32 CAS+add against
+    // `view_storage_primary[observer]` — preserves the existing
+    // `threats_view_probe.sim` behaviour.
+    let struct_ring_k: Option<u32> =
+        if let Some(CgStorageHint::PerEntityRing { k }) = storage_hint {
+            Some(k as u32)
+        } else {
+            None
+        };
+
     for (i, op_id) in body_ops.iter().enumerate() {
         if i > 0 {
             out.push_str("\n\n");
         }
         let op = resolve_op(prog, *op_id)?;
         let fragment = match &op.kind {
-            ComputeOpKind::ViewFold { body: _, .. } => {
-                // G3h MVP: PerAgentEventScan + scalar f32 view +
-                // self += <const>. The standard lowering keys self
-                // off `target_slot` from event payload, but
-                // PerAgentEventScan has no event ring read — `self`
-                // means observer here. Emit a hardcoded
-                // f32-CAS-add-by-1.0 against view_storage_primary[observer].
-                //
-                // Future: route the body's actual value expression
-                // through here (the existing lowered CgStmt::Assign
-                // emit can be reused once we teach it to substitute
-                // `target_slot` ⇒ `observer`). Today the threats
-                // probe only adds 1.0 per pair, so the hardcode is
-                // sufficient.
-                "// PerAgentEventScan + scalar f32 view fold — keyed on observer.\n\
-                 loop {\n\
-                 \x20   let old = atomicLoad(&view_storage_primary[observer]);\n\
-                 \x20   let new_val = bitcast<u32>(bitcast<f32>(old) + 1.0);\n\
-                 \x20   let result = atomicCompareExchangeWeak(&view_storage_primary[observer], old, new_val);\n\
-                 \x20   if (result.exchanged) { break; }\n\
-                 }".to_string()
+            ComputeOpKind::ViewFold { body, view, .. } => {
+                let layout = prog.view_layouts.get(&view.0);
+                match (struct_ring_k, layout) {
+                    (Some(k), Some(layout)) => {
+                        // ----- G3 final: struct-cell ring-append keyed on observer -----
+                        //
+                        // Walk the body's prelude statements, lowering each
+                        // `Let` through the standard helper so user-bound
+                        // locals (e.g. `let zone_kind = config.probe.zone_kind`)
+                        // resolve via `ReadLocal` in the field expressions.
+                        // Then hand-emit the cursor allocation + per-field
+                        // stores — the `target_slot` derivation that the
+                        // PerEvent struct path uses doesn't apply here
+                        // (cursor is keyed on observer, no event ring read).
+                        let body_list = prog
+                            .stmt_lists
+                            .get(body.0 as usize)
+                            .ok_or(KernelEmitError::Inner(InnerEmitError::StmtListIdOutOfRange {
+                                id: *body,
+                                arena_len: prog.stmt_lists.len() as u32,
+                            }))?;
+
+                        let mut chunk = String::new();
+                        chunk.push_str(
+                            "// PerAgentEventScan + struct-cell ring-append — keyed on observer.\n",
+                        );
+
+                        // Prelude: lower every Let; locate the
+                        // ViewStorageAppend's field-expr ids.
+                        let mut append_fields: Option<&Vec<(String, crate::cg::data_handle::CgExprId)>> =
+                            None;
+                        for stmt_id in &body_list.stmts {
+                            let Some(stmt) = prog.stmts.get(stmt_id.0 as usize) else {
+                                continue;
+                            };
+                            match stmt {
+                                CgStmt::ViewStorageAppend { fields, .. } => {
+                                    append_fields = Some(fields);
+                                    break;
+                                }
+                                CgStmt::Let { .. } => {
+                                    let stmt_wgsl = lower_cg_stmt_to_wgsl(*stmt_id, ctx)
+                                        .map_err(KernelEmitError::from)?;
+                                    for line in stmt_wgsl.lines() {
+                                        chunk.push_str(line);
+                                        chunk.push('\n');
+                                    }
+                                }
+                                _ => {} // skip other prelude shapes for now
+                            }
+                        }
+
+                        match append_fields {
+                            None => {
+                                // No append in body — emit a documented stub
+                                // and continue. (Should be unreachable: a
+                                // ViewLayout is only registered when an
+                                // append exists.)
+                                chunk.push_str(
+                                    "// (no ViewStorageAppend found in body; layout was registered without an append?)\n",
+                                );
+                            }
+                            Some(fields) => {
+                                // Cursor allocation keyed on OBSERVER (PerAgentEventScan
+                                // semantics — `self` in the body means the observer's slot).
+                                chunk.push_str(
+                                    "let cursor_idx = atomicAdd(&view_storage_anchor[observer], 1u);\n",
+                                );
+                                chunk.push_str(&format!(
+                                    "let ring_idx = observer * {k}u + (cursor_idx % {k}u);\n"
+                                ));
+                                // Per-field stores at `ring_idx * field_count + N`.
+                                let field_count = layout.cell_stride_u32();
+                                for (field_idx, ((name, expr_id), layout_field)) in
+                                    fields.iter().zip(layout.fields.iter()).enumerate()
+                                {
+                                    let value_wgsl = lower_cg_expr_to_wgsl(*expr_id, ctx)
+                                        .map_err(KernelEmitError::from)?;
+                                    let bits_expr = match layout_field.ty {
+                                        crate::cg::expr::CgTy::U32
+                                        | crate::cg::expr::CgTy::AgentId
+                                        | crate::cg::expr::CgTy::Tick => value_wgsl,
+                                        crate::cg::expr::CgTy::F32 => {
+                                            format!("bitcast<u32>({value_wgsl})")
+                                        }
+                                        crate::cg::expr::CgTy::I32 => {
+                                            format!("bitcast<u32>({value_wgsl})")
+                                        }
+                                        crate::cg::expr::CgTy::Bool => {
+                                            format!("select(0u, 1u, {value_wgsl})")
+                                        }
+                                        crate::cg::expr::CgTy::Vec3F32 => {
+                                            // Vec3 doesn't fit in a single u32 word;
+                                            // type-checker gates this at lowering, but
+                                            // emit a placeholder so the body still
+                                            // compiles.
+                                            format!("/* vec3 packing TODO */ 0u")
+                                        }
+                                        crate::cg::expr::CgTy::ViewKey { .. } => value_wgsl,
+                                    };
+                                    chunk.push_str(&format!(
+                                        "view_storage_primary[ring_idx * {field_count}u + {field_idx}u] = {bits_expr}; // {name}\n"
+                                    ));
+                                }
+                            }
+                        }
+                        chunk
+                    }
+                    _ => {
+                        // ----- G3h MVP: scalar f32 PerAgentEventScan path (preserved) -----
+                        //
+                        // The standard lowering keys self off `target_slot`
+                        // from event payload, but PerAgentEventScan has no
+                        // event ring read — `self` means observer here.
+                        // Emit a hardcoded f32-CAS-add-by-1.0 against
+                        // view_storage_primary[observer]. The existing
+                        // threats_view_probe.sim fixture lands here.
+                        "// PerAgentEventScan + scalar f32 view fold — keyed on observer.\n\
+                         loop {\n\
+                         \x20   let old = atomicLoad(&view_storage_primary[observer]);\n\
+                         \x20   let new_val = bitcast<u32>(bitcast<f32>(old) + 1.0);\n\
+                         \x20   let result = atomicCompareExchangeWeak(&view_storage_primary[observer], old, new_val);\n\
+                         \x20   if (result.exchanged) { break; }\n\
+                         }".to_string()
+                    }
+                }
             }
             ComputeOpKind::MaskPredicate { .. }
             | ComputeOpKind::PhysicsRule { .. }

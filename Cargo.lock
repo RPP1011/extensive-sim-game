@@ -2565,6 +2565,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "threats_struct_probe_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "threats_view_probe_runtime"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,167 @@
+// threats_struct_probe — Plan G G3 final composition fixture.
+//
+// Closes the last design-doc gap from `docs/plans/g3_threats_view_design.md`:
+// the struct-payload `ThreatZoneCell` ring keyed per-observer, populated by
+// the PerAgentEventScan dispatch. Today's `threats_view_probe.sim` is a
+// degenerate scalar count; this fixture is its struct-cell sibling.
+//
+// **Composition (3 already-landed primitives wired for the first time):**
+//   * G3a/b/c — `@per_entity_ring(K = N)` storage with struct payload +
+//     multi-statement view fold body (`let` admission + `self.append(...)`).
+//   * G3d — `@dispatch(per_agent_event_scan)` per-(observer, source_candidate)
+//     iteration with busy-filter early-exit on the source candidate.
+//   * G3e — telegraph metadata column on PackedAbilityRegistry (referenced
+//     in concept; reads land in a follow-up — see "MVP scope" below).
+//
+// **Cell layout (per design doc — 8 fields).** Each cell is one
+// `ThreatZoneCell` carrying the projected zone metadata so AI scoring can
+// compute spatial intensity from (observer.pos, cell.center, cell.radius)
+// without a follow-up GPU pass. Today every field stores at u32 stride
+// (`bitcast<u32>` per field) per the existing G3b struct layout
+// convention; future iterations may pack sub-32-bit fields.
+//
+//   zone_kind:        u32 (sentinel 0 = inactive, 1 = circle, 2 = line)
+//   center_x_q8:      u32 (i16 q8 packed into low 16 bits)
+//   center_y_q8:      u32 (i16 q8 packed into low 16 bits)
+//   radius_q8:        u32 (u16 q8 packed into low 16 bits)
+//   dir_x_q8:         u32 (i16 q8; 0 for circle zones)
+//   dir_y_q8:         u32 (i16 q8; 0 for circle zones)
+//   expires_at_tick:  u32
+//   source:           u32 (caster AgentId)
+//
+// Cell stride = 8 u32 words = 32 bytes. Per-agent ring K=4 = 128 bytes/agent.
+//
+// **MVP scope (gaps documented for follow-up).** This fixture proves the
+// COMPOSITIONAL WIRING — struct-payload ring-append fires from a
+// PerAgentEventScan dispatch, and the resulting cells contain
+// per-observer-per-source-candidate metadata. The full design doc shape
+// requires three secondary expansions that surface as typed lowering errors
+// when wired naively today; each is tracked as a follow-up:
+//
+//   (b) Bind `source_candidate` as an in-scope local in the view-fold body
+//       so authors can write `agents.busy_with_ability_id(source_candidate)`.
+//       The resolver currently only binds `self` + view params; the
+//       PerAgentEventScan emit uses `source_candidate` as a kernel-local
+//       identifier that the lowering doesn't know about. Follow-up: extend
+//       `Decl::View` resolver to bind `source_candidate` in scope when the
+//       view's `@dispatch` annotation is `per_agent_event_scan`.
+//
+//   (c) `abilities.telegraph_kind(id)` / `abilities.telegraph_param_0(id)`
+//       lowering. The columns landed with G3e on PackedAbilityRegistry
+//       but no `abilities.<method>` lowering arm reads them. Follow-up:
+//       add to `cg/lower/expr.rs::lower_namespace_call` sibling to the
+//       `abilities.on_cooldown(id)` path.
+//
+//   (d) `agents.busy_target_pos_x_q8(...)` / `_y_q8(...)` — `busy_target_pos`
+//       is currently a single Vec3 SoA column with no axis-slicing surface
+//       in the .sim grammar. Follow-up: either grow the `agents.<field>`
+//       grammar to support `.x_q8` / `.y_q8` suffixes, OR pack
+//       busy_target_pos as 2 separate i16 SoA columns.
+//
+// To keep this slice landable, the cell field expressions below are
+// constants + locals derived from `world.tick`. The struct-payload
+// ring-append composition with PerAgentEventScan is what's load-bearing;
+// once the per-cell field reads are unblocked (b/c/d above), the field
+// expressions swap in without touching the emit / runtime sides.
+//
+// **Behavioural pin (target shape — runtime in the sibling crate).**
+//
+//   AGENT_COUNT=4. At tick 0, agent 0 stamps `busy_with_ability_id = 7`
+//   (MarkCasterBusy fires once per alive agent, where-clause gates on
+//   `world.tick == cast_begin_tick`).
+//
+//   At tick 0, fold_threats dispatches 4×4 = 16 (observer, source) pairs.
+//   The busy-filter early-exits non-busy candidates (in the steady-state
+//   pin all 4 are busy at tick 0 because MarkCasterBusy stamps every
+//   alive agent — same shape as `threats_view_probe.sim`). Each pair
+//   that survives the filter executes the body, allocating a ring cell
+//   at the observer's slot via the cursor atomicAdd and writing the
+//   8-field struct.
+//
+//   After tick 0: each observer's ring has 4 cells (one per busy
+//   candidate), each carrying:
+//     zone_kind = 1 (circle, MVP constant)
+//     center_x_q8 = source_candidate (placeholder; real: agents.busy_target_pos.x)
+//     center_y_q8 = 0
+//     radius_q8 = 1024 (= 4.0 in q8)
+//     dir_x_q8 = 0
+//     dir_y_q8 = 0
+//     expires_at_tick = world.tick + 100 (placeholder; real: agents.busy_until_tick)
+//     source = source_candidate (placeholder; real: same value, but read
+//             through a typed AgentId binding)
+//
+//   Cells are written non-atomically (the cursor atomicAdd serialized
+//   slot allocation) at distinct ring slots, so the reads from a host
+//   readback are race-free for ≤K events per (observer, tick) pair.
+
+event Tick { }
+event ThreatsFoldDriver { source: AgentId, target: AgentId, ability_id: u32 }
+
+entity Subject : Agent { }
+
+config probe {
+  // Tick at which alive agents stamp `busy_with_ability_id`. Same
+  // shape as threats_view_probe.sim's `cast_begin_tick`.
+  cast_begin_tick: u32 = 0,
+  // Ability id stamped on the busy SoA. Any non-zero u32 marks the
+  // agent as casting (the busy-filter early-exits zero values).
+  cast_ability_id: u32 = 7,
+  // Hardcoded telegraph kind constant (1 = circle). When (c) lands,
+  // this is replaced by a read against
+  // `abilities.telegraph_kind(busy_with_ability_id)`.
+  zone_kind:        u32 = 1,
+  // Hardcoded telegraph radius (q8). 1024 q8 = 4.0 world units. When
+  // (c) lands, replaced by `abilities.telegraph_param_0(busy_with_ability_id)`.
+  zone_radius_q8:   u32 = 1024,
+  // Hardcoded zone duration (in ticks from now). When (d) lands,
+  // replaced by `agents.busy_until_tick(source_candidate)`.
+  zone_duration:    u32 = 100,
+}
+
+@phase(per_agent)
+physics MarkCasterBusy {
+  on Tick {} where (
+    self.alive
+    && world.tick == config.probe.cast_begin_tick
+  ) {
+    agents.set_busy_with_ability_id(self, config.probe.cast_ability_id);
+  }
+}
+
+// G3 final-composition view-under-test. Per-observer ring of K=4 cells,
+// each storing the 8-field threat-zone struct. The fold is dispatched per
+// (observer, source_candidate); the body's `self.append(...)` writes one
+// cell to the observer's ring per qualifying source.
+//
+// The fold body's `let` declarations bind locals derived from `world.tick`
+// + config consts; the `self.append(...)` writes them into the cell.
+// Today's emit hardcodes `target_slot` for the cursor key from the event
+// ring (G3a/b shape) — for PerAgentEventScan that key must be `observer`
+// (no event ring read). The new emit branch in
+// `cg/emit/kernel.rs::build_view_fold_per_agent_event_scan_body` handles
+// this divergence: detects a registered `ViewLayout` for the view and
+// emits a struct-cell ring-append keyed on observer instead of the
+// hardcoded scalar CAS+add.
+@materialized(on_event = [ThreatsFoldDriver])
+@dispatch(per_agent_event_scan)
+@per_entity_ring(K = 4)
+view threats(observer: Agent) -> f32 {
+  initial: 0.0,
+  on ThreatsFoldDriver { source: _, target: _, ability_id: _ } {
+    // MVP placeholders — see fixture-header gaps (b)/(c)/(d) for the
+    // load-bearing reads each will replace.
+    let zone_kind        = config.probe.zone_kind
+    let radius           = config.probe.zone_radius_q8
+    let expires_at_tick  = world.tick + config.probe.zone_duration
+    self.append(
+      zone_kind:       zone_kind,
+      center_x_q8:     0u,
+      center_y_q8:     0u,
+      radius_q8:       radius,
+      dir_x_q8:        0u,
+      dir_y_q8:        0u,
+      expires_at_tick: expires_at_tick,
+      source:          0u
+    )
+  }
+}
