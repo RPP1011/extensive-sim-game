@@ -1,0 +1,32 @@
+[package]
+name = "threats_view_probe_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Plan G G3h — per-fixture runtime crate for
+# `assets/sim/threats_view_probe.sim`. First end-to-end fixture
+# composing G3d's PerAgentEventScan dispatch with G3a's view fold
+# storage. Behavioural pin: at tick 0 (cast_begin_tick), agent 0
+# stamps busy_with_ability_id; the threats fold dispatches per
+# (observer, source_candidate) pair, busy-filters out non-busy
+# sources (only agent 0 is busy), and increments each observer's
+# threats[obs] by 1.0. After tick 0: threats = [1.0, 1.0, 1.0, 1.0].
+# After tick 1: threats = [2.0, 2.0, 2.0, 2.0] (no decay yet —
+# scalar accumulator just adds).
+#
+# Build.rs lowers the .sim through the DSL compiler into
+# `OUT_DIR/generated.rs`; src/lib.rs owns the GPU context, per-buffer
+# storage, kernel cache, and per-tick dispatch chain.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

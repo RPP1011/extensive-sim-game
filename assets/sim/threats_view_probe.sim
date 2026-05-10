@@ -1,0 +1,83 @@
+// threats_view_probe — Plan G G3g.
+//
+// First end-to-end fixture composing the full G3 stack:
+//   * G3a/b/c — per-agent ring storage with struct/scalar payload
+//   * G3d — `@dispatch(per_agent_event_scan)` per-(observer, busy-source) iteration
+//   * G3e — telegraph metadata column (read at scoring time, not folded here)
+//   * G3f — `threats.intensity_at(pos)` Builtin that reads the view
+//
+// **MVP scope.** The view stores a scalar f32 per observer: the count
+// of currently-busy source agents visible (= every agent with
+// `busy_with_ability_id != 0`). This is a degenerate "threats view"
+// that's a stepping-stone to the full struct-payload ring of zone
+// records. The MVP proves the wiring (dispatch + storage + Builtin
+// read) end-to-end on a runnable surface; future iterations replace
+// the scalar count with the 8-field threat-zone struct.
+//
+// **Behavioural pin (target shape — runtime in G3h).**
+//   AGENT_COUNT=4. At tick 0, agent 0 begins casting (sets
+//   busy_with_ability_id = 7). The threats view's per-(observer,
+//   source) dispatch fires once per (observer, source) pair where
+//   the source is busy:
+//     observer=0: source=0 (busy, self-included). count = 1
+//     observer=1: source=0 (busy). count = 1
+//     observer=2: source=0 (busy). count = 1
+//     observer=3: source=0 (busy). count = 1
+//   After tick 0: every observer's view = 1.0.
+//
+//   At tick 1, agent 0 still busy. The view fold runs again — each
+//   observer's view increments by 1 (no decay yet — the scalar
+//   accumulator just adds), so view = 2.0 per observer.
+//
+//   This shows the dispatch fires correctly. A non-degenerate
+//   threats view would clear-then-write per tick (decay) so the
+//   value reflects "current threat count, not historical sum".
+//   The decay primitive lands in a follow-up (`@decay(rate = 1.0)`).
+
+event Tick { }
+event CastBeginMarker { source: AgentId, target: AgentId, ability_id: u32 }
+
+entity Subject : Agent { }
+
+config probe {
+  // Tick at which agent 0 begins casting. Before this tick no
+  // agents are busy and the view stays at 0.
+  cast_begin_tick: u32 = 0,
+  // Ability id stamped on the busy SoA. Any non-zero u32 marks the
+  // agent as casting.
+  cast_ability_id: u32 = 7,
+  caster_slot:     u32 = 0,
+}
+
+// Set agent 0's busy_with_ability_id at cast_begin_tick. The
+// PerAgentEventScan dispatch reads this column to early-exit
+// non-busy candidates.
+@phase(per_agent)
+physics MarkCasterBusy {
+  on Tick {} where (
+    self.alive
+    && world.tick == config.probe.cast_begin_tick
+  ) {
+    agents.set_busy_with_ability_id(self, config.probe.cast_ability_id);
+    // The runtime initialises busy_until_tick to a high sentinel
+    // (e.g. 99999) so the cast doesn't auto-resolve during the test.
+    // Per-fixture sim doesn't need to set it for this probe — the
+    // PerAgentEventScan only checks busy_with_ability_id != 0.
+  }
+}
+
+// G3g's view-under-test. Per-observer scalar f32 counting busy
+// sources. PerAgentEventScan dispatch hits every (observer, source)
+// pair; the busy-filter at the kernel preamble drops non-busy
+// sources; the body increments observer's slot by 1.0.
+//
+// `on CastBeginMarker` is a placeholder: the dispatch shape ignores
+// the event ring (the runtime drives the dispatch directly off
+// agent_cap), but the resolver requires `on_event = [...]` for
+// materialized fold views to validate.
+@materialized(on_event = [CastBeginMarker])
+@dispatch(per_agent_event_scan)
+view threats(observer: Agent) -> f32 {
+  initial: 0.0,
+  on CastBeginMarker { source: _, target: _, ability_id: _ } { self += 1.0 }
+}
