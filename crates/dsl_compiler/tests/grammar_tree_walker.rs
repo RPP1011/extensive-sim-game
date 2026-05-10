@@ -163,6 +163,116 @@ fn walker_each_header_parses_and_lowers() {
     );
 }
 
+/// One modifier-axis sample. `body` is a complete effect statement
+/// (verb + args + modifier under test). The body is paired with the
+/// verb that legally accepts the modifier — `chance` works on most,
+/// `stacking` requires a duration-bearing verb, `+ N% stat_ref` needs
+/// a damage-bearing verb, etc. Sourced from real corpus shapes (see
+/// assets/ability_test/duel_abilities/* and dsl_coverage/Aegis.ability).
+struct ModifierProbe {
+    label: &'static str,
+    body: &'static str,
+}
+
+const MODIFIERS: &[ModifierProbe] = &[
+    // Slot 1 — area shape.
+    ModifierProbe { label: "area_circle", body: "damage 10 in circle(2.5)" },
+    ModifierProbe { label: "area_cone", body: "damage 10 in cone(5.0, 45)" },
+    ModifierProbe { label: "area_line", body: "damage 10 in line(5.0, 1.0)" },
+    // Slot 2 — power tags.
+    ModifierProbe { label: "tag_physical", body: "damage 10 [PHYSICAL: 50]" },
+    ModifierProbe { label: "tag_magical", body: "damage 10 [MAGICAL: 50]" },
+    ModifierProbe { label: "tag_utility", body: "damage 10 [UTILITY: 50]" },
+    ModifierProbe { label: "tag_crowd_control", body: "stun 1s [CROWD_CONTROL: 100]" },
+    ModifierProbe { label: "tag_heal", body: "heal 10 [HEAL: 50]" },
+    ModifierProbe { label: "tag_defense", body: "shield 10 for 5s [DEFENSE: 100]" },
+    // Slot 3 — chance.
+    ModifierProbe { label: "chance_50", body: "stun 1s chance 50%" },
+    ModifierProbe { label: "chance_100", body: "damage 10 chance 100%" },
+    // Slot 4 — stacking.
+    ModifierProbe { label: "stacking_refresh", body: "damage_modify 0.5 for 5s stacking refresh" },
+    ModifierProbe { label: "stacking_stack", body: "slow 0.3 for 2s stacking stack" },
+    ModifierProbe { label: "stacking_extend", body: "lifesteal 0.4 for 6s stacking extend" },
+    // Slot 5 — scaling (`+ N% stat_ref`).
+    ModifierProbe { label: "scaling_AP", body: "damage 10 + 30% AP" },
+    ModifierProbe { label: "scaling_AD", body: "damage 10 + 50% AD" },
+    ModifierProbe { label: "scaling_hp", body: "damage 10 + 25% hp" },
+    ModifierProbe { label: "scaling_max_hp", body: "damage 10 + 10% max_hp" },
+    // Slot 6 — lifetime.
+    ModifierProbe { label: "lifetime_break_on_damage", body: "stealth for 3s break_on_damage" },
+    // Slot 7 — `when (predicate)`.
+    ModifierProbe { label: "when_simple", body: "damage 10 when (target.hp > 0.5)" },
+    // Slot 8 — combinations (mirrors corpus Aegis.ability shape).
+    ModifierProbe { label: "combo_stack_tag_scaling",
+        body: "damage_modify 0.6 for 8s stacking refresh [DEFENSE: 100] + 15% armor" },
+];
+
+fn synthesize_modifier_ability(probe: &ModifierProbe) -> String {
+    format!(
+        "ability TreeWalkerModifierProbe_{label} {{\n    target: self\n    {body}\n}}\n",
+        label = probe.label,
+        body = probe.body,
+    )
+}
+
+#[test]
+fn walker_each_modifier_parses_and_lowers() {
+    let mut failures: Vec<(String, String)> = Vec::new();
+    for probe in MODIFIERS {
+        let text = synthesize_modifier_ability(probe);
+        if let Err(stage) = try_pipeline(&text) {
+            failures.push((probe.label.to_string(), format!("{stage}\n--- source ---\n{text}")));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{}/{} modifiers failed parse/lower:\n\n{}",
+        failures.len(),
+        MODIFIERS.len(),
+        failures
+            .iter()
+            .map(|(m, msg)| format!("[{m}] {msg}"))
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+    );
+}
+
+/// Multi-effect bodies: an ability with N stacked top-level effect
+/// statements. Real-corpus pattern (e.g. Aatrox.WorldEnder pairs heal
+/// + fear + slow + buff under one ability). Catches lowering arms
+/// that assume single-effect ability bodies.
+#[test]
+fn walker_multi_effect_body_parses_and_lowers() {
+    let text = "ability TreeWalkerMultiEffect {\n\
+        \x20   target: self\n\
+        \x20   heal 10\n\
+        \x20   damage 5\n\
+        \x20   shield 10 for 5s\n\
+        \x20   stun 1s\n\
+        \x20   slow 0.3 for 2s\n\
+    }\n";
+    try_pipeline(text).unwrap_or_else(|e| panic!("multi-effect body must lower: {e}"));
+}
+
+/// Negative pin: dotted refs (`self.hp`) in scaling position parse
+/// (the `parse_stat_ref` cursor accepts dotted segments) but lower
+/// rejects them — `ScalingStatRef::parse` only knows flat names like
+/// `AP`, `AD`, `hp`. Documents the grammar-vs-lowering boundary so a
+/// future fix to either side is a deliberate decision rather than a
+/// silent surface-area shift.
+#[test]
+fn walker_dotted_scaling_ref_surfaces_lower_error() {
+    let text = "ability TreeWalkerDottedScaling {\n    target: self\n    damage 10 + 25% self.hp\n}\n";
+    let parsed = parse_ability_file(text).expect("dotted ref parses");
+    let err = lower_ability_decl(&parsed.abilities[0])
+        .expect_err("dotted ref must fail lowering today");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("UnknownStatRef"),
+        "expected UnknownStatRef, got: {msg}",
+    );
+}
+
 /// Negative pin: a synthesized ability that uses an unknown verb
 /// keyword must surface a `LowerError` (NOT panic, NOT silently
 /// succeed). Guards against future regressions where adding parser
