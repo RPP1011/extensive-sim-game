@@ -40,6 +40,7 @@ mod id;
 pub use id::AbilityId;
 
 pub mod apply;
+pub mod interrupt;
 pub mod packed;
 pub mod program;
 pub mod registry;
