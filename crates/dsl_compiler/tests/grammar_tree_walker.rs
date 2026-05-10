@@ -15,6 +15,7 @@
 
 use dsl_ast::ability_parser::parse_ability_file;
 use dsl_compiler::ability_lower::lower_ability_decl;
+use engine::ability::AbilityRegistryBuilder;
 
 /// One verb-axis sample. `args` is appended after the verb keyword to
 /// build a single effect statement.
@@ -461,6 +462,83 @@ fn walker_dotted_scaling_ref_surfaces_lower_error() {
     assert!(
         msg.contains("UnknownStatRef"),
         "expected UnknownStatRef, got: {msg}",
+    );
+}
+
+/// **Walker × hot-reload cross-product.** The walker generates every
+/// recognised verb shape (Plan I-1); the hot-reload primitive swaps
+/// programs in an `AbilityRegistry` (Plan I-3). This test validates
+/// the intersection: every walker-generated program must be a valid
+/// hot-reload payload — register one verb, then iterate through every
+/// other verb swapping it into the same slot, asserting the swap
+/// succeeds and the registry still answers lookups correctly.
+///
+/// Without this test, a future EffectOp variant that's parseable +
+/// lowerable but not Clone-friendly (e.g. holds a non-Clone-able
+/// resource) would silently break hot-reload's `with_program_replaced`
+/// — the unit pin only covers Damage, the cheapest variant. This
+/// closes the loop end-to-end: walker → lower → register → swap →
+/// re-lookup → repeat.
+#[test]
+fn walker_verbs_compose_with_hot_reload_swap() {
+    // Lower every verb probe to a program; collect the failures so
+    // the assertion can name the offender.
+    let mut programs: Vec<(&'static str, engine::ability::AbilityProgram)> =
+        Vec::with_capacity(VERBS.len());
+    for verb in VERBS {
+        let text = synthesize_verb_ability(verb);
+        let parsed = parse_ability_file(&text)
+            .unwrap_or_else(|e| panic!("[{}] parse failed: {e:?}", verb.name));
+        let prog = lower_ability_decl(&parsed.abilities[0]).unwrap_or_else(|e| {
+            panic!("[{}] lower failed: {e:?}", verb.name)
+        });
+        programs.push((verb.name, prog));
+    }
+
+    // Register the FIRST verb's program; we'll swap each subsequent
+    // verb into its slot and assert the lookup reflects the swap.
+    let mut builder = AbilityRegistryBuilder::new();
+    let id = builder.register(programs[0].1.clone());
+    let mut registry = builder.build();
+
+    let mut swap_failures: Vec<String> = Vec::new();
+    for (verb_name, prog) in programs.iter().skip(1) {
+        match registry.with_program_replaced(id, prog.clone()) {
+            Some(next) => {
+                // Confirm the new registry has the swapped program at
+                // the same slot (effects vector match by length is the
+                // cheapest structural check).
+                let after = next.get(id).unwrap();
+                if after.effects.len() != prog.effects.len() {
+                    swap_failures.push(format!(
+                        "[{verb_name}] post-swap effects.len() = {}, expected {}",
+                        after.effects.len(),
+                        prog.effects.len(),
+                    ));
+                }
+                registry = next;
+            }
+            None => {
+                swap_failures.push(format!(
+                    "[{verb_name}] with_program_replaced returned None on a known id"
+                ));
+            }
+        }
+    }
+    assert!(
+        swap_failures.is_empty(),
+        "{}/{} walker verbs failed hot-reload swap:\n{}",
+        swap_failures.len(),
+        programs.len() - 1,
+        swap_failures.join("\n"),
+    );
+
+    // After all swaps, the registry length is still 1 (one slot,
+    // many in-place updates). The original `id` is still valid.
+    assert_eq!(registry.len(), 1, "swap must not change registry length");
+    assert!(
+        registry.get(id).is_some(),
+        "the original id must still resolve after every swap"
     );
 }
 
