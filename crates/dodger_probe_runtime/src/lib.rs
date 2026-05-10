@@ -1660,4 +1660,132 @@ mod dodger_behavioural_tests {
              dodge state followed; A escaped only because rotation happened in time."
         );
     }
+
+    /// **Population-scale FOV pin.** N=32 agents arranged in a circle
+    /// around the origin, each facing OUTWARD (radially). One threat
+    /// source at the origin. For each agent, the FOV check evaluates
+    /// `dot(source - pos, facing)` — but since the agent faces
+    /// OUTWARD and the source is at origin, the source is always
+    /// BEHIND every agent. Geometric prediction: 0 agents dodge.
+    ///
+    /// Counter-scenario: same N agents, but every agent faces INWARD
+    /// (toward origin). Now the source is always in front. Geometric
+    /// prediction: every agent dodges.
+    ///
+    /// The pin compares both — same world, only facings differ.
+    /// Outward → 0 dodgers. Inward → N dodgers. The behavioral
+    /// asymmetry tracks geometry through the full pipeline:
+    /// agent_facing (GPU SoA) → host FOV → beliefs_flags (GPU SoA)
+    /// → fold (GPU kernel, belief-gated) → scoring (GPU kernel) →
+    /// per-agent action (read back).
+    #[test]
+    fn population_scale_fov_geometric_dodging() {
+        const N: u32 = 32;
+        const SOURCE_SLOT: u32 = 0;
+        // Agents live in slots 1..N; source is slot 0 at origin.
+        // Place the agents on a unit circle of radius R.
+        const R: f32 = 5.0;
+
+        fn place_agents_on_circle(n_dodgers: u32) -> Vec<[f32; 4]> {
+            let mut positions = vec![[0.0f32; 4]; (n_dodgers + 1) as usize];
+            // Slot 0: source at origin.
+            // Slots 1..=n_dodgers: dodgers around the circle.
+            for i in 0..n_dodgers {
+                let theta =
+                    (i as f32) * std::f32::consts::TAU / (n_dodgers as f32);
+                positions[(i + 1) as usize] = [R * theta.cos(), R * theta.sin(), 0.0, 0.0];
+            }
+            positions
+        }
+
+        fn radial_facings(n_dodgers: u32, outward: bool) -> Vec<[f32; 4]> {
+            let mut facings = vec![[1.0f32, 0.0, 0.0, 0.0]; (n_dodgers + 1) as usize];
+            for i in 0..n_dodgers {
+                let theta =
+                    (i as f32) * std::f32::consts::TAU / (n_dodgers as f32);
+                let dir = if outward { 1.0 } else { -1.0 };
+                facings[(i + 1) as usize] =
+                    [dir * theta.cos(), dir * theta.sin(), 0.0, 0.0];
+            }
+            facings
+        }
+
+        fn is_in_front(observer: (f32, f32), facing: (f32, f32), source: (f32, f32)) -> bool {
+            let dx = source.0 - observer.0;
+            let dy = source.1 - observer.1;
+            (dx * facing.0 + dy * facing.1) > 0.0
+        }
+
+        // Run one scenario; return (dodgers_who_picked_flee, total_dodgers).
+        fn run_scenario(outward: bool) -> Option<(u32, u32)> {
+            let n_dodgers = N - 1; // slot 0 is the source
+            let mut state = DodgerProbeState::try_new(0xCAFE, N)?;
+            state.seed_agent_pos(&place_agents_on_circle(n_dodgers));
+            state.seed_agent_facing(&radial_facings(n_dodgers, outward));
+
+            let positions = state.read_agent_pos();
+            let facings = state.read_agent_facing();
+            let source_pos = (positions[SOURCE_SLOT as usize][0], positions[SOURCE_SLOT as usize][1]);
+
+            // Compute beliefs from FOV for each (dodger, source) pair.
+            let cap = (N * N) as usize;
+            let mut beliefs = vec![0u32; cap];
+            for dodger in 1..=n_dodgers {
+                let pos = (positions[dodger as usize][0], positions[dodger as usize][1]);
+                let facing = (facings[dodger as usize][0], facings[dodger as usize][1]);
+                if is_in_front(pos, facing, source_pos) {
+                    beliefs[(dodger * N + SOURCE_SLOT) as usize] =
+                        DodgerProbeState::OBSERVED_BUSY_BIT;
+                }
+            }
+            state.seed_beliefs_flags(&beliefs);
+
+            // Two ticks: tick 0 settles the busy preload + fold; tick 1
+            // is the first observable steady-state scoring.
+            state.step();
+            state.step();
+
+            let scoring = state.read_scoring_output();
+            let mut flees = 0u32;
+            for dodger in 1..=n_dodgers {
+                if state.chosen_action(&scoring, dodger) == FLEE_ACTION_ID {
+                    flees += 1;
+                }
+            }
+            Some((flees, n_dodgers))
+        }
+
+        // Outward facings → source always behind → no dodges.
+        let (flees_outward, total) = match run_scenario(true) {
+            Some(v) => v,
+            None => {
+                eprintln!("[pop-fov-pin] skipping: no wgpu adapter on host.");
+                return;
+            }
+        };
+        eprintln!(
+            "[pop-fov-pin] OUTWARD facings: {flees_outward}/{total} dodgers picked Flee (expected 0)"
+        );
+        assert_eq!(
+            flees_outward, 0,
+            "every dodger faces away → source in everyone's back → 0 should pick Flee"
+        );
+
+        // Inward facings → source always in front → every dodger dodges.
+        let (flees_inward, _) =
+            run_scenario(false).expect("second scenario must construct");
+        eprintln!(
+            "[pop-fov-pin] INWARD facings:  {flees_inward}/{total} dodgers picked Flee (expected {total})"
+        );
+        assert_eq!(
+            flees_inward, total,
+            "every dodger faces toward source → source in everyone's front → {total} should pick Flee"
+        );
+
+        eprintln!(
+            "[pop-fov-pin] PROVEN: at N={total} dodgers, the same world produces 0 vs {total} \
+             dodging decisions purely from facing geometry. Per-agent FOV resolves the right \
+             belief bits; the GPU's belief-gated fold + scoring tracks them all in one dispatch."
+        );
+    }
 }
