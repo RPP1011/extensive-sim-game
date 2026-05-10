@@ -1751,10 +1751,13 @@ fn compose_view_fold_bind_method(spec: &KernelSpec) -> String {
 ///   the `agent_cap` parameter is suppressed via `let _ = agent_cap;`
 ///   to silence unused-variable warnings.
 fn compose_view_fold_record_method(spec: &KernelSpec) -> String {
-    debug_assert_eq!(
-        spec.bindings.len(),
-        7,
-        "compose_view_fold_record_method: ViewFold spec must carry exactly 7 bindings; got {}",
+    // ViewFold has 7 bindings in the standard PerEvent shape
+    // (event_ring/event_tail/primary/anchor/ids/sim_cfg/cfg). G3d's
+    // PerAgentEventScan adds slot 7 = `agent_busy_with_ability_id`
+    // for the busy-filter early-exit, bringing the total to 8.
+    debug_assert!(
+        spec.bindings.len() == 7 || spec.bindings.len() == 8,
+        "compose_view_fold_record_method: ViewFold spec must carry 7 or 8 bindings; got {}",
         spec.bindings.len()
     );
     let mut out = String::new();
@@ -1799,6 +1802,15 @@ fn compose_view_fold_record_method(spec: &KernelSpec) -> String {
     out.push_str(
         "                wgpu::BindGroupEntry { binding: 6, resource: bindings.cfg.as_entire_binding() },\n",
     );
+    // G3d: PerAgentEventScan adds an 8th binding for the busy-filter
+    // SoA read. The spec's binding-count classification (7 vs 8) tells
+    // us whether to emit the extra entry. Mirror's the BGL emit at
+    // `cg/emit/kernel.rs::build_view_fold_bindings`'s extra slot.
+    if spec.bindings.len() == 8 {
+        out.push_str(
+            "                wgpu::BindGroupEntry { binding: 7, resource: bindings.agent_busy_with_ability_id.as_entire_binding() },\n",
+        );
+    }
     out.push_str("            ],\n        });\n");
     out.push_str(&format!(
         "        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {{\n            \

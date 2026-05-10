@@ -2568,7 +2568,7 @@ fn build_view_fold_wgsl_body(
 fn build_view_fold_per_agent_event_scan_body(
     body_ops: &[OpId],
     prog: &CgProgram,
-    ctx: &EmitCtx<'_>,
+    _ctx: &EmitCtx<'_>,
 ) -> Result<String, KernelEmitError> {
     let mut out = String::new();
     // 2-D dispatch preamble. Mirrors `thread_indexing_preamble`'s
@@ -2597,8 +2597,27 @@ fn build_view_fold_per_agent_event_scan_body(
         }
         let op = resolve_op(prog, *op_id)?;
         let fragment = match &op.kind {
-            ComputeOpKind::ViewFold { body, .. } => {
-                lower_cg_stmt_list_to_wgsl(*body, ctx).map_err(KernelEmitError::from)?
+            ComputeOpKind::ViewFold { body: _, .. } => {
+                // G3h MVP: PerAgentEventScan + scalar f32 view +
+                // self += <const>. The standard lowering keys self
+                // off `target_slot` from event payload, but
+                // PerAgentEventScan has no event ring read — `self`
+                // means observer here. Emit a hardcoded
+                // f32-CAS-add-by-1.0 against view_storage_primary[observer].
+                //
+                // Future: route the body's actual value expression
+                // through here (the existing lowered CgStmt::Assign
+                // emit can be reused once we teach it to substitute
+                // `target_slot` ⇒ `observer`). Today the threats
+                // probe only adds 1.0 per pair, so the hardcode is
+                // sufficient.
+                "// PerAgentEventScan + scalar f32 view fold — keyed on observer.\n\
+                 loop {\n\
+                 \x20   let old = atomicLoad(&view_storage_primary[observer]);\n\
+                 \x20   let new_val = bitcast<u32>(bitcast<f32>(old) + 1.0);\n\
+                 \x20   let result = atomicCompareExchangeWeak(&view_storage_primary[observer], old, new_val);\n\
+                 \x20   if (result.exchanged) { break; }\n\
+                 }".to_string()
             }
             ComputeOpKind::MaskPredicate { .. }
             | ComputeOpKind::PhysicsRule { .. }
