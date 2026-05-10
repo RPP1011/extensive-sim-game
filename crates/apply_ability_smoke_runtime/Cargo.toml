@@ -29,6 +29,10 @@ bytemuck = { version = "1.16", features = ["derive"] }
 glam = "0.29"
 pollster = "0.4"
 dsl_compiler = { path = "../dsl_compiler" }
+# Plan I-step-3: `reload_from_ability_source` parses + lowers an
+# `.ability` source string into an updated AbilityRegistry, then
+# re-uploads to GPU. Runtime-side dep (not just build).
+dsl_ast = { path = "../dsl_ast" }
 
 [build-dependencies]
 dsl_ast = { path = "../dsl_ast" }

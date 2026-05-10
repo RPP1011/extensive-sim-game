@@ -104,3 +104,100 @@ fn hot_reload_changes_emitted_chronicle_damage_amount() {
         "hot reload must produce a chronicle-level behavioural change on GPU"
     );
 }
+
+/// Live `.ability` source → live GPU registry, in one runtime call.
+/// The caller-friendly bridge over the parse → lower → swap →
+/// re-pack → re-upload chain. Models how a file-watch loop would
+/// invoke hot-reload: read the changed source, hand it off, dispatch.
+#[test]
+fn hot_reload_from_ability_source_string_changes_chronicle_damage() {
+    const DAMAGE_KIND: u32 = 26;
+
+    let mut builder = AbilityRegistryBuilder::new();
+    let id = builder.register(damage_program(7.0));
+    let registry_v1 = builder.build();
+
+    let mut state = match ApplyAbilitySmokeState::try_new_with_registry(
+        1,
+        &registry_v1,
+        &[id.raw()],
+        &[Default::default()],
+    ) {
+        Some(s) => s,
+        None => {
+            eprintln!("[hot_reload_source_pin] skipping: no wgpu adapter on host.");
+            return;
+        }
+    };
+
+    state.step(0);
+    let r_initial = state.read_event_ring(state.read_event_tail())[0];
+    assert_eq!(
+        r_initial[4],
+        7.0_f32.to_bits(),
+        "v1 chronicle damage = 7.0; got 0x{:08X}",
+        r_initial[4],
+    );
+
+    // Hand the runtime an .ability source verbatim — the same shape
+    // an editor would save to disk on a hot-reload trigger.
+    let updated_source = "ability HotReloadFromSource {\n    \
+                          target: enemy\n    \
+                          range: 5.0\n    \
+                          damage 99\n}\n";
+    let _registry_v2 = state
+        .reload_from_ability_source(&registry_v1, id, updated_source)
+        .expect("source must parse + lower + swap cleanly");
+    state.reset_event_tail();
+
+    state.step(1);
+    let r_after = state.read_event_ring(state.read_event_tail())[0];
+    assert_eq!(r_after[0], DAMAGE_KIND, "post-reload kind still EffectDamageApplied");
+    assert_eq!(
+        r_after[4],
+        99.0_f32.to_bits(),
+        "post-reload chronicle damage must be 99.0 from the source string; got 0x{:08X}",
+        r_after[4],
+    );
+}
+
+/// Negative pin: malformed source surfaces an error and leaves GPU
+/// state untouched. Catches a future regression where a bad source
+/// string corrupts the live registry.
+#[test]
+fn reload_from_invalid_source_keeps_gpu_state_intact() {
+    let mut builder = AbilityRegistryBuilder::new();
+    let id = builder.register(damage_program(13.0));
+    let registry_v1 = builder.build();
+
+    let mut state = match ApplyAbilitySmokeState::try_new_with_registry(
+        1,
+        &registry_v1,
+        &[id.raw()],
+        &[Default::default()],
+    ) {
+        Some(s) => s,
+        None => {
+            eprintln!("[hot_reload_invalid_pin] skipping: no wgpu adapter on host.");
+            return;
+        }
+    };
+
+    let bad_source = "this is not a valid .ability file at all";
+    let result = state.reload_from_ability_source(&registry_v1, id, bad_source);
+    assert!(
+        result.is_err(),
+        "malformed source must return Err, not silently overwrite GPU state"
+    );
+
+    // Confirm GPU state is unchanged: dispatch still emits damage 13.
+    state.step(0);
+    let tail = state.read_event_tail();
+    let r = state.read_event_ring(tail)[0];
+    assert_eq!(
+        r[4],
+        13.0_f32.to_bits(),
+        "after failed reload, original damage 13.0 must still be live; got 0x{:08X}",
+        r[4],
+    );
+}

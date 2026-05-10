@@ -818,6 +818,50 @@ impl ApplyAbilitySmokeState {
         );
     }
 
+    /// Plan I-step-3 — `.ability` source → live GPU registry, in one
+    /// call. Caller-friendly bridge over the parse → lower → swap →
+    /// re-pack → re-upload chain. Use case: a file watcher (notify,
+    /// inotify, etc.) reads a changed `.ability` file and passes the
+    /// source string here; the runtime is live with the new program
+    /// before the next `step()`.
+    ///
+    /// `slot_id` selects which existing registry slot to overwrite.
+    /// The previous registry stays alive in `previous` (returned to
+    /// the caller) so any in-flight `Arc<AbilityRegistry>` holders
+    /// can drain naturally — this method intentionally does NOT
+    /// drop the previous CPU registry inside the runtime's own
+    /// state, since this fixture doesn't keep one.
+    ///
+    /// Errors: returns `Err(String)` for parse, lower, or
+    /// out-of-range-id failures. The runtime's GPU state is
+    /// untouched on error — callers can retry with a corrected
+    /// source without restarting the simulation.
+    pub fn reload_from_ability_source(
+        &mut self,
+        previous: &engine::ability::AbilityRegistry,
+        slot_id: AbilityId,
+        src: &str,
+    ) -> Result<engine::ability::AbilityRegistry, String> {
+        let parsed = dsl_ast::ability_parser::parse_ability_file(src)
+            .map_err(|e| format!("parse: {e:?}"))?;
+        let decl = parsed
+            .abilities
+            .first()
+            .ok_or_else(|| "source has no `ability` declarations".to_string())?;
+        let new_program = dsl_compiler::ability_lower::lower_ability_decl(decl)
+            .map_err(|e| format!("lower: {e:?}"))?;
+        let next = previous
+            .with_program_replaced(slot_id, new_program)
+            .ok_or_else(|| {
+                format!(
+                    "slot id {slot_id:?} out of range for registry of len {}",
+                    previous.len()
+                )
+            })?;
+        self.hot_reload_registry(&next);
+        Ok(next)
+    }
+
     /// Test hook: zero out the event ring tail counter so the next
     /// `step()` writes from slot 0. Pairs with `hot_reload_registry`
     /// to make readback after a reload deterministic — the chronicle
