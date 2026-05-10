@@ -818,9 +818,13 @@ pub fn project_storage_hint(hint: StorageHint) -> crate::cg::program::CgStorageH
     use crate::cg::program::CgStorageHint;
     match hint {
         StorageHint::PairMap => CgStorageHint::PairMap,
+        // Plan G G3a — PerEntityRing carries K through to the emit
+        // so the fold body can ring-append-modulo via `% K`. Other
+        // shapes (TopK, SymmetricPairTopK, LazyCached) still
+        // collapse to SingleKey emit until per-shape templates land.
+        StorageHint::PerEntityRing { k } => CgStorageHint::PerEntityRing { k },
         StorageHint::PerEntityTopK { .. }
         | StorageHint::SymmetricPairTopK { .. }
-        | StorageHint::PerEntityRing { .. }
         | StorageHint::LazyCached => CgStorageHint::SingleKey,
     }
 }

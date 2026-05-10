@@ -67,57 +67,46 @@ fn per_entity_ring_probe_sim_lowers_clean() {
     eprintln!("[G3a smoke] inspecting {}", fold_wgsl.0);
     eprintln!("[G3a smoke] body length: {} bytes", fold_wgsl.1.len());
 
-    // PROBE-ONLY signal — surfaces the current state of the
-    // PerEntityRing emit gap. Today (2026-05-10), the storage hint
-    // does NOT propagate to the BGL or fold body:
+    // Plan G G3a-step-2 — ring-append emit landed. The fold body
+    // hand-emits the ring-append shape when the view's storage hint
+    // is PerEntityRing { k }:
     //
-    //   * BGL slots 2/3/4 hardcode primary/anchor/ids. PerEntityRing
-    //     should bind primary + cursors (no anchor/ids). See
-    //     `cg/emit/kernel.rs:2222-2261` — slots are unconditional.
-    //   * Fold body lowers `self += amount` as scalar CAS-add on
-    //     `view_storage_primary[target_slot]`. PerEntityRing needs
-    //     ring-append: `let idx = atomicAdd(&cursors[target], 1u);
-    //     primary[target * K + (idx % K)] = amount`. See
-    //     `cg/emit/kernel.rs:2186` (the documented TODO).
-    //   * Runtime `ViewStorage` (engine/src/gpu/event_ring.rs:353)
-    //     has no `cursors` field — would need extension.
+    //   let cursor_idx = atomicAdd(&view_storage_anchor[target], 1u);
+    //   let ring_idx = target * 4u + (cursor_idx % 4u);
+    //   atomicStore(&view_storage_primary[ring_idx], amount_bits);
     //
-    // The pin is intentionally lenient (eprintln, not assert) so
-    // the test stays GREEN as a regression guard for the .sim
-    // parsing + lowering path. It flips to a hard assertion once
-    // any one of those three layers is fixed and we want to lock
-    // in the new shape.
-    let has_cursors = fold_wgsl.1.contains("cursors");
-    let has_modulo  = fold_wgsl.1.contains("% 4u");
-    eprintln!("[G3a smoke] has 'cursors' binding: {has_cursors}");
-    eprintln!("[G3a smoke] has '% 4u' ring-modulo: {has_modulo}");
-    if !has_cursors || !has_modulo {
-        eprintln!("[G3a smoke] PerEntityRing emit gap still open. Next sub-steps:");
-        eprintln!("  1. BGL emit (cg/emit/kernel.rs:2220-2261) — branch on storage hint;");
-        eprintln!("     PerEntityRing slot 3 = cursors (not anchor), slot 4 unused.");
-        eprintln!("  2. Runtime ViewStorage (engine/src/gpu/event_ring.rs:353) — add");
-        eprintln!("     `cursors: Option<wgpu::Buffer>` field + has_cursors constructor flag.");
-        eprintln!("  3. Fold body emit (cg/emit/kernel.rs:2186 TODO) — when storage hint");
-        eprintln!("     is PerEntityRing, generate ring-append instead of CAS-add.");
-        eprintln!("  4. Per-runtime crate (per_entity_ring_probe_runtime) — exercise on GPU.");
-    }
+    // The slot 3 binding is reused as the cursors counter (renamed
+    // semantically; the binding still says `view_storage_anchor` so
+    // the existing per-runtime bindings struct field name is
+    // preserved). For PerEntityRing the WGSL declares slot 3 as
+    // `array<atomic<u32>>` so `atomicAdd` is well-typed.
+    //
+    // These are HARD assertions — a regression that drops the
+    // ring-append primitive surfaces here as a test failure.
+    assert!(fold_wgsl.1.contains("atomicAdd(&view_storage_anchor"),
+        "PerEntityRing emit must atomicAdd the cursors slot to allocate \
+         a ring index. WGSL did not contain the substring.\n\nWGSL:\n{}",
+         fold_wgsl.1);
+    assert!(fold_wgsl.1.contains("% 4u"),
+        "PerEntityRing emit must compute `ring_idx = target * K + (cursor_idx % K)`. \
+         WGSL did not contain `% 4u` (K=4 from the .sim's @per_entity_ring(K = 4)).\n\nWGSL:\n{}",
+         fold_wgsl.1);
+    assert!(fold_wgsl.1.contains("atomicStore(&view_storage_primary"),
+        "PerEntityRing emit must atomicStore the value at the computed ring_idx. \
+         WGSL did not contain the substring.\n\nWGSL:\n{}",
+         fold_wgsl.1);
 
-    // The ring-append primitive itself: the modulo on the cursor.
-    // K=4 in the .sim's `@per_entity_ring(K = 4)`. If `% 4u` is
-    // absent, the emit hasn't grown the ring-append yet (the gap
-    // documented at `cg/emit/kernel.rs:2186`). Test fails loud so
-    // the author surfaces the gap.
-    if !fold_wgsl.1.contains("% 4u") {
-        eprintln!("[G3a smoke] recent_damages WGSL DOES NOT contain `% 4u` ring-modulo.");
-        eprintln!("[G3a smoke] This means the WGSL emit hasn't been taught the ring-append");
-        eprintln!("[G3a smoke] primitive yet (see TODO at cg/emit/kernel.rs:2186). The");
-        eprintln!("[G3a smoke] storage scaffold (cursors binding) is likely in place but");
-        eprintln!("[G3a smoke] the body is lowering as scalar accumulate. G3a's next");
-        eprintln!("[G3a smoke] sub-step is to teach the emit to recognise PerEntityRing.");
-        eprintln!("[G3a smoke] Body excerpt (first 800 chars):");
-        eprintln!("{}", &fold_wgsl.1[..fold_wgsl.1.len().min(800)]);
-    }
-    // Don't fail the assertion yet — the test is a probe to surface
-    // current state. The emit-side fix flips this from a probe to
-    // a regression guard.
+    // Confirm the BGL declared slot 3 as an atomic array (required for
+    // atomicAdd). Substring check against the WGSL declaration.
+    assert!(fold_wgsl.1.contains("view_storage_anchor: array<atomic<u32>>"),
+        "PerEntityRing BGL must declare slot 3 as `array<atomic<u32>>`. \
+         WGSL did not match.\n\nWGSL:\n{}",
+         fold_wgsl.1);
+
+    // Negative pin: the CAS-add scalar accumulator should NOT be in the
+    // body for a PerEntityRing view (the ring-append emit replaces it).
+    assert!(!fold_wgsl.1.contains("atomicCompareExchangeWeak"),
+        "PerEntityRing emit must NOT fall back to the scalar CAS-add \
+         (CAS is for non-ring views). WGSL contained `atomicCompareExchangeWeak`.\n\nWGSL:\n{}",
+         fold_wgsl.1);
 }
