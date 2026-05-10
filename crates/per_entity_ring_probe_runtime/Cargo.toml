@@ -1,0 +1,27 @@
+[package]
+name = "per_entity_ring_probe_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Plan G G3a-step-3 — per-fixture runtime crate for
+# `assets/sim/per_entity_ring_probe.sim`. Drives the new
+# PerEntityRing storage hint end-to-end on real wgpu hardware.
+# Behavioural pin: ring[0] = [10, 20, 30, 40] after 4 Damaged
+# events; ring[0] = [50, 20, 30, 40] after 5 (wrap proves the
+# cursor's `% K` modulo). Mirrors `cooldown_probe_runtime` shape:
+# build.rs lowers the .sim through the DSL compiler into
+# `OUT_DIR/generated.rs`; src/lib.rs owns the GPU context, per-buffer
+# storage, kernel cache, and per-tick dispatch chain.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

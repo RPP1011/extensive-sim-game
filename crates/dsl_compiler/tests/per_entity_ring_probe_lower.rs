@@ -88,11 +88,11 @@ fn per_entity_ring_probe_sim_lowers_clean() {
          a ring index. WGSL did not contain the substring.\n\nWGSL:\n{}",
          fold_wgsl.1);
     assert!(fold_wgsl.1.contains("% 4u"),
-        "PerEntityRing emit must compute `ring_idx = target * K + (cursor_idx % K)`. \
+        "PerEntityRing emit must compute `ring_idx = target_slot * K + (cursor_idx % K)`. \
          WGSL did not contain `% 4u` (K=4 from the .sim's @per_entity_ring(K = 4)).\n\nWGSL:\n{}",
          fold_wgsl.1);
-    assert!(fold_wgsl.1.contains("atomicStore(&view_storage_primary"),
-        "PerEntityRing emit must atomicStore the value at the computed ring_idx. \
+    assert!(fold_wgsl.1.contains("view_storage_primary[ring_idx] = amount_bits"),
+        "PerEntityRing emit must store amount_bits at the computed ring_idx. \
          WGSL did not contain the substring.\n\nWGSL:\n{}",
          fold_wgsl.1);
 

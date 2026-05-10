@@ -2552,21 +2552,23 @@ fn build_view_fold_ring_append_body(
             "    if (event_ring[event_idx * {stride}u + 0u] == {event_id}u) {{\n"
         ));
         out.push_str(&format!(
-            "        let target = event_ring[event_idx * {stride}u + 3u];\n"
+            "        let target_slot = event_ring[event_idx * {stride}u + 3u];\n"
         ));
         out.push_str(&format!(
             "        let amount_bits = event_ring[event_idx * {stride}u + 4u];\n"
         ));
         out.push_str(
-            "        let cursor_idx = atomicAdd(&view_storage_anchor[target], 1u);\n",
+            "        let cursor_idx = atomicAdd(&view_storage_anchor[target_slot], 1u);\n",
         );
         out.push_str(&format!(
-            "        let ring_idx = target * {k}u + (cursor_idx % {k}u);\n"
+            "        let ring_idx = target_slot * {k}u + (cursor_idx % {k}u);\n"
         ));
-        // primary is `array<atomic<u32>>` per the BGL declaration; use
-        // atomicStore so the WGSL validator is happy.
+        // primary is `array<u32>` for PerEntityRing (non-atomic — the
+        // cursor atomicAdd already serialized slot allocation, so
+        // each writer's `ring_idx` is distinct within one tick for
+        // ≤K events per agent). Plain assignment, not atomicStore.
         out.push_str(
-            "        atomicStore(&view_storage_primary[ring_idx], amount_bits);\n",
+            "        view_storage_primary[ring_idx] = amount_bits;\n",
         );
         out.push_str("    }\n");
     }
