@@ -89,6 +89,22 @@ config interrupt {
   // injected) and "no interrupt + resolve fired"
   // (hp = 100 - injected - firebolt_damage) is a clean signal.
   inject_amount:  f32 = 10.0,
+  // Interrupt mask the casting ability declared. Bit layout matches
+  // engine::ability::interrupt::InterruptKind:
+  //   bit 0 = Damage, bit 1 = Stun, bit 2 = CasterDied,
+  //   bit 3 = TargetDied, bit 4 = Movement.
+  // Default 15 = standard (Damage|Stun|CasterDied|TargetDied — what
+  // `interrupts: standard` resolves to via lower_interrupt_set).
+  // Tests can override to e.g. 14 (standard - { damage }) to verify
+  // the InterruptCastOnDamage rule's mask gate suppresses the
+  // interrupt for damage-only events.
+  //
+  // Hardcoded per-fixture today rather than packed into the chronicle
+  // event payload — `EffectCastBeginApplied` already uses both u32
+  // payload slots for (ability_id|duration<<16, target_x_q8|target_y_q8<<16).
+  // The runtime sets this cfg value to match the registered ability's
+  // `AbilityProgram::cast_interrupt_mask` (engine API).
+  mask:           u32 = 15,
 }
 
 physics DispatchFirebolt @phase(per_agent) {
@@ -117,19 +133,25 @@ physics InjectDamage {
 }
 
 // Plan G G2.5 — interrupt detection consumer. Reads each
-// EffectDamageApplied chronicle row; if the target was mid-cast,
-// clears the busy SoA so the resolve never fires.
+// EffectDamageApplied chronicle row; if the target was mid-cast AND
+// the cast's interrupt mask includes the Damage bit, clears the busy
+// SoA so the resolve never fires.
 //
-// Only checks `busy_until_tick > 0` today (no interrupt-mask gate).
-// The full check would also consult `agents.busy_interrupt_mask(t)`
-// against the InterruptKind::Damage bit, but that SoA column doesn't
-// exist yet (cast_interrupt_mask is CPU-only on AbilityProgram). For
-// the firebolt_interrupt_probe MVP we treat all damage as interrupting
-// (matches `interrupts: standard` which always includes Damage).
+// The mask gate makes `interrupts: standard - { damage }` semantics
+// observable — a forager-style cast that "keeps moving even under
+// fire" sets `config.interrupt.mask` to 14 (standard with bit 0
+// cleared); the rule's `(mask & 1) != 0` check evaluates false and
+// busy state stays put.
+//
+// Today the mask is sourced from per-fixture config (one value per
+// fixture). The generalization (per-cast mask sourced from a new
+// `agents.busy_interrupt_mask` SoA column written by
+// RecordCastBegin) is a follow-up — needs the chronicle event to
+// carry the mask, which means another payload slot.
 @phase(post)
 physics InterruptCastOnDamage {
   on EffectDamageApplied { actor: _, target: t, amount: _ } {
-    if (agents.busy_until_tick(t) > 0) {
+    if (agents.busy_until_tick(t) > 0 && (config.interrupt.mask % 2) == 1) {
       agents.set_busy_until_tick(t, 0);
       agents.set_busy_with_ability_id(t, 0);
     }
