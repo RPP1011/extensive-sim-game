@@ -106,11 +106,17 @@ physics DispatchFirebolt @phase(per_agent) {
 // here).
 @phase(post)
 physics RecordCastBegin {
-  on EffectCastBeginApplied { actor: a, target: t, ability_id: aid, duration_ticks: dur, target_x_q8: _, target_y_q8: _ } {
+  on EffectCastBeginApplied { actor: a, target: _, ability_id: aid, duration_ticks: dur, target_x_q8: _, target_y_q8: _ } {
     agents.set_busy_until_tick(a, world.tick + dur);
     agents.set_busy_with_ability_id(a, aid);
     agents.set_busy_started_at_tick(a, world.tick);
-    agents.set_busy_target_slot(a, t);
+    // busy_target_slot is u32 in the SoA; the chronicle's `target`
+    // field is an AgentId. The DSL doesn't yet auto-coerce
+    // AgentId → u32 via .raw(), so we leave the slot at its
+    // baseline 0 for self-cast firebolt and revisit when the first
+    // non-self-cast fixture needs the column. The interrupt /
+    // threats-zone layers (G2.5 / G3) will need this coercion
+    // primitive — flag it then.
   }
 }
 
