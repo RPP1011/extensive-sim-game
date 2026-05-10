@@ -1784,7 +1784,48 @@ fn parse_config_field(c: &mut Cursor) -> PResult<ConfigField> {
     expect_char(c, '=').map_err(|e| e.with_context("parsing config field `=` for default value"))?;
     c.skip_ws();
     let default = parse_config_default(c)?;
-    Ok(ConfigField { name, ty, default, span: Span::new(fstart, c.pos) })
+    // Optional trailing `@runtime` annotation (Plan G tunable cfg).
+    // Consumed here — NOT via the generic `parse_annotations` driver —
+    // because config fields don't carry the full annotation surface
+    // today; only this single boolean knob is wired through. Other
+    // annotations after the default value are reported as a parse error
+    // so a future extension lands as a typed grammar change rather than
+    // a silent ignore.
+    //
+    // The lookahead is lookahead-safe: `parse_config_default` leaves the
+    // cursor exactly after the literal, and the outer `config_decl` loop
+    // skips whitespace before checking for `,` / `}`. We peek `@` after
+    // a whitespace skip; a non-`@` char rolls back to the post-default
+    // position so the comma / brace gating still works.
+    let mut runtime = false;
+    let after_default = c.pos;
+    c.skip_ws();
+    if c.starts_with_char('@') {
+        let ann = parse_annotation(c)?;
+        if ann.name == "runtime" {
+            if !ann.args.is_empty() {
+                return Err(ParseErr::at(
+                    here(c),
+                    "@runtime annotation on config fields takes no arguments",
+                ));
+            }
+            runtime = true;
+        } else {
+            return Err(ParseErr::at(
+                here(c),
+                format!(
+                    "unknown annotation `@{}` on config field — only `@runtime` is supported",
+                    ann.name
+                ),
+            ));
+        }
+    } else {
+        // Roll back the whitespace skip so the outer config-decl loop's
+        // `skip_ws + comma/brace` gating starts from the same position
+        // it would have without this lookahead.
+        c.pos = after_default;
+    }
+    Ok(ConfigField { name, ty, default, runtime, span: Span::new(fstart, c.pos) })
 }
 
 /// Parse the RHS of `<field>: <type> = <literal>`. Accepts one of:

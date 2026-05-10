@@ -214,6 +214,7 @@ mod tests {
                 },
             ],
             kind: KernelKind::Generic,
+            runtime_cfg_fields: Vec::new(),
         }
     }
 
@@ -300,6 +301,7 @@ mod tests {
                 },
             ],
             kind: KernelKind::Generic,
+            runtime_cfg_fields: Vec::new(),
         };
         let fields = lower_rust_bindings_struct_fields(&spec);
         assert!(fields.contains("pub primary: &'a wgpu::Buffer,"));

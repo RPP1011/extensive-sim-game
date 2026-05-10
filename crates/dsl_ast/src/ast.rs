@@ -637,6 +637,15 @@ pub struct ConfigField {
     pub name: String,
     pub ty: TypeRef,
     pub default: ConfigDefault,
+    /// `@runtime` annotation flag (Plan G tunable cfg). When `true`, the
+    /// field lowers to a per-kernel cfg-uniform field (host-tunable per
+    /// tick) instead of a baked-at-compile WGSL `const`. The default
+    /// (`false`) preserves the existing const-baked behaviour for every
+    /// field that doesn't opt in. Source surface:
+    ///   `mask: u32 = 15 @runtime,`
+    /// (the `@runtime` token sits AFTER the default value, matching the
+    /// trailing-annotation idiom used elsewhere in the grammar).
+    pub runtime: bool,
     pub span: Span,
 }
 

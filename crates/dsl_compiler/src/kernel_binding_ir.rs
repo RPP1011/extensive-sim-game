@@ -142,6 +142,21 @@ pub struct KernelSpec {
     /// `cg/emit/kernel.rs`; defaults to [`KernelKind::Generic`] for
     /// hand-built spec literals (legacy emitters).
     pub kind: KernelKind,
+    /// Plan G tunable cfg — extra cfg-uniform fields appended to the
+    /// kernel's Cfg struct (after the base layout: agent_cap/event_count/
+    /// tick/seed/_pad/agent_cap). One entry per runtime-tunable
+    /// `ConfigConstId` the kernel body references, in `(name, scalar_ty)`
+    /// form (e.g. `("config_interrupt_mask", "u32")`).
+    ///
+    /// Sorted by source `ConfigConstId` (id-ascending). The Rust
+    /// [`Self::cfg_struct_decl`] already encodes them; this field lets
+    /// the WGSL composer (`cg::emit::program::compose_wgsl_cfg_struct`)
+    /// mirror the same layout into the WGSL struct without re-walking
+    /// body ops.
+    ///
+    /// Empty for kernels with no `@runtime` config refs (the default
+    /// shape).
+    pub runtime_cfg_fields: Vec<(String, String)>,
 }
 
 impl KernelSpec {
@@ -225,6 +240,7 @@ mod tests {
                 b(1, "cfg", AccessMode::Uniform, "DemoCfg", BgSource::Cfg),
             ],
             kind: KernelKind::Generic,
+            runtime_cfg_fields: Vec::new(),
         };
         assert!(spec.validate().is_ok());
     }
@@ -244,6 +260,7 @@ mod tests {
                 b(2, "cfg", AccessMode::Uniform, "DemoCfg", BgSource::Cfg),
             ],
             kind: KernelKind::Generic,
+            runtime_cfg_fields: Vec::new(),
         };
         assert!(spec.validate().is_err());
     }
@@ -264,6 +281,7 @@ mod tests {
                   BgSource::AliasOf("not_a_field".into())),
             ],
             kind: KernelKind::Generic,
+            runtime_cfg_fields: Vec::new(),
         };
         assert!(spec.validate().is_err());
     }

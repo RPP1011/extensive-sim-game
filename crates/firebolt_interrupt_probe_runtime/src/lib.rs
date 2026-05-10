@@ -142,6 +142,13 @@ pub struct FireboltInterruptProbeState {
     pub initial_hp: f32,
     /// Current tick — incremented at the end of every `step()` call.
     tick: u32,
+    /// Plan G tunable cfg — per-tick value the InterruptCastOnDamage
+    /// kernel reads as `cfg.config_interrupt_mask`. Mirrors the .sim's
+    /// `config.interrupt.mask` `@runtime` field. Defaults to 15
+    /// (standard interrupt mask = Damage|Stun|CasterDied|TargetDied).
+    /// Tests override via [`Self::set_interrupt_mask`] to exercise
+    /// `interrupts: standard - { damage }` semantics.
+    interrupt_mask: u32,
 }
 
 impl FireboltInterruptProbeState {
@@ -311,8 +318,16 @@ impl FireboltInterruptProbeState {
             "firebolt_interrupt_probe::record_cfg",
             bytemuck::bytes_of(&record_cfg_init),
         );
+        // Plan G tunable cfg — `config.interrupt.mask` is `@runtime`,
+        // so the kernel's Cfg struct now carries `config_interrupt_mask:
+        // u32`. Initial value mirrors the .sim default (15 = standard
+        // interrupt mask) so callers that don't override the mask
+        // (`set_interrupt_mask`) keep the prior behaviour. Tests that
+        // exercise the `standard - { damage }` semantics overwrite this
+        // via `set_interrupt_mask(14)` after construction.
         let interrupt_cfg_init = physics_InterruptCastOnDamage::PhysicsInterruptCastOnDamageCfg {
             event_count: 0, tick: 0, seed: 0, agent_cap: n_agents,
+            config_interrupt_mask: 15,
         };
         let interrupt_cfg_buf = mk_uniform(
             "firebolt_interrupt_probe::interrupt_cfg",
@@ -363,7 +378,24 @@ impl FireboltInterruptProbeState {
             n_agents,
             initial_hp,
             tick: 0,
+            // Default = 15 (standard interrupt mask). Mirrors the .sim
+            // default; `set_interrupt_mask` overrides per test.
+            interrupt_mask: 15,
         })
+    }
+
+    /// Plan G tunable cfg — override the per-tick interrupt mask the
+    /// `InterruptCastOnDamage` kernel reads from
+    /// `cfg.config_interrupt_mask`. Bit layout matches
+    /// `engine::ability::interrupt::InterruptKind`:
+    ///   bit 0 = Damage, bit 1 = Stun, bit 2 = CasterDied,
+    ///   bit 3 = TargetDied, bit 4 = Movement.
+    /// `set_interrupt_mask(14)` clears bit 0 (= `standard - { damage }`)
+    /// — proves the mask gate suppresses damage-driven interrupts.
+    /// The new value applies on the next `step()` call (the cfg buffer
+    /// is rewritten at the start of every step).
+    pub fn set_interrupt_mask(&mut self, mask: u32) {
+        self.interrupt_mask = mask;
     }
 
     /// Block on the GPU and read `event_tail` back into a host u32.
@@ -500,6 +532,12 @@ impl FireboltInterruptProbeState {
             tick,
             seed:        0,
             agent_cap:   self.n_agents,
+            // Plan G tunable cfg — sourced from
+            // `Self::interrupt_mask` (default 15; tests override via
+            // `set_interrupt_mask`). Determines whether
+            // EffectDamageApplied events clear the busy SoA on a
+            // mid-cast target.
+            config_interrupt_mask: self.interrupt_mask,
         };
         self.gpu.queue.write_buffer(
             &self.interrupt_cfg_buf, 0, bytemuck::bytes_of(&interrupt_cfg),
@@ -850,6 +888,141 @@ mod closed_loop_tests {
             assert_eq!(
                 b, 5,
                 "tick 3: agent {i} busy_until_tick = {b}, expected 5 (second cast still busy)",
+            );
+        }
+    }
+
+    /// **Plan G tunable cfg behavioural pin.** Same fixture as
+    /// `cast_interrupted_by_external_damage` but with the interrupt
+    /// mask narrowed to `14` (= 0b01110 = `standard - { damage }` —
+    /// bit 0 cleared). The mask gate in
+    /// `physics_InterruptCastOnDamage`'s WGSL body is
+    /// `(cfg.config_interrupt_mask % 2u) == 1u`; with the bit cleared
+    /// the gate evaluates `false`, so EffectDamageApplied events
+    /// DON'T clear the busy SoA. The original cast's tick-3 resolve
+    /// fires normally.
+    ///
+    /// Per-tick chain (with `mask = 14`):
+    ///   * Tick 0: cast begins. busy_until_tick = 3. hp = [100, 100].
+    ///   * Tick 1: InjectDamage emits 10 dmg. InterruptCastOnDamage
+    ///     sees busy=3>0 BUT `(mask % 2) != 1` → no-op.
+    ///     ApplyChronicleDamage drops hp by 10. hp = [90, 90].
+    ///   * Tick 2: dispatcher sees busy=3 still > 0 → does NOT cast.
+    ///     No new busy stamp. hp = [90, 90].
+    ///   * Tick 3: ResolveBusy fires (`world.tick >= busy_until_tick`
+    ///     === `3 >= 3`). Emits EffectDamageApplied{amount=25}.
+    ///     ApplyChronicleDamage drops hp by 25. hp = [65, 65].
+    ///
+    /// **The hp=65 assertion at tick 3 is the critical signal.** Diff
+    /// vs `cast_interrupted_by_external_damage` (which sees hp=90 at
+    /// tick 3) is exactly 25 hp = the firebolt resolve damage that
+    /// was suppressed when the mask included Damage and that lands
+    /// here when it doesn't.
+    #[test]
+    fn cast_with_mask_excluding_damage_resolves_normally() {
+        let n_agents:   u32 = 2;
+        let initial_hp: f32 = 100.0;
+        let inject_amount:   f32 = 10.0;
+        let firebolt_damage: f32 = 25.0;
+
+        let mut state = match FireboltInterruptProbeState::try_new(n_agents, initial_hp) {
+            Some(s) => s,
+            None => {
+                eprintln!(
+                    "[firebolt_interrupt_probe @runtime mask] skipping: no \
+                     wgpu adapter available on this host. The build itself \
+                     still validates the kernel emit (firebolt_interrupt_probe.sim \
+                     → 11 WGSL kernels including \
+                     physics_InterruptCastOnDamage with cfg.config_interrupt_mask) \
+                     and binding hookup at compile time.",
+                );
+                return;
+            }
+        };
+
+        // Override the interrupt mask BEFORE any step. 14 = 0b01110 =
+        // standard with bit 0 (Damage) cleared. The next step()'s cfg
+        // refresh writes this into the InterruptCastOnDamage uniform.
+        state.set_interrupt_mask(14);
+
+        // -- Tick 0: cast begins. busy_until_tick = 3. hp = 100.
+        state.step();
+        let hp = state.read_agent_hp();
+        for (i, &h) in hp.iter().enumerate() {
+            assert!(
+                (h - initial_hp).abs() < 1e-4,
+                "tick 0: agent {i} hp = {h}, expected {initial_hp} (cast just started)",
+            );
+        }
+        let busy = state.read_busy_until_tick();
+        for (i, &b) in busy.iter().enumerate() {
+            assert_eq!(b, 3, "tick 0: agent {i} busy_until_tick = {b}, expected 3");
+        }
+
+        // -- Tick 1: InjectDamage fires. InterruptCastOnDamage sees
+        //    busy=3>0 BUT mask gate fails (14 % 2 == 0) → no-op.
+        //    ApplyChronicleDamage drops hp by 10. busy STAYS at 3.
+        //    hp = [90, 90]; busy_until_tick = [3, 3].
+        state.step();
+        let hp = state.read_agent_hp();
+        let expected_hp_t1 = initial_hp - inject_amount; // 90.0
+        for (i, &h) in hp.iter().enumerate() {
+            assert!(
+                (h - expected_hp_t1).abs() < 1e-4,
+                "tick 1: agent {i} hp = {h}, expected {expected_hp_t1} \
+                 (injected dmg landed; mask gate suppressed interrupt)",
+            );
+        }
+        let busy = state.read_busy_until_tick();
+        for (i, &b) in busy.iter().enumerate() {
+            assert_eq!(
+                b, 3,
+                "tick 1: agent {i} busy_until_tick = {b}, expected 3 \
+                 (mask=14 suppressed damage-driven interrupt; original \
+                 cast still busy)",
+            );
+        }
+
+        // -- Tick 2: dispatcher sees busy=3 still > 0 → does NOT
+        //    re-cast. No InjectDamage. hp stays at 90; busy stays at 3.
+        state.step();
+        let hp = state.read_agent_hp();
+        for (i, &h) in hp.iter().enumerate() {
+            assert!(
+                (h - expected_hp_t1).abs() < 1e-4,
+                "tick 2: agent {i} hp = {h}, expected {expected_hp_t1} \
+                 (busy still set; no new cast, no damage)",
+            );
+        }
+        let busy = state.read_busy_until_tick();
+        for (i, &b) in busy.iter().enumerate() {
+            assert_eq!(
+                b, 3,
+                "tick 2: agent {i} busy_until_tick = {b}, expected 3 \
+                 (original cast still busy)",
+            );
+        }
+
+        // -- Tick 3: **CRITICAL ASSERTION.** ResolveBusy predicate
+        //    fires (`world.tick >= busy_until_tick` === `3 >= 3`).
+        //    Emits EffectDamageApplied{amount=25}. The same chronicle
+        //    consumer that JUST cleared the busy state in
+        //    ResolveBusy's body also feeds InterruptCastOnDamage —
+        //    but mask=14 keeps that no-op. ApplyChronicleDamage runs
+        //    against the resolve event, dropping hp by 25.
+        //    hp = [65, 65]. The diff vs the mask=15 baseline (90) is
+        //    exactly 25 = the firebolt resolve damage that didn't get
+        //    suppressed.
+        state.step();
+        let hp = state.read_agent_hp();
+        let expected_hp_t3 = expected_hp_t1 - firebolt_damage; // 65.0
+        for (i, &h) in hp.iter().enumerate() {
+            assert!(
+                (h - expected_hp_t3).abs() < 1e-4,
+                "tick 3: agent {i} hp = {h}, expected {expected_hp_t3} \
+                 (mask=14 suppressed interrupt → original cast resolved \
+                 → 25 firebolt damage landed on top of the 10 inject \
+                 damage). Mask=15 baseline would be 90.",
             );
         }
     }

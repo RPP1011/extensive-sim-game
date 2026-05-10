@@ -774,8 +774,20 @@ fn compose_wgsl_file(
     // an `f32 → u32` auto-conversion error. Non-numeric defaults
     // (Bool / String) skip silently because no kernel references
     // them. Sorted by id for deterministic output.
+    //
+    // Plan G tunable cfg — runtime-tunable consts (those flagged in
+    // `prog.runtime_config_consts`) are NOT emitted as inline `const`
+    // declarations. The kernel body's `config_<id>` substring was
+    // already rewritten to `cfg.config_<block>_<field>` by the kernel
+    // emit (`cg::emit::kernel`), so the body no longer references the
+    // bare `config_<id>` token; emitting a const here would dead-code
+    // the declaration. Skipping aligns the emit with the per-kernel
+    // cfg-uniform field surface.
     let mut emitted_consts = false;
     for (id, value) in &prog.config_const_values {
+        if prog.runtime_config_consts.contains(id) {
+            continue;
+        }
         let needle = format!("config_{}", id);
         if body.contains(&needle) {
             out.push_str(&format!(
@@ -1023,7 +1035,7 @@ fn compose_wgsl_cfg_struct(spec: &KernelSpec) -> String {
     // `emit <Event>` bodies started writing the tick header word into
     // the event ring. Layout matches `build_generic_cfg_struct_decl`
     // (Rust side): { agent_cap: u32, tick: u32, _pad0: u32, _pad1: u32 }.
-    let fields = match spec.kind {
+    let base_fields = match spec.kind {
         // `second_key_pop` joined the layout with the pair_map storage
         // gap fix (2026-05-03): fold body's RMW indexes
         // `view_storage_primary[k1 * cfg.second_key_pop + k2]` for
@@ -1056,6 +1068,21 @@ fn compose_wgsl_cfg_struct(spec: &KernelSpec) -> String {
         // body lowers from `rng.*`. Mirrors `build_generic_cfg_struct_decl`.
         KernelKind::Generic => "agent_cap: u32, tick: u32, seed: u32, _pad0: u32",
     };
+    // Plan G tunable cfg — append every runtime-tunable cfg field the
+    // kernel referenced (mirrors the Rust struct decl in
+    // `kernel.rs::build_generic_cfg_struct_decl` /
+    // `build_per_event_emit_cfg_struct_decl`). One `, <name>: <ty>`
+    // entry per field, in `ConfigConstId`-ascending order. ViewFold /
+    // ViewDecay never carry runtime fields today so the suffix stays
+    // empty for those branches; the Generic + PerEventEmit branches
+    // surface the kernel-specific knob set.
+    let mut fields = base_fields.to_string();
+    for (name, ty) in &spec.runtime_cfg_fields {
+        fields.push_str(", ");
+        fields.push_str(name);
+        fields.push_str(": ");
+        fields.push_str(ty);
+    }
     format!("struct {ty} {{ {fields} }};\n", ty = cfg.wgsl_ty)
 }
 
@@ -2193,6 +2220,7 @@ mod tests {
             cfg_struct_decl: format!("pub struct {}Cfg;", snake_to_pascal(name)),
             bindings,
             kind: KernelKind::Generic,
+            runtime_cfg_fields: Vec::new(),
         }
     }
 

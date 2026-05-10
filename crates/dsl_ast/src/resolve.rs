@@ -992,6 +992,7 @@ fn collect(
                         name: f.name.clone(),
                         ty,
                         default: f.default.clone(),
+                        runtime: f.runtime,
                         span: f.span,
                     });
                 }

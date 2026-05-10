@@ -58,7 +58,7 @@ fn firebolt_interrupt_probe_sim_lowers_clean() {
     }
 
     // Plan G G2.5 mask-aware filter — InterruptCastOnDamage's WGSL
-    // body must contain a mask gate (`(config_<N> % 2u) == 1u` —
+    // body must contain a mask gate (`(<mask_token> % 2u) == 1u` —
     // bit 0 = Damage in InterruptKind). Without it, the rule treats
     // ALL damage as interrupting and `interrupts: standard - { damage }`
     // semantics aren't observable. Greps the emitted WGSL to confirm
@@ -73,4 +73,30 @@ fn firebolt_interrupt_probe_sim_lowers_clean() {
         "InterruptCastOnDamage.wgsl must gate on (config.interrupt.mask % 2) for the Damage bit; \
          emitted body did not contain `% 2u` (substring match). Body length: {} bytes",
         interrupt_wgsl.len());
+
+    // Plan G tunable cfg — the .sim now marks `config.interrupt.mask`
+    // as `@runtime`, so the kernel emit must route the mask read
+    // through the cfg uniform (`cfg.config_interrupt_mask`) instead
+    // of a baked WGSL `const config_<N>`. The body should reference
+    // the cfg-uniform field and NOT emit a matching `const` line.
+    assert!(
+        interrupt_wgsl.contains("cfg.config_interrupt_mask"),
+        "expected runtime cfg-uniform read `cfg.config_interrupt_mask` in InterruptCastOnDamage.wgsl; \
+         body excerpt: {}",
+        &interrupt_wgsl[..interrupt_wgsl.len().min(800)],
+    );
+    assert!(
+        !interrupt_wgsl.contains("const config_") || !interrupt_wgsl.lines().any(|line| {
+            line.trim_start().starts_with("const config_") && line.contains(": u32 = 15u")
+        }),
+        "runtime cfg const should NOT be emitted as `const config_<N>: u32 = 15u`; \
+         body still contains the baked const declaration",
+    );
+    // The matching cfg struct must declare the runtime field too.
+    assert!(
+        interrupt_wgsl.contains("config_interrupt_mask: u32"),
+        "expected `config_interrupt_mask: u32` field in the kernel's WGSL Cfg struct; \
+         body excerpt: {}",
+        &interrupt_wgsl[..interrupt_wgsl.len().min(800)],
+    );
 }
