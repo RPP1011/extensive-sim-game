@@ -1642,10 +1642,11 @@ fn view_fold_accessor(spec: &KernelSpec) -> Option<&str> {
 ///   by [`super::kernel::build_view_fold_bindings`]. A spec with a
 ///   different shape would silently produce a misaligned struct.
 fn compose_view_fold_bindings_struct_fields(spec: &KernelSpec) -> String {
-    debug_assert_eq!(
-        spec.bindings.len(),
-        7,
-        "compose_view_fold_bindings_struct_fields: ViewFold spec must carry exactly 7 bindings; got {}",
+    // G3d adds 8th slot (`agent_busy_with_ability_id`) for
+    // PerAgentEventScan dispatch.
+    debug_assert!(
+        spec.bindings.len() == 7 || spec.bindings.len() == 8,
+        "compose_view_fold_bindings_struct_fields: ViewFold spec must carry 7 or 8 bindings; got {}",
         spec.bindings.len()
     );
     let mut out = String::new();
@@ -1699,10 +1700,9 @@ fn compose_view_fold_bindings_struct_fields(spec: &KernelSpec) -> String {
 ///   `crates/engine_gpu_rules/src/resident_context.rs`).
 #[allow(dead_code)]
 fn compose_view_fold_bind_method(spec: &KernelSpec) -> String {
-    debug_assert_eq!(
-        spec.bindings.len(),
-        7,
-        "compose_view_fold_bind_method: ViewFold spec must carry exactly 7 bindings; got {}",
+    debug_assert!(
+        spec.bindings.len() == 7 || spec.bindings.len() == 8,
+        "compose_view_fold_bind_method: ViewFold spec must carry 7 or 8 bindings; got {}",
         spec.bindings.len()
     );
     let accessor = view_fold_accessor(spec).expect("ViewFold spec must carry an accessor");
@@ -1827,7 +1827,19 @@ fn compose_view_fold_record_method(spec: &KernelSpec) -> String {
     out.push_str("        // { return; }` early-return guards over-dispatch. Future indirect-\n");
     out.push_str("        // args wiring via seed_indirect_0 would replace this with\n");
     out.push_str("        // dispatch_workgroups_indirect against the args buffer.\n");
-    out.push_str("        pass.dispatch_workgroups((agent_cap + 63u32) / 64u32, 1, 1);\n");
+    // G3d: PerAgentEventScan needs a 2-D dispatch (workgroup_size 8×8,
+    // covering agent_cap × agent_cap pairs). Detect via the 8-binding
+    // shape (only PerAgentEventScan ViewFold has 8 bindings today).
+    if spec.bindings.len() == 8 {
+        out.push_str(
+            "        // PerAgentEventScan: 2-D dispatch over (observer, source) pairs.\n",
+        );
+        out.push_str(
+            "        pass.dispatch_workgroups((agent_cap + 7u32) / 8u32, (agent_cap + 7u32) / 8u32, 1);\n",
+        );
+    } else {
+        out.push_str("        pass.dispatch_workgroups((agent_cap + 63u32) / 64u32, 1, 1);\n");
+    }
     out.push_str("    }\n");
     out
 }

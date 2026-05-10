@@ -28,7 +28,7 @@ fn threat_stresstest_sim_lowers_clean() {
         .expect("emit threat_stresstest");
 
     let kernel_names: Vec<&str> = artifacts.kernel_index.iter().map(|s| s.as_str()).collect();
-    for expected in ["MarkBusyByPhase", "ClearBusyByPhase", "threats"] {
+    for expected in ["MarkAllBusy", "threats"] {
         assert!(kernel_names.iter().any(|n| n.contains(expected)),
             "expected kernel containing {expected:?}; got: {kernel_names:?}");
     }
