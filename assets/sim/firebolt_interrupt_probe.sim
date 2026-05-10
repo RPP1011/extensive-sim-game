@@ -1,0 +1,153 @@
+// firebolt_interrupt_probe — Plan G G2.5 behavioural probe.
+//
+// Variant of `firebolt_probe.sim` that exercises the interrupt path.
+// The fixture has 2 agents that each cast Firebolt at themselves on
+// tick 0 (3-tick cast window) — same baseline as firebolt_probe — but
+// adds two new physics rules:
+//
+//   1. `InjectDamage` (per_agent) — at a configured tick, emits a
+//      Damaged event on every alive agent. Simulates an external
+//      attack landing mid-cast (the role a second hostile agent
+//      would play in a 2v2 fixture).
+//
+//   2. `InterruptCastOnDamage` (post) — chronicle consumer. On any
+//      EffectDamageApplied event whose target is currently busy
+//      (`busy_until_tick > 0`), clears the busy SoA columns. The
+//      ResolveBusy rule's `where` clause then fails (`busy_until_tick
+//      == 0`) at the would-be resolve tick, so the deferred damage
+//      NEVER fires.
+//
+// **Race ordering.** This works cleanly because @phase(post) rules
+// run AFTER @phase(per_agent). The flow per tick:
+//
+//   * per_agent pass: DispatchFirebolt + InjectDamage (if scripted).
+//                     ResolveBusy fires for any agent whose
+//                     busy_until_tick has elapsed AND clears its
+//                     busy state, in the same rule body.
+//   * post pass:      InterruptCastOnDamage iterates Damaged events.
+//                     For the resolve damage, the agent's busy state
+//                     was already cleared in per_agent (visible to
+//                     the post pass). The interrupt check sees
+//                     busy_until_tick == 0 → no-op (correct: the
+//                     cast already resolved, nothing to interrupt).
+//                     For the injected damage, busy is still set.
+//                     The interrupt check fires → clears busy.
+//                     ApplyChronicleDamage decrements hp.
+//
+// **Behavioural pin (target shape — runtime not built yet).**
+//
+//   AGENT_COUNT=2, INITIAL_HP=100.0, FIREBOLT_DAMAGE=25.0,
+//   CAST_DURATION_TICKS=3, INJECTED_DAMAGE_AT_TICK=1,
+//   INJECTED_DAMAGE_AMOUNT=10.0
+//
+//   * Tick 0: cast begins. busy_until_tick = 3. hp = 100.
+//   * Tick 1: InjectDamage emits Damaged{target=self, amount=10}.
+//             InterruptCastOnDamage sees busy > 0 → clears busy.
+//             ApplyChronicleDamage decrements hp by 10. hp = 90.
+//   * Tick 2: dispatcher re-casts (busy == 0). New busy_until_tick = 5.
+//             No damage. hp = 90.
+//   * Tick 3: ORIGINAL cast WOULD HAVE resolved at tick 3 with the
+//             busy-resolution rule firing damage 25. But busy was
+//             cleared at tick 1, AND a NEW cast set busy_until_tick = 5
+//             at tick 2, so ResolveBusy doesn't fire at tick 3
+//             (3 < 5). hp stays at 90 — proves interrupt worked.
+//
+//   The diff vs firebolt_probe.sim's resolution at tick 3 (hp = 75,
+//   one resolve damage fired) is the behavioural signal. With
+//   interrupt: hp = 90. Without interrupt: hp = 75 (or 65 if the
+//   injected damage also lands).
+
+event Tick { }
+
+event EffectCastBeginApplied {
+  actor:          AgentId,
+  target:         AgentId,
+  ability_id:     u16,
+  duration_ticks: u16,
+  target_x_q8:    i16,
+  target_y_q8:    i16,
+}
+
+event EffectDamageApplied { actor: AgentId, target: AgentId, amount: f32 }
+
+entity Caster : Agent { }
+
+config firebolt {
+  damage:         f32 = 25.0,
+  firebolt_id:    u32 = 1,
+  cast_duration:  u32 = 3,
+}
+
+config interrupt {
+  // Tick at which InjectDamage emits a scripted damage event on
+  // each alive agent. Default = tick 1 (mid-cast for the 3-tick
+  // firebolt window). Set to a high value (e.g. 99999) to disable
+  // injection entirely for control-group runs.
+  inject_at_tick: u32 = 1,
+  // Damage amount the injected event carries. Picked < firebolt
+  // damage so the diff between "interrupt fired" (hp = 100 -
+  // injected) and "no interrupt + resolve fired"
+  // (hp = 100 - injected - firebolt_damage) is a clean signal.
+  inject_amount:  f32 = 10.0,
+}
+
+physics DispatchFirebolt @phase(per_agent) {
+  on Tick {} where (self.alive && agents.busy_until_tick(self) == 0) {
+    apply_ability config.firebolt.firebolt_id by self target self
+  }
+}
+
+@phase(post)
+physics RecordCastBegin {
+  on EffectCastBeginApplied { actor: a, target: _, ability_id: _, duration_ticks: _, target_x_q8: _, target_y_q8: _ } {
+    agents.set_busy_until_tick(a, world.tick + config.firebolt.cast_duration);
+    agents.set_busy_with_ability_id(a, config.firebolt.firebolt_id);
+    agents.set_busy_started_at_tick(a, world.tick);
+  }
+}
+
+// Scripted damage injector. Fires once, at the configured tick, on
+// every alive agent. Simulates an external attack mid-cast — the
+// role a second hostile agent would play in a 2v2 fixture.
+@phase(per_agent)
+physics InjectDamage {
+  on Tick {} where (self.alive && world.tick == config.interrupt.inject_at_tick) {
+    emit EffectDamageApplied { actor: self, target: self, amount: config.interrupt.inject_amount }
+  }
+}
+
+// Plan G G2.5 — interrupt detection consumer. Reads each
+// EffectDamageApplied chronicle row; if the target was mid-cast,
+// clears the busy SoA so the resolve never fires.
+//
+// Only checks `busy_until_tick > 0` today (no interrupt-mask gate).
+// The full check would also consult `agents.busy_interrupt_mask(t)`
+// against the InterruptKind::Damage bit, but that SoA column doesn't
+// exist yet (cast_interrupt_mask is CPU-only on AbilityProgram). For
+// the firebolt_interrupt_probe MVP we treat all damage as interrupting
+// (matches `interrupts: standard` which always includes Damage).
+@phase(post)
+physics InterruptCastOnDamage {
+  on EffectDamageApplied { actor: _, target: t, amount: _ } {
+    if (agents.busy_until_tick(t) > 0) {
+      agents.set_busy_until_tick(t, 0);
+      agents.set_busy_with_ability_id(t, 0);
+    }
+  }
+}
+
+@phase(per_agent)
+physics ResolveBusy {
+  on Tick {} where (self.alive && agents.busy_until_tick(self) > 0 && world.tick >= agents.busy_until_tick(self)) {
+    emit EffectDamageApplied { actor: self, target: self, amount: config.firebolt.damage }
+    agents.set_busy_until_tick(self, 0);
+    agents.set_busy_with_ability_id(self, 0);
+  }
+}
+
+@phase(post)
+physics ApplyChronicleDamage {
+  on EffectDamageApplied { actor: c, target: t, amount: a } {
+    agents.set_hp(t, agents.hp(t) - a);
+  }
+}
