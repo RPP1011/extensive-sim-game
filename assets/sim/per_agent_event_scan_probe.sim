@@ -1,0 +1,88 @@
+// per_agent_event_scan_probe — Plan G G3d smoke fixture.
+//
+// Lights up the new `DispatchShape::PerAgentEventScan` variant added
+// alongside the threats-view design (`docs/plans/g3_threats_view_design.md`).
+// The shape dispatches one thread per `(observer_agent, source_agent)`
+// pair, with an early-exit when the source agent's
+// `busy_with_ability_id` SoA column is zero (no in-flight cast).
+//
+// **Why a separate dispatch shape?** Existing view-fold dispatches
+// today are PerEvent (one thread per event in a source ring). The
+// threats view (G3g) needs to project per-(observer, busy-caster)
+// zones — the source candidate set is "all agents currently mid-cast",
+// which is a per-agent SoA column read, NOT an event-ring entry. The
+// PerAgentEventScan shape closes that gap.
+//
+// **What this fixture proves.**
+//   * The new dispatch shape lowers cleanly through the existing
+//     ViewFold lowering pipeline.
+//   * The kernel's WGSL has the 2-D `(observer, source_candidate)`
+//     preamble + the busy-filter early-exit (`agent_busy_with_ability_id
+//     [source_candidate] == 0u`).
+//   * The fold body still routes through the standard
+//     `lower_cg_stmt_list_to_wgsl` path — a `self += 1.0` body lowers
+//     just like every other view-fold body, but executes once per
+//     (observer, busy-source) pair instead of once per event.
+//
+// **Shape (this fixture).** A scalar f32 view per agent, accumulating
+// the count of distinct busy-caster sources visible to each observer.
+// With one agent always busy and N observers, every observer's view
+// resolves to `N - 1` (each observer skips itself if the source-equals-
+// observer guard is added; the MVP body unconditionally += 1.0 over
+// every busy candidate, so the count includes self).
+//
+// The probe doesn't cover threat-zone semantics (G3g) or struct
+// payloads (G3b) or multi-statement fold bodies (G3c). It exclusively
+// pins the dispatch-shape mechanism so future slices can land each
+// piece in isolation.
+
+event Tick { }
+event CastStarted { source: AgentId, target: AgentId, ability_id: u32 }
+
+entity Subject : Agent { }
+
+config probe {
+  // Tick at which one agent starts casting. Before this tick every
+  // observer's threat_count view is 0; after, it is 1 (one busy source
+  // visible to all observers).
+  cast_begin_tick: u32 = 1,
+  // Ability id stamped on the busy SoA column. Any non-zero u32 marks
+  // the agent as "currently casting".
+  cast_ability_id: u32 = 7,
+  // The single casting agent's slot.
+  caster_slot: u32 = 0,
+}
+
+// Mark every agent as busy at `cast_begin_tick`. Writes to the
+// `busy_with_ability_id` SoA column so the threat_count fold's busy-
+// filter sees a non-zero value at every `source_candidate`.
+//
+// MVP scope — the probe only exercises the dispatch shape, not the
+// per-agent threat-zone projection (G3g). A real threats fixture
+// would mark only specific agents and assert per-observer counts;
+// here we just need enough busy agents to drive the fold body
+// through the busy-filter at least once.
+@phase(per_agent)
+physics StartCast {
+  on Tick {} where (
+    self.alive
+    && world.tick == config.probe.cast_begin_tick
+  ) {
+    agents.set_busy_with_ability_id(self, config.probe.cast_ability_id);
+  }
+}
+
+// G3d's view-under-test. Per-observer scalar count of busy-caster
+// sources visible. Annotated `@dispatch(per_agent_event_scan)` to
+// override the default `PerEvent { source_ring }` dispatch with the
+// 2-D `(observer, source_candidate)` shape. The `@materialized` slot
+// names CastStarted as a placeholder source — the dispatch shape
+// ignores the event ring entirely (the runtime drives the dispatch
+// directly off `agent_cap`), but the resolver requires `on_event = [...]`
+// for materialized fold views to validate.
+@materialized(on_event = [CastStarted])
+@dispatch(per_agent_event_scan)
+view threat_count(observer: Agent) -> f32 {
+  initial: 0.0,
+  on CastStarted { source: _, target: _, ability_id: _ } { self += 1.0 }
+}
