@@ -252,6 +252,25 @@ pub const ENGINE_EVENT_KIND_IDS: &[(&str, u32)] = &[
     // columns: busy_until_tick = world.tick + duration_ticks,
     // busy_with_ability_id, busy_started_at_tick, busy_target_slot.
     ("EffectCastBeginApplied", 77),
+    // Plan G — public cast lifecycle chronicle events (kinds 78/79/80).
+    // The engine schema declares them (`crates/engine/src/schema_hash.rs`
+    // EventKindId table) and the host-side apply path emits them
+    // (`crates/engine/src/ability/apply.rs::emit_cast_began` and friends);
+    // wiring them as DSL aliases lets per-fixture .sim files mirror the
+    // emit on the GPU consumer side via `emit CastBegan { ... }`. The
+    // payload columns (actor, ability_id, duration_ticks, target slot,
+    // target_x_q8, target_y_q8) are packed into the 4-payload chronicle
+    // record the same way `EffectCastBeginApplied` packs its fields —
+    // see `cascade::handler::EventKindId` for the per-event slot layout.
+    //
+    // Closes #284 sub-item #7's name-resolution prerequisite. Wiring
+    // a real `emit CastBegan` into per-fixture sims is the follow-up
+    // slice; this entry alone is necessary so that future emit lands
+    // a chronicle record with the correct kind tag rather than a
+    // sequential id colliding with one of the existing aliases.
+    ("CastBegan",       78),
+    ("CastResolved",    79),
+    ("CastInterrupted", 80),
 ];
 
 /// Look up the engine-defined `EventKindId` discriminant for an
@@ -319,6 +338,9 @@ mod tests {
         assert_eq!(engine_event_kind_id_for_name("EffectGainSkillApplied"), Some(75));
         assert_eq!(engine_event_kind_id_for_name("EffectCreateObligationApplied"), Some(76));
         assert_eq!(engine_event_kind_id_for_name("EffectCastBeginApplied"), Some(77));
+        assert_eq!(engine_event_kind_id_for_name("CastBegan"), Some(78));
+        assert_eq!(engine_event_kind_id_for_name("CastResolved"), Some(79));
+        assert_eq!(engine_event_kind_id_for_name("CastInterrupted"), Some(80));
     }
 
     #[test]
