@@ -2904,6 +2904,74 @@ mod tests {
             "bare-effect ability must have empty pending_program");
     }
 
+    /// Plan G option D — pure-utility cast (`cast{}` with no
+    /// `effect{}` sibling). Emits CastBegin in `effects` and leaves
+    /// `pending_program` empty. The busy-resolution kernel sees the
+    /// empty pending slot and clears busy state without firing damage
+    /// — useful for non-damage casts (a 3-tick channel that just
+    /// blocks the agent).
+    #[test]
+    fn cast_only_lowers_with_empty_pending_program() {
+        let src = "ability Channel {
+            target: self cooldown: 5s
+            cast { duration: 5t interrupts: standard }
+        }";
+        let file = parse_ability_file(src).expect("parser");
+        let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+        assert_eq!(prog.effects.len(), 1, "CastBegin still emitted for cast-only programs");
+        assert!(matches!(prog.effects[0], EffectOp::CastBegin { .. }));
+        assert!(prog.pending_program.is_empty(),
+            "pending_program empty when no effect{{}} follows");
+    }
+
+    /// Plan G option D MVP — multi-stage chains
+    /// (cast → effect → cast → effect) are NOT yet supported. The
+    /// lowering captures the FIRST `Cast` step's CastBegin and
+    /// silently skips subsequent Cast steps; all `Effects` blocks
+    /// (in source order) merge into a single pending_program. This
+    /// pin documents the MVP behaviour so the future multi-stage
+    /// slice can update the assertion in lockstep.
+    #[test]
+    fn multi_stage_cast_chain_takes_first_cast_only_today() {
+        let src = "ability TwoStage {
+            target: enemy range: 5.0 cooldown: 8s
+            cast { duration: 3t interrupts: standard }
+            effect { damage 10 }
+            cast { duration: 5t interrupts: standard }
+            effect { damage 20 }
+        }";
+        let file = parse_ability_file(src).expect("parser");
+        let prog = lower_ability_decl(&file.abilities[0]).expect("multi-stage must lower (first-cast-only MVP)");
+        assert_eq!(prog.effects.len(), 1, "first Cast step's CastBegin only");
+        // Both effect{} blocks merge into pending_program.
+        assert_eq!(prog.pending_program.len(), 2);
+        match prog.effects[0] {
+            EffectOp::CastBegin { duration_ticks, .. } => {
+                assert_eq!(duration_ticks, 3, "must take FIRST cast's duration, not subsequent");
+            }
+            ref other => panic!("expected CastBegin; got {other:?}"),
+        }
+    }
+
+    /// Plan G — `interrupts: none` is a valid InterruptSet. The
+    /// lowering should accept it; the busy-resolution kernel reads
+    /// the set per-fixture so the lowering doesn't need to do
+    /// anything special with it today.
+    #[test]
+    fn cast_block_with_interrupts_none_lowers() {
+        let src = "ability BindSoul {
+            target: self cooldown: 60s
+            cast { duration: 10t interrupts: none }
+            effect { heal 50 }
+        }";
+        let file = parse_ability_file(src).expect("parser");
+        let prog = lower_ability_decl(&file.abilities[0]).expect("uninterruptible cast must lower");
+        assert_eq!(prog.effects.len(), 1);
+        assert_eq!(prog.pending_program.len(), 1);
+        assert!(matches!(prog.effects[0], EffectOp::CastBegin { .. }));
+        assert!(matches!(prog.pending_program[0], EffectOp::Heal { .. }));
+    }
+
     /// Plan G option D — multiple statements inside one `effect{}` block
     /// lower in order into pending_program, preserving authored order.
     #[test]
