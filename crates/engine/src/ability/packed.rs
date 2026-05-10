@@ -1745,6 +1745,42 @@ mod tests {
         assert_eq!(p.effect_payload_b[0], 384);
     }
 
+    /// Plan G G2.1 — CastBegin packs to (kind=46, payload_a=ability|dur<<16,
+    /// payload_b=x_q8|y_q8<<16). Pin the encoding so a future drift
+    /// surfaces here before the WGSL dispatcher's `if (kind == 46u)` arm
+    /// reads stale payloads.
+    #[test]
+    fn pack_cast_begin_payload() {
+        // ability_id=7, duration_ticks=30, target_x_q8=256 (1.0),
+        // target_y_q8=-512 (-2.0). target_slot is intentionally non-zero
+        // (11) — packed encoding ignores it (the runtime target_slot is
+        // plumbed via the chronicle's runtime context, not the EffectOp).
+        let prog = AbilityProgram::new_single_target(
+            5.0,
+            Gate { cooldown_ticks: 50, hostile_only: true, line_of_sight: false },
+            [EffectOp::CastBegin {
+                ability_id:     7,
+                duration_ticks: 30,
+                target_slot:    11,
+                target_x_q8:    256,
+                target_y_q8:    -512,
+            }],
+        );
+        let reg = build(vec![prog]);
+        let p = PackedAbilityRegistry::pack(&reg);
+
+        // CastBegin discriminant == 46 (Plan G).
+        assert_eq!(p.effect_kinds[0], 46);
+        // payload_a = ability_id (low 16) | duration_ticks (high 16).
+        // = 7 | (30 << 16) = 7 | 0x001E_0000 = 0x001E_0007 = 1_966_087.
+        assert_eq!(p.effect_payload_a[0], 7 | (30 << 16));
+        // payload_b = x_q8 (low 16, as u16) | y_q8 (high 16, as u16).
+        // x_q8 = 256 → u16 = 0x0100; y_q8 = -512 → u16 = 0xFE00.
+        // payload_b = 0x0100 | (0xFE00 << 16) = 0xFE00_0100 = 4_261_413_120.
+        let expected_b = (256u16 as u32) | ((-512i16 as u16 as u32) << 16);
+        assert_eq!(p.effect_payload_b[0], expected_b);
+    }
+
     #[test]
     fn pack_damage_modify_payload_sign_extends_negative_q8() {
         // Sign-preservation guard for the multiplier bitcast.
