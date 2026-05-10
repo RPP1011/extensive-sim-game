@@ -321,6 +321,7 @@ pub fn kernel_topology_to_spec_and_body(
             cfg_struct_decl,
             bindings,
             kind: KernelKind::ViewFold,
+            runtime_cfg_fields: Vec::new(),
         };
         spec.validate()
             .map_err(|reason| KernelEmitError::InvalidKernelSpec { reason })?;
@@ -348,6 +349,7 @@ pub fn kernel_topology_to_spec_and_body(
             cfg_struct_decl,
             bindings,
             kind: KernelKind::ViewDecay,
+            runtime_cfg_fields: Vec::new(),
         };
         spec.validate()
             .map_err(|reason| KernelEmitError::InvalidKernelSpec { reason })?;
@@ -516,16 +518,28 @@ pub fn kernel_topology_to_spec_and_body(
     //    type-check as `array<atomic<u32>>`.
 
     let is_per_event_emit = matches!(dispatch, DispatchShape::PerEvent { .. });
+
+    // Plan G tunable cfg — collect every runtime-tunable config const
+    // the kernel body references. One entry per runtime id, with the
+    // synthesized cfg-uniform field name, scalar type token, and
+    // default-value Rust literal. Empty when the body has no
+    // `@runtime` refs — kernel keeps its prior cfg shape verbatim.
+    let runtime_fields: Vec<RuntimeCfgField> =
+        body_ops_collect_runtime_config_consts(&body_ops, prog)
+            .into_iter()
+            .map(|(id, val)| RuntimeCfgField::new(id, val, prog))
+            .collect();
+
     let (cfg_struct_decl, cfg_build_expr, kernel_kind) = if is_per_event_emit {
         (
-            build_per_event_emit_cfg_struct_decl(&cfg_struct),
-            build_per_event_emit_cfg_build_expr(&cfg_struct),
+            build_per_event_emit_cfg_struct_decl(&cfg_struct, &runtime_fields),
+            build_per_event_emit_cfg_build_expr(&cfg_struct, &runtime_fields),
             KernelKind::PerEventEmit,
         )
     } else {
         (
-            build_generic_cfg_struct_decl(&cfg_struct),
-            build_generic_cfg_build_expr(&cfg_struct),
+            build_generic_cfg_struct_decl(&cfg_struct, &runtime_fields),
+            build_generic_cfg_build_expr(&cfg_struct, &runtime_fields),
             KernelKind::Generic,
         )
     };
@@ -678,7 +692,18 @@ pub fn kernel_topology_to_spec_and_body(
     ctx.f32_atomic_field_writes.set(prior_f32_atomic_writes);
     ctx.alive_atomic_writes.set(prior_alive_cas);
     ctx.event_ring_atomic_loads.set(prior_atomic_loads);
-    let wgsl_body = wgsl_body_result?;
+    let mut wgsl_body = wgsl_body_result?;
+
+    // Plan G tunable cfg — rewrite every `config_<id>` substring for
+    // a runtime-tunable id to `cfg.<field_name>` so the body reads
+    // the per-tick cfg-uniform field instead of a baked WGSL `const`.
+    // `replace_isolated_token` enforces ident-boundary on both sides
+    // so `config_1` can't snag inside `config_15`.
+    for f in &runtime_fields {
+        let needle = format!("config_{}", f.id);
+        let replacement = format!("cfg.{}", f.name);
+        wgsl_body = replace_isolated_token(&wgsl_body, &needle, &replacement);
+    }
 
     // 10b. Compiler debug mode Phase 2 (DebugWgslFlags) — when the body
     //      references one of the instrumentation counter buffers, append
@@ -758,6 +783,15 @@ pub fn kernel_topology_to_spec_and_body(
         bg_source: BgSource::Cfg,
     });
 
+    // Stamp the per-kernel runtime cfg field metadata onto the spec so
+    // `compose_wgsl_cfg_struct` can mirror the Rust-side layout into
+    // the WGSL struct. The WGSL composer needs only (name, scalar_ty);
+    // defaults are baked into the Rust cfg-build expr.
+    let runtime_cfg_fields: Vec<(String, String)> = runtime_fields
+        .iter()
+        .map(|f| (f.name.clone(), f.scalar_ty.to_string()))
+        .collect();
+
     let spec = KernelSpec {
         name,
         pascal,
@@ -767,6 +801,7 @@ pub fn kernel_topology_to_spec_and_body(
         cfg_struct_decl,
         bindings,
         kind: kernel_kind,
+        runtime_cfg_fields,
     };
 
     spec.validate()
@@ -1955,7 +1990,10 @@ fn compute_op_kind_short(kind: &ComputeOpKind) -> &'static str {
 ///   (event_count + tick) routed through [`build_view_fold_cfg_struct_decl`].
 ///   Mask, scoring, physics, spatial, and plumbing kernels share this
 ///   placeholder today; Task 5.5 will refine.
-fn build_generic_cfg_struct_decl(cfg_struct: &str) -> String {
+fn build_generic_cfg_struct_decl(
+    cfg_struct: &str,
+    runtime_fields: &[RuntimeCfgField],
+) -> String {
     // `tick: u32` joined the layout when PerAgent rules with `emit
     // <Event>` bodies started referencing `tick` in the per-tick
     // event payload header. `seed: u32` joined when the rng.* surface
@@ -1967,16 +2005,21 @@ fn build_generic_cfg_struct_decl(cfg_struct: &str) -> String {
     // padding (`_pad: [u32; 2]` → `seed: u32, _pad: u32`) surfaces as
     // a missing-field error at the per-fixture build site — caller
     // updates that in lockstep.
+    let runtime_decl_suffix = RuntimeCfgField::render_decl_suffix(runtime_fields);
     format!(
         "#[repr(C)]\n\
          #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]\n\
-         pub struct {cfg_struct} {{ pub agent_cap: u32, pub tick: u32, pub seed: u32, pub _pad: u32 }}"
+         pub struct {cfg_struct} {{ pub agent_cap: u32, pub tick: u32, pub seed: u32, pub _pad: u32{runtime_decl_suffix} }}"
     )
 }
 
-fn build_generic_cfg_build_expr(cfg_struct: &str) -> String {
+fn build_generic_cfg_build_expr(
+    cfg_struct: &str,
+    runtime_fields: &[RuntimeCfgField],
+) -> String {
+    let runtime_init_suffix = RuntimeCfgField::render_init_suffix(runtime_fields);
     format!(
-        "{cfg_struct} {{ agent_cap: state.agent_cap(), tick: state.tick as u32, seed: state.seed as u32, _pad: 0 }}"
+        "{cfg_struct} {{ agent_cap: state.agent_cap(), tick: state.tick as u32, seed: state.seed as u32, _pad: 0{runtime_init_suffix} }}"
     )
 }
 
@@ -1991,7 +2034,10 @@ fn build_generic_cfg_build_expr(cfg_struct: &str) -> String {
 /// { return; }` early-return guard and the body's emit-side `tick`
 /// header word both resolve. Two `_pad` fields preserve the 16-byte
 /// uniform alignment.
-fn build_per_event_emit_cfg_struct_decl(cfg_struct: &str) -> String {
+fn build_per_event_emit_cfg_struct_decl(
+    cfg_struct: &str,
+    runtime_fields: &[RuntimeCfgField],
+) -> String {
     // `agent_cap: u32` joined the layout in Wave 3 ToM Phase 3.7 so the
     // belief-setter WGSL stubs (`agents.set_beliefs_<field>`) can index
     // their target columns as `cell = observer * cfg.agent_cap +
@@ -2001,10 +2047,11 @@ fn build_per_event_emit_cfg_struct_decl(cfg_struct: &str) -> String {
     // renamed pad (`_pad0: u32` → `agent_cap: u32`) surfaces as a
     // missing-field error at the per-fixture build site — caller updates
     // that in lockstep.
+    let runtime_decl_suffix = RuntimeCfgField::render_decl_suffix(runtime_fields);
     format!(
         "#[repr(C)]\n\
          #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]\n\
-         pub struct {cfg_struct} {{ pub event_count: u32, pub tick: u32, pub seed: u32, pub agent_cap: u32 }}"
+         pub struct {cfg_struct} {{ pub event_count: u32, pub tick: u32, pub seed: u32, pub agent_cap: u32{runtime_decl_suffix} }}"
     )
 }
 
@@ -2013,10 +2060,68 @@ fn build_per_event_emit_cfg_struct_decl(cfg_struct: &str) -> String {
 /// with the actual per-tick event count from the source ring's tail
 /// (or an upper-bound estimate). This mirrors the
 /// [`build_view_fold_cfg_build_expr`] convention.
-fn build_per_event_emit_cfg_build_expr(cfg_struct: &str) -> String {
+fn build_per_event_emit_cfg_build_expr(
+    cfg_struct: &str,
+    runtime_fields: &[RuntimeCfgField],
+) -> String {
+    let runtime_init_suffix = RuntimeCfgField::render_init_suffix(runtime_fields);
     format!(
-        "{cfg_struct} {{ event_count: 0, tick: state.tick as u32, seed: state.seed as u32, agent_cap: state.agent_cap() }}"
+        "{cfg_struct} {{ event_count: 0, tick: state.tick as u32, seed: state.seed as u32, agent_cap: state.agent_cap(){runtime_init_suffix} }}"
     )
+}
+
+/// Plan G tunable cfg — one runtime-tunable cfg-uniform field synthesized
+/// from a `@runtime`-annotated `config <block>.<field>`. Sorted by
+/// `ConfigConstId` (ascending) so emitted cfg layouts are deterministic.
+/// Both Rust + WGSL composers consume the same structure.
+#[derive(Debug, Clone)]
+pub(crate) struct RuntimeCfgField {
+    /// Source `ConfigConstId.0` — used to rewrite `config_<id>` body
+    /// substrings to `cfg.<name>`.
+    pub id: u32,
+    /// `config_<block>_<field>` — valid Rust + WGSL identifier.
+    pub name: String,
+    /// `u32` / `i32` / `f32` — scalar token for both Rust and WGSL.
+    pub scalar_ty: &'static str,
+    /// Rust literal for the field default (`5u32`, `-3i32`, `1.0_f32`).
+    /// Host overwrites per tick; this just makes the synthesized
+    /// `build_cfg` expression compile cleanly.
+    pub default_lit: String,
+}
+
+impl RuntimeCfgField {
+    fn new(id: u32, val: crate::cg::program::ConfigConstValue, prog: &CgProgram) -> Self {
+        use crate::cg::program::ConfigConstValue;
+        // The `u32`/`i32`/`f32` suffix protects against integer-literal
+        // default-typing (otherwise `5` → i32 inferred against a u32 field).
+        let default_lit = match val {
+            ConfigConstValue::U32(v) => format!("{v}u32"),
+            ConfigConstValue::I32(v) => format!("{v}i32"),
+            ConfigConstValue::F32(v) => format!("{v:?}_f32"),
+        };
+        Self {
+            id,
+            name: runtime_config_const_field_name(id, prog),
+            scalar_ty: val.wgsl_scalar_ty(),
+            default_lit,
+        }
+    }
+
+    fn render_decl_suffix(fields: &[Self]) -> String {
+        let mut out = String::new();
+        for f in fields {
+            out.push_str(&format!(", pub {}: {}", f.name, f.scalar_ty));
+        }
+        out
+    }
+
+    fn render_init_suffix(fields: &[Self]) -> String {
+        let mut out = String::new();
+        for f in fields {
+            out.push_str(&format!(", {}: {}", f.name, f.default_lit));
+        }
+        out
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2449,6 +2554,92 @@ fn body_ops_collect_f32_atomic_writes(body_ops: &[OpId], prog: &CgProgram) -> u6
         }
     }
     bits
+}
+
+/// Plan G tunable cfg — collect every runtime-tunable
+/// [`crate::cg::data_handle::ConfigConstId`] referenced (via reads) by
+/// `body_ops`. Returns ascending-id order so emitted cfg layouts are
+/// deterministic. Each entry pairs the id with its
+/// [`crate::cg::program::ConfigConstValue`] default; the cfg-build
+/// expression uses it to seed the host buffer (host overrides per tick).
+pub(crate) fn body_ops_collect_runtime_config_consts(
+    body_ops: &[OpId],
+    prog: &CgProgram,
+) -> Vec<(u32, crate::cg::program::ConfigConstValue)> {
+    use crate::cg::data_handle::DataHandle;
+    let mut ids: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+    for op_id in body_ops {
+        let Ok(op) = resolve_op(prog, *op_id) else {
+            continue;
+        };
+        for h in &op.reads {
+            if let DataHandle::ConfigConst { id } = h {
+                if prog.runtime_config_consts.contains(&id.0) {
+                    ids.insert(id.0);
+                }
+            }
+        }
+    }
+    ids.into_iter()
+        .map(|id| {
+            // Defensive fallback: the driver always pairs
+            // `set_config_const_value` with `mark_config_const_runtime`,
+            // so a missing entry would be a bug; U32(0) keeps the
+            // generated Rust compilable so the cause surfaces upstream.
+            let v = prog
+                .config_const_values
+                .get(&id)
+                .copied()
+                .unwrap_or(crate::cg::program::ConfigConstValue::U32(0));
+            (id, v)
+        })
+        .collect()
+}
+
+/// Plan G tunable cfg — derive the per-kernel cfg-uniform field name
+/// for a runtime config const id (`config_<block>_<field>`). The
+/// underlying `<block>.<field>` string lives in
+/// [`crate::cg::program::Interner::config_consts`]; the dot is replaced
+/// with an underscore so the result is a valid WGSL/Rust identifier.
+/// Falls back to `config_<id>` when no name is interned (defensive —
+/// the driver always interns alongside id allocation).
+pub(crate) fn runtime_config_const_field_name(id: u32, prog: &CgProgram) -> String {
+    let Some(name) = prog
+        .interner
+        .get_config_const_name(crate::cg::data_handle::ConfigConstId(id))
+    else {
+        return format!("config_{id}");
+    };
+    format!("config_{}", name.replace('.', "_"))
+}
+
+/// Replace every occurrence of `needle` in `haystack` with `replacement`,
+/// but only when both sides of the match are non-identifier characters
+/// (or string boundaries). Prevents e.g. `config_1` from matching inside
+/// `config_15`. `needle` MUST be ASCII; identifier chars (`[A-Za-z0-9_]`)
+/// are single-byte ASCII, so the boundary check is byte-safe even when
+/// `haystack` contains multi-byte UTF-8 in comments.
+fn replace_isolated_token(haystack: &str, needle: &str, replacement: &str) -> String {
+    debug_assert!(needle.is_ascii() && !needle.is_empty());
+    let bytes = haystack.as_bytes();
+    let mut out = String::with_capacity(haystack.len());
+    let mut start = 0usize;
+    let is_ident = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    while let Some(rel) = haystack[start..].find(needle) {
+        let pos = start + rel;
+        let end = pos + needle.len();
+        let left_ok = pos == 0 || !is_ident(bytes[pos - 1]);
+        let right_ok = end == bytes.len() || !is_ident(bytes[end]);
+        out.push_str(&haystack[start..pos]);
+        if left_ok && right_ok {
+            out.push_str(replacement);
+        } else {
+            out.push_str(&haystack[pos..end]);
+        }
+        start = end;
+    }
+    out.push_str(&haystack[start..]);
+    out
 }
 
 /// Recursive walk: `true` iff the statement list named by `list_id`

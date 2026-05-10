@@ -104,7 +104,13 @@ config interrupt {
   // payload slots for (ability_id|duration<<16, target_x_q8|target_y_q8<<16).
   // The runtime sets this cfg value to match the registered ability's
   // `AbilityProgram::cast_interrupt_mask` (engine API).
-  mask:           u32 = 15,
+  //
+  // Plan G tunable cfg — `@runtime` flips this from a baked WGSL
+  // `const` to a per-tick cfg-uniform field on the
+  // InterruptCastOnDamage kernel. Lets per-test overrides
+  // (`set_interrupt_mask(14)` for `standard - { damage }`) exercise
+  // the mask-gate behaviour without recompiling the .sim.
+  mask:           u32 = 15 @runtime,
 }
 
 physics DispatchFirebolt @phase(per_agent) {

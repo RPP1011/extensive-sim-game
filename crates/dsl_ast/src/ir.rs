@@ -977,6 +977,12 @@ pub struct ConfigFieldIR {
     pub name: String,
     pub ty: IrType,
     pub default: ast::ConfigDefault,
+    /// Mirrors [`ast::ConfigField::runtime`] — `true` when the source
+    /// field carried the `@runtime` annotation. Threaded through resolve
+    /// so the CG-lowering driver can mark the resulting `ConfigConstId`
+    /// as runtime-tunable (per-kernel cfg-uniform field) instead of the
+    /// default baked-WGSL-const path.
+    pub runtime: bool,
     pub span: Span,
 }
 

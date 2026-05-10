@@ -1931,6 +1931,17 @@ fn populate_config_consts(
                 };
                 ctx.builder.set_config_const_value(id, value);
             }
+            // Plan G tunable cfg — flag this id as runtime-tunable when
+            // the source field carried `@runtime`. The kernel emit
+            // consults `prog.runtime_config_consts` to swap the default
+            // baked-WGSL-const path for a per-kernel cfg-uniform field.
+            // We still register the literal default above so the host
+            // initialises the cfg buffer with the same value (and so
+            // kernels that don't cross-reference the runtime path stay
+            // bit-identical).
+            if fld.runtime {
+                ctx.builder.mark_config_const_runtime(id);
+            }
         }
     }
 }
@@ -3976,12 +3987,14 @@ mod tests {
                     name: "attack_range".to_string(),
                     ty: IrType::F32,
                     default: ConfigDefault::Float(1.0),
+                    runtime: false,
                     span: Span::dummy(),
                 },
                 ConfigFieldIR {
                     name: "aggro_range".to_string(),
                     ty: IrType::F32,
                     default: ConfigDefault::Float(2.0),
+                    runtime: false,
                     span: Span::dummy(),
                 },
             ],
@@ -3994,6 +4007,7 @@ mod tests {
                 name: "move_speed_mps".to_string(),
                 ty: IrType::F32,
                 default: ConfigDefault::Float(3.0),
+                runtime: false,
                 span: Span::dummy(),
             }],
             annotations: Vec::new(),
@@ -4038,6 +4052,7 @@ mod tests {
                 name: "attack_range".to_string(),
                 ty: IrType::F32,
                 default: ConfigDefault::Float(1.0),
+                runtime: false,
                 span: Span::dummy(),
             }],
             annotations: Vec::new(),
@@ -4092,18 +4107,21 @@ mod tests {
                     name: "observation_bit".to_string(),
                     ty: IrType::U32,
                     default: ConfigDefault::Uint(5),
+                    runtime: false,
                     span: Span::dummy(),
                 },
                 ConfigFieldIR {
                     name: "trade_amount".to_string(),
                     ty: IrType::F32,
                     default: ConfigDefault::Float(1.5),
+                    runtime: false,
                     span: Span::dummy(),
                 },
                 ConfigFieldIR {
                     name: "delta".to_string(),
                     ty: IrType::I32,
                     default: ConfigDefault::Int(-3),
+                    runtime: false,
                     span: Span::dummy(),
                 },
             ],

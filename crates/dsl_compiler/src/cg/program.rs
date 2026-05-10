@@ -48,7 +48,7 @@
 //! construction seam for the parts of the dependency graph the
 //! auto-walker can't synthesize structurally.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -961,6 +961,17 @@ pub struct CgProgram {
     /// runtime-tunable config goes through a future cfg-uniform
     /// extension; today every config field is a compile-time constant.
     pub config_const_values: BTreeMap<u32, ConfigConstValue>,
+    /// Plan G tunable cfg — `ConfigConstId`s whose source field carried
+    /// a `@runtime` annotation. These IDs are routed through a per-kernel
+    /// cfg-uniform field (`cfg.config_<block>_<field>`) instead of the
+    /// default WGSL `const config_<id>` baked at compile time. Populated
+    /// by the driver's `populate_config_consts` from the
+    /// [`dsl_ast::ir::ConfigFieldIR::runtime`] flag; consumed by the
+    /// kernel emit (`cg::emit::kernel`) which augments the cfg struct
+    /// + body text for any kernel that references an id in this set.
+    /// Empty for fixtures with no `@runtime`-annotated config fields —
+    /// the WGSL emit shape is unchanged in that case.
+    pub runtime_config_consts: BTreeSet<u32>,
     /// Per-fixture catalog of `entity X : Item { ... }` and `entity Y :
     /// Group { ... }` field declarations. Resolves opaque
     /// [`crate::cg::data_handle::ItemFieldId`] /
@@ -1287,6 +1298,14 @@ impl CgProgramBuilder {
     /// intentional last-write semantics.
     pub fn set_config_const_value(&mut self, id: ConfigConstId, value: ConfigConstValue) {
         self.inner.config_const_values.insert(id.0, value);
+    }
+    /// Plan G tunable cfg — mark a config const id as runtime-tunable
+    /// (i.e. its source field carried `@runtime`). The kernel emit will
+    /// route reads of this id through a per-kernel cfg-uniform field
+    /// instead of the default baked WGSL `const`. Idempotent — re-marking
+    /// the same id is a no-op.
+    pub fn mark_config_const_runtime(&mut self, id: ConfigConstId) {
+        self.inner.runtime_config_consts.insert(id.0);
     }
     pub fn intern_event_ring_name(
         &mut self,
