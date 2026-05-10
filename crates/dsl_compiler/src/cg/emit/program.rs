@@ -828,6 +828,21 @@ fn compose_wgsl_file(
         out.push('\n');
     }
 
+    // Plan G G3f-deep (audit task #288) — view-storage cross-kernel
+    // read prelude. Scoring kernels that reference `view_<id>_get(`
+    // get a helper function definition that reads from the
+    // corresponding `view_storage_<view_name>_primary` binding (added
+    // to the kernel spec by `kernel_topology_to_spec_and_body`'s
+    // body-scan step). The MVP: f32 per-agent scalar read with
+    // bitcast<f32>. Struct-payload + ring views need a richer prelude
+    // (per-cell walk, aggregation) — deferred to the struct-walk
+    // follow-up that closes ThreatsNearest / ThreatsDirAwayFromNearest.
+    let view_prelude = compose_view_storage_prelude(body, prog);
+    if !view_prelude.is_empty() {
+        out.push_str(&view_prelude);
+        out.push('\n');
+    }
+
     // Emit the deterministic per-agent RNG primitive iff the kernel
     // body references it. Substring-keyed on `per_agent_u32(` so a
     // comment that incidentally names the function doesn't trigger
@@ -1011,6 +1026,64 @@ fn compose_namespace_prelude(body: &str, prog: &CgProgram) -> String {
                 out.push('\n');
             }
         }
+    }
+    out
+}
+
+/// Plan G G3f-deep (audit task #288) — view-storage helper prelude.
+///
+/// Emits a `fn view_<id>_get(idx: u32) -> f32 { ... }` helper for
+/// every `view_<id>_get(` substring found in the kernel body. Mirrors
+/// the per-view BGL binding `view_storage_<view_name>_primary` that
+/// `kernel_topology_to_spec_and_body` appends to the kernel's spec
+/// when the same substring is detected.
+///
+/// MVP scope: per-agent scalar f32 views only (the dodger fixture's
+/// shape — `view threats(observer: Agent) -> f32`). Struct-payload
+/// or pair-keyed views need richer prelude shapes (per-cell walk,
+/// pair-key composition); deferred to follow-ups that close
+/// ThreatsNearest / ThreatsDirAwayFromNearest.
+///
+/// **Bitcast.** The view's primary storage is `array<u32>` at the
+/// BGL level (matches the runtime's wgpu::Buffer with `usage:
+/// STORAGE | COPY_SRC | COPY_DST`); the f32 values are bitcast to
+/// u32 at write time (`view_storage_primary[idx] = bitcast<u32>(value)`)
+/// and bitcast back at read time. This is the standard scalar-view
+/// storage convention.
+fn compose_view_storage_prelude(body: &str, prog: &CgProgram) -> String {
+    use std::collections::BTreeSet;
+    let mut seen_view_ids: BTreeSet<u32> = BTreeSet::new();
+    let mut search_pos = 0;
+    while let Some(rel) = body[search_pos..].find("view_") {
+        let abs = search_pos + rel;
+        let after = &body[abs + 5..]; // skip "view_"
+        let id_end = after.bytes().take_while(|b| b.is_ascii_digit()).count();
+        if id_end > 0 && after[id_end..].starts_with("_get(") {
+            if let Ok(view_id) = after[..id_end].parse::<u32>() {
+                seen_view_ids.insert(view_id);
+            }
+        }
+        search_pos = abs + 5;
+    }
+    if seen_view_ids.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    for view_id in &seen_view_ids {
+        let view_name = prog
+            .interner
+            .get_view_name(crate::cg::data_handle::ViewId(*view_id))
+            .unwrap_or("unnamed_view");
+        // Helper function: read u32 from the storage binding,
+        // bitcast to f32. The binding name + slot are pinned by
+        // `kernel_topology_to_spec_and_body`'s body-scan step which
+        // appends `view_storage_<view_name>_primary` to the kernel's
+        // BGL when the same substring is detected.
+        out.push_str(&format!(
+            "fn view_{view_id}_get(idx: u32) -> f32 {{\n\
+             \x20   return bitcast<f32>(view_storage_{view_name}_primary[idx]);\n\
+             }}\n"
+        ));
     }
     out
 }

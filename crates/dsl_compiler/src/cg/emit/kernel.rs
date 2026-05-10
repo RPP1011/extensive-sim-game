@@ -787,6 +787,57 @@ pub fn kernel_topology_to_spec_and_body(
         });
     }
 
+    // 10c-extra. View-storage cross-kernel reads (Plan G G3f-deep, audit task #288).
+    //
+    // The threats.* Builtin lowering emits `view_<id>_get(idx)` calls
+    // when scoring expressions read from a materialized view. Without
+    // a binding + helper function, the WGSL kernel won't compile (naga
+    // rejects at pipeline creation: "no view_<id>_get function").
+    //
+    // Body-scan for `view_<id>_get(` substrings, extract unique view
+    // ids, and append the corresponding `view_storage_<view_name>_primary`
+    // binding to the kernel's BGL. The matching helper function is
+    // emitted by `compose_wgsl_file` (`compose_view_storage_prelude`)
+    // when the body contains the same substring.
+    //
+    // Storage slot: read-only is the safe default — fold kernels write
+    // the storage; consumer kernels (this one) read.
+    {
+        let mut seen_view_ids: std::collections::BTreeSet<u32> =
+            std::collections::BTreeSet::new();
+        let mut search_pos = 0;
+        while let Some(rel) = wgsl_body[search_pos..].find("view_") {
+            let abs = search_pos + rel;
+            let after = &wgsl_body[abs + 5..]; // skip "view_"
+            // Parse the numeric id; stop on first non-digit.
+            let id_end = after.bytes().take_while(|b| b.is_ascii_digit()).count();
+            if id_end > 0 && after[id_end..].starts_with("_get(") {
+                if let Ok(view_id) = after[..id_end].parse::<u32>() {
+                    if seen_view_ids.insert(view_id) {
+                        // First reference to this view in the body —
+                        // append the storage binding.
+                        let view_name = prog
+                            .interner
+                            .get_view_name(crate::cg::data_handle::ViewId(view_id))
+                            .unwrap_or("unnamed_view");
+                        let slot = bindings.len() as u32;
+                        bindings.push(KernelBinding {
+                            slot,
+                            name: format!("view_storage_{}_primary", view_name),
+                            access: AccessMode::ReadStorage,
+                            wgsl_ty: "array<u32>".into(),
+                            bg_source: BgSource::ViewHandle {
+                                accessor: format!("fold_view_{}_handles", view_name),
+                                tuple_idx: 0,
+                            },
+                        });
+                    }
+                }
+            }
+            search_pos = abs + 5;
+        }
+    }
+
     // 10c. Push the cfg uniform LAST so its slot lands after every data
     //      binding (including any Phase 2 debug instrumentation buffers
     //      added in 10b above).
