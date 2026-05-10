@@ -891,8 +891,22 @@ fn check_op(
     // as [`TypeError::DanglingExprId`] wrapped in a
     // [`CgError::TypeMismatch`]; the structural id-range pass above
     // produced the [`CgError::ExprIdOutOfRange`] form independently.
-
-    let ctx = TypeCheckCtx::new(prog);
+    //
+    // Wire `prog.view_signatures` as the ViewCall resolver so
+    // `view_<id>_get(...)` calls get type-checked against their real
+    // signatures rather than surfacing the spurious
+    // `ViewSignatureUnresolved` diagnostic. Without this, every
+    // dodger_probe / threats_view_probe build emitted an "expr#N
+    // view_call.#0 signature unresolved (no resolver wired)" warning
+    // even though the per-op lowering paths (mask / scoring / expr)
+    // already wire the same resolver against `ctx.view_signatures`.
+    let resolver: &dyn Fn(crate::cg::data_handle::ViewId) -> Option<(Vec<crate::cg::expr::CgTy>, crate::cg::expr::CgTy)> =
+        &|view_id| {
+            prog.view_signatures
+                .get(&view_id.0)
+                .map(|sig| (sig.args.clone(), sig.result))
+        };
+    let ctx = TypeCheckCtx::with_view_signature(prog, resolver);
     type_check_op(op, op_id, prog, &ctx, expr_arena_len, errors);
 
     // --- P6 mutation channel: AgentField writes only in ViewFold ----
