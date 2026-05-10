@@ -82,8 +82,22 @@ physics MarkCasterBusy {
 // PerAgentEventScan dispatch shape iterates over (observer, source)
 // pairs directly off agent_cap and the busy-filter on
 // `agent_busy_with_ability_id[source]` decides which pairs accumulate.
+// @belief_gated swaps the source-candidate gate from the omniscient
+// `agent_busy_with_ability_id[source]` lookup to a per-(observer,
+// source) belief lookup: `beliefs_flags[observer * agent_cap + source]
+// & (1u << 7u)`. Bit 7 is the architectural convention for "observer
+// believes source is busy casting" — see
+// `crates/dsl_compiler/tests/threats_belief_gated_fold.rs` and the
+// kernel emit at `crates/dsl_compiler/src/cg/emit/kernel.rs:2645`.
+//
+// The runtime defaults to "everyone knows everything" by seeding
+// every cell with bit 7 in `try_new`, so existing tests that don't
+// explicitly diverge beliefs see the same behaviour as the previous
+// omniscient fold. New tests can call `seed_beliefs_flags` to
+// produce per-observer asymmetry.
 @materialized(on_event = [ScriptedCastBegin])
 @dispatch(per_agent_event_scan)
+@belief_gated
 view threats(observer: Agent) -> f32 {
   initial: 0.0,
   on ScriptedCastBegin { source: _, target: _, ability_id: _ } { self += 1.0 }

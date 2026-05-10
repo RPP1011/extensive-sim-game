@@ -1876,12 +1876,19 @@ fn compose_view_fold_record_method(spec: &KernelSpec) -> String {
         "                wgpu::BindGroupEntry { binding: 6, resource: bindings.cfg.as_entire_binding() },\n",
     );
     // G3d: PerAgentEventScan adds an 8th binding for the busy-filter
-    // SoA read. The spec's binding-count classification (7 vs 8) tells
-    // us whether to emit the extra entry. Mirror's the BGL emit at
-    // `cg/emit/kernel.rs::build_view_fold_bindings`'s extra slot.
-    if spec.bindings.len() == 8 {
+    // SoA read. The spec's binding-count classification (≥8 vs 7)
+    // tells us whether to emit the extra entry. Mirrors the BGL emit
+    // at `cg/emit/kernel.rs::build_view_fold_bindings`'s extra slot.
+    if spec.bindings.len() >= 8 {
         out.push_str(
             "                wgpu::BindGroupEntry { binding: 7, resource: bindings.agent_busy_with_ability_id.as_entire_binding() },\n",
+        );
+    }
+    // @belief_gated adds a 9th binding for per-(observer, source)
+    // belief lookup. Mirrors the BGL emit's slot 8.
+    if spec.bindings.len() >= 9 {
+        out.push_str(
+            "                wgpu::BindGroupEntry { binding: 8, resource: bindings.beliefs_flags.as_entire_binding() },\n",
         );
     }
     out.push_str("            ],\n        });\n");
@@ -1901,9 +1908,10 @@ fn compose_view_fold_record_method(spec: &KernelSpec) -> String {
     out.push_str("        // args wiring via seed_indirect_0 would replace this with\n");
     out.push_str("        // dispatch_workgroups_indirect against the args buffer.\n");
     // G3d: PerAgentEventScan needs a 2-D dispatch (workgroup_size 8×8,
-    // covering agent_cap × agent_cap pairs). Detect via the 8-binding
-    // shape (only PerAgentEventScan ViewFold has 8 bindings today).
-    if spec.bindings.len() == 8 {
+    // covering agent_cap × agent_cap pairs). Detect via the 8-or-9-
+    // binding shape (PerAgentEventScan ViewFold has 8 bindings today;
+    // 9 when @belief_gated adds the beliefs_flags read).
+    if spec.bindings.len() == 8 || spec.bindings.len() == 9 {
         out.push_str(
             "        // PerAgentEventScan: 2-D dispatch over (observer, source) pairs.\n",
         );

@@ -50,6 +50,16 @@ pub struct DodgerProbeState {
     /// `when (self.alive)` eligibility gate.
     agent_alive_buf: wgpu::Buffer,
 
+    /// Per-(observer, source) belief bits — `agent_count * agent_count`
+    /// u32 cells. The `@belief_gated` annotation on dodger_probe.sim's
+    /// `view threats` causes the fold kernel to read
+    /// `beliefs_flags[observer * agent_cap + source] & (1u << 7u)`
+    /// instead of the raw busy lookup. Default seed in `try_new` is
+    /// `(1u << 7u)` for every cell — preserves the omniscient
+    /// behavior the existing tests expect. Tests that want per-observer
+    /// asymmetry call `seed_beliefs_flags`.
+    beliefs_flags_buf: wgpu::Buffer,
+
     /// `busy_with_ability_id` SoA. The fused MarkCasterBusy kernel
     /// (now compilable thanks to the WGSL prelude composer fix at
     /// commit 6d8bd159) writes this column at tick 0; subsequent
@@ -122,6 +132,23 @@ impl DodgerProbeState {
             gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("dodger_probe::agent_alive"),
                 contents: bytemuck::cast_slice(&alive_init),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            });
+
+        // beliefs_flags — `agent_count * agent_count` u32 cells. The
+        // `@belief_gated` annotation on the threats view causes the
+        // fold to read this buffer for the source-candidate gate.
+        // Default seed: every cell carries `(1u << 7u)` (the
+        // OBSERVED_BUSY bit) so every observer sees every source —
+        // preserves the omniscient behavior the existing tests expect.
+        // Tests that want per-observer asymmetry call
+        // `seed_beliefs_flags` to override.
+        let beliefs_init: Vec<u32> =
+            vec![1u32 << 7u32; (agent_count as usize) * (agent_count as usize)];
+        let beliefs_flags_buf =
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("dodger_probe::beliefs_flags"),
+                contents: bytemuck::cast_slice(&beliefs_init),
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             });
 
@@ -211,6 +238,7 @@ impl DodgerProbeState {
             gpu,
             agent_alive_buf,
             agent_busy_with_ability_id_buf,
+            beliefs_flags_buf,
             threats,
             mask_0_bitmap_buf,
             mask_1_bitmap_buf,
@@ -226,6 +254,38 @@ impl DodgerProbeState {
             seed,
         })
     }
+
+    /// Plan G — seed the per-(observer, source) belief grid. Each
+    /// cell at index `observer * agent_count + source` is a u32
+    /// bitset; bit 7 is the `OBSERVED_BUSY` convention the fold gate
+    /// reads. Setting bit 7 → "observer believes source is busy
+    /// casting" → the fold counts source's contribution toward
+    /// observer's threat tally. Clearing bit 7 → fold skips the pair.
+    ///
+    /// Length must be `agent_count * agent_count`. Used by tests
+    /// that want to demonstrate per-observer threat asymmetry on
+    /// real GPU (the default `try_new` seeds every cell with bit 7,
+    /// preserving the omniscient behavior).
+    pub fn seed_beliefs_flags(&mut self, values: &[u32]) {
+        let expected = (self.agent_count as usize) * (self.agent_count as usize);
+        assert_eq!(
+            values.len(),
+            expected,
+            "seed_beliefs_flags: length {} doesn't match agent_count^2 = {}",
+            values.len(),
+            expected,
+        );
+        self.gpu.queue.write_buffer(
+            &self.beliefs_flags_buf,
+            0,
+            bytemuck::cast_slice(values),
+        );
+    }
+
+    /// Convenience: the OBSERVED_BUSY bit value (1 << 7). Tests
+    /// constructing seed arrays use this to keep bit position in
+    /// one place.
+    pub const OBSERVED_BUSY_BIT: u32 = 1u32 << 7u32;
 
     /// Force-zero both the busy source AND the threats view — test-only.
     /// Both writes are needed:
@@ -249,6 +309,17 @@ impl DodgerProbeState {
             self.threats.primary(),
             0,
             bytemuck::cast_slice(&view_zeros),
+        );
+        // @belief_gated: clear the actual gate predicate's source.
+        // Without this, the fold's belief-bit check passes for every
+        // cell (default seed = all-bit-7-set) and threats accumulate
+        // again on the next step.
+        let beliefs_zeros: Vec<u32> =
+            vec![0u32; (self.agent_count as usize) * (self.agent_count as usize)];
+        self.gpu.queue.write_buffer(
+            &self.beliefs_flags_buf,
+            0,
+            bytemuck::cast_slice(&beliefs_zeros),
         );
         self.threats.mark_dirty();
     }
@@ -403,6 +474,7 @@ impl CompiledSim for DodgerProbeState {
                         view_storage_anchor: self.threats.anchor(),
                         view_storage_ids: self.threats.ids(),
                         agent_busy_with_ability_id: &self.agent_busy_with_ability_id_buf,
+                        beliefs_flags: &self.beliefs_flags_buf,
                         sim_cfg: self.event_ring.sim_cfg(),
                         cfg: &self.fold_cfg_buf,
                     };
@@ -814,6 +886,72 @@ mod dodger_behavioural_tests {
         assert!(
             delta_pp >= 95.0,
             "threat infrastructure must shift ≥95 percentage points of decisions; got {delta_pp:.1}pp",
+        );
+    }
+
+    /// **The belief-gated divergence pin — the E2E proof.** Same
+    /// physical world (every agent stamps `busy = 1` at tick 0), but
+    /// per-observer beliefs produce divergent scoring on real GPU.
+    ///
+    /// Setup with N=4: observer slot 1 has belief bit 7 set for
+    /// source 0 ONLY. Every other (observer, source) cell is clear.
+    /// Every observer except slot 1 is "blind" — believes no source
+    /// is busy.
+    ///
+    /// Expected with `@belief_gated` on `view threats`:
+    ///   * Slot 1's threats[1] = 1.0 → picks Flee.
+    ///   * Every other slot's threats[i] = 0.0 → picks Idle.
+    ///
+    /// Without the annotation the omniscient gate would make every
+    /// observer see every busy source → every agent picks Flee. The
+    /// behavioral asymmetry IS the proof the GPU kernel is reading
+    /// the belief bits, not the raw busy bits.
+    #[test]
+    fn belief_gated_divergence_per_observer_on_gpu() {
+        const N: u32 = 4;
+        let mut state = match DodgerProbeState::try_new(0xCAFE, N) {
+            Some(s) => s,
+            None => {
+                eprintln!("[belief-divergence] skipping: no wgpu adapter on host.");
+                return;
+            }
+        };
+
+        // Per-observer asymmetric seed: only slot 1 believes slot 0
+        // is busy. Every other (observer, source) cell is clear.
+        let cap = (N * N) as usize;
+        let mut beliefs = vec![0u32; cap];
+        beliefs[(1 * N + 0) as usize] = DodgerProbeState::OBSERVED_BUSY_BIT;
+        state.seed_beliefs_flags(&beliefs);
+
+        // Two ticks: tick 0 lets the busy preload + fold settle;
+        // tick 1 is the first observable steady-state scoring.
+        state.step();
+        state.step();
+
+        let scoring = state.read_scoring_output();
+        let actions: Vec<u32> = (0..N).map(|i| state.chosen_action(&scoring, i)).collect();
+        eprintln!("[belief-divergence] per-agent chosen actions: {actions:?}");
+
+        assert_eq!(
+            actions[1], FLEE_ACTION_ID,
+            "slot 1 has belief bit set for source 0 → expected Flee, got {}",
+            actions[1],
+        );
+        for i in 0..N {
+            if i == 1 {
+                continue;
+            }
+            assert_eq!(
+                actions[i as usize], IDLE_ACTION_ID,
+                "slot {i} has no beliefs set → expected Idle, got {}",
+                actions[i as usize],
+            );
+        }
+
+        eprintln!(
+            "[belief-divergence] proven on real GPU: only slot 1 (with belief bit) picked Flee; \
+             slots 0/2/3 (no beliefs) picked Idle. Same physical world, divergent per-observer behavior."
         );
     }
 
