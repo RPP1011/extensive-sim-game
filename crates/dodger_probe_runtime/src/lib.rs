@@ -50,6 +50,17 @@ pub struct DodgerProbeState {
     /// `when (self.alive)` eligibility gate.
     agent_alive_buf: wgpu::Buffer,
 
+    /// Per-agent position SoA. Layout `vec3<f32>` padded to vec4 for
+    /// std430 (16 bytes per agent — `[x, y, z, _pad]`). Plumbed
+    /// through `AgentBuffers::pos_buf` so any future GPU kernel
+    /// that reads positions (sidestep consumer, FOV computation,
+    /// etc.) can resolve the binding through the standard context.
+    /// Default seed is all-zero; tests call `seed_agent_pos` to
+    /// place agents and `read_agent_pos` to inspect post-step
+    /// positions.
+    agent_pos_buf: wgpu::Buffer,
+    agent_pos_staging: wgpu::Buffer,
+
     /// Per-(observer, source) belief bits — `agent_count * agent_count`
     /// u32 cells. The `@belief_gated` annotation on dodger_probe.sim's
     /// `view threats` causes the fold kernel to read
@@ -134,6 +145,25 @@ impl DodgerProbeState {
                 contents: bytemuck::cast_slice(&alive_init),
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             });
+
+        // agent_pos SoA — vec4-padded `[x, y, z, _pad]` per agent.
+        // 16 bytes per slot (std430 vec3 alignment). Default seed is
+        // zero; tests call `seed_agent_pos` to place agents.
+        let pos_bytes = ((agent_count as u64) * 16).max(16);
+        let agent_pos_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("dodger_probe::agent_pos"),
+            size: pos_bytes,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let agent_pos_staging = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("dodger_probe::agent_pos_staging"),
+            size: pos_bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
 
         // beliefs_flags — `agent_count * agent_count` u32 cells. The
         // `@belief_gated` annotation on the threats view causes the
@@ -238,6 +268,8 @@ impl DodgerProbeState {
             gpu,
             agent_alive_buf,
             agent_busy_with_ability_id_buf,
+            agent_pos_buf,
+            agent_pos_staging,
             beliefs_flags_buf,
             threats,
             mask_0_bitmap_buf,
@@ -286,6 +318,60 @@ impl DodgerProbeState {
     /// constructing seed arrays use this to keep bit position in
     /// one place.
     pub const OBSERVED_BUSY_BIT: u32 = 1u32 << 7u32;
+
+    /// Seed per-agent positions. Layout `[x, y, z, _pad]` per agent;
+    /// length must be `agent_count`. Writes via `queue.write_buffer`
+    /// — the next dispatch sees the updated positions.
+    pub fn seed_agent_pos(&mut self, values: &[[f32; 4]]) {
+        assert_eq!(
+            values.len(),
+            self.agent_count as usize,
+            "seed_agent_pos: length {} != agent_count {}",
+            values.len(),
+            self.agent_count,
+        );
+        self.gpu.queue.write_buffer(
+            &self.agent_pos_buf,
+            0,
+            bytemuck::cast_slice(values),
+        );
+    }
+
+    /// Block on the GPU and read agent positions back. Layout
+    /// matches `seed_agent_pos`: one `[x, y, z, _pad]` per agent.
+    pub fn read_agent_pos(&self) -> Vec<[f32; 4]> {
+        let bytes = ((self.agent_count as u64) * 16).max(16);
+        let mut encoder = self.gpu.device.create_command_encoder(
+            &wgpu::CommandEncoderDescriptor {
+                label: Some("dodger_probe::read_agent_pos"),
+            },
+        );
+        encoder.copy_buffer_to_buffer(
+            &self.agent_pos_buf,
+            0,
+            &self.agent_pos_staging,
+            0,
+            bytes,
+        );
+        self.gpu.queue.submit(Some(encoder.finish()));
+        let slice = self.agent_pos_staging.slice(..bytes);
+        slice.map_async(wgpu::MapMode::Read, |res| {
+            res.expect("agent_pos_staging map_async failed")
+        });
+        self.gpu.device.poll(wgpu::PollType::Wait).expect("device poll");
+        let out = {
+            let view = slice.get_mapped_range();
+            let words: &[f32] = bytemuck::cast_slice(&view);
+            (0..self.agent_count as usize)
+                .map(|i| {
+                    let b = i * 4;
+                    [words[b], words[b + 1], words[b + 2], words[b + 3]]
+                })
+                .collect()
+        };
+        self.agent_pos_staging.unmap();
+        out
+    }
 
     /// Force-zero both the busy source AND the threats view — test-only.
     /// Both writes are needed:
@@ -411,6 +497,7 @@ impl CompiledSim for DodgerProbeState {
 
         let agent_buffers = engine::gpu::AgentBuffers {
             alive_buf: Some(&self.agent_alive_buf),
+            pos_buf: Some(&self.agent_pos_buf),
             ..Default::default()
         };
         let ctx = engine::gpu::KernelBindingsContext {
@@ -1205,6 +1292,131 @@ mod dodger_behavioural_tests {
         eprintln!(
             "[fov-pin] PROVEN: same world, two projectiles, FOV-driven belief gate produces \
              divergent outcomes — A dodges the front attacker, B is hit by the back attacker."
+        );
+    }
+
+    /// Same scenario as `front_attacker_dodged_back_attacker_hits_via_fov_belief_gate`,
+    /// but agent positions live in GPU SoA (`agent_pos_buf`) instead
+    /// of host-side tuples. Sidestep writes the new position back via
+    /// `seed_agent_pos`; FOV check reads positions via `read_agent_pos`.
+    /// Closes one half of the host-side gap I called out in chat —
+    /// position is now GPU-resident, no more host mirror needed.
+    /// (FOV computation + sidestep apply are still host-side; agent_facing
+    /// SoA + a movement consumer kernel are the next slices.)
+    #[test]
+    fn front_vs_back_with_gpu_resident_positions() {
+        const N: u32 = 4;
+        const HIT_TICK: usize = 10;
+        const PROJECTILE_CORRIDOR_HALF_WIDTH: f32 = 0.5;
+        const SIDESTEP_SPEED: f32 = 0.1;
+
+        const SOURCE_FOR_A: u32 = 0;
+        const SOURCE_FOR_B: u32 = 1;
+        const AGENT_A: u32 = 2;
+        const AGENT_B: u32 = 3;
+        const FACING: (f32, f32) = (1.0, 0.0);
+
+        let projectile_source_a = (10.0_f32, 0.0_f32);
+        let projectile_source_b = (-5.0_f32, 0.0_f32);
+
+        let mut state = match DodgerProbeState::try_new(0xCAFE, N) {
+            Some(s) => s,
+            None => {
+                eprintln!("[fov-gpu-pin] skipping: no wgpu adapter on host.");
+                return;
+            }
+        };
+
+        // Seed initial positions on GPU. Slot indices match the
+        // logical roles above; sources and agents are all real
+        // SoA slots so the belief grid indexes line up.
+        state.seed_agent_pos(&[
+            [0.0, 0.0, 0.0, 0.0],   // SOURCE_FOR_A position
+            [0.0, 0.0, 0.0, 0.0],   // SOURCE_FOR_B position
+            [0.0, 0.0, 0.0, 0.0],   // AGENT_A starts at origin
+            [5.0, 0.0, 0.0, 0.0],   // AGENT_B starts at (5, 0)
+        ]);
+
+        fn is_in_front(observer: (f32, f32), facing: (f32, f32), source: (f32, f32)) -> bool {
+            let dx = source.0 - observer.0;
+            let dy = source.1 - observer.1;
+            (dx * facing.0 + dy * facing.1) > 0.0
+        }
+
+        let cap = (N * N) as usize;
+        let bit = DodgerProbeState::OBSERVED_BUSY_BIT;
+
+        let mut a_sidesteps = 0usize;
+        let mut b_sidesteps = 0usize;
+
+        for _tick in 0..HIT_TICK {
+            // Read positions back from GPU each tick. This is the
+            // round trip the host-side FOV computation needs — we're
+            // no longer tracking position in a Rust tuple.
+            let positions = state.read_agent_pos();
+            let a_pos = (positions[AGENT_A as usize][0], positions[AGENT_A as usize][1]);
+            let b_pos = (positions[AGENT_B as usize][0], positions[AGENT_B as usize][1]);
+
+            // FOV-driven belief seed (still host-computed; the GPU
+            // gate consumes the result).
+            let mut beliefs = vec![0u32; cap];
+            if is_in_front(a_pos, FACING, projectile_source_a) {
+                beliefs[(AGENT_A * N + SOURCE_FOR_A) as usize] = bit;
+            }
+            if is_in_front(b_pos, FACING, projectile_source_b) {
+                beliefs[(AGENT_B * N + SOURCE_FOR_B) as usize] = bit;
+            }
+            state.seed_beliefs_flags(&beliefs);
+
+            state.step();
+
+            let scoring = state.read_scoring_output();
+            let action_a = state.chosen_action(&scoring, AGENT_A);
+            let action_b = state.chosen_action(&scoring, AGENT_B);
+
+            // Sidestep writes new positions back to GPU (no host
+            // tuple mirror — position is GPU-resident).
+            let mut new_positions = positions.clone();
+            if action_a == FLEE_ACTION_ID {
+                new_positions[AGENT_A as usize][1] += SIDESTEP_SPEED;
+                a_sidesteps += 1;
+            }
+            if action_b == FLEE_ACTION_ID {
+                new_positions[AGENT_B as usize][1] += SIDESTEP_SPEED;
+                b_sidesteps += 1;
+            }
+            state.seed_agent_pos(&new_positions);
+        }
+
+        let final_positions = state.read_agent_pos();
+        let final_a = (final_positions[AGENT_A as usize][0], final_positions[AGENT_A as usize][1]);
+        let final_b = (final_positions[AGENT_B as usize][0], final_positions[AGENT_B as usize][1]);
+
+        eprintln!(
+            "[fov-gpu-pin] AGENT A (front-attacker visible): {a_sidesteps} sidesteps → GPU pos {final_a:?}"
+        );
+        eprintln!(
+            "[fov-gpu-pin] AGENT B (back-attacker invisible): {b_sidesteps} sidesteps → GPU pos {final_b:?}"
+        );
+
+        assert!(
+            final_a.1.abs() > PROJECTILE_CORRIDOR_HALF_WIDTH,
+            "A must escape P_a's corridor (|y|={} > {PROJECTILE_CORRIDOR_HALF_WIDTH})",
+            final_a.1.abs()
+        );
+        assert_eq!(
+            b_sidesteps, 0,
+            "B should NOT sidestep — back-attacker invisible"
+        );
+        assert!(
+            final_b.1.abs() <= PROJECTILE_CORRIDOR_HALF_WIDTH,
+            "B must stay in P_b's corridor (|y|={} ≤ {PROJECTILE_CORRIDOR_HALF_WIDTH})",
+            final_b.1.abs()
+        );
+
+        eprintln!(
+            "[fov-gpu-pin] PROVEN: same outcomes as the host-tuple version, but agent positions \
+             live in GPU SoA — closes the position half of the host-side gap."
         );
     }
 }
