@@ -5,32 +5,25 @@
 //!
 //! ## What this proves
 //!
-//! The threats infrastructure delivers data to the dodger's scoring
-//! inputs. The runtime test reads `view_storage_threats` after the
-//! `fold_threats` kernel runs and confirms `threats[1] > 0` — i.e.
-//! the dodger SAW a busy threat candidate.
+//! The threats infrastructure materially changes AI behaviour on
+//! GPU. Three pins:
+//!   * `dodger_observes_threats_after_fold` — the fold kernel
+//!     populates `view_storage_threats[obs] > 0` per observer.
+//!   * `dodger_picks_flee_via_host_scoring_when_threats_present` —
+//!     host-side mirror of the scoring expression; sanity check.
+//!   * `dodger_picks_flee_on_gpu_when_threats_present` — full GPU
+//!     pipeline; reads `scoring_output[agent * 4]` after running the
+//!     scoring kernel and asserts dodger picks Flee WITH threats and
+//!     Idle WITHOUT.
 //!
-//! ## What this does NOT yet prove (compiler gap surfaced)
+//! ## Step-loop architecture
 //!
-//! Whether the dodger's scoring kernel actually picks `Flee` over
-//! `Idle` is observable via `scoring_output[best_action]`, but
-//! reaching that observable requires the scoring kernel to compile
-//! to valid WGSL. Today's compiler emits a `view_<id>_get(agent_id)`
-//! call inside the scoring body for the wired-up `threats.intensity_at`
-//! Builtin, BUT no prelude composer emits the function definition
-//! and the fused kernel doesn't carry the `view_storage_threats`
-//! storage binding either. Naga rejects the WGSL with an undefined-
-//! function error at pipeline-creation time. See
-//! `crates/dsl_compiler/src/cg/emit/wgsl_body.rs::builtin_name`
-//! (renders the call) and `cg/emit/program.rs::compose_wgsl_file`
-//! (the place the prelude composer would inject the helper).
-//!
-//! So for now the test runs ONLY the `fold_threats` kernel — it
-//! pre-loads `agent_busy_with_ability_id` to all-1 from the host
-//! (bypassing the broken `fused_MarkCasterBusy` kernel that
-//! co-emits the scoring body) and checks `threats[1] > 0` after
-//! one fold dispatch. Once the prelude gap closes, the test can
-//! extend to dispatch scoring and assert `chosen_action == Flee`.
+//! `step()` walks the compiler-emitted [`schedule::SCHEDULE`] table
+//! in source order rather than hand-authoring the dispatch sequence.
+//! Each kernel's bindings are wired in a match arm against
+//! `KernelId`; missing a dispatch is impossible because the loop
+//! visits every emitted entry. Adding a kernel to the .sim grows the
+//! match by one arm.
 
 use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
 use engine::ability::PackedAbilityRegistry;
@@ -53,18 +46,38 @@ pub const IDLE_ACTION_ID: u32 = 1;
 pub struct DodgerProbeState {
     gpu: GpuContext,
 
-    /// `busy_with_ability_id` SoA. Pre-initialised by the runtime
-    /// (host write) instead of computed by the per-tick MarkCasterBusy
-    /// kernel — that kernel's WGSL is currently broken (see the
-    /// crate-level docstring's "compiler gap surfaced" section).
+    /// `agent_alive` SoA. Flee + Idle verbs read this for their
+    /// `when (self.alive)` eligibility gate.
+    agent_alive_buf: wgpu::Buffer,
+
+    /// `busy_with_ability_id` SoA. The fused MarkCasterBusy kernel
+    /// (now compilable thanks to the WGSL prelude composer fix at
+    /// commit 6d8bd159) writes this column at tick 0; subsequent
+    /// ticks read it. Initialised to zero so the kernel's
+    /// `where (world.tick == 0)` gate can flip the bits.
     agent_busy_with_ability_id_buf: wgpu::Buffer,
 
     /// Per-observer scalar f32 view (the `threats` view's primary
     /// storage). Sized `agent_count * 4` bytes, zero-init.
     threats: ViewStorage,
 
+    /// Per-verb mask bitmaps (one bit per agent each). Verb scoring
+    /// kernels write to these atomically as the eligibility gate
+    /// (`when (self.alive)` for both Flee and Idle today). Sized
+    /// `(agent_count + 31) / 32 * 4` bytes — one u32 word per 32
+    /// agents, zero-init each tick by the dispatch.
+    mask_0_bitmap_buf: wgpu::Buffer, // Flee verb's mask
+    mask_1_bitmap_buf: wgpu::Buffer, // Idle verb's mask
+
+    /// Scoring output: 4 × u32 per agent — `[best_action,
+    /// best_target, bitcast<u32>(best_utility), 0]`. The argmax
+    /// kernel writes the winning action per agent.
+    scoring_output_buf: wgpu::Buffer,
+    scoring_output_staging: wgpu::Buffer,
+
     event_ring: EventRing,
     fold_cfg_buf: wgpu::Buffer,
+    fused_cfg_buf: wgpu::Buffer,
 
     #[allow(dead_code)]
     registry_gpu: PackedAbilityRegistryGpu,
@@ -84,12 +97,14 @@ impl DodgerProbeState {
     pub fn try_new(seed: u64, agent_count: u32) -> Option<Self> {
         let gpu = GpuContext::new_blocking().ok()?;
 
-        // Pre-load every agent as busy. In a non-broken end-to-end
-        // path, MarkCasterBusy's WGSL would write these bits at tick
-        // 0; today its co-emitted fused kernel has unresolved
-        // `view_<id>_get` references and naga rejects it. Bypassing
-        // the kernel keeps the threats-fold path testable in
-        // isolation.
+        // Pre-load busy_with_ability_id to all-1. The fused
+        // MarkCasterBusy kernel ALSO writes these bits at tick 0 via
+        // its `where (world.tick == 0)` gate — so the host preload is
+        // idempotent there but lets the first fold dispatch (which
+        // runs BEFORE MarkCasterBusy in [`schedule::SCHEDULE`]) see
+        // non-zero busy on tick 0. Without the preload, fold would
+        // early-exit on tick 0 and the view would stay at 0 until
+        // tick 1, costing every observer one tick of latency.
         let busy_init: Vec<u32> = vec![1u32; agent_count as usize];
         let agent_busy_with_ability_id_buf =
             gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -99,6 +114,53 @@ impl DodgerProbeState {
                     | wgpu::BufferUsages::COPY_SRC
                     | wgpu::BufferUsages::COPY_DST,
             });
+
+        // alive SoA — Flee/Idle's `when (self.alive)` gate reads
+        // agent_alive. All-1 (every agent alive).
+        let alive_init: Vec<u32> = vec![1u32; agent_count as usize];
+        let agent_alive_buf =
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("dodger_probe::agent_alive"),
+                contents: bytemuck::cast_slice(&alive_init),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            });
+
+        // Mask bitmaps — one u32 word per 32 agents (16 bytes minimum
+        // floor for wgpu's >0-sized binding requirement).
+        let mask_words = ((agent_count + 31) / 32).max(1) as usize;
+        let mask_bytes = (mask_words * 4).max(16) as u64;
+        let mask_zeros = vec![0u32; (mask_bytes / 4) as usize];
+        let mk_mask = |label: &str| {
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: bytemuck::cast_slice(&mask_zeros),
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+            })
+        };
+        let mask_0_bitmap_buf = mk_mask("dodger_probe::mask_0_bitmap_flee");
+        let mask_1_bitmap_buf = mk_mask("dodger_probe::mask_1_bitmap_idle");
+
+        // Scoring output: 4 × u32 per agent. The argmax kernel writes
+        // [best_action, best_target, bitcast<u32>(best_utility), pad].
+        let scoring_words = (agent_count as usize) * 4;
+        let scoring_bytes = ((scoring_words * 4).max(16)) as u64;
+        let scoring_zeros = vec![0u32; (scoring_bytes / 4) as usize];
+        let scoring_output_buf =
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("dodger_probe::scoring_output"),
+                contents: bytemuck::cast_slice(&scoring_zeros),
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+            });
+        let scoring_output_staging = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("dodger_probe::scoring_output_staging"),
+            size: scoring_bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
 
         let event_ring = EventRing::new(&gpu, "dodger_probe");
         let threats = ViewStorage::new(
@@ -126,6 +188,19 @@ impl DodgerProbeState {
             },
         );
 
+        let fused_cfg_init = fused_MarkCasterBusy::FusedMarkCasterBusyCfg {
+            agent_cap: agent_count,
+            tick: 0,
+            seed: 0, _pad: 0,
+        };
+        let fused_cfg_buf = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("dodger_probe::fused_cfg"),
+                contents: bytemuck::bytes_of(&fused_cfg_init),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        );
+
         let registry_gpu = PackedAbilityRegistryGpu::upload(
             &PackedAbilityRegistry::pack(&engine::ability::AbilityRegistry::new()),
             &gpu,
@@ -134,16 +209,86 @@ impl DodgerProbeState {
 
         Some(Self {
             gpu,
+            agent_alive_buf,
             agent_busy_with_ability_id_buf,
             threats,
+            mask_0_bitmap_buf,
+            mask_1_bitmap_buf,
+            scoring_output_buf,
+            scoring_output_staging,
             event_ring,
             fold_cfg_buf,
+            fused_cfg_buf,
             registry_gpu,
             cache: dispatch::KernelCache::default(),
             tick: 0,
             agent_count,
             seed,
         })
+    }
+
+    /// Force-zero both the busy source AND the threats view — test-only.
+    /// Both writes are needed:
+    ///   * `busy = 0` stops `FoldThreats` from re-incrementing the view
+    ///     this tick (the fold's busy-filter early-exits).
+    ///   * `view = 0` clears the accumulated value from prior ticks
+    ///     (the fold's body is `self += 1.0` with no per-tick reset, so
+    ///     a non-zero view persists once any tick stamped a non-zero
+    ///     value).
+    /// Without both, scoring on the next tick would still read the
+    /// pre-existing accumulated view value.
+    pub fn force_no_threats(&mut self) {
+        let busy_zeros: Vec<u32> = vec![0u32; self.agent_count as usize];
+        self.gpu.queue.write_buffer(
+            &self.agent_busy_with_ability_id_buf,
+            0,
+            bytemuck::cast_slice(&busy_zeros),
+        );
+        let view_zeros: Vec<u32> = vec![0u32; (self.agent_count as usize).max(4)];
+        self.gpu.queue.write_buffer(
+            self.threats.primary(),
+            0,
+            bytemuck::cast_slice(&view_zeros),
+        );
+        self.threats.mark_dirty();
+    }
+
+    /// Read the scoring_output buffer back to host. Layout per agent:
+    /// `[best_action: u32, best_target: u32, bitcast<u32>(best_utility): u32, _pad: u32]`.
+    /// The argmax kernel writes one quad per agent; index by
+    /// `agent_id * 4 + 0` for the winning action.
+    pub fn read_scoring_output(&self) -> Vec<u32> {
+        let bytes = ((self.agent_count as usize) * 4 * 4).max(16) as u64;
+        let mut encoder =
+            self.gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("dodger_probe::read_scoring_output"),
+            });
+        encoder.copy_buffer_to_buffer(
+            &self.scoring_output_buf,
+            0,
+            &self.scoring_output_staging,
+            0,
+            bytes,
+        );
+        self.gpu.queue.submit(Some(encoder.finish()));
+        let slice = self.scoring_output_staging.slice(..bytes);
+        slice.map_async(wgpu::MapMode::Read, |res| {
+            res.expect("scoring_output_staging map_async failed")
+        });
+        self.gpu.device.poll(wgpu::PollType::Wait).expect("device poll");
+        let out = {
+            let view = slice.get_mapped_range();
+            let words: &[u32] = bytemuck::cast_slice(&view);
+            words.to_vec()
+        };
+        self.scoring_output_staging.unmap();
+        out
+    }
+
+    /// Convenience: per-agent winning action as parsed by the argmax
+    /// kernel. `chosen_action(agent_id)` reads `scoring_output[agent_id * 4]`.
+    pub fn chosen_action(&self, scoring_output: &[u32], agent_id: u32) -> u32 {
+        scoring_output[(agent_id as usize) * 4]
     }
 
     /// Per-observer threats count (`view_storage_threats[obs]`).
@@ -167,6 +312,25 @@ impl DodgerProbeState {
 }
 
 impl CompiledSim for DodgerProbeState {
+    /// Walk the compiler-emitted [`schedule::SCHEDULE`] table in source
+    /// order, binding each kernel from its `KernelId`. The runtime no
+    /// longer hand-authors the dispatch sequence — that's the
+    /// compiler's job. Adding a kernel to the .sim only requires a new
+    /// match arm here for binding setup; missing a dispatch is
+    /// impossible because the loop visits every entry.
+    ///
+    /// The 3 kernels actively wired in this fixture:
+    ///   1. `FusedMaskVerbFlee` — sets mask bitmaps so the scoring
+    ///      kernel's per-verb eligibility checks pass.
+    ///   2. `FoldThreats` — PerAgentEventScan; updates view storage
+    ///      from `agent_busy_with_ability_id` (read on next tick).
+    ///   3. `FusedMarkCasterBusy` — stamps busy at tick 0 + computes
+    ///      scoring_argmax against the threats view.
+    ///
+    /// `UploadSimCfg`, `FusedPackAgents`, `KickSnapshot` are emitted
+    /// by the compiler but unused in this minimal pin (no snapshot
+    /// readback path, no agent-pack consumer); they fall through the
+    /// catch-all match arm.
     fn step(&mut self) {
         let mut encoder =
             self.gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -174,13 +338,36 @@ impl CompiledSim for DodgerProbeState {
             });
         self.event_ring.clear_tail_in(&mut encoder);
 
-        // fold_threats — PerAgentEventScan over (observer,
-        // source_candidate). Busy-filter passes when source is busy;
-        // remaining pairs increment observer's view by 1.0.
-        //
-        // The host pre-loaded `agent_busy_with_ability_id = 1` for
-        // every slot, so the busy-filter passes on every (obs, src)
-        // pair → each observer's threats[obs] += agent_count per tick.
+        let agent_buffers = engine::gpu::AgentBuffers {
+            alive_buf: Some(&self.agent_alive_buf),
+            ..Default::default()
+        };
+        let ctx = engine::gpu::KernelBindingsContext {
+            state: &agent_buffers,
+            event_ring: &self.event_ring,
+            registry: &self.registry_gpu,
+            voxel_grid: None,
+        };
+
+        // Per-tick mask clear: mask_predicate ops accumulate via
+        // atomicOr; stale bits from previous ticks would break per-tick
+        // eligibility. Issued before the compute pass so the GPU
+        // observes zeroes when the mask kernel reads-modify-writes.
+        let mask_words = ((self.agent_count + 31) / 32).max(1) as usize;
+        let mask_bytes = (mask_words * 4).max(16) as u64;
+        let zeros = vec![0u32; (mask_bytes / 4) as usize];
+        self.gpu.queue.write_buffer(&self.mask_0_bitmap_buf, 0, bytemuck::cast_slice(&zeros));
+        self.gpu.queue.write_buffer(&self.mask_1_bitmap_buf, 0, bytemuck::cast_slice(&zeros));
+
+        // Update per-tick cfg uniforms once. Both kernels consume the
+        // same `(agent_cap, tick, seed, _pad)` POD layout.
+        let cfg = fused_MarkCasterBusy::FusedMarkCasterBusyCfg {
+            agent_cap: self.agent_count,
+            tick: self.tick as u32,
+            seed: 0,
+            _pad: 0,
+        };
+        self.gpu.queue.write_buffer(&self.fused_cfg_buf, 0, bytemuck::bytes_of(&cfg));
         let fold_cfg = fold_threats::FoldThreatsCfg {
             event_count: self.agent_count,
             tick: self.tick as u32,
@@ -188,23 +375,75 @@ impl CompiledSim for DodgerProbeState {
             _pad: 0,
         };
         self.gpu.queue.write_buffer(&self.fold_cfg_buf, 0, bytemuck::bytes_of(&fold_cfg));
-        let fold_bindings = fold_threats::FoldThreatsBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            view_storage_primary: self.threats.primary(),
-            view_storage_anchor: self.threats.anchor(),
-            view_storage_ids: self.threats.ids(),
-            agent_busy_with_ability_id: &self.agent_busy_with_ability_id_buf,
-            sim_cfg: self.event_ring.sim_cfg(),
-            cfg: &self.fold_cfg_buf,
-        };
-        dispatch::dispatch_fold_threats(
-            &mut self.cache,
-            &fold_bindings,
-            &self.gpu.device,
-            &mut encoder,
-            self.agent_count,
-        );
+
+        for op in schedule::SCHEDULE {
+            match op {
+                schedule::DispatchOp::Kernel(KernelId::FusedMaskVerbFlee) => {
+                    let extras = fused_mask_verb_Flee::FusedMaskVerbFleeExtras {
+                        mask_0_bitmap: &self.mask_0_bitmap_buf,
+                        mask_1_bitmap: &self.mask_1_bitmap_buf,
+                        cfg: &self.fused_cfg_buf,
+                    };
+                    let bindings = fused_mask_verb_Flee::FusedMaskVerbFleeBindings::from_context_with_extras(
+                        &ctx, &extras,
+                    );
+                    dispatch::dispatch_fused_mask_verb_flee(
+                        &mut self.cache,
+                        &bindings,
+                        &self.gpu.device,
+                        &mut encoder,
+                        self.agent_count,
+                    );
+                }
+                schedule::DispatchOp::Kernel(KernelId::FoldThreats) => {
+                    let bindings = fold_threats::FoldThreatsBindings {
+                        event_ring: self.event_ring.ring(),
+                        event_tail: self.event_ring.tail(),
+                        view_storage_primary: self.threats.primary(),
+                        view_storage_anchor: self.threats.anchor(),
+                        view_storage_ids: self.threats.ids(),
+                        agent_busy_with_ability_id: &self.agent_busy_with_ability_id_buf,
+                        sim_cfg: self.event_ring.sim_cfg(),
+                        cfg: &self.fold_cfg_buf,
+                    };
+                    dispatch::dispatch_fold_threats(
+                        &mut self.cache,
+                        &bindings,
+                        &self.gpu.device,
+                        &mut encoder,
+                        self.agent_count,
+                    );
+                }
+                schedule::DispatchOp::Kernel(KernelId::FusedMarkCasterBusy) => {
+                    let extras = fused_MarkCasterBusy::FusedMarkCasterBusyExtras {
+                        agent_busy_with_ability_id: &self.agent_busy_with_ability_id_buf,
+                        mask_0_bitmap: &self.mask_0_bitmap_buf,
+                        mask_1_bitmap: &self.mask_1_bitmap_buf,
+                        scoring_output: &self.scoring_output_buf,
+                        view_storage_threats_primary: self.threats.primary(),
+                        cfg: &self.fused_cfg_buf,
+                    };
+                    let bindings = fused_MarkCasterBusy::FusedMarkCasterBusyBindings::from_context_with_extras(
+                        &ctx, &extras,
+                    );
+                    dispatch::dispatch_fused_markcasterbusy(
+                        &mut self.cache,
+                        &bindings,
+                        &self.gpu.device,
+                        &mut encoder,
+                        self.agent_count,
+                    );
+                }
+                // UploadSimCfg / FusedPackAgents / KickSnapshot — emitted
+                // by the compiler but not wired to any consumer in this
+                // fixture. Skipping them is the explicit choice; the
+                // schedule loop makes the omission audit-visible.
+                schedule::DispatchOp::Kernel(_) => {}
+                schedule::DispatchOp::FixedPoint { .. }
+                | schedule::DispatchOp::Indirect { .. }
+                | schedule::DispatchOp::GatedBy { .. } => {}
+            }
+        }
 
         self.gpu.queue.submit(Some(encoder.finish()));
         self.threats.mark_dirty();
@@ -396,6 +635,80 @@ mod dodger_behavioural_tests {
              WITHOUT → action={} ({:.2} util). Diff confirmed.",
             threats[1], dodger_action_aware, dodger_utility_aware,
             dodger_action_baseline, dodger_utility_baseline,
+        );
+    }
+
+    /// **The load-bearing GPU pin.** Replaces the host-side stand-in
+    /// with a real GPU-side scoring readback. The full pipeline runs:
+    ///
+    ///   1. fused_MarkCasterBusy stamps `busy_with_ability_id = 1`
+    ///      at tick 0; mask predicates gate Flee + Idle on `self.alive`;
+    ///      scoring argmax computes per-agent winning action by reading
+    ///      `view_storage_threats_primary` via the new prelude composer.
+    ///   2. fold_threats updates the view storage (read on next tick).
+    ///   3. After step 2, scoring_output[agent * 4] == winning action.
+    ///
+    /// Pin shape:
+    ///   * Run TWO ticks: tick 0 fires MarkCasterBusy + fold; tick 1
+    ///     fires scoring with the threats view populated by tick 0's fold.
+    ///   * After tick 1: dodger's scoring_output[1*4] == FLEE (0).
+    ///   * Reset threats to zero (force-zero baseline); run another
+    ///     tick; scoring_output[1*4] == IDLE (1).
+    ///
+    /// This is the pin that proves the threats infrastructure
+    /// materially changes AI behaviour ON GPU — not via host-side
+    /// scoring stand-in.
+    #[test]
+    fn dodger_picks_flee_on_gpu_when_threats_present() {
+        const N: u32 = 2;
+        let mut state = match DodgerProbeState::try_new(0xCAFE, N) {
+            Some(s) => s,
+            None => {
+                eprintln!("[dodger gpu pin] skipping: no wgpu adapter on host.");
+                return;
+            }
+        };
+
+        // Tick 0: MarkCasterBusy stamps busy + scoring runs against
+        // initial-zero threats (so picks Idle), then fold populates
+        // threats from busy.
+        state.step();
+        // Tick 1: MarkCasterBusy is a no-op (`world.tick == 0` gate
+        // fails), fold sees busy=1 and adds N to each observer.
+        // Scoring sees the previous tick's threat counts (also N=2 from
+        // tick 0's fold). Dodger picks Flee.
+        state.step();
+
+        let scoring = state.read_scoring_output();
+        let dodger_action = state.chosen_action(&scoring, 1);
+        eprintln!(
+            "[dodger gpu pin] tick 1 (threats present) — dodger chosen action = {} (FLEE={}, IDLE={})",
+            dodger_action, FLEE_ACTION_ID, IDLE_ACTION_ID,
+        );
+        assert_eq!(
+            dodger_action, FLEE_ACTION_ID,
+            "WITH threats: dodger should pick Flee on GPU; got action_id={}",
+            dodger_action,
+        );
+
+        // Baseline: zero both the busy source and the accumulated view,
+        // then step. Fold sees busy=0 (early-exits, view stays zero);
+        // scoring then reads view=0 so Flee (0.0) loses to Idle (0.5).
+        // The MarkCasterBusy `world.tick == 0` gate has long since
+        // stopped firing, so busy stays at 0 once we zero it.
+        state.force_no_threats();
+        state.step();
+        let scoring = state.read_scoring_output();
+        let dodger_action_baseline = state.chosen_action(&scoring, 1);
+        assert_eq!(
+            dodger_action_baseline, IDLE_ACTION_ID,
+            "WITHOUT threats: dodger should pick Idle on GPU; got action_id={}",
+            dodger_action_baseline,
+        );
+
+        assert_ne!(
+            dodger_action, dodger_action_baseline,
+            "GPU scoring must produce a behaviour delta when threats are present vs absent",
         );
     }
 }
