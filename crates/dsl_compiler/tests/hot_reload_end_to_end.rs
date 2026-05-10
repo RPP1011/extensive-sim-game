@@ -23,7 +23,7 @@
 use dsl_ast::ability_parser::parse_ability_file;
 use dsl_compiler::ability_lower::lower_ability_decl;
 use engine::ability::{
-    AbilityProgram, AbilityRegistryBuilder, EffectOp,
+    AbilityId, AbilityProgram, AbilityRegistry, AbilityRegistryBuilder, EffectOp,
 };
 
 fn parse_and_lower_one(src: &str) -> AbilityProgram {
@@ -89,4 +89,82 @@ fn ability_source_edit_propagates_through_hot_reload_swap() {
     // contract for hot-reload — any cached AbilityId references in
     // simulation state stay valid).
     assert_eq!(registry_v1.len(), registry_v2.len());
+}
+
+/// **The behavioral pin.** Earlier tests proved registry-lookup
+/// returns the new program; this proves the change PROPAGATES through
+/// a simulated tick loop that dispatches the ability each tick.
+///
+/// Models a 10-tick sim where one ability fires at a target every
+/// tick, accumulating hp damage. At tick 5 we hot-swap the ability
+/// from `damage 10` to `damage 25`. Total damage taken should be:
+///   ticks 0..5 (5 ticks): 5 × 10 = 50
+///   ticks 5..10 (5 ticks): 5 × 25 = 125
+///   total: 175
+///
+/// Without the hot swap (baseline run): 10 × 10 = 100.
+///
+/// The 75-damage delta IS the load-bearing proof that hot-reload
+/// produces a behavioural change inside a running sim, not just a
+/// registry-lookup change.
+#[test]
+fn hot_reload_propagates_through_sim_loop() {
+    // Tiny dispatcher: read the program at `id`, sum damage from its
+    // effects (the only EffectOp variant this test uses).
+    fn dispatch_one_tick(reg: &AbilityRegistry, id: AbilityId) -> f32 {
+        let prog = reg.get(id).expect("ability registered");
+        prog.effects
+            .iter()
+            .map(|e| match e {
+                EffectOp::Damage { amount } => *amount,
+                _ => 0.0,
+            })
+            .sum()
+    }
+
+    let prog_v1 = parse_and_lower_one(
+        "ability HotSwapMidLoop {\n    target: enemy\n    range: 5.0\n    damage 10\n}\n",
+    );
+    let prog_v2 = parse_and_lower_one(
+        "ability HotSwapMidLoop {\n    target: enemy\n    range: 5.0\n    damage 25\n}\n",
+    );
+
+    let mut builder = AbilityRegistryBuilder::new();
+    let id = builder.register(prog_v1.clone());
+    let mut reg = builder.build();
+
+    // --- Run with a hot swap at tick 5.
+    let mut hp_taken_with_swap: f32 = 0.0;
+    for tick in 0..10 {
+        if tick == 5 {
+            reg = reg
+                .with_program_replaced(id, prog_v2.clone())
+                .expect("swap at known id");
+        }
+        hp_taken_with_swap += dispatch_one_tick(&reg, id);
+    }
+    assert_eq!(
+        hp_taken_with_swap, 175.0,
+        "with hot swap at tick 5: 5 × 10 + 5 × 25 = 175; got {hp_taken_with_swap}"
+    );
+
+    // --- Baseline: no swap. 10 × 10 = 100.
+    let mut baseline_builder = AbilityRegistryBuilder::new();
+    let id_b = baseline_builder.register(prog_v1);
+    let baseline_reg = baseline_builder.build();
+    let mut hp_taken_baseline: f32 = 0.0;
+    for _ in 0..10 {
+        hp_taken_baseline += dispatch_one_tick(&baseline_reg, id_b);
+    }
+    assert_eq!(
+        hp_taken_baseline, 100.0,
+        "baseline (no swap): 10 × 10 = 100; got {hp_taken_baseline}"
+    );
+
+    // --- The behavioural delta IS the proof.
+    let delta = hp_taken_with_swap - hp_taken_baseline;
+    assert_eq!(
+        delta, 75.0,
+        "hot reload at tick 5 must shift total damage by +75 (5 × (25-10)); got {delta}"
+    );
 }
