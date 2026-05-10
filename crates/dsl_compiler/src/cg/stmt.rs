@@ -474,6 +474,28 @@ pub enum CgStmt {
     ///
     /// Lands in #136 (initial: 4 EffectOp variants — Damage, Heal,
     /// Stun, Slow), then #137 expands to the full vocabulary.
+    /// Plan G G3b/G3c — struct-payload ring append in a
+    /// `@per_entity_ring(...)` view fold body. Source form:
+    /// `self.append(field1: expr1, field2: expr2, ...)`.
+    ///
+    /// `view` names the materialized view whose ring receives the cell.
+    /// `fields` carries the per-field name + bound expression in
+    /// declaration order; the per-cell struct layout (field count +
+    /// per-field types + total cell width in u32 words) lives on
+    /// [`crate::cg::program::CgProgram::view_layouts`] keyed by `view`,
+    /// registered at the same time the lowering produces this stmt.
+    ///
+    /// Emit (per-storage-hint synthesized in `kernel.rs`): allocates a
+    /// ring index via the per-target cursor counter, then writes each
+    /// field at `primary[ring_idx * field_count + field_idx]`. The
+    /// auto-walker surfaces all field-expr reads + the
+    /// `ViewStorage{view, Primary}` and `ViewStorage{view, Cursors}`
+    /// writes.
+    ViewStorageAppend {
+        view: super::data_handle::ViewId,
+        fields: Vec<(String, CgExprId)>,
+    },
+
     ApplyAbility {
         ability: CgExprId,
         /// Caster slot — u32-typed expression. Written into the actor
@@ -584,6 +606,16 @@ impl fmt::Display for CgStmt {
                     "for_each_agent_body(binder={}, body=stmts#{})",
                     binder, body.0
                 )
+            }
+            CgStmt::ViewStorageAppend { view, fields } => {
+                write!(f, "view_storage_append(view=#{}, [", view.0)?;
+                for (i, (name, expr)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{}=expr#{}", name, expr.0)?;
+                }
+                f.write_str("])")
             }
             CgStmt::ApplyAbility { ability, caster, target, with_aoe_dispatch } => {
                 // Slice ε: include caster + target operand ids in the
@@ -981,6 +1013,24 @@ pub fn collect_stmt_dependencies(
             collect_expr_reads(*ability, exprs, reads);
             collect_expr_reads(*caster, exprs, reads);
             collect_expr_reads(*target, exprs, reads);
+        }
+        CgStmt::ViewStorageAppend { view, fields } => {
+            // Plan G G3b/G3c — struct-payload ring append. Each
+            // field's bound expression contributes reads (event-pattern
+            // bindings, locals, agent-field reads); the writes are
+            // both Primary (per-field cell stores) and Cursors (the
+            // atomicAdd that allocates the ring slot).
+            for (_, expr_id) in fields {
+                collect_expr_reads(*expr_id, exprs, reads);
+            }
+            writes.push(DataHandle::ViewStorage {
+                view: *view,
+                slot: super::data_handle::ViewStorageSlot::Primary,
+            });
+            writes.push(DataHandle::ViewStorage {
+                view: *view,
+                slot: super::data_handle::ViewStorageSlot::Cursors,
+            });
         }
     }
 }

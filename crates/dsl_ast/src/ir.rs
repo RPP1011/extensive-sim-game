@@ -475,6 +475,21 @@ pub enum IrStmt {
         value: IrExprNode,
         span: Span,
     },
+    /// Plan G G3b/G3c — `self.append(field1: expr1, field2: expr2, ...)` —
+    /// struct-payload ring append in a `@per_entity_ring(...)` view fold
+    /// body. Each cell of the ring stores a multi-field struct whose
+    /// layout is implied by the field list (declaration order, types
+    /// inferred from the bound exprs at lowering time). The ring index
+    /// is allocated via the per-agent cursor counter; the per-field
+    /// stores write into `primary[ring_idx * field_count + field_idx]`.
+    ///
+    /// Distinct from `SelfUpdate { op = "+=" }` — that scalar accumulate
+    /// path stays in place for `recent_damages` style folds; this new
+    /// shape unblocks the threats view's struct-cell payload.
+    SelfAppend {
+        fields: Vec<IrFieldInit>,
+        span: Span,
+    },
     Expr(IrExprNode),
     /// `beliefs(observer).observe(target) with { field: expr, ... }` — belief
     /// mutation primitive resolved from the DSL surface (Plan ToM Task 4).

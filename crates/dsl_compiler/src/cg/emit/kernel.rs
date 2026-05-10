@@ -109,7 +109,8 @@ use crate::kernel_binding_ir::{
 
 use super::wgsl_body::EmitError as InnerEmitError;
 use super::wgsl_body::{
-    lower_cg_expr_to_wgsl, lower_cg_stmt_list_to_wgsl, stmt_list_contains_set_alive_false, EmitCtx,
+    lower_cg_expr_to_wgsl, lower_cg_stmt_list_to_wgsl, lower_cg_stmt_to_wgsl,
+    stmt_list_contains_set_alive_false, EmitCtx,
 };
 
 // ---------------------------------------------------------------------------
@@ -2397,7 +2398,7 @@ fn build_view_fold_wgsl_body(
     // we lock in the per_entity_ring_probe.sim shape so the smoke test can
     // assert ring-append semantics without G3b's struct-payload work.
     if let Some(CgStorageHint::PerEntityRing { k }) = storage_hint {
-        return build_view_fold_ring_append_body(body_ops, prog, k as u32);
+        return build_view_fold_ring_append_body(body_ops, prog, ctx, k as u32);
     }
     let mut out = String::new();
     out.push_str("    let event_idx = gid.x;\n");
@@ -2686,8 +2687,10 @@ const EVENT_RING_DEFAULT_STRIDE_U32: u32 = 10;
 fn build_view_fold_ring_append_body(
     body_ops: &[OpId],
     prog: &CgProgram,
+    ctx: &EmitCtx<'_>,
     k: u32,
 ) -> Result<String, KernelEmitError> {
+    use crate::cg::stmt::CgStmt;
     let mut out = String::new();
     out.push_str("    let event_idx = gid.x;\n");
     out.push_str("    if (event_idx >= cfg.event_count) { return; }\n");
@@ -2695,42 +2698,177 @@ fn build_view_fold_ring_append_body(
 
     for op_id in body_ops {
         let op = resolve_op(prog, *op_id)?;
-        let (event_id, stride) = match &op.kind {
-            ComputeOpKind::ViewFold { on_event, .. } => {
+        let (event_id, body_list_id, view_id, stride) = match &op.kind {
+            ComputeOpKind::ViewFold {
+                on_event,
+                body,
+                view,
+            } => {
                 let stride = prog
                     .event_layouts
                     .get(&on_event.0)
                     .map(|l| l.record_stride_u32)
                     .unwrap_or(EVENT_RING_DEFAULT_STRIDE_U32);
-                (on_event.0, stride)
+                (on_event.0, *body, *view, stride)
             }
             _ => continue,
         };
+
+        // Plan G G3b/G3c — branch on the registered struct-cell
+        // ViewLayout. When present, the body's `CgStmt::ViewStorageAppend`
+        // drives a per-field ring-append; without one, fall through to
+        // the G3a scalar shape (`view_storage_primary[ring_idx] =
+        // amount_bits`) hard-coded against the well-known event ring
+        // offset 3 / 4 (target / amount).
+        let layout = prog.view_layouts.get(&view_id.0);
+
         out.push_str(&format!(
             "    // PerEntityRing append (K = {k}, on_event = {event_id}).\n"
         ));
         out.push_str(&format!(
             "    if (event_ring[event_idx * {stride}u + 0u] == {event_id}u) {{\n"
         ));
-        out.push_str(&format!(
-            "        let target_slot = event_ring[event_idx * {stride}u + 3u];\n"
-        ));
-        out.push_str(&format!(
-            "        let amount_bits = event_ring[event_idx * {stride}u + 4u];\n"
-        ));
-        out.push_str(
-            "        let cursor_idx = atomicAdd(&view_storage_anchor[target_slot], 1u);\n",
-        );
-        out.push_str(&format!(
-            "        let ring_idx = target_slot * {k}u + (cursor_idx % {k}u);\n"
-        ));
-        // primary is `array<u32>` for PerEntityRing (non-atomic — the
-        // cursor atomicAdd already serialized slot allocation, so
-        // each writer's `ring_idx` is distinct within one tick for
-        // ≤K events per agent). Plain assignment, not atomicStore.
-        out.push_str(
-            "        view_storage_primary[ring_idx] = amount_bits;\n",
-        );
+
+        if let Some(layout) = layout {
+            // ----- G3b/G3c struct-payload path -----
+            //
+            // Step 1: emit prelude statements (event-pattern binding
+            // `Let`s synthesized by the lowering, plus user `Let`s),
+            // PROVIDING the bound locals reads in the SelfAppend's
+            // field expressions can resolve.
+            //
+            // Step 2: emit the cursor allocation + per-field stores.
+            //
+            // The walker locates the `ViewStorageAppend` stmt and uses
+            // its lowered field-expression CgExprIds.
+            let body_list = prog
+                .stmt_lists
+                .get(body_list_id.0 as usize)
+                .ok_or(KernelEmitError::Inner(InnerEmitError::StmtListIdOutOfRange {
+                    id: body_list_id,
+                    arena_len: prog.stmt_lists.len() as u32,
+                }))?;
+
+            // Lower every prelude stmt (Let / Assign / etc.) until we
+            // hit the ViewStorageAppend.
+            let mut append_fields: Option<&Vec<(String, crate::cg::data_handle::CgExprId)>> = None;
+            for stmt_id in &body_list.stmts {
+                let Some(stmt) = prog.stmts.get(stmt_id.0 as usize) else {
+                    continue;
+                };
+                match stmt {
+                    CgStmt::ViewStorageAppend { fields, .. } => {
+                        append_fields = Some(fields);
+                        break;
+                    }
+                    CgStmt::Let { .. } => {
+                        // Plan G G3c — delegate to the shared single-
+                        // stmt lowerer so event-pattern bindings +
+                        // local typing flow through their normal path
+                        // (no parallel emit logic to maintain).
+                        let stmt_wgsl =
+                            lower_cg_stmt_to_wgsl(*stmt_id, ctx).map_err(KernelEmitError::from)?;
+                        for line in stmt_wgsl.lines() {
+                            if line.is_empty() {
+                                out.push('\n');
+                            } else {
+                                out.push_str(&format!("        {line}\n"));
+                            }
+                        }
+                    }
+                    // Skip non-let prelude shapes (Assign, etc.) — for
+                    // the struct-cell append shape today, only Lets
+                    // appear before the ViewStorageAppend.
+                    _ => {}
+                }
+            }
+
+            let Some(fields) = append_fields else {
+                // No ViewStorageAppend in the body — close the if-block
+                // and continue. The auto-walker still recorded the
+                // primary/cursors writes, but the body has no actual
+                // append to emit.
+                out.push_str("    }\n");
+                continue;
+            };
+
+            // Step 2: cursor allocation. The cursor counter (BGL slot 3,
+            // declared as `array<atomic<u32>>`) is keyed on the
+            // append-target — by convention, the FIRST field's value if
+            // that field is named `target` or one of the layout's
+            // declared fields names a target binding. To keep the MVP
+            // scope tight, we hardcode the target slot from
+            // `event_ring[event_idx * stride + 3u]` (matching the
+            // existing G3a scalar shape's `target_slot` derivation).
+            // The struct-payload threats view follows the same shape
+            // (the cursor is keyed on the per-agent observer slot,
+            // which the event payload's target field carries).
+            out.push_str(&format!(
+                "        let target_slot = event_ring[event_idx * {stride}u + 3u];\n"
+            ));
+            out.push_str(
+                "        let cursor_idx = atomicAdd(&view_storage_anchor[target_slot], 1u);\n",
+            );
+            let field_count = layout.cell_stride_u32();
+            out.push_str(&format!(
+                "        let ring_idx = target_slot * {k}u + (cursor_idx % {k}u);\n"
+            ));
+            // Step 3: per-field stores. Each field writes to
+            // `view_storage_primary[ring_idx * field_count + field_idx]`.
+            // For non-u32 types, bitcast to u32 (primary is
+            // `array<u32>`).
+            for (field_idx, ((name, expr_id), layout_field)) in
+                fields.iter().zip(layout.fields.iter()).enumerate()
+            {
+                let value_wgsl =
+                    lower_cg_expr_to_wgsl(*expr_id, ctx).map_err(KernelEmitError::from)?;
+                let bits_expr = match layout_field.ty {
+                    crate::cg::expr::CgTy::U32
+                    | crate::cg::expr::CgTy::AgentId
+                    | crate::cg::expr::CgTy::Tick => value_wgsl,
+                    crate::cg::expr::CgTy::F32 => format!("bitcast<u32>({value_wgsl})"),
+                    crate::cg::expr::CgTy::I32 => format!("bitcast<u32>({value_wgsl})"),
+                    crate::cg::expr::CgTy::Bool => format!("select(0u, 1u, {value_wgsl})"),
+                    crate::cg::expr::CgTy::Vec3F32 => {
+                        // Vec3 doesn't fit in a single u32 word; the
+                        // type-checker gates this at the lowering, but
+                        // emit a placeholder so the body still
+                        // compiles.
+                        format!("/* vec3 packing TODO */ 0u")
+                    }
+                    crate::cg::expr::CgTy::ViewKey { .. } => value_wgsl,
+                };
+                out.push_str(&format!(
+                    "        view_storage_primary[ring_idx * {field_count}u + {field_idx}u] = {bits_expr}; // {name}\n",
+                    field_count = field_count,
+                    field_idx = field_idx,
+                    bits_expr = bits_expr,
+                    name = name,
+                ));
+            }
+        } else {
+            // ----- G3a scalar-payload fallback (preserve existing emit) -----
+            out.push_str(&format!(
+                "        let target_slot = event_ring[event_idx * {stride}u + 3u];\n"
+            ));
+            out.push_str(&format!(
+                "        let amount_bits = event_ring[event_idx * {stride}u + 4u];\n"
+            ));
+            out.push_str(
+                "        let cursor_idx = atomicAdd(&view_storage_anchor[target_slot], 1u);\n",
+            );
+            out.push_str(&format!(
+                "        let ring_idx = target_slot * {k}u + (cursor_idx % {k}u);\n"
+            ));
+            // primary is `array<u32>` for PerEntityRing (non-atomic — the
+            // cursor atomicAdd already serialized slot allocation, so
+            // each writer's `ring_idx` is distinct within one tick for
+            // ≤K events per agent). Plain assignment, not atomicStore.
+            out.push_str(
+                "        view_storage_primary[ring_idx] = amount_bits;\n",
+            );
+        }
+
         out.push_str("    }\n");
     }
 
@@ -2978,6 +3116,11 @@ fn stmt_list_has_emit(list_id: crate::cg::stmt::CgStmtListId, prog: &CgProgram) 
             // the dispatcher kernel binds the chronicle ring on its
             // own once #136's emit-side companion lands.
             CgStmt::ApplyAbility { .. } => false,
+            // Plan G G3b/G3c — view-storage append writes to the
+            // per-entity ring's primary + cursors slots, not to an
+            // event ring. Treat as false here so the emit-list scan
+            // doesn't miscount it as an event emitter.
+            CgStmt::ViewStorageAppend { .. } => false,
         };
         if hit {
             return true;

@@ -1051,6 +1051,14 @@ fn walk_body_expr_subtrees(
                 validate_expr_subtree(arena, *caster, op_id, expr_arena_len, errors);
                 validate_expr_subtree(arena, *target, op_id, expr_arena_len, errors);
             }
+            CgStmt::ViewStorageAppend { fields, .. } => {
+                // Plan G G3b/G3c — every field's bound expression
+                // subtree must be range-valid. The `view` payload is a
+                // typed [`ViewId`] (arena-independent).
+                for (_, expr_id) in fields {
+                    validate_expr_subtree(arena, *expr_id, op_id, expr_arena_len, errors);
+                }
+            }
         }
     }
 }
@@ -1092,7 +1100,8 @@ fn walk_list_id_ranges(
             | CgStmt::Let { .. }
             | CgStmt::ForEachAgent { .. }
             | CgStmt::ForEachNeighbor { .. }
-            | CgStmt::ApplyAbility { .. } => {
+            | CgStmt::ApplyAbility { .. }
+            | CgStmt::ViewStorageAppend { .. } => {
                 // Nothing to range-check at the list-walk level —
                 // these statements only embed expr-ids and (for
                 // Assign) a target handle, all of which are validated
@@ -1707,6 +1716,23 @@ fn type_check_list(
                     }
                 }
             }
+            CgStmt::ViewStorageAppend { fields, .. } => {
+                // Plan G G3b/G3c — type-check every field's bound
+                // expression. Field types are inferred at lowering
+                // time and recorded on the registered `ViewLayout`;
+                // this walk only re-runs `type_check` to surface any
+                // structural defect in a field's expression subtree.
+                for (_, expr_id) in fields {
+                    if let Some(expr) = prog.exprs.get(expr_id.0 as usize) {
+                        if let Err(err) = type_check(expr, *expr_id, ctx) {
+                            errors.push(CgError::TypeMismatch {
+                                op: op_id,
+                                error: err,
+                            });
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -1849,6 +1875,13 @@ fn p6_walk_list(
                 // ApplyAbility writes to the chronicle ring per
                 // emitted ApplyEvent — the P6 mutation channel. No
                 // direct AgentField write surface to police.
+            }
+            CgStmt::ViewStorageAppend { .. } => {
+                // Plan G G3b/G3c — writes to the per-entity ring's
+                // primary + cursors slots, NOT to AgentField. P6 only
+                // polices AgentField writes; ViewStorage writes flow
+                // through the existing slot validator in
+                // `validate_storage_slot`.
             }
         }
     }
@@ -2011,6 +2044,21 @@ fn event_field_scope_walk_list(
                     errors,
                 );
             }
+            CgStmt::ViewStorageAppend { fields, .. } => {
+                // Plan G G3b/G3c — each field's bound expression may
+                // read event-payload bindings through `IrExpr::Local`
+                // resolution; the scope walker visits each like Emit.
+                for (_, expr_id) in fields {
+                    event_field_scope_walk_expr(
+                        *expr_id,
+                        op_id,
+                        kind_label,
+                        shape_label,
+                        prog,
+                        errors,
+                    );
+                }
+            }
         }
     }
 }
@@ -2125,7 +2173,8 @@ fn match_uniqueness_walk_list(
             | CgStmt::Let { .. }
             | CgStmt::ForEachAgent { .. }
             | CgStmt::ForEachNeighbor { .. }
-            | CgStmt::ApplyAbility { .. } => {
+            | CgStmt::ApplyAbility { .. }
+            | CgStmt::ViewStorageAppend { .. } => {
                 // Leaves — no nested bodies to descend into.
             }
             CgStmt::ForEachNeighborBody { body, .. }
@@ -2674,7 +2723,11 @@ fn collect_emit_kinds_in_list(
             CgStmt::Assign { .. }
             | CgStmt::Let { .. }
             | CgStmt::ForEachAgent { .. }
-            | CgStmt::ForEachNeighbor { .. } => {}
+            | CgStmt::ForEachNeighbor { .. }
+            | CgStmt::ViewStorageAppend { .. } => {
+                // Plan G G3b/G3c — view-storage append writes to the
+                // ring's primary + cursors slots, not to an event ring.
+            }
         }
     }
 }

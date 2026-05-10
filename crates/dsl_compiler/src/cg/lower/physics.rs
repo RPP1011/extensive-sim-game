@@ -593,6 +593,15 @@ fn lower_stmt(
             ast_label: "SelfUpdate",
             span: *span,
         }),
+        IrStmt::SelfAppend { span, .. } => Err(LoweringError::UnsupportedPhysicsStmt {
+            // Plan G G3b/G3c — `self.append(...)` is a view-fold-body
+            // primitive (struct-payload ring append). Physics rules
+            // have no `self` cell to ring-append into, so reject up
+            // front with a typed deferral.
+            rule: rule_id,
+            ast_label: "SelfAppend",
+            span: *span,
+        }),
         IrStmt::BeliefObserve { span, .. } => Err(LoweringError::UnsupportedPhysicsStmt {
             rule: rule_id,
             ast_label: "BeliefObserve",
@@ -1455,7 +1464,8 @@ fn list_contains_for_each_agent_body(
             | CgStmt::Emit { .. }
             | CgStmt::ApplyAbility { .. }
             | CgStmt::ForEachAgent { .. }
-            | CgStmt::ForEachNeighbor { .. } => {}
+            | CgStmt::ForEachNeighbor { .. }
+            | CgStmt::ViewStorageAppend { .. } => {}
         }
     }
     false
@@ -1519,7 +1529,8 @@ fn is_tile_eligible_body(
             | CgStmt::If { .. }
             | CgStmt::Match { .. }
             | CgStmt::Emit { .. }
-            | CgStmt::ApplyAbility { .. } => {
+            | CgStmt::ApplyAbility { .. }
+            | CgStmt::ViewStorageAppend { .. } => {
                 // ForEachNeighborBody carries an emit-bearing body —
                 // not a pure fold over fields. The tiled-MoveBoid
                 // optimisation only applies to fold-shaped bodies; a
@@ -2529,7 +2540,8 @@ mod tests {
                 | CgStmt::ForEachNeighbor { .. }
                 | CgStmt::ForEachNeighborBody { .. }
                 | CgStmt::ForEachAgentBody { .. }
-                | CgStmt::ApplyAbility { .. } => {
+                | CgStmt::ApplyAbility { .. }
+                | CgStmt::ViewStorageAppend { .. } => {
                     // Other body shapes — not produced by this fixture.
                 }
             }

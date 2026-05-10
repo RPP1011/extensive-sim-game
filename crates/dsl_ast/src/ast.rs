@@ -708,6 +708,14 @@ pub enum Stmt {
     Match { scrutinee: Expr, arms: Vec<MatchArm>, span: Span },
     /// Self-delta in fold bodies: `self -= 0.1 * e.damage`, `self += 0.3`.
     SelfUpdate { op: String, value: Expr, span: Span },
+    /// Plan G G3b/G3c — `self.append(field1: expr1, field2: expr2, ...)` —
+    /// struct-payload ring append in a `@per_entity_ring(...)` view fold
+    /// body. The field list defines the per-cell struct layout (in
+    /// declaration order); types are inferred from the bound exprs at
+    /// lowering time. The ring index is allocated via the per-agent
+    /// cursor counter; per-field stores write into
+    /// `primary[ring_idx * field_count + field_idx]`.
+    SelfAppend { fields: Vec<FieldInit>, span: Span },
     /// Bare expression (for fold bodies that set self).
     Expr(Expr),
     /// `beliefs(observer).observe(target) with { field: expr, ... }` — belief
