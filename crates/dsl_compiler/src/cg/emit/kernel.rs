@@ -308,10 +308,23 @@ pub fn kernel_topology_to_spec_and_body(
     //    spec directly for ViewFold; route every other kernel through
     //    the generic pipeline.
     if let KernelKindClass::ViewFold { view_name } = &class {
-        let bindings = build_view_fold_bindings(view_name, &cfg_struct);
+        // Plan G G3a — look up the view's storage hint so the
+        // BGL + body emit can branch for PerEntityRing (ring-append
+        // instead of CAS-add). The view_id comes from the
+        // ComputeOpKind::ViewFold op already in body_ops_resolved.
+        let storage_hint: Option<crate::cg::program::CgStorageHint> = body_ops_resolved
+            .iter()
+            .find_map(|op| match &op.kind {
+                ComputeOpKind::ViewFold { view, .. } => prog
+                    .view_signatures
+                    .get(&view.0)
+                    .and_then(|sig| sig.storage_hint),
+                _ => None,
+            });
+        let bindings = build_view_fold_bindings(view_name, &cfg_struct, storage_hint);
         let cfg_struct_decl = build_view_fold_cfg_struct_decl(&cfg_struct);
         let cfg_build_expr = build_view_fold_cfg_build_expr(&cfg_struct);
-        let wgsl_body = build_view_fold_wgsl_body(&body_ops, prog, ctx)?;
+        let wgsl_body = build_view_fold_wgsl_body(&body_ops, prog, ctx, storage_hint)?;
         let spec = KernelSpec {
             name,
             pascal,
@@ -2202,8 +2215,26 @@ fn build_view_fold_cfg_build_expr(cfg_struct: &str) -> String {
 ///   may fall back to `primary` at runtime.** The BGL slot has to be
 ///   live; rebinding primary into both is a no-op safe choice that
 ///   matches the legacy emitters.
-fn build_view_fold_bindings(view_name: &str, cfg_struct: &str) -> Vec<KernelBinding> {
+fn build_view_fold_bindings(
+    view_name: &str,
+    cfg_struct: &str,
+    storage_hint: Option<crate::cg::program::CgStorageHint>,
+) -> Vec<KernelBinding> {
+    use crate::cg::program::CgStorageHint;
     let accessor = format!("fold_view_{view_name}_handles");
+    // Plan G G3a — PerEntityRing reuses slot 3 ("anchor") as the
+    // ring-cursors counter. The runtime side allocates a
+    // zero-initialized atomic<u32> array of agent_count slots; the
+    // WGSL declares it `array<atomic<u32>>` so the body's atomicAdd
+    // is well-typed. Other storage hints keep the historical
+    // `array<u32>` non-atomic anchor declaration (they don't read
+    // the slot today; the BGL just has to be live).
+    let anchor_is_cursors = matches!(storage_hint, Some(CgStorageHint::PerEntityRing { .. }));
+    let (anchor_access, anchor_wgsl_ty) = if anchor_is_cursors {
+        (AccessMode::AtomicStorage, "u32".to_string())
+    } else {
+        (AccessMode::ReadWriteStorage, "array<u32>".to_string())
+    };
     vec![
         KernelBinding {
             slot: 0,
@@ -2232,8 +2263,14 @@ fn build_view_fold_bindings(view_name: &str, cfg_struct: &str) -> Vec<KernelBind
             // alias primary's buffer via `unwrap_or(primary_buf)` at
             // record time but the WGSL declarations are independent
             // (the kernel body never indexes anchor/ids today).
-            access: AccessMode::AtomicStorage,
-            wgsl_ty: "u32".into(),
+            //
+            // Plan G G3a exception: PerEntityRing uses primary as a
+            // K-cell ring per agent (non-atomic stores at distinct
+            // ring slots; the cursor atomicAdd serializes slot
+            // allocation, eliminating the same-cell race for ≤K
+            // events per agent per tick).
+            access: if anchor_is_cursors { AccessMode::ReadWriteStorage } else { AccessMode::AtomicStorage },
+            wgsl_ty: if anchor_is_cursors { "array<u32>".to_string() } else { "u32".to_string() },
             bg_source: BgSource::ViewHandle {
                 accessor: accessor.clone(),
                 tuple_idx: 0,
@@ -2242,8 +2279,8 @@ fn build_view_fold_bindings(view_name: &str, cfg_struct: &str) -> Vec<KernelBind
         KernelBinding {
             slot: 3,
             name: "view_storage_anchor".into(),
-            access: AccessMode::ReadWriteStorage,
-            wgsl_ty: "array<u32>".into(),
+            access: anchor_access,
+            wgsl_ty: anchor_wgsl_ty,
             bg_source: BgSource::ViewHandle {
                 accessor: accessor.clone(),
                 tuple_idx: 1,
@@ -2302,7 +2339,22 @@ fn build_view_fold_wgsl_body(
     body_ops: &[OpId],
     prog: &CgProgram,
     ctx: &EmitCtx<'_>,
+    storage_hint: Option<crate::cg::program::CgStorageHint>,
 ) -> Result<String, KernelEmitError> {
+    use crate::cg::program::CgStorageHint;
+    // Plan G G3a — PerEntityRing diverts from the generic CgStmt::Assign
+    // lowering and emits a hand-written ring-append body. The body
+    // hardcodes the well-known event-ring layout
+    // (`event_ring[event_idx*10 + N]`) for the Damaged event:
+    //   slot 2 = source / actor (u32)
+    //   slot 3 = target (u32)
+    //   slot 4 = amount (f32 bitcast)
+    // Future steps generalize this for any (event-bound) ring fold; today
+    // we lock in the per_entity_ring_probe.sim shape so the smoke test can
+    // assert ring-append semantics without G3b's struct-payload work.
+    if let Some(CgStorageHint::PerEntityRing { k }) = storage_hint {
+        return build_view_fold_ring_append_body(body_ops, prog, k as u32);
+    }
     let mut out = String::new();
     out.push_str("    let event_idx = gid.x;\n");
     out.push_str("    if (event_idx >= cfg.event_count) { return; }\n");
@@ -2436,6 +2488,91 @@ fn build_view_fold_wgsl_body(
 /// harnesses that bypass the lowering). Real compilation always
 /// populates the layout, so the lookup hits.
 const EVENT_RING_DEFAULT_STRIDE_U32: u32 = 10;
+
+/// Plan G G3a — synthesise the WGSL body for a PerEntityRing fold.
+///
+/// Diverts from the generic `CgStmt::Assign` lowering and emits a
+/// hand-written ring-append:
+///
+/// ```wgsl
+/// let event_idx = gid.x;
+/// if (event_idx >= cfg.event_count) { return; }
+/// let kind = event_ring[event_idx * 10u + 0u];
+/// if (kind == <event_id>u) {
+///     let target = event_ring[event_idx * 10u + 3u];
+///     let amount_bits = event_ring[event_idx * 10u + 4u];
+///     let cursor_idx = atomicAdd(&view_storage_anchor[target], 1u);
+///     let ring_idx = target * <K>u + (cursor_idx % <K>u);
+///     view_storage_primary[ring_idx] = amount_bits;
+/// }
+/// ```
+///
+/// **MVP scope.** Hardcodes the well-known event-ring layout for a
+/// single-handler scalar-payload fold: target at offset 3, amount
+/// at offset 4. The `per_entity_ring_probe.sim` fixture matches this
+/// shape; G3b's struct-payload work generalizes it. Multi-handler
+/// folds aren't supported yet (the loop iterates body_ops but the
+/// ring-append shape only takes the first handler's on_event into
+/// account today).
+///
+/// **Race note.** The cursor `atomicAdd` serializes slot allocation,
+/// so within one tick each writer to a given (target, ring slot)
+/// gets a distinct ring_idx (modulo K). The `primary[ring_idx]`
+/// store is non-atomic but race-free for ≤K events per agent per
+/// tick. Above K events per tick on the same agent, multiple
+/// writers can collide on the same ring cell — accepted MVP
+/// behaviour (the ring is for "recent N", overwrites are by design).
+fn build_view_fold_ring_append_body(
+    body_ops: &[OpId],
+    prog: &CgProgram,
+    k: u32,
+) -> Result<String, KernelEmitError> {
+    let mut out = String::new();
+    out.push_str("    let event_idx = gid.x;\n");
+    out.push_str("    if (event_idx >= cfg.event_count) { return; }\n");
+    out.push_str("    let tick = cfg.tick;\n\n");
+
+    for op_id in body_ops {
+        let op = resolve_op(prog, *op_id)?;
+        let (event_id, stride) = match &op.kind {
+            ComputeOpKind::ViewFold { on_event, .. } => {
+                let stride = prog
+                    .event_layouts
+                    .get(&on_event.0)
+                    .map(|l| l.record_stride_u32)
+                    .unwrap_or(EVENT_RING_DEFAULT_STRIDE_U32);
+                (on_event.0, stride)
+            }
+            _ => continue,
+        };
+        out.push_str(&format!(
+            "    // PerEntityRing append (K = {k}, on_event = {event_id}).\n"
+        ));
+        out.push_str(&format!(
+            "    if (event_ring[event_idx * {stride}u + 0u] == {event_id}u) {{\n"
+        ));
+        out.push_str(&format!(
+            "        let target = event_ring[event_idx * {stride}u + 3u];\n"
+        ));
+        out.push_str(&format!(
+            "        let amount_bits = event_ring[event_idx * {stride}u + 4u];\n"
+        ));
+        out.push_str(
+            "        let cursor_idx = atomicAdd(&view_storage_anchor[target], 1u);\n",
+        );
+        out.push_str(&format!(
+            "        let ring_idx = target * {k}u + (cursor_idx % {k}u);\n"
+        ));
+        // primary is `array<atomic<u32>>` per the BGL declaration; use
+        // atomicStore so the WGSL validator is happy.
+        out.push_str(
+            "        atomicStore(&view_storage_primary[ring_idx], amount_bits);\n",
+        );
+        out.push_str("    }\n");
+    }
+
+    Ok(out)
+}
 
 /// Per-event op-kind tag (= EventKindId.0) and per-record stride
 /// extracted from `op.kind`'s `on_event` discriminator, when present.

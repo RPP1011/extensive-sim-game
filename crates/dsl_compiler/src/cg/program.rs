@@ -449,8 +449,16 @@ pub enum CgStorageHint {
     /// kernel iterates `cfg.slot_count` slots (= `agent_cap *
     /// second_key_pop` for Agent×Agent).
     PairMap,
+    /// Plan G G3a — per-entity ring of K cells. Fold body
+    /// ring-appends instead of CAS-adds:
+    /// `let idx = atomicAdd(&cursors[k], 1u);`
+    /// `primary[k * K + (idx % K)] = value;`
+    /// BGL slot 3 reused as `view_storage_anchor: array<atomic<u32>>`
+    /// (semantically the cursors counter — no API rename to avoid
+    /// breaking the per-runtime bindings struct field name).
+    PerEntityRing { k: u16 },
     /// Every other shape (`PerEntityTopK`, `SymmetricPairTopK`,
-    /// `PerEntityRing`, `LazyCached`). Fold body's RMW indexes
+    /// `LazyCached`). Fold body's RMW indexes
     /// `view_storage_primary[k_last]`; decay kernel iterates
     /// `cfg.agent_cap` slots.
     SingleKey,
