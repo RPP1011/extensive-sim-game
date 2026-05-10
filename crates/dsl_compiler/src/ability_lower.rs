@@ -88,8 +88,9 @@
 
 use dsl_ast::ast::{
     AbilityDecl, AbilityFile, AbilityHeader, AbilityProgramStep, CastSpec, EffectArg, EffectStmt,
-    HintName, Span, TargetMode,
+    HintName, InterruptKind as AstInterruptKind, InterruptSet, Span, TargetMode,
 };
+use engine::ability::interrupt::{InterruptKind, InterruptMask};
 use engine::ability::program::{
     AbilityCost, AbilityHint, AbilityProgram, AbilityTag, Area, CostAmount, CostResource, Delivery, EffectAreaShape, EffectOp, EffectPredicate, EffectPredicateBinder, EffectPredicateOp, EffectWhenCondition, MAX_NESTED_PER_EFFECT, MAX_PRED_NODES_PER_EFFECT, TargetModeKind,
     EffectScaling, Gate, LifetimeMode, ScalingStatRef, ShapeKind, StackingMode, TargetSelector, WhenPredicate,
@@ -97,6 +98,42 @@ use engine::ability::program::{
 };
 use engine::ability::AbilityId;
 use smallvec::SmallVec;
+
+/// Resolve a parsed [`InterruptSet`] to the engine-side packed
+/// [`InterruptMask`]. Plan G G2.5 — the lowering captures the
+/// declared interrupt set at compile time so the busy-resolution
+/// kernel sees a fixed bitmask per ability rather than re-evaluating
+/// the AST shape at runtime.
+fn lower_interrupt_set(set: &InterruptSet) -> InterruptMask {
+    fn ast_to_engine(k: AstInterruptKind) -> InterruptKind {
+        match k {
+            AstInterruptKind::Damage     => InterruptKind::Damage,
+            AstInterruptKind::Stun       => InterruptKind::Stun,
+            AstInterruptKind::CasterDied => InterruptKind::CasterDied,
+            AstInterruptKind::TargetDied => InterruptKind::TargetDied,
+            AstInterruptKind::Movement   => InterruptKind::Movement,
+        }
+    }
+    match set {
+        InterruptSet::None     => InterruptMask::none(),
+        InterruptSet::Standard => InterruptMask::standard(),
+        InterruptSet::Subset(kinds) => {
+            let mut m = InterruptMask::none();
+            for k in kinds { m = m.with(ast_to_engine(*k)); }
+            m
+        }
+        InterruptSet::StandardPlus(kinds) => {
+            let mut m = InterruptMask::standard();
+            for k in kinds { m = m.with(ast_to_engine(*k)); }
+            m
+        }
+        InterruptSet::StandardMinus(kinds) => {
+            let mut m = InterruptMask::standard();
+            for k in kinds { m = m.without(ast_to_engine(*k)); }
+            m
+        }
+    }
+}
 
 /// Errors surfaced by `lower_ability_decl` / `lower_ability_file`.
 ///
@@ -918,6 +955,7 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     // pending-program with modifiers will land the parallel aggregator
     // slots; deferring keeps this slice small.
     let mut pending_effects: SmallVec<[EffectOp; MAX_EFFECTS_PER_PROGRAM]> = SmallVec::new();
+    let mut cast_interrupt_mask: Option<InterruptMask> = None;
     if let Some(steps) = &decl.program {
         for step in steps {
             match step {
@@ -927,8 +965,9 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
                         // Cast steps. Multi-stage chains are a follow-up.
                         continue;
                     }
-                    let CastSpec { duration_ticks, .. } = spec;
+                    let CastSpec { duration_ticks, interrupts, .. } = spec;
                     let duration_clamped: u16 = (*duration_ticks).min(u16::MAX as u32) as u16;
+                    cast_interrupt_mask = Some(lower_interrupt_set(interrupts));
                     effects.push(EffectOp::CastBegin {
                         ability_id:     0,
                         duration_ticks: duration_clamped,
@@ -1284,6 +1323,7 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
         recast: lowered_recast,
         recast_window_ticks: lowered_recast_window_ticks,
         target_mode: lowered_target_mode,
+        cast_interrupt_mask,
         pending_program: pending_effects,
     })
 }
@@ -2970,6 +3010,65 @@ mod tests {
         assert_eq!(prog.pending_program.len(), 1);
         assert!(matches!(prog.effects[0], EffectOp::CastBegin { .. }));
         assert!(matches!(prog.pending_program[0], EffectOp::Heal { .. }));
+        assert_eq!(prog.cast_interrupt_mask, Some(InterruptMask::none()),
+            "cast_interrupt_mask should resolve `interrupts: none` to InterruptMask::none()");
+    }
+
+    /// Plan G G2.5 — `cast_interrupt_mask` is populated for cast{}
+    /// programs from the parsed `interrupts:` declaration. The
+    /// engine-side helper `should_interrupt(...)` consults the same
+    /// mask; this pin proves the lowering writes what the kernel
+    /// will read.
+    #[test]
+    fn cast_interrupt_mask_round_trips_from_source() {
+        // standard mask
+        let std_src = "ability Firebolt {
+            target: enemy range: 8.0 cooldown: 5s
+            cast { duration: 3t interrupts: standard }
+            effect { damage 25 }
+        }";
+        let file = parse_ability_file(std_src).expect("parser");
+        let prog = lower_ability_decl(&file.abilities[0]).expect("lowering");
+        assert_eq!(prog.cast_interrupt_mask, Some(InterruptMask::standard()));
+
+        // legacy bare-effect ability has no cast{} block → None.
+        let bare_src = "ability Strike { target: enemy range: 1.5 cooldown: 1s damage 10 }";
+        let bare_file = parse_ability_file(bare_src).expect("parser");
+        let bare_prog = lower_ability_decl(&bare_file.abilities[0]).expect("lowering");
+        assert_eq!(bare_prog.cast_interrupt_mask, None,
+            "bare-effect abilities have no cast block → no interrupt mask");
+    }
+
+    /// Plan G G2.5 — `lower_interrupt_set` round-trips every AST
+    /// shape into the engine packed mask. Pin the resolution at the
+    /// helper level so the runtime kernel always sees a fixed
+    /// bitmask (not the AST shape).
+    #[test]
+    fn interrupt_set_lowering_round_trip() {
+        use dsl_ast::ast::{InterruptKind as AstK, InterruptSet};
+        // standard = Damage | Stun | CasterDied | TargetDied (4 bits).
+        assert_eq!(super::lower_interrupt_set(&InterruptSet::Standard),
+                   InterruptMask::standard());
+        // none — uninterruptible.
+        assert_eq!(super::lower_interrupt_set(&InterruptSet::None),
+                   InterruptMask::none());
+        // Subset { Damage, Movement } — explicit pair, NOT standard.
+        let subset = InterruptSet::Subset(vec![AstK::Damage, AstK::Movement]);
+        let m = super::lower_interrupt_set(&subset);
+        assert!(m.contains(InterruptKind::Damage));
+        assert!(m.contains(InterruptKind::Movement));
+        assert!(!m.contains(InterruptKind::Stun),
+            "subset is exact — Stun NOT included");
+        // standard + { movement } — every standard kind PLUS Movement.
+        let plus = InterruptSet::StandardPlus(vec![AstK::Movement]);
+        assert_eq!(super::lower_interrupt_set(&plus), InterruptMask::all());
+        // standard - { damage } — forager-style "keep moving under fire".
+        let minus = InterruptSet::StandardMinus(vec![AstK::Damage]);
+        let mm = super::lower_interrupt_set(&minus);
+        assert!(!mm.contains(InterruptKind::Damage));
+        assert!(mm.contains(InterruptKind::Stun));
+        assert!(mm.contains(InterruptKind::CasterDied));
+        assert!(mm.contains(InterruptKind::TargetDied));
     }
 
     /// Plan G option D — multiple statements inside one `effect{}` block

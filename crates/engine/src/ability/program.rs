@@ -1668,6 +1668,20 @@ pub struct AbilityProgram {
     /// is `Enemy` to match historical `Area::SingleTarget` +
     /// `gate.hostile_only=true` shape.
     pub target_mode: TargetModeKind,
+    /// Plan G G2.5 (2026-05-09) — interrupt mask resolved from the
+    /// `cast { interrupts: <set> }` declaration at lowering time.
+    /// `Some(InterruptMask)` for abilities authored with a cast{}
+    /// block; `None` for legacy bare-effect abilities (no cast →
+    /// no interrupt semantics).
+    ///
+    /// Per-fixture busy-resolution rules consult this via
+    /// `engine::ability::interrupt::should_interrupt(...)` to decide
+    /// whether an incoming Damaged / Stunned / etc. event cancels
+    /// the cast. CPU-only (no GPU SoA bump) — per-fixture WGSL
+    /// hardcodes the mask today; the registry-driven dispatcher
+    /// slice will pack this into the GPU registry alongside
+    /// `pending_program`.
+    pub cast_interrupt_mask: Option<crate::ability::interrupt::InterruptMask>,
     /// Plan G (2026-05-09) — deferred-effect resolution for
     /// `cast { … } effect { … }` ability programs.
     ///
@@ -1727,6 +1741,10 @@ impl AbilityProgram {
             // Default Enemy keeps historical convenience-constructor shape
             // (single-target, hostile_only=true on the gate).
             target_mode:         TargetModeKind::Enemy,
+            // None by default — the convenience constructor is for
+            // immediate-cast programs (no cast{} block). Plan G G2.5's
+            // lowering populates this for cast-block abilities.
+            cast_interrupt_mask: None,
             // Empty by default — the convenience constructor is for
             // immediate-cast programs. Plan G `cast{}` programs build
             // through the lowering path, which populates this slot.
