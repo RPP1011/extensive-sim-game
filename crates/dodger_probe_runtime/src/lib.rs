@@ -816,4 +816,118 @@ mod dodger_behavioural_tests {
             "threat infrastructure must shift ≥95 percentage points of decisions; got {delta_pp:.1}pp",
         );
     }
+
+    /// **The sidestep pin.** This is the test that closes the gap
+    /// from "Flee is a state" → "agent escapes a real projectile".
+    /// The bar set in chat: an agent must be able to sidestep a
+    /// narrow projectile launched at them.
+    ///
+    /// Setup: a projectile travels along the line y=0 from x=10 to
+    /// x=-10 over 10 ticks (speed 1 / tick). Corridor half-width
+    /// 0.5 — anything within |y| < 0.5 at impact tick gets hit. The
+    /// dodger starts at (0, 0) — dead center of the corridor at
+    /// the impact tick, so it WILL be hit if it doesn't move.
+    ///
+    /// Per tick the GPU scoring runs (existing pipeline). When the
+    /// scoring picks Flee (because threats are present), the host
+    /// applies a perpendicular sidestep — the projectile direction
+    /// is `(-1, 0)`, so perpendicular is `(0, ±1)`. With sidestep
+    /// speed 0.1 over 10 ticks the dodger ends at y ≈ 1.0, well
+    /// outside the |y| < 0.5 corridor.
+    ///
+    /// Honest scope note: GPU produces the per-tick "should I
+    /// dodge" decision; the host applies the perpendicular sidestep
+    /// and runs the corridor check. Position SoA + a movement
+    /// consumer rule that runs the sidestep on GPU is the next
+    /// slice (the threats view today is a scalar, not directional;
+    /// extending it to carry projectile direction so the dodger can
+    /// pick the perpendicular axis on its own is the bigger lift
+    /// after this).
+    ///
+    /// Assertion shape:
+    ///   * WITH threats: dodger picks Flee every tick → host applies
+    ///     10 sidesteps → final y > corridor_half_width → dodge
+    ///     succeeded.
+    ///   * WITHOUT threats (force_no_threats each tick): dodger
+    ///     picks Idle every tick → host applies 0 sidesteps →
+    ///     final y = 0 → INSIDE corridor → dodger gets hit.
+    /// Behavioural delta: same projectile, different scoring → one
+    /// agent escapes, the other doesn't.
+    #[test]
+    fn agent_sidesteps_narrow_projectile_when_warned_via_gpu_scoring() {
+        const N: u32 = 2;
+        const HIT_TICK: usize = 10;
+        const PROJECTILE_CORRIDOR_HALF_WIDTH: f32 = 0.5;
+        const SIDESTEP_SPEED: f32 = 0.1; // per tick when Flee is chosen
+
+        // Helper: run one scenario, return final dodger y position.
+        // `force_baseline` zeroes threats each tick so scoring picks
+        // Idle instead of Flee.
+        fn run_scenario(force_baseline: bool) -> Option<(f32, usize)> {
+            let mut state = DodgerProbeState::try_new(0xCAFE, N)?;
+            let mut dodger_y: f32 = 0.0;
+            let mut sidesteps_taken = 0;
+            for _tick in 0..HIT_TICK {
+                if force_baseline {
+                    state.force_no_threats();
+                }
+                state.step();
+                let scoring = state.read_scoring_output();
+                let dodger_action = state.chosen_action(&scoring, 1);
+                if dodger_action == FLEE_ACTION_ID {
+                    // Sidestep perpendicular to projectile direction
+                    // `(-1, 0)`. Perpendicular axis = y; pick +y.
+                    dodger_y += SIDESTEP_SPEED;
+                    sidesteps_taken += 1;
+                }
+            }
+            Some((dodger_y, sidesteps_taken))
+        }
+
+        // --- WITH threats (warned): dodger should escape.
+        let (final_y_warned, sidesteps_warned) = match run_scenario(false) {
+            Some(v) => v,
+            None => {
+                eprintln!("[sidestep-pin] skipping: no wgpu adapter on host.");
+                return;
+            }
+        };
+        eprintln!(
+            "[sidestep-pin] WARNED: {sidesteps_warned} sidesteps over {HIT_TICK} ticks → final y = {final_y_warned:.3}"
+        );
+        assert!(
+            final_y_warned > PROJECTILE_CORRIDOR_HALF_WIDTH,
+            "WARNED: dodger must end OUTSIDE corridor (|y|={final_y_warned} > {PROJECTILE_CORRIDOR_HALF_WIDTH}); \
+             {sidesteps_warned} sidesteps were applied"
+        );
+
+        // --- WITHOUT threats (no warning): dodger eats the hit.
+        let (final_y_baseline, sidesteps_baseline) =
+            run_scenario(true).expect("second wgpu state");
+        eprintln!(
+            "[sidestep-pin] BASELINE: {sidesteps_baseline} sidesteps over {HIT_TICK} ticks → final y = {final_y_baseline:.3}"
+        );
+        assert_eq!(
+            sidesteps_baseline, 0,
+            "BASELINE: with threats forced to zero, NO sidesteps should fire; got {sidesteps_baseline}"
+        );
+        assert!(
+            final_y_baseline.abs() <= PROJECTILE_CORRIDOR_HALF_WIDTH,
+            "BASELINE: dodger must end INSIDE corridor (|y|={final_y_baseline} ≤ {PROJECTILE_CORRIDOR_HALF_WIDTH}); \
+             dodger should be hit by the projectile"
+        );
+
+        // --- The behavioural delta IS the proof: same projectile,
+        // same agent, same physics — only the threat-warning state
+        // differs, and one agent escapes while the other doesn't.
+        let escape_delta = final_y_warned - final_y_baseline.abs();
+        eprintln!(
+            "[sidestep-pin] DODGE DELTA: warned dodger ended {escape_delta:.3} units further from corridor centerline than baseline"
+        );
+        assert!(
+            escape_delta > PROJECTILE_CORRIDOR_HALF_WIDTH,
+            "the threat warning must produce a positional delta exceeding the corridor half-width; \
+             got delta={escape_delta}, threshold={PROJECTILE_CORRIDOR_HALF_WIDTH}"
+        );
+    }
 }
