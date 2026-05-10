@@ -793,6 +793,42 @@ impl ApplyAbilitySmokeState {
         self.step_explicit_target_with_seed(tick, 0);
     }
 
+    /// Plan I-step-3 — hot-reload the GPU-side `AbilityRegistry` from
+    /// a fresh CPU registry. Re-packs the SoA columns and uploads new
+    /// GPU buffers, dropping the old `PackedAbilityRegistryGpu`. The
+    /// next `step()` binds the new buffers automatically because
+    /// `KernelBindingsContext::registry: &PackedAbilityRegistryGpu`
+    /// reads through `&self.registry_gpu` per dispatch.
+    ///
+    /// Slot ids stay stable (the caller passes a registry that
+    /// preserved them via `with_program_replaced`); per-agent
+    /// `agent_level` references remain valid across the swap. The
+    /// GPU pin in `tests/hot_reload_changes_chronicle_damage.rs`
+    /// proves an end-to-end source change (damage 30 → damage 50)
+    /// produces the new amount in the chronicle ring.
+    pub fn hot_reload_registry(
+        &mut self,
+        registry: &engine::ability::AbilityRegistry,
+    ) {
+        let packed = PackedAbilityRegistry::pack(registry);
+        self.registry_gpu = PackedAbilityRegistryGpu::upload(
+            &packed,
+            &self.gpu,
+            "apply_ability_smoke::hot_reload",
+        );
+    }
+
+    /// Test hook: zero out the event ring tail counter so the next
+    /// `step()` writes from slot 0. Pairs with `hot_reload_registry`
+    /// to make readback after a reload deterministic — the chronicle
+    /// records emitted post-reload land at the start of the ring,
+    /// not appended after the pre-reload records.
+    pub fn reset_event_tail(&mut self) {
+        self.gpu
+            .queue
+            .write_buffer(self.event_ring.tail(), 0, bytemuck::cast_slice(&[0u32]));
+    }
+
     /// Block on the GPU and read back `event_tail`. Returns the
     /// number of chronicle records written by the most-recent
     /// `step()`.
