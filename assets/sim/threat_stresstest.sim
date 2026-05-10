@@ -1,0 +1,64 @@
+// threat_stresstest — Plan H — scaling + perf characterization for
+// the Plan G G3 threats infrastructure.
+//
+// Original Plan H design called for a baseline-vs-threat-aware A/B
+// to measure scoring effectiveness. That measurement is blocked
+// today: the `threats.*` Builtin still emits sentinels (the G3f
+// wire-up to actual view storage reads is a follow-up slice). What
+// we CAN measure here is the dispatch + storage cost at scale.
+//
+// **Stresstest shape.**
+//   * Configurable AGENT_COUNT (e.g. 256). Every agent is busy
+//     from tick 0 onward via MarkAllBusy (mirrors
+//     threats_view_probe.sim::MarkCasterBusy but for ALL agents).
+//   * Per-(observer, source) dispatch = AGENT_COUNT² pairs per
+//     tick. With 256 agents = 65,536 pairs.
+//   * No early-exit savings — every candidate is busy. This
+//     measures the WORST case (all pairs do the body's CAS-add).
+//   * Test asserts: per-tick wall-clock < BUDGET_MS (set per host).
+//
+// What we LEARN:
+//   * Whether the 65k-pair worst-case dispatch fits a typical-tick
+//     budget on the host's GPU.
+//   * The threats[obs] count at scale (= AGENT_COUNT per observer
+//     after one tick — every observer sees every busy candidate).
+//
+// What this DOESN'T measure (deferred):
+//   * Scoring delta — needs threats.* Builtin reads wired to
+//     actual view storage (G3f follow-up).
+//   * Cyclic / time-varying load (deferred to a richer stresstest
+//     once `agents.spawn_tick` is plumbed via AgentBuffers).
+
+event Tick { }
+event ScriptedCastBegin { source: AgentId, target: AgentId, ability_id: u32 }
+
+entity Subject : Agent { }
+
+config stress {
+  // Tick at which all agents become busy. Default 0 = busy
+  // throughout the test. Set to a high value to delay the start.
+  busy_begin_tick: u32 = 0,
+  // Ability id stamped on busy slots. Any non-zero u32.
+  cast_ability_id: u32 = 1,
+}
+
+// Mark every alive agent as busy at busy_begin_tick. Once busy,
+// stays busy (no clear) — this is the WORST case for the threats
+// fold (no early-exit savings).
+@phase(per_agent)
+physics MarkAllBusy {
+  on Tick {} where (
+    self.alive
+    && world.tick == config.stress.busy_begin_tick
+  ) {
+    agents.set_busy_with_ability_id(self, config.stress.cast_ability_id);
+  }
+}
+
+// The threats view at scale.
+@materialized(on_event = [ScriptedCastBegin])
+@dispatch(per_agent_event_scan)
+view threats(observer: Agent) -> f32 {
+  initial: 0.0,
+  on ScriptedCastBegin { source: _, target: _, ability_id: _ } { self += 1.0 }
+}
