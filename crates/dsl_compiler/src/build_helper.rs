@@ -488,10 +488,33 @@ fn synthesize_generated_runtime_struct(
     //   * Transient-source buffer alloc (mask_bitmaps, etc.) — not
     //     yet handled by the A3.2 alloc loop (External-only).
     out.push_str(
-        "    /// Default step. Builds AgentBuffers + KernelBindingsContext\n\
-         \x20   /// + walks SCHEDULE with empty match arms. A4.1+ populates the\n\
-         \x20   /// per-kernel dispatch arms.\n\
+        "    /// Default step. Builds AgentBuffers + KernelBindingsContext,\n\
+         \x20   /// writes per-tick cfg uniforms, and walks SCHEDULE.\n\
+         \x20   /// Per-kernel dispatch arms land in A4.1.\n\
          \x20   pub fn step(&mut self) {\n\
+         \x20       // Per-tick cfg uniform write to every kernel's cfg buffer.\n\
+         \x20       // Layout: [slot0, tick, seed, slot3] where slot0 is\n\
+         \x20       // agent_cap (per-agent kernels) or event_count (per-event\n\
+         \x20       // kernels). Today we write agent_count to both slots — for\n\
+         \x20       // an empty event_ring this over-bounds harmlessly because\n\
+         \x20       // the kernel's event-kind check on each row falls through.\n\
+         \x20       // A4.1 will detect cfg shape per kernel from KernelSpec and\n\
+         \x20       // write the right value per slot.\n\
+         \x20       let cfg_words: [u32; 4] = [\n\
+         \x20           self.agent_count,\n\
+         \x20           self.tick as u32,\n\
+         \x20           self.seed as u32,\n\
+         \x20           self.agent_count,\n\
+         \x20       ];\n\
+         \x20       let cfg_bytes: &[u8] = bytemuck::cast_slice(&cfg_words);\n",
+    );
+    for kernel_name in &cfg_buffer_names {
+        out.push_str(&format!(
+            "        self.gpu.queue.write_buffer(&self.cfg_{kernel_name}_buf, 0, cfg_bytes);\n",
+        ));
+    }
+    out.push_str(
+        "\n\
          \x20       let mut encoder = self.gpu.device.create_command_encoder(\n\
          \x20           &wgpu::CommandEncoderDescriptor {\n\
          \x20               label: Some(concat!(env!(\"CARGO_PKG_NAME\"), \"::step\")),\n\
