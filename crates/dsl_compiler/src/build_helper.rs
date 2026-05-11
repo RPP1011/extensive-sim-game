@@ -338,11 +338,15 @@ fn synthesize_generated_runtime_struct(
     artifacts: &crate::cg::emit::EmittedArtifacts,
 ) -> String {
     use crate::kernel_binding_ir::BgSource;
-    use std::collections::BTreeSet;
+    use std::collections::BTreeMap;
 
     // Collect unique fixture-owned bindings across all kernels.
-    // BTreeSet preserves deterministic iteration order.
-    let mut owned: BTreeSet<(String, String)> = BTreeSet::new(); // (name, wgsl_ty)
+    // BTreeMap (name → wgsl_ty) — same binding may appear in multiple
+    // kernels with different wgsl_ty (e.g. one kernel sees `array<f32>`,
+    // another sees `array<atomic<u32>>` after the f32 RMW upgrade). Pick
+    // the first ty seen; sizing is bytes-based so the alloc is correct
+    // for either ty as long as elem-size matches (it does for f32 vs u32).
+    let mut owned: BTreeMap<String, String> = BTreeMap::new(); // name → wgsl_ty
     // Per-kernel cfg buffers — one wgpu::Buffer per kernel that has
     // a Cfg-source binding (which is every kernel today). Allocated
     // sized to the cfg struct's std430 footprint (16 bytes covers
@@ -365,10 +369,15 @@ fn synthesize_generated_runtime_struct(
             if !is_owned_source {
                 continue;
             }
-            if is_standard_agent_column(&b.name) || is_infra_binding(&b.name) {
+            // Standard agent columns ARE allocated as fixture-owned
+            // today (no shared SimState yet). The AgentBuffers
+            // population in step() routes them into ctx.state for the
+            // from_context_with_extras call.
+            if is_infra_binding(&b.name) {
                 continue;
             }
-            owned.insert((b.name.clone(), b.wgsl_ty.clone()));
+            // BTreeMap insert is "first-wins" via or_insert.
+            owned.entry(b.name.clone()).or_insert_with(|| b.wgsl_ty.clone());
         }
         if has_cfg {
             cfg_buffer_names.push(spec.name.clone());
@@ -416,11 +425,20 @@ fn synthesize_generated_runtime_struct(
          \x20   pub fn try_new(seed: u64, agent_count: u32) -> Option<Self> {{\n\
          \x20       let gpu = engine::GpuContext::new_blocking().ok()?;\n\
          \x20       let event_ring = engine::gpu::EventRing::new(&gpu, \"{fixture_name}\");\n\
-         \x20       // Empty AbilityRegistry by default; runtime callers that\n\
-         \x20       // need a non-empty registry build their own and reload\n\
-         \x20       // (Plan I hot-reload primitive). Avoids forcing every\n\
-         \x20       // fixture to know about ability programs at try_new time.\n\
-         \x20       let registry = engine::ability::AbilityRegistry::new();\n\
+         \x20       // Placeholder AbilityRegistry — wgpu rejects zero-sized\n\
+         \x20       // bindings, so we register one no-op program to give the\n\
+         \x20       // ability_registry SoA columns at least 1 entry. Runtime\n\
+         \x20       // callers that need real abilities use the Plan I\n\
+         \x20       // hot-reload primitive to swap in a populated registry.\n\
+         \x20       let mut _registry_builder = engine::ability::AbilityRegistryBuilder::new();\n\
+         \x20       let _ = _registry_builder.register(\n\
+         \x20           engine::ability::AbilityProgram::new_single_target(\n\
+         \x20               1.0,\n\
+         \x20               engine::ability::Gate {{ cooldown_ticks: 0, hostile_only: false, line_of_sight: false }},\n\
+         \x20               [],\n\
+         \x20           ),\n\
+         \x20       );\n\
+         \x20       let registry = _registry_builder.build();\n\
          \x20       let packed = engine::ability::PackedAbilityRegistry::pack(&registry);\n\
          \x20       let registry_gpu = engine::ability::registry_gpu::PackedAbilityRegistryGpu::upload(\n\
          \x20           &packed, &gpu, \"{fixture_name}\",\n\
@@ -532,8 +550,25 @@ fn synthesize_generated_runtime_struct(
          \x20       );\n\
          \x20       self.event_ring.clear_tail_in(&mut encoder);\n\
          \x20\n\
-         \x20       let agent_buffers = engine::gpu::AgentBuffers {\n\
-         \x20           ..Default::default()\n\
+         \x20       let agent_buffers = engine::gpu::AgentBuffers {\n",
+    );
+    // Populate AgentBuffers' standard column fields from any matching
+    // agent_<col>_buf the runtime owns. Each entry: `<col>_buf:
+    // Some(&self.agent_<col>_buf),`.
+    for (name, _) in &owned {
+        let suffix = match name.strip_prefix("agent_") {
+            Some(s) => s,
+            None => continue,
+        };
+        if !is_standard_agent_column(name) {
+            continue;
+        }
+        out.push_str(&format!(
+            "            {suffix}_buf: Some(&self.{name}_buf),\n",
+        ));
+    }
+    out.push_str(
+        "            ..Default::default()\n\
          \x20       };\n\
          \x20       let _ctx = engine::gpu::KernelBindingsContext {\n\
          \x20           state: &agent_buffers,\n\
@@ -543,16 +578,85 @@ fn synthesize_generated_runtime_struct(
          \x20       };\n\
          \x20\n\
          \x20       for op in schedule::SCHEDULE {\n\
-         \x20           match op {\n\
-         \x20               // A4.1 attempt reverted — Extras struct shape is\n\
-         \x20               // not reliably reconstructable from KernelBinding\n\
-         \x20               // metadata (the compiler decides per-kernel which\n\
-         \x20               // bindings go in Extras vs come from ctx — e.g.\n\
-         \x20               // event_ring is Transient for cascade kernels but\n\
-         \x20               // pulled from ctx; mask_bitmap is Transient and IS\n\
-         \x20               // in extras). Proper fix needs the compiler to\n\
-         \x20               // expose Extras field list directly in KernelSpec.\n\
-         \x20               _ => {}\n\
+         \x20           match op {\n",
+    );
+    // Plan E-A4.1 — per-kernel dispatch arms.
+    //
+    // Mirrors `cg::emit::program::classify_binding` rules EXACTLY (by
+    // binding name, not bg_source — that was the bug in attempt #1).
+    // For each kernel with from_context_with_extras, build the Extras
+    // struct literal + dispatch.
+    for spec in &artifacts.kernel_specs {
+        let kernel_rs = artifacts
+            .rust_files
+            .get(&format!("{}.rs", spec.name))
+            .map(|s| s.as_str())
+            .unwrap_or("");
+        if !kernel_rs.contains("from_context_with_extras") {
+            // ViewFold kernels and other non-extras shapes — skip
+            // until A4.2 handles direct Bindings construction.
+            continue;
+        }
+        // Walk bindings, mirror classify_binding name rules.
+        let mut extras_fields: Vec<String> = Vec::new();
+        for b in &spec.bindings {
+            let name = b.name.as_str();
+            // ctx-routed (NOT in Extras): same name list as
+            // classify_binding's special cases.
+            if matches!(name, "event_ring" | "event_tail" | "voxel_grid") {
+                continue;
+            }
+            if let Some(suffix) = name.strip_prefix("agent_") {
+                if is_standard_agent_column(&format!("agent_{suffix}")) {
+                    continue;
+                }
+            }
+            if name.starts_with("ability_registry_") {
+                continue;
+            }
+            // AliasOf bindings have no struct field.
+            if matches!(b.bg_source, crate::kernel_binding_ir::BgSource::AliasOf(_)) {
+                continue;
+            }
+            // Extras-bound. Render the runtime call-site expression:
+            //   cfg     → &self.cfg_<kernel>_buf
+            //   sim_cfg → self.event_ring.sim_cfg()
+            //   else    → &self.<name>_buf
+            let value_expr = if name == "cfg" {
+                format!("&self.cfg_{}_buf", spec.name)
+            } else if name == "sim_cfg" {
+                "self.event_ring.sim_cfg()".to_string()
+            } else {
+                format!("&self.{name}_buf")
+            };
+            extras_fields.push(format!(
+                "                        {name}: {value_expr},"
+            ));
+        }
+        let extras_body = extras_fields.join("\n");
+        let dispatch_fn = format!("dispatch_{}", spec.name.to_lowercase());
+        out.push_str(&format!(
+            "                schedule::DispatchOp::Kernel(KernelId::{pascal}) => {{\n\
+             \x20                   let extras = {kname}::{pascal}Extras {{\n\
+             {extras_body}\n\
+             \x20                   }};\n\
+             \x20                   let bindings = {kname}::{pascal}Bindings::from_context_with_extras(\n\
+             \x20                       &_ctx, &extras,\n\
+             \x20                   );\n\
+             \x20                   dispatch::{dispatch_fn}(\n\
+             \x20                       &mut self.cache,\n\
+             \x20                       &bindings,\n\
+             \x20                       &self.gpu.device,\n\
+             \x20                       &mut encoder,\n\
+             \x20                       self.agent_count,\n\
+             \x20                   );\n\
+             \x20               }}\n",
+            kname = spec.name,
+            pascal = spec.pascal,
+        ));
+    }
+    out.push_str(
+        "                _ => {}\n\
          \x20           }\n\
          \x20       }\n\
          \x20\n\
