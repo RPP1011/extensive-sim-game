@@ -56,6 +56,14 @@
 // If the field-read path lowers and the `if (tick >= ready_at) {
 // emit }` works end-to-end, the per-slot pattern matches above.
 
+// Plan E-A6 — fixture-owned initial buffer state lives in the .sim
+// source. The build helper consumes this and emits create_buffer_init
+// in GeneratedRuntime::try_new instead of zero-init create_buffer.
+init {
+  alive: 1,
+  cooldown_next_ready_tick: slot,
+}
+
 event Tick { }
 
 @replayable @gpu_amenable

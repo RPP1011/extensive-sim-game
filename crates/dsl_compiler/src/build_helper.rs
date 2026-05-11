@@ -77,6 +77,19 @@ pub fn emit_with_strategy(
         .unwrap_or_else(|e| panic!("read {}: {e}", sim_path.display()));
     let program = crate::parse(&src)
         .unwrap_or_else(|e| panic!("parse {fixture_name}.sim: {e:?}"));
+    // Plan E-A6 — extract `init { ... }` blocks before resolve consumes
+    // the Program. The build helper carries these through to
+    // synthesize_runtime_core so try_new emits create_buffer_init with
+    // the right per-slot pattern instead of zero-init create_buffer.
+    let init_stmts: Vec<dsl_ast::ast::InitStmt> = program
+        .decls
+        .iter()
+        .filter_map(|d| match d {
+            dsl_ast::ast::Decl::Init(i) => Some(i.stmts.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
     let comp = dsl_ast::resolve::resolve(program)
         .unwrap_or_else(|e| panic!("resolve {fixture_name}.sim: {e}"));
     let cg = match crate::cg::lower::lower_compilation_to_cg(&comp) {
@@ -164,7 +177,7 @@ pub fn emit_with_strategy(
     // hand-writes. For A2 we just prove the wiring works: file lands
     // in OUT_DIR, doesn't get included anywhere yet, doesn't break
     // any fixture's existing build.
-    let runtime_core = synthesize_runtime_core_a2(fixture_name, &artifacts);
+    let runtime_core = synthesize_runtime_core_a2(fixture_name, &artifacts, &init_stmts);
     fs::write(out_dir.join("runtime_core.rs"), runtime_core)
         .unwrap_or_else(|e| panic!("write runtime_core.rs: {e}"));
 }
@@ -185,6 +198,7 @@ pub fn emit_with_strategy(
 fn synthesize_runtime_core_a2(
     fixture_name: &str,
     artifacts: &crate::cg::emit::EmittedArtifacts,
+    init_stmts: &[dsl_ast::ast::InitStmt],
 ) -> String {
     let kernel_count = artifacts.kernel_index.len();
     let mut out = String::new();
@@ -244,7 +258,7 @@ fn synthesize_runtime_core_a2(
     // shape today. A real binding-shape annotation in the AST is the
     // proper long-term fix; for now the heuristic + a TODO comment
     // keeps the generator working.
-    out.push_str(&synthesize_generated_runtime_struct(fixture_name, artifacts));
+    out.push_str(&synthesize_generated_runtime_struct(fixture_name, artifacts, init_stmts));
 
     out
 }
@@ -336,6 +350,7 @@ fn slot_count_expr(binding_name: &str) -> &'static str {
 fn synthesize_generated_runtime_struct(
     fixture_name: &str,
     artifacts: &crate::cg::emit::EmittedArtifacts,
+    init_stmts: &[dsl_ast::ast::InitStmt],
 ) -> String {
     use crate::kernel_binding_ir::BgSource;
     use std::collections::BTreeMap;
@@ -459,6 +474,48 @@ fn synthesize_generated_runtime_struct(
             }
         };
         let slot_expr = slot_count_expr(name);
+        // Plan E-A6 — if `init { ... }` declared a per-slot fill for
+        // this `agent_<col>` binding, switch from zero-init create_buffer
+        // to create_buffer_init with the computed slice. This is how
+        // fixture-owned init state lives in the .sim source instead of
+        // a hand-written *_runtime/lib.rs.
+        let init_match = name.strip_prefix("agent_").and_then(|col| {
+            init_stmts.iter().find(|s| s.field == col)
+        });
+        if let Some(stmt) = init_match {
+            if elem_bytes != 4 {
+                out.push_str(&format!(
+                    "        // TODO(plan-e/a6): init for {name} ignored — only u32/f32 (4-byte) elem types supported today (saw {elem_bytes}-byte).\n\
+                     \x20       let {name}_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {{\n\
+                     \x20           label: Some(\"{fixture_name}::{name}\"),\n\
+                     \x20           size: ({slot_expr} * {elem_bytes}u64).max(16),\n\
+                     \x20           usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,\n\
+                     \x20           mapped_at_creation: false,\n\
+                     \x20       }});\n",
+                ));
+                continue;
+            }
+            let init_vec_expr = match &stmt.expr {
+                dsl_ast::ast::InitExpr::Const(n) => {
+                    format!("vec![{n}u32; agent_count as usize]")
+                }
+                dsl_ast::ast::InitExpr::Slot => {
+                    "(0..agent_count).collect::<Vec<u32>>()".to_string()
+                }
+            };
+            out.push_str(&format!(
+                "        let {name}_init: Vec<u32> = {init_vec_expr};\n\
+                 \x20       let {name}_buf = wgpu::util::DeviceExt::create_buffer_init(\n\
+                 \x20           &gpu.device,\n\
+                 \x20           &wgpu::util::BufferInitDescriptor {{\n\
+                 \x20               label: Some(\"{fixture_name}::{name}\"),\n\
+                 \x20               contents: bytemuck::cast_slice(&{name}_init),\n\
+                 \x20               usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,\n\
+                 \x20           }},\n\
+                 \x20       );\n",
+            ));
+            continue;
+        }
         out.push_str(&format!(
             "        let {name}_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {{\n\
              \x20           label: Some(\"{fixture_name}::{name}\"),\n\
@@ -526,12 +583,22 @@ fn synthesize_generated_runtime_struct(
          \x20       // kernels). Today we write agent_count to both slots — for\n\
          \x20       // an empty event_ring this over-bounds harmlessly because\n\
          \x20       // the kernel's event-kind check on each row falls through.\n\
-         \x20       // A4.1 will detect cfg shape per kernel from KernelSpec and\n\
-         \x20       // write the right value per slot.\n\
+         \x20       // Cfg layout per kernel:\n\
+         \x20       //   per-agent: { agent_cap, tick, seed, _pad }\n\
+         \x20       //   ViewFold:  { event_count, tick, second_key_pop, _pad }\n\
+         \x20       // Slot 2 is `seed` (per-agent — most kernels ignore it,\n\
+         \x20       // they key PCG off tick+agent+purpose) or `second_key_pop`\n\
+         \x20       // (ViewFold — must be 1 for single-key views, otherwise\n\
+         \x20       // the per-(observer, source) index calc divides by 0 or\n\
+         \x20       // wraps and the fold writes to wrong slots). Writing 1\n\
+         \x20       // is correct for ViewFolds and harmless for per-agent.\n\
+         \x20       // A later slice can detect cfg shape per kernel and\n\
+         \x20       // write the proper seed for per-agent kernels — pinned\n\
+         \x20       // to the cooldown_probe staggered-fire test as a regression.\n\
          \x20       let cfg_words: [u32; 4] = [\n\
          \x20           self.agent_count,\n\
          \x20           self.tick as u32,\n\
-         \x20           self.seed as u32,\n\
+         \x20           1u32,\n\
          \x20           self.agent_count,\n\
          \x20       ];\n\
          \x20       let cfg_bytes: &[u8] = bytemuck::cast_slice(&cfg_words);\n",
@@ -745,7 +812,7 @@ mod tests {
     #[test]
     fn synthesize_runtime_core_minimal_fixture_emits_well_formed_struct() {
         let artifacts = crate::cg::emit::EmittedArtifacts::default();
-        let out = super::synthesize_runtime_core_a2("smoke_fixture", &artifacts);
+        let out = super::synthesize_runtime_core_a2("smoke_fixture", &artifacts, &[]);
 
         // Braces balance.
         let opens = out.matches('{').count();

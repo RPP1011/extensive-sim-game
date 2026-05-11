@@ -1097,6 +1097,11 @@ fn collect(
                     span: d.span,
                 });
             }
+            Decl::Init(_) => {
+                // Plan E-A6 — `init` blocks are consumed directly by
+                // `dsl_compiler::build_helper` from the parsed Program.
+                // No Compilation IR slot today; resolver passes through.
+            }
         }
     }
     Ok(())
@@ -1537,6 +1542,9 @@ fn resolve_bodies(
                 comp.spatial_queries[spatial_query_idx].params = params;
                 comp.spatial_queries[spatial_query_idx].filter = filter;
                 spatial_query_idx += 1;
+            }
+            Decl::Init(_) => {
+                // Plan E-A6 — handled in build_helper, no IR pass-2 work.
             }
         }
     }

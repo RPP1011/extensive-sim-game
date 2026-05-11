@@ -142,6 +142,7 @@ fn decl_annotations_mut(d: &mut Decl) -> Option<&mut Vec<Annotation>> {
         Decl::Probe(x) => &mut x.annotations,
         Decl::Metric(x) => &mut x.annotations,
         Decl::Config(x) => &mut x.annotations,
+        Decl::Init(x) => &mut x.annotations,
         Decl::SpatialQuery(x) => &mut x.annotations,
         // `query` does not currently accept annotations on the decl; trailing
         // `@`s after a `query` will fall through to the orphan-annotation
@@ -167,6 +168,7 @@ fn decl_span_mut(d: &mut Decl) -> &mut Span {
         Decl::Config(x) => &mut x.span,
         Decl::Query(x) => &mut x.span,
         Decl::SpatialQuery(x) => &mut x.span,
+        Decl::Init(x) => &mut x.span,
     }
 }
 
@@ -195,17 +197,81 @@ fn decl(c: &mut Cursor) -> PResult<Decl> {
         Some("probe") => probe_decl(c, annotations, start).map(Decl::Probe),
         Some("metric") => metric_block(c, annotations, start).map(Decl::Metric),
         Some("config") => config_decl(c, annotations, start).map(Decl::Config),
+        Some("init") => init_decl(c, annotations, start).map(Decl::Init),
         Some("spatial_query") => {
             spatial_query_decl(c, annotations, start).map(Decl::SpatialQuery)
         }
         _ => Err(ParseErr::at(
             here(c),
             format!(
-                "expected top-level declaration (entity, event, event_tag, enum, view, query, physics, mask, verb, scoring, invariant, probe, metric, config, spatial_query); got `{}`",
+                "expected top-level declaration (entity, event, event_tag, enum, view, query, physics, mask, verb, scoring, invariant, probe, metric, config, init, spatial_query); got `{}`",
                 peek_word_for_error(c)
             ),
         )),
     }
+}
+
+// ---------------------------------------------------------------------------
+// 2.16 init (Plan E-A6 — fixture-owned initial buffer state in the DSL)
+// ---------------------------------------------------------------------------
+
+fn init_decl(
+    c: &mut Cursor,
+    annotations: Vec<Annotation>,
+    start: usize,
+) -> PResult<InitDecl> {
+    expect_keyword(c, "init")
+        .map_err(|e| e.with_context("parsing `init` declaration"))?;
+    c.skip_ws();
+    expect_char(c, '{')
+        .map_err(|e| e.with_context("parsing init body (expected `{`)"))?;
+    let mut stmts = Vec::new();
+    loop {
+        c.skip_ws();
+        if c.starts_with_char('}') {
+            c.bump(1);
+            break;
+        }
+        let stmt_start = c.pos;
+        let field = ident(c).map_err(|e| e.with_context("parsing init field name"))?;
+        c.skip_ws();
+        expect_char(c, ':')
+            .map_err(|e| e.with_context("parsing init stmt (expected `:` after field)"))?;
+        c.skip_ws();
+        let expr = if let Some(name) = peek_ident(c) {
+            if name == "slot" {
+                c.bump(name.len());
+                InitExpr::Slot
+            } else {
+                return Err(ParseErr::at(
+                    here(c),
+                    format!(
+                        "expected `slot` or integer literal as init expression; got `{name}`"
+                    ),
+                ));
+            }
+        } else if peek_number(c) {
+            let (n, is_float) = number_literal(c)?;
+            if is_float {
+                return Err(ParseErr::at(
+                    here(c),
+                    "init expression must be an integer (no float fills)",
+                ));
+            }
+            InitExpr::Const(n as i64)
+        } else {
+            return Err(ParseErr::at(
+                here(c),
+                "expected `slot` or integer literal as init expression",
+            ));
+        };
+        stmts.push(InitStmt { field, expr, span: Span::new(stmt_start, c.pos) });
+        c.skip_ws();
+        if c.starts_with_char(',') {
+            c.bump(1);
+        }
+    }
+    Ok(InitDecl { annotations, stmts, span: Span::new(start, c.pos) })
 }
 
 // ---------------------------------------------------------------------------

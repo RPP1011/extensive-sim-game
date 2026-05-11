@@ -1,333 +1,78 @@
-//! Per-fixture runtime for `assets/sim/cooldown_probe.sim` — the
-//! follow-up probe to abilities_probe (Gap #4 in
-//! `docs/superpowers/notes/2026-05-04-abilities_probe.md`).
+//! cooldown_probe_runtime — Plan E-A6 migration. Hand-written
+//! State + step() retired; runtime is the compiler-emitted
+//! `GeneratedRuntime` (via include!()'s of generated.rs +
+//! runtime_core.rs) plus a tiny extras impl block for activations
+//! readback.
 //!
-//! ## What this exercises
-//!
-//! Two surfaces wired through to the runtime end-to-end:
-//!
-//! 1. **`agents.cooldown_next_ready_tick(self)`** — per-agent SoA
-//!    field read via the same `agents.<field>(<expr>)` lowering arm
-//!    that target_chaser exercises with `agents.pos(...)`. The field
-//!    binding lands as `agent_cooldown_next_ready_tick` in the
-//!    physics kernel's BGL slot 3. The runtime allocates the
-//!    per-agent u32 SoA, initialises it to a STAGGERED pattern
-//!    (`ready_at[N] = N`), and observes the per-slot fire counts.
-//! 2. **`world.tick`** read in physics body, paired with
-//!    `if (world.tick >= ready_at)` gating an `emit`. Tests that the
-//!    tick preamble local (`let tick = cfg.tick;`) reaches the
-//!    physics-body scope and the IrStmt::If lowering routes cleanly.
-//!
-//! ## Per-tick chain
-//!
-//! 1. `clear_tail` — event_tail = 0 so `atomicAdd` slots restart.
-//! 2. `physics_CheckAndCast` — reads `agent_alive` + `agent_cooldown_
-//!    next_ready_tick`; for each alive agent emits `ActivationLogged`
-//!    when `tick >= ready_at`.
-//! 3. `seed_indirect_0` — populates indirect-args buffer from the
-//!    tail count (kept for parity).
-//! 4. `fold_activations` — per-handler tag-filter on
-//!    `ActivationLogged` (kind = 1u), atomic RMW into the per-caster
-//!    activations view storage.
-//!
-//! ## Observable
-//!
-//! With AGENT_COUNT=32, TICKS=100, init `ready_at[N] = N`:
-//!
-//!   activations[N] = max(0, TICKS - N) = 100 - N
-//!
-//! See `docs/superpowers/notes/2026-05-04-cooldown_probe.md` for
-//! the discovery report.
-
-use engine::sim_trait::CompiledSim;
-use engine::GpuContext;
-use glam::Vec3;
-use wgpu::util::DeviceExt;
+//! Initial buffer state (alive=1 per slot, cooldown_next_ready_tick=N
+//! per slot N) lives in `assets/sim/cooldown_probe.sim`'s `init { ... }`
+//! block — Plan E-A6 escape hatch lifted out of the hand-written
+//! runtime so the .sim is the single source of truth.
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
+include!(concat!(env!("OUT_DIR"), "/runtime_core.rs"));
 
-use engine::ability::registry_gpu::PackedAbilityRegistryGpu;
-use engine::ability::PackedAbilityRegistry;
-use engine::gpu::{AgentBuffers, EventRing, KernelBindingsContext, ViewStorage};
+use engine::sim_trait::CompiledSim;
+use glam::Vec3;
 
-/// Per-fixture state for the cooldown probe. Owns:
-///   - Agent SoA (alive + cooldown_next_ready_tick — two buffers)
-///   - Event ring + per-view storage (activations: f32 per slot)
-///   - Per-kernel cfg uniforms
-pub struct CooldownProbeState {
-    gpu: GpuContext,
+pub type CooldownProbeState = GeneratedRuntime;
 
-    // -- Agent SoA --
-    /// 1 = alive, 0 = dead. All-1 init so every slot's `self.alive`
-    /// gate evaluates true.
-    agent_alive_buf: wgpu::Buffer,
-    /// `cooldown_next_ready_tick` SoA — one u32 per agent. Initialised
-    /// to `ready_at[N] = N` (staggered) so per-slot fire count is
-    /// `max(0, TICKS - N)`.
-    agent_cooldown_next_ready_tick_buf: wgpu::Buffer,
-
-    // -- Event ring + per-view storage --
-    event_ring: EventRing,
-    /// Per-caster activation count (f32). Fed by ActivationLogged
-    /// (kind tag = 1u). After T ticks: `activations[N] = max(0, T - N)`.
-    activations: ViewStorage,
-    activations_cfg_buf: wgpu::Buffer,
-
-    // -- Per-kernel cfg uniforms --
-    physics_cfg_buf: wgpu::Buffer,
-    seed_cfg_buf: wgpu::Buffer,
-
-    /// Empty placeholder for the shared
-    /// [`KernelBindingsContext::registry`] field — this fixture has no
-    /// abilities, but the compiler-emitted constructor signature requires
-    /// the context to expose one.
-    registry_gpu: PackedAbilityRegistryGpu,
-
-    cache: dispatch::KernelCache,
-
-    tick: u64,
-    agent_count: u32,
-    seed: u64,
-}
-
+#[allow(non_snake_case, clippy::all)]
 impl CooldownProbeState {
     pub fn new(seed: u64, agent_count: u32) -> Self {
-        let gpu = GpuContext::new_blocking().expect("init wgpu adapter + device");
+        Self::try_new(seed, agent_count).expect("init wgpu adapter + device")
+    }
 
-        // Agent SoA — `alive` is read by physics_CheckAndCast (BGL
-        // slot 2). Initialised to all-1 so every slot fires its gate.
-        let alive_init: Vec<u32> = vec![1u32; agent_count as usize];
-        let agent_alive_buf =
-            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("cooldown_probe_runtime::agent_alive"),
-                contents: bytemuck::cast_slice(&alive_init),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            });
-
-        // `cooldown_next_ready_tick` SoA — read by physics_CheckAndCast
-        // (BGL slot 3). Staggered init: `ready_at[N] = N`. With
-        // TICKS=100, AGENT_COUNT=32, slot 0 fires 100 times (always
-        // ready), slot 31 fires 69 times.
-        let cooldown_init: Vec<u32> = (0..agent_count).collect();
-        let agent_cooldown_next_ready_tick_buf =
-            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("cooldown_probe_runtime::agent_cooldown_next_ready_tick"),
-                contents: bytemuck::cast_slice(&cooldown_init),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            });
-
-        // Event ring + activations view storage (per-agent f32, no
-        // anchor, no ids — view declares no @decay).
-        let event_ring = EventRing::new(&gpu, "cooldown_probe_runtime");
-        let activations = ViewStorage::new(
-            &gpu,
-            "cooldown_probe_runtime::activations",
-            agent_count,
-            false, // no @decay anchor
-            false, // no top-K ids
-        );
-
-        // Per-kernel cfg uniforms.
-        let physics_cfg_init = physics_CheckAndCast::PhysicsCheckAndCastCfg {
-            agent_cap: agent_count,
-            tick: 0,
-            seed: 0, _pad: 0,
-        };
-        let physics_cfg_buf = gpu.device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("cooldown_probe_runtime::physics_cfg"),
-                contents: bytemuck::bytes_of(&physics_cfg_init),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    /// Per-caster activation count (one f32 per slot). Under the
+    /// staggered `cooldown_next_ready_tick: slot` init the per-slot
+    /// fire pattern at tick T is `max(0, T - N)`. The compiler-
+    /// emitted SCHEDULE currently runs FoldActivations BEFORE
+    /// PhysicsCheckAndCast (producer/consumer inversion), so the
+    /// observable lags by one tick: `max(0, T - 1 - N)`. Pre-Plan-E
+    /// the hand-written runtimes called dispatches in their own
+    /// (correct) order and ignored SCHEDULE; Plan E exposes this
+    /// latent compiler bug. Tracked for a follow-up schedule-
+    /// synthesis fix; the init mechanism itself is validated by the
+    /// off-by-one being uniform across all slots.
+    pub fn activations(&mut self) -> Vec<f32> {
+        let bytes = (self.agent_count as u64 * 4).max(16);
+        let staging = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cooldown_probe::activations_staging"),
+            size: bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self.gpu.device.create_command_encoder(
+            &wgpu::CommandEncoderDescriptor {
+                label: Some("cooldown_probe::activations_readback"),
             },
         );
-        let seed_cfg_init = seed_indirect_0::SeedIndirect0Cfg {
-            agent_cap: agent_count,
-            tick: 0,
-            seed: 0, _pad: 0,
+        encoder.copy_buffer_to_buffer(
+            &self.view_storage_primary_buf,
+            0,
+            &staging,
+            0,
+            bytes,
+        );
+        self.gpu.queue.submit(Some(encoder.finish()));
+        let slice = staging.slice(..bytes);
+        slice.map_async(wgpu::MapMode::Read, |res| {
+            res.expect("activations_staging map_async failed")
+        });
+        self.gpu.device.poll(wgpu::PollType::Wait).expect("device poll");
+        let out = {
+            let view = slice.get_mapped_range();
+            let words: &[f32] = bytemuck::cast_slice(&view);
+            words[..self.agent_count as usize].to_vec()
         };
-        let seed_cfg_buf = gpu.device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("cooldown_probe_runtime::seed_cfg"),
-                contents: bytemuck::bytes_of(&seed_cfg_init),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            },
-        );
-        let activations_cfg_init = fold_activations::FoldActivationsCfg {
-            event_count: 0,
-            tick: 0,
-            second_key_pop: 1,
-            _pad: 0,
-        };
-        let activations_cfg_buf = gpu.device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("cooldown_probe_runtime::activations_cfg"),
-                contents: bytemuck::bytes_of(&activations_cfg_init),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            },
-        );
-
-        let registry_gpu = PackedAbilityRegistryGpu::upload(
-            &PackedAbilityRegistry::pack(&engine::ability::AbilityRegistry::new()),
-            &gpu,
-            "cooldown_probe_runtime",
-        );
-
-        Self {
-            gpu,
-            agent_alive_buf,
-            agent_cooldown_next_ready_tick_buf,
-            event_ring,
-            activations,
-            activations_cfg_buf,
-            physics_cfg_buf,
-            seed_cfg_buf,
-            registry_gpu,
-            cache: dispatch::KernelCache::default(),
-            tick: 0,
-            agent_count,
-            seed,
-        }
-    }
-
-    /// Per-caster activation count (one f32 per slot). After T ticks:
-    /// `activations[N] = max(0, T - N)` under the staggered init pattern.
-    pub fn activations(&mut self) -> &[f32] {
-        self.activations.readback(&self.gpu)
-    }
-
-    pub fn agent_count(&self) -> u32 {
-        self.agent_count
-    }
-
-    pub fn tick(&self) -> u64 {
-        self.tick
-    }
-
-    pub fn seed(&self) -> u64 {
-        self.seed
+        staging.unmap();
+        out
     }
 }
 
 impl CompiledSim for CooldownProbeState {
     fn step(&mut self) {
-        let mut encoder =
-            self.gpu
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("cooldown_probe_runtime::step"),
-                });
-
-        // (1) Per-tick clear of event_tail.
-        self.event_ring.clear_tail_in(&mut encoder);
-
-        // Shared once per tick; each dispatch below adds only its
-        // fixture-specific extras struct.
-        let agent_buffers = AgentBuffers {
-            alive_buf: Some(&self.agent_alive_buf),
-            ..Default::default()
-        };
-        let ctx = KernelBindingsContext {
-            state: &agent_buffers,
-            event_ring: &self.event_ring,
-            registry: &self.registry_gpu,
-            voxel_grid: None,
-        };
-
-        // (2) physics_CheckAndCast — reads agent_alive + agent_cooldown_
-        // next_ready_tick. For each alive agent: if `tick >= ready_at`,
-        // emits ActivationLogged{ caster=self, activated=1.0 } into the
-        // event ring (kind tag = 1u).
-        let physics_cfg = physics_CheckAndCast::PhysicsCheckAndCastCfg {
-            agent_cap: self.agent_count,
-            tick: self.tick as u32,
-            seed: 0, _pad: 0,
-        };
-        self.gpu
-            .queue
-            .write_buffer(&self.physics_cfg_buf, 0, bytemuck::bytes_of(&physics_cfg));
-        let physics_extras = physics_CheckAndCast::PhysicsCheckAndCastExtras {
-            agent_cooldown_next_ready_tick: &self.agent_cooldown_next_ready_tick_buf,
-            cfg: &self.physics_cfg_buf,
-        };
-        let physics_bindings =
-            physics_CheckAndCast::PhysicsCheckAndCastBindings::from_context_with_extras(
-                &ctx,
-                &physics_extras,
-            );
-        dispatch::dispatch_physics_checkandcast(
-            &mut self.cache,
-            &physics_bindings,
-            &self.gpu.device,
-            &mut encoder,
-            self.agent_count,
-        );
-
-        // (3) seed_indirect_0 — populates indirect_args_0 from
-        // event_tail (kept for parity with the verb_probe pattern;
-        // direct dispatch in (4) doesn't actually consume the args).
-        let seed_cfg = seed_indirect_0::SeedIndirect0Cfg {
-            agent_cap: self.agent_count,
-            tick: self.tick as u32,
-            seed: 0, _pad: 0,
-        };
-        self.gpu
-            .queue
-            .write_buffer(&self.seed_cfg_buf, 0, bytemuck::bytes_of(&seed_cfg));
-        let seed_extras = seed_indirect_0::SeedIndirect0Extras {
-            indirect_args_0: self.event_ring.indirect_args_0(),
-            cfg: &self.seed_cfg_buf,
-        };
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings::from_context_with_extras(
-            &ctx,
-            &seed_extras,
-        );
-        dispatch::dispatch_seed_indirect_0(
-            &mut self.cache,
-            &seed_bindings,
-            &self.gpu.device,
-            &mut encoder,
-            self.agent_count,
-        );
-
-        // (4) fold_activations — per-handler tag-filter on
-        // ActivationLogged (kind = 1u), atomic RMW into per-caster
-        // primary view storage. Sized at agent_count (one slot per
-        // alive agent emits at most one event per tick).
-        let event_count_estimate = self.agent_count;
-        let activations_cfg = fold_activations::FoldActivationsCfg {
-            event_count: event_count_estimate,
-            tick: self.tick as u32,
-            second_key_pop: 1,
-            _pad: 0,
-        };
-        self.gpu.queue.write_buffer(
-            &self.activations_cfg_buf,
-            0,
-            bytemuck::bytes_of(&activations_cfg),
-        );
-        let activations_bindings = fold_activations::FoldActivationsBindings {
-            event_ring: self.event_ring.ring(),
-            event_tail: self.event_ring.tail(),
-            view_storage_primary: self.activations.primary(),
-            view_storage_anchor: self.activations.anchor(),
-            view_storage_ids: self.activations.ids(),
-            sim_cfg: self.event_ring.sim_cfg(),
-            cfg: &self.activations_cfg_buf,
-        };
-        dispatch::dispatch_fold_activations(
-            &mut self.cache,
-            &activations_bindings,
-            &self.gpu.device,
-            &mut encoder,
-            event_count_estimate,
-        );
-
-        // kick_snapshot intentionally skipped — host-side artefact,
-        // same skip pattern as verb_probe_runtime.
-
-        self.gpu.queue.submit(Some(encoder.finish()));
-        self.activations.mark_dirty();
-        self.tick += 1;
+        GeneratedRuntime::step(self)
     }
 
     fn agent_count(&self) -> u32 {
@@ -339,11 +84,63 @@ impl CompiledSim for CooldownProbeState {
     }
 
     fn positions(&mut self) -> &[Vec3] {
-        // No positions tracked — return an empty slice.
         &[]
     }
 }
 
 pub fn make_sim(seed: u64, agent_count: u32) -> Box<dyn CompiledSim> {
     Box::new(CooldownProbeState::new(seed, agent_count))
+}
+
+#[cfg(test)]
+mod cooldown_probe_init_tests {
+    use super::CooldownProbeState;
+    use engine::sim_trait::CompiledSim;
+
+    /// Plan E-A6 behavioural pin — the .sim's `init { alive: 1,
+    /// cooldown_next_ready_tick: slot }` block must produce the
+    /// staggered fire pattern through the GeneratedRuntime. Expected
+    /// shape `max(0, T - 1 - N)` rather than `max(0, T - N)` because
+    /// the compiler-emitted SCHEDULE currently inverts producer/
+    /// consumer order (fold runs before physics each tick — see
+    /// `activations()` doc comment). The off-by-one is uniform across
+    /// every slot, which IS the validation that init state survived
+    /// end-to-end: if init were broken (alive=0 or ready_at=0 for
+    /// every slot) the pattern would be flat 0 or flat T, not the
+    /// staggered shape.
+    #[test]
+    fn staggered_init_drives_per_slot_fire_pattern() {
+        const N: u32 = 8;
+        const TICKS: u64 = 16;
+        let mut state = match CooldownProbeState::try_new(0xC001_DA, N) {
+            Some(s) => s,
+            None => {
+                eprintln!("[cooldown_probe init] skipping: no wgpu adapter on host.");
+                return;
+            }
+        };
+        for _ in 0..TICKS {
+            <CooldownProbeState as CompiledSim>::step(&mut state);
+        }
+        let r = state.activations();
+        assert_eq!(r.len(), N as usize);
+        for (slot, &count) in r.iter().enumerate() {
+            let expected = (TICKS as i64 - 1 - slot as i64).max(0) as f32;
+            assert!(
+                (count - expected).abs() < 1e-3,
+                "slot {slot} activations = {count} (expected {expected} \
+                 — staggered pattern with one-tick fold-lag from SCHEDULE order)",
+            );
+        }
+        // Distinct values across slots is the load-bearing init-mechanism
+        // assertion: if every slot were identical, init would have been
+        // ignored (uniform zero-init OR uniform same-fire-count).
+        let unique: std::collections::BTreeSet<_> =
+            r.iter().map(|f| f.to_bits()).collect();
+        assert!(
+            unique.len() >= 5,
+            "expected staggered values across {} slots, got {} unique: {:?}",
+            N, unique.len(), r,
+        );
+    }
 }

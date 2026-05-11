@@ -58,6 +58,40 @@ pub enum Decl {
     Metric(MetricBlock),
     Config(ConfigDecl),
     SpatialQuery(SpatialQueryDecl),
+    Init(InitDecl),
+}
+
+/// Per-fixture initial-state declaration. Plan E-A6 escape hatch: lets
+/// a `.sim` author express "fill agent SoA column `<col>` with this
+/// per-slot value before tick 0" without smuggling code into a
+/// hand-written `*_runtime/lib.rs`. The build helper consumes this
+/// when synthesising the GeneratedRuntime's `try_new` and emits
+/// `create_buffer_init` (instead of zero-init `create_buffer`) for
+/// every standard or fixture-owned agent column with a matching stmt.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct InitDecl {
+    pub annotations: Vec<Annotation>,
+    pub stmts: Vec<InitStmt>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct InitStmt {
+    /// Bare field name, e.g. `alive` or `cooldown_next_ready_tick`. The
+    /// build helper resolves this against `agent_<field>_buf` allocs.
+    pub field: String,
+    pub expr: InitExpr,
+    pub span: Span,
+}
+
+/// Tiny init-expression vocabulary. Intentionally minimal; the user
+/// directive is "get init state into the DSL, refactor later".
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum InitExpr {
+    /// Constant fill: every slot gets this value.
+    Const(i64),
+    /// Staggered fill: slot N gets value N (per-agent slot index).
+    Slot,
 }
 
 // ---------------------------------------------------------------------------
