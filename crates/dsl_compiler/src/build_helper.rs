@@ -359,7 +359,7 @@ fn synthesize_generated_runtime_struct(
          // standard agent SoA column and NOT shared infrastructure. Today\n\
          // no fixture's lib.rs imports this — A5 (firebolt_probe pilot)\n\
          // will be the first runtime to switch to it.\n\
-         #[allow(dead_code, clippy::all)]\n\
+         #[allow(dead_code, non_snake_case, clippy::all)]\n\
          pub struct GeneratedRuntime {\n\
          \x20   pub gpu: engine::GpuContext,\n\
          \x20   pub agent_count: u32,\n\
@@ -378,7 +378,7 @@ fn synthesize_generated_runtime_struct(
     out.push_str("}\n\n");
 
     out.push_str(
-        "#[allow(dead_code, clippy::all)]\n\
+        "#[allow(dead_code, non_snake_case, clippy::all)]\n\
          impl GeneratedRuntime {\n\
          \x20   pub fn try_new(seed: u64, agent_count: u32) -> Option<Self> {\n\
          \x20       let gpu = engine::GpuContext::new_blocking().ok()?;\n",

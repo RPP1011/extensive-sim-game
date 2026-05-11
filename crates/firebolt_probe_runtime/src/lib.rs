@@ -823,3 +823,34 @@ mod closed_loop_tests {
         }
     }
 }
+
+// Plan E-A5 — pilot integration. Verify the compiler-emitted
+// `GeneratedRuntime` (Plan E-A2/A3) compiles + initializes end-to-end
+// on the firebolt_probe fixture without disturbing the existing
+// hand-written FireboltProbeState. Doesn't replace anything yet —
+// just proves the generator output IS buildable + GPU-initializable
+// against the same .sim. Failure mode signals what A4 step() emit
+// must add to make a full migration possible.
+#[cfg(test)]
+mod a5_pilot_generator_smoke {
+    include!(concat!(env!("OUT_DIR"), "/runtime_core.rs"));
+
+    #[test]
+    fn generated_runtime_try_new_initializes_against_firebolt_probe_kernels() {
+        let r = match GeneratedRuntime::try_new(0xCAFE, 4) {
+            Some(s) => s,
+            None => {
+                eprintln!("[a5_pilot] skipping: no wgpu adapter on host.");
+                return;
+            }
+        };
+        assert_eq!(r.agent_count, 4);
+        assert_eq!(r.tick, 0);
+        assert_eq!(r.seed, 0xCAFE);
+        assert_eq!(FIXTURE_NAME, "firebolt_probe");
+        assert!(KERNEL_COUNT > 0);
+        eprintln!(
+            "[a5_pilot] GeneratedRuntime initialized OK; FIXTURE_NAME={FIXTURE_NAME} KERNEL_COUNT={KERNEL_COUNT}"
+        );
+    }
+}
