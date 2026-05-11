@@ -407,3 +407,48 @@ fn synthesize_generated_runtime_struct(
 
     out
 }
+
+#[cfg(test)]
+mod tests {
+    //! Plan E-A3.2 structural verification — confirms the generated
+    //! `runtime_core.rs` source has the expected shape (balanced
+    //! braces, declared pub items present). The full compile gate
+    //! lands when A5 pilot `include!`s the file from a real fixture
+    //! crate; this test just catches obvious emit bugs without that
+    //! integration cost.
+
+    #[test]
+    fn synthesize_runtime_core_minimal_fixture_emits_well_formed_struct() {
+        let artifacts = crate::cg::emit::EmittedArtifacts::default();
+        let out = super::synthesize_runtime_core_a2("smoke_fixture", &artifacts);
+
+        // Braces balance.
+        let opens = out.matches('{').count();
+        let closes = out.matches('}').count();
+        assert_eq!(
+            opens, closes,
+            "brace mismatch in generated runtime_core: {opens} `{{` vs {closes} `}}`\n--- source ---\n{out}"
+        );
+
+        // Required public surface.
+        for required in [
+            "pub struct GeneratedRuntime",
+            "pub gpu: engine::GpuContext",
+            "pub agent_count: u32",
+            "pub fn try_new(seed: u64, agent_count: u32) -> Option<Self>",
+            "pub const FIXTURE_NAME: &str = \"smoke_fixture\";",
+        ] {
+            assert!(
+                out.contains(required),
+                "generated source missing required item {required:?}\n--- source ---\n{out}"
+            );
+        }
+
+        // Empty fixture has no External bindings → no buffer alloc
+        // lines in try_new (only the gpu init + Some(Self {{...}})).
+        assert!(
+            !out.contains("create_buffer"),
+            "minimal fixture should not emit buffer alloc lines\n{out}"
+        );
+    }
+}
