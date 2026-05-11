@@ -327,11 +327,17 @@ fn synthesize_generated_runtime_struct(
     // Collect unique fixture-owned bindings across all kernels.
     // BTreeSet preserves deterministic iteration order.
     let mut owned: BTreeSet<(String, String)> = BTreeSet::new(); // (name, wgsl_ty)
+    // Per-kernel cfg buffers — one wgpu::Buffer per kernel that has
+    // a Cfg-source binding (which is every kernel today). Allocated
+    // sized to the cfg struct's std430 footprint (16 bytes covers
+    // the standard 4-u32 cfg layouts; oversize is fine).
+    let mut cfg_buffer_names: Vec<String> = Vec::new();
     for spec in &artifacts.kernel_specs {
+        let mut has_cfg = false;
         for b in &spec.bindings {
-            // Only External bindings are fixture-owned candidates.
-            // Resident/Transient/Cfg/ViewHandle/AliasOf are
-            // engine-helper-supplied.
+            if matches!(b.bg_source, BgSource::Cfg) {
+                has_cfg = true;
+            }
             if !matches!(b.bg_source, BgSource::External(_)) {
                 continue;
             }
@@ -339,6 +345,9 @@ fn synthesize_generated_runtime_struct(
                 continue;
             }
             owned.insert((b.name.clone(), b.wgsl_ty.clone()));
+        }
+        if has_cfg {
+            cfg_buffer_names.push(spec.name.clone());
         }
     }
 
@@ -359,6 +368,12 @@ fn synthesize_generated_runtime_struct(
     );
     for (name, _ty) in &owned {
         out.push_str(&format!("    pub {name}_buf: wgpu::Buffer,\n"));
+    }
+    // Per-kernel cfg buffers (Plan E-A4). One per kernel with a
+    // Cfg-source binding. Named `cfg_<kernel>_buf` to avoid
+    // collisions with fixture-owned buffers.
+    for kernel_name in &cfg_buffer_names {
+        out.push_str(&format!("    pub cfg_{kernel_name}_buf: wgpu::Buffer,\n"));
     }
     out.push_str("}\n\n");
 
@@ -393,6 +408,19 @@ fn synthesize_generated_runtime_struct(
              \x20       }});\n",
         ));
     }
+    // Allocate per-kernel cfg buffer (uniform, sized 64 bytes — covers
+    // the standard 4-u32 cfg layout with comfortable headroom for the
+    // few cfg shapes that grow). Per-tick writes happen inside step().
+    for kernel_name in &cfg_buffer_names {
+        out.push_str(&format!(
+            "        let cfg_{kernel_name}_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {{\n\
+             \x20           label: Some(\"{fixture_name}::cfg_{kernel_name}\"),\n\
+             \x20           size: 64u64,\n\
+             \x20           usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,\n\
+             \x20           mapped_at_creation: false,\n\
+             \x20       }});\n",
+        ));
+    }
     out.push_str("        Some(Self {\n");
     out.push_str("            gpu,\n");
     out.push_str("            agent_count,\n");
@@ -400,6 +428,9 @@ fn synthesize_generated_runtime_struct(
     out.push_str("            tick: 0,\n");
     for (name, _) in &owned {
         out.push_str(&format!("            {name}_buf,\n"));
+    }
+    for kernel_name in &cfg_buffer_names {
+        out.push_str(&format!("            cfg_{kernel_name}_buf,\n"));
     }
     out.push_str("        })\n");
     out.push_str("    }\n");
