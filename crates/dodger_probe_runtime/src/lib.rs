@@ -34,6 +34,7 @@ use glam::Vec3;
 use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
+include!(concat!(env!("OUT_DIR"), "/runtime_core.rs"));
 
 /// ActionId allocated to the `Flee` verb. Source-order in the .sim
 /// puts Flee first, so it gets ActionId(0). Pinned by
@@ -1787,5 +1788,31 @@ mod dodger_behavioural_tests {
              dodging decisions purely from facing geometry. Per-agent FOV resolves the right \
              belief bits; the GPU's belief-gated fold + scoring tracks them all in one dispatch."
         );
+    }
+}
+
+
+// Plan E-A6 — third fixture, exercises a ViewFold kernel
+// (fold_threats) that the generator falls through. Validates the
+// skip behavior doesn't crash anything; existing dodger tests still
+// rely on the hand-written DodgerProbeState.step() path.
+#[cfg(test)]
+mod a6_pilot_dodger_with_viewfold {
+    use crate::{GeneratedRuntime, FIXTURE_NAME, KERNEL_COUNT};
+
+    #[test]
+    fn generated_runtime_works_for_dodger_probe_with_viewfold_skip() {
+        let mut r = match GeneratedRuntime::try_new(0xCAFE, 4) {
+            Some(s) => s,
+            None => {
+                eprintln!("[a6_pilot] skipping: no wgpu adapter on host.");
+                return;
+            }
+        };
+        assert_eq!(FIXTURE_NAME, "dodger_probe");
+        r.step();
+        r.step();
+        assert_eq!(r.tick, 2);
+        eprintln!("[a6_pilot] dodger_probe: KERNEL_COUNT={KERNEL_COUNT}, ran 2 ticks (fold_threats skipped)");
     }
 }

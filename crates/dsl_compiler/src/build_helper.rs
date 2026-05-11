@@ -357,25 +357,25 @@ fn synthesize_generated_runtime_struct(
         for b in &spec.bindings {
             if matches!(b.bg_source, BgSource::Cfg) {
                 has_cfg = true;
+                continue;
             }
-            // Transient bindings (mask_bitmaps, action_buf, cascade
-            // ring records, etc.) are per-fixture-allocated scratch
-            // buffers reused across ticks. Treat them like External
-            // for alloc purposes.
-            let is_owned_source = matches!(
-                b.bg_source,
-                BgSource::External(_) | BgSource::Transient(_)
-            );
-            if !is_owned_source {
+            // Skip AliasOf — handled at BindGroup time, not a real
+            // separate binding.
+            if matches!(b.bg_source, BgSource::AliasOf(_)) {
+                continue;
+            }
+            // Use NAME-based classification (mirroring the compiler's
+            // classify_binding) instead of bg_source. Name-based is
+            // authoritative for what goes in Extras vs ctx; bg_source
+            // can't tell them apart for some cases (scoring_output,
+            // view_storage_* are Resident-source but Extras-bound).
+            if is_infra_binding(&b.name) {
                 continue;
             }
             // Standard agent columns ARE allocated as fixture-owned
             // today (no shared SimState yet). The AgentBuffers
             // population in step() routes them into ctx.state for the
             // from_context_with_extras call.
-            if is_infra_binding(&b.name) {
-                continue;
-            }
             // BTreeMap insert is "first-wins" via or_insert.
             owned.entry(b.name.clone()).or_insert_with(|| b.wgsl_ty.clone());
         }

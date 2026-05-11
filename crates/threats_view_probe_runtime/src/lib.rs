@@ -41,6 +41,7 @@ use glam::Vec3;
 use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
+include!(concat!(env!("OUT_DIR"), "/runtime_core.rs"));
 
 pub struct ThreatsViewProbeState {
     gpu: GpuContext,
@@ -314,5 +315,33 @@ mod threats_lifecycle_tests {
             assert!((count - 8.0).abs() < 1e-3,
                 "tick 1: observer {obs} threats count = {count} (expected 8.0 = 2 ticks × 4 busy)");
         }
+    }
+}
+
+
+// Plan E-A6 — second fixture validating GeneratedRuntime works
+// beyond just firebolt_probe. Same shape as the firebolt a5 pilot
+// smoke test.
+#[cfg(test)]
+mod a6_pilot_generator_smoke {
+    use crate::{GeneratedRuntime, FIXTURE_NAME, KERNEL_COUNT};
+
+    #[test]
+    fn generated_runtime_works_for_threats_view_probe() {
+        let mut r = match GeneratedRuntime::try_new(0xCAFE, 4) {
+            Some(s) => s,
+            None => {
+                eprintln!("[a6_pilot] skipping: no wgpu adapter on host.");
+                return;
+            }
+        };
+        assert_eq!(FIXTURE_NAME, "threats_view_probe");
+        assert!(KERNEL_COUNT > 0);
+        r.step();
+        r.step();
+        assert_eq!(r.tick, 2);
+        eprintln!(
+            "[a6_pilot] threats_view_probe: KERNEL_COUNT={KERNEL_COUNT}, ran 2 ticks"
+        );
     }
 }
