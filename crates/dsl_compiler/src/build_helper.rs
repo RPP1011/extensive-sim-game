@@ -534,7 +534,14 @@ fn synthesize_generated_runtime_struct(
          \x20\n\
          \x20       for op in schedule::SCHEDULE {\n\
          \x20           match op {\n\
-         \x20               // Per-kernel arms emitted by A4.1+\n\
+         \x20               // A4.1 attempt reverted — Extras struct shape is\n\
+         \x20               // not reliably reconstructable from KernelBinding\n\
+         \x20               // metadata (the compiler decides per-kernel which\n\
+         \x20               // bindings go in Extras vs come from ctx — e.g.\n\
+         \x20               // event_ring is Transient for cascade kernels but\n\
+         \x20               // pulled from ctx; mask_bitmap is Transient and IS\n\
+         \x20               // in extras). Proper fix needs the compiler to\n\
+         \x20               // expose Extras field list directly in KernelSpec.\n\
          \x20               _ => {}\n\
          \x20           }\n\
          \x20       }\n\
