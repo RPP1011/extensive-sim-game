@@ -344,7 +344,15 @@ fn synthesize_generated_runtime_struct(
             if matches!(b.bg_source, BgSource::Cfg) {
                 has_cfg = true;
             }
-            if !matches!(b.bg_source, BgSource::External(_)) {
+            // Transient bindings (mask_bitmaps, action_buf, cascade
+            // ring records, etc.) are per-fixture-allocated scratch
+            // buffers reused across ticks. Treat them like External
+            // for alloc purposes.
+            let is_owned_source = matches!(
+                b.bg_source,
+                BgSource::External(_) | BgSource::Transient(_)
+            );
+            if !is_owned_source {
                 continue;
             }
             if is_standard_agent_column(&b.name) || is_infra_binding(&b.name) {
