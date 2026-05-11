@@ -34,12 +34,11 @@ fn main() {
             Some(s) => s.to_string(),
             None => continue,
         };
-        // The mega-crate intentionally covers ONLY the new
-        // `threat_impact` fixture today. Other fixtures stay on the
-        // per-`*_runtime` crate path until separately migrated. Keep
-        // the gate explicit so build time doesn't blow up on the
-        // first compile.
-        if stem != "threat_impact" {
+        // The mega-crate covers fixtures that have been actively
+        // migrated off the per-`*_runtime` crate path. Add new
+        // fixtures here as they migrate. Other fixtures stay on
+        // their per-fixture crate until each is moved over.
+        if !matches!(stem.as_str(), "threat_impact" | "cooldown_probe") {
             continue;
         }
         fixtures.push(stem);
