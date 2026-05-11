@@ -1,0 +1,65 @@
+// threat_impact — decision-impact harness for the threat infrastructure.
+// Runs the same hunt twice from the host: once with @runtime config
+// `flee_strength = 1.0` (threat-aware hares actively flee from wolves),
+// once with 0.0 (threat-blind hares ignore the threat signal). Compare
+// final hare positions to measure how much the threat-aware behavior
+// changes the spatial outcome.
+//
+// Mega-crate hosted (`crates/sims`) — no per-fixture runtime crate.
+// Adding a new fixture = drop a `.sim` file and the build script
+// auto-discovers it.
+
+event Tick { }
+
+entity Hare : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Wolf : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config hunt {
+  // The decision-impact knob. Multiplied into the flee_force in
+  // MoveHare. flee_strength=1.0 → hares actively evade; 0.0 →
+  // hares ignore the threat signal entirely.
+  flee_strength:        f32 = 1.0 @runtime,
+  prey_speed:           f32 = 0.4,
+  predator_speed:       f32 = 0.5,
+}
+
+init {
+  alive: 1,
+}
+
+physics MoveHare @phase(per_agent) {
+  on Tick {} where (self.creature_type == Hare) {
+    let flee_force = sum(other in agents where
+      if (other != self) && (other.creature_type == Wolf) {
+        self.pos - other.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let new_vel = self.vel + flee_force * config.hunt.flee_strength;
+    let new_pos = self.pos + new_vel * config.hunt.prey_speed;
+    agents.set_vel(self, new_vel);
+    agents.set_pos(self, new_pos);
+  }
+}
+
+physics MoveWolf @phase(per_agent) {
+  on Tick {} where (self.creature_type == Wolf) {
+    let chase_force = sum(other in agents where
+      if (other != self) && (other.creature_type == Hare) {
+        other.pos - self.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let new_vel = self.vel + chase_force * 0.05;
+    let new_pos = self.pos + new_vel * config.hunt.predator_speed;
+    agents.set_vel(self, new_vel);
+    agents.set_pos(self, new_pos);
+  }
+}

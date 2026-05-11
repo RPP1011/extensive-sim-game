@@ -1,0 +1,26 @@
+[package]
+name = "sims"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Plan E-A6 follow-up: a single mega-crate that hosts every fixture.
+# `build.rs` scans `assets/sim/*.sim` and emits a `pub mod <fixture>`
+# for each. Adding a new fixture = drop a `.sim` file, rebuild — no
+# new crate, no Cargo.toml plumbing, no per-fixture lib.rs shim.
+#
+# Coexists with the legacy per-fixture `*_runtime` crates during
+# migration. New fixtures should land here only; existing fixtures
+# migrate one at a time.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

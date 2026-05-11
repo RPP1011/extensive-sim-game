@@ -49,6 +49,19 @@ pub fn emit(fixture_name: &str) {
     emit_with_strategy(fixture_name, crate::cg::schedule::ScheduleStrategy::Default)
 }
 
+/// Same as [`emit`], but writes generated artifacts into a fixture-named
+/// sub-directory of `OUT_DIR` instead of `OUT_DIR` itself. Used by the
+/// `sims` mega-crate (Plan E-A6 follow-up) — its `build.rs` calls this
+/// once per `.sim` file in `assets/sim/` so a single crate hosts every
+/// fixture as `pub mod <fixture> { include!(.../<fixture>/generated.rs)
+/// include!(.../<fixture>/runtime_core.rs) }`.
+pub fn emit_namespaced(fixture_name: &str) {
+    emit_namespaced_with_strategy(
+        fixture_name,
+        crate::cg::schedule::ScheduleStrategy::Default,
+    )
+}
+
 /// Same as [`emit`], but lets the caller pin a non-default
 /// [`ScheduleStrategy`]. Quest-arc and village-day-cycle fixtures
 /// historically used `Conservative` to disable kernel fusion the
@@ -56,6 +69,47 @@ pub fn emit(fixture_name: &str) {
 pub fn emit_with_strategy(
     fixture_name: &str,
     strategy: crate::cg::schedule::ScheduleStrategy,
+) {
+    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
+    emit_into(fixture_name, strategy, &out_dir);
+}
+
+/// Same as [`emit_namespaced`], with a custom strategy.
+pub fn emit_namespaced_with_strategy(
+    fixture_name: &str,
+    strategy: crate::cg::schedule::ScheduleStrategy,
+) {
+    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"))
+        .join(fixture_name);
+    fs::create_dir_all(&out_dir)
+        .unwrap_or_else(|e| panic!("create_dir_all {}: {e}", out_dir.display()));
+    emit_into(fixture_name, strategy, &out_dir);
+    // The emitter bakes `crate::` paths in schedule.rs / dispatch.rs /
+    // kernel sub-modules. Those work in a per-fixture crate (kernel
+    // modules ARE at crate root) but break in the `sims` mega-crate
+    // where everything sits inside `pub mod <fixture>`. Rewriting to
+    // `super::` makes the generated code work in BOTH layouts (in a
+    // per-fixture crate, `super::` from a sub-module = crate root).
+    for entry in fs::read_dir(&out_dir).expect("read out_dir for crate:: rewrite") {
+        let entry = entry.expect("dir entry");
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("rs") {
+            continue;
+        }
+        let body = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let rewritten = body.replace("crate::", "super::");
+        if rewritten != body {
+            fs::write(&path, rewritten)
+                .unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
+        }
+    }
+}
+
+fn emit_into(
+    fixture_name: &str,
+    strategy: crate::cg::schedule::ScheduleStrategy,
+    out_dir: &std::path::Path,
 ) {
     let manifest_dir =
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
@@ -105,8 +159,6 @@ pub fn emit_with_strategy(
     let artifacts =
         crate::cg::emit::emit_cg_program(&schedule_result.schedule, &cg)
             .unwrap_or_else(|e| panic!("emit {fixture_name} CG program: {e:?}"));
-
-    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
 
     println!(
         "cargo:warning=[{fixture_name} emit-stats] {} kernels, schedule has {} stages",
