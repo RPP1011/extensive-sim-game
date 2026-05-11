@@ -462,7 +462,56 @@ fn synthesize_generated_runtime_struct(
         out.push_str(&format!("            cfg_{kernel_name}_buf,\n"));
     }
     out.push_str("        })\n");
-    out.push_str("    }\n");
+    out.push_str("    }\n\n");
+
+    // Plan E-A4 — default step() body.
+    //
+    // Today: builds AgentBuffers + KernelBindingsContext + walks the
+    // compiler-emitted SCHEDULE with empty match arms (every kernel
+    // dispatch falls through to the catch-all `_ => {}`). Validates
+    // the infrastructure scaffolding compiles end-to-end against a
+    // real fixture without yet emitting per-kernel dispatch arms.
+    //
+    // A4.1+ will populate match arms per kernel — needs:
+    //   * Per-kernel cfg struct construction (using KernelSpec.cfg_build_expr)
+    //   * Per-kernel Extras struct construction (mapping bindings →
+    //     fixture-owned buffers)
+    //   * dispatch::dispatch_<kernel> call
+    //   * Transient-source buffer alloc (mask_bitmaps, etc.) — not
+    //     yet handled by the A3.2 alloc loop (External-only).
+    out.push_str(
+        "    /// Default step. Builds AgentBuffers + KernelBindingsContext\n\
+         \x20   /// + walks SCHEDULE with empty match arms. A4.1+ populates the\n\
+         \x20   /// per-kernel dispatch arms.\n\
+         \x20   pub fn step(&mut self) {\n\
+         \x20       let mut encoder = self.gpu.device.create_command_encoder(\n\
+         \x20           &wgpu::CommandEncoderDescriptor {\n\
+         \x20               label: Some(concat!(env!(\"CARGO_PKG_NAME\"), \"::step\")),\n\
+         \x20           },\n\
+         \x20       );\n\
+         \x20       self.event_ring.clear_tail_in(&mut encoder);\n\
+         \x20\n\
+         \x20       let agent_buffers = engine::gpu::AgentBuffers {\n\
+         \x20           ..Default::default()\n\
+         \x20       };\n\
+         \x20       let _ctx = engine::gpu::KernelBindingsContext {\n\
+         \x20           state: &agent_buffers,\n\
+         \x20           event_ring: &self.event_ring,\n\
+         \x20           registry: &self.registry_gpu,\n\
+         \x20           voxel_grid: None,\n\
+         \x20       };\n\
+         \x20\n\
+         \x20       for op in schedule::SCHEDULE {\n\
+         \x20           match op {\n\
+         \x20               // Per-kernel arms emitted by A4.1+\n\
+         \x20               _ => {}\n\
+         \x20           }\n\
+         \x20       }\n\
+         \x20\n\
+         \x20       self.gpu.queue.submit(Some(encoder.finish()));\n\
+         \x20       self.tick += 1;\n\
+         \x20   }\n",
+    );
     out.push_str("}\n");
 
     out

@@ -856,5 +856,16 @@ mod a5_pilot_generator_smoke {
         eprintln!(
             "[a5_pilot] GeneratedRuntime initialized OK; FIXTURE_NAME={FIXTURE_NAME} KERNEL_COUNT={KERNEL_COUNT}"
         );
+
+        // A4 — step() is currently a no-op SCHEDULE walk. Verify it
+        // runs (validates encoder + AgentBuffers + KernelBindingsContext
+        // build) without panicking. tick should advance from 0 to 1.
+        let mut r = r;
+        assert_eq!(r.tick, 0);
+        r.step();
+        assert_eq!(r.tick, 1, "step() must advance tick");
+        r.step();
+        assert_eq!(r.tick, 2);
+        eprintln!("[a5_pilot] step() ran 2 ticks; tick now = {}", r.tick);
     }
 }
