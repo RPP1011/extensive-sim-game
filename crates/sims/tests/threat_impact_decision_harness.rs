@@ -153,18 +153,13 @@ fn seed_initial_state(state: &mut GeneratedRuntime) {
     );
 }
 
-/// Write the @runtime config field directly into the per-kernel cfg
-/// uniform buffer at offset 16 (after the 4-u32 standard cfg header
-/// the generator's step() rewrites every tick). The test relies on
-/// the documented invariant that the synthesized cfg_words write only
-/// touches bytes 0..16 — bytes 16+ are stable across step() calls.
+/// Drives the generator-emitted setter for the .sim's
+/// `flee_strength: f32 @runtime` config field. Each call updates the
+/// host-side mirror AND writes the value to every kernel cfg buffer
+/// that references the field, at the per-kernel offset baked at
+/// build time.
 fn set_flee_strength(state: &mut GeneratedRuntime, value: f32) {
-    let bytes = value.to_le_bytes();
-    state.gpu.queue.write_buffer(
-        &state.cfg_physics_MoveHare_buf,
-        16,
-        &bytes,
-    );
+    state.set_config_hunt_flee_strength(value);
 }
 
 fn read_hare_positions(state: &mut GeneratedRuntime) -> Vec<(f32, f32, f32)> {

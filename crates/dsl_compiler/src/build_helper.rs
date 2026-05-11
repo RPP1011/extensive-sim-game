@@ -146,6 +146,44 @@ fn emit_into(
         .collect();
     let comp = dsl_ast::resolve::resolve(program)
         .unwrap_or_else(|e| panic!("resolve {fixture_name}.sim: {e}"));
+
+    // Plan E-A6 — collect every `@runtime` config field's default value
+    // keyed by the kernel-side name (`config_<block>_<field>`). Threads
+    // into synthesize_runtime_core so try_new can preload each runtime
+    // field with its .sim default and emit a host-side setter.
+    let runtime_config_defaults: std::collections::BTreeMap<String, RuntimeConfigDefault> =
+        comp.configs
+            .iter()
+            .flat_map(|c| {
+                let block = c.name.clone();
+                c.fields.iter().filter(|f| f.runtime).map(move |f| {
+                    let key = format!("config_{block}_{}", f.name);
+                    let scalar_ty = match &f.ty {
+                        dsl_ast::ir::IrType::Named(n) => n.clone(),
+                        _ => "f32".to_string(),
+                    };
+                    let default_lit = match &f.default {
+                        dsl_ast::ast::ConfigDefault::Int(n) => format!("{n}"),
+                        dsl_ast::ast::ConfigDefault::Uint(n) => format!("{n}"),
+                        dsl_ast::ast::ConfigDefault::Float(f) => {
+                            // Always render with a decimal so the literal
+                            // typechecks as f32 in the synthesized init
+                            // expression (e.g. `1.0_f32`, not `1_f32`).
+                            let s = format!("{f}");
+                            if s.contains('.') || s.contains('e') || s.contains('E') {
+                                s
+                            } else {
+                                format!("{s}.0")
+                            }
+                        }
+                        dsl_ast::ast::ConfigDefault::Bool(b) => format!("{b}"),
+                        dsl_ast::ast::ConfigDefault::String(s) => format!("\"{s}\""),
+                    };
+                    (key, RuntimeConfigDefault { scalar_ty, default_lit })
+                })
+            })
+            .collect();
+
     let cg = match crate::cg::lower::lower_compilation_to_cg(&comp) {
         Ok(p) => p,
         Err(o) => {
@@ -229,9 +267,24 @@ fn emit_into(
     // hand-writes. For A2 we just prove the wiring works: file lands
     // in OUT_DIR, doesn't get included anywhere yet, doesn't break
     // any fixture's existing build.
-    let runtime_core = synthesize_runtime_core_a2(fixture_name, &artifacts, &init_stmts);
+    let runtime_core = synthesize_runtime_core_a2(
+        fixture_name,
+        &artifacts,
+        &init_stmts,
+        &runtime_config_defaults,
+    );
     fs::write(out_dir.join("runtime_core.rs"), runtime_core)
         .unwrap_or_else(|e| panic!("write runtime_core.rs: {e}"));
+}
+
+/// Per-kernel `@runtime` config field. Carried from the resolved
+/// Compilation IR through synthesize_runtime_core so try_new can
+/// initialize each cfg buffer's runtime field with its .sim default
+/// and the generator can emit a host-side setter.
+#[derive(Clone)]
+struct RuntimeConfigDefault {
+    scalar_ty: String,
+    default_lit: String,
 }
 
 /// Plan E-A3.1 — placeholder generated runtime body, now with per-kernel
@@ -251,6 +304,7 @@ fn synthesize_runtime_core_a2(
     fixture_name: &str,
     artifacts: &crate::cg::emit::EmittedArtifacts,
     init_stmts: &[dsl_ast::ast::InitStmt],
+    runtime_config_defaults: &std::collections::BTreeMap<String, RuntimeConfigDefault>,
 ) -> String {
     let kernel_count = artifacts.kernel_index.len();
     let mut out = String::new();
@@ -310,7 +364,12 @@ fn synthesize_runtime_core_a2(
     // shape today. A real binding-shape annotation in the AST is the
     // proper long-term fix; for now the heuristic + a TODO comment
     // keeps the generator working.
-    out.push_str(&synthesize_generated_runtime_struct(fixture_name, artifacts, init_stmts));
+    out.push_str(&synthesize_generated_runtime_struct(
+        fixture_name,
+        artifacts,
+        init_stmts,
+        runtime_config_defaults,
+    ));
 
     out
 }
@@ -403,6 +462,7 @@ fn synthesize_generated_runtime_struct(
     fixture_name: &str,
     artifacts: &crate::cg::emit::EmittedArtifacts,
     init_stmts: &[dsl_ast::ast::InitStmt],
+    runtime_config_defaults: &std::collections::BTreeMap<String, RuntimeConfigDefault>,
 ) -> String {
     use crate::kernel_binding_ir::BgSource;
     use std::collections::BTreeMap;
@@ -483,6 +543,14 @@ fn synthesize_generated_runtime_struct(
     // collisions with fixture-owned buffers.
     for kernel_name in &cfg_buffer_names {
         out.push_str(&format!("    pub cfg_{kernel_name}_buf: wgpu::Buffer,\n"));
+    }
+    // Plan E-A6 — `@runtime` config field values, mirrored host-side.
+    // The .sim's `flee_strength: f32 = 1.0 @runtime` lands here as
+    // `pub flee_strength: f32`. Host setters write the value to every
+    // kernel cfg buffer that references the field, at the per-kernel
+    // offset derived from KernelSpec.runtime_cfg_fields.
+    for (name, def) in runtime_config_defaults {
+        out.push_str(&format!("    pub {name}: {ty},\n", ty = def.scalar_ty));
     }
     out.push_str("}\n\n");
 
@@ -592,6 +660,37 @@ fn synthesize_generated_runtime_struct(
              \x20       }});\n",
         ));
     }
+    // Plan E-A6 — preload each kernel's `@runtime` config fields with
+    // their .sim defaults. The standard 4-u32 cfg header (bytes 0..16)
+    // lives at the start of every kernel's cfg struct; runtime fields
+    // are appended after, in KernelSpec.runtime_cfg_fields order. Each
+    // field is a 4-byte scalar today (u32/f32) so offset = 16 + idx*4.
+    for spec in &artifacts.kernel_specs {
+        if spec.runtime_cfg_fields.is_empty() {
+            continue;
+        }
+        for (idx, (field_name, field_ty)) in spec.runtime_cfg_fields.iter().enumerate() {
+            let def = match runtime_config_defaults.get(field_name) {
+                Some(d) => d,
+                None => continue,
+            };
+            let offset = 16 + idx * 4;
+            let bytes_expr = match field_ty.as_str() {
+                "f32" => format!("({}_f32).to_le_bytes()", def.default_lit),
+                "u32" => format!("({}_u32).to_le_bytes()", def.default_lit),
+                "i32" => format!("({}_i32).to_le_bytes()", def.default_lit),
+                _ => continue,
+            };
+            out.push_str(&format!(
+                "        gpu.queue.write_buffer(\n\
+                 \x20           &cfg_{kernel}_buf,\n\
+                 \x20           {offset}u64,\n\
+                 \x20           &{bytes_expr},\n\
+                 \x20       );\n",
+                kernel = spec.name,
+            ));
+        }
+    }
     out.push_str("        Some(Self {\n");
     out.push_str("            gpu,\n");
     out.push_str("            agent_count,\n");
@@ -606,8 +705,51 @@ fn synthesize_generated_runtime_struct(
     for kernel_name in &cfg_buffer_names {
         out.push_str(&format!("            cfg_{kernel_name}_buf,\n"));
     }
+    for (name, def) in runtime_config_defaults {
+        let lit_typed = match def.scalar_ty.as_str() {
+            "f32" => format!("{}_f32", def.default_lit),
+            "u32" => format!("{}_u32", def.default_lit),
+            "i32" => format!("{}_i32", def.default_lit),
+            _ => format!("{} as {}", def.default_lit, def.scalar_ty),
+        };
+        out.push_str(&format!("            {name}: {lit_typed},\n"));
+    }
     out.push_str("        })\n");
     out.push_str("    }\n\n");
+
+    // Plan E-A6 — host-side setters for `@runtime` config fields. Each
+    // setter updates the host-side mirror AND writes the value to every
+    // kernel cfg buffer that references the field, at the per-kernel
+    // offset within that kernel's cfg struct.
+    for (name, def) in runtime_config_defaults {
+        // Find every kernel that lists this field + its index there.
+        let writes: Vec<(String, usize)> = artifacts
+            .kernel_specs
+            .iter()
+            .filter_map(|spec| {
+                spec.runtime_cfg_fields
+                    .iter()
+                    .position(|(n, _)| n == name)
+                    .map(|idx| (spec.name.clone(), idx))
+            })
+            .collect();
+        if writes.is_empty() {
+            continue;
+        }
+        out.push_str(&format!(
+            "    pub fn set_{name}(&mut self, value: {ty}) {{\n\
+             \x20       self.{name} = value;\n\
+             \x20       let bytes = value.to_le_bytes();\n",
+            ty = def.scalar_ty,
+        ));
+        for (kernel, idx) in writes {
+            let offset = 16 + idx * 4;
+            out.push_str(&format!(
+                "        self.gpu.queue.write_buffer(&self.cfg_{kernel}_buf, {offset}u64, &bytes);\n",
+            ));
+        }
+        out.push_str("    }\n\n");
+    }
 
     // Plan E-A4 — default step() body.
     //
@@ -864,7 +1006,7 @@ mod tests {
     #[test]
     fn synthesize_runtime_core_minimal_fixture_emits_well_formed_struct() {
         let artifacts = crate::cg::emit::EmittedArtifacts::default();
-        let out = super::synthesize_runtime_core_a2("smoke_fixture", &artifacts, &[]);
+        let out = super::synthesize_runtime_core_a2("smoke_fixture", &artifacts, &[], &std::collections::BTreeMap::new());
 
         // Braces balance.
         let opens = out.matches('{').count();
