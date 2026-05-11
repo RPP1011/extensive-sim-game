@@ -81,6 +81,7 @@ use engine::GpuContext;
 use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
+include!(concat!(env!("OUT_DIR"), "/runtime_core.rs"));
 
 /// Per-record stride in u32 words — matches
 /// `dsl_compiler::cpu_chronicle_reference::CHRONICLE_RECORD_STRIDE_U32`
@@ -627,5 +628,28 @@ mod parity_tests {
                 g[0], g[1], g[2], g[3], g[4],
             );
         }
+    }
+}
+
+
+// Plan E-A6 sweep — generator validation smoke test for apply_ability_verb_smoke_runtime.
+#[cfg(test)]
+mod a6_sweep_smoke {
+    use crate::{GeneratedRuntime, FIXTURE_NAME, KERNEL_COUNT};
+
+    #[test]
+    fn generated_runtime_works_for_this_fixture() {
+        let mut r = match GeneratedRuntime::try_new(0xCAFE, 4) {
+            Some(s) => s,
+            None => {
+                eprintln!("[a6_sweep] skipping: no wgpu adapter on host.");
+                return;
+            }
+        };
+        assert!(KERNEL_COUNT > 0);
+        r.step();
+        r.step();
+        assert_eq!(r.tick, 2);
+        eprintln!("[a6_sweep] {}: KERNEL_COUNT={}, ran 2 ticks", FIXTURE_NAME, KERNEL_COUNT);
     }
 }

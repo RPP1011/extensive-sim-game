@@ -49,6 +49,7 @@ use glam::Vec3;
 use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
+include!(concat!(env!("OUT_DIR"), "/runtime_core.rs"));
 
 /// Per-agent ring depth — matches `assets/sim/threats_struct_probe.sim`'s
 /// `@per_entity_ring(K = 4)`.
@@ -490,5 +491,28 @@ mod threats_struct_lifecycle_tests {
             assert_eq!(c[F_RADIUS_Q8], 1024,
                 "tick 1: observer {obs} radius_q8 unchanged at 1024");
         }
+    }
+}
+
+
+// Plan E-A6 sweep — generator validation smoke test for threats_struct_probe_runtime.
+#[cfg(test)]
+mod a6_sweep_smoke {
+    use crate::{GeneratedRuntime, FIXTURE_NAME, KERNEL_COUNT};
+
+    #[test]
+    fn generated_runtime_works_for_this_fixture() {
+        let mut r = match GeneratedRuntime::try_new(0xCAFE, 4) {
+            Some(s) => s,
+            None => {
+                eprintln!("[a6_sweep] skipping: no wgpu adapter on host.");
+                return;
+            }
+        };
+        assert!(KERNEL_COUNT > 0);
+        r.step();
+        r.step();
+        assert_eq!(r.tick, 2);
+        eprintln!("[a6_sweep] {}: KERNEL_COUNT={}, ran 2 ticks", FIXTURE_NAME, KERNEL_COUNT);
     }
 }
