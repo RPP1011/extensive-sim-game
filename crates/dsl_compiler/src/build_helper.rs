@@ -273,10 +273,16 @@ fn is_standard_agent_column(binding_name: &str) -> bool {
 /// `event_ring.sim_cfg()` / per-kernel cfg uniforms — never allocated
 /// per-fixture.
 fn is_infra_binding(binding_name: &str) -> bool {
-    matches!(
+    if matches!(
         binding_name,
         "sim_cfg" | "event_ring" | "event_tail" | "cfg" | "snapshot_kick"
-    )
+    ) {
+        return true;
+    }
+    // `ability_registry_*` columns come from the runtime's
+    // `PackedAbilityRegistryGpu` field, not separate buffers. The
+    // dispatch reads them as `&self.registry_gpu.<col>`.
+    binding_name.starts_with("ability_registry_")
 }
 
 /// Bytes per element for a binding's `wgsl_ty`. Returns `None` for
@@ -359,12 +365,21 @@ fn synthesize_generated_runtime_struct(
          // standard agent SoA column and NOT shared infrastructure. Today\n\
          // no fixture's lib.rs imports this — A5 (firebolt_probe pilot)\n\
          // will be the first runtime to switch to it.\n\
+         //\n\
+         // **Inclusion contract.** This file uses module-relative paths\n\
+         // (`dispatch::KernelCache`, `schedule::SCHEDULE`) so it MUST be\n\
+         // `include!`d at the crate root of a runtime crate where the\n\
+         // sibling generated.rs is also included (it provides those\n\
+         // modules). Including from a sub-module breaks path resolution.\n\
          #[allow(dead_code, non_snake_case, clippy::all)]\n\
          pub struct GeneratedRuntime {\n\
          \x20   pub gpu: engine::GpuContext,\n\
          \x20   pub agent_count: u32,\n\
          \x20   pub seed: u64,\n\
-         \x20   pub tick: u64,\n",
+         \x20   pub tick: u64,\n\
+         \x20   pub event_ring: engine::gpu::EventRing,\n\
+         \x20   pub registry_gpu: engine::ability::registry_gpu::PackedAbilityRegistryGpu,\n\
+         \x20   pub cache: dispatch::KernelCache,\n",
     );
     for (name, _ty) in &owned {
         out.push_str(&format!("    pub {name}_buf: wgpu::Buffer,\n"));
@@ -377,12 +392,23 @@ fn synthesize_generated_runtime_struct(
     }
     out.push_str("}\n\n");
 
-    out.push_str(
+    out.push_str(&format!(
         "#[allow(dead_code, non_snake_case, clippy::all)]\n\
-         impl GeneratedRuntime {\n\
-         \x20   pub fn try_new(seed: u64, agent_count: u32) -> Option<Self> {\n\
-         \x20       let gpu = engine::GpuContext::new_blocking().ok()?;\n",
-    );
+         impl GeneratedRuntime {{\n\
+         \x20   pub fn try_new(seed: u64, agent_count: u32) -> Option<Self> {{\n\
+         \x20       let gpu = engine::GpuContext::new_blocking().ok()?;\n\
+         \x20       let event_ring = engine::gpu::EventRing::new(&gpu, \"{fixture_name}\");\n\
+         \x20       // Empty AbilityRegistry by default; runtime callers that\n\
+         \x20       // need a non-empty registry build their own and reload\n\
+         \x20       // (Plan I hot-reload primitive). Avoids forcing every\n\
+         \x20       // fixture to know about ability programs at try_new time.\n\
+         \x20       let registry = engine::ability::AbilityRegistry::new();\n\
+         \x20       let packed = engine::ability::PackedAbilityRegistry::pack(&registry);\n\
+         \x20       let registry_gpu = engine::ability::registry_gpu::PackedAbilityRegistryGpu::upload(\n\
+         \x20           &packed, &gpu, \"{fixture_name}\",\n\
+         \x20       );\n\
+         \x20       let cache = dispatch::KernelCache::default();\n",
+    ));
     for (name, ty) in &owned {
         let elem_bytes = match elem_bytes_for_wgsl_ty(ty) {
             Some(b) => b,
@@ -426,6 +452,9 @@ fn synthesize_generated_runtime_struct(
     out.push_str("            agent_count,\n");
     out.push_str("            seed,\n");
     out.push_str("            tick: 0,\n");
+    out.push_str("            event_ring,\n");
+    out.push_str("            registry_gpu,\n");
+    out.push_str("            cache,\n");
     for (name, _) in &owned {
         out.push_str(&format!("            {name}_buf,\n"));
     }

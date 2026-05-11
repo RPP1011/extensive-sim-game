@@ -63,6 +63,10 @@ use engine::GpuContext;
 use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
+// Plan E-A5 pilot — runtime_core.rs MUST be included at crate root
+// because it references `dispatch::KernelCache`, `schedule::SCHEDULE` etc.
+// at module-relative paths.
+include!(concat!(env!("OUT_DIR"), "/runtime_core.rs"));
 
 /// Per-fixture state for the firebolt-probe closed-loop demo. Owns:
 ///   - The wgpu context.
@@ -833,7 +837,7 @@ mod closed_loop_tests {
 // must add to make a full migration possible.
 #[cfg(test)]
 mod a5_pilot_generator_smoke {
-    include!(concat!(env!("OUT_DIR"), "/runtime_core.rs"));
+    use crate::{GeneratedRuntime, FIXTURE_NAME, KERNEL_COUNT};
 
     #[test]
     fn generated_runtime_try_new_initializes_against_firebolt_probe_kernels() {
