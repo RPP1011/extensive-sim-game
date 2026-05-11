@@ -44,6 +44,11 @@ pub mod kernel_lowerings;
 // (P2: schema-hash bumps on layout change).
 pub mod schema_hash;
 
+// Plan E-A1 — shared build-script helper. Each `crates/*_runtime/build.rs`
+// becomes a 1-line stub: `dsl_compiler::build_helper::emit("<fixture>")`.
+// Replaces ~110 LOC of identical pipeline boilerplate × 60 fixtures.
+pub mod build_helper;
+
 // CPU reference for the WGSL apply_ability dispatcher's chronicle
 // output — establishes the contract that the GPU dispatcher's
 // chronicle records mirror, ahead of the runtime crate that #133

@@ -9,6 +9,17 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "path=$(jq -r '.tool_input.file_path // empty'); echo \"$path\" | grep -qE 'crates/[a-z0-9_]+_runtime/src/' && { echo 'BLOCKED: edits to crates/*_runtime/src/ are prohibited (Plan E runtime lockdown). Express the change as a .sim or compiler primitive instead. Bypass with RUNTIME_EDIT_JUSTIFIED=1 in your shell env if this is a mechanical compiler-driven update.' >&2; [ \"$RUNTIME_EDIT_JUSTIFIED\" = '1' ] && exit 0 || exit 2; } || exit 0"
+          }
+        ]
+      }
     ]
   }
 }
