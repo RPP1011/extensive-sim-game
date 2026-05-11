@@ -273,9 +273,19 @@ fn is_standard_agent_column(binding_name: &str) -> bool {
 /// `event_ring.sim_cfg()` / per-kernel cfg uniforms — never allocated
 /// per-fixture.
 fn is_infra_binding(binding_name: &str) -> bool {
+    // Mirrors `cg::emit::program::classify_binding` — bindings whose
+    // value comes from the shared KernelBindingsContext (event_ring,
+    // event_tail, voxel_grid, the per-kernel cfg buf, sim_cfg via
+    // EventRing accessor) rather than a fixture-owned buffer.
+    //
+    // NOT in the list: `snapshot_kick`. It looks like infrastructure
+    // by name but the compiler classifies it as Extras → it's a real
+    // fixture-owned buffer the runtime allocates + writes a one-shot
+    // kick into. Adding it here was the bug A4.1's failed attempt
+    // surfaced.
     if matches!(
         binding_name,
-        "sim_cfg" | "event_ring" | "event_tail" | "cfg" | "snapshot_kick"
+        "sim_cfg" | "event_ring" | "event_tail" | "cfg" | "voxel_grid"
     ) {
         return true;
     }
