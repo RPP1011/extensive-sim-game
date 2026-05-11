@@ -593,8 +593,72 @@ fn synthesize_generated_runtime_struct(
             .map(|s| s.as_str())
             .unwrap_or("");
         if !kernel_rs.contains("from_context_with_extras") {
-            // ViewFold kernels and other non-extras shapes — skip
-            // until A4.2 handles direct Bindings construction.
+            // A4.2 — emit direct Bindings { ... } construction for
+            // ViewFold kernels (no Extras helper). Walk bindings,
+            // render each field per name-based classification.
+            let mut binding_fields: Vec<String> = Vec::new();
+            for b in &spec.bindings {
+                use crate::kernel_binding_ir::BgSource;
+                if matches!(b.bg_source, BgSource::AliasOf(_)) {
+                    continue;
+                }
+                let name = b.name.as_str();
+                let value = if name == "event_ring" {
+                    "self.event_ring.ring()".to_string()
+                } else if name == "event_tail" {
+                    "self.event_ring.tail()".to_string()
+                } else if name == "sim_cfg" {
+                    "self.event_ring.sim_cfg()".to_string()
+                } else if name == "cfg" {
+                    format!("&self.cfg_{}_buf", spec.name)
+                } else if name == "voxel_grid" {
+                    // ViewFold kernels don't bind voxel_grid; skip if seen.
+                    continue;
+                } else if let Some(suffix) = name.strip_prefix("agent_") {
+                    if is_standard_agent_column(name) {
+                        // Standard column from AgentBuffers.
+                        format!(
+                            "agent_buffers.{suffix}_buf.expect(\"kernel binds {name} but agent_buffers.{suffix}_buf is None\")"
+                        )
+                    } else {
+                        format!("&self.{name}_buf")
+                    }
+                } else if name.starts_with("ability_registry_") {
+                    let col = name.strip_prefix("ability_registry_").unwrap();
+                    format!("&self.registry_gpu.{col}")
+                } else {
+                    format!("&self.{name}_buf")
+                };
+                // anchor/ids are Option<&Buffer> for view fold kernels.
+                let value = if name == "view_storage_anchor"
+                    || name == "view_storage_ids"
+                {
+                    format!("Some({value})")
+                } else {
+                    value
+                };
+                binding_fields.push(format!(
+                    "                        {name}: {value},"
+                ));
+            }
+            let body = binding_fields.join("\n");
+            let dispatch_fn = format!("dispatch_{}", spec.name.to_lowercase());
+            out.push_str(&format!(
+                "                schedule::DispatchOp::Kernel(KernelId::{pascal}) => {{\n\
+                 \x20                   let bindings = {kname}::{pascal}Bindings {{\n\
+                 {body}\n\
+                 \x20                   }};\n\
+                 \x20                   dispatch::{dispatch_fn}(\n\
+                 \x20                       &mut self.cache,\n\
+                 \x20                       &bindings,\n\
+                 \x20                       &self.gpu.device,\n\
+                 \x20                       &mut encoder,\n\
+                 \x20                       self.agent_count,\n\
+                 \x20                   );\n\
+                 \x20               }}\n",
+                kname = spec.name,
+                pascal = spec.pascal,
+            ));
             continue;
         }
         // Walk bindings, mirror classify_binding name rules.
