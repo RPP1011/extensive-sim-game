@@ -452,7 +452,12 @@ fn voxel_line_of_sight(seg_from: vec3<f32>, seg_to: vec3<f32>) -> bool {
 /// File-name keys carry the basename only (e.g. `fused_mask.wgsl`); the
 /// xtask resolves them under `crates/engine_gpu_rules/src/`. Both maps
 /// use [`BTreeMap`] so iteration is deterministic across runs.
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
+// Note: dropped Eq/PartialEq when `kernel_specs: Vec<KernelSpec>` was
+// added in Plan E-A3.1 — KernelSpec doesn't implement Eq (it carries
+// `Vec<KernelBinding>` and dispatch metadata that aren't trivially
+// comparable). The derives weren't load-bearing — no callsite did
+// `==` on EmittedArtifacts.
+#[derive(Debug, Clone, Default)]
 pub struct EmittedArtifacts {
     /// Per-kernel WGSL file content. Key is the output filename
     /// (`<kernel_name>.wgsl`); value is the full file contents.
@@ -464,6 +469,14 @@ pub struct EmittedArtifacts {
     /// kernel's snake_case name. Useful for building a `mod.rs` /
     /// `lib.rs` registry (Task 5.1).
     pub kernel_index: Vec<String>,
+    /// Plan E-A3 — per-kernel binding metadata for runtime synthesis.
+    /// Same iteration order as `kernel_index`. Lets
+    /// `dsl_compiler::build_helper::synthesize_runtime_core_a3+` walk
+    /// every binding and emit per-binding buffer allocation in the
+    /// generated `try_new()` body without re-traversing the schedule.
+    /// Excluded from `Default` because the slim shape may grow as
+    /// runtime synth needs more metadata.
+    pub kernel_specs: Vec<crate::kernel_binding_ir::KernelSpec>,
 }
 
 /// Errors that can surface from [`emit_cg_program`]. Every variant
@@ -562,6 +575,7 @@ pub fn emit_cg_program_with_debug(
     let mut wgsl_files: BTreeMap<String, String> = BTreeMap::new();
     let mut rust_files: BTreeMap<String, String> = BTreeMap::new();
     let mut kernel_index: Vec<String> = Vec::new();
+    let mut kernel_specs: Vec<crate::kernel_binding_ir::KernelSpec> = Vec::new();
     let mut seen_names: BTreeMap<String, (usize, usize)> = BTreeMap::new();
 
     let ctx = EmitCtx {
@@ -619,6 +633,7 @@ pub fn emit_cg_program_with_debug(
             rust_files.insert(format!("{}.rs", spec.name), rs);
 
             kernel_index.push(spec.name.clone());
+            kernel_specs.push(spec);
         }
     }
 
@@ -670,6 +685,7 @@ pub fn emit_cg_program_with_debug(
         wgsl_files,
         rust_files,
         kernel_index,
+        kernel_specs,
     })
 }
 
