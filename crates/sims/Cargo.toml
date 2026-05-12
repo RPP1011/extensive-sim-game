@@ -19,6 +19,15 @@ wgpu = "=26.0.1"
 bytemuck = { version = "1.16", features = ["derive"] }
 glam = "0.29"
 pollster = "0.4"
+# Runtime deps for the synthesized try_new() — when a fixture has a
+# companion `assets/ability_test/<fixture>/` directory, the generated
+# runtime parses each .ability file via `dsl_ast::parse_ability_file`
+# and builds the registry via `dsl_compiler::ability_registry::build_registry`
+# at runtime. Per-fixture corpus contents are baked into the binary via
+# `include_str!` so no runtime file I/O is required, but the parse +
+# build_registry passes themselves run on first try_new() to keep one
+# code shape across hot-reload + future incremental rebuild paths.
+dsl_ast = { path = "../dsl_ast" }
 dsl_compiler = { path = "../dsl_compiler" }
 
 [build-dependencies]

@@ -414,11 +414,21 @@ fn emit_into(
     // hand-writes. For A2 we just prove the wiring works: file lands
     // in OUT_DIR, doesn't get included anywhere yet, doesn't break
     // any fixture's existing build.
+    // Per-fixture ability-corpus file list — drives runtime registry
+    // construction inside the synthesized try_new(). Each entry is the
+    // bare file name (e.g. "Strike.ability"); the synthesized code
+    // joins it with `<workspace>/assets/ability_test/<fixture>/` via
+    // `concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/...")` so the
+    // contents are baked into the binary via include_str!. Empty list
+    // (no corpus) → the placeholder no-op-program path stays in effect.
+    let ability_file_names: Vec<String> =
+        ability_files.iter().map(|(n, _)| n.clone()).collect();
     let runtime_core = synthesize_runtime_core_a2(
         fixture_name,
         &artifacts,
         &init_stmts,
         &runtime_config_defaults,
+        &ability_file_names,
     );
     fs::write(out_dir.join("runtime_core.rs"), runtime_core)
         .unwrap_or_else(|e| panic!("write runtime_core.rs: {e}"));
@@ -601,6 +611,7 @@ fn synthesize_runtime_core_a2(
     artifacts: &crate::cg::emit::EmittedArtifacts,
     init_stmts: &[dsl_ast::ast::InitStmt],
     runtime_config_defaults: &std::collections::BTreeMap<String, RuntimeConfigDefault>,
+    ability_file_names: &[String],
 ) -> String {
     let kernel_count = artifacts.kernel_index.len();
     let mut out = String::new();
@@ -665,6 +676,7 @@ fn synthesize_runtime_core_a2(
         artifacts,
         init_stmts,
         runtime_config_defaults,
+        ability_file_names,
     ));
 
     out
@@ -759,6 +771,7 @@ fn synthesize_generated_runtime_struct(
     artifacts: &crate::cg::emit::EmittedArtifacts,
     init_stmts: &[dsl_ast::ast::InitStmt],
     runtime_config_defaults: &std::collections::BTreeMap<String, RuntimeConfigDefault>,
+    ability_file_names: &[String],
 ) -> String {
     use crate::kernel_binding_ir::BgSource;
     use std::collections::BTreeMap;
@@ -855,27 +868,83 @@ fn synthesize_generated_runtime_struct(
          impl GeneratedRuntime {{\n\
          \x20   pub fn try_new(seed: u64, agent_count: u32) -> Option<Self> {{\n\
          \x20       let gpu = engine::GpuContext::new_blocking().ok()?;\n\
-         \x20       let event_ring = engine::gpu::EventRing::new(&gpu, \"{fixture_name}\");\n\
-         \x20       // Placeholder AbilityRegistry — wgpu rejects zero-sized\n\
-         \x20       // bindings, so we register one no-op program to give the\n\
-         \x20       // ability_registry SoA columns at least 1 entry. Runtime\n\
-         \x20       // callers that need real abilities use the Plan I\n\
-         \x20       // hot-reload primitive to swap in a populated registry.\n\
-         \x20       let mut _registry_builder = engine::ability::AbilityRegistryBuilder::new();\n\
-         \x20       let _ = _registry_builder.register(\n\
-         \x20           engine::ability::AbilityProgram::new_single_target(\n\
-         \x20               1.0,\n\
-         \x20               engine::ability::Gate {{ cooldown_ticks: 0, hostile_only: false, line_of_sight: false }},\n\
-         \x20               [],\n\
-         \x20           ),\n\
-         \x20       );\n\
-         \x20       let registry = _registry_builder.build();\n\
-         \x20       let packed = engine::ability::PackedAbilityRegistry::pack(&registry);\n\
-         \x20       let registry_gpu = engine::ability::registry_gpu::PackedAbilityRegistryGpu::upload(\n\
-         \x20           &packed, &gpu, \"{fixture_name}\",\n\
-         \x20       );\n\
-         \x20       let cache = dispatch::KernelCache::default();\n",
+         \x20       let event_ring = engine::gpu::EventRing::new(&gpu, \"{fixture_name}\");\n",
     ));
+    // Registry construction. Two paths:
+    // (a) Fixture has a companion `assets/ability_test/<fixture>/`
+    //     directory with `.ability` files — emit real construction.
+    //     Each file is `include_str!`'d with a path resolved against
+    //     CARGO_MANIFEST_DIR so the contents are baked into the binary.
+    //     Iteration order matches the build-script order (alphabetical),
+    //     so slot ids stay stable across build + runtime registries.
+    // (b) No corpus — emit the historical placeholder (one no-op
+    //     program; wgpu rejects zero-sized bindings).
+    if ability_file_names.is_empty() {
+        out.push_str(&format!(
+            "        // No companion `assets/ability_test/{fixture_name}/` directory\n\
+             \x20       // exists, so the registry stays a single-no-op-program\n\
+             \x20       // placeholder (wgpu rejects zero-sized bindings, so an\n\
+             \x20       // empty registry would fail to upload).\n\
+             \x20       let mut _registry_builder = engine::ability::AbilityRegistryBuilder::new();\n\
+             \x20       let _ = _registry_builder.register(\n\
+             \x20           engine::ability::AbilityProgram::new_single_target(\n\
+             \x20               1.0,\n\
+             \x20               engine::ability::Gate {{ cooldown_ticks: 0, hostile_only: false, line_of_sight: false }},\n\
+             \x20               [],\n\
+             \x20           ),\n\
+             \x20       );\n\
+             \x20       let registry = _registry_builder.build();\n\
+             \x20       let packed = engine::ability::PackedAbilityRegistry::pack(&registry);\n\
+             \x20       let registry_gpu = engine::ability::registry_gpu::PackedAbilityRegistryGpu::upload(\n\
+             \x20           &packed, &gpu, \"{fixture_name}\",\n\
+             \x20       );\n",
+        ));
+    } else {
+        // Build the (file_name, include_str!(...)) tuple list. Path
+        // joins workspace_root + assets/ability_test/<fixture>/<name>;
+        // CARGO_MANIFEST_DIR sits at <workspace>/crates/<crate>, so
+        // `../../assets/...` resolves to the workspace assets dir
+        // regardless of which crate (per-fixture *_runtime or sims)
+        // calls into this generator.
+        out.push_str(
+            "        // Real ability registry — corpus discovered at build time.\n\
+             \x20       // .ability sources are baked in via include_str! and parsed\n\
+             \x20       // on first try_new(). Build-script and runtime see identical\n\
+             \x20       // file lists in identical (alphabetical) order, so AbilityId\n\
+             \x20       // slots line up between schedule synthesis and dispatch.\n\
+             \x20       let _ability_sources: &[(&str, &str)] = &[\n",
+        );
+        for name in ability_file_names {
+            out.push_str(&format!(
+                "            (\n\
+                 \x20               {name_lit},\n\
+                 \x20               include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../../assets/ability_test/{fixture_name}/{name}\")),\n\
+                 \x20           ),\n",
+                name_lit = format!("{name:?}"),
+            ));
+        }
+        out.push_str(&format!(
+            "        ];\n\
+             \x20       let _parsed: Vec<(String, dsl_ast::AbilityFile)> = _ability_sources\n\
+             \x20           .iter()\n\
+             \x20           .map(|(name, src)| {{\n\
+             \x20               let parsed = dsl_ast::parse_ability_file(src)\n\
+             \x20                   .unwrap_or_else(|e| panic!(\"parse {{}}: {{:?}}\", name, e));\n\
+             \x20               ((*name).to_string(), parsed)\n\
+             \x20           }})\n\
+             \x20           .collect();\n\
+             \x20       let _built = dsl_compiler::ability_registry::build_registry(&_parsed)\n\
+             \x20           .unwrap_or_else(|e| panic!(\"build_registry({fixture_name}): {{:?}}\", e));\n\
+             \x20       let registry = _built.registry;\n\
+             \x20       let packed = engine::ability::PackedAbilityRegistry::pack(&registry);\n\
+             \x20       let registry_gpu = engine::ability::registry_gpu::PackedAbilityRegistryGpu::upload(\n\
+             \x20           &packed, &gpu, \"{fixture_name}\",\n\
+             \x20       );\n",
+        ));
+    }
+    out.push_str(
+        "        let cache = dispatch::KernelCache::default();\n",
+    );
     for (name, ty) in &owned {
         let elem_bytes = match elem_bytes_for_wgsl_ty(ty) {
             Some(b) => b,
@@ -1302,7 +1371,13 @@ mod tests {
     #[test]
     fn synthesize_runtime_core_minimal_fixture_emits_well_formed_struct() {
         let artifacts = crate::cg::emit::EmittedArtifacts::default();
-        let out = super::synthesize_runtime_core_a2("smoke_fixture", &artifacts, &[], &std::collections::BTreeMap::new());
+        let out = super::synthesize_runtime_core_a2(
+            "smoke_fixture",
+            &artifacts,
+            &[],
+            &std::collections::BTreeMap::new(),
+            &[],
+        );
 
         // Braces balance.
         let opens = out.matches('{').count();
