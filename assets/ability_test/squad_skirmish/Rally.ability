@@ -1,4 +1,5 @@
-// squad_skirmish — single-target ally heal. AbilityId 3.
+// squad_skirmish — single-target ally heal. AbilityId 2
+// (alphabetical slot, between Daze=1 and Strike=3).
 // Lowers to AbilityProgram { effects: [EffectOp::Heal { amount: 20.0 }] }.
 //
 // Used by Soldiers acting as field medics — the verb's `when` clause

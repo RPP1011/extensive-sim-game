@@ -60,11 +60,20 @@
 // follow-up slice can layer cast() once the immediate-effect surface
 // is gap-noted.
 //
-// Companion .ability corpus at assets/ability_test/squad_skirmish/:
-//   - Strike.ability    (id 1, single-target damage 12)
-//   - Volley.ability    (id 2, AOE damage 6 in spread(4.0, 8))
-//   - Rally.ability     (id 3, single-target heal 20)
-//   - Daze.ability      (id 4, single-target stun 8 ticks)
+// Companion .ability corpus at assets/ability_test/squad_skirmish/.
+// `build_registry` reads the `.ability` files in alphabetical order
+// (build_helper.rs:320 calls `entries.sort()`), so AbilityIds are:
+//   - Daze.ability      (id 1, single-target stun 8 ticks)
+//   - Rally.ability     (id 2, single-target heal 20)
+//   - Strike.ability    (id 3, single-target damage 12)
+//   - Volley.ability    (id 4, AOE damage 6 in spread(4.0, 8))
+// The verb bodies below pass the matching numeric id to `apply_ability`.
+// Mismatching the .ability filename order to the verb's literal id
+// silently dispatches a different program (e.g. `apply_ability 1` from
+// the Strike verb fired Daze's stun effect, producing zero damage and
+// stray heal/stun events). The pin's chronicle readback caught this:
+// hand-coded ids in the verb body must mirror the alphabetical slot
+// assignment of the .ability corpus.
 
 event Tick { }
 
@@ -162,7 +171,7 @@ verb Strike(self, target: Agent) =
         && target != self
         && target.level != self.level
         && (world.tick % config.combat.cooldown_strike == 0))
-  apply_ability 1 by self target target
+  apply_ability 3 by self target target
   // PAIR PREDICATE IN SCORE — the scoring kernel does NOT re-apply
   // the mask kernel's pair-specific predicate per-candidate; the mask
   // bitmap only filters at agent-level. To keep `target != self` and
@@ -186,7 +195,7 @@ verb Volley(self, target: Agent) =
         && target != self
         && target.level != self.level
         && (world.tick % config.combat.cooldown_volley == 0))
-  apply_ability 2 by self target target
+  apply_ability 4 by self target target
   score (if (target.alive && target != self && target.level != self.level) {
            config.combat.volley_score_base - target.hp
            + agents.risk_tolerance(self) * config.combat.aggression_scale
@@ -204,7 +213,7 @@ verb Rally(self, target: Agent) =
         && target.level == self.level
         && target.hp < config.combat.rally_hp_floor
         && (world.tick % config.combat.cooldown_rally == 0))
-  apply_ability 3 by self target target
+  apply_ability 2 by self target target
   score (if (target.alive && target != self && target.level == self.level && target.hp < config.combat.rally_hp_floor) {
            config.combat.rally_score_base - target.hp
          } else { -1000000.0 })
@@ -221,7 +230,7 @@ verb Daze(self, target: Agent) =
         && target.level != self.level
         && target.hp > config.combat.daze_hp_ceiling
         && (world.tick % config.combat.cooldown_daze == 0))
-  apply_ability 4 by self target target
+  apply_ability 1 by self target target
   // PAIR-VIEW READ ATTEMPTED — `threat_taken(self, target)` would be
   // the natural way to drive Daze's argmax toward the highest-threat
   // enemy. BLOCKED: the scoring kernel emit generates a single-arg

@@ -1,4 +1,5 @@
-// squad_skirmish — single-target stun (control). AbilityId 4.
+// squad_skirmish — single-target stun (control). AbilityId 1
+// (alphabetical slot, Daze sorts first).
 // Lowers to AbilityProgram { effects: [EffectOp::Stun { duration_ticks: 8 }] }.
 //
 // Anti-burst tool — used pre-emptively against the highest-threat

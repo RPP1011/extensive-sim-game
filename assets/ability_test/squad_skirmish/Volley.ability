@@ -1,4 +1,5 @@
-// squad_skirmish — AOE damage burst. AbilityId 2.
+// squad_skirmish — AOE damage burst. AbilityId 4
+// (alphabetical slot, last after Daze=1, Rally=2, Strike=3).
 // Lowers to AbilityProgram with EffectOp::Damage{amount=6} +
 // per_effect_areas[0] = ShapeKind::Spread (radius=4.0, max_targets=8).
 //

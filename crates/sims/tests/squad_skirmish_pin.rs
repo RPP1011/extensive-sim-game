@@ -212,29 +212,28 @@ fn squad_skirmish_200_tick_skirmish() {
          consistently 0; the load-bearing pin now confirms the full apply_ability → EffectHealApplied → Healed → \
          ApplyHeal pipeline rolls end-to-end.",
     );
-    // 3. Some HP movement check — soft today. Series of gaps cleared
-    //    in this session (cfg slot3 = 0 pair_offset, PerPair dispatch
-    //    sizing = agent_cap², user-authored `scoring Soldier` block
-    //    disabled because rows 4..8 out-scored the verb rows, and the
-    //    mask bitmap clear-per-tick wire-up). After those fixes:
-    //    - Healing flows end-to-end (2700 healing units across 200
-    //      ticks; 15 of 16 agents source heals). This is the
-    //      load-bearing cross-check above.
-    //    - Damage doesn't flow YET — Rally row (action_id=2) appears
-    //      to be selected by argmax for most agents even though the
-    //      `agent_hp[target] < rally_hp_floor=60` mask predicate
-    //      should never be true at hp=100. Either the mask kernel's
-    //      predicate evaluation has a latched-data issue not closed
-    //      by the bitmap clear, or the scoring kernel's row-2 entry
-    //      escapes its mask gate. Tracked as the "squad_skirmish
-    //      residual zero-damage" follow-up; the chronicle pipeline
-    //      itself is proven correct by the healing flow.
+    // 3. Damage flows end-to-end. Pre-2026-05-12 the .sim's verbs
+    //    passed hand-coded ability ids (`apply_ability 1` for Strike,
+    //    `apply_ability 2` for Volley, etc.) that didn't match the
+    //    registry's alphabetical id assignment (build_helper.rs:320
+    //    sorts the .ability filenames before registering). Strike
+    //    (verb action_id=0) ran Daze's stun program, Volley fired
+    //    Rally's heal, etc. — symptoms: 0 damage, 2520 heal_done, 7
+    //    stray stun events at tick 0. Fix landed in this commit by
+    //    rewriting the verb bodies to pass the correct alphabetical
+    //    ids (Daze=1, Rally=2, Strike=3, Volley=4) so the dispatcher
+    //    pulls the right effect_kinds[] row.
     let any_hp_changed = final_hp.iter().any(|&h| (h - 100.0).abs() > 0.01);
-    if !any_hp_changed {
-        println!(
-            "  NOTE: zero HP movement (but {total_healing:.0} healing flowed) —\n         scoring → chronicle → ApplyHeal pipeline is end-to-end live, but Rally\n         (action_id=2) is being selected by argmax instead of Strike (0) for\n         most agents. Rally's mask predicate gates on `target.hp < 60` which\n         should be false at hp=100; the residual is whether the mask kernel\n         actually writes mask_2 spuriously, or whether scoring picks action=2\n         without the mask gate. Tracked as the squad_skirmish residual\n         zero-damage follow-up.",
-        );
-    }
+    assert!(
+        any_hp_changed,
+        "no HP movement after 200 ticks (total_damage={total_damage}, total_healing={total_healing}). \
+         Symptom of the apply_ability id↔registry-slot mismatch documented above — if the verb bodies' \
+         hand-coded ids drift again, this assert latches it.",
+    );
+    assert!(
+        total_damage > 0.0,
+        "total damage dealt must be > 0 — apply_ability dispatcher routing damage chronicle records.",
+    );
     // 3. NaN check — personality SoA reads + pair-view fold should not
     //    push any slot to NaN/Inf.
     for (slot, &hp) in final_hp.iter().enumerate() {

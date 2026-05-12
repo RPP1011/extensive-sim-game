@@ -1,4 +1,5 @@
-// squad_skirmish — basic single-target ranged strike. AbilityId 1.
+// squad_skirmish — basic single-target ranged strike. AbilityId 3
+// (alphabetical slot, after Daze=1 and Rally=2).
 // Lowers to AbilityProgram { gate: { cooldown_ticks: 5, range: 8.0 },
 //                            effects: [EffectOp::Damage { amount: 12.0 }] }
 //
