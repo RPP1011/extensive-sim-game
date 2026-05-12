@@ -1390,6 +1390,14 @@ fn resolve_bodies(
                             Some(t) => Some(resolve_expr(t, &mut scope, symbols)?),
                             None => None,
                         };
+                        // `weights:` — utility-table addend resolved
+                        // against the same scope as `score:`. The
+                        // lowerer composes `score + weights`. Closes
+                        // Gap C from `gaps_observed.md` (2026-05-11).
+                        let weights = match &r.weights {
+                            Some(w) => Some(resolve_expr(w, &mut scope, symbols)?),
+                            None => None,
+                        };
                         // Apply the same closed-operator-set validation
                         // the standard rows take — per_ability rows
                         // lower onto the same kernel surface (scoring +
@@ -1402,11 +1410,15 @@ fn resolve_bodies(
                         if let Some(t) = &target {
                             validate_scoring_body(t)?;
                         }
+                        if let Some(w) = &weights {
+                            validate_scoring_body(w)?;
+                        }
                         Ok::<_, ResolveError>(PerAbilityRowIR {
                             name: r.name.clone(),
                             guard,
                             score,
                             target,
+                            weights,
                             span: r.span,
                         })
                     })

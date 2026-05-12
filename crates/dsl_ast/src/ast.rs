@@ -617,7 +617,7 @@ pub struct ScoringEntry {
 
 /// A `per_ability` scoring row: `row <name> per_ability { ... }`.
 ///
-/// The row's three clauses:
+/// The row's clauses:
 /// * `guard:` — boolean predicate evaluated per (agent, ability). When
 ///   the guard is false the ability is skipped (does not compete for
 ///   argmax). Optional; default is `true`.
@@ -626,6 +626,14 @@ pub struct ScoringEntry {
 /// * `target:` — agent-id expression resolving to the cast target for
 ///   the selected ability. Optional at parse time; Phase 3 may require
 ///   it when lowering.
+/// * `weights:` — utility-table form addend that is summed into the
+///   row's score expression. The lowerer composes the utility as
+///   `score + weights` (both F32). Optional; design-target fixtures
+///   (predator_prey, crowd_navigation, squad_skirmish) use the
+///   `base: <const>, weights: <expr>` shape where `base:` doubles as
+///   the score field. Closes Gap C from `docs/architecture/gaps_observed.md`
+///   (2026-05-11): pre-fix the parser parse-and-discarded `weights:`
+///   so personality-weighted scoring contributed nothing to argmax.
 ///
 /// See `docs/spec/engine.md §11`
 /// §Architecture.
@@ -635,6 +643,7 @@ pub struct PerAbilityRow {
     pub guard: Option<Expr>,
     pub score: Expr,
     pub target: Option<Expr>,
+    pub weights: Option<Expr>,
     pub span: Span,
 }
 

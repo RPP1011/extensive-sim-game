@@ -1692,6 +1692,7 @@ fn parse_per_ability_row(c: &mut Cursor) -> PResult<PerAbilityRow> {
     let mut guard: Option<Expr> = None;
     let mut score: Option<Expr> = None;
     let mut target: Option<Expr> = None;
+    let mut weights: Option<Expr> = None;
     loop {
         c.skip_ws();
         if c.starts_with_char('}') {
@@ -1732,17 +1733,32 @@ fn parse_per_ability_row(c: &mut Cursor) -> PResult<PerAbilityRow> {
                 target = Some(expr);
             }
             // Design-target fixtures use `base:` + `weights:` clauses
-            // for the utility-table form of scoring rows. Parse-and-
-            // discard for now; semantic adoption when utility scoring
-            // lands in the GeneratedRuntime path. `base:` doubles as
-            // the score in those rows.
+            // for the utility-table form of scoring rows. The lowerer
+            // composes the row's utility as `base + weights` (both
+            // F32). `base:` doubles as the score field; `weights:` is
+            // captured into a sibling `weights` slot the IR / lowerer
+            // consume. Closes Gap C from `gaps_observed.md` (2026-05-11):
+            // pre-fix the parser parse-and-discarded `weights:` so the
+            // personality-weighted scoring rows contributed nothing to
+            // argmax. See `cg::lower::scoring::lower_per_ability_row`.
             "base" => {
-                if score.is_none() {
-                    score = Some(expr);
+                if score.is_some() {
+                    return Err(ParseErr::at(
+                        here(c),
+                        "duplicate `base:` clause in per_ability row \
+                         (also conflicts with `score:`)",
+                    ));
                 }
+                score = Some(expr);
             }
             "weights" => {
-                let _ = expr;
+                if weights.is_some() {
+                    return Err(ParseErr::at(
+                        here(c),
+                        "duplicate `weights:` clause in per_ability row",
+                    ));
+                }
+                weights = Some(expr);
             }
             // Any other identifier-keyed clause is parse-and-discarded.
             // Design-target rows carry fixture-specific fields like
@@ -1773,6 +1789,7 @@ fn parse_per_ability_row(c: &mut Cursor) -> PResult<PerAbilityRow> {
         guard,
         score,
         target,
+        weights,
         span: Span::new(start, c.pos),
     })
 }

@@ -18,12 +18,15 @@
 //
 //   1. MULTI-ROW SCORING WITH per_target — declares a `scoring Soldier`
 //      block with 4 `row Strike per_target { ... }` style entries
-//      alongside the verb-injected entries. The parser parse-and-
-//      discards the inner `base:` / `weights:` clauses today (see
-//      parser.rs:1734-1746), so this is a parse-only smoke for the
-//      utility-table form. EXPECTED GAP: the per_target rows compile
-//      but produce no observable behavior — only the verb-injected
-//      rows actually drive argmax.
+//      alongside the verb-injected entries. As of 2026-05-11 the
+//      lowerer composes the row's utility as `base + weights` (Gap C
+//      close from `docs/architecture/gaps_observed.md`); pre-fix the
+//      `weights:` clause was parse-and-discarded so personality-
+//      weighted scoring contributed nothing. The user-authored rows
+//      now compete in argmax against the verb-injected rows; their
+//      action-id resolution is not yet wired through the .ability
+//      registry, so they may emit `UnknownScoringAction` if the row
+//      names don't match a registered verb.
 //
 //   2. abilities.cooldown_ticks(id) IN SCORING WEIGHTS — references
 //      `abilities.cooldown_ticks(1)` inside scoring weights. The
@@ -310,15 +313,14 @@ view healing_done(source: Agent) -> f32 {
 }
 
 // MULTI-ROW SCORING TABLE — design-target shape with `row X per_target
-// { base: ..., weights: ... }` entries. The parser parse-and-discards
-// the `base:` and `weights:` clauses today (parser.rs:1734-1746); this
-// block exists primarily as a parse-and-resolve probe for the
-// utility-table form. The verb-injected scoring entries above are the
-// load-bearing argmax driver.
-//
-// EXPECTED GAP: this block parses but contributes no rows that
-// influence behavior beyond the verb-injected entries. Confirms the
-// parse path round-trips cleanly without rejecting unknown clauses.
+// { base: ..., weights: ... }` entries. Post-2026-05-11 (Gap C close
+// from `docs/architecture/gaps_observed.md`) the lowerer composes the
+// row's utility as `base + weights`; pre-fix the parser parse-and-
+// discarded the `weights:` clause so the personality-weighted scoring
+// contributed nothing to argmax. The verb-injected scoring entries
+// above remain load-bearing for argmax; these per_target rows now
+// also contribute (their action-id resolution is per the `row Strike
+// / Rally / Daze / Hold` names matching the registered verbs).
 scoring Soldier {
   row Strike per_target {
     base:        config.combat.strike_score_base,

@@ -128,7 +128,7 @@ use dsl_ast::ir::{
 
 use crate::cg::data_handle::CgExprId;
 use crate::cg::dispatch::DispatchShape;
-use crate::cg::expr::{type_check, CgTy, TypeCheckCtx, TypeError};
+use crate::cg::expr::{type_check, BinaryOp, CgExpr, CgTy, TypeCheckCtx, TypeError};
 use crate::cg::op::{ActionId, ComputeOpKind, OpId, ScoringId, ScoringRowOp};
 use crate::cg::stmt::LocalId;
 
@@ -426,12 +426,46 @@ fn lower_per_ability_row(
 ) -> Result<ScoringRowOp, LoweringError> {
     let action = resolve_action_id(scoring_id, &row.name, row.span, ctx)?;
 
-    // Score (utility) — required, must be F32.
+    // Score (utility base) — required, must be F32.
     let prev_self = shadow_self_binders(&row.score, ctx);
     let score_result = lower_expr(&row.score, ctx);
     restore_self_binders(prev_self, ctx);
-    let utility = score_result?;
-    check_utility_f32(scoring_id, action, utility, row.score.span, ctx)?;
+    let base_utility = score_result?;
+    check_utility_f32(scoring_id, action, base_utility, row.score.span, ctx)?;
+
+    // Weights (utility addend) — optional, must be F32. When present
+    // the row's effective utility is `base + weights`. Closes Gap C
+    // from `docs/architecture/gaps_observed.md` (2026-05-11): the
+    // utility-table form of scoring rows used by predator_prey,
+    // crowd_navigation, squad_skirmish (`row X per_target { base:
+    // <const>, weights: <expr> }`) was parse-and-discarded pre-fix,
+    // so personality-weighted scoring contributed nothing to argmax.
+    // The composed Add stays a CgExpr::Binary AddF32 node so the
+    // existing well_formed type-check (`type_check_row`) walks it
+    // unchanged.
+    let utility = match &row.weights {
+        Some(weights_node) => {
+            let prev_self = shadow_self_binders(weights_node, ctx);
+            let weights_result = lower_expr(weights_node, ctx);
+            restore_self_binders(prev_self, ctx);
+            let weights_id = weights_result?;
+            // Re-use the utility-F32 gate so a non-F32 weights surfaces
+            // as the same `ScoringUtilityNotF32` variant authors already
+            // know from a non-F32 `score:`. The span pins the
+            // `weights:` sub-expression so the diagnostic still
+            // localises to the offending clause.
+            check_utility_f32(scoring_id, action, weights_id, weights_node.span, ctx)?;
+            compose_base_plus_weights(
+                scoring_id,
+                action,
+                base_utility,
+                weights_id,
+                row.span,
+                ctx,
+            )?
+        }
+        None => base_utility,
+    };
 
     // Target — optional, must be AgentId when Some.
     let target = match &row.target {
@@ -461,6 +495,33 @@ fn lower_per_ability_row(
         target,
         guard,
     })
+}
+
+/// Compose `base + weights` as a single `CgExpr::Binary { AddF32 }`
+/// node and re-confirm the result type-checks to F32. Both operands
+/// have already been F32-checked individually; the wrapper guards
+/// against a constructed node that fails re-typecheck (defensive —
+/// should not normally fire, mirrors the contract on
+/// `check_utility_f32`).
+fn compose_base_plus_weights(
+    scoring_id: ScoringId,
+    action: ActionId,
+    base: CgExprId,
+    weights: CgExprId,
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<CgExprId, LoweringError> {
+    let composed = ctx
+        .builder
+        .add_expr(CgExpr::Binary {
+            op: BinaryOp::AddF32,
+            lhs: base,
+            rhs: weights,
+            ty: CgTy::F32,
+        })
+        .map_err(|e| LoweringError::BuilderRejected { error: e, span })?;
+    check_utility_f32(scoring_id, action, composed, span, ctx)?;
+    Ok(composed)
 }
 
 // ---------------------------------------------------------------------------
@@ -948,6 +1009,7 @@ mod tests {
             guard: Some(lit_bool(true)),
             score: lit_f32(0.5),
             target: Some(target_node),
+            weights: None,
             span: span(0, 0),
         };
         let ir = scoring_with(vec![], vec![row]);
@@ -981,6 +1043,7 @@ mod tests {
             guard: None,
             score: lit_f32(0.5),
             target: None,
+            weights: None,
             span: span(0, 0),
         };
         let ir = scoring_with(vec![], vec![row]);
@@ -1041,6 +1104,7 @@ mod tests {
             guard: None,
             score: lit_f32(0.5),
             target: Some(lit_f32(1.0)),
+            weights: None,
             span: span(0, 0),
         };
         let ir = scoring_with(vec![], vec![row]);
@@ -1076,6 +1140,7 @@ mod tests {
             guard: Some(node(IrExpr::LitInt(5))),
             score: lit_f32(0.5),
             target: None,
+            weights: None,
             span: span(0, 0),
         };
         let ir = scoring_with(vec![], vec![row]);
@@ -1120,6 +1185,7 @@ mod tests {
                 guard: None,
                 score: lit_f32(0.5),
                 target: None,
+                weights: None,
                 span: span(0, 0),
             }],
         );
@@ -1299,6 +1365,7 @@ mod tests {
             guard: Some(alive),
             score: hp,
             target: Some(engaged),
+            weights: None,
             span: span(0, 0),
         };
         let ir = scoring_with(vec![], vec![row]);
@@ -1706,6 +1773,7 @@ mod tests {
             guard: Some(lit_bool(true)),
             score: lit_f32(0.5),
             target: None,
+            weights: None,
             span: span(0, 0),
         };
         let ir = scoring_with(vec![], vec![row]);
@@ -1908,6 +1976,7 @@ mod tests {
             guard: None,
             score: score_expr,
             target: None,
+            weights: None,
             span: span(0, 0),
         };
         let ir = scoring_with(vec![], vec![row]);

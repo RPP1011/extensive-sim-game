@@ -285,24 +285,36 @@ verb Strike(self, target: Agent) =
 // Scoring (utility backend)
 // ---------------------------------------------------------------------------
 
+// Weights reference the registered personality SoA fields (see
+// `crates/dsl_compiler/src/cg/data_handle.rs::AgentFieldId`):
+// `agents.risk_tolerance(self)` proxies "aggression",
+// `agents.hunger(self)` is a direct match,
+// `agents.altruism(self)` proxies "caution" (low risk_tolerance ≠
+// high altruism, but altruism stands in for the "defensive /
+// non-greedy" axis the design intent was reaching for).
+// Pre-2026-05-11 these read `personality.<X>` — an aspirational
+// namespace that didn't resolve; the parser silently dropped the
+// entire `weights:` clause (Gap C in `gaps_observed.md`). Now that
+// the lowerer composes `base + weights`, the weights body must
+// reference real identifiers.
 scoring Wolf {
   // Per-predator action-utility table. Personality weights bias toward
   // aggressive vs defensive choices.
   row Strike per_target {
     base:        2.0,
-    weights:     personality.aggression * 1.5
-                + personality.hunger * 1.2,
+    weights:     agents.risk_tolerance(self) * 1.5
+                + agents.hunger(self) * 1.2,
     cooldown:    0,  // wolves can strike every tick that has prey in range
   }
 
   row Hold {
     base:        0.5,
-    weights:     personality.caution,
+    weights:     agents.altruism(self),
   }
 
   row Wander {
     base:        1.0,
-    weights:     personality.curiosity,
+    weights:     agents.curiosity(self),
   }
 }
 

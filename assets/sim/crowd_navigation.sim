@@ -296,21 +296,32 @@ verb MoveToward(self, t: vec3) =
 // Scoring
 // ---------------------------------------------------------------------------
 
+// Weights reference the registered personality SoA fields (see
+// `crates/dsl_compiler/src/cg/data_handle.rs::AgentFieldId`):
+// `agents.altruism(self)` proxies "patience" (low aggression bias),
+// `agents.ambition(self)` and `agents.curiosity(self)` are direct
+// matches. Pre-2026-05-11 these read `personality.<X>` — an
+// aspirational namespace that didn't resolve; the parser silently
+// dropped the entire `weights:` clause (Gap C in
+// `docs/architecture/gaps_observed.md`). Now that the lowerer
+// composes `base + weights`, the weights body must reference real
+// identifiers. The semantics are unchanged for the design-target
+// reading: per-agent personality biases the row's argmax.
 scoring Walker {
   row Wait {
     base:        0.5,
-    weights:     personality.patience
+    weights:     agents.altruism(self)
                 + 0.5 * (1.0 - group_cohesion(self)),
   }
 
   row MoveToward per_target {
     base:        1.5,
-    weights:     personality.ambition * group_cohesion(self),
+    weights:     agents.ambition(self) * group_cohesion(self),
   }
 
   row Wander {
     base:        0.2,
-    weights:     personality.curiosity,
+    weights:     agents.curiosity(self),
   }
 }
 

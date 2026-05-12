@@ -638,6 +638,20 @@ that predator_prey.sim and crowd_navigation.sim use as a design target
 parses cleanly without any signal that the weights clause is being
 dropped. Either accept and lower it, or reject with a typed
 "`weights:` clause not yet supported in scoring rows".
+**Resolution (2026-05-11, approach B)**: lowered. The parser captures
+`weights:` into a sibling `Option<Expr>` field on `PerAbilityRow`
+(AST), the resolver propagates it through to `PerAbilityRowIR`, and
+`cg::lower::scoring::lower_per_ability_row` now composes the row's
+utility as `Binary { AddF32, base, weights }` when `weights:` is
+present (both operands type-checked F32 individually). Post-fix the
+squad_skirmish scoring.wgsl row-4 body emits
+`(config_9 + (agent_risk_tolerance[agent_id] * config_13))` instead
+of the bare `config_9`. Pin: `crates/dsl_compiler/tests/scoring_weights_clause_emit.rs`.
+The `personality.<X>` aspirational namespace in predator_prey.sim /
+crowd_navigation.sim no longer parse-and-discards (since weights are
+now resolved); those .sim files were updated to read from the
+matching `agents.<field>(self)` SoA columns to keep their weights
+expressions resolvable.
 
 ### Gap D — `view_storage_primary_buf` aliases ALL views into one buffer
 

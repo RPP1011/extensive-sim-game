@@ -787,6 +787,11 @@ pub struct ScoringEntryIR {
 /// * `guard` — optional boolean predicate. `None` parses as `true`.
 /// * `score` — f32 scoring expression (required).
 /// * `target` — optional agent-id expression picking the cast target.
+/// * `weights` — optional f32 utility-table addend. When present, the
+///   lowerer composes the row's utility as `score + weights` (both
+///   F32). Mirrors the AST `weights:` clause; design-target fixtures
+///   that use the `base: <const>, weights: <expr>` shape route through
+///   this field. See `crates/dsl_ast/src/ast.rs::PerAbilityRow.weights`.
 ///
 /// Phase 2 of the GPU ability evaluation subsystem. See
 /// `docs/spec/engine.md §11`
@@ -797,6 +802,7 @@ pub struct PerAbilityRowIR {
     pub guard: Option<IrExprNode>,
     pub score: IrExprNode,
     pub target: Option<IrExprNode>,
+    pub weights: Option<IrExprNode>,
     pub span: Span,
 }
 
