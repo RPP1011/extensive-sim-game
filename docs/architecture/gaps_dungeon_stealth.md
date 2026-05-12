@@ -125,54 +125,52 @@ of the natural `patrol_origin: vec3` + `patrol_step: vec3`.
     allocation already supports vec3 sizing (`elem_bytes = 16`); the
     auto-emit's read/write accessor lowering needs verification.
 
-### Gap #5 — `apply_ability Stealth by self target self` chronicle-→-SoA round-trip silently no-ops
+### Gap #5 — `apply_ability Stealth by self target self` chronicle-→-SoA round-trip silently no-ops — **CLOSED 2026-05-12**
 
-**Status:** soft-pinned (warning printed, not asserted). The Rogue's
-Stealth verb dispatches every 20 ticks (cd gate verified — verb body
-is reached); the dispatcher's `kind == 27u` branch writes a kind=54
-chronicle record with the correct slots (verified in
-`out/dungeon_stealth/physics_RogueStealth.wgsl`); the consumer rule
-`ApplyStealthFromChronicle` reads slot 2 (actor) + slot 3 (duration)
-and writes `agent_stealth_until_tick[actor] = tick + duration`
-(verified in `physics_ApplyStealthFromChronicle.wgsl`). End-to-end,
-the readback observes `stealth_until_tick == 0` for every hero
-across every sampled tick in a 100-tick run.
+**Status:** **CLOSED.** Pin's stealth assertion is now load-bearing
+(`any_stealthed_observed` is asserted, not just warned). The schedule
+synthesizer's `APPLY_ABILITY_EMITTED_KINDS` table was hardcoded to the
+first four engine effect kinds (26 Damage / 27 Heal / 28 Shield / 29
+Stun); every extended-corpus kind (Stealth=54, Charm=55, …, all of
+`EFFECT_KIND_TO_EVENT_KIND_ID` past the original four) was invisible to
+producer→consumer matching. So `ApplyStealthFromChronicle`'s
+`on EffectStealthApplied` (kind=54) had no inbound edge from
+`RogueStealth`'s `apply_ability Stealth` dispatch, and Kahn's topo sort
+placed the consumer FIRST in the schedule. The consumer scanned an
+empty ring each tick; the dispatcher wrote records that were silently
+dropped on the per-tick ring reset.
 
-**Discovery sequence:**
+**Fix (`crates/dsl_compiler/src/cg/schedule/topology.rs`):** replaced
+the hardcoded `const APPLY_ABILITY_EMITTED_KINDS: &[EventKindId]` with
+a function `apply_ability_emitted_kinds() -> Vec<EventKindId>` that
+derives the set from `EFFECT_KIND_TO_EVENT_KIND_ID` — the single
+source of truth the dispatcher's WGSL arm chain already renders
+against. Adding a new EffectOp / chronicle event to that table now
+automatically updates schedule-time producer matching.
+
+**Verification:**
+
+  - `cargo test -p sims --release --test dungeon_stealth_pin -- --nocapture`:
+    `[dungeon_stealth] observed stealth: hero[4] stealthed until tick 50 (at tick 0)`;
+    pin's `assert!(any_stealthed_observed, ...)` passes.
+  - Schedule walk in `out/dungeon_stealth/generated.rs` now lists
+    `PhysicsApplyHealFromChronicleAndApplyStunFromChronicleAndApplyStealthFromChronicle`
+    AFTER `PhysicsRogueStealth` (the fusion analyzer also merged
+    Heal/Stun/Stealth consumers into a single kernel).
+  - `cargo test -p dsl_compiler --release`: green.
+
+**Discovery sequence (pre-fix, archived for context):**
 
   1. Pin asserts a sample-every-10-ticks readback should see some
-     hero with `stealth_until_tick > world.tick`. At cd=20 and
-     duration=50, the Rogue ought to be stealthed in the first ~50
-     ticks of every 20-tick fire window — almost every readback
-     sample should land inside a stealth window.
-  2. 0 readbacks observed stealth at TICKS=100, sampled every 10
-     ticks (10 sample points).
-  3. The WGSL kernels for both halves of the round trip look
-     correct on inspection. The chronicle ring is shared with the
-     ApplyDamageFromChronicle / ApplyHealFromChronicle paths which
-     DO fire (combat-side pins pass), so the ring itself is wired.
-
-**Suspected causes (uninvestigated):**
-
-  - `apply_ability X by self target self` for an ability with
-    `target: self` might not route through the standard chronicle
-    write path. (apply_ability_smoke.sim uses the same surface form
-    but its target is `agents.level(self)` which is a numeric id
-    rather than the symbolic "self".)
-  - The per-agent dispatcher may emit the chronicle record into a
-    different ring slot than the @phase(post) consumer reads from
-    (event_ring index race).
-  - The `agent_stealth_until_tick` buffer write might be racing with
-    the per-agent kernel's read (writes during physics_RogueStealth
-    aren't visible to the post-phase kernel — but the WGSL clearly
-    binds it as `storage, read_write` in both kernels).
-
-**Fix surface (engine-side, deferred to follow-up):**
-
-  - Add a duel_abilities-style integration pin that fires `apply_ability
-    Stealth by self target self` in isolation and reads back
-    `agent_stealth_until_tick` — would isolate the chronicle vs.
-    consumer race without 36 other kernels in the way.
+     hero with `stealth_until_tick > world.tick`. 0 readbacks
+     observed stealth at TICKS=100 (10 sample points).
+  2. Both halves of the WGSL round trip look correct on inspection
+     (`physics_RogueStealth.wgsl` writes kind=54;
+     `physics_ApplyStealthFromChronicle.wgsl` reads kind=54 and
+     writes the stealth field).
+  3. The damage/heal-side chronicle paths (kinds 26/27) DO fire —
+     ring itself is wired. The schedule ORDER was the bug:
+     dispatcher ran AFTER its own consumer.
 
 ### Gap #4 — `else if` chain rejected at parse time (cosmetic)
 

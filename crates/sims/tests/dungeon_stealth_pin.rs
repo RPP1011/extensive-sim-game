@@ -327,21 +327,23 @@ fn dungeon_stealth_500_tick_clear_report() {
         );
     }
 
-    // Stealth pin (soft — see Gap #5 in gaps_dungeon_stealth.md). At
-    // a 100-tick budget RogueStealth fires at ticks 0/20/40/60/80
-    // (cd=20). The chronicle dispatcher emits kind=54 records with
-    // duration=50 ticks, and ApplyStealthFromChronicle SHOULD write
-    // `stealth_until_tick = world.tick + 50`. Empirically the
-    // readback observes stealth_until_tick==0 for all heroes across
-    // every sampled tick — investigation tracked in the gaps doc.
-    // For now we report observability rather than assert it.
-    if !any_stealthed_observed {
-        eprintln!(
-            "[dungeon_stealth] WARNING: Rogue Stealth verb dispatched but \
-             stealth_until_tick stayed at 0 across all sampled ticks. See \
-             docs/architecture/gaps_dungeon_stealth.md Gap #5."
-        );
-    }
+    // Stealth pin (load-bearing — Gap dungeon_stealth#5 closed
+    // 2026-05-12). At a 100-tick budget RogueStealth fires at ticks
+    // 0/20/40/60/80 (cd=20). The chronicle dispatcher emits kind=54
+    // records with duration=50 ticks, and ApplyStealthFromChronicle
+    // writes `stealth_until_tick = world.tick + 50`. Pre-fix the
+    // schedule synthesizer dropped the producer→consumer edge for
+    // kind=54 (`APPLY_ABILITY_EMITTED_KINDS` was hardcoded to just
+    // kinds 26..29), so the consumer ran BEFORE the dispatcher each
+    // tick and the records were silently dropped.
+    assert!(
+        any_stealthed_observed,
+        "stealth round-trip: RogueStealth verb dispatched but no hero's \
+         stealth_until_tick > tick across the {TICKS}-tick run. The \
+         apply_ability Stealth chronicle write should land at \
+         agent_stealth_until_tick[caster] = tick + duration. \
+         See docs/architecture/gaps_dungeon_stealth.md Gap #5."
+    );
 
     if let Some((alive_99, _reached)) = tick_99_state {
         assert!(

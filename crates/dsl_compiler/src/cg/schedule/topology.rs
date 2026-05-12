@@ -445,24 +445,38 @@ struct EventRingKindFacts {
 }
 
 /// Engine event kinds the `apply_ability` dispatcher emits per
-/// non-EMPTY effect slot. Mirrors `engine::ability::EFFECT_KIND_*`
-/// (Damage = 0 → kind 26, Heal = 1 → 27, Shield = 2 → 28, Stun = 3 →
-/// 29) and the host-side `engine_event_kind_id_for_name` table in
-/// `crates/dsl_ast/src/engine_events.rs`.
+/// non-EMPTY effect slot. Sourced from
+/// `crate::cg::emit::wgsl_body::EFFECT_KIND_TO_EVENT_KIND_ID` — the
+/// authoritative `EffectOp` ordinal → `EventKindId` mapping that the
+/// dispatcher's WGSL arm chain renders against. Any new EffectOp /
+/// chronicle event added to that table is automatically picked up
+/// here.
 ///
 /// The exact subset depends on the ability program's per-effect
 /// `kind` array, which is data the registry carries — not visible at
-/// schedule synthesis time. So we conservatively claim ALL four; this
-/// over-estimates the producer→consumer matches but only ever ADDS
-/// edges (never spuriously suppresses them), and a consumer that
-/// reads kind 26 will correctly find every `apply_ability` op as a
-/// producer regardless of the underlying ability's actual effect mix.
-const APPLY_ABILITY_EMITTED_KINDS: &[EventKindId] = &[
-    EventKindId(26), // EffectDamageApplied
-    EventKindId(27), // EffectHealApplied
-    EventKindId(28), // EffectShieldApplied
-    EventKindId(29), // EffectStunApplied
-];
+/// schedule synthesis time. So we conservatively claim every chronicle
+/// event the dispatcher CAN emit; this over-estimates producer→consumer
+/// matches but only ever ADDS edges (never spuriously suppresses them),
+/// and a consumer that reads kind X will correctly find every
+/// `apply_ability` op as a producer regardless of the underlying
+/// ability's actual effect mix.
+///
+/// **Gap dungeon_stealth#5 (2026-05-12).** Previously this list was
+/// hardcoded to `[26, 27, 28, 29]`, missing every extended-corpus kind
+/// (Stealth=54, Charm=55, …). The `ApplyStealthFromChronicle` consumer
+/// rule's kind=54 read therefore had no matching producer in the
+/// dep-graph, so Kahn's topo sort placed it BEFORE `RogueStealth` (the
+/// dispatcher) in the schedule. Each tick: the consumer scanned an
+/// empty ring, then the dispatcher emitted records that wouldn't be
+/// drained until the next tick's consumer pass — but the ring is reset
+/// per tick, so the records were silently dropped, leaving
+/// `stealth_until_tick` at 0 forever.
+fn apply_ability_emitted_kinds() -> Vec<EventKindId> {
+    crate::cg::emit::wgsl_body::EFFECT_KIND_TO_EVENT_KIND_ID
+        .iter()
+        .map(|(_effect_kind, event_kind)| EventKindId(*event_kind))
+        .collect()
+}
 
 fn compute_event_ring_kind_facts(
     op: &crate::cg::op::ComputeOp,
@@ -514,8 +528,9 @@ fn compute_event_ring_kind_facts(
 
 /// Recursively walk a [`CgStmtListId`] and collect every emitted
 /// [`EventKindId`] — both direct `CgStmt::Emit { event }` statements
-/// and `CgStmt::ApplyAbility` dispatcher calls (which expand to the
-/// four engine effect kinds — see [`APPLY_ABILITY_EMITTED_KINDS`]).
+/// and `CgStmt::ApplyAbility` dispatcher calls (which expand to every
+/// chronicle event kind the dispatcher CAN emit — see
+/// [`apply_ability_emitted_kinds`]).
 ///
 /// Mirrors the shape of `crate::cg::lower::driver::collect_emits_in_list`
 /// but lives here so the schedule-layer dependency analysis doesn't
@@ -539,8 +554,8 @@ fn collect_emit_kinds_in_list(
                 out.insert(*event);
             }
             CgStmt::ApplyAbility { .. } => {
-                for k in APPLY_ABILITY_EMITTED_KINDS {
-                    out.insert(*k);
+                for k in apply_ability_emitted_kinds() {
+                    out.insert(k);
                 }
             }
             CgStmt::If { then, else_, .. } => {
