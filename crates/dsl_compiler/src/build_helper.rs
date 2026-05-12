@@ -1378,6 +1378,56 @@ fn slot_count_expr_for_view_buf(pair_keyed: Option<PairKeyedSecondKey>) -> Strin
     }
 }
 
+/// Slot-count expression for a spatial-grid backing buffer.
+///
+/// Returns `Some(expr)` when `binding_name` is one of the three
+/// spatial-grid buffers the auto-emitter writes into:
+///
+/// * `spatial_grid_starts` — exclusive-prefix-scan of per-cell
+///   counts. Indexed by `cell` in `[0, num_cells)`, with a `_cell +
+///   1u` lookahead read at every cell. Sized `num_cells + 1` u32
+///   cells.
+/// * `spatial_grid_offsets` — per-cell atomic counter (phase 1) +
+///   per-cell write cursor (phase 3). Indexed by `cell` in
+///   `[0, num_cells)`. Sized `num_cells` u32 cells.
+/// * `spatial_grid_cells` — agent-id slots. Two access patterns:
+///   the legacy `BuildHash` path indexes `cell * MAX_PER_CELL +
+///   slot` (max `num_cells * MAX_PER_CELL`), the real counting-sort
+///   path indexes `starts[cell] + local_slot` (max `agent_count`).
+///   The larger of the two bounds is `num_cells * MAX_PER_CELL`, so
+///   we size for that to cover both paths without per-fixture
+///   discrimination.
+///
+/// Pre-fix sizing routed every spatial buffer through the
+/// per-agent default (`agent_count * 4 bytes`). For boids' 22³ =
+/// 10 648-cell grid that left `starts` and `offsets` reading out
+/// of bounds at every cell past index `agent_count - 1` (silent
+/// OOB → returns 0 in WGSL storage), collapsing `nearby_targets`
+/// to the empty set. Gap 1 of `detective_investigation`; same
+/// shape powers hill_raid's "siege didn't animate" mode.
+///
+/// Returns `None` for non-spatial bindings — the caller falls
+/// through to [`slot_count_expr`].
+fn slot_count_expr_for_spatial_grid_buffer(binding_name: &str) -> Option<String> {
+    use crate::cg::emit::spatial::{grid_dim, MAX_PER_CELL};
+    let num_cells = (grid_dim() as u64).pow(3);
+    match binding_name {
+        // Prefix-scan output. Per-cell read at index `_cell` plus
+        // a lookahead at `_cell + 1u` for every in-range cell, so
+        // the buffer needs one extra slot past `num_cells - 1`.
+        "spatial_grid_starts" => Some(format!("{}u64", num_cells + 1)),
+        // Per-cell atomic counter / write cursor. One slot per
+        // cell; no lookahead.
+        "spatial_grid_offsets" => Some(format!("{}u64", num_cells)),
+        // Agent-id slots. Sized for the larger of the two access
+        // patterns (legacy `cell * MAX_PER_CELL + slot`).
+        "spatial_grid_cells" => {
+            Some(format!("{}u64", num_cells * (MAX_PER_CELL as u64)))
+        }
+        _ => None,
+    }
+}
+
 /// Extract the `<view>` name from a `fold_<view>` / `decay_<view>`
 /// kernel name. Returns `None` for kernels that don't follow either
 /// pattern (e.g. `physics_*`, `fused_*`, `scoring`). Used by the
@@ -1719,7 +1769,16 @@ fn synthesize_generated_runtime_struct(
         // `pair_keyed_second_key` (which was the legacy single-
         // bucket sizing path). Falls through to the per-agent /
         // legacy-shared sizing for every other binding.
-        let slot_expr = if let Some(pk) = owned_view_buf_pair_keyed.get(name) {
+        //
+        // Spatial-grid buffer sizing (Gap detective#1, 2026-05-12):
+        // the three `spatial_grid_*` bindings index by cell (range
+        // `[0, GRID_DIM^3)`) not by agent, so the per-agent default
+        // under-allocated by ~600× on boids' 22³ grid at agent_count
+        // ≈ 18. Now sized via the spatial-grid constants — see
+        // `slot_count_expr_for_spatial_grid_buffer`.
+        let slot_expr = if let Some(expr) = slot_count_expr_for_spatial_grid_buffer(name) {
+            expr
+        } else if let Some(pk) = owned_view_buf_pair_keyed.get(name) {
             slot_count_expr_for_view_buf(*pk)
         } else if let Some(view) = name
             .strip_prefix("view_storage_")
