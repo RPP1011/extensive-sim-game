@@ -31,7 +31,10 @@ type Factory = fn(u64, u32) -> Box<dyn CompiledSim>;
 
 const SIMS: &[(&str, Factory, u32, &str)] = &[
     // (name, factory, default_count, one-line description)
-    ("boids",                 sim_runtime::make_sim,                       512, "boids flocking"),
+    // boids retired here — the .sim now lives in the sims mega-crate
+    // (`sims::boids::GeneratedRuntime`), but the mega-crate doesn't
+    // yet expose `make_sim()` returning `Box<dyn CompiledSim>` or a
+    // populated `positions()`. Re-add when those surfaces land.
     ("predator_prey",         predator_prey_runtime::make_sim,             64,  "predator/prey 2-species"),
     ("particle_collision",    particle_collision_runtime::make_sim,        256, "elastic collisions"),
     ("crowd_navigation",      crowd_navigation_runtime::make_sim,          256, "crowd navigation"),

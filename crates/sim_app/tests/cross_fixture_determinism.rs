@@ -11,7 +11,12 @@
 //! fixture crate so adding a fifth fixture only requires importing
 //! its `make_sim` and adding one row to the table.
 
-use sim_runtime::BoidsState; // boids_runtime, aliased in Cargo.toml
+// boids_runtime was retired when assets/sim/boids.sim migrated to the
+// `sims` mega-crate. Boids' two-runs determinism check moves back here
+// once `sims::<fixture>::GeneratedRuntime` exposes a position readback
+// surface (today the mega-crate's `positions()` shim returns `&[]`,
+// so a bit-identical comparison would be vacuous). The other three
+// per-fixture runtimes below still cover the determinism contract.
 use crowd_navigation_runtime::CrowdNavigationState;
 use engine::sim_trait::CompiledSim;
 use glam::Vec3;
@@ -46,12 +51,8 @@ fn assert_bit_identical(label: &str, a: Vec<Vec3>, b: Vec<Vec3>) {
     }
 }
 
-#[test]
-fn boids_two_runs_bit_identical() {
-    let a = run_to_positions(Box::new(BoidsState::new(SEED, AGENT_COUNT)));
-    let b = run_to_positions(Box::new(BoidsState::new(SEED, AGENT_COUNT)));
-    assert_bit_identical("boids", a, b);
-}
+// boids two-runs determinism check retired with boids_runtime. See
+// the import-block comment for the migration condition.
 
 #[test]
 fn predator_prey_two_runs_bit_identical() {

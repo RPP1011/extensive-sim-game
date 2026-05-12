@@ -21,9 +21,10 @@ edition = "2021"
 engine = { path = "../engine" }
 glam = "0.29"
 
-# The boids fixture, aliased to a fixture-agnostic name so the
-# original sim_app harness in src/main.rs stays sim-agnostic.
-sim_runtime = { path = "../boids_runtime", package = "boids_runtime", optional = true }
+# `sim_runtime` rename is gone — it was an alias for boids_runtime, which
+# was retired when assets/sim/boids.sim moved to the sims mega-crate.
+# The src/main.rs `sim_app` binary that depended on the rename is gone
+# with it; viz_app remains as the universal sim-picker harness.
 # Sibling per-creature predator/prey demo. Imported under its real
 # name (no rename) — the pp_app binary in src/pp_app.rs is fixture-
 # aware and introspects per-creature counts via the runtime API.
@@ -221,7 +222,6 @@ default = ["test-fixtures"]
 
 # Runtimes referenced unconditionally by tests/cross_fixture_determinism.rs.
 test-fixtures = [
-    "dep:sim_runtime",
     "dep:crowd_navigation_runtime",
     "dep:particle_collision_runtime",
     "dep:predator_prey_runtime",
@@ -229,7 +229,6 @@ test-fixtures = [
 
 # Per-binary features. Each pulls in only the runtime that binary needs.
 # Build pattern: `cargo build -p sim_app --bin foo_app --features bin-foo_app`.
-bin-sim_app = ["dep:sim_runtime"]
 bin-pp_app = ["dep:predator_prey_runtime"]
 bin-pc_app = ["dep:particle_collision_runtime"]
 bin-cn_app = ["dep:crowd_navigation_runtime"]
@@ -242,17 +241,11 @@ bin-tom_probe_app = ["dep:tom_probe_runtime"]
 # matches the binary's "any fixture by name" intent (#99 closes
 # the build gap surfaced by predator_prey snapshot work, 2026-05-05).
 bin-viz_app = [
-    "dep:sim_runtime",
     "dep:crowd_navigation_runtime",
     "dep:particle_collision_runtime",
     "dep:predator_prey_runtime",
     "dep:tom_probe_runtime",
 ]
-
-[[bin]]
-name = "sim_app"
-path = "src/main.rs"
-required-features = ["bin-sim_app"]
 
 [[bin]]
 name = "pp_app"

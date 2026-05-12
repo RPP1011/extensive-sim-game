@@ -159,19 +159,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "boids_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
 name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1813,7 +1800,6 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 name = "sim_app"
 version = "0.1.0"
 dependencies = [
- "boids_runtime",
  "crowd_navigation_runtime",
  "engine",
  "glam",

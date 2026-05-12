@@ -44,6 +44,7 @@ fn main() {
             // no per-fixture *_runtime crate. Add to this list as each
             // .sim parses cleanly + its handcoded crate gets deleted.
             "threat_impact"
+                | "boids"
                 | "cooldown_probe"
                 | "for_each_agent_probe"
                 | "target_chaser"
