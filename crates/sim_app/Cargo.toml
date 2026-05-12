@@ -70,7 +70,6 @@ abilities_runtime = { path = "../abilities_runtime", optional = true }
 # Cooldown probe — follow-up to abilities_probe Gap #4. Drives the
 # per-agent cooldown_next_ready_tick SoA + world.tick preamble +
 # `if (tick >= ready_at) { emit }` gating end-to-end.
-cooldown_probe_runtime = { path = "../cooldown_probe_runtime", optional = true }
 # Diplomacy probe — first fixture combining ALL of: pair_map u32 view
 # (ToM shape), verb cascade with TWO competing verbs gated on
 # disjoint Mod-tick predicates, three distinct event kinds in one
@@ -280,7 +279,6 @@ bin-verb_fire_app = ["dep:verb_probe_runtime"]
 bin-tom_probe_app = ["dep:tom_probe_runtime"]
 bin-trade_market_app = ["dep:trade_market_runtime"]
 bin-abilities_app = ["dep:abilities_runtime"]
-bin-cooldown_probe_app = ["dep:cooldown_probe_runtime"]
 bin-diplomacy_probe_app = ["dep:diplomacy_probe_runtime"]
 bin-stochastic_probe_app = ["dep:stochastic_probe_runtime"]
 bin-pair_scoring_probe_app = ["dep:pair_scoring_probe_runtime"]
@@ -320,7 +318,6 @@ bin-viz_app = [
     "dep:auction_runtime",
     "dep:bartering_runtime",
     "dep:boss_fight_runtime",
-    "dep:cooldown_probe_runtime",
     "dep:crafting_diffusion_runtime",
     "dep:crowd_navigation_runtime",
     "dep:diplomacy_probe_runtime",
@@ -431,11 +428,6 @@ required-features = ["bin-trade_market_app"]
 name = "abilities_app"
 path = "src/abilities_app.rs"
 required-features = ["bin-abilities_app"]
-
-[[bin]]
-name = "cooldown_probe_app"
-path = "src/cooldown_probe_app.rs"
-required-features = ["bin-cooldown_probe_app"]
 
 [[bin]]
 name = "diplomacy_probe_app"

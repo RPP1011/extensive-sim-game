@@ -45,7 +45,6 @@ const SIMS: &[(&str, Factory, u32, &str)] = &[
     ("tom_probe",             tom_probe_runtime::make_sim,                 32,  "ToM probe"),
     ("trade_market",          trade_market_runtime::make_sim,              32,  "trade market probe"),
     ("abilities",             abilities_runtime::make_sim,                 16,  "abilities probe"),
-    ("cooldown_probe",        cooldown_probe_runtime::make_sim,            16,  "cooldown probe"),
     ("diplomacy_probe",       diplomacy_probe_runtime::make_sim,           16,  "diplomacy probe"),
     ("stochastic_probe",      stochastic_probe_runtime::make_sim,          64,  "RNG probe"),
     ("pair_scoring_probe",    pair_scoring_probe_runtime::make_sim,        16,  "pair-scoring probe"),
