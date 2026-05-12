@@ -1,0 +1,16 @@
+// detective_investigation — passive observation pulse. Slot id 3
+// (alphabetical filename order in the registry: Accuse=1, Investigate=2,
+// Observe=3).
+//
+// As with Investigate, the .ability is a parse/lower placeholder; the
+// behavioural effect (evidence accumulation in the pair-keyed view)
+// lives in the .sim's `physics ObserveAndAccrue` rule below.
+
+ability Observe {
+    target: enemy
+    range: 100.0
+    cooldown: 1
+    hint: damage
+
+    damage 0.0 [PHYSICAL: 100]
+}

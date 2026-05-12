@@ -1,0 +1,15 @@
+// detective_investigation — formal accusation. Damage 0 (the verb's
+// effect on the simulation is observability via the chronicle's
+// EffectDamageApplied record + the pair-keyed accusation count view).
+//
+// The .ability slot id is alphabetical: Accuse=1, Investigate=2,
+// Observe=3 (alphabetical filename order in the registry builder).
+
+ability Accuse {
+    target: enemy
+    range: 100.0
+    cooldown: 5
+    hint: damage
+
+    damage 0.1 [PHYSICAL: 100]
+}

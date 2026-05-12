@@ -1,0 +1,17 @@
+// detective_investigation — focused investigation pulse on a specific
+// suspect. Slot id 2 (alphabetical: Accuse=1, Investigate=2, Observe=3).
+//
+// `damage 0.0` keeps the program parseable / well-formed without any
+// real HP impact (suspects retain full HP for the entire run). The
+// real effect lives in the .sim's Witnessed / EvidenceLogged event
+// cascade — this .ability slot exists so the verb can dispatch via
+// apply_ability and surface a chronicle record per investigation.
+
+ability Investigate {
+    target: enemy
+    range: 100.0
+    cooldown: 1
+    hint: damage
+
+    damage 0.0 [PHYSICAL: 100]
+}

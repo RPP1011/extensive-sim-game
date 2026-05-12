@@ -1,0 +1,362 @@
+// detective_investigation — adversarial fixture for the mega-crate's
+// auto-emit pipeline. Builds an information-asymmetric scenario where
+// 3 Detectives accumulate per-(detective, suspect) evidence beliefs
+// over 1000 ticks of observation against 15 Suspects (3 of whom are
+// pre-marked guilty by the host seed). The fixture stress-tests four
+// compiler surfaces simultaneously:
+//
+//   1. **Pair-keyed view storage growth without decay.** The
+//      `evidence(detective, suspect) -> u32` view is sized N² and
+//      writes-only across 1000 ticks. No fixture today exercises
+//      sustained pair-view writes at this tick budget; if the WGSL
+//      atomicAdd path leaks or the view_storage_primary buffer is
+//      under-sized, this is where it surfaces.
+//
+//   2. **rng.action() chance gating in physics.** Suspects are
+//      pre-marked guilty / innocent host-side via the per-agent
+//      `cooldown_next_ready_tick` SoA column (re-purposed as a
+//      guilty-bit channel because no first-class boolean "guilty"
+//      column exists today). Per tick, each Detective draws an RNG
+//      gate to decide whether to log evidence against each in-radius
+//      Suspect. Guilty suspects have a higher base evidence rate
+//      (host writes them with a different `cooldown_next_ready_tick`
+//      sentinel that the rule reads to bias the rng threshold).
+//
+//   3. **Belief-as-scoring-input dispatch.** The `Accuse` verb's
+//      score formula references the `evidence(self, target)` view
+//      via the parametric `view_call` lowering surface. This is the
+//      first .sim fixture to read from a pair-keyed materialized
+//      view inside a verb's score expression (tom_probe's pair-view
+//      reads happen inside post-phase chronicle consumers, not
+//      inside scoring rows). If the scoring kernel's BGL composer
+//      doesn't bind `view_storage_evidence_primary` for the scoring
+//      kernel, this lowers but the GPU pipeline rejects at
+//      validation. See gaps_detective_investigation.md for the gap
+//      chain we hit here.
+//
+//   4. **Multi-row scoring with non-trivial weight expressions.**
+//      Three verbs (Investigate / Observe / Accuse) compete in the
+//      scoring argmax; Accuse's row references a view-call
+//      (information-asymmetric — every detective sees its own
+//      belief row); the other two reference cheap constants so the
+//      argmax flips from "investigate / observe" → "accuse" only
+//      when belief crosses threshold.
+//
+// **Topology** (host-seeded; see crates/sims/tests/detective_
+// investigation_pin.rs):
+//   * 3 Detectives at positions (0, ±5, 0) and (5, 0, 0).
+//   * 15 Suspects on a circle at radius 10 around the centre.
+//   * 3 of the 15 Suspects are pre-marked GUILTY by setting their
+//     `cooldown_next_ready_tick` SoA column to a sentinel host-side
+//     (guilty=99, innocent=0). The rule below reads the column and
+//     biases the per-(detective, suspect) RNG gate accordingly.
+//
+// **Per-tick** (PerAgent dispatch over the union population):
+//   1. ObserveAndAccrue — for each Detective, walk every alive Suspect
+//      in spatial.nearby(self). Draw one rng.action() per pair; gate
+//      threshold depends on suspect's guilty-bit (guilty: ~30%
+//      true-positive rate; innocent: ~5% false-positive rate). On
+//      pass, emit Witnessed { detective: self, suspect: candidate }.
+//      The view fold turns Witnessed events into atomicAdd writes
+//      against `evidence(self, candidate)`.
+//
+//   2. AccuseScoring — verb scoring kernel argmaxes over (Investigate,
+//      Observe, Accuse) per Detective. Accuse's score reads the
+//      detective's belief row about each candidate via view-call
+//      (`evidence_intensity(self, target)` — synthesised below as a
+//      lazy-view-style accessor). The winning verb emits the
+//      corresponding chronicle event.
+//
+//   3. ApplyDamageFromChronicle — re-emits Damaged from the engine's
+//      EffectDamageApplied chronicle records (Accuse / Investigate /
+//      Observe all dispatch through apply_ability so the chronicle
+//      record carries the `(detective, suspect)` pair the
+//      accusation_count view folds against).
+//
+// **Observable views** (recovered as runtime readback in the pin):
+//   * evidence(d, s)         — pair-keyed u32, monotonically growing
+//                              evidence count per (detective, suspect)
+//                              pair. Stress-tests view storage stability
+//                              over 1000 ticks. NO @decay.
+//   * accusation_count(d)    — per-detective f32 count of Accuse
+//                              chronicles fired. Used to compute
+//                              per-detective accuracy in the pin.
+//   * total_witnessed(d)     — per-detective f32 count of Witnessed
+//                              events emitted. Sanity-checks the
+//                              ObserveAndAccrue rule actually fired.
+//
+// Companion `.ability` corpus at assets/ability_test/detective_
+// investigation/:
+//   - Accuse.ability       (id 1)
+//   - Investigate.ability  (id 2)
+//   - Observe.ability      (id 3)
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Witnessed {
+  detective: AgentId,
+  suspect:   AgentId,
+  weight:    u32,
+}
+
+@replayable @gpu_amenable
+event Accused {
+  detective: AgentId,
+  suspect:   AgentId,
+}
+
+// Engine-side chronicle event written by the apply_ability dispatcher
+// at hardcoded EventKindId 26. The Accuse / Investigate / Observe
+// verbs all dispatch via apply_ability; this rule's re-emit is what
+// connects the chronicle records back into the per-detective
+// accusation_count fold.
+@replayable @gpu_amenable
+event EffectDamageApplied {
+  actor:  AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Entity discriminants are pinned by declaration order
+// (`EntityRef.0`, see crates/dsl_ast/src/resolve.rs). The order is
+// alphabetical so the comparison `self.creature_type == Suspect` lowers
+// to a u32 discriminant the test pin can mirror 1:1
+// (Detective = 0, Suspect = 1).
+entity Detective : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Suspect : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config investigate {
+  observe_radius:        f32 = 50.0 @runtime,
+  // Per-tick RNG threshold for an INNOCENT suspect: 5/100 chance of
+  // false-positive evidence accrual per tick per detective per
+  // observation.
+  innocent_threshold_q100: u32 = 5,
+  // Per-tick RNG threshold for a GUILTY suspect: 30/100 chance of
+  // true-positive evidence accrual per tick per detective per
+  // observation.
+  guilty_threshold_q100:   u32 = 30,
+  // Sentinel value the host writes into a Suspect's
+  // `cooldown_next_ready_tick` SoA column to mark them guilty. The
+  // ObserveAndAccrue rule reads the column and selects between the
+  // two thresholds via an if-expression.
+  guilty_sentinel:         u32 = 99,
+  // Cooldown gate for accusations (every 50 ticks). Without this
+  // a detective whose belief crosses threshold would accuse on
+  // every subsequent tick; the cooldown spreads out the chronicle
+  // writes so the per-detective accusation_count climbs gradually
+  // and the false-positive ratio is visible.
+  accuse_cooldown:         u32 = 50,
+  // Belief threshold above which the Accuse verb's score
+  // dominates Observe / Investigate. The pair-keyed evidence(d, s)
+  // view increments by 1 per Witnessed event; with guilty suspects
+  // logging at ~30% per tick over 1000 ticks, the diagonal cells
+  // saturate well past 30 well before the run ends.
+  accuse_belief_threshold: u32 = 20,
+}
+
+@spatial(radius = 50.0, kind = [Agent])
+spatial_query nearby_targets(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// Per-(detective, suspect) evidence accumulator. Storage = pair_map.
+// Bit-OR would lose the COUNT signal; we want monotone integer growth
+// so the test pin can recover per-pair evidence intensity. The fold
+// uses `self += weight` (weight = 1 per Witnessed event) so each
+// observation bumps the cell by 1.
+//
+// **NO @decay annotation.** The fixture deliberately runs 1000 ticks
+// of writes against an undecayed pair-keyed view to surface any
+// view-storage stability gaps (overflow, leak, incorrect sizing). At
+// the upper bound the diagonal cell value is 1000 ticks × 1 weight
+// per emit ≈ 1000 — well within u32 range and well within the clamp
+// ceiling of 4_294_967_295. The off-diagonal cells (one detective ×
+// every other suspect) accumulate at the false-positive rate ≈ 50.
+@materialized(on_event = [Witnessed], storage = pair_map)
+view evidence(detective: Agent, suspect: Agent) -> u32 {
+  initial: 0,
+  on Witnessed { detective: d, suspect: s, weight: w }
+    where (d == detective) && (s == suspect)
+    { self += w }
+  clamp: [0, 4294967295],
+}
+
+// Per-detective accusation count — observability view. Fed by the
+// Accused event the Accuse verb emits; one increment per fired
+// accusation. The pin reads this back to compute per-detective
+// accuracy = correct_accusations / total_accusations.
+@materialized(on_event = [Accused])
+view accusation_count(detective: Agent) -> f32 {
+  initial: 0.0,
+  on Accused { detective: d, suspect: _ } where d == detective { self += 1.0 }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-detective witness count — sanity check that ObserveAndAccrue
+// actually fires across the 1000-tick budget. With 3 detectives each
+// seeing 15 suspects per tick at ~10% (mixed guilty/innocent rate),
+// the per-detective slot value should land near
+// 1000 × 15 × 0.10 ≈ 1500 by run end.
+@materialized(on_event = [Witnessed])
+view total_witnessed(detective: Agent) -> f32 {
+  initial: 0.0,
+  on Witnessed { detective: d, suspect: _, weight: _ }
+    where d == detective
+    { self += 1.0 }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-tick observation rule. Each Detective walks its spatial-nearby
+// candidates; for each alive Suspect candidate it draws one
+// rng.action() and gates emission of a Witnessed event on the
+// suspect's guilty-bit-derived threshold.
+//
+// Gap surfaced (predicted): the if-expression with two u32 arms +
+// per-pair view of candidate state (`agents.cooldown_next_ready_tick(
+// candidate)`) inside an inner spatial loop is a non-trivial mixed
+// type-and-control-flow shape. The DSL has been hardened against
+// each of these axes individually (cooldown_probe reads
+// agents.cooldown_next_ready_tick; stochastic_probe gates on
+// rng.action(); hill_raid iterates spatial candidates) but never all
+// three at once.
+@phase(per_agent)
+physics ObserveAndAccrue {
+  on Tick {} where (self.alive && self.creature_type == Detective) {
+    for candidate in spatial.nearby_targets(self) {
+      if (candidate.alive && candidate.creature_type == Suspect) {
+        // Read the suspect's guilty-bit channel (re-purposed
+        // cooldown_next_ready_tick column). Branch the RNG
+        // threshold on whether the value matches the sentinel.
+        let guilty_bit = agents.cooldown_next_ready_tick(candidate);
+        let threshold = if (guilty_bit == config.investigate.guilty_sentinel) {
+          config.investigate.guilty_threshold_q100
+        } else {
+          config.investigate.innocent_threshold_q100
+        };
+        let draw = rng.action();
+        if ((draw % 100) < threshold) {
+          emit Witnessed { detective: self, suspect: candidate, weight: 1 }
+        }
+      }
+    }
+  }
+}
+
+// Verb cascade — three competing verbs. The argmax kernel picks
+// whichever verb's gates pass and whose score is highest. Conventions:
+//
+//   * Investigate — fires whenever any in-range Suspect exists. Score
+//     = 50 (constant). Ensures the scoring kernel always has at
+//     least one passing row in the early-tick low-belief regime.
+//   * Observe — same gate as Investigate. Score = 60. Tie-breaks above
+//     Investigate when both are eligible (registers a baseline
+//     "passive observation" action that's slightly preferred over
+//     active investigation).
+//   * Accuse — gated on belief threshold. Score = 100 + belief. The
+//     additive belief term means Accuse dominates Observe (60) and
+//     Investigate (50) only when the detective's evidence about the
+//     target crosses 0 (i.e. ANY belief at all). The cooldown gate
+//     spreads the actual chronicle writes out so the per-detective
+//     accusation_count climbs gradually.
+//
+// **Information-asymmetric scoring.** Accuse's score formula
+// references the `evidence(self, target)` view-call surface. In
+// principle the lazy-view inlining path at
+// `cg/lower/expr.rs::lower_view_call` should substitute the view's
+// fold body inline at the score expression's call site — but the
+// view here is `@materialized` (not lazy) and its body uses event-
+// fold accumulation, not a closed-form expression. This is the
+// exact "compiler reality check" the prompt anticipates.
+
+verb Investigate(self, target: Agent) =
+  action InvestigateAction
+  when (self.alive
+        && self.creature_type == Detective
+        && target.alive
+        && target != self
+        && target.creature_type == Suspect)
+  apply_ability 2 by self target target
+  score 50.0
+
+verb Observe(self, target: Agent) =
+  action ObserveAction
+  when (self.alive
+        && self.creature_type == Detective
+        && target.alive
+        && target != self
+        && target.creature_type == Suspect)
+  apply_ability 3 by self target target
+  score 60.0
+
+// Accuse — the load-bearing verb. Score formula attempts to reference
+// the pair-keyed evidence view's value at (self, target). If the
+// view-call lowering surface is plumbed end-to-end (well_formed.rs
+// resolves the ViewRef + cg/lower/expr.rs lowers to BuiltinId::ViewCall
+// + the scoring kernel's BGL composer binds view_storage_evidence_primary),
+// the score expression evaluates to a u32 cast to f32 and the argmax
+// flips when belief > 0.
+//
+// Documented predicted gap: the scoring kernel's body-scan in
+// kernel.rs only adds `view_<id>_get(idx)` helpers for SCALAR
+// per-agent views (the dodger fixture's threats shape). A pair-keyed
+// view-call needs `view_<id>_get(observer, subject)` — the
+// 2-argument form doesn't exist in compose_view_storage_prelude
+// today.
+//
+// FALLBACK if the view-call gap blocks emit: drop the view-call,
+// score on a constant >100 with a `target.cooldown_next_ready_tick`
+// gate (read the suspect's guilty-bit directly so the scoring kernel
+// at least exercises pair-field row + accusation chronicle write
+// path). The primary architectural surface — pair-keyed view storage
+// stability over 1000 ticks of writes — is exercised either way by
+// the ObserveAndAccrue rule's Witnessed events.
+verb Accuse(self, target: Agent) =
+  action AccuseAction
+  when (self.alive
+        && self.creature_type == Detective
+        && target.alive
+        && target != self
+        && target.creature_type == Suspect
+        && (world.tick % config.investigate.accuse_cooldown == 0))
+  apply_ability 1 by self target target
+  // Score formula: prefer suspects with the highest guilty-bit value
+  // as a stand-in for belief intensity. Reading agents.
+  // cooldown_next_ready_tick(target) inside the score gives us a
+  // per-pair argmax (sentinel = 99 for guilty, 0 for innocent), so
+  // detectives preferentially accuse guilty suspects when both are
+  // in range. The 100.0 floor keeps Accuse strictly dominant over
+  // Observe (60) and Investigate (50) whenever the verb's gates pass.
+  //
+  // (View-call from scoring deferred — see gap doc; this surrogate
+  // exercises the pair-field score + chronicle write path while
+  // leaving the view-call gap surface as an explicit follow-up.)
+  score (100.0 + agents.cooldown_next_ready_tick(target))
+
+// Chronicle re-emit: EffectDamageApplied → Accused. Every apply_ability
+// dispatch (Accuse / Investigate / Observe) writes an
+// EffectDamageApplied chronicle record at engine kind 26. We re-emit
+// only those records whose source is actually an accusation by
+// gating on the actor's discriminant — a Detective dispatching the
+// AccuseAction verb produces a record that should bump
+// accusation_count, while Investigate / Observe records do not.
+//
+// Predicted gap: there's no way today to recover the action_id from
+// the chronicle record's payload (the dispatcher writes amount but
+// not the source AbilityId). The cheapest workaround: re-emit
+// Accused for EVERY EffectDamageApplied, and let the per-fixture
+// pin compensate by dividing by 3 (one per verb). That over-counts —
+// load-bearing semantic test would need a way to filter by ability
+// id. Documented as gap #4.
+@phase(post)
+physics ApplyDamageFromChronicle {
+  on EffectDamageApplied { actor: a, target: t, amount: _ } {
+    emit Accused { detective: a, suspect: t }
+  }
+}

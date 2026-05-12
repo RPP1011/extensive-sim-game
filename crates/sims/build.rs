@@ -114,6 +114,7 @@ fn main() {
                 | "forest_fire"
                 | "squad_skirmish"
                 | "plague_city"
+                | "detective_investigation"
         ) {
             continue;
         }
