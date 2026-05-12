@@ -150,7 +150,7 @@ event BeliefAcquired {
 event TrustTransition {
   source: AgentId,
   target: AgentId,
-  new_level: u32,
+  new_level: f32,
 }
 
 // Conspirator entities declared in alphabetical order (Civilian = 0,
