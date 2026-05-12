@@ -40,6 +40,9 @@ fn main() {
         // their per-fixture crate until each is moved over.
         if !matches!(
             stem.as_str(),
+            // Migrated fixtures live under `sims::<fixture>::*` and have
+            // no per-fixture *_runtime crate. Add to this list as each
+            // .sim parses cleanly + its handcoded crate gets deleted.
             "threat_impact"
                 | "cooldown_probe"
                 | "for_each_agent_probe"
@@ -52,6 +55,41 @@ fn main() {
                 | "per_entity_ring_probe"
                 | "crafting_diffusion"
                 | "flocking_skirmish"
+                | "abilities_probe"
+                | "apply_ability_chronicle_consumer"
+                | "apply_ability_verb_chronicle_consumer"
+                | "apply_ability_verb_smoke"
+                | "auction_market"
+                | "boss_fight"
+                | "diplomacy_probe"
+                | "duel_1v1"
+                | "duel_abilities"
+                | "dungeon_crawl"
+                | "firebolt_interrupt_probe"
+                | "firebolt_probe"
+                | "foraging_colony"
+                | "foraging_real"
+                | "mass_battle_100v100"
+                | "megaswarm_1000"
+                | "megaswarm_10000"
+                | "multi_zone_world"
+                | "objective_capture_10v10"
+                | "predator_prey_real"
+                | "quest_arc_real"
+                | "scripted_battle"
+                | "spy_network"
+                | "tactical_horde_500"
+                | "tactical_squad_5v5"
+                | "threat_stresstest"
+                | "threats_struct_probe"
+                | "threats_view_probe"
+                | "threats_with_decay_probe"
+                | "tower_defense"
+                | "trade_market_probe"
+                | "trade_market_real"
+                | "trophic_3tier"
+                | "verb_fire_probe"
+                | "village_day_cycle"
         ) {
             continue;
         }

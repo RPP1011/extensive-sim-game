@@ -3,19 +3,6 @@
 version = 4
 
 [[package]]
-name = "abilities_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
 name = "addr2line"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -80,19 +67,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f0e0fee31ef5ed1ba1316088939cea399010ed7731dba877ed44aeb407a75ea"
 
 [[package]]
-name = "apply_ability_chronicle_consumer_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
 name = "apply_ability_smoke_runtime"
 version = "0.1.0"
 dependencies = [
@@ -103,32 +77,6 @@ dependencies = [
  "glam",
  "pollster",
  "smallvec",
- "wgpu",
-]
-
-[[package]]
-name = "apply_ability_verb_chronicle_consumer_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
-name = "apply_ability_verb_smoke_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
  "wgpu",
 ]
 
@@ -156,19 +104,6 @@ dependencies = [
  "ash",
  "raw-window-handle",
  "raw-window-metal",
-]
-
-[[package]]
-name = "auction_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
 ]
 
 [[package]]
@@ -239,19 +174,6 @@ dependencies = [
 
 [[package]]
 name = "boids_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
-name = "boss_fight_runtime"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
@@ -641,19 +563,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "diplomacy_probe_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
 name = "disease_spread_runtime"
 version = "0.1.0"
 dependencies = [
@@ -720,46 +629,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "duel_1v1_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
 name = "duel_25v25_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
-name = "duel_abilities_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
-name = "dungeon_crawl_runtime"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
@@ -876,32 +746,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
-name = "firebolt_interrupt_probe_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
-name = "firebolt_probe_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -912,32 +756,6 @@ name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
-
-[[package]]
-name = "foraging_real_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
-name = "foraging_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
 
 [[package]]
 name = "foreign-types"
@@ -1378,45 +1196,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mass_battle_100v100_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
-name = "megaswarm_10000_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
-name = "megaswarm_1000_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
 name = "memchr"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1451,19 +1230,6 @@ name = "mintex"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c505b3e17ed6b70a7ed2e67fbb2c560ee327353556120d6e72f5232b6880d536"
-
-[[package]]
-name = "multi_zone_world_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
 
 [[package]]
 name = "naga"
@@ -1571,19 +1337,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff76201f031d8863c38aa7f905eca4f53abbfa15f609db4277d44cd8938f33fe"
 dependencies = [
  "memchr",
-]
-
-[[package]]
-name = "objective_capture_10v10_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
 ]
 
 [[package]]
@@ -1720,19 +1473,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "predator_prey_real_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
 name = "predator_prey_runtime"
 version = "0.1.0"
 dependencies = [
@@ -1793,19 +1533,6 @@ dependencies = [
  "rusty-fork",
  "tempfile",
  "unarray",
-]
-
-[[package]]
-name = "quest_arc_real_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
 ]
 
 [[package]]
@@ -2039,19 +1766,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
-name = "scripted_battle_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
 name = "semver"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2160,41 +1874,16 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 name = "sim_app"
 version = "0.1.0"
 dependencies = [
- "abilities_runtime",
- "auction_runtime",
  "boids_runtime",
- "boss_fight_runtime",
  "crowd_navigation_runtime",
- "diplomacy_probe_runtime",
- "duel_1v1_runtime",
  "duel_25v25_runtime",
- "duel_abilities_runtime",
- "dungeon_crawl_runtime",
  "ecosystem_runtime",
  "engine",
- "foraging_real_runtime",
- "foraging_runtime",
  "glam",
- "mass_battle_100v100_runtime",
- "megaswarm_10000_runtime",
- "megaswarm_1000_runtime",
- "multi_zone_world_runtime",
- "objective_capture_10v10_runtime",
  "particle_collision_runtime",
- "predator_prey_real_runtime",
  "predator_prey_runtime",
- "quest_arc_real_runtime",
- "scripted_battle_runtime",
  "swarm_storm_runtime",
- "tactical_horde_500_runtime",
- "tactical_squad_5v5_runtime",
  "tom_probe_runtime",
- "tower_defense_runtime",
- "trade_market_real_runtime",
- "trade_market_runtime",
- "trophic_3tier_runtime",
- "verb_probe_runtime",
- "village_day_cycle_runtime",
 ]
 
 [[package]]
@@ -2244,19 +1933,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eda41003dc44290527a59b13432d4a0379379fa074b70174882adfbdfd917844"
 dependencies = [
  "bitflags 2.11.0",
-]
-
-[[package]]
-name = "spy_network_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
 ]
 
 [[package]]
@@ -2313,32 +1989,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "tactical_horde_500_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
-name = "tactical_squad_5v5_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
 ]
 
 [[package]]
@@ -2414,58 +2064,6 @@ name = "thousands"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3bf63baf9f5039dadc247375c29eb13706706cfde997d0330d05aa63a77d8820"
-
-[[package]]
-name = "threat_stresstest_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
-name = "threats_struct_probe_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
-name = "threats_view_probe_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
-name = "threats_with_decay_probe_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
 
 [[package]]
 name = "tinytemplate"
@@ -2571,58 +2169,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "756daf9b1013ebe47a8776667b466417e2d4c5679d441c26230efd9ef78692db"
 
 [[package]]
-name = "tower_defense_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
-name = "trade_market_real_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
-name = "trade_market_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
-name = "trophic_3tier_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
 name = "trybuild"
 version = "1.0.116"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2668,36 +2214,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
-name = "verb_probe_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
 name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "village_day_cycle_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
 
 [[package]]
 name = "village_economy_runtime"
