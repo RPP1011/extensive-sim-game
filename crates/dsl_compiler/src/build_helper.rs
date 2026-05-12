@@ -2186,18 +2186,36 @@ fn synthesize_generated_runtime_struct(
         "        // Per-tick cfg uniform write to every kernel's cfg buffer.\n\
          \x20       // Layout: [slot0, tick, seed, slot3] where slot0 is\n\
          \x20       // agent_cap (per-agent kernels) or event_count (per-event\n\
-         \x20       // kernels). Today we write agent_count to both slots — for\n\
+         \x20       // kernels). Today we write agent_count to slot0 — for\n\
          \x20       // an empty event_ring this over-bounds harmlessly because\n\
          \x20       // the kernel's event-kind check on each row falls through.\n\
          \x20       // Cfg layout per kernel:\n\
-         \x20       //   per-agent: { agent_cap, tick, seed, _pad }\n\
-         \x20       //   ViewFold:  { event_count, tick, second_key_pop, _pad }\n\
+         \x20       //   per-agent: { agent_cap, tick, seed, _pad0 }\n\
+         \x20       //   ViewFold:  { event_count, tick, second_key_pop, _pad0 }\n\
+         \x20       //   PerPair:   { agent_cap, tick, seed, pair_offset }\n\
          \x20       // Slot 2 is `seed` (per-agent — most kernels ignore it,\n\
          \x20       // they key PCG off tick+agent+purpose) or `second_key_pop`\n\
          \x20       // (ViewFold — must be 1 for single-key views, otherwise\n\
          \x20       // the per-(observer, source) index calc divides by 0 or\n\
          \x20       // wraps and the fold writes to wrong slots). Writing 1\n\
          \x20       // is correct for ViewFolds and harmless for per-agent.\n\
+         \x20       // Slot 3 is _pad0 for per-agent/ViewFold (unused) and\n\
+         \x20       // `pair_offset` for PerPair fused-mask kernels — those\n\
+         \x20       // emit `let pair = gid.x + cfg._pad0` to chunk\n\
+         \x20       // agent_cap²-sized dispatches that exceed\n\
+         \x20       // `max_compute_workgroups_per_dimension`. Single-shot\n\
+         \x20       // PerPair dispatches MUST set pair_offset = 0 so that\n\
+         \x20       // gid.x = 0..agent_cap² covers the full pair grid.\n\
+         \x20       // Pre-2026-05-12 squad_skirmish fix: slot3 was being\n\
+         \x20       // written as `self.agent_count`, which made every PerPair\n\
+         \x20       // mask kernel skip the first `agent_cap` pairs and walk\n\
+         \x20       // pairs [agent_cap..agent_cap+dispatch_threads). For\n\
+         \x20       // agent_count=16 with `(agent_cap+63)/64=1` workgroup\n\
+         \x20       // (64 threads), only pairs 16..79 ran — agent 0's mask bit\n\
+         \x20       // never got set and damage didn't flow. The fix lands\n\
+         \x20       // pair_offset=0 universally; chunked dispatch (megaswarm\n\
+         \x20       // 10000) would override per-batch but uses a separate\n\
+         \x20       // emit path.\n\
          \x20       // A later slice can detect cfg shape per kernel and\n\
          \x20       // write the proper seed for per-agent kernels — pinned\n\
          \x20       // to the cooldown_probe staggered-fire test as a regression.\n\
@@ -2205,7 +2223,7 @@ fn synthesize_generated_runtime_struct(
          \x20           self.agent_count,\n\
          \x20           self.tick as u32,\n\
          \x20           1u32,\n\
-         \x20           self.agent_count,\n\
+         \x20           0u32,\n\
          \x20       ];\n\
          \x20       let cfg_bytes: &[u8] = bytemuck::cast_slice(&cfg_words);\n",
     );
@@ -2354,6 +2372,26 @@ fn synthesize_generated_runtime_struct(
          \x20           },\n\
          \x20       );\n",
     );
+    // Mask bitmap clear (2026-05-12 squad_skirmish gap): the
+    // fused-mask kernel sets bits via `atomicOr` with no clear step,
+    // so bits latched at tick 0 stay set forever. The cooldown
+    // predicate `(tick % cooldown_X == 0)` evaluates true at tick 0
+    // (every cooldown), and the latched bit means scoring picks the
+    // verb every subsequent tick regardless of cooldown — collapsing
+    // the per-tick gate. `clear_buffer(buf, 0, None)` zeroes each
+    // mask bitmap right after the encoder is created so the
+    // fused-mask kernel re-evaluates from a clean slate every tick.
+    let mut mask_bitmap_buf_names: Vec<String> = owned
+        .keys()
+        .filter(|n| n.starts_with("mask_") && n.ends_with("_bitmap"))
+        .cloned()
+        .collect();
+    mask_bitmap_buf_names.sort();
+    for buf_name in &mask_bitmap_buf_names {
+        out.push_str(&format!(
+            "        encoder.clear_buffer(&self.{buf_name}_buf, 0, None);\n",
+        ));
+    }
     // Stage 2: copy prev_event_tail_buf → each fold's cfg.event_count
     // slot inside the main encoder. queue.write_buffer of cfg_bytes
     // landed earlier (host-side enqueue) and writes slot 0 to

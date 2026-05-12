@@ -1995,9 +1995,26 @@ fn compose_dispatch_call(topology: &KernelTopology) -> String {
             wg_x_minus_one = wg_x - 1
         ),
         DispatchShape::PerAgent
-        | DispatchShape::PerEvent { .. }
-        | DispatchShape::PerPair { .. } => format!(
+        | DispatchShape::PerEvent { .. } => format!(
             "        pass.dispatch_workgroups((agent_cap + {wg_x_minus_one}u32) / {wg_x}u32, 1, 1);\n",
+            wg_x = wg_x,
+            wg_x_minus_one = wg_x - 1
+        ),
+        DispatchShape::PerPair { .. } => format!(
+            // PerPair: walk the agent_cap × agent_cap pair grid. The WGSL
+            // body emits `let pair = gid.x + cfg._pad0;` and decodes
+            // `(agent, cand) = (pair / agent_cap, pair % agent_cap)` —
+            // requires agent_cap² invocations to cover every pair.
+            // Pre-2026-05-12 squad_skirmish fix: this arm shared the
+            // PerAgent formula, so agent_count=16 only dispatched 64
+            // threads against the 256-pair grid; mask bits only got set
+            // for agents whose `pair / agent_cap` landed in 0..63/16. The
+            // fix dispatches `(agent_cap² + wg-1) / wg` workgroups so
+            // the kernel sees the full pair walk. Chunked dispatch for
+            // exceeding `max_compute_workgroups_per_dimension` stays a
+            // future concern (cfg._pad0 = pair_offset still works for it).
+            "        let pair_count = agent_cap * agent_cap;\n        \
+             pass.dispatch_workgroups((pair_count + {wg_x_minus_one}u32) / {wg_x}u32, 1, 1);\n",
             wg_x = wg_x,
             wg_x_minus_one = wg_x - 1
         ),
