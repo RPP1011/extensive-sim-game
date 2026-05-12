@@ -117,6 +117,8 @@ fn synthesize_spatial_fixture() -> String {
         &[],
         false,
         &[],
+        0,
+        0,
     )
 }
 

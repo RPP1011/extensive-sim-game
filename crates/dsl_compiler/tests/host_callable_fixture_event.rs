@@ -107,6 +107,8 @@ fn host_callable_fixture_event_emits_typed_injector_with_sequential_kind_id() {
         &[],
         false,
         &[],
+        0,
+        0,
     );
 
     // No `cargo:warning` codepath should fire — the typed method must
@@ -209,6 +211,8 @@ fn host_callable_engine_aliased_event_still_uses_engine_kind_id() {
         &[],
         false,
         &[],
+        0,
+        0,
     );
 
     // Fixture-defined event uses sequential id (index 0 → 0).

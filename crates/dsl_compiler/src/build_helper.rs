@@ -580,6 +580,20 @@ fn emit_into(
             }
         }
     }
+    // Gap T2 fix (2026-05-12): count Item-rooted and Group-rooted
+    // entity declarations. Used by the alloc loop to size
+    // `item_<field>_buf` / `group_<field>_buf` buffers — one slot
+    // per entity of that root.
+    let item_entity_count = comp
+        .entities
+        .iter()
+        .filter(|e| matches!(e.root, dsl_ast::ast::EntityRoot::Item))
+        .count() as u32;
+    let group_entity_count = comp
+        .entities
+        .iter()
+        .filter(|e| matches!(e.root, dsl_ast::ast::EntityRoot::Group))
+        .count() as u32;
     let runtime_core = synthesize_runtime_core_a2(
         fixture_name,
         &artifacts,
@@ -591,6 +605,8 @@ fn emit_into(
         &materialized_views,
         binds_voxel_grid,
         &indirect_consumer_kernel_names,
+        item_entity_count,
+        group_entity_count,
     );
     fs::write(out_dir.join("runtime_core.rs"), runtime_core)
         .unwrap_or_else(|e| panic!("write runtime_core.rs: {e}"));
@@ -1118,6 +1134,16 @@ pub fn synthesize_runtime_core_a2(
     materialized_views: &[MaterializedViewInfo],
     binds_voxel_grid: bool,
     indirect_consumer_kernel_names: &[String],
+    // Gap T2 fix (2026-05-12): per-Item / per-Group field bindings
+    // (named `item_<field>` / `group_<field>`) need their backing
+    // buffers sized to one slot per Item-rooted (resp. Group-rooted)
+    // entity, NOT the per-agent default. These counts are passed in
+    // from the .sim's resolved Compilation; pre-fix the alloc loop
+    // defaulted to `agent_count` for these bindings AND only emitted
+    // the first per field name (entity-prefixed names collapsed in a
+    // BTreeMap), silently dropping the rest.
+    item_entity_count: u32,
+    group_entity_count: u32,
 ) -> String {
     let kernel_count = artifacts.kernel_index.len();
     let mut out = String::new();
@@ -1196,6 +1222,8 @@ pub fn synthesize_runtime_core_a2(
         materialized_views,
         binds_voxel_grid,
         indirect_consumer_kernel_names,
+        item_entity_count,
+        group_entity_count,
     ));
 
     out
@@ -1326,6 +1354,22 @@ fn is_belief_state_pair_column(binding_name: &str) -> bool {
 ///   `<second_key_pop>×` under-allocation that silently corrupted
 ///   memory at runtime when the fold body wrote through indices past
 ///   the per-agent prefix.
+/// * `item_entity_count` for `item_<field>` bindings (Gap T2 fix,
+///   2026-05-12). The `items.<field>(N)` lowering produces a binding
+///   keyed by FIELD NAME (shared across all Item-rooted entities
+///   declaring the field); the buffer holds one slot per declared
+///   Item entity, indexed by the entity's position in declaration
+///   order among Item-rooted entities. trade_caravans declares
+///   3 Items (Grain, Spice, Silk), so `item_base_price` is sized to
+///   3 slots. Entities not declaring the field still occupy a slot
+///   (zero-init by default) — the storage layout is positional, not
+///   sparse, so the user index `N` directly addresses the right
+///   entity. Pre-fix the alloc loop sized this binding to
+///   `agent_count` and only emitted the FIRST per-Item-entity name
+///   (a `BTreeMap` collapse), silently dropping the others; reads
+///   for N=1, 2, ... aliased the first Item's buffer.
+/// * `group_entity_count` for `group_<field>` bindings — same shape
+///   as `item_<field>` but for Group-rooted entities.
 /// * `agent_count` for everything else — the per-agent default.
 ///
 /// Today's pair-keyed detection picks a SINGLE fixture-wide
@@ -1339,6 +1383,8 @@ fn is_belief_state_pair_column(binding_name: &str) -> bool {
 fn slot_count_expr(
     binding_name: &str,
     pair_keyed_second_key: Option<PairKeyedSecondKey>,
+    item_entity_count: u32,
+    group_entity_count: u32,
 ) -> String {
     if is_belief_state_pair_column(binding_name) {
         // Per-(observer, subject) cell — `pair_map` storage shape per
@@ -1356,6 +1402,19 @@ fn slot_count_expr(
         // renamed names is handled by the call site (see
         // `slot_count_expr_for_view_buf`).
         format!("(agent_count as u64) * {}", skey.population_u64_expr())
+    } else if binding_name.starts_with("item_") {
+        // Gap T2 fix (2026-05-12): per-Item field buffer. One slot
+        // per declared Item-rooted entity. `.max(1)` so a fixture
+        // with zero Items (a defensive case — every binding implies
+        // a non-empty field catalog) still produces a non-zero
+        // allocation that wgpu accepts.
+        let n = item_entity_count.max(1) as u64;
+        format!("{n}u64")
+    } else if binding_name.starts_with("group_") {
+        // Gap T2 fix (2026-05-12): per-Group field buffer. Same
+        // shape as `item_<field>` but for Group-rooted entities.
+        let n = group_entity_count.max(1) as u64;
+        format!("{n}u64")
     } else {
         "agent_count as u64".to_string()
     }
@@ -1504,6 +1563,8 @@ fn synthesize_generated_runtime_struct(
     materialized_views: &[MaterializedViewInfo],
     binds_voxel_grid: bool,
     indirect_consumer_kernel_names: &[String],
+    item_entity_count: u32,
+    group_entity_count: u32,
 ) -> String {
     use crate::kernel_binding_ir::BgSource;
     use std::collections::BTreeMap;
@@ -1865,7 +1926,7 @@ fn synthesize_generated_runtime_struct(
             let pk = view_pair_keyed.get(view).copied().flatten();
             slot_count_expr_for_view_buf(pk)
         } else {
-            slot_count_expr(name, pair_keyed_second_key)
+            slot_count_expr(name, pair_keyed_second_key, item_entity_count, group_entity_count)
         };
         // Plan E-A6 — if `init { ... }` declared a per-slot fill for
         // this `agent_<col>` binding, switch from zero-init create_buffer
@@ -2855,6 +2916,8 @@ mod tests {
             &[],
             false,
             &[],
+            0,
+            0,
         );
 
         // Braces balance.
@@ -2930,6 +2993,8 @@ mod tests {
             &[],
             false,
             &[],
+            0,
+            0,
         );
 
         // Typed signature with snake_case method name + matching params.
@@ -2995,6 +3060,8 @@ mod tests {
             &[],
             false,
             &[],
+            0,
+            0,
         );
 
         // The generic helper still lands.

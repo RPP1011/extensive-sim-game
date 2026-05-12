@@ -170,6 +170,8 @@ fn synthesize_two_view_fixture() -> String {
         &materialized_views,
         false,
         &[],
+        0,
+        0,
     )
 }
 

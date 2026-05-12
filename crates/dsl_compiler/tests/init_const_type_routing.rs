@@ -93,6 +93,8 @@ fn synthesize_with_init(init_stmts: &[InitStmt]) -> String {
         &[],
         false,
         &[],
+        0,
+        0,
     )
 }
 

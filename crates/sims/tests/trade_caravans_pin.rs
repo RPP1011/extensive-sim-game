@@ -448,16 +448,18 @@ fn seed_topology(state: &mut GeneratedRuntime) {
         bytemuck::cast_slice(&engaged),
     );
 
-    // Per-Item base_price — only `grain_base_price_buf` exists today
-    // (Spice + Silk Item entities don't allocate per-item buffers per
-    // the GAP documented in gaps_observed.md). Seed three slots in
-    // grain_base_price_buf so `items.base_price(0..2)` reads land on
-    // valid indices. Buffer ships zero-initialised by build_helper;
-    // explicit write makes the price values observable via current_price
-    // view fold.
+    // Per-Item base_price — Gap T2 fix (2026-05-12): the binding is
+    // FIELD-keyed (`item_base_price_buf`) and sized to one slot per
+    // declared Item-rooted entity (3: Grain=0, Spice=1, Silk=2 in
+    // declaration order among Items). Each `items.base_price(N)` read
+    // in the .sim now resolves to the right slot in this shared
+    // buffer. Buffer ships zero-initialised by build_helper; explicit
+    // write seeds the per-Item price values so they're observable via
+    // the current_price view fold (which PriceBroadcast emits per
+    // good).
     let prices: Vec<f32> = vec![10.0, 20.0, 35.0];
     state.gpu.queue.write_buffer(
-        &state.grain_base_price_buf,
+        &state.item_base_price_buf,
         0,
         bytemuck::cast_slice(&prices),
     );

@@ -297,13 +297,25 @@ fn bartering_resolves_three_distinct_entity_roots() {
 /// `bartering.sim`'s IdleDrift physics rule reads BOTH
 /// `items.weight(0)` (Item-field read) AND `groups.size(0)`
 /// (Group-field read). Confirm the emitted physics WGSL contains
-/// indexed accesses against BOTH the `coin_weight[` and
-/// `caravan_size[` external bindings — the runtime-side proof that
+/// indexed accesses against BOTH the `item_weight[` and
+/// `group_size[` external bindings — the runtime-side proof that
 /// the Group-field READ path is wired symmetrically to the Item-field
-/// READ path through the entity-field catalog. Without this
-/// assertion a regression that silently collapsed the Group-field
-/// arm to a typed default (or routed it to the Item catalog) would
-/// pass other tests but break the bartering_app drift observable.
+/// READ path through the entity-field catalog.
+///
+/// Gap T2 fix (2026-05-12): the binding is FIELD-keyed
+/// (`item_<field>` / `group_<field>`) so all Item / Group entities
+/// declaring the same field name share one buffer; pre-fix the
+/// names were entity-keyed (`coin_weight`, `caravan_size`) which
+/// produced one buffer per entity but the alloc loop only emitted
+/// the first per field name, silently dropping the rest when a
+/// fixture declared multiple Items / Groups with overlapping
+/// fields (trade_caravans's `Grain` / `Spice` / `Silk` `base_price`
+/// was the trigger).
+///
+/// Without this assertion a regression that silently collapsed the
+/// Group-field arm to a typed default (or routed it to the Item
+/// catalog) would pass other tests but break the bartering_app
+/// drift observable.
 #[test]
 fn bartering_emits_item_and_group_field_reads() {
     let path = workspace_path("assets/sim/bartering.sim");
@@ -317,15 +329,16 @@ fn bartering_emits_item_and_group_field_reads() {
             );
         });
     assert!(
-        body.contains("coin_weight["),
-        "expected indexed access against `coin_weight[…]` (Item-field read) \
-         in physics body; got:\n{body}",
+        body.contains("item_weight["),
+        "expected indexed access against `item_weight[…]` (Item-field read, \
+         field-keyed across all Item entities per Gap T2) in physics body; got:\n{body}",
     );
     assert!(
-        body.contains("caravan_size["),
-        "expected indexed access against `caravan_size[…]` (Group-field read) \
-         in physics body — confirms the Group-field READ path is symmetric \
-         with the Item-field READ path via the entity-field catalog; got:\n{body}",
+        body.contains("group_size["),
+        "expected indexed access against `group_size[…]` (Group-field read, \
+         field-keyed across all Group entities per Gap T2) in physics body — \
+         confirms the Group-field READ path is symmetric with the Item-field \
+         READ path via the entity-field catalog; got:\n{body}",
     );
 }
 

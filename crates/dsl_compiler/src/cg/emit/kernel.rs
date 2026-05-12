@@ -1163,18 +1163,22 @@ fn handle_to_binding_metadata(h: &DataHandle, prog: &CgProgram) -> Option<Bindin
         }),
         DataHandle::ItemField { field, target: _ } => {
             // Per-Item SoA field — emit a bare external binding named
-            // `<entity_snake>_<field_snake>`. The per-fixture runtime
-            // is responsible for allocating + binding the buffer at
-            // dispatch time. Read-only at this slice (no write surface
-            // routed through the lowering yet); upgrades to RW would
-            // happen via the same `record_write` path AgentField uses.
-            let (entity_name, field_name, _) = prog
+            // `item_<field_snake>` (Gap T2 fix, 2026-05-12). The
+            // binding is FIELD-keyed (not entity-keyed) so multiple
+            // Item entities declaring the same field name share ONE
+            // buffer; the user index expression (`items.<field>(N)`)
+            // is the Item-type discriminant (position in declaration
+            // order among Item-rooted entities) into that buffer.
+            // Read-only at this slice (no write surface routed
+            // through the lowering yet); upgrades to RW would happen
+            // via the same `record_write` path AgentField uses.
+            let (_entity_name, field_name, _) = prog
                 .entity_field_catalog
                 .resolve_item(*field)
                 .unwrap_or(("item", "field", AgentFieldTy::U32));
             Some(BindingMetadata {
                 bg_source: BgSource::External(item_field_external_name(
-                    entity_name,
+                    "item",
                     field_name,
                 )),
                 base_access: AccessMode::ReadStorage,
@@ -1182,13 +1186,13 @@ fn handle_to_binding_metadata(h: &DataHandle, prog: &CgProgram) -> Option<Bindin
             })
         }
         DataHandle::GroupField { field, target: _ } => {
-            let (entity_name, field_name, _) = prog
+            let (_entity_name, field_name, _) = prog
                 .entity_field_catalog
                 .resolve_group(*field)
                 .unwrap_or(("group", "field", AgentFieldTy::U32));
             Some(BindingMetadata {
                 bg_source: BgSource::External(item_field_external_name(
-                    entity_name,
+                    "group",
                     field_name,
                 )),
                 base_access: AccessMode::ReadStorage,
@@ -1495,27 +1499,35 @@ fn handle_to_binding_metadata(h: &DataHandle, prog: &CgProgram) -> Option<Bindin
 /// pack/unpack pipeline). We surface the structurally honest type so
 /// downstream lowerings can specialise per-field if they choose.
 /// External binding name for an Item / Group SoA field. The
-/// per-fixture runtime allocates a `<entity_snake>_<field_snake>`
-/// buffer (e.g. `coin_weight`) and binds it on the kernel's external
-/// bind group. Pulled out of the per-handle metadata so the structural
-/// binding name + the BGL composer's external lookup stay in lockstep.
-pub(crate) fn item_field_external_name(entity_name: &str, field_name: &str) -> String {
-    format!("{}_{}", to_snake_case(entity_name), field_name)
-}
-
-/// Convert a PascalCase / camelCase identifier to snake_case. Used for
-/// the entity-name half of the Item / Group binding name.
-fn to_snake_case(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 4);
-    for (i, ch) in s.chars().enumerate() {
-        if ch.is_uppercase() && i != 0 {
-            out.push('_');
-        }
-        for low in ch.to_lowercase() {
-            out.push(low);
-        }
-    }
-    out
+/// per-fixture runtime allocates a single `item_<field_snake>`
+/// (or `group_<field_snake>`) buffer per FIELD NAME — shared
+/// across every Item-rooted entity that declares that field —
+/// and binds it on the kernel's external bind group. The buffer
+/// is sized to hold one slot per Item-rooted (resp. Group-rooted)
+/// entity, indexed by the entity's position in declaration order
+/// among Item-rooted entities (e.g. for `entity Grain : Item`,
+/// `entity Spice : Item`, `entity Silk : Item` in declaration
+/// order, `items.base_price(0)` reads Grain, `(1)` reads Spice,
+/// `(2)` reads Silk — all from the SAME `item_base_price` buffer).
+///
+/// Gap T2 fix (2026-05-12): pre-fix the buffer name was
+/// `<entity_snake>_<field_snake>` (e.g. `grain_base_price`), so
+/// each Item entity got its OWN buffer — but the buffer alloc loop
+/// only ever emitted the FIRST (the `BTreeMap<binding_name, _>`
+/// merge collapsed across all Item entities sharing a field name
+/// because the lowering's `resolve_item_by_name` always returned
+/// the first-declaring entity). Post-fix the binding name is
+/// field-keyed (`item_base_price`), so all Items declaring
+/// `base_price` route through one buffer and the index disambiguates.
+///
+/// Pulled out of the per-handle metadata so the structural
+/// binding name + the BGL composer's external lookup stay in
+/// lockstep.
+///
+/// `kind_prefix` is `"item"` for Item-rooted fields, `"group"` for
+/// Group-rooted fields.
+pub(crate) fn item_field_external_name(kind_prefix: &str, field_name: &str) -> String {
+    format!("{}_{}", kind_prefix, field_name)
 }
 
 fn agent_field_wgsl_ty(ty: AgentFieldTy) -> String {
@@ -1673,28 +1685,31 @@ fn structural_binding_name(h: &DataHandle, prog: Option<&CgProgram>) -> String {
             format!("agent_{}", field.snake())
         }
         DataHandle::ItemField { field, target: _ } => {
-            // Per-Item SoA: prefer the catalog-resolved form
-            // `<entity_snake>_<field_snake>` (e.g. `coin_weight`) so
+            // Per-Item SoA: prefer the catalog-resolved field-keyed
+            // form `item_<field_snake>` (e.g. `item_base_price`) so
             // the BGL binding name matches the WGSL body's access
             // form (set by `item_field_binding_name` in
             // `cg/emit/wgsl_body.rs`). Falls back to the opaque
             // `item_<entity>_<slot>` form when no program / catalog is
-            // available (e.g. structural debug rendering).
+            // available (e.g. structural debug rendering). Gap T2 fix
+            // (2026-05-12): the binding is field-keyed across all Item
+            // entities so multiple Items declaring the same field name
+            // share one buffer.
             if let Some(p) = prog {
-                if let Some((entity_name, field_name, _)) =
+                if let Some((_entity_name, field_name, _)) =
                     p.entity_field_catalog.resolve_item(*field)
                 {
-                    return item_field_external_name(entity_name, field_name);
+                    return item_field_external_name("item", field_name);
                 }
             }
             format!("item_{}_{}", field.entity, field.slot)
         }
         DataHandle::GroupField { field, target: _ } => {
             if let Some(p) = prog {
-                if let Some((entity_name, field_name, _)) =
+                if let Some((_entity_name, field_name, _)) =
                     p.entity_field_catalog.resolve_group(*field)
                 {
-                    return item_field_external_name(entity_name, field_name);
+                    return item_field_external_name("group", field_name);
                 }
             }
             format!("group_{}_{}", field.entity, field.slot)
@@ -8433,56 +8448,52 @@ mod tests {
         assert_eq!(spatial_kind_name(kind), "filtered_walk_0");
     }
 
-    /// Gap #2 / #3 from `2026-05-04-trade_market_probe.md` — the
-    /// per-Item / per-Group external binding name must disambiguate
-    /// when multiple Item / Group entities declare overlapping field
-    /// names. The naming rule is `<entity_snake>_<field_snake>`, so
-    /// `Wood.weight` → `wood_weight` and `Iron.weight` → `iron_weight`,
-    /// not a collision on a shared `weight` binding.
+    /// Gap T2 (2026-05-12) — the per-Item / per-Group external
+    /// binding name is FIELD-KEYED, not entity-keyed. Multiple Item
+    /// entities declaring the same field (e.g. trade_caravans's
+    /// `Grain`, `Spice`, `Silk` all declaring `base_price: f32`)
+    /// share ONE buffer; the user index expression
+    /// `items.<field>(N)` selects the Item entity by discriminant
+    /// (position in declaration order among Item-rooted entities).
     ///
-    /// Pre-this-test: the existing bartering fixture exercises ONE
-    /// Item field-read and ONE Group field-read, but no test pinned
-    /// the multi-entity disambiguation shape. This test pins it so a
-    /// future refactor that drops the entity-name half (e.g.
-    /// `format!("{field_name}")`) fires immediately.
+    /// Pre-T2 the naming rule was `<entity_snake>_<field_snake>`,
+    /// which produced `grain_base_price`, `spice_base_price`,
+    /// `silk_base_price` as DISTINCT bindings — but only the first
+    /// was actually allocated by the build_helper alloc loop, and
+    /// the lowering's `resolve_item_by_name` always returned the
+    /// FIRST entity declaring the field, so all 3 reads aliased
+    /// the first Item's buffer. Post-T2 the binding is the
+    /// field-keyed `item_<field_snake>` (or `group_<field_snake>`
+    /// for Group fields), allocated once and indexed by Item-type
+    /// discriminant.
     #[test]
-    fn item_field_external_name_disambiguates_overlapping_field_names() {
-        // Same field name on 4 distinct Item entities — the trade-market
-        // probe shape (Wood / Iron / Grain / Cloth, all with
-        // `base_price: f32`).
+    fn item_field_external_name_collapses_across_entities_with_shared_field() {
+        // Three Item entities (`Grain`, `Spice`, `Silk`) all
+        // declaring `base_price` MUST resolve to the SAME binding
+        // name (`item_base_price`); the discriminant lives in the
+        // index expression, not the binding name.
         assert_eq!(
-            item_field_external_name("Wood", "base_price"),
-            "wood_base_price"
-        );
-        assert_eq!(
-            item_field_external_name("Iron", "base_price"),
-            "iron_base_price"
-        );
-        assert_eq!(
-            item_field_external_name("Grain", "base_price"),
-            "grain_base_price"
-        );
-        assert_eq!(
-            item_field_external_name("Cloth", "base_price"),
-            "cloth_base_price"
+            item_field_external_name("item", "base_price"),
+            "item_base_price"
         );
 
-        // PascalCase entity names → snake_case (the to_snake_case
-        // helper). `MultiWord` becomes `multi_word`.
+        // Different field name → different binding (single shared
+        // buffer per field name across all Items). `weight` is the
+        // bartering fixture's Coin field; post-T2 it's `item_weight`
+        // (collapsed) instead of `coin_weight` (entity-prefixed).
         assert_eq!(
-            item_field_external_name("LegendaryArtifact", "weight"),
-            "legendary_artifact_weight"
+            item_field_external_name("item", "weight"),
+            "item_weight"
         );
 
-        // Same shape works for Group entities (the function is shared
-        // between item and group binding emission — the gap-#3 surface).
+        // Group-rooted entities use `group_` prefix.
         assert_eq!(
-            item_field_external_name("Guild", "size"),
-            "guild_size"
+            item_field_external_name("group", "size"),
+            "group_size"
         );
         assert_eq!(
-            item_field_external_name("Faction", "size"),
-            "faction_size"
+            item_field_external_name("group", "reputation"),
+            "group_reputation"
         );
     }
 }

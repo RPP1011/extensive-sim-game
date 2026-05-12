@@ -106,6 +106,26 @@ buffers wired via Item discriminant index, or (b) a single
 `item_<field>_buf` per field (not per Item-type) sized
 `sum(Items.count)`, with offset bookkeeping per Item-type.
 
+**Status (2026-05-12, fixed):** option (b) landed. The WGSL
+binding name is now field-keyed (`item_<field>` / `group_<field>`)
+across all Item / Group entities that declare the same field
+name. The buffer is sized to one slot per declared Item-rooted
+(resp. Group-rooted) entity, indexed by the entity's position in
+declaration order among that root — so `items.base_price(0)`
+reads Grain's slot, `(1)` Spice, `(2)` Silk, all from the same
+`item_base_price` buffer. The lowering's `resolve_item_by_name`
+still picks the first-declaring entity for typing (the buffer
+shape is uniform across all declarers of the same field name, so
+the first match is sufficient for primitive-type lookup). Pin
+test: `crates/dsl_compiler/tests/multi_item_buffer_allocation.rs`
+(3 pins — WGSL emits field-keyed bindings, runtime struct emits
+1 buffer per unique field name sized to Item count, Group surface
+mirrors the Item surface). bartering's `item_weight` /
+`group_size` names migrated cleanly (single-Item/Group fixture);
+trade_caravans's `item_base_price` now allocates 3 slots and all
+3 reads route through the same buffer. The pin's inventory
+readback is still not Item-keyed — that's a follow-up.
+
 ---
 
 ### Gap T3: Birth path (alive 0→1 in chronicle consumer) doesn't propagate

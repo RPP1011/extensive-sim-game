@@ -1060,11 +1060,21 @@ fn agent_ref_token(target: &AgentRef) -> String {
 }
 
 /// Resolve an Item / Group field's binding name via the program's
-/// catalog. Returns `<entity_snake>_<field_snake>` (e.g. `coin_weight`)
-/// when the (entity, slot) pair has a catalog entry; falls back to the
-/// opaque structural form `item_<entity>_<slot>` /
-/// `group_<entity>_<slot>` so the WGSL still parses if the catalog is
-/// missing the entry (a lowering defect).
+/// catalog. Returns the field-keyed form `item_<field_snake>` (e.g.
+/// `item_base_price`) for Item fields or `group_<field_snake>` for
+/// Group fields when the (entity, slot) pair has a catalog entry;
+/// falls back to the opaque structural form `item_<entity>_<slot>`
+/// / `group_<entity>_<slot>` so the WGSL still parses if the catalog
+/// is missing the entry (a lowering defect).
+///
+/// Gap T2 fix (2026-05-12): the binding name was previously
+/// `<entity_snake>_<field_snake>` (e.g. `coin_weight` /
+/// `grain_base_price`), which produced one binding per Item entity.
+/// The build_helper alloc loop only emitted the FIRST per field name,
+/// silently dropping the others. Post-fix the binding is field-keyed
+/// across all Items declaring that field name; the discriminant lives
+/// in the user index expression `items.<field>(N)` (N = position in
+/// Item-only declaration order).
 pub(crate) fn item_field_binding_name(
     prog: &CgProgram,
     entity_ref: u16,
@@ -1086,34 +1096,15 @@ pub(crate) fn item_field_binding_name(
                 ty: crate::cg::data_handle::AgentFieldTy::U32,
             })
     };
+    let prefix = if is_item { "item" } else { "group" };
     match resolved {
-        Some((entity_name, field_name, _)) => {
-            format!("{}_{}", to_snake_case(entity_name), field_name)
+        Some((_entity_name, field_name, _)) => {
+            format!("{}_{}", prefix, field_name)
         }
         None => {
-            let prefix = if is_item { "item" } else { "group" };
             format!("{}_{}_{}", prefix, entity_ref, slot)
         }
     }
-}
-
-/// Convert a PascalCase / camelCase identifier to snake_case. Mirrors
-/// the helper of the same name in `cg/emit/kernel.rs` — kept here so
-/// the body emit doesn't need to depend on the kernel emit's private
-/// helpers. Adding the kernel-side helper to `pub(crate)` would couple
-/// the two files; the duplicated four-line helper is the lower-friction
-/// choice.
-fn to_snake_case(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 4);
-    for (i, ch) in s.chars().enumerate() {
-        if ch.is_uppercase() && i != 0 {
-            out.push('_');
-        }
-        for low in ch.to_lowercase() {
-            out.push(low);
-        }
-    }
-    out
 }
 
 /// True iff `expr` is a `CgExpr::EventField` read — the binder
@@ -1569,12 +1560,16 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
                 }
                 return Ok(agent_field_read_wgsl(*field, target, ctx));
             }
-            // Item / Group fields: emit `<entity_snake>_<field>[<idx>]`.
-            // The binding name is sourced from the program's
-            // `entity_field_catalog` so kernel binding names + body
-            // accesses agree on the same identifier (e.g. `coin_weight`).
-            // The `<idx>` expression is the catalog-resolved target id;
-            // it lowers identically to the AgentField `Target(_)` path
+            // Item / Group fields: emit `item_<field>[<idx>]` (or
+            // `group_<field>[<idx>]`). The binding name is field-keyed
+            // across all entities of the same root that declare the
+            // field (Gap T2 fix, 2026-05-12); the user index `<idx>`
+            // is the entity discriminant (position in declaration
+            // order among Item-rooted entities). Sourced from the
+            // program's `entity_field_catalog` so kernel binding names
+            // + body accesses agree on the same identifier (e.g.
+            // `item_base_price`). The `<idx>` expression lowers
+            // identically to the AgentField `Target(_)` path
             // (recursive lowering with stmt-prefix `let item_target_<N>`
             // hoisting via `pending_target_lets`).
             if let DataHandle::ItemField { field, target } = handle {

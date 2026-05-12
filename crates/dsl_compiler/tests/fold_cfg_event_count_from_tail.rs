@@ -144,6 +144,8 @@ fn fold_step_snapshot_copies_event_tail_into_cfg_event_count() {
         // copy from the side buffer into each fold's cfg.event_count
         // slot inside the main encoder.
     &[],
+    0,
+    0,
     );
 
     // (a) Side buffer is allocated + threaded through the struct.
@@ -269,6 +271,8 @@ fn non_event_ring_kernel_does_not_get_snapshot_copy() {
         &[],
         false,
         &[],
+        0,
+        0,
     );
 
     // No fold consumers → no prev_event_tail_buf field, no
