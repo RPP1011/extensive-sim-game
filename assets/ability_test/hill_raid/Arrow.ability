@@ -1,0 +1,12 @@
+// Defender ranged attack. AbilityId 1 (alphabetical: Arrow < Strike).
+// Single-target damage; cooldown encoded via chronicle gate so
+// per-defender fire rate is bounded.
+
+ability Arrow {
+    target: enemy
+    range: 6.0
+    cooldown: 4
+    hint: damage
+
+    damage 8.0 [PHYSICAL: 100]
+}

@@ -107,6 +107,7 @@ fn main() {
                 | "particle_collision"
                 | "crowd_navigation"
                 | "dsl_stress_coverage"
+                | "hill_raid"
         ) {
             continue;
         }

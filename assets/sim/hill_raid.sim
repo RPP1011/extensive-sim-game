@@ -1,0 +1,175 @@
+// hill_raid — tower-defense + raid scenario WITH actual voxel terrain.
+//
+// **Topology** (host-side seeded; see crates/sims/tests/hill_raid_pin.rs):
+//   * Voxel terrain: a hill (paraboloid) at world centre. Defenders
+//     stand on the literal voxel surface — their z-coords come from
+//     `engine_voxel::VoxelTerrain::height_at(x, y)` at seed time.
+//   * 16 Defenders on the hilltop (radius 0..3, on terrain surface).
+//   * 32 Wall segments ringing the hill at radius ~5 (also on
+//     terrain surface, following the slope).
+//   * 64 Enemy attackers spawning at perimeter (radius 25, ground
+//     level), pathing inward toward the hilltop.
+//
+// **Terrain advantage** is mechanical, not cosmetic:
+//   * Defenders shoot via `terrain.line_of_sight(self.pos, target.pos)`
+//     — works downhill (clear sightline) but a defender behind the
+//     hill from an enemy can't fire (hill blocks LOS).
+//   * Enemies bash walls in melee range. Walls block enemy LOS
+//     to defenders behind them (for future extension where enemies
+//     have ranged units too).
+//
+// **Per-tick** (PerAgent dispatch over the union population):
+//   1. EnemyAdvance — enemies drift toward the nearest alive defender
+//   2. DefenderFire — for each enemy in spatial.nearby(self) where
+//      LOS clear, dispatch Arrow ability (damage 8). Cooldown gated
+//      via apply_ability's chronicle-side gate.
+//   3. EnemyMelee — for each wall in spatial.nearby(self) within
+//      strike_radius, dispatch Strike ability (damage 5).
+//   4. ApplyDamage — chronicle consumer for EffectDamageApplied;
+//      decrements target hp; Reaper flips alive=0 when hp <= 0.
+//
+// **Observable views** (recovered as runtime readback in the pin):
+//   * defender_kills(by) — per-defender kill count, @decay(0.97).
+//   * shots_on_target(observer, target) — pair-keyed engagement
+//     intensity, validates pair-fold sizing.
+//
+// Companion `.ability` corpus at assets/ability_test/hill_raid/:
+//   - Arrow.ability    (id 1, defender ranged attack)
+//   - Strike.ability   (id 2, enemy melee attack)
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Engine-side chronicle event written by `apply_ability` dispatcher
+// at hardcoded EventKindId 26. Same shape duel_abilities + duel_25v25
+// declare. Re-emitted as `Damaged` by ApplyDamageFromChronicle below
+// so the per-target hp delta path is uniform.
+@replayable @gpu_amenable
+event EffectDamageApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+entity Defender : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Wall : Agent {
+  pos: vec3,
+}
+
+entity Enemy : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config raid {
+  attack_step:    f32 = 0.18,
+  fire_radius:    f32 = 6.0 @runtime,
+  strike_radius:  f32 = 1.4,
+  arrow_damage:   f32 = 8.0 @runtime,
+  strike_damage:  f32 = 5.0,
+}
+
+init {
+  alive: 1,
+  hp:    100,
+}
+
+@spatial(radius = 6.0, kind = [Agent])
+spatial_query nearby_targets(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+@spatial(radius = 1.4, kind = [Agent])
+spatial_query nearby_walls(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+@phase(per_agent)
+physics EnemyAdvance {
+  on Tick {} where (self.alive && self.creature_type == Enemy) {
+    let toward_city = sum(d in agents where
+      if (d != self) && (d.alive) && (d.creature_type == Defender) {
+        d.pos - self.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let new_pos = self.pos + toward_city * config.raid.attack_step;
+    agents.set_pos(self, new_pos);
+  }
+}
+
+@phase(per_agent)
+physics DefenderFire {
+  on Tick {} where (self.alive && self.creature_type == Defender) {
+    for candidate in spatial.nearby_targets(self) {
+      if (candidate.alive && candidate.creature_type == Enemy) {
+        // TODO: gate on `terrain.line_of_sight(self.pos, candidate.pos)`
+        // when the auto-emitted GeneratedRuntime grows voxel_grid
+        // wiring. The elevation hierarchy is still present (defender
+        // seed z = 6 vs enemy z = 0) — when LoS lands, defenders
+        // gain the real high-ground advantage.
+        apply_ability 1 by self target candidate
+      }
+    }
+  }
+}
+
+@phase(per_agent)
+physics EnemyMelee {
+  on Tick {} where (self.alive && self.creature_type == Enemy) {
+    for candidate in spatial.nearby_walls(self) {
+      if (candidate.alive && candidate.creature_type == Wall) {
+        apply_ability 2 by self target candidate
+      }
+    }
+  }
+}
+
+@phase(post)
+physics ApplyDamageFromChronicle {
+  on EffectDamageApplied { actor: a, target: t, amount: amt } {
+    emit Damaged { source: a, target: t, amount: amt }
+  }
+}
+
+// Chronicle consumer — single @phase(post) rule that does the hp
+// delta AND the alive flip + emits a Defeated marker on the
+// transition. Same shape duel_25v25's ApplyDamage uses; merging the
+// reaper into here avoids a fusion-shape gap where a PerAgent
+// reaper would lose the chronicle binding when fused alongside the
+// PerEvent damage applier.
+@phase(post)
+physics ApplyDamage {
+  on Damaged { source: _, target: t, amount: a } {
+    let old_hp = agents.hp(t);
+    let new_hp = old_hp - a;
+    agents.set_hp(t, new_hp);
+    if (old_hp > 0.0 && new_hp <= 0.0) {
+      agents.set_alive(t, false);
+    }
+  }
+}
+
+@materialized(on_event = [Damaged])
+@decay(rate = 0.97, per = tick)
+view defender_kill_pressure(by: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: s } where s == by { self += 1.0 }
+  clamp: [0.0, 10000.0],
+}
+
+@materialized(on_event = [Damaged])
+@decay(rate = 0.92, per = tick)
+view shots_on_target(observer: Agent, target: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: s, target: t } where s == observer && t == target { self += 1.0 }
+  clamp: [0.0, 1000.0],
+}

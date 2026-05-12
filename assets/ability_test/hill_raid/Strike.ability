@@ -1,0 +1,10 @@
+// Enemy melee bash (against walls + defenders). AbilityId 2.
+
+ability Strike {
+    target: enemy
+    range: 1.4
+    cooldown: 8
+    hint: damage
+
+    damage 5.0 [PHYSICAL: 100]
+}
