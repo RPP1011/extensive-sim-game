@@ -452,6 +452,45 @@ fn emit_into(
         .kernel_specs
         .iter()
         .any(|spec| spec.bindings.iter().any(|b| b.name == "voxel_grid"));
+
+    // Walk the synthesized schedule and collect the set of kernel names
+    // that classify as `KernelTopology::Indirect` consumers — the
+    // chronicle-driven `apply_ability` consumers that read events out
+    // of the unified ring. The synthesized step() uses this list to
+    // (a) snapshot the host-side event-ring tail BEFORE clear_tail_in,
+    // and (b) overwrite each Indirect consumer's cfg `event_count`
+    // slot with the snapshot. Without this, the consumers would walk
+    // `agent_count` slots every tick — re-firing on stale records and
+    // trampling the inject-before-step lifecycle (gaps 3 + 4 from
+    // commit 353527e6's Indirect-arm doc block).
+    //
+    // `fold_*` kernels (PerAgentEventScan ViewFolds) classify as
+    // `Indirect` at the topology layer but the schedule emits them as
+    // `DispatchOp::Kernel(...)` (see `classify_topology_for_schedule`
+    // in `cg/emit/cross_cutting.rs`); they handle event counting in
+    // their own bodies and don't need the cfg overwrite. Filter them
+    // out here so the runtime list only includes "true" Indirect
+    // consumers (`physics_Apply*`-shaped chronicle handlers).
+    let mut indirect_consumer_kernel_names: Vec<String> = Vec::new();
+    for stage in &schedule_result.schedule.stages {
+        for topology in &stage.kernels {
+            if !matches!(topology, crate::cg::schedule::synthesis::KernelTopology::Indirect { .. }) {
+                continue;
+            }
+            let name = match crate::cg::emit::kernel::semantic_kernel_name_for_topology(
+                topology, &cg,
+            ) {
+                Some(n) => n,
+                None => continue,
+            };
+            if name.starts_with("fold_") {
+                continue;
+            }
+            if !indirect_consumer_kernel_names.contains(&name) {
+                indirect_consumer_kernel_names.push(name);
+            }
+        }
+    }
     let runtime_core = synthesize_runtime_core_a2(
         fixture_name,
         &artifacts,
@@ -461,6 +500,7 @@ fn emit_into(
         &comp.events,
         pair_keyed_view_present,
         binds_voxel_grid,
+        &indirect_consumer_kernel_names,
     );
     fs::write(out_dir.join("runtime_core.rs"), runtime_core)
         .unwrap_or_else(|e| panic!("write runtime_core.rs: {e}"));
@@ -672,6 +712,7 @@ fn synthesize_runtime_core_a2(
     events: &[dsl_ast::ir::EventIR],
     pair_keyed_view_present: bool,
     binds_voxel_grid: bool,
+    indirect_consumer_kernel_names: &[String],
 ) -> String {
     let kernel_count = artifacts.kernel_index.len();
     let mut out = String::new();
@@ -746,6 +787,7 @@ fn synthesize_runtime_core_a2(
         events,
         pair_keyed_view_present,
         binds_voxel_grid,
+        indirect_consumer_kernel_names,
     ));
 
     out
@@ -905,6 +947,7 @@ fn synthesize_generated_runtime_struct(
     events: &[dsl_ast::ir::EventIR],
     pair_keyed_view_present: bool,
     binds_voxel_grid: bool,
+    indirect_consumer_kernel_names: &[String],
 ) -> String {
     use crate::kernel_binding_ir::BgSource;
     use std::collections::BTreeMap;
@@ -1339,6 +1382,62 @@ fn synthesize_generated_runtime_struct(
             "        self.gpu.queue.write_buffer(&self.cfg_{kernel_name}_buf, 0, cfg_bytes);\n",
         ));
     }
+    // Indirect-consumer cfg.event_count override — close gaps 3 + 4
+    // from commit 353527e6's Indirect-arm doc block.
+    //
+    // Background: chronicle consumers (e.g. `physics_ApplyObserveBeliefUpdate`,
+    // `physics_ApplyDamage`) classify as `KernelTopology::Indirect` and
+    // emit as `DispatchOp::Indirect { kernel: KernelId::X, args_buf:
+    // BufferRef::ResidentIndirectArgs }` in SCHEDULE. Their bodies
+    // bound on `cfg.event_count` (`if event_idx >= cfg.event_count
+    // { return; }`). The default cfg write above sets `event_count =
+    // agent_count` — wrong, because:
+    //   * agent_count is 16..1024 typical, but the real event count is
+    //     the ring tail (0..N depending on what producer kernels +
+    //     host-side injects emitted).
+    //   * Old slot-0 records left from a previous tick (e.g. a
+    //     `effect_observe_applied()` host inject 50 ticks ago) STAY in
+    //     the ring (only the tail counter resets), and the consumer's
+    //     kind-tag filter would re-process them every tick with the
+    //     `agent_count` upper bound. That re-fire is the
+    //     `tom_probe_decay_pin::fresh_observation_resets_decay`
+    //     regression the naive Indirect-arm wire-up tripped.
+    //
+    // Fix: snapshot the host-side `event_ring.tail_value()` BEFORE
+    // `clear_tail_in()` zeros it, then write that snapshot to slot 0
+    // of every Indirect-consumer cfg. Both auto-emitted host-side
+    // injects (`effect_*_applied` typed methods) and per-tick GPU
+    // producers participate via `note_emits` / `append_chronicle_record`
+    // which both bump the host estimate. After consumer dispatch the
+    // estimate is reset (by the consumer's own clear_tail or via the
+    // next tick's clear_tail_in).
+    //
+    // **Limitation: in-step GPU producers don't auto-bump the host
+    // estimate.** Today's `apply_ability` dispatcher emits chronicle
+    // events via `atomicAdd(&event_tail, 1u)` from inside the kernel
+    // — the host has no visibility into the count. For those
+    // fixtures (e.g. `hill_raid`'s `apply_ability` rules) the
+    // snapshot is 0 and consumers no-op. The proper fix is a true
+    // `dispatch_workgroups_indirect` against the SeedIndirectArgs
+    // output (gaps 1 + 2 from the same doc block) — orthogonal slice.
+    if !indirect_consumer_kernel_names.is_empty() {
+        out.push_str(
+            "        // Snapshot host-side ring tail for Indirect-consumer cfg overrides.\n\
+             \x20       // See the multi-paragraph comment above for the 4-gap rationale.\n\
+             \x20       let pending_event_count: u32 = self.event_ring.tail_value();\n\
+             \x20       let pending_event_count_bytes = pending_event_count.to_le_bytes();\n",
+        );
+        for kernel_name in indirect_consumer_kernel_names {
+            // Only override if the kernel actually has a cfg buffer
+            // (every chronicle consumer does today, but be defensive).
+            if !cfg_buffer_names.contains(kernel_name) {
+                continue;
+            }
+            out.push_str(&format!(
+                "        self.gpu.queue.write_buffer(&self.cfg_{kernel_name}_buf, 0, &pending_event_count_bytes);\n",
+            ));
+        }
+    }
     out.push_str(
         "\n\
          \x20       let mut encoder = self.gpu.device.create_command_encoder(\n\
@@ -1456,8 +1555,32 @@ fn synthesize_generated_runtime_struct(
             }
             let body = binding_fields.join("\n");
             let dispatch_fn = format!("dispatch_{}", spec.name.to_lowercase());
+            // Indirect-consumer kernels match BOTH `Kernel(...)` AND
+            // `Indirect { kernel, .. }` arms (the latter is what the
+            // synthesized SCHEDULE actually contains for a chronicle
+            // consumer). The dispatch body is identical — the consumer
+            // kernel reads `cfg.event_count` (which step() wrote with
+            // the host tail snapshot above) to bound its event walk.
+            // Keeping `Kernel(...)` in the or-pattern is defensive: if
+            // the schedule classifier ever re-routes a consumer back to
+            // `Kernel`, the arm still fires.
+            let arm_pattern = if indirect_consumer_kernel_names
+                .iter()
+                .any(|n| n == &spec.name)
+            {
+                format!(
+                    "schedule::DispatchOp::Kernel(KernelId::{pascal}) \
+                     | schedule::DispatchOp::Indirect {{ kernel: KernelId::{pascal}, .. }}",
+                    pascal = spec.pascal,
+                )
+            } else {
+                format!(
+                    "schedule::DispatchOp::Kernel(KernelId::{pascal})",
+                    pascal = spec.pascal,
+                )
+            };
             out.push_str(&format!(
-                "                schedule::DispatchOp::Kernel(KernelId::{pascal}) => {{\n\
+                "                {arm_pattern} => {{\n\
                  \x20                   let bindings = {kname}::{pascal}Bindings {{\n\
                  {body}\n\
                  \x20                   }};\n\
@@ -1512,8 +1635,28 @@ fn synthesize_generated_runtime_struct(
         }
         let extras_body = extras_fields.join("\n");
         let dispatch_fn = format!("dispatch_{}", spec.name.to_lowercase());
+        // Indirect-consumer or-pattern (see the parallel block above for
+        // the rationale). Both `Kernel(...)` and `Indirect { kernel, .. }`
+        // dispatch through the same `dispatch::dispatch_<name>` helper;
+        // the consumer kernel's body bounds on `cfg.event_count` set
+        // earlier in step() from the host-side ring tail snapshot.
+        let arm_pattern = if indirect_consumer_kernel_names
+            .iter()
+            .any(|n| n == &spec.name)
+        {
+            format!(
+                "schedule::DispatchOp::Kernel(KernelId::{pascal}) \
+                 | schedule::DispatchOp::Indirect {{ kernel: KernelId::{pascal}, .. }}",
+                pascal = spec.pascal,
+            )
+        } else {
+            format!(
+                "schedule::DispatchOp::Kernel(KernelId::{pascal})",
+                pascal = spec.pascal,
+            )
+        };
         out.push_str(&format!(
-            "                schedule::DispatchOp::Kernel(KernelId::{pascal}) => {{\n\
+            "                {arm_pattern} => {{\n\
              \x20                   let extras = {kname}::{pascal}Extras {{\n\
              {extras_body}\n\
              \x20                   }};\n\
@@ -1532,79 +1675,45 @@ fn synthesize_generated_runtime_struct(
             pascal = spec.pascal,
         ));
     }
-    // The catch-all swallows `DispatchOp::Indirect { kernel, args_buf }`
-    // and `DispatchOp::FixedPoint { kernel, max_iter }` entries. These
-    // are NOT no-ops at the topology level — they're the consumer-side
-    // dispatch entries for chronicle producer→consumer chains
-    // (`Indirect`, e.g. `physics_ApplyObserveBeliefUpdate` in
-    // `tom_probe.sim`) and physics-rule cascade fixed-points
-    // (`FixedPoint`).
+    // Catch-all for unhandled DispatchOp variants. Status (2026-05-11):
     //
-    // Wiring them through `step()` requires a coordinated multi-slice
-    // change that's larger than the dispatch-arm wire-up alone:
+    //   * `DispatchOp::Kernel(...)` — handled by the per-kernel arms
+    //     emitted in the loop above (every emitted kernel produces an
+    //     arm).
+    //   * `DispatchOp::Indirect { kernel: X, .. }` — handled when X is
+    //     in `indirect_consumer_kernel_names`: each per-kernel arm
+    //     becomes an or-pattern matching BOTH `Kernel(X)` and
+    //     `Indirect { kernel: X, .. }` and runs the same dispatch
+    //     body. The consumer kernel reads `cfg.event_count` (set to the
+    //     host-side ring tail snapshot earlier in step()) to bound its
+    //     event walk, so direct `dispatch_workgroups(agent_count, ...)`
+    //     is correct (the threads past the event count early-return).
+    //   * `DispatchOp::FixedPoint { kernel, max_iter }` — still falls
+    //     through. Cascade-physics fixed-point iteration requires a
+    //     loop in the synthesized step() with per-iteration A/B-ring
+    //     swap. Tracked separately.
+    //   * `DispatchOp::GatedBy { kernel, gate }` — never emitted by
+    //     today's `synthesize_schedule`; placeholder for future use.
     //
-    //   1. **Kernel-emit side has no indirect-dispatch entry point.** Every
-    //      kernel's `record()` method calls `pass.dispatch_workgroups(...)`
-    //      (direct), not `pass.dispatch_workgroups_indirect(args_buf, 0)`.
-    //      The Indirect topology classifier
-    //      (`cg::emit::program::compose_dispatch_call`) collapses
-    //      `KernelTopology::Indirect` to `DispatchShape::PerEvent` and
-    //      emits a direct dispatch keyed on `agent_cap`. Adding an
-    //      indirect arm here without a sibling
-    //      `record_indirect()` would still emit a direct dispatch.
-    //
-    //   2. **Synthesised schedule order puts `seed_indirect_*` AFTER its
-    //      consumer.** Inspect any built `runtime_core.rs` (e.g.
-    //      `target/release/build/tom_probe_runtime-*/out/generated.rs`):
-    //      `SeedIndirect0` is scheduled after every
-    //      `PhysicsApply*BeliefUpdate` Indirect entry. Even with a real
-    //      `dispatch_workgroups_indirect` wire-up, the args buffer would
-    //      hold last tick's value at consumer-dispatch time.
-    //
-    //   3. **Per-tick cfg writes use a single `event_count = agent_count`
-    //      across every kernel's cfg buffer.** Indirect consumers need
-    //      `event_count = ring.tail()` for the body's `if (event_idx
-    //      >= cfg.event_count) { return; }` early-return to bound on
-    //      actual emit count, not `agent_count`.
-    //
-    //   4. **`clear_tail_in` / `clear_ring_headers_in` semantics conflict
-    //      with the host-side inject-before-step pattern.** Today the
-    //      auto-emitted `effect_*_applied` typed injectors (created by
-    //      the `@host_callable` annotation, see below) write a record
-    //      into the ring and bump the GPU tail BEFORE the next
-    //      `step()` runs. step()'s `clear_tail_in` zeros the tail
-    //      inside its encoder, and any added `clear_ring_headers_in`
-    //      would zero the inject's record header — losing the event.
-    //
-    // The bespoke `tom_probe_runtime/src/lib.rs` works around this by
-    // hand-rolling per-verb methods (`observe`, `scry`, `reveal`,
-    // `decoy`, `erase_belief`, `disguise`) that build the chronicle
-    // record AND immediately encode the matching consumer kernel
-    // dispatch — bypassing both `step()` and the schedule's Indirect
-    // entries entirely. The mega-crate port at
-    // `crates/sims/tests/tom_probe_helpers/mod.rs` mirrors that
-    // pattern (`dispatch_observe`, `dispatch_scry`, …).
-    //
-    // **Naive wire-up was tried and reverted (2026-05-11):** an
-    // or-pattern arm `Kernel(KernelId::X) | Indirect { kernel:
-    // KernelId::X, .. } => { dispatch::dispatch_X(..., agent_count) }`
-    // builds and runs but breaks the
-    // `tom_probe_decay_pin::fresh_observation_resets_decay` test
-    // because the consumer kernel re-fires every step on stale ring
-    // contents (the consumer's kind-tag filter matches a slot-0 record
-    // left over from a host inject 50 ticks ago).
-    //
-    // Until those four gaps are addressed (kernel-emit indirect entry
-    // + schedule order fix + per-consumer cfg + inject-step
-    // coordination), the Indirect arm stays in the catch-all and the
-    // typed `effect_*_applied` injectors require a sibling
-    // synchronous wrapper that dispatches the consumer immediately.
+    // **In-step GPU producers limitation.** When chronicle events are
+    // produced by IN-STEP GPU kernels (e.g. `apply_ability` dispatcher
+    // calls `atomicAdd(&event_tail, 1u)`), the host-side `tail_value()`
+    // estimate is NOT bumped — only `note_emits` / typed
+    // `effect_*_applied` injectors update it. Such fixtures (e.g.
+    // `hill_raid`'s `apply_ability` rules) get `event_count = 0` at
+    // consumer dispatch and the consumer no-ops. The proper fix is a
+    // true `dispatch_workgroups_indirect(args_buf, 0)` against the
+    // SeedIndirectArgs output (gaps 1 + 2 from commit 353527e6's
+    // doc block — kernel-emit indirect entry + schedule reorder of
+    // SeedIndirect0 BEFORE its consumers). That wiring is orthogonal
+    // to this slice and tracked separately.
     out.push_str(
-        "                // DispatchOp::Indirect / DispatchOp::FixedPoint\n\
-         \x20               // are intentionally unhandled. See\n\
-         \x20               // `synthesize_generated_runtime_struct` source comment\n\
-         \x20               // for the four-gap blocker (kernel-emit indirect entry,\n\
-         \x20               // schedule order, per-consumer cfg, inject coordination).\n\
+        "                // DispatchOp::FixedPoint, DispatchOp::GatedBy,\n\
+         \x20               // and DispatchOp::Indirect for kernels not in\n\
+         \x20               // indirect_consumer_kernel_names fall through here.\n\
+         \x20               // See `synthesize_generated_runtime_struct` source\n\
+         \x20               // comment for status + remaining gaps (in-step GPU\n\
+         \x20               // producers, FixedPoint cascade iteration).\n\
          \x20               _ => {}\n\
          \x20           }\n\
          \x20       }\n\
@@ -1782,6 +1891,7 @@ mod tests {
             &[],
             false,
             false,
+            &[],
         );
 
         // Braces balance.
@@ -1855,6 +1965,7 @@ mod tests {
             &[event],
             false,
             false,
+            &[],
         );
 
         // Typed signature with snake_case method name + matching params.
@@ -1918,6 +2029,7 @@ mod tests {
             &[event],
             false,
             false,
+            &[],
         );
 
         // The generic helper still lands.
