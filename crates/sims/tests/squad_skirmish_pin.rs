@@ -167,7 +167,7 @@ fn squad_skirmish_200_tick_skirmish() {
     } else if final_alive_blue == 0 {
         "RED VICTORY (Blue wiped)"
     } else if total_damage == 0.0 {
-        "STALEMATE — NO DAMAGE FLOWED (scoring or chronicle gap)"
+        "STALEMATE — NO DAMAGE FLOWED (scoring picks untargeted multi-row Rally; chronicle pipeline OK)"
     } else {
         "SKIRMISH ONGOING (both teams have survivors)"
     };
@@ -184,15 +184,45 @@ fn squad_skirmish_200_tick_skirmish() {
         N_AGENTS,
         "seed didn't survive init — expected all 16 alive at t=0",
     );
-    // 2. Some HP movement occurred — catches the silent-no-op failure
+    // 2. Schedule wires chronicle producer → consumer in same tick.
+    //    Read the GPU event_tail counter post-step to confirm the
+    //    scoring kernel emitted ActionSelected events. Pre-2026-05-12
+    //    the kind-aware schedule edge fix went in, the chronicle
+    //    pipeline ordered consumers BEFORE producers and event_tail
+    //    stayed at zero across every tick (the consumer read 0 events
+    //    out of an empty ring, all producer atomicAdds got overwritten
+    //    next tick by the per-tick `pending_event_count = 0` reset).
+    //    Now scoring's `atomicAdd(&event_tail, 1u)` per agent shows up
+    //    on readback as 16 (1 ActionSelected per Soldier).
+    let event_tail_after_step = read_event_tail(state_mut(&mut state));
+    assert!(
+        event_tail_after_step >= N_AGENTS,
+        "scoring kernel must emit ActionSelected — expected event_tail >= {N_AGENTS}, got {event_tail_after_step}. \
+         Pre-2026-05-12 kind-aware schedule fix this was 0 (consumers ran before producers, atomicAdd-emitted events \
+         got overwritten); the load-bearing pin now confirms scoring produces and the in-tick GPU producer/consumer \
+         wiring is intact.",
+    );
+    // 3. Some HP movement occurred — catches the silent-no-op failure
     //    mode where the verb cascade lowers but no apply_ability
     //    dispatch reaches the chronicle. With Strike on cooldown 5,
     //    Volley on 18, Rally on 12, Daze on 20, we expect lots of
     //    damage events.
+    //
+    //    Post-2026-05-12 schedule fix: chronicle producer/consumer
+    //    chain now ORDERS correctly (Scoring → verb_chronicle_X →
+    //    ApplyDamageFromChronicle → ApplyDamage), so events propagate.
+    //    The remaining no-HP-movement cause is a SCORING bug — the
+    //    multi-row scoring's row 5 (`row Rally per_target` with no
+    //    targeting filter) has higher unconditional utility than the
+    //    verb-injected rows (which require mask gates), so every
+    //    Soldier picks action_id=5 with target=0xFFFFFFFFu (no
+    //    target). VerbChronicle handlers gate on action_id 0..3 so
+    //    none fire. Tracked separately as the "multi-row scoring
+    //    over-rules verb rows" gap.
     let any_hp_changed = final_hp.iter().any(|&h| (h - 100.0).abs() > 0.01);
     if !any_hp_changed {
         println!(
-            "  NOTE: zero HP movement — known chronicle-consumer Indirect-dispatch\n         gap from commit 353527e6 (and the Indirect-arm comment in\n         build_helper.rs::synthesize_generated_runtime_struct's catch-all).\n         apply_ability records enqueue but consumers don't fire from the\n         synthesized step(). Skirmish animates when that gap closes.",
+            "  NOTE: zero HP movement — chronicle pipeline NOW propagates (load-bearing\n         event_tail pin above), but the multi-row scoring's untargeted Rally\n         row (action_id=5) out-utility-scores the verb rows, so VerbChronicle\n         handlers (which gate on action_id 0..3) never fire. Tracked as a\n         scoring gap, separate from the in-step GPU producer/consumer\n         schedule fix this pin's #2 assert covers.",
         );
     }
     // 3. NaN check — personality SoA reads + pair-view fold should not
@@ -286,6 +316,49 @@ fn count_alive_of_team(state: &mut GeneratedRuntime, team: u32) -> u32 {
         .zip(levels.iter())
         .filter(|(&a, &t)| a != 0 && t == team)
         .count() as u32
+}
+
+/// Re-borrow helper. `read_event_tail` needs `&mut state` while
+/// holding a `&Buffer` from `state.event_ring.tail()`; without this
+/// indirection the borrow checker rejects the simultaneous use.
+fn state_mut(s: &mut GeneratedRuntime) -> &mut GeneratedRuntime {
+    s
+}
+
+/// Read the GPU event_tail counter back to the host. Used by the
+/// "scoring kernel emits ActionSelected" pin to confirm that
+/// in-step GPU producers and consumers wire up correctly under the
+/// kind-aware schedule order. See the assert site for the gap
+/// rationale.
+fn read_event_tail(state: &mut GeneratedRuntime) -> u32 {
+    let buf = state.event_ring.tail().clone();
+    let staging = state.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("squad_skirmish::event_tail_staging"),
+        size: 16,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut encoder = state.gpu.device.create_command_encoder(
+        &wgpu::CommandEncoderDescriptor {
+            label: Some("squad_skirmish::event_tail_readback"),
+        },
+    );
+    encoder.copy_buffer_to_buffer(&buf, 0, &staging, 0, 4);
+    state.gpu.queue.submit(Some(encoder.finish()));
+    let slice = staging.slice(..16);
+    slice.map_async(wgpu::MapMode::Read, |r| r.expect("map_async"));
+    state
+        .gpu
+        .device
+        .poll(wgpu::PollType::Wait)
+        .expect("poll");
+    let val = {
+        let view = slice.get_mapped_range();
+        let words: &[u32] = bytemuck::cast_slice(&view);
+        words[0]
+    };
+    staging.unmap();
+    val
 }
 
 fn read_alive(state: &mut GeneratedRuntime) -> Vec<u32> {

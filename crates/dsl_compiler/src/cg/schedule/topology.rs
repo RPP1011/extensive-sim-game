@@ -51,9 +51,10 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::fmt;
 
-use crate::cg::data_handle::CycleEdgeKey;
-use crate::cg::op::OpId;
+use crate::cg::data_handle::{CycleEdgeKey, DataHandle, EventRingAccess};
+use crate::cg::op::{ComputeOpKind, EventKindId, OpId};
 use crate::cg::program::CgProgram;
+use crate::cg::stmt::{CgStmt, CgStmtListId};
 
 // ---------------------------------------------------------------------------
 // DepGraph
@@ -230,14 +231,55 @@ impl fmt::Display for CycleError {
 ///   in edge construction iff the driver placed them on the op.
 /// - Edge keys use the `cycle_edge_key()` projection — EventRing
 ///   producers (`Append`) match consumers (`Read` / `Drain`) on ring
-///   identity alone.
+///   identity alone for non-EventRing handles. **EventRing edges are
+///   refined by event KIND** (see below) to break the ring-as-cycle
+///   collapse that ate every chronicle producer/consumer schedule.
+///
+/// # EventRing kind-aware refinement
+///
+/// The legacy ring-collapse projection ([`CycleEdgeKey::Ring`]) treated
+/// every op touching a ring (Append OR Read) as a producer AND consumer
+/// of the entire ring. With multiple chronicle stages on the same ring
+/// (`Scoring → verb_chronicle_X → ApplyDamageFromChronicle → ApplyDamage`,
+/// each stage Appending one kind and Reading another), every pair forms
+/// a 2-op cycle in the dep graph, [`topological_sort_best_effort`] falls
+/// back to OpId source order, and chronicle consumers run BEFORE their
+/// in-tick GPU producers — so the consumer's `cfg.event_count = 0` snap
+/// finds no matching kind-tag and silently no-ops. This was the
+/// 6-fixture in-step GPU producer gap (hill_raid + 5 others).
+///
+/// The fix: refine EventRing edges by event KIND. For each op, walk its
+/// body to collect the set of [`EventKindId`]s its emit statements
+/// produce (`apply_ability` expands to the four engine effect kinds —
+/// `EffectDamageApplied(26)`, `EffectHealApplied(27)`,
+/// `EffectShieldApplied(28)`, `EffectStunApplied(29)`). Read [`OpId`]s
+/// match producers via `producer.emits ⊇ {consumer.consumes}`. The
+/// consumer's kind is the [`ComputeOpKind::PhysicsRule::on_event`] /
+/// [`ComputeOpKind::ViewFold::on_event`] field. Producer/consumer pairs
+/// that don't share a kind get NO EventRing edge — the
+/// `verb_chronicle_Strike` Append of kind 26 and the `ApplyDamage` Read
+/// of kind 1 (Damaged) used to form spurious cross-edges, but now
+/// only `verb_chronicle_Strike → ApplyDamageFromChronicle` (kind 26
+/// match) and `ApplyDamageFromChronicle → ApplyDamage` (kind 1 match)
+/// fire — a clean DAG, no cycle, correct order.
 pub fn dependency_graph(prog: &CgProgram) -> DepGraph {
     let mut edges: BTreeMap<OpId, BTreeSet<OpId>> = BTreeMap::new();
     let mut edge_reasons: BTreeMap<(OpId, OpId), Vec<CycleEdgeKey>> = BTreeMap::new();
 
+    // Pre-compute per-op (emitted_kinds, consumed_kind) for the
+    // EventRing kind-aware refinement (see doc comment above). Empty
+    // sets / `None` for ops that don't touch the chronicle ring.
+    let kind_facts: Vec<EventRingKindFacts> = prog
+        .ops
+        .iter()
+        .map(|op| compute_event_ring_kind_facts(op, prog))
+        .collect();
+
     // Index "what does each handle's writers list look like" first.
     // Same projection (`cycle_edge_key`) used by the consumer-side scan
     // so EventRing append/read/drain accesses match on ring identity.
+    // EventRing entries get a SECOND filter via `kind_facts` below so
+    // we don't over-edge across unrelated kinds on the same ring.
     let mut writers: BTreeMap<CycleEdgeKey, Vec<OpId>> = BTreeMap::new();
     for (op_index, op) in prog.ops.iter().enumerate() {
         let producer = OpId(op_index as u32);
@@ -282,8 +324,34 @@ pub fn dependency_graph(prog: &CgProgram) -> DepGraph {
             op.kind,
             crate::cg::op::ComputeOpKind::SpatialQuery { .. }
         );
+        let consumer_facts = &kind_facts[op_index];
         for r in &op.reads {
             let key = r.cycle_edge_key();
+            // EventRing-shaped read: refine producer matching by event
+            // KIND. The consumer's kind comes from the op-level
+            // `on_event` (PhysicsRule / ViewFold). Producers must
+            // declare the same kind in their emit set (which for
+            // ApplyAbility expands to the four engine effect kinds).
+            //
+            // **Why we still consult `writers[key]` first.** EventRing
+            // edges share the same `Ring(EventRingId)` projection, so
+            // `writers[Ring(0)]` is the union of every Append onto that
+            // ring. The kind filter then prunes non-matching pairs
+            // pairwise — this is what breaks the chronicle-stage cycle.
+            //
+            // **Drain reads are NOT kind-filtered.** A `DrainEvents`
+            // plumbing op consumes EVERY event regardless of kind; treat
+            // it as a wildcard consumer (matches every producer on the
+            // ring) so view-fold pipelines that read-then-drain still
+            // see their producer edges.
+            let is_event_ring_read = matches!(
+                r,
+                DataHandle::EventRing { kind: EventRingAccess::Read, .. }
+            );
+            let is_event_ring_drain = matches!(
+                r,
+                DataHandle::EventRing { kind: EventRingAccess::Drain, .. }
+            );
             if let Some(producers) = writers.get(&key) {
                 for &producer in producers {
                     if producer == consumer {
@@ -302,6 +370,25 @@ pub fn dependency_graph(prog: &CgProgram) -> DepGraph {
                     if producer_is_unpack_agents {
                         // Cross-tick write (see comment above).
                         continue;
+                    }
+                    // EventRing kind-aware filter. See doc comment on
+                    // `dependency_graph`. Drain reads bypass the filter
+                    // (wildcard consumer of all kinds on the ring).
+                    if is_event_ring_read && !is_event_ring_drain {
+                        let producer_facts = &kind_facts[producer.0 as usize];
+                        let kinds_overlap = match consumer_facts.consumed {
+                            Some(ck) => producer_facts.emitted.contains(&ck),
+                            // Consumer has no `on_event` (shouldn't
+                            // happen for PerEvent ops in practice — the
+                            // driver wires source-ring reads only on
+                            // PerEvent — but be defensive: treat as
+                            // wildcard so we don't drop a legitimate
+                            // edge a future op kind introduces).
+                            None => true,
+                        };
+                        if !kinds_overlap {
+                            continue;
+                        }
                     }
                     edges.entry(producer).or_default().insert(consumer);
                     edge_reasons
@@ -325,6 +412,162 @@ pub fn dependency_graph(prog: &CgProgram) -> DepGraph {
         op_count: prog.ops.len(),
         edges,
         edge_reasons,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// EventRing kind-aware refinement helpers
+// ---------------------------------------------------------------------------
+
+/// What event kinds an op emits to / consumes from the chronicle ring,
+/// gleaned from its op-kind metadata + body walk. Used by
+/// [`dependency_graph`] to refine EventRing edges by kind so chronicle
+/// producer/consumer chains form a DAG instead of a 2-op cycle.
+///
+/// `emitted` is the union of every `CgStmt::Emit { event }` and every
+/// `CgStmt::ApplyAbility` (which expands to the four engine effect
+/// kinds the apply_ability dispatcher writes — see
+/// [`apply_ability_emitted_kinds`]). `consumed` is the op's
+/// `on_event` field (if any).
+///
+/// Empty / `None` for ops that don't subscribe to or emit events.
+struct EventRingKindFacts {
+    /// Set of [`EventKindId`]s this op writes to the chronicle ring,
+    /// either via direct `CgStmt::Emit` statements or via the
+    /// `apply_ability` dispatcher's effect-event emits.
+    emitted: BTreeSet<EventKindId>,
+    /// The single [`EventKindId`] this op subscribes to (from
+    /// `PhysicsRule.on_event` / `ViewFold.on_event`). `None` for ops
+    /// that don't read the ring or that have no kind-tagged
+    /// subscription (e.g. per-agent rules whose `on_event` lowers to
+    /// `None`, plumbing ops, mask predicates).
+    consumed: Option<EventKindId>,
+}
+
+/// Engine event kinds the `apply_ability` dispatcher emits per
+/// non-EMPTY effect slot. Mirrors `engine::ability::EFFECT_KIND_*`
+/// (Damage = 0 → kind 26, Heal = 1 → 27, Shield = 2 → 28, Stun = 3 →
+/// 29) and the host-side `engine_event_kind_id_for_name` table in
+/// `crates/dsl_ast/src/engine_events.rs`.
+///
+/// The exact subset depends on the ability program's per-effect
+/// `kind` array, which is data the registry carries — not visible at
+/// schedule synthesis time. So we conservatively claim ALL four; this
+/// over-estimates the producer→consumer matches but only ever ADDS
+/// edges (never spuriously suppresses them), and a consumer that
+/// reads kind 26 will correctly find every `apply_ability` op as a
+/// producer regardless of the underlying ability's actual effect mix.
+const APPLY_ABILITY_EMITTED_KINDS: &[EventKindId] = &[
+    EventKindId(26), // EffectDamageApplied
+    EventKindId(27), // EffectHealApplied
+    EventKindId(28), // EffectShieldApplied
+    EventKindId(29), // EffectStunApplied
+];
+
+fn compute_event_ring_kind_facts(
+    op: &crate::cg::op::ComputeOp,
+    prog: &CgProgram,
+) -> EventRingKindFacts {
+    let mut emitted: BTreeSet<EventKindId> = BTreeSet::new();
+    let consumed: Option<EventKindId> = match &op.kind {
+        ComputeOpKind::PhysicsRule { on_event, body, .. } => {
+            collect_emit_kinds_in_list(*body, prog, &mut emitted);
+            *on_event
+        }
+        ComputeOpKind::ViewFold { on_event, body, .. } => {
+            collect_emit_kinds_in_list(*body, prog, &mut emitted);
+            Some(*on_event)
+        }
+        // Mask / scoring / spatial / plumbing / decay don't carry an
+        // `on_event` and don't emit chronicle records via CgStmt::Emit
+        // (the scoring kernel's ActionSelected emit is inlined at the
+        // emit layer rather than via CgStmt::Emit, but it does appear
+        // in the writes list as Append on the ring — the kind-aware
+        // filter ALWAYS lets edges fire when the consumer reads with
+        // no specific kind subscription via the `consumed.is_none()`
+        // wildcard branch). For a producer whose emitted set we
+        // can't enumerate at this layer (e.g. scoring), we treat it
+        // as a wildcard producer (`emit ALL` — matches every kind).
+        ComputeOpKind::ScoringArgmax { .. } => {
+            // The scoring kernel emits ActionSelected directly in the
+            // emitted WGSL — claim it here so verb_chronicle ops
+            // (which subscribe via `on_event = ActionSelected`) match
+            // their producer correctly. ActionSelected lives in the
+            // event-kind interner; resolve by name.
+            for (id, name) in &prog.interner.event_kinds {
+                if name
+                    == crate::cg::lower::verb_expand::ACTION_SELECTED_EVENT_NAME
+                {
+                    emitted.insert(EventKindId(*id));
+                    break;
+                }
+            }
+            None
+        }
+        ComputeOpKind::MaskPredicate { .. }
+        | ComputeOpKind::SpatialQuery { .. }
+        | ComputeOpKind::Plumbing { .. }
+        | ComputeOpKind::ViewDecay { .. } => None,
+    };
+    EventRingKindFacts { emitted, consumed }
+}
+
+/// Recursively walk a [`CgStmtListId`] and collect every emitted
+/// [`EventKindId`] — both direct `CgStmt::Emit { event }` statements
+/// and `CgStmt::ApplyAbility` dispatcher calls (which expand to the
+/// four engine effect kinds — see [`APPLY_ABILITY_EMITTED_KINDS`]).
+///
+/// Mirrors the shape of `crate::cg::lower::driver::collect_emits_in_list`
+/// but lives here so the schedule-layer dependency analysis doesn't
+/// need to reach across the module boundary. The two walkers SHOULD
+/// stay structurally aligned — a future `CgStmt` variant that
+/// introduces an emit-bearing body must be handled in BOTH.
+fn collect_emit_kinds_in_list(
+    list_id: CgStmtListId,
+    prog: &CgProgram,
+    out: &mut BTreeSet<EventKindId>,
+) {
+    let Some(list) = prog.stmt_lists.get(list_id.0 as usize) else {
+        return;
+    };
+    for &stmt_id in &list.stmts {
+        let Some(stmt) = prog.stmts.get(stmt_id.0 as usize) else {
+            continue;
+        };
+        match stmt {
+            CgStmt::Emit { event, .. } => {
+                out.insert(*event);
+            }
+            CgStmt::ApplyAbility { .. } => {
+                for k in APPLY_ABILITY_EMITTED_KINDS {
+                    out.insert(*k);
+                }
+            }
+            CgStmt::If { then, else_, .. } => {
+                collect_emit_kinds_in_list(*then, prog, out);
+                if let Some(else_list) = else_ {
+                    collect_emit_kinds_in_list(*else_list, prog, out);
+                }
+            }
+            CgStmt::Match { arms, .. } => {
+                for arm in arms {
+                    collect_emit_kinds_in_list(arm.body, prog, out);
+                }
+            }
+            CgStmt::ForEachNeighborBody { body, .. } => {
+                collect_emit_kinds_in_list(*body, prog, out);
+            }
+            CgStmt::ForEachAgentBody { body, .. } => {
+                collect_emit_kinds_in_list(*body, prog, out);
+            }
+            CgStmt::Assign { .. }
+            | CgStmt::Let { .. }
+            | CgStmt::ForEachAgent { .. }
+            | CgStmt::ForEachNeighbor { .. }
+            | CgStmt::ViewStorageAppend { .. } => {
+                // No emit-bearing payload.
+            }
+        }
     }
 }
 

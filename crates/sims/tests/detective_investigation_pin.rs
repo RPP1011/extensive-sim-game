@@ -256,11 +256,23 @@ fn detective_investigation_1000_tick_drain() {
             "  NOTE: zero Witnessed events fired — ObserveAndAccrue rule didn't propagate.\n        Possible causes: spatial.nearby_targets returns no candidates,\n        rng.action() lowering broken in PerAgent dispatch, or\n        the fused-kernel order swallowed the emit.",
         );
     }
-    if total_accusations == 0.0 {
-        println!(
-            "  NOTE: zero Accused events fired — verb cascade didn't write any\n        chronicle records, OR the chronicle re-emit physics block didn't\n        consume them. See gap doc for the action_id-from-chronicle gap.",
-        );
-    }
+    // Load-bearing: the chronicle re-emit physics block (`on
+    // EffectDamageApplied → emit Accused`) MUST consume the verb
+    // cascade's apply_ability outputs. Pre-2026-05-12 the schedule
+    // ordered the chronicle consumer BEFORE the producer (kind-aware
+    // edge fix) and total_accusations stayed at 0 across 1000 ticks.
+    // Post-fix the load-bearing assertion confirms the in-step GPU
+    // producer/consumer chain wires up correctly.
+    assert!(
+        total_accusations > 0.0,
+        "zero Accused events after {TICKS} ticks — chronicle re-emit physics rule \
+         (`physics ApplyDamageFromChronicle` consuming EffectDamageApplied) didn't \
+         fire. Pre-2026-05-12 kind-aware schedule fix this was the symptom of the \
+         in-step GPU producer/consumer ordering gap (consumers ran before producers, \
+         `cfg.event_count = 0` snap missed the producer's atomicAdd). Now the \
+         assertion is load-bearing: any regression in the producer-before-consumer \
+         schedule order will trip it.",
+    );
     if accuracy_pct > 0.0 && accuracy_pct < 33.3 {
         println!(
             "  NOTE: top-1 belief accuracy ({accuracy_pct:.1}%) is below the\n        baseline of 3/15 = 20% (random pick). Investigate whether the\n        guilty-bit channel is being read correctly by ObserveAndAccrue.",
