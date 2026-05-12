@@ -2950,7 +2950,13 @@ fn edit_distance(a: &str, b: &str) -> usize {
 /// - Paired with `@materialized` (errors otherwise — v1 only supports
 ///   anchor-pattern decay on event-folded views).
 /// - Host body is a `Fold` (lazy views have no persistent state to decay).
-/// - `rate` argument is a float literal in the open interval `(0.0, 1.0)`.
+/// - `rate` argument is a float literal in the closed interval `[0.0, 1.0)`.
+///   `rate = 0.0` is the "full reset every tick" idiom — the per-tick
+///   decay multiplier zeroes the previous storage before the fold's
+///   event handlers add the current tick's contributions, so the view
+///   reflects only this-tick state. `rate = 1.0` is rejected because it
+///   makes the decay kernel a no-op (callers should drop the annotation
+///   instead, which avoids the wasted dispatch).
 /// - `per` argument is the identifier `tick`. Other time bases are parsed
 ///   but rejected here.
 /// - No extra unknown keys.
@@ -3043,10 +3049,17 @@ fn lower_decay_hint(
         span: ann.span,
     })?;
 
-    if !(rate > 0.0 && rate < 1.0) || !rate.is_finite() {
+    // `rate = 0.0` is the "full reset every tick" idiom: the decay
+    // kernel multiplies storage by 0 before the fold runs, so the view
+    // reflects only the current tick's contributions. The downstream
+    // WGSL emit (`build_view_decay_wgsl_body`) handles `rate=0` with no
+    // special-case — `old * 0.0 = 0.0` is exactly the reset semantic.
+    // `rate = 1.0` stays rejected because it makes the decay kernel a
+    // no-op; callers should drop the annotation instead.
+    if !(rate >= 0.0 && rate < 1.0) || !rate.is_finite() {
         return Err(ResolveError::InvalidDecayHint {
             detail: format!(
-                "`rate` must be a finite float in the open interval (0.0, 1.0); got {rate}"
+                "`rate` must be a finite float in the half-open interval [0.0, 1.0); got {rate}"
             ),
             span: ann.span,
         });

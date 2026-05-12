@@ -671,7 +671,7 @@ pub enum ComputeOpKind {
     ///
     /// The decay rate is carried as raw `u32` bits (`f32::to_bits()`) so
     /// the variant remains `Eq + Hash + Ord` — the AST-side
-    /// [`dsl_ast::ir::DecayHint`] holds the validated `f32` (∈ (0.0, 1.0)),
+    /// [`dsl_ast::ir::DecayHint`] holds the validated `f32` (∈ [0.0, 1.0)),
     /// the lowering converts via `f32::to_bits()` once.
     ViewDecay {
         view: ViewId,

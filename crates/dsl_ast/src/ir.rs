@@ -875,8 +875,10 @@ pub enum StorageHint {
 
 /// Parsed `@decay(rate=R, per=tick)` annotation. The anchor-pattern
 /// emitter reads `rate` to generate `base * rate.powi(tick - anchor)`.
-/// Rate is a compile-time constant in `(0.0, 1.0)`. Variable decay
-/// rates are not supported in v1.
+/// Rate is a compile-time constant in `[0.0, 1.0)` — `0.0` is the
+/// "full reset every tick" idiom (decay multiplier zeroes prior
+/// storage before the fold runs); `1.0` is rejected as a no-op.
+/// Variable decay rates are not supported in v1.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct DecayHint {
     pub rate: f32,
