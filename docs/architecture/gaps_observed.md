@@ -29,26 +29,40 @@ on Sold { seller: s, buyer: _, good: g, price: _ }
   where s == merchant && g == good { self -= 1.0 }
 ```
 
-**Diag:**
+**Diag (pre-fix):**
 ```
 [trade_caravans lower diag] view #1 self-update operator -= not supported
 by CG IR; only +=, |=, and = are lowered today
 ```
 
-**Class:** lowering / CG IR. The well-formed checker detects the unsupported
-operator and skips the body, so the fold kernel emits BUT the decrement
-arm is silently dropped. Per-merchant inventory therefore monotonically
-increases on Bought (and on Sold via the additive arm — see Gap T6).
+**Class:** lowering / CG IR. The well-formed checker detected the
+unsupported operator and skipped the body, so the fold kernel emitted
+BUT the decrement arm was silently dropped.
 
 **Why this matters:** any view that wants signed accumulation
-(inventory delta, net wealth flow, score difference) is currently
+(inventory delta, net wealth flow, score difference) was previously
 limited to a single-direction fold. Multi-event views with opposing
-arms cannot be expressed.
+arms could not be expressed.
 
-**Likely fix surface:** `crates/dsl_compiler/src/cg/lower/view.rs`
-(grep for `+=, |=, and =` to find the gating site). Add `SubAssign`
-arm + WGSL emit support for `atomicSub` (or equivalent f32 emulation
-via `atomicCompareExchangeWeak`).
+**Status (2026-05-11, fixed):** `ViewFoldOp::Sub` added (this commit).
+Lower accepts `-=`, emit produces native `atomicSub` for u32 views and
+a CAS+sub loop for f32 views (mirrors the `+=` f32 CAS+add shape). Test
+pin: `crates/dsl_compiler/tests/view_fold_self_sub_emit.rs` (3 pins —
+u32 atomicSub, f32 CAS+sub, regression guard on `+= 1u` → atomicAdd).
+
+**Follow-up — Gap T1b (introduced when fixing T1):** the per-view
+`ViewSignature::fold_op` field is a single `Option<ViewFoldOp>`, not a
+per-handler vector. `register_view_fold_op` is called once per fold
+handler and last-write-wins. For the trade_caravans `inventory` view
+(2 handlers: `+=` on Bought, `-=` on Sold), the second handler's op
+(`Sub`) now overwrites the first (`Add`), so BOTH arms emit the
+CAS+sub shape. Pre-fix the Sold arm was silently dropped; post-fix the
+Bought arm is silently miscompiled. The bug moved but did not
+disappear. Fixing it requires threading `fold_op` per-handler — either
+on each handler's `Assign` op (op-level instead of view-level) or by
+expanding `ViewSignature::fold_op` to `Vec<ViewFoldOp>` and indexing by
+handler ordinal in the emit branch. Out of scope for the smallest-
+slice T1 fix; track as Gap T1b for the next iteration.
 
 ---
 

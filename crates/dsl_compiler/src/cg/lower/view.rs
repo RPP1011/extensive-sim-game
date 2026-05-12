@@ -636,10 +636,16 @@ fn lower_stmt(
             // `String`, so unrecognised strings also route here under
             // the closed-set tag `"unknown"`.
             let op_label = canonical_self_update_op_label(op.as_str());
-            // Three operators flow through the existing
+            // Four operators flow through the existing
             // `ComputeOpKind::ViewFold` wrapper:
             //   - `+=`: numeric accumulator (f32/i32/u32). Emits a
             //     CAS+add loop in WGSL — see `wgsl_body.rs`.
+            //   - `-=`: numeric subtract accumulator. Mirrors `+=`:
+            //     u32 emits `atomicSub` (commutative + associative
+            //     under modular arithmetic — P11 trivially satisfied),
+            //     f32 emits a CAS+sub loop. The trade_caravans
+            //     `inventory` view's `self -= 1.0` on `Sold` is the
+            //     first shipping consumer.
             //   - `|=`: bit-OR accumulator (u32). Emits a single
             //     `atomicOr(&storage[idx], rhs)` — commutative +
             //     associative so no CAS retry needed (P11). The emit
@@ -654,11 +660,12 @@ fn lower_stmt(
             //     the same value (idempotent constant set) or when at
             //     most one thread per slot writes per tick — the DSL
             //     author owns that semantic.
-            // The remaining canonical operators (`-=`, `*=`, `/=`)
-            // would silently miscompile to `+=` semantics and surface
-            // as typed deferrals.
+            // The remaining canonical operators (`*=`, `/=`) would
+            // silently miscompile to `+=` semantics and surface as
+            // typed deferrals.
             let fold_op = match op_label {
                 "+=" => crate::cg::program::ViewFoldOp::Add,
+                "-=" => crate::cg::program::ViewFoldOp::Sub,
                 "|=" => crate::cg::program::ViewFoldOp::Or,
                 "=" => crate::cg::program::ViewFoldOp::Set,
                 _ => {
@@ -1740,13 +1747,15 @@ mod tests {
     }
 
     #[test]
-    fn rejects_self_update_with_minus_equals() {
-        // `-=` is grammatically valid (resolver permits it) but
-        // semantically distinct from `+=`. The CG IR's
-        // `ComputeOpKind::ViewFold` does not yet thread the operator,
-        // so silent acceptance would lower `self -= x` identically to
-        // `self += x` — a guaranteed miscompile. Reject with a typed
-        // deferral.
+    fn accepts_self_update_with_minus_equals() {
+        // `-=` is the numeric subtract accumulator. Lowers through
+        // `ViewFoldOp::Sub` and emits `atomicSub` (u32) or a CAS+sub
+        // loop (f32) — see `wgsl_body.rs`. This regression guard
+        // pins the fast happy-path: a per-entity-topK view fold body
+        // with `self -= 1.0` lowers to a single Assign without
+        // tripping the operator gate. The trade_caravans
+        // `inventory(merchant, good) -> f32` view is the first
+        // shipping consumer.
         let view = fold_view(
             "v",
             StorageHint::PerEntityTopK { k: 8, keyed_on: 0 },
@@ -1754,12 +1763,12 @@ mod tests {
                 "AgentAttacked",
                 "-=",
                 lit_f32(1.0),
-                span(11, 17),
+                span(0, 0),
             )],
         );
         let mut builder = CgProgramBuilder::new();
         let mut ctx = LoweringCtx::new(&mut builder);
-        let err = lower_view(
+        let ops = lower_view(
             ViewId(0),
             &view,
             &[HandlerResolution {
@@ -1768,20 +1777,8 @@ mod tests {
             }],
             &mut ctx,
         )
-        .expect_err("non-`+=` operator must be rejected");
-        match err {
-            LoweringError::UnsupportedFoldOperator {
-                view,
-                op_label,
-                span,
-            } => {
-                assert_eq!(view, ViewId(0));
-                assert_eq!(op_label, "-=");
-                assert_eq!(span.start, 11);
-                assert_eq!(span.end, 17);
-            }
-            other => panic!("expected UnsupportedFoldOperator, got {other:?}"),
-        }
+        .expect("`-=` is now a supported operator and must lower cleanly");
+        assert_eq!(ops.len(), 1);
     }
 
     #[test]
@@ -1862,7 +1859,7 @@ mod tests {
         let s = format!("{}", e);
         assert!(s.contains("view #7"));
         assert!(s.contains("*="));
-        assert!(s.contains("only +=, |=, and = are lowered today"));
+        assert!(s.contains("only +=, -=, |=, and = are lowered today"));
     }
 
     // ---- Snapshot: pinned `Display` form for a lowered op ---------------

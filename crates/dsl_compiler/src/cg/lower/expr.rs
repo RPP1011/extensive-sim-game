@@ -478,13 +478,24 @@ impl<'a> LoweringCtx<'a> {
         self.view_storage_hints.insert(view_id, hint)
     }
 
-    /// Register the fold-body operator (`+=` / `|=`) for `view_id`.
-    /// Recorded by the view-body lowerer at the same point it
-    /// accepts the operator gate. Snapshotted by the driver onto
+    /// Register the fold-body operator (`+=` / `-=` / `|=` / `=`) for
+    /// `view_id`. Recorded by the view-body lowerer at the same point
+    /// it accepts the operator gate. Snapshotted by the driver onto
     /// [`crate::cg::program::ViewSignature::fold_op`]; emit branches
     /// on `(fold_op, result_ty)` to pick the right atomic primitive.
-    /// Returns the prior entry if any (caller-side defect; the
-    /// driver registers each view's fold body exactly once today).
+    /// Returns the prior entry if any.
+    ///
+    /// LIMITATION (Gap T1b in `docs/architecture/gaps_observed.md`):
+    /// the storage is keyed per-view, not per-handler. A multi-handler
+    /// view with mixed operators (e.g. trade_caravans's `inventory`
+    /// view: `+=` on Bought + `-=` on Sold) overwrites the first
+    /// handler's op with the second's, so both emit branches use the
+    /// last-registered op. Fixing this requires threading `fold_op`
+    /// per-handler (on each handler's Assign op, or by expanding
+    /// [`crate::cg::program::ViewSignature::fold_op`] to a
+    /// per-handler vector). Today the prior-entry return value is
+    /// surfaced for debug instrumentation but no caller errors on a
+    /// non-`None` return.
     pub fn register_view_fold_op(
         &mut self,
         view_id: ViewId,

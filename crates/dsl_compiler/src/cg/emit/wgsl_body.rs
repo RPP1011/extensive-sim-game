@@ -1835,6 +1835,7 @@ fn lower_cg_stmt_body_to_wgsl(
                     ) && match fold_op {
                         Some(crate::cg::program::ViewFoldOp::Or) => true,
                         Some(crate::cg::program::ViewFoldOp::Add) => false,
+                        Some(crate::cg::program::ViewFoldOp::Sub) => false,
                         Some(crate::cg::program::ViewFoldOp::Set) => false,
                         None => true,
                     };
@@ -1844,6 +1845,28 @@ fn lower_cg_stmt_body_to_wgsl(
                     ) && matches!(
                         fold_op,
                         Some(crate::cg::program::ViewFoldOp::Add)
+                    );
+                    // `self -= rhs` mirrors `self += rhs`'s emit shape.
+                    // u32 routes through native `atomicSub` (commutative
+                    // + associative under modular arithmetic — P11
+                    // trivially satisfied, no CAS retry). f32 falls
+                    // through to the explicit CAS+sub branch below
+                    // (the trailing CAS+add fallthrough only applies to
+                    // Add+f32; Sub+f32 needs the matching subtract op
+                    // inside the loop body).
+                    let use_atomic_sub = matches!(
+                        view_result_ty,
+                        Some(crate::cg::expr::CgTy::U32)
+                    ) && matches!(
+                        fold_op,
+                        Some(crate::cg::program::ViewFoldOp::Sub)
+                    );
+                    let use_cas_sub_f32 = matches!(
+                        view_result_ty,
+                        Some(crate::cg::expr::CgTy::F32)
+                    ) && matches!(
+                        fold_op,
+                        Some(crate::cg::program::ViewFoldOp::Sub)
                     );
                     // `self = rhs` lowers to `atomicStore` regardless
                     // of element type — for u32 the store is a single
@@ -1869,6 +1892,30 @@ fn lower_cg_stmt_body_to_wgsl(
                             "{{\n\
                              \x20   let _idx = {idx_expr};\n\
                              \x20   atomicAdd(&{storage}[_idx], ({rhs}));\n\
+                             }}"
+                        ));
+                    }
+                    if use_atomic_sub {
+                        return Ok(format!(
+                            "{{\n\
+                             \x20   let _idx = {idx_expr};\n\
+                             \x20   atomicSub(&{storage}[_idx], ({rhs}));\n\
+                             }}"
+                        ));
+                    }
+                    if use_cas_sub_f32 {
+                        // f32 has no native atomicSub in WGSL — the
+                        // storage binding is `array<atomic<u32>>` and
+                        // we round-trip through bitcast. Mirrors the
+                        // CAS+add f32 fallthrough below but with `-`
+                        // inside the new_val computation.
+                        return Ok(format!(
+                            "loop {{\n\
+                             \x20   let _idx = {idx_expr};\n\
+                             \x20   let old = atomicLoad(&{storage}[_idx]);\n\
+                             \x20   let new_val = bitcast<u32>(bitcast<f32>(old) - ({rhs}));\n\
+                             \x20   let result = atomicCompareExchangeWeak(&{storage}[_idx], old, new_val);\n\
+                             \x20   if (result.exchanged) {{ break; }}\n\
                              }}"
                         ));
                     }

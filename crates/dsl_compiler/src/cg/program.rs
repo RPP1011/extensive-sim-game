@@ -430,11 +430,20 @@ pub struct ViewSignature {
 
 /// CG-side fold operator — the `self <op> rhs` op recognized by the
 /// view-body lowerer. Drives the WGSL emit branch (atomicAdd vs
-/// atomicOr vs CAS+add vs atomicStore).
+/// atomicSub vs atomicOr vs CAS+add vs CAS+sub vs atomicStore).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ViewFoldOp {
     /// `self += rhs` — numeric add accumulator.
     Add,
+    /// `self -= rhs` — numeric subtract accumulator. Mirrors `Add`'s
+    /// emit shape: u32 routes through native `atomicSub` (commutative
+    /// + associative under modular arithmetic — P11 trivially
+    /// satisfied), f32 routes through a CAS+sub loop (atomicLoad →
+    /// bitcast<f32> → subtract rhs → bitcast<u32> →
+    /// atomicCompareExchangeWeak). The trade_caravans `inventory`
+    /// view's `self -= 1.0` arm on `Sold` is the first shipping
+    /// consumer.
+    Sub,
     /// `self |= rhs` — bit-OR accumulator (u32 only).
     Or,
     /// `self = rhs` — last-writer-wins assignment. Emits `atomicStore`
