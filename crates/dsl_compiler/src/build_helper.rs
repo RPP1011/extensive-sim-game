@@ -2430,6 +2430,77 @@ fn synthesize_generated_runtime_struct(
          \x20       for op in schedule::SCHEDULE {\n\
          \x20           match op {\n",
     );
+    // FixedPoint kernel detection (Gap forest_fire#F follow-up).
+    //
+    // The schedule synthesizer (`cg::emit::cross_cutting::synthesize_schedule`)
+    // emits `DispatchOp::FixedPoint { kernel: KernelId::Pascal, max_iter: N }`
+    // entries for `@cascade(max_iter=N)`-annotated physics rules (see
+    // `classify_topology_for_schedule`'s FixedPoint branches). The runtime
+    // arm for these is the same as `DispatchOp::Kernel(...)` except the
+    // dispatch body runs inside a `for _iter in 0..N` loop.
+    //
+    // MVP semantics: unconditional loop, no early-break on no-change.
+    // Re-running an idempotent fixed-point kernel past its convergence
+    // tick is safe (the kernel observes its own writes from the previous
+    // iteration via the agent buffers, and a converged state is by
+    // definition stable under further application). A true early-break
+    // would need a per-iteration "changed" flag read back from the GPU,
+    // which is a separately-scoped follow-up tracked in the doc note
+    // on `cg/program.rs::cascade_max_iter`.
+    //
+    // Parse the already-emitted `schedule.rs` string to discover which
+    // kernels are scheduled as `FixedPoint` (keyed by pascal name, which
+    // is what the SCHEDULE entry references). This avoids re-walking the
+    // schedule or duplicating `classify_topology_for_schedule` logic.
+    //
+    // A kernel can in principle be both `KernelTopology::Indirect`
+    // (placing it in `indirect_consumer_kernel_names` upstream) AND
+    // scheduled as `FixedPoint` (when the topology carries a
+    // `@cascade(max_iter=N)` annotation). Today's no fixture exercises
+    // this overlap (the cascade tests use a per-agent physics rule which
+    // lowers to a Split or Fused topology, not Indirect), so the MVP
+    // treats the two paths as mutually exclusive: the FixedPoint arm
+    // replaces — does not augment — the Indirect or-pattern for those
+    // kernels. The cfg-copy block stays a pre-loop step in practice
+    // because the only Indirect topologies that flow into FixedPoint are
+    // hypothetical; if a future fixture combines them we'd want the
+    // event_tail copy *inside* the loop iteration so each fixed-point
+    // sweep sees fresh events emitted by the previous iteration. Flagged
+    // here for that future investigation.
+    let fixed_point_kernels: std::collections::BTreeMap<String, u32> = {
+        let mut map = std::collections::BTreeMap::new();
+        let schedule_src = artifacts
+            .rust_files
+            .get("schedule.rs")
+            .map(|s| s.as_str())
+            .unwrap_or("");
+        // Match lines of the form (with arbitrary leading whitespace):
+        //     DispatchOp::FixedPoint { kernel: KernelId::<Pascal>, max_iter: <N> }
+        // The synthesizer emits exactly this shape per-entry; format is
+        // deterministic so a simple substring scan suffices.
+        for line in schedule_src.lines() {
+            let trimmed = line.trim();
+            let after_marker = match trimmed.strip_prefix("DispatchOp::FixedPoint { kernel: KernelId::") {
+                Some(s) => s,
+                None => continue,
+            };
+            let (pascal, rest) = match after_marker.split_once(',') {
+                Some(p) => p,
+                None => continue,
+            };
+            let pascal = pascal.trim().to_string();
+            let max_iter_str = match rest.trim().strip_prefix("max_iter:") {
+                Some(s) => s.trim().trim_end_matches(',').trim_end_matches('}').trim(),
+                None => continue,
+            };
+            let max_iter: u32 = match max_iter_str.parse() {
+                Ok(n) if n > 0 => n,
+                _ => continue,
+            };
+            map.insert(pascal, max_iter);
+        }
+        map
+    };
     // Plan E-A4.1 — per-kernel dispatch arms.
     //
     // Mirrors `cg::emit::program::classify_binding` rules EXACTLY (by
@@ -2518,10 +2589,22 @@ fn synthesize_generated_runtime_struct(
             // Keeping `Kernel(...)` in the or-pattern is defensive: if
             // the schedule classifier ever re-routes a consumer back to
             // `Kernel`, the arm still fires.
+            //
+            // FixedPoint kernels (`@cascade(max_iter=N)`) get a distinct
+            // arm matching `DispatchOp::FixedPoint { kernel, .. }` and
+            // wrap the dispatch body in a `for _iter in 0..N` loop. See
+            // the `fixed_point_kernels` doc block at the top of the loop
+            // for the MVP semantics (unconditional loop, no early-break).
             let is_indirect_consumer = indirect_consumer_kernel_names
                 .iter()
                 .any(|n| n == &spec.name);
-            let arm_pattern = if is_indirect_consumer {
+            let fixed_point_max_iter = fixed_point_kernels.get(&spec.pascal).copied();
+            let arm_pattern = if let Some(_) = fixed_point_max_iter {
+                format!(
+                    "schedule::DispatchOp::FixedPoint {{ kernel: KernelId::{pascal}, .. }}",
+                    pascal = spec.pascal,
+                )
+            } else if is_indirect_consumer {
                 format!(
                     "schedule::DispatchOp::Kernel(KernelId::{pascal}) \
                      | schedule::DispatchOp::Indirect {{ kernel: KernelId::{pascal}, .. }}",
@@ -2549,7 +2632,15 @@ fn synthesize_generated_runtime_struct(
             // 1: the prev-tick snapshot lives in `prev_event_tail_buf`
             // and is copied into each fold's cfg.event_count there,
             // not here.
-            let cfg_copy_block = if is_indirect_consumer {
+            //
+            // FixedPoint kernels skip the cfg-copy block — today no
+            // `@cascade`-annotated kernel is also an Indirect chronicle
+            // consumer (the cascade fixtures use per-agent physics rules
+            // which lower to Split / Fused topologies). If a future
+            // fixture combines them, the copy would belong INSIDE the
+            // for-loop so each iteration sees fresh events; flagged
+            // in the top-of-loop doc block for that follow-up.
+            let cfg_copy_block = if is_indirect_consumer && fixed_point_max_iter.is_none() {
                 format!(
                     "                    encoder.copy_buffer_to_buffer(\n\
                      \x20                       self.event_ring.tail(),\n\
@@ -2563,9 +2654,18 @@ fn synthesize_generated_runtime_struct(
             } else {
                 String::new()
             };
+            let (loop_open, loop_close) = if let Some(n) = fixed_point_max_iter {
+                (
+                    format!("                    for _iter in 0..{n}u32 {{\n"),
+                    "                    }\n".to_string(),
+                )
+            } else {
+                (String::new(), String::new())
+            };
             out.push_str(&format!(
                 "                {arm_pattern} => {{\n\
                  {cfg_copy_block}\
+                 {loop_open}\
                  \x20                   let bindings = {kname}::{pascal}Bindings {{\n\
                  {body}\n\
                  \x20                   }};\n\
@@ -2576,6 +2676,7 @@ fn synthesize_generated_runtime_struct(
                  \x20                       &mut encoder,\n\
                  \x20                       self.agent_count,\n\
                  \x20                   );\n\
+                 {loop_close}\
                  \x20               }}\n",
                 kname = spec.name,
                 pascal = spec.pascal,
@@ -2637,10 +2738,20 @@ fn synthesize_generated_runtime_struct(
         // dispatch through the same `dispatch::dispatch_<name>` helper;
         // the consumer kernel's body bounds on `cfg.event_count` populated
         // immediately below from the live GPU event_tail value.
+        //
+        // FixedPoint kernels (`@cascade(max_iter=N)`) get their own arm
+        // shape, wrapping the dispatch in a `for _iter in 0..N` loop.
+        // See the `fixed_point_kernels` doc block above for MVP details.
         let is_indirect_consumer = indirect_consumer_kernel_names
             .iter()
             .any(|n| n == &spec.name);
-        let arm_pattern = if is_indirect_consumer {
+        let fixed_point_max_iter = fixed_point_kernels.get(&spec.pascal).copied();
+        let arm_pattern = if let Some(_) = fixed_point_max_iter {
+            format!(
+                "schedule::DispatchOp::FixedPoint {{ kernel: KernelId::{pascal}, .. }}",
+                pascal = spec.pascal,
+            )
+        } else if is_indirect_consumer {
             format!(
                 "schedule::DispatchOp::Kernel(KernelId::{pascal}) \
                  | schedule::DispatchOp::Indirect {{ kernel: KernelId::{pascal}, .. }}",
@@ -2657,7 +2768,10 @@ fn synthesize_generated_runtime_struct(
         // block above for rationale (and the fold-vs-indirect split:
         // folds get their snapshot at the TOP of step() since they
         // consume prior-tick records, not in-tick ones).
-        let cfg_copy_block = if is_indirect_consumer {
+        //
+        // FixedPoint kernels skip the cfg-copy (see the parallel block
+        // above for why; same overlap-with-Indirect caveat applies).
+        let cfg_copy_block = if is_indirect_consumer && fixed_point_max_iter.is_none() {
             format!(
                 "                    encoder.copy_buffer_to_buffer(\n\
                  \x20                       self.event_ring.tail(),\n\
@@ -2671,9 +2785,18 @@ fn synthesize_generated_runtime_struct(
         } else {
             String::new()
         };
+        let (loop_open, loop_close) = if let Some(n) = fixed_point_max_iter {
+            (
+                format!("                    for _iter in 0..{n}u32 {{\n"),
+                "                    }\n".to_string(),
+            )
+        } else {
+            (String::new(), String::new())
+        };
         out.push_str(&format!(
             "                {arm_pattern} => {{\n\
              {cfg_copy_block}\
+             {loop_open}\
              \x20                   let extras = {kname}::{pascal}Extras {{\n\
              {extras_body}\n\
              \x20                   }};\n\
@@ -2687,12 +2810,13 @@ fn synthesize_generated_runtime_struct(
              \x20                       &mut encoder,\n\
              \x20                       self.agent_count,\n\
              \x20                   );\n\
+             {loop_close}\
              \x20               }}\n",
             kname = spec.name,
             pascal = spec.pascal,
         ));
     }
-    // Catch-all for unhandled DispatchOp variants. Status (2026-05-11):
+    // Catch-all for unhandled DispatchOp variants. Status (2026-05-12):
     //
     //   * `DispatchOp::Kernel(...)` — handled by the per-kernel arms
     //     emitted in the loop above (every emitted kernel produces an
@@ -2705,10 +2829,14 @@ fn synthesize_generated_runtime_struct(
     //     host-side ring tail snapshot earlier in step()) to bound its
     //     event walk, so direct `dispatch_workgroups(agent_count, ...)`
     //     is correct (the threads past the event count early-return).
-    //   * `DispatchOp::FixedPoint { kernel, max_iter }` — still falls
-    //     through. Cascade-physics fixed-point iteration requires a
-    //     loop in the synthesized step() with per-iteration A/B-ring
-    //     swap. Tracked separately.
+    //   * `DispatchOp::FixedPoint { kernel: X, .. }` — handled when X
+    //     was parsed out of the synthesized schedule.rs into
+    //     `fixed_point_kernels`. Each such kernel gets its own per-arm
+    //     emission with the dispatch body wrapped in
+    //     `for _iter in 0..N { ... }` where N is the authored
+    //     `@cascade(max_iter=N)` value. MVP runs unconditionally to N;
+    //     early-break on no-change is a follow-up (see the
+    //     `fixed_point_kernels` doc block at the top of the loop).
     //   * `DispatchOp::GatedBy { kernel, gate }` — never emitted by
     //     today's `synthesize_schedule`; placeholder for future use.
     //
@@ -2725,12 +2853,13 @@ fn synthesize_generated_runtime_struct(
     // SeedIndirect0 BEFORE its consumers). That wiring is orthogonal
     // to this slice and tracked separately.
     out.push_str(
-        "                // DispatchOp::FixedPoint, DispatchOp::GatedBy,\n\
-         \x20               // and DispatchOp::Indirect for kernels not in\n\
-         \x20               // indirect_consumer_kernel_names fall through here.\n\
-         \x20               // See `synthesize_generated_runtime_struct` source\n\
-         \x20               // comment for status + remaining gaps (in-step GPU\n\
-         \x20               // producers, FixedPoint cascade iteration).\n\
+        "                // DispatchOp::GatedBy is never emitted today;\n\
+         \x20               // DispatchOp::Indirect for kernels not in\n\
+         \x20               // indirect_consumer_kernel_names and any other\n\
+         \x20               // unhandled variant fall through here. See\n\
+         \x20               // `synthesize_generated_runtime_struct` source\n\
+         \x20               // comment for status + remaining gaps (in-step\n\
+         \x20               // GPU producers).\n\
          \x20               _ => {}\n\
          \x20           }\n\
          \x20       }\n\
