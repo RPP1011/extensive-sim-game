@@ -2473,9 +2473,12 @@ fn synthesize_generated_runtime_struct(
     // For every event in `comp.events` carrying the `@host_callable`
     // annotation, emit a typed Rust method that:
     //   1. Builds a 10-word chronicle record from typed args:
-    //      slot 0 = engine kind id (from `EventIR.engine_kind_id`,
-    //               required — events without an engine alias can't
-    //               participate today),
+    //      slot 0 = kind id — engine alias via `EventIR.engine_kind_id`
+    //               when present, else the fixture-allocated sequential
+    //               `EventKindId(i)` where `i` is the event's position in
+    //               `comp.events` (mirrors `cg::lower::driver::
+    //               populate_event_kinds`'s allocation so the dispatcher's
+    //               filter constant matches),
     //      slot 1 = self.tick as u32,
     //      slot 2..= = each declared field, packed in declaration order.
     //   2. Calls `self.inject_chronicle_record(&record)` to write it
@@ -2496,29 +2499,27 @@ fn synthesize_generated_runtime_struct(
     // PerEvent consumer over the ring). Callers that want immediate
     // synchronous dispatch (e.g. tom_probe's hand-written verbs that
     // pre-dated this codegen) layer their own dispatch code on top.
-    for ev in events {
+    for (event_index, ev) in events.iter().enumerate() {
         if !ev.annotations.iter().any(|a| a.name == "host_callable") {
             continue;
         }
-        let kind_id = match ev.engine_kind_id {
-            Some(k) => k,
-            None => {
-                // No engine alias → no fixed kind id → can't build the
-                // record. Surface as a build-time error so the .sim author
-                // sees it immediately instead of silently shipping a
-                // method that would write a zero-kind record (= invalid).
-                out.push_str(&format!(
-                    "    // @host_callable on `{name}` skipped: event has no engine kind id alias.\n\
-                     \x20   // (See dsl_ast::engine_events::ENGINE_EVENT_KIND_IDS for the registered set.)\n",
-                    name = ev.name,
-                ));
-                println!(
-                    "cargo:warning=[{fixture_name} host_callable] event `{}` has no engine kind id; skipping codegen",
-                    ev.name,
-                );
-                continue;
-            }
-        };
+        // Two-path kind id resolution, mirroring
+        // `cg::lower::driver::populate_event_kinds`:
+        //
+        //   1. Engine-aliased events (e.g. `EffectDamageApplied = 26`)
+        //      carry a hardcoded `engine_kind_id` populated by
+        //      `dsl_ast::resolve` from `engine_events::
+        //      engine_event_kind_id_for_name`. Use it directly so the
+        //      injector's `record[0]` matches the dispatcher's filter
+        //      constant.
+        //   2. Fixture-defined events (no engine alias) get a sequential
+        //      `EventKindId(i)` where `i` is the position in
+        //      `comp.events` — same allocation the lowering driver
+        //      performs. The dispatcher already handles arbitrary kinds
+        //      via the unified event ring; the previous engine-aliased-
+        //      only gate dropped fixture-defined `@host_callable` events
+        //      with a `cargo:warning` (Gap plague_city#P-B).
+        let kind_id = ev.engine_kind_id.unwrap_or(event_index as u32);
         let method_name = crate::snake_case(&ev.name);
         let mut params: Vec<String> = Vec::new();
         let mut slot_writes: Vec<String> = Vec::new();
@@ -2559,10 +2560,15 @@ fn synthesize_generated_runtime_struct(
         } else {
             format!(", {}", params.join(", "))
         };
+        let kind_id_source = if ev.engine_kind_id.is_some() {
+            "engine alias"
+        } else {
+            "fixture-allocated, matches `cg::lower::driver::populate_event_kinds`"
+        };
         out.push_str(&format!(
             "\n\
              \x20   /// Auto-emitted from `@host_callable event {ev_name}` in the .sim source.\n\
-             \x20   /// Builds a chronicle record with kind id {kind_id} (engine alias) and\n\
+             \x20   /// Builds a chronicle record with kind id {kind_id} ({kind_id_source}) and\n\
              \x20   /// the per-field payload in declaration order, then injects it via\n\
              \x20   /// [`Self::inject_chronicle_record`]. The matching consumer kernel\n\
              \x20   /// fires on the next [`Self::step`] call.\n\
