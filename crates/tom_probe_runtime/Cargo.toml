@@ -25,5 +25,4 @@ pollster = "0.4"
 dsl_compiler = { path = "../dsl_compiler" }
 
 [build-dependencies]
-dsl_ast = { path = "../dsl_ast" }
 dsl_compiler = { path = "../dsl_compiler" }

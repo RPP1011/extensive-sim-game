@@ -246,8 +246,21 @@ fn emit_into(
             })
         })
         .unwrap_or(false);
+    // Belief-state auto-detect: if any physics rule body contains an
+    // `agents.set_beliefs_<field>(observer, subject, value)` call, the
+    // BGL composer must surface the matching `BeliefStateColumn` binding
+    // and the WGSL emit must replace the `return true` no-op stubs with
+    // real SoA stores. Mirrors the AOE auto-detect above — collapses the
+    // manual `LowerOpts.belief_state = true` opt-in that tom_probe's
+    // custom build.rs used to set explicitly.
+    let belief_state = comp.physics.iter().any(|p| {
+        p.handlers
+            .iter()
+            .any(|h| stmts_contain_set_beliefs_call(&h.body))
+    });
     let lower_opts = crate::cg::lower::LowerOpts {
         aoe_dispatch,
+        belief_state,
         ..Default::default()
     };
     if !ability_files.is_empty() {
@@ -255,6 +268,11 @@ fn emit_into(
             "cargo:warning=[{fixture_name} ability-corpus] {} .ability files, aoe_dispatch={}",
             ability_files.len(),
             aoe_dispatch,
+        );
+    }
+    if belief_state {
+        println!(
+            "cargo:warning=[{fixture_name} belief-state] auto-detected agents.set_beliefs_* call(s); enabling LowerOpts.belief_state",
         );
     }
     let cg = match crate::cg::lower::lower_compilation_to_cg_with_opts(&comp, lower_opts) {
@@ -362,6 +380,155 @@ fn emit_into(
 struct RuntimeConfigDefault {
     scalar_ty: String,
     default_lit: String,
+}
+
+/// Recursive walk over a physics rule body looking for any
+/// `agents.set_beliefs_<field>(observer, subject, value)` call. The
+/// AST surface is `IrExpr::NamespaceCall { ns: Agents, method:
+/// "set_beliefs_*", .. }` matched by `lower::physics::lower_expr_stmt`
+/// at line 861. Mirroring the same name-based gate here lets the
+/// build helper auto-set `LowerOpts.belief_state` instead of forcing
+/// every belief-state fixture to carry a hand-written build.rs that
+/// flips the bit explicitly.
+fn stmts_contain_set_beliefs_call(stmts: &[dsl_ast::ir::IrStmt]) -> bool {
+    stmts.iter().any(stmt_contains_set_beliefs_call)
+}
+
+fn stmt_contains_set_beliefs_call(stmt: &dsl_ast::ir::IrStmt) -> bool {
+    use dsl_ast::ir::IrStmt;
+    match stmt {
+        IrStmt::Let { value, .. } => expr_contains_set_beliefs_call(value),
+        IrStmt::Emit(emit) => emit
+            .fields
+            .iter()
+            .any(|f| expr_contains_set_beliefs_call(&f.value)),
+        IrStmt::For { iter, filter, body, .. } => {
+            expr_contains_set_beliefs_call(iter)
+                || filter.as_ref().is_some_and(expr_contains_set_beliefs_call)
+                || stmts_contain_set_beliefs_call(body)
+        }
+        IrStmt::ForEachAgent { body, .. } => stmts_contain_set_beliefs_call(body),
+        IrStmt::If { cond, then_body, else_body, .. } => {
+            expr_contains_set_beliefs_call(cond)
+                || stmts_contain_set_beliefs_call(then_body)
+                || else_body
+                    .as_ref()
+                    .is_some_and(|b| stmts_contain_set_beliefs_call(b))
+        }
+        IrStmt::Match { scrutinee, arms, .. } => {
+            expr_contains_set_beliefs_call(scrutinee)
+                || arms.iter().any(|a| stmts_contain_set_beliefs_call(&a.body))
+        }
+        IrStmt::SelfUpdate { value, .. } => expr_contains_set_beliefs_call(value),
+        IrStmt::SelfAppend { fields, .. } => fields
+            .iter()
+            .any(|f| expr_contains_set_beliefs_call(&f.value)),
+        IrStmt::Expr(e) => expr_contains_set_beliefs_call(e),
+        IrStmt::BeliefObserve { observer, target, fields, .. } => {
+            expr_contains_set_beliefs_call(observer)
+                || expr_contains_set_beliefs_call(target)
+                || fields
+                    .iter()
+                    .any(|f| expr_contains_set_beliefs_call(&f.value))
+        }
+        IrStmt::ApplyAbility { ability, caster, target, .. } => {
+            expr_contains_set_beliefs_call(ability)
+                || caster.as_ref().is_some_and(expr_contains_set_beliefs_call)
+                || target.as_ref().is_some_and(expr_contains_set_beliefs_call)
+        }
+    }
+}
+
+fn expr_contains_set_beliefs_call(node: &dsl_ast::ir::IrExprNode) -> bool {
+    use dsl_ast::ir::{IrExpr, NamespaceId};
+    match &node.kind {
+        IrExpr::NamespaceCall { ns: NamespaceId::Agents, method, args }
+            if method.starts_with("set_beliefs_") =>
+        {
+            // Deep walk would also catch nested set_beliefs_* in the
+            // value arg, but the immediate-call match is the only shape
+            // the lower-time gate at physics.rs:861 keys off, so this
+            // arm is sufficient. Still recurse into args so nested
+            // composite uses are covered.
+            let _ = args;
+            true
+        }
+        IrExpr::NamespaceCall { args, .. } => args.iter().any(call_arg_contains),
+        IrExpr::Field { base, .. } => expr_contains_set_beliefs_call(base),
+        IrExpr::Index(a, b) => {
+            expr_contains_set_beliefs_call(a) || expr_contains_set_beliefs_call(b)
+        }
+        IrExpr::ViewCall(_, args)
+        | IrExpr::VerbCall(_, args)
+        | IrExpr::BuiltinCall(_, args)
+        | IrExpr::UnresolvedCall(_, args) => args.iter().any(call_arg_contains),
+        IrExpr::Binary(_, a, b) => {
+            expr_contains_set_beliefs_call(a) || expr_contains_set_beliefs_call(b)
+        }
+        IrExpr::Unary(_, a) => expr_contains_set_beliefs_call(a),
+        IrExpr::In(a, b) | IrExpr::Contains(a, b) => {
+            expr_contains_set_beliefs_call(a) || expr_contains_set_beliefs_call(b)
+        }
+        IrExpr::Quantifier { iter, body, .. } => {
+            expr_contains_set_beliefs_call(iter) || expr_contains_set_beliefs_call(body)
+        }
+        IrExpr::Fold { iter, body, .. } => {
+            iter.as_ref()
+                .is_some_and(|i| expr_contains_set_beliefs_call(i))
+                || expr_contains_set_beliefs_call(body)
+        }
+        IrExpr::List(items) | IrExpr::Tuple(items) => {
+            items.iter().any(expr_contains_set_beliefs_call)
+        }
+        IrExpr::StructLit { fields, .. } => {
+            fields.iter().any(|f| expr_contains_set_beliefs_call(&f.value))
+        }
+        IrExpr::Ctor { args, .. } => args.iter().any(expr_contains_set_beliefs_call),
+        IrExpr::Match { scrutinee, arms } => {
+            expr_contains_set_beliefs_call(scrutinee)
+                || arms.iter().any(|a| expr_contains_set_beliefs_call(&a.body))
+        }
+        IrExpr::If { cond, then_expr, else_expr } => {
+            expr_contains_set_beliefs_call(cond)
+                || expr_contains_set_beliefs_call(then_expr)
+                || else_expr
+                    .as_ref()
+                    .is_some_and(|e| expr_contains_set_beliefs_call(e))
+        }
+        IrExpr::PerUnit { expr, delta } => {
+            expr_contains_set_beliefs_call(expr) || expr_contains_set_beliefs_call(delta)
+        }
+        // Leaf nodes — no nested expression to walk.
+        IrExpr::LitBool(_)
+        | IrExpr::LitInt(_)
+        | IrExpr::LitFloat(_)
+        | IrExpr::LitString(_)
+        | IrExpr::Local(_, _)
+        | IrExpr::Event(_)
+        | IrExpr::Entity(_)
+        | IrExpr::View(_)
+        | IrExpr::Verb(_)
+        | IrExpr::Namespace(_)
+        | IrExpr::NamespaceField { .. }
+        | IrExpr::EnumVariant { .. }
+        | IrExpr::AbilityTag { .. }
+        | IrExpr::AbilityHint
+        | IrExpr::AbilityHintLit(_) => false,
+        // Other leaf / legacy ToM-accessor variants don't surface
+        // `agents.set_beliefs_*` calls — they're either pure leaves
+        // (AbilityRange) or accessor reads (BeliefsAccessor /
+        // BeliefsConfidence) that the resolver flags separately. A
+        // catch-all keeps this walker robust to future IrExpr variants
+        // — the auto-detect can over-trigger safely (the LowerOpts.
+        // belief_state flag's only effect is to surface bindings that
+        // would otherwise no-op, harmless on a fixture that never
+        // calls set_beliefs_*).
+        _ => false,
+    }
+}
+
+fn call_arg_contains(arg: &dsl_ast::ir::IrCallArg) -> bool {
+    expr_contains_set_beliefs_call(&arg.value)
 }
 
 /// Plan E-A3.1 — placeholder generated runtime body, now with per-kernel

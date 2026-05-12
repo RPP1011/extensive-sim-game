@@ -99,6 +99,7 @@ fn main() {
                 | "apply_ability_smoke"
                 | "voxel_probe"
                 | "dodger_probe"
+                | "tom_probe"
         ) {
             continue;
         }

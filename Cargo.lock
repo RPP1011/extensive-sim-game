@@ -1989,7 +1989,6 @@ name = "tom_probe_runtime"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
- "dsl_ast",
  "dsl_compiler",
  "engine",
  "glam",
