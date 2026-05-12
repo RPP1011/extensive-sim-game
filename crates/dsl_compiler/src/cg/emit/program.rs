@@ -605,6 +605,12 @@ pub fn emit_cg_program_with_debug(
         // existing emit shape; per-runtime build.rs opt-in via
         // `LowerOpts.debug_wgsl` flows through `CgProgram.debug_wgsl`.
         debug_wgsl: prog.debug_wgsl,
+        // Plan G #244 bug 2 (post-CAS emit gating): the f32
+        // first-writer-wins gate. Default `None` keeps the existing
+        // CAS-loop shape verbatim; the `If`-arm of the per-stmt
+        // emit toggles it for the inner Assign whose `(field, target)`
+        // is also read by the outer cond.
+        f32_first_writer_gate: std::cell::Cell::new(None),
     };
 
     for (stage_idx, stage) in schedule.stages.iter().enumerate() {

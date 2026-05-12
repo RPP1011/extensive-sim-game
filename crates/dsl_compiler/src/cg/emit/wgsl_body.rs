@@ -298,6 +298,38 @@ pub struct EmitCtx<'a> {
     /// Read-only on `&EmitCtx` — the gate is checked in the same
     /// emit functions that emit the chronicle/mask/scoring bodies.
     pub debug_wgsl: DebugWgslFlags,
+
+    /// "First-writer-wins" CAS gate. When `Some(stmt_id)`, the per-stmt
+    /// emit for that exact `Assign` stmt id (an
+    /// `Assign(AgentField{f32}, target, Lit(F32(_)))` inside an `If`
+    /// whose cond reads the same field) emits a CAS-loop variant that
+    /// declares `var _f32_cas_did_transition_<sid>: bool = false;`
+    /// outside the loop and sets it to `(_old_bits != _new_bits)` on
+    /// the iteration that wins the CAS. The surrounding stmt-list emit
+    /// reads the same gate and wraps subsequent stmts (especially
+    /// `Emit`) in `if (_f32_cas_did_transition_<sid>) { ... }` so only
+    /// the thread that caused the actual state transition fires the
+    /// post-write side effects.
+    ///
+    /// Plan G #244 bug 2 fix: the bare CAS loop's natural retry covers
+    /// per-thread RHS shapes (`set_hp(t, hp - 1)`) — every thread sees
+    /// a real transition because each contribution is real. But for
+    /// a `set_hp(t, 99)` literal-RHS shape guarded by `if (hp == 100)`,
+    /// CAS losers retry, see hp==99, and CAS(99→99) succeeds with NO
+    /// real transition; without this gate they all run the post-write
+    /// `emit Foo`, producing N emits per single 100→99 transition.
+    /// Forest_fire's Catch handler exhibits exactly this shape (see
+    /// `assets/sim/forest_fire.sim` Catch on EmberLanded).
+    ///
+    /// Set by [`lower_cg_stmt_body_to_wgsl`]'s `If` arm when the
+    /// `(field, target)` of the inner Assign is also read by the
+    /// outer cond, restored to `None` after the inner stmt list
+    /// returns. Default `None` preserves the existing per-stmt emit
+    /// shape verbatim — non-gated CAS sites stay bit-identical to
+    /// the pre-fix loop body (so `memory_ordering_cas_emit`'s exact
+    /// `.exchanged) { break; }` substring assertion still holds for
+    /// the chronicle-damage shape).
+    pub f32_first_writer_gate: std::cell::Cell<Option<u32>>,
 }
 
 impl<'a> EmitCtx<'a> {
@@ -323,6 +355,7 @@ impl<'a> EmitCtx<'a> {
             // `DebugWgslFlags::NONE` (when no opts threaded) leaves
             // the existing emit shape unchanged.
             debug_wgsl: prog.debug_wgsl,
+            f32_first_writer_gate: std::cell::Cell::new(None),
         }
     }
 
@@ -662,6 +695,119 @@ fn stmt_reads_any_chain_local(
             .iter()
             .any(|(_, e)| expr_reads_any_chain_local(*e, chain_locals, prog)),
     }
+}
+
+/// True when `stmt` is `Assign(AgentField{f32, …}, target, Lit(F32(_)))`
+/// — the "first-writer-wins" candidate shape (Plan G #244 bug 2).
+/// Returns the field id and target ref so the caller can correlate
+/// against an enclosing `If` cond reading the same field.
+///
+/// Restricting to literal-F32 RHS is the load-bearing safety filter:
+/// a per-thread RHS shape (`set_hp(t, hp - 1)`) does NOT need
+/// transition gating — the natural CAS retry covers correctness
+/// because every retry computes a fresh contribution. Only the
+/// constant-RHS shape produces no-op CAS retries (loser sees the
+/// already-written constant and CAS-stores-the-same-value succeeds
+/// trivially), and only that shape causes downstream side-effects
+/// to over-fire.
+pub(crate) fn stmt_is_f32_const_assign(
+    prog: &CgProgram,
+    stmt: &CgStmt,
+) -> Option<(AgentFieldId, AgentRef)> {
+    let CgStmt::Assign { target, value } = stmt else {
+        return None;
+    };
+    let DataHandle::AgentField { field, target: agent_ref } = target else {
+        return None;
+    };
+    if !matches!(field.ty(), AgentFieldTy::F32) {
+        return None;
+    }
+    match <CgProgram as ExprArena>::get(prog, *value) {
+        Some(CgExpr::Lit(LitValue::F32(_))) => Some((*field, agent_ref.clone())),
+        _ => None,
+    }
+}
+
+/// True when `expr_id` (or any descendant CgExpr) reads
+/// `Read(AgentField { field: <field>, .. })` — without requiring the
+/// `target` to match. Used by the post-CAS emit-gating detection
+/// (Plan G #244 bug 2): when the inner `Assign` writes an f32 field
+/// with a literal RHS AND the enclosing `If`'s cond reads the same
+/// field id (any target), we infer "first-writer-wins" intent and
+/// gate subsequent stmts on actual transition.
+///
+/// Loose target match is intentional. Two `AgentRef::Target(expr_id)`
+/// values referencing the same source local end up with different
+/// expr ids in the IR (each `lower_field` call allocates a fresh
+/// `CgExprId` for the base) — strict equality would miss the
+/// canonical Catch-handler shape `if (agents.hp(t) >= 100.0) { …
+/// agents.set_hp(t, 99.0); … }` even though both reads target the
+/// same row. Field-id equality is sufficient because the gating
+/// predicate is "did THIS CAS transition?" — even if the cond reads
+/// hp(other) and the assign writes hp(self), the transition-gate
+/// remains correct (only fires the post-write side-effect when the
+/// CAS produced a real value change on the assigned slot).
+fn expr_reads_agent_field_id(
+    expr_id: CgExprId,
+    field: AgentFieldId,
+    prog: &CgProgram,
+) -> bool {
+    let Some(node) = <CgProgram as ExprArena>::get(prog, expr_id) else {
+        return false;
+    };
+    match node {
+        CgExpr::Read(DataHandle::AgentField { field: f, .. }) => *f == field,
+        CgExpr::Read(_)
+        | CgExpr::Lit(_)
+        | CgExpr::AgentSelfId
+        | CgExpr::PerPairCandidateId
+        | CgExpr::EventField { .. }
+        | CgExpr::Rng { .. }
+        | CgExpr::NamespaceField { .. }
+        | CgExpr::ReadLocal { .. } => false,
+        CgExpr::Unary { arg, .. } => {
+            expr_reads_agent_field_id(*arg, field, prog)
+        }
+        CgExpr::Binary { lhs, rhs, .. } => {
+            expr_reads_agent_field_id(*lhs, field, prog)
+                || expr_reads_agent_field_id(*rhs, field, prog)
+        }
+        CgExpr::Builtin { args, .. } => args
+            .iter()
+            .any(|a| expr_reads_agent_field_id(*a, field, prog)),
+        CgExpr::Select { cond, then, else_, .. } => {
+            expr_reads_agent_field_id(*cond, field, prog)
+                || expr_reads_agent_field_id(*then, field, prog)
+                || expr_reads_agent_field_id(*else_, field, prog)
+        }
+        CgExpr::NamespaceCall { args, .. } => args
+            .iter()
+            .any(|a| expr_reads_agent_field_id(*a, field, prog)),
+    }
+}
+
+/// Scan a stmt list for the FIRST `Assign(AgentField{f32}, target,
+/// Lit(F32(_)))` — the inner-Assign side of the "first-writer-wins"
+/// pattern. Returns the stmt id (so the per-stmt emit can match
+/// against the gate) and the field id. Returns `None` if no such
+/// stmt exists at the top level of `list_id`.
+///
+/// Top-level only — nested `If` / `Match` arms have their own
+/// inner stmt lists and are detected by their own enclosing `If` arm
+/// (recursion happens through `lower_cg_stmt_body_to_wgsl`).
+pub(crate) fn stmt_list_first_f32_const_assign(
+    prog: &CgProgram,
+    list_id: CgStmtListId,
+) -> Option<(CgStmtId, AgentFieldId)> {
+    let list = <CgProgram as StmtListArena>::get(prog, list_id)?;
+    for stmt_id in &list.stmts {
+        let stmt = <CgProgram as StmtArena>::get(prog, *stmt_id)?;
+        if let Some((field, _)) = stmt_is_f32_const_assign(prog, stmt) {
+            return Some((*stmt_id, field));
+        }
+    }
+    None
 }
 
 /// Recursive walk: collect the set of f32 [`AgentFieldId`]s assigned
@@ -2157,6 +2303,48 @@ fn lower_cg_stmt_body_to_wgsl(
                         AgentRef::Target(id) => format!("target_expr_{}", id.0),
                     };
                     let snake = field.snake();
+                    // Plan G #244 bug 2: when the enclosing `If` arm
+                    // marked this Assign as a "first-writer-wins"
+                    // candidate (literal-RHS f32 write inside an If
+                    // whose cond reads the same field), emit the
+                    // CAS-loop variant that captures the transition
+                    // outcome in `_f32_cas_did_transition_<sid>` —
+                    // declared OUTSIDE the loop so the surrounding
+                    // stmt-list emit can wrap subsequent stmts in
+                    // `if (_f32_cas_did_transition_<sid>) { ... }`.
+                    // The transition predicate is `_old_bits !=
+                    // _new_bits`, which is `false` for CAS-losers
+                    // that retried, observed the already-written
+                    // constant, and stored the same constant
+                    // (a no-op transition) — exactly the threads
+                    // whose post-write side-effects (e.g. `emit
+                    // Ignited`) must NOT fire under the first-
+                    // writer-wins contract.
+                    //
+                    // Non-gated path (gate is `None` or refers to a
+                    // different stmt id): emit the bit-identical
+                    // legacy loop, preserving `memory_ordering_cas_emit`'s
+                    // exact-substring assertion on `.exchanged) { break; }`
+                    // for the chronicle-damage shape.
+                    let gate_matches = ctx.f32_first_writer_gate.get() == Some(stmt_id.0);
+                    if gate_matches {
+                        return Ok(format!(
+                            "var _f32_cas_did_transition_{sid}: bool = false;\n\
+                             loop {{\n\
+                             \x20   let _old_bits_{sid} = atomicLoad(&agent_{snake}[{idx}]);\n\
+                             \x20   let _new_bits_{sid} = bitcast<u32>({rhs});\n\
+                             \x20   let _r_{sid} = atomicCompareExchangeWeak(&agent_{snake}[{idx}], _old_bits_{sid}, _new_bits_{sid});\n\
+                             \x20   if (_r_{sid}.exchanged) {{\n\
+                             \x20       _f32_cas_did_transition_{sid} = (_old_bits_{sid} != _new_bits_{sid});\n\
+                             \x20       break;\n\
+                             \x20   }}\n\
+                             }}",
+                            sid = stmt_id.0,
+                            snake = snake,
+                            idx = idx,
+                            rhs = rhs,
+                        ));
+                    }
                     return Ok(format!(
                         "loop {{\n\
                          \x20   let _old_bits_{sid} = atomicLoad(&agent_{snake}[{idx}]);\n\
@@ -2188,7 +2376,59 @@ fn lower_cg_stmt_body_to_wgsl(
         CgStmt::Emit { event, fields } => lower_emit_to_wgsl(event.0, fields, ctx),
         CgStmt::If { cond, then, else_ } => {
             let c = lower_cg_expr_to_wgsl(*cond, ctx)?;
+            // Plan G #244 bug 2: detect the "first-writer-wins" shape
+            // — an inner Assign of a literal F32 to an f32 SoA column
+            // whose field is also read by THIS If's cond. If matched,
+            // set the per-stmt gate to the inner Assign's stmt_id so
+            // its CAS-loop emit captures the transition outcome AND
+            // the inner stmt-list emit knows to wrap subsequent
+            // stmts. Restored after the inner-list lowering returns
+            // so the gate doesn't leak to sibling Ifs.
+            //
+            // The eligibility check requires the f32 RMW upgrade
+            // (`f32_atomic_field_writes`) to be active for the
+            // assigned field — without it the inner Assign would
+            // emit as a plain `agent_<f>[idx] = …` write (no CAS,
+            // no transition predicate possible). The forest_fire
+            // Catch handler trips the upgrade because its body
+            // contains `agents.set_hp(t, 99.0)`, which
+            // `stmt_list_collect_f32_atomic_writes` records.
+            let gate_save = ctx.f32_first_writer_gate.get();
+            if let Some((assign_sid, field)) =
+                stmt_list_first_f32_const_assign(ctx.prog, *then)
+            {
+                let upgraded = f32_field_atomic_bit(field).map_or(false, |bit| {
+                    (ctx.f32_atomic_field_writes.get() >> bit) & 1 == 1
+                });
+                if upgraded && expr_reads_agent_field_id(*cond, field, ctx.prog) {
+                    // Only set the gate if there are post-Assign
+                    // stmts in the then-list to actually gate.
+                    // Without subsequent stmts, the gate would
+                    // only declare a dead `var
+                    // _f32_cas_did_transition_<sid>` and emit no
+                    // wrap (`if (bool) { }` is valid WGSL but
+                    // noisy + a no-op). The plague_city
+                    // `ApplyLastRites` body
+                    // `if (hunger > 0) { set_hunger(t, 0.0); }`
+                    // is the canonical no-tail case.
+                    let has_post_assign_stmts = <CgProgram as StmtListArena>::get(
+                        ctx.prog, *then,
+                    )
+                    .map(|tl| {
+                        tl.stmts
+                            .iter()
+                            .position(|sid| *sid == assign_sid)
+                            .map(|pos| pos + 1 < tl.stmts.len())
+                            .unwrap_or(false)
+                    })
+                    .unwrap_or(false);
+                    if has_post_assign_stmts {
+                        ctx.f32_first_writer_gate.set(Some(assign_sid.0));
+                    }
+                }
+            }
             let then_body = lower_cg_stmt_list_to_wgsl(*then, ctx)?;
+            ctx.f32_first_writer_gate.set(gate_save);
             match else_ {
                 Some(else_id) => {
                     let else_body = lower_cg_stmt_list_to_wgsl(*else_id, ctx)?;
@@ -5648,6 +5888,18 @@ pub fn lower_cg_stmt_list_to_wgsl(
     let mut wrapped: Vec<String> = Vec::new();
     let mut cas_loop_body: Vec<String> = Vec::new();
     let mut cas_loop_parts_idx: Option<usize> = None;
+    // Plan G #244 bug 2: post-CAS emit gating accumulator. When the
+    // per-stmt path emits the gated CAS variant for the f32
+    // first-writer-wins shape, subsequent residual stmts collect into
+    // `f32_wrapped` and are emitted at the end of the list as
+    // `if (_f32_cas_did_transition_<sid>) { ... }`. The gate is the
+    // stmt_id of the gated Assign — read off `EmitCtx::f32_first_writer_gate`
+    // (which the enclosing `If` arm set BEFORE recursing into this list).
+    // Mirrors the alive-CAS `wrap_open` / `wrapped` mechanism but
+    // gates on `_f32_cas_did_transition_<sid>` instead of
+    // `_alive_cas_<sid>.exchanged`.
+    let mut f32_wrap_open: Option<u32> = None;
+    let mut f32_wrapped: Vec<String> = Vec::new();
     for (pos, &idx) in residual.iter().enumerate() {
         let stmt_id = list.stmts[idx];
         let stmt_node = <CgProgram as StmtArena>::get(ctx.prog, stmt_id).ok_or(
@@ -5754,6 +6006,20 @@ pub fn lower_cg_stmt_list_to_wgsl(
                 };
                 cas_loop_parts_idx = Some(parts.len());
                 parts.push(composed);
+                // Plan G #244 bug 2: if this Assign was the gated
+                // first-writer-wins write (per `EmitCtx::f32_first_writer_gate`),
+                // open the post-CAS emit-gating wrap. Subsequent
+                // residual stmts collect into `f32_wrapped` and emit
+                // as `if (_f32_cas_did_transition_<sid>) { ... }` at
+                // list close. Without this, all CAS-losers (which
+                // retried, observed the already-written constant,
+                // and CAS'd the same value with no real transition)
+                // would still execute the post-write side-effects
+                // (e.g. `emit Ignited`), producing N emits per single
+                // semantic transition.
+                if ctx.f32_first_writer_gate.get() == Some(stmt_id.0) {
+                    f32_wrap_open = Some(stmt_id.0);
+                }
                 continue;
             }
             // pos > rmw_pos — suffix stmt, falls through to the
@@ -5769,6 +6035,18 @@ pub fn lower_cg_stmt_list_to_wgsl(
             wrap_open = Some(stmt_id.0);
             continue;
         }
+        // Plan G #244 bug 2: if a gated f32 first-writer-wins CAS is
+        // open, route this suffix stmt into the gating wrap instead of
+        // the normal `parts` (or alive-CAS `wrapped`). Subsequent
+        // alive-CAS sites can still appear inside the gated tail (the
+        // alive flip + Defeated emit chain), and the per-stmt emit will
+        // route them through their own CAS — but the structural wrap
+        // above takes precedence: the entire tail (including any
+        // alive-CAS sub-tree) only runs when the f32 transition won.
+        if f32_wrap_open.is_some() {
+            f32_wrapped.push(stmt_wgsl);
+            continue;
+        }
         if wrap_open.is_some() {
             wrapped.push(stmt_wgsl);
         } else {
@@ -5782,6 +6060,27 @@ pub fn lower_cg_stmt_list_to_wgsl(
             cas_id,
             indent_block(&inner, 1),
         ));
+    }
+    if let Some(gate_sid) = f32_wrap_open {
+        // Skip the empty wrap when there were no post-CAS stmts to
+        // gate (e.g. plague_city's `ApplyLastRites` whose body is
+        // just `if (hunger > 0) { set_hunger(t, 0.0); }` with no
+        // emit). The wrap would still type-check (`if (bool) { }`
+        // is valid WGSL) but it's noisy and a no-op. The transition
+        // tracking variable's `var` decl is still emitted by the
+        // per-stmt CAS arm — harmless dead store, and removing the
+        // emit conditionally on the wrap being non-empty would
+        // require a second source-of-truth for the gate decision.
+        // Keep it simple: emit the wrap only when there's something
+        // inside.
+        if !f32_wrapped.is_empty() {
+            let inner = f32_wrapped.join("\n");
+            parts.push(format!(
+                "if (_f32_cas_did_transition_{}) {{\n{}\n}}",
+                gate_sid,
+                indent_block(&inner, 1),
+            ));
+        }
     }
     // Prepend var declarations for the f32 RMW chain (must precede
     // the CAS loop in the WGSL block scope so the loop body's
