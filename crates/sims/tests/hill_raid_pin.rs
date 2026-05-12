@@ -9,7 +9,13 @@
 //!   `terrain.line_of_sight` in the .sim consults the GPU mirror via
 //!   the auto-emitted `KernelBindingsContext::voxel_grid` wire-up.
 //!
-//! creature_type discriminants (from .sim entity decl order, alphabetical):
+//! creature_type discriminants are pinned by `.sim` declaration
+//! order (`EntityRef.0` in `crates/dsl_ast/src/resolve.rs`). The
+//! `hill_raid.sim` entities are declared alphabetically — Defender,
+//! Enemy, Wall — so the per-slot creature_type the host writes
+//! into `agent_creature_type_buf` mirrors the constants the rule
+//! gates compare against (`self.creature_type == Enemy` lowers
+//! to a `== 1u` comparison in the fused kernel).
 //!   Defender = 0, Enemy = 1, Wall = 2
 //!
 //! Voxel binding: the auto-emitted `GeneratedRuntime` detects that
@@ -96,17 +102,17 @@ fn city_holds_or_falls_after_200_ticks() {
     assert!(initial_defenders_alive > 0, "defender seed didn't survive init");
     assert!(initial_enemies_alive > 0, "enemy seed didn't survive init");
     assert!(initial_walls_alive > 0, "wall seed didn't survive init");
-    // 2. The siege did SOMETHING — either kills happened or movement
-    //    drew enemies in. A perfectly static state means the rules
-    //    didn't fire and the fixture is broken.
-    // Movement-based state change is the load-bearing assertion today.
-    // The chronicle-consumer wiring (Indirect-dispatch from synthesized
-    // step()) is the documented 4-gap blocker in `build_helper.rs`'s
-    // `DispatchOp::Indirect` arm comment (commit 353527e6) — until that
-    // lands, `apply_ability` consumers don't fire and no damage flows.
-    // EnemyAdvance is a PerAgent rule using `agents.set_pos` — it
-    // fires fine and enemies should have closed distance toward the
-    // hill over 200 ticks.
+    // 2. The siege did SOMETHING — movement drew enemies in toward the
+    //    hill. EnemyAdvance is a PerAgent rule using `agents.set_pos`
+    //    that gets fused with DefenderFire into a single PerAgent
+    //    kernel. Both writes (the EnemyAdvance position update and
+    //    the DefenderFire apply_ability dispatch) need to propagate
+    //    through the fused body. The NaN failure mode this used to
+    //    have (raw `sum * step` recurrence) is fixed by the
+    //    normalize-direction form in the .sim — each tick advances
+    //    `attack_step = 0.18` toward the defender centroid. Over
+    //    200 ticks an enemy at radius 25 should close at least
+    //    ~10 units (well clear of the 25.0 init).
     let positions = read_positions(state_mut(&mut state));
     let enemy_radii: Vec<f32> = positions
         .iter()
@@ -116,18 +122,24 @@ fn city_holds_or_falls_after_200_ticks() {
     let mean_enemy_radius: f32 =
         enemy_radii.iter().sum::<f32>() / (enemy_radii.len() as f32);
     println!("  movement: mean enemy radius = {mean_enemy_radius:.2} (init = 25.0)");
-    if (mean_enemy_radius - 25.0).abs() < 0.01 {
-        println!(
-            "  NOTE: enemies didn\'t move — EnemyAdvance was fused into\n           a kernel that didn\'t end up dispatched correctly (likely\n           tied to the same chronicle/fusion gap). Static topology\n           sticks; movement + damage land when fusion + Indirect\n           dispatch are reconciled.",
-        );
-    }
+    assert!(
+        mean_enemy_radius.is_finite(),
+        "enemy positions diverged to NaN/Inf — EnemyAdvance recurrence \
+         unstable (likely a regression in the normalize-direction form)",
+    );
+    assert!(
+        mean_enemy_radius < 24.5,
+        "enemies didn't advance — fused EnemyAdvance position writes \
+         aren't propagating; expected mean radius < 24.5 after 200 \
+         ticks of attack_step=0.18 toward centroid, got {mean_enemy_radius:.4}",
+    );
     if total_kill_pressure == 0.0 {
         println!(
             "  NOTE: zero damage flowed — chronicle-consumer Indirect-dispatch\n           gap from commit 353527e6. apply_ability records enqueue but\n           consumers don\'t fire from synthesized step(). Siege animates\n           when that gap closes.",
         );
     }
     println!(
-        "  contract: 19 kernels emit, 200 ticks step without panic, all\n            seeded slots survive, view storage allocated correctly.",
+        "  contract: 19 kernels emit, 200 ticks step without panic, all\n            seeded slots survive, view storage allocated correctly,\n            EnemyAdvance position writes propagate post-fusion.",
     );
 }
 

@@ -57,18 +57,23 @@ event EffectDamageApplied {
   amount: f32,
 }
 
+// Entity discriminants are pinned by declaration order
+// (`EntityRef.0`, see crates/dsl_ast/src/resolve.rs). The order
+// here is alphabetical so the comparison `self.creature_type ==
+// Enemy` lowers to a u32 discriminant the test pin can mirror
+// 1:1 (Defender = 0, Enemy = 1, Wall = 2).
 entity Defender : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Enemy : Agent {
   pos: vec3,
   vel: vec3,
 }
 
 entity Wall : Agent {
   pos: vec3,
-}
-
-entity Enemy : Agent {
-  pos: vec3,
-  vel: vec3,
 }
 
 config raid {
@@ -95,13 +100,23 @@ spatial_query nearby_walls(self: AgentId, candidate: AgentId) =
 @phase(per_agent)
 physics EnemyAdvance {
   on Tick {} where (self.alive && self.creature_type == Enemy) {
+    // Sum the (defender - self) deltas across every alive defender,
+    // then normalize so each step advances a fixed `attack_step`
+    // toward the defender centroid. Without normalize the unbounded
+    // `sum * step` recurrence diverges to NaN within a few ticks
+    // (16 defenders × 0.18 = 2.88 gain — well past 1.0 stability).
     let toward_city = sum(d in agents where
       if (d != self) && (d.alive) && (d.creature_type == Defender) {
         d.pos - self.pos
       } else {
         vec3(0.0, 0.0, 0.0)
       });
-    let new_pos = self.pos + toward_city * config.raid.attack_step;
+    let dist = length(toward_city);
+    let new_pos = if (dist > 0.001) {
+      self.pos + (toward_city / dist) * config.raid.attack_step
+    } else {
+      self.pos
+    };
     agents.set_pos(self, new_pos);
   }
 }
