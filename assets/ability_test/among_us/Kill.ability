@@ -1,0 +1,18 @@
+// among_us — Imposter melee Kill on isolated Crew. AbilityId 1
+// (alphabetical: Kill < Task < Vote among the 3 Among Us abilities).
+//
+// `damage 100` lowers via the standard "damage" arm; the dispatcher
+// writes EffectDamageApplied (kind=26) per cast. The .sim's
+// ApplyDamageFromChronicle re-emits as `Damaged` so the witness
+// chronicle consumer can read the (killer, victim) pair and the
+// reaper can flip alive=0. Damage is one-shot lethal (Crew start
+// hp=100; 100 dmg + reaper transition fires alive=0 in one tick).
+
+ability Kill {
+    target: enemy
+    range: 1.5
+    cooldown: 8
+    hint: damage
+
+    damage 100.0 [PHYSICAL: 100]
+}

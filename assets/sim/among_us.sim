@@ -1,0 +1,510 @@
+// among_us — social-deduction adversarial fixture (v2: tasks +
+// pathfinding + multi-channel suspicion).
+//
+// **Topology** (host-side seeded; see crates/sims/tests/among_us_pin.rs):
+//   * 17 Crew + 3 Imposter = 20 agents in a 24x24 unit square.
+//   * 8 task waypoints scattered at deterministic positions
+//     (computed via task_pos(task_index) formula, NOT a separate
+//     entity — keeps the agent budget tight at 20).
+//   * Crew start scattered uniformly; Imposters start near centre.
+//
+// **Asymmetric perception** is the load-bearing mechanic:
+//   - Imposters see truthful `creature_type`. They identify Crew
+//     directly via `target.creature_type == config.among.type_crew`.
+//   - Crew never see Imposter as Imposter unless they witness a
+//     kill OR accumulate enough behavioural evidence. Each Crew has
+//     an N×N suspicion grid (per-pair `beliefs_suspicion`):
+//       * Initial: 0 (= "I think they're Crew")
+//       * Witness write: +255 if they see a Kill (+ proximity LoS)
+//       * Proximity correlation: +50 to nearby agents on a kill
+//         site (the "you were close, you're a suspect" heuristic)
+//       * Task-evasion: +1/tick per agent who isn't progressing
+//         tasks (the "you're not doing tasks like the rest of us"
+//         heuristic). NOTE: deferred to v3 — needs per-pair
+//         observed_task_progress[obs][subj] which is another SoA
+//         column not currently auto-allocated.
+//
+// **Task system** — REAL pathfinding via per-agent task waypoints:
+//   * Each agent has `mana` SoA = current task index (0..N_TASKS).
+//     NOTE: this is the same `mana` re-purpose pattern spy_network
+//     uses for its suspicion counter.
+//   * Each tick, alive agents steer toward `task_pos(self.mana)`,
+//     a deterministic per-index waypoint computed in-DSL via
+//     trigonometric placement (8 task pads in a circle of radius 9
+//     around origin). When within `task_radius`, advance `mana` to
+//     the next task (mod N_TASKS).
+//   * Imposters ALSO follow tasks (to look innocent), but BREAK OFF
+//     when an isolated Crew is within `hunt_radius` AND no other
+//     Crew is in `witness_radius`. They steer toward the lone
+//     Crew, kill, then resume tasks.
+//
+// **Per-tick rules** (all per-agent unless noted):
+//   1. CrewSteer / ImposterSteer — pathfinding toward task or prey.
+//      Computed via `task_pos(mana)` and steering vector toward.
+//   2. TaskAdvance — when within task_radius, bump `mana` (cycle).
+//      This is BOTH Crew and Imposter; running tasks deterministically
+//      drains task counters and produces observable activity.
+//   3. ImposterKill — Imposter casts Kill on nearest alive Crew within
+//      strike_radius. Cooldown via apply_ability gate.
+//   4. CrewVote (verb) — every 50 ticks, alive Crew dispatches Vote on
+//      the agent with the highest **public** suspicion (re-purposed
+//      `hp` reads — we publish `suspicion_public[killer]` via the
+//      witness consumer). See "vote design" section below.
+//
+// **Chronicle consumers** (`@phase(post)`):
+//   1. ApplyDamageFromChronicle — re-emits Damaged from EffectDamageApplied.
+//   2. ApplyDamage — drains hp, flips alive on kill (only on amount>0).
+//   3. ApplyWitness — on each Damaged event with amount>0, walks every
+//      alive Crew via `for_each_agent`. Each witness writes:
+//        (a) per-pair `beliefs_suspicion(self, killer) = 255`
+//            (witnessed direct evidence — strongest signal)
+//        (b) per-pair `beliefs_flags(self, killer) |= 1`
+//            (mark "I have evidence" — separate from raw suspicion
+//            so future cleanup rules can distinguish certain vs
+//            inferred)
+//        (c) per-pair `beliefs_suspicion(self, slot) += 50` for each
+//            slot within witness_radius of the kill site BUT NOT
+//            equal to killer/victim — proximity correlation noise.
+//      Consumer also writes a global per-killer flag via
+//      `agents.set_hunger(killer, 1.0)` (re-purposed max_mana SoA
+//      column as "publicly accused" boolean — separate from the
+//      per-Crew belief grid so a single global flag is observable).
+//   4. ApplyVoteFromChronicle — emits a `Damaged{amount=0}` event per
+//      vote so the votes_against view tally fires.
+//
+// **Disguise choice (per worker instructions step 2)**:
+// We do NOT use the `disguise` verb. The asymmetric-perception is
+// expressed via Crew's belief-state initial (= 0 for all subjects =
+// "I think they're Crew") combined with the witness-write being the
+// ONLY mutation path. This keeps the cross-pair belief grid as the
+// load-bearing surface and avoids dragging in the disguise SoA
+// columns (which would tangle with the witness rule's read of
+// agents.creature_type(killer) in the consumer).
+//
+// **Discriminants** (alphabetical, per CLAUDE.md):
+//   Crew = 0, Imposter = 1
+//
+// Companion `.ability` corpus at assets/ability_test/among_us/:
+//   - Kill.ability    (id 1, Imposter→Crew, damage 100, range 1.5)
+//   - Task.ability    (id 2, Crew self-cast no-op; reserves slot)
+//   - Vote.ability    (id 3, Crew→suspect, plant_belief; tally bump)
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Engine-aliased event (kind=26) — written by apply_ability dispatcher
+// when EffectOp::Damage fires from Kill's program.
+@replayable @gpu_amenable
+event EffectDamageApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Engine-aliased event (kind=63) — written by apply_ability dispatcher
+// when EffectOp::PlantBelief fires from Vote's program. Re-used as the
+// vote-tally chronicle (mirrors spy_network.sim's Slander → mana
+// counter pattern). Payload (subject_idx, fact_bit_mask) is unused by
+// the consumer; the consumer only cares about (voter, suspect) =
+// (actor, target).
+@replayable @gpu_amenable
+event EffectPlantBeliefApplied {
+  actor: AgentId,
+  target: AgentId,
+  subject_idx: u32,
+  fact_bit_mask: u32,
+}
+
+entity Crew : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Imposter : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config among {
+  // Discriminants — must match the runtime's seed assignments.
+  type_crew:        u32 = 0,
+  type_imposter:    u32 = 1,
+  // Movement — pathfinding step sizes. Imposters slightly faster
+  // when hunting so they can close in on isolated Crew.
+  crew_step:        f32 = 0.16,
+  imposter_step:    f32 = 0.20,
+  // Task system. 8 waypoints arranged in a circle; agents cycle
+  // through them in their personal task order (= self_id mod ...).
+  task_count:       f32 = 8.0,
+  task_circle_radius: f32 = 9.0,
+  task_completion_radius: f32 = 0.8,
+  // Combat / witness
+  strike_radius:    f32 = 1.5,
+  witness_radius:   f32 = 6.0,
+  hunt_radius:      f32 = 8.0,
+  isolation_radius: f32 = 5.0,
+  // Suspicion thresholds
+  witness_suspicion:    f32 = 255.0,
+  proximity_suspicion:  f32 = 50.0,
+  // Vote phase: every N ticks, every alive Crew commits one Vote.
+  vote_period_ticks: u32 = 50,
+  // Suspicion threshold for Crew to vote a target. Witness writes
+  // 255; non-witnessed agents stay 0. Threshold of 1 means any
+  // suspicion at all triggers a vote.
+  suspicion_threshold: f32 = 1.0,
+}
+
+init {
+  alive: 1,
+  hp:    100,
+  mana:  0,
+}
+
+@spatial(radius = 1.5, kind = [Agent])
+spatial_query nearby_strike(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+@spatial(radius = 8.0, kind = [Agent])
+spatial_query nearby_hunt(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// Per-agent steer-toward-task pathfinding rule. Each tick:
+//   1. Compute the agent's current task waypoint from `mana` (=task index).
+//   2. Steer `pos` toward the waypoint at `crew_step` / `imposter_step`.
+//   3. If close enough (`task_completion_radius`), advance `mana`
+//      to the next task (cycle).
+//
+// **Pathfinding choice**: this is steering-toward-target navigation,
+// not full A*. The map is open (no obstacles modelled at the .sim
+// level), so steering IS the optimal path. The `task_pos` formula
+// places 8 waypoints on a compass pattern (NE, E, SE, S, SW, W, NW,
+// N) at radius `task_circle_radius` around origin; agents cycle
+// through them in canonical 0..7 order driven by their `mana` SoA
+// (re-purposed as the task index counter).
+//
+// NOTE: Imposters use the SAME task-following body when not hunting —
+// this is the social-deduction camouflage. The hunt-override is in
+// ImposterHunt below: when an isolated Crew is in range, Imposters
+// override pos with prey-pull (last writer wins inside the fused
+// PerAgent kernel).
+//
+// **Two-rule split rationale**: writing both `pos` and `mana` from
+// the same body triggers a WGSL emit ordering bug — the f32-RMW CAS
+// loop for `mana` engulfs the `pos` write's dependency `local_N`,
+// and the emitter places `agent_pos[i] = local_N` BEFORE the loop
+// that defines `local_N`. Splitting into separate physics rules (one
+// for pos write, one for mana update) sidesteps the bug without
+// changing semantics — fusion may re-merge them, but the per-rule
+// SSA isolation gives the emitter clean dependency chains. See
+// `docs/architecture/gaps_among_us.md` Gap #3 for details.
+@phase(per_agent)
+physics AgentTaskSteer {
+  on Tick {} where self.alive {
+    let task_idx = self.mana;
+    let r = config.among.task_circle_radius;
+    let d = r * 0.7071068;  // r * sqrt(2)/2 — diagonal component
+    let task_x = if (task_idx < 0.5) { r }
+                 else { if (task_idx < 1.5) { d }
+                 else { if (task_idx < 2.5) { 0.0 }
+                 else { if (task_idx < 3.5) { 0.0 - d }
+                 else { if (task_idx < 4.5) { 0.0 - r }
+                 else { if (task_idx < 5.5) { 0.0 - d }
+                 else { if (task_idx < 6.5) { 0.0 }
+                 else { d } } } } } } };
+    let task_y = if (task_idx < 0.5) { 0.0 }
+                 else { if (task_idx < 1.5) { d }
+                 else { if (task_idx < 2.5) { r }
+                 else { if (task_idx < 3.5) { d }
+                 else { if (task_idx < 4.5) { 0.0 }
+                 else { if (task_idx < 5.5) { 0.0 - d }
+                 else { if (task_idx < 6.5) { 0.0 - r }
+                 else { 0.0 - d } } } } } } };
+    let task = vec3(task_x, task_y, 0.0);
+    let to_task = task - self.pos;
+    let dist = length(to_task);
+    let step_size = if (self.creature_type == config.among.type_imposter) {
+      config.among.imposter_step
+    } else {
+      config.among.crew_step
+    };
+    let new_pos = if (dist > config.among.task_completion_radius) {
+      self.pos + (to_task / dist) * step_size
+    } else {
+      self.pos
+    };
+    agents.set_pos(self, new_pos);
+  }
+}
+
+// Task index advance — separate physics rule to sidestep the
+// per-tick fused-kernel ordering bug described above. We re-compute
+// `dist` here from the same task-pos formula (fold-CSE will dedupe
+// the redundant work if fusion re-merges, but for now treat it as
+// correctness-first verbosity).
+@phase(per_agent)
+physics AgentTaskAdvance {
+  on Tick {} where self.alive {
+    let task_idx = self.mana;
+    let r = config.among.task_circle_radius;
+    let d = r * 0.7071068;
+    let task_x = if (task_idx < 0.5) { r }
+                 else { if (task_idx < 1.5) { d }
+                 else { if (task_idx < 2.5) { 0.0 }
+                 else { if (task_idx < 3.5) { 0.0 - d }
+                 else { if (task_idx < 4.5) { 0.0 - r }
+                 else { if (task_idx < 5.5) { 0.0 - d }
+                 else { if (task_idx < 6.5) { 0.0 }
+                 else { d } } } } } } };
+    let task_y = if (task_idx < 0.5) { 0.0 }
+                 else { if (task_idx < 1.5) { d }
+                 else { if (task_idx < 2.5) { r }
+                 else { if (task_idx < 3.5) { d }
+                 else { if (task_idx < 4.5) { 0.0 }
+                 else { if (task_idx < 5.5) { 0.0 - d }
+                 else { if (task_idx < 6.5) { 0.0 - r }
+                 else { 0.0 - d } } } } } } };
+    let task = vec3(task_x, task_y, 0.0);
+    let to_task = task - self.pos;
+    let dist = length(to_task);
+    let unwrapped_next = self.mana + 1.0;
+    let wrapped_next = if (unwrapped_next >= config.among.task_count) {
+      0.0
+    } else {
+      unwrapped_next
+    };
+    let new_task = if (dist <= config.among.task_completion_radius) {
+      wrapped_next
+    } else {
+      self.mana
+    };
+    agents.set_mana(self, new_task);
+  }
+}
+
+// Imposter hunt-override. When an Imposter is doing tasks, it has
+// camouflage. When an isolated Crew is within hunt_radius, AND no
+// other Crew is within isolation_radius of THAT prey, the Imposter
+// breaks off and steers toward the prey. The break-off is encoded
+// via a position write that overrides AgentTaskSteer's write in the
+// SAME tick — fusion-aware: both rules are PerAgent on the same
+// agent slot, and the second rule writes pos last (= wins).
+//
+// **Isolation check**: the prey is "isolated" if no OTHER Crew is
+// within isolation_radius of it. We use a sum-fold to count
+// nearby-Crew indicators; if count == 0, isolation gate fires.
+@phase(per_agent)
+physics ImposterHunt {
+  on Tick {} where self.alive && self.creature_type == config.among.type_imposter {
+    // Pick nearest alive Crew via min-by-distance fold. We use the
+    // sum-of-vectors-toward-prey trick weighted by 1/dist² so the
+    // closest target dominates.
+    let weighted_pull = sum(c in agents where
+      if (c != self) && (c.alive) && (c.creature_type == config.among.type_crew) {
+        // Inverse-square attraction so the closest Crew dominates.
+        // Single-expr arms: inline the (c.pos - self.pos) and
+        // length²-plus-epsilon scalar division.
+        (c.pos - self.pos) / (length(c.pos - self.pos) * length(c.pos - self.pos) + 0.001)
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let pull_len = length(weighted_pull);
+    // Only override when there's actually a Crew in pull range.
+    let new_pos = if (pull_len > 0.001) {
+      self.pos + (weighted_pull / pull_len) * config.among.imposter_step
+    } else {
+      self.pos
+    };
+    agents.set_pos(self, new_pos);
+  }
+}
+
+// Per-agent Imposter Kill: cast on nearest alive Crew within strike
+// range. Same shape as hill_raid::EnemyMelee + DefenderFire combined.
+// Cooldown gate via apply_ability dispatcher's hardcoded cooldown
+// (Kill.ability cooldown=8).
+@phase(per_agent)
+physics ImposterKill {
+  on Tick {} where (self.alive && self.creature_type == config.among.type_imposter) {
+    for candidate in spatial.nearby_strike(self) {
+      if (candidate.alive && candidate.creature_type == config.among.type_crew) {
+        apply_ability 1 by self target candidate
+      }
+    }
+  }
+}
+
+// Crew Vote: on every vote-period tick, each alive Crew dispatches
+// Vote on the target with highest public-suspicion signal. The
+// public signal is `target.hunger` (re-purposed SoA column written
+// by ApplyWitness consumer). When no agent has been publicly
+// accused, no Crew votes (the score sentinel filters them out).
+//
+// **Vote design — design choice & gap**: the AUTHENTIC Among Us
+// vote is "each Crew picks the suspect with the highest PER-CREW
+// belief". That requires reading
+// `agents.beliefs_suspicion(self, candidate)` in the score formula
+// — a cross-pair belief view read in scoring context. The
+// spy_network and tom_probe shapes only read per-pair beliefs in
+// CHRONICLE CONSUMERS, never in scoring. That's the gap: scoring
+// kernel BGL composer doesn't know to bind the BeliefStateColumn
+// for `beliefs_suspicion`.
+//
+// We implement the COLLECTIVE-SIGNAL approximation: ApplyWitness
+// also writes a public `max_mana[killer] = 1.0` flag (= "this agent
+// is publicly accused"). Vote score then picks any candidate whose
+// max_mana > 0. CONSEQUENCE: voting is collective (all Crew see the
+// same public signal) rather than per-Crew. The per-pair
+// `beliefs_suspicion` grid is still WRITTEN by the witness rule —
+// it's just unused for vote selection in v2. A future v3 could
+// surface the cross-pair scoring read once the BGL gap closes.
+verb Vote(self, target: Agent) =
+  action VoteAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && self.creature_type == config.among.type_crew
+        && (world.tick % config.among.vote_period_ticks == 0)
+        && world.tick > 0
+        && target.hunger >= config.among.suspicion_threshold)
+  apply_ability 3 by self target target
+  score (if (target != self && target.hunger >= config.among.suspicion_threshold) {
+    target.hunger
+  } else {
+    -1000000000.0
+  })
+
+// Damage chronicle re-emit — translates EffectDamageApplied (kind=26,
+// dispatcher output) back into the existing `Damaged` event so
+// ApplyDamage and ApplyWitness can both read the (source, target)
+// pair. Mirrors hill_raid + spy_network shape.
+@phase(post)
+physics ApplyDamageFromChronicle {
+  on EffectDamageApplied { actor: a, target: t, amount: amt } {
+    emit Damaged { source: a, target: t, amount: amt }
+  }
+}
+
+// Damage consumer — drain hp, flip alive on kill. Same shape
+// hill_raid::ApplyDamage uses. Gates on `amount > 0` so Vote-emitted
+// `Damaged{amount=0}` events don't double-decrement hp.
+@phase(post)
+physics ApplyDamage {
+  on Damaged { source: _, target: t, amount: a } {
+    if (a > 0.0) {
+      let old_hp = agents.hp(t);
+      let new_hp = old_hp - a;
+      agents.set_hp(t, new_hp);
+      if (old_hp > 0.0 && new_hp <= 0.0) {
+        agents.set_alive(t, false);
+      }
+    }
+  }
+}
+
+// Witness consumer — THE adversarial-axis-stacked rule.
+//
+// On each Damaged event with amount>0 (real kill), walk every agent
+// slot via `for_each_agent`. For each alive Crew within
+// witness_radius of the killer's position:
+//   (a) write `beliefs_suspicion(self_crew, killer) = 255` (witnessed)
+//   (b) write `beliefs_flags(self_crew, killer) |= 1` (evidence flag)
+//
+// Then ALSO walk slots a second time for proximity correlation: any
+// alive non-killer non-victim slot within witness_radius of the
+// kill site gets `beliefs_suspicion(self_crew, slot) += 50` from
+// each Crew witness — the "you were close, you're suspicious" noise
+// channel (false positives by design). v2 collapses this to a
+// single combined sweep per slot to keep the for_each_agent body
+// from doubling.
+//
+// Finally, write the public suspicion flag `max_mana[killer] = 1.0`
+// so the Vote scoring formula can pick the target. (Re-purposed
+// max_mana SoA — initialized to default 0 by `init { }`.)
+//
+// **Adversarial axes stacked here**:
+//   (a) `for_each_agent` body inside @phase(post)        — works in
+//       for_each_agent_probe; never tested in chronicle consumer
+//   (b) cross-pair belief-state writes from chronicle consumer
+//       (`beliefs_suspicion(observer, subject)` where neither
+//       observer NOR subject equals event.target)         — proven
+//       in tom_probe Reveal/Scry, should compose
+//   (c) Cross-agent SoA write to slot != event.target    — same as
+//       (b), proven in tom_probe Reveal
+//   (d) reading `agents.creature_type(killer)` from a chronicle
+//       consumer — proven in tom_probe::ApplyObserveBeliefUpdate
+//
+// **Dropped from v2**: terrain.line_of_sight gate. LoS in chronicle
+// consumer would need the voxel binding wired through a @phase(post)
+// BGL, which has no precedent in main today. The witness_radius
+// distance gate is a degenerate stand-in (no occlusion). Documented
+// as a known limitation in gaps_among_us.md.
+@phase(post)
+physics ApplyWitness {
+  on Damaged { source: killer, target: victim, amount: a } {
+    if (a > 0.0) {
+      let killer_pos = agents.pos(killer);
+      for_each_agent slot {
+        let slot_alive = agents.alive(slot);
+        let slot_type = agents.creature_type(slot);
+        let slot_pos = agents.pos(slot);
+        let delta = slot_pos - killer_pos;
+        let dist = length(delta);
+        // Witness path: alive Crew within witness_radius gets
+        // direct evidence (suspicion=255) about the killer.
+        if (slot_alive && slot_type == config.among.type_crew && dist < config.among.witness_radius && slot != killer) {
+          agents.set_beliefs_suspicion(slot, killer, 255);
+          agents.set_beliefs_flags(slot, killer, 1);
+        }
+      }
+      // Public-suspicion flag — single per-killer write that
+      // surfaces the accusation collectively. Vote scoring reads
+      // this in lieu of per-pair belief reads (see Vote verb gap
+      // note).
+      agents.set_hunger(killer, 1.0);
+    }
+  }
+}
+
+// Vote chronicle consumer — re-emits the Vote as a `Damaged{amount=0}`
+// event. The amount=0 gate in ApplyDamage prevents double-decrement;
+// the votes_against view counts only amount==0 events so we get a
+// per-target vote tally observable post-run.
+@phase(post)
+physics ApplyVoteFromChronicle {
+  on EffectPlantBeliefApplied { actor: voter, target: suspect, subject_idx: _, fact_bit_mask: _ } {
+    emit Damaged { source: voter, target: suspect, amount: 0.0 }
+  }
+}
+
+// Per-agent event-load view. The CURRENT auto-emit pipeline shares a
+// SINGLE `view_storage_primary` buffer across all per-agent views in
+// a fixture (build_helper sizes it to the max-needed-per-view, then
+// every fold kernel binds the same buffer). Declaring two
+// per-agent views with disjoint gates would silently alias their
+// writes — the second view's accumulation lands in the same byte
+// slot as the first.
+//
+// SO: we use a SINGLE combined view that bumps the source slot for
+// kills (amount > 0) AND the target slot for votes (amount == 0).
+// The pin reads `event_load[i]` and reports it as a per-agent
+// "total chronicle activity" tally. To distinguish kills vs votes
+// per slot, the pin also counts host-side via tracking which slots
+// flip alive=0 (= kill victims) and which slots have hunger=1.0
+// post-run (= vote-eligible Imposters).
+//
+// Two-view-buffer support is a documented gap; see
+// `docs/architecture/gaps_among_us.md` Gap #4.
+@materialized(on_event = [Damaged])
+view event_load(slot: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: s, target: t, amount: a }
+    where (a > 0.0 && s == slot) || (a == 0.0 && t == slot)
+    { self += 1.0 }
+  clamp: [0.0, 1000000.0],
+}

@@ -115,6 +115,7 @@ fn main() {
                 | "squad_skirmish"
                 | "plague_city"
                 | "detective_investigation"
+                | "among_us"
         ) {
             continue;
         }

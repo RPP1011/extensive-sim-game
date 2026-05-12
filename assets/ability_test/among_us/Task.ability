@@ -1,0 +1,17 @@
+// among_us — Crew innocuous heal-self while moving (acts as a
+// "doing tasks" placeholder, no real effect on outcome). AbilityId 2.
+//
+// The verb body in among_us.sim doesn't actually dispatch this today —
+// Crew movement is handled in the CrewWander physics rule directly
+// (no chronicle path). The .ability file exists so the auto-detected
+// ability_registry has a stable 3-entry slot for Kill/Task/Vote
+// (registry id assignment is alphabetical name order, so Vote
+// stays at AbilityId 3 even after later additions).
+
+ability Task {
+    target: self
+    cooldown: 1
+    hint: utility
+
+    heal 1.0 [HEAL: 100]
+}

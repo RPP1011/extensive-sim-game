@@ -1,0 +1,21 @@
+// among_us — Crew ejection vote. AbilityId 3 (alphabetical: Kill,
+// Task, Vote). Cast every 50 ticks ("vote phase") by every alive
+// Crew. The verb's score function picks the agent with the highest
+// `beliefs_suspicion(self, target)` from the cross-pair belief grid
+// (Crew updates this when they witness an Imposter Kill, see
+// among_us.sim::ApplyWitness consumer).
+//
+// `plant_belief 0 0` lowers to EffectOp::PlantBelief (kind=32) →
+// EffectPlantBeliefApplied (kind=63). The consumer
+// ApplyVoteFromChronicle bumps a per-target vote-tally counter
+// (re-purposed mana SoA column on the target). At the end of the vote
+// phase, the agent with the highest tally is ejected.
+
+ability Vote {
+    target: enemy
+    range: 100.0
+    cooldown: 1
+    hint: utility
+
+    plant_belief 0 bit 0 [UTILITY: 100]
+}
