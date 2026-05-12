@@ -662,22 +662,43 @@ pub enum ComputeOpKind {
         body: CgStmtListId,
     },
 
-    /// Per-tick anchor multiplication for `@decay(rate, per=tick)` views.
-    /// One thread per slot; reads `view_storage_primary[k]`, multiplies by
-    /// `rate`, writes back. Synthesised by `lower_view` when the view's
-    /// `DecayHint` is present; runs before any [`ComputeOpKind::ViewFold`]
-    /// over the same view in the per-tick schedule (achieved via source-
-    /// order ⇒ smaller `OpId`; see `lower::view::lower_view`).
+    /// Per-tick decay step for `@decay(...)` views. Two modes today:
     ///
-    /// The decay rate is carried as raw `u32` bits (`f32::to_bits()`) so
-    /// the variant remains `Eq + Hash + Ord` — the AST-side
-    /// [`dsl_ast::ir::DecayHint`] holds the validated `f32` (∈ [0.0, 1.0)),
-    /// the lowering converts via `f32::to_bits()` once.
+    /// * `mode = mul` — `view_storage_primary[k] = old * rate` (legacy
+    ///   anchor-pattern). Targets f32 storage. `rate_bits` carries
+    ///   `f32::to_bits(rate)` so the variant stays `Eq + Hash + Ord`.
+    /// * `mode = sub` — `view_storage_primary[k] = saturating_sub(old, by)`.
+    ///   Targets integer storage. `sub_by` carries the positive integer
+    ///   step.
+    ///
+    /// Synthesised by `lower_view` when the view's `DecayHint` is
+    /// present; runs before any [`ComputeOpKind::ViewFold`] over the
+    /// same view in the per-tick schedule (achieved via source-order
+    /// ⇒ smaller `OpId`; see `lower::view::lower_view`).
+    ///
+    /// `gate` is the optional `@decay(gate = MaskName)` mask reference
+    /// (carried as `u16` to stay `Eq + Hash + Ord`); when set, the
+    /// per-cell decay body wraps in `if (<mask_predicate>) { ... }`.
+    /// The emit currently surfaces a TODO marker rather than inlining
+    /// cross-view-storage predicate reads — see
+    /// `build_view_decay_wgsl_body`.
     ViewDecay {
         view: ViewId,
-        /// `f32::to_bits()` of the validated decay rate. Convert back at
-        /// emit time via `f32::from_bits(rate_bits)`.
+        /// `f32::to_bits()` of the validated decay rate (used when
+        /// `mode = Mul`). Convert back at emit time via
+        /// `f32::from_bits(rate_bits)`. Zero in `Sub` mode.
         rate_bits: u32,
+        /// Discriminator: `0` = mul, `1` = sub. Kept as a primitive int
+        /// so the variant stays `Eq + Hash + Ord`. Decoded at emit time
+        /// by [`super::data_handle::DecayModeKind::from_u8`].
+        mode: u8,
+        /// Saturating-subtract magnitude (used when `mode = Sub`). Zero
+        /// in `Mul` mode.
+        sub_by: u32,
+        /// Optional gate mask: `Some(MaskId)` corresponds to the .sim
+        /// `@decay(gate = MaskName)` argument. `None` means the
+        /// per-cell body runs unconditionally.
+        gate: Option<MaskId>,
     },
 
     /// Spatial query — dispatch shape determines hash-build vs
@@ -776,7 +797,7 @@ impl ComputeOpKind {
                 // writes nothing.
                 collect_list_dependencies(*body, exprs, stmts, lists, &mut reads, &mut writes);
             }
-            ComputeOpKind::ViewDecay { view, rate_bits: _ } => {
+            ComputeOpKind::ViewDecay { view, .. } => {
                 // Per-slot read-modify-write of the view's primary
                 // storage. Modeled as both a read AND a write of the
                 // same handle so the schedule sees it as touching the
@@ -844,11 +865,20 @@ impl ComputeOpKind {
             ComputeOpKind::ViewFold { view, on_event, .. } => {
                 format!("view_fold(view=#{}, on_event=#{})", view.0, on_event.0)
             }
-            ComputeOpKind::ViewDecay { view, rate_bits } => {
+            ComputeOpKind::ViewDecay { view, rate_bits, mode, sub_by, gate } => {
+                let mode_label = if *mode == 1 { "sub" } else { "mul" };
+                let mag = if *mode == 1 {
+                    format!("{sub_by}")
+                } else {
+                    format!("{:?}", f32::from_bits(*rate_bits))
+                };
+                let gate_label = match gate {
+                    Some(m) => format!(", gate=#{}", m.0),
+                    None => String::new(),
+                };
                 format!(
-                    "view_decay(view=#{}, rate={:?})",
+                    "view_decay(view=#{}, mode={mode_label}, by={mag}{gate_label})",
                     view.0,
-                    f32::from_bits(*rate_bits)
                 )
             }
             ComputeOpKind::SpatialQuery { kind } => {

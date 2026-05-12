@@ -446,9 +446,24 @@ fn lower_decay_op(
     decay: &DecayHint,
     ctx: &mut LoweringCtx<'_>,
 ) -> Result<OpId, LoweringError> {
+    use dsl_ast::ir::DecayMode;
+    let mode_disc: u8 = match decay.mode {
+        DecayMode::Mul => 0,
+        DecayMode::Sub => 1,
+    };
+    // The DSL-side `MaskRef` (u16 newtype) lowers to the IR `MaskId`
+    // (u32 newtype). The lowering driver assigns `MaskId(idx)` in
+    // source order during mask resolution; the AST `MaskRef.0` matches
+    // the same idx because both pass 1 collection passes share the
+    // ordering. Cast through `u32` here to keep the conversion
+    // explicit.
+    let gate = decay.gate.map(|m| crate::cg::data_handle::MaskId(m.0 as u32));
     let kind = ComputeOpKind::ViewDecay {
         view: view_id,
         rate_bits: decay.rate.to_bits(),
+        mode: mode_disc,
+        sub_by: decay.sub_by,
+        gate,
     };
     let shape = DispatchShape::PerAgent;
     ctx.builder
@@ -1497,6 +1512,9 @@ mod tests {
         let decay = DecayHint {
             rate: 0.95,
             per: dsl_ast::ir::DecayUnit::Tick,
+            mode: dsl_ast::ir::DecayMode::Mul,
+            sub_by: 0,
+            gate: None,
             span: span(0, 0),
         };
         assert!(validate_storage_slot(

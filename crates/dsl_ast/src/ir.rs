@@ -879,11 +879,55 @@ pub enum StorageHint {
 /// "full reset every tick" idiom (decay multiplier zeroes prior
 /// storage before the fold runs); `1.0` is rejected as a no-op.
 /// Variable decay rates are not supported in v1.
+///
+/// **Wave-N extension (mode = sub).** The annotation now carries a
+/// `mode` discriminator + `by` magnitude that subsume the legacy
+/// `rate = R` form:
+///
+///   * `mode = mul, by = R` (also spelled `rate = R`) — per-tick
+///     `cell = old * R` (legacy anchor-pattern).
+///   * `mode = sub, by = N` — per-tick `cell = saturating_sub(old, N)`
+///     (linear decay; tom_probe's belief-confidence shape).
+///
+/// `rate` is preserved as the compile-time constant scalar for the
+/// `mul` mode (in `[0.0, 1.0)`). For `sub` mode, `sub_by` carries the
+/// positive integer step. The two share the `span` + `per` fields.
+///
+/// **Optional `gate = MaskName`.** When set, the emitted decay kernel
+/// wraps its per-cell body in `if (<mask_predicate>) { ... }`, so cells
+/// where the predicate evaluates FALSE are left untouched. The mask is
+/// resolved against the compilation's `masks` vec by name. Today the
+/// runtime stops at this IR field — the WGSL emit reports an
+/// unsupported-gate diagnostic when the gate mask's predicate
+/// references view-storage cells (cross-binding plumbing not yet
+/// available for decay kernels).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct DecayHint {
     pub rate: f32,
     pub per: DecayUnit,
+    pub mode: DecayMode,
+    /// For `mode = sub`: the integer step magnitude (positive). Unused
+    /// in `mode = mul` (the multiplier travels via `rate`).
+    pub sub_by: u32,
+    /// Resolved `MaskRef` for the optional `gate = <MaskName>` argument.
+    /// `None` when no gate is specified. Resolution happens in
+    /// `resolve.rs::lower_decay_hint` once the global symbol table is
+    /// populated. The `MaskRef`'s u16 indexes `Compilation.masks`.
+    pub gate: Option<MaskRef>,
     pub span: Span,
+}
+
+/// Discriminator for the `@decay(mode = ...)` argument. Defaults to
+/// `Mul` for the legacy `rate = R` shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum DecayMode {
+    /// Per-tick `cell = old * rate` (legacy anchor-pattern).
+    Mul,
+    /// Per-tick `cell = saturating_sub(old, sub_by)`. Targets integer
+    /// storage (u8/u16/u32). The decay kernel's per-cell body emits
+    /// `let new_val = select(old - by, 0, old < by);` (or the
+    /// equivalent u32 saturating-sub).
+    Sub,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

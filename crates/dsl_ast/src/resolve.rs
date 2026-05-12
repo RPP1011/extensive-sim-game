@@ -1462,7 +1462,7 @@ fn resolve_bodies(
                     }
                 }
                 // Parse and validate `@decay(rate=R, per=tick)` if present.
-                let decay = lower_decay_hint(&d.annotations, &d.body)?;
+                let decay = lower_decay_hint(&d.annotations, &d.body, symbols)?;
                 // Parse `@lazy` / `@materialized(on_event=[...],
                 // storage=<hint>)` to set the view kind. Spec §2.3 + §9 D31.
                 let kind = lower_view_kind(&d.name, &d.annotations, &d.body, d.span)?;
@@ -3015,25 +3015,45 @@ fn edit_distance(a: &str, b: &str) -> usize {
 // @decay annotation lowering (spec §2.3, §9 D31)
 // ---------------------------------------------------------------------------
 
-/// Walk the view's annotations; if a `@decay(rate=R, per=tick)` annotation
-/// exists, validate it and return a typed `DecayHint`. Validates:
+/// Walk the view's annotations; if a `@decay(...)` annotation exists,
+/// validate it and return a typed `DecayHint`. Validates:
 ///
 /// - Paired with `@materialized` (errors otherwise — v1 only supports
 ///   anchor-pattern decay on event-folded views).
 /// - Host body is a `Fold` (lazy views have no persistent state to decay).
-/// - `rate` argument is a float literal in the closed interval `[0.0, 1.0)`.
-///   `rate = 0.0` is the "full reset every tick" idiom — the per-tick
-///   decay multiplier zeroes the previous storage before the fold's
-///   event handlers add the current tick's contributions, so the view
-///   reflects only this-tick state. `rate = 1.0` is rejected because it
-///   makes the decay kernel a no-op (callers should drop the annotation
-///   instead, which avoids the wasted dispatch).
-/// - `per` argument is the identifier `tick`. Other time bases are parsed
-///   but rejected here.
-/// - No extra unknown keys.
+///
+/// **Two equivalent shapes are accepted:**
+///
+/// 1. **Legacy multiplicative** — `@decay(rate = R, per = tick)`. `R`
+///    is a float literal in `[0.0, 1.0)`. Implies `mode = mul`. The
+///    `0.0` value is the "full reset every tick" idiom — the per-tick
+///    decay multiplier zeroes the previous storage before the fold's
+///    event handlers add the current tick's contributions. `1.0` is
+///    rejected (no-op).
+///
+/// 2. **Explicit mode + magnitude** — `@decay(per = tick, mode = <mul|sub>, by = N)`:
+///    - `mode = mul, by = R` is identical to the legacy `rate = R` form.
+///    - `mode = sub, by = N` (positive integer) emits a saturating
+///      per-cell subtract: `cell = saturating_sub(old, N)`. Targets
+///      integer-valued storage (u8/u16/u32). N must be > 0.
+///
+/// **Optional `gate = MaskName`** (sub mode only today): names a mask
+/// declared elsewhere in the .sim. Cells where the mask predicate
+/// evaluates FALSE are skipped by the per-cell decay step. The name is
+/// resolved against the global symbol table here; downstream emit may
+/// surface a "gate mask predicate references view-storage cells —
+/// cross-binding plumbing not yet implemented in decay kernels"
+/// diagnostic when it cannot inline the predicate's WGSL body. In that
+/// case the kernel emits a TODO marker rather than silently skipping
+/// the gate (caller must address the architectural gap before tom_probe-
+/// style decay subsumption can land).
+///
+/// The two forms are mutually exclusive: callers either spell `rate`
+/// (legacy) or `mode + by` (explicit). Mixing is rejected.
 fn lower_decay_hint(
     annotations: &[ast::Annotation],
     body: &ast::ViewBody,
+    symbols: &SymbolTable,
 ) -> Result<Option<DecayHint>, ResolveError> {
     let ann = match annotations.iter().find(|a| a.name == "decay") {
         Some(a) => a,
@@ -3061,6 +3081,10 @@ fn lower_decay_hint(
 
     let mut rate: Option<f64> = None;
     let mut per: Option<String> = None;
+    let mut mode: Option<String> = None;
+    let mut by_int: Option<i64> = None;
+    let mut by_float: Option<f64> = None;
+    let mut gate_name: Option<(String, ast::Span)> = None;
     for arg in &ann.args {
         let key = match &arg.key {
             Some(k) => k.as_str(),
@@ -3100,10 +3124,50 @@ fn lower_decay_hint(
                 };
                 per = Some(p);
             }
+            "mode" => {
+                let m = match &arg.value {
+                    ast::AnnotationValue::Ident(s) => s.clone(),
+                    other => {
+                        return Err(ResolveError::InvalidDecayHint {
+                            detail: format!(
+                                "`mode` must be an identifier (`mul` or `sub`); got {other:?}"
+                            ),
+                            span: arg.span,
+                        });
+                    }
+                };
+                mode = Some(m);
+            }
+            "by" => match &arg.value {
+                ast::AnnotationValue::Int(i) => by_int = Some(*i),
+                ast::AnnotationValue::Float(f) => by_float = Some(*f),
+                other => {
+                    return Err(ResolveError::InvalidDecayHint {
+                        detail: format!(
+                            "`by` must be a numeric literal; got {other:?}"
+                        ),
+                        span: arg.span,
+                    });
+                }
+            },
+            "gate" => {
+                let n = match &arg.value {
+                    ast::AnnotationValue::Ident(s) => s.clone(),
+                    other => {
+                        return Err(ResolveError::InvalidDecayHint {
+                            detail: format!(
+                                "`gate` must be a mask name identifier; got {other:?}"
+                            ),
+                            span: arg.span,
+                        });
+                    }
+                };
+                gate_name = Some((n, arg.span));
+            }
             other => {
                 return Err(ResolveError::InvalidDecayHint {
                     detail: format!(
-                        "unknown `@decay` argument `{other}`; expected `rate` and `per`"
+                        "unknown `@decay` argument `{other}`; expected `rate`, `per`, `mode`, `by`, or `gate`"
                     ),
                     span: arg.span,
                 });
@@ -3111,31 +3175,10 @@ fn lower_decay_hint(
         }
     }
 
-    let rate = rate.ok_or_else(|| ResolveError::InvalidDecayHint {
-        detail: "missing required argument `rate`".into(),
-        span: ann.span,
-    })?;
     let per = per.ok_or_else(|| ResolveError::InvalidDecayHint {
         detail: "missing required argument `per`".into(),
         span: ann.span,
     })?;
-
-    // `rate = 0.0` is the "full reset every tick" idiom: the decay
-    // kernel multiplies storage by 0 before the fold runs, so the view
-    // reflects only the current tick's contributions. The downstream
-    // WGSL emit (`build_view_decay_wgsl_body`) handles `rate=0` with no
-    // special-case — `old * 0.0 = 0.0` is exactly the reset semantic.
-    // `rate = 1.0` stays rejected because it makes the decay kernel a
-    // no-op; callers should drop the annotation instead.
-    if !(rate >= 0.0 && rate < 1.0) || !rate.is_finite() {
-        return Err(ResolveError::InvalidDecayHint {
-            detail: format!(
-                "`rate` must be a finite float in the half-open interval [0.0, 1.0); got {rate}"
-            ),
-            span: ann.span,
-        });
-    }
-
     let per_unit = match per.as_str() {
         "tick" => DecayUnit::Tick,
         other => {
@@ -3148,9 +3191,141 @@ fn lower_decay_hint(
         }
     };
 
+    // Decide which form was used:
+    //   * `rate = R` → legacy `mul` mode, magnitude carried by `rate`.
+    //   * `mode = X, by = Y` → explicit, `rate` rejected as a
+    //     coexisting key.
+    // Mixing both forms is a hard error to keep the surface predictable.
+    let (resolved_mode, resolved_rate, resolved_by): (DecayMode, f32, u32) = match (rate, mode) {
+        (Some(_), Some(_)) => {
+            return Err(ResolveError::InvalidDecayHint {
+                detail: "`@decay` accepts either `rate = R` (legacy) OR \
+                    `mode = ..., by = ...` (explicit), not both".into(),
+                span: ann.span,
+            });
+        }
+        (Some(r), None) => {
+            // Legacy multiplicative form: `rate = R`.
+            if by_int.is_some() || by_float.is_some() {
+                return Err(ResolveError::InvalidDecayHint {
+                    detail: "`@decay(rate = ...)` does not accept `by`; \
+                        the rate IS the multiplier. Use `mode = mul, by = R` if you \
+                        want the explicit spelling.".into(),
+                    span: ann.span,
+                });
+            }
+            // `rate = 0.0` is the "full reset every tick" idiom; `rate
+            // = 1.0` stays rejected because it makes the decay kernel a
+            // no-op; callers should drop the annotation instead.
+            if !(r >= 0.0 && r < 1.0) || !r.is_finite() {
+                return Err(ResolveError::InvalidDecayHint {
+                    detail: format!(
+                        "`rate` must be a finite float in the half-open interval [0.0, 1.0); got {r}"
+                    ),
+                    span: ann.span,
+                });
+            }
+            (DecayMode::Mul, r as f32, 0)
+        }
+        (None, Some(m)) => {
+            // Explicit `mode + by` form.
+            match m.as_str() {
+                "mul" => {
+                    let mag = match (by_int, by_float) {
+                        (None, Some(f)) => f,
+                        (Some(i), None) => i as f64,
+                        (None, None) => {
+                            return Err(ResolveError::InvalidDecayHint {
+                                detail: "`mode = mul` requires `by = <float in [0.0, 1.0)>`".into(),
+                                span: ann.span,
+                            });
+                        }
+                        (Some(_), Some(_)) => unreachable!("by is parsed once"),
+                    };
+                    if !(mag >= 0.0 && mag < 1.0) || !mag.is_finite() {
+                        return Err(ResolveError::InvalidDecayHint {
+                            detail: format!(
+                                "`mode = mul` requires `by` in the half-open interval [0.0, 1.0); got {mag}"
+                            ),
+                            span: ann.span,
+                        });
+                    }
+                    (DecayMode::Mul, mag as f32, 0)
+                }
+                "sub" => {
+                    let n = match (by_int, by_float) {
+                        (Some(i), None) => i,
+                        (None, Some(_)) => {
+                            return Err(ResolveError::InvalidDecayHint {
+                                detail: "`mode = sub` requires `by = <positive int>`; \
+                                    floats are not allowed (saturating-sub targets integer storage)".into(),
+                                span: ann.span,
+                            });
+                        }
+                        (None, None) => {
+                            return Err(ResolveError::InvalidDecayHint {
+                                detail: "`mode = sub` requires `by = <positive int>`".into(),
+                                span: ann.span,
+                            });
+                        }
+                        (Some(_), Some(_)) => unreachable!("by is parsed once"),
+                    };
+                    if n <= 0 || n > u32::MAX as i64 {
+                        return Err(ResolveError::InvalidDecayHint {
+                            detail: format!(
+                                "`mode = sub` requires `by > 0` (and ≤ u32::MAX); got {n}"
+                            ),
+                            span: ann.span,
+                        });
+                    }
+                    (DecayMode::Sub, 0.0, n as u32)
+                }
+                other => {
+                    return Err(ResolveError::InvalidDecayHint {
+                        detail: format!(
+                            "unknown `mode` value `{other}`; expected `mul` or `sub`"
+                        ),
+                        span: ann.span,
+                    });
+                }
+            }
+        }
+        (None, None) => {
+            return Err(ResolveError::InvalidDecayHint {
+                detail: "`@decay` requires either `rate = R` (legacy) OR \
+                    `mode = ..., by = ...` (explicit)".into(),
+                span: ann.span,
+            });
+        }
+    };
+
+    // Resolve the optional `gate = MaskName` against the symbol table.
+    // Surfaces an unknown-mask error if the name doesn't match a
+    // declared mask (ResolveError::UnknownSymbol-style; we use the
+    // InvalidDecayHint variant to keep the locus tied to the
+    // annotation's own diagnostics path).
+    let gate = match gate_name {
+        Some((name, span)) => match symbols.masks.get(&name) {
+            Some(mref) => Some(*mref),
+            None => {
+                return Err(ResolveError::InvalidDecayHint {
+                    detail: format!(
+                        "`gate = {name}` does not match any declared mask; \
+                         declare `mask {name}(...) when <pred>` first"
+                    ),
+                    span,
+                });
+            }
+        },
+        None => None,
+    };
+
     Ok(Some(DecayHint {
-        rate: rate as f32,
+        rate: resolved_rate,
         per: per_unit,
+        mode: resolved_mode,
+        sub_by: resolved_by,
+        gate,
         span: ann.span,
     }))
 }
