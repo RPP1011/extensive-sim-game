@@ -38,6 +38,29 @@
 //! 100 ticks (= 255 - 100), so the implementation must produce a
 //! linear slope. The simplest linear formulation is "decrement by 1
 //! per call, skipping cells observed this tick".
+//!
+//! ## Why not `@decay(gate = BeliefStillFresh)` yet (2026-05-11)
+//!
+//! The compiler now supports per-cell `@decay(... gate = MaskName)`
+//! end-to-end: the gate mask's predicate IR walk surfaces every storage
+//! handle it touches, the decay kernel BGL extends with matching read
+//! bindings, and the per-cell body inlines the predicate as
+//! `if (<pred>) { <decay step> }`. See
+//! `cg/emit/kernel.rs::build_view_decay_wgsl` and the
+//! `decay_mode_sub_and_gate.rs::gate_inlines_belief_state_predicate`
+//! pin for the canonical example.
+//!
+//! Tom_probe's `confidence` column does NOT migrate to the auto-emitted
+//! path because the storage is q8-packed (4 cells per u32 word,
+//! decremented via byte-shift masks). The auto-emitted decay kernel
+//! iterates per-CELL on `array<atomic<u32>>` with one logical cell per
+//! u32; adopting it here would require either a `@storage(packed_q8)`
+//! annotation (no DSL surface today) or unpacking confidence to a flat
+//! u32 column (4x storage + downstream readback / setter reformat).
+//! Both are out of scope for the gate-inlining slice; this hand-rolled
+//! per-word kernel keeps the path until one lands. See
+//! `assets/sim/tom_probe.sim`'s "Wave 3 ToM Phase 3.9" header for the
+//! same gap chain documented at the .sim layer.
 
 /// WGSL source for the per-tick BeliefState decay sweep kernel.
 ///

@@ -110,6 +110,45 @@ physics WhatIBelieve @phase(per_agent) {
   }
 }
 
+// Wave 3 ToM Phase 3.9 (2026-05-11) — gate-mask infrastructure.
+//
+// The DSL now supports `@decay(per = tick, mode = sub, by = 1, gate =
+// <MaskName>)` end-to-end: the compiler walks the gate mask's predicate
+// for every storage handle it touches (BeliefStateColumn / AgentField),
+// extends the decay kernel's BGL with the matching read bindings, and
+// inlines the predicate as `if (<pred>) { <decay step> }` per cell. The
+// per-cell binder mapping (`agent_id` = k / cfg.agent_cap,
+// `per_pair_candidate` = k % cfg.agent_cap, `tick` = cfg.tick) lets
+// `self.<field>` / `target.<field>` / `world.tick` references in the
+// predicate resolve cleanly against the existing per-pair lowering.
+// See `crates/dsl_compiler/tests/decay_mode_sub_and_gate.rs`'s
+// `gate_inlines_belief_state_predicate` for the end-to-end test.
+//
+// A natural mask shape for tom_probe's confidence-decay would be:
+//
+//   mask BeliefStillFresh(target: Agent)
+//     when agents.beliefs_last_seen_tick(self, target) != world.tick
+//
+//   @materialized(on_event = [...])
+//   @decay(per = tick, mode = sub, by = 1, gate = BeliefStillFresh)
+//   view confidence(observer: Agent, subject: Agent) -> u32 { ... }
+//
+// **Why this fixture stays on the bespoke `decay_step()` path.** The
+// runtime's `beliefs_confidence` column is q8-packed (4 cells per u32
+// word, `array<atomic<u32>>`); the bespoke kernel iterates per-WORD and
+// uses byte-shift masks to decrement each packed cell. The auto-emitted
+// `@decay` kernel iterates per-CELL and treats `view_storage_primary`
+// as `array<atomic<u32>>` with one logical cell per u32. Adopting the
+// auto-emitted path here would either:
+//   (a) require a `@storage(packed_q8)` annotation (not in the DSL
+//       today) so the per-cell body composes shift-masked atomic RMWs,
+//       OR
+//   (b) require the runtime to flip `beliefs_confidence` from q8-packed
+//       u8s to plain u32s — a 4x storage blow-up + downstream readback
+//       reformat (the host-side cache + setter contracts assume q8).
+// Neither is in scope for the gate-inlining slice; the bespoke
+// `decay_step()` keeps owning the path until one lands.
+
 // Wave 3 ToM Phase 3.7 — DSL-authored demo rule
 // `ApplyTickBeliefStamp` was retired in Phase 3.8 (this commit). The
 // rule unilaterally stamped `beliefs_last_seen_tick[i*N+i] = 1` every

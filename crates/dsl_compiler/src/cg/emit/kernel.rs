@@ -369,15 +369,25 @@ pub fn kernel_topology_to_spec_and_body(
         gate_mask_id,
     } = &class
     {
-        let bindings = build_view_decay_bindings(view_name, &cfg_struct);
-        let cfg_struct_decl = build_view_decay_cfg_struct_decl(&cfg_struct);
-        let cfg_build_expr = build_view_decay_cfg_build_expr(&cfg_struct);
-        let wgsl_body = build_view_decay_wgsl_body(
+        // Lower the per-cell decay body first; if the gate-mask
+        // predicate is set, this also returns the set of `DataHandle`
+        // reads the predicate touches so we can extend the binding set
+        // with the matching slots before composing the spec. The
+        // per-cell binder mapping (`agent_id` = k/cap, `per_pair_candidate`
+        // = k%cap, `tick` = cfg.tick) is bound inside the body builder
+        // so the predicate's `self` / `target` / `world.tick` references
+        // resolve to declared identifiers.
+        let (wgsl_body, gate_handles) = build_view_decay_wgsl(
             *rate_bits,
             *mode,
             *sub_by,
             *gate_mask_id,
-        );
+            prog,
+            ctx,
+        )?;
+        let bindings = build_view_decay_bindings(view_name, &cfg_struct, &gate_handles, prog);
+        let cfg_struct_decl = build_view_decay_cfg_struct_decl(&cfg_struct);
+        let cfg_build_expr = build_view_decay_cfg_build_expr(&cfg_struct);
         let spec = KernelSpec {
             name,
             pascal,
@@ -3446,8 +3456,9 @@ fn build_view_decay_cfg_build_expr(cfg_struct: &str) -> String {
     )
 }
 
-/// Synthesise the 2-binding [`KernelBinding`] vector for a ViewDecay
-/// kernel:
+/// Synthesise the [`KernelBinding`] vector for a ViewDecay kernel.
+///
+/// Base layout (no gate-mask extras):
 ///
 ///   slot 0: view_storage_primary  (atomic storage — type-compat with
 ///                                  the ViewFold kernel binding shape
@@ -3458,33 +3469,88 @@ fn build_view_decay_cfg_build_expr(cfg_struct: &str) -> String {
 /// per-view resident accessor (`fold_view_<view_name>_handles`) — same
 /// accessor the ViewFold kernel uses, so the host-side wiring already
 /// exposes the right buffer.
-fn build_view_decay_bindings(view_name: &str, cfg_struct: &str) -> Vec<KernelBinding> {
+///
+/// **Gate-mask extras (`extra_handles`).** When the `@decay(gate =
+/// MaskName)` predicate references additional storage (e.g. tom_probe's
+/// `BeliefStillFresh` mask reading `agents.beliefs_last_seen_tick(self,
+/// target)`), each unique handle the predicate touches surfaces as a
+/// read-only binding inserted between `view_storage_primary` and `cfg`.
+/// `cfg` always lands on the LAST slot so the existing host-side wiring
+/// (which references `cfg` by binding-source, not slot index) keeps
+/// working unchanged. `handle_to_binding_metadata` resolves each handle
+/// to its WGSL type / `BgSource`. Handles whose `handle_to_binding_metadata`
+/// returns `None` (Rng / ConfigConst — routed via cfg uniform / inline
+/// helpers) are skipped silently.
+fn build_view_decay_bindings(
+    view_name: &str,
+    cfg_struct: &str,
+    extra_handles: &[DataHandle],
+    prog: &CgProgram,
+) -> Vec<KernelBinding> {
     let accessor = format!("fold_view_{view_name}_handles");
-    vec![
-        KernelBinding {
-            slot: 0,
-            name: "view_storage_primary".into(),
-            // B1 (the ViewFold path's atomic-CAS body) declares
-            // `view_storage_primary: array<atomic<u32>>`. ViewDecay's
-            // dispatch is one thread per slot — there's no contention
-            // across threads — but the WGSL type must match the shared
-            // binding declaration the runtime hands the same buffer to,
-            // hence atomic load + store.
-            access: AccessMode::AtomicStorage,
-            wgsl_ty: "u32".into(),
-            bg_source: BgSource::ViewHandle {
-                accessor,
-                tuple_idx: 0,
-            },
+    let mut bindings = vec![KernelBinding {
+        slot: 0,
+        name: "view_storage_primary".into(),
+        // B1 (the ViewFold path's atomic-CAS body) declares
+        // `view_storage_primary: array<atomic<u32>>`. ViewDecay's
+        // dispatch is one thread per slot — there's no contention
+        // across threads — but the WGSL type must match the shared
+        // binding declaration the runtime hands the same buffer to,
+        // hence atomic load + store.
+        access: AccessMode::AtomicStorage,
+        wgsl_ty: "u32".into(),
+        bg_source: BgSource::ViewHandle {
+            accessor,
+            tuple_idx: 0,
         },
-        KernelBinding {
-            slot: 1,
-            name: "cfg".into(),
-            access: AccessMode::Uniform,
-            wgsl_ty: cfg_struct.to_string(),
-            bg_source: BgSource::Cfg,
-        },
-    ]
+    }];
+
+    // Append gate-mask predicate-derived extras. Deduplicate by
+    // structural binding name so the same handle referenced twice in
+    // the predicate doesn't double-bind.
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for h in extra_handles {
+        let Some(meta) = handle_to_binding_metadata(h, prog) else {
+            continue;
+        };
+        let name = structural_binding_name(h, Some(prog));
+        if !seen.insert(name.clone()) {
+            continue;
+        }
+        let slot = bindings.len() as u32;
+        bindings.push(KernelBinding {
+            slot,
+            name,
+            // Decay-kernel reads only — even handles whose base mode is
+            // ReadWriteStorage stay read-only here (we never write the
+            // belief-state columns from the decay body, only the view's
+            // own primary).
+            access: downgrade_access_for_read(meta.base_access),
+            wgsl_ty: meta.wgsl_ty,
+            bg_source: meta.bg_source,
+        });
+    }
+
+    bindings.push(KernelBinding {
+        slot: bindings.len() as u32,
+        name: "cfg".into(),
+        access: AccessMode::Uniform,
+        wgsl_ty: cfg_struct.to_string(),
+        bg_source: BgSource::Cfg,
+    });
+    bindings
+}
+
+/// Demote a binding's [`AccessMode`] to its read-only equivalent.
+/// `AtomicStorage` stays atomic (the prelude functions for the q8
+/// belief columns use `atomicLoad` even on the read side, so the
+/// binding declaration must match). `ReadWriteStorage` becomes
+/// `ReadStorage`. `Uniform` and `ReadStorage` pass through unchanged.
+fn downgrade_access_for_read(access: AccessMode) -> AccessMode {
+    match access {
+        AccessMode::ReadWriteStorage => AccessMode::ReadStorage,
+        other => other,
+    }
 }
 
 /// Compose the ViewDecay-specific WGSL body. One thread per slot;
@@ -3503,21 +3569,47 @@ fn build_view_decay_bindings(view_name: &str, cfg_struct: &str) -> Vec<KernelBin
 ///     Targets integer storage. The atomic word IS the integer (no
 ///     bitcast); the body emits `select(old - by, 0u, old < by)`.
 ///
-/// **Gate mask (`gate_mask_id`):** `Some` when the .sim used
-/// `@decay(gate = MaskName)`. The body emits a `// TODO(decay-gate)`
-/// marker and skips the per-cell update entirely. Cross-binding
-/// plumbing (decay kernel needs READ access to a different view's
-/// storage to evaluate the mask predicate at the cell coordinate) is
-/// not yet implemented — see resolve.rs::lower_decay_hint and the
-/// 2026-05-11 commit message for the gap chain. Keeping the gate as a
-/// no-op kernel dispatch lets the .sim grammar exercise the surface
-/// while the runtime still relies on its bespoke decay path.
-fn build_view_decay_wgsl_body(
+/// **Gate mask (`gate_predicate_wgsl`).** When `Some(pred_wgsl)` the
+/// per-cell decay step wraps in `if (pred_wgsl) { ... }` so cells where
+/// the predicate evaluates FALSE keep their current value. The caller
+/// (`build_view_decay_wgsl`) is responsible for lowering the mask
+/// predicate to WGSL using a per-cell binding context (`agent_id` =
+/// `k / cfg.agent_cap`, `per_pair_candidate` = `k % cfg.agent_cap`).
+fn build_view_decay_wgsl_body_inner(
     rate_bits: u32,
     mode: u8,
     sub_by: u32,
-    gate_mask_id: Option<u32>,
+    gate_predicate_wgsl: Option<&str>,
 ) -> String {
+    let mut step = String::new();
+    if mode == 1 {
+        // Saturating-sub mode. Atomic word IS the integer (no bitcast);
+        // `view_storage_primary` is `array<atomic<u32>>`, but the
+        // logical cell value lives in the low bits. Saturation is
+        // `select(old - by, 0u, old < by)`.
+        writeln!(step, "    let old = atomicLoad(&view_storage_primary[k]);")
+            .expect("write to String never fails");
+        writeln!(step, "    let by: u32 = {sub_by}u;")
+            .expect("write to String never fails");
+        step.push_str(
+            "    let new_val: u32 = select(old - by, 0u, old < by);\n",
+        );
+        step.push_str("    atomicStore(&view_storage_primary[k], new_val);\n");
+    } else {
+        // Multiplicative mode (legacy + default).
+        let rate = f32::from_bits(rate_bits);
+        writeln!(
+            step,
+            "    let old = bitcast<f32>(atomicLoad(&view_storage_primary[k]));"
+        )
+        .expect("write to String never fails");
+        writeln!(step, "    let new_val = old * {rate:?};")
+            .expect("write to String never fails");
+        step.push_str(
+            "    atomicStore(&view_storage_primary[k], bitcast<u32>(new_val));\n",
+        );
+    }
+
     let mut out = String::new();
     out.push_str("    let k = gid.x;\n");
     // `cfg.slot_count` is the over-allocated slot count for PairMap
@@ -3526,62 +3618,226 @@ fn build_view_decay_wgsl_body(
     // bound stays equivalent to the legacy `k >= cfg.agent_cap` form.
     out.push_str("    if (k >= cfg.slot_count) { return; }\n");
 
-    // Gate-mask resolution gap (2026-05-11): the per-cell predicate
-    // wants to read another view's storage at the cell coordinate, but
-    // the decay kernel binding set today only carries
-    // `view_storage_primary` for THIS view + the cfg uniform. Inlining
-    // the predicate would require:
-    //   (a) extending `build_view_decay_bindings` to surface every
-    //       view-storage handle the mask predicate references as a
-    //       read-only second binding, AND
-    //   (b) translating the mask's IrExpr through the regular WGSL
-    //       expression emitter inside the decay kernel's binding
-    //       context (the existing emitter assumes per-agent / per-pair
-    //       dispatch shapes; decay is per-cell with row/col derived
-    //       from `k / agent_cap` and `k % agent_cap`).
-    // Both are non-trivial. Until they land, surface the gate as a
-    // TODO marker so .sim authors can declare the surface shape but the
-    // runtime keeps using its bespoke decay path.
-    if let Some(mask_id) = gate_mask_id {
-        writeln!(
-            out,
-            "    // TODO(decay-gate): mask #{mask_id} predicate inlining requires \
-             cross-view-storage binding plumbing — runtime still owns the bespoke \
-             decay path. See `cg/emit/kernel.rs::build_view_decay_wgsl_body`."
-        )
-        .expect("write to String never fails");
-        out.push_str("    return;\n");
-        return out;
-    }
-
-    if mode == 1 {
-        // Saturating-sub mode. Atomic word IS the integer (no bitcast);
-        // `view_storage_primary` is `array<atomic<u32>>`, but the
-        // logical cell value lives in the low bits. Saturation is
-        // `select(old - by, 0u, old < by)`.
-        writeln!(out, "    let old = atomicLoad(&view_storage_primary[k]);")
+    if let Some(pred) = gate_predicate_wgsl {
+        // Per-cell binder mapping for the mask predicate's WGSL emit:
+        //
+        //   self     →  agent_id           (= row    = k / cfg.agent_cap)
+        //   target   →  per_pair_candidate (= column = k % cfg.agent_cap)
+        //   world.tick → tick               (preamble local)
+        //
+        // Bind these BEFORE the predicate so its inline reads
+        // (`agent_alive[agent_id]`, `agents_beliefs_*(agent_id,
+        // per_pair_candidate)`, `tick`) all resolve to declared
+        // identifiers.
+        out.push_str("    let agent_id = k / cfg.agent_cap;\n");
+        out.push_str("    let per_pair_candidate = k % cfg.agent_cap;\n");
+        out.push_str("    let tick = cfg.tick;\n");
+        writeln!(out, "    let decay_gate_value: bool = {pred};")
             .expect("write to String never fails");
-        writeln!(out, "    let by: u32 = {sub_by}u;")
-            .expect("write to String never fails");
-        out.push_str(
-            "    let new_val: u32 = select(old - by, 0u, old < by);\n",
-        );
-        out.push_str("    atomicStore(&view_storage_primary[k], new_val);\n");
+        out.push_str("    if (decay_gate_value) {\n");
+        // Indent the existing decay step body one extra level.
+        for line in step.lines() {
+            if line.is_empty() {
+                out.push('\n');
+            } else {
+                out.push_str("    ");
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+        out.push_str("    }\n");
     } else {
-        // Multiplicative mode (legacy + default).
-        let rate = f32::from_bits(rate_bits);
-        writeln!(
-            out,
-            "    let old = bitcast<f32>(atomicLoad(&view_storage_primary[k]));"
-        )
-        .expect("write to String never fails");
-        writeln!(out, "    let new_val = old * {rate:?};")
-            .expect("write to String never fails");
-        out.push_str(
-            "    atomicStore(&view_storage_primary[k], bitcast<u32>(new_val));\n",
-        );
+        out.push_str(&step);
     }
     out
+}
+
+/// ViewDecay WGSL body builder — entry point that resolves the optional
+/// gate-mask predicate to inline WGSL, then defers to
+/// [`build_view_decay_wgsl_body_inner`] for the per-cell step shape.
+///
+/// Returns the body string AND the set of [`DataHandle`] reads the
+/// gate-mask predicate touched so the caller can extend the kernel's
+/// binding set with the matching slots. When `gate_mask_id` is `None`,
+/// the returned vec is empty.
+fn build_view_decay_wgsl(
+    rate_bits: u32,
+    mode: u8,
+    sub_by: u32,
+    gate_mask_id: Option<u32>,
+    prog: &CgProgram,
+    ctx: &EmitCtx<'_>,
+) -> Result<(String, Vec<DataHandle>), KernelEmitError> {
+    let Some(mask_id_u32) = gate_mask_id else {
+        return Ok((
+            build_view_decay_wgsl_body_inner(rate_bits, mode, sub_by, None),
+            Vec::new(),
+        ));
+    };
+    let mask_id = MaskId(mask_id_u32);
+
+    // Find the MaskPredicate op for this gate. The mask op is built by
+    // `lower_mask` and pushed onto `prog.ops`; its `kind.predicate` is
+    // the CgExprId we lower inline.
+    let mask_op = prog.ops.iter().find(|op| {
+        matches!(&op.kind, ComputeOpKind::MaskPredicate { mask, .. } if *mask == mask_id)
+    });
+    let Some(mask_op) = mask_op else {
+        // No matching MaskPredicate op — fall through to the no-gate
+        // body. This should not happen in well-formed programs (the
+        // resolver pins the gate name to a declared mask), but bailing
+        // gracefully here is preferable to panicking at codegen.
+        return Ok((
+            build_view_decay_wgsl_body_inner(rate_bits, mode, sub_by, None),
+            Vec::new(),
+        ));
+    };
+    let predicate_id = match &mask_op.kind {
+        ComputeOpKind::MaskPredicate { predicate, .. } => *predicate,
+        _ => unreachable!("filter above ensures MaskPredicate kind"),
+    };
+
+    // Lower the predicate to WGSL using the existing per-expression
+    // emitter. The predicate's `self` references emit as `agent_id`
+    // and its `target` references emit as `per_pair_candidate` — the
+    // body builder binds both to (k/cap, k%cap) before evaluation.
+    //
+    // `lower_cg_expr_to_wgsl` may push entries onto
+    // `ctx.pending_target_lets` (for `Target(_)` agent-field reads in
+    // the predicate); snapshot + drain so any pending lets that ARE
+    // produced get hoisted into the body before the gate evaluation.
+    let snapshot_len = ctx.pending_target_lets.borrow().len();
+    let predicate_wgsl = lower_cg_expr_to_wgsl(predicate_id, ctx)?;
+    let pending: Vec<(crate::cg::CgExprId, String)> = ctx
+        .pending_target_lets
+        .borrow_mut()
+        .drain(snapshot_len..)
+        .collect();
+    let predicate_wgsl_with_lets = if pending.is_empty() {
+        predicate_wgsl
+    } else {
+        // Wrap the predicate in a WGSL expression-block IIFE alternative:
+        // we can't insert lets mid-expression. Instead, hoist the lets
+        // into a multi-line block AHEAD of the predicate by formatting
+        // them as preamble lines that get spliced into the body builder
+        // BEFORE the `let decay_gate_value =` line. Since
+        // `build_view_decay_wgsl_body_inner` consumes `pred` as an
+        // expression, we synthesize a leading `// hoisted lets` comment
+        // and inline the lets via a WGSL `(let_wgsl, rest_wgsl)` shape —
+        // which WGSL doesn't support. Pragmatic fallback: refuse to
+        // emit and surface a typed error so the .sim author sees the
+        // unsupported predicate shape rather than a silent miscompile.
+        let lets_dump: Vec<String> = pending
+            .iter()
+            .map(|(id, w)| format!("let target_expr_{}: u32 = {};", id.0, w))
+            .collect();
+        return Err(KernelEmitError::InvalidKernelSpec {
+            reason: format!(
+                "@decay gate-mask predicate produced hoisted target-expr lets \
+                 ({} entries) which the decay kernel emitter cannot splice mid-body. \
+                 First entry: `{}`. Rewrite the predicate to use direct binders \
+                 (`self.<field>`, `agents.<getter>(self, target)`) without nested \
+                 cross-agent reads.",
+                pending.len(),
+                lets_dump[0]
+            ),
+        });
+    };
+
+    // Walk the predicate to collect the data handles its WGSL emit
+    // touches. Two contributors:
+    //   1. Direct `Read(handle)` walks via `collect_expr_reads` —
+    //      surfaces `AgentField` (e.g. `self.alive`) + any other
+    //      explicit reads.
+    //   2. `agents.beliefs_<col>(observer, subject)` namespace calls —
+    //      these are structurally opaque to `collect_expr_reads`
+    //      (the call lowers to a prelude function whose body reads
+    //      `beliefs_<col>` storage), so we walk the predicate
+    //      explicitly to surface the matching `BeliefStateColumn`
+    //      handles.
+    let mut handles = Vec::new();
+    crate::cg::stmt::collect_expr_reads(predicate_id, prog, &mut handles);
+    collect_belief_state_calls(predicate_id, prog, &mut handles);
+
+    let body = build_view_decay_wgsl_body_inner(
+        rate_bits,
+        mode,
+        sub_by,
+        Some(&predicate_wgsl_with_lets),
+    );
+    Ok((body, handles))
+}
+
+/// Walk a [`crate::cg::expr::CgExpr`] tree rooted at `id` and append a
+/// [`DataHandle::BeliefStateColumn`] entry for every `agents.beliefs_*`
+/// namespace call encountered.
+///
+/// The auto-walker `collect_expr_reads` does not surface
+/// `BeliefStateColumn` handles for `NamespaceCall` arms because the
+/// call site is structurally opaque (the call lowers to a prelude
+/// function). For decay-gate inlining, however, we MUST surface those
+/// handles so [`build_view_decay_bindings`] adds the matching storage
+/// bindings — otherwise the prelude function's `beliefs_<col>[...]`
+/// access would reference an undeclared identifier at WGSL validation
+/// time.
+///
+/// The mapping `method name → BeliefStateColumn` mirrors the registry
+/// table in `cg::lower::driver::populate_namespace_registry` (the
+/// BeliefState Phase 3.5 getter set).
+fn collect_belief_state_calls(
+    id: crate::cg::CgExprId,
+    prog: &CgProgram,
+    out: &mut Vec<DataHandle>,
+) {
+    use crate::cg::data_handle::BeliefStateColumn;
+    use crate::cg::expr::{CgExpr, ExprArena};
+    let Some(node) = <CgProgram as ExprArena>::get(prog, id) else {
+        return;
+    };
+    match node {
+        CgExpr::NamespaceCall { ns, method, args, .. } => {
+            if matches!(ns, dsl_ast::ir::NamespaceId::Agents) {
+                let column = match method.as_str() {
+                    "beliefs_pos" => Some(BeliefStateColumn::Pos),
+                    "beliefs_creature_type" => Some(BeliefStateColumn::CreatureType),
+                    "beliefs_last_seen_tick" => Some(BeliefStateColumn::LastSeenTick),
+                    "beliefs_confidence" => Some(BeliefStateColumn::Confidence),
+                    "beliefs_suspicion" => Some(BeliefStateColumn::Suspicion),
+                    "beliefs_flags" => Some(BeliefStateColumn::Flags),
+                    _ => None,
+                };
+                if let Some(column) = column {
+                    out.push(DataHandle::BeliefStateColumn { column });
+                }
+            }
+            for a in args {
+                collect_belief_state_calls(*a, prog, out);
+            }
+        }
+        CgExpr::Binary { lhs, rhs, .. } => {
+            collect_belief_state_calls(*lhs, prog, out);
+            collect_belief_state_calls(*rhs, prog, out);
+        }
+        CgExpr::Unary { arg, .. } => collect_belief_state_calls(*arg, prog, out),
+        CgExpr::Builtin { args, .. } => {
+            for a in args {
+                collect_belief_state_calls(*a, prog, out);
+            }
+        }
+        CgExpr::Select { cond, then, else_, .. } => {
+            collect_belief_state_calls(*cond, prog, out);
+            collect_belief_state_calls(*then, prog, out);
+            collect_belief_state_calls(*else_, prog, out);
+        }
+        // Read / Lit / id reads / EventField / NamespaceField / Rng /
+        // ReadLocal — none can carry a NamespaceCall sub-tree; nothing
+        // to recurse into. (Read of an AgentField{Target(expr)} could
+        // in principle hold a NamespaceCall in `expr`, but mask
+        // predicates today don't reach for that shape; the mask
+        // grammar rejects pair-bound reads with non-identifier index
+        // expressions at parse time.)
+        _ => {}
+    }
 }
 
 // ---------------------------------------------------------------------------

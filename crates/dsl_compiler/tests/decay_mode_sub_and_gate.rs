@@ -175,16 +175,16 @@ fn mixing_rate_and_mode_is_rejected() {
     );
 }
 
-// -- mode = sub gate marker lands in emitted WGSL -----------------------
+// -- mode = sub gate inlining lands in emitted WGSL ---------------------
 
-/// When `gate = MaskName` is set, the emitted decay kernel surfaces a
-/// `TODO(decay-gate)` marker rather than inlining the predicate. This
-/// pins the documented gap-resolution: cross-binding plumbing for decay
-/// kernels is not yet implemented; the runtime keeps owning the bespoke
-/// decay path. Removing this marker requires landing the (a) + (b)
-/// extension chain documented in `build_view_decay_wgsl_body`.
+/// When `gate = MaskName` is set, the emitted decay kernel inlines the
+/// mask predicate as `if (<pred>) { <decay step> }`. The predicate's
+/// `self` reference resolves against the per-cell row-derived `agent_id`
+/// the body builder binds (`agent_id = k / cfg.agent_cap`). For the
+/// no-arg `mask Strike when self.alive` predicate, the inlined WGSL
+/// reads `agent_alive[agent_id]`.
 #[test]
-fn gate_emits_todo_marker_in_wgsl() {
+fn gate_inlines_predicate_in_wgsl() {
     let src = TEMPLATE_WITH_MASK
         .replace("MODE_AND_BY_PLACEHOLDER", "mode = sub, by = 1")
         .replace("GATE_PLACEHOLDER", "Strike");
@@ -204,9 +204,53 @@ fn gate_emits_todo_marker_in_wgsl() {
         .find(|(k, _)| k.starts_with("decay_"))
         .map(|(_, v)| v.as_str())
         .expect("decay kernel WGSL must be emitted when @decay is set");
+    // 1. The TODO marker is gone — the gap chain is closed.
     assert!(
-        decay_wgsl.contains("TODO(decay-gate)"),
-        "gate-set decay kernel must surface the TODO marker; got:\n{decay_wgsl}"
+        !decay_wgsl.contains("TODO(decay-gate)"),
+        "gate-inlining should retire the TODO marker; got:\n{decay_wgsl}"
+    );
+    // 2. The per-cell binder mapping is in place: agent_id derived from
+    //    the row, per_pair_candidate from the column, tick aliased from
+    //    cfg.tick (so `world.tick` references resolve).
+    assert!(
+        decay_wgsl.contains("let agent_id = k / cfg.agent_cap;"),
+        "expected per-cell agent_id binding; got:\n{decay_wgsl}"
+    );
+    assert!(
+        decay_wgsl.contains("let per_pair_candidate = k % cfg.agent_cap;"),
+        "expected per-cell per_pair_candidate binding; got:\n{decay_wgsl}"
+    );
+    assert!(
+        decay_wgsl.contains("let tick = cfg.tick;"),
+        "expected tick preamble alias; got:\n{decay_wgsl}"
+    );
+    // 3. The predicate inlines as an `if` wrapping the existing step
+    //    body. For `self.alive`, the lowered WGSL reads
+    //    `agent_alive[agent_id]`.
+    assert!(
+        decay_wgsl.contains("let decay_gate_value: bool"),
+        "expected gate evaluation binding; got:\n{decay_wgsl}"
+    );
+    assert!(
+        decay_wgsl.contains("agent_alive[agent_id]"),
+        "expected `self.alive` to lower to indexed agent_alive read; got:\n{decay_wgsl}"
+    );
+    assert!(
+        decay_wgsl.contains("if (decay_gate_value)"),
+        "expected gate-wrapped decay step; got:\n{decay_wgsl}"
+    );
+    // 4. The kernel binds the `agent_alive` storage the predicate reads
+    //    (gate-mask handle walk extends the BGL).
+    assert!(
+        decay_wgsl.contains("var<storage, read> agent_alive"),
+        "expected agent_alive read-only binding; got:\n{decay_wgsl}"
+    );
+    // 5. cfg moves to the LAST slot once gate-mask extras land between
+    //    view_storage_primary and cfg — verify the slot 0 / cfg invariant
+    //    still holds (cfg is no longer at slot 1).
+    assert!(
+        decay_wgsl.contains("var<uniform> cfg:"),
+        "cfg uniform binding must still exist; got:\n{decay_wgsl}"
     );
 }
 
@@ -243,6 +287,126 @@ fn mode_sub_emits_saturating_select_in_wgsl() {
     assert!(
         !decay_wgsl.contains("bitcast<f32>"),
         "sub mode should NOT bitcast to f32; got:\n{decay_wgsl}"
+    );
+}
+
+/// Per-cell decay-gate inlining for a predicate that reads BeliefState
+/// storage (`agents.beliefs_last_seen_tick(self, target) != world.tick`).
+/// This exercises the full extension chain:
+///
+///   * gate-mask predicate IR walk discovers the `BeliefStateColumn::
+///     LastSeenTick` handle even though the DSL surface is a
+///     namespace-call (not a `Read(handle)` node);
+///   * `build_view_decay_bindings` extends the kernel BGL with the
+///     `beliefs_tick` storage binding;
+///   * the body builder lowers the predicate to
+///     `agents_beliefs_last_seen_tick(agent_id, per_pair_candidate) != tick`
+///     and wraps the saturating-sub step in `if (<predicate>) { ... }`;
+///   * `compose_namespace_prelude` substring-detects the call form and
+///     injects the `agents_beliefs_last_seen_tick` prelude function.
+///
+/// The fixture mirrors tom_probe's `BeliefStillFresh` shape (the only
+/// real-world consumer of this slice) without requiring the .sim to opt
+/// into the runtime-managed BeliefState SoA via `agents.set_beliefs_*`
+/// in physics — declaring the mask alone is sufficient because the
+/// gate-mask handle walk + `BeliefStateColumn` BGL extension is
+/// orthogonal to the `LowerOpts.belief_state` auto-detect.
+#[test]
+fn gate_inlines_belief_state_predicate() {
+    let src = r#"
+event Tick { }
+
+@replayable
+@gpu_amenable
+event Hit {
+  target: AgentId,
+}
+
+entity Knower : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+mask BeliefStillFresh(target: Agent) when agents.beliefs_last_seen_tick(self, target) != world.tick
+
+@materialized(on_event = [Hit])
+@decay(per = tick, mode = sub, by = 1, gate = BeliefStillFresh)
+view confidence(observer: Agent, subject: Agent) -> u32 {
+  initial: 0,
+  on Hit { target: agent } where agent == subject { self += 1 }
+  clamp: [0, 1000000],
+}
+
+physics Tickle @phase(per_agent) {
+  on Tick {} {
+    emit Hit { target: self }
+  }
+}
+
+physics SetSomeBelief @phase(post) {
+  on Tick {} {
+    agents.set_beliefs_last_seen_tick(self, self, world.tick);
+  }
+}
+"#;
+    let program = dsl_compiler::parse(src).expect("parse");
+    let comp = dsl_ast::resolve::resolve(program).expect("resolve");
+    let cg = dsl_compiler::cg::lower::lower_compilation_to_cg_with_opts(
+        &comp,
+        dsl_compiler::cg::lower::LowerOpts {
+            belief_state: true,
+            ..Default::default()
+        },
+    )
+    .expect("lower");
+    let schedule = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let artifacts = dsl_compiler::cg::emit::emit_cg_program(&schedule.schedule, &cg)
+        .expect("emit");
+    let decay_wgsl = artifacts
+        .wgsl_files
+        .iter()
+        .find(|(k, _)| k.starts_with("decay_"))
+        .map(|(_, v)| v.as_str())
+        .expect("decay kernel WGSL must be emitted");
+
+    // 1. The kernel's BGL extends with the `beliefs_tick` binding
+    //    (BeliefStateColumn::LastSeenTick → `beliefs_tick`). Without the
+    //    handle walk surfacing this, the prelude function's
+    //    `beliefs_tick[...]` access would reference an undeclared name.
+    assert!(
+        decay_wgsl.contains("beliefs_tick"),
+        "expected beliefs_tick binding from gate-mask BeliefState handle walk; got:\n{decay_wgsl}"
+    );
+    // 2. The substring-driven namespace prelude injects the getter fn
+    //    body (`fn agents_beliefs_last_seen_tick(observer: u32, ...)`).
+    assert!(
+        decay_wgsl.contains("fn agents_beliefs_last_seen_tick"),
+        "expected agents_beliefs_last_seen_tick prelude fn; got:\n{decay_wgsl}"
+    );
+    // 3. The predicate inlines via the prelude call form, with `self` /
+    //    `target` mapped to per-cell `agent_id` / `per_pair_candidate`.
+    assert!(
+        decay_wgsl
+            .contains("agents_beliefs_last_seen_tick(agent_id, per_pair_candidate)"),
+        "expected per-cell binder mapping in predicate call; got:\n{decay_wgsl}"
+    );
+    // 4. The decay step wraps in the gate predicate.
+    assert!(
+        decay_wgsl.contains("if (decay_gate_value)"),
+        "expected gate-wrapped decay step; got:\n{decay_wgsl}"
+    );
+    // 5. The saturating-sub formula still lives in the wrapped block.
+    assert!(
+        decay_wgsl.contains("select(old - by, 0u, old < by)"),
+        "expected saturating-sub formula inside gate-wrapped block; got:\n{decay_wgsl}"
+    );
+    // 6. No leftover TODO marker.
+    assert!(
+        !decay_wgsl.contains("TODO(decay-gate)"),
+        "TODO marker should be retired; got:\n{decay_wgsl}"
     );
 }
 
