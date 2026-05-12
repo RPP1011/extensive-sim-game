@@ -94,3 +94,16 @@ physics PingDamage {
     emit Damaged { source: self, target: self, amount: config.combat.base_damage }
   }
 }
+
+// @storage(packed_q8) — q8-packed per-(observer, subject) confidence
+// view. Validates per-WORD decay WGSL emit (4 bytes per u32 word with
+// per-byte unpack/process/recompose) + the existing pair-keyed
+// sizing rule (the storage gets ceil(N²/4) words).
+@materialized(on_event = [Observed])
+@storage(packed_q8)
+@decay(per = tick, mode = sub, by = 1)
+view confidence(observer: Agent, subject: Agent) -> u8 {
+  initial: 0,
+  on Observed { observer: o, subject: s } where o == observer && s == subject { self = 255 }
+  clamp: [0, 255],
+}
