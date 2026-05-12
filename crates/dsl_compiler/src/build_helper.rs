@@ -1382,8 +1382,11 @@ fn synthesize_generated_runtime_struct(
             "        self.gpu.queue.write_buffer(&self.cfg_{kernel_name}_buf, 0, cfg_bytes);\n",
         ));
     }
-    // Indirect-consumer cfg.event_count override — close gaps 3 + 4
-    // from commit 353527e6's Indirect-arm doc block.
+    // Indirect-consumer event-ring lifecycle — closes gaps 3 + 4
+    // from commit 353527e6's Indirect-arm doc block, and folds in the
+    // in-step GPU producer case via an in-encoder
+    // `copy_buffer_to_buffer(event_tail → cfg.event_count)` per
+    // consumer dispatch.
     //
     // Background: chronicle consumers (e.g. `physics_ApplyObserveBeliefUpdate`,
     // `physics_ApplyDamage`) classify as `KernelTopology::Indirect` and
@@ -1403,40 +1406,48 @@ fn synthesize_generated_runtime_struct(
     //     `tom_probe_decay_pin::fresh_observation_resets_decay`
     //     regression the naive Indirect-arm wire-up tripped.
     //
-    // Fix: snapshot the host-side `event_ring.tail_value()` BEFORE
-    // `clear_tail_in()` zeros it, then write that snapshot to slot 0
-    // of every Indirect-consumer cfg. Both auto-emitted host-side
-    // injects (`effect_*_applied` typed methods) and per-tick GPU
-    // producers participate via `note_emits` / `append_chronicle_record`
-    // which both bump the host estimate. After consumer dispatch the
-    // estimate is reset (by the consumer's own clear_tail or via the
-    // next tick's clear_tail_in).
+    // Two-pronged fix:
     //
-    // **Limitation: in-step GPU producers don't auto-bump the host
-    // estimate.** Today's `apply_ability` dispatcher emits chronicle
-    // events via `atomicAdd(&event_tail, 1u)` from inside the kernel
-    // — the host has no visibility into the count. For those
-    // fixtures (e.g. `hill_raid`'s `apply_ability` rules) the
-    // snapshot is 0 and consumers no-op. The proper fix is a true
-    // `dispatch_workgroups_indirect` against the SeedIndirectArgs
-    // output (gaps 1 + 2 from the same doc block) — orthogonal slice.
-    if !indirect_consumer_kernel_names.is_empty() {
+    //   (a) **Host-inject preservation.** When a fixture has Indirect
+    //       consumers, replace `clear_tail_in` (encoder copy of 0 into
+    //       event_tail) with a `queue.write_buffer` of the host-side
+    //       `tail_value()` snapshot. Both auto-emitted host-side
+    //       injects (`effect_*_applied` typed methods) and any other
+    //       caller of `note_emits` / `append_chronicle_record` get
+    //       their records preserved into the next step()'s producer
+    //       atomicAdd window. `wgpu::Queue::write_buffer` sequences
+    //       before all encoder commands, so the value lands before
+    //       any producer kernel sees the buffer.
+    //
+    //   (b) **GPU-side tail propagation.** For each Indirect consumer,
+    //       emit an `encoder.copy_buffer_to_buffer(event_tail, 0,
+    //       cfg_<name>_buf, 0, 4)` IMMEDIATELY BEFORE the consumer's
+    //       dispatch. This transcribes the live GPU tail (including
+    //       all events emitted by in-step GPU producers AND prior
+    //       Indirect consumers in this same encoder) into the
+    //       consumer's `cfg.event_count` slot, so the consumer walks
+    //       0..tail and stops, instead of walking 0..agent_count and
+    //       reading garbage past tail. This unlocks fixtures like
+    //       `hill_raid` whose `apply_ability` rules emit events via
+    //       `atomicAdd(&event_tail, 1u)` from inside the kernel — the
+    //       host has zero visibility into the count, but the in-encoder
+    //       copy reads the live GPU value at consumer-dispatch time.
+    //
+    // The per-tick cfg write above still sets `event_count =
+    // agent_count` for every kernel; the per-consumer
+    // copy_buffer_to_buffer overwrites the Indirect kernels' slot 0
+    // before their dispatch lands. The order matters — wgpu's encoder
+    // commands run in submission order, so the copy lands BEFORE the
+    // dispatch reads the cfg uniform.
+    let has_indirect_consumers = !indirect_consumer_kernel_names.is_empty();
+    if has_indirect_consumers {
         out.push_str(
-            "        // Snapshot host-side ring tail for Indirect-consumer cfg overrides.\n\
-             \x20       // See the multi-paragraph comment above for the 4-gap rationale.\n\
-             \x20       let pending_event_count: u32 = self.event_ring.tail_value();\n\
-             \x20       let pending_event_count_bytes = pending_event_count.to_le_bytes();\n",
+            "        // Snapshot the host-side tail estimate (counts host-injected\n\
+             \x20       // chronicle records pending from `effect_*_applied()` /\n\
+             \x20       // `inject_chronicle_record()` calls since the last step).\n\
+             \x20       // See the multi-paragraph step() comment for the 4-gap fix.\n\
+             \x20       let pending_event_count: u32 = self.event_ring.tail_value();\n",
         );
-        for kernel_name in indirect_consumer_kernel_names {
-            // Only override if the kernel actually has a cfg buffer
-            // (every chronicle consumer does today, but be defensive).
-            if !cfg_buffer_names.contains(kernel_name) {
-                continue;
-            }
-            out.push_str(&format!(
-                "        self.gpu.queue.write_buffer(&self.cfg_{kernel_name}_buf, 0, &pending_event_count_bytes);\n",
-            ));
-        }
     }
     out.push_str(
         "\n\
@@ -1444,9 +1455,29 @@ fn synthesize_generated_runtime_struct(
          \x20           &wgpu::CommandEncoderDescriptor {\n\
          \x20               label: Some(concat!(env!(\"CARGO_PKG_NAME\"), \"::step\")),\n\
          \x20           },\n\
-         \x20       );\n\
-         \x20       self.event_ring.clear_tail_in(&mut encoder);\n\
-         \x20\n\
+         \x20       );\n",
+    );
+    if has_indirect_consumers {
+        // Replace clear_tail_in with a queue.write_buffer of the
+        // pending count. queue.write_buffer is sequenced before all
+        // encoder commands, so producers atomicAdd from
+        // pending_event_count upward; injected slot 0..pending-1
+        // records survive intact. The host estimate resets so the
+        // next step() starts clean (the same guarantee
+        // clear_tail_in's `tail_estimate = 0` line provided).
+        out.push_str(
+            "        self.gpu.queue.write_buffer(\n\
+             \x20           self.event_ring.tail(),\n\
+             \x20           0,\n\
+             \x20           &pending_event_count.to_le_bytes(),\n\
+             \x20       );\n\
+             \x20       self.event_ring.reset_tail_estimate();\n",
+        );
+    } else {
+        out.push_str("        self.event_ring.clear_tail_in(&mut encoder);\n");
+    }
+    out.push_str(
+        "\n\
          \x20       let agent_buffers = engine::gpu::AgentBuffers {\n",
     );
     // Populate AgentBuffers' standard column fields from any matching
@@ -1564,10 +1595,10 @@ fn synthesize_generated_runtime_struct(
             // Keeping `Kernel(...)` in the or-pattern is defensive: if
             // the schedule classifier ever re-routes a consumer back to
             // `Kernel`, the arm still fires.
-            let arm_pattern = if indirect_consumer_kernel_names
+            let is_indirect_consumer = indirect_consumer_kernel_names
                 .iter()
-                .any(|n| n == &spec.name)
-            {
+                .any(|n| n == &spec.name);
+            let arm_pattern = if is_indirect_consumer {
                 format!(
                     "schedule::DispatchOp::Kernel(KernelId::{pascal}) \
                      | schedule::DispatchOp::Indirect {{ kernel: KernelId::{pascal}, .. }}",
@@ -1579,8 +1610,30 @@ fn synthesize_generated_runtime_struct(
                     pascal = spec.pascal,
                 )
             };
+            // For Indirect consumers, copy the live GPU event_tail
+            // value into cfg.event_count (slot 0) right before the
+            // dispatch. This picks up events emitted by in-step GPU
+            // producers (e.g. `apply_ability` calling
+            // `atomicAdd(&event_tail, 1u)`) AND any host-side injects
+            // preserved across the per-tick `queue.write_buffer` of
+            // `pending_event_count`.
+            let cfg_copy_block = if is_indirect_consumer {
+                format!(
+                    "                    encoder.copy_buffer_to_buffer(\n\
+                     \x20                       self.event_ring.tail(),\n\
+                     \x20                       0,\n\
+                     \x20                       &self.cfg_{kname}_buf,\n\
+                     \x20                       0,\n\
+                     \x20                       4,\n\
+                     \x20                   );\n",
+                    kname = spec.name,
+                )
+            } else {
+                String::new()
+            };
             out.push_str(&format!(
                 "                {arm_pattern} => {{\n\
+                 {cfg_copy_block}\
                  \x20                   let bindings = {kname}::{pascal}Bindings {{\n\
                  {body}\n\
                  \x20                   }};\n\
@@ -1638,12 +1691,12 @@ fn synthesize_generated_runtime_struct(
         // Indirect-consumer or-pattern (see the parallel block above for
         // the rationale). Both `Kernel(...)` and `Indirect { kernel, .. }`
         // dispatch through the same `dispatch::dispatch_<name>` helper;
-        // the consumer kernel's body bounds on `cfg.event_count` set
-        // earlier in step() from the host-side ring tail snapshot.
-        let arm_pattern = if indirect_consumer_kernel_names
+        // the consumer kernel's body bounds on `cfg.event_count` populated
+        // immediately below from the live GPU event_tail value.
+        let is_indirect_consumer = indirect_consumer_kernel_names
             .iter()
-            .any(|n| n == &spec.name)
-        {
+            .any(|n| n == &spec.name);
+        let arm_pattern = if is_indirect_consumer {
             format!(
                 "schedule::DispatchOp::Kernel(KernelId::{pascal}) \
                  | schedule::DispatchOp::Indirect {{ kernel: KernelId::{pascal}, .. }}",
@@ -1655,8 +1708,26 @@ fn synthesize_generated_runtime_struct(
                 pascal = spec.pascal,
             )
         };
+        // For Indirect consumers, copy the live GPU event_tail into
+        // cfg.event_count immediately before dispatch. See parallel
+        // block above for rationale.
+        let cfg_copy_block = if is_indirect_consumer {
+            format!(
+                "                    encoder.copy_buffer_to_buffer(\n\
+                 \x20                       self.event_ring.tail(),\n\
+                 \x20                       0,\n\
+                 \x20                       &self.cfg_{kname}_buf,\n\
+                 \x20                       0,\n\
+                 \x20                       4,\n\
+                 \x20                   );\n",
+                kname = spec.name,
+            )
+        } else {
+            String::new()
+        };
         out.push_str(&format!(
             "                {arm_pattern} => {{\n\
+             {cfg_copy_block}\
              \x20                   let extras = {kname}::{pascal}Extras {{\n\
              {extras_body}\n\
              \x20                   }};\n\
