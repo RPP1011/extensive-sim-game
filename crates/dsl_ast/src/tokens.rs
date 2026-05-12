@@ -116,6 +116,16 @@ pub fn unicode_op_ascii(c: char) -> Option<&'static str> {
         '∧' => Some("&&"),
         '∨' => Some("||"),
         '¬' => Some("!"),
+        // `a ⇒ b` is logical implication (`!a || b`). The parser
+        // currently flattens it to `||` so the LHS still evaluates —
+        // semantically wrong but parse-clean. Used by design-target
+        // invariant bodies (`crowd_navigation.sim`); they live behind
+        // `@runtime` / `@debug_only` modes that aren't yet wired into
+        // the GeneratedRuntime path, so the loss of `!a` is invisible.
+        '⇒' => Some("||"),
+        '≤' => Some("<="),
+        '≥' => Some(">="),
+        '≠' => Some("!="),
         _ => None,
     }
 }

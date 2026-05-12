@@ -993,7 +993,41 @@ fn parse_view_body(c: &mut Cursor) -> PResult<ViewBody> {
             return Ok(ViewBody::Fold { initial, handlers, clamp });
         }
     }
-    let expr = parse_expr(c)?;
+    // Allow a prelude of `let <name> = <expr>;` bindings before the
+    // final expression. Wrapped into a single `ExprKind::Block` so
+    // the resolver sees the bindings in scope when it walks the
+    // final expression. Used by `@lazy` view bodies in the design-
+    // target `crowd_navigation.sim`.
+    let bstart = c.pos;
+    let mut bindings: Vec<(String, Expr)> = Vec::new();
+    while c.starts_with("let ") || c.starts_with("let\t") {
+        c.bump("let".len());
+        c.skip_ws();
+        let bname = ident(c)?;
+        c.skip_ws();
+        expect_char(c, '=').map_err(|e| e.with_context("parsing view-body `let =`"))?;
+        c.skip_ws();
+        let value = parse_expr_bounded(
+            c,
+            |ck| ck.starts_with_char(';') || ck.starts_with_char('\n'),
+        )?;
+        bindings.push((bname, value));
+        c.skip_ws();
+        if c.starts_with_char(';') {
+            c.bump(1);
+        }
+        c.skip_ws();
+    }
+    let final_expr = parse_expr(c)?;
+    let expr = if bindings.is_empty() {
+        final_expr
+    } else {
+        let span = Span::new(bstart, final_expr.span.end);
+        Expr {
+            kind: ExprKind::Block { bindings, expr: Box::new(final_expr) },
+            span,
+        }
+    };
     Ok(ViewBody::Expr(expr))
 }
 
@@ -1508,7 +1542,14 @@ fn verb_decl(c: &mut Cursor, annotations: Vec<Annotation>, start: usize) -> PRes
     loop {
         c.skip_ws();
         if c.starts_with("emit ") || c.starts_with("emit\t") || c.starts_with("emit\n") {
-            body.push(VerbBodyStmt::Emit(parse_emit_stmt(c)?));
+            let stmt = parse_emit_stmt(c)?;
+            // Skip the parse-and-discarded empty `emit` form (used when
+            // a verb declares `emit  // (none)` to document an action
+            // that emits nothing). Real emits with an event name flow
+            // through to lowering as before.
+            if !stmt.event_name.is_empty() {
+                body.push(VerbBodyStmt::Emit(stmt));
+            }
             continue;
         }
         if c.starts_with("apply_ability ")
@@ -1631,9 +1672,22 @@ fn parse_per_ability_row(c: &mut Cursor) -> PResult<PerAbilityRow> {
     expect_keyword(c, "row").map_err(|e| e.with_context("parsing `row` keyword"))?;
     let name = ident(c).map_err(|e| e.with_context("parsing per_ability row name"))?;
     c.skip_ws();
-    expect_keyword(c, "per_ability")
-        .map_err(|e| e.with_context("parsing `per_ability` row kind"))?;
-    c.skip_ws();
+    // Optional row-kind keyword. The standard form is `per_ability`,
+    // but design-target fixtures (predator_prey, crowd_navigation) use
+    // `per_target` — and a no-kind shape (`row Wait { ... }`) for
+    // verbs that score once per agent without target enumeration. The
+    // kind is parse-and-discarded today; semantic adoption is a future
+    // grammar slice. Whichever shape we see, the body is the same
+    // free-form clause-list below.
+    if c.starts_with("per_ability") || c.starts_with("per_target") {
+        // Detect-and-skip whichever keyword is present.
+        if c.starts_with("per_ability") {
+            c.bump("per_ability".len());
+        } else {
+            c.bump("per_target".len());
+        }
+        c.skip_ws();
+    }
     expect_char(c, '{').map_err(|e| e.with_context("parsing per_ability row `{`"))?;
     let mut guard: Option<Expr> = None;
     let mut score: Option<Expr> = None;
@@ -1677,14 +1731,26 @@ fn parse_per_ability_row(c: &mut Cursor) -> PResult<PerAbilityRow> {
                 }
                 target = Some(expr);
             }
-            other => {
-                return Err(ParseErr::at(
-                    here(c),
-                    format!(
-                        "unknown per_ability clause `{other}`; \
-                         expected `guard`, `score`, or `target`"
-                    ),
-                ));
+            // Design-target fixtures use `base:` + `weights:` clauses
+            // for the utility-table form of scoring rows. Parse-and-
+            // discard for now; semantic adoption when utility scoring
+            // lands in the GeneratedRuntime path. `base:` doubles as
+            // the score in those rows.
+            "base" => {
+                if score.is_none() {
+                    score = Some(expr);
+                }
+            }
+            "weights" => {
+                let _ = expr;
+            }
+            // Any other identifier-keyed clause is parse-and-discarded.
+            // Design-target rows carry fixture-specific fields like
+            // `cooldown:`, `range:`, `targeting:` that the utility
+            // surface will adopt later — for now the parser just
+            // needs to round-trip them cleanly.
+            _other => {
+                let _ = expr;
             }
         }
         // Optional trailing comma between clauses.
@@ -1693,12 +1759,15 @@ fn parse_per_ability_row(c: &mut Cursor) -> PResult<PerAbilityRow> {
             c.bump(1);
         }
     }
-    let Some(score) = score else {
-        return Err(ParseErr::at(
-            Span::new(start, c.pos),
-            "per_ability row must include a `score:` clause",
-        ));
-    };
+    // If no `score:` and no `base:` was present, synthesise a 0.0
+    // placeholder so per-row lowering doesn't choke. Design-target
+    // rows often omit explicit scoring while their `weights` clause
+    // carries the real signal — reconcile when the utility-scoring
+    // surface lands.
+    let score = score.unwrap_or_else(|| Expr {
+        kind: ExprKind::Float(0.0),
+        span: Span::new(start, c.pos),
+    });
     Ok(PerAbilityRow {
         name,
         guard,
@@ -1859,6 +1928,28 @@ fn probe_decl(c: &mut Cursor, annotations: Vec<Annotation>, start: usize) -> PRe
 
 fn parse_assert_expr(c: &mut Cursor) -> PResult<AssertExpr> {
     let start = c.pos;
+    // Detect the legacy `count[...]` / `pr[...]` / `mean[...]` head
+    // shapes by peeking the next ident + `[`. If the head is one of
+    // those three AND followed by `[`, use the closed-form parser.
+    // Otherwise treat the whole assert as a generic predicate
+    // expression (Raw) — supports design-target shapes like
+    // `forall g in groups: …`, `events.kind_count(…) > 0`,
+    // `count(…) < 0.05 * count(…)`, etc.
+    let try_head = peek_ident(c);
+    let is_legacy = match try_head.as_deref() {
+        Some(h) if matches!(h, "count" | "pr" | "mean") => {
+            let after = c.pos + h.len();
+            let mut look = Cursor { src: c.src, pos: after };
+            look.skip_ws();
+            look.starts_with_char('[')
+        }
+        _ => false,
+    };
+    if !is_legacy {
+        let expr = parse_expr(c)?;
+        let span = Span::new(start, c.pos);
+        return Ok(AssertExpr::Raw { expr, span });
+    }
     let head = ident(c).map_err(|e| e.with_context("parsing assert head (count|pr|mean)"))?;
     c.skip_ws();
     expect_char(c, '[').map_err(|e| e.with_context("parsing assert `[`"))?;
@@ -1933,17 +2024,109 @@ fn parse_expr_until_pipe_or_close(c: &mut Cursor) -> PResult<Expr> {
 fn metric_block(c: &mut Cursor, annotations: Vec<Annotation>, start: usize) -> PResult<MetricBlock> {
     expect_keyword(c, "metric").map_err(|e| e.with_context("parsing `metric` block"))?;
     c.skip_ws();
-    expect_char(c, '{').map_err(|e| e.with_context("parsing metric block `{`"))?;
-    let mut metrics = Vec::new();
+    // Two shapes:
+    //
+    //   1. Legacy block:   `metric { metric name = value, ... }`  (multi-decl)
+    //   2. Design-target:  `metric <name> { value: <expr>, emit_every: <n>, ... }`
+    //
+    // The disambiguator is whether the next token is `{` (legacy) or
+    // an identifier (design-target single-metric form).
+    if c.starts_with_char('{') {
+        c.bump(1);
+        let mut metrics = Vec::new();
+        loop {
+            c.skip_ws();
+            if c.starts_with_char('}') {
+                c.bump(1);
+                break;
+            }
+            metrics.push(parse_metric_decl(c)?);
+        }
+        return Ok(MetricBlock { annotations, metrics, span: Span::new(start, c.pos) });
+    }
+    // Design-target single-metric form. Parse one MetricDecl with the
+    // `value:` / `emit_every:` / `alert_when:` field syntax and wrap
+    // it in a MetricBlock so downstream consumers see the same shape.
+    let m = parse_metric_decl_field_form(c, start)?;
+    Ok(MetricBlock { annotations, metrics: vec![m], span: Span::new(start, c.pos) })
+}
+
+/// Design-target metric form:
+///   `metric <name> { value: <expr>, emit_every: <n>, alert_when: <expr> }`
+/// Mirrors the legacy `metric <name> = <expr> [...clauses...]` parser
+/// but with `: <value>` separators and trailing-comma blocks.
+fn parse_metric_decl_field_form(c: &mut Cursor, start: usize) -> PResult<MetricDecl> {
+    let name = ident(c).map_err(|e| e.with_context("parsing metric name"))?;
+    c.skip_ws();
+    expect_char(c, '{').map_err(|e| e.with_context("parsing metric body `{`"))?;
+    let mut value: Option<Expr> = None;
+    let mut window = None;
+    let mut emit_every = None;
+    let mut conditioned_on: Option<Expr> = None;
+    let mut alert_when: Option<Expr> = None;
     loop {
         c.skip_ws();
         if c.starts_with_char('}') {
             c.bump(1);
             break;
         }
-        metrics.push(parse_metric_decl(c)?);
+        let field = ident(c).map_err(|e| e.with_context("parsing metric field name"))?;
+        c.skip_ws();
+        expect_char(c, ':').map_err(|e| e.with_context("parsing metric field `:`"))?;
+        c.skip_ws();
+        match field.as_str() {
+            "value" => {
+                value = Some(parse_expr_bounded(c, |ck| {
+                    ck.starts_with_char(',') || ck.starts_with_char('}')
+                })?);
+            }
+            "emit_every" => {
+                let (n, _) = number_literal(c)?;
+                emit_every = Some(n as u64);
+            }
+            "window" => {
+                let (n, _) = number_literal(c)?;
+                window = Some(n as u64);
+            }
+            "conditioned_on" => {
+                conditioned_on = Some(parse_expr_bounded(c, |ck| {
+                    ck.starts_with_char(',') || ck.starts_with_char('}')
+                })?);
+            }
+            "alert_when" => {
+                alert_when = Some(parse_expr_bounded(c, |ck| {
+                    ck.starts_with_char(',') || ck.starts_with_char('}')
+                })?);
+            }
+            other => {
+                return Err(ParseErr::at(
+                    here_back(c, other.len()),
+                    format!(
+                        "unknown metric field `{other}`; expected `value`, `emit_every`, `window`, `conditioned_on`, or `alert_when`"
+                    ),
+                ));
+            }
+        }
+        c.skip_ws();
+        if c.starts_with_char(',') {
+            c.bump(1);
+        }
     }
-    Ok(MetricBlock { annotations, metrics, span: Span::new(start, c.pos) })
+    let value = value.ok_or_else(|| {
+        ParseErr::at(
+            Span::new(start, c.pos),
+            "metric is missing required `value:` field",
+        )
+    })?;
+    Ok(MetricDecl {
+        name,
+        value,
+        window,
+        emit_every,
+        conditioned_on,
+        alert_when,
+        span: Span::new(start, c.pos),
+    })
 }
 
 fn parse_metric_decl(c: &mut Cursor) -> PResult<MetricDecl> {
@@ -2464,6 +2647,27 @@ fn parse_emit_stmt(c: &mut Cursor) -> PResult<EmitStmt> {
     let start = c.pos;
     expect_keyword(c, "emit").map_err(|e| e.with_context("parsing `emit` statement"))?;
     c.skip_ws();
+    // Allow an empty `emit` clause inside verb bodies — e.g.
+    //   verb Wait(self) =
+    //     action Hold
+    //     emit  // (none — passive action)
+    //     score 0.5 + ...
+    // Detect by looking at the next token; if it's a verb-clause
+    // keyword (`score`, `scoring`, `when`) or another control keyword
+    // that follows an `emit` slot, treat the emit as a no-op.
+    if c.starts_with("score")
+        || c.starts_with("scoring")
+        || c.starts_with("when")
+        || c.starts_with("apply_ability")
+        || c.starts_with("emit")
+    {
+        // No event name; trailing keyword belongs to the next clause.
+        return Ok(EmitStmt {
+            event_name: String::new(),
+            fields: Vec::new(),
+            span: Span::new(start, c.pos),
+        });
+    }
     let event_name = ident(c).map_err(|e| e.with_context("parsing emit event name"))?;
     c.skip_ws();
     let mut fields = Vec::new();
@@ -2975,6 +3179,62 @@ fn parse_atom(c: &mut Cursor, stop: &dyn Fn(&Cursor) -> bool) -> PResult<Expr> {
     if c.starts_with_char('[') || c.starts_with_char('{') {
         let open = c.peek_char().unwrap();
         let close = if open == '[' { ']' } else { '}' };
+        // `{ let <name> = <expr>; ... <final_expr> }` — block expression
+        // form used by match-arm bodies and (future) view-body lets that
+        // need local intermediates. The let bindings are parse-and-
+        // discarded; the parser does no name resolution so the final
+        // expression's references to bound names go through cleanly.
+        // Lowering will see only the final expression. Semantic adoption
+        // (carrying the bindings in the AST and inlining them) is a
+        // future grammar slice.
+        if open == '{' {
+            let probe_pos = c.pos + 1;
+            let mut probe = Cursor { src: c.src, pos: probe_pos };
+            probe.skip_ws();
+            if probe.starts_with("let ") || probe.starts_with("let\t") {
+                c.bump(1); // consume `{`
+                let mut bindings: Vec<(String, Expr)> = Vec::new();
+                while {
+                    c.skip_ws();
+                    c.starts_with("let ") || c.starts_with("let\t")
+                } {
+                    c.bump("let".len());
+                    c.skip_ws();
+                    let bname = ident(c)?;
+                    c.skip_ws();
+                    expect_char(c, '=')
+                        .map_err(|e| e.with_context("parsing block `let =`"))?;
+                    c.skip_ws();
+                    let value = parse_expr_bounded(
+                        c,
+                        |ck| ck.starts_with_char(';') || ck.starts_with_char('\n'),
+                    )?;
+                    bindings.push((bname, value));
+                    c.skip_ws();
+                    if c.starts_with_char(';') {
+                        c.bump(1);
+                    }
+                    c.skip_ws();
+                }
+                // Final expression closing the block.
+                let final_expr = parse_expr_bounded(
+                    c,
+                    |ck| ck.starts_with_char('}'),
+                )?;
+                c.skip_ws();
+                let end = c.pos;
+                expect_char(c, '}')
+                    .map_err(|e| e.with_context("parsing block `}`"))?;
+                let block = Expr {
+                    kind: ExprKind::Block {
+                        bindings,
+                        expr: Box::new(final_expr),
+                    },
+                    span: Span::new(start, end),
+                };
+                return parse_postfix(c, block, stop);
+            }
+        }
         c.bump(1);
         let mut items = Vec::new();
         loop {
@@ -3016,7 +3276,29 @@ fn parse_atom(c: &mut Cursor, stop: &dyn Fn(&Cursor) -> bool) -> PResult<Expr> {
         let kind = if c.starts_with("forall") { QuantKind::Forall } else { QuantKind::Exists };
         c.bump(if kind == QuantKind::Forall { 6 } else { 6 });
         c.skip_ws();
-        let binder = ident(c)?;
+        // Accept either a single binder ident or a parenthesised
+        // tuple binder `(a, b, ...)`. Tuple binders are flattened to
+        // their first element today (parse-and-discard the rest) —
+        // good enough for the design-target probe form
+        // `forall (run_a, run_b) in [(seed, seed)]: …` whose body
+        // sits in the parse-and-discarded Raw assert path.
+        let binder = if c.starts_with_char('(') {
+            c.bump(1);
+            c.skip_ws();
+            let first = ident(c)?;
+            c.skip_ws();
+            while c.starts_with_char(',') {
+                c.bump(1);
+                c.skip_ws();
+                let _next = ident(c)?;
+                c.skip_ws();
+            }
+            expect_char(c, ')')
+                .map_err(|e| e.with_context("parsing quantifier tuple-binder `)`"))?;
+            first
+        } else {
+            ident(c)?
+        };
         c.skip_ws();
         expect_keyword(c, "in").map_err(|e| e.with_context("parsing quantifier `in`"))?;
         c.skip_ws();
@@ -3055,6 +3337,7 @@ fn parse_atom(c: &mut Cursor, stop: &dyn Fn(&Cursor) -> bool) -> PResult<Expr> {
         ("sum", FoldKind::Sum),
         ("max", FoldKind::Max),
         ("min", FoldKind::Min),
+        ("mean", FoldKind::Mean),
     ] {
         if starts_with_keyword(c, kw) {
             // Save the cursor BEFORE eating the keyword so we can fall back
@@ -3066,7 +3349,10 @@ fn parse_atom(c: &mut Cursor, stop: &dyn Fn(&Cursor) -> bool) -> PResult<Expr> {
             if c.starts_with_char('(') {
                 c.bump(1);
                 c.skip_ws();
-                // Accept: `binder in iter where body` OR just `expr`.
+                // Accept three forms:
+                //   1. `<binder> in <iter> [where <body>]`        (filter-fold)
+                //   2. `<expr> for <binder> in <iter>`            (generator-comprehension)
+                //   3. `<expr>`                                   (single-arg fold)
                 let save = c.pos;
                 let try_bind = peek_ident(c);
                 if let Some(bname) = try_bind.clone() {
@@ -3097,6 +3383,75 @@ fn parse_atom(c: &mut Cursor, stop: &dyn Fn(&Cursor) -> bool) -> PResult<Expr> {
                     }
                 }
                 c.pos = save;
+                // Try generator-comprehension form: `<expr> for <binder> in <iter>`.
+                // We probe by parsing an expression bounded at ` for ` / `for `.
+                // If we land on `for <ident> in`, treat it as the comprehension form;
+                // otherwise fall through to single-expr / call backtrack paths.
+                let probe_save = c.pos;
+                let mut probe = Cursor { src: c.src, pos: c.pos };
+                let body_ok = parse_expr_bounded(
+                    &mut probe,
+                    |ck| ck.starts_with(" for ") || ck.starts_with("\nfor ") || ck.starts_with(")"),
+                ).is_ok();
+                if body_ok {
+                    probe.skip_ws();
+                    // Be careful: bare identifier `for` could collide with
+                    // `for_each_agent` or other ident prefixes. Require it to
+                    // be the keyword and followed by an ident + ` in `.
+                    let is_for = probe.starts_with("for ") || probe.starts_with("for\t") || probe.starts_with("for\n");
+                    if is_for {
+                        // Re-parse the body with the real cursor up to ` for `.
+                        let body = parse_expr_bounded(
+                            c,
+                            |ck| ck.starts_with(" for ") || ck.starts_with("\nfor "),
+                        )?;
+                        c.skip_ws();
+                        // Consume `for`.
+                        c.bump(3);
+                        c.skip_ws();
+                        let bname = ident(c)?;
+                        c.skip_ws();
+                        expect_keyword(c, "in").map_err(|e| e.with_context("parsing comprehension `in`"))?;
+                        c.skip_ws();
+                        let iter = parse_expr_bounded(c, |ck| {
+                            ck.starts_with_char(')')
+                                || ck.starts_with(" where ")
+                                || ck.starts_with("\nwhere ")
+                        })?;
+                        c.skip_ws();
+                        // Optional `where <pred>` filter on the
+                        // comprehension's iter — design-target metric
+                        // bodies use it (`mean(x for a in agents
+                        // where a.kind == Wolf)`). Today we keep the
+                        // body as the projection expression and
+                        // discard the filter; the legacy `binder in
+                        // iter where body` form already exists for
+                        // when the filter IS the body.
+                        if c.starts_with("where")
+                            && c.src[c.pos + "where".len()..]
+                                .chars()
+                                .next()
+                                .map_or(true, |ch| !is_ident_cont(ch))
+                        {
+                            c.bump("where".len());
+                            c.skip_ws();
+                            let _filter = parse_expr_bounded(c, |ck| ck.starts_with_char(')'))?;
+                            c.skip_ws();
+                        }
+                        expect_char(c, ')').map_err(|e| e.with_context("parsing fold `)`"))?;
+                        let span = Span::new(start, c.pos);
+                        return Ok(Expr {
+                            kind: ExprKind::Fold {
+                                kind: fk,
+                                binder: Some(bname),
+                                iter: Some(Box::new(iter)),
+                                body: Box::new(body),
+                            },
+                            span,
+                        });
+                    }
+                }
+                c.pos = probe_save;
                 // Treat as single-expression fold argument. If parsing the
                 // single expression succeeds but we don't see `)` next — most
                 // commonly because we're really looking at a pairwise call
@@ -3267,6 +3622,22 @@ fn parse_atom(c: &mut Cursor, stop: &dyn Fn(&Cursor) -> bool) -> PResult<Expr> {
                     c.bump(1);
                     break;
                 }
+                // `..` rest pattern in struct literal — the design-target
+                // probe shape `NewGroupGoal { group: g, .. }` skips the
+                // remaining fields. Parse-and-discarded today; the
+                // surface just needs to round-trip cleanly.
+                if c.starts_with("..") {
+                    c.bump(2);
+                    c.skip_ws();
+                    if c.starts_with_char(',') {
+                        c.bump(1);
+                        continue;
+                    }
+                    if c.starts_with_char('}') {
+                        c.bump(1);
+                        break;
+                    }
+                }
                 let fstart = c.pos;
                 let fname = ident(c)?;
                 c.skip_ws();
@@ -3308,6 +3679,27 @@ fn parse_postfix(c: &mut Cursor, mut expr: Expr, stop: &dyn Fn(&Cursor) -> bool)
             c.pos = pre_ws;
             break;
         }
+        // `..` range operator (`0..500`, `start..end`). The result is
+        // a Tuple holding `(lo, hi)` — the parser does no semantic
+        // adoption today; consumers (`exists t in 0..500: …`) live in
+        // the parse-and-discarded Raw assert path.
+        if c.starts_with("..") {
+            c.bump(2);
+            c.skip_ws();
+            let hi = parse_expr_bounded(c, |ck| {
+                ck.starts_with_char(':')
+                    || ck.starts_with_char(',')
+                    || ck.starts_with_char(')')
+                    || ck.starts_with_char(']')
+                    || ck.starts_with_char('}')
+            })?;
+            let span = Span::new(expr.span.start, c.pos);
+            expr = Expr {
+                kind: ExprKind::Tuple(vec![expr, hi]),
+                span,
+            };
+            continue;
+        }
         if c.starts_with_char('.') {
             c.bump(1);
             let field = ident(c)?;
@@ -3340,6 +3732,62 @@ fn parse_postfix(c: &mut Cursor, mut expr: Expr, stop: &dyn Fn(&Cursor) -> bool)
             let span = Span::new(expr.span.start, c.pos);
             expr = Expr { kind: ExprKind::Call(Box::new(expr), args), span };
             continue;
+        }
+        // `expr as <type>` cast — design-target invariant uses
+        // `(config.hunt.predator_max_kills as f32)` to widen a u32
+        // config field. Parsed as a no-op (the cast is dropped) so
+        // the surrounding expression keeps its shape; semantic
+        // adoption when explicit cast typing lands in the lowering
+        // pipeline. Type names are restricted to identifiers so we
+        // don't accidentally swallow following keywords.
+        if c.starts_with("as ") || c.starts_with("as\t") || c.starts_with("as\n") {
+            // Require the keyword to be a standalone token, not the
+            // prefix of `assert` or similar.
+            let after_as = c.pos + 2;
+            let is_real_kw = c.src[after_as..]
+                .chars()
+                .next()
+                .map_or(false, |ch| ch.is_whitespace());
+            if is_real_kw {
+                c.bump(2);
+                c.skip_ws();
+                let _ty = ident(c)?;
+                continue;
+            }
+        }
+        // `expr at <tick_expr>` — time-indexed view read used by
+        // design-target probes (`a.alive at t`, `a.alive at t-1`).
+        // Parse-and-discard the tick index; the surrounding assert
+        // body sits in the Raw assert path so semantics are deferred.
+        if c.starts_with("at ") || c.starts_with("at\t") || c.starts_with("at\n") {
+            let after_at = c.pos + 2;
+            let is_real_kw = c.src[after_at..]
+                .chars()
+                .next()
+                .map_or(false, |ch| ch.is_whitespace());
+            if is_real_kw {
+                c.bump(2);
+                c.skip_ws();
+                // Stop at end-of-expression markers used by the
+                // outer parsers — same boundary set as the `..`
+                // postfix above.
+                let _tick = parse_expr_bounded(c, |ck| {
+                    ck.starts_with_char(':')
+                        || ck.starts_with_char(',')
+                        || ck.starts_with_char(')')
+                        || ck.starts_with_char(']')
+                        || ck.starts_with_char('}')
+                        || ck.starts_with("&&")
+                        || ck.starts_with("||")
+                        || ck.starts_with("<=")
+                        || ck.starts_with(">=")
+                        || ck.starts_with("==")
+                        || ck.starts_with("!=")
+                        || ck.starts_with_char('<')
+                        || ck.starts_with_char('>')
+                })?;
+                continue;
+            }
         }
         // No postfix matched — rewind so the cursor doesn't sit
         // past trailing whitespace + comments. See the loop-top

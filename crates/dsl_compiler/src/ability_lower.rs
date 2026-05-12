@@ -2743,6 +2743,12 @@ fn first_unknown_agent_field(expr: &dsl_ast::ast::Expr) -> Option<(String, Strin
             first_unknown_agent_field(observer).or_else(|| first_unknown_agent_field(target))
         }
         ExprKind::BeliefsView { observer, .. } => first_unknown_agent_field(observer),
+        ExprKind::Block { bindings, expr } => {
+            bindings
+                .iter()
+                .find_map(|(_, v)| first_unknown_agent_field(v))
+                .or_else(|| first_unknown_agent_field(expr))
+        }
         // Leaves: literals + bare idents have no nested fields to check.
         ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_)
         | ExprKind::String(_) | ExprKind::Ident(_) => None,

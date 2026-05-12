@@ -832,7 +832,7 @@ pub fn lower_expr(ast: &IrExprNode, ctx: &mut LoweringCtx<'_>) -> Result<CgExprI
                         ctx,
                     )
                 }
-                FoldKind::Min | FoldKind::Max => {
+                FoldKind::Min | FoldKind::Max | FoldKind::Mean => {
                     Err(LoweringError::UnsupportedAstNode {
                         ast_label: "Fold",
                         span,
@@ -2778,11 +2778,11 @@ fn lower_fold_over_agents(
             };
             (body_ty, init, body_id)
         }
-        FoldKind::Min | FoldKind::Max => {
+        FoldKind::Min | FoldKind::Max | FoldKind::Mean => {
             // Filtered out by the caller; defensive.
             ctx.fold_binder_name = prev_binder;
             return Err(LoweringError::UnsupportedAstNode {
-                ast_label: "Fold (Min/Max)",
+                ast_label: "Fold (Min/Max/Mean)",
                 span,
             });
         }

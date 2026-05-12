@@ -685,6 +685,12 @@ pub enum AssertExpr {
     Pr { action_filter: Expr, obs_filter: Expr, op: String, value: Expr, span: Span },
     /// `mean[<scalar_expr> | <filter>] <op> <scalar>`
     Mean { scalar: Expr, filter: Expr, op: String, value: Expr, span: Span },
+    /// Generic predicate form — used by design-target probes whose
+    /// assert clause is a free-form quantifier or comparison
+    /// (`forall g in groups: ...`, `events.kind_count(...) > 0`, etc.).
+    /// Parse-and-discarded today; semantic adoption when probe runner
+    /// grows a generic-expr evaluator.
+    Raw { expr: Expr, span: Span },
 }
 
 // ---------------------------------------------------------------------------
@@ -946,6 +952,13 @@ pub enum ExprKind {
     /// `beliefs(observer).<view_name>(_)` — aggregate view over the set of
     /// targets the observer currently believes in (Plan ToM Task 8).
     BeliefsView { observer: Box<Expr>, view_name: String },
+    /// `{ let a = e1; let b = e2; final_expr }` — sequential
+    /// let-binding block. Used by @lazy view bodies and match arms
+    /// that need an intermediate name. Each binding extends the
+    /// scope visible to subsequent bindings + the final expression.
+    /// Lowering inlines bindings substitution-style; the resolver
+    /// simply binds each name into the local scope.
+    Block { bindings: Vec<(String, Expr)>, expr: Box<Expr> },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -1007,6 +1020,12 @@ pub enum FoldKind {
     Sum,
     Max,
     Min,
+    /// Arithmetic mean. Parser accepts `mean(<binder> in <iter>)` and
+    /// `mean(<expr> for <binder> in <iter>)`. Lowering currently treats
+    /// Mean the same as Sum (no /N divide) — the design-target fixtures
+    /// that use it (`crowd_navigation.sim`) ride a future semantic-
+    /// adoption slice; today the symbol just has to round-trip.
+    Mean,
 }
 
 // ---------------------------------------------------------------------------

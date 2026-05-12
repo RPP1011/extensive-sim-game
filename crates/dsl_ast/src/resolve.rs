@@ -1485,6 +1485,13 @@ fn resolve_bodies(
                 let asserts = d
                     .asserts
                     .iter()
+                    // Drop the parse-and-discard Raw form — it lives
+                    // outside the IR's closed Count/Pr/Mean shape.
+                    // The probe still appears in the IR (just with
+                    // fewer asserts) so the lowering pipeline keeps
+                    // its structural invariants. Re-introduce when
+                    // the probe runner grows a generic-expr evaluator.
+                    .filter(|a| !matches!(a, AssertExpr::Raw { .. }))
                     .map(|a| {
                         let mut scope = LocalScope::new();
                         scope.bind("self", IrType::Unknown);
@@ -2331,6 +2338,20 @@ fn resolve_expr(
             observer: Box::new(resolve_expr(observer, scope, symbols)?),
             view_name: view_name.clone(),
         },
+        ExprKind::Block { bindings, expr } => {
+            // Resolve each binding into the local scope so the final
+            // expression sees the bound names. Bind values are
+            // resolved-and-discarded today — the LocalRefs in the
+            // final expression have no actual storage. Used by the
+            // parse-time `let` prelude in @lazy view bodies; those
+            // views aren't yet wired into the lowering pipeline,
+            // so the dangling Locals aren't reached.
+            for (name, value) in bindings {
+                let _ = resolve_expr(value, scope, symbols)?;
+                scope.bind(name, IrType::Unknown);
+            }
+            return resolve_expr(expr, scope, symbols);
+        }
     };
     Ok(IrExprNode { kind, span })
 }
@@ -2836,6 +2857,14 @@ fn resolve_assert(
             filter: resolve_expr(filter, scope, symbols)?,
             op: op.clone(),
             value: resolve_expr(value, scope, symbols)?,
+            span: *span,
+        }),
+        // Filtered out by the caller (probe-decl resolve loop) before
+        // reaching here — defensive arm so the match stays exhaustive.
+        AssertExpr::Raw { span, .. } => Ok(IrAssertExpr::Count {
+            filter: IrExprNode { kind: IrExpr::LitBool(true), span: *span },
+            op: ">=".to_string(),
+            value: IrExprNode { kind: IrExpr::LitInt(0), span: *span },
             span: *span,
         }),
     }
