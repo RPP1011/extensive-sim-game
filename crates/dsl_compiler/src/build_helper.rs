@@ -30,6 +30,78 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
+/// Environment-variable name that, when set to a truthy value
+/// (`1`/`true`/`yes`, case-insensitive), promotes any lower-time
+/// `[<fixture> lower diag]` warning to a hard build error.
+///
+/// Default off (unset / `0` / `false` / empty) preserves the historical
+/// "warn-and-drop" behaviour every fixture relied on before Gap
+/// plague_city#P-C surfaced. Fixtures that opt in with this flag get
+/// fail-fast on silent rule-drops.
+///
+/// Used by [`emit_into`] (and therefore every public `emit*` entry
+/// point) to gate the diagnostic-promotion check.
+pub const REQUIRE_ALL_RULES_ENV: &str = "SIM_REQUIRE_ALL_RULES";
+
+/// Decides whether `SIM_REQUIRE_ALL_RULES` should be treated as set.
+///
+/// Truthy values (case-insensitive): `1`, `true`, `yes`, `on`. Anything
+/// else — including absent, empty, `0`, `false`, `no`, `off` — is
+/// treated as off. Mirrors the convention `RUST_LOG` / `CARGO_TERM_*`
+/// environment-variable parsing uses.
+fn require_all_rules_enabled() -> bool {
+    match env::var(REQUIRE_ALL_RULES_ENV) {
+        Ok(v) => is_truthy_env_value(&v),
+        Err(_) => false,
+    }
+}
+
+fn is_truthy_env_value(v: &str) -> bool {
+    matches!(
+        v.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+/// Pure helper that decides whether a set of lower diagnostics should
+/// promote to a build error under the current environment settings.
+///
+/// Returns `Ok(())` when either (a) `diagnostics` is empty, or (b)
+/// `SIM_REQUIRE_ALL_RULES` is unset / falsy. Returns `Err(message)` —
+/// a multi-line, fixture-tagged compile-error string suitable for
+/// `panic!`-ing in a build script — when the env var is truthy AND
+/// at least one diagnostic fired.
+///
+/// This entry point is split out from the `emit_into` body so tests in
+/// `crates/dsl_compiler/tests/` can assert the env-gate semantics
+/// without faking `OUT_DIR` / `CARGO_MANIFEST_DIR` / a real `.sim`
+/// file. Tests synthesise a minimal `.sim` that fails to lower, run
+/// it through `parse → resolve → lower_compilation_to_cg`, then call
+/// this helper with the resulting `Vec<LoweringError>`.
+///
+/// See Gap P-C in `docs/architecture/gaps_plague_city.md` for the
+/// real-world failure mode this guards against (silent rule-drop
+/// shrinks the schedule from N to N-9 stages with no compile-time
+/// signal).
+pub fn check_required_rules<E: std::fmt::Display>(
+    fixture_name: &str,
+    diagnostics: &[E],
+) -> Result<(), String> {
+    if diagnostics.is_empty() || !require_all_rules_enabled() {
+        return Ok(());
+    }
+    let mut msg = format!(
+        "[{fixture_name} lower diag] {} diagnostic(s) fired with {REQUIRE_ALL_RULES_ENV}=1; \
+         promoting to build error (rules referenced by these diagnostics would otherwise be \
+         silently dropped from the schedule):\n",
+        diagnostics.len(),
+    );
+    for d in diagnostics {
+        msg.push_str(&format!("  - {d}\n"));
+    }
+    Err(msg)
+}
+
 /// Standard build-script body for any per-fixture runtime crate.
 ///
 /// `fixture_name` is the basename used to:
@@ -45,6 +117,12 @@ use std::path::PathBuf;
 /// Panics on parse, resolve, or emit failures (these were `expect()`
 /// calls in every per-fixture build.rs; surface them the same way so
 /// the diagnostic surface is unchanged).
+///
+/// Set `SIM_REQUIRE_ALL_RULES=1` in the build environment to promote
+/// any lower diagnostic to a hard build error — useful for fixtures
+/// where a silently-dropped physics rule would shrink the schedule
+/// below the author's intent (Gap plague_city#P-C). See
+/// [`REQUIRE_ALL_RULES_ENV`] / [`check_required_rules`].
 pub fn emit(fixture_name: &str) {
     emit_with_strategy(fixture_name, crate::cg::schedule::ScheduleStrategy::Default)
 }
@@ -317,6 +395,13 @@ fn emit_into(
         Err(o) => {
             for d in &o.diagnostics {
                 println!("cargo:warning=[{fixture_name} lower diag] {d}");
+            }
+            // Gap plague_city#P-C: promote diagnostics to a build
+            // error when the fixture (or its runtime crate's build.rs
+            // wrapper) sets SIM_REQUIRE_ALL_RULES=1. Default off
+            // preserves the historical warn-and-drop behaviour.
+            if let Err(msg) = check_required_rules(fixture_name, &o.diagnostics) {
+                panic!("{msg}");
             }
             o.program
         }
