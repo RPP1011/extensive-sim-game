@@ -1297,19 +1297,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "particle_collision_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
 name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1383,19 +1370,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9"
 dependencies = [
  "zerocopy",
-]
-
-[[package]]
-name = "predator_prey_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
 ]
 
 [[package]]
@@ -1790,8 +1764,6 @@ dependencies = [
  "crowd_navigation_runtime",
  "engine",
  "glam",
- "particle_collision_runtime",
- "predator_prey_runtime",
  "tom_probe_runtime",
 ]
 

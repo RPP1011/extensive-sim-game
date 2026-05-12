@@ -35,8 +35,6 @@ const SIMS: &[(&str, Factory, u32, &str)] = &[
     // (`sims::boids::GeneratedRuntime`), but the mega-crate doesn't
     // yet expose `make_sim()` returning `Box<dyn CompiledSim>` or a
     // populated `positions()`. Re-add when those surfaces land.
-    ("predator_prey",         predator_prey_runtime::make_sim,             64,  "predator/prey 2-species"),
-    ("particle_collision",    particle_collision_runtime::make_sim,        256, "elastic collisions"),
     ("crowd_navigation",      crowd_navigation_runtime::make_sim,          256, "crowd navigation"),
     ("tom_probe",             tom_probe_runtime::make_sim,                 32,  "ToM probe"),
 ];

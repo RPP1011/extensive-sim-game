@@ -104,6 +104,7 @@ fn main() {
                 | "stress_agent_count"
                 | "stress_cast_density"
                 | "predator_prey"
+                | "particle_collision"
         ) {
             continue;
         }

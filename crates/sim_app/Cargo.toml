@@ -28,10 +28,8 @@ glam = "0.29"
 # Sibling per-creature predator/prey demo. Imported under its real
 # name (no rename) — the pp_app binary in src/pp_app.rs is fixture-
 # aware and introspects per-creature counts via the runtime API.
-predator_prey_runtime = { path = "../predator_prey_runtime", optional = true }
 # Particle collision sibling fixture — pc_app drives it through the
 # CompiledSim trait.
-particle_collision_runtime = { path = "../particle_collision_runtime", optional = true }
 # Crowd navigation sibling fixture — cn_app drives it.
 crowd_navigation_runtime = { path = "../crowd_navigation_runtime", optional = true }
 # Target-chaser stress fixture for slice 1 (cross-agent target reads).
@@ -223,14 +221,10 @@ default = ["test-fixtures"]
 # Runtimes referenced unconditionally by tests/cross_fixture_determinism.rs.
 test-fixtures = [
     "dep:crowd_navigation_runtime",
-    "dep:particle_collision_runtime",
-    "dep:predator_prey_runtime",
 ]
 
 # Per-binary features. Each pulls in only the runtime that binary needs.
 # Build pattern: `cargo build -p sim_app --bin foo_app --features bin-foo_app`.
-bin-pp_app = ["dep:predator_prey_runtime"]
-bin-pc_app = ["dep:particle_collision_runtime"]
 bin-cn_app = ["dep:crowd_navigation_runtime"]
 bin-tom_probe_app = ["dep:tom_probe_runtime"]
 # `viz_app` is the universal sim-picker — its SIMS table in
@@ -242,20 +236,10 @@ bin-tom_probe_app = ["dep:tom_probe_runtime"]
 # the build gap surfaced by predator_prey snapshot work, 2026-05-05).
 bin-viz_app = [
     "dep:crowd_navigation_runtime",
-    "dep:particle_collision_runtime",
-    "dep:predator_prey_runtime",
     "dep:tom_probe_runtime",
 ]
 
-[[bin]]
-name = "pp_app"
-path = "src/pp_app.rs"
-required-features = ["bin-pp_app"]
 
-[[bin]]
-name = "pc_app"
-path = "src/pc_app.rs"
-required-features = ["bin-pc_app"]
 
 [[bin]]
 name = "cn_app"
