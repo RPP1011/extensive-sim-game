@@ -144,6 +144,44 @@ fn emit_into(
         })
         .flatten()
         .collect();
+    // Compiler-debug-mode opt-in (#242 follow-up). A `.sim` file may
+    // declare `debug { depth: kernel, wgsl_event_kind_histogram: true,
+    // ... }` — we extract the parsed values BEFORE resolve consumes the
+    // Program and thread them into LowerOpts.debug + LowerOpts.debug_wgsl
+    // below. Multiple `debug { }` blocks in one file are merged: depth
+    // takes the LAST one set, every wgsl_* flag is OR'd. Absent block →
+    // compiler defaults (DebugDepth::Off, all wgsl_* = false), which is
+    // identical to the pre-annotation emit shape.
+    let mut debug_depth: Option<dsl_ast::ast::DebugDepthLit> = None;
+    let mut debug_wgsl_event_kind_histogram = false;
+    let mut debug_wgsl_mask_hit_rate = false;
+    let mut debug_wgsl_score_kernel_visits = false;
+    for d in &program.decls {
+        if let dsl_ast::ast::Decl::Debug(b) = d {
+            if let Some(dd) = b.depth {
+                debug_depth = Some(dd);
+            }
+            debug_wgsl_event_kind_histogram |= b.wgsl_event_kind_histogram;
+            debug_wgsl_mask_hit_rate |= b.wgsl_mask_hit_rate;
+            debug_wgsl_score_kernel_visits |= b.wgsl_score_kernel_visits;
+        }
+    }
+    let lower_debug_depth = match debug_depth {
+        Some(dsl_ast::ast::DebugDepthLit::Off) | None => crate::cg::lower::DebugDepth::Off,
+        Some(dsl_ast::ast::DebugDepthLit::Stage) => crate::cg::lower::DebugDepth::Stage,
+        Some(dsl_ast::ast::DebugDepthLit::StageMemory) => {
+            crate::cg::lower::DebugDepth::StageMemory
+        }
+        Some(dsl_ast::ast::DebugDepthLit::Kernel) => crate::cg::lower::DebugDepth::Kernel,
+        Some(dsl_ast::ast::DebugDepthLit::DslMapped) => {
+            crate::cg::lower::DebugDepth::DslMapped
+        }
+    };
+    let lower_debug_wgsl = crate::cg::lower::DebugWgslFlags {
+        event_kind_histogram: debug_wgsl_event_kind_histogram,
+        mask_hit_rate: debug_wgsl_mask_hit_rate,
+        score_kernel_visits: debug_wgsl_score_kernel_visits,
+    };
     let comp = dsl_ast::resolve::resolve(program)
         .unwrap_or_else(|e| panic!("resolve {fixture_name}.sim: {e}"));
 
@@ -261,6 +299,8 @@ fn emit_into(
     let lower_opts = crate::cg::lower::LowerOpts {
         aoe_dispatch,
         belief_state,
+        debug: lower_debug_depth,
+        debug_wgsl: lower_debug_wgsl,
         ..Default::default()
     };
     if !ability_files.is_empty() {
@@ -273,6 +313,15 @@ fn emit_into(
     if belief_state {
         println!(
             "cargo:warning=[{fixture_name} belief-state] auto-detected agents.set_beliefs_* call(s); enabling LowerOpts.belief_state",
+        );
+    }
+    if lower_debug_depth != crate::cg::lower::DebugDepth::Off || lower_debug_wgsl.any() {
+        println!(
+            "cargo:warning=[{fixture_name} debug-opts] depth={:?} wgsl=event_kind_histogram={} mask_hit_rate={} score_kernel_visits={}",
+            lower_debug_depth,
+            lower_debug_wgsl.event_kind_histogram,
+            lower_debug_wgsl.mask_hit_rate,
+            lower_debug_wgsl.score_kernel_visits,
         );
     }
     let cg = match crate::cg::lower::lower_compilation_to_cg_with_opts(&comp, lower_opts) {
@@ -289,9 +338,12 @@ fn emit_into(
         strategy,
         built_registry.as_ref().map(|r| &r.registry),
     );
-    let artifacts =
-        crate::cg::emit::emit_cg_program(&schedule_result.schedule, &cg)
-            .unwrap_or_else(|e| panic!("emit {fixture_name} CG program: {e:?}"));
+    let artifacts = crate::cg::emit::emit_cg_program_with_debug(
+        &schedule_result.schedule,
+        &cg,
+        lower_debug_depth,
+    )
+    .unwrap_or_else(|e| panic!("emit {fixture_name} CG program: {e:?}"));
 
     println!(
         "cargo:warning=[{fixture_name} emit-stats] {} kernels, schedule has {} stages",

@@ -41,6 +41,17 @@
 // `per_agent_u32(seed=0x5tre55_bb, agent_id, 0, purpose=0)` — the .sim
 // itself does not RNG.
 
+// Compiler-debug-mode opt-in. D3 per-kernel timestamps + memory
+// traffic accounting plus the event-kind histogram so the driver can
+// attribute the chronicle ring's high-water mark back to the dominant
+// kind (hypothesised: kind=26 EffectDamageApplied at saturation). AOE
+// dispatch itself is auto-detected from the AoePulse.ability spread()
+// shape — no opt-in needed here.
+debug {
+  depth: kernel,
+  wgsl_event_kind_histogram: true,
+}
+
 event Tick { }
 
 event EffectDamageApplied {

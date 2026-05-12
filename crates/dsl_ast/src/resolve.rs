@@ -1102,6 +1102,12 @@ fn collect(
                 // `dsl_compiler::build_helper` from the parsed Program.
                 // No Compilation IR slot today; resolver passes through.
             }
+            Decl::Debug(_) => {
+                // `debug { depth: ..., wgsl_*: ... }` blocks are consumed
+                // directly by `dsl_compiler::build_helper` from the
+                // parsed Program (mirrors `init`). No Compilation IR
+                // slot — the values feed straight into LowerOpts.
+            }
         }
     }
     Ok(())
@@ -1545,6 +1551,9 @@ fn resolve_bodies(
             }
             Decl::Init(_) => {
                 // Plan E-A6 — handled in build_helper, no IR pass-2 work.
+            }
+            Decl::Debug(_) => {
+                // `debug { ... }` — handled in build_helper, no IR pass-2 work.
             }
         }
     }

@@ -21,6 +21,16 @@
 // instrumentation surface lines up with the cast_density fixture's
 // dominant kind for cross-check.
 
+// Compiler-debug-mode opt-in (#242). Mirrors the LowerOpts the
+// retired `debug_probe_runtime/build.rs` set: every WGSL atomic-counter
+// axis on, no host-side timestamp depth (the fixture's pin doesn't
+// read DebugTimings — it asserts on the atomic-counter readbacks).
+debug {
+  wgsl_event_kind_histogram: true,
+  wgsl_mask_hit_rate: true,
+  wgsl_score_kernel_visits: true,
+}
+
 event Tick { }
 
 @replayable @gpu_amenable

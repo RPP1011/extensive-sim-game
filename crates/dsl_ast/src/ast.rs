@@ -59,6 +59,7 @@ pub enum Decl {
     Config(ConfigDecl),
     SpatialQuery(SpatialQueryDecl),
     Init(InitDecl),
+    Debug(DebugDecl),
 }
 
 /// Per-fixture initial-state declaration. Plan E-A6 escape hatch: lets
@@ -92,6 +93,42 @@ pub enum InitExpr {
     Const(i64),
     /// Staggered fill: slot N gets value N (per-agent slot index).
     Slot,
+}
+
+/// Per-fixture compiler-debug-mode opt-in. Lets a `.sim` author surface
+/// the `LowerOpts.debug` (per-stage / per-kernel timestamp depth) and
+/// `LowerOpts.debug_wgsl` (atomic-counter axes) knobs that previously
+/// required a hand-written `*_runtime/build.rs`. Mirrors the `init`
+/// block precedent: build_helper extracts the parsed values directly
+/// from the Program; no Compilation IR slot.
+///
+/// Today three fixtures opt in (debug_probe, stress_agent_count,
+/// stress_cast_density) — every other fixture omits the block and the
+/// build_helper falls back to `LowerOpts::default()`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DebugDecl {
+    pub annotations: Vec<Annotation>,
+    /// Per-stage/per-kernel timestamp depth. `None` = compiler default
+    /// (`DebugDepth::Off`).
+    pub depth: Option<DebugDepthLit>,
+    /// WGSL-side atomic-counter axes. Defaults all-false; setting any
+    /// `true` flag in the block flips it on.
+    pub wgsl_event_kind_histogram: bool,
+    pub wgsl_mask_hit_rate: bool,
+    pub wgsl_score_kernel_visits: bool,
+    pub span: Span,
+}
+
+/// Mirror of `dsl_compiler::cg::lower::DebugDepth`. Kept in `dsl_ast`
+/// so the parser can reject invalid level names without depending on
+/// the compiler crate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum DebugDepthLit {
+    Off,
+    Stage,
+    StageMemory,
+    Kernel,
+    DslMapped,
 }
 
 // ---------------------------------------------------------------------------

@@ -143,6 +143,7 @@ fn decl_annotations_mut(d: &mut Decl) -> Option<&mut Vec<Annotation>> {
         Decl::Metric(x) => &mut x.annotations,
         Decl::Config(x) => &mut x.annotations,
         Decl::Init(x) => &mut x.annotations,
+        Decl::Debug(x) => &mut x.annotations,
         Decl::SpatialQuery(x) => &mut x.annotations,
         // `query` does not currently accept annotations on the decl; trailing
         // `@`s after a `query` will fall through to the orphan-annotation
@@ -169,6 +170,7 @@ fn decl_span_mut(d: &mut Decl) -> &mut Span {
         Decl::Query(x) => &mut x.span,
         Decl::SpatialQuery(x) => &mut x.span,
         Decl::Init(x) => &mut x.span,
+        Decl::Debug(x) => &mut x.span,
     }
 }
 
@@ -198,13 +200,14 @@ fn decl(c: &mut Cursor) -> PResult<Decl> {
         Some("metric") => metric_block(c, annotations, start).map(Decl::Metric),
         Some("config") => config_decl(c, annotations, start).map(Decl::Config),
         Some("init") => init_decl(c, annotations, start).map(Decl::Init),
+        Some("debug") => debug_decl(c, annotations, start).map(Decl::Debug),
         Some("spatial_query") => {
             spatial_query_decl(c, annotations, start).map(Decl::SpatialQuery)
         }
         _ => Err(ParseErr::at(
             here(c),
             format!(
-                "expected top-level declaration (entity, event, event_tag, enum, view, query, physics, mask, verb, scoring, invariant, probe, metric, config, init, spatial_query); got `{}`",
+                "expected top-level declaration (entity, event, event_tag, enum, view, query, physics, mask, verb, scoring, invariant, probe, metric, config, init, debug, spatial_query); got `{}`",
                 peek_word_for_error(c)
             ),
         )),
@@ -272,6 +275,114 @@ fn init_decl(
         }
     }
     Ok(InitDecl { annotations, stmts, span: Span::new(start, c.pos) })
+}
+
+// ---------------------------------------------------------------------------
+// 2.17 debug (compiler-debug-mode opt-in: surfaces LowerOpts.debug +
+// LowerOpts.debug_wgsl from the .sim source instead of a hand-written
+// build.rs)
+//
+// Grammar:
+//   debug {
+//     depth: <off|stage|stage_memory|kernel|dsl_mapped>,
+//     wgsl_event_kind_histogram: true,
+//     wgsl_mask_hit_rate: true,
+//     wgsl_score_kernel_visits: true,
+//   }
+//
+// All fields are optional; an empty `debug { }` is equivalent to omitting
+// the block entirely. Trailing commas allowed. Unknown field names raise
+// a parse error (catches typos early).
+// ---------------------------------------------------------------------------
+
+fn debug_decl(
+    c: &mut Cursor,
+    annotations: Vec<Annotation>,
+    start: usize,
+) -> PResult<DebugDecl> {
+    expect_keyword(c, "debug")
+        .map_err(|e| e.with_context("parsing `debug` declaration"))?;
+    c.skip_ws();
+    expect_char(c, '{')
+        .map_err(|e| e.with_context("parsing debug body (expected `{`)"))?;
+    let mut depth: Option<DebugDepthLit> = None;
+    let mut wgsl_event_kind_histogram = false;
+    let mut wgsl_mask_hit_rate = false;
+    let mut wgsl_score_kernel_visits = false;
+    loop {
+        c.skip_ws();
+        if c.starts_with_char('}') {
+            c.bump(1);
+            break;
+        }
+        let field = ident(c).map_err(|e| e.with_context("parsing debug field name"))?;
+        c.skip_ws();
+        expect_char(c, ':')
+            .map_err(|e| e.with_context("parsing debug field (expected `:` after name)"))?;
+        c.skip_ws();
+        match field.as_str() {
+            "depth" => {
+                let level = ident(c).map_err(|e| e.with_context("parsing debug depth level"))?;
+                depth = Some(match level.as_str() {
+                    "off" => DebugDepthLit::Off,
+                    "stage" => DebugDepthLit::Stage,
+                    "stage_memory" => DebugDepthLit::StageMemory,
+                    "kernel" => DebugDepthLit::Kernel,
+                    "dsl_mapped" => DebugDepthLit::DslMapped,
+                    other => {
+                        return Err(ParseErr::at(
+                            here(c),
+                            format!(
+                                "unknown debug depth `{other}`; expected one of off, stage, stage_memory, kernel, dsl_mapped"
+                            ),
+                        ));
+                    }
+                });
+            }
+            "wgsl_event_kind_histogram"
+            | "wgsl_mask_hit_rate"
+            | "wgsl_score_kernel_visits" => {
+                let val = ident(c)
+                    .map_err(|e| e.with_context("parsing debug bool value (true/false)"))?;
+                let b = match val.as_str() {
+                    "true" => true,
+                    "false" => false,
+                    other => {
+                        return Err(ParseErr::at(
+                            here(c),
+                            format!("expected `true` or `false`; got `{other}`"),
+                        ));
+                    }
+                };
+                match field.as_str() {
+                    "wgsl_event_kind_histogram" => wgsl_event_kind_histogram = b,
+                    "wgsl_mask_hit_rate" => wgsl_mask_hit_rate = b,
+                    "wgsl_score_kernel_visits" => wgsl_score_kernel_visits = b,
+                    _ => unreachable!(),
+                }
+            }
+            other => {
+                return Err(ParseErr::at(
+                    here(c),
+                    format!(
+                        "unknown debug field `{other}`; expected one of depth, wgsl_event_kind_histogram, wgsl_mask_hit_rate, wgsl_score_kernel_visits"
+                    ),
+                ));
+            }
+        }
+        c.skip_ws();
+        if c.starts_with_char(',') {
+            c.bump(1);
+        }
+    }
+    Ok(DebugDecl {
+        annotations,
+        depth,
+        wgsl_event_kind_histogram,
+        wgsl_mask_hit_rate,
+        wgsl_score_kernel_visits,
+        span: Span::new(start, c.pos),
+    })
 }
 
 // ---------------------------------------------------------------------------

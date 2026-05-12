@@ -100,6 +100,9 @@ fn main() {
                 | "voxel_probe"
                 | "dodger_probe"
                 | "tom_probe"
+                | "debug_probe"
+                | "stress_agent_count"
+                | "stress_cast_density"
         ) {
             continue;
         }

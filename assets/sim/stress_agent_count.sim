@@ -24,6 +24,17 @@
 // the per-tick chain at a given agent_cap from any cascade-driven
 // shrinking that would muddy the wall-clock readings.
 
+// Compiler-debug-mode opt-in — D3 per-kernel timestamps + memory
+// traffic accounting (no source-map overhead) plus the event-kind
+// histogram and per-agent scoring visit counters. At 200k agents the
+// stress harness wants to know if scoring is load-balanced (visits
+// uniform) and which event kind dominates the chronicle ring.
+debug {
+  depth: kernel,
+  wgsl_event_kind_histogram: true,
+  wgsl_score_kernel_visits: true,
+}
+
 event Tick { }
 
 @replayable @gpu_amenable
