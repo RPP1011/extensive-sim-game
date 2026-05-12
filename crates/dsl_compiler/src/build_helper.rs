@@ -752,14 +752,44 @@ fn elem_bytes_for_wgsl_ty(wgsl_ty: &str) -> Option<u64> {
     }
 }
 
+/// True if `binding_name` is a per-(observer, subject) BeliefState SoA
+/// column. The 6 columns the spec defines (`pair_map`-shaped, sized
+/// `agent_count * agent_count` cells each):
+///
+/// * `beliefs_flags`       — bit-OR accumulator for `BeliefAcquired`
+/// * `beliefs_pos`         — last-known pos (vec4-padded vec3)
+/// * `beliefs_type`        — last-known creature_type (u8-q8)
+/// * `beliefs_tick`        — last-seen tick (u32)
+/// * `beliefs_confidence`  — q8 confidence (u8)
+/// * `beliefs_suspicion`   — q8 suspicion (u8)
+///
+/// Anything else with a `beliefs_` prefix is fixture-specific and falls
+/// through to per-agent sizing (no fixture today uses such a name; the
+/// allow-list keeps the gate explicit).
+///
+/// Mirrors the column set the compiler surfaces from `LowerOpts.
+/// belief_state` (see `cg::lower::driver::LowerOpts.belief_state` doc).
+fn is_belief_state_pair_column(binding_name: &str) -> bool {
+    matches!(
+        binding_name,
+        "beliefs_flags"
+            | "beliefs_pos"
+            | "beliefs_type"
+            | "beliefs_tick"
+            | "beliefs_confidence"
+            | "beliefs_suspicion"
+    )
+}
+
 /// Number of slots in the buffer for a given binding. Heuristic:
 /// `agent_count` for the common per-agent case; `agent_count *
-/// agent_count` for per-(observer, source) bindings detected by the
-/// `_flags` suffix (today: only `beliefs_flags`).
+/// agent_count` for per-(observer, subject) BeliefState SoA columns
+/// (the 6 columns enumerated in [`is_belief_state_pair_column`]).
 fn slot_count_expr(binding_name: &str) -> &'static str {
-    if binding_name.ends_with("_flags") {
-        // Per-(observer, source) cell. TODO: replace heuristic with
-        // proper binding-shape annotation in the AST.
+    if is_belief_state_pair_column(binding_name) {
+        // Per-(observer, subject) cell — `pair_map` storage shape per
+        // the BeliefState column contract. TODO: replace name-list
+        // heuristic with proper binding-shape annotation in the AST.
         "(agent_count as u64) * (agent_count as u64)"
     } else {
         "agent_count as u64"
