@@ -631,6 +631,11 @@ pub enum EntityFieldValueIR {
         ty: IrType,
         fields: Vec<EntityFieldIR>,
     },
+    /// `predator_prey: { prey_of: [], preys_on: [] }` — anonymous
+    /// struct body, shape implicit from the field's declared type.
+    AnonStruct {
+        fields: Vec<EntityFieldIR>,
+    },
     /// A list of expressions.
     List(Vec<IrExprNode>),
     /// `eligibility_predicate: <expr>`.

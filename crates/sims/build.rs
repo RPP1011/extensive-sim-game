@@ -95,6 +95,7 @@ fn main() {
                 | "village_economy"
                 | "swarm_event_storm"
                 | "ecosystem_cascade"
+                | "apply_ability_smoke"
         ) {
             continue;
         }

@@ -87,6 +87,18 @@ fn append_field_rows(
                 append_field_rows(entity, root, &sub_prefix, &sub.value, rows);
             }
         }
+        EntityFieldValueIR::AnonStruct { fields } => {
+            rows.push(SchemaHashRow {
+                entity: entity.into(),
+                root: root.into(),
+                field: prefix.into(),
+                tag: "anon_struct".into(),
+            });
+            for sub in fields {
+                let sub_prefix = format!("{}.{}", prefix, sub.name);
+                append_field_rows(entity, root, &sub_prefix, &sub.value, rows);
+            }
+        }
         EntityFieldValueIR::List(items) => {
             rows.push(SchemaHashRow {
                 entity: entity.into(),

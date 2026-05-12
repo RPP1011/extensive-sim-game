@@ -405,6 +405,25 @@ fn parse_annotation_value(c: &mut Cursor) -> PResult<AnnotationValue> {
     }
     if let Some(name) = peek_ident(c) {
         c.bump(name.len());
+        // Extend bare ident to a dotted path (`config.nav.radius`). The
+        // path text is stored as a single `Ident(String)` value to keep
+        // the AnnotationValue surface narrow — consumers that care
+        // about the head/tail split it themselves.
+        let mut full = name.clone();
+        while c.starts_with_char('.') {
+            // Look-ahead: only consume `.<ident>` (not `.5` floats etc.).
+            let after_dot = c.pos + 1;
+            let probe = Cursor { src: c.src, pos: after_dot };
+            if probe.peek_char().map_or(false, is_ident_start) {
+                c.bump(1);
+                let segment = ident(c)?;
+                full.push('.');
+                full.push_str(&segment);
+            } else {
+                break;
+            }
+        }
+        let name = full;
         // `per_entity_topk(K = 8)` — an ident followed by `(` opens a
         // Call form. The inner args reuse `parse_annotation_arg` so
         // `key = value` and bare positional args parse identically to
@@ -558,6 +577,17 @@ fn parse_entity_field_value(c: &mut Cursor) -> PResult<EntityFieldValue> {
             return Err(ParseErr::at(here(c), "expected `,` or `]` in list"));
         }
         return Ok(EntityFieldValue::List(items));
+    }
+    // Anonymous struct literal: bare `{ ... }` with no leading typename.
+    // The shape is implicit from the field's declared type — used for
+    // `predator_prey: { prey_of: [], preys_on: [] }` in entity bodies.
+    if c.starts_with_char('{') {
+        c.bump(1);
+        let fields = parse_entity_fields(c)?;
+        c.skip_ws();
+        expect_char(c, '}')
+            .map_err(|e| e.with_context("parsing anonymous struct literal `}`"))?;
+        return Ok(EntityFieldValue::AnonStruct(fields));
     }
     // Struct literal? (typename followed by `{`)
     let save = c.pos;
@@ -792,7 +822,12 @@ fn parse_view_body(c: &mut Cursor) -> PResult<ViewBody> {
                 if c.starts_with_char('}') {
                     break;
                 }
-                if c.starts_with("clamp") {
+                if c.starts_with("clamp")
+                    && c.src[c.pos + "clamp".len()..]
+                        .chars()
+                        .next()
+                        .map_or(true, |ch| !is_ident_cont(ch))
+                {
                     let save = c.pos;
                     c.bump("clamp".len());
                     c.skip_ws();
@@ -835,11 +870,31 @@ fn parse_fold_handler(c: &mut Cursor) -> PResult<FoldHandler> {
     c.skip_ws();
     let pattern = parse_event_pattern(c)?;
     c.skip_ws();
+    // Optional `where <predicate>` between pattern and body — same
+    // surface physics handlers already accept. Resolver gates the
+    // fold's write on this when present.
+    let where_clause = if c.starts_with("where") {
+        // Boundary check: `where` only counts as a keyword if not part
+        // of a longer identifier (e.g. `where_house`).
+        let after = c.pos + "where".len();
+        let next = c.src[after..].chars().next();
+        if next.map_or(true, |ch| !is_ident_cont(ch)) {
+            c.bump("where".len());
+            c.skip_ws();
+            let expr = parse_expr(c)?;
+            c.skip_ws();
+            Some(expr)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     expect_char(c, '{').map_err(|e| e.with_context("parsing fold handler body `{`"))?;
     let body = parse_stmt_block_until_close(c)?;
     c.skip_ws();
     expect_char(c, '}').map_err(|e| e.with_context("parsing fold handler body `}`"))?;
-    Ok(FoldHandler { pattern, body, span: Span::new(start, c.pos) })
+    Ok(FoldHandler { pattern, where_clause, body, span: Span::new(start, c.pos) })
 }
 
 fn query_decl(c: &mut Cursor, annotations: Vec<Annotation>, start: usize) -> PResult<QueryDecl> {

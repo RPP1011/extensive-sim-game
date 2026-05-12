@@ -211,6 +211,12 @@ pub enum EntityFieldValue {
     Type(TypeRef),
     /// `capabilities: Capabilities { ... }` — a type name followed by a struct body.
     StructLiteral { ty: TypeRef, fields: Vec<EntityField> },
+    /// `predator_prey: { prey_of: [], preys_on: [] }` — anonymous
+    /// struct body with no leading typename. Shape is implicit from the
+    /// field's declared type. The resolver passes this through; the
+    /// GeneratedRuntime path doesn't interpret entity field values, so
+    /// this just needs to parse cleanly.
+    AnonStruct(Vec<EntityField>),
     /// A list literal of values (expressions).
     List(Vec<Expr>),
     /// An expression (used for `eligibility_predicate: <predicate>`).
@@ -337,6 +343,11 @@ pub struct SpatialQueryDecl {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FoldHandler {
     pub pattern: EventPattern,
+    /// Optional `where <predicate>` clause between the pattern and the
+    /// body, e.g. `on Killed { by: predator } where predator == by { ... }`.
+    /// Same surface as physics-handler `where`. Resolver gates the
+    /// fold-write on this when present.
+    pub where_clause: Option<Expr>,
     pub body: Vec<Stmt>,
     pub span: Span,
 }

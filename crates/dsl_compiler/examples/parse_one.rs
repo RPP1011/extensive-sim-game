@@ -4,6 +4,6 @@ fn main() {
     let src = std::fs::read_to_string(&path).expect("read .sim");
     match dsl_compiler::parse(&src) {
         Ok(_) => println!("{name}: OK"),
-        Err(e) => println!("{name}: FAIL ({:?})", e.message),
+        Err(e) => println!("{name}: FAIL\n{}", e.rendered),
     }
 }

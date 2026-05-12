@@ -1632,6 +1632,13 @@ fn resolve_entity_field(
                 .collect::<Result<Vec<_>, _>>()?;
             EntityFieldValueIR::StructLiteral { ty, fields }
         }
+        ast::EntityFieldValue::AnonStruct(fields) => {
+            let fields = fields
+                .iter()
+                .map(|g| resolve_entity_field(g, symbols))
+                .collect::<Result<Vec<_>, _>>()?;
+            EntityFieldValueIR::AnonStruct { fields }
+        }
         ast::EntityFieldValue::List(exprs) => {
             let mut scope = LocalScope::new();
             let exprs = exprs
