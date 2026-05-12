@@ -1,0 +1,279 @@
+// pirate_fleet — adversarial fixture stacking ownership-transfer +
+// cone AOE + treasure conservation + per-tick @runtime wind tunable.
+//
+// **Topology** (host-side seeded; see crates/sims/tests/pirate_fleet_pin.rs):
+//   * 16 Pirate ships in a parallel line at y = -8, x = -15..15.
+//   * 16 Navy ships in a parallel line at y = +8, x = -15..15.
+//   * Each ship: hp = 100, mana repurposed as treasure (gold) starting
+//     at 50 for Pirates, 0 for Navy. Total fleet gold = 800. The
+//     pin asserts conservation (no minting / no destruction).
+//
+// **Adversarial axes stacked (the unique surface here is mutating
+// creature_type mid-sim)**:
+//   * Ownership transfer — `agents.set_creature_type(target, new_type)`
+//     in a chronicle consumer rule. As of this commit `set_creature_type`
+//     is NOT in the agents-setter allowlist (`crates/dsl_compiler/src/
+//     cg/lower/physics.rs::agents_setter_field`). The expectation is a
+//     lower diagnostic surfaced as a `cargo:warning` and the rule body
+//     silently downgraded — see `docs/architecture/gaps_pirate_fleet.md`
+//     for the full gap class write-up.
+//   * Cone AOE — `damage X in cone(range, half_angle_deg)`. Existing
+//     AOE Path B (Cone arm in `cg/emit/wgsl_body.rs`) but under-tested
+//     vs Circle/Spread. Each ship has a forward-firing broadside.
+//   * Multi-event scoring — Cannons fires PER TICK against every
+//     enemy in cone (per-pair scoring inside the spatial walk).
+//   * Treasure transfer — `transfer_gold N` effect emits
+//     `EffectGoldTransfer` (kind=31) chronicle records consumed by
+//     `ApplyTreasureTransfer` to debit boarder source / credit ship
+//     target. Conservation invariant pinned by the test.
+//   * @runtime config wind — host writes `wind_strength` BEFORE EVERY
+//     STEP (vs once at try_new in other fixtures). Stresses per-tick
+//     setter call cost + the per-kernel cfg buffer write coalescing.
+//   * Multi-faction with discriminant flips — pin asserts faction
+//     populations stay valid (no slot orphaned by a bogus discriminant).
+//   * Long horizon (500 ticks) — emergent fleet dynamics.
+//
+// **Per-tick** (PerAgent dispatch):
+//   1. WindDrift — every alive ship advances along (vel + wind_x_hat *
+//      wind_strength). Wind_strength is a @runtime config.
+//   2. FireCannons — for each enemy in spatial.broadside_cone(self),
+//      dispatch Cannons (AOE cone). Cooldown gated.
+//   3. AttemptBoard — for each enemy ship in melee range, dispatch
+//      Board (single-target). Board emits `transfer_gold` AND damage.
+//   4. ApplyDamage — chronicle consumer drains EffectDamageApplied.
+//   5. ApplyTreasureTransfer — chronicle consumer drains
+//      EffectGoldTransfer (kind=31), debits source's mana, credits
+//      target's mana — conservation by construction.
+//   6. AttemptOwnershipFlip — separate verb-emitted Boarded event.
+//      Consumer attempts `agents.set_creature_type(t, new)` —
+//      EXPECTED TO LOWER-DIAG until the allowlist gap closes.
+//
+// CREATURE TYPE TABLE (decl-order alphabetical):
+//   Navy   = 0
+//   Pirate = 1
+//
+// Note on Boarded ownership-flip semantics: the verb emits a Boarded
+// event with `new_creature_type` packed in. The consumer rule (post
+// phase, on Boarded) calls `agents.set_creature_type(t, new)`. Once
+// the allowlist gap closes the flip propagates and a Pirate boarder
+// converts a Navy ship into a Pirate-owned slot at the next tick.
+// Until the gap closes, the rule body downgrades to a no-op; the pin
+// reports zero ownership flips and documents the surfaced lower diag.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Engine-aliased event (kind=26). Written by the apply_ability
+// dispatcher when EffectOp::Damage fires from Cannons / Board.
+@replayable @gpu_amenable
+event EffectDamageApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Engine-aliased event (kind=31). Written by the apply_ability
+// dispatcher when EffectOp::TransferGold fires from Board's
+// `transfer_gold` effect verb. Payload (per
+// `dsl_compiler/src/cg/emit/wgsl_body.rs::TransferGold` arm):
+//   actor  = source slot (boarder pays)
+//   target = target slot (boarded ship receives)
+//   amount = gold transferred (i32 as f32-cast on chronicle row)
+@replayable @gpu_amenable
+event EffectGoldTransfer {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Custom DSL event for the ownership-flip path. Emitted by
+// AttemptBoard verb (post-board, alongside the apply_ability dispatch
+// that handles damage + gold). Consumer attempts the creature_type
+// flip — surfaces the agents-setter allowlist gap.
+@replayable @gpu_amenable
+event Boarded {
+  boarder: AgentId,
+  ship: AgentId,
+  new_type: u32,
+}
+
+// Discriminants pinned by .sim declaration order (alphabetical):
+//   Navy = 0, Pirate = 1.
+entity Navy : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Pirate : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config fleet {
+  // Creature type discriminants (mirror decl order).
+  type_navy:   u32 = 0,
+  type_pirate: u32 = 1,
+
+  // Movement tuning. Wind shears the ship's effective velocity along
+  // +x each tick. Magnitude is @runtime so the host can adjust mid-sim
+  // (e.g. random gusts every step in the pin).
+  wind_strength: f32 = 0.05 @runtime,
+  drift_step:    f32 = 0.0,
+
+  // Cannon range / cone tuning.
+  cannon_range:    f32 = 8.0,
+  cannon_cooldown: u32 = 3,
+
+  // Boarding.
+  board_range:     f32 = 1.5,
+  board_cooldown:  u32 = 6,
+  board_gold:      f32 = 5.0,
+}
+
+init {
+  alive: 1,
+  hp:    100,
+}
+
+// Spatial neighbour query: 27-cell ring at radius = cannon_range.
+// Body-side direction filter implements the cone gate (the actual
+// AOE cone walks per cast inside the apply_ability dispatcher).
+@spatial(radius = 8.0, kind = [Agent])
+spatial_query nearby_targets(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+@spatial(radius = 1.5, kind = [Agent])
+spatial_query board_range(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// ---------------------------------------------------------------------
+// WindDrift — every alive ship advances along its current velocity
+// PLUS a per-tick wind shear. Wind shear pushes along +x at magnitude
+// `wind_strength` (the @runtime config the host re-writes EACH TICK
+// in the pin).
+@phase(per_agent)
+physics WindDrift {
+  on Tick {} where (self.alive) {
+    let wind = vec3(config.fleet.wind_strength, 0.0, 0.0);
+    let new_pos = self.pos + self.vel + wind;
+    agents.set_pos(self, new_pos);
+  }
+}
+
+// ---------------------------------------------------------------------
+// FireCannons — body-form spatial walk + apply_ability dispatch. Each
+// alive ship scans neighbours in cannon range; for any enemy, dispatch
+// Cannons (AbilityId 2 — alphabetical: Board < Cannons). The dispatcher
+// walks the cone area shape from the cast center per its program.
+@phase(per_agent)
+physics FireCannons {
+  on Tick {} where (self.alive
+                    && (world.tick % config.fleet.cannon_cooldown == 0)) {
+    for other in spatial.nearby_targets(self) {
+      if (other.alive
+          && other.creature_type != self.creature_type) {
+        apply_ability 2 by self target other
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------
+// AttemptBoard — body-form spatial walk + apply_ability dispatch
+// for the boarding action. Dispatches Board (AbilityId 1). Board's
+// program contains:
+//   * damage 1 [PHYSICAL: 100]    — kind=26 EffectDamageApplied
+//   * transfer_gold 5             — kind=31 EffectGoldTransfer
+// AND we ALSO `emit Boarded` from a paired physics rule below so the
+// downstream ownership-flip consumer fires.
+@phase(per_agent)
+physics AttemptBoard {
+  on Tick {} where (self.alive
+                    && (world.tick % config.fleet.board_cooldown == 0)) {
+    for other in spatial.board_range(self) {
+      if (other.alive
+          && other.creature_type != self.creature_type) {
+        apply_ability 1 by self target other
+        // Custom emit so the ownership-flip consumer has a rule to fire
+        // on. The new_type is packed as the BOARDER'S creature_type —
+        // boarder converts the ship to its own faction.
+        emit Boarded { boarder: self, ship: other, new_type: self.creature_type }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------
+// ApplyDamageFromChronicle — re-emits Damaged from EffectDamageApplied.
+@phase(post)
+physics ApplyDamageFromChronicle {
+  on EffectDamageApplied { actor: a, target: t, amount: amt } {
+    emit Damaged { source: a, target: t, amount: amt }
+  }
+}
+
+// ApplyDamage — chronicle physics. On each Damaged event, decrement
+// target HP, set alive=false on HP<=0.
+@phase(post)
+physics ApplyDamage {
+  on Damaged { source: _, target: t, amount: a } {
+    let old_hp = agents.hp(t);
+    let new_hp = old_hp - a;
+    agents.set_hp(t, new_hp);
+    if (old_hp > 0.0 && new_hp <= 0.0) {
+      agents.set_alive(t, false);
+    }
+  }
+}
+
+// ApplyTreasureTransfer — chronicle physics. Debits source's mana
+// (treasure) and credits target's mana on each EffectGoldTransfer
+// record. Conservation invariant: total `mana` summed across slots
+// is fixed by construction (every record adds X to one slot and
+// subtracts X from another).
+@phase(post)
+physics ApplyTreasureTransfer {
+  on EffectGoldTransfer { actor: src, target: dst, amount: amt } {
+    let src_prev = agents.mana(src);
+    let dst_prev = agents.mana(dst);
+    agents.set_mana(src, src_prev - amt);
+    agents.set_mana(dst, dst_prev + amt);
+  }
+}
+
+// AttemptOwnershipFlip — adversarial. Calls `agents.set_creature_type`
+// which (as of this commit) is NOT in the agents-setter allowlist.
+// The lower pass surfaces an `UnsupportedPhysicsStmt` diagnostic; the
+// build_helper tolerates lower errors by falling through with the
+// partial program, so this entire rule body downgrades to a no-op
+// in the emitted kernel. The pin reports zero `flip_attempts_observed`
+// and the gap doc tracks the failure mode.
+@phase(post)
+physics AttemptOwnershipFlip {
+  on Boarded { boarder: _, ship: t, new_type: nt } {
+    agents.set_creature_type(t, nt);
+  }
+}
+
+// ---------------------------------------------------------------------
+// Per-source kill / damage views — observability.
+@materialized(on_event = [Damaged])
+view damage_dealt(source: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: s, target: _, amount: a } { self += a }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-source boarding count — pair-keyed (boarder, ship).
+@materialized(on_event = [Boarded])
+view boarding_attempts(boarder: Agent, ship: Agent) -> f32 {
+  initial: 0.0,
+  on Boarded { boarder: b, ship: s } where b == boarder && s == ship { self += 1.0 }
+  clamp: [0.0, 100000.0],
+}

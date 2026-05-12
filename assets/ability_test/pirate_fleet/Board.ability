@@ -1,0 +1,24 @@
+// Boarding action — single-target damage + treasure transfer.
+//
+// AbilityId 1 (alphabetical: Board < Cannons). Dispatched by
+// AttemptBoard physics rule when ships are within `board_range`.
+//
+// Two effect verbs in one program:
+//   * damage 1                — kind=26 EffectDamageApplied
+//   * transfer_gold 5         — kind=31 EffectGoldTransfer
+//                               (boarder pays 5 gold to the boarded
+//                                ship — see ApplyTreasureTransfer)
+//
+// The .sim's AttemptBoard rule ALSO emits a custom Boarded event in the
+// same body so the AttemptOwnershipFlip consumer (which calls the
+// not-yet-allowlisted `agents.set_creature_type`) gets a chance to fire.
+
+ability Board {
+    target: enemy
+    range: 1.5
+    cooldown: 6
+    hint: damage
+
+    damage 1.0 [PHYSICAL: 100]
+    transfer_gold 5
+}

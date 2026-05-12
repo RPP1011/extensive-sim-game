@@ -110,6 +110,7 @@ fn main() {
                 | "hill_raid"
                 | "trade_caravans"
                 | "palace_coup"
+                | "pirate_fleet"
         ) {
             continue;
         }

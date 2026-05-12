@@ -1,0 +1,20 @@
+// Broadside cannons — AOE cone damage. AbilityId 2 (alphabetical:
+// Board < Cannons). Dispatched by FireCannons physics rule.
+//
+// `damage X in cone(range, half_angle_deg)` lowers via the cone arm
+// in `cg/emit/wgsl_body.rs::emit_aoe_dispatch_branch`. The dispatcher
+// walks the 27-cell neighborhood around the cast center, gates each
+// candidate by (range² ∧ angular gate), and writes one
+// EffectDamageApplied chronicle record per kept candidate.
+//
+// Cone exercises the second-most-tested AOE shape (after Circle/Spread).
+// Range 8.0 + 90° half-angle = wide forward broadside.
+
+ability Cannons {
+    target: enemy
+    range: 8.0
+    cooldown: 3
+    hint: damage
+
+    damage 6.0 in cone(8.0, 90.0) [PHYSICAL: 100]
+}
