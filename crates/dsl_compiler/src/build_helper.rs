@@ -424,19 +424,26 @@ fn emit_into(
     let ability_file_names: Vec<String> =
         ability_files.iter().map(|(n, _)| n.clone()).collect();
     // Pair-keyed materialized-view detection. Any `view name(p1: Agent,
-    // p2: Agent) -> ... { ... }` declared `@materialized` (any storage
-    // hint, but in practice `pair_map`) writes its fold output into
-    // `view_storage_primary` at index `[p1 * agent_count + p2]`. The
-    // backing buffer therefore needs `agent_count * agent_count` slots,
-    // not the per-agent default. The auto-emitted `GeneratedRuntime`
-    // sizes `view_storage_primary_buf` from `slot_count_expr`; threading
-    // this bool downstream lets the sizing path branch without a new IR
-    // field.
+    // p2: <Entity>) -> ... { ... }` declared `@materialized` (any
+    // storage hint, but in practice `pair_map`) writes its fold output
+    // into `view_storage_primary` at index `[p1 * cfg.second_key_pop
+    // + p2]`. The backing buffer therefore needs `agent_count *
+    // <second_key_population>` slots, not the per-agent default.
     //
-    // Today's gate: 2 params with `IrType::AgentId` + materialized kind.
+    // T6 fix (2026-05-11): generalised from Agent×Agent only (a single
+    // bool) to a `PairKeyedSecondKey` carrying the second-key kind +
+    // static count. Agent second key keeps `agent_count` (per-tick
+    // variable, tom_probe shape); Item / Group / Quest second keys
+    // resolve to the static count of declared entities of that root
+    // (trade_caravans's `view inventory(merchant: Agent, good: Item)`
+    // was the in-tree trigger — 3 declared Items resolve to a slot
+    // count of `agent_count * 3` instead of the previous `agent_count`
+    // under-allocation). See [`detect_pair_keyed_second_key`].
+    //
     // Single-agent or scalar-keyed views (e.g. dodger_probe's `view
-    // threats(observer: Agent) -> f32`) keep the per-agent sizing.
-    let pair_keyed_view_present = detect_pair_keyed_materialized_view(&comp);
+    // threats(observer: Agent) -> f32`) keep the per-agent sizing
+    // (detector returns `None`).
+    let pair_keyed_second_key = detect_pair_keyed_second_key(&comp);
     // Voxel-binding detection. If any kernel binds `voxel_grid` then the
     // synthesized runtime needs a CPU-side `engine_voxel::VoxelTerrain`
     // + GPU-side `engine_voxel::VoxelMirror` so `KernelBindingsContext::
@@ -498,7 +505,7 @@ fn emit_into(
         &runtime_config_defaults,
         &ability_file_names,
         &comp.events,
-        pair_keyed_view_present,
+        pair_keyed_second_key,
         binds_voxel_grid,
         &indirect_consumer_kernel_names,
     );
@@ -672,14 +679,174 @@ fn call_arg_contains(arg: &dsl_ast::ir::IrCallArg) -> bool {
 ///
 /// Public for integration-test access (the `tests/` crate exercises
 /// the full call chain `parse → resolve → detect → synthesize`).
+///
+/// **Generalised in T6 fix (2026-05-11):** delegates to
+/// [`detect_pair_keyed_second_key`] which now accepts a non-Agent
+/// second key (`Item` / `Group` / `Quest`). The bool-returning helper
+/// stays for tom_probe-shape pins that only care "is there ANY
+/// pair-keyed view"; sizing-aware callers should use the richer form.
 pub fn detect_pair_keyed_materialized_view(comp: &dsl_ast::ir::Compilation) -> bool {
-    comp.views.iter().any(|v| {
-        matches!(v.kind, dsl_ast::ir::ViewKind::Materialized(_))
-            && v.params.len() == 2
-            && v.params
-                .iter()
-                .all(|p| matches!(p.ty, dsl_ast::ir::IrType::AgentId))
-    })
+    detect_pair_keyed_second_key(comp).is_some()
+}
+
+/// Second-key shape of a fixture's pair-keyed `@materialized` view.
+/// Returned by [`detect_pair_keyed_second_key`].
+///
+/// The first key is always `Agent` (the only shape the resolve+lower
+/// pipeline currently supports for the host-emit side). The second
+/// key can be any entity-rooted type — for Agent the per-tick
+/// population is the runtime `agent_count`; for Item / Group / Quest
+/// the population is the static count of declared entities of that
+/// root in the .sim source.
+///
+/// `Agent` is special-cased so the slot-count expression stays
+/// `agent_count * agent_count` (matches the pre-T6 sizing for
+/// tom_probe). Other variants carry their static count so the slot-
+/// count expression resolves to `agent_count * <count>` at compile
+/// time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PairKeyedSecondKey {
+    /// Agent×Agent — second-key population varies per tick. Slot-
+    /// count expression: `agent_count * agent_count`.
+    Agent,
+    /// Agent×Item — second-key population is the static count of
+    /// declared `entity X : Item` decls in the .sim. trade_caravans
+    /// declares 3 (Grain / Spice / Silk).
+    Item(u32),
+    /// Agent×Group — second-key population is the static count of
+    /// declared `entity X : Group` decls in the .sim.
+    Group(u32),
+    /// Agent×Quest — second-key population is the static count of
+    /// declared `entity X : Quest` decls in the .sim.
+    Quest(u32),
+}
+
+impl PairKeyedSecondKey {
+    /// Static second-key population if known at compile time. `None`
+    /// for `Agent` (the per-tick `agent_count` runtime variable).
+    pub fn static_count(self) -> Option<u32> {
+        match self {
+            PairKeyedSecondKey::Agent => None,
+            PairKeyedSecondKey::Item(n)
+            | PairKeyedSecondKey::Group(n)
+            | PairKeyedSecondKey::Quest(n) => Some(n),
+        }
+    }
+
+    /// Rust expression (in the synthesized `try_new` / `step` body
+    /// scope where `agent_count: u32` is in scope) that evaluates to
+    /// the second-key population. Used by [`slot_count_expr`].
+    pub fn population_u64_expr(self) -> String {
+        match self {
+            PairKeyedSecondKey::Agent => "(agent_count as u64)".to_string(),
+            PairKeyedSecondKey::Item(n)
+            | PairKeyedSecondKey::Group(n)
+            | PairKeyedSecondKey::Quest(n) => format!("{n}u64"),
+        }
+    }
+}
+
+/// Returns the second-key shape if `comp` declares ≥1 `@materialized`
+/// view with exactly two parameters where the first is `Agent` and
+/// the second is some entity-rooted type. Returns `None` otherwise.
+///
+/// **First-match wins** when a fixture mixes second-key shapes (e.g.
+/// one Agent×Agent view + one Agent×Item view). Today the fold body
+/// indexes `view_storage_primary[k1 * cfg.second_key_pop + k2]`
+/// where `cfg.second_key_pop` is uploaded per-kernel by hand (or
+/// inherited from the auto-emitter's hardcoded `1u32`). The
+/// auto-emitter's slot-count expression sizes the SHARED storage
+/// buffer big enough for the LARGEST second-key population — picking
+/// `Agent` (whose count is `agent_count`, typically the largest)
+/// when both shapes coexist keeps every view safely backed.
+///
+/// The mixed-key case isn't exercised by any in-tree fixture today;
+/// every fixture has at most one pair-keyed view. The first-match
+/// fallback keeps the contract single-valued for the synthesizer.
+pub fn detect_pair_keyed_second_key(
+    comp: &dsl_ast::ir::Compilation,
+) -> Option<PairKeyedSecondKey> {
+    use dsl_ast::ast::EntityRoot;
+    use dsl_ast::ir::{IrType, ViewKind};
+    // Static counts — walked once and reused across all candidate
+    // views. Cheap (entities is a few-element list in every fixture).
+    let item_count = comp
+        .entities
+        .iter()
+        .filter(|e| matches!(e.root, EntityRoot::Item))
+        .count() as u32;
+    let group_count = comp
+        .entities
+        .iter()
+        .filter(|e| matches!(e.root, EntityRoot::Group))
+        .count() as u32;
+    let quest_count = comp
+        .entities
+        .iter()
+        .filter(|e| matches!(e.root, EntityRoot::Quest))
+        .count() as u32;
+    // Prefer the largest second-key shape across all pair-keyed views
+    // so the shared `view_storage_primary` buffer is sized for the
+    // worst case. Agent (= agent_count) dominates the static counts
+    // in every realistic fixture, so the order is: Agent first, then
+    // the largest static count.
+    let mut best: Option<PairKeyedSecondKey> = None;
+    for v in &comp.views {
+        if !matches!(v.kind, ViewKind::Materialized(_)) {
+            continue;
+        }
+        if v.params.len() != 2 {
+            continue;
+        }
+        // First param must be Agent — host-side sizing keys off
+        // `agent_count` for the first dimension. Non-Agent first
+        // params aren't supported by the storage shape today.
+        if !matches!(v.params[0].ty, IrType::AgentId) {
+            continue;
+        }
+        // The resolve pass lowers the surface keyword as follows:
+        //   * `Agent` → `IrType::AgentId` (stdlib alias entry)
+        //   * `Item` / `Group` / `Quest` → `IrType::Named("Item"|...)`
+        //     because there's no stdlib alias; the names ARE the
+        //     entity-root keywords (and not the names of declared
+        //     entities). They fall through `resolve_type`'s
+        //     `entities` lookup (entities are `Grain`/`Spice`/etc.,
+        //     not the root name) and land in the `Named` fallback.
+        // The auto-emitter therefore matches BOTH the niche-id
+        // variants (`IrType::ItemId` etc., for completeness — these
+        // appear when the param is typed against a concrete event-
+        // field shape rather than the entity-root keyword) AND the
+        // `Named("Item"|"Group"|"Quest")` variants (the surface form
+        // every in-tree fixture uses).
+        let candidate = match &v.params[1].ty {
+            IrType::AgentId => PairKeyedSecondKey::Agent,
+            IrType::ItemId => PairKeyedSecondKey::Item(item_count.max(1)),
+            IrType::GroupId => PairKeyedSecondKey::Group(group_count.max(1)),
+            IrType::QuestId => PairKeyedSecondKey::Quest(quest_count.max(1)),
+            IrType::Named(n) => match n.as_str() {
+                "Agent" => PairKeyedSecondKey::Agent,
+                "Item" => PairKeyedSecondKey::Item(item_count.max(1)),
+                "Group" => PairKeyedSecondKey::Group(group_count.max(1)),
+                "Quest" => PairKeyedSecondKey::Quest(quest_count.max(1)),
+                _ => continue,
+            },
+            _ => continue,
+        };
+        // Pick the variant with the largest population. Agent always
+        // wins ties (its per-tick population is unbounded above). If
+        // we already saw Agent, keep it.
+        match (best, candidate) {
+            (None, c) => best = Some(c),
+            (Some(PairKeyedSecondKey::Agent), _) => {}
+            (Some(_), PairKeyedSecondKey::Agent) => best = Some(candidate),
+            (Some(prev), c) => {
+                if c.static_count().unwrap_or(0) > prev.static_count().unwrap_or(0) {
+                    best = Some(c);
+                }
+            }
+        }
+    }
+    best
 }
 
 /// Plan E-A3.1 — placeholder generated runtime body, now with per-kernel
@@ -696,13 +863,21 @@ pub fn detect_pair_keyed_materialized_view(comp: &dsl_ast::ir::Compilation) -> b
 /// per-binding buffer allocation. A4 layers a default `step()` body
 /// that walks the SCHEDULE table and binds each kernel automatically.
 ///
-/// `pair_keyed_view_present` is true if the fixture declares ≥1
-/// `@materialized` view with two `Agent` params (= `pair_map`-shaped
-/// storage). Threaded through to `synthesize_generated_runtime_struct`
-/// so the alloc loop can size `view_storage_primary_buf` as
-/// `agent_count * agent_count` u32 cells instead of the per-agent
-/// default. Without this signal the per-(observer, subject) fold body
+/// `pair_keyed_second_key` is `Some(_)` if the fixture declares ≥1
+/// `@materialized` view with two params where the first is `Agent`
+/// (= `pair_map`-shaped storage). The variant carries the second-key
+/// kind + static population. Threaded through to
+/// `synthesize_generated_runtime_struct` so the alloc loop can size
+/// `view_storage_primary_buf` as `agent_count *
+/// <second_key_population>` u32 cells instead of the per-agent
+/// default. Without this signal the per-(observer, source) fold body
 /// would write past the end of the buffer at any `agent_count > 1`.
+///
+/// Generalised in T6 fix (2026-05-11) from `bool` (Agent×Agent only)
+/// to a richer enum so non-Agent second keys (Item / Group / Quest —
+/// trade_caravans's `view inventory(merchant: Agent, good: Item)` is
+/// the in-tree trigger) get their proper static counts threaded
+/// through.
 fn synthesize_runtime_core_a2(
     fixture_name: &str,
     artifacts: &crate::cg::emit::EmittedArtifacts,
@@ -710,7 +885,7 @@ fn synthesize_runtime_core_a2(
     runtime_config_defaults: &std::collections::BTreeMap<String, RuntimeConfigDefault>,
     ability_file_names: &[String],
     events: &[dsl_ast::ir::EventIR],
-    pair_keyed_view_present: bool,
+    pair_keyed_second_key: Option<PairKeyedSecondKey>,
     binds_voxel_grid: bool,
     indirect_consumer_kernel_names: &[String],
 ) -> String {
@@ -772,12 +947,14 @@ fn synthesize_runtime_core_a2(
     //   1. The 6 BeliefState SoA columns surfaced from `LowerOpts.
     //      belief_state` (allow-list inside [`is_belief_state_pair_column`]).
     //   2. The materialized-view backing storage `view_storage_primary`
-    //      when the fixture has a `view foo(a: Agent, b: Agent)` decl
-    //      (gate via the `pair_keyed_view_present` parameter, derived
-    //      from `comp.views` at the call site).
+    //      when the fixture has a `view foo(a: Agent, b: <Entity>)` decl
+    //      (gate via the `pair_keyed_second_key` parameter, derived
+    //      from `comp.views` at the call site). Generalised in T6 fix
+    //      from Agent×Agent to also handle Agent×Item / Agent×Group /
+    //      Agent×Quest second keys.
     // A real binding-shape annotation in the AST is the proper long-term
-    // fix; for now the per-binding-name heuristic + a fixture-level bool
-    // keep the generator working.
+    // fix; for now the per-binding-name heuristic + a fixture-level
+    // second-key shape keep the generator working.
     out.push_str(&synthesize_generated_runtime_struct(
         fixture_name,
         artifacts,
@@ -785,7 +962,7 @@ fn synthesize_runtime_core_a2(
         runtime_config_defaults,
         ability_file_names,
         events,
-        pair_keyed_view_present,
+        pair_keyed_second_key,
         binds_voxel_grid,
         indirect_consumer_kernel_names,
     ));
@@ -899,45 +1076,66 @@ fn is_belief_state_pair_column(binding_name: &str) -> bool {
 ///   [`is_belief_state_pair_column`]). These are agent-side consumer-
 ///   write columns the BGL composer surfaces when `LowerOpts.belief_state`
 ///   is set.
-/// * `agent_count * agent_count` for the materialized-view backing
-///   storage (`view_storage_primary`) when `pair_keyed_view_present`
-///   is true. The fold body of a `view foo(observer: Agent, subject:
-///   Agent) -> u32` writes into `view_storage_primary[observer *
-///   agent_count + subject]`, so the buffer must hold N² u32 cells —
-///   not the per-agent default (which leaves the upper rows past the
-///   buffer end and silently corrupts memory at runtime). See task
-///   docstring on [`synthesize_runtime_core_a2`] for the gap this
-///   closes.
+/// * `agent_count * <second_key_population>` for the materialized-view
+///   backing storage (`view_storage_primary`) when
+///   `pair_keyed_second_key` is `Some(_)`. The fold body of a
+///   `view foo(observer: Agent, source: X) -> ...` writes into
+///   `view_storage_primary[observer * cfg.second_key_pop + source]`,
+///   so the buffer must hold `agent_count * <second_key_pop>` cells.
+///   The second-key population is determined by the kind of the second
+///   param:
+///     * `Agent` → `agent_count` (per-tick variable; tom_probe shape)
+///     * `Item` / `Group` / `Quest` → static count of declared
+///       entities of that root in the .sim source (T6 fix —
+///       trade_caravans declares 3 Items, so the inventory view
+///       sizes as `agent_count * 3` instead of the previous
+///       `agent_count * agent_count` over-allocation OR the pre-fix
+///       under-allocation).
+///   Pre-fix sizing fell back to `agent_count` cells, producing a
+///   `<second_key_pop>×` under-allocation that silently corrupted
+///   memory at runtime when the fold body wrote through indices past
+///   the per-agent prefix.
 /// * `agent_count` for everything else — the per-agent default.
 ///
-/// Today's pair-keyed detection is a single fixture-level bool because
-/// the literal binding name `view_storage_primary` is shared across
-/// every ViewFold kernel in the fixture; up-sizing to N² is safe even
-/// for fixtures that mix pair-keyed + per-agent views (the larger
-/// alloc dominates). When the codebase grows a fixture with multiple
-/// distinct view-storage buffers (e.g. one `view_storage_<view>_primary`
-/// per view), this gate splits into per-binding lookup.
-fn slot_count_expr(binding_name: &str, pair_keyed_view_present: bool) -> &'static str {
+/// Today's pair-keyed detection picks a SINGLE fixture-wide
+/// second-key shape (largest population — see
+/// [`detect_pair_keyed_second_key`] doc on the mixed-key first-match
+/// fallback) because the literal binding name `view_storage_primary`
+/// is shared across every ViewFold kernel in the fixture. When the
+/// codebase grows a fixture with multiple distinct view-storage
+/// buffers (e.g. one `view_storage_<view>_primary` per view), this
+/// gate splits into per-binding lookup.
+fn slot_count_expr(
+    binding_name: &str,
+    pair_keyed_second_key: Option<PairKeyedSecondKey>,
+) -> String {
     if is_belief_state_pair_column(binding_name) {
         // Per-(observer, subject) cell — `pair_map` storage shape per
         // the BeliefState column contract. TODO: replace name-list
         // heuristic with proper binding-shape annotation in the AST.
-        "(agent_count as u64) * (agent_count as u64)"
-    } else if pair_keyed_view_present && binding_name == "view_storage_primary" {
-        // Materialized view's own backing storage when the fixture has
-        // a `view foo(a: Agent, b: Agent)` declaration. The fold body
-        // writes `view_storage_primary[a * agent_count + b]`; sized
-        // N*N to match.
-        "(agent_count as u64) * (agent_count as u64)"
+        "(agent_count as u64) * (agent_count as u64)".to_string()
+    } else if let (true, Some(skey)) = (
+        binding_name == "view_storage_primary",
+        pair_keyed_second_key,
+    ) {
+        // Materialized view's own backing storage when the fixture
+        // has a `view foo(a: Agent, b: <Entity>)` declaration. The
+        // fold body writes `view_storage_primary[a *
+        // cfg.second_key_pop + b]`; size for `agent_count *
+        // <second_key_population>` so every (a, b) cell has its own
+        // slot. T6 fix (2026-05-11) generalised the second-key
+        // population from "always agent_count" to entity-typed
+        // counts.
+        format!("(agent_count as u64) * {}", skey.population_u64_expr())
     } else {
-        "agent_count as u64"
+        "agent_count as u64".to_string()
     }
 }
 
-/// `pair_keyed_view_present` — see [`synthesize_runtime_core_a2`]'s
+/// `pair_keyed_second_key` — see [`synthesize_runtime_core_a2`]'s
 /// same-named param. Read by [`slot_count_expr`] to up-size
-/// `view_storage_primary` to N² cells when the fixture has a
-/// pair-keyed materialized view.
+/// `view_storage_primary` to `agent_count * <second_key_population>`
+/// cells when the fixture has a pair-keyed materialized view.
 fn synthesize_generated_runtime_struct(
     fixture_name: &str,
     artifacts: &crate::cg::emit::EmittedArtifacts,
@@ -945,7 +1143,7 @@ fn synthesize_generated_runtime_struct(
     runtime_config_defaults: &std::collections::BTreeMap<String, RuntimeConfigDefault>,
     ability_file_names: &[String],
     events: &[dsl_ast::ir::EventIR],
-    pair_keyed_view_present: bool,
+    pair_keyed_second_key: Option<PairKeyedSecondKey>,
     binds_voxel_grid: bool,
     indirect_consumer_kernel_names: &[String],
 ) -> String {
@@ -1157,7 +1355,7 @@ fn synthesize_generated_runtime_struct(
                 continue;
             }
         };
-        let slot_expr = slot_count_expr(name, pair_keyed_view_present);
+        let slot_expr = slot_count_expr(name, pair_keyed_second_key);
         // Plan E-A6 — if `init { ... }` declared a per-slot fill for
         // this `agent_<col>` binding, switch from zero-init create_buffer
         // to create_buffer_init with the computed slice. This is how
@@ -1960,7 +2158,7 @@ mod tests {
             &std::collections::BTreeMap::new(),
             &[],
             &[],
-            false,
+            None,
             false,
             &[],
         );
@@ -2034,7 +2232,7 @@ mod tests {
             &std::collections::BTreeMap::new(),
             &[],
             &[event],
-            false,
+            None,
             false,
             &[],
         );
@@ -2098,7 +2296,7 @@ mod tests {
             &std::collections::BTreeMap::new(),
             &[],
             &[event],
-            false,
+            None,
             false,
             &[],
         );

@@ -323,6 +323,33 @@ inventory, per-faction reputation toward each Faction (Group), etc.
 arithmetically valid (no OOB) but the addressing scheme isn't what
 the user wrote.
 
+**Fix status (2026-05-11) — STORAGE SIZING:** the
+`detect_pair_keyed_materialized_view` bool was generalised to
+`detect_pair_keyed_second_key -> Option<PairKeyedSecondKey>` so the
+auto-emitter's `slot_count_expr` now sizes
+`view_storage_primary_buf` as `agent_count *
+<second_key_population>` u32 cells. The second-key population is
+either `agent_count` (Agent×Agent — tom_probe shape, unchanged) or
+the static count of declared Item / Group / Quest entities in the
+.sim (3 for trade_caravans's Grain/Spice/Silk). Pinned in
+`crates/dsl_compiler/tests/pair_keyed_view_storage_sizing.rs`
+(`agent_item_pair_view_resolves_to_item_count`,
+`agent_group_pair_view_resolves_to_group_count`,
+`trade_caravans_sim_resolves_to_item_second_key`).
+
+**Fix status (2026-05-11) — WGSL INDEX (pre-existing, unchanged):**
+the fold body already uses `view_storage_primary[k1 *
+cfg.second_key_pop + k2]`, so the per-tick cfg upload of
+`second_key_pop` is what selects the right addressing. The
+auto-emitter still writes `1u32` for slot 2 of every kernel's cfg
+(see `crates/dsl_compiler/src/build_helper.rs::synthesize_runtime_core_a2`
+step()'s `cfg_words[2]`); fixtures that need a non-1
+`second_key_pop` (tom_probe, trade_caravans's inventory) still hand-
+roll their cfg upload. Closing that gap (writing the right
+`second_key_pop` per ViewFold kernel from the auto-emitter) is the
+remaining T6 follow-up; the storage-sizing fix here is an
+independent, load-bearing prerequisite.
+
 ---
 
 ### Observation: 26-kernel emit + 4-way PerEvent fusion succeeded
