@@ -430,13 +430,23 @@ pub struct ViewSignature {
 
 /// CG-side fold operator — the `self <op> rhs` op recognized by the
 /// view-body lowerer. Drives the WGSL emit branch (atomicAdd vs
-/// atomicOr vs CAS+add).
+/// atomicOr vs CAS+add vs atomicStore).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ViewFoldOp {
     /// `self += rhs` — numeric add accumulator.
     Add,
     /// `self |= rhs` — bit-OR accumulator (u32 only).
     Or,
+    /// `self = rhs` — last-writer-wins assignment. Emits `atomicStore`
+    /// on the view storage slot. Determinism (P11) is preserved when
+    /// every event in the same tick assigns the same value (idempotent
+    /// constant set, e.g. `self = 255` on `Observed`) or when a single
+    /// thread per slot writes per tick (e.g. `Tick`-driven group
+    /// centroid recompute). Multiple distinct writers per slot per
+    /// tick will see last-writer-wins, which is non-deterministic on
+    /// GPU; the DSL author owns that semantic — the lowering trusts
+    /// the source.
+    Set,
 }
 
 // ---------------------------------------------------------------------------

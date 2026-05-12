@@ -636,7 +636,7 @@ fn lower_stmt(
             // `String`, so unrecognised strings also route here under
             // the closed-set tag `"unknown"`.
             let op_label = canonical_self_update_op_label(op.as_str());
-            // Two operators flow through the existing
+            // Three operators flow through the existing
             // `ComputeOpKind::ViewFold` wrapper:
             //   - `+=`: numeric accumulator (f32/i32/u32). Emits a
             //     CAS+add loop in WGSL — see `wgsl_body.rs`.
@@ -645,12 +645,22 @@ fn lower_stmt(
             //     associative so no CAS retry needed (P11). The emit
             //     branches on the view's `result` type from
             //     `view_signatures` (u32 → atomicOr; otherwise CAS+add).
-            // The remaining canonical operators (`=`, `-=`, `*=`, `/=`)
+            //   - `=`: last-writer-wins assignment. Emits a single
+            //     `atomicStore(&storage[idx], rhs)`. Used by fixtures
+            //     where each matching event resets the slot to a
+            //     constant (e.g. `self = 255` on `Observed`,
+            //     `self = Walking` on `NewGroupGoal`). Determinism is
+            //     preserved when every writer in the same tick assigns
+            //     the same value (idempotent constant set) or when at
+            //     most one thread per slot writes per tick — the DSL
+            //     author owns that semantic.
+            // The remaining canonical operators (`-=`, `*=`, `/=`)
             // would silently miscompile to `+=` semantics and surface
             // as typed deferrals.
             let fold_op = match op_label {
                 "+=" => crate::cg::program::ViewFoldOp::Add,
                 "|=" => crate::cg::program::ViewFoldOp::Or,
+                "=" => crate::cg::program::ViewFoldOp::Set,
                 _ => {
                     return Err(LoweringError::UnsupportedFoldOperator {
                         view: view_id,
@@ -1852,7 +1862,7 @@ mod tests {
         let s = format!("{}", e);
         assert!(s.contains("view #7"));
         assert!(s.contains("*="));
-        assert!(s.contains("only += is lowered today"));
+        assert!(s.contains("only +=, |=, and = are lowered today"));
     }
 
     // ---- Snapshot: pinned `Display` form for a lowered op ---------------

@@ -1227,7 +1227,7 @@ impl fmt::Display for LoweringError {
                 span: _,
             } => write!(
                 f,
-                "view #{} self-update operator {} not supported by CG IR; only += is lowered today",
+                "view #{} self-update operator {} not supported by CG IR; only +=, |=, and = are lowered today",
                 view.0, op_label
             ),
             LoweringError::SelfAppendRequiresPerEntityRing {

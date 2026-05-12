@@ -1835,6 +1835,7 @@ fn lower_cg_stmt_body_to_wgsl(
                     ) && match fold_op {
                         Some(crate::cg::program::ViewFoldOp::Or) => true,
                         Some(crate::cg::program::ViewFoldOp::Add) => false,
+                        Some(crate::cg::program::ViewFoldOp::Set) => false,
                         None => true,
                     };
                     let use_atomic_add = matches!(
@@ -1843,6 +1844,17 @@ fn lower_cg_stmt_body_to_wgsl(
                     ) && matches!(
                         fold_op,
                         Some(crate::cg::program::ViewFoldOp::Add)
+                    );
+                    // `self = rhs` lowers to `atomicStore` regardless
+                    // of element type — for u32 the store is a single
+                    // atomic op, for f32 we bitcast the rhs to u32 bits
+                    // first (the storage binding is `array<atomic<u32>>`).
+                    // Last-writer-wins semantics: the DSL author owns
+                    // determinism (idempotent constant set or
+                    // single-writer-per-slot per tick).
+                    let use_atomic_store = matches!(
+                        fold_op,
+                        Some(crate::cg::program::ViewFoldOp::Set)
                     );
                     if use_atomic_or {
                         return Ok(format!(
@@ -1857,6 +1869,26 @@ fn lower_cg_stmt_body_to_wgsl(
                             "{{\n\
                              \x20   let _idx = {idx_expr};\n\
                              \x20   atomicAdd(&{storage}[_idx], ({rhs}));\n\
+                             }}"
+                        ));
+                    }
+                    if use_atomic_store {
+                        // Bitcast the rhs to u32 bits when the view
+                        // result type is f32 (the storage binding is
+                        // `array<atomic<u32>>`); for u32 results pass
+                        // the rhs through directly.
+                        let stored = if matches!(
+                            view_result_ty,
+                            Some(crate::cg::expr::CgTy::F32)
+                        ) {
+                            format!("bitcast<u32>(({rhs}))")
+                        } else {
+                            format!("({rhs})")
+                        };
+                        return Ok(format!(
+                            "{{\n\
+                             \x20   let _idx = {idx_expr};\n\
+                             \x20   atomicStore(&{storage}[_idx], {stored});\n\
                              }}"
                         ));
                     }
