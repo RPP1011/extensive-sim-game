@@ -1422,6 +1422,17 @@ fn slot_count_expr(
         // shape as `item_<field>` but for Group-rooted entities.
         let n = group_entity_count.max(1) as u64;
         format!("{n}u64")
+    } else if binding_name == "scoring_output" {
+        // The scoring kernel writes 4 u32s per agent
+        // (`best_action`, `best_target`, `best_utility`, _pad)
+        // at `scoring_output[agent_id*4 + N]`. Pre-fix the buffer
+        // was sized as `agent_count * 4 bytes` (1 u32/agent) and
+        // every write past agent_id=3 silently OOB'd — scoring for
+        // those slots fell back to last-tick values (or 0), which
+        // surfaced as squad_skirmish "Rally fires despite mask_2=0"
+        // and similar "scoring picks an action that shouldn't be
+        // eligible" bugs across PerPair-scoring fixtures.
+        "(agent_count as u64) * 4u64".to_string()
     } else {
         "agent_count as u64".to_string()
     }
