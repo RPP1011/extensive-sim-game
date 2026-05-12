@@ -90,6 +90,11 @@ fn main() {
                 | "trophic_3tier"
                 | "verb_fire_probe"
                 | "village_day_cycle"
+                | "wave_defense"
+                | "duel_25v25"
+                | "village_economy"
+                | "swarm_event_storm"
+                | "ecosystem_cascade"
         ) {
             continue;
         }

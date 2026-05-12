@@ -36,13 +36,11 @@ crowd_navigation_runtime = { path = "../crowd_navigation_runtime", optional = tr
 # Target-chaser stress fixture for slice 1 (cross-agent target reads).
 # Swarm-event-storm stress fixture for Phase 7+8 primitives (multi-emit
 # producer + 2 view-folds with @decay anchor).
-swarm_storm_runtime = { path = "../swarm_storm_runtime", optional = true }
 # Bartering fixture — entity-root coverage probe (Item + Group entity
 # declarations + ItemId in event payload).
 # Ecosystem-cascade fixture — three-tier event cascade (Plant ←
 # Herbivore ← Carnivore) with two distinct event kinds and three
 # @decay-anchored views.
-ecosystem_runtime = { path = "../ecosystem_runtime", optional = true }
 # Foraging-colony fixture — single-Agent SoA + Item / Group entity
 # declarations (declaration-only today) + per-tick Drop emit folded
 # into a `@decay`-anchored pheromone_deposits view.
@@ -102,7 +100,6 @@ tom_probe_runtime = { path = "../tom_probe_runtime", optional = true }
 # Per-tick: spatial-hash → ScanAndStrike (per-agent walk + emit
 # Damaged for cross-team neighbours) → ApplyDamage chronicle.
 # Discovery doc: docs/superpowers/notes/2026-05-04-duel_25v25.md.
-duel_25v25_runtime = { path = "../duel_25v25_runtime", optional = true }
 # Duel abilities — Wave 1 acceptance fixture for the .ability DSL pipeline.
 # Mirrors duel_1v1's verb-cascade shape (Strike/ShieldUp/Mend) but the
 # constants are hand-mirrored from `assets/ability_test/duel_abilities/*.ability`
@@ -236,10 +233,7 @@ bin-sim_app = ["dep:sim_runtime"]
 bin-pp_app = ["dep:predator_prey_runtime"]
 bin-pc_app = ["dep:particle_collision_runtime"]
 bin-cn_app = ["dep:crowd_navigation_runtime"]
-bin-ses_app = ["dep:swarm_storm_runtime"]
-bin-ecosystem_app = ["dep:ecosystem_runtime"]
 bin-tom_probe_app = ["dep:tom_probe_runtime"]
-bin-duel_25v25_app = ["dep:duel_25v25_runtime"]
 # `viz_app` is the universal sim-picker — its SIMS table in
 # src/viz_app.rs references every per-fixture runtime crate
 # unconditionally. To keep the binary build-able we enable all 42
@@ -250,11 +244,8 @@ bin-duel_25v25_app = ["dep:duel_25v25_runtime"]
 bin-viz_app = [
     "dep:sim_runtime",
     "dep:crowd_navigation_runtime",
-    "dep:duel_25v25_runtime",
-    "dep:ecosystem_runtime",
     "dep:particle_collision_runtime",
     "dep:predator_prey_runtime",
-    "dep:swarm_storm_runtime",
     "dep:tom_probe_runtime",
 ]
 
@@ -279,26 +270,12 @@ path = "src/cn_app.rs"
 required-features = ["bin-cn_app"]
 
 
-[[bin]]
-name = "ses_app"
-path = "src/ses_app.rs"
-required-features = ["bin-ses_app"]
-
-[[bin]]
-name = "ecosystem_app"
-path = "src/ecosystem_app.rs"
-required-features = ["bin-ecosystem_app"]
 
 
 [[bin]]
 name = "tom_probe_app"
 path = "src/tom_probe_app.rs"
 required-features = ["bin-tom_probe_app"]
-
-[[bin]]
-name = "duel_25v25_app"
-path = "src/duel_25v25_app.rs"
-required-features = ["bin-duel_25v25_app"]
 
 
 

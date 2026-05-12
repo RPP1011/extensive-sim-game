@@ -621,32 +621,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "duel_25v25_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
-name = "ecosystem_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1868,13 +1842,10 @@ version = "0.1.0"
 dependencies = [
  "boids_runtime",
  "crowd_navigation_runtime",
- "duel_25v25_runtime",
- "ecosystem_runtime",
  "engine",
  "glam",
  "particle_collision_runtime",
  "predator_prey_runtime",
- "swarm_storm_runtime",
  "tom_probe_runtime",
 ]
 
@@ -1948,19 +1919,6 @@ dependencies = [
 
 [[package]]
 name = "stress_cast_density_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
-name = "swarm_storm_runtime"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
@@ -2212,19 +2170,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "village_economy_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
 name = "voxel_engine"
 version = "0.1.0"
 dependencies = [
@@ -2380,20 +2325,6 @@ dependencies = [
  "hashbrown 0.15.5",
  "indexmap",
  "semver",
-]
-
-[[package]]
-name = "wave_defense_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "engine_voxel",
- "glam",
- "pollster",
- "wgpu",
 ]
 
 [[package]]

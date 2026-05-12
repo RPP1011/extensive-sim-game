@@ -184,7 +184,80 @@ fn emit_into(
             })
             .collect();
 
-    let cg = match crate::cg::lower::lower_compilation_to_cg(&comp) {
+    // Plan E-A6 follow-up — auto-detect companion `.ability` files at
+    // `assets/ability_test/<fixture>/` and (a) build a real registry to
+    // hand to the schedule synthesizer (so producer/consumer fusion sees
+    // real chronicle EventKindIds), (b) auto-set `LowerOpts.aoe_dispatch`
+    // when any program uses a non-Single area shape. Closes the gap that
+    // forced fixtures with `.ability` corpora into custom build.rs files
+    // (wave_defense, duel_25v25, swarm_storm, etc).
+    let ability_corpus_dir =
+        workspace_root.join("assets/ability_test").join(fixture_name);
+    let ability_files: Vec<(String, dsl_ast::AbilityFile)> = if ability_corpus_dir.is_dir() {
+        let mut entries: Vec<PathBuf> = fs::read_dir(&ability_corpus_dir)
+            .unwrap_or_else(|e| panic!("read_dir {}: {e}", ability_corpus_dir.display()))
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("ability"))
+            .collect();
+        entries.sort();
+        entries
+            .into_iter()
+            .map(|p| {
+                println!("cargo:rerun-if-changed={}", p.display());
+                let name = p.file_name().unwrap().to_string_lossy().into_owned();
+                let src = fs::read_to_string(&p)
+                    .unwrap_or_else(|e| panic!("read {}: {e}", p.display()));
+                let parsed = dsl_ast::parse_ability_file(&src)
+                    .unwrap_or_else(|e| panic!("parse {name}: {e:?}"));
+                (name, parsed)
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let built_registry = if !ability_files.is_empty() {
+        match crate::ability_registry::build_registry(&ability_files) {
+            Ok(r) => Some(r),
+            Err(e) => {
+                println!("cargo:warning=[{fixture_name} ability_registry] {e:?}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    // AOE auto-detect: if any program in the registry has any effect with
+    // a non-None `EffectAreaShape`, the dispatcher needs Path B (spatial
+    // walk + per-target chronicle write). Mirrors the manual opt-in every
+    // outlier fixture's build.rs sets explicitly.
+    let aoe_dispatch = built_registry
+        .as_ref()
+        .map(|br| {
+            let n = br.registry.len();
+            // AbilityId is a NonZero* newtype starting at 1; iterate the
+            // 1..=n range and skip ids the registry rejects (defensive —
+            // build_registry is contiguous today).
+            (1..=n).any(|i| {
+                engine::ability::AbilityId::new(i as u32)
+                    .and_then(|id| br.registry.get(id))
+                    .map(|p| p.per_effect_areas.iter().any(|a| a.is_some()))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false);
+    let lower_opts = crate::cg::lower::LowerOpts {
+        aoe_dispatch,
+        ..Default::default()
+    };
+    if !ability_files.is_empty() {
+        println!(
+            "cargo:warning=[{fixture_name} ability-corpus] {} .ability files, aoe_dispatch={}",
+            ability_files.len(),
+            aoe_dispatch,
+        );
+    }
+    let cg = match crate::cg::lower::lower_compilation_to_cg_with_opts(&comp, lower_opts) {
         Ok(p) => p,
         Err(o) => {
             for d in &o.diagnostics {
@@ -193,7 +266,11 @@ fn emit_into(
             o.program
         }
     };
-    let schedule_result = crate::cg::schedule::synthesize_schedule(&cg, strategy);
+    let schedule_result = crate::cg::schedule::synthesize_schedule_with_registry(
+        &cg,
+        strategy,
+        built_registry.as_ref().map(|r| &r.registry),
+    );
     let artifacts =
         crate::cg::emit::emit_cg_program(&schedule_result.schedule, &cg)
             .unwrap_or_else(|e| panic!("emit {fixture_name} CG program: {e:?}"));

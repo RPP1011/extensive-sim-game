@@ -35,10 +35,7 @@ const SIMS: &[(&str, Factory, u32, &str)] = &[
     ("predator_prey",         predator_prey_runtime::make_sim,             64,  "predator/prey 2-species"),
     ("particle_collision",    particle_collision_runtime::make_sim,        256, "elastic collisions"),
     ("crowd_navigation",      crowd_navigation_runtime::make_sim,          256, "crowd navigation"),
-    ("swarm_storm",           swarm_storm_runtime::make_sim,               64,  "multi-emit swarm"),
-    ("ecosystem",             ecosystem_runtime::make_sim,                 96,  "3-tier ecosystem cascade"),
     ("tom_probe",             tom_probe_runtime::make_sim,                 32,  "ToM probe"),
-    ("duel_25v25",            duel_25v25_runtime::make_sim,                50,  "25v25 squad combat"),
 ];
 
 fn print_help() {
