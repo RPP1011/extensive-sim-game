@@ -113,6 +113,7 @@ fn main() {
                 | "pirate_fleet"
                 | "forest_fire"
                 | "squad_skirmish"
+                | "plague_city"
         ) {
             continue;
         }

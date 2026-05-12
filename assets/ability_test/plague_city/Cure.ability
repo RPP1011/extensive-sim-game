@@ -1,0 +1,18 @@
+// plague_city's Cure — Doctor's injection. AbilityId 2.
+// High-amount heal that the chronicle consumer interprets as a
+// disease cure (resets infected=0 + emits Recovered). The amount
+// (30.0 >= 25.0) crosses the consumer's "this is a Cure not a
+// Bless" threshold.
+//
+// Lowers to AbilityProgram { gate: { cooldown_ticks: 0,
+//                                    hostile_only: false },
+//                            area: SingleTarget { range: 3.5 },
+//                            effects: [EffectOp::Heal { amount: 30.0 }] }.
+
+ability Cure {
+    target: ally
+    range: 3.5
+    cooldown: 0
+
+    heal 30
+}

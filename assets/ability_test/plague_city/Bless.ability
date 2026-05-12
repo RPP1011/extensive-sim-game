@@ -1,0 +1,20 @@
+// plague_city's Bless — Healer's prayer pulse. AbilityId 1
+// (alphabetical: Bless < Cure < LastRites). The Healer's ScanAndHeal-
+// style rule fires this on visibly-sick neighbours, but only when an
+// rng.action() draw lands in the lower half (the .sim's body-side
+// gate). The chronicle-side ApplyHealOrCure consumer treats amounts
+// less than 25 as Bless (heal only, no infection clear) so this
+// ability provides palliative HP top-up without curing the disease.
+//
+// Lowers to AbilityProgram { gate: { cooldown_ticks: 0,
+//                                    hostile_only: false },
+//                            area: SingleTarget { range: 3.5 },
+//                            effects: [EffectOp::Heal { amount: 2.0 }] }.
+
+ability Bless {
+    target: ally
+    range: 3.5
+    cooldown: 0
+
+    heal 2
+}

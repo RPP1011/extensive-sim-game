@@ -1,0 +1,486 @@
+// plague_city — adversarial fixture stacking lifecycle (deaths +
+// burials), spatial proximity infection, ToM beliefs about who is
+// sick (pair-keyed N²), @decay belief-confidence forgetting, multi-
+// source cure routing through SHARED chronicle consumers, stochastic
+// transmission via rng.action(), and a 500-tick equilibrium horizon.
+//
+// **Topology** (host-side seeded; see crates/sims/tests/plague_city_pin.rs):
+//   * 64 Citizens scattered inside a walled city footprint at z=0.
+//   * 4 Doctors on a hospital tile near the centre (high-cost cure).
+//   * 4 Healers walking the periphery (cheap stochastic prayer).
+//   * 4 Priests on a graveyard tile (perform LastRites on dead).
+//
+// **Disease state encoding** (workaround for GAP P-A —
+// `agents.set_infected` not in the closed AgentFieldId enum, see
+// docs/architecture/gaps_plague_city.md):
+//
+//   * Per-citizen `hunger` (f32) is repurposed as "infection load":
+//       hunger == 0.0  → healthy
+//       hunger >  0.0  → infected, with hunger as the severity gauge
+//     The contagion producer sets hunger = INITIAL_INFECTION (e.g.
+//     30.0); SicknessProgresses drains hp at sickness_rate per tick
+//     while hunger > 0; cure pulses (Doctor & Healer) zero `hunger`
+//     and top up `hp`. The Priest's burial rite touches hp only —
+//     burial just clears the slot from the active-infection rollup,
+//     since the dead are already alive=0.
+//
+// **Disease cycle**:
+//   1. Initial outbreak: ~6 Citizens get hunger = 30.0 at host setup.
+//   2. ContagionScan @phase(per_agent) — every alive infected Citizen
+//      walks its 27-cell neighbourhood; for each healthy alive Citizen
+//      in range, draws rng.action() and (chance < transmission_rate)
+//      sets the neighbour's hunger to INITIAL_INFECTION_LOAD via a
+//      direct per-tick `agents.set_hunger` write. (No chronicle ferry
+//      needed — the producer is per_agent and the target is the
+//      per-pair candidate; same shape boids' velocity nudge uses.
+//      P5 caveat: per-pair-candidate writes from a per_agent rule
+//      race when N agents target the same neighbour in one tick;
+//      last-writer-wins is fine here because the value is constant.)
+//   3. SicknessProgresses @phase(per_agent) — every infected agent
+//      loses hp at sickness_rate per tick. On hp <= 0, set_alive(self,
+//      false), emit Died{victim:self}.
+//   4. CitizenObserve @phase(per_agent) — every alive Citizen does a
+//      proximity sniff in its 27-cell ring; for each alive neighbour,
+//      emits SymptomSeen{observer:self, subject:other,
+//      sick_q8: (hunger > 0 ? 255 : 0)}. The PerEvent fold on
+//      beliefs_confidence pegs to 25 per observation; @decay drains
+//      it 3% per tick. Forgetting curve.
+//   5. DoctorTriage / HealerTriage — per-agent rules that walk the
+//      treatment ring and dispatch ability on confirmed-sick neighbours.
+//      Doctor: apply_ability 2 (Cure) — sure thing.
+//      Healer: apply_ability 1 (Bless) — stochastic 50% gate.
+//   6. PriestRites — for each dead Citizen in proximity, apply_ability
+//      3 (LastRites). The kind=26 EffectDamageApplied chronicle record
+//      flows through ApplyLastRites, which clears the body's hunger
+//      back to 0 (the dead have been put to rest).
+//   7. ApplyHealOrCure @phase(post) — kind=27 EffectHealApplied is
+//      consumed by ONE rule that routes BOTH abilities (Bless and
+//      Cure) — proves the multi-class shared-event-consumer axis.
+//      amt < 25 → Bless (heal hp only). amt >= 25 → Cure (heal hp +
+//      zero hunger + emit Recovered).
+//   8. ApplyLastRites @phase(post) — kind=26 EffectDamageApplied
+//      drains burial events (LastRites uses Damage(0) as a delivery
+//      channel — see Cure.ability comment). Clears the dead body's
+//      hunger so the SIR rollup stops counting them as still-sick.
+//
+// **Adversarial axes stacked** (post-GAP-P-A workaround):
+//   - Multi-class entities (Citizen / Doctor / Healer / Priest)
+//     sharing the SAME chronicle event consumers (EffectHealApplied,
+//     EffectDamageApplied) — proves consumer routing doesn't get
+//     confused when multiple producer rules write the same kind.
+//   - Lifecycle: deaths via SicknessProgresses (alive 1 → 0). No
+//     respawns — population monotonically decreases. The Priest's
+//     LastRites is a flag-clear, not a slot-recycle.
+//   - Pair-keyed N² ToM views (beliefs_flags + beliefs_confidence)
+//     with @decay on confidence — tom_probe shape with REAL producer
+//     load (every Citizen emits SymptomSeen for every in-range
+//     neighbour, ~256 events/tick at peak with 64 Citizens).
+//   - Per-tick proximity scoring: Doctor/Healer dispatch on every
+//     confirmed-sick neighbour (no argmax — see GAP P-D below).
+//   - 3 distinct spatial queries (contagion / observation /
+//     treatment radii) — proves the multi-radius spatial-query
+//     allocation path.
+//   - rng.action() % gate for stochastic transmission inside a
+//     conditional emit body (P5 conformant per-agent stream).
+//   - 500-tick equilibrium horizon (perf + state stability).
+//
+// Companion `.ability` corpus at assets/ability_test/plague_city/:
+//   - Bless.ability      (id 1, healer prayer — heal 2.0)
+//   - Cure.ability       (id 2, doctor injection — heal 30.0)
+//   - LastRites.ability  (id 3, priest burial — damage 0.0 placeholder)
+//
+// Discriminants (decl-order alphabetical, per commit 1c565df9):
+//   Citizen = 0, Doctor = 1, Healer = 2, Priest = 3.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Died {
+  victim: AgentId,
+}
+
+@replayable @gpu_amenable
+event Recovered {
+  patient: AgentId,
+}
+
+@replayable @gpu_amenable
+event Infected {
+  patient: AgentId,
+  source:  AgentId,
+}
+
+@replayable @gpu_amenable
+event SymptomSeen {
+  observer: AgentId,
+  subject:  AgentId,
+  sick_q8:  u32,
+}
+
+// Engine-side chronicle event written by apply_ability dispatcher
+// at hardcoded EventKindId 26.
+@replayable @gpu_amenable
+event EffectDamageApplied {
+  actor:  AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Engine-side chronicle event written by apply_ability dispatcher
+// at hardcoded EventKindId 27.
+@replayable @gpu_amenable
+event EffectHealApplied {
+  actor:  AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Decl-order alphabetical. Citizen=0, Doctor=1, Healer=2, Priest=3.
+entity Citizen : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Doctor : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Healer : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Priest : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config plague {
+  // Citizens within this radius of an infected citizen are eligible
+  // for transmission per tick.
+  contagion_radius:    f32 = 1.5 @runtime,
+  // Observation radius — citizens "see" neighbours within this much
+  // and stamp belief about their infection.
+  observation_radius:  f32 = 2.5,
+  // Treatment radius — Doctor/Healer/Priest reach.
+  treatment_radius:    f32 = 3.5 @runtime,
+  // Per-tick HP loss for an infected citizen.
+  sickness_rate:       f32 = 1.0 @runtime,
+  // Initial infection load stamped on contagion. SicknessProgresses
+  // doesn't drain hunger — it drains hp; hunger is the diagnostic
+  // gauge ("are you currently sick?").
+  initial_infection:   f32 = 30.0,
+  // q100 transmission probability per neighbour per tick.
+  transmission_q100:   u32 = 25 @runtime,
+  // q100 probability the Healer's prayer connects (gates the
+  // apply_ability dispatch — only ~50% of Bless attempts go out).
+  bless_connect_q100:  u32 = 50,
+}
+
+init {
+  alive: 1,
+  hp:    100,
+}
+
+// ---- Spatial queries ----------------------------------------------
+
+@spatial(radius = 1.5, kind = [Agent])
+spatial_query nearby_for_contagion(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+@spatial(radius = 2.5, kind = [Agent])
+spatial_query nearby_for_observation(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+@spatial(radius = 3.5, kind = [Agent])
+spatial_query nearby_for_treatment(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// ---- ContagionScan ------------------------------------------------
+//
+// Each tick, every alive infected Citizen scans its 27-cell ring;
+// for each alive healthy Citizen within range, draws rng.action() and
+// (draw % 100 < transmission_q100) writes the neighbour's hunger to
+// the initial-infection load. The rng.action() draw gives a
+// per-(actor,tick,purpose) deterministic stream — P5 conformant;
+// mirrors stochastic_probe.sim's gate shape.
+//
+// Direct-write transmission (vs. chronicle ferry) — the producer
+// writes another agent's column from a per_agent rule, exactly the
+// shape `agents.set_pos(other, ...)` would take from an EnemyAdvance
+// rule. P5 caveat: when N infected citizens hit the same healthy
+// neighbour in one tick, the writes race (last-writer-wins). Since
+// every write stores the SAME constant (initial_infection_load), the
+// outcome is deterministic regardless of order. If we wanted
+// distinct payloads (per-source variants), this would need either a
+// chronicle ferry OR atomicCompareExchangeWeak ramp (see #244).
+@phase(per_agent)
+physics ContagionScan {
+  on Tick {} where (self.alive
+                    && self.creature_type == Citizen
+                    && agents.hunger(self) > 0.0) {
+    for other in spatial.nearby_for_contagion(self) {
+      if (other.alive
+          && other.creature_type == Citizen
+          && agents.hunger(other) <= 0.0) {
+        let draw = rng.action();
+        if ((draw % 100) < config.plague.transmission_q100) {
+          agents.set_hunger(other, config.plague.initial_infection);
+        }
+      }
+    }
+  }
+}
+
+// ---- SicknessProgresses -------------------------------------------
+//
+// Per-tick HP drain for every infected agent. On hp<=0 set
+// alive=false AND emit Died. The `old_hp > 0.0` race guard mirrors
+// duel_25v25 + foraging_real — prevents Died re-firing on stale
+// slots that already crossed zero in a prior tick.
+@phase(per_agent)
+physics SicknessProgresses {
+  on Tick {} where (self.alive
+                    && self.creature_type == Citizen
+                    && agents.hunger(self) > 0.0) {
+    let old_hp = agents.hp(self);
+    let new_hp = old_hp - config.plague.sickness_rate;
+    agents.set_hp(self, new_hp);
+    if (old_hp > 0.0 && new_hp <= 0.0) {
+      agents.set_alive(self, false);
+      emit Died { victim: self }
+    }
+  }
+}
+
+// ---- CitizenObserve -----------------------------------------------
+//
+// Every alive Citizen sniffs its 27-cell ring and emits a
+// SymptomSeen for every alive neighbour. The `sick_q8` payload is
+// 255 if the subject's hunger > 0 (= sick), 0 otherwise. No false
+// positives in this fixture; deception channel deferred.
+//
+// HIGH event volume: at peak ~64 citizens × ~4 neighbours = ~256
+// SymptomSeen per tick. The pair-keyed beliefs_flags + beliefs_
+// confidence views absorb them into pair_map storage, with @decay
+// providing the forgetting curve on the confidence cells.
+@phase(per_agent)
+physics CitizenObserve {
+  on Tick {} where (self.alive && self.creature_type == Citizen) {
+    for other in spatial.nearby_for_observation(self) {
+      if (other.alive) {
+        // sick_q8 encoding: 255 if observed-as-infected, 0 otherwise.
+        // The conditional uses an inline if-expr (lowering: select).
+        let q = if (agents.hunger(other) > 0.0) { 255 } else { 0 };
+        emit SymptomSeen {
+          observer: self,
+          subject:  other,
+          sick_q8:  q,
+        }
+      }
+    }
+  }
+}
+
+// ---- DoctorTriage -------------------------------------------------
+//
+// Each Doctor every tick walks its treatment ring and dispatches
+// Cure (id 2) on every confirmed-sick Citizen in range.
+//
+// SCORING NOTE (see GAP P-D): today's per-agent body-form spatial
+// walk does NOT have a `score (...)` row form for the spatial-walk
+// body. We can't lower "argmax over neighbours, dispatch on the most-
+// sick one" inside a `for other in spatial.<q>(self)` body without
+// either (a) a fold-with-argmax builtin (not specced today), or (b)
+// a verb expansion (which gets pair_scoring_probe.sim's `target.<f>`
+// gap #3). For now we dispatch on EVERY confirmed-sick neighbour;
+// busy doctors fan out across multiple targets per tick instead of
+// committing to one.
+@phase(per_agent)
+physics DoctorTriage {
+  on Tick {} where (self.alive && self.creature_type == Doctor) {
+    for other in spatial.nearby_for_treatment(self) {
+      if (other.alive
+          && other.creature_type == Citizen
+          && agents.hunger(other) > 0.0) {
+        apply_ability 2 by self target other
+      }
+    }
+  }
+}
+
+// ---- HealerTriage -------------------------------------------------
+//
+// Healer walks treatment ring; for each confirmed-sick Citizen in
+// range, draws rng.action() and only dispatches Bless (id 1) on a
+// successful 50% roll. This stresses the rng draw INSIDE a body-form
+// spatial walk (vs ContagionScan which draws inside the same shape
+// but for transmission). Two distinct rules using `rng.action()` in
+// the same fixture validates the P5-stream isolation
+// (per-tick per-agent per-purpose hashing).
+@phase(per_agent)
+physics HealerTriage {
+  on Tick {} where (self.alive && self.creature_type == Healer) {
+    for other in spatial.nearby_for_treatment(self) {
+      if (other.alive
+          && other.creature_type == Citizen
+          && agents.hunger(other) > 0.0) {
+        let draw = rng.action();
+        if ((draw % 100) < config.plague.bless_connect_q100) {
+          apply_ability 1 by self target other
+        }
+      }
+    }
+  }
+}
+
+// ---- PriestRites --------------------------------------------------
+//
+// Priest walks treatment ring; for each DEAD Citizen still flagged
+// as having been infected, dispatches LastRites. The kind=26
+// chronicle record flows through ApplyLastRites, which clears the
+// body's hunger so the SIR rollup ("still sick") stops counting
+// them. The dead slot stays alive=0 — no resurrection; this is purely
+// hygiene on the active-infection counter.
+//
+// Body-side `where alive == false` would be cleaner but the spatial-
+// walk visits all candidates (alive + dead); the chronicle consumer
+// does the alive==false gate at apply time.
+@phase(per_agent)
+physics PriestRites {
+  on Tick {} where (self.alive && self.creature_type == Priest) {
+    for other in spatial.nearby_for_treatment(self) {
+      if (other.creature_type == Citizen
+          && agents.hunger(other) > 0.0) {
+        apply_ability 3 by self target other
+      }
+    }
+  }
+}
+
+// ---- Chronicle consumers ------------------------------------------
+//
+// Same tolerance pattern duel_25v25 uses — these PerEvent rules
+// write AgentField (hp, hunger) which trips P6, but build.rs
+// tolerates the lower diagnostic. Result is direct-SoA-write into
+// agents columns.
+
+// Cure (Doctor — apply_ability 2) and Bless (Healer — apply_ability
+// 1) BOTH route through this single kind=27 EffectHealApplied
+// consumer — proves shared-event-consumer routing at multi-class
+// scale. The amount discriminator picks the path:
+//   amt >= 25 → Cure: heal hp + zero hunger + emit Recovered.
+//   amt <  25 → Bless: heal hp only. Doesn't clear the disease.
+@phase(post)
+physics ApplyHealOrCure {
+  on EffectHealApplied { actor: _, target: t, amount: amt } {
+    let cur_hp = agents.hp(t);
+    let new_hp = cur_hp + amt;
+    let cap = agents.max_hp(t);
+    let clamped = if (new_hp > cap) { cap } else { new_hp };
+    agents.set_hp(t, clamped);
+    if (amt >= 25.0) {
+      // Doctor's Cure — also clears infection severity.
+      if (agents.hunger(t) > 0.0) {
+        agents.set_hunger(t, 0.0);
+        emit Recovered { patient: t }
+      }
+    }
+  }
+}
+
+// LastRites (Priest — apply_ability 3) drains kind=26
+// EffectDamageApplied. The actual "damage" is 0 — the chronicle is
+// purely a delivery channel. Consumer clears the body's hunger so
+// the dead are properly buried in the SIR rollup.
+@phase(post)
+physics ApplyLastRites {
+  on EffectDamageApplied { actor: _, target: t, amount: _ } {
+    if (agents.hunger(t) > 0.0) {
+      agents.set_hunger(t, 0.0);
+    }
+  }
+}
+
+// Producer of the Infected event — the in-DSL chronicle ferry. Today
+// (post-GAP P-A workaround) ContagionScan writes hunger directly,
+// not through this event; this rule exists so the host-callable
+// codegen has a per-event injection path AND so the contagion_pressure
+// view's fold has a populated event source. The producer is a
+// PerEvent rule that fires Infected when hunger crosses from 0 to >0
+// during the same-tick chain. Today there's no "edge-trigger" verb
+// in the DSL — this is a future-slice path. The view today will read
+// 0 because no producer fires Infected; the test pin notes this with
+// a soft NOTE.
+@phase(per_agent)
+physics InfectionEdgeTrigger {
+  on Tick {} where (self.alive
+                    && self.creature_type == Citizen
+                    && agents.hunger(self) > 0.0
+                    && world.tick > 0) {
+    // Approximation: emit Infected each tick the citizen is sick.
+    // This over-counts vs a true edge-trigger; contagion_pressure
+    // therefore decays toward "currently radiating" sum, not the
+    // strict "newly infected this tick" sum. NOTE in the pin.
+    emit Infected { patient: self, source: self }
+  }
+}
+
+// ---- Belief views (pair-keyed N²) ---------------------------------
+//
+// beliefs_flags — bit-OR fold from SymptomSeen. Bit 0 = "this subject
+// has been observed as currently sick at some point" (sick_q8 > 0).
+// Bit 1 = "this subject has been observed at all" (always set).
+// Bit-OR is idempotent. Storage = pair_map (N×N×u32).
+@materialized(on_event = [SymptomSeen], storage = pair_map)
+view beliefs_flags(observer: Agent, subject: Agent) -> u32 {
+  initial: 0,
+  on SymptomSeen { observer: o, subject: s, sick_q8: q }
+    where o == observer && s == subject
+    { self |= if (q > 0) { 3 } else { 2 } }
+  clamp: [0, 4294967295],
+}
+
+// beliefs_confidence — observer's confidence about subject's current
+// sickness. Pegged to +25 on every fresh SymptomSeen with sick_q8>0;
+// decayed @decay(rate=0.97) per tick (forgetting curve). Storage =
+// pair_map (N×N).
+@materialized(on_event = [SymptomSeen], storage = pair_map)
+@decay(rate = 0.97, per = tick)
+view beliefs_confidence(observer: Agent, subject: Agent) -> f32 {
+  initial: 0.0,
+  on SymptomSeen { observer: o, subject: s, sick_q8: q }
+    where o == observer && s == subject && q > 0
+    { self += 25.0 }
+  clamp: [0.0, 255.0],
+}
+
+// ---- Per-agent rollup views ---------------------------------------
+
+// Per-source contagion_pressure — currently-radiating sum.
+@materialized(on_event = [Infected])
+@decay(rate = 0.95, per = tick)
+view contagion_pressure(source: Agent) -> f32 {
+  initial: 0.0,
+  on Infected { patient: _, source: s } where s == source { self += 1.0 }
+  clamp: [0.0, 1000.0],
+}
+
+// Per-target cure_count — Doctor/Healer effectiveness.
+@materialized(on_event = [Recovered])
+view cure_count(patient: Agent) -> f32 {
+  initial: 0.0,
+  on Recovered { patient: p } where p == patient { self += 1.0 }
+  clamp: [0.0, 1000.0],
+}
+
+// Per-target death_count — should be 0 or 1 per slot. Useful for
+// invariants in the pin (sum == initial_infected - recovered -
+// still_infected).
+@materialized(on_event = [Died])
+view death_count(victim: Agent) -> f32 {
+  initial: 0.0,
+  on Died { victim: v } where v == victim { self += 1.0 }
+  clamp: [0.0, 100.0],
+}

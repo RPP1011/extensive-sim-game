@@ -1,0 +1,22 @@
+// plague_city's LastRites — Priest's burial rite. AbilityId 3.
+// We use the EffectOp::Damage path purely as a delivery channel —
+// the priest doesn't actually damage anyone, the consumer
+// (ApplyLastRites @phase(post)) just clears the infected flag on
+// the dead body when it sees the chronicle record arrive.
+//
+// `target: enemy` because the dispatcher's `hostile_only` gate would
+// otherwise filter against the priest's team; the body-side check
+// in PriestRites picks dead Citizen slots regardless.
+//
+// Lowers to AbilityProgram { gate: { cooldown_ticks: 0,
+//                                    hostile_only: true },
+//                            area: SingleTarget { range: 3.5 },
+//                            effects: [EffectOp::Damage { amount: 0.0 }] }.
+
+ability LastRites {
+    target: enemy
+    range: 3.5
+    cooldown: 0
+
+    damage 0 [PHYSICAL: 100]
+}
