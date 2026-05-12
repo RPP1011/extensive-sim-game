@@ -96,6 +96,7 @@ fn main() {
                 | "swarm_event_storm"
                 | "ecosystem_cascade"
                 | "apply_ability_smoke"
+                | "voxel_probe"
         ) {
             continue;
         }

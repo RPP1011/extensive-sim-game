@@ -855,6 +855,28 @@ fn parse_view_body(c: &mut Cursor) -> PResult<ViewBody> {
                     handlers.push(parse_fold_handler(c)?);
                     continue;
                 }
+                // Fixture-extension fields like `clamp_norm: 100.0` —
+                // the standard view-body grammar (initial/on/clamp)
+                // doesn't recognise them. Parse-and-discard rather than
+                // failing so the .sim still lowers; semantic adoption
+                // is a future grammar slice.
+                if let Some(name) = peek_ident(c) {
+                    let after = c.pos + name.len();
+                    let mut look = Cursor { src: c.src, pos: after };
+                    look.skip_ws();
+                    if look.starts_with_char(':') {
+                        c.bump(name.len());
+                        c.skip_ws();
+                        c.bump(1); // `:`
+                        c.skip_ws();
+                        let _ = parse_expr(c)?;
+                        c.skip_ws();
+                        if c.starts_with_char(',') {
+                            c.bump(1);
+                        }
+                        continue;
+                    }
+                }
                 break;
             }
             return Ok(ViewBody::Fold { initial, handlers, clamp });
@@ -881,7 +903,9 @@ fn parse_fold_handler(c: &mut Cursor) -> PResult<FoldHandler> {
         if next.map_or(true, |ch| !is_ident_cont(ch)) {
             c.bump("where".len());
             c.skip_ws();
-            let expr = parse_expr(c)?;
+            // Same body-`{` boundary as physics handler — see comment
+            // on `parse_physics_handler::where_clause` for the rationale.
+            let expr = parse_expr_bounded(c, |ck| ck.starts_with_char('{'))?;
             c.skip_ws();
             Some(expr)
         } else {
@@ -1055,7 +1079,11 @@ fn parse_physics_handler(c: &mut Cursor) -> PResult<PhysicsHandler> {
     if c.starts_with("where") {
         c.bump("where".len());
         c.skip_ws();
-        where_clause = Some(parse_expr(c)?);
+        // Bound the where-predicate at the body's opening `{` — without
+        // this, a tail like `where self.creature_type == Hare {` parses
+        // `Hare {...}` as a struct literal and swallows the entire body.
+        // Mirrors the for/if/match parsers that also stop at `{`.
+        where_clause = Some(parse_expr_bounded(c, |ck| ck.starts_with_char('{'))?);
         c.skip_ws();
     }
     expect_char(c, '{').map_err(|e| e.with_context("parsing physics handler body `{`"))?;
@@ -1431,6 +1459,16 @@ fn parse_verb_action(c: &mut Cursor) -> PResult<VerbAction> {
 fn scoring_decl(c: &mut Cursor, annotations: Vec<Annotation>, start: usize) -> PResult<ScoringDecl> {
     expect_keyword(c, "scoring").map_err(|e| e.with_context("parsing `scoring` block"))?;
     c.skip_ws();
+    // Optional entity-binding name: `scoring Wolf {` scopes the table
+    // to a specific entity. Resolver doesn't currently use the name —
+    // accepted at parse time so fixtures with multi-entity scoring
+    // (predator_prey, etc.) parse cleanly.
+    if let Some(name) = peek_ident(c) {
+        if name.chars().next().map_or(false, |c0| c0.is_ascii_uppercase()) {
+            c.bump(name.len());
+            c.skip_ws();
+        }
+    }
     expect_char(c, '{').map_err(|e| e.with_context("parsing scoring block `{`"))?;
     let mut entries = Vec::new();
     let mut per_ability_rows = Vec::new();
@@ -1618,6 +1656,13 @@ fn probe_decl(c: &mut Cursor, annotations: Vec<Annotation>, start: usize) -> PRe
         }
         let kw = ident(c).map_err(|e| e.with_context("parsing probe field name"))?;
         c.skip_ws();
+        // Optional `:` between field name and value. Older .sim files
+        // omit it (`scenario "foo"`); newer design-target .sim files
+        // include it (`scenario: "foo"`). Accept both.
+        if c.starts_with_char(':') {
+            c.bump(1);
+            c.skip_ws();
+        }
         match kw.as_str() {
             "scenario" => {
                 scenario = Some(string_lit(c)?);
@@ -1655,19 +1700,25 @@ fn probe_decl(c: &mut Cursor, annotations: Vec<Annotation>, start: usize) -> PRe
             }
             "assert" => {
                 c.skip_ws();
-                expect_char(c, '{')
-                    .map_err(|e| e.with_context("parsing `assert {` block"))?;
-                loop {
-                    c.skip_ws();
-                    if c.starts_with_char('}') {
-                        c.bump(1);
-                        break;
+                if c.starts_with_char('{') {
+                    c.bump(1);
+                    loop {
+                        c.skip_ws();
+                        if c.starts_with_char('}') {
+                            c.bump(1);
+                            break;
+                        }
+                        asserts.push(parse_assert_expr(c)?);
+                        c.skip_ws();
+                        if c.starts_with_char(',') {
+                            c.bump(1);
+                        }
                     }
+                } else {
+                    // Single inline assert: `assert: <expr>` (no block).
+                    // Newer probe grammar uses this shape — accept it
+                    // alongside the existing `assert { … }` block form.
                     asserts.push(parse_assert_expr(c)?);
-                    c.skip_ws();
-                    if c.starts_with_char(',') {
-                        c.bump(1);
-                    }
                 }
             }
             other => {
@@ -2858,8 +2909,27 @@ fn parse_atom(c: &mut Cursor, stop: &dyn Fn(&Cursor) -> bool) -> PResult<Expr> {
         c.skip_ws();
         expect_keyword(c, "in").map_err(|e| e.with_context("parsing quantifier `in`"))?;
         c.skip_ws();
-        let iter = parse_expr_bounded(c, |ck| ck.starts_with_char(':'))?;
+        let iter = parse_expr_bounded(c, |ck| {
+            ck.starts_with_char(':') || ck.starts_with("where")
+        })?;
         c.skip_ws();
+        // Optional `where <pred>` between iter and body — parsed and
+        // ANDed into the body. `forall e in xs where p(e): q(e)` is
+        // semantically `forall e in xs: !p(e) || q(e)`. For the
+        // parse-only path we just discard the predicate; semantic
+        // adoption happens when invariants land in the GeneratedRuntime
+        // path.
+        if c.starts_with("where")
+            && c.src[c.pos + "where".len()..]
+                .chars()
+                .next()
+                .map_or(true, |ch| !is_ident_cont(ch))
+        {
+            c.bump("where".len());
+            c.skip_ws();
+            let _pred = parse_expr_bounded(c, |ck| ck.starts_with_char(':'))?;
+            c.skip_ws();
+        }
         expect_char(c, ':').map_err(|e| e.with_context("parsing quantifier `:`"))?;
         c.skip_ws();
         let body = parse_expr_bounded(c, stop)?;
