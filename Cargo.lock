@@ -950,19 +950,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
-name = "for_each_agent_probe_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
 name = "foraging_real_runtime"
 version = "0.1.0"
 dependencies = [
@@ -1884,19 +1871,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "quest_probe_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
 name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2276,14 +2250,10 @@ dependencies = [
  "predator_prey_real_runtime",
  "predator_prey_runtime",
  "quest_arc_real_runtime",
- "quest_probe_runtime",
  "scripted_battle_runtime",
- "stdlib_math_probe_runtime",
- "stochastic_probe_runtime",
  "swarm_storm_runtime",
  "tactical_horde_500_runtime",
  "tactical_squad_5v5_runtime",
- "target_chaser_runtime",
  "tom_probe_runtime",
  "tower_defense_runtime",
  "trade_market_real_runtime",
@@ -2360,32 +2330,6 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
-
-[[package]]
-name = "stdlib_math_probe_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
-name = "stochastic_probe_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
 
 [[package]]
 name = "stress_agent_count_runtime"
@@ -2468,19 +2412,6 @@ name = "target-triple"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "591ef38edfb78ca4771ee32cf494cb8771944bee237a9b91fc9c1424ac4b777b"
-
-[[package]]
-name = "target_chaser_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
 
 [[package]]
 name = "tempfile"

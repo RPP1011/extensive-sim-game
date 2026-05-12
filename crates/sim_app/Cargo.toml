@@ -34,7 +34,6 @@ particle_collision_runtime = { path = "../particle_collision_runtime", optional 
 # Crowd navigation sibling fixture — cn_app drives it.
 crowd_navigation_runtime = { path = "../crowd_navigation_runtime", optional = true }
 # Target-chaser stress fixture for slice 1 (cross-agent target reads).
-target_chaser_runtime = { path = "../target_chaser_runtime", optional = true }
 # Swarm-event-storm stress fixture for Phase 7+8 primitives (multi-emit
 # producer + 2 view-folds with @decay anchor).
 swarm_storm_runtime = { path = "../swarm_storm_runtime", optional = true }
@@ -79,7 +78,6 @@ diplomacy_probe_runtime = { path = "../diplomacy_probe_runtime", optional = true
 # real per-agent physics body. First fixture to exercise
 # `rng.action()` end-to-end with a per-tick activation gate;
 # verifies P5 determinism and per-slot binomial convergence.
-stochastic_probe_runtime = { path = "../stochastic_probe_runtime", optional = true }
 # Pair-scoring probe — discovery probe of PAIR-FIELD SCORING (spec
 # §8.3). Attempts the canonical `target.<field>` pattern in a verb's
 # scoring expression. Outcome (b) NO FIRE — the gap chain is
@@ -91,7 +89,6 @@ pair_scoring_probe_runtime = { path = "../pair_scoring_probe_runtime", optional 
 # probe body retains only the surfaces that actually wire through;
 # four omitted-gap surfaces stay commented in the .sim with citations
 # to the responsible compiler arms.
-stdlib_math_probe_runtime = { path = "../stdlib_math_probe_runtime", optional = true }
 # Quest probe — discovery probe of `entity X : Quest` AND the
 # `quests.*` namespace. Both surfaces are documented in spec but
 # never exercised by any prior fixture. Surfaces THREE gaps:
@@ -100,7 +97,6 @@ stdlib_math_probe_runtime = { path = "../stdlib_math_probe_runtime", optional = 
 # registry, (C) `+= 1u` on a u32-result view silently lowers to
 # `atomicOr` per the result-type-only emit branch. See
 # `docs/superpowers/notes/2026-05-04-quest_probe.md`.
-quest_probe_runtime = { path = "../quest_probe_runtime", optional = true }
 # Duel 1v1 — first REAL gameplay-shaped fixture (not a coverage
 # probe). Two Combatants duel with three abilities (Strike, Spell,
 # Heal) compiled through the verb cascade + cooldown gates + pair-
@@ -269,7 +265,6 @@ bin-sim_app = ["dep:sim_runtime"]
 bin-pp_app = ["dep:predator_prey_runtime"]
 bin-pc_app = ["dep:particle_collision_runtime"]
 bin-cn_app = ["dep:crowd_navigation_runtime"]
-bin-tc_app = ["dep:target_chaser_runtime"]
 bin-ses_app = ["dep:swarm_storm_runtime"]
 bin-bartering_app = ["dep:bartering_runtime"]
 bin-ecosystem_app = ["dep:ecosystem_runtime"]
@@ -280,10 +275,7 @@ bin-tom_probe_app = ["dep:tom_probe_runtime"]
 bin-trade_market_app = ["dep:trade_market_runtime"]
 bin-abilities_app = ["dep:abilities_runtime"]
 bin-diplomacy_probe_app = ["dep:diplomacy_probe_runtime"]
-bin-stochastic_probe_app = ["dep:stochastic_probe_runtime"]
 bin-pair_scoring_probe_app = ["dep:pair_scoring_probe_runtime"]
-bin-stdlib_math_probe_app = ["dep:stdlib_math_probe_runtime"]
-bin-quest_probe_app = ["dep:quest_probe_runtime"]
 bin-duel_1v1_app = ["dep:duel_1v1_runtime"]
 bin-duel_25v25_app = ["dep:duel_25v25_runtime"]
 bin-foraging_real_app = ["dep:foraging_real_runtime"]
@@ -339,14 +331,10 @@ bin-viz_app = [
     "dep:predator_prey_real_runtime",
     "dep:predator_prey_runtime",
     "dep:quest_arc_real_runtime",
-    "dep:quest_probe_runtime",
     "dep:scripted_battle_runtime",
-    "dep:stdlib_math_probe_runtime",
-    "dep:stochastic_probe_runtime",
     "dep:swarm_storm_runtime",
     "dep:tactical_horde_500_runtime",
     "dep:tactical_squad_5v5_runtime",
-    "dep:target_chaser_runtime",
     "dep:tom_probe_runtime",
     "dep:tower_defense_runtime",
     "dep:trade_market_real_runtime",
@@ -379,10 +367,6 @@ name = "cn_app"
 path = "src/cn_app.rs"
 required-features = ["bin-cn_app"]
 
-[[bin]]
-name = "tc_app"
-path = "src/tc_app.rs"
-required-features = ["bin-tc_app"]
 
 [[bin]]
 name = "ses_app"
@@ -435,24 +419,9 @@ path = "src/diplomacy_probe_app.rs"
 required-features = ["bin-diplomacy_probe_app"]
 
 [[bin]]
-name = "stochastic_probe_app"
-path = "src/stochastic_probe_app.rs"
-required-features = ["bin-stochastic_probe_app"]
-
-[[bin]]
 name = "pair_scoring_probe_app"
 path = "src/pair_scoring_probe_app.rs"
 required-features = ["bin-pair_scoring_probe_app"]
-
-[[bin]]
-name = "stdlib_math_probe_app"
-path = "src/stdlib_math_probe_app.rs"
-required-features = ["bin-stdlib_math_probe_app"]
-
-[[bin]]
-name = "quest_probe_app"
-path = "src/quest_probe_app.rs"
-required-features = ["bin-quest_probe_app"]
 
 [[bin]]
 name = "duel_1v1_app"

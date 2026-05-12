@@ -38,7 +38,16 @@ fn main() {
         // migrated off the per-`*_runtime` crate path. Add new
         // fixtures here as they migrate. Other fixtures stay on
         // their per-fixture crate until each is moved over.
-        if !matches!(stem.as_str(), "threat_impact" | "cooldown_probe") {
+        if !matches!(
+            stem.as_str(),
+            "threat_impact"
+                | "cooldown_probe"
+                | "for_each_agent_probe"
+                | "target_chaser"
+                | "stochastic_probe"
+                | "quest_probe"
+                | "stdlib_math_probe"
+        ) {
             continue;
         }
         fixtures.push(stem);
