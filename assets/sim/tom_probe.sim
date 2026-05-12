@@ -149,14 +149,14 @@ physics WhatIBelieve @phase(per_agent) {
 //   * EffectRevealApplied: actor=slot 2 (caster), subject=slot 3,
 //     subject_idx=slot 4 (= subject; redundant on the wire).
 
-@replayable
+@replayable @host_callable
 event EffectObserveApplied {
   actor: AgentId,
   target: AgentId,
   target_observer: u32,
 }
 
-@replayable
+@replayable @host_callable
 event EffectScryApplied {
   actor: AgentId,
   subject: AgentId,
@@ -164,7 +164,7 @@ event EffectScryApplied {
   subject_idx: u32,
 }
 
-@replayable
+@replayable @host_callable
 event EffectRevealApplied {
   actor: AgentId,
   subject: AgentId,
@@ -280,7 +280,7 @@ physics ApplyRevealBeliefUpdate @phase(post) {
 // "this is fresh" semantic), `confidence` (= 255 q8 max). Leaves the
 // suspicion + flags slots unchanged — Decoy is a positional / identity
 // fake, not a slander or knowledge claim.
-@replayable
+@replayable @host_callable
 event EffectDecoyApplied {
   actor: AgentId,
   target: AgentId,
@@ -316,7 +316,7 @@ physics ApplyDecoyBeliefUpdate @phase(post) {
 // Field binding mirrors Decoy: `target` (slot 3) is the OBSERVER whose
 // row caster clears; `subject_idx` (slot 4) is the agent slot the
 // belief is ABOUT; `fields` (slot 5) is the u8-in-u32 bitset.
-@replayable
+@replayable @host_callable
 event EffectEraseBeliefApplied {
   actor: AgentId,
   target: AgentId,
@@ -373,7 +373,7 @@ physics ApplyEraseBeliefUpdate @phase(post) {
 // `actor` for self-cast disguise (the dispatcher's implicit-target
 // rule). We bind it into `_` because the consumer only writes to the
 // actor's row — the target slot is informational on the wire.
-@replayable
+@replayable @host_callable
 event EffectDisguiseApplied {
   actor: AgentId,
   target: AgentId,

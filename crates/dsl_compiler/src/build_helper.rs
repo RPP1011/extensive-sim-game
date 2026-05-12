@@ -429,6 +429,7 @@ fn emit_into(
         &init_stmts,
         &runtime_config_defaults,
         &ability_file_names,
+        &comp.events,
     );
     fs::write(out_dir.join("runtime_core.rs"), runtime_core)
         .unwrap_or_else(|e| panic!("write runtime_core.rs: {e}"));
@@ -612,6 +613,7 @@ fn synthesize_runtime_core_a2(
     init_stmts: &[dsl_ast::ast::InitStmt],
     runtime_config_defaults: &std::collections::BTreeMap<String, RuntimeConfigDefault>,
     ability_file_names: &[String],
+    events: &[dsl_ast::ir::EventIR],
 ) -> String {
     let kernel_count = artifacts.kernel_index.len();
     let mut out = String::new();
@@ -677,6 +679,7 @@ fn synthesize_runtime_core_a2(
         init_stmts,
         runtime_config_defaults,
         ability_file_names,
+        events,
     ));
 
     out
@@ -802,6 +805,7 @@ fn synthesize_generated_runtime_struct(
     init_stmts: &[dsl_ast::ast::InitStmt],
     runtime_config_defaults: &std::collections::BTreeMap<String, RuntimeConfigDefault>,
     ability_file_names: &[String],
+    events: &[dsl_ast::ir::EventIR],
 ) -> String {
     use crate::kernel_binding_ir::BgSource;
     use std::collections::BTreeMap;
@@ -1419,6 +1423,114 @@ fn synthesize_generated_runtime_struct(
          \x20   }\n",
     );
 
+    // Per-event typed host-side injectors for `@host_callable` events.
+    // For every event in `comp.events` carrying the `@host_callable`
+    // annotation, emit a typed Rust method that:
+    //   1. Builds a 10-word chronicle record from typed args:
+    //      slot 0 = engine kind id (from `EventIR.engine_kind_id`,
+    //               required — events without an engine alias can't
+    //               participate today),
+    //      slot 1 = self.tick as u32,
+    //      slot 2..= = each declared field, packed in declaration order.
+    //   2. Calls `self.inject_chronicle_record(&record)` to write it
+    //      into the event_ring.
+    //
+    // Field type → param mapping:
+    //   AgentId / U8 / U16 / U32 → `u32` (one slot, raw value)
+    // Other field types are not supported in this slice; the emitter
+    // bails with a `compile_error!` for the offending event so the
+    // failure surfaces at build time rather than as a silent miscompile.
+    //
+    // Method name = snake_case(event.name). Arguments are listed in
+    // declaration order with the source field names.
+    //
+    // The dispatch of the matching consumer kernel is NOT performed
+    // by this method — that happens via the next `step()` call which
+    // walks the schedule and dispatches every kernel (including the
+    // PerEvent consumer over the ring). Callers that want immediate
+    // synchronous dispatch (e.g. tom_probe's hand-written verbs that
+    // pre-dated this codegen) layer their own dispatch code on top.
+    for ev in events {
+        if !ev.annotations.iter().any(|a| a.name == "host_callable") {
+            continue;
+        }
+        let kind_id = match ev.engine_kind_id {
+            Some(k) => k,
+            None => {
+                // No engine alias → no fixed kind id → can't build the
+                // record. Surface as a build-time error so the .sim author
+                // sees it immediately instead of silently shipping a
+                // method that would write a zero-kind record (= invalid).
+                out.push_str(&format!(
+                    "    // @host_callable on `{name}` skipped: event has no engine kind id alias.\n\
+                     \x20   // (See dsl_ast::engine_events::ENGINE_EVENT_KIND_IDS for the registered set.)\n",
+                    name = ev.name,
+                ));
+                println!(
+                    "cargo:warning=[{fixture_name} host_callable] event `{}` has no engine kind id; skipping codegen",
+                    ev.name,
+                );
+                continue;
+            }
+        };
+        let method_name = crate::snake_case(&ev.name);
+        let mut params: Vec<String> = Vec::new();
+        let mut slot_writes: Vec<String> = Vec::new();
+        let mut bail: Option<String> = None;
+        for (i, f) in ev.fields.iter().enumerate() {
+            let slot = 2 + i;
+            if slot >= 10 {
+                bail = Some(format!(
+                    "event `{}` has more than 8 fields; chronicle records only carry 10 u32 slots",
+                    ev.name,
+                ));
+                break;
+            }
+            use dsl_ast::ir::IrType;
+            let (rust_ty, write_expr): (&str, String) = match &f.ty {
+                IrType::AgentId => ("u32", format!("{}", f.name)),
+                IrType::U8 | IrType::U16 | IrType::U32 => ("u32", format!("{}", f.name)),
+                other => {
+                    bail = Some(format!(
+                        "event `{}` field `{}` has type {:?}; @host_callable codegen only supports AgentId / U8 / U16 / U32 today",
+                        ev.name, f.name, other,
+                    ));
+                    break;
+                }
+            };
+            params.push(format!("{}: {}", f.name, rust_ty));
+            slot_writes.push(format!(
+                "        record[{slot}] = {write_expr};\n",
+            ));
+        }
+        if let Some(msg) = bail {
+            // Build-time hard error. Mirrors the panic-on-emit-failure
+            // policy elsewhere in this helper.
+            panic!("[{fixture_name} host_callable] {msg}");
+        }
+        let params_joined = if params.is_empty() {
+            String::new()
+        } else {
+            format!(", {}", params.join(", "))
+        };
+        out.push_str(&format!(
+            "\n\
+             \x20   /// Auto-emitted from `@host_callable event {ev_name}` in the .sim source.\n\
+             \x20   /// Builds a chronicle record with kind id {kind_id} (engine alias) and\n\
+             \x20   /// the per-field payload in declaration order, then injects it via\n\
+             \x20   /// [`Self::inject_chronicle_record`]. The matching consumer kernel\n\
+             \x20   /// fires on the next [`Self::step`] call.\n\
+             \x20   pub fn {method_name}(&mut self{params_joined}) {{\n\
+             \x20       let mut record = [0u32; 10];\n\
+             \x20       record[0] = {kind_id};\n\
+             \x20       record[1] = self.tick as u32;\n\
+             {writes}        self.inject_chronicle_record(&record);\n\
+             \x20   }}\n",
+            ev_name = ev.name,
+            writes = slot_writes.concat(),
+        ));
+    }
+
     out.push_str("}\n");
 
     out
@@ -1441,6 +1553,7 @@ mod tests {
             &artifacts,
             &[],
             &std::collections::BTreeMap::new(),
+            &[],
             &[],
         );
 
@@ -1471,6 +1584,117 @@ mod tests {
         assert!(
             !out.contains("create_buffer"),
             "minimal fixture should not emit buffer alloc lines\n{out}"
+        );
+    }
+
+    #[test]
+    fn host_callable_event_emits_typed_injector_method() {
+        use dsl_ast::ast::{Annotation, Span};
+        use dsl_ast::ir::{EventField, EventIR, IrType};
+
+        let span = Span::new(0, 0);
+        // Mirrors `tom_probe.sim`'s `@host_callable event EffectObserveApplied`
+        // — the canonical 3-field shape across the 6 ToM verbs. AgentId fields
+        // become `u32` params; declaration order maps to slots 2..= (slot 0 is
+        // the engine kind id 64, slot 1 is `self.tick as u32`).
+        let event = EventIR {
+            name: "EffectObserveApplied".into(),
+            fields: vec![
+                EventField { name: "actor".into(), ty: IrType::AgentId, span },
+                EventField { name: "target".into(), ty: IrType::AgentId, span },
+                EventField {
+                    name: "target_observer".into(),
+                    ty: IrType::U32,
+                    span,
+                },
+            ],
+            tags: Vec::new(),
+            annotations: vec![Annotation {
+                name: "host_callable".into(),
+                args: Vec::new(),
+                span,
+            }],
+            span,
+            engine_kind_id: Some(64),
+        };
+
+        let artifacts = crate::cg::emit::EmittedArtifacts::default();
+        let out = super::synthesize_runtime_core_a2(
+            "host_callable_smoke",
+            &artifacts,
+            &[],
+            &std::collections::BTreeMap::new(),
+            &[],
+            &[event],
+        );
+
+        // Typed signature with snake_case method name + matching params.
+        assert!(
+            out.contains(
+                "pub fn effect_observe_applied(&mut self, actor: u32, target: u32, target_observer: u32)"
+            ),
+            "expected typed `effect_observe_applied` method signature\n--- source ---\n{out}"
+        );
+        // Engine kind id at slot 0.
+        assert!(
+            out.contains("record[0] = 64;"),
+            "expected `record[0] = 64;` for engine kind id\n--- source ---\n{out}"
+        );
+        // Tick at slot 1.
+        assert!(
+            out.contains("record[1] = self.tick as u32;"),
+            "expected tick stamp at slot 1\n--- source ---\n{out}"
+        );
+        // Per-field slot writes 2..=4 in declaration order.
+        for (slot, field) in [(2, "actor"), (3, "target"), (4, "target_observer")] {
+            let expected = format!("record[{slot}] = {field};");
+            assert!(
+                out.contains(&expected),
+                "expected `{expected}`\n--- source ---\n{out}"
+            );
+        }
+        // Body forwards to the generic injector helper.
+        assert!(
+            out.contains("self.inject_chronicle_record(&record);"),
+            "expected forward to inject_chronicle_record\n--- source ---\n{out}"
+        );
+    }
+
+    #[test]
+    fn event_without_host_callable_annotation_emits_no_injector_method() {
+        use dsl_ast::ast::Span;
+        use dsl_ast::ir::{EventField, EventIR, IrType};
+
+        let span = Span::new(0, 0);
+        let event = EventIR {
+            name: "BeliefAcquired".into(),
+            fields: vec![EventField {
+                name: "fact_bit".into(),
+                ty: IrType::U32,
+                span,
+            }],
+            tags: Vec::new(),
+            annotations: Vec::new(),
+            span,
+            engine_kind_id: None,
+        };
+
+        let artifacts = crate::cg::emit::EmittedArtifacts::default();
+        let out = super::synthesize_runtime_core_a2(
+            "no_host_callable",
+            &artifacts,
+            &[],
+            &std::collections::BTreeMap::new(),
+            &[],
+            &[event],
+        );
+
+        // The generic helper still lands.
+        assert!(out.contains("pub fn inject_chronicle_record"));
+        // But no typed wrapper for BeliefAcquired (no @host_callable annotation).
+        assert!(
+            !out.contains("pub fn belief_acquired"),
+            "should not auto-emit method without @host_callable annotation\n--- source ---\n{out}"
         );
     }
 }
