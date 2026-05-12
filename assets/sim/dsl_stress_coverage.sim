@@ -1,0 +1,96 @@
+// dsl_stress_coverage — kitchen-sink fixture exercising every DSL
+// surface the mega-crate gained during the *_runtime cleanup sweep.
+// One file that lights up:
+//
+//   - `init { ... }` block (alive=1 + per-slot staggered field)
+//   - `debug { ... }` block (kernel-depth instrumentation + wgsl flags)
+//   - `@runtime` config tunable surface + setter codegen
+//   - `@host_callable` event annotation (auto-emits typed injector
+//     methods on GeneratedRuntime)
+//   - Multiple chronicle event types with PerEvent consumers
+//   - Per-agent `@materialized` view with `@decay(rate = X)`
+//     (multiplicative — legacy form)
+//   - Pair-keyed `@materialized(observer, subject)` view sized N²
+//     (validates the pair-fold sizing fix)
+//   - `@decay(mode = sub, by = 1, gate = MaskName)` with mask
+//     predicate inlining (per-cell binders + mask-IR walk)
+//   - `mask <Name>(args) when <pred>` declarations referenced both
+//     from physics rules and from a decay-gate annotation
+//   - Multi-event physics rules with `emit` cascades
+//   - `world.tick` reads in physics + view body contexts
+//   - Vec3 builtins (length, dot, normalize)
+//
+// The fixture is deliberately small in agent count + tick budget —
+// the goal is BREADTH (kernel + emit coverage) not throughput. Real
+// stress is the breadth of compiler surfaces hit; runtime perf comes
+// from a separate per-feature stress fixture.
+
+event Tick { }
+
+@replayable @gpu_amenable @host_callable
+event PlayerJoined {
+  agent: AgentId,
+  team:  u32,
+}
+
+@replayable @gpu_amenable
+event Damaged {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable @host_callable
+event Observed {
+  observer: AgentId,
+  subject:  AgentId,
+}
+
+entity Combatant : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config combat {
+  base_damage:    f32 = 10.0,
+  flee_threshold: f32 = 0.3 @runtime,
+  alert_radius:   f32 = 6.0 @runtime,
+}
+
+debug {
+  depth: kernel,
+  wgsl_event_kind_histogram: true,
+}
+
+init {
+  alive: 1,
+  hp:    100,
+}
+
+mask LowHp(self) when self.hp < (config.combat.flee_threshold * 100.0)
+
+mask InAlertRange(self, t) when
+  distance(self.pos, t.pos) < config.combat.alert_radius
+
+@materialized(on_event = [Damaged])
+@decay(rate = 0.95, per = tick)
+view damage_taken(target: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { target: t } where t == target { self += 1.0 }
+  clamp: [0.0, 1000.0],
+}
+
+@materialized(on_event = [Damaged])
+@decay(rate = 0.98, per = tick)
+view damage_pair(source: Agent, target: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: s, target: t } where s == source && t == target { self += 1.0 }
+  clamp: [0.0, 1000.0],
+}
+
+@phase(per_agent)
+physics PingDamage {
+  on Tick {} where (self.alive) {
+    emit Damaged { source: self, target: self, amount: config.combat.base_damage }
+  }
+}
