@@ -423,6 +423,20 @@ fn emit_into(
     // (no corpus) → the placeholder no-op-program path stays in effect.
     let ability_file_names: Vec<String> =
         ability_files.iter().map(|(n, _)| n.clone()).collect();
+    // Pair-keyed materialized-view detection. Any `view name(p1: Agent,
+    // p2: Agent) -> ... { ... }` declared `@materialized` (any storage
+    // hint, but in practice `pair_map`) writes its fold output into
+    // `view_storage_primary` at index `[p1 * agent_count + p2]`. The
+    // backing buffer therefore needs `agent_count * agent_count` slots,
+    // not the per-agent default. The auto-emitted `GeneratedRuntime`
+    // sizes `view_storage_primary_buf` from `slot_count_expr`; threading
+    // this bool downstream lets the sizing path branch without a new IR
+    // field.
+    //
+    // Today's gate: 2 params with `IrType::AgentId` + materialized kind.
+    // Single-agent or scalar-keyed views (e.g. dodger_probe's `view
+    // threats(observer: Agent) -> f32`) keep the per-agent sizing.
+    let pair_keyed_view_present = detect_pair_keyed_materialized_view(&comp);
     let runtime_core = synthesize_runtime_core_a2(
         fixture_name,
         &artifacts,
@@ -430,6 +444,7 @@ fn emit_into(
         &runtime_config_defaults,
         &ability_file_names,
         &comp.events,
+        pair_keyed_view_present,
     );
     fs::write(out_dir.join("runtime_core.rs"), runtime_core)
         .unwrap_or_else(|e| panic!("write runtime_core.rs: {e}"));
@@ -594,6 +609,23 @@ fn call_arg_contains(arg: &dsl_ast::ir::IrCallArg) -> bool {
     expr_contains_set_beliefs_call(&arg.value)
 }
 
+/// True if `comp` declares ≥1 `@materialized` view with exactly two
+/// `Agent` parameters (= `pair_map`-shaped storage). The auto-emitter
+/// uses this to up-size `view_storage_primary_buf` to N² cells; see
+/// [`slot_count_expr`] for the per-binding sizing rule.
+///
+/// Public for integration-test access (the `tests/` crate exercises
+/// the full call chain `parse → resolve → detect → synthesize`).
+pub fn detect_pair_keyed_materialized_view(comp: &dsl_ast::ir::Compilation) -> bool {
+    comp.views.iter().any(|v| {
+        matches!(v.kind, dsl_ast::ir::ViewKind::Materialized(_))
+            && v.params.len() == 2
+            && v.params
+                .iter()
+                .all(|p| matches!(p.ty, dsl_ast::ir::IrType::AgentId))
+    })
+}
+
 /// Plan E-A3.1 — placeholder generated runtime body, now with per-kernel
 /// binding metadata derived from `EmittedArtifacts.kernel_specs` (added in
 /// the same slice).
@@ -607,6 +639,14 @@ fn call_arg_contains(arg: &dsl_ast::ir::IrCallArg) -> bool {
 /// `pub fn try_new(seed: u64, agent_count: u32) -> Option<Self>` with
 /// per-binding buffer allocation. A4 layers a default `step()` body
 /// that walks the SCHEDULE table and binds each kernel automatically.
+///
+/// `pair_keyed_view_present` is true if the fixture declares ≥1
+/// `@materialized` view with two `Agent` params (= `pair_map`-shaped
+/// storage). Threaded through to `synthesize_generated_runtime_struct`
+/// so the alloc loop can size `view_storage_primary_buf` as
+/// `agent_count * agent_count` u32 cells instead of the per-agent
+/// default. Without this signal the per-(observer, subject) fold body
+/// would write past the end of the buffer at any `agent_count > 1`.
 fn synthesize_runtime_core_a2(
     fixture_name: &str,
     artifacts: &crate::cg::emit::EmittedArtifacts,
@@ -614,6 +654,7 @@ fn synthesize_runtime_core_a2(
     runtime_config_defaults: &std::collections::BTreeMap<String, RuntimeConfigDefault>,
     ability_file_names: &[String],
     events: &[dsl_ast::ir::EventIR],
+    pair_keyed_view_present: bool,
 ) -> String {
     let kernel_count = artifacts.kernel_index.len();
     let mut out = String::new();
@@ -667,12 +708,18 @@ fn synthesize_runtime_core_a2(
     // and an alloc line in `try_new` with size derived from the
     // wgsl_ty.
     //
-    // Sizing today: `agent_count * elem_bytes`. Per-(observer, source)
-    // bindings (e.g. beliefs_flags = N*N u32) are heuristically
-    // detected by the binding-name suffix `_flags` — the only such
-    // shape today. A real binding-shape annotation in the AST is the
-    // proper long-term fix; for now the heuristic + a TODO comment
-    // keeps the generator working.
+    // Sizing today: `agent_count * elem_bytes`. Per-(observer, subject)
+    // bindings need `agent_count * agent_count` cells; the up-sizing is
+    // gated by [`slot_count_expr`] in two cases:
+    //   1. The 6 BeliefState SoA columns surfaced from `LowerOpts.
+    //      belief_state` (allow-list inside [`is_belief_state_pair_column`]).
+    //   2. The materialized-view backing storage `view_storage_primary`
+    //      when the fixture has a `view foo(a: Agent, b: Agent)` decl
+    //      (gate via the `pair_keyed_view_present` parameter, derived
+    //      from `comp.views` at the call site).
+    // A real binding-shape annotation in the AST is the proper long-term
+    // fix; for now the per-binding-name heuristic + a fixture-level bool
+    // keep the generator working.
     out.push_str(&synthesize_generated_runtime_struct(
         fixture_name,
         artifacts,
@@ -680,6 +727,7 @@ fn synthesize_runtime_core_a2(
         runtime_config_defaults,
         ability_file_names,
         events,
+        pair_keyed_view_present,
     ));
 
     out
@@ -784,21 +832,52 @@ fn is_belief_state_pair_column(binding_name: &str) -> bool {
     )
 }
 
-/// Number of slots in the buffer for a given binding. Heuristic:
-/// `agent_count` for the common per-agent case; `agent_count *
-/// agent_count` for per-(observer, subject) BeliefState SoA columns
-/// (the 6 columns enumerated in [`is_belief_state_pair_column`]).
-fn slot_count_expr(binding_name: &str) -> &'static str {
+/// Number of slots in the buffer for a given binding. Sizing rules:
+///
+/// * `agent_count * agent_count` for per-(observer, subject) BeliefState
+///   SoA columns (the 6 columns enumerated in
+///   [`is_belief_state_pair_column`]). These are agent-side consumer-
+///   write columns the BGL composer surfaces when `LowerOpts.belief_state`
+///   is set.
+/// * `agent_count * agent_count` for the materialized-view backing
+///   storage (`view_storage_primary`) when `pair_keyed_view_present`
+///   is true. The fold body of a `view foo(observer: Agent, subject:
+///   Agent) -> u32` writes into `view_storage_primary[observer *
+///   agent_count + subject]`, so the buffer must hold N² u32 cells —
+///   not the per-agent default (which leaves the upper rows past the
+///   buffer end and silently corrupts memory at runtime). See task
+///   docstring on [`synthesize_runtime_core_a2`] for the gap this
+///   closes.
+/// * `agent_count` for everything else — the per-agent default.
+///
+/// Today's pair-keyed detection is a single fixture-level bool because
+/// the literal binding name `view_storage_primary` is shared across
+/// every ViewFold kernel in the fixture; up-sizing to N² is safe even
+/// for fixtures that mix pair-keyed + per-agent views (the larger
+/// alloc dominates). When the codebase grows a fixture with multiple
+/// distinct view-storage buffers (e.g. one `view_storage_<view>_primary`
+/// per view), this gate splits into per-binding lookup.
+fn slot_count_expr(binding_name: &str, pair_keyed_view_present: bool) -> &'static str {
     if is_belief_state_pair_column(binding_name) {
         // Per-(observer, subject) cell — `pair_map` storage shape per
         // the BeliefState column contract. TODO: replace name-list
         // heuristic with proper binding-shape annotation in the AST.
+        "(agent_count as u64) * (agent_count as u64)"
+    } else if pair_keyed_view_present && binding_name == "view_storage_primary" {
+        // Materialized view's own backing storage when the fixture has
+        // a `view foo(a: Agent, b: Agent)` declaration. The fold body
+        // writes `view_storage_primary[a * agent_count + b]`; sized
+        // N*N to match.
         "(agent_count as u64) * (agent_count as u64)"
     } else {
         "agent_count as u64"
     }
 }
 
+/// `pair_keyed_view_present` — see [`synthesize_runtime_core_a2`]'s
+/// same-named param. Read by [`slot_count_expr`] to up-size
+/// `view_storage_primary` to N² cells when the fixture has a
+/// pair-keyed materialized view.
 fn synthesize_generated_runtime_struct(
     fixture_name: &str,
     artifacts: &crate::cg::emit::EmittedArtifacts,
@@ -806,6 +885,7 @@ fn synthesize_generated_runtime_struct(
     runtime_config_defaults: &std::collections::BTreeMap<String, RuntimeConfigDefault>,
     ability_file_names: &[String],
     events: &[dsl_ast::ir::EventIR],
+    pair_keyed_view_present: bool,
 ) -> String {
     use crate::kernel_binding_ir::BgSource;
     use std::collections::BTreeMap;
@@ -992,7 +1072,7 @@ fn synthesize_generated_runtime_struct(
                 continue;
             }
         };
-        let slot_expr = slot_count_expr(name);
+        let slot_expr = slot_count_expr(name, pair_keyed_view_present);
         // Plan E-A6 — if `init { ... }` declared a per-slot fill for
         // this `agent_<col>` binding, switch from zero-init create_buffer
         // to create_buffer_init with the computed slice. This is how
@@ -1627,6 +1707,7 @@ mod tests {
             &std::collections::BTreeMap::new(),
             &[],
             &[],
+            false,
         );
 
         // Braces balance.
@@ -1698,6 +1779,7 @@ mod tests {
             &std::collections::BTreeMap::new(),
             &[],
             &[event],
+            false,
         );
 
         // Typed signature with snake_case method name + matching params.
@@ -1759,6 +1841,7 @@ mod tests {
             &std::collections::BTreeMap::new(),
             &[],
             &[event],
+            false,
         );
 
         // The generic helper still lands.
