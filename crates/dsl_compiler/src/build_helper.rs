@@ -1384,6 +1384,41 @@ fn synthesize_generated_runtime_struct(
          \x20       self.tick += 1;\n\
          \x20   }\n",
     );
+
+    // Generic host-side chronicle injection helper. Provides a single
+    // primitive every fixture can call to inject a synthetic chronicle
+    // record into the unified event_ring without going through a
+    // producer kernel. Mirrors the queue_clear_tail + append_chronicle_record
+    // pattern that every per-fixture runtime crate previously hand-wrote.
+    //
+    // Steps:
+    //   1. Write 0 to the GPU event_tail counter (synthetic record lands at slot 0).
+    //   2. Call event_ring.reset_tail_estimate() to sync host-side tail.
+    //   3. Append the record via the engine helper (which bumps the tail).
+    //
+    // The caller is responsible for setting record[0] = engine event kind id
+    // (see dsl_ast::engine_events::engine_event_kind_id_for_name) and
+    // record[1] = world tick. Slots [2..] carry per-event payload words
+    // per the chronicle layout in dsl_compiler::cpu_chronicle_reference.
+    //
+    // Used by host-driven runtime APIs (verbs that inject chronicle
+    // events from CPU outside the per-tick step encoder), e.g.
+    // tom_probe_runtime's observe/scry/reveal/decoy/erase_belief/disguise
+    // methods.
+    out.push_str(
+        "\n\
+         \x20   /// Generic host-side chronicle injection helper.\n\
+         \x20   /// Resets the event_ring tail and appends a single synthetic\n\
+         \x20   /// chronicle record. Caller is responsible for the kind+tick+payload\n\
+         \x20   /// layout of the 10-word record.\n\
+         \x20   pub fn inject_chronicle_record(&mut self, record: &[u32; 10]) {\n\
+         \x20       let zero = 0u32;\n\
+         \x20       self.gpu.queue.write_buffer(self.event_ring.tail(), 0, bytemuck::bytes_of(&zero));\n\
+         \x20       self.event_ring.reset_tail_estimate();\n\
+         \x20       self.event_ring.append_chronicle_record(&self.gpu.queue, record);\n\
+         \x20   }\n",
+    );
+
     out.push_str("}\n");
 
     out
