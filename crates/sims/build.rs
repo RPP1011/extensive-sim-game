@@ -111,6 +111,7 @@ fn main() {
                 | "trade_caravans"
                 | "palace_coup"
                 | "pirate_fleet"
+                | "forest_fire"
         ) {
             continue;
         }

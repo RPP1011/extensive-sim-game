@@ -1,0 +1,303 @@
+// forest_fire — adversarial event-storm fixture for the event-ring +
+// chronicle-cascade + per-handler tag-filter axis.
+//
+// **Topology** (host-side seeded; see crates/sims/tests/forest_fire_pin.rs):
+//   * N×N grid of `Tree` agents (default N=32 → 1024 trees). Each tree
+//     starts at hp=100, alive=1 (healthy state). The host seeds an
+//     ignition cluster (a few burning trees at the centre) by writing
+//     hp=80 directly to those slots BEFORE the first step().
+//   * Tree state encoding (single hp scalar, no extra SoA needed):
+//       hp == 100         → healthy (not yet burning)
+//       1 <= hp < 100     → burning (active spreader, drains 4 hp/tick)
+//       hp == 0 + alive=1 → about to convert to ash (Reaper rule)
+//       alive == 0        → ash (terminal)
+//
+// **Why this fixture is adversarial** (event throughput stress):
+//   - At equilibrium ~25-50% of grid is simultaneously burning. Each
+//     burning tree emits up to 4 EmberLanded events / tick (one per
+//     compass-direction neighbour) — at N²=1024 trees that's >2000
+//     emits/tick on the chronicle ring. Pushes the per-tick fold
+//     dispatch + per-handler tag-filter scan with realistic mixed
+//     event traffic (NOT one-emit-per-agent like swarm_event_storm).
+//   - Five distinct event kinds in the same ring (Ignited, Burned,
+//     EmberLanded, RainFell, WindShifted) with FOUR consumer handlers,
+//     two of which subscribe to the same kind (EmberLanded → Catch
+//     physics + ember_landings view) — exercises the per-handler tag
+//     filter under genuine multi-kind cross-traffic.
+//   - Per-tick stochastic gate via `rng.action() % 100 < spread_chance`
+//     (uses the deterministic per-agent PCG surface; no `rng.chance()`
+//     today — that surface isn't lowered).
+//   - Cascade chain: Spread (drain hp + emit EmberLanded) → Catch (post
+//     phase, hp(t) flip from 100 → 99 + emit Ignited) → next-tick
+//     Spread fires from the newly-burning tree. Tests the
+//     PerAgent → PerEvent → next-tick PerAgent chain across ticks
+//     without the "fusion blind to ApplyAbility writes" gap (#235)
+//     because Spread reads hp directly, not a chronicle fanout.
+//   - Long horizon: 500-tick run reaches equilibrium; no fire-front
+//     should escape the grid bounds (positions are fixed).
+//   - Conservation invariant: alive_count + ash_count == N² for every
+//     tick. The pin reads agent_alive and verifies. Any drift surfaces
+//     a reaper / consumer ordering bug.
+//
+// **Likely gap surfaces** (any one a successful discovery):
+//   1. Ring saturation behaviour at high N (pin walks N=32→64→128 to
+//      probe). The default 1M-slot ring covers up to ~250K trees at
+//      4 emits/tree/tick, but the per-tick tail estimate must also
+//      cover Ignited + Burned + WindShifted. Watch for tail_value()
+//      growth + missing-event symptoms.
+//   2. Per-handler tag-filter scaling — five-event mixed ring with two
+//      handlers on the same kind. The diplomacy_probe `cb24fd69`
+//      scaling test only covered ONE handler-per-kind.
+//   3. `@phase(post)` Reaper triggered by an event (Ignited/Burned)
+//      vs by Tick — hill_raid merges its Reaper into the chronicle
+//      consumer to dodge a fusion gap; this fixture intentionally
+//      keeps Reaper as a SEPARATE PerAgent rule on Tick, surfacing
+//      that fusion shape if it regresses.
+//   4. `@traced` annotation (non-replayable diagnostic events): NOT
+//      explored here — the AST surface is unverified, and the resolver
+//      may reject it. This fixture stays on @replayable + @gpu_amenable
+//      across all five event kinds; the @traced gap is documented in
+//      docs/architecture/gaps_observed.md for a follow-up agent.
+//   5. `@cascade(max_iter=N)` annotation — the resolver registers a
+//      `cascade` namespace + `cascade.iterations` config, but no
+//      `@cascade` annotation surface exists today. Leaving the
+//      cross-tick cascade pattern as the natural "events from tick T
+//      arrive in tick T+1's consumers" instead of pretending fixed-
+//      point iteration is a real DSL annotation.
+//
+// Companion: NO .ability corpus (no apply_ability — pure chronicle
+// emit / consume chain).
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Ignited {
+  tree:   AgentId,
+  by:     AgentId,
+}
+
+@replayable @gpu_amenable
+event Burned {
+  tree:   AgentId,
+}
+
+@replayable @gpu_amenable
+event EmberLanded {
+  source: AgentId,
+  target: AgentId,
+}
+
+// Periodic environmental events. Wind / rain are emitted by ALL trees
+// every K ticks (gated on world.tick % K == 0) — they're broadcast
+// pulses, not per-tree state. Multiple agents firing the same gated
+// event tests dedup-free overproduction (the consumer side just sums).
+@replayable @gpu_amenable
+event RainFell {
+  source: AgentId,
+}
+
+@replayable @gpu_amenable
+event WindShifted {
+  source: AgentId,
+}
+
+// Single entity type — the grid is homogeneous. Position is host-seeded
+// once and never updated; spatial.nearby_trees on a fixed-position
+// grid will return the same neighbour set every tick (cheap to walk).
+entity Tree : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config fire {
+  // Per-tick hp drop while burning (1 < hp < 100). At 4/tick a tree
+  // burns for ~25 ticks before becoming ash. With ~4 ember emits per
+  // burning tree per tick, an active fire produces ~100 EmberLanded
+  // emits over its lifetime.
+  burn_rate:        f32 = 4.0,
+  // Per-ember spread chance (% out of 100) — a healthy neighbour gets
+  // ignited when (rng.action() % 100) < spread_chance AND it received
+  // an EmberLanded this tick. 35% per ember, 4 embers per burning
+  // tree → ~80% per-tick ignition probability per healthy neighbour
+  // adjacent to a fire (1 - (1-0.35)^4 ≈ 0.82).
+  spread_chance:    u32 = 35,
+  // Spatial radius for neighbour discovery (units = world position).
+  // Grid spacing is 1.0 in the host seed, so radius=1.5 picks up the
+  // 4 cardinal neighbours but not diagonals. Diagonals would inflate
+  // emit count to 8/burning-tree/tick.
+  ember_radius:     f32 = 1.5,
+  // Wind / rain pulse periods (ticks). Coprime so the two events
+  // don't co-occur in the same tick most of the time, broadening the
+  // per-tick mixed-kind ring traffic.
+  wind_period:      u32 = 7,
+  rain_period:      u32 = 23,
+}
+
+init {
+  alive: 1,
+  hp:    100,
+}
+
+// Spatial query for ember dispersion. Walks the per-tick spatial grid
+// for cells within ember_radius. The per-handler `kind = [Agent]`
+// filter is the only one available — there's no Tree-typed filter yet.
+@spatial(radius = 1.5, kind = [Agent])
+spatial_query nearby_trees(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// =====================================================================
+// Per-agent physics rules (run every tick)
+// =====================================================================
+
+// Burning trees drain fuel + emit embers to neighbours. Per-tree
+// stochastic gate uses rng.action() — the supported per-agent PCG
+// surface (`rng.chance(p)` is not lowered today).
+//
+// hp window check: only trees with 1 <= hp < 100 (currently burning)
+// fire. hp == 100 → healthy, hp == 0 → fuel exhausted (Reaper handles
+// the alive flip).
+@phase(per_agent)
+physics Spread {
+  on Tick {} where (self.alive && agents.hp(self) > 0.0 && agents.hp(self) < 100.0) {
+    // Drain fuel. Each tick subtracts burn_rate; after 25 ticks the
+    // tree's hp hits 0 and the Reaper flips alive=0 + emits Burned.
+    let new_hp = agents.hp(self) - config.fire.burn_rate;
+    agents.set_hp(self, new_hp);
+    // Walk neighbours. For each one, the per-ember stochastic gate
+    // decides whether to drop an EmberLanded. Spatial walk over
+    // ember_radius=1.5 → 4 cardinal neighbours on a unit grid. The
+    // gate threshold is per-ember; the per-tick probability the
+    // neighbour catches is 1 - (1 - p)^k where k is the number of
+    // burning neighbours of THAT cell.
+    for candidate in spatial.nearby_trees(self) {
+      if (candidate.alive && agents.hp(candidate) >= 100.0) {
+        let draw = rng.action();
+        if ((draw % 100) < config.fire.spread_chance) {
+          emit EmberLanded { source: self, target: candidate }
+        }
+      }
+    }
+  }
+}
+
+// Reaper — burning trees with hp <= 0 transition to ash. Emits Burned
+// on the tick of transition; subsequent ticks the rule's `where`
+// predicate fails (alive == 0) so it doesn't re-fire.
+@phase(per_agent)
+physics Reaper {
+  on Tick {} where (self.alive && agents.hp(self) <= 0.0) {
+    agents.set_alive(self, false);
+    emit Burned { tree: self }
+  }
+}
+
+// Wind pulse — every wind_period ticks, every alive tree emits a
+// WindShifted event. With wind_period=7 and 1024 trees this is ~146
+// emits/tick on average — adds ~50% overhead to the EmberLanded
+// volume. The view downstream (wind_exposure) just counts.
+//
+// `world.tick % K == 0` gating works because the resolver lowers
+// `world.tick` as a u32 binding from the kernel preamble (cooldown_probe
+// + per_entity_ring_struct_probe are existing precedents).
+@phase(per_agent)
+physics WindEvent {
+  on Tick {} where (self.alive && (world.tick % config.fire.wind_period) == 0) {
+    emit WindShifted { source: self }
+  }
+}
+
+// Rain pulse — every rain_period ticks. Rain is a "soft" event today
+// (the consumer just counts), but the topology (every alive tree fires
+// once on the gate tick) tests the same dispatch + ring shape as wind
+// at a different period — verifying two periodic emitters with
+// different gating constants compile + dispatch independently.
+@phase(per_agent)
+physics RainEvent {
+  on Tick {} where (self.alive && (world.tick % config.fire.rain_period) == 0) {
+    emit RainFell { source: self }
+  }
+}
+
+// =====================================================================
+// Chronicle consumers (@phase(post), event-bound)
+// =====================================================================
+
+// Catch — a healthy tree that received any EmberLanded this tick
+// transitions to "burning" by setting hp = 99. The check
+// `agents.hp(t) >= 100.0` rejects already-burning trees (avoids a
+// double-ignite that would reset their burn timer). Emits Ignited
+// on the transition; downstream views count Ignited per tree.
+//
+// Note: f32 RMW race (project_f32_rmw_race) — multiple ember sources
+// can target the same healthy tree in the same tick. The `agents.set_hp`
+// here is a last-writer-wins on GPU, but since both writes set the
+// same value (99.0), the race is benign for THIS use. The Ignited
+// emit may double-fire (one per ember that landed first); the view
+// counter is +1 per emit, so ignition_count goes up by N for an
+// N-ember tick — that's the observable.
+@phase(post)
+physics Catch {
+  on EmberLanded { source: s, target: t } {
+    if (agents.hp(t) >= 100.0 && agents.alive(t)) {
+      agents.set_hp(t, 99.0);
+      emit Ignited { tree: t, by: s }
+    }
+  }
+}
+
+// =====================================================================
+// View-fold storage (per-tree counters, multiple decay rates)
+// =====================================================================
+
+// Per-tree ignition count — total times this tree was ignited (pre-burn
+// transition). At equilibrium each tree is ignited exactly once over
+// the whole run (it then either burns out or the fire moves on); the
+// observable is `sum(ignition_count) == burned_count`. NO decay —
+// validates that long-horizon view storage stays bounded under
+// monotonic accumulation. Clamp at 100k as a safety rail (any single
+// tree hitting >1 ignition is itself a discovered shape).
+@materialized(on_event = [Ignited])
+view ignition_count(tree: Agent) -> f32 {
+  initial: 0.0,
+  on Ignited { tree: t } where t == tree { self += 1.0 }
+  clamp: [0.0, 100000.0],
+}
+
+// Per-tree ember-landing count — number of EmberLanded events targeting
+// this tree across the run. Heavier than ignition_count because it
+// includes embers that landed on already-burning trees (no Catch
+// happens, but EmberLanded was still emitted). NO decay; total-over-
+// time observable.
+@materialized(on_event = [EmberLanded])
+view ember_landings(target: Agent) -> f32 {
+  initial: 0.0,
+  on EmberLanded { target: t } where t == target { self += 1.0 }
+  clamp: [0.0, 100000.0],
+}
+
+// Per-tree wind exposure — count of WindShifted events received
+// (broadcast, so every alive tree gets one per wind tick). At
+// wind_period=7 and 500 ticks the per-tree expected count is
+// floor(500 / 7) = 71. This isn't a "received" view — every tree
+// emits its own WindShifted with source=self, so this counts
+// "WindShifted emitted by self" → it's a self-source per-tree counter.
+// Gives a per-agent ground-truth tick counter useful for the pin's
+// wind / fire correlation check.
+@materialized(on_event = [WindShifted])
+view wind_exposure(source: Agent) -> f32 {
+  initial: 0.0,
+  on WindShifted { source: s } where s == source { self += 1.0 }
+  clamp: [0.0, 100000.0],
+}
+
+// Per-tree damage taken (decay-anchored) — counts EmberLanded with
+// rate=0.90, so recent fires rank higher than past ones. Useful as a
+// "recently under fire" signal for downstream AI. Validates @decay
+// running alongside three undecayed views in the same fixture.
+@materialized(on_event = [EmberLanded])
+@decay(rate = 0.90, per = tick)
+view recent_fire_pressure(target: Agent) -> f32 {
+  initial: 0.0,
+  on EmberLanded { target: t } where t == target { self += 1.0 }
+  clamp: [0.0, 10000.0],
+}

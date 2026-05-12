@@ -286,3 +286,158 @@ correctly across 1500 ticks, hitting max_age=800 within 1 tick of
 the predicted reaper trip.
 
 ---
+# Gaps observed during adversarial fixture validation
+
+Living document. Each entry: a fixture pushed an axis hard, surfaced
+something the auto-emit path can't yet handle. Add new entries to the
+top. Resolved entries move to git history (delete from this file when
+the underlying gap closes; the linked commit + pin captures the fix
+context).
+
+---
+
+## 2026-05-11 — `forest_fire` event-storm fixture (event-cascade axis)
+
+Fixture: `assets/sim/forest_fire.sim`
+Pin: `crates/sims/tests/forest_fire_pin.rs::forest_fire_event_storm_500_ticks`
+Branch: `worktree-agent-a9304bc53b3c32920`
+
+Topology: 32×32 grid (1024 Trees), 4-tree centre ignition cluster,
+500-tick horizon. Five distinct event kinds (Ignited, Burned,
+EmberLanded, RainFell, WindShifted) on the shared chronicle ring; four
+view consumers; one PerEvent consumer (Catch on EmberLanded).
+
+Run output (release, 500 ticks): mean 0.16 ms/tick, p95 0.19 ms,
+warmup 22 ms (pipeline compile dominates).
+
+### Gap A — All views in a fixture share ONE `view_storage_primary_buf`
+
+**Severity: high — view semantics broken.**
+
+Symptom: when a fixture declares N per-agent materialized views
+(e.g. forest_fire's `ignition_count`, `ember_landings`, `wind_exposure`,
+`recent_fire_pressure`), the auto-emitted runtime allocates a SINGLE
+`view_storage_primary_buf` of size `agent_count * 4` bytes and binds
+it as slot 2 of every fold kernel and slot 0 of every decay kernel.
+All N folds atomicAdd into the same per-agent slot, producing an
+aggregate sum across views — there is no per-view readback path.
+
+Root cause: `crates/dsl_compiler/src/build_helper.rs::slot_count_expr`
+returns `"agent_count as u64"` for every binding named
+`view_storage_primary` (unless a pair-keyed view triggers the N²
+override). The synthesised `try_new` allocates ONE buffer with that
+name, and every `KernelBindingsContext` for every fold kernel binds
+the same buffer.
+
+Reproduction: `crates/sims/tests/forest_fire_pin.rs` reads
+`view_storage_primary_buf` after 500 ticks. Aggregate sum across
+1024 slots = 445,948 (= sum of all four views' contributions across
+all agents); per-view differentiation impossible.
+
+Fix sketch: emit one `view_<name>_storage_primary_buf` per declared
+view; teach `KernelBindingsContext` to pull the right buffer by view
+name (the binding handle accessor `fold_view_<name>_handles` already
+encodes the view identity — just route to per-view storage instead of
+the shared one).
+
+### Gap B — `event_ring.tail_value()` host-side estimate stays at 0 forever
+
+**Severity: high — silent chronicle drop in auto-emit path.**
+
+Symptom: `state.event_ring.tail_value()` returns 0 every tick of a
+500-tick run, even though producer kernels (Spread, WindEvent,
+RainEvent, Reaper) are emitting events to the GPU `event_tail`
+counter.
+
+Root cause: synthesised `step()` calls
+`self.event_ring.clear_tail_in(&mut encoder)` (which zeros both the
+GPU buffer AND the host-side `tail_estimate`) at the start of every
+tick, but never calls `note_emits()` after a producer kernel runs.
+The host-side estimate exists exactly to avoid a per-tick GPU→host
+sync (see `EventRing::note_emits` docstring); without it, downstream
+chronicle consumers that read `event_count = tail_value()` for their
+per-tick cfg uniform see 0 and early-return their bodies.
+
+Consequence: every PerEvent consumer dispatched via the documented
+`event_count = ring.tail()` pattern silently drops every event. The
+fold kernels don't hit this because they bind `event_tail` directly
+as a GPU storage buffer (slot 1) and read the ATOMIC counter in-shader,
+not the host-side estimate. So folds work; PerEvent rules wired
+through the cfg uniform don't.
+
+Fix sketch: `synthesize_step_body` (build_helper.rs ~1460) emits a
+per-Kernel arm with `dispatch::dispatch_<name>(...)` calls. After each
+producer kernel arm, append:
+
+```rust
+self.event_ring.note_emits(self.agent_count * <max_emits_per_agent>);
+```
+
+The per-kernel max-emits count is recoverable from the kernel's
+`emit` statement count in the lowered IR — the build helper already
+knows this for the `[<fixture> emit-stats]` warning.
+
+### Gap C — Indirect-dispatch consumer arm intentionally unhandled
+
+**Already documented.** See `build_helper.rs:1535-1601` for the
+four-gap blocker. forest_fire's `physics_Catch` (PerEvent on
+EmberLanded → flip hp + emit Ignited) is `DispatchOp::Indirect` and
+falls through the `_ => {}` catch-all. Verdict in pin output:
+"INDIRECT GAP CONFIRMED — only seed cluster burned out".
+
+This isn't a new finding — it's the SAME gap hill_raid hit (commit
+1c565df9 + 78ad8a77). Forest_fire lights it up cleanly because the
+fire-spread cascade depends ENTIRELY on Catch (with no apply_ability
+fallback). When this gap closes, the forest_fire pin's verdict line
+will flip to one of "FIRE SPREADS PARTIALLY" or "FIRE CONSUMED FOREST".
+
+### Gap D — f32 RMW race amplified by shared view storage
+
+**Severity: medium — known issue, fixture surfaces it broadly.**
+
+Symptom: re-running forest_fire with the same seed twice produces
+view aggregate buffers that drift by max |Δ| = 1.000 across 1020/1024
+slots. Drift magnitude is tiny (≤1 increment per slot out of ~440
+total per slot), but the byte-equality determinism contract (P5) is
+broken.
+
+Root cause: documented at `project_f32_rmw_race` (Plan G #244 —
+atomicCompareExchangeWeak fix). When N producers atomicAdd into the
+same `view_storage_primary[agent_id]` slot in the same tick, the
+last-writer-wins f32 conversion drops one event per race. With Gap A
+amplifying this — four views ALL atomicAdd into the same slot via
+four separate kernels in the SCHEDULE — every per-agent slot is a
+race target, not just shared-target slots in pair-keyed views.
+
+The pin records mismatch count + max |Δ| as observation, with a
+loose pin (max_abs_drift ≤ 2.5) so future control-flow divergence
+regressions still trip but the documented race doesn't.
+
+### Gap E — `@traced` annotation surface absent / unverified
+
+Not investigated by this fixture. The original task brief mentions
+`@traced` non-replayable events for diagnostics; the .sim resolver may
+or may not accept the surface. Recommend a focused probe fixture
+later.
+
+### Gap F — `@cascade(max_iter=N)` annotation surface absent
+
+The resolver registers `cascade` as a NamespaceId + `cascade.iterations`
+config (per `dsl_ast/src/ir.rs:228-241`), but no `@cascade` annotation
+parses today (grep across `dsl_ast/src/resolve.rs` returns 0 hits for
+"cascade(" in annotation context). Recommend leaving the cross-tick
+"events from tick T arrive in tick T+1's consumers" as the natural
+shape; the Plan G fixed-point cascade work tracks the real surface.
+
+---
+
+## How to run forest_fire pin
+
+```bash
+RUST_MIN_STACK=33554432 cargo test -p sims --release \
+    --test forest_fire_pin -- --nocapture
+```
+
+Output verdict line tells you which gaps are still open. When all
+six are closed, the verdict should read "FIRE CONSUMED FOREST" and
+the determinism mismatch count should drop to 0.
