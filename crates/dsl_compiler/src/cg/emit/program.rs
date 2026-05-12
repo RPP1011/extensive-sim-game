@@ -1724,18 +1724,24 @@ fn view_fold_accessor(spec: &KernelSpec) -> Option<&str> {
 /// don't expose dedicated anchor/ids buffers).
 ///
 /// # Limitations
-/// - **Field shape is fixed at the 7-binding ViewFold layout.** The
-///   helper assumes the spec carries exactly those bindings (event_ring,
+/// - **Field shape is anchored at the 7-binding ViewFold base layout.** The
+///   helper assumes the spec carries the base bindings (event_ring,
 ///   event_tail, view_storage_primary, view_storage_anchor,
 ///   view_storage_ids, sim_cfg, cfg) in that slot order — guaranteed
-///   by [`super::kernel::build_view_fold_bindings`]. A spec with a
+///   by [`super::kernel::build_view_fold_bindings`]. PerAgentEventScan
+///   adds slot 7 (`agent_busy_with_ability_id`) and `@belief_gated` adds
+///   slot 8 (`beliefs_flags`); both ride past this loop unchanged
+///   because the body iterates `spec.bindings` and emits one mandatory
+///   `&wgpu::Buffer` field per non-anchor/ids slot. A spec with a
 ///   different shape would silently produce a misaligned struct.
 fn compose_view_fold_bindings_struct_fields(spec: &KernelSpec) -> String {
-    // G3d adds 8th slot (`agent_busy_with_ability_id`) for
-    // PerAgentEventScan dispatch.
+    // Base ViewFold = 7 bindings.
+    // + PerAgentEventScan dispatch adds slot 7 = `agent_busy_with_ability_id` (→ 8).
+    // + `@belief_gated` (only valid alongside PerAgentEventScan) adds
+    //   slot 8 = `beliefs_flags` (→ 9). See `build_view_fold_bindings`.
     debug_assert!(
-        spec.bindings.len() == 7 || spec.bindings.len() == 8,
-        "compose_view_fold_bindings_struct_fields: ViewFold spec must carry 7 or 8 bindings; got {}",
+        matches!(spec.bindings.len(), 7 | 8 | 9),
+        "compose_view_fold_bindings_struct_fields: ViewFold spec must carry 7, 8, or 9 bindings; got {}",
         spec.bindings.len()
     );
     let mut out = String::new();
@@ -1790,8 +1796,8 @@ fn compose_view_fold_bindings_struct_fields(spec: &KernelSpec) -> String {
 #[allow(dead_code)]
 fn compose_view_fold_bind_method(spec: &KernelSpec) -> String {
     debug_assert!(
-        spec.bindings.len() == 7 || spec.bindings.len() == 8,
-        "compose_view_fold_bind_method: ViewFold spec must carry 7 or 8 bindings; got {}",
+        matches!(spec.bindings.len(), 7 | 8 | 9),
+        "compose_view_fold_bind_method: ViewFold spec must carry 7, 8, or 9 bindings; got {}",
         spec.bindings.len()
     );
     let accessor = view_fold_accessor(spec).expect("ViewFold spec must carry an accessor");
@@ -1844,9 +1850,12 @@ fn compose_view_fold_record_method(spec: &KernelSpec) -> String {
     // (event_ring/event_tail/primary/anchor/ids/sim_cfg/cfg). G3d's
     // PerAgentEventScan adds slot 7 = `agent_busy_with_ability_id`
     // for the busy-filter early-exit, bringing the total to 8.
+    // `@belief_gated` (PerAgentEventScan only) adds slot 8 =
+    // `beliefs_flags` for the per-(observer, source) gate read,
+    // bringing the total to 9.
     debug_assert!(
-        spec.bindings.len() == 7 || spec.bindings.len() == 8,
-        "compose_view_fold_record_method: ViewFold spec must carry 7 or 8 bindings; got {}",
+        matches!(spec.bindings.len(), 7 | 8 | 9),
+        "compose_view_fold_record_method: ViewFold spec must carry 7, 8, or 9 bindings; got {}",
         spec.bindings.len()
     );
     let mut out = String::new();

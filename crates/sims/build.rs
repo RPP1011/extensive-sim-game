@@ -97,6 +97,7 @@ fn main() {
                 | "ecosystem_cascade"
                 | "apply_ability_smoke"
                 | "voxel_probe"
+                | "dodger_probe"
         ) {
             continue;
         }
