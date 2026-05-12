@@ -68,7 +68,9 @@
 //!      slot ember_landings buffers match.
 //!
 //! **What this pin does NOT probe (documented for follow-up agents)**:
-//!   * `@traced` non-replayable events — surface unverified.
+//!   * `@traced` non-replayable events — surface VERIFIED (parses +
+//!     resolves + lowers; see `crates/dsl_compiler/tests/traced_annotation_parses.rs`
+//!     and `EventIR::is_traced()`); EventLayout-level wiring still TBD.
 //!   * `@cascade(max_iter=N)` annotation — surface absent today.
 //!   * `rng.chance(p)` — surface unverified, fixture uses `rng.action()
 //!     % 100`.

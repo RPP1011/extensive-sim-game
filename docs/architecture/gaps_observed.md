@@ -539,12 +539,32 @@ The pin records mismatch count + max |Δ| as observation, with a
 loose pin (max_abs_drift ≤ 2.5) so future control-flow divergence
 regressions still trip but the documented race doesn't.
 
-### Gap E — `@traced` annotation surface absent / unverified
+### Gap E — `@traced` annotation surface absent / unverified — CLOSED (phantom, 2026-05-12)
 
-Not investigated by this fixture. The original task brief mentions
-`@traced` non-replayable events for diagnostics; the .sim resolver may
-or may not accept the surface. Recommend a focused probe fixture
-later.
+Investigated 2026-05-12 — **the surface already parses + resolves +
+lowers** through the generic annotation infrastructure. No parser
+arm, resolver allowlist, or lowering allowlist gates the
+`@traced` name; it lands directly on
+`dsl_ast::ir::EventIR::annotations` and survives through to
+`dsl_compiler::cg::program::CgProgram`. The
+`assets/sim/predator_prey_min.sim` fixture has been exercising
+`@non_replayable @traced` on its `DeathCry` event since Stage 8
+and `predator_prey_non_replayable.rs` pins the resolver path.
+
+Pinned by a standalone regression fixture: `crates/dsl_compiler/tests/traced_annotation_parses.rs`
+(parse + resolve + lower + `EventIR::is_traced()` helper, both bare
+`@traced` and stacked `@non_replayable @traced` forms). Schema hash
+unchanged.
+
+**Deferred (still open under the same gap entry):** wiring
+`is_traced` into the per-kind
+`dsl_compiler::cg::program::EventLayout` so the schedule synthesizer
+can route traced events to a separate ring and the host fold can
+filter at layout level without re-walking the
+`EventIR.annotations` vec. The fold path that would consume this
+flag is still TBD — no runtime trace-vs-replay-hash split exists
+today; `@non_replayable` is the only currently-honoured
+ring-routing flag.
 
 ### Gap F — `@cascade(max_iter=N)` annotation surface absent
 

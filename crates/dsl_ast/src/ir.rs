@@ -574,6 +574,43 @@ pub struct EventIR {
     pub engine_kind_id: Option<u32>,
 }
 
+impl EventIR {
+    /// Returns `true` when this event carries the `@traced` annotation —
+    /// the surface that marks an event as a non-replayable observability /
+    /// diagnostics record (sibling to `@non_replayable`, inverse-intent
+    /// of `@replayable`). Fold consumers that produce the deterministic
+    /// trace hash should skip events for which this returns `true`;
+    /// trace consumers (histograms, per-tick debug logs, chronicle
+    /// renderers) should include them.
+    ///
+    /// **Surface status (Gap forest_fire#E, 2026-05-12):** the
+    /// annotation parses + resolves through the generic annotation
+    /// surface today (no special parser arm). Pinned by
+    /// `crates/dsl_compiler/tests/traced_annotation_parses.rs` and
+    /// `crates/dsl_compiler/tests/predator_prey_non_replayable.rs`.
+    /// Wiring `is_traced` into the per-kind [`EventLayout`] (so the
+    /// schedule synthesizer can route traced events to a separate ring
+    /// and the host fold can filter on it without re-walking the
+    /// `EventIR.annotations` vec) is a follow-up scoped behind the same
+    /// gap entry.
+    ///
+    /// [`EventLayout`]: ../../dsl_compiler/cg/program/struct.EventLayout.html
+    pub fn is_traced(&self) -> bool {
+        self.annotations.iter().any(|a| a.name == "traced")
+    }
+
+    /// Returns `true` when this event carries the `@non_replayable`
+    /// annotation — the surface that routes the event off the
+    /// deterministic replay ring and onto the host-side chronicle ring
+    /// (string payloads allowed, no `Pod` round-trip). The matching
+    /// resolver path lives in
+    /// [`crate::resolve`] (`non_replayable_events` collection +
+    /// `validate_physics_body`).
+    pub fn is_non_replayable(&self) -> bool {
+        self.annotations.iter().any(|a| a.name == "non_replayable")
+    }
+}
+
 /// `event_tag <Name>` declaration. The listed fields are the contract every
 /// event claiming this tag must satisfy (same name + matching type).
 #[derive(Debug, Clone, PartialEq, Serialize)]

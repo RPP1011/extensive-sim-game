@@ -53,11 +53,17 @@
 //      consumer to dodge a fusion gap; this fixture intentionally
 //      keeps Reaper as a SEPARATE PerAgent rule on Tick, surfacing
 //      that fusion shape if it regresses.
-//   4. `@traced` annotation (non-replayable diagnostic events): NOT
-//      explored here — the AST surface is unverified, and the resolver
-//      may reject it. This fixture stays on @replayable + @gpu_amenable
-//      across all five event kinds; the @traced gap is documented in
-//      docs/architecture/gaps_observed.md for a follow-up agent.
+//   4. `@traced` annotation (non-replayable diagnostic events): the
+//      surface already parses + resolves + lowers through the generic
+//      annotation infrastructure (verified 2026-05-12 — Gap E CLOSED
+//      as phantom; see docs/architecture/gaps_observed.md). This
+//      fixture intentionally stays on @replayable + @gpu_amenable
+//      across all five event kinds so the determinism contract
+//      remains testable end-to-end — a separate
+//      crates/dsl_compiler/tests/traced_annotation_parses.rs fixture
+//      pins the @traced surface. EventLayout-level wiring (so the
+//      schedule synthesizer can route traced events to a separate
+//      ring) is the deferred follow-up.
 //   5. `@cascade(max_iter=N)` annotation — the resolver registers a
 //      `cascade` namespace + `cascade.iterations` config, but no
 //      `@cascade` annotation surface exists today. Leaving the
