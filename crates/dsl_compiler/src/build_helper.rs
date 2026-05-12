@@ -518,9 +518,9 @@ fn emit_into(
 /// initialize each cfg buffer's runtime field with its .sim default
 /// and the generator can emit a host-side setter.
 #[derive(Clone)]
-struct RuntimeConfigDefault {
-    scalar_ty: String,
-    default_lit: String,
+pub struct RuntimeConfigDefault {
+    pub scalar_ty: String,
+    pub default_lit: String,
 }
 
 /// Recursive walk over a physics rule body looking for any
@@ -878,7 +878,7 @@ pub fn detect_pair_keyed_second_key(
 /// trade_caravans's `view inventory(merchant: Agent, good: Item)` is
 /// the in-tree trigger) get their proper static counts threaded
 /// through.
-fn synthesize_runtime_core_a2(
+pub fn synthesize_runtime_core_a2(
     fixture_name: &str,
     artifacts: &crate::cg::emit::EmittedArtifacts,
     init_stmts: &[dsl_ast::ast::InitStmt],
@@ -1362,9 +1362,9 @@ fn synthesize_generated_runtime_struct(
         // fixture-owned init state lives in the .sim source instead of
         // a hand-written *_runtime/lib.rs.
         let init_match = name.strip_prefix("agent_").and_then(|col| {
-            init_stmts.iter().find(|s| s.field == col)
+            init_stmts.iter().find(|s| s.field == col).map(|s| (col, s))
         });
-        if let Some(stmt) = init_match {
+        if let Some((col, stmt)) = init_match {
             if elem_bytes != 4 {
                 out.push_str(&format!(
                     "        // TODO(plan-e/a6): init for {name} ignored — only u32/f32 (4-byte) elem types supported today (saw {elem_bytes}-byte).\n\
@@ -1377,16 +1377,52 @@ fn synthesize_generated_runtime_struct(
                 ));
                 continue;
             }
-            let init_vec_expr = match &stmt.expr {
-                dsl_ast::ast::InitExpr::Const(n) => {
+            // Gap G fix (2026-05-11) — route the init constant by the
+            // target column's primitive type. Pre-fix, every init lowered
+            // to `vec![Nu32; agent_count]` regardless of whether the
+            // column is f32, u32, or bool. For f32 columns (hp, max_hp,
+            // mana, ...) that wrote the u32 bit-pattern of N (e.g. 100
+            // == 0x64) into the f32 buffer, which reads back as 1.4e-43
+            // — functionally zero. Look up the column type via
+            // `AgentFieldId::from_snake` so f32 columns get an f32 init
+            // slice and u32/bool columns keep the historical u32 path.
+            //
+            // Bool columns are represented as packed `u32` (0/1) on GPU,
+            // so they share the u32 emit. I16/q8 columns currently fall
+            // through `elem_bytes != 4` above (they're 2-byte) so they
+            // hit the no-init path; if a future column is i16-packed at
+            // 4 bytes, this match will need an explicit arm.
+            //
+            // Vec3 / EnumU8 / OptAgentId / OptEnumU32 are not surfaceable
+            // through `init { col: <int> }` today (no fixture declares
+            // them), but if one tries we emit u32 to preserve the old
+            // behaviour rather than silently producing the wrong slice.
+            use crate::cg::data_handle::{AgentFieldId, AgentFieldTy};
+            let col_ty = AgentFieldId::from_snake(col).map(AgentFieldId::ty);
+            let elem_rust_ty = match col_ty {
+                Some(AgentFieldTy::F32) => "f32",
+                _ => "u32",
+            };
+            let init_vec_expr = match (&stmt.expr, elem_rust_ty) {
+                (dsl_ast::ast::InitExpr::Const(n), "f32") => {
+                    // `100` → `100.0_f32` — InitExpr is i64; cast through
+                    // f64 first preserves sign for the (rare) negative
+                    // init values without surprising the compiler about
+                    // the suffix on a literal-expr.
+                    format!("vec![{n}.0_f32; agent_count as usize]")
+                }
+                (dsl_ast::ast::InitExpr::Const(n), _) => {
                     format!("vec![{n}u32; agent_count as usize]")
                 }
-                dsl_ast::ast::InitExpr::Slot => {
+                (dsl_ast::ast::InitExpr::Slot, "f32") => {
+                    "(0..agent_count).map(|i| i as f32).collect::<Vec<f32>>()".to_string()
+                }
+                (dsl_ast::ast::InitExpr::Slot, _) => {
                     "(0..agent_count).collect::<Vec<u32>>()".to_string()
                 }
             };
             out.push_str(&format!(
-                "        let {name}_init: Vec<u32> = {init_vec_expr};\n\
+                "        let {name}_init: Vec<{elem_rust_ty}> = {init_vec_expr};\n\
                  \x20       let {name}_buf = wgpu::util::DeviceExt::create_buffer_init(\n\
                  \x20           &gpu.device,\n\
                  \x20           &wgpu::util::BufferInitDescriptor {{\n\
