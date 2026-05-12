@@ -303,35 +303,27 @@ fn read_hp(state: &mut GeneratedRuntime) -> Vec<f32> {
     readback_f32(state, &buf, N_AGENTS as usize)
 }
 
-fn read_view_damage_dealt(_state: &mut GeneratedRuntime) -> Vec<f32> {
-    // GAP: `damage_dealt`, `healing_done`, AND the pair-keyed
-    // `threat_taken` ALL fold into the same `view_storage_primary_buf`
-    // (see gaps_observed.md, gap class "view storage aliasing"). The
-    // single-key views write to slot[source_id]; the pair view writes
-    // to slot[obs*N + src]. There's no per-view offset arithmetic in
-    // the auto-emit path today, so the per-view readback would return
-    // values polluted by the other folds.
-    //
-    // Returning zeros here keeps the pin shape stable while the gap is
-    // documented. Once the build_helper grows per-view storage offsets,
-    // swap the body for an actual readback.
-    vec![0.0; N_AGENTS as usize]
+fn read_view_damage_dealt(state: &mut GeneratedRuntime) -> Vec<f32> {
+    // Per-view storage post the aliasing-gap fix — `damage_dealt`
+    // has its own backing buffer (`view_storage_damage_dealt_primary_buf`),
+    // not aliased with `healing_done` / `threat_taken` anymore.
+    let buf = state.view_storage_damage_dealt_primary_buf.clone();
+    readback_f32(state, &buf, N_AGENTS as usize)
 }
 
-fn read_view_healing_done(_state: &mut GeneratedRuntime) -> Vec<f32> {
-    // Same aliasing gap as `damage_dealt` above — placeholder zeros
-    // until per-view storage offsets land in the auto-emit.
-    vec![0.0; N_AGENTS as usize]
+fn read_view_healing_done(state: &mut GeneratedRuntime) -> Vec<f32> {
+    // Per-view storage post the aliasing-gap fix.
+    let buf = state.view_storage_healing_done_primary_buf.clone();
+    readback_f32(state, &buf, N_AGENTS as usize)
 }
 
 fn read_view_threat_taken(state: &mut GeneratedRuntime) -> Vec<f32> {
-    // threat_taken IS the pair-keyed view that drove
-    // `view_storage_primary_buf` to be sized N*N. Readback the full
-    // matrix; the single-key folds for damage/heal pollute the
-    // diagonal-ish slots (see gap above), so this readback's
-    // off-diagonal cells are the cleanest signal.
+    // Per-view storage post the aliasing-gap fix. `threat_taken` is
+    // pair-keyed (observer, source) and gets its own N²-sized backing
+    // buffer `view_storage_threat_taken_primary_buf` — independent of
+    // the per-agent `damage_dealt` / `healing_done` views.
     let n = N_AGENTS as usize;
-    let buf = state.view_storage_primary_buf.clone();
+    let buf = state.view_storage_threat_taken_primary_buf.clone();
     readback_f32(state, &buf, n * n)
 }
 

@@ -38,9 +38,10 @@
 //! the SIR breakdown without asserting specific values):
 //!   - SIR breakdown: susceptible / infected / recovered / dead.
 //!   - Healer kill-pressure proxy: # of bless dispatches landed.
-//!   - Belief drift over time: by reading the shared
-//!     view_storage_primary_buf at intervals (NOTE only — see
-//!     potential GAP P-E for shared view storage corruption).
+//!   - Belief drift over time: each `@materialized` view now lives
+//!     in its own per-view backing buffer (`view_storage_<name>_primary_buf`)
+//!     after the per-view aliasing-gap fix; readbacks are no longer
+//!     shared / corrupted across views.
 
 use sims::plague_city::GeneratedRuntime;
 
@@ -108,11 +109,10 @@ fn plague_runs_to_equilibrium_after_500_ticks() {
     // 100 (i.e. they took damage from infection but were cured before
     // it killed them). Susceptible = alive AND hunger == 0 AND hp ==
     // 100 (untouched throughout). This is approximate — it conflates
-    // "always healthy" with "healed and refilled" since Cure heals hp;
-    // the fold sums in cure_count would be the precise signal but
-    // those views all share view_storage_primary_buf with each other
-    // (potential GAP P-E — see gaps_plague_city.md). The hp/hunger
-    // SoA columns have unambiguous backing buffers.
+    // "always healthy" with "healed and refilled" since Cure heals hp.
+    // (Per-view storage now lives in its own buffer; reading
+    // `cure_count` directly via `view_storage_cure_count_primary_buf`
+    // would give the precise signal — left as a follow-up.)
     let hp_buf = state.agent_hp_buf.clone();
     let hunger_buf = state.agent_hunger_buf.clone();
     let alive_buf = state.agent_alive_buf.clone();

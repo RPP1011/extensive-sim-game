@@ -244,7 +244,8 @@ fn read_view_event_load(state: &mut GeneratedRuntime) -> Vec<f32> {
     let mut encoder = state.gpu.device.create_command_encoder(
         &wgpu::CommandEncoderDescriptor { label: Some("among_us::event_load_readback") },
     );
-    encoder.copy_buffer_to_buffer(&state.view_storage_primary_buf, 0, &staging, 0, bytes);
+    // Per-view storage post the aliasing-gap fix.
+    encoder.copy_buffer_to_buffer(&state.view_storage_event_load_primary_buf, 0, &staging, 0, bytes);
     state.gpu.queue.submit(Some(encoder.finish()));
     let slice = staging.slice(..bytes);
     slice.map_async(wgpu::MapMode::Read, |r| r.expect("map_async"));

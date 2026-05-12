@@ -107,8 +107,11 @@ fn view_storage_primary_round_trips_per_pair_cells() {
         })
         .collect();
 
+    // Per-view storage post the aliasing-gap fix — `beliefs_flags`
+    // is the pair-keyed view in this fixture; backing buffer is
+    // `view_storage_beliefs_flags_primary_buf`.
     rt.gpu.queue.write_buffer(
-        &rt.view_storage_primary_buf,
+        &rt.view_storage_beliefs_flags_primary_buf,
         0,
         bytemuck::cast_slice(&seeded),
     );

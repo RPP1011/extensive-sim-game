@@ -200,21 +200,22 @@ fn forest_fire_event_storm_500_ticks() {
     println!(
         "    cap usage:  max_tail = {tail_capped} ({pct_of_cap:.2}% of {RING_CAP} slot cap)",
     );
-    println!("  -- view fold AGGREGATE (single shared backing buffer) --");
+    // Per-view sums (aliasing-gap fix landed — each fold now writes
+    // its own backing buffer).
+    let sum_ignition: f32 = read_per_view_storage(&mut state, ForestView::IgnitionCount).iter().sum();
+    let sum_ember: f32 = read_per_view_storage(&mut state, ForestView::EmberLandings).iter().sum();
+    let sum_wind: f32 = read_per_view_storage(&mut state, ForestView::WindExposure).iter().sum();
+    let sum_recent: f32 = read_per_view_storage(&mut state, ForestView::RecentFirePressure).iter().sum();
+
+    println!("  -- view fold per-view + AGGREGATE --");
     println!(
-        "    sum across all slots = {total_view_aggregate:.0}  max/slot = {max_aggregate_per_slot:.0}  nonzero_slots = {nonzero_slots}/{N_TOTAL}",
+        "    sum across all views = {total_view_aggregate:.0}  max/slot = {max_aggregate_per_slot:.0}  nonzero_slots = {nonzero_slots}/{N_TOTAL}",
     );
     println!(
-        "    NOTE: the four declared views (ignition_count, ember_landings,",
+        "    per-view sums: ignition={sum_ignition:.0} ember={sum_ember:.0} wind={sum_wind:.0} recent={sum_recent:.0}",
     );
     println!(
-        "          wind_exposure, recent_fire_pressure) all alias the same",
-    );
-    println!(
-        "          per-agent storage. Per-view differentiation impossible.",
-    );
-    println!(
-        "          Expected per-slot wind contribution ≈ {expected:.0} (TICKS/7).",
+        "    Expected per-slot wind contribution ≈ {expected:.0} (TICKS/7).",
         expected = (TICKS as f64) / 7.0,
     );
 
@@ -260,15 +261,21 @@ fn forest_fire_event_storm_500_ticks() {
         "alive + ash conservation broken: {final_alive} + {final_ash} != {N_TOTAL}",
     );
 
-    // P3: View accumulator picked up SOMETHING. With the shared-buffer
-    // gap, we can't separate per-view counts, but the AGGREGATE must be
-    // > 0 — Spread emits embers, WindEvent broadcasts, RainEvent
-    // broadcasts, all four folds atomicAdd into the shared slot. Sum
-    // across all slots will be in the thousands at minimum (mostly
-    // wind: 1024 trees × 71 wind ticks = 72704 just for wind).
+    // P3: View accumulators picked up SOMETHING. Now that per-view
+    // storage is wired (no more shared aliasing), each view's sum is
+    // independently observable. wind_exposure broadcasts to every
+    // tree on every WindShifted tick and is the largest accumulator;
+    // load-bear on the wind sum being well above zero (1024 trees ×
+    // 71 wind ticks = ~72,000 expected).
     assert!(
         total_view_aggregate > 0.0,
         "view storage aggregate is 0 — no fold fired OR Spread didn't emit",
+    );
+    assert!(
+        sum_wind > 1000.0,
+        "wind_exposure per-view sum unexpectedly low ({sum_wind:.0}) — \
+         Spread/WindEvent producer or fold pipeline regressed; \
+         per-view storage now isolates this view from the others.",
     );
 
     // P4 (DISCOVERED GAP): host-side `event_ring.tail_value()` stays at
@@ -411,19 +418,21 @@ fn count_burning(state: &mut GeneratedRuntime) -> u32 {
         .count() as u32
 }
 
-/// Read the (single, shared) `view_storage_primary_buf`. Per the
-/// architectural gap discovered while building this pin: the
-/// auto-emitted runtime allocates ONE per-agent f32 buffer named
-/// `view_storage_primary` and binds it as slot 2 of every fold kernel
-/// (and slot 0 of every decay kernel). All four views in this fixture
-/// SHARE the same storage. After each tick the buffer holds the
-/// CUMULATIVE atomicAdd of every fold kernel that ran this tick — i.e.
-/// `ignition_count[i] + ember_landings[i] + wind_exposure[i] +
-/// recent_fire_pressure[i]` mashed into one slot. Per-view readback
-/// is impossible until the compiler emits per-view backing buffers.
-///
-/// See `docs/architecture/gaps_observed.md` for the gap write-up.
-fn read_shared_view_storage(state: &mut GeneratedRuntime) -> Vec<f32> {
+/// Read one of the four per-view storage buffers. The per-view
+/// storage aliasing gap (commit "fix(build_helper): per-view storage
+/// buffers (6-fixture aliasing gap)") is now closed: each
+/// `@materialized` view gets its own host-side
+/// `view_storage_<view_name>_primary_buf` instead of the legacy
+/// shared `view_storage_primary_buf`.
+#[derive(Debug, Clone, Copy)]
+enum ForestView {
+    IgnitionCount,
+    EmberLandings,
+    WindExposure,
+    RecentFirePressure,
+}
+
+fn read_per_view_storage(state: &mut GeneratedRuntime, view: ForestView) -> Vec<f32> {
     let n = N_TOTAL as usize;
     let bytes = (n as u64 * 4).max(16);
     let staging = state.gpu.device.create_buffer(&wgpu::BufferDescriptor {
@@ -437,13 +446,13 @@ fn read_shared_view_storage(state: &mut GeneratedRuntime) -> Vec<f32> {
             label: Some("forest_fire::view_readback"),
         },
     );
-    encoder.copy_buffer_to_buffer(
-        &state.view_storage_primary_buf,
-        0,
-        &staging,
-        0,
-        bytes,
-    );
+    let src_buf = match view {
+        ForestView::IgnitionCount => &state.view_storage_ignition_count_primary_buf,
+        ForestView::EmberLandings => &state.view_storage_ember_landings_primary_buf,
+        ForestView::WindExposure => &state.view_storage_wind_exposure_primary_buf,
+        ForestView::RecentFirePressure => &state.view_storage_recent_fire_pressure_primary_buf,
+    };
+    encoder.copy_buffer_to_buffer(src_buf, 0, &staging, 0, bytes);
     state.gpu.queue.submit(Some(encoder.finish()));
     let slice = staging.slice(..bytes);
     slice.map_async(wgpu::MapMode::Read, |r| r.expect("map_async"));
@@ -454,6 +463,26 @@ fn read_shared_view_storage(state: &mut GeneratedRuntime) -> Vec<f32> {
         words[..n].to_vec()
     };
     staging.unmap();
+    out
+}
+
+/// Convenience: sum all four per-view buffers slot-wise. Used to
+/// preserve the legacy "aggregate" shape the pin's determinism check
+/// + total-accumulator assertions consume.
+fn read_shared_view_storage(state: &mut GeneratedRuntime) -> Vec<f32> {
+    let n = N_TOTAL as usize;
+    let mut out = vec![0.0f32; n];
+    for v in [
+        ForestView::IgnitionCount,
+        ForestView::EmberLandings,
+        ForestView::WindExposure,
+        ForestView::RecentFirePressure,
+    ] {
+        let cells = read_per_view_storage(state, v);
+        for (i, c) in cells.iter().enumerate() {
+            out[i] += c;
+        }
+    }
     out
 }
 

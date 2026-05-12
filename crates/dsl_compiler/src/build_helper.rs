@@ -432,6 +432,15 @@ fn emit_into(
     // threats(observer: Agent) -> f32`) keep the per-agent sizing
     // (detector returns `None`).
     let pair_keyed_second_key = detect_pair_keyed_second_key(&comp);
+    // Per-view metadata (one entry per `@materialized` view) — drives
+    // the per-view storage-buffer allocation in
+    // `synthesize_generated_runtime_struct` so each fold/decay kernel's
+    // `view_storage_primary` BGL binding routes to its OWN
+    // `view_storage_<view_name>_primary_buf` instead of the shared
+    // (aliased) buffer the legacy emitter produced. Closes the 6-fixture
+    // aliasing gap (forest_fire/squad_skirmish/plague_city/
+    // detective_investigation/palace_coup/among_us).
+    let materialized_views = collect_materialized_views(&comp);
     // Voxel-binding detection. If any kernel binds `voxel_grid` then the
     // synthesized runtime needs a CPU-side `engine_voxel::VoxelTerrain`
     // + GPU-side `engine_voxel::VoxelMirror` so `KernelBindingsContext::
@@ -494,6 +503,7 @@ fn emit_into(
         &ability_file_names,
         &comp.events,
         pair_keyed_second_key,
+        &materialized_views,
         binds_voxel_grid,
         &indirect_consumer_kernel_names,
     );
@@ -789,6 +799,97 @@ impl PairKeyedSecondKey {
     }
 }
 
+/// Per-`@materialized`-view metadata threaded into the runtime
+/// synthesizer for per-view storage-buffer allocation. Each entry
+/// pairs a view name (the `<view_name>` in `view <view_name>(...)
+/// -> ... { @materialized }`) with the shape of its backing storage
+/// (per-agent for single-key views; pair-keyed with a known
+/// second-key population for two-key views).
+///
+/// Used by the per-view storage allocator to size each view's own
+/// `view_storage_<view_name>_primary_buf` independently — closes the
+/// 6-fixture aliasing gap (forest_fire/squad_skirmish/plague_city/
+/// detective_investigation/palace_coup/among_us) where the previous
+/// shared `view_storage_primary_buf` aliased every view's writes
+/// into a single buffer.
+#[derive(Debug, Clone)]
+pub struct MaterializedViewInfo {
+    /// Snake_case view name as declared in the .sim source (e.g.
+    /// `damage_dealt`, `threat_taken`, `evidence`). Matches the
+    /// `<view>` segment of the kernel name (`fold_<view>` /
+    /// `decay_<view>`) and the per-view BGL binding (`view_storage_
+    /// <view>_primary` for read accessors).
+    pub name: String,
+    /// Pair-keyed second-key population (`Some(_)`) for views with
+    /// two key parameters where the first is `Agent`; `None` for
+    /// per-agent (single-key) views. Drives per-view buffer sizing
+    /// in the synthesized `try_new`.
+    pub pair_keyed: Option<PairKeyedSecondKey>,
+}
+
+/// Walk `comp.views` and return one [`MaterializedViewInfo`] per
+/// `@materialized` view declaration, in declaration order. Used by
+/// the runtime synthesizer to allocate one
+/// `view_storage_<view_name>_primary_buf` per view and route each
+/// fold/decay kernel's `view_storage_primary` BGL binding to its
+/// own backing buffer (instead of the shared
+/// `view_storage_primary_buf` that aliased every view together).
+pub fn collect_materialized_views(
+    comp: &dsl_ast::ir::Compilation,
+) -> Vec<MaterializedViewInfo> {
+    use dsl_ast::ast::EntityRoot;
+    use dsl_ast::ir::{IrType, ViewKind};
+    let item_count = comp
+        .entities
+        .iter()
+        .filter(|e| matches!(e.root, EntityRoot::Item))
+        .count() as u32;
+    let group_count = comp
+        .entities
+        .iter()
+        .filter(|e| matches!(e.root, EntityRoot::Group))
+        .count() as u32;
+    let quest_count = comp
+        .entities
+        .iter()
+        .filter(|e| matches!(e.root, EntityRoot::Quest))
+        .count() as u32;
+    let mut out = Vec::new();
+    for v in &comp.views {
+        if !matches!(v.kind, ViewKind::Materialized(_)) {
+            continue;
+        }
+        let pair_keyed = if v.params.len() == 2
+            && matches!(v.params[0].ty, IrType::AgentId)
+        {
+            // Mirrors `detect_pair_keyed_second_key`'s per-view
+            // classification — the second param's type picks the
+            // pair-keyed second-key population.
+            match &v.params[1].ty {
+                IrType::AgentId => Some(PairKeyedSecondKey::Agent),
+                IrType::ItemId => Some(PairKeyedSecondKey::Item(item_count.max(1))),
+                IrType::GroupId => Some(PairKeyedSecondKey::Group(group_count.max(1))),
+                IrType::QuestId => Some(PairKeyedSecondKey::Quest(quest_count.max(1))),
+                IrType::Named(n) => match n.as_str() {
+                    "Agent" => Some(PairKeyedSecondKey::Agent),
+                    "Item" => Some(PairKeyedSecondKey::Item(item_count.max(1))),
+                    "Group" => Some(PairKeyedSecondKey::Group(group_count.max(1))),
+                    "Quest" => Some(PairKeyedSecondKey::Quest(quest_count.max(1))),
+                    _ => None,
+                },
+                _ => None,
+            }
+        } else {
+            None
+        };
+        out.push(MaterializedViewInfo {
+            name: v.name.clone(),
+            pair_keyed,
+        });
+    }
+    out
+}
+
 /// Returns the second-key shape if `comp` declares ≥1 `@materialized`
 /// view with exactly two parameters where the first is `Agent` and
 /// the second is some entity-rooted type. Returns `None` otherwise.
@@ -929,6 +1030,7 @@ pub fn synthesize_runtime_core_a2(
     ability_file_names: &[String],
     events: &[dsl_ast::ir::EventIR],
     pair_keyed_second_key: Option<PairKeyedSecondKey>,
+    materialized_views: &[MaterializedViewInfo],
     binds_voxel_grid: bool,
     indirect_consumer_kernel_names: &[String],
 ) -> String {
@@ -1006,6 +1108,7 @@ pub fn synthesize_runtime_core_a2(
         ability_file_names,
         events,
         pair_keyed_second_key,
+        materialized_views,
         binds_voxel_grid,
         indirect_consumer_kernel_names,
     ));
@@ -1161,17 +1264,81 @@ fn slot_count_expr(
         binding_name == "view_storage_primary",
         pair_keyed_second_key,
     ) {
-        // Materialized view's own backing storage when the fixture
-        // has a `view foo(a: Agent, b: <Entity>)` declaration. The
-        // fold body writes `view_storage_primary[a *
-        // cfg.second_key_pop + b]`; size for `agent_count *
-        // <second_key_population>` so every (a, b) cell has its own
-        // slot. T6 fix (2026-05-11) generalised the second-key
-        // population from "always agent_count" to entity-typed
-        // counts.
+        // Legacy fixture-wide path — fires when the rename to
+        // `view_storage_<view>_primary` didn't apply (defensive
+        // fallback for kernels whose names don't follow the
+        // `fold_*` / `decay_*` convention). Per-view sizing for the
+        // renamed names is handled by the call site (see
+        // `slot_count_expr_for_view_buf`).
         format!("(agent_count as u64) * {}", skey.population_u64_expr())
     } else {
         "agent_count as u64".to_string()
+    }
+}
+
+/// Slot-count expression for a per-view storage buffer (one of
+/// `view_storage_<view>_primary` / `view_storage_<view>_anchor` /
+/// `view_storage_<view>_ids`). `pair_keyed` is `Some(_)` for views
+/// with an `(Agent, X)` key pair; `None` for per-agent views.
+///
+/// Per-view sizing closes the aliasing gap where the legacy single
+/// `view_storage_primary_buf` was sized for the LARGEST view and
+/// every fold wrote into it. Each view now allocates exactly its
+/// own footprint (`agent_count` for per-agent; `agent_count *
+/// second_key_pop` for pair-keyed).
+fn slot_count_expr_for_view_buf(pair_keyed: Option<PairKeyedSecondKey>) -> String {
+    match pair_keyed {
+        Some(skey) => format!("(agent_count as u64) * {}", skey.population_u64_expr()),
+        None => "agent_count as u64".to_string(),
+    }
+}
+
+/// Extract the `<view>` name from a `fold_<view>` / `decay_<view>`
+/// kernel name. Returns `None` for kernels that don't follow either
+/// pattern (e.g. `physics_*`, `fused_*`, `scoring`). Used by the
+/// per-view storage rename pass in
+/// [`synthesize_generated_runtime_struct`] — the kernel name is the
+/// authoritative source of the view a fold/decay kernel writes
+/// (the legacy BGL binding name `view_storage_primary` is uniform
+/// across all fold/decay kernels and carries no per-view info).
+fn view_name_from_kernel_name(kernel_name: &str) -> Option<&str> {
+    if let Some(rest) = kernel_name.strip_prefix("fold_") {
+        // Defensive: `fold_view_<id>` is the un-named-view fallback
+        // form `view_fold_fused_kernel_name` emits when the view
+        // name lookup fails. Treat the trailing slug as the view
+        // name (the per-view buffer name still keeps the kernel +
+        // BGL in sync).
+        return Some(rest);
+    }
+    if let Some(rest) = kernel_name.strip_prefix("decay_") {
+        return Some(rest);
+    }
+    None
+}
+
+/// Per-view rename of a fold/decay kernel's view-storage bindings.
+/// `binding_name` is the BGL-level name as the kernel synthesiser
+/// emitted it (`view_storage_primary` / `view_storage_anchor` /
+/// `view_storage_ids` for fold kernels; `view_storage_primary` only
+/// for decay kernels). `view_name` is `Some(<view>)` when the
+/// enclosing kernel is `fold_<view>` / `decay_<view>` (per
+/// [`view_name_from_kernel_name`]).
+///
+/// Returns the per-view-namespaced name when both inputs match the
+/// rename rule (e.g. `view_storage_damage_dealt_primary`); returns
+/// the original `binding_name` (unchanged) otherwise. Bindings with
+/// names that don't start with `view_storage_` (or that already
+/// carry a per-view name from the scoring-kernel emit path) pass
+/// through unchanged so the rename is idempotent.
+fn view_storage_per_view_name(binding_name: &str, view_name: Option<&str>) -> String {
+    let Some(view) = view_name else {
+        return binding_name.to_string();
+    };
+    match binding_name {
+        "view_storage_primary" => format!("view_storage_{view}_primary"),
+        "view_storage_anchor" => format!("view_storage_{view}_anchor"),
+        "view_storage_ids" => format!("view_storage_{view}_ids"),
+        _ => binding_name.to_string(),
     }
 }
 
@@ -1179,6 +1346,18 @@ fn slot_count_expr(
 /// same-named param. Read by [`slot_count_expr`] to up-size
 /// `view_storage_primary` to `agent_count * <second_key_population>`
 /// cells when the fixture has a pair-keyed materialized view.
+///
+/// `materialized_views` — one entry per `@materialized` view in the
+/// fixture. Used to (a) allocate one
+/// `view_storage_<view_name>_primary_buf` per view (sized for THAT
+/// view's own pair-keyed second-key, not the fixture-wide max), and
+/// (b) route each fold/decay kernel's `view_storage_primary` /
+/// `view_storage_anchor` / `view_storage_ids` BGL bindings to the
+/// per-view buffer instead of a single shared one. Closes the
+/// 6-fixture aliasing gap (forest_fire/squad_skirmish/plague_city/
+/// detective_investigation/palace_coup/among_us) where the legacy
+/// shared `view_storage_primary_buf` aggregated incoherently
+/// across views.
 fn synthesize_generated_runtime_struct(
     fixture_name: &str,
     artifacts: &crate::cg::emit::EmittedArtifacts,
@@ -1187,11 +1366,21 @@ fn synthesize_generated_runtime_struct(
     ability_file_names: &[String],
     events: &[dsl_ast::ir::EventIR],
     pair_keyed_second_key: Option<PairKeyedSecondKey>,
+    materialized_views: &[MaterializedViewInfo],
     binds_voxel_grid: bool,
     indirect_consumer_kernel_names: &[String],
 ) -> String {
     use crate::kernel_binding_ir::BgSource;
     use std::collections::BTreeMap;
+
+    // Per-view sizing lookup: view_name → pair-keyed second-key shape.
+    // Used by the binding-rename loop below to size each per-view
+    // `view_storage_<view_name>_primary_buf` for THAT view's own
+    // shape, independently of fixture-wide pair-keyed detection.
+    let view_pair_keyed: BTreeMap<&str, Option<PairKeyedSecondKey>> = materialized_views
+        .iter()
+        .map(|v| (v.name.as_str(), v.pair_keyed))
+        .collect();
 
     // Collect unique fixture-owned bindings across all kernels.
     // BTreeMap (name → wgsl_ty) — same binding may appear in multiple
@@ -1205,8 +1394,25 @@ fn synthesize_generated_runtime_struct(
     // sized to the cfg struct's std430 footprint (16 bytes covers
     // the standard 4-u32 cfg layouts; oversize is fine).
     let mut cfg_buffer_names: Vec<String> = Vec::new();
+    // Per-view-buffer name → its pair-keyed shape. Used by
+    // `slot_count_expr_for_view_buf` to size each per-view storage
+    // buffer independently of the (legacy) fixture-wide
+    // `pair_keyed_second_key`. Populated by the binding-rename loop
+    // below as renamed `view_storage_<view>_primary` names land in
+    // `owned`.
+    let mut owned_view_buf_pair_keyed: BTreeMap<String, Option<PairKeyedSecondKey>> =
+        BTreeMap::new();
     for spec in &artifacts.kernel_specs {
         let mut has_cfg = false;
+        // Per-fold/decay kernel view-name extraction. The BGL slot
+        // names `view_storage_primary|anchor|ids` are uniform across
+        // every fold/decay kernel — the kernel name encodes WHICH
+        // view's storage they refer to (`fold_<view>` / `decay_<view>`).
+        // Resolve the view name once here and rewrite the binding
+        // names below so each fold/decay kernel allocates + binds to
+        // its own per-view buffer instead of the legacy shared
+        // `view_storage_primary_buf`.
+        let view_name_for_kernel = view_name_from_kernel_name(&spec.name);
         for b in &spec.bindings {
             if matches!(b.bg_source, BgSource::Cfg) {
                 has_cfg = true;
@@ -1225,12 +1431,35 @@ fn synthesize_generated_runtime_struct(
             if is_infra_binding(&b.name) {
                 continue;
             }
+            // Per-view storage rename: in fold/decay kernels the BGL
+            // slot names `view_storage_primary|anchor|ids` are
+            // generic — rewrite them to per-view names so each view
+            // gets its own host-side buffer. Without this every
+            // fold/decay kernel allocates + binds the SAME
+            // `view_storage_primary_buf` and cross-view writes
+            // collide (forest_fire / squad_skirmish / plague_city /
+            // detective_investigation / palace_coup / among_us all
+            // surface this gap).
+            let effective_name = view_storage_per_view_name(&b.name, view_name_for_kernel);
+            // Track per-view-buffer pair-keyed shape (look up by view
+            // name from the materialized-view list).
+            if effective_name.starts_with("view_storage_") && effective_name.ends_with("_primary") {
+                let view_name = effective_name
+                    .strip_prefix("view_storage_")
+                    .and_then(|s| s.strip_suffix("_primary"));
+                if let Some(vname) = view_name {
+                    let pk = view_pair_keyed.get(vname).copied().flatten();
+                    owned_view_buf_pair_keyed
+                        .entry(effective_name.clone())
+                        .or_insert(pk);
+                }
+            }
             // Standard agent columns ARE allocated as fixture-owned
             // today (no shared SimState yet). The AgentBuffers
             // population in step() routes them into ctx.state for the
             // from_context_with_extras call.
             // BTreeMap insert is "first-wins" via or_insert.
-            owned.entry(b.name.clone()).or_insert_with(|| b.wgsl_ty.clone());
+            owned.entry(effective_name).or_insert_with(|| b.wgsl_ty.clone());
         }
         if has_cfg {
             cfg_buffer_names.push(spec.name.clone());
@@ -1398,7 +1627,29 @@ fn synthesize_generated_runtime_struct(
                 continue;
             }
         };
-        let slot_expr = slot_count_expr(name, pair_keyed_second_key);
+        // Per-view storage buffer sizing: when the binding name is
+        // a renamed `view_storage_<view>_primary|anchor|ids`, look
+        // up THAT view's pair-keyed second-key shape and size for
+        // it independently of the fixture-wide
+        // `pair_keyed_second_key` (which was the legacy single-
+        // bucket sizing path). Falls through to the per-agent /
+        // legacy-shared sizing for every other binding.
+        let slot_expr = if let Some(pk) = owned_view_buf_pair_keyed.get(name) {
+            slot_count_expr_for_view_buf(*pk)
+        } else if let Some(view) = name
+            .strip_prefix("view_storage_")
+            .and_then(|s| s.strip_suffix("_anchor").or_else(|| s.strip_suffix("_ids")))
+        {
+            // Anchor / ids slots inherit the SAME sizing as the view's
+            // primary buffer. The fold body atomicAdds into the
+            // anchor / writes ring-cursor info into ids per agent
+            // slot — they share the per-(observer, source) layout of
+            // the view's primary slab.
+            let pk = view_pair_keyed.get(view).copied().flatten();
+            slot_count_expr_for_view_buf(pk)
+        } else {
+            slot_count_expr(name, pair_keyed_second_key)
+        };
         // Plan E-A6 — if `init { ... }` declared a per-slot fill for
         // this `agent_<col>` binding, switch from zero-init create_buffer
         // to create_buffer_init with the computed slice. This is how
@@ -1816,6 +2067,16 @@ fn synthesize_generated_runtime_struct(
             // A4.2 — emit direct Bindings { ... } construction for
             // ViewFold kernels (no Extras helper). Walk bindings,
             // render each field per name-based classification.
+            //
+            // Per-view storage rename (mirror of the alloc loop): in
+            // fold/decay kernels the BGL slot names
+            // `view_storage_primary|anchor|ids` are uniform, so the
+            // host needs to route each one to the THIS-kernel's
+            // per-view buffer (`view_storage_<view>_<slot>_buf`).
+            // Without this, every fold kernel binds the same
+            // `view_storage_primary_buf` and writes alias across
+            // views (the 6-fixture aliasing gap).
+            let view_name_for_kernel = view_name_from_kernel_name(&spec.name);
             let mut binding_fields: Vec<String> = Vec::new();
             for b in &spec.bindings {
                 use crate::kernel_binding_ir::BgSource;
@@ -1823,6 +2084,12 @@ fn synthesize_generated_runtime_struct(
                     continue;
                 }
                 let name = b.name.as_str();
+                // The struct field name (left of the colon) stays
+                // the BGL-level name (`view_storage_primary` etc.) —
+                // that's what the kernel module's `Bindings` struct
+                // declares. The buffer expression on the RIGHT
+                // routes to the per-view-named host field.
+                let buf_field_name = view_storage_per_view_name(name, view_name_for_kernel);
                 let value = if name == "event_ring" {
                     "self.event_ring.ring()".to_string()
                 } else if name == "event_tail" {
@@ -1847,7 +2114,7 @@ fn synthesize_generated_runtime_struct(
                     let col = name.strip_prefix("ability_registry_").unwrap();
                     format!("&self.registry_gpu.{col}")
                 } else {
-                    format!("&self.{name}_buf")
+                    format!("&self.{buf_field_name}_buf")
                 };
                 // anchor/ids are Option<&Buffer> for view fold kernels.
                 let value = if name == "view_storage_anchor"
@@ -1928,6 +2195,17 @@ fn synthesize_generated_runtime_struct(
             continue;
         }
         // Walk bindings, mirror classify_binding name rules.
+        // Per-view storage rename also applies here for defensive
+        // symmetry — generic kernels classified as `fold_*` /
+        // `decay_*` would otherwise route the BGL `view_storage_
+        // primary` slot to the legacy shared buffer. In practice
+        // ViewFold + ViewDecay kernels go through the Bindings
+        // direct-construction path above (no `from_context_with_extras`)
+        // so this rename is a defensive no-op for today's scoring /
+        // physics generic kernels (whose view-storage bindings carry
+        // per-view names already from the compose_view_storage_prelude
+        // pass).
+        let view_name_for_kernel = view_name_from_kernel_name(&spec.name);
         let mut extras_fields: Vec<String> = Vec::new();
         for b in &spec.bindings {
             let name = b.name.as_str();
@@ -1951,13 +2229,14 @@ fn synthesize_generated_runtime_struct(
             // Extras-bound. Render the runtime call-site expression:
             //   cfg     → &self.cfg_<kernel>_buf
             //   sim_cfg → self.event_ring.sim_cfg()
-            //   else    → &self.<name>_buf
+            //   else    → &self.<view-renamed name>_buf
+            let buf_field_name = view_storage_per_view_name(name, view_name_for_kernel);
             let value_expr = if name == "cfg" {
                 format!("&self.cfg_{}_buf", spec.name)
             } else if name == "sim_cfg" {
                 "self.event_ring.sim_cfg()".to_string()
             } else {
-                format!("&self.{name}_buf")
+                format!("&self.{buf_field_name}_buf")
             };
             extras_fields.push(format!(
                 "                        {name}: {value_expr},"
@@ -2238,6 +2517,7 @@ mod tests {
             &[],
             &[],
             None,
+            &[],
             false,
             &[],
         );
@@ -2312,6 +2592,7 @@ mod tests {
             &[],
             &[event],
             None,
+            &[],
             false,
             &[],
         );
@@ -2376,6 +2657,7 @@ mod tests {
             &[],
             &[event],
             None,
+            &[],
             false,
             &[],
         );

@@ -331,24 +331,19 @@ fn read_mana(state: &mut GeneratedRuntime) -> Vec<f32> {
 }
 
 fn read_view_damage_dealt(state: &mut GeneratedRuntime) -> Vec<f32> {
-    // damage_dealt is a per-Agent view (single-key). Storage layout:
-    // f32 per slot.
-    let buf = state.view_storage_primary_buf.clone();
+    // Per-view storage post the aliasing-gap fix. damage_dealt is a
+    // per-Agent view; backing buffer is `view_storage_damage_dealt_primary_buf`.
+    let buf = state.view_storage_damage_dealt_primary_buf.clone();
     readback_f32(state, &buf, N_TOTAL as usize)
 }
 
 fn read_view_boarding_attempts(state: &mut GeneratedRuntime) -> Vec<f32> {
-    // Pair-keyed view (boarder, ship). Backing storage sized N²
-    // (validated by dsl_stress_coverage_pin's pair_keyed test).
-    // damage_dealt is also stored in view_storage_primary_buf, so
-    // we read past the per-agent prefix; but since the build_helper
-    // sizes view_storage_primary as max(N, N²) and uses a single
-    // shared atomic-storage buffer, the layout matters. Today
-    // *both* views share the same buffer and same indexing space
-    // (per-agent at [a], pair-keyed at [obs * N + subj]); we read
-    // the full N² block and hand it back for inspection.
+    // Per-view storage post the aliasing-gap fix. Pair-keyed view
+    // (boarder, ship): N² backing buffer
+    // `view_storage_boarding_attempts_primary_buf`. No more aliasing
+    // with `damage_dealt` — each view has its own buffer.
     let n = N_TOTAL as usize;
-    let buf = state.view_storage_primary_buf.clone();
+    let buf = state.view_storage_boarding_attempts_primary_buf.clone();
     readback_f32(state, &buf, n * n)
 }
 

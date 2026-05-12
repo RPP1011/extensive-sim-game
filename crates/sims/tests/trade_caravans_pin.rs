@@ -182,14 +182,16 @@ fn merchants_age_die_inherit_to_heirs_over_1500_ticks() {
          individual={merchant_buy_counts:?}",
     );
 
-    let view_buf = state.view_storage_primary_buf.clone();
+    // Per-view storage post the aliasing-gap fix — `deaths_recorded`
+    // has its own backing buffer (`view_storage_deaths_recorded_primary_buf`).
+    let view_buf = state.view_storage_deaths_recorded_primary_buf.clone();
     let deaths = read_buf_f32(&mut state, &view_buf);
     let merchant_deaths: Vec<f32> = (MERCHANT_BASE..MERCHANT_BASE + N_MERCHANTS)
         .map(|i| deaths[i as usize])
         .collect();
     let total_deaths: f32 = merchant_deaths.iter().sum();
     eprintln!(
-        "  view_storage_primary[merchant slots] (first-fold view): {merchant_deaths:?}  \
+        "  view_storage_deaths_recorded[merchant slots]: {merchant_deaths:?}  \
          sum={total_deaths:.2}",
     );
 

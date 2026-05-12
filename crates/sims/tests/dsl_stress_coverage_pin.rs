@@ -44,11 +44,14 @@ fn pair_keyed_view_storage_sized_n_squared() {
         Some(s) => s,
         None => return,
     };
-    let primary_size = state.view_storage_primary_buf.size();
+    // Per-view storage post the aliasing-gap fix — `damage_pair` is
+    // the pair-keyed view in this fixture and gets its own
+    // N²-sized backing buffer named `view_storage_damage_pair_primary_buf`.
+    let primary_size = state.view_storage_damage_pair_primary_buf.size();
     let expected_min = (n as u64) * (n as u64) * 4u64;  // f32 × N²
     assert!(
         primary_size >= expected_min,
-        "view_storage_primary_buf is {primary_size} bytes; pair-keyed \
+        "view_storage_damage_pair_primary_buf is {primary_size} bytes; pair-keyed \
          view damage_pair needs at least {expected_min} bytes \
          (N² × sizeof(f32))",
     );

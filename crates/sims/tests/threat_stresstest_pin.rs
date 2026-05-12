@@ -84,8 +84,10 @@ fn read_threats_primary_stress(state: &mut StressRuntime) -> Vec<f32> {
             label: Some("threat_stresstest_pin::view_readback"),
         },
     );
+    // Per-view storage post the aliasing-gap fix — each `@materialized`
+    // view has its own buffer named `view_storage_<view>_primary_buf`.
     encoder.copy_buffer_to_buffer(
-        &state.view_storage_primary_buf,
+        &state.view_storage_threats_primary_buf,
         0,
         &staging,
         0,
@@ -124,8 +126,9 @@ fn read_threats_primary_decay(state: &mut DecayRuntime) -> Vec<f32> {
             label: Some("threats_with_decay_probe_pin::view_readback"),
         },
     );
+    // Per-view storage post the aliasing-gap fix.
     encoder.copy_buffer_to_buffer(
-        &state.view_storage_primary_buf,
+        &state.view_storage_threats_primary_buf,
         0,
         &staging,
         0,

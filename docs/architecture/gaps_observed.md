@@ -437,35 +437,14 @@ view consumers; one PerEvent consumer (Catch on EmberLanded).
 Run output (release, 500 ticks): mean 0.16 ms/tick, p95 0.19 ms,
 warmup 22 ms (pipeline compile dominates).
 
-### Gap A — All views in a fixture share ONE `view_storage_primary_buf`
+### ~~Gap A~~ — RESOLVED: All views in a fixture share ONE `view_storage_primary_buf`
 
-**Severity: high — view semantics broken.**
-
-Symptom: when a fixture declares N per-agent materialized views
-(e.g. forest_fire's `ignition_count`, `ember_landings`, `wind_exposure`,
-`recent_fire_pressure`), the auto-emitted runtime allocates a SINGLE
-`view_storage_primary_buf` of size `agent_count * 4` bytes and binds
-it as slot 2 of every fold kernel and slot 0 of every decay kernel.
-All N folds atomicAdd into the same per-agent slot, producing an
-aggregate sum across views — there is no per-view readback path.
-
-Root cause: `crates/dsl_compiler/src/build_helper.rs::slot_count_expr`
-returns `"agent_count as u64"` for every binding named
-`view_storage_primary` (unless a pair-keyed view triggers the N²
-override). The synthesised `try_new` allocates ONE buffer with that
-name, and every `KernelBindingsContext` for every fold kernel binds
-the same buffer.
-
-Reproduction: `crates/sims/tests/forest_fire_pin.rs` reads
-`view_storage_primary_buf` after 500 ticks. Aggregate sum across
-1024 slots = 445,948 (= sum of all four views' contributions across
-all agents); per-view differentiation impossible.
-
-Fix sketch: emit one `view_<name>_storage_primary_buf` per declared
-view; teach `KernelBindingsContext` to pull the right buffer by view
-name (the binding handle accessor `fold_view_<name>_handles` already
-encodes the view identity — just route to per-view storage instead of
-the shared one).
+**Closed by:** `fix(build_helper): per-view storage buffers (6-fixture aliasing gap)`.
+Per-view rename now allocates one
+`view_storage_<view_name>_primary_buf` per `@materialized` view; each
+fold/decay kernel's `view_storage_primary` BGL slot routes to its
+own per-view buffer. Pin: `crates/dsl_compiler/tests/per_view_storage_distinct.rs`.
+forest_fire pin's `wind_exposure` per-view sum is now load-bearing.
 
 ### Gap B — `event_ring.tail_value()` host-side estimate stays at 0 forever
 
@@ -653,27 +632,14 @@ now resolved); those .sim files were updated to read from the
 matching `agents.<field>(self)` SoA columns to keep their weights
 expressions resolvable.
 
-### Gap D — `view_storage_primary_buf` aliases ALL views into one buffer
+### ~~Gap D~~ — RESOLVED: `view_storage_primary_buf` aliased ALL views
 
-**Surface**: build_helper view storage allocation.
-**Site**: `crates/dsl_compiler/src/build_helper.rs:1096-1103` allocates
-`view_storage_primary_buf` of size `agent_count * agent_count * 4`
-(driven by the pair-keyed-view detection at line 635), but the
-generated single-key view folds (e.g. `damage_dealt`,
-`healing_done`) write to slot[source_id] of the SAME buffer.
-**Observed**: in squad_skirmish, three views — pair-keyed `threat_taken`
-(N²), single-key `damage_dealt` (N), single-key `healing_done` (N) —
-all bind binding-slot 2 (`view_storage_primary`) in their fold WGSL
-(see `target/release/build/sims-*/out/squad_skirmish/{fold_threat_taken,
-fold_damage_dealt, fold_healing_done}.wgsl`). The single-key folds
-write to slot[source_id] of a 256-cell buffer; the pair-key fold writes
-to slot[obs*N + src]. damage_dealt and healing_done write to the SAME
-slot (slot[source_id]) and silently sum together.
-**Gap class**: view storage layout — no per-view offsets in the
-shared primary buffer. Either grow per-view offsets on the host side
-(threading through the build helper) or allocate per-view buffers
-(`view_storage_<name>_primary_buf`, mirroring the existing per-view
-`view_storage_threat_taken_primary_buf` allocation pattern).
+**Closed by:** same per-view storage rename that closed Gap A above
+(`fix(build_helper): per-view storage buffers (6-fixture aliasing
+gap)`). squad_skirmish's `damage_dealt` / `healing_done` /
+`threat_taken` views now each have their own backing buffer
+(`view_storage_<name>_primary_buf`); pin `squad_skirmish_pin.rs` reads
+each independently. Pin: `crates/dsl_compiler/tests/per_view_storage_distinct.rs`.
 
 ### Gap E — pair-keyed view called from scoring expression emits arity-mismatched WGSL helper
 

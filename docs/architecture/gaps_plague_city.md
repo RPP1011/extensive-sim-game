@@ -274,8 +274,16 @@ survives the alphabetised `_and_` merge. A regression test in
 
 ---
 
-## GAP P-E: Multiple `@materialized` views share one
-view_storage_primary_buf
+## ~~GAP P-E~~ — RESOLVED: Multiple `@materialized` views share one view_storage_primary_buf
+
+**Closed by:** `fix(build_helper): per-view storage buffers (6-fixture aliasing gap)`.
+Per-view rename allocates one `view_storage_<view>_primary_buf` per
+declared view; plague_city's 5 views each get their own backing buffer.
+Pin: `crates/dsl_compiler/tests/per_view_storage_distinct.rs`.
+
+---
+
+## (historical context) GAP P-E
 
 **Surface:** plague_city declares 5 `@materialized` views:
 beliefs_flags, beliefs_confidence, contagion_pressure, cure_count,

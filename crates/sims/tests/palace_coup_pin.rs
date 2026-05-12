@@ -311,11 +311,13 @@ fn read_busy_until_tick(state: &mut GeneratedRuntime) -> Vec<u32> {
 }
 
 fn read_view_storage_primary(state: &mut GeneratedRuntime) -> Vec<u32> {
-    // The primary view buffer is sized N*N*4 (per build_helper's
-    // pair_keyed-view detection — guard_belief forces N² sizing). Read
-    // the whole thing as u32 cells.
+    // Per-view storage post the aliasing-gap fix: each `@materialized`
+    // view has its own backing buffer (`view_storage_<view>_primary_buf`).
+    // The pair-keyed `guard_belief(observer: Agent, subject: Agent)`
+    // view is sized N² — reading it captures the full belief matrix
+    // for the "view non-emptiness" check.
     let cell_count = (N_TOTAL as usize) * (N_TOTAL as usize);
-    let buf = state.view_storage_primary_buf.clone();
+    let buf = state.view_storage_guard_belief_primary_buf.clone();
     readback_u32(state, &buf, cell_count)
 }
 

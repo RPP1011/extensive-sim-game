@@ -70,8 +70,11 @@ fn read_activations(state: &mut GeneratedRuntime) -> Vec<f32> {
             label: Some("cooldown_probe::activations_readback"),
         },
     );
+    // Per-view storage (was `view_storage_primary_buf`, now per-view
+    // after the aliasing-gap fix). cooldown_probe declares one view
+    // (`activations`), so the per-view buffer is the activations one.
     encoder.copy_buffer_to_buffer(
-        &state.view_storage_primary_buf,
+        &state.view_storage_activations_primary_buf,
         0,
         &staging,
         0,

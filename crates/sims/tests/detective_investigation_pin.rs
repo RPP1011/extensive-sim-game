@@ -453,36 +453,18 @@ fn read_creature_types(state: &mut GeneratedRuntime) -> Vec<u32> {
 /// 0..N) cells via `evidence_cell()`.
 fn read_evidence_view(state: &mut GeneratedRuntime) -> Vec<u32> {
     let n2 = (N_TOTAL as usize) * (N_TOTAL as usize);
-    // Multiple pair-keyed views in this fixture share the
-    // `view_storage_primary_buf` field today — see build_helper's
-    // single-bool pair_keyed_view_present gate. The first
-    // alphabetical view in the fixture wins the primary slot;
-    // others spill into per-view siblings (`view_storage_<name>_primary`).
-    // For this fixture: accusation_count, evidence, total_witnessed.
-    // The pair-keyed `evidence` view's storage may live in
-    // view_storage_primary OR in view_storage_evidence_primary
-    // depending on the alphabetical-priority allocation policy.
-    //
-    // Try the named buffer first; fall back to the shared primary if
-    // not exposed by the auto-emitter.
-    if let Some(v) = read_view_buffer_by_name(state, "view_storage_evidence_primary_buf", n2) {
-        return v;
-    }
-    let buf = state.view_storage_primary_buf.clone();
+    // Per-view storage post the aliasing-gap fix — each view
+    // (accusation_count, evidence, total_witnessed) now has its own
+    // backing buffer. Read the pair-keyed `evidence` slab directly.
+    let buf = state.view_storage_evidence_primary_buf.clone();
     readback_u32(state, &buf, n2)
 }
 
-/// Try to read a view buffer by exact field name. Returns None if the
-/// auto-emitter doesn't expose a buffer of that name (e.g. the view's
-/// storage was aliased into the shared `view_storage_primary_buf`).
-/// This is the future-friendly path for when per-view named buffers
-/// land; today most fixtures share the primary slot, so this returns
-/// None on every fixture and the caller falls back to
-/// `view_storage_primary_buf`.
-///
-/// Implementation note: there's no reflection on the auto-emitted
-/// struct, so this is a TODO-stub. When per-view named buffers
-/// stabilise, replace with a real field accessor.
+/// Per-view stub kept for callers that pass a runtime-string name.
+/// With per-view buffers landed, callers should prefer typed direct
+/// field accesses (`state.view_storage_<view>_primary_buf`); this
+/// helper stays as a no-op shim for back-compat.
+#[allow(dead_code)]
 fn read_view_buffer_by_name(
     _state: &mut GeneratedRuntime,
     _name: &str,
@@ -491,21 +473,15 @@ fn read_view_buffer_by_name(
     None
 }
 
-/// Read a per-agent f32 view from a buffer field whose name is supplied
-/// at compile time. Returns None when the field doesn't exist (the
-/// fixture didn't emit a separate buffer for the view).
+/// Per-view stub kept for callers that pass a runtime-string name.
 fn read_view_per_agent(_state: &mut GeneratedRuntime, _field_name: &str) -> Option<Vec<f32>> {
-    // Same TODO-stub as above — no field-name reflection on the
-    // auto-emit struct yet. The pin's primary signal is the
-    // pair-keyed evidence view (read via view_storage_primary_buf
-    // or view_storage_evidence_primary_buf if it materialises).
     None
 }
 
-/// Best-effort: read the first per-agent slot of view_storage_primary
-/// as f32. When evidence (the pair-keyed view) takes the primary
-/// slot, this returns garbage; when one of the per-agent views does,
-/// it returns useful data. Used as a fallback for soft observability.
+/// Read the per-agent `accusation_count` view as f32 — one of the
+/// two per-agent views in this fixture. Per-view storage post the
+/// aliasing-gap fix means this now reads accusation_count cleanly,
+/// not garbage from another view's writes.
 fn read_first_view_storage_per_agent(state: &mut GeneratedRuntime) -> Vec<f32> {
     let n = N_TOTAL as usize;
     let bytes = (n as u64 * 4u64).max(16);
@@ -520,7 +496,7 @@ fn read_first_view_storage_per_agent(state: &mut GeneratedRuntime) -> Vec<f32> {
             label: Some("detective_investigation::per_agent_readback"),
         },
     );
-    encoder.copy_buffer_to_buffer(&state.view_storage_primary_buf, 0, &staging, 0, bytes);
+    encoder.copy_buffer_to_buffer(&state.view_storage_accusation_count_primary_buf, 0, &staging, 0, bytes);
     state.gpu.queue.submit(Some(encoder.finish()));
     let slice = staging.slice(..bytes);
     slice.map_async(wgpu::MapMode::Read, |r| r.expect("map_async"));

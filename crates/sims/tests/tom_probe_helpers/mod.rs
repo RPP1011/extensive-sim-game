@@ -166,7 +166,10 @@ pub fn read_beliefs_flags(rt: &GeneratedRuntime) -> Vec<u32> {
 /// writes; the mega-crate split them when the view-fold codegen landed).
 pub fn read_view_storage_primary(rt: &GeneratedRuntime) -> Vec<u32> {
     let cells = cell_count(rt);
-    read_u32_buffer(&rt.gpu, &rt.view_storage_primary_buf, cells)
+    // Per-view storage post the aliasing-gap fix — `beliefs_flags`
+    // is the materialized view in tom_probe; backing buffer is
+    // `view_storage_beliefs_flags_primary_buf`.
+    read_u32_buffer(&rt.gpu, &rt.view_storage_beliefs_flags_primary_buf, cells)
 }
 
 pub fn read_beliefs_pos(rt: &GeneratedRuntime) -> Vec<[f32; 4]> {
