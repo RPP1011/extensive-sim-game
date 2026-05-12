@@ -834,7 +834,37 @@ pub struct ViewIR {
     /// so existing fixtures (dodger_probe / threats_view_probe) keep
     /// the omniscient gate by default.
     pub belief_gated: bool,
+    /// `@storage(<name>)` annotation. Defaults to `Packing::None` (one
+    /// logical cell per u32 word — the legacy shape every existing
+    /// view uses). `Packing::Q8` switches the per-cell storage to
+    /// 4 packed u8 cells per u32 word; the decay + fold WGSL emit
+    /// branch on this to compose byte-shift unpack / repack steps.
+    /// Plumbed from the AST `@storage(packed_q8)` annotation —
+    /// see `lower_storage_annotation` in `resolve.rs`.
+    pub storage_packing: Packing,
     pub span: Span,
+}
+
+/// View-storage packing discriminator. Drives the WGSL emit's per-cell
+/// vs per-word arithmetic in the decay + fold kernels — `Packing::None`
+/// keeps the legacy "one logical cell per u32" path; `Packing::Q8`
+/// switches to "4 packed u8 cells per u32 word" with byte-shift
+/// unpack / repack arithmetic. Future packings (`Packing::Q4`,
+/// `Packing::Q16`, …) extend the same surface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum Packing {
+    /// Default: one logical cell per u32 word. Buffer sizing is
+    /// `cells * 4 bytes`; per-cell decay reads `view_storage_primary[k]`
+    /// directly.
+    None,
+    /// q8: 4 packed u8 cells per u32 word, little-endian byte order.
+    /// Buffer sizing is `(cells + 3) / 4 * 4 bytes` (round up to a full
+    /// word). Per-cell decay reads the WORD, decomposes to 4 bytes,
+    /// applies the per-cell step (and gate predicate, if any) to each
+    /// byte, recomposes, atomic-stores. Mirrors the bespoke
+    /// `belief_decay_wgsl::decay_kernel_wgsl` shape that this
+    /// annotation subsumes.
+    Q8,
 }
 
 /// Top-level view kind — lazy (pure fn, evaluated at read) or materialized

@@ -307,7 +307,7 @@ pub fn lower_view(
             // (multiply BEFORE the per-event deltas land).
             let mut op_ids = Vec::with_capacity(handlers.len() + 1);
             if let Some(decay) = ir.decay.as_ref() {
-                let decay_op = lower_decay_op(view_id, decay, ctx)?;
+                let decay_op = lower_decay_op(view_id, decay, ir.storage_packing, ctx)?;
                 op_ids.push(decay_op);
             }
             let fold_ids = lower_fold_handlers(
@@ -444,9 +444,10 @@ fn view_dispatch_override(ir: &dsl_ast::ir::ViewIR) -> Option<DispatchShape> {
 fn lower_decay_op(
     view_id: ViewId,
     decay: &DecayHint,
+    packing: dsl_ast::ir::Packing,
     ctx: &mut LoweringCtx<'_>,
 ) -> Result<OpId, LoweringError> {
-    use dsl_ast::ir::DecayMode;
+    use dsl_ast::ir::{DecayMode, Packing};
     let mode_disc: u8 = match decay.mode {
         DecayMode::Mul => 0,
         DecayMode::Sub => 1,
@@ -458,12 +459,17 @@ fn lower_decay_op(
     // ordering. Cast through `u32` here to keep the conversion
     // explicit.
     let gate = decay.gate.map(|m| crate::cg::data_handle::MaskId(m.0 as u32));
+    let packing_disc: u8 = match packing {
+        Packing::None => 0,
+        Packing::Q8 => 1,
+    };
     let kind = ComputeOpKind::ViewDecay {
         view: view_id,
         rate_bits: decay.rate.to_bits(),
         mode: mode_disc,
         sub_by: decay.sub_by,
         gate,
+        packing: packing_disc,
     };
     let shape = DispatchShape::PerAgent;
     ctx.builder
@@ -1080,6 +1086,7 @@ mod tests {
             kind: ViewKind::Materialized(hint),
             decay: None,
             belief_gated: false,
+            storage_packing: dsl_ast::ir::Packing::None,
             span: span(0, 0),
         }
     }
@@ -1094,6 +1101,7 @@ mod tests {
             kind: ViewKind::Lazy,
             decay: None,
             belief_gated: false,
+            storage_packing: dsl_ast::ir::Packing::None,
             span: span(0, 0),
         }
     }

@@ -829,6 +829,82 @@ pub fn collect_expr_reads(id: CgExprId, exprs: &dyn ExprArena, out: &mut Vec<Dat
     }
 }
 
+/// Walk an expression tree and append a [`DataHandle::BeliefStateColumn`]
+/// entry for every `agents.beliefs_*` namespace call encountered.
+///
+/// The auto-walker [`collect_expr_reads`] does not surface
+/// `BeliefStateColumn` handles for `NamespaceCall` arms because the call
+/// site is structurally opaque (the call lowers to a prelude function).
+/// Op kinds whose body emits prelude calls into `agents_beliefs_*`
+/// (today: [`crate::cg::op::ComputeOpKind::MaskPredicate`] and the
+/// decay-gate inlining branch in `cg::emit::kernel`) MUST explicitly
+/// surface those handles so downstream binding synthesis can extend the
+/// kernel BGL with the matching `beliefs_<col>` storage entry —
+/// otherwise the prelude function's `beliefs_<col>[...]` access would
+/// reference an undeclared identifier at WGSL validation time.
+///
+/// The mapping `method name → BeliefStateColumn` mirrors the registry
+/// table in `cg::lower::driver::populate_namespace_registry` (the
+/// BeliefState Phase 3.5 getter set).
+pub fn collect_belief_state_calls_in_expr(
+    id: CgExprId,
+    exprs: &dyn ExprArena,
+    out: &mut Vec<DataHandle>,
+) {
+    use crate::cg::data_handle::BeliefStateColumn;
+    let Some(node) = exprs.get(id) else {
+        return;
+    };
+    match node {
+        CgExpr::NamespaceCall { ns, method, args, .. } => {
+            if matches!(ns, dsl_ast::ir::NamespaceId::Agents) {
+                let column = match method.as_str() {
+                    "beliefs_pos" => Some(BeliefStateColumn::Pos),
+                    "beliefs_creature_type" => Some(BeliefStateColumn::CreatureType),
+                    "beliefs_last_seen_tick" => Some(BeliefStateColumn::LastSeenTick),
+                    "beliefs_confidence" => Some(BeliefStateColumn::Confidence),
+                    "beliefs_suspicion" => Some(BeliefStateColumn::Suspicion),
+                    "beliefs_flags" => Some(BeliefStateColumn::Flags),
+                    _ => None,
+                };
+                if let Some(column) = column {
+                    out.push(DataHandle::BeliefStateColumn { column });
+                }
+            }
+            for a in args {
+                collect_belief_state_calls_in_expr(*a, exprs, out);
+            }
+        }
+        CgExpr::Binary { lhs, rhs, .. } => {
+            collect_belief_state_calls_in_expr(*lhs, exprs, out);
+            collect_belief_state_calls_in_expr(*rhs, exprs, out);
+        }
+        CgExpr::Unary { arg, .. } => {
+            collect_belief_state_calls_in_expr(*arg, exprs, out);
+        }
+        CgExpr::Builtin { args, .. } => {
+            for a in args {
+                collect_belief_state_calls_in_expr(*a, exprs, out);
+            }
+        }
+        CgExpr::Select { cond, then, else_, .. } => {
+            collect_belief_state_calls_in_expr(*cond, exprs, out);
+            collect_belief_state_calls_in_expr(*then, exprs, out);
+            collect_belief_state_calls_in_expr(*else_, exprs, out);
+        }
+        CgExpr::Read(_)
+        | CgExpr::Lit(_)
+        | CgExpr::Rng { .. }
+        | CgExpr::AgentSelfId
+        | CgExpr::PerPairCandidateId
+        | CgExpr::ReadLocal { .. }
+        | CgExpr::EventField { .. }
+        | CgExpr::NamespaceField { .. } => {
+            // Leaf nodes: no NamespaceCall sub-tree to recurse into.
+        }
+    }
+}
+
 /// Walk a single statement and append its (reads, writes) into the
 /// supplied buffers. For nested `If` bodies the walk recurses through
 /// `lists` to fetch the sub-`CgStmtList`s.

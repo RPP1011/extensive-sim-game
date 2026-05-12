@@ -989,6 +989,7 @@ fn collect(
                 let idx = push_idx(comp.views.len(), "view")?;
                 symbols.views.insert(d.name.clone(), ViewRef(idx));
                 symbols.record_first("view", &d.name, d.span);
+                let storage_packing = lower_storage_annotation(&d.annotations)?;
                 comp.views.push(ViewIR {
                     name: d.name.clone(),
                     params: Vec::new(),
@@ -998,6 +999,7 @@ fn collect(
                     kind: ViewKind::Lazy,
                     decay: None,
                     belief_gated: d.annotations.iter().any(|a| a.name == "belief_gated"),
+                    storage_packing,
                     span: d.span,
                 });
             }
@@ -3328,6 +3330,66 @@ fn lower_decay_hint(
         gate,
         span: ann.span,
     }))
+}
+
+// ---------------------------------------------------------------------------
+// @storage(<packing>) annotation lowering
+// ---------------------------------------------------------------------------
+
+/// Walk the view's annotations; if a `@storage(<name>)` annotation
+/// exists, validate it and return the typed [`Packing`] discriminator.
+/// Returns `Packing::None` when the annotation is absent.
+///
+/// **Surface today:** single positional ident arg — `@storage(packed_q8)`.
+/// Future packings (`packed_q4`, `packed_q16`, …) extend this match list.
+/// The annotation does not require sibling `@materialized` / `@decay`;
+/// it independently controls per-cell storage layout for the view's
+/// primary buffer. The decay + fold WGSL emit consult the IR field to
+/// branch between the legacy "one logical cell per u32" path and the
+/// q8-packed "4 cells per u32 word" path.
+fn lower_storage_annotation(
+    annotations: &[ast::Annotation],
+) -> Result<Packing, ResolveError> {
+    let ann = match annotations.iter().find(|a| a.name == "storage") {
+        Some(a) => a,
+        None => return Ok(Packing::None),
+    };
+    if ann.args.len() != 1 {
+        return Err(ResolveError::InvalidStorageAnnotation {
+            detail: format!(
+                "`@storage(<name>)` takes exactly one positional argument; got {}",
+                ann.args.len()
+            ),
+            span: ann.span,
+        });
+    }
+    let arg = &ann.args[0];
+    if arg.key.is_some() {
+        return Err(ResolveError::InvalidStorageAnnotation {
+            detail: "`@storage(<name>)` argument must be positional (no `key = value`)".into(),
+            span: arg.span,
+        });
+    }
+    let name = match &arg.value {
+        ast::AnnotationValue::Ident(s) => s.as_str(),
+        other => {
+            return Err(ResolveError::InvalidStorageAnnotation {
+                detail: format!(
+                    "`@storage(<name>)` argument must be an identifier; got {other:?}"
+                ),
+                span: arg.span,
+            });
+        }
+    };
+    match name {
+        "packed_q8" => Ok(Packing::Q8),
+        other => Err(ResolveError::InvalidStorageAnnotation {
+            detail: format!(
+                "unknown packing `{other}`; supported packings: `packed_q8`"
+            ),
+            span: arg.span,
+        }),
+    }
 }
 
 // ---------------------------------------------------------------------------

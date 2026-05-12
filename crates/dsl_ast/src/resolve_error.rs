@@ -146,6 +146,13 @@ pub enum ResolveError {
         name: String,
         span: Span,
     },
+    /// A `@storage(<name>)` annotation is malformed (missing positional
+    /// arg, unknown packing identifier, attached to a non-materialized
+    /// view, etc.). `detail` carries the specific constraint violated.
+    InvalidStorageAnnotation {
+        detail: String,
+        span: Span,
+    },
 }
 
 impl std::fmt::Display for ResolveError {
@@ -272,6 +279,11 @@ impl std::fmt::Display for ResolveError {
                  its first two positional binders as `self` and `candidate` \
                  (Phase 7 Task 4: `self` is the querying agent, `candidate` \
                  the per-pair neighbour the filter inspects)",
+                span.start, span.end
+            ),
+            ResolveError::InvalidStorageAnnotation { detail, span } => write!(
+                f,
+                "invalid `@storage` annotation at bytes {}..{}: {detail}",
                 span.start, span.end
             ),
             ResolveError::UnknownSpatialQuery { name, span } => write!(

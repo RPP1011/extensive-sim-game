@@ -4278,6 +4278,7 @@ mod tests {
             annotations: Vec::new(),
             decay: None,
             belief_gated: false,
+            storage_packing: dsl_ast::ir::Packing::None,
             span: dsl_ast::ast::Span::dummy(),
         });
 

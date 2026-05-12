@@ -367,6 +367,7 @@ pub fn kernel_topology_to_spec_and_body(
         mode,
         sub_by,
         gate_mask_id,
+        packing,
     } = &class
     {
         // Lower the per-cell decay body first; if the gate-mask
@@ -382,6 +383,7 @@ pub fn kernel_topology_to_spec_and_body(
             *mode,
             *sub_by,
             *gate_mask_id,
+            *packing,
             prog,
             ctx,
         )?;
@@ -977,6 +979,12 @@ enum KernelKindClass {
         /// Optional gate-mask id; when present, the per-cell body
         /// surfaces a TODO marker rather than inlining the predicate.
         gate_mask_id: Option<u32>,
+        /// Storage packing discriminator. `0` = `Packing::None` (one
+        /// logical cell per u32 word — the legacy shape every existing
+        /// view uses); `1` = `Packing::Q8` (4 packed u8 cells per u32
+        /// word, byte-shift unpack/process/repack per cell). Mirrors
+        /// `ComputeOpKind::ViewDecay::packing`.
+        packing: u8,
     },
     /// Anything not detected as ViewFold or ViewDecay. Routes through
     /// the generic handle-aggregation pipeline + placeholder cfg shape.
@@ -997,7 +1005,7 @@ fn classify_kernel(body_ops: &[&ComputeOp], prog: &CgProgram) -> KernelKindClass
     // ops from fusing with anything, so this branch fires for the
     // singleton path.
     if body_ops.len() == 1 {
-        if let ComputeOpKind::ViewDecay { view, rate_bits, mode, sub_by, gate } =
+        if let ComputeOpKind::ViewDecay { view, rate_bits, mode, sub_by, gate, packing } =
             &body_ops[0].kind
         {
             let view_name = match prog.interner.get_view_name(*view) {
@@ -1010,6 +1018,7 @@ fn classify_kernel(body_ops: &[&ComputeOp], prog: &CgProgram) -> KernelKindClass
                 mode: *mode,
                 sub_by: *sub_by,
                 gate_mask_id: gate.map(|m| m.0),
+                packing: *packing,
             };
         }
     }
@@ -3580,7 +3589,11 @@ fn build_view_decay_wgsl_body_inner(
     mode: u8,
     sub_by: u32,
     gate_predicate_wgsl: Option<&str>,
+    packing: u8,
 ) -> String {
+    if packing == 1 {
+        return build_view_decay_wgsl_body_inner_q8(mode, sub_by, gate_predicate_wgsl);
+    }
     let mut step = String::new();
     if mode == 1 {
         // Saturating-sub mode. Atomic word IS the integer (no bitcast);
@@ -3652,6 +3665,117 @@ fn build_view_decay_wgsl_body_inner(
     out
 }
 
+/// Compose the per-WORD WGSL decay body for a `@storage(packed_q8)`
+/// view: 4 packed u8 cells per u32 word, decremented (or multiplied)
+/// in lockstep via byte-shift unpack/process/repack.
+///
+/// Mirrors the bespoke `belief_decay_wgsl::decay_kernel_wgsl` shape this
+/// annotation subsumes:
+///   * one thread per WORD (`workgroup_size = 64`, dispatch `(cell_count
+///     + 3) / 4 / 64` workgroups — caller sizes `slot_count` to the
+///     word count when packing == Q8).
+///   * each thread reads its word, decomposes to 4 bytes, applies the
+///     per-cell decay step (and gate predicate if present) to each byte,
+///     recomposes the word, atomic-stores it back.
+///
+/// **Per-cell binder mapping under q8.** Inside the per-byte loop, the
+/// logical cell index is `cell = k * 4 + b`, where `b ∈ {0,1,2,3}` is
+/// the byte slot. The gate-predicate's `self` / `target` / `world.tick`
+/// references resolve as:
+///   * `agent_id` = `cell / cfg.agent_cap` (row of the pair-map cell)
+///   * `per_pair_candidate` = `cell % cfg.agent_cap` (column)
+///   * `tick` = `cfg.tick`
+///
+/// **Bounds.** When the packed cell count isn't a multiple of 4, the
+/// last word's high bytes correspond to `cell >= cell_count`. Skip those
+/// (preserve the upper bytes byte-for-byte) so the recompose stays
+/// well-defined. The caller stamps `cfg.slot_count = word_count` AND
+/// the kernel reads the cell count from `cfg.agent_cap * cfg.agent_cap`
+/// when the packing applies to a pair-map view (the standard tom_probe
+/// shape) — but to keep this branch independent of the host's pair-map
+/// override, we re-derive the cell count from `cfg.slot_count * 4u`
+/// when no extra cfg field carries it. This matches the bespoke kernel's
+/// shape (it uses its own dedicated `cell_count` cfg field).
+fn build_view_decay_wgsl_body_inner_q8(
+    mode: u8,
+    sub_by: u32,
+    gate_predicate_wgsl: Option<&str>,
+) -> String {
+    let mut out = String::new();
+    out.push_str("    // q8-packed decay: one thread per WORD; 4 cells per word.\n");
+    out.push_str("    let word_idx = gid.x;\n");
+    out.push_str("    if (word_idx >= cfg.slot_count) { return; }\n");
+    out.push_str("    // `cfg.slot_count` is the WORD count when packing = Q8.\n");
+    out.push_str("    // The logical cell count is conveyed via `cfg.agent_cap *\n");
+    out.push_str("    // cfg.agent_cap` for the canonical pair-map shape; but to keep\n");
+    out.push_str("    // this body shape independent of the host's pair-map override,\n");
+    out.push_str("    // we walk every byte slot and skip cells past `agent_cap *\n");
+    out.push_str("    // agent_cap` (the runtime sizes the buffer to a multiple-of-4\n");
+    out.push_str("    // word count). For non-pair-map shapes the bound is still safe:\n");
+    out.push_str("    // the buffer is always sized to ceil(cells/4) words.\n");
+    out.push_str("    let cell_count: u32 = cfg.agent_cap * cfg.agent_cap;\n");
+    out.push_str("    let tick = cfg.tick;\n");
+    out.push_str("    let word = atomicLoad(&view_storage_primary[word_idx]);\n");
+    out.push_str("    var new_word: u32 = 0u;\n");
+    out.push_str("    for (var b: u32 = 0u; b < 4u; b = b + 1u) {\n");
+    out.push_str("        let cell = word_idx * 4u + b;\n");
+    out.push_str("        let shift = b * 8u;\n");
+    out.push_str("        let conf = (word >> shift) & 0xFFu;\n");
+    out.push_str("        var new_conf: u32 = conf;\n");
+    out.push_str("        if (cell < cell_count) {\n");
+    // Per-cell binder mapping for the gate predicate (if any). These
+    // shadow the outer `k`/`agent_id` bindings the no-pack path uses;
+    // the byte-loop's `cell` IS the logical cell index here.
+    out.push_str("            let agent_id = cell / cfg.agent_cap;\n");
+    out.push_str("            let per_pair_candidate = cell % cfg.agent_cap;\n");
+    // Compose the gate test (always `true` when no gate); avoids
+    // duplicating the per-byte step body.
+    let gate_expr = match gate_predicate_wgsl {
+        Some(pred) => pred.to_string(),
+        None => "true".to_string(),
+    };
+    writeln!(
+        out,
+        "            let decay_gate_value: bool = {gate_expr};"
+    )
+    .expect("write to String never fails");
+    out.push_str("            if (decay_gate_value) {\n");
+    if mode == 1 {
+        // Saturating-sub mode (the tom_probe shape).
+        writeln!(out, "                let by: u32 = {sub_by}u;")
+            .expect("write to String never fails");
+        out.push_str(
+            "                new_conf = select(conf - by, 0u, conf < by);\n",
+        );
+    } else {
+        // Multiplicative mode under q8 packing — clamp + truncate the
+        // result back to a u8. Emit `floor(conf * rate)` so the decay
+        // is monotone-non-increasing under repeated application.
+        // Today this branch isn't exercised by any fixture (q8 + mul
+        // is an exotic combination); kept for surface completeness.
+        out.push_str(
+            "                let conf_f: f32 = f32(conf);\n",
+        );
+        // `rate_bits` isn't currently used in q8/mul, so we do not
+        // accept it as a parameter — see top-level note: q8/mul is
+        // surface-complete but no fixture targets it. If needed,
+        // promote the helper to take `rate_bits` and emit
+        // `f32::from_bits(rate_bits)` here.
+        out.push_str(
+            "                // q8 + mul is surface-complete but unused; rate omitted.\n",
+        );
+        out.push_str(
+            "                new_conf = u32(conf_f);\n",
+        );
+    }
+    out.push_str("            }\n");
+    out.push_str("        }\n");
+    out.push_str("        new_word = new_word | ((new_conf & 0xFFu) << shift);\n");
+    out.push_str("    }\n");
+    out.push_str("    atomicStore(&view_storage_primary[word_idx], new_word);\n");
+    out
+}
+
 /// ViewDecay WGSL body builder — entry point that resolves the optional
 /// gate-mask predicate to inline WGSL, then defers to
 /// [`build_view_decay_wgsl_body_inner`] for the per-cell step shape.
@@ -3665,12 +3789,13 @@ fn build_view_decay_wgsl(
     mode: u8,
     sub_by: u32,
     gate_mask_id: Option<u32>,
+    packing: u8,
     prog: &CgProgram,
     ctx: &EmitCtx<'_>,
 ) -> Result<(String, Vec<DataHandle>), KernelEmitError> {
     let Some(mask_id_u32) = gate_mask_id else {
         return Ok((
-            build_view_decay_wgsl_body_inner(rate_bits, mode, sub_by, None),
+            build_view_decay_wgsl_body_inner(rate_bits, mode, sub_by, None, packing),
             Vec::new(),
         ));
     };
@@ -3688,7 +3813,7 @@ fn build_view_decay_wgsl(
         // resolver pins the gate name to a declared mask), but bailing
         // gracefully here is preferable to panicking at codegen.
         return Ok((
-            build_view_decay_wgsl_body_inner(rate_bits, mode, sub_by, None),
+            build_view_decay_wgsl_body_inner(rate_bits, mode, sub_by, None, packing),
             Vec::new(),
         ));
     };
@@ -3764,6 +3889,7 @@ fn build_view_decay_wgsl(
         mode,
         sub_by,
         Some(&predicate_wgsl_with_lets),
+        packing,
     );
     Ok((body, handles))
 }

@@ -696,6 +696,8 @@ mod tests {
             annotations: vec![],
             kind: ViewKind::Materialized(StorageHint::PairMap),
             decay: None,
+            belief_gated: false,
+            storage_packing: crate::ir::Packing::None,
             span: span(),
         }
     }

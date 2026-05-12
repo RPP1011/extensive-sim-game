@@ -24,7 +24,8 @@ use super::data_handle::{
 use super::dispatch::DispatchShape;
 use super::expr::ExprArena;
 use super::stmt::{
-    collect_expr_reads, collect_list_dependencies, CgStmtListId, StmtArena, StmtListArena,
+    collect_belief_state_calls_in_expr, collect_expr_reads, collect_list_dependencies,
+    CgStmtListId, StmtArena, StmtListArena,
 };
 
 // Re-export the AST `Span` for diagnostic provenance. Reusing the
@@ -699,6 +700,15 @@ pub enum ComputeOpKind {
         /// `@decay(gate = MaskName)` argument. `None` means the
         /// per-cell body runs unconditionally.
         gate: Option<MaskId>,
+        /// Per-view storage packing. `0` = `Packing::None` (one logical
+        /// cell per u32 word — legacy shape every existing view uses);
+        /// `1` = `Packing::Q8` (4 packed u8 cells per u32 word). Drives
+        /// the WGSL emit's per-cell vs per-word arithmetic in
+        /// `build_view_decay_wgsl_body_inner`. Plumbed from the source-
+        /// level `@storage(packed_q8)` annotation via the AST IR field
+        /// `ViewIR::storage_packing`. Encoded as a primitive int so the
+        /// variant stays `Eq + Hash + Ord`.
+        packing: u8,
     },
 
     /// Spatial query — dispatch shape determines hash-build vs
@@ -752,6 +762,17 @@ impl ComputeOpKind {
         match self {
             ComputeOpKind::MaskPredicate { mask, predicate } => {
                 collect_expr_reads(*predicate, exprs, &mut reads);
+                // The standalone mask kernel emits namespace-call
+                // prelude functions (e.g. `agents_beliefs_last_seen_tick`)
+                // that read the BeliefStateColumn storage buffers
+                // (e.g. `beliefs_tick`). `collect_expr_reads` does not
+                // surface those handles for `NamespaceCall` arms — see
+                // the docstring on `collect_belief_state_calls_in_expr`.
+                // Without this walk, the kernel's binding synthesis
+                // would skip the matching `beliefs_<col>` storage entry
+                // and the prelude function's access would reference an
+                // undeclared identifier at WGSL validation time.
+                collect_belief_state_calls_in_expr(*predicate, exprs, &mut reads);
                 writes.push(DataHandle::MaskBitmap { mask: *mask });
             }
             ComputeOpKind::ScoringArgmax { scoring: _, rows } => {
@@ -865,7 +886,7 @@ impl ComputeOpKind {
             ComputeOpKind::ViewFold { view, on_event, .. } => {
                 format!("view_fold(view=#{}, on_event=#{})", view.0, on_event.0)
             }
-            ComputeOpKind::ViewDecay { view, rate_bits, mode, sub_by, gate } => {
+            ComputeOpKind::ViewDecay { view, rate_bits, mode, sub_by, gate, packing } => {
                 let mode_label = if *mode == 1 { "sub" } else { "mul" };
                 let mag = if *mode == 1 {
                     format!("{sub_by}")
@@ -876,8 +897,9 @@ impl ComputeOpKind {
                     Some(m) => format!(", gate=#{}", m.0),
                     None => String::new(),
                 };
+                let packing_label = if *packing == 1 { ", packed_q8" } else { "" };
                 format!(
-                    "view_decay(view=#{}, mode={mode_label}, by={mag}{gate_label})",
+                    "view_decay(view=#{}, mode={mode_label}, by={mag}{gate_label}{packing_label})",
                     view.0,
                 )
             }

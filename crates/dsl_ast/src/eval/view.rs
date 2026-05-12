@@ -775,6 +775,8 @@ mod tests {
             annotations: vec![],
             kind: ViewKind::Materialized(StorageHint::PerEntityTopK { k: 8, keyed_on: 0 }),
             decay: None,
+            belief_gated: false,
+            storage_packing: crate::ir::Packing::None,
             span: dummy_span(),
         }
     }
@@ -821,6 +823,8 @@ mod tests {
             annotations: vec![],
             kind: ViewKind::Materialized(StorageHint::PerEntityTopK { k: 1, keyed_on: 0 }),
             decay: None,
+            belief_gated: false,
+            storage_packing: crate::ir::Packing::None,
             span: dummy_span(),
         }
     }
@@ -875,6 +879,8 @@ mod tests {
             annotations: vec![],
             kind: ViewKind::Lazy,
             decay: None,
+            belief_gated: false,
+            storage_packing: crate::ir::Packing::None,
             span: dummy_span(),
         };
 
@@ -1057,6 +1063,8 @@ mod tests {
             annotations: vec![],
             kind: ViewKind::Materialized(StorageHint::PerEntityTopK { k: 8, keyed_on: 0 }),
             decay: None,
+            belief_gated: false,
+            storage_packing: crate::ir::Packing::None,
             span: dummy_span(),
         };
 
@@ -1135,6 +1143,8 @@ mod tests {
             annotations: vec![],
             kind: ViewKind::Materialized(StorageHint::PerEntityTopK { k: 8, keyed_on: 0 }),
             decay: None,
+            belief_gated: false,
+            storage_packing: crate::ir::Packing::None,
             span: dummy_span(),
         };
 
