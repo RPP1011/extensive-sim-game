@@ -2245,6 +2245,21 @@ fn lower_builtin_call(
                 span,
             )
         }
+        Builtin::NextWaypoint => {
+            expect_arity(builtin, 1, args.len(), span)?;
+            // Placeholder: returns a sentinel `vec3(0,0,0)` until a
+            // real quest/landmark/waypoint runtime lands. The
+            // `crowd_navigation.sim` design-target fixture uses this
+            // in `physics PickNewGroupGoal` to stub out goal selection
+            // for travel parties; lowering as a sentinel preserves
+            // structural emit while leaving behavioural correctness
+            // for a later pass.
+            add(
+                ctx,
+                CgExpr::Lit(LitValue::Vec3F32 { x: 0.0, y: 0.0, z: 0.0 }),
+                span,
+            )
+        }
         // Already filtered above.
         Builtin::Forall | Builtin::Exists | Builtin::Count | Builtin::Sum => {
             unreachable!("filtered earlier in lower_builtin_call")

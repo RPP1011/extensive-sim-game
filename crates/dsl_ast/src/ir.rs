@@ -1337,6 +1337,14 @@ pub enum Builtin {
     /// derives the unit direction from the winning cell's centre +
     /// self.pos.
     ThreatsDirAwayFromNearest,
+
+    /// `next_waypoint(group) -> Vec3` — returns the next destination
+    /// waypoint for a group. Today this is a placeholder (sentinel
+    /// `Vec3::ZERO`) so design-target fixtures (`crowd_navigation.sim`)
+    /// can lower without requiring a quest/landmark runtime. The real
+    /// implementation would consult quest state or random landmarks per
+    /// the `crowd_navigation.sim` author note. Arity 1 (the group id).
+    NextWaypoint,
 }
 
 impl Builtin {
@@ -1373,6 +1381,7 @@ impl Builtin {
             Builtin::ThreatsIntensityAt => "threats.intensity_at",
             Builtin::ThreatsNearest => "threats.nearest",
             Builtin::ThreatsDirAwayFromNearest => "threats.dir_away_from_nearest",
+            Builtin::NextWaypoint => "next_waypoint",
         }
     }
 
@@ -1403,6 +1412,8 @@ impl Builtin {
             | Builtin::ThreatsIntensityAt
             | Builtin::ThreatsNearest
             | Builtin::ThreatsDirAwayFromNearest => Some(1),
+            // `next_waypoint(group)` placeholder — single arg.
+            Builtin::NextWaypoint => Some(1),
             // Quantifiers are parsed as a dedicated AST node, not a call; this
             // entry is for completeness only.
             Builtin::Forall | Builtin::Exists => None,

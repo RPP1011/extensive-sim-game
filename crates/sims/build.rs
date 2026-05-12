@@ -105,6 +105,7 @@ fn main() {
                 | "stress_cast_density"
                 | "predator_prey"
                 | "particle_collision"
+                | "crowd_navigation"
         ) {
             continue;
         }

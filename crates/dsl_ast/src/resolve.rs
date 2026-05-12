@@ -100,6 +100,11 @@ mod stdlib {
         symbols.builtins.insert("f32".into(), Builtin::F32Cast);
         symbols.builtins.insert("u32".into(), Builtin::U32Cast);
         symbols.builtins.insert("i32".into(), Builtin::I32Cast);
+        // `next_waypoint(group)` — design-target placeholder for the
+        // crowd_navigation fixture's group-leader goal-handoff. Returns
+        // a sentinel `vec3(0,0,0)` until a real quest/landmark runtime
+        // lands. See `Builtin::NextWaypoint` for the per-variant doc.
+        symbols.builtins.insert("next_waypoint".into(), Builtin::NextWaypoint);
 
         // Typed namespaces. Each has its own field / method schema below.
         for (name, id) in [

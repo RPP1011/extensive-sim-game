@@ -30,8 +30,6 @@ glam = "0.29"
 # aware and introspects per-creature counts via the runtime API.
 # Particle collision sibling fixture — pc_app drives it through the
 # CompiledSim trait.
-# Crowd navigation sibling fixture — cn_app drives it.
-crowd_navigation_runtime = { path = "../crowd_navigation_runtime", optional = true }
 # Target-chaser stress fixture for slice 1 (cross-agent target reads).
 # Swarm-event-storm stress fixture for Phase 7+8 primitives (multi-emit
 # producer + 2 view-folds with @decay anchor).
@@ -219,13 +217,13 @@ tom_probe_runtime = { path = "../tom_probe_runtime", optional = true }
 default = ["test-fixtures"]
 
 # Runtimes referenced unconditionally by tests/cross_fixture_determinism.rs.
-test-fixtures = [
-    "dep:crowd_navigation_runtime",
-]
+# Today the test file is a stub (every fixture it covered has migrated to
+# the sims mega-crate); kept as an empty group so external invocations
+# of `cargo test -p sim_app --features test-fixtures` keep working.
+test-fixtures = []
 
 # Per-binary features. Each pulls in only the runtime that binary needs.
 # Build pattern: `cargo build -p sim_app --bin foo_app --features bin-foo_app`.
-bin-cn_app = ["dep:crowd_navigation_runtime"]
 bin-tom_probe_app = ["dep:tom_probe_runtime"]
 # `viz_app` is the universal sim-picker — its SIMS table in
 # src/viz_app.rs references every per-fixture runtime crate
@@ -235,16 +233,8 @@ bin-tom_probe_app = ["dep:tom_probe_runtime"]
 # matches the binary's "any fixture by name" intent (#99 closes
 # the build gap surfaced by predator_prey snapshot work, 2026-05-05).
 bin-viz_app = [
-    "dep:crowd_navigation_runtime",
     "dep:tom_probe_runtime",
 ]
-
-
-
-[[bin]]
-name = "cn_app"
-path = "src/cn_app.rs"
-required-features = ["bin-cn_app"]
 
 
 
