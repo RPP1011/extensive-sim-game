@@ -6367,6 +6367,17 @@ fn emit_fused_for_each_neighbor(
                 "                    local_{n} = (local_{n} + ({proj_wgsl}));\n"
             ));
         }
+        // Auto-injected distance gate (Gap dungeon_layout#1) — same
+        // motivation as `emit_for_each_neighbor_body`. The boundary-
+        // cell clamp pools OOB agents into the boundary cell; without
+        // a per-pair distance guard, the per-candidate projection
+        // would see those OOB agents as if they were genuine
+        // neighbours. Gating squared distance against the
+        // cell-neighbourhood diagonal `((r+1) * cell_size * sqrt(3))²
+        // = 3 * (r+1)² * cell_size²` kills the pool without rejecting
+        // any in-window candidate.
+        let r_plus_one = (radius as u32 + 1) as u32;
+        let r_plus_one_sq = r_plus_one * r_plus_one;
         let body = format!(
             "{head}{{\n\
              \x20   let _self_cell_f = (agent_pos[agent_id] + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
@@ -6374,6 +6385,7 @@ fn emit_fused_for_each_neighbor(
              \x20   let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
              \x20   let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
              \x20   let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
+             \x20   let _gate_radius_sq = 3.0 * f32({r_plus_one_sq}u) * SPATIAL_CELL_SIZE * SPATIAL_CELL_SIZE;\n\
              \x20   for (var dz: i32 = -{r}; dz <= {r}; dz = dz + 1) {{\n\
              \x20       for (var dy: i32 = -{r}; dy <= {r}; dy = dy + 1) {{\n\
              \x20           for (var dx: i32 = -{r}; dx <= {r}; dx = dx + 1) {{\n\
@@ -6382,6 +6394,9 @@ fn emit_fused_for_each_neighbor(
              \x20               let _end = spatial_grid_starts[_cell + 1u];\n\
              \x20               for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {{\n\
              \x20                   let per_pair_candidate = spatial_grid_cells[_i];\n\
+             \x20                   let _gate_dxyz = agent_pos[per_pair_candidate] - agent_pos[agent_id];\n\
+             \x20                   let _gate_dist_sq = dot(_gate_dxyz, _gate_dxyz);\n\
+             \x20                   if (_gate_dist_sq > _gate_radius_sq) {{ continue; }}\n\
              {updates}\
              \x20               }}\n\
              \x20           }}\n\
@@ -6389,6 +6404,7 @@ fn emit_fused_for_each_neighbor(
              \x20   }}\n\
              }}",
             r = radius,
+            r_plus_one_sq = r_plus_one_sq,
             head = head,
             updates = updates,
         );
@@ -6468,6 +6484,31 @@ fn emit_for_each_neighbor_body(
     // 4-deep loop chain (3 cell-axis loops + 1 candidate loop). Six
     // levels of 4-space indent → 24 spaces.
     let indented_body = indent_block(&body_wgsl, 6);
+    // Auto-injected distance gate (Gap dungeon_layout#1). The spatial
+    // grid's `cell_index` helper clamps OOB axis coordinates to
+    // `GRID_DIM - 1`, which silently pools every distant agent into
+    // the boundary cell. Walks on a boundary-side cell then see those
+    // OOB agents as "neighbours" by cell-coord arithmetic even though
+    // they are FAR in world coordinates. Gating per-candidate by
+    // squared distance against the cell-neighbourhood diagonal kills
+    // the OOB pool without rejecting any in-window candidate.
+    //
+    // Bound: the cell-walk visits `(2r+1)³` cells centered on self's
+    // cell. The maximum world distance between self at one corner of
+    // its cell and a candidate at the opposite corner of the most-
+    // diagonal visited cell is `(r+1) * cell_size * sqrt(3)` (3D
+    // diagonal). Squaring: `3 * (r+1)² * cell_size²`. Using this as
+    // the upper bound guarantees no false negative — any candidate
+    // genuinely inside the cell window passes the gate.
+    //
+    // The gate body re-uses `agent_pos[agent_id]` (already bound — the
+    // template's `_self_cell_f` read surfaces it) plus the candidate
+    // read `agent_pos[per_pair_candidate]`. The latter introduces no
+    // new buffer binding requirement: `agent_pos` is already in the
+    // kernel's BGL via the implicit-self.pos read surfaced by
+    // `collect_stmt_dependencies` for `CgStmt::ForEachNeighborBody`.
+    let r_plus_one = (radius_cells + 1) as u32;
+    let r_plus_one_sq = r_plus_one * r_plus_one;
     let out = format!(
         "{{\n\
          \x20   let _self_cell_f = (agent_pos[agent_id] + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
@@ -6475,6 +6516,7 @@ fn emit_for_each_neighbor_body(
          \x20   let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
          \x20   let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
          \x20   let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
+         \x20   let _gate_radius_sq = 3.0 * f32({r_plus_one_sq}u) * SPATIAL_CELL_SIZE * SPATIAL_CELL_SIZE;\n\
          \x20   for (var dz: i32 = -{r}; dz <= {r}; dz = dz + 1) {{\n\
          \x20       for (var dy: i32 = -{r}; dy <= {r}; dy = dy + 1) {{\n\
          \x20           for (var dx: i32 = -{r}; dx <= {r}; dx = dx + 1) {{\n\
@@ -6483,6 +6525,9 @@ fn emit_for_each_neighbor_body(
          \x20               let _end = spatial_grid_starts[_cell + 1u];\n\
          \x20               for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {{\n\
          \x20                   let per_pair_candidate = spatial_grid_cells[_i];\n\
+         \x20                   let _gate_dxyz = agent_pos[per_pair_candidate] - agent_pos[agent_id];\n\
+         \x20                   let _gate_dist_sq = dot(_gate_dxyz, _gate_dxyz);\n\
+         \x20                   if (_gate_dist_sq > _gate_radius_sq) {{ continue; }}\n\
          {indented_body}\n\
          \x20               }}\n\
          \x20           }}\n\
@@ -6490,6 +6535,7 @@ fn emit_for_each_neighbor_body(
          \x20   }}\n\
          }}",
         r = r,
+        r_plus_one_sq = r_plus_one_sq,
         indented_body = indented_body,
     );
     Ok(out)

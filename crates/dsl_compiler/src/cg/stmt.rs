@@ -1013,6 +1013,24 @@ pub fn collect_stmt_dependencies(
             reads.push(DataHandle::SpatialStorage {
                 kind: super::data_handle::SpatialStorageKind::GridStarts,
             });
+            // The WGSL template (`emit_fused_for_each_neighbor` in
+            // emit/wgsl_body.rs) reads `agent_pos[agent_id]` to
+            // compute `_self_cell_f` (the per-thread cell coords) AND
+            // — post Gap dungeon_layout#1 — reads both
+            // `agent_pos[agent_id]` and `agent_pos[per_pair_candidate]`
+            // for the auto-injected OOB-pool distance gate. Surface
+            // the implicit self.pos read here so the BGL composer
+            // binds `agent_pos` to the kernel regardless of whether
+            // the user's projection references position. Without this,
+            // a fold whose projection is e.g. a constant (`sum(other
+            // in spatial.nearby(self) where 1.0)`) emits naga-invalid
+            // WGSL that references an unbound `agent_pos` identifier
+            // — mirrors the same fix already in place for
+            // `ForEachNeighborBody` below.
+            reads.push(DataHandle::AgentField {
+                field: super::data_handle::AgentFieldId::Pos,
+                target: super::data_handle::AgentRef::Self_,
+            });
         }
         CgStmt::ForEachNeighborBody { body, .. } => {
             // Body-form spatial walk. The body's own statements
