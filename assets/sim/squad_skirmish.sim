@@ -128,9 +128,15 @@ config combat {
   // tuning pass doesn't have to chase magic numbers in 4 verb bodies.
   rally_hp_floor:   f32 = 60.0,    // gate Rally on target.hp < this
   daze_hp_ceiling:  f32 = 70.0,    // only Daze healthy targets (don't waste on near-dead)
-  strike_score_base: f32 = 200.0,
-  volley_score_base: f32 = 240.0,
-  rally_score_base:  f32 = 300.0,
+  // Bases tuned 2026-05-12 — Rally was 300 (highest), so argmax
+  // always picked it even though it's an ally-buff; combat never
+  // resolved. Reordered so Strike > Volley > Daze > Rally; combat
+  // rows now beat the support row by default. Personality weights
+  // (risk_tolerance / aggression / altruism / ambition) still
+  // perturb the ordering per-agent.
+  strike_score_base: f32 = 300.0,
+  volley_score_base: f32 = 260.0,
+  rally_score_base:  f32 = 150.0,
   daze_score_base:   f32 = 220.0,
   // Personality weight scalers — multiplied into per-verb scoring
   // weights to bias argmax by per-agent disposition. risk_tolerance
@@ -326,6 +332,11 @@ scoring Soldier {
     base:        config.combat.strike_score_base,
     weights:     agents.risk_tolerance(self) * config.combat.aggression_scale,
     cooldown:    config.combat.cooldown_strike,
+  }
+  row Volley per_target {
+    base:        config.combat.volley_score_base,
+    weights:     agents.risk_tolerance(self) * config.combat.aggression_scale,
+    cooldown:    config.combat.cooldown_volley,
   }
   row Rally per_target {
     base:        config.combat.rally_score_base,
