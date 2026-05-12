@@ -1,0 +1,29 @@
+// King's royal decree — Plan G `cast { duration: ... telegraph: ... }`
+// block. The cast block lowers to:
+//   * EffectOp::CastBegin in `effects` (kind=46, dispatched as
+//     EffectKindId::EffectCastBeginApplied = 77)
+//   * `pending_program` populated from the `effect { ... }` body —
+//     a heal 0 placeholder so the lowering captures *something*
+//     non-empty in pending_program (the .sim's ResolveDecree rule
+//     fires the actual decree-reset, NOT this pending_program; same
+//     MVP shortcut firebolt_probe documents).
+//   * `telegraph_kind = TelegraphKind::Circle (= 1)`
+//   * `telegraph_params[0] = 12.0` (radius)
+//
+// AbilityId 4 (alphabetical: last of the four).
+//
+// Why a placeholder pending_program rather than the actual reset
+// effect? The reset is a spatial fan-out (clear evidence on every
+// nearby agent), which the registry-driven pending_program dispatch
+// can't model today (single-target dispatch only). The .sim's
+// ResolveDecree rule does the fan-out via a per-agent scan keyed on
+// `agents.busy_until_tick` elapsing.
+
+ability RoyalDecree {
+    target: self
+    cooldown: 6s
+    hint: utility
+
+    cast { duration: 6t telegraph: circle(self.pos, radius: 12) }
+    effect { heal 0 }
+}

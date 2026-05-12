@@ -1,0 +1,15 @@
+// Guard's arrest ability — fires only against Conspirators whose
+// trust level (= agents.mana) has cascaded to Hostile (= 3). Decisive:
+// arrest_damage 100 vs hp 100 = one-shot kill.
+//
+// AbilityId 1 (alphabetical: Arrest < Assassinate < Investigate <
+// RoyalDecree).
+
+ability Arrest {
+    target: enemy
+    range: 1.5
+    cooldown: 1s
+    hint: damage
+
+    damage 100.0 [PHYSICAL: 100]
+}

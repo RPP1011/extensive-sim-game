@@ -1,0 +1,14 @@
+// Conspirator's assassination ability — high single-hit damage. The
+// king has hp 100 by default, so a single uncontested assassination at
+// damage 60 puts the king at 40 hp; two strikes finish him.
+//
+// AbilityId 2 (alphabetical).
+
+ability Assassinate {
+    target: enemy
+    range: 1.5
+    cooldown: 1s
+    hint: damage
+
+    damage 60.0 [PHYSICAL: 100]
+}

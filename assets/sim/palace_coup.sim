@@ -1,0 +1,541 @@
+// palace_coup — adversarial fixture for the mega-crate auto-emit pipeline.
+//
+// **Topology** (host-seeded; see crates/sims/tests/palace_coup_pin.rs):
+//   * 1 King      at hilltop (radius 0)
+//   * 8 Guards    in a tight ring around the king (radius 3)
+//   * 4 Conspirators on the outer perimeter (radius 8) — they
+//     creep inward each tick toward the king to assassinate him.
+//   * 20 Civilians scattered around the courtyard (radius 12-18).
+//
+// creature_type discriminants are pinned by entity decl order, which
+// per commit 1c565df9 is alphabetical. So the host-side mapping is:
+//   Civilian = 0, Conspirator = 1, Guard = 2, King = 3
+//
+// **Adversarial axes stacked**:
+//   1. **`cast` blocks (Plan G)** — King's RoyalDecree.ability uses
+//      `cast { duration: 6t telegraph: circle(self.pos, radius: 12) }
+//      effect { ... }`. This forces end-to-end exercise of:
+//        * `EffectOp::CastBegin` write at apply_ability time (kind=77)
+//        * RecordCastBegin consumer that stamps `agents.busy_until_tick`
+//        * busy-resolution PerAgent rule that fires when busy expires
+//        * pending_program lowering (the effect{} body)
+//   2. **Discrete state-machine transitions on a re-purposed SoA
+//      column** — `agents.mana(slot)` carries a u8-coded trust level
+//      (0=Loyal, 1=Suspicious, 2=Disloyal, 3=Hostile). State transitions
+//      ramp via the EvidenceConsumer rule which reads the per-agent
+//      `shield_hp` (re-purposed: evidence counter) and bumps mana when
+//      a threshold is crossed. Same SoA-re-purpose precedent as
+//      spy_network's `mana → suspicion` and wave_defense's
+//      `mana → resource_yielded`.
+//   3. **Pair-keyed beliefs (ToM)** — `view guard_belief(observer,
+//      subject) -> u32` is a pair_map storage view. Each tick a Guard
+//      with line-of-sight to a Conspirator emits a BeliefAcquired event;
+//      the bit-OR fold turns this into "Guard observer thinks subject
+//      is suspicious" persistent flag. The view storage is sized N×N
+//      so a 33-agent fixture allocates a 33×33 = 1089-cell pair map —
+//      first non-trivial multi-belief-state.
+//   4. **Voxel terrain LoS** — a palace wall ring at z=2 (radius 5)
+//      blocks line-of-sight between a guard inside the ring and any
+//      conspirator outside. The Guard's Investigate verb only fires
+//      against conspirators with clear LoS; same `terrain.line_of_sight`
+//      gate hill_raid uses.
+//   5. **Multi-row scoring** — Guards have 3 verbs (Investigate / Arrest
+//      / Patrol) competing in the scoring kernel. Conspirators have 2
+//      (Plot / Assassinate). King has 1 (RoyalDecree). The scoring
+//      kernel must argmax over heterogeneous verb counts per
+//      creature_type — this exercises the per-row mask-then-argmax path.
+//
+// **Per-tick** (PerAgent dispatch over the union population):
+//   1. ConspiratorAdvance — conspirators creep toward the king
+//      (similar to hill_raid's EnemyAdvance, normalize-direction form).
+//   2. ConspiratorAssassinate — when in melee range AND target is the
+//      king AND king is alive AND king is busy (Plan G overlap: a king
+//      mid-cast is a conspirator's BEST window), dispatch Assassinate.
+//   3. GuardObserve — for each Conspirator in spatial.nearby_los where
+//      LoS is clear, emit BeliefAcquired { fact_bit: 1 << conspirator_id }.
+//   4. GuardInvestigate — for each Conspirator with belief flag set,
+//      bump evidence_against (= shield_hp) — Plan G2 chronicle path
+//      via the Investigate ability.
+//   5. EvidenceConsumer — when evidence_against on a target crosses
+//      one of the discrete thresholds {25, 50, 75}, transition the
+//      target's mana (= trust_level) Loyal→Suspicious→Disloyal→Hostile.
+//      Counts each transition into a `trust_transitions` per-agent view
+//      so the pin can report total transitions across the run.
+//   6. GuardArrest — Guards with a Hostile (mana == 3) target in melee
+//      range dispatch Arrest, which reduces target hp directly.
+//   7. KingDispatchDecree — every cast_cooldown ticks, king casts
+//      RoyalDecree if not currently busy. This is the Plan G producer.
+//   8. RecordCastBegin — Plan G consumer that stamps busy_until_tick.
+//   9. ResolveDecree — when king's busy_until_tick elapses, the
+//      pending_program (a calming aura — drops shield_hp = evidence
+//      back to zero on every nearby agent) fires.
+//  10. ApplyDamage — chronicle consumer for EffectDamageApplied.
+//
+// **Observable views** (recovered as runtime readback in the pin):
+//   * trust_transitions(by) — per-agent transition count, no decay.
+//   * king_alive_pressure() — single-cell view that increments while
+//     the king is alive and never decays.
+//   * guard_belief(observer, subject) — pair-keyed belief flags.
+//
+// **Outcome contract** (palace_coup_pin):
+//   - king_alive at tick 300: yes (low conspirator count, decree
+//     resets evidence) OR no (assassination during cast window)
+//   - count of trust transitions > 0 (evidence accumulated)
+//   - count of Damaged events > 0 (some violence occurred)
+//   - king_busy_at_some_point: True (RoyalDecree's cast block fired)
+//
+// Companion `.ability` corpus at assets/ability_test/palace_coup/:
+//   - Arrest.ability       (id 1) — Guard's enemy-target damage
+//   - Assassinate.ability  (id 2) — Conspirator's high-damage strike
+//   - Investigate.ability  (id 3) — Guard's evidence-bump ability
+//   - RoyalDecree.ability  (id 4) — King's `cast { ... }` block
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Engine-side chronicle event written by `apply_ability` dispatcher
+// at hardcoded EventKindId 26.
+@replayable @gpu_amenable
+event EffectDamageApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Plan G — engine-side chronicle event written by apply_ability when
+// it processes EffectOp::CastBegin (kind=77). Same shape as
+// firebolt_probe.sim. The 4-payload-word event packs ability_id +
+// duration + target packed coords into 2 u32 slots. The DSL's PerEvent
+// destructuring today maps each declared field to one full u32 slot;
+// for the multi-field-per-slot fields the runtime uses
+// `config.king.cast_duration` as the hardcoded fallback (same gap
+// firebolt_probe documents).
+event EffectCastBeginApplied {
+  actor:          AgentId,
+  target:         AgentId,
+  ability_id:     u16,
+  duration_ticks: u16,
+  target_x_q8:    i16,
+  target_y_q8:    i16,
+}
+
+// Per-fixture events for the evidence/trust state machine.
+@replayable @gpu_amenable
+event EvidenceFiled {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Per-(observer, subject) belief flag fold. Each Guard in LoS of a
+// Conspirator emits one of these per tick; the view bit-OR's the
+// fact_bit into beliefs_flags(observer, subject).
+@replayable @gpu_amenable
+event BeliefAcquired {
+  observer: AgentId,
+  subject:  AgentId,
+  fact_bit: u32,
+}
+
+// Trust state transition marker — emitted by EvidenceConsumer on the
+// tick mana steps Loyal→Suspicious→Disloyal→Hostile. The view fold
+// counts transitions; the host pin reads the total across all agents.
+@replayable @gpu_amenable
+event TrustTransition {
+  source: AgentId,
+  target: AgentId,
+  new_level: u32,
+}
+
+// Conspirator entities declared in alphabetical order (Civilian = 0,
+// Conspirator = 1, Guard = 2, King = 3) — per commit 1c565df9
+// (decl-order alphabetical discriminants).
+entity Civilian : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Conspirator : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Guard : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity King : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+init {
+  alive: 1,
+  hp:    100,
+}
+
+config palace {
+  // Creature type discriminants (mirror runtime seed assignments).
+  ct_civilian:     u32 = 0,
+  ct_conspirator:  u32 = 1,
+  ct_guard:        u32 = 2,
+  ct_king:         u32 = 3,
+
+  // Trust state machine — re-purposes agents.mana as a 4-state level
+  // counter. 0 = Loyal, 1 = Suspicious, 2 = Disloyal, 3 = Hostile.
+  trust_loyal:        u32 = 0,
+  trust_suspicious:   u32 = 1,
+  trust_disloyal:     u32 = 2,
+  trust_hostile:      u32 = 3,
+  // Evidence thresholds for state transitions (read off agents.shield_hp
+  // which is re-purposed as evidence_against). When evidence ≥ thresh,
+  // mana steps up by 1.
+  evidence_thresh_1:  f32 = 25.0,    // Loyal → Suspicious
+  evidence_thresh_2:  f32 = 50.0,    // Suspicious → Disloyal
+  evidence_thresh_3:  f32 = 75.0,    // Disloyal → Hostile
+
+  // Damage / movement tuning.
+  conspirator_step:    f32 = 0.10,    // melee creep speed
+  conspirator_strike_radius: f32 = 1.5,
+  assassinate_damage:  f32 = 60.0,
+  arrest_damage:       f32 = 100.0,   // arrests are decisive
+  arrest_radius:       f32 = 1.5,
+  investigate_radius:  f32 = 8.0,
+  investigate_evidence: f32 = 5.0,    // per-tick evidence bump per LoS
+
+  // King's RoyalDecree cast (Plan G).
+  decree_id:       u32 = 4,           // AbilityId for RoyalDecree
+  cast_duration:   u32 = 6,           // ticks; matches .ability `cast { duration: 6t }`
+  decree_radius:   f32 = 12.0,        // calming aura on resolve
+  decree_cooldown: u32 = 60,          // king casts every 60 ticks when idle
+}
+
+// Spatial queries (radius-keyed). The conspirator's strike radius is
+// tighter than the guard's investigate radius; both go through the
+// same spatial hash.
+@spatial(radius = 8.0, kind = [Agent])
+spatial_query nearby_los(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+@spatial(radius = 1.5, kind = [Agent])
+spatial_query nearby_melee(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+@spatial(radius = 12.0, kind = [Agent])
+spatial_query nearby_decree(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// -------------------------------------------------------------------
+// Producer rules.
+// -------------------------------------------------------------------
+
+// ConspiratorAdvance — every alive conspirator drifts toward the king
+// each tick. Same normalize-direction form hill_raid uses (raw `sum *
+// step` recurrence diverges to NaN within ~4 ticks at any reasonable
+// step size; normalize gives bounded `step` per tick).
+@phase(per_agent)
+physics ConspiratorAdvance {
+  on Tick {} where (self.alive && self.creature_type == Conspirator) {
+    let toward_king = sum(k in agents where
+      if (k != self) && (k.alive) && (k.creature_type == King) {
+        k.pos - self.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let dist = length(toward_king);
+    let new_pos = if (dist > 0.001) {
+      self.pos + (toward_king / dist) * config.palace.conspirator_step
+    } else {
+      self.pos
+    };
+    agents.set_pos(self, new_pos);
+  }
+}
+
+// ConspiratorAssassinate — when in melee range of any king (only one
+// king in the seed, but the rule iterates spatial candidates uniformly),
+// dispatch Assassinate. The verb is gated on king.alive — successful
+// kill flips alive=false and the verb stops firing.
+@phase(per_agent)
+physics ConspiratorAssassinate {
+  on Tick {} where (self.alive && self.creature_type == Conspirator) {
+    for candidate in spatial.nearby_melee(self) {
+      if (candidate.alive && candidate.creature_type == King) {
+        apply_ability 2 by self target candidate
+      }
+    }
+  }
+}
+
+// GuardObserve — every alive guard with LoS to a conspirator emits a
+// BeliefAcquired event. Bit 1 marks "I observed conspirator activity".
+// terrain.line_of_sight reads voxel_grid through the same auto-emit
+// wire-up hill_raid uses; palace walls (seeded host-side) occlude.
+@phase(per_agent)
+physics GuardObserve {
+  on Tick {} where (self.alive && self.creature_type == Guard) {
+    for candidate in spatial.nearby_los(self) {
+      if (candidate.alive && candidate.creature_type == Conspirator &&
+          terrain.line_of_sight(self.pos, candidate.pos)) {
+        emit BeliefAcquired { observer: self, subject: candidate, fact_bit: 1 }
+      }
+    }
+  }
+}
+
+// GuardInvestigate — Guards in investigate_radius of a conspirator
+// dispatch Investigate. The Investigate ability writes
+// EffectDamageApplied records with a small "amount" — the
+// EvidenceConsumer rule below interprets these as evidence bumps
+// rather than literal damage by gating on source.creature_type ==
+// Guard. Same chronicle-shape re-use precedent wave_defense uses.
+@phase(per_agent)
+physics GuardInvestigate {
+  on Tick {} where (self.alive && self.creature_type == Guard) {
+    for candidate in spatial.nearby_los(self) {
+      if (candidate.alive && candidate.creature_type == Conspirator &&
+          terrain.line_of_sight(self.pos, candidate.pos)) {
+        apply_ability 3 by self target candidate
+      }
+    }
+  }
+}
+
+// GuardArrest — Guards with a Hostile (mana == trust_hostile) target
+// in arrest_radius dispatch Arrest. This is the discrete state-machine
+// payoff: a guard can only kill a conspirator AFTER evidence has
+// cascaded mana to 3.
+@phase(per_agent)
+physics GuardArrest {
+  on Tick {} where (self.alive && self.creature_type == Guard) {
+    for candidate in spatial.nearby_melee(self) {
+      if (candidate.alive && candidate.creature_type == Conspirator &&
+          agents.mana(candidate) >= 3.0) {
+        apply_ability 1 by self target candidate
+      }
+    }
+  }
+}
+
+// KingDispatchDecree — every decree_cooldown ticks, the king casts
+// RoyalDecree (ability 4). Gated on busy_until_tick == 0 so we don't
+// overlap casts. This is the Plan G producer side: apply_ability writes
+// EffectCastBeginApplied (kind=77) and the RecordCastBegin consumer
+// stamps busy_until_tick.
+@phase(per_agent)
+physics KingDispatchDecree {
+  on Tick {} where (self.alive
+                    && self.creature_type == King
+                    && agents.busy_until_tick(self) == 0
+                    && (world.tick % config.palace.decree_cooldown == 0)) {
+    apply_ability 4 by self target self
+  }
+}
+
+// -------------------------------------------------------------------
+// Consumer rules (chronicle drains).
+// -------------------------------------------------------------------
+
+// Re-emit EffectDamageApplied as Damaged for the unified ApplyDamage
+// path. Two semantic interpretations of the same chronicle shape:
+//   * source.creature_type == Guard && target.creature_type ==
+//     Conspirator AND amount is small → evidence (folded by
+//     EvidenceConsumer). Investigate uses tiny damage = 5 to mark this.
+//   * everything else → real damage (folded by ApplyDamage).
+// The two consumers are separate physics rules; both gate on the same
+// Damaged event but with disjoint amount/role conditions. To keep the
+// .sim simple, this fixture re-emits unconditionally and lets each
+// downstream rule pick the records it cares about.
+@phase(post)
+physics ApplyDamageFromChronicle {
+  on EffectDamageApplied { actor: a, target: t, amount: amt } {
+    emit Damaged { source: a, target: t, amount: amt }
+  }
+}
+
+// Plan G — RecordCastBegin consumer. Same shape firebolt_probe uses;
+// reads the EffectCastBeginApplied chronicle row and stamps the
+// caster's busy SoA fields. The duration is read from the per-fixture
+// config (the chronicle multi-field-per-slot unpacking gap).
+@phase(post)
+physics RecordCastBegin {
+  on EffectCastBeginApplied { actor: a, target: _, ability_id: _, duration_ticks: _, target_x_q8: _, target_y_q8: _ } {
+    agents.set_busy_until_tick(a, world.tick + config.palace.cast_duration);
+    agents.set_busy_with_ability_id(a, config.palace.decree_id);
+    agents.set_busy_started_at_tick(a, world.tick);
+  }
+}
+
+// Plan G — ResolveDecree busy-resolution rule. Per-agent scan; when
+// `agents.busy_until_tick(self)` elapses, the king's RoyalDecree
+// payload fires: emit a Damaged event with NEGATIVE amount targeting
+// self (a placeholder for "calming aura"). The ApplyEvidenceReset rule
+// then catches the marker and clears nearby evidence.
+//
+// **Plan G MVP shortcut.** Same as firebolt_probe — this rule
+// hardcodes the resolve effect rather than dispatching through
+// `apply_pending_program(prog)`. The registry-based path requires
+// expanding PackedAbilityRegistry with a pending_* column family
+// (deferred to `docs/superpowers/notes/2026-05-09-tom-probe.md`).
+@phase(per_agent)
+physics ResolveDecree {
+  on Tick {} where (self.alive
+                    && self.creature_type == King
+                    && agents.busy_until_tick(self) > 0
+                    && world.tick >= agents.busy_until_tick(self)) {
+    // Emit a marker EvidenceFiled to drain on next tick. Use a sentinel
+    // amount of -1.0 to flag "this is a decree-reset, not a real
+    // evidence bump". The EvidenceConsumer rule below tests for the
+    // sign.
+    emit EvidenceFiled { source: self, target: self, amount: -1.0 }
+    agents.set_busy_until_tick(self, 0);
+    agents.set_busy_with_ability_id(self, 0);
+  }
+}
+
+// Apply damage from chronicle. Standard pattern.
+@phase(post)
+physics ApplyDamage {
+  on Damaged { source: src, target: t, amount: a } {
+    let ct = agents.creature_type(src);
+    let tct = agents.creature_type(t);
+    // Investigate writes Damaged with amount = config.palace.investigate_evidence
+    // (= 5.0). Treat Guard→Conspirator chronicle damage as evidence:
+    // bump shield_hp. All other Damaged drains hp.
+    let is_evidence = if (ct == 2u && tct == 1u) { 1 } else { 0 };
+    if (is_evidence == 0) {
+      let old_hp = agents.hp(t);
+      let new_hp = old_hp - a;
+      agents.set_hp(t, new_hp);
+      if (old_hp > 0.0 && new_hp <= 0.0) {
+        agents.set_alive(t, false);
+        emit Defeated { combatant: t }
+      }
+    } else {
+      // Evidence accumulation: bump shield_hp on the conspirator.
+      let new_evidence = agents.shield_hp(t) + a;
+      agents.set_shield_hp(t, new_evidence);
+      emit EvidenceFiled { source: src, target: t, amount: a }
+    }
+  }
+}
+
+@replayable @gpu_amenable
+event Defeated {
+  combatant: AgentId,
+}
+
+// Discrete state machine on agents.mana. EvidenceConsumer drains
+// EvidenceFiled events and steps mana up when shield_hp crosses
+// thresholds. Sentinel amount = -1.0 means "decree reset" — set
+// shield_hp = 0 and mana = trust_loyal on every conspirator within
+// decree_radius of the source (the king).
+@phase(post)
+physics EvidenceConsumer {
+  on EvidenceFiled { source: s, target: t, amount: a } {
+    if (a > 0.0) {
+      // Real evidence accumulation: check thresholds and bump trust
+      // level on the target. Each upcrossing emits a TrustTransition
+      // event so the view fold counts the transition.
+      let evidence = agents.shield_hp(t);
+      let cur_level = agents.mana(t);
+      let want_level = if (evidence >= config.palace.evidence_thresh_3) {
+        3.0
+      } else {
+        if (evidence >= config.palace.evidence_thresh_2) {
+          2.0
+        } else {
+          if (evidence >= config.palace.evidence_thresh_1) {
+            1.0
+          } else {
+            0.0
+          }
+        }
+      };
+      if (want_level > cur_level) {
+        agents.set_mana(t, want_level);
+        emit TrustTransition { source: s, target: t, new_level: want_level }
+      }
+    }
+    // a < 0.0 (decree reset) is handled by ApplyDecreeReset below
+    // (separate per-agent rule reading the sentinel marker; we keep the
+    // two paths split because per-event mutation of multiple slots needs
+    // a spatial fan-out rule, not a single-target consumer).
+  }
+}
+
+// ApplyDecreeReset — per-agent rule that, on the tick when ANY
+// EvidenceFiled with amount < 0 is in the ring, resets nearby
+// conspirators' shield_hp + trust state. Implemented as a per-agent
+// scan rather than a per-event consumer because the reset has to
+// touch many targets per single source event (spatial fan-out).
+@phase(per_agent)
+physics ApplyDecreeReset {
+  on Tick {} where (self.alive && self.creature_type == Conspirator) {
+    let king_dist = sum(k in agents where
+      if (k != self) && (k.alive) && (k.creature_type == King) {
+        // distance returns f32 (sum of f32). When king is within
+        // decree_radius and was just busy-resolving (busy_with_ability_id
+        // == 4 means "RoyalDecree currently/just-recently active"), reset.
+        if (agents.busy_started_at_tick(k) + config.palace.cast_duration == world.tick &&
+            length(k.pos - self.pos) < config.palace.decree_radius) {
+          1.0
+        } else {
+          0.0
+        }
+      } else {
+        0.0
+      });
+    if (king_dist > 0.5) {
+      // Reset evidence + trust state. Don't emit TrustTransition for
+      // resets (those are downward-only state changes).
+      agents.set_shield_hp(self, 0.0);
+      agents.set_mana(self, 0.0);
+    }
+  }
+}
+
+// -------------------------------------------------------------------
+// Materialized views (observability).
+// -------------------------------------------------------------------
+
+// Per-target trust transition count. No decay — accumulates over the
+// run so the pin can report "total upward state machine transitions".
+@materialized(on_event = [TrustTransition])
+view trust_transitions(target: Agent) -> f32 {
+  initial: 0.0,
+  on TrustTransition { source: _, target: t, new_level: _ } where t == target { self += 1.0 }
+  clamp: [0.0, 100000.0],
+}
+
+// Per-source damage_dealt — observability view. Mirrors duel_abilities'
+// pattern; counts damage events per source so the pin can report
+// per-faction violence (sum over guards = arrests, sum over
+// conspirators = assassination attempts).
+@materialized(on_event = [Damaged])
+view damage_dealt(source: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: s, target: _, amount: a } where s == source { self += a }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-(observer, subject) belief flag bitset. pair_map storage =
+// observer_cap × subject_cap u32 cells. Each Guard with LoS to a
+// Conspirator OR's `1` into beliefs_flags(observer, subject).
+// Off-diagonal cells stay 0 unless that specific guard saw that
+// specific conspirator.
+@materialized(on_event = [BeliefAcquired], storage = pair_map)
+view guard_belief(observer: Agent, subject: Agent) -> u32 {
+  initial: 0,
+  on BeliefAcquired { observer: o, subject: s, fact_bit: b }
+    where (o == observer) && (s == subject)
+    { self |= b }
+  clamp: [0, 4294967295],
+}

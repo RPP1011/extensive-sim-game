@@ -1,0 +1,16 @@
+// Guard's investigate ability — bumps evidence on a target conspirator.
+// The "damage" amount is interpreted as evidence in the .sim's
+// EvidenceConsumer rule (gated on source.creature_type == Guard).
+// Tiny amount (5.0) so accumulating a Hostile-trust transition takes
+// many ticks of investigation.
+//
+// AbilityId 3 (alphabetical).
+
+ability Investigate {
+    target: enemy
+    range: 8.0
+    cooldown: 1s
+    hint: utility
+
+    damage 5.0 [PHYSICAL: 100]
+}

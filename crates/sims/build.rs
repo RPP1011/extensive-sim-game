@@ -109,6 +109,7 @@ fn main() {
                 | "dsl_stress_coverage"
                 | "hill_raid"
                 | "trade_caravans"
+                | "palace_coup"
         ) {
             continue;
         }
