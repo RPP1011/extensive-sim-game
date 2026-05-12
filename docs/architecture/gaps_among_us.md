@@ -41,28 +41,36 @@ catch-all arm; not in scope for this fixture.
 
 ## Gap #2 — `terrain.line_of_sight` in `@phase(post)` chronicle consumer
 
-**Status**: confirmed unproven; design DROPPED for v1.
+**Status**: investigated 2026-05-12 — **phantom gap**, fix already
+in place; regression locked in.
 
 **Original design**: ApplyWitness was supposed to gate witness writes
 on `terrain.line_of_sight(self.pos, killer_pos)` so witnesses behind
 cover wouldn't update their belief. This is the LoS-gated belief-
 write surface the user specifically called out as a likely gap.
 
-**Why dropped**: hill_raid uses `terrain.line_of_sight` only in
-PerAgent physics (`DefenderFire`), not in chronicle consumers.
-Wiring the voxel binding through a `@phase(post)` BGL has no
-precedent in main today and would surface multiple sub-gaps:
-voxel-grid binding kind-classification in chronicle-consumer BGL
-composer, voxel-mirror flush-before-consumer ordering, etc.
+**Investigation**: the voxel_grid binding synthesis in
+`cg/emit/kernel.rs` (the substring scan around `terrain_line_of_sight(`
+≈line 810) runs after `wgsl_body` is composed — kernel-kind agnostic.
+PerEventEmit (chronicle-consumer) kernels go through the same generic
+binding pipeline as PerAgent physics, so the scan fires for both. The
+host-side dispatch (`build_helper.rs` line 2348+) wires
+`KernelBindingsContext::voxel_grid: Some(...)` whenever ANY kernel's
+spec binds `voxel_grid` — chronicle-consumer kernels included.
 
-**Replacement**: pure-distance witness gate (`dist <
-config.among.witness_radius`). No occlusion modelled. v2 could
-revisit once `engine_voxel` is reachable from chronicle-consumer
-WGSL emit.
+Verified end-to-end by temporarily adding `&& terrain.line_of_sight(
+slot_pos, killer_pos)` to `ApplyWitness`'s `for_each_agent` body
+gate: `cargo build -p sims --release` succeeded, the emitted
+`physics_ApplyDamage_and_ApplyWitness.wgsl` declared `voxel_grid` at
+slot 9 with a clean `cs_*` entry point, naga validated every kernel,
+and the 500-tick `among_us_pin` ran green. Among_us .sim itself NOT
+modified in this commit — the LoS gate is a behavioural change held
+back as a follow-up so the binding-side fix lands without coupling.
 
-**To verify when fix lands**: re-add `&& terrain.line_of_sight(slot_pos,
-killer_pos)` to the `for_each_agent` body's gate condition; expect
-build to fail with a binding-classification error in the BGL composer.
+**Regression**: `crates/dsl_compiler/tests/voxel_query_in_chronicle_consumer.rs`
+pins both the positive (consumer with LoS → `voxel_grid` binding,
+`ctx.voxel_grid.expect(...)` routing, naga-clean WGSL) and negative
+(consumer without any terrain call → NO `voxel_grid` binding) shapes.
 
 ---
 

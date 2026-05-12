@@ -807,6 +807,18 @@ pub fn kernel_topology_to_spec_and_body(
     //      may grow / rename. Body text only contains the terrain_*
     //      calls; the voxel_* prelude is added later by compose_wgsl_file
     //      (see the substring gate around `voxel_at(`).
+    //
+    //      Kernel-kind agnostic: this scan runs after `build_wgsl_body`
+    //      for EVERY non-ViewFold/ViewDecay kernel, which means
+    //      PerEventEmit (chronicle-consumer) kernels surface the
+    //      binding too — the original among_us Gap #2 worry (that
+    //      `@phase(post) physics { on Damaged { ... terrain.line_of_sight ... } }`
+    //      couldn't reach the voxel mirror) was a phantom: build_helper.rs's
+    //      `binds_voxel_grid` scan walks ALL kernel specs by name and
+    //      lights up `voxel_mirror.buffer()` whenever ANY kernel surfaces
+    //      `voxel_grid` — chronicle consumers included. See
+    //      `crates/dsl_compiler/tests/voxel_query_in_chronicle_consumer.rs`
+    //      for the regression pin.
     if wgsl_body.contains("terrain_line_of_sight(")
         || wgsl_body.contains("terrain_height_at(")
         || wgsl_body.contains("terrain_walkable(")
