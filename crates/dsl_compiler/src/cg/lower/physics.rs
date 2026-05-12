@@ -956,6 +956,16 @@ fn agents_setter_field(method: &str) -> Option<&'static AgentFieldId> {
         // hunger - decay_rate)) and ApplyEat (chronicle:
         // agents.set_hunger(t, hunger + gain)).
         "set_hunger" => Some(&AgentFieldId::Hunger),
+        // pirate_fleet fixture: ownership-transfer primitive. Boarding
+        // attempts flip a slot's `creature_type` from Navy to Pirate
+        // (or vice versa) via a chronicle consumer that consumes a
+        // pair-keyed `Boarded` event. The column is `OptEnumU32`
+        // (lowers to plain `array<u32>` with no atomic upgrade) — the
+        // assign emits as `agent_creature_type[idx] = value;` through
+        // the same indexed-store path that drives the
+        // `expires_at_tick` u32 columns. Closes Gap 1 of
+        // `docs/architecture/gaps_pirate_fleet.md`.
+        "set_creature_type" => Some(&AgentFieldId::CreatureType),
         _ => None,
     }
 }
