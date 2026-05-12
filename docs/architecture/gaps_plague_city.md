@@ -161,8 +161,20 @@ emitted schedule.
 
 ---
 
-## GAP P-D: `agents.set_alive(self, false)` inside a fused PerAgent
-rule doesn't flip the alive bit
+## GAP P-D: `agents.set_alive(self, false)` inside a fused PerAgent rule doesn't flip the alive bit — RESOLVED (downstream of T5)
+
+**Status:** Resolved. The fusion-side hypothesis was structurally
+falsified during the post-T5 audit (`d1207fca`). The actual symptom
+described below was a downstream effect of the spatial-build-after-
+consumer schedule cycle (Gap T5 / `gaps_observed.md`); after that
+cycle was broken, the SicknessProgresses kernel runs alone (the
+original `_and_ContagionScan` fusion changed shape) and the original
+6 host-seeded citizens die from the alive flip exactly as expected
+(`D=6` in the pin output). The fused-emit path itself preserves
+conditional alive writes — pinned by
+`crates/dsl_compiler/tests/fused_set_alive_conditional_emit.rs` and
+the post-T5 `plague_city_pin.rs` `dead >= INITIAL_INFECTED`
+assertion. The investigation log below is preserved for reference.
 
 **Surface:** `SicknessProgresses` body:
 
@@ -219,6 +231,46 @@ NOTE in the pin tracks it.
 conditional writes that touch the alive bit; ensure the write
 survives the alphabetised `_and_` merge. A regression test in
 `crates/dsl_compiler/tests/` would pin the precise shape.
+
+**Resolution audit (post-T5):**
+
+  - `body_ops_have_set_alive_false` in `cg/emit/kernel.rs` walks
+    every body op of a fused kernel and recursively scans nested
+    `If` / `Match` / `ForEachNeighborBody` bodies via
+    `stmt_list_contains_set_alive_false` (`cg/emit/wgsl_body.rs`).
+    A `set_alive(self, false)` nested inside a conditional in any
+    sub-body of any fused op is detected and triggers the
+    `agent_alive` AtomicStorage upgrade.
+  - The per-stmt emit path (`is_alive_cas_site` branch in
+    `cg/emit/wgsl_body.rs`) emits the
+    `atomicCompareExchangeWeak(&agent_alive[idx], 1u, 0u)` CAS
+    regardless of nesting depth — the conditional wrapper around
+    it is preserved verbatim. An inspection of the (now-stale)
+    fused WGSL artifact `physics_ContagionScan_and_Sickness
+    Progresses.wgsl` from a pre-T5 build confirmed the alive CAS
+    was emitted correctly inside the conditional even pre-fix.
+  - Post-T5 the schedule fuses ContagionScan with CitizenObserve
+    instead of SicknessProgresses (the topology shifted when the
+    spatial-build chain moved earlier in the order); the gap's
+    original kernel name `physics_ContagionScan_and_Sickness
+    Progresses` is no longer in the schedule.
+  - Pre-T5 the contagion didn't transmit (the spatial walk hit an
+    empty grid on every tick), so citizens never accumulated
+    negative hp; the original 6 DID die from the alive flip but
+    the pin's NOTE described it as "0 deaths" because of a
+    separate condition-coupling bug in the original soft NOTE.
+    Post-T5 the pin reports `D=6` and the alive-flip assertion
+    is load-bearing.
+
+**Regression coverage:**
+
+  - `crates/dsl_compiler/tests/fused_set_alive_conditional_emit.rs`
+    asserts the fused WGSL body upgrades `agent_alive` to atomic
+    storage AND emits the kill CAS inside the conditional, for a
+    minimal-repro `Bleeder + Sickness` two-rule fusion.
+  - `crates/sims/tests/plague_city_pin.rs` asserts `dead >=
+    INITIAL_INFECTED` (load-bearing) — a regression that breaks
+    the conditional alive flip would trip exactly that.
 
 ---
 

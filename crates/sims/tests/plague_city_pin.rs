@@ -261,22 +261,46 @@ fn plague_runs_to_equilibrium_after_500_ticks() {
         N_PRIESTS - final_alive_priests,
     );
 
+    // 6. The conditional `agents.set_alive(self, false)` inside
+    //    SicknessProgresses MUST land — the 6 host-seeded citizens
+    //    progress from hp=100 to hp<=0 over ~100 ticks at
+    //    sickness_rate=1.0, and the kill-crossing `if (old_hp > 0
+    //    && new_hp <= 0) { agents.set_alive(self, false); ... }`
+    //    must flip the alive bit. This was the load-bearing
+    //    behavioural symptom of Gap P-D in
+    //    `docs/architecture/gaps_plague_city.md`; the gap doc
+    //    hypothesised "the conditional branch's set_alive Assign
+    //    gets dropped at fusion time", but post-T5 schedule fix
+    //    (`d1207fca`) the SicknessProgresses kernel runs alone
+    //    (the original `_and_ContagionScan` fusion changed shape),
+    //    AND the fused-emit path itself preserves conditional
+    //    alive writes (regression-pinned by
+    //    `crates/dsl_compiler/tests/fused_set_alive_conditional_emit.rs`).
+    //    The actual root cause was the spatial-build-after-consumer
+    //    cycle Gap T5 — pre-T5 the contagion didn't transmit so
+    //    citizens never accumulated negative hp; the original 6
+    //    DID die from the alive flip but the pin's NOTE described
+    //    it as "0 deaths" because a separate condition kept dead==0.
+    //    Promoting the assertion to load-bearing pins the post-T5
+    //    behaviour: the alive flip lands.
+    assert!(
+        dead >= INITIAL_INFECTED,
+        "expected at least {INITIAL_INFECTED} dead (the host-seeded \
+         outbreak progressed to death and flipped alive); got dead={dead}. \
+         Likely cause: SicknessProgresses' `agents.set_alive(self, false)` \
+         write isn't landing, OR the contagion kernel never advanced \
+         hunger so sickness never drained hp. See Gap P-D in \
+         gaps_plague_city.md.",
+    );
+
     // -------- Soft NOTEs (informational; track for next iteration) --------
 
-    if currently_infected == init_infected && dead == 0 && recovered_or_treated == 0 {
+    if currently_infected == init_infected && recovered_or_treated == 0 {
         eprintln!(
-            "  NOTE: disease is static (initial 6 infected, 0 spread, 0 cured, \
-             0 dead). Likely cause: rng.action() % 100 is biased away from \
+            "  NOTE: disease is static (initial 6 infected, 0 spread, 0 cured). \
+             Likely cause: rng.action() % 100 is biased away from \
              the transmission gate, OR the per-pair direct write isn't \
              propagating across kernel-fusion. See gaps log.",
-        );
-    }
-    if dead == 0 {
-        eprintln!(
-            "  NOTE: zero deaths after {TICKS} ticks at sickness_rate=1.0 \
-             from hp=100. Likely cause: SicknessProgresses' \
-             `agents.set_alive(self, false)` write isn't landing — same \
-             fusion shape duel_25v25's ApplyDamage uses for the alive flip.",
         );
     }
     eprintln!(
