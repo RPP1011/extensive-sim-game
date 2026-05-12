@@ -1517,6 +1517,67 @@ fn synthesize_generated_runtime_struct(
         .map(|v| (v.name.as_str(), v.pair_keyed))
         .collect();
 
+    // Plan G #244 bug 1 — fold consumer detection. Used to decide
+    // whether to allocate the `prev_event_tail_buf` snapshot side
+    // buffer + emit the snapshot stage at the top of step(). Hoisted
+    // here so the struct + try_new emit can gate the side-buffer field
+    // on the same signal as the step() body emit below.
+    //
+    // Detection criteria (must satisfy ALL):
+    //
+    //   1. `kernel.kind in {ViewFold, ViewDecay, PerEventEmit}` —
+    //      Generic kernels (per-agent producers like `physics_Spread`)
+    //      bind event_ring too because they `atomicAdd(&event_tail,
+    //      1u)` to emit, but their cfg slot 0 is `agent_cap`, NOT
+    //      event_count. Overwriting agent_cap with the snapshot
+    //      value would short-circuit per-agent dispatch.
+    //
+    //   2. NOT in `indirect_consumer_kernel_names` — Indirect
+    //      chronicle handlers take a per-dispatch live-tail copy
+    //      (existing path), not a top-of-step snapshot.
+    //
+    //   3. The kernel's WGSL actually walks the event_ring as
+    //      records (1-D dispatch: one thread per `event_idx`). Some
+    //      ViewFold kernels are `@dispatch(per_agent_event_scan)`
+    //      — they take a 2-D dispatch over (observer, source) pairs
+    //      and use `cfg.event_count` as the agent-count bound, NOT
+    //      as an event-ring tail. The signal: their generated
+    //      kernel rust file calls `dispatch_workgroups(_, _, 1)`
+    //      with two non-1 dims (a 2-D dispatch). Event-scan folds
+    //      call `dispatch_workgroups(_, 1, 1)` (1-D).
+    //
+    //      Heuristic: scan the kernel's wgsl_files entry for
+    //      `workgroup_size(8, 8)` — that's the canonical 2-D
+    //      PerAgentEventScan workgroup. 1-D folds emit
+    //      `workgroup_size(64)`.
+    use crate::kernel_binding_ir::KernelKind;
+    let fold_consumer_kernel_names_owned: Vec<String> = artifacts
+        .kernel_specs
+        .iter()
+        .filter(|spec| {
+            let binds_event_ring = spec.bindings.iter().any(|b| {
+                b.name == "event_ring" || b.name == "event_tail"
+            });
+            let is_indirect = indirect_consumer_kernel_names
+                .iter()
+                .any(|n| n == &spec.name);
+            let event_count_in_slot_0 = matches!(
+                spec.kind,
+                KernelKind::ViewFold | KernelKind::ViewDecay | KernelKind::PerEventEmit,
+            );
+            // Per-agent-event-scan filter: skip 2-D pair-scan folds
+            // (they treat slot 0 as agent_count, not event_count).
+            let is_pair_scan = artifacts
+                .wgsl_files
+                .get(&format!("{}.wgsl", spec.name))
+                .map(|src| src.contains("workgroup_size(8, 8)"))
+                .unwrap_or(false);
+            binds_event_ring && !is_indirect && event_count_in_slot_0 && !is_pair_scan
+        })
+        .map(|spec| spec.name.clone())
+        .collect();
+    let has_fold_consumers_outer = !fold_consumer_kernel_names_owned.is_empty();
+
     // Collect unique fixture-owned bindings across all kernels.
     // BTreeMap (name → wgsl_ty) — same binding may appear in multiple
     // kernels with different wgsl_ty (e.g. one kernel sees `array<f32>`,
@@ -1633,6 +1694,18 @@ fn synthesize_generated_runtime_struct(
     // collisions with fixture-owned buffers.
     for kernel_name in &cfg_buffer_names {
         out.push_str(&format!("    pub cfg_{kernel_name}_buf: wgpu::Buffer,\n"));
+    }
+    // Plan G #244 bug 1 — 4-byte side buffer holding the snapshotted
+    // GPU `event_tail` value from the END of the previous tick. Only
+    // allocated when the fixture has at least one fold consumer (a
+    // kernel that binds `event_ring`/`event_tail` and is NOT an
+    // indirect chronicle handler). step() captures event_tail into
+    // this buffer via its own submit at the top of the tick (before
+    // clear_tail_in or the indirect-consumer queue.write_buffer
+    // overwrites the GPU tail), then in the main encoder copies this
+    // value into each fold's `cfg.event_count` slot.
+    if has_fold_consumers_outer {
+        out.push_str("    pub prev_event_tail_buf: wgpu::Buffer,\n");
     }
     // Voxel terrain + GPU mirror — only allocated when the fixture has at
     // least one kernel that binds `voxel_grid`. Without this gate the
@@ -1896,6 +1969,22 @@ fn synthesize_generated_runtime_struct(
              \x20       }});\n",
         ));
     }
+    // Plan G #244 bug 1 — allocate the prev_event_tail snapshot side
+    // buffer when the fixture has fold consumers. 4 bytes (one u32),
+    // STORAGE so it can be a copy_buffer_to_buffer source AND
+    // destination across two encoders.
+    if has_fold_consumers_outer {
+        out.push_str(&format!(
+            "        let prev_event_tail_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {{\n\
+             \x20           label: Some(\"{fixture_name}::prev_event_tail\"),\n\
+             \x20           size: 4u64,\n\
+             \x20           usage: wgpu::BufferUsages::STORAGE\n\
+             \x20               | wgpu::BufferUsages::COPY_SRC\n\
+             \x20               | wgpu::BufferUsages::COPY_DST,\n\
+             \x20           mapped_at_creation: false,\n\
+             \x20       }});\n",
+        ));
+    }
     // Plan E-A6 — preload each kernel's `@runtime` config fields with
     // their .sim defaults. The standard 4-u32 cfg header (bytes 0..16)
     // lives at the start of every kernel's cfg struct; runtime fields
@@ -1940,6 +2029,9 @@ fn synthesize_generated_runtime_struct(
     }
     for kernel_name in &cfg_buffer_names {
         out.push_str(&format!("            cfg_{kernel_name}_buf,\n"));
+    }
+    if has_fold_consumers_outer {
+        out.push_str("            prev_event_tail_buf,\n");
     }
     if binds_voxel_grid {
         out.push_str("            voxel_terrain,\n");
@@ -2121,6 +2213,71 @@ fn synthesize_generated_runtime_struct(
              \x20       let pending_event_count: u32 = self.event_ring.tail_value();\n",
         );
     }
+    // Plan G #244 bug 1 — fold consumer prior-tick tail snapshot.
+    //
+    // Folds bind `event_ring`/`event_tail` and consume PRIOR-tick
+    // records (the ViewFold contract: a fold at tick T sees emits from
+    // tick T-1). Their bodies bound on `cfg.event_count`; the per-tick
+    // host write above set that slot to `agent_count` (over-bounds),
+    // so folds were walking ALL `agent_count` ring slots including
+    // stale records from ticks past T-1, and producer atomicAdd
+    // reordering across runs flipped which fresh slot landed where
+    // (forest_fire_pin observed `max |Δ| ≈ 470 / 1024` slots).
+    //
+    // Fix: BEFORE clear_tail_in (or the indirect-consumer
+    // queue.write_buffer of `pending_event_count`) overwrites the GPU
+    // event_tail for THIS tick, snapshot it into a tiny side buffer
+    // `prev_event_tail_buf`. Then in the main encoder, copy that side
+    // buffer into each fold's `cfg.event_count` slot — this lands
+    // AFTER the per-tick `cfg_bytes` queue.write_buffer (which sets
+    // slot 0 to agent_count) since encoder commands run after queue
+    // writes, so slot 0 ends up holding the prior-tick tail.
+    //
+    // Indirect chronicle consumers (`physics_Apply*`-shape, in-tick
+    // semantics) take a DIFFERENT cfg copy — at per-dispatch time
+    // from the LIVE event_tail — so they pick up THIS tick's GPU
+    // producer atomicAdds. Folds need prior-tick semantics; indirect
+    // consumers need in-tick semantics. Mixed fixtures (folds +
+    // indirect consumers) are correctly handled by the two-stage
+    // pattern: snapshot encoder runs first (capturing prior-tick GPU
+    // tail before the host queue.write_buffer of pending_event_count),
+    // then the main encoder applies clear/preserve and dispatches.
+    let fold_consumer_kernel_names: Vec<&str> = fold_consumer_kernel_names_owned
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+    let has_fold_consumers = has_fold_consumers_outer;
+    if has_fold_consumers {
+        // Stage 1: capture event_tail into prev_event_tail_buf via its
+        // own submit. This MUST land before the host enqueues the
+        // per-tick cfg_bytes write or (for indirect-consumer fixtures)
+        // the queue.write_buffer of pending_event_count, both of which
+        // would otherwise sequence before any subsequent encoder
+        // command and clobber what event_tail holds.
+        out.push_str(
+            "        // Plan G #244 bug 1 — capture prior-tick GPU event_tail\n\
+             \x20       // into prev_event_tail_buf via its own submit BEFORE the\n\
+             \x20       // main step encoder enqueues anything that overwrites the\n\
+             \x20       // GPU tail (clear_tail_in or pending_event_count write).\n\
+             \x20       // The captured value drives each fold consumer's\n\
+             \x20       // cfg.event_count for THIS tick (folds-at-T see T-1 emits).\n\
+             \x20       {\n\
+             \x20           let mut snap_encoder = self.gpu.device.create_command_encoder(\n\
+             \x20               &wgpu::CommandEncoderDescriptor {\n\
+             \x20                   label: Some(concat!(env!(\"CARGO_PKG_NAME\"), \"::fold_tail_snapshot\")),\n\
+             \x20               },\n\
+             \x20           );\n\
+             \x20           snap_encoder.copy_buffer_to_buffer(\n\
+             \x20               self.event_ring.tail(),\n\
+             \x20               0,\n\
+             \x20               &self.prev_event_tail_buf,\n\
+             \x20               0,\n\
+             \x20               4,\n\
+             \x20           );\n\
+             \x20           self.gpu.queue.submit(Some(snap_encoder.finish()));\n\
+             \x20       }\n",
+        );
+    }
     out.push_str(
         "\n\
          \x20       let mut encoder = self.gpu.device.create_command_encoder(\n\
@@ -2129,6 +2286,23 @@ fn synthesize_generated_runtime_struct(
          \x20           },\n\
          \x20       );\n",
     );
+    // Stage 2: copy prev_event_tail_buf → each fold's cfg.event_count
+    // slot inside the main encoder. queue.write_buffer of cfg_bytes
+    // landed earlier (host-side enqueue) and writes slot 0 to
+    // agent_count; this encoder copy runs after queue effects on
+    // submit, so slot 0 ends up holding the snapshot value.
+    for kname in &fold_consumer_kernel_names {
+        out.push_str(&format!(
+            "        // Fold cfg.event_count from prev-tick snapshot (Plan G #244 bug 1).\n\
+             \x20       encoder.copy_buffer_to_buffer(\n\
+             \x20           &self.prev_event_tail_buf,\n\
+             \x20           0,\n\
+             \x20           &self.cfg_{kname}_buf,\n\
+             \x20           0,\n\
+             \x20           4,\n\
+             \x20       );\n",
+        ));
+    }
     if has_indirect_consumers {
         // Replace clear_tail_in with a queue.write_buffer of the
         // pending count. queue.write_buffer is sequenced before all
@@ -2305,6 +2479,15 @@ fn synthesize_generated_runtime_struct(
             // `atomicAdd(&event_tail, 1u)`) AND any host-side injects
             // preserved across the per-tick `queue.write_buffer` of
             // `pending_event_count`.
+            //
+            // Folds bind event_ring/event_tail too, but they consume
+            // PRIOR-tick records (the docstring contract: "folds at
+            // tick T see emits from tick T-1") — so they get their
+            // event_count snapshotted at the TOP of step() before
+            // clear_tail_in zeroes the GPU tail. See Plan G #244 bug
+            // 1: the prev-tick snapshot lives in `prev_event_tail_buf`
+            // and is copied into each fold's cfg.event_count there,
+            // not here.
             let cfg_copy_block = if is_indirect_consumer {
                 format!(
                     "                    encoder.copy_buffer_to_buffer(\n\
@@ -2410,7 +2593,9 @@ fn synthesize_generated_runtime_struct(
         };
         // For Indirect consumers, copy the live GPU event_tail into
         // cfg.event_count immediately before dispatch. See parallel
-        // block above for rationale.
+        // block above for rationale (and the fold-vs-indirect split:
+        // folds get their snapshot at the TOP of step() since they
+        // consume prior-tick records, not in-tick ones).
         let cfg_copy_block = if is_indirect_consumer {
             format!(
                 "                    encoder.copy_buffer_to_buffer(\n\

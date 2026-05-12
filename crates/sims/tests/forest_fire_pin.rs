@@ -357,14 +357,19 @@ fn forest_fire_event_storm_500_ticks() {
     //           empty sets), driving ~10× more atomicAdd contention on
     //           the shared `view_storage_primary` slab. Observed max
     //           drift sits at 500-700; 1024 (= N_TOTAL) is a generous
-    //           ceiling that still catches a true control-flow
-    //           divergence (which would drift every slot by aggregate-
-    //           scale amounts, not the ULP-scale shifts the race
-    //           produces). Plan G #244 (atomicCompareExchangeWeak) is
-    //           the structural fix.
+    //           ceiling.
+    //   * 200  — Plan G #244 bug 1 fix (2026-05-12) snapshots the
+    //           prior-tick GPU `event_tail` into each fold's
+    //           `cfg.event_count` slot via a top-of-step encoder +
+    //           submit, so folds walk only `0..prior_tail` and skip
+    //           the stale slots. Producer atomicAdd reordering still
+    //           drifts the slot-level f32 RMW (Plan G #244 atomic
+    //           CAS is the structural fix), but the over-bounds walk
+    //           is no longer compounding it. Observed max drift
+    //           ~100-110; 200 is a snug ceiling.
     assert!(
-        max_abs_drift <= 1024.0,
-        "determinism drift exceeds 1024 — control flow may be divergent, \
+        max_abs_drift <= 200.0,
+        "determinism drift exceeds 200 — control flow may be divergent, \
          not just the documented atomic RMW race. max_abs_drift={max_abs_drift}",
     );
 }

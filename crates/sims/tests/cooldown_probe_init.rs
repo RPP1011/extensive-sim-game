@@ -31,14 +31,21 @@ fn staggered_init_drives_per_slot_fire_pattern() {
     for (slot, &count) in r.iter().enumerate() {
         // Producer-then-consumer ordering: with the schedule's topo
         // sort placing the per-agent fire rule BEFORE its accumulator
-        // ViewFold (the correct dataflow direction post-T5 fix), each
-        // tick's fire is folded the SAME tick. Slot s fires when
-        // `tick >= s` (init `cooldown_next_ready_tick: slot`); over
-        // TICKS ticks slot s contributes `TICKS - s` activations.
+        // ViewFold (post-T5), the producer atomicAdds into the
+        // event_ring BEFORE the fold dispatch. Slot s fires when
+        // `tick >= s` (init `cooldown_next_ready_tick: slot`).
         //
-        // Pre-T5: fold ran BEFORE physics on the same tick, so fold
-        // saw events one tick late and the count lagged by one.
-        let expected = (TICKS as i64 - slot as i64).max(0) as f32;
+        // Plan G #244 bug 1 (2026-05-12) snapshots event_tail at
+        // start-of-tick into each fold's cfg.event_count slot to fix
+        // the over-bounds-walk-into-stale-records drift in
+        // forest_fire. As a side effect, folds in any fixture now
+        // see PRIOR-tick events (the snapshot is taken before this
+        // tick's producer atomicAdds run), so each tick's fire is
+        // folded one tick LATER. Over TICKS ticks slot s contributes
+        // `max(0, TICKS - s - 1)` activations (the very last tick's
+        // fire is captured by the next tick's snapshot, but no next
+        // tick runs).
+        let expected = (TICKS as i64 - slot as i64 - 1).max(0) as f32;
         assert!(
             (count - expected).abs() < 1e-3,
             "slot {slot} activations = {count} (expected {expected})",
