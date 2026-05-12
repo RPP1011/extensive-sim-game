@@ -141,6 +141,47 @@ check whether Damaged events flow when triggered by Born — if yes,
 BornRevive is firing but the alive write isn't visible to next-tick
 dispatch; if no, OnDied isn't firing and the cascade never starts.
 
+**STATUS — fixed by `5d62f9b7` + `96d8c8ae` (chronicle-consumer
+Indirect-dispatch + live event_tail copy).** As of 2026-05-11 the
+trade_caravans pin reports `heirs(alive)=15/16  merchants(alive)=0/16`
+with verdict `GENERATIONAL TURNOVER`. The lowering / WGSL emit was
+NEVER one-directional — investigation walked the full path:
+
+* `agents_setter_field` (`crates/dsl_compiler/src/cg/lower/physics.rs:916`)
+  accepts `set_alive` regardless of value direction.
+* `lower_agents_setter` (same file, line 976) lowers `true` and `false`
+  literals through the same `CgStmt::Assign` shape — no directional
+  bias at the IR layer.
+* `alive_pack` (the `PlumbingKind::AliveBitmap` body in
+  `crates/dsl_compiler/src/cg/emit/kernel.rs::ALIVE_BITMAP_BODY`) packs
+  via `agent_alive[slot] != 0u` — fully bidirectional. Re-emitted
+  every tick after the alive-write kernels.
+* WGSL emit: kill kernels (containing `set_alive(_, false)`) upgrade
+  `agent_alive` to `array<atomic<u32>>` and emit
+  `atomicCompareExchangeWeak` (Gap N race fix). Revive kernels (only
+  `set_alive(_, true)`) keep `array<u32>` and emit a plain
+  `agent_alive[<idx>] = select(0u, 1u, true);` indexed store. Both
+  forms write to the same underlying buffer (wgpu doesn't distinguish
+  atomic vs non-atomic at the BGL layer).
+
+The actual root cause was the chronicle ring not surviving end-of-tick
++ the consumer's `cfg.event_count` being seeded with 0 (so consumers
+no-op'd). `5d62f9b7` wired the Indirect-dispatch arm; `96d8c8ae`
+added the per-consumer `copy_buffer_to_buffer(event_tail → cfg, 4 B)`
+immediately before each Indirect dispatch so consumer A's emits land
+in consumer B's `event_count` window when A precedes B in SCHEDULE.
+
+The remaining 1/16 unrevived heir is a fixture-side off-by-one in the
+`engaged_with` `+1` Some-encoded sentinel: heir N's slot index +1
+lands on slot N+1; for N=15 that overshoots the heir block into the
+market block (already alive). Compiler-side T3 is structurally fixed.
+
+**Regression test:** `crates/dsl_compiler/tests/set_alive_both_directions_emit.rs`
+pins all four arms of the matrix: kill-only kernel emits CAS; revive-only
+kernel emits plain store; both-direction program keeps each kernel's
+mode independent; `alive_pack` exists and uses `!= 0u` (bidirectional)
+for revive-only programs.
+
 ---
 
 ### Gap T4: Cross-agent state transfer chain (chronicle → emit → consumer) not propagating
