@@ -30,6 +30,13 @@ fn aid(n: u32) -> AgentId {
     AgentId::new(n).expect("AgentId::new requires non-zero u32")
 }
 
+/// Default ability_id for tests that don't care about the slot-6 tag.
+/// Gap detective#6 (2026-05-12) added `ability_id: u32` at slot 6 of
+/// every chronicle record — every dispatched effect now carries the id
+/// of the ability that produced it. Tests that don't probe slot 6 use
+/// this constant for consistency.
+const TEST_ABILITY_ID: u32 = 1;
+
 fn run_pipeline(
     program: &AbilityProgram,
     caster: AgentId,
@@ -52,7 +59,7 @@ fn run_pipeline(
         // caster=target — chronicle records keep their existing
         // per-record byte layout. New tests can vary target_id to
         // exercise the explicit-target path.
-        .filter_map(|e| apply_event_to_chronicle_record(e, tick, caster.raw(), caster.raw()))
+        .filter_map(|e| apply_event_to_chronicle_record(e, tick, caster.raw(), caster.raw(), TEST_ABILITY_ID))
         .collect()
 }
 
@@ -251,6 +258,7 @@ fn dash_pipeline_emits_kind_47_record() {
     assert_eq!(r[3], 12.0_f32.to_bits(), "distance at payload word 1 (no target field)");
     // No payload word 2 — engine event has no target field.
     for i in 4..10 {
+        if i == 6 { continue; } // slot 6 = ability_id (Gap detective#6)
         assert_eq!(r[i], 0, "Dash: tail word {i} should be zero");
     }
 }
@@ -270,6 +278,7 @@ fn blink_pipeline_emits_kind_48_record() {
     assert_eq!(r[2], 7, "actor slot — caster_id");
     assert_eq!(r[3], 8.5_f32.to_bits(), "distance at payload word 1 (no target field)");
     for i in 4..10 {
+        if i == 6 { continue; } // slot 6 = ability_id (Gap detective#6)
         assert_eq!(r[i], 0, "Blink: tail word {i} should be zero");
     }
 }
@@ -290,6 +299,7 @@ fn knockback_pipeline_emits_kind_49_record() {
     assert_eq!(r[3], 7, "target slot — target_id (self-cast: ==caster)");
     assert_eq!(r[4], 5.0_f32.to_bits(), "distance at payload word 2 (forced-motion shape)");
     for i in 5..10 {
+        if i == 6 { continue; } // slot 6 = ability_id (Gap detective#6)
         assert_eq!(r[i], 0, "Knockback: tail word {i} should be zero");
     }
 }
@@ -310,6 +320,7 @@ fn pull_pipeline_emits_kind_50_record() {
     assert_eq!(r[3], 7, "target slot — target_id (self-cast: ==caster)");
     assert_eq!(r[4], 3.5_f32.to_bits(), "distance at payload word 2 (forced-motion shape)");
     for i in 5..10 {
+        if i == 6 { continue; } // slot 6 = ability_id (Gap detective#6)
         assert_eq!(r[i], 0, "Pull: tail word {i} should be zero");
     }
 }
@@ -341,6 +352,7 @@ fn damage_over_time_pipeline_emits_kind_51_record() {
     assert_eq!(r[4], 6.5_f32.to_bits(), "amount-per-tick at payload word 2 (bitcast f32)");
     assert_eq!(r[5], 30, "duration_ticks at payload word 3 (raw u32)");
     for i in 6..10 {
+        if i == 6 { continue; } // slot 6 = ability_id (Gap detective#6)
         assert_eq!(r[i], 0, "DamageOverTime: tail word {i} should be zero");
     }
 }
@@ -362,6 +374,7 @@ fn heal_over_time_pipeline_emits_kind_52_record() {
     assert_eq!(r[4], 4.0_f32.to_bits(), "amount-per-tick at payload word 2 (bitcast f32)");
     assert_eq!(r[5], 50, "duration_ticks at payload word 3 (raw u32)");
     for i in 6..10 {
+        if i == 6 { continue; } // slot 6 = ability_id (Gap detective#6)
         assert_eq!(r[i], 0, "HealOverTime: tail word {i} should be zero");
     }
 }
@@ -383,6 +396,7 @@ fn timed_shield_pipeline_emits_kind_53_record() {
     assert_eq!(r[4], 25.0_f32.to_bits(), "amount at payload word 2 (bitcast f32)");
     assert_eq!(r[5], 100, "duration_ticks at payload word 3 (raw u32)");
     for i in 6..10 {
+        if i == 6 { continue; } // slot 6 = ability_id (Gap detective#6)
         assert_eq!(r[i], 0, "TimedShield: tail word {i} should be zero");
     }
 }
@@ -413,6 +427,7 @@ fn stealth_pipeline_emits_kind_54_record() {
     assert_eq!(r[3], 50, "duration_ticks at payload word 1 (no target field)");
     // No payload word 2 — engine event has no target field.
     for i in 4..10 {
+        if i == 6 { continue; } // slot 6 = ability_id (Gap detective#6)
         assert_eq!(r[i], 0, "Stealth: tail word {i} should be zero");
     }
 }
@@ -433,6 +448,7 @@ fn charm_pipeline_emits_kind_55_record() {
     assert_eq!(r[3], 7, "target slot — target_id (self-cast: ==caster)");
     assert_eq!(r[4], 30, "duration_ticks at payload word 2 (target-cast shape)");
     for i in 5..10 {
+        if i == 6 { continue; } // slot 6 = ability_id (Gap detective#6)
         assert_eq!(r[i], 0, "Charm: tail word {i} should be zero");
     }
 }
@@ -453,6 +469,7 @@ fn grounded_pipeline_emits_kind_56_record() {
     assert_eq!(r[3], 7, "target slot — target_id (self-cast: ==caster)");
     assert_eq!(r[4], 25, "duration_ticks at payload word 2 (target-cast shape)");
     for i in 5..10 {
+        if i == 6 { continue; } // slot 6 = ability_id (Gap detective#6)
         assert_eq!(r[i], 0, "Grounded: tail word {i} should be zero");
     }
 }
@@ -473,6 +490,7 @@ fn suppress_pipeline_emits_kind_57_record() {
     assert_eq!(r[3], 7, "target slot — target_id (self-cast: ==caster)");
     assert_eq!(r[4], 40, "duration_ticks at payload word 2 (target-cast shape)");
     for i in 5..10 {
+        if i == 6 { continue; } // slot 6 = ability_id (Gap detective#6)
         assert_eq!(r[i], 0, "Suppress: tail word {i} should be zero");
     }
 }
@@ -517,6 +535,7 @@ fn buff_pipeline_emits_kind_58_record_with_signed_magnitude() {
     );
     assert_eq!(r[5], 50, "duration_ticks at payload word 3 (raw u32)");
     for i in 6..10 {
+        if i == 6 { continue; } // slot 6 = ability_id (Gap detective#6)
         assert_eq!(r[i], 0, "Buff: tail word {i} should be zero");
     }
 }
@@ -537,6 +556,7 @@ fn harvest_pipeline_emits_kind_59_record() {
     assert_eq!(r[3], 0xCAFEBABE, "kind_hash at payload word 1 (no target field)");
     assert_eq!(r[4], 5, "amount at payload word 2 (u16 widened to u32)");
     for i in 5..10 {
+        if i == 6 { continue; } // slot 6 = ability_id (Gap detective#6)
         assert_eq!(r[i], 0, "Harvest: tail word {i} should be zero");
     }
 }
@@ -558,6 +578,7 @@ fn place_voxel_pipeline_emits_kind_60_record() {
     // Position is implicit from the cast's target world position;
     // chronicle record stops here.
     for i in 4..10 {
+        if i == 6 { continue; } // slot 6 = ability_id (Gap detective#6)
         assert_eq!(r[i], 0, "PlaceVoxel: tail word {i} should be zero");
     }
 }
@@ -590,6 +611,7 @@ fn reflect_pipeline_emits_kind_61_record_with_signed_fraction() {
          zero-extend). Consumer sign-extends to recover the negative value."
     );
     for i in 6..10 {
+        if i == 6 { continue; } // slot 6 = ability_id (Gap detective#6)
         assert_eq!(r[i], 0, "Reflect: tail word {i} should be zero");
     }
 }
@@ -622,6 +644,7 @@ fn summon_pipeline_emits_kind_62_record() {
     assert_eq!(r[4], 3, "count (u8 widened to u32) at payload word 2");
     assert_eq!(r[5], 120, "lifetime_ticks (raw u32) at payload word 3");
     for i in 6..10 {
+        if i == 6 { continue; } // slot 6 = ability_id (Gap detective#6)
         assert_eq!(r[i], 0, "Summon: tail word {i} should be zero");
     }
 }
@@ -786,7 +809,7 @@ fn execute_pipeline_emits_kind_42_record() {
     let records: Vec<_> = events
         .into_iter()
         .filter_map(|e| {
-            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw())
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID)
         })
         .collect();
     assert_eq!(records.len(), 1, "one Execute effect → one chronicle record");
@@ -864,7 +887,7 @@ fn distinct_caster_and_target_pipeline_writes_both_slots() {
     let records: Vec<_> = events
         .into_iter()
         .filter_map(|e| {
-            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw())
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID)
         })
         .collect();
 
@@ -904,7 +927,7 @@ fn distinct_caster_and_target_pipeline_handles_stun_payload_shape() {
     let records: Vec<_> = events
         .into_iter()
         .filter_map(|e| {
-            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw())
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID)
         })
         .collect();
 
@@ -943,7 +966,7 @@ fn distinct_caster_and_target_pipeline_handles_friendly_heal() {
     let records: Vec<_> = events
         .into_iter()
         .filter_map(|e| {
-            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw())
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID)
         })
         .collect();
 
@@ -993,7 +1016,7 @@ fn distinct_caster_and_target_pipeline_preserves_routing_across_multi_effect() {
     let records: Vec<_> = events
         .into_iter()
         .filter_map(|e| {
-            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw())
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID)
         })
         .collect();
 
@@ -1050,7 +1073,7 @@ fn distinct_caster_and_target_pipeline_handles_modify_standing() {
     let records: Vec<_> = events
         .into_iter()
         .filter_map(|e| {
-            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw())
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID)
         })
         .collect();
 
@@ -1091,7 +1114,7 @@ fn distinct_caster_and_target_pipeline_handles_transfer_gold() {
     let records: Vec<_> = events
         .into_iter()
         .filter_map(|e| {
-            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw())
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID)
         })
         .collect();
 
@@ -1131,7 +1154,7 @@ fn distinct_caster_and_target_pipeline_transfer_gold_negative_amount() {
     let records: Vec<_> = events
         .into_iter()
         .filter_map(|e| {
-            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw())
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID)
         })
         .collect();
 
@@ -1170,7 +1193,7 @@ fn distinct_caster_and_target_pipeline_handles_shield() {
     let records: Vec<_> = events
         .into_iter()
         .filter_map(|e| {
-            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw())
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID)
         })
         .collect();
 
@@ -1209,7 +1232,7 @@ fn distinct_caster_and_target_pipeline_handles_slow_4_field_payload() {
     let records: Vec<_> = events
         .into_iter()
         .filter_map(|e| {
-            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw())
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID)
         })
         .collect();
 
