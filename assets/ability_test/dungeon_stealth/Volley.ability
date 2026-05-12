@@ -1,0 +1,14 @@
+// dungeon_layout — Archer's ranged AOE. AbilityId 9
+// (alphabetical: last after Stun=8). Used by Archer creature_type
+// enemies for harassment fire across rooms.
+// AOE via spread(5.0, 4) — friendly-fire by default per AOE Path B
+// gotcha; the verb gates on hero-target so casters fire toward heroes.
+
+ability Volley {
+    target: enemy
+    range: 18.0
+    cooldown: 5
+    hint: damage
+
+    damage 18.0 in spread(5.0, 4) [PHYSICAL: 100]
+}

@@ -1,0 +1,21 @@
+// dungeon_layout — long-range belief broadcast (stage 2 wiring).
+// AbilityId 4 (alphabetical: after Heal=3, before Snipe=5).
+//
+// Stage 1: a no-op placeholder. The ability parses cleanly so the
+// alphabetical slot ID is stable across stages. damage 0.0 emits an
+// EffectDamageApplied chronicle row with amount=0 — the .sim's
+// ApplyDamage rule's `new_hp = old_hp - 0.0` is a no-op so this
+// ability has no behavioural side-effect today.
+//
+// Stage 2 will replace the body with a belief-broadcast effect that
+// emits SymptomSeen-shape events for every enemy in radius, building
+// a Hero-side enemy-positions map.
+
+ability Scout {
+    target: enemy
+    range: 18.0
+    cooldown: 12
+    hint: damage
+
+    damage 0.0 [PHYSICAL: 100]
+}

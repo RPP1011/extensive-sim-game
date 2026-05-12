@@ -1,0 +1,878 @@
+// dungeon_stealth — stage 2 of 3 in the dungeon-crawl fixture series.
+//
+// Inherits stage 1's topology (voxel roomgen, 5 heroes + ~30 enemies,
+// alphabetical creature_type discriminants, 6×6 slot grid, host-side
+// frontier-greedy exploration). Adds the **information-asymmetry
+// layer**:
+//
+//   * Bilateral beliefs: per-(observer, subject) `beliefs_flags`
+//     bitset (bit 0 = DETECTED). Heroes/enemies only fire on targets
+//     they currently believe-detect (gated via the pair-keyed view
+//     read in the verb's `if (...)` filter).
+//   * Hero stealth: Rogue's `Stealth` ability sets a custom-field
+//     `stealth_until_tick` u32; while world.tick < that value, the
+//     enemy LoS-scan rule (DetectHeroByLoS) skips the hero — DETECTED
+//     belief is not granted, so enemy verbs don't engage them.
+//   * Sound broadcast on damage: when a hero deals damage, every
+//     enemy within `config.stealth.attack_sound_radius` gains
+//     DETECTED belief for that hero (= the hero just announced
+//     themselves). This is the "stealth breaks on attack" mechanic.
+//   * Enemy alert mechanic: per-agent u32 `alert` column. Alert
+//     raises via (a) witnessing an ally die nearby (BroadcastAlertOnAllyDeath
+//     handles AllyDied chronicle events), and (b) periodic
+//     missing-ally suspicion scan (MissingAllySuspicion @ every 30
+//     ticks counts nearby live allies vs `expected_chamber_allies`).
+//   * Goblin patrols: enemies with `patrol_axis > 0` walk a fixed
+//     line within their starting room, bouncing at the per-agent
+//     `patrol_min_x/max_x` bounds (~30% of goblins get an axis at
+//     init).
+//   * Rogue Scout: `apply_ability 4` triggers a chronicle consumer
+//     `ScoutBroadcast` that grants DETECTED belief for every nearby
+//     enemy to every hero — a party-wide reveal (cone simplified to
+//     radius per design spec).
+//
+// Stage 3 will scale this design to 5v1000 by changing the topology
+// only — no structural rework. The beliefs view is pair-keyed
+// (N² u32 cells) so 1k² × 4 bytes = 4 MB — still trivial.
+//
+// **Discriminant order** (decl-order alphabetical, same as stage 1):
+//   Archer = 0, Brute = 1, Goblin = 2, Hero = 3
+//
+// **Ability slot IDs** (alphabetical .ability filename, same as stage 1):
+//   Backstab=1, Cleave=2, Heal=3, Scout=4, Snipe=5,
+//   Stealth=6, Strike=7, Stun=8, Volley=9
+//
+// **Custom per-agent fields** (stage 1 base + stage 2 additions):
+//   stage 1: role, target_room_idx
+//   stage 2: stealth_until_tick, alert, expected_chamber_allies,
+//            patrol_axis, patrol_dir, patrol_min_x, patrol_max_x
+//
+// Companion `.ability` corpus at assets/ability_test/dungeon_stealth/
+// (unchanged from stage 1 — Backstab/Scout/Stealth now load-bearing).
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Healed {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Engine-side chronicle (kind 26 / EffectDamageApplied).
+@replayable @gpu_amenable
+event EffectDamageApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Engine-side chronicle (kind 27 / EffectHealApplied).
+@replayable @gpu_amenable
+event EffectHealApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Engine-side chronicle (kind 29 / EffectStunApplied). slot 4 carries
+// `world.tick + duration_ticks` (absolute expiry tick).
+@replayable @gpu_amenable
+event EffectStunApplied {
+  actor: AgentId,
+  target: AgentId,
+  expires_at_tick: u32,
+}
+
+// Engine-side chronicle (kind 54 / EffectStealthApplied). slot 3 is
+// `duration_ticks` (raw u32, NOT bitcast — caster-self stealth has no
+// target field). The consumer below computes `stealth_until_tick =
+// world.tick + duration_ticks`.
+@replayable @gpu_amenable
+event EffectStealthApplied {
+  actor: AgentId,
+  duration_ticks: u32,
+}
+
+// -------------------------------------------------------------------
+// Belief layer — pair-keyed (observer, subject) flag bitset.
+//   bit 0 = DETECTED (observer believes subject is visible / known).
+// Written by:
+//   (a) DetectHeroByLoS — enemy sees hero within effective_detect_range,
+//       hero not stealthed → set bit 0.
+//   (b) SoundDetectFromDamage — chronicle consumer on Damaged where
+//       source is a Hero → every enemy in attack_sound_radius gains
+//       bit 0 for the hero.
+//   (c) ScoutBroadcast — chronicle consumer on Scout cast (ability_id
+//       == 4) → every hero gains bit 0 for every enemy within
+//       scout_radius of the scouting hero.
+// -------------------------------------------------------------------
+@replayable @gpu_amenable
+event BeliefUpdate {
+  observer: AgentId,
+  subject: AgentId,
+  flags: u32,
+}
+
+@materialized(on_event = [BeliefUpdate], storage = pair_map)
+view beliefs_flags(observer: Agent, subject: Agent) -> u32 {
+  initial: 0,
+  on BeliefUpdate { observer: o, subject: s, flags: f }
+    where (o == observer) && (s == subject)
+    { self |= f }
+  clamp: [0, 4294967295],
+}
+
+// AllyDied — emitted from ApplyDamage when an enemy transitions
+// alive 1→0. Drives BroadcastAlertOnAllyDeath.
+@replayable @gpu_amenable
+event AllyDied {
+  dead: AgentId,
+  killer: AgentId,
+}
+
+// Entity discriminants pinned alphabetical (decl order = sort order):
+//   Archer = 0, Brute = 1, Goblin = 2, Hero = 3
+entity Archer : Agent { pos: vec3, vel: vec3 }
+entity Brute  : Agent { pos: vec3, vel: vec3 }
+entity Goblin : Agent { pos: vec3, vel: vec3 }
+entity Hero   : Agent { pos: vec3, vel: vec3 }
+
+// ---------------------------------------------------------------
+// Custom per-agent SoA columns.
+// ---------------------------------------------------------------
+// Stage 1 inherited:
+field role:                    u32
+field target_room_idx:         u32
+
+// Stage 2 additions:
+// stealth_until_tick — written by ApplyStealthFromChronicle. While
+// `world.tick < agents.stealth_until_tick(self)`, the hero is
+// stealthed; DetectHeroByLoS skips them.
+field stealth_until_tick:      u32
+
+// alert — per-enemy alertness. Effective detect range =
+// base_detect_range + alert * detect_range_per_alert. Bumped by
+// BroadcastAlertOnAllyDeath (+2 when ally dies in radius) and
+// MissingAllySuspicion (+1 every 30 ticks when nearby ally count
+// drops below expected_chamber_allies).
+field alert:                   u32
+
+// expected_chamber_allies — seeded by the pin at init = initial count
+// of non-hero agents in this enemy's spawn room. Used by
+// MissingAllySuspicion to detect "my friends went missing".
+field expected_chamber_allies: u32
+
+// patrol_axis — 0 = stationary, 1 = patrolling.
+field patrol_axis:             u32
+
+// patrol_origin_x / _y — anchor point of the patrol; the rule
+// bounces when the agent strays farther than patrol_radius from
+// `vec3(origin_x, origin_y, 1.0)`. Stored as 2× f32 because the
+// custom-field registry doesn't yet accept vec3 (supports
+// u32/f32/bool only — Gap dungeon_stealth#3).
+field patrol_origin_x:         f32
+field patrol_origin_y:         f32
+
+// patrol_step_x / _y — step applied every tick. When the patroller
+// reaches the bounce radius, the rule writes -step back into the
+// field. (Same registry gap as above forces the scalar encoding.)
+field patrol_step_x:           f32
+field patrol_step_y:           f32
+
+config dungeon {
+  // Move speeds (per 100ms tick).
+  hero_move_speed:    f32 = 0.20,
+  goblin_move_speed:  f32 = 0.15,
+  brute_move_speed:   f32 = 0.10,
+  patrol_speed:       f32 = 0.10,
+
+  // Hero verb tuning.
+  warrior_cleave_range: f32 = 4.0,
+  warrior_cleave_cd:    u32 = 6,
+  cleric_heal_range:    f32 = 8.0,
+  cleric_heal_cd:       u32 = 4,
+  cleric_heal_floor:    f32 = 130.0,
+  ranger_snipe_range:   f32 = 18.0,
+  ranger_snipe_cd:      u32 = 12,
+  mage_stun_range:      f32 = 12.0,
+  mage_stun_cd:         u32 = 15,
+  hero_strike_range:    f32 = 4.0,
+  hero_strike_cd:       u32 = 3,
+  rogue_backstab_range: f32 = 1.5,
+  rogue_backstab_cd:    u32 = 6,
+  rogue_stealth_cd:     u32 = 20,
+  rogue_scout_cd:       u32 = 15,
+  scout_radius:         f32 = 18.0,
+  patrol_radius:        f32 = 4.0,
+
+  // Enemy verb tuning.
+  goblin_melee_range:   f32 = 2.5,
+  goblin_melee_cd:      u32 = 4,
+  goblin_charge_range:  f32 = 12.0,
+  brute_cleave_range:   f32 = 4.0,
+  brute_cleave_cd:      u32 = 8,
+  brute_charge_range:   f32 = 10.0,
+  archer_volley_range:  f32 = 18.0,
+  archer_volley_cd:     u32 = 6,
+
+  // Role discriminants.
+  role_warrior: u32 = 1,
+  role_cleric:  u32 = 2,
+  role_ranger:  u32 = 3,
+  role_mage:    u32 = 4,
+  role_rogue:   u32 = 5,
+
+  // Creature type discriminants (mirror runtime seed assignments).
+  ct_archer: u32 = 0,
+  ct_brute:  u32 = 1,
+  ct_goblin: u32 = 2,
+  ct_hero:   u32 = 3,
+}
+
+config stealth {
+  // Per-tick enemy LoS scan: an enemy detects a hero if the hero is
+  // within `base_detect_range + alert * detect_range_per_alert` AND
+  // the hero is NOT stealthed AND terrain.line_of_sight passes.
+  base_detect_range:        f32 = 8.0,
+  detect_range_per_alert:   f32 = 0.5,
+
+  // Sound broadcast — when a hero deals damage, every enemy within
+  // this radius gains DETECTED belief for the attacker. Per the
+  // design spec we use a single radius rather than per-ability
+  // lookup (compromise between Backstab=2 / Cleave=8 / Strike=4).
+  // Per-ability noise is a follow-up — chronicle slot 6 already
+  // carries ability_id (commit ad492ee2).
+  attack_sound_radius:      f32 = 6.0,
+
+  // BroadcastAlertOnAllyDeath: enemies within this radius of a
+  // dying ally bump alert by alert_step_ally_death.
+  ally_death_radius:        f32 = 8.0,
+  alert_step_ally_death:    u32 = 2,
+
+  // MissingAllySuspicion: every 30 ticks each enemy counts living
+  // non-hero allies within this radius; if < expected_chamber_allies,
+  // alert += alert_step_missing.
+  missing_ally_radius:      f32 = 12.0,
+  missing_ally_period:      u32 = 30,
+  alert_step_missing:       u32 = 1,
+}
+
+init {
+  alive:  1,
+  hp:     200,
+  max_hp: 200,
+}
+
+// Spatial queries. base_detect_range scales up via alert — use the
+// largest needed radius (~16 units for alert>=16) for the detection
+// scan to be safe. The per-pair distance gate in DetectHeroByLoS does
+// the precise check.
+@spatial(radius = 4.0,  kind = [Agent])
+spatial_query nearby_melee(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+@spatial(radius = 8.0,  kind = [Agent])
+spatial_query nearby_heal(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+@spatial(radius = 12.0, kind = [Agent])
+spatial_query nearby_charge(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+@spatial(radius = 18.0, kind = [Agent])
+spatial_query nearby_los(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// 16-unit detection scan (~base 8 + alert*0.5 capped at alert=16).
+@spatial(radius = 16.0, kind = [Agent])
+spatial_query nearby_detect(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// -------------------------------------------------------------------
+// Hero exploration — same as stage 1. Host-side pin updates
+// target_room_idx between ticks.
+// -------------------------------------------------------------------
+@phase(per_agent)
+physics HeroExplore {
+  on Tick {} where (self.alive
+                    && self.creature_type == Hero
+                    && agents.stun_expires_at_tick(self) <= world.tick) {
+    let target_idx = agents.target_room_idx(self);
+    let rx = target_idx % 6u;
+    let ry = target_idx / 6u;
+    let cx = (rx as f32) * 12.0 + 6.0;
+    let cy = (ry as f32) * 12.0 + 6.0;
+    let target_centroid = vec3(cx, cy, 1.0);
+    let toward = target_centroid - self.pos;
+    let dist = length(toward);
+    if (dist > 1.0) {
+      let step = (toward / dist) * config.dungeon.hero_move_speed;
+      agents.set_pos(self, self.pos + step);
+    }
+  }
+}
+
+// -------------------------------------------------------------------
+// Enemy movement.
+// -------------------------------------------------------------------
+//
+// GoblinCharge / BruteCharge: only engage heroes the enemy currently
+// believes-detects (beliefs_flags(self, h) & 1 != 0). This is the
+// load-bearing stealth gate on the movement side — undetected heroes
+// don't pull aggro.
+@phase(per_agent)
+physics GoblinCharge {
+  on Tick {} where (self.alive
+                    && self.creature_type == Goblin
+                    && agents.stun_expires_at_tick(self) <= world.tick
+                    && agents.patrol_axis(self) == 0u) {
+    let toward = sum(h in agents where
+      if (h != self) && (h.alive) && (h.creature_type == Hero)
+         && ((agents.beliefs_flags(self, h) % 2u) != 0u)
+         && (length(h.pos - self.pos) < config.dungeon.goblin_charge_range) {
+        h.pos - self.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let dist = length(toward);
+    let new_pos = if (dist > 0.001) {
+      self.pos + (toward / dist) * config.dungeon.goblin_move_speed
+    } else {
+      self.pos
+    };
+    agents.set_pos(self, new_pos);
+  }
+}
+
+@phase(per_agent)
+physics BruteCharge {
+  on Tick {} where (self.alive
+                    && self.creature_type == Brute
+                    && agents.stun_expires_at_tick(self) <= world.tick) {
+    let toward = sum(h in agents where
+      if (h != self) && (h.alive) && (h.creature_type == Hero)
+         && ((agents.beliefs_flags(self, h) % 2u) != 0u)
+         && (length(h.pos - self.pos) < config.dungeon.brute_charge_range) {
+        h.pos - self.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let dist = length(toward);
+    let new_pos = if (dist > 0.001) {
+      self.pos + (toward / dist) * config.dungeon.brute_move_speed
+    } else {
+      self.pos
+    };
+    agents.set_pos(self, new_pos);
+  }
+}
+
+// PatrolBounce — agents with patrol_axis > 0 walk a vec3 step every
+// tick away from patrol_origin. When they stray farther than
+// patrol_radius, the rule flips the step (`step * -1.0`) so they
+// retrace their path. Patrolling agents don't engage in GoblinCharge
+// (the `patrol_axis == 0u` gate above).
+//
+// Uses vec3-only arithmetic — the DSL parser doesn't accept
+// `self.pos.x` / `.y` accessors today (Gap dungeon_stealth#1). The
+// pin seeds `patrol_origin` and `patrol_step` per-agent at init.
+@phase(per_agent)
+physics PatrolBounce {
+  on Tick {} where (self.alive
+                    && self.creature_type != Hero
+                    && agents.stun_expires_at_tick(self) <= world.tick
+                    && agents.patrol_axis(self) == 1u) {
+    let sx = agents.patrol_step_x(self);
+    let sy = agents.patrol_step_y(self);
+    let ox = agents.patrol_origin_x(self);
+    let oy = agents.patrol_origin_y(self);
+    let step = vec3(sx, sy, 0.0);
+    let origin = vec3(ox, oy, 1.0);
+    let new_pos = self.pos + step;
+    let dist_from_origin = length(new_pos - origin);
+    if (dist_from_origin > config.dungeon.patrol_radius) {
+      // Bounce: flip step direction. The agent stays put this tick
+      // (next tick it walks back along the reversed step).
+      agents.set_patrol_step_x(self, sx * -1.0);
+      agents.set_patrol_step_y(self, sy * -1.0);
+    } else {
+      agents.set_pos(self, new_pos);
+    }
+  }
+}
+
+// -------------------------------------------------------------------
+// Detection — enemies LoS-scan for non-stealthed heroes. Emits a
+// BeliefUpdate event setting bit 0 (DETECTED). The view's bit-OR
+// fold turns this into a persistent flag (only cleared when bit-OR
+// is replaced by a clear-on-tick mechanism — for stage 2, beliefs
+// are sticky-true once granted; stage 3 will add a decay channel).
+// -------------------------------------------------------------------
+@phase(per_agent)
+physics DetectHeroByLoS {
+  on Tick {} where (self.alive
+                    && self.creature_type != Hero
+                    && agents.stun_expires_at_tick(self) <= world.tick) {
+    for candidate in spatial.nearby_detect(self) {
+      if (candidate.alive
+          && candidate.creature_type == Hero
+          && agents.stealth_until_tick(candidate) <= world.tick
+          && terrain.line_of_sight(self.pos, candidate.pos)) {
+        // Effective detect range scales with alert. Re-check inside
+        // the if so out-of-range candidates (from the 16-unit
+        // spatial walk) get rejected here.
+        let alert_f = (agents.alert(self) as f32);
+        let eff = config.stealth.base_detect_range
+                + alert_f * config.stealth.detect_range_per_alert;
+        if (length(candidate.pos - self.pos) < eff) {
+          emit BeliefUpdate { observer: self, subject: candidate, flags: 1u }
+        }
+      }
+    }
+  }
+}
+
+// -------------------------------------------------------------------
+// MissingAllySuspicion — every 30 ticks, each enemy counts living
+// non-hero allies within missing_ally_radius. If count <
+// expected_chamber_allies, alert += alert_step_missing.
+// -------------------------------------------------------------------
+@phase(per_agent)
+physics MissingAllySuspicion {
+  on Tick {} where (self.alive
+                    && self.creature_type != Hero
+                    && (world.tick % config.stealth.missing_ally_period == 0u)
+                    && world.tick > 0u) {
+    // Use f32 sum (the DSL fusion analyzer's type-check rejects u32
+    // sums today — Gap dungeon_stealth#2). Cast `expected_chamber_allies`
+    // to f32 for the compare.
+    let nearby_count = sum(other in agents where
+      if (other != self) && (other.alive) && (other.creature_type != Hero)
+         && (length(other.pos - self.pos) < config.stealth.missing_ally_radius) {
+        1.0
+      } else {
+        0.0
+      });
+    let expected_f = (agents.expected_chamber_allies(self) as f32);
+    if (nearby_count < expected_f) {
+      agents.set_alert(self, agents.alert(self) + config.stealth.alert_step_missing);
+    }
+  }
+}
+
+// -------------------------------------------------------------------
+// Hero verb cascade — all hero verbs gate on:
+//   - self.alive
+//   - self.creature_type == Hero
+//   - agents.stun_expires_at_tick(self) <= world.tick
+//   - agents.role(self) matches the verb's role
+//   - cooldown via world.tick % cd == 0
+//   - target.alive && target.creature_type != Hero
+//   - terrain.line_of_sight(self.pos, target.pos)
+//   - length(target - self) < range  (per-pair distance gate;
+//     Gap dungeon_layout#1 — spatial cells clamp at boundaries)
+// -------------------------------------------------------------------
+
+@phase(per_agent)
+physics WarriorCleave {
+  on Tick {} where (self.alive
+                    && self.creature_type == Hero
+                    && agents.role(self) == config.dungeon.role_warrior
+                    && agents.stun_expires_at_tick(self) <= world.tick
+                    && (world.tick % config.dungeon.warrior_cleave_cd == 0)) {
+    for candidate in spatial.nearby_melee(self) {
+      if (candidate.alive
+          && candidate.creature_type != config.dungeon.ct_hero
+          && length(candidate.pos - self.pos) < config.dungeon.warrior_cleave_range
+          && terrain.line_of_sight(self.pos, candidate.pos)) {
+        apply_ability Cleave by self target candidate
+      }
+    }
+  }
+}
+
+@phase(per_agent)
+physics ClericHeal {
+  on Tick {} where (self.alive
+                    && self.creature_type == Hero
+                    && agents.role(self) == config.dungeon.role_cleric
+                    && agents.stun_expires_at_tick(self) <= world.tick
+                    && (world.tick % config.dungeon.cleric_heal_cd == 0)) {
+    for candidate in spatial.nearby_heal(self) {
+      if (candidate.alive
+          && candidate.creature_type == config.dungeon.ct_hero
+          && candidate.hp < config.dungeon.cleric_heal_floor
+          && length(candidate.pos - self.pos) < config.dungeon.cleric_heal_range
+          && terrain.line_of_sight(self.pos, candidate.pos)) {
+        apply_ability Heal by self target candidate
+      }
+    }
+  }
+}
+
+@phase(per_agent)
+physics RangerSnipe {
+  on Tick {} where (self.alive
+                    && self.creature_type == Hero
+                    && agents.role(self) == config.dungeon.role_ranger
+                    && agents.stun_expires_at_tick(self) <= world.tick
+                    && (world.tick % config.dungeon.ranger_snipe_cd == 0)) {
+    for candidate in spatial.nearby_los(self) {
+      if (candidate.alive
+          && candidate.creature_type != config.dungeon.ct_hero
+          && length(candidate.pos - self.pos) < config.dungeon.ranger_snipe_range
+          && terrain.line_of_sight(self.pos, candidate.pos)) {
+        apply_ability Snipe by self target candidate
+      }
+    }
+  }
+}
+
+@phase(per_agent)
+physics MageStun {
+  on Tick {} where (self.alive
+                    && self.creature_type == Hero
+                    && agents.role(self) == config.dungeon.role_mage
+                    && agents.stun_expires_at_tick(self) <= world.tick
+                    && (world.tick % config.dungeon.mage_stun_cd == 0)) {
+    for candidate in spatial.nearby_charge(self) {
+      if (candidate.alive
+          && candidate.creature_type != config.dungeon.ct_hero
+          && length(candidate.pos - self.pos) < config.dungeon.mage_stun_range
+          && terrain.line_of_sight(self.pos, candidate.pos)) {
+        apply_ability Stun by self target candidate
+      }
+    }
+  }
+}
+
+@phase(per_agent)
+physics HeroStrike {
+  on Tick {} where (self.alive
+                    && self.creature_type == Hero
+                    && agents.stun_expires_at_tick(self) <= world.tick
+                    && (world.tick % config.dungeon.hero_strike_cd == 0)) {
+    for candidate in spatial.nearby_melee(self) {
+      if (candidate.alive
+          && candidate.creature_type != config.dungeon.ct_hero
+          && length(candidate.pos - self.pos) < config.dungeon.hero_strike_range
+          && terrain.line_of_sight(self.pos, candidate.pos)) {
+        apply_ability Strike by self target candidate
+      }
+    }
+  }
+}
+
+// -------------------------------------------------------------------
+// Rogue verbs — load-bearing in stage 2.
+//
+//   RogueStealth — self-cast 5s stealth. Sets stealth_until_tick via
+//     the chronicle consumer below.
+//   RogueBackstab — melee, 1.5-unit range, 60 dmg single-target.
+//   RogueScout — long-range belief broadcast via chronicle consumer.
+// -------------------------------------------------------------------
+
+@phase(per_agent)
+physics RogueStealth {
+  on Tick {} where (self.alive
+                    && self.creature_type == Hero
+                    && agents.role(self) == config.dungeon.role_rogue
+                    && agents.stun_expires_at_tick(self) <= world.tick
+                    && (world.tick % config.dungeon.rogue_stealth_cd == 0)) {
+    apply_ability Stealth by self target self
+  }
+}
+
+@phase(per_agent)
+physics RogueBackstab {
+  on Tick {} where (self.alive
+                    && self.creature_type == Hero
+                    && agents.role(self) == config.dungeon.role_rogue
+                    && agents.stun_expires_at_tick(self) <= world.tick
+                    && (world.tick % config.dungeon.rogue_backstab_cd == 0)) {
+    for candidate in spatial.nearby_melee(self) {
+      if (candidate.alive
+          && candidate.creature_type != config.dungeon.ct_hero
+          && length(candidate.pos - self.pos) < config.dungeon.rogue_backstab_range
+          && terrain.line_of_sight(self.pos, candidate.pos)) {
+        apply_ability Backstab by self target candidate
+      }
+    }
+  }
+}
+
+// Rogue Scout — fires every rogue_scout_cd ticks at any nearby enemy
+// (the target is a placeholder; ScoutBroadcast below reads the actor's
+// position and does the actual belief grant per-hero per-enemy).
+@phase(per_agent)
+physics RogueScout {
+  on Tick {} where (self.alive
+                    && self.creature_type == Hero
+                    && agents.role(self) == config.dungeon.role_rogue
+                    && agents.stun_expires_at_tick(self) <= world.tick
+                    && (world.tick % config.dungeon.rogue_scout_cd == 0)) {
+    for candidate in spatial.nearby_los(self) {
+      if (candidate.alive
+          && candidate.creature_type != config.dungeon.ct_hero
+          && length(candidate.pos - self.pos) < config.dungeon.scout_radius) {
+        apply_ability Scout by self target candidate
+      }
+    }
+  }
+}
+
+// -------------------------------------------------------------------
+// Enemy verb cascade — same as stage 1 but gated on `beliefs_flags(self,
+// target) & 1`.  Undetected heroes are invisible to enemy attacks.
+// -------------------------------------------------------------------
+
+@phase(per_agent)
+physics GoblinMelee {
+  on Tick {} where (self.alive
+                    && self.creature_type == Goblin
+                    && agents.stun_expires_at_tick(self) <= world.tick
+                    && (world.tick % config.dungeon.goblin_melee_cd == 0)) {
+    for candidate in spatial.nearby_melee(self) {
+      if (candidate.alive
+          && candidate.creature_type == config.dungeon.ct_hero
+          && ((agents.beliefs_flags(self, candidate) % 2u) != 0u)
+          && length(candidate.pos - self.pos) < config.dungeon.goblin_melee_range) {
+        apply_ability Strike by self target candidate
+      }
+    }
+  }
+}
+
+@phase(per_agent)
+physics BruteCleave {
+  on Tick {} where (self.alive
+                    && self.creature_type == Brute
+                    && agents.stun_expires_at_tick(self) <= world.tick
+                    && (world.tick % config.dungeon.brute_cleave_cd == 0)) {
+    for candidate in spatial.nearby_melee(self) {
+      if (candidate.alive
+          && candidate.creature_type == config.dungeon.ct_hero
+          && ((agents.beliefs_flags(self, candidate) % 2u) != 0u)
+          && length(candidate.pos - self.pos) < config.dungeon.brute_cleave_range) {
+        apply_ability Cleave by self target candidate
+      }
+    }
+  }
+}
+
+@phase(per_agent)
+physics ArcherVolley {
+  on Tick {} where (self.alive
+                    && self.creature_type == Archer
+                    && agents.stun_expires_at_tick(self) <= world.tick
+                    && (world.tick % config.dungeon.archer_volley_cd == 0)) {
+    for candidate in spatial.nearby_los(self) {
+      if (candidate.alive
+          && candidate.creature_type == config.dungeon.ct_hero
+          && ((agents.beliefs_flags(self, candidate) % 2u) != 0u)
+          && length(candidate.pos - self.pos) < config.dungeon.archer_volley_range
+          && terrain.line_of_sight(self.pos, candidate.pos)) {
+        apply_ability Volley by self target candidate
+      }
+    }
+  }
+}
+
+// -------------------------------------------------------------------
+// Chronicle consumers.
+// -------------------------------------------------------------------
+
+@phase(post)
+physics ApplyDamageFromChronicle {
+  on EffectDamageApplied { actor: a, target: t, amount: amt } {
+    emit Damaged { source: a, target: t, amount: amt }
+  }
+}
+
+@phase(post)
+physics ApplyHealFromChronicle {
+  on EffectHealApplied { actor: a, target: t, amount: amt } {
+    emit Healed { source: a, target: t, amount: amt }
+  }
+}
+
+@phase(post)
+physics ApplyStunFromChronicle {
+  on EffectStunApplied { actor: _, target: t, expires_at_tick: e } {
+    agents.set_stun_expires_at_tick(t, e);
+  }
+}
+
+// Stealth chronicle: slot 3 of EffectStealthApplied is raw
+// duration_ticks (NOT an absolute deadline). Compute the absolute
+// expiry tick = world.tick + duration_ticks and write it to the
+// `stealth_until_tick` custom field. The verb's `apply_ability
+// Stealth by self target self` dispatches caster-self; the engine
+// event has no target field (consumer reads slot 2 as `actor`).
+@phase(post)
+physics ApplyStealthFromChronicle {
+  on EffectStealthApplied { actor: a, duration_ticks: d } {
+    agents.set_stealth_until_tick(a, world.tick + d);
+  }
+}
+
+// HP drain + alive flip + AllyDied emission. Emits AllyDied when a
+// non-hero transitions alive 1→0 (drives BroadcastAlertOnAllyDeath).
+@phase(post)
+physics ApplyDamage {
+  on Damaged { source: src, target: t, amount: a } {
+    let old_hp = agents.hp(t);
+    let new_hp = old_hp - a;
+    agents.set_hp(t, new_hp);
+    if (old_hp > 0.0 && new_hp <= 0.0) {
+      agents.set_alive(t, false);
+      if (agents.creature_type(t) != Hero) {
+        emit AllyDied { dead: t, killer: src }
+      }
+    }
+  }
+}
+
+@phase(post)
+physics ApplyHeal {
+  on Healed { source: _, target: t, amount: a } {
+    agents.set_hp(t, min(agents.hp(t) + a, agents.max_hp(t)));
+  }
+}
+
+// SoundDetectFromDamage — when a Hero deals damage, every nearby
+// non-hero gains DETECTED belief for the attacker. Walks every agent
+// slot via `for_each_agent` (same shape among_us::ApplyWitness uses
+// — proven path for cross-pair belief writes from a @phase(post)
+// consumer). The DSL doesn't support spatial.nearby calls from
+// @phase(post) bodies today, so we use the full-population walk
+// (N enemies × 1 hero-source = up to ~30 distance checks per event,
+// cheap at this scale).
+@phase(post)
+physics SoundDetectFromDamage {
+  on Damaged { source: s, target: _, amount: a } {
+    if (a > 0.0) {
+      let src_pos = agents.pos(s);
+      let src_type = agents.creature_type(s);
+      // Only emit for hero-sourced damage (the stealth-break case).
+      if (src_type == Hero) {
+        for_each_agent slot {
+          let slot_alive = agents.alive(slot);
+          let slot_type = agents.creature_type(slot);
+          let slot_pos = agents.pos(slot);
+          let delta = slot_pos - src_pos;
+          let dist = length(delta);
+          if (slot_alive
+              && slot_type != Hero
+              && slot != s
+              && dist < config.stealth.attack_sound_radius) {
+            emit BeliefUpdate { observer: slot, subject: s, flags: 1u }
+          }
+        }
+      }
+    }
+  }
+}
+
+// BroadcastAlertOnAllyDeath — every alive non-hero within
+// ally_death_radius of the dying ally gets alert += 2. Same
+// for_each_agent pattern as SoundDetectFromDamage.
+@phase(post)
+physics BroadcastAlertOnAllyDeath {
+  on AllyDied { dead: d, killer: _ } {
+    let dead_pos = agents.pos(d);
+    for_each_agent slot {
+      let slot_alive = agents.alive(slot);
+      let slot_type = agents.creature_type(slot);
+      let slot_pos = agents.pos(slot);
+      let delta = slot_pos - dead_pos;
+      let dist = length(delta);
+      if (slot_alive
+          && slot_type != Hero
+          && slot != d
+          && dist < config.stealth.ally_death_radius) {
+        let cur = agents.alert(slot);
+        agents.set_alert(slot, cur + config.stealth.alert_step_ally_death);
+      }
+    }
+  }
+}
+
+// ScoutBroadcast — when a Scout ability lands. Stage 2 simplification
+// per the design spec: bypass the cone direction. The Scouting hero
+// `a` learns about every nearby enemy (writes belief into its OWN
+// row). Party-wide broadcast is dropped to keep the walk single-pass
+// (one for_each_agent instead of the nested O(N²) shape, which hangs
+// the GPU at our agent count). A future revision can replay the
+// belief write across the other hero slots via a separate fanout
+// rule keyed on the same chronicle event.
+//
+// **Detection trick**: stage 1's Scout.ability emits damage=0.0, so
+// `amount == 0.0` distinguishes it from real damage events. This
+// avoids needing chronicle slot 6 (ability_id) read support in the
+// consumer.
+@phase(post)
+physics ScoutBroadcast {
+  on EffectDamageApplied { actor: a, target: _, amount: amt } {
+    if (amt == 0.0) {
+      let src_pos = agents.pos(a);
+      let src_type = agents.creature_type(a);
+      let src_role = agents.role(a);
+      // Gate: only Rogue heroes broadcast — avoids accidental fires
+      // from any other zero-damage chronicle row.
+      if (src_type == Hero && src_role == config.dungeon.role_rogue) {
+        for_each_agent enemy_slot {
+          let enemy_alive = agents.alive(enemy_slot);
+          let enemy_type = agents.creature_type(enemy_slot);
+          let enemy_pos = agents.pos(enemy_slot);
+          let dist = length(enemy_pos - src_pos);
+          if (enemy_alive
+              && enemy_type != Hero
+              && dist < config.dungeon.scout_radius) {
+            // Grant DETECTED to the Rogue itself (single-pass).
+            emit BeliefUpdate { observer: a, subject: enemy_slot, flags: 1u }
+          }
+        }
+      }
+    }
+  }
+}
+
+// -------------------------------------------------------------------
+// Materialized views (observability).
+// -------------------------------------------------------------------
+
+// Per-source total damage dealt.
+@materialized(on_event = [Damaged])
+view damage_dealt(source: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: s, target: _, amount: a } where s == source { self += a }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-source healing dispensed.
+@materialized(on_event = [Healed])
+view healing_done(source: Agent) -> f32 {
+  initial: 0.0,
+  on Healed { source: s, target: _, amount: a } where s == source { self += a }
+  clamp: [0.0, 1000000.0],
+}
+
+// Pair-keyed threat view with decay. Inherited from stage 1.
+@materialized(on_event = [Damaged], storage = pair_map)
+@decay(rate = 0.98, per = tick)
+view threat_taken(observer: Agent, source: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: s, target: t, amount: a }
+    where (t == observer) && (s == source)
+    { self += a }
+  clamp: [0.0, 10000.0],
+}

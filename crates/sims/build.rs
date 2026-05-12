@@ -117,6 +117,7 @@ fn main() {
                 | "detective_investigation"
                 | "among_us"
                 | "dungeon_layout"
+                | "dungeon_stealth"
         ) {
             continue;
         }
