@@ -36,7 +36,6 @@ const SIMS: &[(&str, Factory, u32, &str)] = &[
     ("particle_collision",    particle_collision_runtime::make_sim,        256, "elastic collisions"),
     ("crowd_navigation",      crowd_navigation_runtime::make_sim,          256, "crowd navigation"),
     ("swarm_storm",           swarm_storm_runtime::make_sim,               64,  "multi-emit swarm"),
-    ("bartering",             bartering_runtime::make_sim,                 32,  "bartering probe"),
     ("ecosystem",             ecosystem_runtime::make_sim,                 96,  "3-tier ecosystem cascade"),
     ("foraging",              foraging_runtime::make_sim,                  32,  "ant foraging"),
     ("auction",               auction_runtime::make_sim,                   32,  "auction probe"),
@@ -45,7 +44,6 @@ const SIMS: &[(&str, Factory, u32, &str)] = &[
     ("trade_market",          trade_market_runtime::make_sim,              32,  "trade market probe"),
     ("abilities",             abilities_runtime::make_sim,                 16,  "abilities probe"),
     ("diplomacy_probe",       diplomacy_probe_runtime::make_sim,           16,  "diplomacy probe"),
-    ("pair_scoring_probe",    pair_scoring_probe_runtime::make_sim,        16,  "pair-scoring probe"),
     ("duel_1v1",              duel_1v1_runtime::make_sim,                  2,   "1v1 combat duel"),
     ("duel_25v25",            duel_25v25_runtime::make_sim,                50,  "25v25 squad combat"),
     ("duel_abilities",        duel_abilities_runtime::make_sim,            2,   "1v1 driven by .ability files (Wave 1)"),
@@ -59,7 +57,6 @@ const SIMS: &[(&str, Factory, u32, &str)] = &[
     ("megaswarm_1000",        megaswarm_1000_runtime::make_sim,            1000,"1000-agent pair-field stress"),
     ("tactical_horde_500",    tactical_horde_500_runtime::make_sim,        1000,"500v500 multi-verb cascade"),
     ("trophic_3tier",         trophic_3tier_runtime::make_sim,             400, "3-tier food web (grass/sheep/wolf)"),
-    ("flocking_skirmish",     flocking_skirmish_runtime::make_sim,         200, "team-aware boids combat"),
     ("tower_defense",         tower_defense_runtime::make_sim,             111, "wave-based TD"),
     ("boss_fight",            boss_fight_runtime::make_sim,                6,   "1 boss + 5 heroes"),
     ("megaswarm_10000",       megaswarm_10000_runtime::make_sim,           10000,"10k-agent GPU saturation"),
@@ -67,7 +64,6 @@ const SIMS: &[(&str, Factory, u32, &str)] = &[
     ("scripted_battle",       scripted_battle_runtime::make_sim,           75,  "3-phase scripted narrative arc"),
     ("multi_zone_world",      multi_zone_world_runtime::make_sim,          35,  "Forest/Town/Dungeon zone migration"),
     ("dungeon_crawl",         dungeon_crawl_runtime::make_sim,             35,  "5 heroes traverse 3 sequential rooms"),
-    ("crafting_diffusion",    crafting_diffusion_runtime::make_sim,        50,  "5 groups share recipe knowledge"),
 ];
 
 fn print_help() {

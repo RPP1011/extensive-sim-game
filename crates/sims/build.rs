@@ -47,6 +47,11 @@ fn main() {
                 | "stochastic_probe"
                 | "quest_probe"
                 | "stdlib_math_probe"
+                | "bartering"
+                | "pair_scoring_probe"
+                | "per_entity_ring_probe"
+                | "crafting_diffusion"
+                | "flocking_skirmish"
         ) {
             continue;
         }

@@ -193,19 +193,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bartering_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -522,16 +509,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "crafting_diffusion_runtime"
-version = "0.1.0"
-dependencies = [
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
 ]
 
 [[package]]
@@ -913,19 +890,6 @@ dependencies = [
 
 [[package]]
 name = "firebolt_probe_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
-name = "flocking_skirmish_runtime"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
@@ -1644,19 +1608,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pair_scoring_probe_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
-
-[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1697,19 +1648,6 @@ name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
-
-[[package]]
-name = "per_entity_ring_probe_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "glam",
- "pollster",
- "wgpu",
-]
 
 [[package]]
 name = "pin-project-lite"
@@ -2224,10 +2162,8 @@ version = "0.1.0"
 dependencies = [
  "abilities_runtime",
  "auction_runtime",
- "bartering_runtime",
  "boids_runtime",
  "boss_fight_runtime",
- "crafting_diffusion_runtime",
  "crowd_navigation_runtime",
  "diplomacy_probe_runtime",
  "duel_1v1_runtime",
@@ -2236,7 +2172,6 @@ dependencies = [
  "dungeon_crawl_runtime",
  "ecosystem_runtime",
  "engine",
- "flocking_skirmish_runtime",
  "foraging_real_runtime",
  "foraging_runtime",
  "glam",
@@ -2245,7 +2180,6 @@ dependencies = [
  "megaswarm_1000_runtime",
  "multi_zone_world_runtime",
  "objective_capture_10v10_runtime",
- "pair_scoring_probe_runtime",
  "particle_collision_runtime",
  "predator_prey_real_runtime",
  "predator_prey_runtime",
