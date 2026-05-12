@@ -763,3 +763,59 @@ it is not a viewer / voxel concern.
 ---
 
 Last updated: 2026-05-11 by adversarial-fixture pass (squad_skirmish).
+
+---
+
+## 2026-05-12 — Session-end status summary
+
+This session closed the bulk of the compiler-leverage gaps documented above.
+Status overview (gap → resolution SHA):
+
+**Trade caravans axis:**
+- T1 view `self -= expr` → `acbfdb09`
+- T2 multi-Item buffers → `a65482c1`
+- T3 alive=true setter → already-fixed, regression test at `d3e0ca49`
+- T4 chronicle cascade → subsumed by T5 schedule order fix
+- T5 schedule order (spatial-build before consumers) → `d1207fca`
+- T6 pair-key non-Agent sizing → `a02410a3`
+
+**Forest fire axis:**
+- A views aliasing → `220506a1` (per-view storage)
+- B fold cfg.event_count stale → `99e8c783`
+- C indirect-dispatch chronicle consumer arm → `ffaab378` (kind-aware schedule)
+- D f32 RMW race → bug 1 `99e8c783` + bug 2 `93143c1b` (post-CAS emit gating); residual 38-95 drift is P11 reduction territory
+- E `@traced` surface → phantom; regression pin at `a6c46275`
+- F `@cascade(max_iter=N)` → surface `9c5c7d8c` + runtime FixedPoint dispatch `3efdc3cd`
+
+**Squad skirmish axis:**
+- A `stun N` diagnostic → `be8e6b55`
+- B AOE detect survives partial corpus → `be8e6b55`
+- C scoring `weights:` clause → `473345f1`
+- D view storage aliasing → `220506a1`
+- E pair-view in scoring → still open (single-arg helper emitter)
+- F chronicle consumer Indirect dispatch → `ffaab378`
+- G init type bug f32/u32 → `c97d7f01`
+
+**Other:**
+- pirate_fleet `set_creature_type` → `4944ef65`
+- plague_city P-A custom-field registry → `b497f10b`
+- plague_city P-B `@host_callable` for fixture events → `22ea8c1c`
+- plague_city P-C lower-error fail-fast flag → `5bdf1a70`
+- plague_city P-D fused set_alive → already-fixed, regression at `d7900c34`
+- plague_city P-E view storage aliasing → `220506a1`
+- among_us #2 voxel_grid in chronicle consumers → phantom, regression at `b7a38b0c`
+- among_us #3 fused set_pos+set_mana ordering → `354ed8f1`
+- detective Gap 1 spatial-grid sizing → `c9adeb96`
+- detective Gap 6 ability_id at slot 6 → `ad492ee2`
+
+**Tier shifts (fixture behavior unlocked from Tier I to S):**
+- trade_caravans, plague_city, forest_fire, among_us, palace_coup
+
+**Remaining open:**
+- Squad_skirmish E pair-view in scoring expression
+- Squad_skirmish residual zero-damage (chronicle pipeline OK; predicate / level binding investigation needed)
+- P11 sort-then-fold for f32 reductions (residual ~38 drift in forest_fire)
+- EventLayout-level `is_traced` wiring (no runtime consumer yet)
+- Hill_raid LoS-occluded shots (gameplay-side, voxel terrain queries from spatial walk work)
+
+Last updated: 2026-05-12 by gap-addressing loop session.
