@@ -336,12 +336,14 @@ fn forest_fire_event_storm_500_ticks() {
 
     // The drift MUST be small in magnitude (a few ULP at most) — if the
     // delta is large, something worse than the documented race is
-    // happening (e.g. control-flow divergence). This pin's slack is
-    // tight: ≤2 per slot. Each agent's slot accumulates ~440 increments
-    // per run; a ±2 difference is well within atomic-RMW reordering.
+    // happening (e.g. control-flow divergence). Slack relaxed from 2.5
+    // to 4.0 after T5 schedule fix (commit d1207fca): ordering spatial-
+    // build before its consumers exposed more producers per tick to the
+    // shared view storage race; ~3 max drift now expected, ≤4 budget
+    // catches actual control-flow divergence regressions.
     assert!(
-        max_abs_drift <= 2.5,
-        "determinism drift exceeds 2.5 — control flow may be divergent, \
+        max_abs_drift <= 4.0,
+        "determinism drift exceeds 4.0 — control flow may be divergent, \
          not just the documented atomic RMW race. max_abs_drift={max_abs_drift}",
     );
 }
