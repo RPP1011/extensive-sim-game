@@ -2447,6 +2447,15 @@ fn lower_all_physics(
         if is_post_phase_authored(&rule.annotations) {
             ctx.builder.mark_post_phase_physics_rule(rule_id);
         }
+        // Record `@cascade(max_iter=N)` rules into the program-level
+        // side-table so the schedule synthesizer can emit a per-rule
+        // `DispatchOp::FixedPoint { max_iter: N }` instead of the
+        // hardcoded default. Runtime FixedPoint dispatch is still a
+        // catch-all no-op today (see build_helper.rs ~line 2708);
+        // landing the surface here is a prerequisite for that wiring.
+        if let Some(max_iter) = cascade_max_iter_authored(&rule.annotations) {
+            ctx.builder.mark_cascade_max_iter(rule_id, max_iter);
+        }
         if let Err(e) = lower_physics(rule_id, replayable, rule, &resolutions, ctx) {
             diagnostics.push(e);
         }
@@ -2491,6 +2500,52 @@ pub(crate) fn is_post_phase_authored(annotations: &[dsl_ast::ast::Annotation]) -
                     if s == "post"
             )
     })
+}
+
+/// Extract the `max_iter` value from a `@cascade(max_iter=N)` annotation
+/// on a physics rule. Returns `None` when the annotation is absent or
+/// when the form doesn't match (no args, wrong key, non-positive int).
+///
+/// Accepted shape: `@cascade(max_iter = <positive int literal>)` —
+/// exactly one keyword argument with key `max_iter`. Negative or zero
+/// values fall through (return `None`) so the schedule synthesizer
+/// keeps the legacy hardcoded `max_iter = 8` default; the resolver
+/// handles emitting a hard error for malformed forms.
+///
+/// Verb-cascade-synthesised physics rules carry empty annotations
+/// (`PhysicsIR::annotations: Vec::new()` per
+/// [`super::verb_expand::synthesize_cascade_physics`]) — they don't
+/// match here and continue to receive the default iteration ceiling.
+///
+/// **Runtime status (2026-05-12):** the runtime `DispatchOp::FixedPoint`
+/// arm is still a catch-all no-op (see
+/// `crates/dsl_compiler/src/build_helper.rs` near the
+/// "DispatchOp::FixedPoint, DispatchOp::GatedBy" comment block). A rule
+/// annotated `@cascade(max_iter=N)` will have its synthesized SCHEDULE
+/// entry emit `FixedPoint { max_iter: N }`, but the host will not loop
+/// the kernel — it will silently skip dispatch. Landing the parser /
+/// resolver / lower surface here is a prerequisite for the runtime
+/// wiring follow-up.
+pub(crate) fn cascade_max_iter_authored(
+    annotations: &[dsl_ast::ast::Annotation],
+) -> Option<u32> {
+    use dsl_ast::ast::{AnnotationArg, AnnotationValue};
+    for ann in annotations {
+        if ann.name != "cascade" {
+            continue;
+        }
+        if let [AnnotationArg {
+            key: Some(k),
+            value: AnnotationValue::Int(n),
+            ..
+        }] = ann.args.as_slice()
+        {
+            if k == "max_iter" && *n > 0 && *n <= u32::MAX as i64 {
+                return Some(*n as u32);
+            }
+        }
+    }
+    None
 }
 
 fn build_physics_handler_resolutions(

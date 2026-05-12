@@ -528,10 +528,17 @@ pub fn synthesize_pool() -> String {
 ///
 /// # Limitations
 ///
-/// - **`FixedPoint::max_iter` is hardcoded to 8.** The legacy emitter
-///   uses the same value (see `crates/xtask/src/compile_dsl_cmd.rs:1283`).
-///   Threading a per-rule `@cascade(max_iter=N)` annotation through the
-///   IR is a future refinement.
+/// - **`FixedPoint::max_iter` defaults to 8** when no
+///   `@cascade(max_iter=N)` annotation is present on the underlying
+///   physics rule. The legacy emitter uses the same value (see
+///   `crates/xtask/src/compile_dsl_cmd.rs:1283`). `@cascade`-annotated
+///   rules emit their authored `N` instead — see
+///   [`classify_topology_for_schedule`] for the per-topology lookup.
+///   **Runtime status (2026-05-12):** the per-rule `max_iter` lands in
+///   the emitted SCHEDULE entry, but the runtime `DispatchOp::FixedPoint`
+///   arm is still a catch-all no-op (see `build_helper.rs`'s
+///   `dispatch_by_id` synthesizer). Until that wiring lands, the host
+///   silently skips dispatch for any cascade-annotated kernel.
 /// - **`Indirect::args_buf` is pinned to `BufferRef::ResidentIndirectArgs`.**
 ///   The runtime currently routes all indirect-args buffers through
 ///   that single variant; future plans that introduce per-consumer
@@ -1166,11 +1173,13 @@ enum ScheduleEntry {
 ///
 /// 2. [`KernelTopology::Split`] / [`KernelTopology::Fused`] whose body
 ///    is a `ComputeOpKind::PhysicsRule` AND whose semantic name is
-///    `"physics"` → `DispatchOp::FixedPoint { max_iter: 8 }`. The
-///    `max_iter: 8` matches the legacy
-///    `crates/xtask/src/compile_dsl_cmd.rs:1283` value; threading
-///    a per-rule `@cascade(max_iter=N)` annotation through the IR is
-///    a future refinement.
+///    `"physics"` → `DispatchOp::FixedPoint { max_iter }`. `max_iter`
+///    defaults to `8` (matching the legacy
+///    `crates/xtask/src/compile_dsl_cmd.rs:1283` value) but is
+///    overridden when any constituent physics rule carries a
+///    `@cascade(max_iter=N)` annotation — the synthesizer picks the
+///    max ceiling across the topology's rules via
+///    [`topology_cascade_max_iter`].
 ///
 /// 3. Everything else → `DispatchOp::Kernel(...)`.
 ///
@@ -1209,9 +1218,32 @@ fn classify_topology_for_schedule(
                     .iter()
                     .any(|op| topology_op_is_physics_rule(prog, *op))
             {
+                let max_iter = topology_cascade_max_iter(prog, consumers.iter().copied())
+                    .unwrap_or(8);
                 return ScheduleEntry::FixedPoint {
                     kernel: kernel_name.to_string(),
-                    max_iter: 8,
+                    max_iter,
+                };
+            }
+            // `@cascade(max_iter=N)`-annotated rules opt into FixedPoint
+            // dispatch even when the legacy "physics" / "physics_post"
+            // name guard above doesn't match (CG-named kernels follow
+            // the `physics_<rule>` convention, not the legacy bare
+            // `physics` name). Without this fall-through the
+            // `@cascade` annotation surface would only fire for the
+            // dead legacy path.
+            //
+            // Runtime caveat: the runtime `DispatchOp::FixedPoint` arm
+            // is still a catch-all no-op (see `build_helper.rs`'s
+            // `dispatch_by_id` synthesizer). Until that wiring lands,
+            // cascade-annotated kernels silently skip dispatch. See
+            // [`synthesize_schedule`]'s `# Limitations` doc.
+            if let Some(max_iter) =
+                topology_cascade_max_iter(prog, consumers.iter().copied())
+            {
+                return ScheduleEntry::FixedPoint {
+                    kernel: kernel_name.to_string(),
+                    max_iter,
                 };
             }
             ScheduleEntry::Indirect {
@@ -1221,13 +1253,22 @@ fn classify_topology_for_schedule(
         }
         KernelTopology::Split { op, .. } => {
             if topology_op_is_physics_rule(prog, *op) && kernel_name == "physics" {
-                ScheduleEntry::FixedPoint {
+                let max_iter = topology_cascade_max_iter(prog, std::iter::once(*op))
+                    .unwrap_or(8);
+                return ScheduleEntry::FixedPoint {
                     kernel: kernel_name.to_string(),
-                    max_iter: 8,
-                }
-            } else {
-                ScheduleEntry::Kernel(kernel_name.to_string())
+                    max_iter,
+                };
             }
+            // `@cascade`-annotated rules: same fall-through as the
+            // Indirect arm above. See that arm's comment for rationale.
+            if let Some(max_iter) = topology_cascade_max_iter(prog, std::iter::once(*op)) {
+                return ScheduleEntry::FixedPoint {
+                    kernel: kernel_name.to_string(),
+                    max_iter,
+                };
+            }
+            ScheduleEntry::Kernel(kernel_name.to_string())
         }
         KernelTopology::Fused { ops, .. } => {
             // Classify on the FIRST op (today every fused kernel is
@@ -1239,13 +1280,22 @@ fn classify_topology_for_schedule(
                 None => return ScheduleEntry::Kernel(kernel_name.to_string()),
             };
             if topology_op_is_physics_rule(prog, primary_op_id) && kernel_name == "physics" {
-                ScheduleEntry::FixedPoint {
+                let max_iter = topology_cascade_max_iter(prog, ops.iter().copied())
+                    .unwrap_or(8);
+                return ScheduleEntry::FixedPoint {
                     kernel: kernel_name.to_string(),
-                    max_iter: 8,
-                }
-            } else {
-                ScheduleEntry::Kernel(kernel_name.to_string())
+                    max_iter,
+                };
             }
+            // `@cascade`-annotated rules: same fall-through as the
+            // Indirect arm above. See that arm's comment for rationale.
+            if let Some(max_iter) = topology_cascade_max_iter(prog, ops.iter().copied()) {
+                return ScheduleEntry::FixedPoint {
+                    kernel: kernel_name.to_string(),
+                    max_iter,
+                };
+            }
+            ScheduleEntry::Kernel(kernel_name.to_string())
         }
     }
 }
@@ -1258,6 +1308,37 @@ fn topology_op_is_physics_rule(prog: &CgProgram, op_id: crate::cg::op::OpId) -> 
         .get(op_id.0 as usize)
         .map(|op| matches!(op.kind, ComputeOpKind::PhysicsRule { .. }))
         .unwrap_or(false)
+}
+
+/// Walk the ops referenced by a fused physics topology and return the
+/// largest `@cascade(max_iter=N)` value any of them carry. Returns
+/// `None` if no constituent rule is `@cascade`-annotated, in which
+/// case the caller falls back to the legacy hardcoded `max_iter = 8`.
+///
+/// Rationale for the **max** reduction: when multiple physics rules
+/// fuse into one kernel, each rule's authored ceiling is a request to
+/// "iterate at least this many times." Picking the max preserves
+/// every rule's worst-case ceiling without any rule's contract being
+/// silently truncated. (Today fused physics kernels are rare — the
+/// fusion partitioner splits across replayability flags; this is
+/// future-proofing for when multiple `@cascade` rules co-fuse.)
+fn topology_cascade_max_iter(
+    prog: &CgProgram,
+    op_ids: impl IntoIterator<Item = crate::cg::op::OpId>,
+) -> Option<u32> {
+    let mut acc: Option<u32> = None;
+    for op_id in op_ids {
+        let op = match prog.ops.get(op_id.0 as usize) {
+            Some(o) => o,
+            None => continue,
+        };
+        if let ComputeOpKind::PhysicsRule { rule, .. } = op.kind {
+            if let Some(n) = prog.cascade_max_iter_for(rule) {
+                acc = Some(acc.map_or(n, |cur| cur.max(n)));
+            }
+        }
+    }
+    acc
 }
 
 // ---------------------------------------------------------------------------

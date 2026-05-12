@@ -1121,6 +1121,27 @@ pub struct CgProgram {
     /// table is a zero-cost surface for the P6 check that doesn't
     /// touch the fusion / emit pipeline.
     pub post_phase_physics_rules: std::collections::BTreeSet<u32>,
+    /// Per-rule fixed-point cascade iteration ceiling, populated from
+    /// `@cascade(max_iter=N)` annotations on physics rules. Maps
+    /// `PhysicsRuleId.0` → `max_iter`. Empty for fixtures with no
+    /// `@cascade`-annotated rules — in which case the schedule
+    /// synthesizer falls back to the legacy hardcoded `max_iter = 8`
+    /// for any kernel it routes to `DispatchOp::FixedPoint`.
+    ///
+    /// Populated by the lowering driver from each `PhysicsIR`'s
+    /// annotation list (see
+    /// `super::lower::driver::cascade_max_iter_authored`); consumed by
+    /// `super::emit::cross_cutting::classify_topology_for_schedule`
+    /// when classifying a physics topology into a schedule entry.
+    ///
+    /// **Runtime status (2026-05-12):** the runtime FixedPoint
+    /// dispatch arm is still a catch-all no-op (see
+    /// `super::build_helper`'s `dispatch_by_id` synthesizer). The
+    /// emitted SCHEDULE entry carries the per-rule `max_iter` faith-
+    /// fully, but the host loop wiring is a separately-scoped
+    /// follow-up; until that lands, `@cascade`-annotated rules are
+    /// silently no-ops at run time.
+    pub cascade_max_iter: std::collections::BTreeMap<u32, u32>,
     /// 2026-05-09 (Compiler debug mode Phase 2): WGSL-side atomic
     /// counter instrumentation bitset, plumbed in from
     /// [`super::lower::driver::LowerOpts::debug_wgsl`]. Read by the
@@ -1158,6 +1179,14 @@ impl CgProgram {
     /// rationale.
     pub fn is_post_phase_physics_rule(&self, id: PhysicsRuleId) -> bool {
         self.post_phase_physics_rules.contains(&id.0)
+    }
+    /// Per-rule fixed-point iteration ceiling from
+    /// `@cascade(max_iter=N)`. Returns `None` if the rule isn't
+    /// cascade-annotated (in which case the schedule synthesizer
+    /// keeps the legacy default of `8`). See
+    /// [`CgProgram::cascade_max_iter`] for the runtime-wiring caveat.
+    pub fn cascade_max_iter_for(&self, id: PhysicsRuleId) -> Option<u32> {
+        self.cascade_max_iter.get(&id.0).copied()
     }
 }
 
@@ -1364,6 +1393,13 @@ impl CgProgramBuilder {
     /// rationale (side-table vs op-level flag).
     pub fn mark_post_phase_physics_rule(&mut self, id: PhysicsRuleId) {
         self.inner.post_phase_physics_rules.insert(id.0);
+    }
+    /// Record the `@cascade(max_iter=N)` ceiling for physics rule
+    /// `id`. Idempotent (last write wins, but the driver only calls
+    /// once per rule). Consulted by the schedule synthesizer via
+    /// [`CgProgram::cascade_max_iter_for`].
+    pub fn mark_cascade_max_iter(&mut self, id: PhysicsRuleId, max_iter: u32) {
+        self.inner.cascade_max_iter.insert(id.0, max_iter);
     }
     pub fn intern_event_kind_name(
         &mut self,
