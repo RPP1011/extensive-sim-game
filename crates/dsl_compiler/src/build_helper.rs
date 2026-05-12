@@ -268,22 +268,10 @@ fn emit_into(
     // AOE auto-detect: if any program in the registry has any effect with
     // a non-None `EffectAreaShape`, the dispatcher needs Path B (spatial
     // walk + per-target chronicle write). Mirrors the manual opt-in every
-    // outlier fixture's build.rs sets explicitly.
-    let aoe_dispatch = built_registry
-        .as_ref()
-        .map(|br| {
-            let n = br.registry.len();
-            // AbilityId is a NonZero* newtype starting at 1; iterate the
-            // 1..=n range and skip ids the registry rejects (defensive —
-            // build_registry is contiguous today).
-            (1..=n).any(|i| {
-                engine::ability::AbilityId::new(i as u32)
-                    .and_then(|id| br.registry.get(id))
-                    .map(|p| p.per_effect_areas.iter().any(|a| a.is_some()))
-                    .unwrap_or(false)
-            })
-        })
-        .unwrap_or(false);
+    // outlier fixture's build.rs sets explicitly. See
+    // `detect_aoe_dispatch` for the partial-failure fallback (Gap
+    // squad_skirmish#B).
+    let aoe_dispatch = detect_aoe_dispatch(built_registry.as_ref(), &ability_files);
     // Belief-state auto-detect: if any physics rule body contains an
     // `agents.set_beliefs_<field>(observer, subject, value)` call, the
     // BGL composer must surface the matching `BeliefStateColumn` binding
@@ -521,6 +509,61 @@ fn emit_into(
 pub struct RuntimeConfigDefault {
     pub scalar_ty: String,
     pub default_lit: String,
+}
+
+/// AOE auto-detect: scan the .ability corpus for any program with a
+/// non-None `EffectAreaShape` and return whether the dispatcher needs
+/// AOE Path B (spatial walk + per-target chronicle write).
+///
+/// Two paths:
+///
+/// 1. **Happy path** — `built_registry` is `Some(_)`: every .ability
+///    lowered cleanly AND `build_registry` succeeded (no duplicate
+///    names, no unresolved cast targets, no cast cycles). Walk the
+///    frozen registry's slots in id order; return `true` on the first
+///    program with any per-effect AOE shape.
+///
+/// 2. **Partial-failure fallback** — `built_registry` is `None`:
+///    EITHER there's no corpus, OR `build_registry` returned `Err(_)`
+///    because at least one .ability didn't lower (canonical case:
+///    `Daze.ability` with `stun 8` — see Gap squad_skirmish#A). Pre-
+///    this-helper the bare `unwrap_or(false)` then silently disabled
+///    AOE Path B emit for the WHOLE corpus, including .ability peers
+///    that DO declare AOE shapes (`Volley.ability`'s
+///    `damage 6 in spread(4.0, 8)`). Now we walk each decl
+///    individually via `lower_ability_decl` (NOT `lower_ability_file`,
+///    which short-circuits on the first decl error) and union the AOE
+///    signal across every program that DID lower. Per-decl lowering
+///    errors are treated as `no AOE in that decl` and skipped silently
+///    — the registry-build path already surfaced them via
+///    `cargo:warning`.
+///
+/// The fallback mirrors the spirit of `LowerOutcome` (#140): one bad
+/// apple shouldn't poison the rest of the file, and the same principle
+/// extends across the corpus.
+pub fn detect_aoe_dispatch(
+    built_registry: Option<&crate::ability_registry::BuiltRegistry>,
+    ability_files:  &[(String, dsl_ast::AbilityFile)],
+) -> bool {
+    if let Some(br) = built_registry {
+        let n = br.registry.len();
+        // AbilityId is a NonZero* newtype starting at 1; iterate the
+        // 1..=n range and skip ids the registry rejects (defensive —
+        // build_registry is contiguous today).
+        return (1..=n).any(|i| {
+            engine::ability::AbilityId::new(i as u32)
+                .and_then(|id| br.registry.get(id))
+                .map(|p| p.per_effect_areas.iter().any(|a| a.is_some()))
+                .unwrap_or(false)
+        });
+    }
+    ability_files.iter().any(|(_, file)| {
+        file.abilities.iter().any(|decl| {
+            crate::ability_lower::lower_ability_decl(decl)
+                .map(|p| p.per_effect_areas.iter().any(|a| a.is_some()))
+                .unwrap_or(false)
+        })
+    })
 }
 
 /// Recursive walk over a physics rule body looking for any

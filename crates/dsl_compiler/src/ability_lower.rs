@@ -204,6 +204,25 @@ pub enum LowerError {
     /// (Wave 1.0 parser drops modifier-tail tokens, so this counts only
     /// the leading scalar args).
     EffectArgMismatch { verb: String, expected: usize, got: usize, span: Span },
+    /// A status-effect verb that wants a `Duration` arg (with a time
+    /// suffix — `1s`, `500ms`) received a bare integer instead. The
+    /// parser captures `stun 8` as `EffectArg::Number(8.0)`, which is
+    /// structurally correct (one positional arg) but semantically wrong
+    /// — the lowering needs millis, and an unsuffixed integer is
+    /// ambiguous (ticks? seconds? millis?). Pre-this-variant the
+    /// failure surfaced as `EffectArgMismatch { expected: 1, got: 1 }`,
+    /// which is structurally false (both sides are 1) and gave the
+    /// designer no hint about the missing time suffix. The new variant
+    /// is purely a diagnostic improvement — no engine impact.
+    ///
+    /// `got_value` is the parser's f32, rendered to a stable string
+    /// (e.g. `"8"` for `stun 8`, `"8.5"` for `stun 8.5`) so the carrier
+    /// stays `Eq`-compatible with the rest of `LowerError`.
+    EffectArgExpectedDuration {
+        verb:      String,
+        got_value: String,
+        span:      Span,
+    },
     /// Body holds more than `MAX_EFFECTS_PER_PROGRAM` effects.
     BudgetExceeded { ability: String, count: usize, max: usize, span: Span },
     /// Wave 1.1 parser accepted a header (`cost`, `charges`, `recharge`,
@@ -465,6 +484,10 @@ impl std::fmt::Display for LowerError {
             LowerError::EffectArgMismatch { verb, expected, got, .. } => write!(
                 f,
                 "effect verb '{verb}' expects {expected} positional arg(s); got {got}"
+            ),
+            LowerError::EffectArgExpectedDuration { verb, got_value, .. } => write!(
+                f,
+                "effect verb `{verb}` expects a time-suffixed argument (e.g. `1s`, `500ms`); got bare number `{got_value}` (did you mean `{got_value}s` or `{got_value}ms`?)"
             ),
             LowerError::BudgetExceeded { ability, count, max, .. } => write!(
                 f,
@@ -2309,9 +2332,38 @@ fn require_number_arg(stmt: &EffectStmt, idx: usize) -> Result<f32, LowerError> 
     }
 }
 
+/// Render an f32 captured from `EffectArg::Number(_)` so the
+/// `EffectArgExpectedDuration` diagnostic reads `bare number 8` for an
+/// integer-valued literal and `bare number 8.5` for a fractional one.
+/// The default `Display` for f32 always renders integer values with a
+/// trailing `.0` (`8` → `"8"` is what the parser saw on the screen, but
+/// `format!("{}", 8.0_f32)` is `"8"` on stable as of 1.55+ — we still
+/// route through this helper so a future `f32::Display` change doesn't
+/// regress the diagnostic).
+fn format_bare_number(v: f32) -> String {
+    if v.fract() == 0.0 && v.is_finite() {
+        format!("{}", v as i64)
+    } else {
+        format!("{v}")
+    }
+}
+
 fn require_duration_arg(stmt: &EffectStmt, idx: usize) -> Result<u32, LowerError> {
     match stmt.args.get(idx) {
         Some(EffectArg::Duration(d)) => Ok(d.millis),
+        // Designer wrote `stun 8` (intending "8 ticks" or "8 seconds") —
+        // arity is right but the parser captured the unsuffixed integer
+        // as `Number(8.0)`, not `Duration { millis: 8000 }`. Surface a
+        // typed diagnostic that names the missing time suffix instead
+        // of the misleading `EffectArgMismatch { expected: 1, got: 1 }`.
+        // `format_bare_number` renders integer-valued f32s without the
+        // `.0` tail so the diagnostic reads `bare integer 8`, not
+        // `bare integer 8.0`.
+        Some(EffectArg::Number(v)) => Err(LowerError::EffectArgExpectedDuration {
+            verb:      stmt.verb.clone(),
+            got_value: format_bare_number(*v),
+            span:      stmt.span,
+        }),
         Some(_) | None => Err(LowerError::EffectArgMismatch {
             verb:     stmt.verb.clone(),
             expected: stmt.args.len().max(idx + 1),
