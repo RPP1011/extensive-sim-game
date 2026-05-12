@@ -492,6 +492,18 @@ pub enum BuiltinId {
     /// `(Vec3, Vec3) -> F32` — `abs(a.z - b.z)`.
     ZSeparation,
 
+    // --- Vec3 math primitives ---
+    /// `(Vec3) -> F32` — Euclidean norm of a `vec3<f32>`. Lowers to
+    /// WGSL `length(...)`. The `Builtin::Normalize` AST surface lowers
+    /// to a `CgExpr::Unary { NormalizeVec3F32 }` node (mirroring how
+    /// `Builtin::Sqrt` lowers to `UnaryOp::SqrtF32`); only `length` and
+    /// `dot` carry [`BuiltinId`] variants because their result type
+    /// differs from the operand type (UnaryOp's contract is
+    /// shape-pure: result_ty == operand_ty).
+    LengthVec3F32,
+    /// `(Vec3, Vec3) -> F32` — dot product. Lowers to WGSL `dot(...)`.
+    DotVec3F32,
+
     // --- Numeric (pairwise) ---
     Min(NumericTy),
     Max(NumericTy),
@@ -583,6 +595,14 @@ impl BuiltinId {
                 args: vec![CgTy::Vec3F32, CgTy::Vec3F32],
                 result: CgTy::F32,
             },
+            LengthVec3F32 => BuiltinSignature::Fixed {
+                args: vec![CgTy::Vec3F32],
+                result: CgTy::F32,
+            },
+            DotVec3F32 => BuiltinSignature::Fixed {
+                args: vec![CgTy::Vec3F32, CgTy::Vec3F32],
+                result: CgTy::F32,
+            },
             Min(t) | Max(t) => BuiltinSignature::Fixed {
                 args: vec![t.cg_ty(), t.cg_ty()],
                 result: t.cg_ty(),
@@ -630,6 +650,8 @@ impl BuiltinId {
             Distance => "distance".to_string(),
             PlanarDistance => "planar_distance".to_string(),
             ZSeparation => "z_separation".to_string(),
+            LengthVec3F32 => "length.vec3<f32>".to_string(),
+            DotVec3F32 => "dot.vec3<f32>".to_string(),
             Min(t) => format!("min.{}", t.label()),
             Max(t) => format!("max.{}", t.label()),
             Clamp(t) => format!("clamp.{}", t.label()),

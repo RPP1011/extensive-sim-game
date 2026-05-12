@@ -1958,6 +1958,76 @@ fn lower_builtin_call(
                 span,
             )
         }
+        Builtin::Normalize => {
+            // `normalize(v)` — vec3 unit vector. Shape-pure (operand_ty
+            // == result_ty == Vec3F32), so the lowering uses
+            // `UnaryOp::NormalizeVec3F32` (mirrors `Builtin::Sqrt`'s
+            // rewrite to `UnaryOp::SqrtF32`).
+            expect_arity(builtin, 1, args.len(), span)?;
+            let arg_id = arg_ids[0];
+            let arg_ty = arg_tys[0];
+            if arg_ty != CgTy::Vec3F32 {
+                return Err(LoweringError::IllTypedExpression {
+                    expected: CgTy::Vec3F32,
+                    got: arg_ty,
+                    span,
+                });
+            }
+            add(
+                ctx,
+                CgExpr::Unary {
+                    op: UnaryOp::NormalizeVec3F32,
+                    arg: arg_id,
+                    ty: CgTy::Vec3F32,
+                },
+                span,
+            )
+        }
+        Builtin::Length => {
+            // `length(v)` — Vec3F32 -> F32. Result type differs from
+            // operand type, so it uses a `BuiltinId` variant rather
+            // than `UnaryOp` (which is shape-pure by contract).
+            expect_arity(builtin, 1, args.len(), span)?;
+            let arg_ty = arg_tys[0];
+            if arg_ty != CgTy::Vec3F32 {
+                return Err(LoweringError::IllTypedExpression {
+                    expected: CgTy::Vec3F32,
+                    got: arg_ty,
+                    span,
+                });
+            }
+            add(
+                ctx,
+                CgExpr::Builtin {
+                    fn_id: BuiltinId::LengthVec3F32,
+                    args: arg_ids,
+                    ty: CgTy::F32,
+                },
+                span,
+            )
+        }
+        Builtin::Dot => {
+            // `dot(a, b)` — (Vec3F32, Vec3F32) -> F32.
+            expect_arity(builtin, 2, args.len(), span)?;
+            for (idx, &t) in arg_tys.iter().enumerate() {
+                if t != CgTy::Vec3F32 {
+                    return Err(LoweringError::IllTypedExpression {
+                        expected: CgTy::Vec3F32,
+                        got: t,
+                        span: args[idx].value.span,
+                    });
+                }
+            }
+            add(
+                ctx,
+                CgExpr::Builtin {
+                    fn_id: BuiltinId::DotVec3F32,
+                    args: arg_ids,
+                    ty: CgTy::F32,
+                },
+                span,
+            )
+        }
         Builtin::Abs => {
             // Same UnaryOp rewrite as `sqrt`, but typed `F32` or `I32`.
             expect_arity(builtin, 1, args.len(), span)?;

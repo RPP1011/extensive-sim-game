@@ -1114,6 +1114,10 @@ fn builtin_name(id: BuiltinId) -> String {
         Distance => "distance".to_string(),
         PlanarDistance => "planar_distance".to_string(),
         ZSeparation => "z_separation".to_string(),
+        // WGSL natives — `length(vec3<f32>) -> f32` and
+        // `dot(vec3<f32>, vec3<f32>) -> f32`. No prelude needed.
+        LengthVec3F32 => "length".to_string(),
+        DotVec3F32 => "dot".to_string(),
         Min(t) => format!("min_{}", numeric_ty_token(t)),
         Max(t) => format!("max_{}", numeric_ty_token(t)),
         Clamp(t) => format!("clamp_{}", numeric_ty_token(t)),

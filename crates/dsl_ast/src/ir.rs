@@ -1141,6 +1141,40 @@ pub enum NamespaceId {
     /// fold's per-cell walk is invisible at the DSL surface.
     /// See `docs/plans/g3_threats_view_design.md`.
     Threats,
+    /// `events::*` — Sim-wide event-trace accessors used by metrics,
+    /// invariants, and probes (NOT physics / view bodies). Surfaces
+    /// the per-tick event ring + history-window queries that
+    /// trace-consumer hooks (`metric { value: count(e in
+    /// events.this_tick where e.kind == X) }`) read against.
+    ///
+    /// Methods/fields:
+    ///   * `events.this_tick` — accessor returning the current-tick
+    ///     events vec (iter source for `count(e in events.this_tick
+    ///     where ...)` folds).
+    ///   * `events.at_tick(tick: u32) -> [Event]` — events recorded at
+    ///     a specific tick.
+    ///   * `events.range(from: u32, to: u32) -> [Event]` — range
+    ///     query over the trace history.
+    ///   * `events.kind_count(kind: EventKindId) -> u32` — count of
+    ///     events of a given kind in the current tick.
+    ///
+    /// Registered 2026-05-11 to close the migration gap blocking
+    /// `crowd_navigation` + `predator_prey` from the `sims/`
+    /// mega-crate. The events namespace is META-LEVEL: today it
+    /// resolves cleanly into `IrExpr::NamespaceField` /
+    /// `IrExpr::NamespaceCall` so metric/invariant/probe shape
+    /// classifiers see a structured node and emit per-name SKIP
+    /// setters (the runtime fills in the actual count). Physics /
+    /// view bodies that reach for `events.*` will fail at lowering
+    /// with `UnsupportedNamespaceCall` — that's intentional: the
+    /// trace consumer surface stays host-side until a future plan
+    /// wires real GPU-side ring scans.
+    ///
+    /// Distinct from the singular `event` namespace which carries
+    /// the per-handler currently-firing event accessors (`event.kind`,
+    /// `event.tick`); `events` is the plural accessor over the trace
+    /// stream as a whole.
+    Events,
 }
 
 impl NamespaceId {
@@ -1171,6 +1205,7 @@ impl NamespaceId {
             NamespaceId::Group => "group",
             NamespaceId::Quest => "quest",
             NamespaceId::Threats => "threats",
+            NamespaceId::Events => "events",
         }
     }
 }
@@ -1214,6 +1249,21 @@ pub enum Builtin {
     Log2,
     Log10,
     Sqrt,
+    /// `normalize(v)` — vec3 unit-vector. Length 0 returns `(0,0,0)`
+    /// (the lowering uses [`UnaryOp::NormalizeVec3F32`] which the WGSL
+    /// emitter renders as a `normalize(...)` call). Used by movement /
+    /// flocking rules that need a direction from a delta. Spec-compliant
+    /// vector primitive.
+    Normalize,
+    /// `length(v)` — Euclidean norm of a `vec3<f32>`. Returns `f32`.
+    /// Used by speed-cap clamps and invariants. Lowers to the WGSL
+    /// `length(...)` builtin via [`BuiltinId::LengthVec3F32`].
+    Length,
+    /// `dot(a, b)` — dot product of two `vec3<f32>` operands. Returns
+    /// `f32`. Used by direction-filter masks (only count obstructions
+    /// in front of self) and projection arithmetic. Lowers to the WGSL
+    /// `dot(...)` builtin via [`BuiltinId::DotVec3F32`].
+    Dot,
     /// `saturating_add(a, b)` — saturating addition on integer scalars.
     /// Clamps to the type's MAX on overflow instead of wrapping or
     /// panicking. Used by the `cast` physics rule to compute absolute
@@ -1311,6 +1361,9 @@ impl Builtin {
             Builtin::Log2 => "log2",
             Builtin::Log10 => "log10",
             Builtin::Sqrt => "sqrt",
+            Builtin::Normalize => "normalize",
+            Builtin::Length => "length",
+            Builtin::Dot => "dot",
             Builtin::SaturatingAdd => "saturating_add",
             Builtin::Vec3 => "vec3",
             Builtin::F32Cast => "f32",
@@ -1339,7 +1392,10 @@ impl Builtin {
             | Builtin::Ln
             | Builtin::Log2
             | Builtin::Log10
-            | Builtin::Sqrt => Some(1),
+            | Builtin::Sqrt
+            | Builtin::Normalize
+            | Builtin::Length => Some(1),
+            Builtin::Dot => Some(2),
             Builtin::SaturatingAdd => Some(2),
             // Threats scoring primitives — every variant is arity 1
             // (a single agent / pos arg). See the per-variant doc.

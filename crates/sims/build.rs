@@ -103,6 +103,7 @@ fn main() {
                 | "debug_probe"
                 | "stress_agent_count"
                 | "stress_cast_density"
+                | "predator_prey"
         ) {
             continue;
         }

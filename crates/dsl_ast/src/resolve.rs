@@ -83,6 +83,12 @@ mod stdlib {
         symbols.builtins.insert("log2".into(), Builtin::Log2);
         symbols.builtins.insert("log10".into(), Builtin::Log10);
         symbols.builtins.insert("sqrt".into(), Builtin::Sqrt);
+        // Vec3 math primitives. WGSL natives — emit as `length(...)` /
+        // `dot(...)` / `normalize(...)`. Used by movement / flocking
+        // physics rules + speed-cap invariants.
+        symbols.builtins.insert("normalize".into(), Builtin::Normalize);
+        symbols.builtins.insert("length".into(), Builtin::Length);
+        symbols.builtins.insert("dot".into(), Builtin::Dot);
         symbols.builtins.insert("saturating_add".into(), Builtin::SaturatingAdd);
         // Vec3 constructor. Three-arg call returning Vec3F32; operands are F32.
         symbols.builtins.insert("vec3".into(), Builtin::Vec3);
@@ -171,6 +177,22 @@ mod stdlib {
             // per-cell walk; today's lowering emits sentinel values.
             // See `docs/plans/g3_threats_view_design.md`.
             ("threats", NamespaceId::Threats),
+            // Sim-wide event-trace accessors used by metrics /
+            // invariants / probes (NOT physics / view bodies):
+            //   * `events.this_tick` (NamespaceField; iter source)
+            //   * `events.at_tick(t)` / `events.range(lo, hi)`
+            //     (NamespaceCall returning an event-list iter source)
+            //   * `events.kind_count(KIND)` (NamespaceCall returning u32)
+            // Per-field / per-method schemas live in `field_type` /
+            // `method_sig` below. The events namespace stays META-LEVEL
+            // today: shape classifiers in `cg::emit::{metrics,probes,
+            // invariants}` recognise the IR node + emit per-name SKIP
+            // setters the runtime fills in. Physics / view bodies that
+            // reach for `events.*` will fail at CG lowering with
+            // `UnsupportedNamespaceCall`. Registered 2026-05-11 to
+            // close the migration gap blocking `crowd_navigation` +
+            // `predator_prey` from the `sims/` mega-crate.
+            ("events", NamespaceId::Events),
         ] {
             symbols.stdlib_namespaces.insert(name.to_string(), id);
         }
@@ -255,6 +277,19 @@ mod stdlib {
             (NamespaceId::Cascade, "max_iterations") => Some(IrType::U8),
             (NamespaceId::Event, "kind") => Some(IrType::Named("EventKindId".into())),
             (NamespaceId::Event, "tick") => Some(IrType::U64),
+            // `events.this_tick` — list of events recorded on the
+            // current world.tick. Iter source for `count(e in
+            // events.this_tick where e.kind == X)` folds in metric /
+            // invariant / probe bodies. The element type is left
+            // un-narrowed (Unknown) because the trace stream carries a
+            // tagged-union of every declared event kind in the .sim
+            // file; the `e.kind == X` filter inside the fold body is
+            // the discriminant test. Per-element field reads (`e.kind`,
+            // `e.by`, ...) flow through `IrExpr::Field` on the binder
+            // local without a per-field schema today.
+            (NamespaceId::Events, "this_tick") => {
+                Some(IrType::List(Box::new(IrType::Unknown)))
+            }
             (NamespaceId::Mask, "rejections") => Some(IrType::U64),
             (NamespaceId::Action, "head") => Some(IrType::Named("ActionHeadKind".into())),
             (NamespaceId::Action, "target") => {
@@ -586,6 +621,32 @@ mod stdlib {
             (NamespaceId::Threats, "intensity_at") => Some((1, IrType::F32)),
             (NamespaceId::Threats, "nearest") => Some((1, IrType::AgentId)),
             (NamespaceId::Threats, "dir_away_from_nearest") => Some((1, IrType::Vec3)),
+            // -------------------------------------------------------------
+            // Events namespace — sim-wide event-trace accessors used by
+            // metrics / invariants / probes. Returned types are
+            // informational at 1a (the metric/invariant/probe shape
+            // classifiers don't enforce the inner element type today —
+            // they pattern-match on the surrounding `count(e in
+            // events.<method>(...) where ...)` shape and emit a
+            // per-name SKIP setter the runtime fills in). The arities
+            // are checked by 1b's NamespaceCall arity validator.
+            //
+            // `events.at_tick(tick: u32) -> [Event]` — events recorded
+            // at a specific past tick.
+            (NamespaceId::Events, "at_tick") => {
+                Some((1, IrType::List(Box::new(IrType::Unknown))))
+            }
+            // `events.range(from: u32, to: u32) -> [Event]` — half-open
+            // range query over the trace history.
+            (NamespaceId::Events, "range") => {
+                Some((2, IrType::List(Box::new(IrType::Unknown))))
+            }
+            // `events.kind_count(kind: EventKindId) -> u32` — count of
+            // events of a given kind in the current tick. Provided so
+            // metric authors don't have to spell out the full
+            // `count(e in events.this_tick where e.kind == X)` fold
+            // for the common case.
+            (NamespaceId::Events, "kind_count") => Some((1, IrType::U32)),
             _ => None,
         }
     }
@@ -1512,11 +1573,16 @@ fn resolve_bodies(
                         .map(|e| resolve_expr(e, &mut scope, symbols))
                         .transpose()?;
                     // `alert when` clauses see implicit bindings: `value`
-                    // (scalar metrics), `max_bin` (histograms). Bind both as
-                    // Unknown so 1b can specialize.
+                    // (scalar metrics), `max_bin` (histograms), AND the
+                    // metric's own name (designers commonly read the
+                    // most-recent value by referring back to the metric
+                    // name itself — `alert_when: pack_aggression > 50.0`
+                    // — instead of the generic `value` binding). Bind
+                    // all three as Unknown so 1b can specialize.
                     let mut alert_scope = LocalScope::new();
                     alert_scope.bind("value", IrType::Unknown);
                     alert_scope.bind("max_bin", IrType::Unknown);
+                    alert_scope.bind(&m.name, IrType::Unknown);
                     let alert = m
                         .alert_when
                         .as_ref()
@@ -3719,6 +3785,21 @@ fn validate_fold_expr(view_name: &str, e: &IrExprNode) -> Result<(), ResolveErro
 
 /// Enforce that every physics rule body is emittable to SPIR-V.
 pub(crate) fn validate_physics_bodies(comp: &Compilation) -> Result<(), ResolveError> {
+    // Pre-collect the set of event names declared `@non_replayable`.
+    // String-typed fields on these events are LEGAL chronicle prose
+    // (the non-replayable ring is host-side only, P10), so an
+    // `emit <NonReplayableEvent> { utterance: "..." }` inside a
+    // physics body must NOT trigger the heap-allocation rejection.
+    // The body validator threads this set through so its emit-arm
+    // handler can recognise the case.
+    let mut non_replayable_events: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    for ev in &comp.events {
+        if ev.annotations.iter().any(|a| a.name == "non_replayable") {
+            non_replayable_events.insert(ev.name.clone());
+        }
+    }
+
     // Cross-rule recursion bookkeeping: for every physics rule, collect
     // the set of event names it handles and the set of event names it
     // emits. A rule is "recursive" if any event it emits is handled by
@@ -3821,7 +3902,7 @@ pub(crate) fn validate_physics_bodies(comp: &Compilation) -> Result<(), ResolveE
         // Per-handler body walk: heap types, unbounded iter sources, UDF
         // calls, `String` let-bindings.
         for h in &p.handlers {
-            validate_physics_body(&p.name, &h.body)?;
+            validate_physics_body(&p.name, &h.body, &non_replayable_events)?;
         }
     }
 
@@ -3832,14 +3913,19 @@ pub(crate) fn validate_physics_bodies(comp: &Compilation) -> Result<(), ResolveE
 pub(crate) fn validate_physics_body(
     physics_name: &str,
     body: &[IrStmt],
+    non_replayable_events: &std::collections::HashSet<String>,
 ) -> Result<(), ResolveError> {
     for s in body {
-        validate_physics_stmt(physics_name, s)?;
+        validate_physics_stmt(physics_name, s, non_replayable_events)?;
     }
     Ok(())
 }
 
-fn validate_physics_stmt(physics_name: &str, s: &IrStmt) -> Result<(), ResolveError> {
+fn validate_physics_stmt(
+    physics_name: &str,
+    s: &IrStmt,
+    non_replayable_events: &std::collections::HashSet<String>,
+) -> Result<(), ResolveError> {
     match s {
         IrStmt::Let { name, value, span, .. } => {
             // `String` bindings defeat the POD discipline — every hot /
@@ -3860,9 +3946,26 @@ fn validate_physics_stmt(physics_name: &str, s: &IrStmt) -> Result<(), ResolveEr
             }
             validate_physics_expr(physics_name, value)
         }
-        IrStmt::Emit(IrEmit { fields, .. }) => {
+        IrStmt::Emit(IrEmit { event_name, fields, .. }) => {
+            // Spec: `String` field values are LEGAL when the emitted
+            // event is declared `@non_replayable` — the chronicle ring
+            // is host-side only (compiler/spec.md §1.2), so the heap
+            // allocation never has to round-trip through a Pod
+            // storage buffer or replay log. For replayable events the
+            // POD discipline still applies; recurse through the
+            // standard validator to surface the same error message
+            // pre-existing fixtures see.
+            let allow_strings = non_replayable_events.contains(event_name);
             for f in fields {
-                validate_physics_expr(physics_name, &f.value)?;
+                if allow_strings {
+                    // Permissive walk: skip the String-literal check on
+                    // bare values (the validator's only String-rejection
+                    // path), but still recurse into composite shapes so
+                    // unsupported call constructs surface normally.
+                    validate_physics_expr_allowing_strings(physics_name, &f.value)?;
+                } else {
+                    validate_physics_expr(physics_name, &f.value)?;
+                }
             }
             Ok(())
         }
@@ -3873,7 +3976,7 @@ fn validate_physics_stmt(physics_name: &str, s: &IrStmt) -> Result<(), ResolveEr
                 validate_physics_expr(physics_name, f)?;
             }
             for bs in body {
-                validate_physics_stmt(physics_name, bs)?;
+                validate_physics_stmt(physics_name, bs, non_replayable_events)?;
             }
             Ok(())
         }
@@ -3884,18 +3987,18 @@ fn validate_physics_stmt(physics_name: &str, s: &IrStmt) -> Result<(), ResolveEr
             // (string literals, unsupported namespaces, etc.) still
             // surface from inside the for_each_agent block.
             for bs in body {
-                validate_physics_stmt(physics_name, bs)?;
+                validate_physics_stmt(physics_name, bs, non_replayable_events)?;
             }
             Ok(())
         }
         IrStmt::If { cond, then_body, else_body, .. } => {
             validate_physics_expr(physics_name, cond)?;
             for ts in then_body {
-                validate_physics_stmt(physics_name, ts)?;
+                validate_physics_stmt(physics_name, ts, non_replayable_events)?;
             }
             if let Some(eb) = else_body {
                 for es in eb {
-                    validate_physics_stmt(physics_name, es)?;
+                    validate_physics_stmt(physics_name, es, non_replayable_events)?;
                 }
             }
             Ok(())
@@ -3904,7 +4007,7 @@ fn validate_physics_stmt(physics_name: &str, s: &IrStmt) -> Result<(), ResolveEr
             validate_physics_expr(physics_name, scrutinee)?;
             for arm in arms {
                 for stmt in &arm.body {
-                    validate_physics_stmt(physics_name, stmt)?;
+                    validate_physics_stmt(physics_name, stmt, non_replayable_events)?;
                 }
             }
             Ok(())
@@ -4123,6 +4226,34 @@ fn validate_physics_expr(physics_name: &str, e: &IrExprNode) -> Result<(), Resol
         IrExpr::BeliefsView { observer, .. } => {
             validate_physics_expr(physics_name, observer)
         }
+    }
+}
+
+/// Permissive variant of [`validate_physics_expr`] used when the
+/// expression is a field-value position on an `emit
+/// <NonReplayableEvent> { ... }` statement. Bare `String` literals
+/// (chronicle prose) are LEGAL in this position because the
+/// non-replayable ring lives host-side only — no `Pod` round-trip.
+/// Everything else is checked under the standard
+/// [`validate_physics_expr`] rules so the relaxation is scoped to
+/// the literal at the field's bare value position; nested function
+/// calls / arithmetic that compute Strings (none today) would still
+/// flow through the strict check via composite-shape recursion.
+fn validate_physics_expr_allowing_strings(
+    physics_name: &str,
+    e: &IrExprNode,
+) -> Result<(), ResolveError> {
+    match &e.kind {
+        // The ONE relaxation: a bare String literal at a field-value
+        // position on a `@non_replayable` emit.
+        IrExpr::LitString(_) => Ok(()),
+        // Everything else delegates to the standard validator. Composite
+        // shapes (List, Tuple, StructLit, ...) recurse through the
+        // strict path — this is intentional: the chronicle prose
+        // exemption is for the bare literal, not for arbitrary
+        // String-producing call shapes that don't exist in the DSL
+        // anyway.
+        _ => validate_physics_expr(physics_name, e),
     }
 }
 
