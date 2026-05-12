@@ -569,6 +569,101 @@ fn expr_depends_on_upgraded_field(
     }
 }
 
+/// True when `expr_id` (or any descendant CgExpr) reads any local in
+/// `chain_locals` via [`CgExpr::ReadLocal`]. Used by the f32 RMW pass
+/// to decide if a non-chain prefix stmt (e.g. an `agents.set_pos`
+/// Assign whose RHS references a chain-let) MUST run inside the CAS
+/// loop body — otherwise the var-promoted local has no committed
+/// value at the stmt's source-order position and the emitted WGSL
+/// references it before its declaration.
+///
+/// Closes Gap #3 of `docs/architecture/gaps_among_us.md`.
+fn expr_reads_any_chain_local(
+    expr_id: CgExprId,
+    chain_locals: &std::collections::HashSet<LocalId>,
+    prog: &CgProgram,
+) -> bool {
+    let Some(node) = <CgProgram as ExprArena>::get(prog, expr_id) else {
+        return false;
+    };
+    match node {
+        CgExpr::ReadLocal { local, .. } => chain_locals.contains(local),
+        CgExpr::Read(_)
+        | CgExpr::Lit(_)
+        | CgExpr::AgentSelfId
+        | CgExpr::PerPairCandidateId
+        | CgExpr::EventField { .. }
+        | CgExpr::Rng { .. }
+        | CgExpr::NamespaceField { .. } => false,
+        CgExpr::Unary { arg, .. } => {
+            expr_reads_any_chain_local(*arg, chain_locals, prog)
+        }
+        CgExpr::Binary { lhs, rhs, .. } => {
+            expr_reads_any_chain_local(*lhs, chain_locals, prog)
+                || expr_reads_any_chain_local(*rhs, chain_locals, prog)
+        }
+        CgExpr::Builtin { args, .. } => args
+            .iter()
+            .any(|a| expr_reads_any_chain_local(*a, chain_locals, prog)),
+        CgExpr::Select { cond, then, else_, .. } => {
+            expr_reads_any_chain_local(*cond, chain_locals, prog)
+                || expr_reads_any_chain_local(*then, chain_locals, prog)
+                || expr_reads_any_chain_local(*else_, chain_locals, prog)
+        }
+        CgExpr::NamespaceCall { args, .. } => args
+            .iter()
+            .any(|a| expr_reads_any_chain_local(*a, chain_locals, prog)),
+    }
+}
+
+/// True when `stmt` reads any local in `chain_locals` via any of its
+/// expression children. Wraps [`expr_reads_any_chain_local`] over the
+/// stmt's expression operands (Assign value, Emit field exprs, If
+/// cond, Match scrutinee, Let value, ApplyAbility ability/caster/
+/// target, ViewStorageAppend field exprs, ForEachAgent/ForEachNeighbor
+/// init+projection). Nested stmt lists (If branches, Match arms,
+/// ForEach*Body) are NOT walked — the chain-local promotion only
+/// covers the current stmt list scope; nested lists open their own
+/// scopes and are emitted via recursive `lower_cg_stmt_list_to_wgsl`
+/// calls that re-derive their own f32 RMW state.
+fn stmt_reads_any_chain_local(
+    stmt: &CgStmt,
+    chain_locals: &std::collections::HashSet<LocalId>,
+    prog: &CgProgram,
+) -> bool {
+    match stmt {
+        CgStmt::Assign { value, .. } => {
+            expr_reads_any_chain_local(*value, chain_locals, prog)
+        }
+        CgStmt::Emit { fields, .. } => fields
+            .iter()
+            .any(|(_, e)| expr_reads_any_chain_local(*e, chain_locals, prog)),
+        CgStmt::If { cond, .. } => {
+            expr_reads_any_chain_local(*cond, chain_locals, prog)
+        }
+        CgStmt::Match { scrutinee, .. } => {
+            expr_reads_any_chain_local(*scrutinee, chain_locals, prog)
+        }
+        CgStmt::Let { value, .. } => {
+            expr_reads_any_chain_local(*value, chain_locals, prog)
+        }
+        CgStmt::ForEachAgent { init, projection, .. }
+        | CgStmt::ForEachNeighbor { init, projection, .. } => {
+            expr_reads_any_chain_local(*init, chain_locals, prog)
+                || expr_reads_any_chain_local(*projection, chain_locals, prog)
+        }
+        CgStmt::ForEachNeighborBody { .. } | CgStmt::ForEachAgentBody { .. } => false,
+        CgStmt::ApplyAbility { ability, caster, target, .. } => {
+            expr_reads_any_chain_local(*ability, chain_locals, prog)
+                || expr_reads_any_chain_local(*caster, chain_locals, prog)
+                || expr_reads_any_chain_local(*target, chain_locals, prog)
+        }
+        CgStmt::ViewStorageAppend { fields, .. } => fields
+            .iter()
+            .any(|(_, e)| expr_reads_any_chain_local(*e, chain_locals, prog)),
+    }
+}
+
 /// Recursive walk: collect the set of f32 [`AgentFieldId`]s assigned
 /// inside the stmt list named by `list_id`. Returns a u64 bitset keyed
 /// by [`f32_field_atomic_bit`]. Descends through `If` / `Match` /
@@ -5529,7 +5624,33 @@ pub fn lower_cg_stmt_list_to_wgsl(
                     cas_loop_body.push(stmt_wgsl);
                     continue;
                 }
-                // Non-chain prefix stmt — emit normally below.
+                // Gap among_us#3: non-chain prefix stmts that READ a
+                // chain-local (e.g. `agents.set_pos(self, new_pos)`
+                // where `new_pos` was promoted to `var local_N` for
+                // recompute-on-retry) must ALSO run inside the CAS
+                // loop body. Otherwise the emitter places the read
+                // (`agent_pos[agent_id] = local_N;`) at the source-
+                // order position BEFORE the var declarations are
+                // inserted, producing WGSL with a use-before-decl.
+                //
+                // Soundness: per-agent SoA writes (e.g. `agent_pos`)
+                // are single-writer per slot in PerAgent kernels —
+                // running the same write on every CAS retry stores
+                // the same recomputed value (each retry sees the
+                // same loop-iteration snapshot of the chain). The
+                // final iteration's value is what persists. No
+                // cross-thread race because each `agent_id` only
+                // owns its own slot.
+                let reads_chain = stmt_node_check
+                    .map(|s| stmt_reads_any_chain_local(s, &chain_locals, ctx.prog))
+                    .unwrap_or(false);
+                if reads_chain {
+                    cas_loop_body.push(stmt_wgsl);
+                    continue;
+                }
+                // Non-chain prefix stmt with no chain reads — emit
+                // normally below (e.g. event-payload index lets,
+                // hoisted target_expr bindings).
             }
             if pos == rmw_pos {
                 // The upgraded Assign — its lowered WGSL is already
