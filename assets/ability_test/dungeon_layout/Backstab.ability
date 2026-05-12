@@ -1,0 +1,17 @@
+// dungeon_layout — Rogue's stealthed melee burst. AbilityId 1
+// (alphabetical slot, Backstab sorts first).
+//
+// Stage 1: parses cleanly but is NOT dispatched (no verb references
+// `apply_ability 1`). Stage 2 will gate on `stealth_until_tick` and
+// drive the assassinate path. Slot reserved so stage 2 .ability
+// reorders stay zero — Stage 1's stable ID assignment also makes
+// the pin's "ability_id == 1" comparisons portable across stages.
+
+ability Backstab {
+    target: enemy
+    range: 1.5
+    cooldown: 6
+    hint: damage
+
+    damage 60.0 [PHYSICAL: 100]
+}

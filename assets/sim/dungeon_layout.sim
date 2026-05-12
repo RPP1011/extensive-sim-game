@@ -1,0 +1,594 @@
+// dungeon_layout — stage 1 of 3 in the dungeon-crawl fixture series.
+//
+// **Topology** (host-seeded; see crates/sims/tests/dungeon_layout_pin.rs):
+//   * 72×72×8 voxel grid carved by host-side roomgen — Binding-of-
+//     Isaac-style. A 6×6 slot grid (each slot 12×12 cells) has ~18 of
+//     36 slots chosen via random-walk-with-backtracking to form a
+//     connected dungeon. Per-slot Cellular Automata sculpts the
+//     interior; 2-cell doorways connect adjacent slots.
+//   * 5 Heroes in roles {Warrior, Cleric, Ranger, Mage, Rogue} at the
+//     spawn-room centroid.
+//   * ~30 Enemies (≈70% Goblins, ≈20% Archers, ≈10% Brutes) distributed
+//     across non-spawn rooms; boss room gets the heaviest concentration.
+//
+// **Adversarial axes stacked**:
+//   1. Voxel terrain seeded at unprecedented scale for sims/ —
+//      72×72×8 cell footprint blocks LoS at room boundaries via the
+//      same `terrain.line_of_sight` voxel gate hill_raid / palace_coup
+//      use. The CA-noisy interiors give variable LoS within rooms.
+//   2. Multi-role hero verb cascade — 5 ordinal-keyed roles, each with
+//      a distinct ability filter via custom `role` SoA column.
+//   3. Custom-field registry (Gap plague_city#P-A) exercised at scale:
+//      4 fields declared at the top level (`role`, `rooms_visited_lo`,
+//      `current_room_idx`, `target_room_idx`). The auto-emit
+//      allocates `agent_<name>_buf` for each.
+//   4. Heterogeneous enemy classes — Goblin/Brute melee + Archer
+//      ranged competing in the same per_agent dispatch cycle.
+//
+// **Per-tick** (PerAgent dispatch over the unified population):
+//   1. HeroExplore — heroes walk toward `target_room_idx` centroid;
+//      when reached, the host-side pin updates `rooms_visited_lo` +
+//      picks a new `target_room_idx` between ticks via direct buffer
+//      writes (see exploration gap note below).
+//   2. WarriorCleave / ClericHeal / RangerSnipe / MageStun / HeroStrike
+//      — role-gated verbs, LoS-checked, cooldown-gated.
+//   3. GoblinMelee / BruteCleave / GoblinCharge / BruteCharge —
+//      creature_type-gated melee.
+//   4. ArcherVolley — creature_type-gated ranged.
+//   5. ApplyDamageFromChronicle / ApplyHealFromChronicle /
+//      ApplyStunFromChronicle — chronicle re-emit.
+//   6. ApplyDamage / ApplyHeal — hp delta + alive flip.
+//
+// **Observable views**:
+//   * damage_dealt(source: Agent) — per-source total damage flow.
+//   * healing_done(source: Agent) — per-Cleric heal sum.
+//   * threat_taken(observer, source) — pair-keyed @decay accumulator
+//     (stage 2 will read this for target prioritization).
+//
+// **Stage 1 → Stage 2/3 bolt-on points** (designed-in, not used yet):
+//   * Backstab.ability / Scout.ability / Stealth.ability — alphabetical
+//     slots 1, 4, 6 reserved so stage 2's hot-swap doesn't reshuffle
+//     existing IDs.
+//   * The 4 custom fields don't include stage-2 belief/alert columns
+//     (intentional — they're stage-2-only). Adding them later is a
+//     pure `field <name>: <type>` append.
+//
+// **Pin asserts** (see dungeon_layout_pin.rs):
+//   - All 5 heroes alive at tick 30.
+//   - Heroes have explored ≥ 3 distinct rooms by tick 200.
+//   - Total enemy kills ≥ 10 by tick 400.
+//   - Pin survives 500 ticks without panic / NaN / OOM.
+//
+// **Discriminant order** (decl-order alphabetical per commit 1c565df9):
+//   Archer = 0, Brute = 1, Goblin = 2, Hero = 3
+//
+// **Ability slot order** (alphabetical .ability filename):
+//   Backstab=1, Cleave=2, Heal=3, Scout=4, Snipe=5,
+//   Stealth=6, Strike=7, Stun=8, Volley=9
+//
+// Companion `.ability` corpus at assets/ability_test/dungeon_layout/.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Healed {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Engine-side chronicle event written by `apply_ability` dispatcher
+// at hardcoded EventKindId 26 (damage). Same shape every fixture using
+// apply_ability declares.
+@replayable @gpu_amenable
+event EffectDamageApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Engine-side chronicle event for heals (kind 27).
+@replayable @gpu_amenable
+event EffectHealApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Engine-side chronicle event for stuns (kind 29). Third payload word
+// is `world.tick + duration_ticks` (the absolute expiry tick).
+@replayable @gpu_amenable
+event EffectStunApplied {
+  actor: AgentId,
+  target: AgentId,
+  expires_at_tick: u32,
+}
+
+// Entity discriminants pinned alphabetical (decl order = sort order).
+//   Archer = 0
+//   Brute  = 1
+//   Goblin = 2
+//   Hero   = 3
+entity Archer : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Brute : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Goblin : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Hero : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+// Custom per-agent SoA columns (Gap plague_city#P-A — `field <name>:
+// <type>` registry). The auto-emit allocates `agent_role_buf`,
+// `agent_rooms_visited_lo_buf`, `agent_current_room_idx_buf`,
+// `agent_target_room_idx_buf` (each sized agent_count × 4 bytes).
+//
+// Hero role encoding:
+//   role == 0 → non-hero (Archer/Brute/Goblin slots set 0)
+//   role == 1 → Warrior  (Cleave)
+//   role == 2 → Cleric   (Heal)
+//   role == 3 → Ranger   (Snipe)
+//   role == 4 → Mage     (Stun)
+//   role == 5 → Rogue    (stage 2 — Backstab/Stealth; stage 1 = Strike only)
+field role: u32
+
+// target_room_idx — which 0..35 grid slot the hero is currently
+// walking toward. Host-side pin picks the next room when the hero
+// reaches `target` (HeroExplore's `dist < 1.0` branch). The .sim's
+// HeroExplore physics rule reads `target_room_idx` and computes the
+// centroid via `(idx % 6) * 12 + 6` (room grid 6×6, slot 12 cells).
+field target_room_idx: u32
+
+// (Two more stage-1 fields — `rooms_visited_lo` (bitmask of explored
+// rooms) and `current_room_idx` — are tracked CPU-side in the pin
+// rather than as SoA columns. Reasoning: stage 1 doesn't read them
+// from any kernel, so allocating GPU storage just to readback every
+// tick is needless overhead. Stage 2 may promote them to SoA columns
+// when belief views need them for kernel-side gating.)
+
+config dungeon {
+  // Move speeds (per tick at 100ms cadence).
+  hero_move_speed:    f32 = 0.20,
+  goblin_move_speed:  f32 = 0.15,
+  brute_move_speed:   f32 = 0.10,
+
+  // Hero verb tuning.
+  warrior_cleave_range: f32 = 4.0,
+  warrior_cleave_cd:    u32 = 6,
+  cleric_heal_range:    f32 = 8.0,
+  cleric_heal_cd:       u32 = 4,
+  cleric_heal_floor:    f32 = 130.0,
+  ranger_snipe_range:   f32 = 18.0,
+  ranger_snipe_cd:      u32 = 12,
+  mage_stun_range:      f32 = 12.0,
+  mage_stun_cd:         u32 = 15,
+  hero_strike_range:    f32 = 4.0,
+  hero_strike_cd:       u32 = 3,
+
+  // Enemy verb tuning.
+  goblin_melee_range:   f32 = 2.5,
+  goblin_melee_cd:      u32 = 4,
+  goblin_charge_range:  f32 = 12.0,
+  brute_cleave_range:   f32 = 4.0,
+  brute_cleave_cd:      u32 = 8,
+  brute_charge_range:   f32 = 10.0,
+  archer_volley_range:  f32 = 18.0,
+  archer_volley_cd:     u32 = 6,
+
+  // Role discriminants.
+  role_warrior: u32 = 1,
+  role_cleric:  u32 = 2,
+  role_ranger:  u32 = 3,
+  role_mage:    u32 = 4,
+  role_rogue:   u32 = 5,
+
+  // Creature type discriminants (mirror runtime seed assignments).
+  ct_archer: u32 = 0,
+  ct_brute:  u32 = 1,
+  ct_goblin: u32 = 2,
+  ct_hero:   u32 = 3,
+}
+
+init {
+  alive:  1,
+  hp:     200,
+  max_hp: 200,
+}
+
+// Spatial queries. The 4 distinct radii cover hero melee, hero
+// long-range, hero detection (Cleric heal scan), and Archer LoS.
+@spatial(radius = 4.0, kind = [Agent])
+spatial_query nearby_melee(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+@spatial(radius = 8.0, kind = [Agent])
+spatial_query nearby_heal(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+@spatial(radius = 12.0, kind = [Agent])
+spatial_query nearby_charge(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+@spatial(radius = 18.0, kind = [Agent])
+spatial_query nearby_los(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// -------------------------------------------------------------------
+// Hero movement — walk toward target_room_idx centroid.
+// -------------------------------------------------------------------
+//
+// The hero's target_room_idx is a 0..35 grid slot ID seeded by the
+// host pin. The world-space room centroid is computed via the slot
+// grid arithmetic: room (rx, ry) sits at world coord
+//   (rx * 12 + 6, ry * 12 + 6, 1.0)
+// where 12 is SLOT_WIDTH and 6 is SLOT_HALF_WIDTH. We unpack the
+// 0..35 idx via (rx = idx % 6, ry = idx / 6). Floating-point arith on
+// the WGSL side is fine here — the idx is u32 but trunc-to-f32 keeps
+// 12 bits of room slot space (we need 6 + 6 = 12).
+//
+// When `dist < 1.0`, the hero has reached the room — the host-side
+// pin updates `rooms_visited_lo` (sets the bit for `current_room_idx`)
+// and picks a new `target_room_idx` between ticks via direct buffer
+// writes. The .sim doesn't update these fields from kernels — keeping
+// the per-tick step pure and host-controlled.
+@phase(per_agent)
+physics HeroExplore {
+  on Tick {} where (self.alive
+                    && self.creature_type == Hero
+                    && agents.stun_expires_at_tick(self) <= world.tick) {
+    let target_idx = agents.target_room_idx(self);
+    // Centroid arithmetic. Stage 1 hardcodes slot-grid: 6 cols, 12-cell
+    // slots, half-width 6. The host-side roomgen seeds target_room_idx
+    // to a valid present slot, so the centroid computed here is always
+    // inside the carved dungeon.
+    let rx = target_idx % 6u;
+    let ry = target_idx / 6u;
+    let cx = (rx as f32) * 12.0 + 6.0;
+    let cy = (ry as f32) * 12.0 + 6.0;
+    let target_centroid = vec3(cx, cy, 1.0);
+    let toward = target_centroid - self.pos;
+    let dist = length(toward);
+    if (dist > 1.0) {
+      let step = (toward / dist) * config.dungeon.hero_move_speed;
+      agents.set_pos(self, self.pos + step);
+    }
+    // When dist <= 1.0, the host-side update path takes over. The .sim
+    // intentionally does NOT touch rooms_visited_lo / current_room_idx
+    // / target_room_idx here — kernel-side bitmask OR + adjacency pick
+    // would require encoding the 36-slot adjacency table inline, which
+    // bloats the kernel by ~150 lines. Host-side pick is cleaner.
+  }
+}
+
+// -------------------------------------------------------------------
+// Enemy movement — Goblins / Brutes charge nearest hero, but only if
+// in the per-class charge range. Without the range gate enemies in
+// distant rooms drift through walls toward spawn (voxel terrain
+// blocks LoS but NOT movement in stage 1 — stage 2 will pass
+// per-step positions through `terrain.walkable`). The sum-of-deltas
+// shape is unchanged from hill_raid's normalize-direction form.
+// -------------------------------------------------------------------
+@phase(per_agent)
+physics GoblinCharge {
+  on Tick {} where (self.alive
+                    && self.creature_type == Goblin
+                    && agents.stun_expires_at_tick(self) <= world.tick) {
+    // Sum the deltas to alive heroes WITHIN charge range. Out-of-
+    // range heroes contribute vec3(0) so the goblin only walks when
+    // a hero is close enough; otherwise it idles in place. This
+    // serves as a coarse stand-in for room-bounded movement until
+    // terrain-walkable gating lands in stage 2.
+    let toward = sum(h in agents where
+      if (h != self) && (h.alive) && (h.creature_type == Hero)
+         && (length(h.pos - self.pos) < config.dungeon.goblin_charge_range) {
+        h.pos - self.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let dist = length(toward);
+    let new_pos = if (dist > 0.001) {
+      self.pos + (toward / dist) * config.dungeon.goblin_move_speed
+    } else {
+      self.pos
+    };
+    agents.set_pos(self, new_pos);
+  }
+}
+
+@phase(per_agent)
+physics BruteCharge {
+  on Tick {} where (self.alive
+                    && self.creature_type == Brute
+                    && agents.stun_expires_at_tick(self) <= world.tick) {
+    let toward = sum(h in agents where
+      if (h != self) && (h.alive) && (h.creature_type == Hero)
+         && (length(h.pos - self.pos) < config.dungeon.brute_charge_range) {
+        h.pos - self.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let dist = length(toward);
+    let new_pos = if (dist > 0.001) {
+      self.pos + (toward / dist) * config.dungeon.brute_move_speed
+    } else {
+      self.pos
+    };
+    agents.set_pos(self, new_pos);
+  }
+}
+
+// (Archers are stationary in stage 1 — they fire from where they
+// spawn. Stage 2 will add patrol.)
+
+// -------------------------------------------------------------------
+// Hero verb cascade.
+// -------------------------------------------------------------------
+// All hero verbs gate on:
+//   - self.alive
+//   - self.creature_type == Hero
+//   - agents.stun_expires_at_tick(self) <= world.tick
+//   - agents.role(self) matches the verb's role
+//   - cooldown via world.tick % cd == 0
+//   - target.alive && target.creature_type != Hero (enemy)
+//   - terrain.line_of_sight(self.pos, target.pos)
+// The hero verbs use the per_agent physics-rule + spatial-query
+// pattern (same shape as hill_raid's DefenderFire). Each candidate
+// in the spatial walk is filtered by LoS + creature_type before
+// apply_ability fires.
+
+// WarriorCleave — role 1, AOE damage in 4-unit range. AbilityId 2.
+//
+// **Per-pair distance gate** (Gap dungeon_layout#1 — see
+// `docs/architecture/gaps_dungeon_layout.md`). spatial.nearby_X
+// queries do a 27-cell window walk and the spatial grid clamps
+// out-of-bounds coords to the boundary cell — distant enemies thus
+// appear as valid candidates from heroes whose own cell sits near
+// the clamp boundary. Adding `length(candidate.pos - self.pos) <
+// <range>` inside the if-block ensures only true in-range candidates
+// pass.
+@phase(per_agent)
+physics WarriorCleave {
+  on Tick {} where (self.alive
+                    && self.creature_type == Hero
+                    && agents.role(self) == config.dungeon.role_warrior
+                    && agents.stun_expires_at_tick(self) <= world.tick
+                    && (world.tick % config.dungeon.warrior_cleave_cd == 0)) {
+    for candidate in spatial.nearby_melee(self) {
+      if (candidate.alive
+          && candidate.creature_type != config.dungeon.ct_hero
+          && length(candidate.pos - self.pos) < config.dungeon.warrior_cleave_range
+          && terrain.line_of_sight(self.pos, candidate.pos)) {
+        apply_ability 2 by self target candidate
+      }
+    }
+  }
+}
+
+// ClericHeal — role 2, ally heal in 8-unit range, target hp floor.
+@phase(per_agent)
+physics ClericHeal {
+  on Tick {} where (self.alive
+                    && self.creature_type == Hero
+                    && agents.role(self) == config.dungeon.role_cleric
+                    && agents.stun_expires_at_tick(self) <= world.tick
+                    && (world.tick % config.dungeon.cleric_heal_cd == 0)) {
+    for candidate in spatial.nearby_heal(self) {
+      if (candidate.alive
+          && candidate.creature_type == config.dungeon.ct_hero
+          && candidate.hp < config.dungeon.cleric_heal_floor
+          && length(candidate.pos - self.pos) < config.dungeon.cleric_heal_range
+          && terrain.line_of_sight(self.pos, candidate.pos)) {
+        apply_ability 3 by self target candidate
+      }
+    }
+  }
+}
+
+// RangerSnipe — role 3, long-range single-target. AbilityId 5.
+@phase(per_agent)
+physics RangerSnipe {
+  on Tick {} where (self.alive
+                    && self.creature_type == Hero
+                    && agents.role(self) == config.dungeon.role_ranger
+                    && agents.stun_expires_at_tick(self) <= world.tick
+                    && (world.tick % config.dungeon.ranger_snipe_cd == 0)) {
+    for candidate in spatial.nearby_los(self) {
+      if (candidate.alive
+          && candidate.creature_type != config.dungeon.ct_hero
+          && length(candidate.pos - self.pos) < config.dungeon.ranger_snipe_range
+          && terrain.line_of_sight(self.pos, candidate.pos)) {
+        apply_ability 5 by self target candidate
+      }
+    }
+  }
+}
+
+// MageStun — role 4, 12-unit range control. AbilityId 8.
+@phase(per_agent)
+physics MageStun {
+  on Tick {} where (self.alive
+                    && self.creature_type == Hero
+                    && agents.role(self) == config.dungeon.role_mage
+                    && agents.stun_expires_at_tick(self) <= world.tick
+                    && (world.tick % config.dungeon.mage_stun_cd == 0)) {
+    for candidate in spatial.nearby_charge(self) {
+      if (candidate.alive
+          && candidate.creature_type != config.dungeon.ct_hero
+          && length(candidate.pos - self.pos) < config.dungeon.mage_stun_range
+          && terrain.line_of_sight(self.pos, candidate.pos)) {
+        apply_ability 8 by self target candidate
+      }
+    }
+  }
+}
+
+// HeroStrike — universal melee. 4-unit range, LoS-gated.
+@phase(per_agent)
+physics HeroStrike {
+  on Tick {} where (self.alive
+                    && self.creature_type == Hero
+                    && agents.stun_expires_at_tick(self) <= world.tick
+                    && (world.tick % config.dungeon.hero_strike_cd == 0)) {
+    for candidate in spatial.nearby_melee(self) {
+      if (candidate.alive
+          && candidate.creature_type != config.dungeon.ct_hero
+          && length(candidate.pos - self.pos) < config.dungeon.hero_strike_range
+          && terrain.line_of_sight(self.pos, candidate.pos)) {
+        apply_ability 7 by self target candidate
+      }
+    }
+  }
+}
+
+// -------------------------------------------------------------------
+// Enemy verb cascade.
+// -------------------------------------------------------------------
+
+// GoblinMelee — 2.5-unit range melee (Strike, id 7).
+@phase(per_agent)
+physics GoblinMelee {
+  on Tick {} where (self.alive
+                    && self.creature_type == Goblin
+                    && agents.stun_expires_at_tick(self) <= world.tick
+                    && (world.tick % config.dungeon.goblin_melee_cd == 0)) {
+    for candidate in spatial.nearby_melee(self) {
+      if (candidate.alive
+          && candidate.creature_type == config.dungeon.ct_hero
+          && length(candidate.pos - self.pos) < config.dungeon.goblin_melee_range) {
+        apply_ability 7 by self target candidate
+      }
+    }
+  }
+}
+
+// BruteCleave — 4-unit AOE cleave (Cleave, id 2).
+@phase(per_agent)
+physics BruteCleave {
+  on Tick {} where (self.alive
+                    && self.creature_type == Brute
+                    && agents.stun_expires_at_tick(self) <= world.tick
+                    && (world.tick % config.dungeon.brute_cleave_cd == 0)) {
+    for candidate in spatial.nearby_melee(self) {
+      if (candidate.alive
+          && candidate.creature_type == config.dungeon.ct_hero
+          && length(candidate.pos - self.pos) < config.dungeon.brute_cleave_range) {
+        apply_ability 2 by self target candidate
+      }
+    }
+  }
+}
+
+// ArcherVolley — 18-unit ranged AOE (Volley, id 9). LoS required —
+// voxel terrain blocks shots through walls.
+@phase(per_agent)
+physics ArcherVolley {
+  on Tick {} where (self.alive
+                    && self.creature_type == Archer
+                    && agents.stun_expires_at_tick(self) <= world.tick
+                    && (world.tick % config.dungeon.archer_volley_cd == 0)) {
+    for candidate in spatial.nearby_los(self) {
+      if (candidate.alive
+          && candidate.creature_type == config.dungeon.ct_hero
+          && length(candidate.pos - self.pos) < config.dungeon.archer_volley_range
+          && terrain.line_of_sight(self.pos, candidate.pos)) {
+        apply_ability 9 by self target candidate
+      }
+    }
+  }
+}
+
+// -------------------------------------------------------------------
+// Chronicle consumers.
+// -------------------------------------------------------------------
+
+@phase(post)
+physics ApplyDamageFromChronicle {
+  on EffectDamageApplied { actor: a, target: t, amount: amt } {
+    emit Damaged { source: a, target: t, amount: amt }
+  }
+}
+
+@phase(post)
+physics ApplyHealFromChronicle {
+  on EffectHealApplied { actor: a, target: t, amount: amt } {
+    emit Healed { source: a, target: t, amount: amt }
+  }
+}
+
+@phase(post)
+physics ApplyStunFromChronicle {
+  on EffectStunApplied { actor: _, target: t, expires_at_tick: e } {
+    agents.set_stun_expires_at_tick(t, e);
+  }
+}
+
+// HP drain + alive flip. Same shape hill_raid uses.
+@phase(post)
+physics ApplyDamage {
+  on Damaged { source: _, target: t, amount: a } {
+    let old_hp = agents.hp(t);
+    let new_hp = old_hp - a;
+    agents.set_hp(t, new_hp);
+    if (old_hp > 0.0 && new_hp <= 0.0) {
+      agents.set_alive(t, false);
+    }
+  }
+}
+
+// HP add from Healed, clamped at max_hp.
+@phase(post)
+physics ApplyHeal {
+  on Healed { source: _, target: t, amount: a } {
+    agents.set_hp(t, min(agents.hp(t) + a, agents.max_hp(t)));
+  }
+}
+
+// -------------------------------------------------------------------
+// Materialized views (observability).
+// -------------------------------------------------------------------
+
+// Per-source total damage dealt.
+@materialized(on_event = [Damaged])
+view damage_dealt(source: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: s, target: _, amount: a } where s == source { self += a }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-source healing dispensed (Cleric reporting).
+@materialized(on_event = [Healed])
+view healing_done(source: Agent) -> f32 {
+  initial: 0.0,
+  on Healed { source: s, target: _, amount: a } where s == source { self += a }
+  clamp: [0.0, 1000000.0],
+}
+
+// Pair-keyed threat view (stage 2 will read this for target priority).
+// Decays 2%/tick so old threats fade.
+@materialized(on_event = [Damaged], storage = pair_map)
+@decay(rate = 0.98, per = tick)
+view threat_taken(observer: Agent, source: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: s, target: t, amount: a }
+    where t == observer && s == source
+    { self += a }
+  clamp: [0.0, 10000.0],
+}

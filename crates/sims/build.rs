@@ -116,6 +116,7 @@ fn main() {
                 | "plague_city"
                 | "detective_investigation"
                 | "among_us"
+                | "dungeon_layout"
         ) {
             continue;
         }

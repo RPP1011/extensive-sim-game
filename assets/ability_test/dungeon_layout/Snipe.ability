@@ -1,0 +1,13 @@
+// dungeon_layout — Ranger's long-range single-target shot. AbilityId 5
+// (alphabetical: after Scout=4, before Stealth=6).
+// Highest single-target damage in the kit — paired with the longest
+// range. The verb `when` clause requires LoS through voxel terrain.
+
+ability Snipe {
+    target: enemy
+    range: 18.0
+    cooldown: 12
+    hint: damage
+
+    damage 100.0 [PHYSICAL: 100]
+}
