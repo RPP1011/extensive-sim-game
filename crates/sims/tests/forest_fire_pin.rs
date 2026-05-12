@@ -366,10 +366,19 @@ fn forest_fire_event_storm_500_ticks() {
     //           drifts the slot-level f32 RMW (Plan G #244 atomic
     //           CAS is the structural fix), but the over-bounds walk
     //           is no longer compounding it. Observed max drift
-    //           ~100-110; 200 is a snug ceiling.
+    //           ~100-110; 200 was a snug ceiling.
+    //   * 150  — Plan G #244 bug 2 fix (2026-05-12) hoists post-CAS
+    //           emits into the f32 first-writer-wins success branch,
+    //           gating duplicate `emit Ignited` from CAS-loser threads.
+    //           Combined with bug 1, observed max drift varies 38-95
+    //           run-to-run (race-driven); 150 is a comfortable ceiling
+    //           that still trips on control-flow divergence. Closing
+    //           the residual requires the broader atomic-add-f32
+    //           surface (Plan G #244 atomicCompareExchange on every
+    //           f32 view-fold accumulator).
     assert!(
-        max_abs_drift <= 200.0,
-        "determinism drift exceeds 200 — control flow may be divergent, \
+        max_abs_drift <= 150.0,
+        "determinism drift exceeds 150 — control flow may be divergent, \
          not just the documented atomic RMW race. max_abs_drift={max_abs_drift}",
     );
 }
