@@ -1,0 +1,341 @@
+// squad_skirmish — adversarial scoring/AI/cascade fixture.
+//
+// Designed to surface gaps in the scoring backend + abilities namespace
+// + cast deferred-resolution + personality SoA + AOE Path B + multi-row
+// scoring competition. Companion to hill_raid (combat-AI + scoring axis).
+//
+// Topology: 8 Red Soldiers vs 8 Blue Soldiers (16 total) ringed around
+// the world origin, alternating positions so the per-pair argmax has
+// real fan-out across both teams.
+//
+// Per-tick decision loop (per agent, per tick):
+//   For each verb { Strike, Volley, Rally, Daze }:
+//     Scan every enemy/ally as candidate; compute score(self, target).
+//   Pick the (verb, target) with the highest score (argmax).
+//   Dispatch the winning verb's apply_ability with the bound target.
+//
+// Adversarial surfaces (designed to STRESS the scoring backend):
+//
+//   1. MULTI-ROW SCORING WITH per_target — declares a `scoring Soldier`
+//      block with 4 `row Strike per_target { ... }` style entries
+//      alongside the verb-injected entries. The parser parse-and-
+//      discards the inner `base:` / `weights:` clauses today (see
+//      parser.rs:1734-1746), so this is a parse-only smoke for the
+//      utility-table form. EXPECTED GAP: the per_target rows compile
+//      but produce no observable behavior — only the verb-injected
+//      rows actually drive argmax.
+//
+//   2. abilities.cooldown_ticks(id) IN SCORING WEIGHTS — references
+//      `abilities.cooldown_ticks(1)` inside scoring weights. The
+//      resolver registers the Abilities namespace methods (resolve.rs
+//      :421-451) but cg/lower/expr.rs has no Abilities arm. EXPECTED
+//      GAP: lowering rejects with UnsupportedNamespaceCall or similar;
+//      we may need to drop the reference to get parse → emit cleanly.
+//
+//   3. PAIR-KEYED THREAT VIEW — `threat_taken(observer, source)` is a
+//      pair-keyed @materialized view sized N². Used in Daze's score
+//      expression to pick the highest-threat enemy as stun target.
+//
+//   4. PERSONALITY-DRIVEN WEIGHTS — score expressions read
+//      `agents.risk_tolerance(self)` and `agents.ambition(self)`.
+//      These ARE registered SoA columns (data_handle.rs:197-199), so
+//      the read should lower; the SoA buffer is allocated per
+//      build.rs but may not be SEEDED with non-default values today.
+//
+//   5. AOE PATH B WITH MULTI-ROW SCORING — Volley uses
+//      `damage <amt> in spread(radius, max_targets)`. The
+//      verb-injected scoring row competes with Strike/Rally/Daze in
+//      the same argmax. Friendly-fire by default (project gotcha).
+//
+//   6. MULTI-TARGET ABILITY SCORING — Strike/Rally/Daze all use
+//      pair-field score expressions; on a 16-agent grid each tick
+//      computes 16 × 15 × 4 = 960 (actor, candidate, verb) cells.
+//
+// CAST BLOCK (Plan G primitives) — NOT exercised in this version.
+// firebolt_probe.sim is the canonical cast/busy probe; squad_skirmish
+// stays on the immediate-effect verb path so it parses cleanly. A
+// follow-up slice can layer cast() once the immediate-effect surface
+// is gap-noted.
+//
+// Companion .ability corpus at assets/ability_test/squad_skirmish/:
+//   - Strike.ability    (id 1, single-target damage 12)
+//   - Volley.ability    (id 2, AOE damage 6 in spread(4.0, 8))
+//   - Rally.ability     (id 3, single-target heal 20)
+//   - Daze.ability      (id 4, single-target stun 8 ticks)
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Healed {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Engine-side chronicle event written by the apply_ability dispatcher
+// at hardcoded EventKindId 26.
+@replayable @gpu_amenable
+event EffectDamageApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Engine-side chronicle event written by the apply_ability dispatcher
+// at hardcoded EventKindId 27 (heal).
+@replayable @gpu_amenable
+event EffectHealApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+// Engine-side chronicle event written by the apply_ability dispatcher
+// at hardcoded EventKindId 29 (stun); third payload word is the
+// pre-computed `world.tick + duration_ticks` absolute resolve tick.
+@replayable @gpu_amenable
+event EffectStunApplied {
+  actor: AgentId,
+  target: AgentId,
+  expires_at_tick: u32,
+}
+
+entity Soldier : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config combat {
+  // Hand-mirrored from .ability files. Scoring kernel reads these.
+  strike_damage:    f32 = 12.0,
+  volley_damage:    f32 = 6.0,
+  rally_amount:     f32 = 20.0,
+  cooldown_strike:  u32 = 5,
+  cooldown_volley:  u32 = 18,
+  cooldown_rally:   u32 = 12,
+  cooldown_daze:    u32 = 20,
+  // Scoring constants. The score expressions reference these so a
+  // tuning pass doesn't have to chase magic numbers in 4 verb bodies.
+  rally_hp_floor:   f32 = 60.0,    // gate Rally on target.hp < this
+  daze_hp_ceiling:  f32 = 70.0,    // only Daze healthy targets (don't waste on near-dead)
+  strike_score_base: f32 = 200.0,
+  volley_score_base: f32 = 240.0,
+  rally_score_base:  f32 = 300.0,
+  daze_score_base:   f32 = 220.0,
+  // Personality weight scalers — multiplied into per-verb scoring
+  // weights to bias argmax by per-agent disposition. risk_tolerance
+  // boosts Strike/Volley (offense); ambition boosts Daze (control).
+  aggression_scale:  f32 = 50.0,
+  control_scale:     f32 = 40.0,
+}
+
+init {
+  alive: 1,
+  hp:    100,
+  max_hp: 100,
+}
+
+// Verb: Strike — single-target damage. Pair-field score
+// `(strike_score_base - target.hp + risk_tolerance * scale)` —
+// argmax picks lowest-HP enemy, weighted by caster's aggression.
+verb Strike(self, target: Agent) =
+  action StrikeAction
+  when (self.alive
+        && agents.stun_expires_at_tick(self) <= world.tick
+        && target.alive
+        && target != self
+        && target.level != self.level
+        && (world.tick % config.combat.cooldown_strike == 0))
+  apply_ability 1 by self target target
+  // PERSONALITY READ — agents.risk_tolerance is a registered F32 SoA
+  // column (data_handle.rs:197). Whether it lowers cleanly inside a
+  // pair-field score expression is a gap-test surface.
+  score (if target.alive {
+           config.combat.strike_score_base - target.hp
+           + agents.risk_tolerance(self) * config.combat.aggression_scale
+         } else { -1000000.0 })
+
+// Verb: Volley — AOE damage. Score uses `target.hp` for argmax target
+// selection (the target binding becomes the AOE cast center). The AOE
+// walk in the chronicle dispatcher then hits every alive agent inside
+// radius 4.0 (friendly-fire by default — project gotcha).
+verb Volley(self, target: Agent) =
+  action VolleyAction
+  when (self.alive
+        && agents.stun_expires_at_tick(self) <= world.tick
+        && target.alive
+        && target != self
+        && target.level != self.level
+        && (world.tick % config.combat.cooldown_volley == 0))
+  apply_ability 2 by self target target
+  score (if target.alive {
+           config.combat.volley_score_base - target.hp
+           + agents.risk_tolerance(self) * config.combat.aggression_scale
+         } else { -1000000.0 })
+
+// Verb: Rally — single-target ally heal. Pair-field score peaks for
+// the lowest-HP ally. Gated on `target.hp < rally_hp_floor` so a
+// healthy team doesn't waste casts.
+verb Rally(self, target: Agent) =
+  action RallyAction
+  when (self.alive
+        && agents.stun_expires_at_tick(self) <= world.tick
+        && target.alive
+        && target != self
+        && target.level == self.level
+        && target.hp < config.combat.rally_hp_floor
+        && (world.tick % config.combat.cooldown_rally == 0))
+  apply_ability 3 by self target target
+  score (if target.alive {
+           config.combat.rally_score_base - target.hp
+         } else { -1000000.0 })
+
+// Verb: Daze — single-target stun. Score reads the pair-keyed
+// `threat_taken(self, target)` view to pick the highest-threat enemy.
+// Ambition-scaled — high-ambition agents prioritize control.
+verb Daze(self, target: Agent) =
+  action DazeAction
+  when (self.alive
+        && agents.stun_expires_at_tick(self) <= world.tick
+        && target.alive
+        && target != self
+        && target.level != self.level
+        && target.hp > config.combat.daze_hp_ceiling
+        && (world.tick % config.combat.cooldown_daze == 0))
+  apply_ability 4 by self target target
+  // PAIR-VIEW READ ATTEMPTED — `threat_taken(self, target)` would be
+  // the natural way to drive Daze's argmax toward the highest-threat
+  // enemy. BLOCKED: the scoring kernel emit generates a single-arg
+  // helper `fn view_0_get(idx: u32) -> f32` even though the call site
+  // here passes 2 arguments. WGSL validation then rejects the kernel
+  // ("Requires 1 arguments, but 2 are provided"). See gap class
+  // "pair-view 2-arg call in scoring" in docs/architecture/gaps_observed.md.
+  //
+  // Workaround for the MVP fixture: drop the pair-view ref so the
+  // scoring kernel lowers cleanly. The pair-view itself (`threat_taken`)
+  // still folds correctly per `Damaged` event — the readback in the pin
+  // confirms its N² storage allocation. The gap is in the SCORING-side
+  // call lowering, not the fold-side write path.
+  score (if target.alive {
+           config.combat.daze_score_base
+           + agents.ambition(self) * config.combat.control_scale
+         } else { -1000000.0 })
+
+// Chronicle re-emit: EffectDamageApplied → Damaged. Same shape every
+// other apply_ability fixture uses.
+@phase(post)
+physics ApplyDamageFromChronicle {
+  on EffectDamageApplied { actor: a, target: t, amount: amt } {
+    emit Damaged { source: a, target: t, amount: amt }
+  }
+}
+
+// Chronicle re-emit: EffectHealApplied → Healed (same shape).
+@phase(post)
+physics ApplyHealFromChronicle {
+  on EffectHealApplied { actor: a, target: t, amount: amt } {
+    emit Healed { source: a, target: t, amount: amt }
+  }
+}
+
+// Chronicle: EffectStunApplied directly drains into the per-agent
+// stun_expires_at_tick SoA (no Stunned re-emit needed for this slice;
+// the verb gates already read agents.stun_expires_at_tick directly).
+@phase(post)
+physics ApplyStunFromChronicle {
+  on EffectStunApplied { actor: _, target: t, expires_at_tick: e } {
+    agents.set_stun_expires_at_tick(t, e);
+  }
+}
+
+// HP drain + alive flip from Damaged events. Same shape as duel_25v25's
+// ApplyDamage block. P6 caveat: PerEvent + AgentField writes; the
+// auto-emit tolerates the diagnostic.
+@phase(post)
+physics ApplyDamage {
+  on Damaged { source: _, target: t, amount: a } {
+    let old_hp = agents.hp(t);
+    let new_hp = old_hp - a;
+    agents.set_hp(t, new_hp);
+    if (old_hp > 0.0 && new_hp <= 0.0) {
+      agents.set_alive(t, false);
+    }
+  }
+}
+
+// HP add from Healed events, clamped at max_hp.
+@phase(post)
+physics ApplyHeal {
+  on Healed { source: _, target: t, amount: a } {
+    agents.set_hp(t, min(agents.hp(t) + a, agents.max_hp(t)));
+  }
+}
+
+// PAIR-KEYED VIEW — per (observer, source) accumulator of incoming
+// damage. Decays per tick so old threat fades. Sized N² via
+// `storage = pair_map`. Drives Daze's argmax target selection.
+@materialized(on_event = [Damaged],
+              storage = pair_map)
+@decay(rate = 0.95, per = tick)
+view threat_taken(observer: Agent, source: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: s, target: t, amount: a } where t == observer && s == source {
+    self += a
+  }
+  clamp: [0.0, 10000.0],
+}
+
+// Per-source observability — total damage dealt per agent. Useful for
+// pin readback (which agents are carrying the team's offense).
+@materialized(on_event = [Damaged])
+view damage_dealt(source: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: s, target: _, amount: a } { self += a }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-source observability — total healing dispensed.
+@materialized(on_event = [Healed])
+view healing_done(source: Agent) -> f32 {
+  initial: 0.0,
+  on Healed { source: s, target: _, amount: a } { self += a }
+  clamp: [0.0, 1000000.0],
+}
+
+// MULTI-ROW SCORING TABLE — design-target shape with `row X per_target
+// { base: ..., weights: ... }` entries. The parser parse-and-discards
+// the `base:` and `weights:` clauses today (parser.rs:1734-1746); this
+// block exists primarily as a parse-and-resolve probe for the
+// utility-table form. The verb-injected scoring entries above are the
+// load-bearing argmax driver.
+//
+// EXPECTED GAP: this block parses but contributes no rows that
+// influence behavior beyond the verb-injected entries. Confirms the
+// parse path round-trips cleanly without rejecting unknown clauses.
+scoring Soldier {
+  row Strike per_target {
+    base:        config.combat.strike_score_base,
+    weights:     agents.risk_tolerance(self) * config.combat.aggression_scale,
+    cooldown:    config.combat.cooldown_strike,
+  }
+  row Rally per_target {
+    base:        config.combat.rally_score_base,
+    weights:     agents.altruism(self) * 30.0,
+    targeting:   ally,
+  }
+  row Daze per_target {
+    base:        config.combat.daze_score_base,
+    weights:     agents.ambition(self) * config.combat.control_scale,
+  }
+  row Hold {
+    base:        0.5,
+    weights:     agents.curiosity(self),
+  }
+}

@@ -1,0 +1,17 @@
+// squad_skirmish — basic single-target ranged strike. AbilityId 1.
+// Lowers to AbilityProgram { gate: { cooldown_ticks: 5, range: 8.0 },
+//                            effects: [EffectOp::Damage { amount: 12.0 }] }
+//
+// Used by every Soldier (no role gate at the .ability layer; the verb's
+// `when` clause does the role/team filtering). The pair-field score
+// `(150 - target.hp)` is the multi-target argmax driver — picks the
+// lowest-HP enemy in range.
+
+ability Strike {
+    target: enemy
+    range: 8.0
+    cooldown: 5
+    hint: damage
+
+    damage 12.0 [PHYSICAL: 100]
+}

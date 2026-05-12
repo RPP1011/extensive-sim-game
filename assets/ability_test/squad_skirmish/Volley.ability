@@ -1,0 +1,24 @@
+// squad_skirmish — AOE damage burst. AbilityId 2.
+// Lowers to AbilityProgram with EffectOp::Damage{amount=6} +
+// per_effect_areas[0] = ShapeKind::Spread (radius=4.0, max_targets=8).
+//
+// `damage <amount> in spread(radius, max_targets)` exercises Wave 1.5#2
+// in-shape lowering. The dispatcher (cg/emit/wgsl_body.rs) walks the
+// spread radius from cast center and writes one EffectDamageApplied
+// chronicle record per in-radius target (capped at max_targets via the
+// 256-slot bitonic-sort scratch).
+//
+// Friendly-fire by default — the per-effect AOE walk does NOT consult
+// `target: enemy` (that's a single-target gate). Verb's `when` gate
+// handles the team filter on the cast site (caster), and the AOE walk
+// hits every alive agent inside the radius. This is a known gotcha
+// (project_aoe_gotchas.md).
+
+ability Volley {
+    target: enemy
+    range: 12.0
+    cooldown: 18
+    hint: damage
+
+    damage 6.0 in spread(4.0, 8) [PHYSICAL: 100]
+}

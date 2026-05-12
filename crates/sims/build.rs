@@ -112,6 +112,7 @@ fn main() {
                 | "palace_coup"
                 | "pirate_fleet"
                 | "forest_fire"
+                | "squad_skirmish"
         ) {
             continue;
         }

@@ -1,0 +1,17 @@
+// squad_skirmish — single-target ally heal. AbilityId 3.
+// Lowers to AbilityProgram { effects: [EffectOp::Heal { amount: 20.0 }] }.
+//
+// Used by Soldiers acting as field medics — the verb's `when` clause
+// gates on `target.level == self.level` (same-team) and `target.hp <
+// 60` (only top up when actually hurt). Score peaks for the lowest-HP
+// ally so the multi-target argmax converges on the most-injured
+// teammate.
+
+ability Rally {
+    target: ally
+    range: 8.0
+    cooldown: 12
+    hint: heal
+
+    heal 20.0 [HEAL: 100]
+}

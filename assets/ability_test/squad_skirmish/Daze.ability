@@ -1,0 +1,16 @@
+// squad_skirmish — single-target stun (control). AbilityId 4.
+// Lowers to AbilityProgram { effects: [EffectOp::Stun { duration_ticks: 8 }] }.
+//
+// Anti-burst tool — used pre-emptively against the highest-threat
+// enemy (per the threat_taken pair-keyed view; see verb body). The
+// pair-field score reads `threat_taken(self, target)` so the argmax
+// picks the enemy that has hit the caster the most recently.
+
+ability Daze {
+    target: enemy
+    range: 6.0
+    cooldown: 20
+    hint: crowd_control
+
+    stun 800ms [CROWD_CONTROL: 100]
+}

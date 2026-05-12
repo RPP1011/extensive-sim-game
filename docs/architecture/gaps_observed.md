@@ -441,3 +441,178 @@ RUST_MIN_STACK=33554432 cargo test -p sims --release \
 Output verdict line tells you which gaps are still open. When all
 six are closed, the verdict should read "FIRE CONSUMED FOREST" and
 the determinism mismatch count should drop to 0.
+# Gaps observed under adversarial fixtures
+
+Discovery log for compiler / runtime gaps surfaced by adversarial
+fixtures (hill_raid, squad_skirmish, ...). One section per gap; each
+records the surface, .sim line, observed diagnostic / behaviour, and
+gap class.
+
+The intent: capture each gap in enough detail that a follow-up plan can
+locate the source-level concern without re-running the discovery probe.
+
+## squad_skirmish (commit TBD, 2026-05-11)
+
+Adversarial multi-row scoring + multi-ability + pair-keyed-view
+fixture. 16 Soldiers (8 vs 8) ringed around the world origin, 4 verbs
+competing per tick. See `assets/sim/squad_skirmish.sim` and
+`crates/sims/tests/squad_skirmish_pin.rs`.
+
+### Gap A — `stun N` (no time suffix) rejects with confusing diagnostic
+
+**Surface**: ability parser / EffectOp lowering.
+**Site**: `assets/ability_test/squad_skirmish/Daze.ability:15` —
+originally `stun 8`, expecting "8 ticks".
+**Observed**: `Lower(EffectArgMismatch { verb: "stun", expected: 1,
+got: 1, span: Span { start: 512, end: 539 } })` — the "expected 1, got
+1" message is structurally false (both sides are 1) and gives the
+designer no hint about the missing unit suffix.
+**Workaround**: change to `stun 800ms` (or `stun 1s`). Every other
+shipped `.ability` uses time suffixes (`1s`, `2s`, `1500ms`).
+**Gap class**: ability parser diagnostic clarity. The lowerer ought
+to either accept bare integers as ticks (and document) or emit a
+diagnostic that says "stun expects a time suffix (e.g. `1s`,
+`500ms`), got bare integer".
+
+### Gap B — single ability-corpus failure silently disables AOE auto-detect for the WHOLE corpus
+
+**Surface**: `dsl_compiler::build_helper`, `aoe_dispatch` flag.
+**Site**: `crates/dsl_compiler/src/build_helper.rs:272-286` —
+`built_registry.as_ref().map(...)` returns `None` if ANY .ability in
+the corpus failed to lower; the closure then defaults to `false`.
+**Observed**: Daze.ability with the `stun 8` bug above caused
+`built_registry = None`, which made `aoe_dispatch = false` — even
+though `Volley.ability` declares `damage 6 in spread(4.0, 8)` (clear
+AOE intent). The build log says `ability-corpus] 4 .ability files,
+aoe_dispatch=false` — masking that it's not "no AOE in the corpus" but
+"none of the .ability files lowered". After fixing Daze, the SAME
+corpus correctly reported `aoe_dispatch=true`.
+**Gap class**: build-helper resilience. AOE detection should walk
+whatever programs DID lower, not bail to false on partial failure;
+a single broken .ability file shouldn't disable AOE Path B emit for
+its peers.
+
+### Gap C — `scoring { row X per_target { base, weights } }` parses but `weights:` clause silently dropped
+
+**Surface**: scoring lowering / WGSL emit.
+**Site**: `assets/sim/squad_skirmish.sim:281-302` (the
+`scoring Soldier { row Strike per_target { base: ..., weights: ... } }`
+block) →
+`target/release/build/sims-*/out/squad_skirmish/scoring.wgsl:391` (the
+emitted `let utility_4: f32 = config_9;` body for row 4).
+**Observed**: the `weights:` clause references real per-agent SoA
+columns (`agents.altruism(self) * 30.0`, etc.) but the emitted utility
+expression is just `config_9` (= the `base:` literal). The personality-
+weighted scoring the row pretended to declare contributes nothing to
+argmax. Documented in `crates/dsl_ast/src/parser.rs:1734-1746` (the
+parser parse-and-discards everything beyond `score:` / `base:`).
+**Gap class**: scoring backend completeness. The "utility table" form
+that predator_prey.sim and crowd_navigation.sim use as a design target
+parses cleanly without any signal that the weights clause is being
+dropped. Either accept and lower it, or reject with a typed
+"`weights:` clause not yet supported in scoring rows".
+
+### Gap D — `view_storage_primary_buf` aliases ALL views into one buffer
+
+**Surface**: build_helper view storage allocation.
+**Site**: `crates/dsl_compiler/src/build_helper.rs:1096-1103` allocates
+`view_storage_primary_buf` of size `agent_count * agent_count * 4`
+(driven by the pair-keyed-view detection at line 635), but the
+generated single-key view folds (e.g. `damage_dealt`,
+`healing_done`) write to slot[source_id] of the SAME buffer.
+**Observed**: in squad_skirmish, three views — pair-keyed `threat_taken`
+(N²), single-key `damage_dealt` (N), single-key `healing_done` (N) —
+all bind binding-slot 2 (`view_storage_primary`) in their fold WGSL
+(see `target/release/build/sims-*/out/squad_skirmish/{fold_threat_taken,
+fold_damage_dealt, fold_healing_done}.wgsl`). The single-key folds
+write to slot[source_id] of a 256-cell buffer; the pair-key fold writes
+to slot[obs*N + src]. damage_dealt and healing_done write to the SAME
+slot (slot[source_id]) and silently sum together.
+**Gap class**: view storage layout — no per-view offsets in the
+shared primary buffer. Either grow per-view offsets on the host side
+(threading through the build helper) or allocate per-view buffers
+(`view_storage_<name>_primary_buf`, mirroring the existing per-view
+`view_storage_threat_taken_primary_buf` allocation pattern).
+
+### Gap E — pair-keyed view called from scoring expression emits arity-mismatched WGSL helper
+
+**Surface**: scoring expression lowering for `view_call(2-args)`.
+**Site**: `assets/sim/squad_skirmish.sim` Daze verb's score
+expression originally `threat_taken(self, target) * 10.0` (now
+removed; see comment in source). Generated kernel:
+`target/release/build/sims-*/out/squad_skirmish/scoring.wgsl:39` emits
+`fn view_0_get(idx: u32) -> f32` (single-arg) but line 379 calls
+`view_0_get(agent_id, per_pair_candidate)` (two args).
+**Observed**: WGSL validation rejects the kernel:
+`Call to [0] is invalid; Requires 1 arguments, but 2 are provided`.
+The pin test panicked at `Device::create_shader_module`. This is a
+hard failure — fixture cannot run with the pair-view ref in scoring.
+**Gap class**: pair-view 2-arg call in scoring expression — the
+helper-signature emitter doesn't propagate the pair-arity from the
+call site. Either generate a 2-arg helper for pair-keyed views or
+reject the call with a lowering error that says "pair-keyed view
+calls in scoring expressions need both keys explicitly".
+
+### Gap F — chronicle consumer Indirect dispatch unhandled in synthesized `step()`
+
+**Surface**: `step()` dispatch arm in auto-emitted runtime.
+**Site**: `crates/dsl_compiler/src/build_helper.rs:1602-1614` —
+`DispatchOp::Indirect` and `DispatchOp::FixedPoint` fall into the
+`_ => {}` catch-all of the dispatch match. This is the documented
+"four-gap blocker" (commit 353527e6). The catch-all has a 90-line
+comment explaining why a naive wire-up was reverted.
+**Observed**: in squad_skirmish (and hill_raid), `apply_ability N by
+self target target` writes EffectDamageApplied / EffectHealApplied /
+EffectStunApplied chronicle records, but the consumer kernels
+(`physics_ApplyDamageFromChronicle`,
+`physics_ApplyHealFromChronicle_and_ApplyStunFromChronicle_and_ApplyDamage`)
+never fire because their schedule entries are Indirect. After 200
+ticks of squad combat: 0 damage flowed, 0 healing flowed, 0 entries
+in the threat_taken pair-view, all 16 soldiers at 100% HP. The 18
+emitted kernels DO step without panic — the gap is that the consumers
+don't run, not that the producers crash.
+**Gap class**: chronicle consumer dispatch — same gap hill_raid
+documents. Squad_skirmish is a SECOND data point that confirms this
+isn't a hill_raid-specific anomaly: any fixture using apply_ability +
+auto-emitted runtime hits it. The four-gap blocker comment notes
+kernel-emit, schedule order, per-consumer cfg, and inject coordination
+all need coordinated fixes.
+
+### Gap G — `init { hp: 100 }` writes u32 bit-pattern into f32 buffer (TYPE CONFUSION)
+
+**Surface**: build_helper init lowering.
+**Site**: `crates/dsl_compiler/src/build_helper.rs:1140-1146` — the
+init expression `Const(100)` lowers as
+`vec![100u32; agent_count as usize]` and the buffer is initialised via
+`bytemuck::cast_slice(&{name}_init)`. Generated artifact:
+`target/release/build/sims-*/out/squad_skirmish/runtime_core.rs:708-715`.
+**Observed**: every fixture using `init { hp: 100 }` (including
+shipped `dsl_stress_coverage`, `hill_raid`, and now `squad_skirmish`)
+writes the bit-pattern `0x64` into each `agent_hp` slot. Read as f32
+that's `1.4e-43` — functionally zero. Every `target.hp` read from the
+scoring kernel is therefore ~0.0 from tick 0; verbs that gate on
+`target.alive && target.hp > X` see hp=0 and either fire instantly or
+not at all depending on the predicate direction. The
+`squad_skirmish_pin.rs` workaround writes the correct f32 bit-pattern
+from the host before calling `step()`.
+**Gap class**: init lowering type discipline — the InitExpr::Const
+lowering path doesn't consult the target column's `AgentFieldTy`
+(F32 vs U32 vs Bool vs ...). For F32 columns it should emit
+`vec![{n}.0f32; agent_count]` and bytemuck-cast the f32 slice.
+Existing fixtures that "work" with `init { hp: 100 }` either don't
+read hp directly (use only alive flag) or have a runtime that
+overwrites hp after `try_new`. This is structural — every f32 SoA
+column is affected (hp, max_hp, mana, etc. — but `init` only
+recognises a few fields today).
+
+### Gap H — confused 2026-05-11 secondary observation (already-known)
+
+The fixture also confirms hill_raid's voxel-grid scaling caveat is
+unrelated to scoring: squad_skirmish has no terrain query and still
+hits Gap F unmodified. Gap F is the chokepoint blocking all
+apply_ability fixtures from real behavioural pins under the auto-emit;
+it is not a viewer / voxel concern.
+
+---
+
+Last updated: 2026-05-11 by adversarial-fixture pass (squad_skirmish).
