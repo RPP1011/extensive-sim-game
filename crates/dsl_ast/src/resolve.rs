@@ -1176,6 +1176,19 @@ fn collect(
                 // parsed Program (mirrors `init`). No Compilation IR
                 // slot — the values feed straight into LowerOpts.
             }
+            Decl::AgentField(_) => {
+                // Gap plague_city#P-A — `field <name>: <type>` decls
+                // are extracted by `dsl_compiler::build_helper` /
+                // `dsl_compiler::custom_agent_fields::populate` from
+                // the parsed Program BEFORE any lowering pass touches
+                // `self.<name>` or `agents.set_<name>(...)`. Mirrors
+                // the `init` + `debug` pass-through precedent: no
+                // Compilation IR slot here — the registry lives in
+                // process-static memory keyed by the leaked field
+                // name, and reset to "no custom fields" on each new
+                // compile via `clear_for_compile` at the build helper
+                // entry point.
+            }
         }
     }
     Ok(())
@@ -1646,6 +1659,12 @@ fn resolve_bodies(
             }
             Decl::Debug(_) => {
                 // `debug { ... }` — handled in build_helper, no IR pass-2 work.
+            }
+            Decl::AgentField(_) => {
+                // Gap plague_city#P-A — `field <name>: <type>` decls
+                // are interned process-locally by
+                // `dsl_compiler::custom_agent_fields::populate`
+                // BEFORE lowering. No IR pass-2 work here.
             }
         }
     }

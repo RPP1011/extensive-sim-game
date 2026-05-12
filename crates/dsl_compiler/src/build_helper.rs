@@ -209,6 +209,13 @@ fn emit_into(
         .unwrap_or_else(|e| panic!("read {}: {e}", sim_path.display()));
     let program = crate::parse(&src)
         .unwrap_or_else(|e| panic!("parse {fixture_name}.sim: {e:?}"));
+    // Gap plague_city#P-A — populate the custom-agent-field registry
+    // BEFORE resolve / lower runs. Every `field <name>: <ty>` decl
+    // becomes a leaked `CustomFieldDesc`; subsequent `lower_field` /
+    // `agents_setter_field` calls consult the registry via
+    // `lookup_by_snake`. Idempotent — re-running on the same Program
+    // returns the same interned ids.
+    let _custom_field_ids = crate::custom_agent_fields::populate(&program);
     // Plan E-A6 — extract `init { ... }` blocks before resolve consumes
     // the Program. The build helper carries these through to
     // synthesize_runtime_core so try_new emits create_buffer_init with

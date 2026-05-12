@@ -144,6 +144,7 @@ fn decl_annotations_mut(d: &mut Decl) -> Option<&mut Vec<Annotation>> {
         Decl::Config(x) => &mut x.annotations,
         Decl::Init(x) => &mut x.annotations,
         Decl::Debug(x) => &mut x.annotations,
+        Decl::AgentField(x) => &mut x.annotations,
         Decl::SpatialQuery(x) => &mut x.annotations,
         // `query` does not currently accept annotations on the decl; trailing
         // `@`s after a `query` will fall through to the orphan-annotation
@@ -171,6 +172,7 @@ fn decl_span_mut(d: &mut Decl) -> &mut Span {
         Decl::SpatialQuery(x) => &mut x.span,
         Decl::Init(x) => &mut x.span,
         Decl::Debug(x) => &mut x.span,
+        Decl::AgentField(x) => &mut x.span,
     }
 }
 
@@ -201,17 +203,58 @@ fn decl(c: &mut Cursor) -> PResult<Decl> {
         Some("config") => config_decl(c, annotations, start).map(Decl::Config),
         Some("init") => init_decl(c, annotations, start).map(Decl::Init),
         Some("debug") => debug_decl(c, annotations, start).map(Decl::Debug),
+        Some("field") => agent_field_decl(c, annotations, start).map(Decl::AgentField),
         Some("spatial_query") => {
             spatial_query_decl(c, annotations, start).map(Decl::SpatialQuery)
         }
         _ => Err(ParseErr::at(
             here(c),
             format!(
-                "expected top-level declaration (entity, event, event_tag, enum, view, query, physics, mask, verb, scoring, invariant, probe, metric, config, init, debug, spatial_query); got `{}`",
+                "expected top-level declaration (entity, event, event_tag, enum, view, query, physics, mask, verb, scoring, invariant, probe, metric, config, init, debug, field, spatial_query); got `{}`",
                 peek_word_for_error(c)
             ),
         )),
     }
+}
+
+// ---------------------------------------------------------------------------
+// 2.18 field (Gap plague_city#P-A — custom per-agent SoA column registry)
+//
+// Grammar:
+//   field <name>: <type>
+//
+// Where `<type>` is one of `u32`, `f32`, `bool`. Trailing semicolon
+// optional. Multiple `field` decls allowed per file; each registers a
+// new column the rest of the .sim source can read via `self.<name>` /
+// write via `agents.set_<name>(target, value)`. See `AgentFieldDecl`.
+// ---------------------------------------------------------------------------
+
+fn agent_field_decl(
+    c: &mut Cursor,
+    annotations: Vec<Annotation>,
+    start: usize,
+) -> PResult<AgentFieldDecl> {
+    expect_keyword(c, "field")
+        .map_err(|e| e.with_context("parsing `field` declaration"))?;
+    c.skip_ws();
+    let name = ident(c).map_err(|e| e.with_context("parsing field name"))?;
+    c.skip_ws();
+    expect_char(c, ':')
+        .map_err(|e| e.with_context("parsing field decl (expected `:` after name)"))?;
+    c.skip_ws();
+    let ty_name = ident(c).map_err(|e| e.with_context("parsing field type"))?;
+    c.skip_ws();
+    // Optional trailing semicolon for visual symmetry with `let`
+    // statements; not required.
+    if c.starts_with_char(';') {
+        c.bump(1);
+    }
+    Ok(AgentFieldDecl {
+        annotations,
+        name,
+        ty_name,
+        span: Span::new(start, c.pos),
+    })
 }
 
 // ---------------------------------------------------------------------------

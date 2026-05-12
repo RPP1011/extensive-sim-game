@@ -60,6 +60,13 @@ pub enum Decl {
     SpatialQuery(SpatialQueryDecl),
     Init(InitDecl),
     Debug(DebugDecl),
+    /// Top-level `field <name>: <type>` — declares a custom per-agent
+    /// SoA column shared across every entity rooted at `Agent`. See
+    /// [`AgentFieldDecl`] for the semantics; the resolver passes the
+    /// decl through to `dsl_compiler::custom_agent_fields::intern`
+    /// before lowering touches `self.<name>` reads or
+    /// `agents.set_<name>(...)` writes (Gap plague_city#P-A).
+    AgentField(AgentFieldDecl),
 }
 
 /// Per-fixture initial-state declaration. Plan E-A6 escape hatch: lets
@@ -129,6 +136,35 @@ pub enum DebugDepthLit {
     StageMemory,
     Kernel,
     DslMapped,
+}
+
+/// Top-level `field <name>: <type>` declaration — registers a custom
+/// per-agent SoA column (Gap plague_city#P-A). The declared column
+/// behaves identically to a built-in `AgentFieldId` variant for the
+/// duration of the compile: reads via `self.<name>` /
+/// `<binder>.<name>` lower to `agent_<name>[idx]`; writes via
+/// `agents.set_<name>(target, value)` lower to the standard setter
+/// path; the build helper auto-allocates `agent_<name>_buf` sized
+/// `agent_count * <elem_bytes>`.
+///
+/// Today's supported primitives mirror the q8-free arms of
+/// `AgentFieldTy`: `u32`, `f32`, `bool`. `i16` / `vec3` / `enum_u8`
+/// / option types are deferred — fixtures needing those should add
+/// the necessary `parse_field_ty` arm + sizing/init coverage in a
+/// follow-up. Mirrors the `init` block precedent: the decl is
+/// extracted by `dsl_compiler::build_helper` directly from the
+/// parsed Program; no Compilation IR slot.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct AgentFieldDecl {
+    pub annotations: Vec<Annotation>,
+    /// Bare snake_case column name (`infected`, `cult_loyalty`, …).
+    /// Validated against the closed built-in set + duplicate
+    /// `field` decls in the same Program by the resolver.
+    pub name: String,
+    /// `"u32"` / `"f32"` / `"bool"` — checked by the compiler-side
+    /// interner against the `AgentFieldTy` allowlist.
+    pub ty_name: String,
+    pub span: Span,
 }
 
 // ---------------------------------------------------------------------------

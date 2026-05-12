@@ -839,7 +839,7 @@ fn lower_expr_stmt(
 ) -> Result<CgStmtId, LoweringError> {
     if let IrExpr::NamespaceCall { ns: NamespaceId::Agents, method, args } = &e.kind {
         if let Some(field) = agents_setter_field(method) {
-            return lower_agents_setter(rule_id, *field, args, e.span, ctx);
+            return lower_agents_setter(rule_id, field, args, e.span, ctx);
         }
         // Wave 3 ToM Phase 3.7 — `agents.set_beliefs_<field>(observer,
         // subject, value)` setters lower as a discarded namespace call.
@@ -913,49 +913,56 @@ fn lower_belief_setter_stmt(
 /// the Wave 2 piece 4 buff multipliers (lifesteal + damage_taken_mult,
 /// each with its own expires-at-tick partner). Extend here when new
 /// fixtures need to write more agent fields.
-fn agents_setter_field(method: &str) -> Option<&'static AgentFieldId> {
-    match method {
-        "set_pos" => Some(&AgentFieldId::Pos),
-        "set_vel" => Some(&AgentFieldId::Vel),
-        "set_hp" => Some(&AgentFieldId::Hp),
-        "set_alive" => Some(&AgentFieldId::Alive),
-        "set_mana" => Some(&AgentFieldId::Mana),
-        "set_shield_hp" => Some(&AgentFieldId::ShieldHp),
+///
+/// **Custom-field fallback (Gap plague_city#P-A).** After the built-in
+/// match misses, this consults the process-local
+/// `custom_agent_fields` registry — `agents.set_<name>(target, value)`
+/// for a declared `field <name>: <ty>` resolves to a
+/// `AgentFieldId::Custom(...)` write through the same lowering path
+/// as built-in setters.
+fn agents_setter_field(method: &str) -> Option<AgentFieldId> {
+    let builtin = match method {
+        "set_pos" => Some(AgentFieldId::Pos),
+        "set_vel" => Some(AgentFieldId::Vel),
+        "set_hp" => Some(AgentFieldId::Hp),
+        "set_alive" => Some(AgentFieldId::Alive),
+        "set_mana" => Some(AgentFieldId::Mana),
+        "set_shield_hp" => Some(AgentFieldId::ShieldHp),
         // Pre-Wave-2 statuses (existed in AgentFieldId since the engine
         // baseline but never wired as setters until 2026-05-05 — needed
         // to enable per-fixture ApplyStun / ApplySlow chronicle handlers).
-        "set_stun_expires_at_tick" => Some(&AgentFieldId::StunExpiresAtTick),
-        "set_slow_expires_at_tick" => Some(&AgentFieldId::SlowExpiresAtTick),
-        "set_slow_factor_q8" => Some(&AgentFieldId::SlowFactorQ8),
+        "set_stun_expires_at_tick" => Some(AgentFieldId::StunExpiresAtTick),
+        "set_slow_expires_at_tick" => Some(AgentFieldId::SlowExpiresAtTick),
+        "set_slow_factor_q8" => Some(AgentFieldId::SlowFactorQ8),
         // Wave 2 piece 1 control statuses
-        "set_root_expires_at_tick" => Some(&AgentFieldId::RootExpiresAtTick),
-        "set_silence_expires_at_tick" => Some(&AgentFieldId::SilenceExpiresAtTick),
-        "set_fear_expires_at_tick" => Some(&AgentFieldId::FearExpiresAtTick),
-        "set_taunt_expires_at_tick" => Some(&AgentFieldId::TauntExpiresAtTick),
+        "set_root_expires_at_tick" => Some(AgentFieldId::RootExpiresAtTick),
+        "set_silence_expires_at_tick" => Some(AgentFieldId::SilenceExpiresAtTick),
+        "set_fear_expires_at_tick" => Some(AgentFieldId::FearExpiresAtTick),
+        "set_taunt_expires_at_tick" => Some(AgentFieldId::TauntExpiresAtTick),
         // Wave 2 piece 4 buff multipliers
-        "set_lifesteal_frac_q8" => Some(&AgentFieldId::LifestealFracQ8),
-        "set_lifesteal_expires_at_tick" => Some(&AgentFieldId::LifestealExpiresAtTick),
-        "set_damage_taken_mult_q8" => Some(&AgentFieldId::DamageTakenMultQ8),
-        "set_damage_taken_mult_expires_at_tick" => Some(&AgentFieldId::DamageTakenMultExpiresAtTick),
+        "set_lifesteal_frac_q8" => Some(AgentFieldId::LifestealFracQ8),
+        "set_lifesteal_expires_at_tick" => Some(AgentFieldId::LifestealExpiresAtTick),
+        "set_damage_taken_mult_q8" => Some(AgentFieldId::DamageTakenMultQ8),
+        "set_damage_taken_mult_expires_at_tick" => Some(AgentFieldId::DamageTakenMultExpiresAtTick),
         // Wave 3 ToM Phase 5 disguise SoA (per-agent). The
         // `ApplyDisguise` consumer writes both columns from the chronicle
         // event payload (`a` = caster, `t` from packed payload_a).
-        "set_disguise_expires_at_tick" => Some(&AgentFieldId::DisguiseExpiresAtTick),
-        "set_disguise_fake_type" => Some(&AgentFieldId::DisguiseFakeType),
+        "set_disguise_expires_at_tick" => Some(AgentFieldId::DisguiseExpiresAtTick),
+        "set_disguise_fake_type" => Some(AgentFieldId::DisguiseFakeType),
         // Plan G G2.7 — busy SoA writes for the cast-state lifecycle.
         // `set_busy_until_tick` is reused by Lift A (TravelTo) and
         // Lift B (cast_recipe); the other three were added 2026-05-09
         // for Plan G's deferred-cast path.
-        "set_busy_until_tick" => Some(&AgentFieldId::BusyUntilTick),
-        "set_busy_with_ability_id" => Some(&AgentFieldId::BusyWithAbilityId),
-        "set_busy_started_at_tick" => Some(&AgentFieldId::BusyStartedAtTick),
-        "set_busy_target_slot" => Some(&AgentFieldId::BusyTargetSlot),
+        "set_busy_until_tick" => Some(AgentFieldId::BusyUntilTick),
+        "set_busy_with_ability_id" => Some(AgentFieldId::BusyWithAbilityId),
+        "set_busy_started_at_tick" => Some(AgentFieldId::BusyStartedAtTick),
+        "set_busy_target_slot" => Some(AgentFieldId::BusyTargetSlot),
         // foraging_real fixture: per-ant `hunger` is repurposed as
         // an energy counter (decays each tick, reset on Eat). Used
         // by `EnergyDecay` (per_agent: agents.set_hunger(self,
         // hunger - decay_rate)) and ApplyEat (chronicle:
         // agents.set_hunger(t, hunger + gain)).
-        "set_hunger" => Some(&AgentFieldId::Hunger),
+        "set_hunger" => Some(AgentFieldId::Hunger),
         // pirate_fleet fixture: ownership-transfer primitive. Boarding
         // attempts flip a slot's `creature_type` from Navy to Pirate
         // (or vice versa) via a chronicle consumer that consumes a
@@ -965,9 +972,17 @@ fn agents_setter_field(method: &str) -> Option<&'static AgentFieldId> {
         // the same indexed-store path that drives the
         // `expires_at_tick` u32 columns. Closes Gap 1 of
         // `docs/architecture/gaps_pirate_fleet.md`.
-        "set_creature_type" => Some(&AgentFieldId::CreatureType),
+        "set_creature_type" => Some(AgentFieldId::CreatureType),
         _ => None,
+    };
+    if builtin.is_some() {
+        return builtin;
     }
+    // Custom-field fallback: any `set_<name>` whose `<name>` was
+    // interned via `custom_agent_fields::populate` resolves through
+    // `AgentFieldId::Custom(...)`.
+    let custom_name = method.strip_prefix("set_")?;
+    crate::custom_agent_fields::lookup_by_snake(custom_name).map(AgentFieldId::Custom)
 }
 
 /// Lower an `agents.set_<field>(<target>, <value>)` namespace call to

@@ -49,6 +49,11 @@ pub mod schema_hash;
 // Replaces ~110 LOC of identical pipeline boilerplate × 60 fixtures.
 pub mod build_helper;
 
+// Gap plague_city#P-A — custom per-agent SoA field registry. Lets
+// .sim files declare new `field <name>: <ty>` columns without
+// touching the closed `AgentFieldId` enum. See module docs.
+pub mod custom_agent_fields;
+
 // CPU reference for the WGSL apply_ability dispatcher's chronicle
 // output — establishes the contract that the GPU dispatcher's
 // chronicle records mirror, ahead of the runtime crate that #133

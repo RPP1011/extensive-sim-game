@@ -163,7 +163,16 @@ impl fmt::Display for AgentFieldTy {
 /// Each variant carries an `AgentFieldTy` payload via the
 /// [`AgentFieldId::ty`] method below — that method is the single
 /// source of truth for "which primitive does this field carry?"
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+///
+/// **Serde shape (Gap plague_city#P-A).** Hand-written
+/// `Serialize` / `Deserialize` impls below transcode every variant
+/// (including the new `Custom(_)`) as a single
+/// snake-case string — e.g. `"hp"`, `"infected"`. Deserialize
+/// first tries `from_snake_builtin` then falls back to the custom
+/// registry; deserializing a custom field that hasn't been
+/// `populate()`d in this process fails. JSON snapshots stay
+/// human-readable and round-trip exactly for built-in variants.
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord)]
 pub enum AgentFieldId {
     // --- Hot SoA: physical state, vitals, combat ---
     Pos,
@@ -301,6 +310,21 @@ pub enum AgentFieldId {
     /// When/if the wolf-sim runtime ever wants velocity, this is the
     /// canonical name.
     Vel,
+
+    // --- Gap plague_city#P-A — custom per-agent SoA columns ---
+    /// `.sim`-author-declared per-agent column. Wraps a
+    /// process-leaked descriptor (snake-case name + primitive type)
+    /// so `Copy + Eq + Hash + Ord` are preserved alongside the
+    /// built-in variants. Names + types are validated against the
+    /// built-in set at intern time
+    /// (`custom_agent_fields::populate`), so a `Custom` variant
+    /// always carries a name that is NOT one of the closed built-in
+    /// snake names. Reads via `self.<name>` and writes via
+    /// `agents.set_<name>(target, value)` route through the same
+    /// lowering paths as built-ins; the build_helper auto-allocates
+    /// `agent_<name>_buf`. See
+    /// `crates/dsl_compiler/src/custom_agent_fields.rs`.
+    Custom(crate::custom_agent_fields::CustomFieldId),
 }
 
 impl AgentFieldId {
@@ -353,6 +377,11 @@ impl AgentFieldId {
             SpawnTick => AgentFieldTy::U32,
             GridId => AgentFieldTy::U32,
             LocalPos | MoveTarget => AgentFieldTy::Vec3,
+
+            // Gap plague_city#P-A — custom column. The descriptor's
+            // type tag was validated against the supported allowlist
+            // by `custom_agent_fields::parse_field_ty` at intern time.
+            Custom(id) => id.ty(),
         }
     }
 
@@ -424,6 +453,10 @@ impl AgentFieldId {
             LocalPos => "local_pos",
             MoveTarget => "move_target",
             Vel => "vel",
+            // Gap plague_city#P-A — custom column name, interned as
+            // `&'static str` via `Box::leak` so this method can
+            // continue to return `&'static str` uniformly.
+            Custom(id) => id.name(),
         }
     }
 
@@ -523,7 +556,27 @@ impl AgentFieldId {
     /// variant lands; the
     /// `agent_field_id_from_snake_round_trips_every_variant` test
     /// guards round-trip exhaustively.
+    ///
+    /// **Custom-field fallback (Gap plague_city#P-A).** After the
+    /// built-in match misses, this consults the process-local
+    /// `custom_agent_fields` registry — any name that's been
+    /// `intern_field`'d (typically via `populate()` at build_helper
+    /// entry) resolves through `Custom(_)`. Call sites that
+    /// previously called `from_snake` continue to work without
+    /// modification; the built-in path stays the fast path.
     pub fn from_snake(s: &str) -> Option<Self> {
+        if let Some(b) = Self::from_snake_builtin(s) {
+            return Some(b);
+        }
+        crate::custom_agent_fields::lookup_by_snake(s).map(AgentFieldId::Custom)
+    }
+
+    /// Built-in-only inverse of [`AgentFieldId::snake`]. Skips the
+    /// custom-field registry — useful for `custom_agent_fields::
+    /// populate` itself (avoiding self-recursion at registration
+    /// time) and for collision-detection (a declared `field <name>`
+    /// MUST not match a built-in name; we check that explicitly).
+    pub fn from_snake_builtin(s: &str) -> Option<Self> {
         use AgentFieldId::*;
         Some(match s {
             "pos" => Pos,
@@ -592,6 +645,30 @@ impl AgentFieldId {
 impl fmt::Display for AgentFieldId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.snake())
+    }
+}
+
+// Hand-rolled serde for AgentFieldId — Gap plague_city#P-A. The
+// `Custom(&'static CustomFieldDesc)` payload can't derive serde
+// directly; transcoding every variant as its snake-case string is
+// stable, human-readable, and round-trips through the registry on
+// deserialize. Deserializing a custom name that hasn't been
+// `intern_field`'d in this process surfaces as a typed error
+// (mirrors the existing "unknown built-in" behaviour).
+impl Serialize for AgentFieldId {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.snake())
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentFieldId {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        AgentFieldId::from_snake(&s).ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "unknown AgentFieldId snake name `{s}` (not a built-in; not in custom-field registry)"
+            ))
+        })
     }
 }
 
