@@ -2808,6 +2808,33 @@ fn lower_fold_over_agents(
         },
     };
 
+    // Gap dungeon_horde#1: when the iter is a spatial namespace call,
+    // lower its first arg as the origin agent expression so the WGSL
+    // emit can substitute `agent_pos[<lowered>]` into the cell-window
+    // centre + auto-injected distance gate instead of hard-coding
+    // `agent_pos[agent_id]`. The lowering happens BEFORE pushing the
+    // binder onto the fold-binder slot below so the origin expression
+    // (which references the caller's scope, not the per-pair binder)
+    // resolves correctly — `spatial.<...>(self)` becomes `AgentSelfId`
+    // (WGSL `agent_id`); `spatial.<...>(s)` where `s` is event-bound
+    // becomes a `ReadLocal` for that binding's lowered local.
+    let spatial_origin_id = match (iter, &spatial_iter_shape) {
+        (Some(node), Some(_)) => {
+            if let IrExpr::NamespaceCall { args, .. } = &node.kind {
+                if args.is_empty() {
+                    return Err(LoweringError::UnsupportedAstNode {
+                        ast_label: "Fold/spatial.<...>() — missing origin arg",
+                        span,
+                    });
+                }
+                Some(lower_expr(&args[0].value, ctx)?)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+
     // Push the binder onto the fold-binder slot so body reads of
     // `<binder>` / `<binder>.<field>` resolve to per-pair candidate.
     let prev_binder = ctx.fold_binder_name.replace(binder.to_string());
@@ -2907,6 +2934,15 @@ fn lower_fold_over_agents(
     // ForEachNeighbor (bounded 27-cell walk); plain-`agents` folds
     // become ForEachAgent (unbounded N² walk).
     let stmt = if let Some(shape) = spatial_iter_shape {
+        // `spatial_origin_id` is `Some` because the spatial-iter branch
+        // above populates it whenever it returns `Some(shape)`. The
+        // defensive `unwrap_or` here is unreachable in well-formed
+        // input but lower-impact than a `.expect` panic — surfaces as
+        // a structural assertion that the two branches stay in sync.
+        let origin = spatial_origin_id.ok_or(LoweringError::UnsupportedAstNode {
+            ast_label: "Fold/spatial.<...> — origin lowering desynced from shape",
+            span,
+        })?;
         CgStmt::ForEachNeighbor {
             acc_local,
             acc_ty,
@@ -2918,6 +2954,7 @@ fn lower_fold_over_agents(
             // covers it); when the helper threads call-arg radii
             // through, this picks up the new value automatically.
             radius_cells: shape.radius_cells,
+            origin,
         }
     } else {
         CgStmt::ForEachAgent {

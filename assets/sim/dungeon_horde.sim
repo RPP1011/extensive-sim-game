@@ -20,11 +20,13 @@
 //     covering our 12-unit missing_ally_radius.
 //   * Three other scale-hotspot rules
 //     (SoundDetectFromDamage / BroadcastAlertOnAllyDeath /
-//     ScoutBroadcast) are STILL on `for_each_agent` because the
-//     spatial.nearby auto-injected gate references `agent_id` for
-//     the cell-window origin and `agent_id` is not bound in
-//     `@phase(post)` event-handler bodies — see Gap
-//     dungeon_horde#1 (the migration was attempted and reverted).
+//     ScoutBroadcast) ALSO use `spatial.nearby(<event-bound source>)`
+//     post Gap dungeon_horde#1 (commit threading the spatial iter's
+//     origin expression through to the WGSL emit so the gate prefix
+//     reads `agent_pos[<lowered origin>]` rather than the previously-
+//     hard-coded `agent_pos[agent_id]` — the latter was unbound in
+//     `@phase(post)` event-handler bodies). Each event-bound walk now
+//     visits ~50 candidates per cell window instead of all N=800.
 //
 // All other layers (verb cascade, belief view, chronicle consumers
 // for damage/heal/stun/stealth, exploration tracker) carry forward
@@ -788,20 +790,13 @@ physics ApplyHeal {
 }
 
 // SoundDetectFromDamage — when a Hero deals damage, every nearby
-// non-hero gains DETECTED belief for the attacker. Walks every agent
-// slot via `for_each_agent`.
+// non-hero gains DETECTED belief for the attacker.
 //
-// **Stage 3 note (Gap dungeon_horde#1)**: stage 3 attempted to
-// migrate this to `spatial.nearby(s)` — the codegen accepts the
-// shape but the auto-injected squared-distance gate emits
-// `agent_pos[agent_id]` for the cell-window origin, and `agent_id`
-// is not in scope inside a `@phase(post)` event-handler body
-// (only per-agent rules carry `agent_id` as the implicit loop
-// variable). Naga rejects with "no definition in scope for
-// identifier: `agent_id`". Reverted to `for_each_agent` until the
-// gate either uses the spatial-call's actual origin expression
-// (here `s`) or the lowering plumbs an alternative anchor binding
-// for post-phase consumers.
+// Migrated to `spatial.nearby(s)` post Gap dungeon_horde#1 (commit
+// fixing `agent_pos[agent_id]` → `agent_pos[<lowered origin>]` in
+// the auto-injected gate prefix). The walk visits the 27-cell
+// neighbourhood around the attacker's cell; the per-pair filter
+// narrows to alive non-hero agents within `attack_sound_radius`.
 @phase(post)
 physics SoundDetectFromDamage {
   on Damaged { source: s, target: _, amount: a } {
@@ -810,7 +805,7 @@ physics SoundDetectFromDamage {
       let src_type = agents.creature_type(s);
       // Only emit for hero-sourced damage (the stealth-break case).
       if (src_type == Hero) {
-        for_each_agent slot {
+        for slot in spatial.nearby(s) {
           let slot_alive = agents.alive(slot);
           let slot_type = agents.creature_type(slot);
           let slot_pos = agents.pos(slot);
@@ -830,12 +825,21 @@ physics SoundDetectFromDamage {
 
 // BroadcastAlertOnAllyDeath — every alive non-hero within
 // ally_death_radius of the dying ally gets alert += 2.
-// (Same Gap dungeon_horde#1 — stays on for_each_agent.)
+//
+// Migrated to `spatial.nearby(d)` post Gap dungeon_horde#1 (commit
+// fixing `agent_pos[agent_id]` → `agent_pos[<lowered origin>]` in
+// the auto-injected gate prefix). The walk visits the 27-cell
+// neighbourhood around the dying ally's cell and the per-pair
+// `length(delta) < ally_death_radius` filter narrows the cone — each
+// AllyDied event now does ~50 distance checks at horde scale instead
+// of N=800. The auto-injected squared-distance gate from Gap
+// dungeon_layout#1 keeps OOB-pool agents (boundary-cell-clamp pool)
+// out of the candidate set without a manual rewrite.
 @phase(post)
 physics BroadcastAlertOnAllyDeath {
   on AllyDied { dead: d, killer: _ } {
     let dead_pos = agents.pos(d);
-    for_each_agent slot {
+    for slot in spatial.nearby(d) {
       let slot_alive = agents.alive(slot);
       let slot_type = agents.creature_type(slot);
       let slot_pos = agents.pos(slot);
@@ -852,8 +856,11 @@ physics BroadcastAlertOnAllyDeath {
   }
 }
 
-// ScoutBroadcast — when a Scout ability lands. Walks every agent
-// (Gap dungeon_horde#1 — stays on for_each_agent).
+// ScoutBroadcast — when a Scout ability lands. Walks the 27-cell
+// neighbourhood around the casting Rogue, granting DETECTED beliefs
+// for every nearby non-hero (post Gap dungeon_horde#1 migration —
+// previously on `for_each_agent` because the auto-gate referenced
+// `agent_pos[agent_id]` which is unbound in @phase(post)).
 @phase(post)
 physics ScoutBroadcast {
   on EffectDamageApplied { actor: a, target: _, amount: amt } {
@@ -864,7 +871,7 @@ physics ScoutBroadcast {
       // Gate: only Rogue heroes broadcast — avoids accidental fires
       // from any other zero-damage chronicle row.
       if (src_type == Hero && src_role == config.dungeon.role_rogue) {
-        for_each_agent enemy_slot {
+        for enemy_slot in spatial.nearby(a) {
           let enemy_alive = agents.alive(enemy_slot);
           let enemy_type = agents.creature_type(enemy_slot);
           let enemy_pos = agents.pos(enemy_slot);

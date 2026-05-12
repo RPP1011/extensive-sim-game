@@ -354,6 +354,23 @@ pub enum CgStmt {
         init: CgExprId,
         projection: CgExprId,
         radius_cells: u32,
+        /// The origin agent's id expression, supplied as the first arg
+        /// to `spatial.<query>(<origin>, ...)`. Typed [`CgTy::AgentId`].
+        /// The WGSL emit reads `agent_pos[<lowered origin>]` to compute
+        /// the cell-window centre and the per-candidate distance gate.
+        ///
+        /// For `spatial.<query>(self)` in a per-agent (PerAgent /
+        /// PerEvent — i.e. dispatching-slot-bound) rule, this lowers to
+        /// [`crate::cg::expr::CgExpr::AgentSelfId`] → WGSL `agent_id`
+        /// (the implicit per-thread slot). For non-`self` origins (e.g.
+        /// `spatial.nearby(s)` where `s` is event-pattern bound), this
+        /// lowers to whatever expression the user supplied (a
+        /// `ReadLocal` for event-bound bindings, an `EventField` for
+        /// direct reads, etc.) — the WGSL emit substitutes the lowered
+        /// expression into `agent_pos[<expr>]`, sidestepping the prior
+        /// hard-coded `agent_pos[agent_id]` that broke in `@phase(post)`
+        /// chronicle consumers (Gap dungeon_horde#1).
+        origin: CgExprId,
     },
 
     /// **Spatial-grid-bounded body iteration** — same per-cell walk
@@ -393,6 +410,15 @@ pub enum CgStmt {
         binder: LocalId,
         body: CgStmtListId,
         radius_cells: u32,
+        /// The origin agent's id expression, supplied as the first arg
+        /// to `spatial.<query>(<origin>, ...)`. See
+        /// [`Self::ForEachNeighbor::origin`] for the full contract — the
+        /// body-form mirrors the fold-form here so the WGSL emit's
+        /// cell-window centre + auto-injected distance gate use the
+        /// caller's actual origin (`agent_id` for `self`, the bound
+        /// local name for an event-pattern binder, etc.) rather than
+        /// hard-coding `agent_pos[agent_id]`.
+        origin: CgExprId,
     },
 
     /// **Unbounded body iteration over every alive agent slot.**
@@ -582,22 +608,24 @@ impl fmt::Display for CgStmt {
                 init,
                 projection,
                 radius_cells,
+                origin,
             } => {
                 write!(
                     f,
-                    "for_each_neighbor(acc={}: {}, init=expr#{}, proj=expr#{}, r={})",
-                    acc_local, acc_ty, init.0, projection.0, radius_cells
+                    "for_each_neighbor(acc={}: {}, init=expr#{}, proj=expr#{}, r={}, origin=expr#{})",
+                    acc_local, acc_ty, init.0, projection.0, radius_cells, origin.0
                 )
             }
             CgStmt::ForEachNeighborBody {
                 binder,
                 body,
                 radius_cells,
+                origin,
             } => {
                 write!(
                     f,
-                    "for_each_neighbor_body(binder={}, body=stmts#{}, r={})",
-                    binder, body.0, radius_cells
+                    "for_each_neighbor_body(binder={}, body=stmts#{}, r={}, origin=expr#{})",
+                    binder, body.0, radius_cells, origin.0
                 )
             }
             CgStmt::ForEachAgentBody { binder, body } => {
@@ -988,7 +1016,7 @@ pub fn collect_stmt_dependencies(
             collect_expr_reads(*projection, exprs, reads);
         }
         CgStmt::ForEachNeighbor {
-            init, projection, ..
+            init, projection, origin, ..
         } => {
             // Same shape as ForEachAgent for expr reads, plus three
             // structural reads for the spatial bindings the WGSL
@@ -1004,6 +1032,14 @@ pub fn collect_stmt_dependencies(
             // get dispatched before it).
             collect_expr_reads(*init, exprs, reads);
             collect_expr_reads(*projection, exprs, reads);
+            // Gap dungeon_horde#1: walk the origin expression's reads so
+            // the BGL composer surfaces any AgentField / EventField /
+            // local reads the spatial origin references. For
+            // `spatial.<...>(self)` this is a no-op (`AgentSelfId` has
+            // no reads); for `spatial.<...>(s)` where `s` is event-
+            // bound, the bound local's reads (and the lowered Let's
+            // EventField read in particular) need to flow through.
+            collect_expr_reads(*origin, exprs, reads);
             reads.push(DataHandle::SpatialStorage {
                 kind: super::data_handle::SpatialStorageKind::GridCells,
             });
@@ -1014,25 +1050,24 @@ pub fn collect_stmt_dependencies(
                 kind: super::data_handle::SpatialStorageKind::GridStarts,
             });
             // The WGSL template (`emit_fused_for_each_neighbor` in
-            // emit/wgsl_body.rs) reads `agent_pos[agent_id]` to
+            // emit/wgsl_body.rs) reads `agent_pos[<origin>]` to
             // compute `_self_cell_f` (the per-thread cell coords) AND
             // — post Gap dungeon_layout#1 — reads both
-            // `agent_pos[agent_id]` and `agent_pos[per_pair_candidate]`
-            // for the auto-injected OOB-pool distance gate. Surface
-            // the implicit self.pos read here so the BGL composer
-            // binds `agent_pos` to the kernel regardless of whether
-            // the user's projection references position. Without this,
-            // a fold whose projection is e.g. a constant (`sum(other
-            // in spatial.nearby(self) where 1.0)`) emits naga-invalid
-            // WGSL that references an unbound `agent_pos` identifier
-            // — mirrors the same fix already in place for
-            // `ForEachNeighborBody` below.
+            // `agent_pos[<origin>]` and `agent_pos[per_pair_candidate]`
+            // for the auto-injected OOB-pool distance gate. The origin
+            // resolution per Gap dungeon_horde#1 is per-rule (`Self_`
+            // for `spatial.<...>(self)`, the bound-local-typed-as-
+            // AgentId target ref for non-self origins). Either way the
+            // emit reads agent_pos, so surface it as a Self_-targeted
+            // read here regardless of the origin shape — the BGL
+            // composer only cares about the column binding, not the
+            // per-row target.
             reads.push(DataHandle::AgentField {
                 field: super::data_handle::AgentFieldId::Pos,
                 target: super::data_handle::AgentRef::Self_,
             });
         }
-        CgStmt::ForEachNeighborBody { body, .. } => {
+        CgStmt::ForEachNeighborBody { body, origin, .. } => {
             // Body-form spatial walk. The body's own statements
             // contribute reads/writes via the recursive list walk
             // (e.g. an inner Emit's field-value reads + the host-
@@ -1042,6 +1077,9 @@ pub fn collect_stmt_dependencies(
             // the BGL composer + schedule synthesizer treat both
             // forms identically.
             collect_list_dependencies(*body, exprs, stmts, lists, reads, writes);
+            // Gap dungeon_horde#1: walk the origin expression's reads
+            // (see the ForEachNeighbor arm above for rationale).
+            collect_expr_reads(*origin, exprs, reads);
             reads.push(DataHandle::SpatialStorage {
                 kind: super::data_handle::SpatialStorageKind::GridCells,
             });

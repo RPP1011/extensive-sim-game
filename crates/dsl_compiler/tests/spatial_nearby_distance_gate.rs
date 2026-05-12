@@ -130,10 +130,26 @@ physics PingNeighbors {
     });
 
     // 1. The squared-distance compute is present (the gate's
-    //    centerpiece). `_gate_dxyz = agent_pos[per_pair_candidate] -
-    //    agent_pos[agent_id]` followed by `_gate_dist_sq = dot(...)`.
+    //    centerpiece). Post Gap dungeon_horde#1, the origin position is
+    //    bound once into `_gate_origin_pos` from the caller's spatial-
+    //    iter origin expression (here `self` → `agent_pos[agent_id]`),
+    //    and the per-candidate gate reads `_gate_origin_pos` directly.
+    //    The pin asserts both halves: the origin let-binding is
+    //    populated from `agent_pos[agent_id]` (preserving the legacy
+    //    `self`-shaped emit), and the gate delta references
+    //    `_gate_origin_pos`.
     assert!(
-        body.contains("_gate_dxyz = agent_pos[per_pair_candidate] - agent_pos[agent_id]"),
+        body.contains("_gate_origin_id: u32 = agent_id"),
+        "expected `_gate_origin_id: u32 = agent_id` origin binding for \
+         `self`-shaped spatial iter; body:\n{body}",
+    );
+    assert!(
+        body.contains("_gate_origin_pos: vec3<f32> = agent_pos[_gate_origin_id]"),
+        "expected `_gate_origin_pos` binding from `agent_pos[_gate_origin_id]`; \
+         body:\n{body}",
+    );
+    assert!(
+        body.contains("_gate_dxyz = agent_pos[per_pair_candidate] - _gate_origin_pos"),
         "expected `_gate_dxyz` delta compute inside the per-candidate \
          spatial walk body; body:\n{body}",
     );
@@ -215,10 +231,17 @@ physics CountNeighbors {
         panic!("expected a CountNeighbors kernel; got: {names:?}");
     });
 
-    // Same three structural assertions as the body-form path, on the
-    // emit-fused fold walk.
+    // Same structural assertions as the body-form path, on the
+    // emit-fused fold walk. The origin binding shape is identical
+    // (post Gap dungeon_horde#1) — `agent_id` for the `self`-shaped
+    // iter.
     assert!(
-        body.contains("_gate_dxyz = agent_pos[per_pair_candidate] - agent_pos[agent_id]"),
+        body.contains("_gate_origin_id: u32 = agent_id"),
+        "expected `_gate_origin_id: u32 = agent_id` in fused fold walk; \
+         body:\n{body}",
+    );
+    assert!(
+        body.contains("_gate_dxyz = agent_pos[per_pair_candidate] - _gate_origin_pos"),
         "expected `_gate_dxyz` delta compute in fused fold walk; body:\n{body}",
     );
     assert!(

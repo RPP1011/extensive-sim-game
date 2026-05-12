@@ -1144,6 +1144,18 @@ fn lower_for_spatial_body(
             span,
         })?;
 
+    // Gap dungeon_horde#1: extract the origin agent expression from the
+    // spatial iter's first arg. `spatial.<query>(<origin>, ...)` —
+    // <origin> is typed AgentId, lowered through the standard expr
+    // path. For `spatial.<...>(self)` this is `AgentSelfId` (WGSL
+    // `agent_id`); for `spatial.<...>(s)` where `s` is event-pattern
+    // bound, it's `ReadLocal { local, ty: AgentId }` (WGSL `local_<N>`).
+    // The WGSL emit substitutes `agent_pos[<lowered>]` into the cell-
+    // window centre + distance gate, replacing the previously hard-
+    // coded `agent_pos[agent_id]` that broke in `@phase(post)` event
+    // handlers where `agent_id` isn't bound.
+    let origin_id = lower_spatial_iter_origin(iter, span, ctx)?;
+
     // Register the binder in `ctx.local_ids` (so any future read-side
     // resolution can find it via the standard let-bound path) and
     // record its type as AgentId. Both registries are scoped to the
@@ -1233,8 +1245,65 @@ fn lower_for_spatial_body(
         binder: binder_local,
         body: inner_list_id,
         radius_cells: shape.radius_cells,
+        origin: origin_id,
     };
     push_stmt(stmt, span, ctx)
+}
+
+/// Lower the first arg of a `spatial.<query>(<origin>, ...)` iter
+/// expression to a [`CgExprId`] typed [`crate::cg::expr::CgTy::AgentId`].
+///
+/// Gap dungeon_horde#1: previously the WGSL emit hard-coded
+/// `agent_pos[agent_id]` for the cell-window centre + auto-injected
+/// distance gate, which broke in `@phase(post)` chronicle-event-handler
+/// bodies where `agent_id` is not bound. The fix is to lower the user-
+/// supplied origin (the spatial iter's first arg) and emit
+/// `agent_pos[<lowered>]` instead. For `spatial.<...>(self)` in per-
+/// agent rules this lowers to `AgentSelfId` (WGSL `agent_id`,
+/// identical to the legacy emit); for `spatial.<...>(<event-bound
+/// local>)` in post-phase rules it lowers to the bound local's
+/// `ReadLocal` (WGSL `local_<N>`), sidestepping the bug.
+///
+/// # Defensive parity with `try_recognise_spatial_iter`
+///
+/// This helper expects the caller has already validated the iter shape
+/// via [`super::spatial::try_recognise_spatial_iter`] / its sibling
+/// [`super::spatial::lower_spatial_namespace_call`] (which guarantees
+/// `args.len() >= 1` for `spatial.<...>` and `args.len() == 2` for
+/// the legacy `query.nearby_agents(<pos>, <radius>)` shape — though no
+/// fixture today uses the legacy shape outside masks). If the iter is
+/// somehow not a recognised spatial namespace call when this helper is
+/// reached, it surfaces as a defensive
+/// [`LoweringError::UnsupportedPhysicsStmt`] / equivalent — the
+/// real-world caller in `lower_for_spatial_body` recognises the
+/// shape first, so this branch is unreachable in well-formed input
+/// but defended for robustness.
+fn lower_spatial_iter_origin(
+    iter: &dsl_ast::ir::IrExprNode,
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<crate::cg::data_handle::CgExprId, LoweringError> {
+    use dsl_ast::ir::{IrExpr, NamespaceId};
+    match &iter.kind {
+        IrExpr::NamespaceCall { ns, args, .. }
+            if matches!(ns, NamespaceId::Spatial | NamespaceId::Query) =>
+        {
+            if args.is_empty() {
+                // Defended-against: try_recognise_spatial_iter already
+                // rejects zero-arg spatial calls. If we get here the
+                // upstream validation has drifted.
+                return Err(LoweringError::UnsupportedAstNode {
+                    ast_label: "spatial.<...>() — missing origin arg",
+                    span,
+                });
+            }
+            super::expr::lower_expr(&args[0].value, ctx)
+        }
+        _ => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "spatial iter — not a NamespaceCall",
+            span,
+        }),
+    }
 }
 
 /// Lower an `IrStmt::ForEachAgent { binder, body, .. }`

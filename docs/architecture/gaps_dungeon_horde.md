@@ -49,9 +49,16 @@ post-phase consumers (linear in N per event, but events are sparse).
 
 ### Gap dungeon_horde#1 — `spatial.nearby(<expr>)` references unbound `agent_id` in `@phase(post)` bodies
 
-**Status:** worked around in-fixture by leaving three post-phase rules
-on `for_each_agent`. Migration was attempted, codegen accepted the
-input, runtime crashed at WGSL parse time.
+**Status:** CLOSED 2026-05-12. The WGSL gate-emit now substitutes the
+caller's actual origin expression into the cell-window centre +
+auto-injected distance gate (`agent_pos[<lowered origin>]` rather
+than the previously hard-coded `agent_pos[agent_id]`), and the three
+affected rules in this fixture have been migrated from
+`for_each_agent` to `for slot in spatial.nearby(<event-bound source>)`.
+See `crates/dsl_compiler/tests/spatial_nearby_in_post_phase.rs` for
+the regression pin and `assets/sim/dungeon_horde.sim`'s
+`SoundDetectFromDamage` / `BroadcastAlertOnAllyDeath` /
+`ScoutBroadcast` for the migrated-fixture shape.
 
 **Affected rules** (would have benefited from spatial-grid migration):
   - `SoundDetectFromDamage`  — fires on hero-sourced `Damaged`; walks all N
@@ -89,31 +96,29 @@ input, runtime crashed at WGSL parse time.
      identity is event-field-bound — `s` / `d` / `a` in the three
      affected rules).
 
-**Fix surface (engine-side, deferred):**
+**Fix shape (landed):** `CgStmt::ForEachNeighbor` and
+`CgStmt::ForEachNeighborBody` carry an `origin: CgExprId` field,
+populated by the lowerer from the spatial iter's first arg
+(`spatial.<query>(<origin>, ...)`). The WGSL emit reads
+`agent_pos[<lowered origin>]` for the cell-window centre + binds it
+to a local `_gate_origin_pos` reused by the per-candidate distance
+gate. For `spatial.<...>(self)` the origin lowers to
+`CgExpr::AgentSelfId` (WGSL `agent_id`) — preserving the legacy
+emit byte-for-byte; for non-self origins (e.g. an event-pattern
+binder `s` that lowers to a `ReadLocal`) the gate references the
+bound local directly.
 
-  The spatial walk's gate-emit needs to use the *actual* origin
-  expression supplied to `spatial.nearby(<expr>)` rather than an
-  unconditional `agent_pos[agent_id]`:
+The fold-fusion partition keys on `(radius_cells, lowered origin
+WGSL)` so two folds sharing the same origin still fuse, and folds
+with distinct origins emit separately.
 
-  - `crates/dsl_compiler/src/cg/lower/spatial.rs` plumbs the spatial
-    iter call's first arg into the iter shape; today it appears to be
-    discarded for the gate-prefix emit.
-  - `crates/dsl_compiler/src/cg/emit/wgsl_body.rs` emits the gate
-    prefix (the `_self_cell_f = (agent_pos[agent_id] + ...)` block).
-    Either:
-    (a) read the spatial iter's bound origin from the IR and substitute
-        it into the gate prefix, OR
-    (b) bind a local `let agent_id = <origin_expr>;` immediately above
-        the gate prefix when the surrounding rule is `@phase(post)`.
-  - Verification: re-attempt the migration in this fixture; expect
-    36 kernels emit + green pin run (with the same asserts).
-
-**Workaround impact:** at N=800, each Damaged/AllyDied/EffectDamageApplied
-event triggers a full-population O(N) walk. Profiling at this scale
-showed the run completes in 4 seconds (release), so the for_each_agent
-fallback is acceptable for stage 3. At N≥10k the cost scales linearly
-with population × event count — the gap should close before any
-horde-scale fixture beyond stage 3 lands.
+**Post-fix impact:** at N=800 each event still walks ~50 candidates
+per cell window instead of all N=800 — a ~16× per-event reduction
+matching `MissingAllySuspicion`'s post-migration shape. The pin
+test's wall-clock (run in ~4-7s with the previous workaround)
+trended slightly faster post-migration but the variance dominates;
+the win is asymptotic, visible at the next horde-scale fixture
+beyond N=1000.
 
 ## Architectural notes
 

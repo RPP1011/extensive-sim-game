@@ -1651,9 +1651,6 @@ impl CgProgramBuilder {
             }
             CgStmt::ForEachAgent {
                 init, projection, ..
-            }
-            | CgStmt::ForEachNeighbor {
-                init, projection, ..
             } => {
                 // Both child expression ids (the accumulator's initial
                 // value and the per-candidate projection added inside
@@ -1663,13 +1660,29 @@ impl CgProgramBuilder {
                 self.check_expr_id(*init)?;
                 self.check_expr_id(*projection)
             }
-            CgStmt::ForEachNeighborBody { body, .. } => {
+            CgStmt::ForEachNeighbor {
+                init, projection, origin, ..
+            } => {
+                // Same shape as ForEachAgent for init/projection plus
+                // the Gap-dungeon_horde#1 origin expression (must
+                // already exist in the arena before the program is
+                // well-formed; the emit reads it for the cell-window
+                // centre + distance gate).
+                self.check_expr_id(*init)?;
+                self.check_expr_id(*projection)?;
+                self.check_expr_id(*origin)
+            }
+            CgStmt::ForEachNeighborBody { body, origin, .. } => {
                 // The nested body stmt list must already exist; its
                 // children (statements + their expression ids) are
                 // validated when each was added. The `binder` LocalId
                 // is arena-independent and `radius_cells` is a
-                // primitive payload.
-                self.check_list_id(*body)
+                // primitive payload. The `origin` expression (Gap
+                // dungeon_horde#1) must exist in the arena — the WGSL
+                // emit reads it for the cell-window centre + distance
+                // gate.
+                self.check_list_id(*body)?;
+                self.check_expr_id(*origin)
             }
             CgStmt::ForEachAgentBody { body, .. } => {
                 // Same shape as `ForEachNeighborBody` for arena

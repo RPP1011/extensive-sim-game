@@ -2509,7 +2509,8 @@ fn lower_cg_stmt_body_to_wgsl(
             binder: _,
             body,
             radius_cells,
-        } => emit_for_each_neighbor_body(*body, *radius_cells, ctx),
+            origin,
+        } => emit_for_each_neighbor_body(*body, *radius_cells, *origin, ctx),
         CgStmt::ForEachAgentBody { binder: _, body } => {
             emit_for_each_agent_body(*body, ctx)
         }
@@ -5733,7 +5734,17 @@ pub fn lower_cg_stmt_list_to_wgsl(
     // (the loop bounds differ), so we partition by radius too.
     // Today every spatial fold uses `radius_cells = 1`, so the
     // partition is single-element in practice.
-    let mut hoistable: std::collections::BTreeMap<u32, Vec<&CgStmt>> =
+    // Partition key: `(radius_cells, lowered origin WGSL)`. Gap
+    // dungeon_horde#1 widened the fused-emit precondition from "same
+    // radius" to "same radius AND same origin expression" — the gate
+    // prefix references one origin, so fusing folds with different
+    // origins would silently use whichever origin landed first. The
+    // lowered WGSL is the structural canonical form here: two distinct
+    // `CgExprId`s that both render `agent_id` (e.g. two independent
+    // `CgExpr::AgentSelfId` allocations from sibling fold calls) hash
+    // to the same key and fuse correctly; an `AgentSelfId` vs. a
+    // `ReadLocal` would hash differently and stay split.
+    let mut hoistable: std::collections::BTreeMap<(u32, String), Vec<&CgStmt>> =
         std::collections::BTreeMap::new();
     let mut residual: Vec<usize> = Vec::with_capacity(list.stmts.len());
     for (idx, stmt_id) in list.stmts.iter().enumerate() {
@@ -5747,13 +5758,15 @@ pub fn lower_cg_stmt_list_to_wgsl(
             radius_cells,
             init,
             projection,
+            origin,
             ..
         } = stmt_node
         {
             if expr_is_pure_for_hoisting(*init, ctx)
                 && expr_is_pure_for_hoisting(*projection, ctx)
             {
-                hoistable.entry(*radius_cells).or_default().push(stmt_node);
+                let origin_wgsl = lower_cg_expr_to_wgsl(*origin, ctx)?;
+                hoistable.entry((*radius_cells, origin_wgsl)).or_default().push(stmt_node);
                 continue;
             }
         }
@@ -5761,9 +5774,10 @@ pub fn lower_cg_stmt_list_to_wgsl(
     }
 
     let mut parts: Vec<String> = Vec::new();
-    // Emit the fused walks first, partitioned by radius for
-    // deterministic output (BTreeMap iteration is sorted).
-    for (_radius, folds) in &hoistable {
+    // Emit the fused walks first, partitioned by (radius, origin) for
+    // deterministic output (BTreeMap iteration is sorted lexicographic
+    // on the tuple — radius first, then origin WGSL string).
+    for (_key, folds) in &hoistable {
         parts.push(emit_fused_for_each_neighbor(folds, ctx)?);
     }
     // f32 RMW CAS-loop pre-pass: when the active kernel upgraded an
@@ -6257,6 +6271,16 @@ fn emit_fused_for_each_neighbor(
         CgStmt::ForEachNeighbor { radius_cells, .. } => *radius_cells as i32,
         _ => unreachable!("caller restricts to ForEachNeighbor"),
     };
+    // Gap dungeon_horde#1: the fused-emit shape requires every fold in
+    // the group to share the same lowered origin expression — the gate
+    // prefix can reference only one origin. The hoister at the call
+    // site keys its partition by `(radius, lowered origin WGSL)` so
+    // this invariant holds for every group it produces. We pick the
+    // first fold's origin and trust the hoister's grouping.
+    let origin = match folds[0] {
+        CgStmt::ForEachNeighbor { origin, .. } => *origin,
+        _ => unreachable!("caller restricts to ForEachNeighbor"),
+    };
 
     // Are we emitting inside a tiled-MoveBoid kernel
     // (DispatchShape::PerCell)? If so, the surrounding kernel
@@ -6378,9 +6402,14 @@ fn emit_fused_for_each_neighbor(
         // any in-window candidate.
         let r_plus_one = (radius as u32 + 1) as u32;
         let r_plus_one_sq = r_plus_one * r_plus_one;
+        // Gap dungeon_horde#1: lower the shared origin once. See the
+        // body-form's `emit_for_each_neighbor_body` for the contract.
+        let origin_wgsl = lower_cg_expr_to_wgsl(origin, ctx)?;
         let body = format!(
             "{head}{{\n\
-             \x20   let _self_cell_f = (agent_pos[agent_id] + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
+             \x20   let _gate_origin_id: u32 = {origin_wgsl};\n\
+             \x20   let _gate_origin_pos: vec3<f32> = agent_pos[_gate_origin_id];\n\
+             \x20   let _self_cell_f = (_gate_origin_pos + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
              \x20   let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
              \x20   let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
              \x20   let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
@@ -6394,7 +6423,7 @@ fn emit_fused_for_each_neighbor(
              \x20               let _end = spatial_grid_starts[_cell + 1u];\n\
              \x20               for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {{\n\
              \x20                   let per_pair_candidate = spatial_grid_cells[_i];\n\
-             \x20                   let _gate_dxyz = agent_pos[per_pair_candidate] - agent_pos[agent_id];\n\
+             \x20                   let _gate_dxyz = agent_pos[per_pair_candidate] - _gate_origin_pos;\n\
              \x20                   let _gate_dist_sq = dot(_gate_dxyz, _gate_dxyz);\n\
              \x20                   if (_gate_dist_sq > _gate_radius_sq) {{ continue; }}\n\
              {updates}\
@@ -6406,6 +6435,7 @@ fn emit_fused_for_each_neighbor(
             r = radius,
             r_plus_one_sq = r_plus_one_sq,
             head = head,
+            origin_wgsl = origin_wgsl,
             updates = updates,
         );
         Ok(body)
@@ -6476,10 +6506,19 @@ fn emit_for_each_agent_body(
 fn emit_for_each_neighbor_body(
     body_list: crate::cg::stmt::CgStmtListId,
     radius_cells: u32,
+    origin: CgExprId,
     ctx: &EmitCtx,
 ) -> Result<String, EmitError> {
     let body_wgsl = lower_cg_stmt_list_to_wgsl(body_list, ctx)?;
     let r = radius_cells as i32;
+    // Gap dungeon_horde#1: lower the caller-supplied origin expression
+    // to WGSL. For `spatial.<...>(self)` this is `agent_id`, matching
+    // the pre-fix hard-coded reference exactly; for non-self origins
+    // (e.g. `spatial.<...>(s)` where `s` is event-pattern bound) it's
+    // the let-bound local's name. The `_gate_origin_id` variable below
+    // binds the lowered value once so the gate prefix can reuse it
+    // without re-lowering.
+    let origin_wgsl = lower_cg_expr_to_wgsl(origin, ctx)?;
     // Indent each line of the body so it nests cleanly inside the
     // 4-deep loop chain (3 cell-axis loops + 1 candidate loop). Six
     // levels of 4-space indent → 24 spaces.
@@ -6511,7 +6550,9 @@ fn emit_for_each_neighbor_body(
     let r_plus_one_sq = r_plus_one * r_plus_one;
     let out = format!(
         "{{\n\
-         \x20   let _self_cell_f = (agent_pos[agent_id] + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
+         \x20   let _gate_origin_id: u32 = {origin_wgsl};\n\
+         \x20   let _gate_origin_pos: vec3<f32> = agent_pos[_gate_origin_id];\n\
+         \x20   let _self_cell_f = (_gate_origin_pos + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
          \x20   let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
          \x20   let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
          \x20   let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
@@ -6525,7 +6566,7 @@ fn emit_for_each_neighbor_body(
          \x20               let _end = spatial_grid_starts[_cell + 1u];\n\
          \x20               for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {{\n\
          \x20                   let per_pair_candidate = spatial_grid_cells[_i];\n\
-         \x20                   let _gate_dxyz = agent_pos[per_pair_candidate] - agent_pos[agent_id];\n\
+         \x20                   let _gate_dxyz = agent_pos[per_pair_candidate] - _gate_origin_pos;\n\
          \x20                   let _gate_dist_sq = dot(_gate_dxyz, _gate_dxyz);\n\
          \x20                   if (_gate_dist_sq > _gate_radius_sq) {{ continue; }}\n\
          {indented_body}\n\
@@ -6536,6 +6577,7 @@ fn emit_for_each_neighbor_body(
          }}",
         r = r,
         r_plus_one_sq = r_plus_one_sq,
+        origin_wgsl = origin_wgsl,
         indented_body = indented_body,
     );
     Ok(out)
@@ -8353,12 +8395,17 @@ mod tests {
         let mut prog = empty_prog();
         // Empty inner body; the test focuses on the scaffold.
         let inner_list = push_list(&mut prog, CgStmtList::new(vec![]));
+        // Origin = AgentSelfId (lowers to WGSL `agent_id`), matching the
+        // legacy `spatial.<...>(self)` shape — exercises backward-compat
+        // emit after Gap dungeon_horde#1.
+        let origin = push_expr(&mut prog, CgExpr::AgentSelfId);
         let body_stmt = push_stmt(
             &mut prog,
             CgStmt::ForEachNeighborBody {
                 binder: LocalId(7),
                 body: inner_list,
                 radius_cells: 1,
+                origin,
             },
         );
         let ctx = EmitCtx::structural(&prog);
