@@ -2740,11 +2740,40 @@ fn duel_25v25_compile_gate() {
     );
 
     // ApplyDamage must write agent_hp + agent_alive (same shape as
-    // duel_1v1, post-Bool-LHS-rewrite).
-    let apply_body = kernel_body_containing(&art, "ApplyDamage")
+    // duel_1v1, post-Bool-LHS-rewrite). The rule may host as its own
+    // kernel (`physics_ApplyDamage.wgsl`) or fuse with sibling
+    // chronicle consumers that share the PerEvent dispatch shape
+    // (e.g. `physics_ApplyDamage_and_ApplyStunFromChronicle_...`).
+    // The "ApplyDamageFromChronicle" rule re-emits Damaged events
+    // and does NOT touch agent_hp; we want the rule that DOES, which
+    // emits the `ApplyDamage` token bare (not preceded by "From"
+    // suffix joinery). Match the "ApplyDamage" substring at a word
+    // boundary that isn't immediately followed by "FromChronicle".
+    let apply_body = art
+        .wgsl_files
+        .iter()
+        .find(|(name, _)| {
+            // Token-boundary check: look for "ApplyDamage" not followed
+            // by "FromChronicle". The fused-kernel name shape is
+            // `physics_<rule>_and_<rule>_..._and_<rule>` so we scan for
+            // any occurrence of "ApplyDamage" that's followed by either
+            // end-of-string, ".wgsl", or "_and_".
+            let mut idx = 0;
+            while let Some(pos) = name[idx..].find("ApplyDamage") {
+                let abs = idx + pos;
+                let after = &name[abs + "ApplyDamage".len()..];
+                if !after.starts_with("FromChronicle") {
+                    return true;
+                }
+                idx = abs + "ApplyDamage".len();
+            }
+            false
+        })
+        .map(|(_, body)| body.as_str())
         .unwrap_or_else(|| {
             panic!(
-                "no ApplyDamage kernel emitted; available: {:?}",
+                "no kernel hosting bare `ApplyDamage` rule (not the \
+                 ApplyDamageFromChronicle re-emitter) emitted; available: {:?}",
                 art.kernel_index
             )
         });

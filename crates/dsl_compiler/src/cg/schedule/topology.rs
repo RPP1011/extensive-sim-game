@@ -259,6 +259,23 @@ pub fn dependency_graph(prog: &CgProgram) -> DepGraph {
     // pos AND uses the spatial grid forms a 2-op cycle in the dep
     // graph; topo falls back to source order and fusion misorders
     // BuildHash relative to its consumers.
+    //
+    // Edges FROM `Plumbing { kind: UnpackAgents }` are similarly
+    // skipped. UnpackAgents writes the entire agent SoA at the END of
+    // each tick (re-hydrating from the snapshot's packed buffer), but
+    // user ops next tick read those writes — a cross-tick dependency.
+    // Treating it as same-tick would form a `user_op → PackAgents →
+    // UnpackAgents → user_op` cycle through every `agent.self.<field>`
+    // (Pack reads what user ops wrote; Unpack writes back the same
+    // fields user ops read). With the cycle present, `topological_sort`
+    // falls back to source order and fusion places the spatial-build
+    // phases AFTER their PerAgent consumer kernels (because the
+    // spatial-build ops are synthesised after user ops and therefore
+    // have higher OpIds), which silently no-ops every
+    // `for x in spatial.nearby(self) { ... }` walk on the first tick.
+    // Skipping outgoing edges from UnpackAgents breaks the cycle
+    // without affecting the remaining legitimate edges
+    // (`user_op → PackAgents`, `PackAgents → UnpackAgents`).
     for (op_index, op) in prog.ops.iter().enumerate() {
         let consumer = OpId(op_index as u32);
         let consumer_is_spatial_build = matches!(
@@ -274,6 +291,16 @@ pub fn dependency_graph(prog: &CgProgram) -> DepGraph {
                     }
                     if consumer_is_spatial_build {
                         // Cross-tick read (see comment above).
+                        continue;
+                    }
+                    let producer_is_unpack_agents = matches!(
+                        prog.ops.get(producer.0 as usize).map(|p| &p.kind),
+                        Some(crate::cg::op::ComputeOpKind::Plumbing {
+                            kind: crate::cg::op::PlumbingKind::UnpackAgents,
+                        })
+                    );
+                    if producer_is_unpack_agents {
+                        // Cross-tick write (see comment above).
                         continue;
                     }
                     edges.entry(producer).or_default().insert(consumer);
@@ -382,6 +409,126 @@ pub fn topological_sort(graph: &DepGraph) -> Result<Vec<OpId>, CycleError> {
         sccs.sort();
         Err(CycleError { cycles: sccs })
     }
+}
+
+/// Best-effort variant of [`topological_sort`]. Always returns an order
+/// of length `graph.op_count`; reports any cycles encountered as a
+/// secondary signal.
+///
+/// Algorithm: Kahn's with the same deterministic OpId tie-break as
+/// [`topological_sort`]. When the queue empties before all ops are
+/// emitted, force the smallest-OpId remaining op (in source order)
+/// into the order — this breaks cycles by preferring the user's source
+/// order within each SCC, then continues Kahn's normally. Iterates
+/// until every op is emitted.
+///
+/// **Why fusion needs this.** [`topological_sort`] returns `Err` on any
+/// cycle, even small ones (e.g. two adjacent PerAgent rules whose
+/// write/read sets cross — `LifecycleAge` writes hunger, `Reaper`
+/// writes alive; each reads the other's write target). Fusion's
+/// previous fallback was *full* source order — discarding every edge,
+/// including the well-formed `SpatialBuildHashScatter → user_op` edge
+/// the ordering depends on. Best-effort preserves all edges that don't
+/// participate in the cycle and only forces source order at the SCC
+/// boundary.
+///
+/// Returns `(order, cycles)`. `cycles` is `Some` when at least one
+/// non-trivial SCC was found; the caller can surface a diagnostic
+/// without re-running Tarjan's.
+pub fn topological_sort_best_effort(graph: &DepGraph) -> (Vec<OpId>, Option<CycleError>) {
+    let n = graph.op_count;
+
+    let mut in_degree: Vec<u32> = vec![0; n];
+    for succs in graph.edges.values() {
+        for s in succs {
+            let idx = s.0 as usize;
+            if idx < n {
+                in_degree[idx] += 1;
+            }
+        }
+    }
+
+    let mut queue: BinaryHeap<Reverse<OpId>> = BinaryHeap::new();
+    let mut emitted: Vec<bool> = vec![false; n];
+    for i in 0..n {
+        if in_degree[i] == 0 {
+            queue.push(Reverse(OpId(i as u32)));
+        }
+    }
+
+    let mut order: Vec<OpId> = Vec::with_capacity(n);
+    let mut cycles_observed = false;
+
+    while order.len() < n {
+        // Drain the Kahn's-ready queue first.
+        while let Some(Reverse(op)) = queue.pop() {
+            if emitted[op.0 as usize] {
+                // The forced-emit branch (below) may have already
+                // popped this op out of the residual graph; skip
+                // duplicates so the final order has length == n.
+                continue;
+            }
+            emitted[op.0 as usize] = true;
+            order.push(op);
+            if let Some(succs) = graph.edges.get(&op) {
+                for &succ in succs {
+                    let idx = succ.0 as usize;
+                    if idx < n && !emitted[idx] {
+                        in_degree[idx] -= 1;
+                        if in_degree[idx] == 0 {
+                            queue.push(Reverse(succ));
+                        }
+                    }
+                }
+            }
+        }
+
+        if order.len() == n {
+            break;
+        }
+
+        // No op has in_degree == 0 but ops remain → cycle. Force the
+        // smallest-OpId not-yet-emitted op into the order (preserves
+        // the user's source order within the SCC) and continue
+        // Kahn's. The forced op's outgoing edges drop their target
+        // in-degrees just like a normal pop.
+        cycles_observed = true;
+        let forced = (0..n)
+            .find(|&i| !emitted[i])
+            .expect("len < n implies at least one un-emitted op");
+        let forced_op = OpId(forced as u32);
+        emitted[forced] = true;
+        order.push(forced_op);
+        if let Some(succs) = graph.edges.get(&forced_op) {
+            for &succ in succs {
+                let idx = succ.0 as usize;
+                if idx < n && !emitted[idx] {
+                    in_degree[idx] = in_degree[idx].saturating_sub(1);
+                    if in_degree[idx] == 0 {
+                        queue.push(Reverse(succ));
+                    }
+                }
+            }
+        }
+    }
+
+    let cycles = if cycles_observed {
+        let mut sccs = find_cycles(graph);
+        sccs.retain(|s| s.len() > 1);
+        for s in &mut sccs {
+            s.sort_by_key(|o| o.0);
+        }
+        sccs.sort();
+        if sccs.is_empty() {
+            None
+        } else {
+            Some(CycleError { cycles: sccs })
+        }
+    } else {
+        None
+    };
+
+    (order, cycles)
 }
 
 // ---------------------------------------------------------------------------
@@ -820,5 +967,93 @@ mod tests {
         assert!(rendered.contains("op#0 -> op#1"));
         assert!(rendered.contains("agent.self.hp"));
         assert!(rendered.contains("op_count: 2"));
+    }
+
+    // --- best_effort topo sort -----------------------------------------
+
+    #[test]
+    fn best_effort_topo_matches_strict_topo_on_acyclic_graph() {
+        // Diamond fixture from `diamond_dependency_topologically_orders_root_before_sinks`.
+        // Best-effort must agree with the strict variant when no cycle exists,
+        // and report `None` for cycles.
+        let (mut prog, ids) = program_with_blank_ops(4);
+        prog.ops[ids[0].0 as usize].record_write(hp_handle());
+        prog.ops[ids[1].0 as usize].record_read(hp_handle());
+        prog.ops[ids[1].0 as usize].record_write(shield_handle());
+        prog.ops[ids[2].0 as usize].record_read(hp_handle());
+        prog.ops[ids[2].0 as usize].record_write(mana_handle());
+        prog.ops[ids[3].0 as usize].record_read(shield_handle());
+        prog.ops[ids[3].0 as usize].record_read(mana_handle());
+
+        let graph = dependency_graph(&prog);
+        let strict = topological_sort(&graph).expect("acyclic");
+        let (best, cycles) = topological_sort_best_effort(&graph);
+        assert_eq!(best, strict);
+        assert!(cycles.is_none(), "no cycles expected on acyclic graph");
+    }
+
+    #[test]
+    fn best_effort_topo_breaks_cycle_via_source_order_and_reports_it() {
+        // Op0 ↔ Op1 mutual writers (same shape as `cycle_between_two_ops_is_reported_as_cycle_error`).
+        // Best-effort returns an order of length 2; smallest OpId comes first
+        // because forcing breaks at the smallest remaining OpId, and
+        // every edge that's NOT inside the cycle is honoured (here there
+        // are none, but cycles surface as a `Some(CycleError)` signal).
+        let (mut prog, ids) = program_with_blank_ops(2);
+        prog.ops[ids[0].0 as usize].record_read(hp_handle());
+        prog.ops[ids[0].0 as usize].record_write(mana_handle());
+        prog.ops[ids[1].0 as usize].record_read(mana_handle());
+        prog.ops[ids[1].0 as usize].record_write(hp_handle());
+
+        let graph = dependency_graph(&prog);
+        let (order, cycles) = topological_sort_best_effort(&graph);
+        assert_eq!(order, vec![ids[0], ids[1]]);
+        assert!(cycles.is_some(), "cycle must surface in the secondary signal");
+        let cycles = cycles.unwrap();
+        assert_eq!(cycles.cycles.len(), 1);
+        assert_eq!(cycles.cycles[0], vec![ids[0], ids[1]]);
+    }
+
+    #[test]
+    fn best_effort_topo_preserves_cross_scc_edges_when_one_scc_has_a_cycle() {
+        // 4-op fixture: op0 ↔ op1 (cycle), op2 → op3 (acyclic chain
+        // independent of the cycle). Best-effort must place op2 before
+        // op3 (the cross-SCC edge survives) and forced source order
+        // within the cycle: op0 then op1.
+        //
+        // The previous fusion fallback (`(0..n).map(OpId).collect()`)
+        // gave the right shape here only by accident — when fusion
+        // dispatches a real graph (e.g. trade_caravans's spatial
+        // build-chain → user-op edges), source order discards the
+        // ordering information the best-effort variant preserves.
+        let (mut prog, ids) = program_with_blank_ops(4);
+        // SCC: op0 ↔ op1 via Hp/Mana mutual writers.
+        prog.ops[ids[0].0 as usize].record_read(hp_handle());
+        prog.ops[ids[0].0 as usize].record_write(mana_handle());
+        prog.ops[ids[1].0 as usize].record_read(mana_handle());
+        prog.ops[ids[1].0 as usize].record_write(hp_handle());
+        // Independent chain: op2 → op3 via ShieldHp.
+        prog.ops[ids[2].0 as usize].record_write(shield_handle());
+        prog.ops[ids[3].0 as usize].record_read(shield_handle());
+
+        let graph = dependency_graph(&prog);
+        let (order, cycles) = topological_sort_best_effort(&graph);
+
+        assert_eq!(order.len(), 4);
+        assert!(cycles.is_some(), "cycle present in op0/op1 SCC");
+
+        let pos = |op: OpId| order.iter().position(|x| *x == op).unwrap();
+        // Cross-SCC edge survives: op2 BEFORE op3.
+        assert!(
+            pos(ids[2]) < pos(ids[3]),
+            "op2→op3 edge must be honoured: {:?}",
+            order
+        );
+        // Within-SCC: source order tie-break.
+        assert!(
+            pos(ids[0]) < pos(ids[1]),
+            "within-SCC source-order tie-break: {:?}",
+            order
+        );
     }
 }

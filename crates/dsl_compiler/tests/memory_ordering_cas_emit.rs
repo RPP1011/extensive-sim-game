@@ -44,10 +44,27 @@ fn firebolt_probe_apply_chronicle_damage_emits_cas_loop_on_agent_hp() {
     let artifacts = dsl_compiler::cg::emit::emit_cg_program(&schedule.schedule, &cg)
         .expect("emit firebolt_probe");
 
-    let wgsl = artifacts
+    // The chronicle-consumer rule (`physics ApplyChronicleDamage`) may
+    // ship as its own kernel or fuse with another PerEvent rule that
+    // shares the source ring (e.g. `physics RecordCastBegin` — both are
+    // `PerEvent { source_ring: #0 }`, distinct event-kind subscriptions
+    // make their bodies guarded by `if event_kind == X` arms inside one
+    // kernel). The CAS-loop emit is body-local, so either kernel hosting
+    // ApplyChronicleDamage carries the loop. Find the file by substring
+    // rather than pinning a specific kernel name.
+    let (wgsl_name, wgsl) = artifacts
         .wgsl_files
-        .get("physics_ApplyChronicleDamage.wgsl")
-        .expect("physics_ApplyChronicleDamage.wgsl emitted");
+        .iter()
+        .find(|(name, _)| name.contains("ApplyChronicleDamage"))
+        .map(|(n, w)| (n.clone(), w.clone()))
+        .unwrap_or_else(|| {
+            panic!(
+                "no kernel hosting ApplyChronicleDamage emitted; got files: {:?}",
+                artifacts.wgsl_files.keys().collect::<Vec<_>>()
+            )
+        });
+    let _ = wgsl_name;
+    let wgsl = &wgsl;
 
     // 1. The agent_hp binding must be `array<atomic<u32>>`. Plain
     //    `array<f32>` would let naga accept the kernel but the CAS-loop

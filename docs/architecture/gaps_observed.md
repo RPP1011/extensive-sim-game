@@ -290,6 +290,51 @@ Existing fixtures like duel_25v25 work because they use
 `apply_ability` (different dispatch path that DOES propagate per
 the recent fixes).
 
+**Fix status (2026-05-11):** schedule-side root cause closed.
+The dependency graph used to form a `user_op → PackAgents →
+UnpackAgents → user_op` cycle through every `agent.<field>`
+(UnpackAgents writes the SoA at end-of-tick from the snapshot
+buffer; user ops read those writes NEXT tick). `topological_sort`
+returned `Err`, fusion fell back to *full* source order, and the
+spatial-build phases (`SpatialBuildHashCount` …
+`SpatialBuildHashScatter`, synthesised AFTER user ops in source
+order) ended up dispatching AFTER their PerAgent consumer
+kernels. First-tick `for x in spatial.nearby(self)` iterations
+saw an empty grid; `apply_ability` / `emit` bodies guarded by
+that walk silently no-op'd; downstream chronicle consumers had
+zero events to consume. Two coordinated changes:
+
+  1. `cg::schedule::topology::dependency_graph` skips outgoing
+     edges from `Plumbing { kind: UnpackAgents }`. Same shape as
+     the existing "consumer is `SpatialQuery`" cross-tick read
+     skip — UnpackAgents writes the AgentField SoA in this tick
+     for NEXT tick's user-op reads, so the `Unpack → user`
+     edge is cross-tick and breaking it removes the canonical
+     Pack/Unpack cycle without losing the legitimate same-tick
+     `user → Pack → Unpack` chain.
+  2. New `topological_sort_best_effort` returns an order even on
+     cycles (forces the smallest-OpId remaining op when Kahn's
+     queue empties). Fusion swaps to it — every dep edge that is
+     NOT part of a cycle is still honoured, including the
+     `SpatialBuildHashScatter → user_op` edges that were
+     previously discarded by the `(0..n).map(OpId).collect()`
+     fallback. Cycles still surface as a `CycleFallback`
+     diagnostic so downstream consumers can detect the degraded
+     analysis (e.g. trade_caravans's `LifecycleAge ↔ LifecycleReaper`
+     write-back cycle through `agents.alive`).
+
+Post-fix the `physics_DefenderFire`, `physics_EnemyMelee`,
+`physics_TradeScan`, etc. kernels dispatch AFTER the
+spatial-build chain and their spatial walks find neighbours.
+trade_caravans's pin now shows wealth flowing through the
+inheritance chain (heirs gain 100 mana from dying merchants,
+markets accumulate 500 → 600 wealth) — a behaviour the previous
+schedule made impossible. hill_raid's pin still records 0 losses,
+but that residual is downstream of T5 (LoS occlusion + 6.0-unit
+spatial radius vs hilltop topology + remaining apply_ability
+chronicle-consumer indirect-dispatch gaps); the schedule-side
+ordering bug is closed.
+
 ---
 
 ### Gap T6: Pair-keyed view with non-Agent second key — sizing inferred from Agent dimension

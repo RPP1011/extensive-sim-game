@@ -45,4 +45,6 @@ pub use synthesis::{
     synthesize_schedule, synthesize_schedule_with_registry, ComputeSchedule, ComputeStage,
     KernelTopology, ScheduleDiagnostic, ScheduleDiagnosticKind, ScheduleSynthesisResult,
 };
-pub use topology::{dependency_graph, topological_sort, CycleError, DepGraph};
+pub use topology::{
+    dependency_graph, topological_sort, topological_sort_best_effort, CycleError, DepGraph,
+};

@@ -29,13 +29,16 @@ fn staggered_init_drives_per_slot_fire_pattern() {
     let r = read_activations(&mut state);
     assert_eq!(r.len(), N as usize);
     for (slot, &count) in r.iter().enumerate() {
-        // Per the documented finding from the per-fixture-crate version
-        // of this test: the compiler-emitted SCHEDULE inverts producer/
-        // consumer order (fold runs before physics), so the fire count
-        // lags the analytical staggered prediction by one tick. Pin to
-        // the lagged value; the off-by-one being uniform across slots
-        // is the load-bearing init-mechanism check.
-        let expected = (TICKS as i64 - 1 - slot as i64).max(0) as f32;
+        // Producer-then-consumer ordering: with the schedule's topo
+        // sort placing the per-agent fire rule BEFORE its accumulator
+        // ViewFold (the correct dataflow direction post-T5 fix), each
+        // tick's fire is folded the SAME tick. Slot s fires when
+        // `tick >= s` (init `cooldown_next_ready_tick: slot`); over
+        // TICKS ticks slot s contributes `TICKS - s` activations.
+        //
+        // Pre-T5: fold ran BEFORE physics on the same tick, so fold
+        // saw events one tick late and the count lagged by one.
+        let expected = (TICKS as i64 - slot as i64).max(0) as f32;
         assert!(
             (count - expected).abs() < 1e-3,
             "slot {slot} activations = {count} (expected {expected})",

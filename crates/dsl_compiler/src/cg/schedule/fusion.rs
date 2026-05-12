@@ -67,7 +67,7 @@ use crate::cg::op::{ComputeOp, ComputeOpKind, EventKindId, OpId};
 use crate::cg::program::CgProgram;
 use crate::cg::stmt::{CgStmt, CgStmtListId};
 
-use super::topology::{topological_sort, DepGraph};
+use super::topology::{topological_sort_best_effort, DepGraph};
 
 // ---------------------------------------------------------------------------
 // DispatchShapeKey — typed projection for dispatch-shape equality
@@ -356,23 +356,33 @@ pub fn fusion_decisions_with_registry(
     let mut groups: Vec<FusionGroup> = Vec::new();
     let mut diagnostics: Vec<FusionDiagnostic> = Vec::new();
 
-    // Resolve a deterministic walk order. On cycle, fall back to source
-    // order (see module-level `# Limitations`) AND surface a typed
-    // `CycleFallback` diagnostic as the first entry in the stream so
-    // downstream consumers can detect the degraded analysis.
-    let topo_order: Vec<OpId> = match topological_sort(deps) {
-        Ok(order) => order,
-        Err(_cycle) => {
-            diagnostics.push(FusionDiagnostic {
-                kind: FusionDiagnosticKind::CycleFallback,
-                ops: Vec::new(),
-                message: "fusion analysis fell back to source order due to a cycle in \
-                          the dependency graph"
-                    .to_string(),
-            });
-            (0..prog.ops.len() as u32).map(OpId).collect()
-        }
-    };
+    // Resolve a deterministic walk order. `topological_sort_best_effort`
+    // ALWAYS returns an order — Kahn's algorithm with smallest-OpId
+    // tie-break, plus a "force the smallest remaining OpId" step when
+    // the queue empties before every op is emitted. The forcing step
+    // breaks cycles by preferring the user's source order WITHIN the
+    // SCC; every dep-graph edge that is NOT part of a cycle is still
+    // honoured. That preserves real cross-SCC dependencies (e.g.
+    // `SpatialBuildHashScatter → user_op`) even when an unrelated SCC
+    // (e.g. two PerAgent rules whose write/read sets cross-back, like
+    // trade_caravans's `LifecycleAge` ↔ `LifecycleReaper` pair) would
+    // otherwise have collapsed the previous fallback into pure source
+    // order.
+    //
+    // When `cycles` is `Some`, surface the typed `CycleFallback`
+    // diagnostic so downstream consumers can detect the degraded
+    // analysis — same shape the pure-source-order fallback used.
+    let (topo_order, cycles) = topological_sort_best_effort(deps);
+    if cycles.is_some() {
+        diagnostics.push(FusionDiagnostic {
+            kind: FusionDiagnosticKind::CycleFallback,
+            ops: Vec::new(),
+            message: "fusion analysis used best-effort topological order: at least \
+                      one cycle in the dependency graph forced source-order tie-break \
+                      within the affected SCC(s)"
+                .to_string(),
+        });
+    }
 
     // In-progress group state.
     let mut current_ops: Vec<OpId> = Vec::new();

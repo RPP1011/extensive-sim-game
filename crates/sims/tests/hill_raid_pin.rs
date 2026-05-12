@@ -135,7 +135,7 @@ fn city_holds_or_falls_after_200_ticks() {
     );
     if total_kill_pressure == 0.0 {
         println!(
-            "  NOTE: zero damage flowed — chronicle-consumer Indirect-dispatch\n           gap from commit 353527e6. apply_ability records enqueue but\n           consumers don\'t fire from synthesized step(). Siege animates\n           when that gap closes.",
+            "  NOTE: zero damage flowed. T5 (spatial-build → user-op schedule\n           ordering) was fixed 2026-05-11 — fixtures with `for x in\n           spatial.nearby(self)` now find neighbours; post-fix\n           trade_caravans inheritance chain works end-to-end. The\n           residual zero-damage on hill_raid is downstream of T5: the\n           hilltop-LoS topology (defender at z=6, hill mass at z=0..7)\n           occludes most defender→enemy shots, and the EnemyMelee\n           1.4-unit strike radius is too small for enemies converging\n           to the hilltop centroid via the 0.18-unit/tick advance.\n           Investigate by relaxing LoS or shrinking topology in this\n           pin if a tighter behavioural pin is wanted.",
         );
     }
     println!(
