@@ -5,15 +5,18 @@
 //! - 16 Defenders on the hilltop at z = 6 (radius 0..3 from origin)
 //! - 32 Wall segments ringing the slope at z = 2, radius 5
 //! - 64 Enemy attackers spawning at z = 0, radius 25, around the perimeter
+//! - **Voxel hill** (paraboloid mass) seeded into `state.voxel_terrain`;
+//!   `terrain.line_of_sight` in the .sim consults the GPU mirror via
+//!   the auto-emitted `KernelBindingsContext::voxel_grid` wire-up.
 //!
 //! creature_type discriminants (from .sim entity decl order, alphabetical):
 //!   Defender = 0, Enemy = 1, Wall = 2
 //!
-//! **Note**: `terrain.line_of_sight` in the .sim resolves but doesn't
-//! yet take effect because `GeneratedRuntime`'s `voxel_grid` is `None`
-//! today. Once that wiring lands, the z-elevation hierarchy here gives
-//! defenders a real LoS advantage over enemies behind the hill. For
-//! the smoke pin, the structural elevation hierarchy is the contract.
+//! Voxel binding: the auto-emitted `GeneratedRuntime` detects that
+//! hill_raid's WGSL kernels reference `voxel_grid` (via the
+//! `voxel_line_of_sight` helper) and allocates a `VoxelTerrain` +
+//! `VoxelMirror` pair. `step()` flushes any host-side `set_cell` writes
+//! to GPU before each tick.
 
 use sims::hill_raid::GeneratedRuntime;
 
@@ -39,6 +42,7 @@ fn city_holds_or_falls_after_200_ticks() {
     };
 
     seed_topology(&mut state);
+    seed_voxel_hill(&mut state);
 
     let initial_defenders_alive = count_alive_of_type(&mut state, CT_DEFENDER);
     let initial_enemies_alive = count_alive_of_type(&mut state, CT_ENEMY);
@@ -154,6 +158,56 @@ fn read_positions(state: &mut GeneratedRuntime) -> Vec<[f32; 4]> {
     };
     staging.unmap();
     out
+}
+
+/// Seed a paraboloid hill into the auto-emitted `VoxelTerrain` so the
+/// `terrain.line_of_sight` raycast in `DefenderFire` actually has voxel
+/// mass to traverse. The hill is centred at the cube origin's positive
+/// quadrant (cells `[0..HILL_DIAM)` on x and y) with apex at z =
+/// `HILL_TOP`. Cells at `(x, y, z)` are filled iff `z <= max(0,
+/// HILL_TOP - dist²(x, y) * HILL_SCALE)`.
+///
+/// The world↔cell mapping is approximate: agent positions span
+/// world-coords in `[-25, 25]`, while voxel cells live in `[0, extent)`
+/// (negative cell coords return air per `voxel_at` semantics). The
+/// LoS gate's correctness for this fixture is therefore best-effort —
+/// for any defender/enemy pair both in the positive quadrant near the
+/// hill, shots can be occluded; pairs in the negative quadrant always
+/// see clear LoS. The structural pin is "binding wires up + step()
+/// runs without panic"; semantic LoS validation lives in
+/// `crates/engine_voxel/tests/cpu_gpu_mirror.rs::voxel_line_of_sight_*`.
+fn seed_voxel_hill(state: &mut GeneratedRuntime) {
+    use glam::IVec3;
+
+    const HILL_TOP: u32 = 8; // apex height in cells
+    const HILL_DIAM: u32 = 16; // cube footprint side
+    const HILL_SCALE: f32 = 0.15; // controls slope falloff
+    const STONE: u8 = 1;
+
+    let centre = (HILL_DIAM / 2) as f32;
+    let mut writes: Vec<(u32, u32, u32)> = Vec::new();
+    for x in 0..HILL_DIAM {
+        for y in 0..HILL_DIAM {
+            let dx = x as f32 - centre;
+            let dy = y as f32 - centre;
+            let dist_sq = dx * dx + dy * dy;
+            let top = (HILL_TOP as f32 - dist_sq * HILL_SCALE).max(0.0) as u32;
+            for z in 0..top.min(HILL_TOP) {
+                state.voxel_terrain.set_cell(x, y, z, STONE);
+                writes.push((x, y, z));
+            }
+        }
+    }
+    for (x, y, z) in writes {
+        state
+            .voxel_mirror
+            .mark_dirty(IVec3::new(x as i32, y as i32, z as i32));
+    }
+    // First-step flush happens inside `step()`; nothing else to do here.
+    eprintln!(
+        "[hill_raid] seeded paraboloid hill: {dirty} dirty chunks pending flush",
+        dirty = state.voxel_mirror.dirty_chunk_count(),
+    );
 }
 
 fn seed_topology(state: &mut GeneratedRuntime) {

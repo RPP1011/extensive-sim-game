@@ -437,6 +437,21 @@ fn emit_into(
     // Single-agent or scalar-keyed views (e.g. dodger_probe's `view
     // threats(observer: Agent) -> f32`) keep the per-agent sizing.
     let pair_keyed_view_present = detect_pair_keyed_materialized_view(&comp);
+    // Voxel-binding detection. If any kernel binds `voxel_grid` then the
+    // synthesized runtime needs a CPU-side `engine_voxel::VoxelTerrain`
+    // + GPU-side `engine_voxel::VoxelMirror` so `KernelBindingsContext::
+    // voxel_grid` is `Some(...)` instead of `None` (which panics at
+    // try_new() the moment any kernel `.expect()`s the unwrap). Walking
+    // every kernel's binding list by name mirrors the existing
+    // `is_infra_binding` classification path — `voxel_grid` is the
+    // infra binding routed through `KernelBindingsContext`, so the
+    // detection is just "does any spec have a binding by that name".
+    // Fixtures with no voxel use stay zero-overhead (no buffer alloc,
+    // no per-tick flush).
+    let binds_voxel_grid = artifacts
+        .kernel_specs
+        .iter()
+        .any(|spec| spec.bindings.iter().any(|b| b.name == "voxel_grid"));
     let runtime_core = synthesize_runtime_core_a2(
         fixture_name,
         &artifacts,
@@ -445,6 +460,7 @@ fn emit_into(
         &ability_file_names,
         &comp.events,
         pair_keyed_view_present,
+        binds_voxel_grid,
     );
     fs::write(out_dir.join("runtime_core.rs"), runtime_core)
         .unwrap_or_else(|e| panic!("write runtime_core.rs: {e}"));
@@ -655,6 +671,7 @@ fn synthesize_runtime_core_a2(
     ability_file_names: &[String],
     events: &[dsl_ast::ir::EventIR],
     pair_keyed_view_present: bool,
+    binds_voxel_grid: bool,
 ) -> String {
     let kernel_count = artifacts.kernel_index.len();
     let mut out = String::new();
@@ -728,6 +745,7 @@ fn synthesize_runtime_core_a2(
         ability_file_names,
         events,
         pair_keyed_view_present,
+        binds_voxel_grid,
     ));
 
     out
@@ -886,6 +904,7 @@ fn synthesize_generated_runtime_struct(
     ability_file_names: &[String],
     events: &[dsl_ast::ir::EventIR],
     pair_keyed_view_present: bool,
+    binds_voxel_grid: bool,
 ) -> String {
     use crate::kernel_binding_ir::BgSource;
     use std::collections::BTreeMap;
@@ -967,6 +986,16 @@ fn synthesize_generated_runtime_struct(
     for kernel_name in &cfg_buffer_names {
         out.push_str(&format!("    pub cfg_{kernel_name}_buf: wgpu::Buffer,\n"));
     }
+    // Voxel terrain + GPU mirror — only allocated when the fixture has at
+    // least one kernel that binds `voxel_grid`. Without this gate the
+    // mirror's 4 * extent³ byte buffer (64 MB at the default 256³ extent)
+    // would be paid by every fixture; with it, voxel-free fixtures stay
+    // zero-overhead and `KernelBindingsContext::voxel_grid` keeps its
+    // `None` shape on the runtimes that don't need it.
+    if binds_voxel_grid {
+        out.push_str("    pub voxel_terrain: engine_voxel::VoxelTerrain,\n");
+        out.push_str("    pub voxel_mirror: engine_voxel::VoxelMirror,\n");
+    }
     // Plan E-A6 — `@runtime` config field values, mirrored host-side.
     // The .sim's `flee_strength: f32 = 1.0 @runtime` lands here as
     // `pub flee_strength: f32`. Host setters write the value to every
@@ -984,6 +1013,19 @@ fn synthesize_generated_runtime_struct(
          \x20       let gpu = engine::GpuContext::new_blocking().ok()?;\n\
          \x20       let event_ring = engine::gpu::EventRing::new(&gpu, \"{fixture_name}\");\n",
     ));
+    // Voxel terrain construction. The CPU `VoxelTerrain` starts as an
+    // empty cube at the engine_voxel default extent (256³); the
+    // `VoxelMirror` allocates the matching GPU storage buffer and
+    // performs the initial whole-buffer upload. After this point every
+    // host-side `voxel_terrain.set_cell` call must be paired with a
+    // `voxel_mirror.mark_dirty(...)` so the per-tick `flush_dirty` in
+    // `step()` propagates the change to GPU before the next dispatch.
+    if binds_voxel_grid {
+        out.push_str(
+            "        let voxel_terrain = engine_voxel::VoxelTerrain::new();\n\
+             \x20       let voxel_mirror = engine_voxel::VoxelMirror::new(&gpu, voxel_terrain.grid());\n",
+        );
+    }
     // Registry construction. Two paths:
     // (a) Fixture has a companion `assets/ability_test/<fixture>/`
     //     directory with `.ability` files — emit real construction.
@@ -1184,6 +1226,10 @@ fn synthesize_generated_runtime_struct(
     for kernel_name in &cfg_buffer_names {
         out.push_str(&format!("            cfg_{kernel_name}_buf,\n"));
     }
+    if binds_voxel_grid {
+        out.push_str("            voxel_terrain,\n");
+        out.push_str("            voxel_mirror,\n");
+    }
     for (name, def) in runtime_config_defaults {
         let lit_typed = match def.scalar_ty.as_str() {
             "f32" => format!("{}_f32", def.default_lit),
@@ -1249,8 +1295,20 @@ fn synthesize_generated_runtime_struct(
         "    /// Default step. Builds AgentBuffers + KernelBindingsContext,\n\
          \x20   /// writes per-tick cfg uniforms, and walks SCHEDULE.\n\
          \x20   /// Per-kernel dispatch arms land in A4.1.\n\
-         \x20   pub fn step(&mut self) {\n\
-         \x20       // Per-tick cfg uniform write to every kernel's cfg buffer.\n\
+         \x20   pub fn step(&mut self) {\n",
+    );
+    // Voxel mirror flush — re-uploads any host-side `set_cell` writes
+    // since the last step before any kernel reads `voxel_grid`. Cheap
+    // when nothing's dirty (early-return on empty set inside
+    // `flush_dirty`); essential when the host seeded terrain (test
+    // fixture or chronicle drain) and a kernel needs the new cells.
+    if binds_voxel_grid {
+        out.push_str(
+            "        self.voxel_mirror.flush_dirty(&self.gpu, self.voxel_terrain.grid());\n",
+        );
+    }
+    out.push_str(
+        "        // Per-tick cfg uniform write to every kernel's cfg buffer.\n\
          \x20       // Layout: [slot0, tick, seed, slot3] where slot0 is\n\
          \x20       // agent_cap (per-agent kernels) or event_count (per-event\n\
          \x20       // kernels). Today we write agent_count to both slots — for\n\
@@ -1309,14 +1367,29 @@ fn synthesize_generated_runtime_struct(
     }
     out.push_str(
         "            ..Default::default()\n\
-         \x20       };\n\
-         \x20       let _ctx = engine::gpu::KernelBindingsContext {\n\
-         \x20           state: &agent_buffers,\n\
-         \x20           event_ring: &self.event_ring,\n\
-         \x20           registry: &self.registry_gpu,\n\
-         \x20           voxel_grid: None,\n\
-         \x20       };\n\
-         \x20\n\
+         \x20       };\n",
+    );
+    if binds_voxel_grid {
+        out.push_str(
+            "        let _ctx = engine::gpu::KernelBindingsContext {\n\
+             \x20           state: &agent_buffers,\n\
+             \x20           event_ring: &self.event_ring,\n\
+             \x20           registry: &self.registry_gpu,\n\
+             \x20           voxel_grid: Some(self.voxel_mirror.buffer()),\n\
+             \x20       };\n",
+        );
+    } else {
+        out.push_str(
+            "        let _ctx = engine::gpu::KernelBindingsContext {\n\
+             \x20           state: &agent_buffers,\n\
+             \x20           event_ring: &self.event_ring,\n\
+             \x20           registry: &self.registry_gpu,\n\
+             \x20           voxel_grid: None,\n\
+             \x20       };\n",
+        );
+    }
+    out.push_str(
+        "\n\
          \x20       for op in schedule::SCHEDULE {\n\
          \x20           match op {\n",
     );
@@ -1708,6 +1781,7 @@ mod tests {
             &[],
             &[],
             false,
+            false,
         );
 
         // Braces balance.
@@ -1780,6 +1854,7 @@ mod tests {
             &[],
             &[event],
             false,
+            false,
         );
 
         // Typed signature with snake_case method name + matching params.
@@ -1841,6 +1916,7 @@ mod tests {
             &std::collections::BTreeMap::new(),
             &[],
             &[event],
+            false,
             false,
         );
 

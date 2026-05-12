@@ -15,6 +15,14 @@ build = "build.rs"
 
 [dependencies]
 engine = { path = "../engine" }
+# Voxel terrain + GPU mirror for fixtures whose .sim binds `voxel_grid`
+# (e.g. hill_raid's `terrain.line_of_sight` gate). Auto-emitted
+# `GeneratedRuntime` references `engine_voxel::VoxelTerrain` and
+# `engine_voxel::VoxelMirror` only when build_helper detects a
+# voxel_grid binding in the kernel manifest; voxel-free fixtures
+# don't pull any code from this dep at link time, but the path
+# entry has to be here so cargo resolves the import.
+engine_voxel = { path = "../engine_voxel" }
 wgpu = "=26.0.1"
 bytemuck = { version = "1.16", features = ["derive"] }
 glam = "0.29"

@@ -110,12 +110,12 @@ physics EnemyAdvance {
 physics DefenderFire {
   on Tick {} where (self.alive && self.creature_type == Defender) {
     for candidate in spatial.nearby_targets(self) {
-      if (candidate.alive && candidate.creature_type == Enemy) {
-        // TODO: gate on `terrain.line_of_sight(self.pos, candidate.pos)`
-        // when the auto-emitted GeneratedRuntime grows voxel_grid
-        // wiring. The elevation hierarchy is still present (defender
-        // seed z = 6 vs enemy z = 0) — when LoS lands, defenders
-        // gain the real high-ground advantage.
+      if (candidate.alive && candidate.creature_type == Enemy &&
+          terrain.line_of_sight(self.pos, candidate.pos)) {
+        // Hill mass occludes shots: a defender behind the hill from
+        // an enemy fails the raycast and won't fire. Defenders on the
+        // hilltop (z = 6) shooting downhill at enemies (z = 0) at
+        // perimeter (radius 25) keep clear LoS over the slope.
         apply_ability 1 by self target candidate
       }
     }
