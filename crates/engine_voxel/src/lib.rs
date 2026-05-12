@@ -876,9 +876,10 @@ mod tests {
     // Phase C — VoxelMirror tests that don't need a GPU.
     //
     // These cover the chunk-coord math + dirty-set ordering. The
-    // load-bearing CPU/GPU divergence pin lives in
-    // `voxel_probe_runtime::voxel_pins::cpu_gpu_voxel_state_matches`
-    // since it requires a wgpu device.
+    // load-bearing CPU/GPU divergence pin lives in the
+    // `cpu_gpu_voxel_state_matches` integration test under
+    // `crates/engine_voxel/tests/cpu_gpu_mirror.rs` since it
+    // requires a wgpu device.
     // ---------------------------------------------------------------
 
     /// Helper for the chunk-coord tests below — there's no public
@@ -939,7 +940,7 @@ mod tests {
     // The CPU-side equivalents live here so they exercise the
     // `TerrainQuery` impl directly; the GPU equivalent (the
     // `gpu_terrain_query_matches_cpu` divergence pin) lives in
-    // `voxel_probe_runtime` since it needs a wgpu device.
+    // `tests/cpu_gpu_mirror.rs` since it needs a wgpu device.
     //
     // Don't substitute counter-based pins (e.g. "voxel count > 0")
     // for these — that's the probe-fooling pattern the plan calls

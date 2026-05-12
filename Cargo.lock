@@ -2173,21 +2173,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "voxel_probe_runtime"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "dsl_ast",
- "dsl_compiler",
- "engine",
- "engine_voxel",
- "glam",
- "pollster",
- "sha2",
- "wgpu",
-]
-
-[[package]]
 name = "wait-timeout"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
