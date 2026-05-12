@@ -1379,8 +1379,80 @@ fn synthesize_generated_runtime_struct(
             pascal = spec.pascal,
         ));
     }
+    // The catch-all swallows `DispatchOp::Indirect { kernel, args_buf }`
+    // and `DispatchOp::FixedPoint { kernel, max_iter }` entries. These
+    // are NOT no-ops at the topology level — they're the consumer-side
+    // dispatch entries for chronicle producer→consumer chains
+    // (`Indirect`, e.g. `physics_ApplyObserveBeliefUpdate` in
+    // `tom_probe.sim`) and physics-rule cascade fixed-points
+    // (`FixedPoint`).
+    //
+    // Wiring them through `step()` requires a coordinated multi-slice
+    // change that's larger than the dispatch-arm wire-up alone:
+    //
+    //   1. **Kernel-emit side has no indirect-dispatch entry point.** Every
+    //      kernel's `record()` method calls `pass.dispatch_workgroups(...)`
+    //      (direct), not `pass.dispatch_workgroups_indirect(args_buf, 0)`.
+    //      The Indirect topology classifier
+    //      (`cg::emit::program::compose_dispatch_call`) collapses
+    //      `KernelTopology::Indirect` to `DispatchShape::PerEvent` and
+    //      emits a direct dispatch keyed on `agent_cap`. Adding an
+    //      indirect arm here without a sibling
+    //      `record_indirect()` would still emit a direct dispatch.
+    //
+    //   2. **Synthesised schedule order puts `seed_indirect_*` AFTER its
+    //      consumer.** Inspect any built `runtime_core.rs` (e.g.
+    //      `target/release/build/tom_probe_runtime-*/out/generated.rs`):
+    //      `SeedIndirect0` is scheduled after every
+    //      `PhysicsApply*BeliefUpdate` Indirect entry. Even with a real
+    //      `dispatch_workgroups_indirect` wire-up, the args buffer would
+    //      hold last tick's value at consumer-dispatch time.
+    //
+    //   3. **Per-tick cfg writes use a single `event_count = agent_count`
+    //      across every kernel's cfg buffer.** Indirect consumers need
+    //      `event_count = ring.tail()` for the body's `if (event_idx
+    //      >= cfg.event_count) { return; }` early-return to bound on
+    //      actual emit count, not `agent_count`.
+    //
+    //   4. **`clear_tail_in` / `clear_ring_headers_in` semantics conflict
+    //      with the host-side inject-before-step pattern.** Today the
+    //      auto-emitted `effect_*_applied` typed injectors (created by
+    //      the `@host_callable` annotation, see below) write a record
+    //      into the ring and bump the GPU tail BEFORE the next
+    //      `step()` runs. step()'s `clear_tail_in` zeros the tail
+    //      inside its encoder, and any added `clear_ring_headers_in`
+    //      would zero the inject's record header — losing the event.
+    //
+    // The bespoke `tom_probe_runtime/src/lib.rs` works around this by
+    // hand-rolling per-verb methods (`observe`, `scry`, `reveal`,
+    // `decoy`, `erase_belief`, `disguise`) that build the chronicle
+    // record AND immediately encode the matching consumer kernel
+    // dispatch — bypassing both `step()` and the schedule's Indirect
+    // entries entirely. The mega-crate port at
+    // `crates/sims/tests/tom_probe_helpers/mod.rs` mirrors that
+    // pattern (`dispatch_observe`, `dispatch_scry`, …).
+    //
+    // **Naive wire-up was tried and reverted (2026-05-11):** an
+    // or-pattern arm `Kernel(KernelId::X) | Indirect { kernel:
+    // KernelId::X, .. } => { dispatch::dispatch_X(..., agent_count) }`
+    // builds and runs but breaks the
+    // `tom_probe_decay_pin::fresh_observation_resets_decay` test
+    // because the consumer kernel re-fires every step on stale ring
+    // contents (the consumer's kind-tag filter matches a slot-0 record
+    // left over from a host inject 50 ticks ago).
+    //
+    // Until those four gaps are addressed (kernel-emit indirect entry
+    // + schedule order fix + per-consumer cfg + inject-step
+    // coordination), the Indirect arm stays in the catch-all and the
+    // typed `effect_*_applied` injectors require a sibling
+    // synchronous wrapper that dispatches the consumer immediately.
     out.push_str(
-        "                _ => {}\n\
+        "                // DispatchOp::Indirect / DispatchOp::FixedPoint\n\
+         \x20               // are intentionally unhandled. See\n\
+         \x20               // `synthesize_generated_runtime_struct` source comment\n\
+         \x20               // for the four-gap blocker (kernel-emit indirect entry,\n\
+         \x20               // schedule order, per-consumer cfg, inject coordination).\n\
+         \x20               _ => {}\n\
          \x20           }\n\
          \x20       }\n\
          \x20\n\

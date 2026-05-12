@@ -8,6 +8,14 @@
 //! `DispatchOp::Kernel(_)`; the belief-consumer entries are
 //! `DispatchOp::Indirect{...}` and silently fall through (`_ => {}`).
 //!
+//! Wiring the Indirect arm in `synthesize_generated_runtime_struct`
+//! is blocked on a four-gap coordinated change documented at the
+//! catch-all match arm (`crates/dsl_compiler/src/build_helper.rs`).
+//! Until that lands, these wrappers hand-roll the inject + consumer
+//! dispatch in one method — exactly the pattern the bespoke
+//! `tom_probe_runtime/src/lib.rs` uses for its `observe`/`scry`/etc.
+//! verb methods.
+//!
 //! To keep the ported pins self-sufficient TODAY without changing the
 //! generated-runtime surface, this module wraps each typed injector with
 //! a synchronous companion that:
