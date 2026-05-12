@@ -1,0 +1,490 @@
+// trade_caravans — adversarial fixture targeting the LIFECYCLE +
+// ECONOMY axis of the DSL surface. Designed to surface compiler gaps
+// in:
+//
+//   * Birth/Death state transitions (alive 0→1, 1→0) driven from
+//     chronicle consumers, not just init-block + per-agent reaper.
+//   * Inheritance / cross-agent state transfer (a chronicle consumer
+//     that READS one slot's wealth + WRITES it to ANOTHER slot,
+//     stress-testing AgentRef::Target on the WRITE side AND a non-
+//     self-relative AgentRef on the READ side).
+//   * Multi-event chronicles — six event kinds (Bought, Sold,
+//     Transferred, PriceUpdated, Died, Born) all flowing through the
+//     event ring per tick. Tests the dispatch/fusion analyzer at
+//     wider event-kind fan-out than the 3–4 most fixtures use.
+//   * Per-good price views with @materialized + @decay so prices
+//     ease back to baseline (multiplicative decay on a per-Item
+//     keyed view).
+//   * Cross-tick invariants: wealth_conservation total across all
+//     merchants stays bounded across Transferred events. (Pin asserts
+//     it stays within tolerance of the seed total — any leak is signal.)
+//   * Long-tick stability: 1000+ ticks to expose tick-counter overflow,
+//     view-storage growth bugs, ring-buffer wrap pathologies.
+//   * Per-merchant inventory — pair-keyed (merchant, good) view with
+//     additive on Bought, subtractive on Sold (the DECREMENT path is
+//     the one most likely to hit a sign-flip / clamp gap in the fold
+//     kernel; existing fixtures all monotonically accumulate).
+//   * Cooldown gating on autonomous trade — `world.tick % cadence`.
+//   * Spatial query gating — merchants only trade if a market is in
+//     their 27-cell neighbourhood (mirrors hill_raid's body-form spatial
+//     walk).
+//
+// CREATURE TYPE TABLE (alphabetical decl-order = discriminant value):
+//   0 = Heir     — slot pre-allocated, alive=0 at init; revived on
+//                  inheritance from a Merchant death
+//   1 = Market   — stationary, never moves; broadcasts PriceUpdated
+//   2 = Merchant — wanders + trades + ages + dies of old age
+//
+// SOA REPURPOSE TABLE (no engine SoA columns added; matches village_economy
+// and spy_network's repurpose precedent):
+//   * `agents.mana`    — wealth (gold pieces). Init = 100.0 for Merchants,
+//                        500.0 for Markets (treasury), 0.0 for Heirs.
+//   * `agents.hunger`  — age in ticks. Increments every tick on alive
+//                        Merchants (LifecycleAge rule). Death triggers
+//                        when hunger > MAX_AGE.
+//   * `agents.shield_hp` — per-merchant goods-bought count (running tally,
+//                          observability — separate from the per-good
+//                          inventory view which is pair-keyed).
+//   * `agents.engaged_with` — designated heir (Option<AgentId>). Set at
+//                             init by the host. The OnDied consumer
+//                             reads this slot and transfers the merchant's
+//                             wealth to that heir's mana SoA.
+//
+// LONG-TICK BUDGET: pin runs 1500 ticks. With 16 merchants ageing
+// at 1 hunger/tick + MAX_AGE = 800, the first deaths hit around
+// tick 800. Heirs revive (alive 0→1) and start trading. By tick
+// 1500 a second generation should be partway through its lifespan.
+//
+// EXPECTED-GAP CATALOG (each is a candidate for gaps_observed.md):
+//   - Birth path: setting `alive` from 0 → 1 in a chronicle consumer
+//     (existing fixtures only flip 1 → 0). Likely "works" since the
+//     setter is identical, but the SCHEDULE may not include heirs in
+//     PerAgent dispatch passes if the dispatch population is computed
+//     from initial-alive rather than current-alive (signal: the heir's
+//     LifecycleAge rule never runs even though alive flipped).
+//   - Cross-agent wealth transfer: the OnDied consumer needs
+//     `agents.set_mana(heir, agents.mana(self))` where `heir` is read
+//     from `agents.engaged_with(self)`. The OptAgentId read path is
+//     used by tom_probe but never as a WRITE target for set_mana.
+//   - Sign-flipped fold: the per-merchant inventory view subtracts
+//     on Sold. Existing materialized views all do `self += X`; the
+//     `self -= X` shape may not lower (or may clamp at 0 unexpectedly).
+//   - Multi-event @materialized fold reading TWO event kinds with
+//     opposite-sign updates — existing dsl_stress_coverage uses one
+//     event per view.
+//   - 6-way event-kind fan-out fusion — does the analyzer fuse
+//     6 PerEvent rules in one pass? Or split into multiple kernels?
+//   - Long-tick stability: 1500 ticks with chronicle consumers firing
+//     every tick may saturate the event ring. Signal: panic in the
+//     event-ring wraparound code, or step() time spike.
+
+event Tick { }
+
+// Six chronicle event kinds — all @replayable @gpu_amenable so they
+// flow through the ring uniformly.
+
+@replayable @gpu_amenable
+event Bought {
+  buyer:  AgentId,
+  seller: AgentId,
+  good:   ItemId,
+  price:  f32,
+}
+
+@replayable @gpu_amenable
+event Sold {
+  seller: AgentId,
+  buyer:  AgentId,
+  good:   ItemId,
+  price:  f32,
+}
+
+@replayable @gpu_amenable
+event Transferred {
+  donor:    AgentId,
+  receiver: AgentId,
+  amount:   f32,
+}
+
+@replayable @gpu_amenable
+event PriceUpdated {
+  market: AgentId,
+  good:   ItemId,
+  price:  f32,
+}
+
+@replayable @gpu_amenable
+event Died {
+  agent: AgentId,
+  age:   f32,
+}
+
+@replayable @gpu_amenable
+event Born {
+  agent:    AgentId,
+  ancestor: AgentId,
+  legacy:   f32,
+}
+
+// Entity declarations — alphabetical for stable discriminant order
+// (per `crates/dsl_ast/src/resolve.rs`: Heir=0, Market=1, Merchant=2).
+//
+// Heir + Merchant are both Agent-rooted (need pos / vel / lifecycle).
+// Market is also Agent-rooted because the MARKET broadcasts PriceUpdated
+// events and needs to live in the same SoA + spatial grid as the
+// merchants (so a merchant's spatial.nearby walk picks it up).
+entity Heir : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Market : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Merchant : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+// Goods are Item-rooted — no per-tick state, just a typed handle in
+// event payloads. Three goods (slot 0=Grain, 1=Spice, 2=Silk).
+entity Grain : Item {
+  base_price: f32,
+}
+
+entity Spice : Item {
+  base_price: f32,
+}
+
+entity Silk : Item {
+  base_price: f32,
+}
+
+// Caravan is the Group-rooted entity (stress-tests Group SoA shape).
+// One caravan per ~4 merchants in the runtime seed.
+entity Caravan : Group {
+  member_count: f32,
+}
+
+config econ {
+  // Creature-type discriminants (must match alphabetical decl-order).
+  type_heir:     u32 = 0,
+  type_market:   u32 = 1,
+  type_merchant: u32 = 2,
+
+  // Lifecycle: merchants age 1 hunger/tick. Death at MAX_AGE = 800.
+  max_age: f32 = 800.0,
+
+  // Trade tuning. Single trade per N ticks per merchant.
+  trade_cooldown:   u32 = 5,
+  trade_radius:     f32 = 4.0,
+  base_trade_price: f32 = 10.0,
+
+  // PriceUpdated cadence: each market emits a PriceUpdated every N
+  // ticks. The price is `base_price + sin(world.tick * 0.01) * 5`
+  // (oscillating around base — exercises the @decay-with-write path).
+  price_cadence: u32 = 17,
+
+  // Inheritance: when a merchant dies, all its wealth goes to its
+  // designated heir (agents.engaged_with). The OnDied consumer revives
+  // the heir (alive 0 → 1) AND transfers wealth.
+  inheritance_alive: bool = true,
+
+  // Wander step (drift while alive).
+  wander_step: f32 = 0.08,
+}
+
+// Spatial query — merchants find nearby markets. Body-side filter on
+// creature_type narrows to markets only.
+@spatial(radius = 4.0, kind = [Agent])
+spatial_query nearby_markets(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// Per-merchant aging — increments hunger every tick on alive merchants.
+// At hunger > max_age, the LifecycleReaper rule trips death.
+@phase(per_agent)
+physics LifecycleAge {
+  on Tick {} where (self.alive && self.creature_type == config.econ.type_merchant) {
+    let prev = agents.hunger(self);
+    agents.set_hunger(self, prev + 1.0);
+  }
+}
+
+// Per-merchant death trigger. When hunger > max_age, set alive=0 and
+// emit Died. The OnDied chronicle consumer (below) handles the
+// inheritance + heir-revive cascade.
+//
+// Split from LifecycleAge so the well_formed checker doesn't trip on
+// the multi-write recurrence (LifecycleAge writes hunger; this rule
+// reads hunger AND writes alive — keeping them separate avoids
+// fusion-shape issues).
+@phase(per_agent)
+physics LifecycleReaper {
+  on Tick {} where (self.alive
+                    && self.creature_type == config.econ.type_merchant) {
+    let age = agents.hunger(self);
+    if (age > config.econ.max_age) {
+      agents.set_alive(self, false);
+      emit Died { agent: self, age: age }
+    }
+  }
+}
+
+// Per-merchant wander — alive merchants drift slightly each tick.
+@phase(per_agent)
+physics Wander {
+  on Tick {} where (self.alive
+                    && self.creature_type == config.econ.type_merchant) {
+    let new_pos = self.pos + self.vel * config.econ.wander_step;
+    agents.set_pos(self, new_pos);
+  }
+}
+
+// Per-merchant trade scan. On cooldown ticks, walks the 27-cell
+// neighbourhood for markets and emits Bought + Sold pair (1 round-trip
+// per market). Wealth deltas land via the chronicle consumers.
+@phase(per_agent)
+physics TradeScan {
+  on Tick {} where (self.alive
+                    && self.creature_type == config.econ.type_merchant
+                    && (world.tick % config.econ.trade_cooldown == 0)) {
+    for other in spatial.nearby_markets(self) {
+      if (other.alive
+          && other.creature_type == config.econ.type_market) {
+        // Emit Bought (merchant gives wealth to market) AND Sold
+        // (merchant receives wealth from a different market trip).
+        // Both events route through the ring so the wealth deltas
+        // happen in chronicle consumers (BoughtApply / SoldApply).
+        // ItemId 0 = Grain.
+        emit Bought  { buyer: self, seller: other, good: 0u, price: config.econ.base_trade_price }
+        emit Sold    { seller: self, buyer: other, good: 0u, price: config.econ.base_trade_price }
+      }
+    }
+  }
+}
+
+// Per-market price broadcast. On cadence ticks, each alive market
+// emits one PriceUpdated per good with a price derived from the
+// good's per-Item base_price SoA field. STRESS — reads
+// `items.base_price(0u)` in the emit field expression. The bartering
+// fixture proved this lowers in physics-statement context
+// (`new_pos = ... * items.weight(0)`); this rule promotes the
+// read into a chronicle event PAYLOAD position, which may exercise
+// a different lowering arm (event-emit field-expression vs let-binding).
+@phase(per_agent)
+physics PriceBroadcast {
+  on Tick {} where (self.alive
+                    && self.creature_type == config.econ.type_market
+                    && (world.tick % config.econ.price_cadence == 0)) {
+    emit PriceUpdated { market: self, good: 0u, price: items.base_price(0) }
+    emit PriceUpdated { market: self, good: 1u, price: items.base_price(1) }
+    emit PriceUpdated { market: self, good: 2u, price: items.base_price(2) }
+  }
+}
+
+// ---------------------------------------------------------------------
+// CHRONICLE CONSUMERS
+// ---------------------------------------------------------------------
+
+// Bought consumer: buyer pays seller. Wealth flows out of buyer's mana
+// into seller's mana. Two writes per Bought event — both via the
+// `AgentRef::Target(<expr>)` write path (neither is `self` since the
+// rule is PerEvent).
+@phase(post)
+physics BoughtApply {
+  on Bought { buyer: b, seller: s, good: _, price: p } {
+    let buyer_wealth  = agents.mana(b);
+    let seller_wealth = agents.mana(s);
+    agents.set_mana(b, buyer_wealth - p);
+    agents.set_mana(s, seller_wealth + p);
+    // Bump per-merchant goods-bought tally (shield_hp repurposed).
+    let prev_count = agents.shield_hp(b);
+    agents.set_shield_hp(b, prev_count + 1.0);
+  }
+}
+
+// ADVERSARIAL: multi-event chronicle consumer in ONE physics rule.
+// Reads BOTH Bought AND Sold in alternating arms, each updating the
+// same SoA column (mana). Existing fixtures all single-event their
+// PerEvent rules; the multi-event arm is the surface that
+// `village_economy` carefully splits across N rules so the analyzer
+// can fuse them. Putting both arms in ONE source rule tests whether
+// the lower pass synthesises distinct kind-tag dispatches inside
+// the same WGSL function body.
+//
+// SAME WRITES, DIFFERENT FRAMING — this rule is functionally
+// redundant with BoughtApply + SoldApply (those run every Bought /
+// Sold). The point is: does the compiler accept the source-form
+// fusion of two event arms in one rule, AND does it correctly route
+// each arm's bindings (b vs s, buyer vs seller) without crosstalk?
+@phase(post)
+physics CombinedTradeAudit {
+  on Bought { buyer: b, seller: _, good: _, price: p } {
+    // Pure observability: bump shield_hp on the buyer in addition
+    // to BoughtApply's bump (so a misfire of THIS rule doubles the
+    // tally — pin can detect by comparing shield_hp to expected).
+    let prev = agents.shield_hp(b);
+    agents.set_shield_hp(b, prev + 0.001);
+  }
+  on Sold { seller: s, buyer: _, good: _, price: p } {
+    // Symmetric observability bump on the seller.
+    let prev = agents.shield_hp(s);
+    agents.set_shield_hp(s, prev + 0.001);
+  }
+}
+
+// Sold consumer: symmetric to Bought but flipped direction. The seller
+// gains wealth, buyer loses it.
+@phase(post)
+physics SoldApply {
+  on Sold { seller: s, buyer: b, good: _, price: p } {
+    let seller_wealth = agents.mana(s);
+    let buyer_wealth  = agents.mana(b);
+    agents.set_mana(s, seller_wealth + p);
+    agents.set_mana(b, buyer_wealth - p);
+  }
+}
+
+// Transferred consumer: third path for wealth movement. Used by the
+// inheritance cascade — the OnDied consumer below emits Transferred
+// to actually move wealth from the deceased to the heir. Splitting
+// the wealth-movement logic out of OnDied keeps the cross-event
+// invariant (wealth conservation) measurable through a single rule.
+@phase(post)
+physics TransferApply {
+  on Transferred { donor: d, receiver: r, amount: a } {
+    let donor_wealth    = agents.mana(d);
+    let receiver_wealth = agents.mana(r);
+    agents.set_mana(d, donor_wealth - a);
+    agents.set_mana(r, receiver_wealth + a);
+  }
+}
+
+// Died consumer — INHERITANCE CASCADE. When a merchant dies:
+//   1. Read the merchant's wealth (mana).
+//   2. Find the heir slot via engaged_with.
+//   3. Emit Transferred (donor=deceased, receiver=heir, amount=wealth)
+//      so the wealth lands via TransferApply.
+//   4. Emit Born (revives heir's alive flag in BornRevive consumer).
+//
+// CROSS-AGENT STATE TRANSFER: this is the adversarial surface. The
+// `agents.set_alive(heir, true)` in BornRevive must propagate so that
+// in the NEXT tick, the heir's LifecycleAge / Wander / TradeScan
+// rules pick them up.
+@phase(post)
+physics OnDied {
+  on Died { agent: a, age: _ } {
+    let wealth = agents.mana(a);
+    let heir   = agents.engaged_with(a);
+    emit Transferred { donor: a, receiver: heir, amount: wealth }
+    emit Born        { agent: heir, ancestor: a, legacy: wealth }
+  }
+}
+
+// Born consumer — REVIVE HEIR. Sets alive=1 on the heir. This is
+// the BIRTH path adversarial surface: existing fixtures only flip
+// alive 1→0; here we go 0→1 from a chronicle consumer. The heir's
+// hunger (age) is reset to 0 so the second generation gets a full
+// lifespan.
+@phase(post)
+physics BornRevive {
+  on Born { agent: h, ancestor: _, legacy: _ } {
+    agents.set_alive(h, true);
+    agents.set_hunger(h, 0.0);
+  }
+}
+
+// ---------------------------------------------------------------------
+// MATERIALIZED VIEWS
+// ---------------------------------------------------------------------
+
+// Per-merchant trade volume (wealth flowed through). Sums Bought
+// prices per buyer. Decay-anchored so dormant merchants fade out of
+// the ranking.
+@materialized(on_event = [Bought])
+@decay(rate = 0.98, per = tick)
+view buy_volume(buyer: Agent) -> f32 {
+  initial: 0.0,
+  on Bought { buyer: b, seller: _, good: _, price: p } where b == buyer { self += p }
+  clamp: [0.0, 1000000.0],
+}
+
+// ADVERSARIAL: pair-keyed inventory view (merchant × good). Adds
+// on Bought, SUBTRACTS on Sold. The `self -= p` form is novel —
+// every existing fold body is `self += X` or `self = X`. Tests
+// whether the lower pass + WGSL emit handle decrement-shape folds
+// correctly (a true negative would clamp at 0 unexpectedly, OR the
+// well_formed checker would reject the AssignOp::SubAssign on a
+// view storage write).
+//
+// MULTI-EVENT @materialized — folds TWO event kinds (Bought, Sold)
+// in one view definition. Existing fixtures all single-event their
+// materialized views; this stresses the on_event=[X,Y] dispatch and
+// per-event-arm body specialisation.
+//
+// PAIR-KEYED + ITEM SECOND DIMENSION — second key is `good: Item`
+// (an Item-rooted entity, not Agent). Tests whether the pair-fold
+// sizing pass handles N×K (N merchants × K goods) instead of the
+// usual N×N (agent × agent).
+@materialized(on_event = [Bought, Sold])
+view inventory(merchant: Agent, good: Item) -> f32 {
+  initial: 0.0,
+  on Bought { buyer: b, seller: _, good: g, price: _ } where b == merchant && g == good { self += 1.0 }
+  on Sold { seller: s, buyer: _, good: g, price: _ } where s == merchant && g == good { self -= 1.0 }
+  clamp: [-1000.0, 1000.0],
+}
+
+// Per-merchant sell volume — symmetric to buy_volume but folds Sold
+// events. Two views over two distinct event kinds, both decay-anchored.
+@materialized(on_event = [Sold])
+@decay(rate = 0.98, per = tick)
+view sell_volume(seller: Agent) -> f32 {
+  initial: 0.0,
+  on Sold { seller: s, buyer: _, good: _, price: p } where s == seller { self += p }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-market price-history view, keyed on Market. Folds PriceUpdated
+// events with `self = price` (NOT `self += price`) — exercises the
+// "view-fold self = <expr>" overwrite shape (commit `123e8cd6`'s
+// atomicStore lowering). Without decay the most-recent price stays
+// pinned; with @decay the value eases back toward 0 (a baseline
+// proxy) between updates.
+@materialized(on_event = [PriceUpdated])
+@decay(rate = 0.99, per = tick)
+view current_price(market: Agent) -> f32 {
+  initial: 0.0,
+  on PriceUpdated { market: m, good: _, price: p } where m == market { self = p }
+  clamp: [0.0, 1000.0],
+}
+
+// Per-merchant death count (running tally; should be ≤ 1 per
+// merchant slot since merchants don't revive — heirs are separate
+// slots). Useful pin for "did the lifecycle fire at all".
+@materialized(on_event = [Died])
+view deaths_recorded(agent: Agent) -> f32 {
+  initial: 0.0,
+  on Died { agent: a, age: _ } where a == agent { self += 1.0 }
+  clamp: [0.0, 100.0],
+}
+
+// Per-heir birth count (pin: ≤ 1 per heir slot if inheritance fires
+// once per ancestor). Two-event lifecycle marker pair.
+@materialized(on_event = [Born])
+view births_recorded(agent: Agent) -> f32 {
+  initial: 0.0,
+  on Born { agent: a, ancestor: _, legacy: _ } where a == agent { self += 1.0 }
+  clamp: [0.0, 100.0],
+}
+
+// Wealth-conservation pin: total Transferred amount across all
+// inheritance events. Pin asserts this matches sum(deceased wealth)
+// — net zero across donor + receiver.
+@materialized(on_event = [Transferred])
+view transferred_total(donor: Agent) -> f32 {
+  initial: 0.0,
+  on Transferred { donor: d, receiver: _, amount: a } where d == donor { self += a }
+  clamp: [0.0, 1000000.0],
+}

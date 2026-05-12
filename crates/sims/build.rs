@@ -108,6 +108,7 @@ fn main() {
                 | "crowd_navigation"
                 | "dsl_stress_coverage"
                 | "hill_raid"
+                | "trade_caravans"
         ) {
             continue;
         }
