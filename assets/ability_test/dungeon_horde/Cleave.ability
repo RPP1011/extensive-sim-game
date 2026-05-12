@@ -1,0 +1,14 @@
+// dungeon_layout — Warrior AOE swing + Brute's wide cleave. AbilityId 2
+// (alphabetical: after Backstab=1, before Heal=3).
+// AOE damage in spread(radius, max_targets) — friendly-fire by default
+// per the AOE Path B gotcha; the verb's `when` gate filters the cast
+// site (caster) but the radius walk hits every alive agent in-radius.
+
+ability Cleave {
+    target: enemy
+    range: 4.0
+    cooldown: 6
+    hint: damage
+
+    damage 25.0 in spread(3.5, 6) [PHYSICAL: 100]
+}

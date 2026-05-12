@@ -1,0 +1,16 @@
+// dungeon_layout — Rogue's vanish. AbilityId 6
+// (alphabetical: after Snipe=5, before Strike=7).
+//
+// Stage 1: parses cleanly but is NOT dispatched (no verb references
+// `apply_ability 6`). Stage 2 will gate this on hero-side disposition
+// and drive the bilateral stealth/alert detection layer. The
+// `for 5s` modifier lowers via the standard Wave 2 piece 7 stealth
+// duration-bearing path (`EffectOp::Stealth { duration_ticks }`).
+
+ability Stealth {
+    target: self
+    cooldown: 20
+    hint: utility
+
+    stealth for 5s [CROWD_CONTROL: 100]
+}

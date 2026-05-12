@@ -1,0 +1,13 @@
+// dungeon_layout — Cleric's ally heal. AbilityId 3
+// (alphabetical: after Cleave=2, before Scout=4).
+// Single-target heal — verb `when` clause picks the lowest-HP ally
+// within 8-unit range with LoS.
+
+ability Heal {
+    target: ally
+    range: 8.0
+    cooldown: 4
+    hint: heal
+
+    heal 60.0 [HEAL: 100]
+}

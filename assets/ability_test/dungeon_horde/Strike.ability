@@ -1,0 +1,14 @@
+// dungeon_layout — universal melee bash. AbilityId 7
+// (alphabetical: after Stealth=6, before Stun=8).
+// Every hero role + every melee enemy class (Goblin, Brute) shares
+// this verb. Pair-field score in the producer rule picks the
+// lowest-HP enemy in 4-unit range with LoS.
+
+ability Strike {
+    target: enemy
+    range: 4.0
+    cooldown: 3
+    hint: damage
+
+    damage 15.0 [PHYSICAL: 100]
+}

@@ -118,6 +118,7 @@ fn main() {
                 | "among_us"
                 | "dungeon_layout"
                 | "dungeon_stealth"
+                | "dungeon_horde"
         ) {
             continue;
         }

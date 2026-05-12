@@ -1,0 +1,15 @@
+// dungeon_layout — Mage's control burst. AbilityId 8
+// (alphabetical: after Strike=7, before Volley=9).
+// 2-second stun (20 ticks at 100ms cadence). Stuns drain through the
+// EffectStunApplied (kind=29) chronicle row into agent
+// stun_expires_at_tick SoA; every verb's `when` clause reads
+// `agents.stun_expires_at_tick(self) <= world.tick`.
+
+ability Stun {
+    target: enemy
+    range: 12.0
+    cooldown: 15
+    hint: crowd_control
+
+    stun 2s [CROWD_CONTROL: 100]
+}
