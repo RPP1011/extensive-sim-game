@@ -607,7 +607,7 @@ fn lower_stmt(
             ast_label: "BeliefObserve",
             span: *span,
         }),
-        IrStmt::ApplyAbility { ability, caster, target, span } => {
+        IrStmt::ApplyAbility { ability, caster, target, span, .. } => {
             // Slice δ part 3 (#161): if the source carried explicit
             // `by <caster>`, lower that expression. Otherwise default:
             //   - PerAgent  → `AgentSelfId` (per-thread agent — works)

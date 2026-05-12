@@ -2659,6 +2659,41 @@ fn parse_apply_ability_stmt(c: &mut Cursor) -> PResult<crate::ast::ApplyAbilityS
             || ck.starts_with("target\t")
             || ck.starts_with("target\n")
     })?;
+    // Symbolic ability-name surface (2026-05-12): when the parsed ability
+    // operand is a bare PascalCase identifier (e.g. `Strike`, `Volley`),
+    // capture it as a name for the lowerer to resolve against the
+    // fixture's ability-name registry. Numeric (`apply_ability 3`),
+    // lowercase locals (`apply_ability a` — local from `on Event { …: a }`),
+    // and complex expressions (`agents.level(self)`, `self.action_ability`)
+    // keep their existing expression-only path.
+    //
+    // The PascalCase gate matches the existing DSL convention:
+    //   - Ability filenames are PascalCase (`Strike.ability`).
+    //   - Lowercase bare-ident bindings name pattern locals
+    //     (`on Triggered { who: w, ability_id: a } { apply_ability a … }`).
+    //   - Reserved namespaces (`agents`, `world`, `config`, …) are lowercase
+    //     so they never collide with the PascalCase gate.
+    //
+    // Closes the silent-mis-dispatch footgun documented in commit
+    // 08cc223e (squad_skirmish): the registry sorts filenames
+    // alphabetically, so `apply_ability 1` is NOT necessarily the
+    // verb-author's "first" ability. With this surface, authors write
+    // `apply_ability Strike` and the lowerer resolves the slot for them
+    // (or surfaces a typed `UnknownAbilityName` error).
+    let ability_name = if let ExprKind::Ident(name) = &ability.kind {
+        if name
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_uppercase())
+            .unwrap_or(false)
+        {
+            Some(name.clone())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     c.skip_ws();
     let caster = if c.starts_with("by ") || c.starts_with("by\t") || c.starts_with("by\n") {
         c.bump("by".len());
@@ -2697,6 +2732,7 @@ fn parse_apply_ability_stmt(c: &mut Cursor) -> PResult<crate::ast::ApplyAbilityS
     }
     Ok(crate::ast::ApplyAbilityStmt {
         ability,
+        ability_name,
         caster,
         target,
         span: Span::new(start, c.pos),

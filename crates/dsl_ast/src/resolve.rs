@@ -1533,7 +1533,25 @@ fn resolve_bodies(
                             resolve_emit(e, &mut scope, symbols).map(IrStmt::Emit)
                         }
                         ast::VerbBodyStmt::ApplyAbility(a) => {
-                            let ability = resolve_expr(&a.ability, &mut scope, symbols)?;
+                            // Symbolic-name surface (2026-05-12): when the
+                            // parser captured a bare-identifier ability
+                            // operand on `ability_name`, the resolver
+                            // synthesizes a placeholder `LitInt(0)` for
+                            // the `ability` IR expression so resolve_expr
+                            // doesn't try to look up the name in the
+                            // identifier scope (where it would either
+                            // mis-resolve to an EnumVariant with no owner
+                            // type or surface UnknownIdent). The lowerer
+                            // reads `ability_name` and substitutes the
+                            // resolved AbilityId from the registry.
+                            let ability = if a.ability_name.is_some() {
+                                IrExprNode {
+                                    kind: IrExpr::LitInt(0),
+                                    span: a.ability.span,
+                                }
+                            } else {
+                                resolve_expr(&a.ability, &mut scope, symbols)?
+                            };
                             let caster = match &a.caster {
                                 Some(c) => Some(resolve_expr(c, &mut scope, symbols)?),
                                 None => None,
@@ -1544,6 +1562,7 @@ fn resolve_bodies(
                             };
                             Ok(IrStmt::ApplyAbility {
                                 ability,
+                                ability_name: a.ability_name.clone(),
                                 caster,
                                 target,
                                 span: a.span,
@@ -2012,7 +2031,19 @@ fn resolve_stmt(
             // resolves to an AgentId expression in the rule's scope.
             // Typically `e.actor` for PerEvent rules destructuring the
             // event payload, or `self` for explicit PerAgent self-cast.
-            let ability = resolve_expr(&a.ability, scope, symbols)?;
+            //
+            // Symbolic-name surface (2026-05-12): see the verb-body arm
+            // above for the rationale — when `ability_name` is set we
+            // skip resolving the placeholder ability expression and let
+            // the lowerer substitute the registry-resolved AbilityId.
+            let ability = if a.ability_name.is_some() {
+                IrExprNode {
+                    kind: IrExpr::LitInt(0),
+                    span: a.ability.span,
+                }
+            } else {
+                resolve_expr(&a.ability, scope, symbols)?
+            };
             let caster = match &a.caster {
                 Some(c) => Some(resolve_expr(c, scope, symbols)?),
                 None => None,
@@ -2021,7 +2052,13 @@ fn resolve_stmt(
                 Some(t) => Some(resolve_expr(t, scope, symbols)?),
                 None => None,
             };
-            Ok(IrStmt::ApplyAbility { ability, caster, target, span: a.span })
+            Ok(IrStmt::ApplyAbility {
+                ability,
+                ability_name: a.ability_name.clone(),
+                caster,
+                target,
+                span: a.span,
+            })
         }
         Stmt::For { binder, iter, filter, body, span } => {
             let iter_ir = resolve_expr(iter, scope, symbols)?;

@@ -369,11 +369,28 @@ fn emit_into(
             .iter()
             .any(|h| stmts_contain_set_beliefs_call(&h.body))
     });
+    // Symbolic ability-name → 1-based AbilityId map for the
+    // `apply_ability <Name> …` DSL surface (2026-05-12). Built from the
+    // same `BuiltRegistry` that drives the runtime registry, so the
+    // compile-time name lookup is byte-identical to the runtime slot
+    // assignment. Empty when the fixture has no `.ability` corpus —
+    // every `apply_ability <Name>` then surfaces as a typed
+    // `UnknownAbilityName` lower diagnostic.
+    let ability_names: std::collections::BTreeMap<String, u32> = built_registry
+        .as_ref()
+        .map(|r| {
+            r.names
+                .iter()
+                .map(|(name, id)| (name.clone(), id.raw()))
+                .collect()
+        })
+        .unwrap_or_default();
     let lower_opts = crate::cg::lower::LowerOpts {
         aoe_dispatch,
         belief_state,
         debug: lower_debug_depth,
         debug_wgsl: lower_debug_wgsl,
+        ability_names,
         ..Default::default()
     };
     if !ability_files.is_empty() {

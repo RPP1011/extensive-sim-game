@@ -883,7 +883,27 @@ pub struct ApplyAbilityStmt {
     /// Expression resolving to the ability_id at runtime. Most call sites
     /// pass `self.action_ability` — the AbilityId field already living on
     /// agent SoA, written by the action-selection scoring kernel.
+    ///
+    /// **Symbolic ability-name surface (2026-05-12):** when the source
+    /// reads `apply_ability Strike by self target target`, the parser
+    /// captures the identifier in [`Self::ability_name`] and uses a
+    /// placeholder `Int(0)` here. The lowerer resolves the name through
+    /// the fixture's registry (sorted-filename → 1-based AbilityId map
+    /// in `LowerOpts::ability_names`) and substitutes the resolved id at
+    /// the dispatch boundary. Mismatched names surface as a typed
+    /// `LowerError::UnknownAbilityName` instead of dispatching whatever
+    /// numeric slot happened to be in this field. The numeric surface
+    /// (`apply_ability 3 by …`) still parses and lowers unchanged.
     pub ability: Expr,
+    /// Symbolic ability-name from the `apply_ability <Name> …` surface
+    /// (2026-05-12). `Some(name)` when the parser observed a bare
+    /// identifier as the ability operand; `None` for the numeric / general-
+    /// expression surface. Resolved to an AbilityId at lower time against
+    /// `LowerOpts::ability_names`. Closes the silent-mis-dispatch footgun
+    /// that took ~3h to debug for squad_skirmish (`apply_ability 1` was
+    /// Daze, not Strike, because the registry sorts filenames
+    /// alphabetically).
+    pub ability_name: Option<String>,
     /// Optional explicit caster expression (`apply_ability <ability> by
     /// <caster>`). When `None`, lowering defaults to the per-thread
     /// agent (`self`) for PerAgent rules and surfaces a typed error

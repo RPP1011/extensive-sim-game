@@ -1282,12 +1282,14 @@ mod tests {
         };
         let no_caster = IrStmt::ApplyAbility {
             ability: lit(),
+            ability_name: None,
             caster: None,
             target: None,
             span: Span::dummy(),
         };
         let with_caster = IrStmt::ApplyAbility {
             ability: lit(),
+            ability_name: None,
             caster: Some(lit()),
             target: None,
             span: Span::dummy(),
@@ -1306,6 +1308,7 @@ mod tests {
         // assertion above. Each operand needs its own coverage.
         let with_target_only = IrStmt::ApplyAbility {
             ability: lit(),
+            ability_name: None,
             caster: None,
             target: Some(lit()),
             span: Span::dummy(),

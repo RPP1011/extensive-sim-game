@@ -891,6 +891,30 @@ pub enum LoweringError {
         reason: super::verb_expand::VerbSkipReason,
         span: Span,
     },
+
+    // -- Symbolic ability-name surface (2026-05-12) ----------------------
+
+    /// `apply_ability <Name> …` with a bare-identifier ability operand
+    /// that does not match any registered `.ability` filename for the
+    /// fixture. The lowering driver resolves `ability_name` against
+    /// [`super::driver::LowerOpts::ability_names`] (built from the
+    /// per-fixture `assets/ability_test/<name>/*.ability` corpus); an
+    /// unknown name surfaces as this typed defect instead of silently
+    /// dispatching `AbilityId(0)`.
+    ///
+    /// `available` is the sorted name list as the user would see them
+    /// (case-sensitive; matches the filename stems). Closes the silent-
+    /// mis-dispatch footgun documented in commit 08cc223e
+    /// (squad_skirmish): `apply_ability 1` was Daze, not Strike, because
+    /// the registry sorts filenames alphabetically. The symbolic surface
+    /// avoids the mis-binding; this error variant surfaces a typo
+    /// (`apply_ability Smite` when no `Smite.ability` exists) with the
+    /// available names rather than an obscure WGSL failure downstream.
+    UnknownAbilityName {
+        name: String,
+        available: Vec<String>,
+        span: Span,
+    },
 }
 
 /// Closed-set discriminant for which sub-expression of a scoring row
@@ -1477,6 +1501,15 @@ impl fmt::Display for LoweringError {
                 "lowering: verb `{}` at {}..{} expansion partially completed (mask + scoring \
                  injected): {}",
                 verb_name, span.start, span.end, reason
+            ),
+            LoweringError::UnknownAbilityName { name, available, span } => write!(
+                f,
+                "lowering: apply_ability `{}` at {}..{} — no ability with that name; \
+                 available: [{}] (filename stems under `assets/ability_test/<fixture>/`)",
+                name,
+                span.start,
+                span.end,
+                available.join(", "),
             ),
         }
     }

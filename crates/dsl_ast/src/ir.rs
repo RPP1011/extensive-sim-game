@@ -514,6 +514,14 @@ pub enum IrStmt {
     /// defaults to `self`, target to the verb's `target` binder.
     ApplyAbility {
         ability: IrExprNode,
+        /// Symbolic ability-name from the `apply_ability <Name> …`
+        /// surface (2026-05-12). `Some(name)` when the parser captured a
+        /// bare identifier as the ability operand; the lowerer resolves
+        /// it against `LoweringCtx::ability_name_to_id` (populated from
+        /// `LowerOpts::ability_names`) and replaces the dispatched
+        /// AbilityId. `None` for numeric / general-expression surfaces
+        /// (the existing path lowers the `ability` expression unchanged).
+        ability_name: Option<String>,
         /// Optional explicit caster operand from `apply_ability <a> by
         /// <caster>` source-level syntax (slice δ part 3, #161). When
         /// `None`, lowering uses the per-thread agent (PerAgent rules)

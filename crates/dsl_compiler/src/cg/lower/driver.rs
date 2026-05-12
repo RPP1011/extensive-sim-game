@@ -95,7 +95,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use dsl_ast::ir::{
-    Compilation, EventRef, FoldHandlerIR, IrCallArg, IrExpr, IrExprNode, IrType, MaskIR,
+    Compilation, EventRef, FoldHandlerIR, IrCallArg, IrExpr, IrExprNode, IrStmt, IrType, MaskIR,
     NamespaceId, PhysicsIR, ViewBodyIR, ViewIR, ViewKind,
 };
 
@@ -175,7 +175,7 @@ use super::view::{lower_view, HandlerResolution};
 /// scripts choose between the AOE shape (smoke runtime — wants the
 /// walk for parity testing) and the existing single-target chain
 /// (production runtimes — keep their zero-spatial-overhead BGL).
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct LowerOpts {
     /// When `true`, every `apply_ability` lowered under this
     /// `Compilation` carries `with_aoe_dispatch: true` on its
@@ -243,6 +243,25 @@ pub struct LowerOpts {
     /// slice that lands an opt-in `*_debug_runtime` fixture; today
     /// no runtime opts in.
     pub debug_wgsl: DebugWgslFlags,
+    /// Symbolic ability-name → 1-based AbilityId map for resolving the
+    /// `apply_ability <Name> …` source surface (2026-05-12). When a
+    /// statement carries `IrStmt::ApplyAbility { ability_name: Some(s),
+    /// .. }`, the lowering driver looks up `s` in this map and rewrites
+    /// the IR's `ability` field to a `LitInt(id as i64)` before
+    /// downstream passes (verb_expand, schedule, emit) run. An entry
+    /// that's not in the map surfaces as a typed
+    /// [`LoweringError::UnknownAbilityName`] diagnostic with the
+    /// sorted-name list as `available` for the user-facing message.
+    ///
+    /// The per-fixture build.rs populates this from the same source-of-
+    /// truth that builds the runtime `PackedAbilityRegistry` (sorted
+    /// `.ability` filenames under `assets/ability_test/<fixture>/` —
+    /// see `crate::build_helper::compile_for_fixture`). Default empty
+    /// means every `IrStmt::ApplyAbility { ability_name: Some(_), .. }`
+    /// errors out — fixtures must opt in by populating this map (today
+    /// the build_helper does it automatically when a `.ability` corpus
+    /// exists).
+    pub ability_names: std::collections::BTreeMap<String, u32>,
 }
 
 /// Compiler debug-mode level — graduated GPU + memory + DSL-source
@@ -436,6 +455,29 @@ pub fn lower_compilation_to_cg_with_opts(
     let mut builder = CgProgramBuilder::new();
     let mut diagnostics: Vec<LoweringError> = Vec::new();
 
+    // -- Phase -1: symbolic ability-name resolution (2026-05-12) --------
+    //
+    // The `apply_ability <Name> …` DSL surface (parser captures the
+    // bare identifier on `ApplyAbilityStmt::ability_name`; resolver
+    // forwards it as `IrStmt::ApplyAbility::ability_name`) is rewritten
+    // here to a `LitInt(N)` ability expression. The substitution runs
+    // BEFORE verb_expand because `verb_expand::extract_single_apply_ability_literal`
+    // walks the IR for a `LitInt` ability operand to populate
+    // `verb_ability_ids` for predicate-aware scoring — leaving the
+    // placeholder `LitInt(0)` from the resolver would mis-bind every
+    // verb's ability id to slot 0.
+    //
+    // Unknown names surface as `LoweringError::UnknownAbilityName`
+    // with the sorted name list so the user sees `apply_ability Smite
+    // — available: [Daze, Rally, Strike, Volley]` rather than a
+    // mysterious WGSL failure downstream.
+    let mut comp_owned: Compilation = comp.clone();
+    resolve_ability_names_in_compilation(
+        &mut comp_owned,
+        &opts.ability_names,
+        &mut diagnostics,
+    );
+
     // -- Phase 0: verb expansion (Slice A: verb-probe-metric-emit plan) -
     //
     // `verb` declarations are composition sugar over (mask, cascade,
@@ -450,7 +492,7 @@ pub fn lower_compilation_to_cg_with_opts(
     // Run before any registry population so the synthesised
     // scoring entries' action heads land in `populate_actions`'s
     // walk and the synthesised mask appears in `lower_all_masks`.
-    let expansion = super::verb_expand::expand_verbs(comp);
+    let expansion = super::verb_expand::expand_verbs(&comp_owned);
     let comp = &expansion.compilation;
     diagnostics.extend(expansion.diagnostics);
 
@@ -823,6 +865,116 @@ pub fn lower_compilation_to_cg_with_opts(
             program: prog,
             diagnostics,
         })
+    }
+}
+
+/// Walk `comp` and rewrite every `IrStmt::ApplyAbility { ability_name:
+/// Some(name), .. }` to a `LitInt(N)` ability operand resolved against
+/// `ability_names` (filename-stem → 1-based AbilityId map; populated by
+/// `build_helper` from the `.ability` corpus the runtime registry uses).
+///
+/// Unknown names append [`LoweringError::UnknownAbilityName`] to
+/// `diagnostics` with the sorted name list as `available`. The statement
+/// still rewrites the `ability` field to `LitInt(0)` so downstream
+/// passes (verb_expand, schedule, emit) keep their literal-only walks
+/// — the diagnostic is the user-visible signal that lowering refused
+/// to bind the name.
+///
+/// Walks every nested-body container that can carry an
+/// `IrStmt::ApplyAbility`: physics handlers, verb bodies, view fold
+/// handlers, plus the recursive bodies inside `If` / `For` /
+/// `ForEachAgent` / `Match` arms. The resolver already rejects
+/// `apply_ability` inside view fold bodies, but the walk descends
+/// defensively so a future relaxation doesn't silently drop the
+/// symbolic-name substitution.
+///
+/// Closes the silent-mis-dispatch footgun from commit 08cc223e
+/// (squad_skirmish): authors who wrote `apply_ability 1` thinking it
+/// was Strike instead got Daze (alphabetically first). The symbolic
+/// surface (`apply_ability Strike`) names the intended ability; this
+/// helper does the binding.
+fn resolve_ability_names_in_compilation(
+    comp: &mut Compilation,
+    ability_names: &std::collections::BTreeMap<String, u32>,
+    diagnostics: &mut Vec<LoweringError>,
+) {
+    for physics in &mut comp.physics {
+        for handler in &mut physics.handlers {
+            resolve_ability_names_in_stmts(&mut handler.body, ability_names, diagnostics);
+        }
+    }
+    for verb in &mut comp.verbs {
+        resolve_ability_names_in_stmts(&mut verb.body, ability_names, diagnostics);
+    }
+    for view in &mut comp.views {
+        if let ViewBodyIR::Fold { handlers, .. } = &mut view.body {
+            for handler in handlers {
+                resolve_ability_names_in_stmts(&mut handler.body, ability_names, diagnostics);
+            }
+        }
+    }
+}
+
+fn resolve_ability_names_in_stmts(
+    stmts: &mut [IrStmt],
+    ability_names: &std::collections::BTreeMap<String, u32>,
+    diagnostics: &mut Vec<LoweringError>,
+) {
+    for stmt in stmts {
+        resolve_ability_names_in_stmt(stmt, ability_names, diagnostics);
+    }
+}
+
+fn resolve_ability_names_in_stmt(
+    stmt: &mut IrStmt,
+    ability_names: &std::collections::BTreeMap<String, u32>,
+    diagnostics: &mut Vec<LoweringError>,
+) {
+    match stmt {
+        IrStmt::ApplyAbility { ability, ability_name, span, .. } => {
+            if let Some(name) = ability_name.take() {
+                match ability_names.get(&name) {
+                    Some(id) => {
+                        ability.kind = IrExpr::LitInt(*id as i64);
+                    }
+                    None => {
+                        let available: Vec<String> = ability_names.keys().cloned().collect();
+                        diagnostics.push(LoweringError::UnknownAbilityName {
+                            name,
+                            available,
+                            span: *span,
+                        });
+                        // Leave `ability` as the resolver-emitted
+                        // placeholder `LitInt(0)` — downstream lowering
+                        // still walks the stmt but the diagnostic
+                        // surfaces the source-level failure.
+                    }
+                }
+            }
+        }
+        IrStmt::If { then_body, else_body, .. } => {
+            resolve_ability_names_in_stmts(then_body, ability_names, diagnostics);
+            if let Some(eb) = else_body {
+                resolve_ability_names_in_stmts(eb, ability_names, diagnostics);
+            }
+        }
+        IrStmt::Match { arms, .. } => {
+            for arm in arms {
+                resolve_ability_names_in_stmts(&mut arm.body, ability_names, diagnostics);
+            }
+        }
+        IrStmt::For { body, .. } => {
+            resolve_ability_names_in_stmts(body, ability_names, diagnostics);
+        }
+        IrStmt::ForEachAgent { body, .. } => {
+            resolve_ability_names_in_stmts(body, ability_names, diagnostics);
+        }
+        IrStmt::Let { .. }
+        | IrStmt::Emit(_)
+        | IrStmt::SelfUpdate { .. }
+        | IrStmt::SelfAppend { .. }
+        | IrStmt::Expr(_)
+        | IrStmt::BeliefObserve { .. } => {}
     }
 }
 
