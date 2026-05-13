@@ -190,6 +190,11 @@ pub struct ViewerApp {
     /// current run. Reset to false at startup; set to true after print
     /// so we don't spam the log per-frame after termination.
     summary_printed: bool,
+    /// Has the boss been wounded past the enrage threshold this run?
+    /// On the transition from `false → true` the viewer writes a one-time
+    /// alert spike to every enemy still in the boss room, visibly
+    /// escalating the climax fight.
+    boss_enraged: bool,
 }
 
 impl ViewerApp {
@@ -262,6 +267,7 @@ impl ViewerApp {
             max_alert_seen: 0,
             total_kills: 0,
             summary_printed: false,
+            boss_enraged: false,
         };
         viewer.refresh_snapshot();
         Some(viewer)
@@ -290,6 +296,7 @@ impl ViewerApp {
         self.state.step();
         self.advance_hero_exploration();
         self.refresh_snapshot();
+        self.maybe_enrage_boss_room();
         // Termination heuristic: heroes-alive==0 OR enemies-alive==0.
         let mut heroes_alive = 0u32;
         let mut enemies_alive = 0u32;
@@ -471,6 +478,57 @@ impl ViewerApp {
                 bytemuck::cast_slice(&targets),
             );
         }
+    }
+
+    /// Boss-enrage trigger. When the boss agent first drops below 50%
+    /// HP, write a one-time `+ALERT_BUMP` to the `alert` field of every
+    /// enemy whose position is inside the boss-room slot. The .sim's
+    /// existing alert-driven visuals (MAT_PANICKED tint) then kick in
+    /// automatically — no rule changes required.
+    ///
+    /// Threshold is 50% of the boss HP override (`BOSS_HP=800` in
+    /// `try_new`), i.e. 400. Guarded by `boss_enraged` so the bump
+    /// fires exactly once per run.
+    fn maybe_enrage_boss_room(&mut self) {
+        if self.boss_enraged {
+            return;
+        }
+        let boss_slot = match self.boss_slot {
+            Some(s) => s as usize,
+            None => return,
+        };
+        let boss = &self.agents[boss_slot];
+        const BOSS_ENRAGE_HP: f32 = 400.0;
+        const ALERT_BUMP: u32 = 10;
+        if !(boss.alive && boss.hp < BOSS_ENRAGE_HP && boss.hp > 0.0) {
+            return;
+        }
+        let n = self.agent_count as usize;
+        let alert_buf = self.state.agent_alert_buf.clone();
+        let mut alert = read_agent_u32(&mut self.state, &alert_buf, self.agent_count);
+        let boss_rx = self.dungeon.boss_room.rx;
+        let boss_ry = self.dungeon.boss_room.ry;
+        let sw = dungeon::SLOT_WIDTH;
+        let mut bumped = 0u32;
+        for slot in 0..n {
+            let a = &self.agents[slot];
+            if !a.alive { continue; }
+            if a.creature_type == dungeon::CT_HERO { continue; }
+            let rx = (a.pos.x / sw as f32).floor() as i32;
+            let ry = (a.pos.y / sw as f32).floor() as i32;
+            if rx == boss_rx as i32 && ry == boss_ry as i32 {
+                alert[slot] = alert[slot].saturating_add(ALERT_BUMP);
+                bumped += 1;
+            }
+        }
+        self.state.gpu.queue.write_buffer(
+            &self.state.agent_alert_buf, 0, bytemuck::cast_slice(&alert),
+        );
+        self.boss_enraged = true;
+        eprintln!(
+            "[viewer_runtime] boss enraged @ tick {} (hp={:.0}) — +{ALERT_BUMP} alert on {bumped} boss-room enemies",
+            self.state.tick, boss.hp,
+        );
     }
 
     /// Pretty-print a per-run scorecard: tick budget, verdict, per-hero
