@@ -12,7 +12,7 @@
 //!
 //! # Constants — must stay in sync with the pin
 //!
-//! Hand-laid 25-room layout via `ROOM_LAYOUT` + per-template wall
+//! Hand-laid 21-room layout via `ROOM_LAYOUT` + per-template wall
 //! patterns. The pin (`crates/sims/tests/dungeon_horde_pin.rs`) keeps
 //! its own CA-based roomgen — the viewer is decoupled by design so
 //! we can iterate on visual layout without churning the test
@@ -23,11 +23,11 @@ use sims::dungeon_horde::GeneratedRuntime;
 
 pub const N_HEROES: u32 = 5;
 
-pub const GRID_X: u32 = 234;
-pub const GRID_Y: u32 = 234;
+pub const GRID_X: u32 = 72;
+pub const GRID_Y: u32 = 72;
 pub const GRID_Z: u32 = 8;
-pub const SLOTS_PER_ROW: u32 = 9;
-pub const SLOT_WIDTH: u32 = 26;
+pub const SLOTS_PER_ROW: u32 = 6;
+pub const SLOT_WIDTH: u32 = 12;
 pub const ROOM_INTERIOR_Z: u32 = 6;
 pub const STONE: u8 = 1;
 
@@ -83,16 +83,18 @@ impl Dungeon {
             let idx = room.idx();
             let dist = *self.bfs_dist.get(&idx).unwrap_or(&0);
             let n_floor = self.floor_cells.get(&idx).map(|v| v.len() as u32).unwrap_or(0);
+            // Density formula copied from dungeon_horde_pin so the viewer
+            // renders the same population profile the test asserts on.
             let raw_count = if room == self.boss_room {
-                (n_floor / 8).min(40)
+                (n_floor / 2).min(100)
             } else if dist == 1 {
-                n_floor / 64
+                n_floor / 12
             } else if dist == 2 {
-                n_floor / 36
+                n_floor / 6
             } else if dist == 3 {
-                n_floor / 24
+                n_floor / 4
             } else {
-                n_floor / 18
+                n_floor / 3
             };
             let count = raw_count.min(n_floor.saturating_sub(4));
             for slot in 0..count {
@@ -137,11 +139,19 @@ pub enum RoomTemplate {
     Boss,
 }
 
-/// Hand-laid 25-room dungeon. Each entry is `(rx, ry, template)`; rooms
+/// Hand-laid 21-room dungeon. Each entry is `(rx, ry, template)`; rooms
 /// are placed in slot-adjacent positions so [`seed_voxel_dungeon`]'s
 /// existing doorway carving creates 2-cell-wide passages between them.
 ///
 /// Layout (S=Spawn, V=Treasure, P=Pillared, G=Partition, B=Boss):
+/// ```text
+///       0  1  2  3  4  5
+///   0   S  H  P  V  .  .
+///   1   H  .  .  H  .  .
+///   2   H  G  H  H  P  .
+///   3   .  .  .  .  H  .
+///   4   V  H  H  H  H  .
+///   5   H  .  .  P  H  B
 /// ```text
 ///       0  1  2  3  4  5  6  7  8
 ///   0   .  .  .  .  .  .  .  .  .
@@ -155,38 +165,32 @@ pub enum RoomTemplate {
 ///   8   .  .  .  .  .  B  .  .  .
 /// ```
 pub const ROOM_LAYOUT: &[(u32, u32, RoomTemplate)] = &[
-    (1, 1, RoomTemplate::Spawn),
-    (2, 1, RoomTemplate::Open),
-    (3, 1, RoomTemplate::Pillared),
-    (4, 1, RoomTemplate::Treasure),
+    (0, 0, RoomTemplate::Spawn),
+    (1, 0, RoomTemplate::Open),
+    (2, 0, RoomTemplate::Pillared),
+    (3, 0, RoomTemplate::Treasure),
 
-    (1, 2, RoomTemplate::Open),
-    (4, 2, RoomTemplate::Open),
+    (0, 1, RoomTemplate::Open),
+    (3, 1, RoomTemplate::Open),
 
-    (1, 3, RoomTemplate::Open),
-    (2, 3, RoomTemplate::Partition),
-    (3, 3, RoomTemplate::Open),
+    (0, 2, RoomTemplate::Open),
+    (1, 2, RoomTemplate::Partition),
+    (2, 2, RoomTemplate::Open),
+    (3, 2, RoomTemplate::Open),
+    (4, 2, RoomTemplate::Pillared),
+
     (4, 3, RoomTemplate::Open),
-    (5, 3, RoomTemplate::Open),
 
-    (4, 4, RoomTemplate::Pillared),
+    (0, 4, RoomTemplate::Treasure),
+    (1, 4, RoomTemplate::Open),
+    (2, 4, RoomTemplate::Open),
+    (3, 4, RoomTemplate::Open),
+    (4, 4, RoomTemplate::Open),
 
-    (1, 5, RoomTemplate::Treasure),
-    (2, 5, RoomTemplate::Open),
-    (3, 5, RoomTemplate::Open),
+    (0, 5, RoomTemplate::Open),
+    (3, 5, RoomTemplate::Pillared),
     (4, 5, RoomTemplate::Open),
-    (5, 5, RoomTemplate::Open),
-
-    (1, 6, RoomTemplate::Open),
-    (5, 6, RoomTemplate::Open),
-
-    (1, 7, RoomTemplate::Open),
-    (2, 7, RoomTemplate::Open),
-    (3, 7, RoomTemplate::Pillared),
-    (4, 7, RoomTemplate::Open),
-    (5, 7, RoomTemplate::Open),
-
-    (5, 8, RoomTemplate::Boss),
+    (5, 5, RoomTemplate::Boss),
 ];
 
 /// Build the hand-laid dungeon. The `initial_seed` no longer drives
@@ -287,14 +291,16 @@ fn template_floor_cells(slot: RoomSlot, template: RoomTemplate) -> Vec<(u32, u32
     match template {
         RoomTemplate::Spawn | RoomTemplate::Open => {}
         RoomTemplate::Pillared => {
-            set_block(&mut walls, 5, 5, 2, 2);
-            set_block(&mut walls, SLOT_WIDTH - 7, 5, 2, 2);
-            set_block(&mut walls, 5, SLOT_WIDTH - 7, 2, 2);
-            set_block(&mut walls, SLOT_WIDTH - 7, SLOT_WIDTH - 7, 2, 2);
+            // Four 1x1 columns at the interior quarters
+            for &(px, py) in &[(3u32, 3u32), (SLOT_WIDTH - 4, 3), (3, SLOT_WIDTH - 4), (SLOT_WIDTH - 4, SLOT_WIDTH - 4)] {
+                set_wall(&mut walls, px, py);
+            }
         }
         RoomTemplate::Partition => {
+            // Horizontal partition wall at the middle row, with a 3-cell
+            // gap centered on the room.
             let mid = SLOT_WIDTH / 2;
-            let gap_lo = SLOT_WIDTH / 2 - 2;
+            let gap_lo = SLOT_WIDTH / 2 - 1;
             let gap_hi = SLOT_WIDTH / 2 + 2;
             for lx in 2..(SLOT_WIDTH - 2) {
                 if lx >= gap_lo && lx < gap_hi { continue; }
@@ -302,25 +308,17 @@ fn template_floor_cells(slot: RoomSlot, template: RoomTemplate) -> Vec<(u32, u32
             }
         }
         RoomTemplate::Treasure => {
-            let c = SLOT_WIDTH / 2 - 2;
-            set_block(&mut walls, c, c, 4, 4);
-            for &(px, py) in &[
-                (3u32, 3u32),
-                (SLOT_WIDTH - 4, 3),
-                (3, SLOT_WIDTH - 4),
-                (SLOT_WIDTH - 4, SLOT_WIDTH - 4),
-            ] {
-                set_wall(&mut walls, px, py);
-            }
+            // Central 2x2 chest pillar
+            let c = SLOT_WIDTH / 2 - 1;
+            set_block(&mut walls, c, c, 2, 2);
         }
         RoomTemplate::Boss => {
+            // Four ceremonial 1x1 columns broadly spaced for boss-arena feel
             for &(px, py) in &[
-                (5u32, 7u32),
-                (SLOT_WIDTH / 2, 7),
-                (SLOT_WIDTH - 6, 7),
-                (5, SLOT_WIDTH - 8),
-                (SLOT_WIDTH / 2, SLOT_WIDTH - 8),
-                (SLOT_WIDTH - 6, SLOT_WIDTH - 8),
+                (2u32, 3u32),
+                (SLOT_WIDTH - 3, 3),
+                (2, SLOT_WIDTH - 4),
+                (SLOT_WIDTH - 3, SLOT_WIDTH - 4),
             ] {
                 set_wall(&mut walls, px, py);
             }
