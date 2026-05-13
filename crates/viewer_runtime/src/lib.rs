@@ -139,6 +139,11 @@ pub struct AgentSnapshot {
     /// Absolute tick at which the rogue's Stealth ability expires (per
     /// `stealth_until_tick` custom field). > current tick means stealthed.
     pub stealth_until_tick: u32,
+    /// Direction the agent is currently moving (sim-coord unit vector in
+    /// the XY plane). Computed as a low-pass-filtered delta of position
+    /// across ticks so the mesh pass can rotate models to face their
+    /// movement direction. Defaults to `(0, 1)` for stationary agents.
+    pub facing_xy: [f32; 2],
 }
 
 /// The viewer's host-side state. Owns the sim runtime, the CPU voxel
@@ -199,6 +204,13 @@ pub struct ViewerApp {
     /// Whether the "boss-push" mode has been announced this run. Set true
     /// after the first log so we don't spam the terminal.
     boss_push_logged: bool,
+    /// Previous-tick agent positions; diffed against current to compute
+    /// facing direction for the mesh pass.
+    prev_positions: Vec<[f32; 2]>,
+    /// Sticky last-observed facing direction. Used when delta-position is
+    /// below the movement epsilon (agent stationary) so models don't
+    /// snap back to a default facing every frame they pause.
+    last_facing: Vec<[f32; 2]>,
 }
 
 impl ViewerApp {
@@ -314,6 +326,7 @@ impl ViewerApp {
                     hp: 0.0,
                     alert: 0,
                     stealth_until_tick: 0,
+                    facing_xy: [0.0, 1.0],
                 };
                 agent_count as usize
             ],
@@ -331,6 +344,8 @@ impl ViewerApp {
             summary_printed: false,
             boss_enraged: false,
             boss_push_logged: false,
+            prev_positions: vec![[0.0, 0.0]; agent_count as usize],
+            last_facing: vec![[0.0, 1.0]; agent_count as usize],
         };
         viewer.refresh_snapshot();
         Some(viewer)
@@ -758,6 +773,23 @@ impl ViewerApp {
                 self.max_alert_seen = alert[slot];
             }
 
+            // Facing — delta from previous tick. Below FACING_EPS_SQ we
+            // keep the last-observed direction so stationary agents don't
+            // jitter (and the very first frame defaults to (0, 1)).
+            const FACING_EPS_SQ: f32 = 0.001;
+            let dx = positions[slot][0] - self.prev_positions[slot][0];
+            let dy = positions[slot][1] - self.prev_positions[slot][1];
+            let len_sq = dx * dx + dy * dy;
+            let facing = if len_sq > FACING_EPS_SQ {
+                let inv = 1.0 / len_sq.sqrt();
+                let f = [dx * inv, dy * inv];
+                self.last_facing[slot] = f;
+                f
+            } else {
+                self.last_facing[slot]
+            };
+            self.prev_positions[slot] = [positions[slot][0], positions[slot][1]];
+
             self.agents[slot] = AgentSnapshot {
                 pos: Vec3::new(positions[slot][0], positions[slot][1], positions[slot][2]),
                 alive: now_alive,
@@ -766,6 +798,7 @@ impl ViewerApp {
                 hp: hps[slot],
                 alert: alert[slot],
                 stealth_until_tick: stealth[slot],
+                facing_xy: facing,
             };
         }
     }

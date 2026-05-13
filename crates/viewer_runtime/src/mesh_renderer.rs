@@ -104,12 +104,28 @@ pub struct InstanceData {
 
 impl InstanceData {
     pub fn from_position(pos: Vec3, scale: f32, tint: [f32; 3]) -> Self {
-        let s = scale;
-        // Column-major mat4 = translation + uniform scale.
+        Self::from_pos_facing(pos, scale, [0.0, 0.0, 1.0], tint)
+    }
+
+    /// Position + uniform scale + Y-axis-only orientation. `facing` is a
+    /// 3D direction in renderer space (Y-up); only the XZ components
+    /// matter — Y is silently dropped so models stay upright.
+    ///
+    /// Convention: the model's local +Z axis is taken as "forward", so
+    /// after rotation, local +Z lines up with `facing` in world space.
+    /// Local +Y stays world +Y (up).
+    pub fn from_pos_facing(pos: Vec3, scale: f32, facing: [f32; 3], tint: [f32; 3]) -> Self {
+        let fx = facing[0];
+        let fz = facing[2];
+        let len = (fx * fx + fz * fz).sqrt();
+        let (fx, fz) = if len > 1e-4 { (fx / len, fz / len) } else { (0.0, 1.0) };
+        let sc = scale;
+        // Column-major: col0 = local +X → (fz, 0, -fx) * sc, col1 = +Y → up,
+        // col2 = local +Z → (fx, 0, fz) * sc, col3 = translation.
         let model = [
-            [s, 0.0, 0.0, 0.0],
-            [0.0, s, 0.0, 0.0],
-            [0.0, 0.0, s, 0.0],
+            [fz * sc, 0.0, -fx * sc, 0.0],
+            [0.0, sc, 0.0, 0.0],
+            [fx * sc, 0.0, fz * sc, 0.0],
             [pos.x, pos.y, pos.z, 1.0],
         ];
         Self {

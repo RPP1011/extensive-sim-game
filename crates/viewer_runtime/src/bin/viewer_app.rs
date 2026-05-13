@@ -374,7 +374,17 @@ impl ApplicationHandler for WindowedViewer {
                             } else {
                                 0.75
                             };
-                            let inst = InstanceData::from_position(mesh_pos, scale, tint);
+                            // Sim facing is XY (sim's horizontal plane);
+                            // renderer's horizontal plane is XZ — same Z↔Y swap
+                            // applies to the heading vector.
+                            let facing_renderer = [
+                                agent.facing_xy[0],
+                                0.0,
+                                agent.facing_xy[1],
+                            ];
+                            let inst = InstanceData::from_pos_facing(
+                                mesh_pos, scale, facing_renderer, tint,
+                            );
                             let bucket = if agent.creature_type == 3 /*HERO*/ {
                                 ((agent.role as i32) - 1).clamp(0, 4) as usize
                             } else if agent.creature_type <= 2 {
