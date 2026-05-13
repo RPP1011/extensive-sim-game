@@ -59,8 +59,11 @@ fn observer_camera() -> FreeCamera {
     let cz = BRIDGE_DIM_Z as f32 / 2.0;
     // Height covers the full X-Z floor at the renderer's default ~60° FOV.
     let height = BRIDGE_DIM_X.max(BRIDGE_DIM_Z) as f32 + 8.0;
+    // Tilt the camera off perfect vertical to avoid gimbal lock — straight-down
+    // (-Y forward) with up=+Y makes Mat4::look_at_rh degenerate. Pulling the eye
+    // back along +Z gives a high-angle bird's-eye view.
     FreeCamera::new(
-        glam::Vec3::new(cx, height, cz),
+        glam::Vec3::new(cx, height, cz + height * 0.4),
         glam::Vec3::new(cx, 0.0, cz),
     )
 }
