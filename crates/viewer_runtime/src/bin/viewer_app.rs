@@ -419,13 +419,38 @@ impl ApplicationHandler for WindowedViewer {
                                     tint[2] * tint_mul,
                                 ]
                             };
+                            // Combat facing override: heroes face their
+                            // nearest live enemy within 18 units (longest
+                            // hero ability range) instead of just movement
+                            // direction. Makes stationary firing visibly
+                            // aim at targets. Enemies keep movement facing.
+                            let facing_xy = if agent.creature_type == 3 /*HERO*/ {
+                                const ATTACK_RANGE_SQ: f32 = 18.0 * 18.0;
+                                let mut best_sq = f32::MAX;
+                                let mut best: Option<[f32; 2]> = None;
+                                for other in self.app.agents() {
+                                    if !other.alive { continue; }
+                                    if other.creature_type == 3 /*HERO*/ { continue; }
+                                    let dx = other.pos.x - agent.pos.x;
+                                    let dy = other.pos.y - agent.pos.y;
+                                    let d2 = dx*dx + dy*dy;
+                                    if d2 < best_sq && d2 < ATTACK_RANGE_SQ && d2 > 1e-6 {
+                                        best_sq = d2;
+                                        let inv = 1.0 / d2.sqrt();
+                                        best = Some([dx * inv, dy * inv]);
+                                    }
+                                }
+                                best.unwrap_or(agent.facing_xy)
+                            } else {
+                                agent.facing_xy
+                            };
                             // Sim facing is XY (sim's horizontal plane);
                             // renderer's horizontal plane is XZ — same Z↔Y swap
                             // applies to the heading vector.
                             let facing_renderer = [
-                                agent.facing_xy[0],
+                                facing_xy[0],
                                 0.0,
-                                agent.facing_xy[1],
+                                facing_xy[1],
                             ];
                             let inst = InstanceData::from_pos_facing(
                                 mesh_pos, scale, facing_renderer, tint,
