@@ -569,3 +569,71 @@ fn pick_adjacent_present_room(dungeon: &Dungeon, from: RoomSlot) -> Option<RoomS
     }
     None
 }
+
+// ---------------------------------------------------------------------
+// Host-side hero exploration — ports `dungeon_horde_pin`'s
+// `update_hero_exploration` + `pick_next_target` so the viewer
+// advances `target_room_idx` between ticks the same way the test does.
+// Without this, heroes reach their first adjacent room and stop.
+// ---------------------------------------------------------------------
+
+/// Per-hero exploration state — which rooms each hero has already
+/// visited (bitmask, 1 bit per entry in `dungeon.rooms`) and their
+/// last-known room. Used by the host-side advance step to decide when
+/// to retarget after the hero arrives at their current target.
+pub struct HeroExploreState {
+    pub rooms_visited: [u32; N_HEROES as usize],
+    pub current_room: [Option<u32>; N_HEROES as usize],
+}
+
+impl HeroExploreState {
+    pub fn new(dungeon: &Dungeon) -> Self {
+        let spawn_remap = dungeon
+            .rooms
+            .iter()
+            .position(|r| *r == dungeon.spawn_room)
+            .expect("spawn_room is in rooms");
+        let initial_mask = 1u32 << spawn_remap;
+        Self {
+            rooms_visited: [initial_mask; N_HEROES as usize],
+            current_room: [Some(dungeon.spawn_room.idx()); N_HEROES as usize],
+        }
+    }
+}
+
+/// Frontier-greedy room picker — prefer unvisited adjacent rooms;
+/// fall back to any adjacent room if every neighbour was already
+/// visited (so heroes can retreat or loop). Tied to the hero's
+/// per-tick PCG so picks are deterministic across replays.
+pub fn pick_next_target(
+    dungeon: &Dungeon,
+    from: RoomSlot,
+    visited_mask: u32,
+    tick: u32,
+    hero_idx: u32,
+    seed: u64,
+) -> u32 {
+    let present_set: std::collections::BTreeSet<RoomSlot> =
+        dungeon.rooms.iter().copied().collect();
+    let mut unvisited: Vec<RoomSlot> = Vec::with_capacity(4);
+    let mut adjacent: Vec<RoomSlot> = Vec::with_capacity(4);
+    for (dx, dy) in [(0i32, 1i32), (1, 0), (0, -1), (-1, 0)] {
+        let nx = from.rx as i32 + dx;
+        let ny = from.ry as i32 + dy;
+        if nx < 0 || ny < 0 || (nx as u32) >= SLOTS_PER_ROW || (ny as u32) >= SLOTS_PER_ROW {
+            continue;
+        }
+        let n = RoomSlot::new(nx as u32, ny as u32);
+        if !present_set.contains(&n) { continue; }
+        adjacent.push(n);
+        let remap = dungeon.rooms.iter().position(|r| *r == n).unwrap();
+        if (visited_mask & (1u32 << remap)) == 0 {
+            unvisited.push(n);
+        }
+    }
+    let pool = if !unvisited.is_empty() { &unvisited } else { &adjacent };
+    if pool.is_empty() { return from.idx(); }
+    let pick = engine::rng::per_agent_u32_pcg(seed as u32, hero_idx, tick, 0xFA000) as usize
+        % pool.len();
+    pool[pick].idx()
+}

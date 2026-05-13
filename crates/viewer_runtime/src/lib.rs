@@ -110,6 +110,10 @@ pub struct ViewerApp {
     /// Tick at which sim terminated (TPK or dungeon cleared); `None`
     /// while the sim is still running.
     pub terminated_at_tick: Option<u64>,
+    /// Per-hero exploration state — frontier-greedy retargeting
+    /// advances `target_room_idx` between ticks. Without this,
+    /// heroes stop at the first adjacent room they reach.
+    hero_state: dungeon::HeroExploreState,
 }
 
 impl ViewerApp {
@@ -132,6 +136,7 @@ impl ViewerApp {
         let floor_cells = dungeon::seed_voxel_dungeon(&mut state, &dungeon, seed);
         dungeon::seed_topology(&mut state, &dungeon, seed);
 
+        let hero_state = dungeon::HeroExploreState::new(&dungeon);
         let mut viewer = Self {
             state,
             dungeon,
@@ -149,6 +154,7 @@ impl ViewerApp {
             ],
             agent_count,
             terminated_at_tick: None,
+            hero_state,
         };
         viewer.refresh_snapshot();
         Some(viewer)
@@ -175,6 +181,7 @@ impl ViewerApp {
             return;
         }
         self.state.step();
+        self.advance_hero_exploration();
         self.refresh_snapshot();
         // Termination heuristic: heroes-alive==0 OR enemies-alive==0.
         let mut heroes_alive = 0u32;
@@ -191,6 +198,66 @@ impl ViewerApp {
         }
         if (heroes_alive == 0 || enemies_alive == 0) && self.terminated_at_tick.is_none() {
             self.terminated_at_tick = Some(self.state.tick);
+        }
+    }
+
+    /// Host-side hero target_room_idx advancement. Mirrors
+    /// `dungeon_horde_pin::update_hero_exploration` so the viewer's
+    /// heroes traverse the dungeon the same way the test asserts on.
+    /// Reads positions, marks the room each hero is in as visited,
+    /// and (when a hero arrives at their current target) picks the
+    /// next room via frontier-greedy + writes the new targets back.
+    fn advance_hero_exploration(&mut self) {
+        let agent_count = self.agent_count;
+        let hero_start = (agent_count - dungeon::N_HEROES) as usize;
+        let positions = read_positions(&mut self.state, agent_count);
+        let target_buf = self.state.agent_target_room_idx_buf.clone();
+        let mut targets = read_agent_u32(&mut self.state, &target_buf, agent_count);
+        let present_set: std::collections::BTreeSet<dungeon::RoomSlot> =
+            self.dungeon.rooms.iter().copied().collect();
+        let tick = self.state.tick as u32;
+        let mut any_change = false;
+
+        for h in 0..dungeon::N_HEROES as usize {
+            let p = positions[hero_start + h];
+            if !p[0].is_finite() || !p[1].is_finite() {
+                continue;
+            }
+            let rx = (p[0] / dungeon::SLOT_WIDTH as f32).floor() as i32;
+            let ry = (p[1] / dungeon::SLOT_WIDTH as f32).floor() as i32;
+            if rx < 0 || ry < 0
+                || (rx as u32) >= dungeon::SLOTS_PER_ROW
+                || (ry as u32) >= dungeon::SLOTS_PER_ROW
+            {
+                continue;
+            }
+            let candidate = dungeon::RoomSlot::new(rx as u32, ry as u32);
+            if !present_set.contains(&candidate) {
+                continue;
+            }
+            let cand_idx = candidate.idx();
+            self.hero_state.current_room[h] = Some(cand_idx);
+            let remap = self.dungeon.rooms.iter().position(|r| *r == candidate).unwrap();
+            self.hero_state.rooms_visited[h] |= 1u32 << remap;
+
+            let cur_target = targets[hero_start + h];
+            if cand_idx == cur_target {
+                let new_target = dungeon::pick_next_target(
+                    &self.dungeon, candidate, self.hero_state.rooms_visited[h],
+                    tick, h as u32, self.seed,
+                );
+                if new_target != cur_target {
+                    targets[hero_start + h] = new_target;
+                    any_change = true;
+                }
+            }
+        }
+
+        if any_change {
+            self.state.gpu.queue.write_buffer(
+                &self.state.agent_target_room_idx_buf, 0,
+                bytemuck::cast_slice(&targets),
+            );
         }
     }
 
