@@ -76,6 +76,11 @@ struct WindowedViewer {
     /// Constructed lazily on first `resumed()` — winit 0.30 doesn't
     /// give a window until the event loop is running.
     gfx: Option<Gfx>,
+    /// Wall-clock instant at which the current run terminated.
+    /// `None` while the run is still in progress. Used to delay
+    /// auto-restart so the user can read the verdict + see the
+    /// outcome tint before the next dungeon rolls in.
+    terminated_at_wall: Option<Instant>,
 }
 
 struct Gfx {
@@ -158,6 +163,50 @@ impl ApplicationHandler for WindowedViewer {
                     if let Some(gfx) = self.gfx.as_mut() {
                         if let Err(e) = gfx.bridge.refresh(&gfx.ctx, &self.app) {
                             eprintln!("[viewer_app] VoxelBridge::refresh failed: {e}");
+                        }
+                    }
+                }
+
+                // Auto-restart with the next seed once the user has had a
+                // few seconds to read the outcome. Bumping the seed gives
+                // a fresh dungeon roll without the user having to relaunch
+                // the binary — the viewer becomes a continuous demo reel.
+                const POST_TERMINATION_HOLD: Duration = Duration::from_secs(3);
+                if self.app.terminated_at_tick.is_some() && self.terminated_at_wall.is_none() {
+                    self.terminated_at_wall = Some(Instant::now());
+                }
+                if let Some(t) = self.terminated_at_wall {
+                    if t.elapsed() >= POST_TERMINATION_HOLD {
+                        let next_seed = self.seed.wrapping_add(1);
+                        eprintln!(
+                            "[viewer_app] auto-restart: seed 0x{:X} -> 0x{:X}",
+                            self.seed, next_seed,
+                        );
+                        if let Some(new_app) = ViewerApp::try_new(next_seed) {
+                            self.app = new_app;
+                            self.seed = next_seed;
+                            self.last_tick = Instant::now();
+                            self.terminated_at_wall = None;
+                            // Rebuild the bridge so the dungeon walls/floor
+                            // get re-uploaded from the new ViewerApp's grid.
+                            if let Some(gfx) = self.gfx.as_mut() {
+                                let _ = unsafe { gfx.ctx.device().device_wait_idle() };
+                                let old_bridge = std::mem::replace(
+                                    &mut gfx.bridge,
+                                    VoxelBridge::new(&gfx.ctx, &self.app)
+                                        .expect("VoxelBridge::new (auto-restart) failed"),
+                                );
+                                old_bridge.destroy(&gfx.ctx);
+                                if let Err(e) = gfx.bridge.refresh(&gfx.ctx, &self.app) {
+                                    eprintln!("[viewer_app] post-restart refresh failed: {e}");
+                                }
+                            }
+                        } else {
+                            eprintln!(
+                                "[viewer_app] auto-restart failed (no wgpu adapter on next try).                                  Holding on the current run."
+                            );
+                            // Push the hold deadline forward so we don't hammer the failure path.
+                            self.terminated_at_wall = Some(Instant::now());
                         }
                     }
                 }
@@ -252,6 +301,7 @@ fn main() {
         camera,
         last_tick: Instant::now(),
         gfx: None,
+        terminated_at_wall: None,
     };
     event_loop
         .run_app(&mut viewer)
