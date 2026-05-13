@@ -1,0 +1,42 @@
+// Mage's wall-carving cast. 5-second telegraph (50 ticks at 100ms
+// cadence); on resolve, emits an EffectPlaceVoxelApplied chronicle
+// event at the Mage's position.
+//
+// Tactical loop: the Mage is loud and immobile while casting. Per the
+// per_agent TunnelCastNoise rule in dungeon_*.sim, every nearby enemy
+// (radius ~16 units) gains DETECTED belief on the Mage every cast tick
+// — the horde converges. Party must screen the Mage through the cast.
+//
+// On resolve, place_voxel writes a chronicle row carrying the kind_hash
+// of "air"; the runtime would drain that row via
+// `engine_voxel::VoxelTerrain::apply_voxel_chronicle_record` and clear
+// the cell at the Mage's floor(pos). See the gap note at the top of
+// this dir's pin file — current dungeon runtimes do NOT wire the voxel
+// chronicle drain so the cell is not actually cleared today; the
+// chronicle event IS emitted (visible via histogram + CastResolved
+// event) which proves the cast → busy → resolve loop end-to-end. A
+// follow-up wires `apply_voxel_chronicle_record_with_mirror` into the
+// dungeon runtime's per-tick drain.
+//
+// **Why single-cell, not a multi-cell tunnel.** The `place_voxel`
+// EffectOp accepts only a single positional `<kind>` arg — the
+// authoring surface `place_voxel <k> in line(...)` is not wired (see
+// ability_lower.rs::"place_voxel" arm: require_arity(1)). The cast's
+// target world position is implicit (caster.pos for caster-self
+// targets), so the runtime carves exactly one cell at floor(caster.pos).
+// A multi-cell tunnel would need either (a) line-shape iteration in
+// the EffectOp::PlaceVoxel apply handler, or (b) an `in line(...)` arm
+// in the lowering. Both are compiler/engine work outside this slice.
+//
+// Slot id is 9 (alphabetical: after Stun=8, before Volley=10 — adding
+// Tunnel between them shifts Volley from 9 → 10; dungeon_layout.sim is
+// migrated to symbolic-name `apply_ability` to absorb the renumbering).
+
+ability Tunnel {
+    target: self
+    cooldown: 60
+    hint: utility
+
+    cast { duration: 50t telegraph: line(self.pos, self.pos, width: 1) }
+    effect { place_voxel "air" }
+}

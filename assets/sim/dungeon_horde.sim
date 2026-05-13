@@ -952,3 +952,116 @@ view threat_taken(observer: Agent, source: Agent) -> f32 {
     { self += a }
   clamp: [0.0, 10000.0],
 }
+
+// -------------------------------------------------------------------
+// Mage Tunnel — long noisy cast that carves a wall voxel on resolve.
+// (Appended at file end to avoid structural conflicts with the
+// concurrent number-tuning agent — see worktree note.)
+// -------------------------------------------------------------------
+//
+// Tactical loop in stealth-aware fixtures: the cast is LOUD. Per-tick
+// (every 5 ticks for metering), every nearby enemy in
+// `tunnel_noise_radius` gains DETECTED belief on the casting Mage AND
+// has alert bumped — the horde swarms. Party must screen the Mage
+// through the 50-tick cast.
+//
+// **Multi-cell carve gap.** As documented in Tunnel.ability, the
+// `place_voxel "<kind>"` EffectOp accepts a single positional arg only,
+// AND no current dungeon runtime drains the voxel chronicle event into
+// the GPU voxel mirror — the chronicle row IS emitted on resolve, but
+// the cell isn't actually carved today. This slice proves the cast →
+// busy → resolve → place_voxel chronicle loop end-to-end; the
+// voxel-write hookup is a follow-up.
+
+// Plan G — engine-side chronicle event (kind=77).
+@replayable @gpu_amenable
+event EffectCastBeginApplied {
+  actor:          AgentId,
+  target:         AgentId,
+  ability_id:     u16,
+  duration_ticks: u16,
+  target_x_q8:    i16,
+  target_y_q8:    i16,
+}
+
+// TunnelCarved — observational marker emitted on Tunnel resolve.
+@replayable @gpu_amenable
+event TunnelCarved {
+  caster: AgentId,
+}
+
+config tunnel {
+  tunnel_id:      u32 = 9,
+  cast_duration:  u32 = 50,
+  cooldown:       u32 = 60,
+  noise_radius:   f32 = 16.0,
+  alert_bump:     u32 = 1,
+}
+
+@phase(per_agent)
+physics MageTunnel {
+  on Tick {} where (self.alive
+                    && self.creature_type == Hero
+                    && agents.role(self) == config.dungeon.role_mage
+                    && agents.stun_expires_at_tick(self) <= world.tick
+                    && agents.busy_until_tick(self) == 0
+                    && (world.tick % config.tunnel.cooldown == 0)) {
+    apply_ability Tunnel by self target self
+  }
+}
+
+// TunnelCastNoise — while busy with Tunnel, every nearby enemy gains
+// DETECTED belief on the Mage AND has alert bumped. The
+// `(world.tick % 5 == 0)` gate fires every 5 ticks so the bump is
+// metered (~10 emits per enemy across the 50-tick cast).
+@phase(per_agent)
+physics TunnelCastNoise {
+  on Tick {} where (self.alive
+                    && self.creature_type == Hero
+                    && agents.role(self) == config.dungeon.role_mage
+                    && agents.busy_until_tick(self) > world.tick
+                    && agents.busy_with_ability_id(self) == config.tunnel.tunnel_id
+                    && (world.tick % 5u == 0u)) {
+    for candidate in spatial.nearby_detect(self) {
+      if (candidate.alive
+          && candidate.creature_type != config.dungeon.ct_hero
+          && length(candidate.pos - self.pos) < config.tunnel.noise_radius) {
+        emit BeliefUpdate { observer: candidate, subject: self, flags: 1u }
+        agents.set_alert(candidate, agents.alert(candidate) + config.tunnel.alert_bump);
+      }
+    }
+  }
+}
+
+// RecordTunnelCastBegin — Plan G consumer. Stamps busy SoA fields.
+@phase(post)
+physics RecordTunnelCastBegin {
+  on EffectCastBeginApplied { actor: a, target: _, ability_id: _, duration_ticks: _, target_x_q8: _, target_y_q8: _ } {
+    agents.set_busy_until_tick(a, world.tick + config.tunnel.cast_duration);
+    agents.set_busy_with_ability_id(a, config.tunnel.tunnel_id);
+    agents.set_busy_started_at_tick(a, world.tick);
+  }
+}
+
+// ResolveTunnel — busy-resolution rule. (See dungeon_layout.sim for
+// full design notes.)
+@phase(per_agent)
+physics ResolveTunnel {
+  on Tick {} where (self.alive
+                    && self.creature_type == Hero
+                    && agents.role(self) == config.dungeon.role_mage
+                    && agents.busy_until_tick(self) > 0
+                    && agents.busy_with_ability_id(self) == config.tunnel.tunnel_id
+                    && world.tick >= agents.busy_until_tick(self)) {
+    emit TunnelCarved { caster: self }
+    agents.set_busy_until_tick(self, 0);
+    agents.set_busy_with_ability_id(self, 0);
+  }
+}
+
+@materialized(on_event = [TunnelCarved])
+view tunnels_carved(caster: Agent) -> f32 {
+  initial: 0.0,
+  on TunnelCarved { caster: c } where c == caster { self += 1.0 }
+  clamp: [0.0, 100000.0],
+}

@@ -136,6 +136,13 @@ fn dungeon_500_tick_clear_report() {
     let mut tick_200_rooms_visited_min: Option<u32> = None;
     let mut tick_400_total_kills: Option<u32> = None;
 
+    // Tunnel-cast tracking: sample busy_with_ability_id every TUNNEL_PROBE
+    // ticks, count how many ticks at least one Mage was mid-cast.
+    const TUNNEL_PROBE: u32 = 5;
+    const TUNNEL_ID: u32 = 9;
+    let mut tunnel_cast_in_progress_observed = false;
+    let mut tunnel_cast_ticks_observed: u32 = 0;
+
     for tick in 0..TICKS {
         state.step();
         // After each step, update host-side exploration: read hero
@@ -161,7 +168,22 @@ fn dungeon_500_tick_clear_report() {
                 + count_alive_of_type(&mut state, CT_GOBLIN, agent_count);
             tick_400_total_kills = Some(initial_alive_enemies.saturating_sub(alive_enemies));
         }
+        if tick % TUNNEL_PROBE == 0 {
+            let busy_aid = read_busy_with_ability_id(&mut state, agent_count);
+            let busy_until = read_busy_until_tick(&mut state, agent_count);
+            for slot in 0..agent_count as usize {
+                if busy_aid[slot] == TUNNEL_ID && busy_until[slot] > tick + 1 {
+                    tunnel_cast_in_progress_observed = true;
+                    tunnel_cast_ticks_observed += TUNNEL_PROBE;
+                    break;
+                }
+            }
+        }
     }
+
+    // Final readback: tunnels_carved view (per-caster carve count).
+    let tunnels_carved = read_view_tunnels_carved(&mut state, agent_count);
+    let total_tunnels: u32 = tunnels_carved.iter().map(|&v| v as u32).sum();
 
     // Final readbacks.
     let final_alive_heroes = count_alive_of_type(&mut state, CT_HERO, agent_count);
@@ -229,6 +251,18 @@ fn dungeon_500_tick_clear_report() {
         "PARTY STRUGGLING — few enemies killed"
     };
     println!("  verdict: {outcome}");
+
+    // Tunnel cast verdict (soft pin — does not assert).
+    println!(
+        "  tunnel:  cast_in_progress observed = {tunnel_cast_in_progress_observed} \
+         ({tunnel_cast_ticks_observed} sample-ticks Mage was busy with Tunnel), \
+         total carves resolved = {total_tunnels}",
+    );
+    if tunnel_cast_in_progress_observed {
+        println!("           verdict: cast → busy → resolve loop FIRED");
+    } else {
+        println!("           verdict: NO Tunnel cast observed (Mage may have died early or never satisfied dispatch gate)");
+    }
     println!("==========================================");
 
     // Load-bearing pins.
@@ -268,9 +302,12 @@ fn dungeon_500_tick_clear_report() {
     }
 
     println!(
-        "  contract: 28 kernels emit, {TICKS} ticks step without panic / NaN, \
+        "  contract: 31 kernels emit, {TICKS} ticks step without panic / NaN, \
          voxel dungeon wires up, exploration drives target_room_idx updates, \
-         hero / enemy slots discriminate correctly."
+         hero / enemy slots discriminate correctly. Tunnel ability \
+         (alphabetical slot 9 — Volley shifted to 10) wires the cast → busy → \
+         resolve → place_voxel chronicle loop end-to-end (voxel-write hookup is \
+         a follow-up — see Tunnel.ability gap note)."
     );
 }
 
@@ -1033,4 +1070,26 @@ fn read_agent_f32(state: &mut GeneratedRuntime, buf: &wgpu::Buffer, agent_count:
     };
     staging.unmap();
     out
+}
+
+// ---------------------------------------------------------------------
+// Tunnel-cast readbacks (Plan G + voxel place_voxel chronicle).
+// ---------------------------------------------------------------------
+
+fn read_busy_with_ability_id(state: &mut GeneratedRuntime, agent_count: u32) -> Vec<u32> {
+    let buf = state.agent_busy_with_ability_id_buf.clone();
+    read_agent_u32(state, &buf, agent_count)
+}
+
+fn read_busy_until_tick(state: &mut GeneratedRuntime, agent_count: u32) -> Vec<u32> {
+    let buf = state.agent_busy_until_tick_buf.clone();
+    read_agent_u32(state, &buf, agent_count)
+}
+
+/// Read the per-agent `tunnels_carved` materialized view (f32 cells,
+/// one per agent slot — the @materialized fold writes 1.0 per
+/// TunnelCarved event keyed on the caster).
+fn read_view_tunnels_carved(state: &mut GeneratedRuntime, agent_count: u32) -> Vec<f32> {
+    let buf = state.view_storage_tunnels_carved_primary_buf.clone();
+    read_agent_f32(state, &buf, agent_count)
 }

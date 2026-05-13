@@ -64,7 +64,13 @@
 //
 // **Ability slot order** (alphabetical .ability filename):
 //   Backstab=1, Cleave=2, Heal=3, Scout=4, Snipe=5,
-//   Stealth=6, Strike=7, Stun=8, Volley=9
+//   Stealth=6, Strike=7, Stun=8, Tunnel=9, Volley=10
+//
+// Per commit (this slice): all `apply_ability <numeric>` calls migrated
+// to symbolic-name form (`apply_ability Cleave by ...`) so the
+// alphabetical-shift from adding Tunnel between Stun and Volley doesn't
+// require renumbering each call site. Same surface dungeon_stealth +
+// dungeon_horde already use.
 //
 // Companion `.ability` corpus at assets/ability_test/dungeon_layout/.
 
@@ -376,7 +382,7 @@ physics WarriorCleave {
           && candidate.creature_type != config.dungeon.ct_hero
           && length(candidate.pos - self.pos) < config.dungeon.warrior_cleave_range
           && terrain.line_of_sight(self.pos, candidate.pos)) {
-        apply_ability 2 by self target candidate
+        apply_ability Cleave by self target candidate
       }
     }
   }
@@ -396,7 +402,7 @@ physics ClericHeal {
           && candidate.hp < config.dungeon.cleric_heal_floor
           && length(candidate.pos - self.pos) < config.dungeon.cleric_heal_range
           && terrain.line_of_sight(self.pos, candidate.pos)) {
-        apply_ability 3 by self target candidate
+        apply_ability Heal by self target candidate
       }
     }
   }
@@ -415,7 +421,7 @@ physics RangerSnipe {
           && candidate.creature_type != config.dungeon.ct_hero
           && length(candidate.pos - self.pos) < config.dungeon.ranger_snipe_range
           && terrain.line_of_sight(self.pos, candidate.pos)) {
-        apply_ability 5 by self target candidate
+        apply_ability Snipe by self target candidate
       }
     }
   }
@@ -434,7 +440,7 @@ physics MageStun {
           && candidate.creature_type != config.dungeon.ct_hero
           && length(candidate.pos - self.pos) < config.dungeon.mage_stun_range
           && terrain.line_of_sight(self.pos, candidate.pos)) {
-        apply_ability 8 by self target candidate
+        apply_ability Stun by self target candidate
       }
     }
   }
@@ -452,7 +458,7 @@ physics HeroStrike {
           && candidate.creature_type != config.dungeon.ct_hero
           && length(candidate.pos - self.pos) < config.dungeon.hero_strike_range
           && terrain.line_of_sight(self.pos, candidate.pos)) {
-        apply_ability 7 by self target candidate
+        apply_ability Strike by self target candidate
       }
     }
   }
@@ -473,7 +479,7 @@ physics GoblinMelee {
       if (candidate.alive
           && candidate.creature_type == config.dungeon.ct_hero
           && length(candidate.pos - self.pos) < config.dungeon.goblin_melee_range) {
-        apply_ability 7 by self target candidate
+        apply_ability Strike by self target candidate
       }
     }
   }
@@ -490,14 +496,14 @@ physics BruteCleave {
       if (candidate.alive
           && candidate.creature_type == config.dungeon.ct_hero
           && length(candidate.pos - self.pos) < config.dungeon.brute_cleave_range) {
-        apply_ability 2 by self target candidate
+        apply_ability Cleave by self target candidate
       }
     }
   }
 }
 
-// ArcherVolley — 18-unit ranged AOE (Volley, id 9). LoS required —
-// voxel terrain blocks shots through walls.
+// ArcherVolley — 18-unit ranged AOE (Volley, id 10 post-Tunnel-add). LoS
+// required — voxel terrain blocks shots through walls.
 @phase(per_agent)
 physics ArcherVolley {
   on Tick {} where (self.alive
@@ -509,7 +515,7 @@ physics ArcherVolley {
           && candidate.creature_type == config.dungeon.ct_hero
           && length(candidate.pos - self.pos) < config.dungeon.archer_volley_range
           && terrain.line_of_sight(self.pos, candidate.pos)) {
-        apply_ability 9 by self target candidate
+        apply_ability Volley by self target candidate
       }
     }
   }
@@ -591,4 +597,137 @@ view threat_taken(observer: Agent, source: Agent) -> f32 {
     where t == observer && s == source
     { self += a }
   clamp: [0.0, 10000.0],
+}
+
+// -------------------------------------------------------------------
+// Mage Tunnel — long noisy cast that carves a wall voxel on resolve.
+// (Appended at file end to avoid structural conflicts with the
+// concurrent number-tuning agent — see worktree note.)
+// -------------------------------------------------------------------
+//
+// Tactical loop: the Mage stops moving for 50 ticks (5s @ 100ms cadence).
+// The cast block writes EffectCastBeginApplied; RecordCastBegin stamps
+// busy_until_tick + busy_with_ability_id. While busy, no other Mage
+// verb fires (the existing MageStun's `(world.tick % cd == 0)` gate is
+// independent — there's no busy gate on MageStun in stage 1, but the
+// cooldown spacing keeps the two from competing in practice). On
+// resolve, ResolveTunnel emits the EffectPlaceVoxelApplied chronicle
+// row by re-dispatching apply_ability — proving the busy lifecycle.
+//
+// **Multi-cell carve gap.** As documented in Tunnel.ability, the
+// `place_voxel "<kind>"` EffectOp accepts a single positional arg only
+// (no `in line(...)` shape iteration), AND no current dungeon runtime
+// drains the voxel chronicle event into the GPU voxel mirror — the
+// chronicle row IS emitted, but the cell isn't actually carved today.
+// This slice proves the cast → busy → resolve → place_voxel chronicle
+// loop end-to-end; the voxel-write hookup is a follow-up.
+
+// Plan G — engine-side chronicle event (kind=77) the apply_ability
+// dispatcher writes when it processes EffectOp::CastBegin. Field shape
+// matches the engine event. The PerEvent destructuring lowering today
+// maps each field to one full u32 slot — multi-field-per-slot fields
+// fall back to per-fixture config (see palace_coup precedent).
+@replayable @gpu_amenable
+event EffectCastBeginApplied {
+  actor:          AgentId,
+  target:         AgentId,
+  ability_id:     u16,
+  duration_ticks: u16,
+  target_x_q8:    i16,
+  target_y_q8:    i16,
+}
+
+config tunnel {
+  // Tunnel ability discriminant (alphabetical slot 9 post-shift). The
+  // RecordCastBegin consumer can't reliably unpack the 16-bit ability_id
+  // from the chronicle row (multi-field-per-slot gap), so it stamps
+  // this hardcoded value into busy_with_ability_id instead.
+  tunnel_id:      u32 = 9,
+  // Cast duration in ticks. Matches the .ability `cast { duration: 50t }`
+  // declaration.
+  cast_duration:  u32 = 50,
+  // Cooldown spacing between Tunnel casts (in ticks). The MageTunnel
+  // verb's `(world.tick % cooldown == 0)` gate fires every 60 ticks; if
+  // the Mage is still busy from a previous cast, the busy_until_tick
+  // gate suppresses the new dispatch.
+  cooldown:       u32 = 60,
+}
+
+// MageTunnel — role 4 (Mage) self-cast. Adds a `busy_until_tick == 0`
+// gate so we don't dispatch a second cast while the first resolves. The
+// cast is unconditional (no enemy-count predicate); cooldown alone
+// limits frequency. Same dispatch shape KingDispatchDecree uses in
+// palace_coup.sim.
+@phase(per_agent)
+physics MageTunnel {
+  on Tick {} where (self.alive
+                    && self.creature_type == Hero
+                    && agents.role(self) == config.dungeon.role_mage
+                    && agents.stun_expires_at_tick(self) <= world.tick
+                    && agents.busy_until_tick(self) == 0
+                    && (world.tick % config.tunnel.cooldown == 0)) {
+    apply_ability Tunnel by self target self
+  }
+}
+
+// RecordCastBegin — Plan G consumer. Reads each EffectCastBeginApplied
+// row and stamps the caster's busy SoA fields. Hardcodes
+// `config.tunnel.cast_duration` + `config.tunnel.tunnel_id` per the
+// palace_coup precedent (multi-field-per-slot unpack gap).
+@phase(post)
+physics RecordTunnelCastBegin {
+  on EffectCastBeginApplied { actor: a, target: _, ability_id: _, duration_ticks: _, target_x_q8: _, target_y_q8: _ } {
+    agents.set_busy_until_tick(a, world.tick + config.tunnel.cast_duration);
+    agents.set_busy_with_ability_id(a, config.tunnel.tunnel_id);
+    agents.set_busy_started_at_tick(a, world.tick);
+  }
+}
+
+// TunnelCarved — observational marker event the .sim emits on Tunnel
+// resolve. Drives the @materialized `tunnels_carved` view for the
+// soft pin (counts total carves across the run, per Mage). `tick` is
+// implicit on every event — don't redeclare it.
+@replayable @gpu_amenable
+event TunnelCarved {
+  caster: AgentId,
+}
+
+// ResolveTunnel — busy-resolution rule. When agents.busy_until_tick
+// elapses on a Mage that was casting Tunnel, emit a TunnelCarved
+// marker and clear busy state. Same palace_coup pattern: per-agent
+// scan + sentinel-marker emit on resolve (NOT re-dispatch — re-dispatch
+// would re-enter the cast block and start a fresh 50-tick window).
+//
+// **Why not emit EffectPlaceVoxelApplied directly?** The cast's
+// pending_program already holds the place_voxel op; in the
+// registry-driven deferred dispatch design (the future
+// `apply_pending_program(prog)` path) the runtime fires the
+// place_voxel effect on resolve. For this slice we emit the marker
+// instead so the loop is observable without depending on the
+// pending_program infrastructure (firebolt_probe MVP precedent).
+//
+// Gating on `busy_with_ability_id == config.tunnel.tunnel_id`
+// distinguishes a Tunnel resolve from any other future cast on the
+// same agent.
+@phase(per_agent)
+physics ResolveTunnel {
+  on Tick {} where (self.alive
+                    && self.creature_type == Hero
+                    && agents.role(self) == config.dungeon.role_mage
+                    && agents.busy_until_tick(self) > 0
+                    && agents.busy_with_ability_id(self) == config.tunnel.tunnel_id
+                    && world.tick >= agents.busy_until_tick(self)) {
+    emit TunnelCarved { caster: self }
+    agents.set_busy_until_tick(self, 0);
+    agents.set_busy_with_ability_id(self, 0);
+  }
+}
+
+// Per-caster carve count — observational view. The pin reads this to
+// verify at least one Tunnel completed.
+@materialized(on_event = [TunnelCarved])
+view tunnels_carved(caster: Agent) -> f32 {
+  initial: 0.0,
+  on TunnelCarved { caster: c } where c == caster { self += 1.0 }
+  clamp: [0.0, 100000.0],
 }

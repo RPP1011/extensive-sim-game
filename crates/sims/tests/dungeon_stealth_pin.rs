@@ -133,6 +133,15 @@ fn dungeon_stealth_500_tick_clear_report() {
     let mut any_stealthed_observed = false;
     let mut reached_final = false;
 
+    // Tunnel-cast tracking. Cooldown is 60 ticks + 50-tick cast — at
+    // TICKS=100 the first cast starts at tick 60 but resolves at tick
+    // 110 (after run end). We expect to observe `cast_in_progress` but
+    // zero resolved carves.
+    const TUNNEL_PROBE: u32 = 5;
+    const TUNNEL_ID: u32 = 9;
+    let mut tunnel_cast_in_progress_observed = false;
+    let mut tunnel_cast_ticks_observed: u32 = 0;
+
     for tick in 0..TICKS {
         if tick % 10 == 0 {
             eprintln!("[dungeon_stealth] tick {}", tick);
@@ -213,7 +222,25 @@ fn dungeon_stealth_500_tick_clear_report() {
             let alive = count_alive_of_type(&mut state, CT_HERO, agent_count);
             tick_99_state = Some((alive, reached_final));
         }
+        if tick % TUNNEL_PROBE == 0 {
+            let busy_aid_buf = state.agent_busy_with_ability_id_buf.clone();
+            let busy_until_buf = state.agent_busy_until_tick_buf.clone();
+            let busy_aid = read_agent_u32(&mut state, &busy_aid_buf, agent_count);
+            let busy_until = read_agent_u32(&mut state, &busy_until_buf, agent_count);
+            for slot in 0..agent_count as usize {
+                if busy_aid[slot] == TUNNEL_ID && busy_until[slot] > tick + 1 {
+                    tunnel_cast_in_progress_observed = true;
+                    tunnel_cast_ticks_observed += TUNNEL_PROBE;
+                    break;
+                }
+            }
+        }
     }
+
+    // Final readback: tunnels_carved view (per-caster carve count).
+    let tunnels_carved_buf = state.view_storage_tunnels_carved_primary_buf.clone();
+    let tunnels_carved = read_agent_f32(&mut state, &tunnels_carved_buf, agent_count);
+    let total_tunnels: u32 = tunnels_carved.iter().map(|&v| v as u32).sum();
 
     let final_alive_heroes = count_alive_of_type(&mut state, CT_HERO, agent_count);
     let final_alive_archers = count_alive_of_type(&mut state, CT_ARCHER, agent_count);
@@ -307,6 +334,20 @@ fn dungeon_stealth_500_tick_clear_report() {
         "PARTY EXPLORING — combat ongoing"
     };
     println!("  verdict: {outcome}");
+
+    // Tunnel cast verdict (soft pin — does not assert).
+    println!(
+        "  tunnel:  cast_in_progress observed = {tunnel_cast_in_progress_observed} \
+         ({tunnel_cast_ticks_observed} sample-ticks Mage was busy with Tunnel), \
+         total carves resolved = {total_tunnels}",
+    );
+    if tunnel_cast_in_progress_observed {
+        println!(
+            "           verdict: cast → busy loop FIRED (resolve at tick 110+ — beyond TICKS={TICKS} window)",
+        );
+    } else {
+        println!("           verdict: NO Tunnel cast observed (Mage may have died early)");
+    }
     println!("==========================================");
 
     // Load-bearing pins. Task A retune (2026-05-12): TICKS bumped
