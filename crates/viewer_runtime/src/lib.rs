@@ -195,6 +195,9 @@ pub struct ViewerApp {
     /// alert spike to every enemy still in the boss room, visibly
     /// escalating the climax fight.
     boss_enraged: bool,
+    /// Whether the "boss-push" mode has been announced this run. Set true
+    /// after the first log so we don't spam the terminal.
+    boss_push_logged: bool,
 }
 
 impl ViewerApp {
@@ -265,7 +268,7 @@ impl ViewerApp {
             // Boss has ~9x normal Brute HP — heroes have to commit to
             // the climax fight. Writes both hp and max_hp so cleric
             // heals don't cap at the type default.
-            const BOSS_HP: f32 = 800.0;
+            const BOSS_HP: f32 = 400.0;
             state.gpu.queue.write_buffer(
                 &state.agent_hp_buf, (slot as u64) * 4, bytemuck::bytes_of(&BOSS_HP),
             );
@@ -314,6 +317,7 @@ impl ViewerApp {
             total_kills: 0,
             summary_printed: false,
             boss_enraged: false,
+            boss_push_logged: false,
         };
         viewer.refresh_snapshot();
         Some(viewer)
@@ -402,7 +406,7 @@ impl ViewerApp {
         /// Below this HP heroes break off and head back to spawn.
         const RETREAT_HP: f32 = 45.0;
         /// Once retreating, must heal above this to resume exploring.
-        const RESUME_HP: f32 = 170.0;
+        const RESUME_HP: f32 = 130.0;
         const H_WARRIOR: usize = 0;
         const H_ROGUE: usize = 4;
 
@@ -420,6 +424,24 @@ impl ViewerApp {
         let tick = self.state.tick as u32;
         let spawn_idx = self.dungeon.spawn_room.idx();
         let mut any_change = false;
+        // Boss-push: once enough enemies are dead, frontier-greedy
+        // exhausts and heroes wander cleared rooms aimlessly. Override
+        // the warrior's target to the boss room so the party converges
+        // for the climax. Tuned at 60% — leaves room for exploration
+        // payoff (treasure rooms) before the final push.
+        let initial_enemies = agent_count.saturating_sub(dungeon::N_HEROES);
+        let kill_frac = if initial_enemies > 0 {
+            self.total_kills as f32 / initial_enemies as f32
+        } else { 0.0 };
+        let boss_push = kill_frac > 0.60;
+        let boss_idx = self.dungeon.boss_room.idx();
+        if boss_push && !self.boss_push_logged {
+            eprintln!(
+                "[viewer_runtime] boss-push engaged @ tick {} ({}/{} enemies down) — party converging on boss room",
+                self.state.tick, self.total_kills, initial_enemies,
+            );
+            self.boss_push_logged = true;
+        }
 
         // Pass 1: recompute current_room + rooms_visited for each hero
         // from their current position. None means the hero isn't in any
@@ -461,13 +483,19 @@ impl ViewerApp {
             match warrior_current {
                 Some(cand) if warrior_alive => {
                     if retreating && hp >= RESUME_HP {
-                        dungeon::pick_next_target(
-                            &self.dungeon, cand,
-                            self.hero_state.rooms_visited[H_WARRIOR],
-                            tick, H_WARRIOR as u32, self.seed,
-                        )
+                        if boss_push { boss_idx } else {
+                            dungeon::pick_next_target(
+                                &self.dungeon, cand,
+                                self.hero_state.rooms_visited[H_WARRIOR],
+                                tick, H_WARRIOR as u32, self.seed,
+                            )
+                        }
                     } else if !retreating && hp < RETREAT_HP {
                         spawn_idx
+                    } else if boss_push && !retreating {
+                        // Once 60%+ cleared, march to the climax instead
+                        // of wandering frontier-greedy.
+                        boss_idx
                     } else if !retreating && cand.idx() == cur_target {
                         dungeon::pick_next_target(
                             &self.dungeon, cand,
@@ -583,7 +611,7 @@ impl ViewerApp {
             None => return,
         };
         let boss = &self.agents[boss_slot];
-        const BOSS_ENRAGE_HP: f32 = 400.0;
+        const BOSS_ENRAGE_HP: f32 = 200.0;
         const ALERT_BUMP: u32 = 10;
         if !(boss.alive && boss.hp < BOSS_ENRAGE_HP && boss.hp > 0.0) {
             return;
