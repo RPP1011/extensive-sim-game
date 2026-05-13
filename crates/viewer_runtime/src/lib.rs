@@ -204,22 +204,41 @@ impl ViewerApp {
     /// Host-side hero target_room_idx advancement. Mirrors
     /// `dungeon_horde_pin::update_hero_exploration` so the viewer's
     /// heroes traverse the dungeon the same way the test asserts on.
-    /// Reads positions, marks the room each hero is in as visited,
-    /// and (when a hero arrives at their current target) picks the
-    /// next room via frontier-greedy + writes the new targets back.
+    ///
+    /// Reads positions + HPs, marks the room each hero is in as
+    /// visited, and steers target_room_idx via a small state machine:
+    /// * **Wounded** (`hp < RETREAT_HP`) → redirect to spawn room.
+    ///   Hero pathfinds back through cleared rooms.
+    /// * **Healed** (was retreating, `hp >= RESUME_HP`) → pick a
+    ///   frontier-greedy target from the current room and resume.
+    /// * **Default** → retarget when the hero arrives at their
+    ///   current target (frontier-greedy among adjacent rooms).
+    ///
+    /// Hysteresis between RETREAT and RESUME thresholds prevents
+    /// oscillating around the retreat boundary while the cleric is
+    /// mid-heal.
     fn advance_hero_exploration(&mut self) {
+        /// Below this HP heroes break off and head back to spawn.
+        const RETREAT_HP: f32 = 70.0;
+        /// Once retreating, must heal above this to resume exploring.
+        const RESUME_HP: f32 = 160.0;
+
         let agent_count = self.agent_count;
         let hero_start = (agent_count - dungeon::N_HEROES) as usize;
         let positions = read_positions(&mut self.state, agent_count);
         let target_buf = self.state.agent_target_room_idx_buf.clone();
+        let hp_buf = self.state.agent_hp_buf.clone();
         let mut targets = read_agent_u32(&mut self.state, &target_buf, agent_count);
+        let hps = read_agent_f32(&mut self.state, &hp_buf, agent_count);
         let present_set: std::collections::BTreeSet<dungeon::RoomSlot> =
             self.dungeon.rooms.iter().copied().collect();
         let tick = self.state.tick as u32;
+        let spawn_idx = self.dungeon.spawn_room.idx();
         let mut any_change = false;
 
         for h in 0..dungeon::N_HEROES as usize {
             let p = positions[hero_start + h];
+            let hp = hps[hero_start + h];
             if !p[0].is_finite() || !p[1].is_finite() {
                 continue;
             }
@@ -241,15 +260,29 @@ impl ViewerApp {
             self.hero_state.rooms_visited[h] |= 1u32 << remap;
 
             let cur_target = targets[hero_start + h];
-            if cand_idx == cur_target {
-                let new_target = dungeon::pick_next_target(
+            let retreating = cur_target == spawn_idx && cand_idx != spawn_idx;
+            let new_target = if retreating && hp >= RESUME_HP {
+                // Healed up while back at spawn area — re-engage from
+                // current room.
+                dungeon::pick_next_target(
                     &self.dungeon, candidate, self.hero_state.rooms_visited[h],
                     tick, h as u32, self.seed,
-                );
-                if new_target != cur_target {
-                    targets[hero_start + h] = new_target;
-                    any_change = true;
-                }
+                )
+            } else if !retreating && hp < RETREAT_HP {
+                // Wounded — fall back to spawn.
+                spawn_idx
+            } else if !retreating && cand_idx == cur_target {
+                // Arrived; pick next frontier room.
+                dungeon::pick_next_target(
+                    &self.dungeon, candidate, self.hero_state.rooms_visited[h],
+                    tick, h as u32, self.seed,
+                )
+            } else {
+                cur_target
+            };
+            if new_target != cur_target {
+                targets[hero_start + h] = new_target;
+                any_change = true;
             }
         }
 
