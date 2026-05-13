@@ -22,11 +22,11 @@ use sims::dungeon_horde::GeneratedRuntime;
 
 pub const N_HEROES: u32 = 5;
 
-pub const GRID_X: u32 = 72;
-pub const GRID_Y: u32 = 72;
+pub const GRID_X: u32 = 126;
+pub const GRID_Y: u32 = 126;
 pub const GRID_Z: u32 = 8;
-pub const SLOTS_PER_ROW: u32 = 6;
-pub const SLOT_WIDTH: u32 = 12;
+pub const SLOTS_PER_ROW: u32 = 7;
+pub const SLOT_WIDTH: u32 = 18;
 pub const ROOM_INTERIOR_Z: u32 = 6;
 pub const STONE: u8 = 1;
 
@@ -87,15 +87,15 @@ impl Dungeon {
             let dist = *self.bfs_dist.get(&idx).unwrap_or(&0);
             let n_floor = self.floor_cells.get(&idx).map(|v| v.len() as u32).unwrap_or(0);
             let raw_count = if room == self.boss_room {
-                (n_floor / 2).min(100)
+                (n_floor / 6).min(30)
             } else if dist == 1 {
-                n_floor / 12
+                n_floor / 48
             } else if dist == 2 {
-                n_floor / 6
+                n_floor / 24
             } else if dist == 3 {
-                n_floor / 4
+                n_floor / 16
             } else {
-                n_floor / 3
+                n_floor / 12
             };
             let count = raw_count.min(n_floor.saturating_sub(4));
             for slot in 0..count {
