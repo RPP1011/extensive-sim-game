@@ -78,6 +78,9 @@ pub const MAT_HEAL: u8 = 41;
 /// Floor cell tinted darker beneath each living agent — gives ground
 /// reference + depth perception even without proper diffuse lighting.
 pub const MAT_AGENT_SHADOW: u8 = 42;
+/// Floor tint for rooms whose enemies are all dead — visible "we cleared
+/// this room" feedback. Updates per-tick from the agent snapshot.
+pub const MAT_FLOOR_CLEARED: u8 = 43;
 /// All floor cells tint to this when the dungeon is cleared (every
 /// enemy dead, ≥1 hero alive). Replaces MAT_FLOOR / MAT_BOSS_FLOOR.
 pub const MAT_VICTORY_FLOOR: u8 = 39;
@@ -110,6 +113,7 @@ fn build_palette() -> MaterialPalette {
     p.set(MAT_FLASH,     palette_entry(255, 255, 255)); // pure white     — damage hit flash
     p.set(MAT_HEAL,      palette_entry(180, 255, 200)); // mint           — heal flash
     p.set(MAT_AGENT_SHADOW, palette_entry(120, 105, 85));// dimmed tan    — shadow under agents
+    p.set(MAT_FLOOR_CLEARED, palette_entry(140, 130, 110));// dim tan    — cleared room
     p.set(MAT_VICTORY_FLOOR, palette_entry(80,  180, 100));// muted green  — dungeon cleared
     p.set(MAT_DEFEAT_FLOOR,  palette_entry(180, 50,  50)); // muted red    — TPK
     p
@@ -232,6 +236,11 @@ pub struct ViewerApp {
     /// in 1..DEATH_FADE_TICKS the agent stays rendered with a fade-out
     /// (shrinking scale + dim tint) instead of vanishing instantly.
     pub death_ticks: Vec<u32>,
+    /// Set of room slot indices whose enemies are all dead. Recomputed
+    /// each tick from the agent snapshot. The voxel bridge uses this to
+    /// tint cleared-room floors with `MAT_FLOOR_CLEARED` so dungeon
+    /// progress reads at a glance.
+    pub cleared_rooms: std::collections::BTreeSet<u32>,
 }
 
 /// Number of sim ticks an agent stays rendered after death before
@@ -374,6 +383,7 @@ impl ViewerApp {
             prev_positions: vec![[0.0, 0.0, 0.0]; agent_count as usize],
             last_facing: vec![[0.0, 1.0]; agent_count as usize],
             death_ticks: vec![0u32; agent_count as usize],
+            cleared_rooms: std::collections::BTreeSet::new(),
         };
         viewer.refresh_snapshot();
         Some(viewer)
@@ -759,6 +769,8 @@ impl ViewerApp {
         // Per-tick damage diff: flash agents that lost meaningful HP since
         // the last refresh. FLASH_FRAMES of 4 at the ~100ms sim tick gives
         // a visible ~400ms white pop on each hit.
+        // (cleared_rooms recompute happens at the end of this loop, after
+        // self.agents is fully refreshed.)
         const FLASH_DELTA: f32 = 3.0;
         const FLASH_FRAMES: u8 = 4;
         let cur_tick = self.state.tick;
@@ -845,6 +857,37 @@ impl ViewerApp {
                 facing_xy: facing,
             };
         }
+
+        // Per-tick cleared-rooms scan: bucket alive non-hero agents by the
+        // dungeon room they're in. Rooms with zero alive enemies (and at
+        // least one room cell in dungeon.floor_cells) flip to cleared.
+        // Once cleared, stays cleared — bodies still on the floor count
+        // as cleared, even though the death_fade keeps the mesh visible
+        // for a few frames.
+        let mut alive_per_room: std::collections::BTreeMap<u32, u32> =
+            std::collections::BTreeMap::new();
+        for room in &self.dungeon.rooms {
+            alive_per_room.insert(room.idx(), 0);
+        }
+        let sw = dungeon::SLOT_WIDTH as f32;
+        for a in &self.agents {
+            if !a.alive || a.creature_type == dungeon::CT_HERO { continue; }
+            let rx = (a.pos.x / sw).floor() as i32;
+            let ry = (a.pos.y / sw).floor() as i32;
+            if rx < 0 || ry < 0
+                || (rx as u32) >= dungeon::SLOTS_PER_ROW
+                || (ry as u32) >= dungeon::SLOTS_PER_ROW
+            {
+                continue;
+            }
+            let idx = (ry as u32) * dungeon::SLOTS_PER_ROW + (rx as u32);
+            if let Some(c) = alive_per_room.get_mut(&idx) { *c += 1; }
+        }
+        for (room_idx, count) in &alive_per_room {
+            if *count == 0 {
+                self.cleared_rooms.insert(*room_idx);
+            }
+        }
     }
 }
 
@@ -891,19 +934,11 @@ impl VoxelBridge {
         // cells get MAT_WALL filling z ∈ [0, ROOM_INTERIOR_Z). This
         // matches the runtime's voxel_terrain contents seeded by
         // `seed_voxel_dungeon`.
-        let boss_room = app.dungeon.boss_room;
-        let boss_x_lo = boss_room.rx * dungeon::SLOT_WIDTH;
-        let boss_x_hi = boss_x_lo + dungeon::SLOT_WIDTH;
-        let boss_y_lo = boss_room.ry * dungeon::SLOT_WIDTH;
-        let boss_y_hi = boss_y_lo + dungeon::SLOT_WIDTH;
-        let in_boss_room = |x: u32, y: u32| -> bool {
-            x >= boss_x_lo && x < boss_x_hi && y >= boss_y_lo && y < boss_y_hi
-        };
         for x in 0..GRID_X {
             for y in 0..GRID_Y {
                 if app.floor_cells.contains(&(x, y)) {
                     // sim (x, y, 0) → renderer (x, 0, y): floor sits at vertical=0, depth=sim_y
-                    let mat = if in_boss_room(x, y) { MAT_BOSS_FLOOR } else { MAT_FLOOR };
+                    let mat = floor_mat_for_cell(app, x, y);
                     cpu_grid.set(x, 0, y, mat);
                 } else {
                     // walls extend up the vertical (renderer Y) axis
@@ -952,12 +987,7 @@ impl VoxelBridge {
                     let mat = if let Some(victory) = app.outcome {
                         if victory { MAT_VICTORY_FLOOR } else { MAT_DEFEAT_FLOOR }
                     } else {
-                        let boss_room = app.dungeon.boss_room;
-                        let in_boss = x >= boss_room.rx * dungeon::SLOT_WIDTH
-                            && x < (boss_room.rx + 1) * dungeon::SLOT_WIDTH
-                            && depth >= boss_room.ry * dungeon::SLOT_WIDTH
-                            && depth < (boss_room.ry + 1) * dungeon::SLOT_WIDTH;
-                        if in_boss { MAT_BOSS_FLOOR } else { MAT_FLOOR }
+                        floor_mat_for_cell(app, x, depth)
                     };
                     self.cpu_grid.set(x, vert, depth, mat);
                 } else {
@@ -1132,6 +1162,24 @@ impl VoxelBridge {
 // GPU readback helpers — copy from sim's wgpu buffers to host Vec.
 // Mirrors `dungeon_horde_pin`'s helpers.
 // ---------------------------------------------------------------------
+
+/// Decide the floor material for a single cell — boss room takes
+/// priority, then cleared-room dim tint, else default tan. Outcome
+/// tints (victory/defeat) are checked at the call site since they
+/// override everything when set.
+fn floor_mat_for_cell(app: &ViewerApp, x: u32, y: u32) -> u8 {
+    let sw = dungeon::SLOT_WIDTH;
+    let rx = x / sw;
+    let ry = y / sw;
+    let room_idx = ry * dungeon::SLOTS_PER_ROW + rx;
+    if rx == app.dungeon.boss_room.rx && ry == app.dungeon.boss_room.ry {
+        return MAT_BOSS_FLOOR;
+    }
+    if app.cleared_rooms.contains(&room_idx) {
+        return MAT_FLOOR_CLEARED;
+    }
+    MAT_FLOOR
+}
 
 fn read_positions(state: &mut GeneratedRuntime, agent_count: u32) -> Vec<[f32; 4]> {
     let n = agent_count as usize;
