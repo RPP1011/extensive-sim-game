@@ -81,6 +81,14 @@ struct WindowedViewer {
     /// auto-restart so the user can read the verdict + see the
     /// outcome tint before the next dungeon rolls in.
     terminated_at_wall: Option<Instant>,
+    /// Total runs completed in this session (incremented on each
+    /// auto-restart). Drives the cross-run aggregate line.
+    session_runs: u32,
+    /// Subset of `session_runs` that ended in DUNGEON CLEARED.
+    session_wins: u32,
+    /// Sum of `app.sim_tick()` at termination across all completed
+    /// runs. Divided by `session_runs` for the mean-ticks metric.
+    session_tick_total: u64,
 }
 
 struct Gfx {
@@ -144,6 +152,17 @@ impl ApplicationHandler for WindowedViewer {
                     "[viewer_app] CloseRequested — exit at tick={}",
                     self.app.sim_tick(),
                 );
+                if self.session_runs > 0 {
+                    let mean_ticks = self.session_tick_total / self.session_runs as u64;
+                    eprintln!(
+                        "[viewer_app] final session: {} runs ({} cleared, {} TPK, mean {} ticks, win-rate {:.0}%)",
+                        self.session_runs,
+                        self.session_wins,
+                        self.session_runs - self.session_wins,
+                        mean_ticks,
+                        100.0 * (self.session_wins as f32) / (self.session_runs as f32),
+                    );
+                }
                 if let Some(mut gfx) = self.gfx.take() {
                     let _ = unsafe { gfx.ctx.device().device_wait_idle() };
                     gfx.bridge.destroy(&gfx.ctx);
@@ -177,6 +196,22 @@ impl ApplicationHandler for WindowedViewer {
                 }
                 if let Some(t) = self.terminated_at_wall {
                     if t.elapsed() >= POST_TERMINATION_HOLD {
+                        // Capture this run's contribution to the session aggregate
+                        // before we tear it down. `outcome` is Some by construction
+                        // here (we only enter the hold path after termination).
+                        let won = self.app.outcome.unwrap_or(false);
+                        self.session_runs += 1;
+                        if won { self.session_wins += 1; }
+                        self.session_tick_total += self.app.sim_tick();
+                        let mean_ticks = self.session_tick_total / self.session_runs as u64;
+                        eprintln!(
+                            "[viewer_app] session: {} runs ({} cleared, {} TPK, mean {} ticks)",
+                            self.session_runs,
+                            self.session_wins,
+                            self.session_runs - self.session_wins,
+                            mean_ticks,
+                        );
+
                         let next_seed = self.seed.wrapping_add(1);
                         eprintln!(
                             "[viewer_app] auto-restart: seed 0x{:X} -> 0x{:X}",
@@ -302,6 +337,9 @@ fn main() {
         last_tick: Instant::now(),
         gfx: None,
         terminated_at_wall: None,
+        session_runs: 0,
+        session_wins: 0,
+        session_tick_total: 0,
     };
     event_loop
         .run_app(&mut viewer)
