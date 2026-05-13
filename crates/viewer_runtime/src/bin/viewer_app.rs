@@ -349,13 +349,23 @@ impl ApplicationHandler for WindowedViewer {
                     for i in 0..5 { bucket_slot[i] = gfx.hero_slots[i]; }
                     for i in 0..3 { bucket_slot[5 + i] = gfx.enemy_slots[i]; }
                     if gfx.mesh.is_some() {
+                        // Tick interpolation alpha: 0 at start of current
+                        // tick, 1 just before next tick. Smooths agent motion
+                        // between 20 Hz sim ticks.
+                        let interp_alpha = (self.last_tick.elapsed().as_secs_f32()
+                            / SIM_TICK_PERIOD.as_secs_f32()).clamp(0.0, 1.0);
                         for (idx, agent) in self.app.agents().iter().enumerate() {
                             if !agent.alive { continue; }
+                            // Lerp sim-space position between previous and
+                            // current tick using interp_alpha. prev_positions
+                            // is [x, y, z] in sim space (Z-up).
+                            let prev = self.app.prev_positions[idx];
+                            let sx = prev[0] + (agent.pos.x - prev[0]) * interp_alpha;
+                            let sy = prev[1] + (agent.pos.y - prev[1]) * interp_alpha;
+                            let sz = prev[2] + (agent.pos.z - prev[2]) * interp_alpha;
                             // sim (x, y, z) -> renderer (x, z, y) — same swap
                             // the voxel bridge applies.
-                            let mesh_pos = glam::Vec3::new(
-                                agent.pos.x, agent.pos.z, agent.pos.y,
-                            );
+                            let mesh_pos = glam::Vec3::new(sx, sz, sy);
                             let tint = tint_for_agent(agent.creature_type, agent.role);
                             // Per-creature-type scale gives visible size
                             // hierarchy: goblin < archer < hero < brute < BOSS.

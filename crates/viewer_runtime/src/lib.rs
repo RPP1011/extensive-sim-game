@@ -206,7 +206,11 @@ pub struct ViewerApp {
     boss_push_logged: bool,
     /// Previous-tick agent positions; diffed against current to compute
     /// facing direction for the mesh pass.
-    prev_positions: Vec<[f32; 2]>,
+    /// Per-agent position at the start of the previous tick. Used for
+    /// two things: facing-direction delta (XY only) and tick-interp
+    /// (renderer lerps between prev and current for smooth movement
+    /// between sim ticks).
+    pub prev_positions: Vec<[f32; 3]>,
     /// Sticky last-observed facing direction. Used when delta-position is
     /// below the movement epsilon (agent stationary) so models don't
     /// snap back to a default facing every frame they pause.
@@ -344,7 +348,7 @@ impl ViewerApp {
             summary_printed: false,
             boss_enraged: false,
             boss_push_logged: false,
-            prev_positions: vec![[0.0, 0.0]; agent_count as usize],
+            prev_positions: vec![[0.0, 0.0, 0.0]; agent_count as usize],
             last_facing: vec![[0.0, 1.0]; agent_count as usize],
         };
         viewer.refresh_snapshot();
@@ -779,6 +783,8 @@ impl ViewerApp {
             const FACING_EPS_SQ: f32 = 0.001;
             let dx = positions[slot][0] - self.prev_positions[slot][0];
             let dy = positions[slot][1] - self.prev_positions[slot][1];
+            // ([0]/[1] are sim XY; [2] is the sim Z plane = vertical for the
+            // bridge. Renderer lerps between this and current for smoothing.)
             let len_sq = dx * dx + dy * dy;
             let facing = if len_sq > FACING_EPS_SQ {
                 let inv = 1.0 / len_sq.sqrt();
@@ -788,7 +794,7 @@ impl ViewerApp {
             } else {
                 self.last_facing[slot]
             };
-            self.prev_positions[slot] = [positions[slot][0], positions[slot][1]];
+            self.prev_positions[slot] = [positions[slot][0], positions[slot][1], positions[slot][2]];
 
             self.agents[slot] = AgentSnapshot {
                 pos: Vec3::new(positions[slot][0], positions[slot][1], positions[slot][2]),
