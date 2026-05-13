@@ -108,11 +108,13 @@ struct Gfx {
     /// via `present_blit_with_overlay`. `None` when mesh load failed
     /// at startup (renderer still works, just no meshes painted).
     mesh: Option<MeshRendererGpu>,
-    /// Per-role / per-creature-type slot indices into `mesh.meshes`.
-    /// `hero_slots[role - 1]` for heroes; `enemy_slots[creature_type]`
-    /// for archer/brute/goblin. -1 if that slot wasn't loaded.
+    /// Per-role mesh slot indices into `mesh.meshes`.
+    /// `hero_slots[role - 1]` for heroes.
     hero_slots: [Option<usize>; 5],
-    enemy_slots: [Option<usize>; 3],
+    /// Two mesh variants per enemy creature type for visual variety.
+    /// `enemy_slots[ct * 2 + (agent_slot % 2)]` selects the variant.
+    /// Indices 0/1 = Archer, 2/3 = Brute, 4/5 = Goblin.
+    enemy_slots: [Option<usize>; 6],
 }
 
 impl ApplicationHandler for WindowedViewer {
@@ -171,9 +173,12 @@ impl ApplicationHandler for WindowedViewer {
             "character-male-c.glb",   // Rogue   (role=5)
         ];
         let enemy_files = [
-            "character-male-d.glb",   // Archer (creature_type=0)
-            "character-male-f.glb",   // Brute  (creature_type=1)
-            "character-female-c.glb", // Goblin (creature_type=2)
+            "character-male-d.glb",   // Archer A
+            "character-female-d.glb", // Archer B
+            "character-male-f.glb",   // Brute  A
+            "character-male-e.glb",   // Brute  B
+            "character-female-c.glb", // Goblin A
+            "character-female-e.glb", // Goblin B
         ];
 
         let load_slot = |mesh: &mut Option<MeshRendererGpu>, file: &str| -> Option<usize> {
@@ -202,7 +207,7 @@ impl ApplicationHandler for WindowedViewer {
         for (i, file) in hero_files.iter().enumerate() {
             hero_slots[i] = load_slot(&mut mesh, file);
         }
-        let mut enemy_slots: [Option<usize>; 3] = [None; 3];
+        let mut enemy_slots: [Option<usize>; 6] = [None; 6];
         for (i, file) in enemy_files.iter().enumerate() {
             enemy_slots[i] = load_slot(&mut mesh, file);
         }
@@ -345,11 +350,11 @@ impl ApplicationHandler for WindowedViewer {
                     // mesh with first_instance offsets. 8 buckets: 5 hero
                     // roles + 3 enemy creature types. Any agent whose slot
                     // is None (mesh load failed) is silently skipped.
-                    let mut buckets: [Vec<InstanceData>; 8] =
+                    let mut buckets: [Vec<InstanceData>; 11] =
                         std::array::from_fn(|_| Vec::new());
-                    let mut bucket_slot: [Option<usize>; 8] = [None; 8];
+                    let mut bucket_slot: [Option<usize>; 11] = [None; 11];
                     for i in 0..5 { bucket_slot[i] = gfx.hero_slots[i]; }
-                    for i in 0..3 { bucket_slot[5 + i] = gfx.enemy_slots[i]; }
+                    for i in 0..6 { bucket_slot[5 + i] = gfx.enemy_slots[i]; }
                     if gfx.mesh.is_some() {
                         // Tick interpolation alpha: 0 at start of current
                         // tick, 1 just before next tick. Smooths agent motion
@@ -425,15 +430,20 @@ impl ApplicationHandler for WindowedViewer {
                             let inst = InstanceData::from_pos_facing(
                                 mesh_pos, scale, facing_renderer, tint,
                             );
+                            // Heroes go to role-indexed bucket (0..5); enemies
+                            // pick between 2 variants per type by (idx % 2):
+                            //   creature_type=0 (Archer) → bucket 5 or 6
+                            //   creature_type=1 (Brute)  → bucket 7 or 8
+                            //   creature_type=2 (Goblin) → bucket 9 or 10
                             let bucket = if agent.creature_type == 3 /*HERO*/ {
                                 ((agent.role as i32) - 1).clamp(0, 4) as usize
                             } else if agent.creature_type <= 2 {
-                                5 + agent.creature_type as usize
+                                5 + (agent.creature_type as usize) * 2 + (idx % 2)
                             } else { continue };
                             buckets[bucket].push(inst);
                         }
                     }
-                    let draws: Vec<MeshDraw> = (0..8)
+                    let draws: Vec<MeshDraw> = (0..11)
                         .filter_map(|b| {
                             let slot = bucket_slot[b]?;
                             if buckets[b].is_empty() { return None; }
