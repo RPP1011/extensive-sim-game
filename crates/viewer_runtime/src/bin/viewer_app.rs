@@ -39,7 +39,11 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
-const SIM_TICK_PERIOD: Duration = Duration::from_millis(100);
+/// Wall-clock period between sim ticks. The .sim's `init { hp, etc }` and
+/// ability cooldowns are in *sim* ticks, so halving this constant just
+/// plays the same deterministic sim back 2x faster — the auto-restart
+/// reel cycles through seeds in ~60-80s wall clock instead of ~120-160s.
+const SIM_TICK_PERIOD: Duration = Duration::from_millis(50);
 const WINDOW_W: u32 = 1280;
 const WINDOW_H: u32 = 720;
 
@@ -175,7 +179,7 @@ impl ApplicationHandler for WindowedViewer {
                 // Catch up on fixed-step sim ticks. Bound at 4 to
                 // avoid runaway after a long pause.
                 let mut ticks_this_frame: u32 = 0;
-                while self.last_tick.elapsed() >= SIM_TICK_PERIOD && ticks_this_frame < 4 {
+                while self.last_tick.elapsed() >= SIM_TICK_PERIOD && ticks_this_frame < 8 {
                     self.app.step();
                     self.last_tick += SIM_TICK_PERIOD;
                     ticks_this_frame += 1;
