@@ -215,7 +215,16 @@ pub struct ViewerApp {
     /// below the movement epsilon (agent stationary) so models don't
     /// snap back to a default facing every frame they pause.
     last_facing: Vec<[f32; 2]>,
+    /// Per-agent ticks since death — 0 means alive. While the value is
+    /// in 1..DEATH_FADE_TICKS the agent stays rendered with a fade-out
+    /// (shrinking scale + dim tint) instead of vanishing instantly.
+    pub death_ticks: Vec<u32>,
 }
+
+/// Number of sim ticks an agent stays rendered after death before
+/// disappearing from the mesh pass. ~8 ticks ≈ 400ms wall clock at
+/// 50ms tick = a visible death animation.
+pub const DEATH_FADE_TICKS: u32 = 8;
 
 impl ViewerApp {
     /// Roll a dungeon, build the runtime, seed walls + agents.
@@ -350,6 +359,7 @@ impl ViewerApp {
             boss_push_logged: false,
             prev_positions: vec![[0.0, 0.0, 0.0]; agent_count as usize],
             last_facing: vec![[0.0, 1.0]; agent_count as usize],
+            death_ticks: vec![0u32; agent_count as usize],
         };
         viewer.refresh_snapshot();
         Some(viewer)
@@ -757,6 +767,7 @@ impl ViewerApp {
             let was_alive = self.agents[slot].alive;
             let now_alive = alive[slot] != 0;
             if was_alive && !now_alive {
+                self.death_ticks[slot] = 1;
                 if types[slot] == dungeon::CT_HERO {
                     let h_idx = slot - hero_start;
                     if h_idx < dungeon::N_HEROES as usize
@@ -772,6 +783,10 @@ impl ViewerApp {
                         self.boss_death_tick = Some(cur_tick);
                     }
                 }
+            } else if !now_alive && self.death_ticks[slot] > 0 && self.death_ticks[slot] < DEATH_FADE_TICKS {
+                self.death_ticks[slot] += 1;
+            } else if now_alive {
+                self.death_ticks[slot] = 0;
             }
             if alert[slot] > self.max_alert_seen {
                 self.max_alert_seen = alert[slot];

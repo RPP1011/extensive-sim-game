@@ -355,7 +355,11 @@ impl ApplicationHandler for WindowedViewer {
                         let interp_alpha = (self.last_tick.elapsed().as_secs_f32()
                             / SIM_TICK_PERIOD.as_secs_f32()).clamp(0.0, 1.0);
                         for (idx, agent) in self.app.agents().iter().enumerate() {
-                            if !agent.alive { continue; }
+                            let death_tick = self.app.death_ticks[idx];
+                            let is_dying = !agent.alive
+                                && death_tick > 0
+                                && death_tick < viewer_runtime::DEATH_FADE_TICKS;
+                            if !agent.alive && !is_dying { continue; }
                             // Lerp sim-space position between previous and
                             // current tick using interp_alpha. prev_positions
                             // is [x, y, z] in sim space (Z-up).
@@ -371,7 +375,7 @@ impl ApplicationHandler for WindowedViewer {
                             // hierarchy: goblin < archer < hero < brute < BOSS.
                             // Boss = matches the boss_slot the bridge
                             // already tracks; gets a dramatic 2x.
-                            let scale = if Some(idx as u32) == self.app.boss_slot {
+                            let base_scale = if Some(idx as u32) == self.app.boss_slot {
                                 1.8
                             } else if agent.creature_type == 3 /*HERO*/ {
                                 0.85
@@ -384,6 +388,20 @@ impl ApplicationHandler for WindowedViewer {
                             } else {
                                 0.75
                             };
+                            // Death fade: scale shrinks from 1.0 → 0.0 over
+                            // DEATH_FADE_TICKS, tint dims to 40%.
+                            let (scale, tint_mul) = if is_dying {
+                                let t = death_tick as f32
+                                    / viewer_runtime::DEATH_FADE_TICKS as f32;
+                                (base_scale * (1.0 - t).max(0.0), 0.4)
+                            } else {
+                                (base_scale, 1.0)
+                            };
+                            let tint = [
+                                tint[0] * tint_mul,
+                                tint[1] * tint_mul,
+                                tint[2] * tint_mul,
+                            ];
                             // Sim facing is XY (sim's horizontal plane);
                             // renderer's horizontal plane is XZ — same Z↔Y swap
                             // applies to the heading vector.
