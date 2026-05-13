@@ -366,6 +366,17 @@ impl ViewerApp {
             self.print_run_summary(heroes_alive, enemies_alive);
             self.summary_printed = true;
         }
+        // Live progress ping every 100 ticks. Lets the user follow a
+        // run from the terminal without watching the window, and turns
+        // the auto-restart reel into visible state transitions in the log.
+        if self.state.tick > 0 && self.state.tick % 100 == 0 && self.terminated_at_tick.is_none() {
+            eprintln!(
+                "[viewer_runtime] tick={} heroes={}/5 enemies={} kills={} alert_max={}{}",
+                self.state.tick, heroes_alive, enemies_alive,
+                self.total_kills, self.max_alert_seen,
+                if self.boss_enraged { " BOSS_ENRAGED" } else { "" },
+            );
+        }
     }
 
     /// Host-side hero target_room_idx advancement.
