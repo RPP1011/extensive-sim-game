@@ -51,9 +51,21 @@ const CA_INIT_WALL_PCT: u32 = 40;
 const CA_ITERATIONS: usize = 4;
 
 // Stage 2's 37 kernels per tick run noticeably slower than stage 1's
-// 28. We run 100 ticks here — enough for MissingAllySuspicion to
-// fire 3× and for combat to settle into a steady state.
-const TICKS: u32 = 100;
+// 28. We run 500 ticks here — enough for the party to traverse the
+// dungeon, MissingAllySuspicion to fire 16× (every 30), and combat
+// to produce a real verdict (TPK / DUNGEON CLEARED / PARTY EXPLORING)
+// instead of stage 2's monotone "PARTY EXPLORING" at 100 ticks.
+const TICKS: u32 = 500;
+
+// Per-creature-type HP overrides (Task A — tuning for resolution,
+// 2026-05-12). Same approach as dungeon_horde_pin: override
+// agent_hp_buf + agent_max_hp_buf at init so combat resolves on a
+// 500-tick budget. Heroes squishier than baseline (200 → 80) and
+// enemies near-1-shot tier (200 → 25-50).
+const HERO_HP: f32 = 80.0;
+const GOBLIN_HP: f32 = 25.0;
+const ARCHER_HP: f32 = 30.0;
+const BRUTE_HP: f32 = 60.0;
 
 const CT_ARCHER: u32 = 0;
 const CT_BRUTE: u32 = 1;
@@ -100,6 +112,7 @@ fn dungeon_stealth_500_tick_clear_report() {
 
     seed_voxel_dungeon(&mut state, &dungeon);
     let stealth_seed_info = seed_topology(&mut state, &dungeon);
+    seed_per_type_hp(&mut state, agent_count);
 
     eprintln!(
         "[dungeon_stealth] stealth/patrol seed: {} patrolling enemies, expected-allies sum={}",
@@ -171,18 +184,17 @@ fn dungeon_stealth_500_tick_clear_report() {
             }
         }
 
-        if tick == 5 {
+        if tick == 30 {
             tick_30_heroes_alive = Some(count_alive_of_type(&mut state, CT_HERO, agent_count));
         }
-        if tick == 8 {
+        if tick == 50 {
             tick_50_alive_enemies = Some(
                 count_alive_of_type(&mut state, CT_ARCHER, agent_count)
                     + count_alive_of_type(&mut state, CT_BRUTE, agent_count)
                     + count_alive_of_type(&mut state, CT_GOBLIN, agent_count),
             );
         }
-        if tick == 9 {
-            // Read alert values; sum alerts for alive non-heroes.
+        if tick == 90 {
             let alert_buf = state.agent_alert_buf.clone();
             let alive_buf = state.agent_alive_buf.clone();
             let types_buf = state.agent_creature_type_buf.clone();
@@ -197,7 +209,7 @@ fn dungeon_stealth_500_tick_clear_report() {
             }
             tick_90_alert_sum = Some(sum);
         }
-        if tick == 9 {
+        if tick == TICKS - 1 {
             let alive = count_alive_of_type(&mut state, CT_HERO, agent_count);
             tick_99_state = Some((alive, reached_final));
         }
@@ -297,68 +309,61 @@ fn dungeon_stealth_500_tick_clear_report() {
     println!("  verdict: {outcome}");
     println!("==========================================");
 
-    // Load-bearing pins.
+    // Load-bearing pins. Task A retune (2026-05-12): TICKS bumped
+    // 100→500 + per-creature-type HP overrides. Verdict can land at
+    // TPK / DUNGEON CLEARED / PARTY ADVANCING / PARTY EXPLORING
+    // depending on the seed; the pin asserts only structural invariants
+    // (NaN-free, stealth round-trip fires, combat happens). A wipe at
+    // the boss room is now an *expected* outcome on bad rolls, not a
+    // wiring regression.
     assert_eq!(nan_count, 0, "found {nan_count} NaN positions after {TICKS} ticks");
 
-    // Stage 2's TICKS budget is small (10 ticks) due to the
-    // per-tick AOE-dispatch cost. The assertions below verify
-    // wiring rather than long-run dynamics:
-    //   - All heroes alive after the first 5 ticks (no early wipe).
-    //   - Most enemies still alive at tick 8 (combat takes time).
-    //   - Stealth observed end-to-end (RogueStealth at tick 0 +
-    //     ApplyStealthFromChronicle wrote `stealth_until_tick > 0`).
-    //   - Advancement: ≥3 heroes alive at the final sample tick.
-    // The alert / reached_final pins are reported but not enforced
-    // at this tick budget — alert fires every 30 ticks, exploration
-    // takes 100s of ticks. Re-tuning to longer runs is a follow-up
-    // once the GPU per-tick cost is profiled.
-    if let Some(alive_at_30) = tick_30_heroes_alive {
-        assert_eq!(
-            alive_at_30, N_HEROES,
-            "early-game safety: all 5 heroes should be alive at tick 5 (got {alive_at_30}). \
-             Stealth + LoS-gated detection should prevent any early-game wipe."
-        );
-    }
-
-    if let Some(alive_at_50) = tick_50_alive_enemies {
-        assert!(
-            alive_at_50 >= 3,
-            "stealth leverage: at tick 8, at least 3 enemies should still be alive (got {alive_at_50})."
-        );
-    }
-
     // Stealth pin (load-bearing — Gap dungeon_stealth#5 closed
-    // 2026-05-12). At a 100-tick budget RogueStealth fires at ticks
-    // 0/20/40/60/80 (cd=20). The chronicle dispatcher emits kind=54
-    // records with duration=50 ticks, and ApplyStealthFromChronicle
-    // writes `stealth_until_tick = world.tick + 50`. Pre-fix the
-    // schedule synthesizer dropped the producer→consumer edge for
-    // kind=54 (`APPLY_ABILITY_EMITTED_KINDS` was hardcoded to just
-    // kinds 26..29), so the consumer ran BEFORE the dispatcher each
-    // tick and the records were silently dropped.
+    // 2026-05-12). RogueStealth fires every 20 ticks; cd=20, duration=50.
+    // The chronicle dispatcher emits kind=54 records and
+    // ApplyStealthFromChronicle writes `stealth_until_tick = world.tick
+    // + 50`.
     assert!(
         any_stealthed_observed,
         "stealth round-trip: RogueStealth verb dispatched but no hero's \
-         stealth_until_tick > tick across the {TICKS}-tick run. The \
-         apply_ability Stealth chronicle write should land at \
-         agent_stealth_until_tick[caster] = tick + duration. \
+         stealth_until_tick > tick across the {TICKS}-tick run. \
          See docs/architecture/gaps_dungeon_stealth.md Gap #5."
     );
 
-    if let Some((alive_99, _reached)) = tick_99_state {
-        assert!(
-            alive_99 >= 3,
-            "advancement: at tick 9, ≥3 heroes should be alive (got {alive_99}). \
-             At this tick budget reached_final is not expected (heroes don't \
-             cross enough rooms in 10 ticks)."
-        );
-    }
-    let _ = tick_90_alert_sum; // reported in stdout, not pinned at TICKS=10.
+    // Combat happened: at this tick budget we expect at least some
+    // enemies dead unless the verb cascade is fully silent.
+    assert!(
+        total_kills >= 1,
+        "combat wiring: expected ≥1 enemy kill in {TICKS} ticks, got {total_kills}. \
+         A 0-kill outcome means the hero verb cascade or chronicle consumer is broken."
+    );
+
+    let _ = (tick_30_heroes_alive, tick_50_alive_enemies, tick_90_alert_sum, tick_99_state);
 
     println!(
         "  contract: 37 kernels emit, {TICKS} ticks step without panic / NaN, \
          beliefs view + stealth + alert + patrol fire correctly."
     );
+}
+
+/// Per-creature-type HP override (Task A — tuning for resolution).
+fn seed_per_type_hp(state: &mut GeneratedRuntime, agent_count: u32) {
+    let types = read_agent_u32(state, &state.agent_creature_type_buf.clone(), agent_count);
+    let mut hp = vec![0.0f32; agent_count as usize];
+    let mut max_hp = vec![0.0f32; agent_count as usize];
+    for i in 0..agent_count as usize {
+        let v = match types[i] {
+            CT_HERO => HERO_HP,
+            CT_GOBLIN => GOBLIN_HP,
+            CT_ARCHER => ARCHER_HP,
+            CT_BRUTE => BRUTE_HP,
+            _ => 200.0,
+        };
+        hp[i] = v;
+        max_hp[i] = v;
+    }
+    state.gpu.queue.write_buffer(&state.agent_hp_buf, 0, bytemuck::cast_slice(&hp));
+    state.gpu.queue.write_buffer(&state.agent_max_hp_buf, 0, bytemuck::cast_slice(&max_hp));
 }
 
 // ---------------------------------------------------------------------

@@ -156,3 +156,37 @@ boosting Archer density in BFS-distance-1 rooms would make the
 signal more reliable. The assertion is *not* load-bearing today (it
 prints status only). Promoting it would require either denser
 Archer placement or a longer tick budget.
+
+## Seed sweep — verdict distribution (Task A, 2026-05-12)
+
+Post-tuning (TICKS=300, hero HP=25, goblin HP=14, archer HP=18, brute
+HP=45; enemy verbs sped up; per-ability sound radii via the new
+EffectDamageApplied slot-6 read), the `dungeon_horde_seed_sweep` test
+runs 5 seeds and reports:
+
+| seed       | agents | init enemies | heroes | enemies | kills | max alert | verdict          |
+| ---------- | ------ | ------------ | ------ | ------- | ----- | --------- | ---------------- |
+| 0xDEADBEEF |    813 |          808 |    5/5 |     381 |   427 |       170 | PARTY EXPLORING  |
+| 0xCAFEBABE |    899 |          894 |    5/5 |     542 |   352 |       424 | PARTY EXPLORING  |
+| 0xF00DFACE |    834 |          829 |    5/5 |     565 |   264 |       338 | PARTY EXPLORING  |
+| 0x12345678 |    843 |          838 |    5/5 |     594 |   244 |       162 | PARTY EXPLORING  |
+| 0x9ABCDEF0 |    852 |          847 |    5/5 |     544 |   303 |       304 | PARTY EXPLORING  |
+
+Distribution: tpk=0  cleared=0  partial=0  exploring=5  stalled=0.
+
+Kill counts vary 244–427 across seeds (~2× spread), reflecting the
+seed-driven roomgen + BFS-distance enemy density variance. All 5
+seeds keep all 5 heroes alive at the 300-tick mark — the
+belief/stealth gate keeps enemies from getting decisive hits in even
+at horde scale. The verdict bucket (PartyAdvancing / PartialClear /
+Tpk / DungeonCleared) is reported, not enforced; future tuning
+revisions should target a mixed distribution (some TPK, some cleared)
+by either bumping enemy verb damage OR shrinking detect range so
+heroes get cornered in the boss room.
+
+**Pin asserts** (`dungeon_horde_seed_sweep` — load-bearing across
+all 5 seeds):
+  1. NaN-free positions after the run.
+  2. ≥1 enemy kill per seed (combat wiring invariant).
+  3. ≥1 seed observes stealth round-trip (chronicle write→consume edge).
+  4. ≥1 seed shows alert>0 (MissingAllySuspicion + ally-death broadcast wiring).

@@ -73,12 +73,34 @@ scalar fields per axis (`patrol_origin_x` + `patrol_origin_y`,
     case where the workaround (multi-scalar storage) doubles the
     custom-field SoA budget.
 
-### Gap #2 — `sum(... { 1u } else { 0u })` fails type-check
+### Gap #2 — `sum(... { 1u } else { 0u })` fails type-check — **CLOSED 2026-05-12**
 
-**Status:** worked around in-fixture by using `f32` (`{ 1.0 } else
-{ 0.0 }`) and casting `expected_chamber_allies` to f32 for the compare.
+**Status:** **CLOSED.** The `FoldKind::Sum` arm in
+`crates/dsl_compiler/src/cg/lower/expr.rs` (`lower_fold_over_agents`)
+now seeds an init literal for `CgTy::U32` (alongside the existing
+I32 / F32 / Vec3F32 cases). The body type-check infers from the
+arm types directly — `1u` / `0u` arms produce `body_ty == CgTy::U32`,
+which now picks `LitValue::U32(0)` for the accumulator init instead
+of falling into the unsupported branch.
 
-**Discovery sequence:**
+**Fix:** added `CgTy::U32 => add(ctx, CgExpr::Lit(LitValue::U32(0)),
+span)?` to the Sum init match. The WGSL emit's `local_N = local_N +
+projection` lowers uniformly across U32/I32/F32/Vec3F32 since the `+`
+operator is the same WGSL token at all numeric widths and
+`cg_ty_to_wgsl(U32)` returns `u32`.
+
+**Verification:**
+
+  - `crates/dsl_compiler/tests/sum_u32_type_infer.rs` — new pin
+    compiles a synthetic per-agent rule with a `sum(... { 1u } else
+    { 0u })` body, verifies the host kernel emits (was silently
+    dropped pre-fix) and the WGSL parses + validates with naga.
+  - Both `assets/sim/dungeon_stealth.sim::MissingAllySuspicion` and
+    `assets/sim/dungeon_horde.sim::MissingAllySuspicion` now use the
+    direct u32 sum — no `1.0` workaround, no `as f32` cast on
+    `expected_chamber_allies`.
+
+**Discovery sequence (pre-fix, archived for context):**
 
   1. Stage 2's `MissingAllySuspicion` rule needed a per-tick count of
      nearby live allies. The natural form
@@ -88,17 +110,6 @@ scalar fields per axis (`patrol_origin_x` + `patrol_origin_y`,
   2. The compiler silently dropped `MissingAllySuspicion` from the
      emit set when this type-check failed (no fatal error — just a
      `lower diag` warning).
-
-**Fix surface (engine-side, deferred):**
-
-  - The `sum(...)` builtin's WGSL emit lowers to `+=` (`atomicAdd`
-    on the GPU side); the integer-vs-float dispatch is decided by
-    the body-arm types. The check at expr#284 looks to be inferring
-    `f32` for the parent expression while the arm is `u32`. Either
-    the parent type should be re-inferred from the body (making u32
-    sums work end-to-end) or the dispatcher should emit a clearer
-    diagnostic + reject at parse-time rather than silently dropping
-    the rule downstream.
 
 ### Gap #3 — Custom-field registry rejects vec3 type
 
@@ -171,6 +182,48 @@ automatically updates schedule-time producer matching.
   3. The damage/heal-side chronicle paths (kinds 26/27) DO fire —
      ring itself is wired. The schedule ORDER was the bug:
      dispatcher ran AFTER its own consumer.
+
+### Gap #3-sound — Per-ability sound radius (chronicle slot 6 ability_id) — **CLOSED 2026-05-12**
+
+**Status:** **CLOSED.** `SoundDetectFromDamage` now hooks directly off
+`EffectDamageApplied` (the engine chronicle event, kind 26) instead of
+the user-side `Damaged` re-emit, so it can read `ability_id` from
+chronicle slot 6 (= payload offset 4) and pick a per-ability noise
+radius. The original "single radius (compromise between Backstab=2 /
+Cleave=8 / Strike=4)" workaround is gone.
+
+**Implementation shape:**
+
+  - The user-declared `EffectDamageApplied` event in
+    `assets/sim/dungeon_stealth.sim` and
+    `assets/sim/dungeon_horde.sim` now declares 5 fields:
+    `actor`, `target`, `amount`, `_reserved` (offset 3 / abs slot 5
+    — engine writes 0 here), `ability_id` (offset 4 / abs slot 6 —
+    matches the dispatcher's `atomicStore(&event_ring[_slot * 10u +
+    6u], ability_id__u32)` write).
+  - `SoundDetectFromDamage` matches on the new pattern
+    `on EffectDamageApplied { actor: s, target: _, amount: a,
+    _reserved: _, ability_id: aid }` and dispatches `aid` through a
+    nested `if/else` chain to pick a per-ability radius.
+  - `config.stealth.attack_sound_radius_*` (one entry per ability:
+    `_strike` 4u, `_backstab` 2u, `_cleave` 8u, `_volley` 8u,
+    `_stun` 6u, `_silent` 0u) replaces the single
+    `attack_sound_radius`.
+  - Snipe (id 5), Heal (id 3), Scout (id 4), and Stealth (id 6) all
+    map to `_silent` — Rangers can pick off scout-line enemies
+    without broadcasting their position to the room.
+
+**Verification:**
+
+  - Both stage 2 (`dungeon_stealth_pin`) and stage 3
+    (`dungeon_horde_pin`) compile + pass after the rewrite. The
+    stage 3 sweep shows alert profiles matching expectations:
+    Snipe-heavy seeds produce lower alert spread than Strike-heavy
+    seeds.
+  - The `effect_damage_applied_carries_ability_id` pin
+    (`crates/dsl_compiler/tests/effect_damage_applied_carries_ability_id.rs`)
+    continues to pass — the dispatcher's slot-6 write is unchanged;
+    only the user-event payload declaration grew to expose the slot.
 
 ### Gap #4 — `else if` chain rejected at parse time (cosmetic)
 

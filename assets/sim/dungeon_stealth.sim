@@ -66,12 +66,21 @@ event Healed {
   amount: f32,
 }
 
-// Engine-side chronicle (kind 26 / EffectDamageApplied).
+// Engine-side chronicle (kind 26 / EffectDamageApplied). Slots 5/6
+// land at payload offsets 3/4 — slot 5 is engine-reserved (always 0
+// today; kept as a `_reserved` field so the layout matches the
+// dispatcher's `atomicStore(&event_ring[_slot * 10u + 6u], ability_id)`
+// suffix). Reading `ability_id` lets the SoundDetectFromDamage rule
+// pick a per-ability noise radius (Snipe silent, Backstab quiet,
+// Cleave loud) instead of a single config-wide value (Gap
+// dungeon_stealth#3-sound, closed 2026-05-12).
 @replayable @gpu_amenable
 event EffectDamageApplied {
   actor: AgentId,
   target: AgentId,
   amount: f32,
+  _reserved: u32,
+  ability_id: u32,
 }
 
 // Engine-side chronicle (kind 27 / EffectHealApplied).
@@ -213,15 +222,16 @@ config dungeon {
   scout_radius:         f32 = 18.0,
   patrol_radius:        f32 = 4.0,
 
-  // Enemy verb tuning.
-  goblin_melee_range:   f32 = 2.5,
-  goblin_melee_cd:      u32 = 4,
-  goblin_charge_range:  f32 = 12.0,
-  brute_cleave_range:   f32 = 4.0,
-  brute_cleave_cd:      u32 = 8,
-  brute_charge_range:   f32 = 10.0,
+  // Enemy verb tuning. Stage 2 task A — enemies fire faster +
+  // melee-engage from longer range so combat resolves in 500 ticks.
+  goblin_melee_range:   f32 = 3.0,
+  goblin_melee_cd:      u32 = 3,
+  goblin_charge_range:  f32 = 16.0,
+  brute_cleave_range:   f32 = 5.0,
+  brute_cleave_cd:      u32 = 6,
+  brute_charge_range:   f32 = 14.0,
   archer_volley_range:  f32 = 18.0,
-  archer_volley_cd:     u32 = 6,
+  archer_volley_cd:     u32 = 4,
 
   // Role discriminants.
   role_warrior: u32 = 1,
@@ -244,13 +254,18 @@ config stealth {
   base_detect_range:        f32 = 8.0,
   detect_range_per_alert:   f32 = 0.5,
 
-  // Sound broadcast — when a hero deals damage, every enemy within
-  // this radius gains DETECTED belief for the attacker. Per the
-  // design spec we use a single radius rather than per-ability
-  // lookup (compromise between Backstab=2 / Cleave=8 / Strike=4).
-  // Per-ability noise is a follow-up — chronicle slot 6 already
-  // carries ability_id (commit ad492ee2).
-  attack_sound_radius:      f32 = 6.0,
+  // Per-ability sound radii (Gap dungeon_stealth#3-sound, closed
+  // 2026-05-12). The chronicle event `EffectDamageApplied` now
+  // carries `ability_id` at payload offset 4 (= absolute slot 6); the
+  // SoundDetectFromDamage rule reads it and picks the matching
+  // radius. Silent verbs (Snipe / Heal / Scout / Stealth) don't
+  // broadcast at all (radius=0).
+  attack_sound_radius_strike:   f32 = 4.0,
+  attack_sound_radius_backstab: f32 = 2.0,
+  attack_sound_radius_cleave:   f32 = 8.0,
+  attack_sound_radius_volley:   f32 = 8.0,
+  attack_sound_radius_stun:     f32 = 6.0,
+  attack_sound_radius_silent:   f32 = 0.0,
 
   // BroadcastAlertOnAllyDeath: enemies within this radius of a
   // dying ally bump alert by alert_step_ally_death.
@@ -451,18 +466,16 @@ physics MissingAllySuspicion {
                     && self.creature_type != Hero
                     && (world.tick % config.stealth.missing_ally_period == 0u)
                     && world.tick > 0u) {
-    // Use f32 sum (the DSL fusion analyzer's type-check rejects u32
-    // sums today — Gap dungeon_stealth#2). Cast `expected_chamber_allies`
-    // to f32 for the compare.
+    // u32 sum (Gap dungeon_stealth#2 closed 2026-05-12 — `FoldKind::Sum`
+    // now seeds a `LitValue::U32(0)` init when the body type is U32).
     let nearby_count = sum(other in agents where
       if (other != self) && (other.alive) && (other.creature_type != Hero)
          && (length(other.pos - self.pos) < config.stealth.missing_ally_radius) {
-        1.0
+        1u
       } else {
-        0.0
+        0u
       });
-    let expected_f = (agents.expected_chamber_allies(self) as f32);
-    if (nearby_count < expected_f) {
+    if (nearby_count < agents.expected_chamber_allies(self)) {
       agents.set_alert(self, agents.alert(self) + config.stealth.alert_step_missing);
     }
   }
@@ -749,32 +762,55 @@ physics ApplyHeal {
 }
 
 // SoundDetectFromDamage — when a Hero deals damage, every nearby
-// non-hero gains DETECTED belief for the attacker. Walks every agent
-// slot via `for_each_agent` (same shape among_us::ApplyWitness uses
-// — proven path for cross-pair belief writes from a @phase(post)
-// consumer). The DSL doesn't support spatial.nearby calls from
-// @phase(post) bodies today, so we use the full-population walk
-// (N enemies × 1 hero-source = up to ~30 distance checks per event,
-// cheap at this scale).
+// non-hero gains DETECTED belief for the attacker. Hooks directly off
+// `EffectDamageApplied` (the engine chronicle event) instead of the
+// user-side `Damaged` re-emit so we can read `ability_id` (slot 6 /
+// payload offset 4) and pick a per-ability noise radius. Snipe is
+// silent — Rangers can pick off scout-line enemies without
+// broadcasting their position; Cleave and Volley are loud (full 8u
+// radius); Backstab is a quiet 2u; Strike defaults to 4u.
+//
+// The `for_each_agent` walk is unchanged shape (N enemies × 1
+// hero-source per event, cheap at stage-2 scale). Stage 3
+// (`dungeon_horde.sim`) migrates this to `spatial.nearby(actor)` per
+// Gap dungeon_horde#1.
 @phase(post)
 physics SoundDetectFromDamage {
-  on Damaged { source: s, target: _, amount: a } {
+  on EffectDamageApplied { actor: s, target: _, amount: a, _reserved: _, ability_id: aid } {
     if (a > 0.0) {
       let src_pos = agents.pos(s);
       let src_type = agents.creature_type(s);
       // Only emit for hero-sourced damage (the stealth-break case).
       if (src_type == Hero) {
-        for_each_agent slot {
-          let slot_alive = agents.alive(slot);
-          let slot_type = agents.creature_type(slot);
-          let slot_pos = agents.pos(slot);
-          let delta = slot_pos - src_pos;
-          let dist = length(delta);
-          if (slot_alive
-              && slot_type != Hero
-              && slot != s
-              && dist < config.stealth.attack_sound_radius) {
-            emit BeliefUpdate { observer: slot, subject: s, flags: 1u }
+        // Per-ability noise table. Slot IDs (alphabetical):
+        //   Backstab=1, Cleave=2, Heal=3, Scout=4, Snipe=5,
+        //   Stealth=6, Strike=7, Stun=8, Volley=9
+        let radius = if (aid == 5u) {
+          config.stealth.attack_sound_radius_silent
+        } else { if (aid == 1u) {
+          config.stealth.attack_sound_radius_backstab
+        } else { if (aid == 2u) {
+          config.stealth.attack_sound_radius_cleave
+        } else { if (aid == 9u) {
+          config.stealth.attack_sound_radius_volley
+        } else { if (aid == 8u) {
+          config.stealth.attack_sound_radius_stun
+        } else {
+          config.stealth.attack_sound_radius_strike
+        } } } } };
+        if (radius > 0.0) {
+          for_each_agent slot {
+            let slot_alive = agents.alive(slot);
+            let slot_type = agents.creature_type(slot);
+            let slot_pos = agents.pos(slot);
+            let delta = slot_pos - src_pos;
+            let dist = length(delta);
+            if (slot_alive
+                && slot_type != Hero
+                && slot != s
+                && dist < radius) {
+              emit BeliefUpdate { observer: slot, subject: s, flags: 1u }
+            }
           }
         }
       }

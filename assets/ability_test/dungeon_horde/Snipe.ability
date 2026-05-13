@@ -9,5 +9,5 @@ ability Snipe {
     cooldown: 12
     hint: damage
 
-    damage 100.0 [PHYSICAL: 100]
+    damage 25.0 [PHYSICAL: 100]
 }

@@ -2924,7 +2924,14 @@ fn lower_fold_over_agents(
             (CgTy::I32, init, proj)
         }
         FoldKind::Sum => {
+            // Gap dungeon_stealth#2 (closed): Sum body inferred from the
+            // arm types; `sum(... { 1u } else { 0u })` lowers to a u32
+            // accumulator via `LitValue::U32(0)` init. The WGSL ForEachAgent
+            // emit's `local_N = local_N + projection` works uniformly across
+            // U32/I32/F32/Vec3F32 since `cg_ty_to_wgsl(U32)` returns `u32`
+            // and `+` is the same WGSL operator at all four types.
             let init = match body_ty {
+                CgTy::U32 => add(ctx, CgExpr::Lit(LitValue::U32(0)), span)?,
                 CgTy::I32 => add(ctx, CgExpr::Lit(LitValue::I32(0)), span)?,
                 CgTy::F32 => add(ctx, CgExpr::Lit(LitValue::F32(0.0)), span)?,
                 CgTy::Vec3F32 => add(

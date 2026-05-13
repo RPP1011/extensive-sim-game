@@ -10,5 +10,5 @@ ability Volley {
     cooldown: 5
     hint: damage
 
-    damage 18.0 in spread(5.0, 4) [PHYSICAL: 100]
+    damage 14.0 in spread(5.0, 4) [PHYSICAL: 100]
 }
