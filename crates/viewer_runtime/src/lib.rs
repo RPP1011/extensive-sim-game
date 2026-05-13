@@ -201,44 +201,55 @@ impl ViewerApp {
         }
     }
 
-    /// Host-side hero target_room_idx advancement. Mirrors
-    /// `dungeon_horde_pin::update_hero_exploration` so the viewer's
-    /// heroes traverse the dungeon the same way the test asserts on.
+    /// Host-side hero target_room_idx advancement.
     ///
-    /// Reads positions + HPs, marks the room each hero is in as
-    /// visited, and steers target_room_idx via a small state machine:
-    /// * **Wounded** (`hp < RETREAT_HP`) → redirect to spawn room.
-    ///   Hero pathfinds back through cleared rooms.
-    /// * **Healed** (was retreating, `hp >= RESUME_HP`) → pick a
-    ///   frontier-greedy target from the current room and resume.
-    /// * **Default** → retarget when the hero arrives at their
-    ///   current target (frontier-greedy among adjacent rooms).
+    /// Heroes are placed in role order by `seed_topology` — h=0 is
+    /// Warrior, h=1 Cleric, h=2 Ranger, h=3 Mage, h=4 Rogue — so
+    /// `h` doubles as the role discriminant minus one.
     ///
-    /// Hysteresis between RETREAT and RESUME thresholds prevents
-    /// oscillating around the retreat boundary while the cleric is
-    /// mid-heal.
+    /// Each tick: read positions/HPs, recompute current_room for every
+    /// hero, then derive new targets via a per-role policy:
+    /// * **Warrior** — leader. Standard frontier-greedy.
+    /// * **Cleric / Ranger / Mage** — followers. Target = warrior's
+    ///   current room (cluster with the tank).
+    /// * **Rogue** — scout. Target = warrior's TARGET room (one step
+    ///   ahead of the party, so LoS reveals enemies in advance).
+    /// * If the warrior is dead, every surviving hero falls back to
+    ///   their own frontier-greedy target.
+    ///
+    /// Wounded heroes (`hp < RETREAT_HP`) override the role policy
+    /// and route to spawn until they heal past `RESUME_HP`. Hysteresis
+    /// between the two prevents oscillation while the cleric mid-heals.
     fn advance_hero_exploration(&mut self) {
         /// Below this HP heroes break off and head back to spawn.
         const RETREAT_HP: f32 = 45.0;
         /// Once retreating, must heal above this to resume exploring.
         const RESUME_HP: f32 = 170.0;
+        const H_WARRIOR: usize = 0;
+        const H_ROGUE: usize = 4;
 
         let agent_count = self.agent_count;
         let hero_start = (agent_count - dungeon::N_HEROES) as usize;
         let positions = read_positions(&mut self.state, agent_count);
         let target_buf = self.state.agent_target_room_idx_buf.clone();
         let hp_buf = self.state.agent_hp_buf.clone();
+        let alive_buf = self.state.agent_alive_buf.clone();
         let mut targets = read_agent_u32(&mut self.state, &target_buf, agent_count);
         let hps = read_agent_f32(&mut self.state, &hp_buf, agent_count);
+        let alive = read_agent_u32(&mut self.state, &alive_buf, agent_count);
         let present_set: std::collections::BTreeSet<dungeon::RoomSlot> =
             self.dungeon.rooms.iter().copied().collect();
         let tick = self.state.tick as u32;
         let spawn_idx = self.dungeon.spawn_room.idx();
         let mut any_change = false;
 
+        // Pass 1: recompute current_room + rooms_visited for each hero
+        // from their current position. None means the hero isn't in any
+        // present room (dead, out of bounds, or in a corridor cell).
+        let mut current: [Option<dungeon::RoomSlot>; dungeon::N_HEROES as usize] =
+            [None; dungeon::N_HEROES as usize];
         for h in 0..dungeon::N_HEROES as usize {
             let p = positions[hero_start + h];
-            let hp = hps[hero_start + h];
             if !p[0].is_finite() || !p[1].is_finite() {
                 continue;
             }
@@ -254,31 +265,85 @@ impl ViewerApp {
             if !present_set.contains(&candidate) {
                 continue;
             }
-            let cand_idx = candidate.idx();
-            self.hero_state.current_room[h] = Some(cand_idx);
+            current[h] = Some(candidate);
+            self.hero_state.current_room[h] = Some(candidate.idx());
             let remap = self.dungeon.rooms.iter().position(|r| *r == candidate).unwrap();
             self.hero_state.rooms_visited[h] |= 1u32 << remap;
+        }
 
+        // Pass 2: compute the warrior's target first — it anchors the
+        // party formation. Followers + rogue read off this in pass 3.
+        let warrior_alive = alive[hero_start + H_WARRIOR] != 0;
+        let warrior_current = current[H_WARRIOR];
+        let warrior_target_after = {
+            let hp = hps[hero_start + H_WARRIOR];
+            let cur_target = targets[hero_start + H_WARRIOR];
+            let retreating = cur_target == spawn_idx
+                && warrior_current.map_or(true, |c| c.idx() != spawn_idx);
+            match warrior_current {
+                Some(cand) if warrior_alive => {
+                    if retreating && hp >= RESUME_HP {
+                        dungeon::pick_next_target(
+                            &self.dungeon, cand,
+                            self.hero_state.rooms_visited[H_WARRIOR],
+                            tick, H_WARRIOR as u32, self.seed,
+                        )
+                    } else if !retreating && hp < RETREAT_HP {
+                        spawn_idx
+                    } else if !retreating && cand.idx() == cur_target {
+                        dungeon::pick_next_target(
+                            &self.dungeon, cand,
+                            self.hero_state.rooms_visited[H_WARRIOR],
+                            tick, H_WARRIOR as u32, self.seed,
+                        )
+                    } else {
+                        cur_target
+                    }
+                }
+                _ => cur_target,
+            }
+        };
+        if warrior_target_after != targets[hero_start + H_WARRIOR] {
+            targets[hero_start + H_WARRIOR] = warrior_target_after;
+            any_change = true;
+        }
+
+        // Pass 3: every other hero. Followers cluster with the warrior;
+        // the rogue scouts one step ahead. If the warrior is dead,
+        // everyone falls back to per-hero frontier-greedy.
+        for h in 0..dungeon::N_HEROES as usize {
+            if h == H_WARRIOR { continue; }
+            let cand = match current[h] {
+                Some(c) => c,
+                None => continue,
+            };
+            let hp = hps[hero_start + h];
             let cur_target = targets[hero_start + h];
-            let retreating = cur_target == spawn_idx && cand_idx != spawn_idx;
+            let retreating = cur_target == spawn_idx && cand.idx() != spawn_idx;
+
             let new_target = if retreating && hp >= RESUME_HP {
-                // Healed up while back at spawn area — re-engage from
-                // current room.
                 dungeon::pick_next_target(
-                    &self.dungeon, candidate, self.hero_state.rooms_visited[h],
+                    &self.dungeon, cand, self.hero_state.rooms_visited[h],
                     tick, h as u32, self.seed,
                 )
             } else if !retreating && hp < RETREAT_HP {
-                // Wounded — fall back to spawn.
                 spawn_idx
-            } else if !retreating && cand_idx == cur_target {
-                // Arrived; pick next frontier room.
-                dungeon::pick_next_target(
-                    &self.dungeon, candidate, self.hero_state.rooms_visited[h],
-                    tick, h as u32, self.seed,
-                )
+            } else if !warrior_alive {
+                // No leader — fall back to per-hero exploration.
+                if cand.idx() == cur_target {
+                    dungeon::pick_next_target(
+                        &self.dungeon, cand, self.hero_state.rooms_visited[h],
+                        tick, h as u32, self.seed,
+                    )
+                } else {
+                    cur_target
+                }
+            } else if h == H_ROGUE {
+                // Scout one room ahead of the party.
+                warrior_target_after
             } else {
-                cur_target
+                // Cleric / Ranger / Mage — cluster with the warrior.
+                warrior_current.map_or(cur_target, |c| c.idx())
             };
             if new_target != cur_target {
                 targets[hero_start + h] = new_target;
