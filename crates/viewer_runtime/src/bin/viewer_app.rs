@@ -30,6 +30,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use viewer_runtime::{ViewerApp, VoxelBridge, BRIDGE_DIM_X, BRIDGE_DIM_Z};
+use viewer_runtime::mesh_renderer::{InstanceData, MeshCpu, MeshRendererGpu};
 use voxel_engine::camera::FreeCamera;
 use voxel_engine::render::VoxelRenderer;
 use voxel_engine::vulkan::instance::VulkanContext;
@@ -101,6 +102,10 @@ struct Gfx {
     swapchain: SwapchainContext,
     renderer: VoxelRenderer,
     bridge: VoxelBridge,
+    /// Mesh pass: draws agent character models over the voxel output
+    /// via `present_blit_with_overlay`. `None` when mesh load failed
+    /// at startup (renderer still works, just no meshes painted).
+    mesh: Option<MeshRendererGpu>,
 }
 
 impl ApplicationHandler for WindowedViewer {
@@ -130,9 +135,43 @@ impl ApplicationHandler for WindowedViewer {
             .refresh(&ctx, &self.app)
             .expect("VoxelBridge::refresh (initial) failed");
 
+        // Construct the mesh-pass overlay. Loads one character mesh
+        // for now (all agents render as the same model with per-instance
+        // tint). Failure logs but doesn't abort — voxel-only viewer
+        // still works.
+        let mesh_path = "assets/models/kenney_mini-characters/Models/GLB format/character-male-a.glb";
+        let mesh = match MeshCpu::load_glb(mesh_path) {
+            Ok(m) => {
+                match MeshRendererGpu::new(
+                    &ctx,
+                    swapchain.image_views(),
+                    swapchain.extent(),
+                    swapchain.surface_format(),
+                    &m,
+                    /*max_instances=*/ 1024,
+                ) {
+                    Ok(g) => {
+                        eprintln!(
+                            "[viewer_app] mesh pass ready: {} verts, {} tris, max {} instances",
+                            m.vertex_count(), m.triangle_count(), 1024,
+                        );
+                        Some(g)
+                    }
+                    Err(e) => {
+                        eprintln!("[viewer_app] MeshRendererGpu::new failed: {e:#}");
+                        None
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("[viewer_app] mesh load failed (no overlay this run): {e:#}");
+                None
+            }
+        };
+
         window.request_redraw();
 
-        self.gfx = Some(Gfx { window, ctx, swapchain, renderer, bridge });
+        self.gfx = Some(Gfx { window, ctx, swapchain, renderer, bridge, mesh });
     }
 
     /// Drive continuous animation. winit calls about_to_wait whenever
@@ -169,6 +208,7 @@ impl ApplicationHandler for WindowedViewer {
                 }
                 if let Some(mut gfx) = self.gfx.take() {
                     let _ = unsafe { gfx.ctx.device().device_wait_idle() };
+                    if let Some(mut mesh) = gfx.mesh.take() { mesh.destroy(&gfx.ctx); }
                     gfx.bridge.destroy(&gfx.ctx);
                     gfx.swapchain.destroy(&gfx.ctx);
                     gfx.renderer.destroy(&gfx.ctx);
@@ -260,13 +300,46 @@ impl ApplicationHandler for WindowedViewer {
                         eprintln!("[viewer_app] render_frame_gpu failed: {e}");
                         return;
                     }
-                    if let Err(e) = gfx.swapchain.present_blit(
-                        &gfx.ctx,
+                    // Build per-agent instance data. Each alive agent gets
+                    // one mesh instance translated to its sim position,
+                    // scaled small (sim coords are in cells; the Kenney
+                    // model spans roughly [-0.5..0.5] in model space).
+                    // Tint mirrors the voxel palette so the role color
+                    // reads consistently between the splat layer and
+                    // the mesh layer.
+                    let mut instances: Vec<InstanceData> = Vec::new();
+                    if gfx.mesh.is_some() {
+                        for agent in self.app.agents() {
+                            if !agent.alive { continue; }
+                            let tint = tint_for_agent(agent.creature_type, agent.role);
+                            instances.push(InstanceData::from_position(
+                                agent.pos,
+                                /*scale=*/ 1.5,
+                                tint,
+                            ));
+                        }
+                    }
+                    let view_proj = view_proj_for_camera(&self.camera);
+
+                    let mesh_renderer_opt = gfx.mesh.as_mut();
+                    let ctx_ref = &gfx.ctx;
+                    let present_result = gfx.swapchain.present_blit_with_overlay(
+                        ctx_ref,
                         gfx.renderer.light_output_image(),
                         WINDOW_W,
                         WINDOW_H,
-                    ) {
-                        eprintln!("[viewer_app] present_blit failed: {e}");
+                        ash::vk::Semaphore::null(),
+                        |cmd, image_index| {
+                            if let Some(mesh) = mesh_renderer_opt {
+                                mesh.record_overlay(
+                                    ctx_ref, cmd, image_index, view_proj, &instances,
+                                )?;
+                            }
+                            Ok(())
+                        },
+                    );
+                    if let Err(e) = present_result {
+                        eprintln!("[viewer_app] present_blit_with_overlay failed: {e}");
                         return;
                     }
                 }
@@ -348,4 +421,56 @@ fn main() {
     event_loop
         .run_app(&mut viewer)
         .expect("event_loop.run_app failed");
+}
+
+
+// ---------------------------------------------------------------------
+// Mesh-pass helpers.
+// ---------------------------------------------------------------------
+
+/// Build the view-projection matrix the mesh pass uses for its
+/// push constant. voxel_engine renders with its own camera math; the
+/// mesh pass needs an equivalent VP so meshes line up with voxels.
+///
+/// FreeCamera exposes view (look_at) directly; we wrap with a
+/// perspective projection at the same FOV the renderer uses
+/// (~60° vertical) plus Vulkan-y Y-flip in clip space.
+fn view_proj_for_camera(cam: &FreeCamera) -> glam::Mat4 {
+    // Reuse FreeCamera's own view + projection matrices so the mesh
+    // pass lines up exactly with voxel_engine's rendering. These are
+    // returned as 16-element f32 arrays in column-major order, which is
+    // also how Mat4::from_cols_array reads them.
+    let view = glam::Mat4::from_cols_array(&cam.view_matrix_array());
+    let aspect = WINDOW_W as f32 / WINDOW_H as f32;
+    let proj = glam::Mat4::from_cols_array(&cam.projection_matrix_array(aspect));
+    proj * view
+}
+
+/// Per-agent RGB tint (0..1) for the mesh pass. Mirrors the voxel
+/// palette in `viewer_runtime::lib` so the mesh layer reads as the
+/// same agent class as the splat-layer fallback. Heroes by role,
+/// enemies by creature type.
+fn tint_for_agent(creature_type: u32, role: u32) -> [f32; 3] {
+    const CT_HERO: u32 = 3;
+    const CT_ARCHER: u32 = 0;
+    const CT_BRUTE: u32 = 1;
+    const CT_GOBLIN: u32 = 2;
+    if creature_type == CT_HERO {
+        match role {
+            1 => [140.0 / 255.0, 95.0 / 255.0, 50.0 / 255.0],   // Warrior — brown
+            2 => [240.0 / 255.0, 240.0 / 255.0, 240.0 / 255.0], // Cleric  — white
+            3 => [60.0 / 255.0, 170.0 / 255.0, 75.0 / 255.0],   // Ranger  — green
+            4 => [70.0 / 255.0, 130.0 / 255.0, 230.0 / 255.0],  // Mage    — blue
+            5 => [170.0 / 255.0, 80.0 / 255.0, 220.0 / 255.0],  // Rogue   — purple
+            _ => [0.5, 0.5, 0.5],
+        }
+    } else if creature_type == CT_ARCHER {
+        [230.0 / 255.0, 130.0 / 255.0, 40.0 / 255.0]
+    } else if creature_type == CT_BRUTE {
+        [150.0 / 255.0, 35.0 / 255.0, 35.0 / 255.0]
+    } else if creature_type == CT_GOBLIN {
+        [95.0 / 255.0, 140.0 / 255.0, 70.0 / 255.0]
+    } else {
+        [0.3, 0.3, 0.3]
+    }
 }
