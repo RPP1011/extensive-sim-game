@@ -176,6 +176,20 @@ pub struct ViewerApp {
     /// `None` = sim still running. Set in `step()` at termination so the
     /// bridge can tint the whole floor green or red.
     pub outcome: Option<bool>,
+    /// Tick at which each hero died (None while alive). Indexed by
+    /// hero ordinal (0=Warrior, 1=Cleric, 2=Ranger, 3=Mage, 4=Rogue) —
+    /// matches `seed_topology`'s hero placement order.
+    hero_death_tick: [Option<u64>; dungeon::N_HEROES as usize],
+    /// Tick at which the boss died (None until then or if no boss).
+    boss_death_tick: Option<u64>,
+    /// Highest `alert` value seen on any enemy across the run.
+    max_alert_seen: u32,
+    /// Total enemy kills observed (alive→dead transitions among non-heroes).
+    total_kills: u32,
+    /// Whether `print_run_summary` already printed the verdict for the
+    /// current run. Reset to false at startup; set to true after print
+    /// so we don't spam the log per-frame after termination.
+    summary_printed: bool,
 }
 
 impl ViewerApp {
@@ -243,6 +257,11 @@ impl ViewerApp {
             prev_hp: vec![0.0; agent_count as usize],
             flash_ticks: vec![0u8; agent_count as usize],
             outcome: None,
+            hero_death_tick: [None; dungeon::N_HEROES as usize],
+            boss_death_tick: None,
+            max_alert_seen: 0,
+            total_kills: 0,
+            summary_printed: false,
         };
         viewer.refresh_snapshot();
         Some(viewer)
@@ -289,12 +308,10 @@ impl ViewerApp {
             // Victory = at least one hero alive at termination. (We get
             // here when one side hits 0, so the other side is the winner.)
             self.outcome = Some(heroes_alive > 0);
-            eprintln!(
-                "[viewer_runtime] sim terminated at tick={} — {} (heroes={}/{}, enemies={})",
-                self.state.tick,
-                if heroes_alive > 0 { "DUNGEON CLEARED" } else { "TPK" },
-                heroes_alive, dungeon::N_HEROES, enemies_alive,
-            );
+        }
+        if self.terminated_at_tick.is_some() && !self.summary_printed {
+            self.print_run_summary(heroes_alive, enemies_alive);
+            self.summary_printed = true;
         }
     }
 
@@ -456,6 +473,43 @@ impl ViewerApp {
         }
     }
 
+    /// Pretty-print a per-run scorecard: tick budget, verdict, per-hero
+    /// fates, kill count + boss-kill tick, max alert observed. Called once
+    /// at termination by `step()`.
+    fn print_run_summary(&self, heroes_alive: u32, enemies_alive: u32) {
+        let role_names = ["Warrior", "Cleric", "Ranger", "Mage", "Rogue"];
+        eprintln!("==== run summary (seed=0x{:X}) ====", self.seed);
+        eprintln!("  ticks   : {}", self.state.tick);
+        eprintln!(
+            "  verdict : {}",
+            if heroes_alive > 0 { "DUNGEON CLEARED" } else { "TPK" },
+        );
+        eprintln!(
+            "  heroes  : {}/{} alive",
+            heroes_alive, dungeon::N_HEROES,
+        );
+        for (h, role) in role_names.iter().enumerate() {
+            match self.hero_death_tick[h] {
+                Some(t) => eprintln!("    {role:>7}: died @ tick {t}"),
+                None => eprintln!("    {role:>7}: alive"),
+            }
+        }
+        eprintln!(
+            "  kills   : {} / {} enemies",
+            self.total_kills,
+            self.total_kills + enemies_alive,
+        );
+        match self.boss_death_tick {
+            Some(t) => eprintln!("  boss    : killed @ tick {t}"),
+            None => match self.boss_slot {
+                Some(_) => eprintln!("  boss    : SURVIVED"),
+                None => eprintln!("  boss    : (no boss this roll)"),
+            },
+        }
+        eprintln!("  max alert (any enemy): {}", self.max_alert_seen);
+        eprintln!("==========================================");
+    }
+
     /// Read agent SoA back from sim GPU into the viewer's host cache.
     fn refresh_snapshot(&mut self) {
         let n = self.agent_count;
@@ -480,6 +534,8 @@ impl ViewerApp {
         // a visible ~400ms white pop on each hit.
         const FLASH_DELTA: f32 = 3.0;
         const FLASH_FRAMES: u8 = 4;
+        let cur_tick = self.state.tick;
+        let hero_start = (n - dungeon::N_HEROES) as usize;
         for slot in 0..n as usize {
             // Tick down any in-progress flash first so this frame consumes
             // one frame of the existing window before we test for a new hit.
@@ -492,9 +548,35 @@ impl ViewerApp {
                 self.flash_ticks[slot] = FLASH_FRAMES;
             }
             self.prev_hp[slot] = cur;
+
+            // Death-event detection: track per-hero death tick + count
+            // enemy kills. Compare prev-snapshot alive vs new alive.
+            let was_alive = self.agents[slot].alive;
+            let now_alive = alive[slot] != 0;
+            if was_alive && !now_alive {
+                if types[slot] == dungeon::CT_HERO {
+                    let h_idx = slot - hero_start;
+                    if h_idx < dungeon::N_HEROES as usize
+                        && self.hero_death_tick[h_idx].is_none()
+                    {
+                        self.hero_death_tick[h_idx] = Some(cur_tick);
+                    }
+                } else {
+                    self.total_kills += 1;
+                    if Some(slot as u32) == self.boss_slot
+                        && self.boss_death_tick.is_none()
+                    {
+                        self.boss_death_tick = Some(cur_tick);
+                    }
+                }
+            }
+            if alert[slot] > self.max_alert_seen {
+                self.max_alert_seen = alert[slot];
+            }
+
             self.agents[slot] = AgentSnapshot {
                 pos: Vec3::new(positions[slot][0], positions[slot][1], positions[slot][2]),
-                alive: alive[slot] != 0,
+                alive: now_alive,
                 creature_type: types[slot],
                 role: role[slot],
                 hp: hps[slot],
