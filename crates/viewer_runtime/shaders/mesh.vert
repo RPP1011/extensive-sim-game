@@ -1,13 +1,10 @@
 #version 450
 
 layout(location = 0) in vec3 in_position;
-// Per-vertex color removed — voxel_engine's GraphicsPipelineBuilder
-// hardcodes vertex input as position-only (stride=12). Color comes
-// from per-instance `tint` instead, which matches the existing
-// agent-tinting scheme.
+layout(location = 1) in vec3 in_normal;
 
-// Per-instance data. Layout MUST match
-// `viewer_runtime::mesh_renderer::InstanceData` (mat4 + vec4 + 4×u32).
+// Per-instance shading + transform. Layout MUST match
+// `viewer_runtime::mesh_renderer::InstanceData`.
 struct InstanceData {
     mat4 model;
     vec4 tint;
@@ -25,16 +22,19 @@ layout(push_constant) uniform PushConstants {
 } pc;
 
 layout(location = 0) out vec4 v_color;
-// Local Y of the vertex — used by the fragment shader to fake vertical
-// lighting (top brighter than bottom). Cheap stand-in for proper
-// normal-based diffuse since voxel_engine's pipeline builder doesn't
-// support multi-attribute vertex input today.
-layout(location = 1) out float v_local_y;
+// World-space normal — fragment shader uses this for diffuse lighting.
+// Y-axis-only rotation in InstanceData::model means the normal can be
+// rotated identically (no inverse-transpose needed for uniform scale +
+// rotation; no shear is introduced).
+layout(location = 1) out vec3 v_world_normal;
 
 void main() {
     InstanceData inst = instance_buf.instances[gl_InstanceIndex];
     vec4 world_pos = inst.model * vec4(in_position, 1.0);
     gl_Position = pc.view_proj * world_pos;
     v_color = inst.tint;
-    v_local_y = in_position.y;
+    // model is rotation*scale*translation; normal needs the rotation
+    // part. mat3(model) handles this when scale is uniform — true for
+    // all our agents.
+    v_world_normal = normalize(mat3(inst.model) * in_normal);
 }

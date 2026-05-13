@@ -23,6 +23,11 @@ use std::path::Path;
 /// of one mesh"; we add skinning fields when actual animations land.
 pub struct MeshCpu {
     pub positions: Vec<Vec3>,
+    /// Per-vertex normals from the glTF NORMAL_0 attribute. Defaults to
+    /// (0, 1, 0) (up) when missing so lighting falls back to a flat-top
+    /// look instead of dividing by zero. Used by the fragment shader
+    /// for diffuse lighting.
+    pub normals: Vec<Vec3>,
     /// Optional per-vertex color (sRGB linear). Defaults to white when
     /// the glTF doesn't ship colors — the renderer's per-instance tint
     /// is the primary recoloring channel anyway.
@@ -57,6 +62,10 @@ impl MeshCpu {
             .ok_or_else(|| anyhow!("{path_str}: primitive has no POSITION attribute"))?
             .map(|[x, y, z]| Vec3::new(x, y, z))
             .collect();
+        let normals: Vec<Vec3> = match reader.read_normals() {
+            Some(it) => it.map(|[x, y, z]| Vec3::new(x, y, z)).collect(),
+            None => vec![Vec3::Y; positions.len()],
+        };
         // glTF accessor flavors: u8 / u16 / u32 / no-index. `read_indices()`
         // returns an enum; `into_u32()` normalizes.
         let indices: Vec<u32> = reader
@@ -70,7 +79,7 @@ impl MeshCpu {
             None => vec![Vec4::ONE; positions.len()],
         };
 
-        Ok(Self { positions, colors, indices, source: path_str })
+        Ok(Self { positions, normals, colors, indices, source: path_str })
     }
 
     pub fn vertex_count(&self) -> usize { self.positions.len() }
@@ -159,7 +168,7 @@ impl InstanceData {
 // for vertex/index bindings.
 
 use ash::vk;
-use voxel_engine::vulkan::graphics_pipeline::{GraphicsPipeline, GraphicsPipelineBuilder};
+
 use voxel_engine::vulkan::instance::VulkanContext;
 
 const VERT_SPV: &[u8] = include_bytes!("../shaders/mesh.vert.spv");
@@ -179,11 +188,36 @@ struct MeshSlot {
     source: String,
 }
 
+/// Local pipeline holder — voxel_engine's `GraphicsPipeline` keeps the
+/// shader modules private so we can't construct one with our own
+/// custom vertex input (2 attributes: position + normal). Same fields
+/// + manual destroy.
+struct MeshPipeline {
+    pipeline: vk::Pipeline,
+    layout: vk::PipelineLayout,
+    descriptor_set_layout: vk::DescriptorSetLayout,
+    vert_module: vk::ShaderModule,
+    frag_module: vk::ShaderModule,
+}
+
+impl MeshPipeline {
+    fn destroy(&self, ctx: &VulkanContext) {
+        let device = ctx.device();
+        unsafe {
+            device.destroy_pipeline(self.pipeline, None);
+            device.destroy_pipeline_layout(self.layout, None);
+            device.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+            device.destroy_shader_module(self.vert_module, None);
+            device.destroy_shader_module(self.frag_module, None);
+        }
+    }
+}
+
 pub struct MeshRendererGpu {
     extent: vk::Extent2D,
     render_pass: vk::RenderPass,
     framebuffers: Vec<vk::Framebuffer>,
-    pipeline: GraphicsPipeline,
+    pipeline: MeshPipeline,
     descriptor_pool: vk::DescriptorPool,
     descriptor_set: vk::DescriptorSet,
     meshes: Vec<MeshSlot>,
@@ -231,25 +265,7 @@ impl MeshRendererGpu {
             device, render_pass, swapchain_views, depth_view, swapchain_extent,
         )?;
 
-        let pipeline = GraphicsPipelineBuilder::new(ctx)
-            .vertex_shader(VERT_SPV)
-            .fragment_shader(FRAG_SPV)
-            .render_pass(render_pass)
-            .push_constant_size(
-                std::mem::size_of::<PushConstants>() as u32,
-                vk::ShaderStageFlags::VERTEX,
-            )
-            .descriptor(
-                0,
-                vk::DescriptorType::STORAGE_BUFFER,
-                vk::ShaderStageFlags::VERTEX,
-            )
-            // Depth on for mesh-to-mesh ordering. Builder's defaults
-            // (depth_test=true, depth_write=true, compare=LESS) match
-            // our needs.
-            .depth_write(true)
-            .cull_mode(vk::CullModeFlags::NONE)
-            .build()?;
+        let pipeline = build_mesh_pipeline(ctx, render_pass)?;
 
         let instance_bytes = (max_instances as u64) * std::mem::size_of::<InstanceData>() as u64;
         let (instance_buf, instance_mem) = alloc_host_visible_buffer(
@@ -271,9 +287,7 @@ impl MeshRendererGpu {
             .pool_sizes(&pool_sizes);
         let descriptor_pool = unsafe { device.create_descriptor_pool(&pool_ci, None) }
             .context("create_descriptor_pool")?;
-        let set_layout = pipeline
-            .descriptor_set_layout
-            .expect("mesh pipeline has descriptor set");
+        let set_layout = pipeline.descriptor_set_layout;
         let layouts = [set_layout];
         let alloc_info = vk::DescriptorSetAllocateInfo::default()
             .descriptor_pool(descriptor_pool)
@@ -316,23 +330,32 @@ impl MeshRendererGpu {
     /// types each register one slot; per-frame draws specify slot
     /// indices in their [`MeshDraw`] entries.
     pub fn add_mesh(&mut self, ctx: &VulkanContext, mesh: &MeshCpu) -> Result<usize> {
-        let positions_bytes: Vec<u8> = mesh
-            .positions
-            .iter()
-            .flat_map(|p| {
-                let mut out = [0u8; 12];
-                out[..4].copy_from_slice(&p.x.to_le_bytes());
-                out[4..8].copy_from_slice(&p.y.to_le_bytes());
-                out[8..12].copy_from_slice(&p.z.to_le_bytes());
-                out
-            })
-            .collect();
+        // Interleaved position + normal: 24 bytes per vertex. Matches
+        // the pipeline's vertex input layout (binding 0 stride 24,
+        // attribute 0 = pos at offset 0, attribute 1 = normal at
+        // offset 12). Both vec3 of f32.
+        let n = mesh.positions.len();
+        let mut interleaved: Vec<u8> = Vec::with_capacity(n * 24);
+        for i in 0..n {
+            let p = mesh.positions[i];
+            let nrm = if i < mesh.normals.len() {
+                mesh.normals[i]
+            } else {
+                glam::Vec3::Y
+            };
+            interleaved.extend_from_slice(&p.x.to_le_bytes());
+            interleaved.extend_from_slice(&p.y.to_le_bytes());
+            interleaved.extend_from_slice(&p.z.to_le_bytes());
+            interleaved.extend_from_slice(&nrm.x.to_le_bytes());
+            interleaved.extend_from_slice(&nrm.y.to_le_bytes());
+            interleaved.extend_from_slice(&nrm.z.to_le_bytes());
+        }
         let (vertex_buf, vertex_mem) = alloc_host_visible_buffer(
             ctx,
-            positions_bytes.len() as u64,
+            interleaved.len() as u64,
             vk::BufferUsageFlags::VERTEX_BUFFER,
         )?;
-        write_buffer(ctx, vertex_mem, 0, &positions_bytes)?;
+        write_buffer(ctx, vertex_mem, 0, &interleaved)?;
 
         let index_bytes: Vec<u8> = mesh
             .indices
@@ -560,6 +583,139 @@ fn create_framebuffers(
             unsafe { device.create_framebuffer(&fb_ci, None) }.context("create_framebuffer")
         })
         .collect()
+}
+
+fn build_mesh_pipeline(
+    ctx: &VulkanContext,
+    render_pass: vk::RenderPass,
+) -> Result<MeshPipeline> {
+    let device = ctx.device();
+
+    // Shader modules.
+    let make_module = |spv: &[u8]| -> Result<vk::ShaderModule> {
+        let words: Vec<u32> = spv
+            .chunks_exact(4)
+            .map(|c| u32::from_ne_bytes([c[0], c[1], c[2], c[3]]))
+            .collect();
+        let ci = vk::ShaderModuleCreateInfo::default().code(&words);
+        unsafe { device.create_shader_module(&ci, None) }
+            .context("create_shader_module")
+    };
+    let vert_module = make_module(VERT_SPV)?;
+    let frag_module = make_module(FRAG_SPV)?;
+
+    let stages = [
+        vk::PipelineShaderStageCreateInfo::default()
+            .stage(vk::ShaderStageFlags::VERTEX)
+            .module(vert_module)
+            .name(c"main"),
+        vk::PipelineShaderStageCreateInfo::default()
+            .stage(vk::ShaderStageFlags::FRAGMENT)
+            .module(frag_module)
+            .name(c"main"),
+    ];
+
+    // 1 binding, 2 attributes (position + normal interleaved at stride 24).
+    let bindings = [vk::VertexInputBindingDescription {
+        binding: 0,
+        stride: 24,
+        input_rate: vk::VertexInputRate::VERTEX,
+    }];
+    let attributes = [
+        vk::VertexInputAttributeDescription {
+            location: 0,
+            binding: 0,
+            format: vk::Format::R32G32B32_SFLOAT,
+            offset: 0,
+        },
+        vk::VertexInputAttributeDescription {
+            location: 1,
+            binding: 0,
+            format: vk::Format::R32G32B32_SFLOAT,
+            offset: 12,
+        },
+    ];
+    let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
+        .vertex_binding_descriptions(&bindings)
+        .vertex_attribute_descriptions(&attributes);
+
+    let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default()
+        .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
+    let viewport_state = vk::PipelineViewportStateCreateInfo::default()
+        .viewport_count(1)
+        .scissor_count(1);
+    let rasterizer = vk::PipelineRasterizationStateCreateInfo::default()
+        .polygon_mode(vk::PolygonMode::FILL)
+        .cull_mode(vk::CullModeFlags::NONE)
+        .front_face(vk::FrontFace::CLOCKWISE)
+        .line_width(1.0);
+    let multisampling = vk::PipelineMultisampleStateCreateInfo::default()
+        .rasterization_samples(vk::SampleCountFlags::TYPE_1);
+    let depth_stencil = vk::PipelineDepthStencilStateCreateInfo::default()
+        .depth_test_enable(true)
+        .depth_write_enable(true)
+        .depth_compare_op(vk::CompareOp::LESS);
+    let blend_atts = [vk::PipelineColorBlendAttachmentState::default()
+        .blend_enable(false)
+        .color_write_mask(vk::ColorComponentFlags::RGBA)];
+    let color_blending =
+        vk::PipelineColorBlendStateCreateInfo::default().attachments(&blend_atts);
+    let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
+    let dynamic_state =
+        vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
+
+    let dsl_bindings = [vk::DescriptorSetLayoutBinding::default()
+        .binding(0)
+        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+        .descriptor_count(1)
+        .stage_flags(vk::ShaderStageFlags::VERTEX)];
+    let dsl_ci = vk::DescriptorSetLayoutCreateInfo::default().bindings(&dsl_bindings);
+    let descriptor_set_layout =
+        unsafe { device.create_descriptor_set_layout(&dsl_ci, None) }
+            .context("create_descriptor_set_layout")?;
+
+    let push_range = [vk::PushConstantRange {
+        stage_flags: vk::ShaderStageFlags::VERTEX,
+        offset: 0,
+        size: std::mem::size_of::<PushConstants>() as u32,
+    }];
+    let set_layouts = [descriptor_set_layout];
+    let layout_ci = vk::PipelineLayoutCreateInfo::default()
+        .set_layouts(&set_layouts)
+        .push_constant_ranges(&push_range);
+    let layout = unsafe { device.create_pipeline_layout(&layout_ci, None) }
+        .context("create_pipeline_layout")?;
+
+    let pipeline_ci = vk::GraphicsPipelineCreateInfo::default()
+        .stages(&stages)
+        .vertex_input_state(&vertex_input)
+        .input_assembly_state(&input_assembly)
+        .viewport_state(&viewport_state)
+        .rasterization_state(&rasterizer)
+        .multisample_state(&multisampling)
+        .depth_stencil_state(&depth_stencil)
+        .color_blend_state(&color_blending)
+        .dynamic_state(&dynamic_state)
+        .layout(layout)
+        .render_pass(render_pass)
+        .subpass(0);
+    let pipeline = unsafe {
+        device.create_graphics_pipelines(
+            ctx.pipeline_cache(),
+            &[pipeline_ci],
+            None,
+        )
+    }
+    .map_err(|(_, e)| e)
+    .context("create_graphics_pipelines (mesh)")?[0];
+
+    Ok(MeshPipeline {
+        pipeline,
+        layout,
+        descriptor_set_layout,
+        vert_module,
+        frag_module,
+    })
 }
 
 fn alloc_depth_image(

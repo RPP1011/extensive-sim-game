@@ -1,19 +1,18 @@
 #version 450
 
 layout(location = 0) in vec4 v_color;
-layout(location = 1) in float v_local_y;
+layout(location = 1) in vec3 v_world_normal;
 layout(location = 0) out vec4 out_color;
 
 void main() {
-    // Fake vertical lighting — Kenney's chars are ~1.7 units tall in
-    // model space with feet near y=0, head near y=1.7. Map that to a
-    // brightness gradient (top brighter) so silhouettes read as 3D
-    // shapes instead of flat colored cutouts. Cheap stand-in for
-    // proper diffuse lighting until voxel_engine's pipeline builder
-    // grows multi-attribute vertex input (then we can pass per-vertex
-    // normals + light direction).
-    float ambient = 0.45;
-    float top = clamp(v_local_y * 0.4, 0.0, 0.55);
-    float bright = ambient + top;
+    // Sun-like directional light from above-and-side. Lambert diffuse
+    // with non-zero ambient so back-facing surfaces don't go pitch
+    // black at the camera angle. Light direction tuned for the
+    // 3/4 isometric camera (eye is behind +Z + above +Y).
+    vec3 light_dir = normalize(vec3(0.3, -1.0, -0.4));
+    vec3 normal = normalize(v_world_normal);
+    float diffuse = max(0.0, dot(normal, -light_dir));
+    float ambient = 0.35;
+    float bright = ambient + 0.65 * diffuse;
     out_color = vec4(v_color.rgb * bright, v_color.a);
 }
