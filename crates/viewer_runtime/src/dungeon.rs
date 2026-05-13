@@ -12,10 +12,11 @@
 //!
 //! # Constants — must stay in sync with the pin
 //!
-//! `GRID_X/Y/Z`, `SLOTS_PER_ROW`, `SLOT_WIDTH`, `ROOM_INTERIOR_Z`,
-//! `STONE`, `TARGET_ROOMS`, `CA_INIT_WALL_PCT`, `CA_ITERATIONS` —
-//! same values as `dungeon_horde_pin.rs`. If the pin changes any
-//! of these, the viewer's render will diverge from the test scene.
+//! Hand-laid 25-room layout via `ROOM_LAYOUT` + per-template wall
+//! patterns. The pin (`crates/sims/tests/dungeon_horde_pin.rs`) keeps
+//! its own CA-based roomgen — the viewer is decoupled by design so
+//! we can iterate on visual layout without churning the test
+//! fixture's pinned scene.
 
 use glam::IVec3;
 use sims::dungeon_horde::GeneratedRuntime;
@@ -29,10 +30,6 @@ pub const SLOTS_PER_ROW: u32 = 9;
 pub const SLOT_WIDTH: u32 = 26;
 pub const ROOM_INTERIOR_Z: u32 = 6;
 pub const STONE: u8 = 1;
-
-pub const TARGET_ROOMS: usize = 24;
-pub const CA_INIT_WALL_PCT: u32 = 48;
-pub const CA_ITERATIONS: usize = 5;
 
 pub const CT_ARCHER: u32 = 0;
 pub const CT_BRUTE: u32 = 1;
@@ -119,70 +116,110 @@ impl Dungeon {
     }
 }
 
-pub fn roll_dungeon(initial_seed: u64) -> Dungeon {
-    let mut seed = initial_seed;
-    for _attempt in 0..20 {
-        if let Some(d) = try_roll_dungeon(seed, initial_seed) {
-            return d;
-        }
-        seed = seed.wrapping_add(1);
-    }
-    panic!("dungeon roomgen failed to converge in 20 re-rolls");
+/// Per-slot interior layout — picks which walls/columns/partitions live
+/// inside a room. Selected per-room in [`ROOM_LAYOUT`].
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum RoomTemplate {
+    /// Hero spawn — fully open. Behaviorally identical to `Open`; tagged
+    /// separately so `roll_dungeon` knows which slot is the spawn.
+    Spawn,
+    /// Bare rectangle. Outer ring is wall; interior is fully traversable.
+    Open,
+    /// Four 2×2 stone columns at the interior quarters.
+    Pillared,
+    /// Single horizontal partition wall across the middle with a 4-cell
+    /// gap. Splits sightlines but leaves a clear chokepoint.
+    Partition,
+    /// Central 4×4 chest pillar plus four corner-accent stones.
+    Treasure,
+    /// Boss arena — six ceremonial 1×1 columns down the long axis.
+    /// Tagged so `roll_dungeon` picks this slot as the boss room.
+    Boss,
 }
 
-fn try_roll_dungeon(seed: u64, original_seed: u64) -> Option<Dungeon> {
-    let seed32 = seed as u32;
-    let mut present = std::collections::BTreeSet::<RoomSlot>::new();
-    let start_rx = (engine::rng::per_agent_u32_pcg(seed32, 0, 0, 1) % SLOTS_PER_ROW)
-        .clamp(1, SLOTS_PER_ROW - 2);
-    let start_ry = (engine::rng::per_agent_u32_pcg(seed32, 1, 0, 1) % SLOTS_PER_ROW)
-        .clamp(1, SLOTS_PER_ROW - 2);
-    let start = RoomSlot::new(start_rx, start_ry);
-    present.insert(start);
+/// Hand-laid 25-room dungeon. Each entry is `(rx, ry, template)`; rooms
+/// are placed in slot-adjacent positions so [`seed_voxel_dungeon`]'s
+/// existing doorway carving creates 2-cell-wide passages between them.
+///
+/// Layout (S=Spawn, V=Treasure, P=Pillared, G=Partition, B=Boss):
+/// ```text
+///       0  1  2  3  4  5  6  7  8
+///   0   .  .  .  .  .  .  .  .  .
+///   1   .  S  H  P  V  .  .  .  .
+///   2   .  H  .  .  H  .  .  .  .
+///   3   .  H  G  H  H  H  .  .  .
+///   4   .  .  .  .  P  .  .  .  .
+///   5   .  V  H  H  H  H  .  .  .
+///   6   .  H  .  .  .  H  .  .  .
+///   7   .  H  H  P  H  H  .  .  .
+///   8   .  .  .  .  .  B  .  .  .
+/// ```
+pub const ROOM_LAYOUT: &[(u32, u32, RoomTemplate)] = &[
+    (1, 1, RoomTemplate::Spawn),
+    (2, 1, RoomTemplate::Open),
+    (3, 1, RoomTemplate::Pillared),
+    (4, 1, RoomTemplate::Treasure),
 
-    let mut stack: Vec<RoomSlot> = vec![start];
-    let mut step = 0u32;
-    while present.len() < TARGET_ROOMS && !stack.is_empty() {
-        let cur = *stack.last().unwrap();
-        let mut cands: Vec<RoomSlot> = Vec::with_capacity(4);
-        for (dx, dy) in [(0i32, 1i32), (0, -1), (1, 0), (-1, 0)] {
-            let nx = cur.rx as i32 + dx;
-            let ny = cur.ry as i32 + dy;
-            if nx >= 0 && ny >= 0 && (nx as u32) < SLOTS_PER_ROW && (ny as u32) < SLOTS_PER_ROW {
-                let n = RoomSlot::new(nx as u32, ny as u32);
-                if !present.contains(&n) {
-                    cands.push(n);
-                }
-            }
-        }
-        if cands.is_empty() {
-            stack.pop();
-            continue;
-        }
-        let pick = engine::rng::per_agent_u32_pcg(seed32, cur.idx(), step, 2) as usize % cands.len();
-        let chosen = cands[pick];
-        present.insert(chosen);
-        stack.push(chosen);
-        step = step.wrapping_add(1);
-    }
+    (1, 2, RoomTemplate::Open),
+    (4, 2, RoomTemplate::Open),
 
-    let rooms: Vec<RoomSlot> = present.iter().copied().collect();
-    if rooms.len() < 12 {
-        return None;
-    }
+    (1, 3, RoomTemplate::Open),
+    (2, 3, RoomTemplate::Partition),
+    (3, 3, RoomTemplate::Open),
+    (4, 3, RoomTemplate::Open),
+    (5, 3, RoomTemplate::Open),
 
-    let mut floor_cells = std::collections::BTreeMap::<u32, Vec<(u32, u32)>>::new();
-    for &r in &rooms {
-        let cells = carve_room_interior(seed32, r);
-        if cells.is_empty() {
-            return None;
+    (4, 4, RoomTemplate::Pillared),
+
+    (1, 5, RoomTemplate::Treasure),
+    (2, 5, RoomTemplate::Open),
+    (3, 5, RoomTemplate::Open),
+    (4, 5, RoomTemplate::Open),
+    (5, 5, RoomTemplate::Open),
+
+    (1, 6, RoomTemplate::Open),
+    (5, 6, RoomTemplate::Open),
+
+    (1, 7, RoomTemplate::Open),
+    (2, 7, RoomTemplate::Open),
+    (3, 7, RoomTemplate::Pillared),
+    (4, 7, RoomTemplate::Open),
+    (5, 7, RoomTemplate::Open),
+
+    (5, 8, RoomTemplate::Boss),
+];
+
+/// Build the hand-laid dungeon. The `initial_seed` no longer drives
+/// the layout (it's fixed) — it's still threaded through to the
+/// [`Dungeon`] struct so downstream RNG (door positions, enemy
+/// composition) keeps its per-seed variation.
+pub fn roll_dungeon(initial_seed: u64) -> Dungeon {
+    let mut rooms: Vec<RoomSlot> = Vec::with_capacity(ROOM_LAYOUT.len());
+    let mut floor_cells: std::collections::BTreeMap<u32, Vec<(u32, u32)>> =
+        std::collections::BTreeMap::new();
+    let mut spawn_room: Option<RoomSlot> = None;
+    let mut boss_template_room: Option<RoomSlot> = None;
+
+    for &(rx, ry, template) in ROOM_LAYOUT {
+        let slot = RoomSlot::new(rx, ry);
+        debug_assert!(rx < SLOTS_PER_ROW && ry < SLOTS_PER_ROW, "room {slot:?} out of slot grid");
+        debug_assert!(
+            !rooms.contains(&slot),
+            "room {slot:?} listed twice in ROOM_LAYOUT",
+        );
+        rooms.push(slot);
+        floor_cells.insert(slot.idx(), template_floor_cells(slot, template));
+        if template == RoomTemplate::Spawn {
+            spawn_room = Some(slot);
         }
-        floor_cells.insert(r.idx(), cells);
+        if template == RoomTemplate::Boss {
+            boss_template_room = Some(slot);
+        }
     }
+    let spawn_room = spawn_room
+        .expect("ROOM_LAYOUT must include exactly one RoomTemplate::Spawn entry");
 
     let present_set: std::collections::BTreeSet<RoomSlot> = rooms.iter().copied().collect();
-    let spawn_room = *rooms.iter().min_by_key(|r| r.rx + r.ry).unwrap();
-
     let mut bfs_dist = std::collections::BTreeMap::<u32, u32>::new();
     let mut queue: std::collections::VecDeque<RoomSlot> = std::collections::VecDeque::new();
     queue.push_back(spawn_room);
@@ -202,62 +239,97 @@ fn try_roll_dungeon(seed: u64, original_seed: u64) -> Option<Dungeon> {
             queue.push_back(n);
         }
     }
-    if bfs_dist.len() != rooms.len() {
-        return None;
-    }
+    assert_eq!(
+        bfs_dist.len(),
+        rooms.len(),
+        "ROOM_LAYOUT has disconnected rooms — every room must be slot-adjacent to at least one other"
+    );
 
-    let boss_room = *rooms
-        .iter()
-        .max_by_key(|r| bfs_dist.get(&r.idx()).copied().unwrap_or(0))
-        .unwrap();
+    // Boss room: the explicitly-tagged Boss slot, or fall back to the
+    // BFS-furthest if none was tagged.
+    let boss_room = boss_template_room.unwrap_or_else(|| {
+        *rooms
+            .iter()
+            .max_by_key(|r| bfs_dist.get(&r.idx()).copied().unwrap_or(0))
+            .unwrap()
+    });
 
-    Some(Dungeon { rooms, floor_cells, bfs_dist, spawn_room, boss_room, seed: original_seed })
+    Dungeon { rooms, floor_cells, bfs_dist, spawn_room, boss_room, seed: initial_seed }
 }
 
-fn carve_room_interior(seed: u32, room: RoomSlot) -> Vec<(u32, u32)> {
-    let x0 = room.rx * SLOT_WIDTH;
-    let y0 = room.ry * SLOT_WIDTH;
-    let mut grid: [[bool; SLOT_WIDTH as usize]; SLOT_WIDTH as usize] =
-        [[false; SLOT_WIDTH as usize]; SLOT_WIDTH as usize];
-    for ly in 1..(SLOT_WIDTH - 1) {
-        for lx in 1..(SLOT_WIDTH - 1) {
-            let r = engine::rng::per_agent_u32_pcg(seed, x0 + lx, y0 + ly, 1) % 100;
-            grid[ly as usize][lx as usize] = r < CA_INIT_WALL_PCT;
+/// Stamp a template's floor cells onto the slot. The outer ring is wall
+/// by default — [`seed_voxel_dungeon`] punches doorways at adjacent
+/// slot boundaries — so adjacent rooms are connected only via real
+/// 2-cell-wide doors instead of wide-open shared edges.
+fn template_floor_cells(slot: RoomSlot, template: RoomTemplate) -> Vec<(u32, u32)> {
+    let x0 = slot.rx * SLOT_WIDTH;
+    let y0 = slot.ry * SLOT_WIDTH;
+    let s = SLOT_WIDTH as usize;
+    let mut walls: Vec<Vec<bool>> = vec![vec![true; s]; s];
+    for ly in 1..(s - 1) {
+        for lx in 1..(s - 1) {
+            walls[ly][lx] = false;
         }
     }
-    for _ in 0..CA_ITERATIONS {
-        let mut next = grid;
-        for ly in 1..(SLOT_WIDTH - 1) {
-            for lx in 1..(SLOT_WIDTH - 1) {
-                let mut walls = 0u32;
-                for dy in -1i32..=1 {
-                    for dx in -1i32..=1 {
-                        if dx == 0 && dy == 0 { continue; }
-                        let nx = lx as i32 + dx;
-                        let ny = ly as i32 + dy;
-                        if nx < 0 || ny < 0 || nx >= SLOT_WIDTH as i32 || ny >= SLOT_WIDTH as i32 {
-                            walls += 1;
-                            continue;
-                        }
-                        if grid[ny as usize][nx as usize] { walls += 1; }
-                    }
-                }
-                let was_wall = grid[ly as usize][lx as usize];
-                next[ly as usize][lx as usize] = walls >= 5 || (was_wall && walls >= 4);
+    fn set_wall(walls: &mut [Vec<bool>], lx: u32, ly: u32) {
+        let s = walls.len();
+        if (lx as usize) < s && (ly as usize) < s {
+            walls[ly as usize][lx as usize] = true;
+        }
+    }
+    fn set_block(walls: &mut [Vec<bool>], lx: u32, ly: u32, w: u32, h: u32) {
+        for dy in 0..h {
+            for dx in 0..w {
+                set_wall(walls, lx + dx, ly + dy);
             }
         }
-        grid = next;
     }
-    for i in 0..SLOT_WIDTH {
-        grid[0][i as usize] = false;
-        grid[(SLOT_WIDTH - 1) as usize][i as usize] = false;
-        grid[i as usize][0] = false;
-        grid[i as usize][(SLOT_WIDTH - 1) as usize] = false;
+    match template {
+        RoomTemplate::Spawn | RoomTemplate::Open => {}
+        RoomTemplate::Pillared => {
+            set_block(&mut walls, 5, 5, 2, 2);
+            set_block(&mut walls, SLOT_WIDTH - 7, 5, 2, 2);
+            set_block(&mut walls, 5, SLOT_WIDTH - 7, 2, 2);
+            set_block(&mut walls, SLOT_WIDTH - 7, SLOT_WIDTH - 7, 2, 2);
+        }
+        RoomTemplate::Partition => {
+            let mid = SLOT_WIDTH / 2;
+            let gap_lo = SLOT_WIDTH / 2 - 2;
+            let gap_hi = SLOT_WIDTH / 2 + 2;
+            for lx in 2..(SLOT_WIDTH - 2) {
+                if lx >= gap_lo && lx < gap_hi { continue; }
+                set_wall(&mut walls, lx, mid);
+            }
+        }
+        RoomTemplate::Treasure => {
+            let c = SLOT_WIDTH / 2 - 2;
+            set_block(&mut walls, c, c, 4, 4);
+            for &(px, py) in &[
+                (3u32, 3u32),
+                (SLOT_WIDTH - 4, 3),
+                (3, SLOT_WIDTH - 4),
+                (SLOT_WIDTH - 4, SLOT_WIDTH - 4),
+            ] {
+                set_wall(&mut walls, px, py);
+            }
+        }
+        RoomTemplate::Boss => {
+            for &(px, py) in &[
+                (5u32, 7u32),
+                (SLOT_WIDTH / 2, 7),
+                (SLOT_WIDTH - 6, 7),
+                (5, SLOT_WIDTH - 8),
+                (SLOT_WIDTH / 2, SLOT_WIDTH - 8),
+                (SLOT_WIDTH - 6, SLOT_WIDTH - 8),
+            ] {
+                set_wall(&mut walls, px, py);
+            }
+        }
     }
-    let mut floor = Vec::with_capacity((SLOT_WIDTH * SLOT_WIDTH) as usize);
+    let mut floor = Vec::with_capacity(s * s);
     for ly in 0..SLOT_WIDTH {
         for lx in 0..SLOT_WIDTH {
-            if !grid[ly as usize][lx as usize] {
+            if !walls[ly as usize][lx as usize] {
                 floor.push((x0 + lx, y0 + ly));
             }
         }
