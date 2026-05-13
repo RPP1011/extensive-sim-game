@@ -130,8 +130,13 @@ impl InstanceData {
 // pass writes to `light_output_image`, swapchain blit copies it to the
 // swapchain image (already in COLOR_ATTACHMENT_OPTIMAL when our overlay
 // fires), our overlay records a single render pass that loads existing
-// contents and draws meshes on top, then transitions the image to
-// PRESENT_SRC_KHR for present.
+// contents and draws ALL agent meshes on top, then transitions the
+// image to PRESENT_SRC_KHR for present.
+//
+// Supports multiple meshes per render pass (one per creature type +
+// per hero role). Caller passes draws sorted by mesh slot; the instance
+// buffer is filled contiguously per slot, with one
+// `cmd_draw_indexed(first_instance=slot_offset)` per mesh.
 //
 // Allocates buffers directly via ash::vk (raw) because voxel_engine's
 // `VulkanAllocator` hardcodes STORAGE_BUFFER usage which can't be used
@@ -144,6 +149,20 @@ use voxel_engine::vulkan::instance::VulkanContext;
 const VERT_SPV: &[u8] = include_bytes!("../shaders/mesh.vert.spv");
 const FRAG_SPV: &[u8] = include_bytes!("../shaders/mesh.frag.spv");
 
+/// One uploaded mesh — vertex + index buffers, no per-mesh state beyond
+/// that. Multiple `MeshSlot`s live inside one [`MeshRendererGpu`] and
+/// share the pipeline + render pass + instance buffer.
+struct MeshSlot {
+    vertex_buf: vk::Buffer,
+    vertex_mem: vk::DeviceMemory,
+    index_buf: vk::Buffer,
+    index_mem: vk::DeviceMemory,
+    index_count: u32,
+    /// Source file path for debug — read by `add_mesh`'s log line.
+    #[allow(dead_code)]
+    source: String,
+}
+
 pub struct MeshRendererGpu {
     extent: vk::Extent2D,
     render_pass: vk::RenderPass,
@@ -151,11 +170,7 @@ pub struct MeshRendererGpu {
     pipeline: GraphicsPipeline,
     descriptor_pool: vk::DescriptorPool,
     descriptor_set: vk::DescriptorSet,
-    vertex_buf: vk::Buffer,
-    vertex_mem: vk::DeviceMemory,
-    index_buf: vk::Buffer,
-    index_mem: vk::DeviceMemory,
-    index_count: u32,
+    meshes: Vec<MeshSlot>,
     instance_buf: vk::Buffer,
     instance_mem: vk::DeviceMemory,
     instance_capacity: u32,
@@ -168,13 +183,20 @@ struct PushConstants {
     view_proj: [[f32; 4]; 4],
 }
 
+/// One per-frame draw — `mesh_slot` is the index returned by
+/// [`MeshRendererGpu::add_mesh`]; `instances` holds the agents that
+/// should render with that mesh. Caller is responsible for bucketing.
+pub struct MeshDraw<'a> {
+    pub mesh_slot: usize,
+    pub instances: &'a [InstanceData],
+}
+
 impl MeshRendererGpu {
     pub fn new(
         ctx: &VulkanContext,
         swapchain_views: &[vk::ImageView],
         swapchain_extent: vk::Extent2D,
         swapchain_format: vk::Format,
-        mesh: &MeshCpu,
         max_instances: u32,
     ) -> Result<Self> {
         let device = ctx.device();
@@ -199,39 +221,6 @@ impl MeshRendererGpu {
             .no_depth_test()
             .build()?;
 
-        // Vertex buffer (positions only, host-visible). Kenney's
-        // mini-characters are <1k vertices each; host-visible is fine
-        // for one-time upload at init.
-        let positions_bytes: Vec<u8> = mesh
-            .positions
-            .iter()
-            .flat_map(|p| {
-                let mut out = [0u8; 12];
-                out[..4].copy_from_slice(&p.x.to_le_bytes());
-                out[4..8].copy_from_slice(&p.y.to_le_bytes());
-                out[8..12].copy_from_slice(&p.z.to_le_bytes());
-                out
-            })
-            .collect();
-        let (vertex_buf, vertex_mem) = alloc_host_visible_buffer(
-            ctx,
-            positions_bytes.len() as u64,
-            vk::BufferUsageFlags::VERTEX_BUFFER,
-        )?;
-        write_buffer(ctx, vertex_mem, 0, &positions_bytes)?;
-
-        let index_bytes: Vec<u8> = mesh
-            .indices
-            .iter()
-            .flat_map(|i| i.to_le_bytes())
-            .collect();
-        let (index_buf, index_mem) = alloc_host_visible_buffer(
-            ctx,
-            index_bytes.len() as u64,
-            vk::BufferUsageFlags::INDEX_BUFFER,
-        )?;
-        write_buffer(ctx, index_mem, 0, &index_bytes)?;
-
         let instance_bytes = (max_instances as u64) * std::mem::size_of::<InstanceData>() as u64;
         let (instance_buf, instance_mem) = alloc_host_visible_buffer(
             ctx,
@@ -242,7 +231,6 @@ impl MeshRendererGpu {
             device.map_memory(instance_mem, 0, instance_bytes, vk::MemoryMapFlags::empty())?
         } as *mut u8;
 
-        // Descriptor pool + set.
         let pool_size = vk::DescriptorPoolSize {
             ty: vk::DescriptorType::STORAGE_BUFFER,
             descriptor_count: 1,
@@ -283,11 +271,7 @@ impl MeshRendererGpu {
             pipeline,
             descriptor_pool,
             descriptor_set,
-            vertex_buf,
-            vertex_mem,
-            index_buf,
-            index_mem,
-            index_count: mesh.indices.len() as u32,
+            meshes: Vec::new(),
             instance_buf,
             instance_mem,
             instance_capacity: max_instances,
@@ -295,32 +279,89 @@ impl MeshRendererGpu {
         })
     }
 
-    /// Record the mesh draw into `cmd` (already in a recording state,
-    /// caller's responsibility per voxel_engine's
-    /// `present_blit_with_overlay` contract). Image is in
-    /// COLOR_ATTACHMENT_OPTIMAL on entry; render pass transitions to
-    /// PRESENT_SRC_KHR on exit.
+    /// Upload a mesh and return its slot index. Heroes vs creature
+    /// types each register one slot; per-frame draws specify slot
+    /// indices in their [`MeshDraw`] entries.
+    pub fn add_mesh(&mut self, ctx: &VulkanContext, mesh: &MeshCpu) -> Result<usize> {
+        let positions_bytes: Vec<u8> = mesh
+            .positions
+            .iter()
+            .flat_map(|p| {
+                let mut out = [0u8; 12];
+                out[..4].copy_from_slice(&p.x.to_le_bytes());
+                out[4..8].copy_from_slice(&p.y.to_le_bytes());
+                out[8..12].copy_from_slice(&p.z.to_le_bytes());
+                out
+            })
+            .collect();
+        let (vertex_buf, vertex_mem) = alloc_host_visible_buffer(
+            ctx,
+            positions_bytes.len() as u64,
+            vk::BufferUsageFlags::VERTEX_BUFFER,
+        )?;
+        write_buffer(ctx, vertex_mem, 0, &positions_bytes)?;
+
+        let index_bytes: Vec<u8> = mesh
+            .indices
+            .iter()
+            .flat_map(|i| i.to_le_bytes())
+            .collect();
+        let (index_buf, index_mem) = alloc_host_visible_buffer(
+            ctx,
+            index_bytes.len() as u64,
+            vk::BufferUsageFlags::INDEX_BUFFER,
+        )?;
+        write_buffer(ctx, index_mem, 0, &index_bytes)?;
+
+        let slot = self.meshes.len();
+        self.meshes.push(MeshSlot {
+            vertex_buf,
+            vertex_mem,
+            index_buf,
+            index_mem,
+            index_count: mesh.indices.len() as u32,
+            source: mesh.source.clone(),
+        });
+        Ok(slot)
+    }
+
+    /// Record the overlay pass: load voxel contents, draw each
+    /// `MeshDraw`, transition to PRESENT_SRC_KHR. Instances are
+    /// flattened into the persistent-mapped instance buffer in slot
+    /// order, with first_instance per draw advancing as we go.
     pub fn record_overlay(
         &mut self,
         ctx: &VulkanContext,
         cmd: vk::CommandBuffer,
         image_index: usize,
         view_proj: glam::Mat4,
-        instances: &[InstanceData],
+        draws: &[MeshDraw<'_>],
     ) -> Result<()> {
         let device = ctx.device();
-        let n = (instances.len() as u32).min(self.instance_capacity);
-        if n > 0 {
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    instances.as_ptr() as *const u8,
-                    self.instance_mapped,
-                    (n as usize) * std::mem::size_of::<InstanceData>(),
-                );
+
+        // Pack instances into the mapped buffer; remember each draw's
+        // first_instance offset.
+        let stride = std::mem::size_of::<InstanceData>();
+        let mut first_instances: Vec<u32> = Vec::with_capacity(draws.len());
+        let mut counts: Vec<u32> = Vec::with_capacity(draws.len());
+        let mut cursor: u32 = 0;
+        for d in draws {
+            let n = (d.instances.len() as u32).min(self.instance_capacity - cursor);
+            first_instances.push(cursor);
+            counts.push(n);
+            if n > 0 {
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        d.instances.as_ptr() as *const u8,
+                        self.instance_mapped.add((cursor as usize) * stride),
+                        (n as usize) * stride,
+                    );
+                }
             }
+            cursor += n;
         }
 
-        let clear_values = []; // load-op = Load; no clears
+        let clear_values = [];
         let rp_begin = vk::RenderPassBeginInfo::default()
             .render_pass(self.render_pass)
             .framebuffer(self.framebuffers[image_index])
@@ -367,10 +408,16 @@ impl MeshRendererGpu {
                 0,
                 bytemuck::bytes_of(&pc),
             );
-            device.cmd_bind_vertex_buffers(cmd, 0, &[self.vertex_buf], &[0]);
-            device.cmd_bind_index_buffer(cmd, self.index_buf, 0, vk::IndexType::UINT32);
-            if n > 0 {
-                device.cmd_draw_indexed(cmd, self.index_count, n, 0, 0, 0);
+            for (di, d) in draws.iter().enumerate() {
+                let n = counts[di];
+                if n == 0 { continue; }
+                let slot = match self.meshes.get(d.mesh_slot) {
+                    Some(s) => s,
+                    None => continue,
+                };
+                device.cmd_bind_vertex_buffers(cmd, 0, &[slot.vertex_buf], &[0]);
+                device.cmd_bind_index_buffer(cmd, slot.index_buf, 0, vk::IndexType::UINT32);
+                device.cmd_draw_indexed(cmd, slot.index_count, n, 0, 0, first_instances[di]);
             }
             device.cmd_end_render_pass(cmd);
         }
@@ -381,13 +428,15 @@ impl MeshRendererGpu {
         let device = ctx.device();
         unsafe {
             device.device_wait_idle().ok();
+            for m in self.meshes.drain(..) {
+                device.destroy_buffer(m.index_buf, None);
+                device.free_memory(m.index_mem, None);
+                device.destroy_buffer(m.vertex_buf, None);
+                device.free_memory(m.vertex_mem, None);
+            }
             device.unmap_memory(self.instance_mem);
             device.destroy_buffer(self.instance_buf, None);
             device.free_memory(self.instance_mem, None);
-            device.destroy_buffer(self.index_buf, None);
-            device.free_memory(self.index_mem, None);
-            device.destroy_buffer(self.vertex_buf, None);
-            device.free_memory(self.vertex_mem, None);
             device.destroy_descriptor_pool(self.descriptor_pool, None);
             for fb in &self.framebuffers {
                 device.destroy_framebuffer(*fb, None);
@@ -406,14 +455,11 @@ fn create_overlay_render_pass(
     let color_att = vk::AttachmentDescription::default()
         .format(color_format)
         .samples(vk::SampleCountFlags::TYPE_1)
-        // LOAD_OP_LOAD preserves voxel_engine's output beneath us.
         .load_op(vk::AttachmentLoadOp::LOAD)
         .store_op(vk::AttachmentStoreOp::STORE)
         .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
         .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
-        // Caller (present_blit_with_overlay) guarantees this layout on entry.
         .initial_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-        // Render pass transitions to PRESENT_SRC_KHR — caller's contract.
         .final_layout(vk::ImageLayout::PRESENT_SRC_KHR);
     let color_ref = vk::AttachmentReference {
         attachment: 0,

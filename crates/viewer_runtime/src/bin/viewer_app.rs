@@ -30,7 +30,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use viewer_runtime::{ViewerApp, VoxelBridge, BRIDGE_DIM_X, BRIDGE_DIM_Z};
-use viewer_runtime::mesh_renderer::{InstanceData, MeshCpu, MeshRendererGpu};
+use viewer_runtime::mesh_renderer::{InstanceData, MeshCpu, MeshDraw, MeshRendererGpu};
 use voxel_engine::camera::FreeCamera;
 use voxel_engine::render::VoxelRenderer;
 use voxel_engine::vulkan::instance::VulkanContext;
@@ -106,6 +106,11 @@ struct Gfx {
     /// via `present_blit_with_overlay`. `None` when mesh load failed
     /// at startup (renderer still works, just no meshes painted).
     mesh: Option<MeshRendererGpu>,
+    /// Per-role / per-creature-type slot indices into `mesh.meshes`.
+    /// `hero_slots[role - 1]` for heroes; `enemy_slots[creature_type]`
+    /// for archer/brute/goblin. -1 if that slot wasn't loaded.
+    hero_slots: [Option<usize>; 5],
+    enemy_slots: [Option<usize>; 3],
 }
 
 impl ApplicationHandler for WindowedViewer {
@@ -135,43 +140,77 @@ impl ApplicationHandler for WindowedViewer {
             .refresh(&ctx, &self.app)
             .expect("VoxelBridge::refresh (initial) failed");
 
-        // Construct the mesh-pass overlay. Loads one character mesh
-        // for now (all agents render as the same model with per-instance
-        // tint). Failure logs but doesn't abort — voxel-only viewer
-        // still works.
-        let mesh_path = "assets/models/kenney_mini-characters/Models/GLB format/character-male-a.glb";
-        let mesh = match MeshCpu::load_glb(mesh_path) {
-            Ok(m) => {
-                match MeshRendererGpu::new(
-                    &ctx,
-                    swapchain.image_views(),
-                    swapchain.extent(),
-                    swapchain.surface_format(),
-                    &m,
-                    /*max_instances=*/ 1024,
-                ) {
-                    Ok(g) => {
-                        eprintln!(
-                            "[viewer_app] mesh pass ready: {} verts, {} tris, max {} instances",
-                            m.vertex_count(), m.triangle_count(), 1024,
-                        );
-                        Some(g)
-                    }
-                    Err(e) => {
-                        eprintln!("[viewer_app] MeshRendererGpu::new failed: {e:#}");
-                        None
-                    }
-                }
-            }
+        // Construct the mesh-pass overlay + load per-role / per-creature
+        // glTF meshes from Kenney's mini-characters pack. Order matters:
+        // glTF loaders prefer their own thread-local Vulkan contexts;
+        // build the renderer first, then add_mesh for each slot.
+        let mut mesh = match MeshRendererGpu::new(
+            &ctx,
+            swapchain.image_views(),
+            swapchain.extent(),
+            swapchain.surface_format(),
+            /*max_instances=*/ 1024,
+        ) {
+            Ok(g) => Some(g),
             Err(e) => {
-                eprintln!("[viewer_app] mesh load failed (no overlay this run): {e:#}");
+                eprintln!("[viewer_app] MeshRendererGpu::new failed: {e:#}");
                 None
             }
         };
 
+        const PACK: &str = "assets/models/kenney_mini-characters/Models/GLB format";
+        // Role → mesh assignments. Heroes get the male-a..e palette;
+        // enemies are split across remaining variants for visual variety.
+        let hero_files = [
+            "character-male-a.glb",   // Warrior (role=1)
+            "character-female-a.glb", // Cleric  (role=2)
+            "character-male-b.glb",   // Ranger  (role=3)
+            "character-female-b.glb", // Mage    (role=4)
+            "character-male-c.glb",   // Rogue   (role=5)
+        ];
+        let enemy_files = [
+            "character-male-d.glb",   // Archer (creature_type=0)
+            "character-male-f.glb",   // Brute  (creature_type=1)
+            "character-female-c.glb", // Goblin (creature_type=2)
+        ];
+
+        let load_slot = |mesh: &mut Option<MeshRendererGpu>, file: &str| -> Option<usize> {
+            let path = format!("{PACK}/{file}");
+            match MeshCpu::load_glb(&path) {
+                Ok(m) => match mesh.as_mut()?.add_mesh(&ctx, &m) {
+                    Ok(slot) => {
+                        eprintln!(
+                            "[viewer_app] mesh slot {slot}: {file} ({} verts, {} tris)",
+                            m.vertex_count(), m.triangle_count(),
+                        );
+                        Some(slot)
+                    }
+                    Err(e) => {
+                        eprintln!("[viewer_app] add_mesh({file}) failed: {e:#}");
+                        None
+                    }
+                },
+                Err(e) => {
+                    eprintln!("[viewer_app] load_glb({file}) failed: {e:#}");
+                    None
+                }
+            }
+        };
+        let mut hero_slots: [Option<usize>; 5] = [None; 5];
+        for (i, file) in hero_files.iter().enumerate() {
+            hero_slots[i] = load_slot(&mut mesh, file);
+        }
+        let mut enemy_slots: [Option<usize>; 3] = [None; 3];
+        for (i, file) in enemy_files.iter().enumerate() {
+            enemy_slots[i] = load_slot(&mut mesh, file);
+        }
+
         window.request_redraw();
 
-        self.gfx = Some(Gfx { window, ctx, swapchain, renderer, bridge, mesh });
+        self.gfx = Some(Gfx {
+            window, ctx, swapchain, renderer, bridge, mesh,
+            hero_slots, enemy_slots,
+        });
     }
 
     /// Drive continuous animation. winit calls about_to_wait whenever
@@ -300,34 +339,41 @@ impl ApplicationHandler for WindowedViewer {
                         eprintln!("[viewer_app] render_frame_gpu failed: {e}");
                         return;
                     }
-                    // Build per-agent instance data. Each alive agent gets
-                    // one mesh instance translated to its sim position,
-                    // scaled small (sim coords are in cells; the Kenney
-                    // model spans roughly [-0.5..0.5] in model space).
-                    // Tint mirrors the voxel palette so the role color
-                    // reads consistently between the splat layer and
-                    // the mesh layer.
-                    let mut instances: Vec<InstanceData> = Vec::new();
+                    // Bucket agents by mesh slot so we can do one draw per
+                    // mesh with first_instance offsets. 8 buckets: 5 hero
+                    // roles + 3 enemy creature types. Any agent whose slot
+                    // is None (mesh load failed) is silently skipped.
+                    let mut buckets: [Vec<InstanceData>; 8] =
+                        std::array::from_fn(|_| Vec::new());
+                    let mut bucket_slot: [Option<usize>; 8] = [None; 8];
+                    for i in 0..5 { bucket_slot[i] = gfx.hero_slots[i]; }
+                    for i in 0..3 { bucket_slot[5 + i] = gfx.enemy_slots[i]; }
                     if gfx.mesh.is_some() {
                         for agent in self.app.agents() {
                             if !agent.alive { continue; }
-                            let tint = tint_for_agent(agent.creature_type, agent.role);
-                            // sim (x, y, z) -> renderer (x, z, y) — same Z↔Y
-                            // swap the voxel bridge applies when painting agent
-                            // cells, so meshes land on the same cells the splats
-                            // used to occupy.
+                            // sim (x, y, z) -> renderer (x, z, y) — same swap
+                            // the voxel bridge applies. Without this, meshes
+                            // don't land on the same cells the splats use.
                             let mesh_pos = glam::Vec3::new(
-                                agent.pos.x,
-                                agent.pos.z,
-                                agent.pos.y,
+                                agent.pos.x, agent.pos.z, agent.pos.y,
                             );
-                            instances.push(InstanceData::from_position(
-                                mesh_pos,
-                                /*scale=*/ 0.8,
-                                tint,
-                            ));
+                            let tint = tint_for_agent(agent.creature_type, agent.role);
+                            let inst = InstanceData::from_position(mesh_pos, /*scale=*/ 0.8, tint);
+                            let bucket = if agent.creature_type == 3 /*HERO*/ {
+                                ((agent.role as i32) - 1).clamp(0, 4) as usize
+                            } else if agent.creature_type <= 2 {
+                                5 + agent.creature_type as usize
+                            } else { continue };
+                            buckets[bucket].push(inst);
                         }
                     }
+                    let draws: Vec<MeshDraw> = (0..8)
+                        .filter_map(|b| {
+                            let slot = bucket_slot[b]?;
+                            if buckets[b].is_empty() { return None; }
+                            Some(MeshDraw { mesh_slot: slot, instances: &buckets[b] })
+                        })
+                        .collect();
                     let view_proj = view_proj_for_camera(&self.camera);
 
                     let mesh_renderer_opt = gfx.mesh.as_mut();
@@ -341,7 +387,7 @@ impl ApplicationHandler for WindowedViewer {
                         |cmd, image_index| {
                             if let Some(mesh) = mesh_renderer_opt {
                                 mesh.record_overlay(
-                                    ctx_ref, cmd, image_index, view_proj, &instances,
+                                    ctx_ref, cmd, image_index, view_proj, &draws,
                                 )?;
                             }
                             Ok(())
