@@ -71,6 +71,10 @@ pub const MAT_STEALTHED: u8 = 37;
 /// Per-tick damage flash — agents tinted bright white for a few frames
 /// after taking meaningful damage so combat hits are individually visible.
 pub const MAT_FLASH: u8 = 38;
+/// Per-tick heal flash — green-white tint applied for a few frames
+/// after an agent's HP rises (Cleric's Heal verb / Mend on the duel
+/// roster). Visible "the cleric just healed someone" signal.
+pub const MAT_HEAL: u8 = 41;
 /// All floor cells tint to this when the dungeon is cleared (every
 /// enemy dead, ≥1 hero alive). Replaces MAT_FLOOR / MAT_BOSS_FLOOR.
 pub const MAT_VICTORY_FLOOR: u8 = 39;
@@ -101,6 +105,7 @@ fn build_palette() -> MaterialPalette {
     p.set(MAT_HP_RED,    palette_entry(230, 50,  50));  // bright red     — critical bar
     p.set(MAT_STEALTHED, palette_entry(110, 80, 130));  // muted purple   — rogue invisible
     p.set(MAT_FLASH,     palette_entry(255, 255, 255)); // pure white     — damage hit flash
+    p.set(MAT_HEAL,      palette_entry(180, 255, 200)); // mint           — heal flash
     p.set(MAT_VICTORY_FLOOR, palette_entry(80,  180, 100));// muted green  — dungeon cleared
     p.set(MAT_DEFEAT_FLOOR,  palette_entry(180, 50,  50)); // muted red    — TPK
     p
@@ -177,6 +182,10 @@ pub struct ViewerApp {
     /// when > 0, the painter overrides the agent's material to MAT_FLASH.
     /// Set to FLASH_FRAMES whenever an HP drop ≥ FLASH_DELTA is observed.
     flash_ticks: Vec<u8>,
+    /// Per-agent remaining heal-flash frames — mirror of `flash_ticks`
+    /// for HP increases. Damage flash takes precedence if both fire
+    /// the same tick (combat hits trump heal feedback).
+    pub heal_ticks: Vec<u8>,
     /// `Some(true)` = dungeon cleared (all enemies dead, ≥1 hero alive).
     /// `Some(false)` = TPK (all heroes dead).
     /// `None` = sim still running. Set in `step()` at termination so the
@@ -349,6 +358,7 @@ impl ViewerApp {
             boss_slot,
             prev_hp: vec![0.0; agent_count as usize],
             flash_ticks: vec![0u8; agent_count as usize],
+            heal_ticks: vec![0u8; agent_count as usize],
             outcome: None,
             hero_death_tick: [None; dungeon::N_HEROES as usize],
             boss_death_tick: None,
@@ -750,15 +760,24 @@ impl ViewerApp {
         let cur_tick = self.state.tick;
         let hero_start = (n - dungeon::N_HEROES) as usize;
         for slot in 0..n as usize {
-            // Tick down any in-progress flash first so this frame consumes
-            // one frame of the existing window before we test for a new hit.
+            // Tick down any in-progress flashes first so this frame consumes
+            // one frame of the existing window before we test for new events.
             if self.flash_ticks[slot] > 0 {
                 self.flash_ticks[slot] -= 1;
+            }
+            if self.heal_ticks[slot] > 0 {
+                self.heal_ticks[slot] -= 1;
             }
             let prev = self.prev_hp[slot];
             let cur = hps[slot];
             if alive[slot] != 0 && prev - cur >= FLASH_DELTA {
                 self.flash_ticks[slot] = FLASH_FRAMES;
+            }
+            // Heal flash: same FLASH_DELTA threshold (≥3 HP), but on HP
+            // increase. Cleric's Mend / Heal verbs lift HP by 20+ at a
+            // time so this easily crosses the threshold.
+            if alive[slot] != 0 && cur - prev >= FLASH_DELTA {
+                self.heal_ticks[slot] = FLASH_FRAMES;
             }
             self.prev_hp[slot] = cur;
 
@@ -967,8 +986,13 @@ impl VoxelBridge {
                 && agent.role == 5 /* Rogue */
                 && agent.stealth_until_tick > sim_tick;
             let flashing = app.flash_ticks[slot_idx] > 0;
+            let healing = app.heal_ticks[slot_idx] > 0;
+            // Damage flash trumps heal flash — combat hits are the
+            // higher-signal event when both fire the same tick.
             let mat = if flashing {
                 MAT_FLASH
+            } else if healing {
+                MAT_HEAL
             } else if app.boss_slot == Some(slot_idx as u32) {
                 MAT_BOSS
             } else if stealth_active {

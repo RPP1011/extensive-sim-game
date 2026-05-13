@@ -397,11 +397,21 @@ impl ApplicationHandler for WindowedViewer {
                             } else {
                                 (base_scale, 1.0)
                             };
-                            let tint = [
-                                tint[0] * tint_mul,
-                                tint[1] * tint_mul,
-                                tint[2] * tint_mul,
-                            ];
+                            // Heal flash: blend tint toward MAT_HEAL (mint
+                            // green) for a few frames after HP increases.
+                            // Damage flash on the voxel splat is enough —
+                            // we don't double-flash the mesh to keep combat
+                            // hits as the highest-signal visual event.
+                            let healing = self.app.heal_ticks[idx] > 0;
+                            let tint = if healing {
+                                [0.7, 1.0, 0.78]
+                            } else {
+                                [
+                                    tint[0] * tint_mul,
+                                    tint[1] * tint_mul,
+                                    tint[2] * tint_mul,
+                                ]
+                            };
                             // Sim facing is XY (sim's horizontal plane);
                             // renderer's horizontal plane is XZ — same Z↔Y swap
                             // applies to the heading vector.
