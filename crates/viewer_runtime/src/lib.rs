@@ -219,9 +219,9 @@ impl ViewerApp {
     /// mid-heal.
     fn advance_hero_exploration(&mut self) {
         /// Below this HP heroes break off and head back to spawn.
-        const RETREAT_HP: f32 = 70.0;
+        const RETREAT_HP: f32 = 45.0;
         /// Once retreating, must heal above this to resume exploring.
-        const RESUME_HP: f32 = 160.0;
+        const RESUME_HP: f32 = 170.0;
 
         let agent_count = self.agent_count;
         let hero_start = (agent_count - dungeon::N_HEROES) as usize;
