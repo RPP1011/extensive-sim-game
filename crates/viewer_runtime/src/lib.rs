@@ -81,6 +81,10 @@ pub const MAT_AGENT_SHADOW: u8 = 42;
 /// Floor tint for rooms whose enemies are all dead — visible "we cleared
 /// this room" feedback. Updates per-tick from the agent snapshot.
 pub const MAT_FLOOR_CLEARED: u8 = 43;
+/// Wall material for cells inside the boss room slot — darker, slightly
+/// red-tinted so the climax chamber's walls visibly match the
+/// MAT_BOSS_FLOOR floor tint instead of staying the default gray.
+pub const MAT_BOSS_WALL: u8 = 44;
 /// All floor cells tint to this when the dungeon is cleared (every
 /// enemy dead, ≥1 hero alive). Replaces MAT_FLOOR / MAT_BOSS_FLOOR.
 pub const MAT_VICTORY_FLOOR: u8 = 39;
@@ -114,6 +118,7 @@ fn build_palette() -> MaterialPalette {
     p.set(MAT_HEAL,      palette_entry(180, 255, 200)); // mint           — heal flash
     p.set(MAT_AGENT_SHADOW, palette_entry(120, 105, 85));// dimmed tan    — shadow under agents
     p.set(MAT_FLOOR_CLEARED, palette_entry(140, 130, 110));// dim tan    — cleared room
+    p.set(MAT_BOSS_WALL,  palette_entry(75,  55,  55));  // dark red-gray  — boss-room walls
     p.set(MAT_VICTORY_FLOOR, palette_entry(80,  180, 100));// muted green  — dungeon cleared
     p.set(MAT_DEFEAT_FLOOR,  palette_entry(180, 50,  50)); // muted red    — TPK
     p
@@ -941,9 +946,12 @@ impl VoxelBridge {
                     let mat = floor_mat_for_cell(app, x, y);
                     cpu_grid.set(x, 0, y, mat);
                 } else {
-                    // walls extend up the vertical (renderer Y) axis
+                    // walls extend up the vertical (renderer Y) axis.
+                    // Boss-room walls use MAT_BOSS_WALL for visual
+                    // distinction; everything else is default MAT_WALL.
+                    let wall_mat = wall_mat_for_cell(app, x, y);
                     for vert in 0..ROOM_INTERIOR_Z.min(GRID_Z) {
-                        cpu_grid.set(x, vert, y, MAT_WALL);
+                        cpu_grid.set(x, vert, y, wall_mat);
                     }
                 }
             }
@@ -1179,6 +1187,19 @@ fn floor_mat_for_cell(app: &ViewerApp, x: u32, y: u32) -> u8 {
         return MAT_FLOOR_CLEARED;
     }
     MAT_FLOOR
+}
+
+/// Wall material for a single cell — matches the boss-room floor's
+/// red-stone aesthetic when inside boss-room bounds, else default gray.
+fn wall_mat_for_cell(app: &ViewerApp, x: u32, y: u32) -> u8 {
+    let sw = dungeon::SLOT_WIDTH;
+    let rx = x / sw;
+    let ry = y / sw;
+    if rx == app.dungeon.boss_room.rx && ry == app.dungeon.boss_room.ry {
+        MAT_BOSS_WALL
+    } else {
+        MAT_WALL
+    }
 }
 
 fn read_positions(state: &mut GeneratedRuntime, agent_count: u32) -> Vec<[f32; 4]> {
