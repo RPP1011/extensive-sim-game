@@ -216,9 +216,55 @@ impl ViewerApp {
         let mut state = GeneratedRuntime::try_new(seed, agent_count)?;
         let floor_cells = dungeon::seed_voxel_dungeon(&mut state, &dungeon, seed);
         let boss_slot = dungeon::seed_topology(&mut state, &dungeon, seed);
+
+        // Per-creature-type HP overrides so combat resolves in a
+        // watchable wall-clock time. Defaults (200 HP for everyone in
+        // the .sim's `init { hp: 200 }`) make 5v226 take ~3 minutes
+        // wall-clock — far too long for a demo reel. With these
+        // overrides a typical run resolves in ~30-60s.
+        const ARCHER_HP: f32 = 45.0;
+        const BRUTE_HP:  f32 = 90.0;
+        const GOBLIN_HP: f32 = 30.0;
+        // Heroes stay at the .sim default 200 — they need to tank a few
+        // hits to survive crossing each room.
+        let agent_count = dungeon.total_agent_count();
+        let mut hps = vec![200.0f32; agent_count as usize];
+        let mut max_hps = vec![200.0f32; agent_count as usize];
+        for (slot, &(_, ct)) in dungeon
+            .enemy_placements()
+            .iter()
+            .filter(|(_, c)| *c == dungeon::CT_ARCHER)
+            .enumerate()
+        {
+            let _ = ct;
+            hps[slot] = ARCHER_HP;
+            max_hps[slot] = ARCHER_HP;
+        }
+        let n_archers = dungeon.enemy_placements().iter().filter(|(_, c)| *c == dungeon::CT_ARCHER).count();
+        let n_brutes  = dungeon.enemy_placements().iter().filter(|(_, c)| *c == dungeon::CT_BRUTE ).count();
+        for i in 0..n_brutes {
+            let slot = n_archers + i;
+            hps[slot] = BRUTE_HP;
+            max_hps[slot] = BRUTE_HP;
+        }
+        let n_goblins = dungeon.enemy_placements().iter().filter(|(_, c)| *c == dungeon::CT_GOBLIN).count();
+        for i in 0..n_goblins {
+            let slot = n_archers + n_brutes + i;
+            hps[slot] = GOBLIN_HP;
+            max_hps[slot] = GOBLIN_HP;
+        }
+        // Hero HP (last N_HEROES slots) stays at 200.
+        state.gpu.queue.write_buffer(
+            &state.agent_hp_buf, 0, bytemuck::cast_slice(&hps),
+        );
+        state.gpu.queue.write_buffer(
+            &state.agent_max_hp_buf, 0, bytemuck::cast_slice(&max_hps),
+        );
+
         if let Some(slot) = boss_slot {
-            // Boss has 4x HP — heroes have to commit to the climax fight.
-            // Writes both hp and max_hp so cleric heals don't cap at 200.
+            // Boss has ~9x normal Brute HP — heroes have to commit to
+            // the climax fight. Writes both hp and max_hp so cleric
+            // heals don't cap at the type default.
             const BOSS_HP: f32 = 800.0;
             state.gpu.queue.write_buffer(
                 &state.agent_hp_buf, (slot as u64) * 4, bytemuck::bytes_of(&BOSS_HP),
@@ -227,12 +273,12 @@ impl ViewerApp {
                 &state.agent_max_hp_buf, (slot as u64) * 4, bytemuck::bytes_of(&BOSS_HP),
             );
             eprintln!(
-                "[viewer_runtime] boss agent slot={slot} hp={BOSS_HP} (in boss room slot{})",
+                "[viewer_runtime] HP overrides: archer={ARCHER_HP} brute={BRUTE_HP} goblin={GOBLIN_HP} hero=200 boss={BOSS_HP} (slot={slot}, room slot{})",
                 dungeon.boss_room.idx(),
             );
         } else {
             eprintln!(
-                "[viewer_runtime] no Brute landed in boss room slot{} — no distinct boss this roll",
+                "[viewer_runtime] HP overrides: archer={ARCHER_HP} brute={BRUTE_HP} goblin={GOBLIN_HP} hero=200 — no Brute landed in boss room slot{}",
                 dungeon.boss_room.idx(),
             );
         }
