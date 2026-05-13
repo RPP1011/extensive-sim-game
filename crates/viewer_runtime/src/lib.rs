@@ -40,6 +40,8 @@ use dungeon::{Dungeon, GRID_X, GRID_Y, GRID_Z, N_HEROES, ROOM_INTERIOR_Z};
 pub const MAT_AIR: u8 = 0;
 pub const MAT_FLOOR: u8 = 1;
 pub const MAT_WALL: u8 = 2;
+/// Floor tint for the boss room — clear visual cue that "this is the climax".
+pub const MAT_BOSS_FLOOR: u8 = 3;
 // Heroes: per-role base index (warrior=10, cleric=11, ranger=12, mage=13, rogue=14).
 pub const MAT_HERO_BASE: u8 = 10;
 // Enemies: archer=20, brute=21, goblin=22.
@@ -48,11 +50,15 @@ pub const MAT_BRUTE: u8 = 21;
 pub const MAT_GOBLIN: u8 = 22;
 // Dead agent ghost color.
 pub const MAT_DEAD: u8 = 30;
+/// Boss agent — singular Brute in the boss room with 4x HP. Painted
+/// in a brighter accent so the climax target is immediately visible.
+pub const MAT_BOSS: u8 = 31;
 
 fn build_palette() -> MaterialPalette {
     let mut p = MaterialPalette::new();
     p.set(MAT_FLOOR, palette_entry(180, 160, 130)); // light tan
     p.set(MAT_WALL,  palette_entry(95,  92,  88));  // gray stone
+    p.set(MAT_BOSS_FLOOR, palette_entry(160, 80, 80));  // ochre-red — boss-room floor
     // Heroes (slot+1 → role)
     p.set(MAT_HERO_BASE + 0, palette_entry(140, 95,  50));  // Warrior — brown
     p.set(MAT_HERO_BASE + 1, palette_entry(240, 240, 240)); // Cleric  — white
@@ -63,6 +69,7 @@ fn build_palette() -> MaterialPalette {
     p.set(MAT_BRUTE,  palette_entry(150, 35,  35));  // dark red
     p.set(MAT_GOBLIN, palette_entry(95,  140, 70));  // dim green
     p.set(MAT_DEAD,   palette_entry(50,  50,  50));  // gray
+    p.set(MAT_BOSS,   palette_entry(255, 60,  20));  // bright orange-red — the boss
     p
 }
 
@@ -114,6 +121,10 @@ pub struct ViewerApp {
     /// advances `target_room_idx` between ticks. Without this,
     /// heroes stop at the first adjacent room they reach.
     hero_state: dungeon::HeroExploreState,
+    /// Agent slot of the singular boss enemy (first Brute placed
+    /// in the boss room). `None` if no brute landed in boss_room
+    /// (very small dungeons or unlucky rolls).
+    pub boss_slot: Option<u32>,
 }
 
 impl ViewerApp {
@@ -134,7 +145,27 @@ impl ViewerApp {
         );
         let mut state = GeneratedRuntime::try_new(seed, agent_count)?;
         let floor_cells = dungeon::seed_voxel_dungeon(&mut state, &dungeon, seed);
-        dungeon::seed_topology(&mut state, &dungeon, seed);
+        let boss_slot = dungeon::seed_topology(&mut state, &dungeon, seed);
+        if let Some(slot) = boss_slot {
+            // Boss has 4x HP — heroes have to commit to the climax fight.
+            // Writes both hp and max_hp so cleric heals don't cap at 200.
+            const BOSS_HP: f32 = 800.0;
+            state.gpu.queue.write_buffer(
+                &state.agent_hp_buf, (slot as u64) * 4, bytemuck::bytes_of(&BOSS_HP),
+            );
+            state.gpu.queue.write_buffer(
+                &state.agent_max_hp_buf, (slot as u64) * 4, bytemuck::bytes_of(&BOSS_HP),
+            );
+            eprintln!(
+                "[viewer_runtime] boss agent slot={slot} hp={BOSS_HP} (in boss room slot{})",
+                dungeon.boss_room.idx(),
+            );
+        } else {
+            eprintln!(
+                "[viewer_runtime] no Brute landed in boss room slot{} — no distinct boss this roll",
+                dungeon.boss_room.idx(),
+            );
+        }
 
         let hero_state = dungeon::HeroExploreState::new(&dungeon);
         let mut viewer = Self {
@@ -155,6 +186,7 @@ impl ViewerApp {
             agent_count,
             terminated_at_tick: None,
             hero_state,
+            boss_slot,
         };
         viewer.refresh_snapshot();
         Some(viewer)
@@ -429,11 +461,20 @@ impl VoxelBridge {
         // cells get MAT_WALL filling z ∈ [0, ROOM_INTERIOR_Z). This
         // matches the runtime's voxel_terrain contents seeded by
         // `seed_voxel_dungeon`.
+        let boss_room = app.dungeon.boss_room;
+        let boss_x_lo = boss_room.rx * dungeon::SLOT_WIDTH;
+        let boss_x_hi = boss_x_lo + dungeon::SLOT_WIDTH;
+        let boss_y_lo = boss_room.ry * dungeon::SLOT_WIDTH;
+        let boss_y_hi = boss_y_lo + dungeon::SLOT_WIDTH;
+        let in_boss_room = |x: u32, y: u32| -> bool {
+            x >= boss_x_lo && x < boss_x_hi && y >= boss_y_lo && y < boss_y_hi
+        };
         for x in 0..GRID_X {
             for y in 0..GRID_Y {
                 if app.floor_cells.contains(&(x, y)) {
                     // sim (x, y, 0) → renderer (x, 0, y): floor sits at vertical=0, depth=sim_y
-                    cpu_grid.set(x, 0, y, MAT_FLOOR);
+                    let mat = if in_boss_room(x, y) { MAT_BOSS_FLOOR } else { MAT_FLOOR };
+                    cpu_grid.set(x, 0, y, mat);
                 } else {
                     // walls extend up the vertical (renderer Y) axis
                     for vert in 0..ROOM_INTERIOR_Z.min(GRID_Z) {
@@ -466,7 +507,13 @@ impl VoxelBridge {
             // sim coords (x, sim_y) which now equals (x, depth).
             if app.floor_cells.contains(&(x, depth)) {
                 if vert == 0 {
-                    self.cpu_grid.set(x, vert, depth, MAT_FLOOR);
+                    let boss_room = app.dungeon.boss_room;
+                    let in_boss = x >= boss_room.rx * dungeon::SLOT_WIDTH
+                        && x < (boss_room.rx + 1) * dungeon::SLOT_WIDTH
+                        && depth >= boss_room.ry * dungeon::SLOT_WIDTH
+                        && depth < (boss_room.ry + 1) * dungeon::SLOT_WIDTH;
+                    let mat = if in_boss { MAT_BOSS_FLOOR } else { MAT_FLOOR };
+                    self.cpu_grid.set(x, vert, depth, mat);
                 } else {
                     self.cpu_grid.set(x, vert, depth, MAT_AIR);
                 }
@@ -483,11 +530,15 @@ impl VoxelBridge {
         // Paint each alive agent as a 2x2x2 splat one cell above the
         // floor (z ∈ [1, 3)) so they sit visibly on the floor without
         // sinking. Out-of-bounds cells are skipped.
-        for agent in app.agents() {
+        for (slot_idx, agent) in app.agents().iter().enumerate() {
             if !agent.alive {
                 continue;
             }
-            let mat = material_for(agent.creature_type, agent.role);
+            let mat = if app.boss_slot == Some(slot_idx as u32) {
+                MAT_BOSS
+            } else {
+                material_for(agent.creature_type, agent.role)
+            };
             let cx = agent.pos.x.floor() as i32;
             let cd = agent.pos.y.floor() as i32; // sim_y → renderer depth
             // 2x2x2 splat: span (x, x+1) × vertical (1..3) × depth (cd, cd+1)

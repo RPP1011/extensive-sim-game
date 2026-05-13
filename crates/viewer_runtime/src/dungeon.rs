@@ -401,7 +401,16 @@ pub fn seed_voxel_dungeon(
 /// Mirrors `dungeon_horde_pin::seed_topology` — places enemies at
 /// floor cells, heroes at the spawn room, sets per-agent runtime
 /// fields (creature_type, role, target_room, expected allies, patrol).
-pub fn seed_topology(state: &mut GeneratedRuntime, dungeon: &Dungeon, seed: u64) {
+///
+/// Returns the agent slot of the first Brute placed in the boss
+/// room — the viewer designates that one as "the boss" and gives it
+/// 4x HP + a distinct color. `None` if no brute landed in boss_room
+/// (small dungeons / unlucky rolls).
+pub fn seed_topology(
+    state: &mut GeneratedRuntime,
+    dungeon: &Dungeon,
+    seed: u64,
+) -> Option<u32> {
     let agent_count = dungeon.total_agent_count() as usize;
     let mut positions = vec![[0.0f32; 4]; agent_count];
     let mut creature_type = vec![0u32; agent_count];
@@ -472,6 +481,7 @@ pub fn seed_topology(state: &mut GeneratedRuntime, dungeon: &Dungeon, seed: u64)
         );
         slot += 1;
     }
+    let mut boss_slot: Option<u32> = None;
     for (i, &(room, _ct)) in brutes.iter().enumerate() {
         place_enemy(
             slot, room, CT_BRUTE, &mut positions, &mut creature_type,
@@ -480,6 +490,9 @@ pub fn seed_topology(state: &mut GeneratedRuntime, dungeon: &Dungeon, seed: u64)
             &mut patrol_step_x, &mut patrol_step_y,
             0xB23_C7E, i as u32,
         );
+        if boss_slot.is_none() && room == dungeon.boss_room {
+            boss_slot = Some(slot as u32);
+        }
         slot += 1;
     }
     for (i, &(room, _ct)) in goblins.iter().enumerate() {
@@ -540,6 +553,8 @@ pub fn seed_topology(state: &mut GeneratedRuntime, dungeon: &Dungeon, seed: u64)
     state.gpu.queue.write_buffer(
         &state.agent_patrol_step_y_buf, 0, bytemuck::cast_slice(&patrol_step_y),
     );
+
+    boss_slot
 }
 
 fn pick_floor_cell(
