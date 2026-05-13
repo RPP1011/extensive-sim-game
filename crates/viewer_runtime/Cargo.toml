@@ -39,3 +39,10 @@ ash = "0.38"
 wgpu = "=26.0.1"
 bytemuck = { version = "1.16", features = ["derive"] }
 pollster = "0.4"
+
+# glTF static-mesh loading for agent character models (Kenney's
+# `mini-characters` pack lives in assets/models/). We use `gltf`'s
+# default + import features but disable extras feature to keep the
+# build light; we don't need extras since the kit is plain
+# vertices + indices + (optional) colors.
+gltf = { version = "1.4", default-features = false, features = ["import", "names", "utils"] }

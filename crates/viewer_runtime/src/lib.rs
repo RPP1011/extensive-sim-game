@@ -28,6 +28,7 @@ use voxel_engine::voxel::grid::VoxelGrid;
 use voxel_engine::voxel::material::{MaterialPalette, MaterialType, PaletteEntry};
 
 pub mod dungeon;
+pub mod mesh_renderer;
 
 use dungeon::{Dungeon, GRID_X, GRID_Y, GRID_Z, N_HEROES, ROOM_INTERIOR_Z};
 
@@ -204,6 +205,18 @@ impl ViewerApp {
     /// Roll a dungeon, build the runtime, seed walls + agents.
     /// Returns `None` if no wgpu adapter is available (headless host).
     pub fn try_new(seed: u64) -> Option<Self> {
+        // Phase 1 asset-pipeline smoke check: load one Kenney character
+        // mesh at startup. Loads only; rendering is a separate pass.
+        // Failure logs but doesn't abort — voxel-only viewer still works
+        // until the mesh pass is wired.
+        let mesh_path = "assets/models/kenney_mini-characters/Models/GLB format/character-male-a.glb";
+        match mesh_renderer::MeshCpu::load_glb(mesh_path) {
+            Ok(m) => eprintln!(
+                "[viewer_runtime] loaded mesh {} ({} verts, {} tris)",
+                m.source, m.vertex_count(), m.triangle_count(),
+            ),
+            Err(e) => eprintln!("[viewer_runtime] mesh load failed: {e:#}"),
+        }
         let dungeon = dungeon::roll_dungeon(seed);
         let agent_count = dungeon.total_agent_count();
         eprintln!(
