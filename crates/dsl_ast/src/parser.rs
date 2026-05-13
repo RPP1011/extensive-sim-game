@@ -2514,10 +2514,21 @@ fn parse_stmt(c: &mut Cursor) -> PResult<Stmt> {
         if c.starts_with("else") {
             c.bump("else".len());
             c.skip_ws();
-            expect_char(c, '{').map_err(|e| e.with_context("parsing `else` body `{`"))?;
-            else_body = Some(parse_stmt_block_until_close(c)?);
-            c.skip_ws();
-            expect_char(c, '}').map_err(|e| e.with_context("parsing `else` body `}`"))?;
+            // `else if (cond) { ... }` sugar (Gap dungeon_stealth#4,
+            // 2026-05-12): fold a bare `if` after `else` into the
+            // equivalent `else { if (cond) { ... } [else ...] }`. The
+            // recursive `parse_stmt` call consumes the entire if-stmt
+            // (including any nested else/else-if tail), so chains of
+            // arbitrary length compose without further special-casing.
+            if c.starts_with("if ") {
+                let nested_if = parse_stmt(c)?;
+                else_body = Some(vec![nested_if]);
+            } else {
+                expect_char(c, '{').map_err(|e| e.with_context("parsing `else` body `{`"))?;
+                else_body = Some(parse_stmt_block_until_close(c)?);
+                c.skip_ws();
+                expect_char(c, '}').map_err(|e| e.with_context("parsing `else` body `}`"))?;
+            }
         }
         return Ok(Stmt::If { cond, then_body, else_body, span: Span::new(start, c.pos) });
     }

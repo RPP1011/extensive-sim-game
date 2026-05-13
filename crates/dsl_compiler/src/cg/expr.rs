@@ -503,6 +503,18 @@ pub enum BuiltinId {
     LengthVec3F32,
     /// `(Vec3, Vec3) -> F32` — dot product. Lowers to WGSL `dot(...)`.
     DotVec3F32,
+    /// `(Vec3) -> F32` — read the `x` component of a `vec3<f32>`.
+    /// Lowered from the surface DSL `<vec3_expr>.x` field-access form
+    /// (Gap dungeon_stealth#1, 2026-05-12). The emit special-cases this
+    /// trio to render as postfix (`(<arg>).x` rather than `vec3_x(<arg>)`)
+    /// so WGSL stays idiomatic; mirrors the `Log10` shape-special case.
+    Vec3X,
+    /// `(Vec3) -> F32` — read the `y` component of a `vec3<f32>`. See
+    /// [`BuiltinId::Vec3X`].
+    Vec3Y,
+    /// `(Vec3) -> F32` — read the `z` component of a `vec3<f32>`. See
+    /// [`BuiltinId::Vec3X`].
+    Vec3Z,
 
     // --- Numeric (pairwise) ---
     Min(NumericTy),
@@ -603,6 +615,10 @@ impl BuiltinId {
                 args: vec![CgTy::Vec3F32, CgTy::Vec3F32],
                 result: CgTy::F32,
             },
+            Vec3X | Vec3Y | Vec3Z => BuiltinSignature::Fixed {
+                args: vec![CgTy::Vec3F32],
+                result: CgTy::F32,
+            },
             Min(t) | Max(t) => BuiltinSignature::Fixed {
                 args: vec![t.cg_ty(), t.cg_ty()],
                 result: t.cg_ty(),
@@ -652,6 +668,9 @@ impl BuiltinId {
             ZSeparation => "z_separation".to_string(),
             LengthVec3F32 => "length.vec3<f32>".to_string(),
             DotVec3F32 => "dot.vec3<f32>".to_string(),
+            Vec3X => "vec3_x".to_string(),
+            Vec3Y => "vec3_y".to_string(),
+            Vec3Z => "vec3_z".to_string(),
             Min(t) => format!("min.{}", t.label()),
             Max(t) => format!("max.{}", t.label()),
             Clamp(t) => format!("clamp.{}", t.label()),

@@ -1047,6 +1047,40 @@ fn lower_field(
     span: Span,
     ctx: &mut LoweringCtx<'_>,
 ) -> Result<CgExprId, LoweringError> {
+    // Vec3 component access (Gap dungeon_stealth#1, 2026-05-12): when the
+    // field name is `x` / `y` / `z` AND the base lowers to a `vec3<f32>`
+    // typed expression, route to a `BuiltinId::Vec3X` / `Vec3Y` / `Vec3Z`
+    // call. Lets the surface DSL author `self.pos.x` rather than
+    // unpacking the vec into intermediate scalar fields. The base lowers
+    // through the recursive `lower_expr` call so any vec3-typed
+    // expression — `agents.pos(self)` reader, a let-bound vec3 local,
+    // a `vec3(x,y,z)` literal — is acceptable.
+    //
+    // Sequencing: this MUST run before the agent-target resolution
+    // below, because a `Field { base: <vec3 expr>, field_name: "x" }`
+    // base shape (e.g. `self.pos.x`) would otherwise miss every
+    // `Local(...)` arm and fall straight into the
+    // `UnsupportedFieldBase` catch-all. Falls through (no early exit)
+    // when the base isn't a vec3, so plain `self.<vec3_field>` (no
+    // sub-component) keeps using the existing AgentField read path.
+    if let Some(comp_id) = vec3_component_id(field_name) {
+        if let Ok(base_id) = lower_expr(base, ctx) {
+            if let Ok(base_ty) = typecheck_node(ctx, base_id, base.span) {
+                if base_ty == CgTy::Vec3F32 {
+                    return add(
+                        ctx,
+                        CgExpr::Builtin {
+                            fn_id: comp_id,
+                            args: vec![base_id],
+                            ty: CgTy::F32,
+                        },
+                        span,
+                    );
+                }
+            }
+        }
+    }
+
     // Resolve the agent reference implied by the base expression. Today
     // wired bases are `self` (every dispatch shape) and `target` inside
     // a pair-bound op. Anything else falls through as the typed
@@ -1171,6 +1205,21 @@ fn lower_field(
         CgExpr::Read(DataHandle::AgentField { field, target }),
         span,
     )
+}
+
+/// Map a vec3 component field name (`"x"` / `"y"` / `"z"`) to the
+/// corresponding [`BuiltinId`] for the postfix-component access. Returns
+/// `None` for any other name — the caller (`lower_field`) then falls
+/// through to the agent-target resolution path. Gap dungeon_stealth#1
+/// (2026-05-12): unlocks `self.pos.x` / `.y` / `.z` accessors so authors
+/// don't need to unpack vec3 fields through intermediate scalars.
+fn vec3_component_id(field_name: &str) -> Option<BuiltinId> {
+    match field_name {
+        "x" => Some(BuiltinId::Vec3X),
+        "y" => Some(BuiltinId::Vec3Y),
+        "z" => Some(BuiltinId::Vec3Z),
+        _ => None,
+    }
 }
 
 /// Type alias for a virtual-field synthesizer. Each entry takes the

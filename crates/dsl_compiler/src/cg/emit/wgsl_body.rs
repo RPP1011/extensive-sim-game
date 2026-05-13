@@ -1350,6 +1350,14 @@ fn builtin_name(id: BuiltinId) -> String {
         // `dot(vec3<f32>, vec3<f32>) -> f32`. No prelude needed.
         LengthVec3F32 => "length".to_string(),
         DotVec3F32 => "dot".to_string(),
+        // Vec3 component access — surfaces only as a fallback for
+        // pretty-print / unreachable in the WGSL emit (the
+        // `CgExpr::Builtin` arm short-circuits these to postfix
+        // `(<arg>).x` / `.y` / `.z` before reaching `builtin_name`).
+        // The names mirror `BuiltinId::label`.
+        Vec3X => "vec3_x".to_string(),
+        Vec3Y => "vec3_y".to_string(),
+        Vec3Z => "vec3_z".to_string(),
         Min(t) => format!("min_{}", numeric_ty_token(t)),
         Max(t) => format!("max_{}", numeric_ty_token(t)),
         Clamp(t) => format!("clamp_{}", numeric_ty_token(t)),
@@ -1666,6 +1674,19 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
             if matches!(fn_id, BuiltinId::Log10) {
                 debug_assert_eq!(parts.len(), 1, "log10 takes one arg");
                 return Ok(format!("(log2({}) / log2(10.0))", parts[0]));
+            }
+            // Vec3 component access is postfix in WGSL — emit
+            // `(<arg>).x` / `.y` / `.z` rather than the synthetic
+            // `vec3_x(<arg>)` function name (Gap dungeon_stealth#1,
+            // 2026-05-12). Mirrors `Log10`'s shape special-case above.
+            if let Some(comp) = match fn_id {
+                BuiltinId::Vec3X => Some("x"),
+                BuiltinId::Vec3Y => Some("y"),
+                BuiltinId::Vec3Z => Some("z"),
+                _ => None,
+            } {
+                debug_assert_eq!(parts.len(), 1, "vec3 component takes one arg");
+                return Ok(format!("({}).{}", parts[0], comp));
             }
             Ok(format!("{}({})", builtin_name(*fn_id), parts.join(", ")))
         }
