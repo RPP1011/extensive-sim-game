@@ -1113,6 +1113,25 @@ impl VoxelBridge {
                 }
             }
 
+            // Heal column VFX — vertical line of mint cells rising above
+            // the agent for the duration of the heal flash. Reads as a
+            // visible "healing magic landed here" beam, distinct from
+            // the per-mesh tint blend on the rendered character.
+            if healing {
+                let cx = agent.pos.x.floor() as i32;
+                let cd = agent.pos.y.floor() as i32;
+                if cx >= 0 && cd >= 0 {
+                    let (sx, sd) = (cx as u32, cd as u32);
+                    if sx < BRIDGE_DIM_X && sd < BRIDGE_DIM_Z {
+                        for vert in 4u32..8u32 {
+                            if vert >= BRIDGE_DIM_Y { break; }
+                            self.cpu_grid.set(sx, vert, sd, MAT_HEAL);
+                            self.last_agent_cells.push((sx, vert, sd));
+                        }
+                    }
+                }
+            }
+
             // HP bar — 3 stacked cells above heroes only. Green/yellow/red
             // light up while the corresponding HP fraction is above
             // the tier threshold (33% / 67%).
