@@ -1,0 +1,41 @@
+[package]
+name = "viewer_runtime"
+version = "0.1.0"
+edition = "2021"
+
+# Windowed viewer over a deterministic sim. Pilot fixture is
+# `sims::dungeon_horde::GeneratedRuntime` — the dungeon-crawl stage 3
+# (5 heroes vs ~800-1000 enemies in a procedurally-rolled multi-room
+# voxel dungeon). The viewer reads the GPU agent SoA back to host each
+# tick and mirrors agent positions + colours into a single
+# world-spanning voxel grid the renderer consumes via voxel_engine's
+# `render_frame_gpu`.
+#
+# This crate is the *presentation* seam — sim itself stays in
+# `crates/sims` (mega-crate); viewer just reads its snapshots.
+
+[dependencies]
+engine = { path = "../engine" }
+engine_voxel = { path = "../engine_voxel" }
+# Mega-crate housing all migrated `.sim` fixtures, including
+# dungeon_horde. We use `sims::dungeon_horde::GeneratedRuntime`.
+sims = { path = "../sims" }
+
+# voxel_engine path dep with `app-harness` enabled (winit + egui).
+# Path matches the dep in `engine_voxel` so cargo unifies the dep
+# rather than building two copies. The `app-harness` feature is
+# additive — `engine_voxel` builds with default features, viewer adds
+# the harness for windowing.
+voxel_engine = { path = "/home/ricky/Projects/voxel_engine", features = ["app-harness"] }
+
+glam = "0.29"
+anyhow = "1"
+winit = "0.30"
+# Bridge types for the egui overlay path (vk::CommandPool).
+# Must match voxel_engine's ash version.
+ash = "0.38"
+# wgpu — the sim runtime's GPU context type. Used by the viewer to
+# read agent SoA back from device memory each tick.
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+pollster = "0.4"
