@@ -75,6 +75,9 @@ pub const MAT_FLASH: u8 = 38;
 /// after an agent's HP rises (Cleric's Heal verb / Mend on the duel
 /// roster). Visible "the cleric just healed someone" signal.
 pub const MAT_HEAL: u8 = 41;
+/// Floor cell tinted darker beneath each living agent — gives ground
+/// reference + depth perception even without proper diffuse lighting.
+pub const MAT_AGENT_SHADOW: u8 = 42;
 /// All floor cells tint to this when the dungeon is cleared (every
 /// enemy dead, ≥1 hero alive). Replaces MAT_FLOOR / MAT_BOSS_FLOOR.
 pub const MAT_VICTORY_FLOOR: u8 = 39;
@@ -106,6 +109,7 @@ fn build_palette() -> MaterialPalette {
     p.set(MAT_STEALTHED, palette_entry(110, 80, 130));  // muted purple   — rogue invisible
     p.set(MAT_FLASH,     palette_entry(255, 255, 255)); // pure white     — damage hit flash
     p.set(MAT_HEAL,      palette_entry(180, 255, 200)); // mint           — heal flash
+    p.set(MAT_AGENT_SHADOW, palette_entry(120, 105, 85));// dimmed tan    — shadow under agents
     p.set(MAT_VICTORY_FLOOR, palette_entry(80,  180, 100));// muted green  — dungeon cleared
     p.set(MAT_DEFEAT_FLOOR,  palette_entry(180, 50,  50)); // muted red    — TPK
     p
@@ -1026,6 +1030,24 @@ impl VoxelBridge {
                         }
                         self.cpu_grid.set(x, vert, depth, mat);
                         self.last_agent_cells.push((x, vert, depth));
+                    }
+                }
+            }
+
+            // Floor shadow right under the agent — single cell at vert=0
+            // (replaces the floor tile for this frame; restored on next
+            // clear pass). Skipped for dying agents so the dim mesh
+            // doesn't double-darken the cell beneath.
+            if !flashing && app.flash_ticks[slot_idx] == 0 {
+                let cx = agent.pos.x.floor() as i32;
+                let cd = agent.pos.y.floor() as i32;
+                if cx >= 0 && cd >= 0 {
+                    let (sx, sd) = (cx as u32, cd as u32);
+                    if sx < BRIDGE_DIM_X && sd < BRIDGE_DIM_Z
+                        && app.floor_cells.contains(&(sx, sd))
+                    {
+                        self.cpu_grid.set(sx, 0, sd, MAT_AGENT_SHADOW);
+                        self.last_agent_cells.push((sx, 0, sd));
                     }
                 }
             }
