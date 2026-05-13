@@ -59,6 +59,14 @@ pub const MAT_ALERTED: u8 = 32;
 /// Enemy with `alert >= ALERT_TINT_HI` — visible "I know exactly
 /// what's happening" state. Maximum saturation.
 pub const MAT_PANICKED: u8 = 33;
+/// Per-hero HP bar — 3 cells stacked above each hero. Each cell
+/// lights up while the hero's HP fraction is above its tier threshold.
+pub const MAT_HP_GREEN: u8 = 34;
+pub const MAT_HP_YELLOW: u8 = 35;
+pub const MAT_HP_RED: u8 = 36;
+/// Rogue while stealth is active (stealth_until_tick > world.tick).
+/// Desaturated purple so the hero is still locatable but visibly "ghosted".
+pub const MAT_STEALTHED: u8 = 37;
 
 fn build_palette() -> MaterialPalette {
     let mut p = MaterialPalette::new();
@@ -78,6 +86,10 @@ fn build_palette() -> MaterialPalette {
     p.set(MAT_BOSS,   palette_entry(255, 60,  20));  // bright orange-red — the boss
     p.set(MAT_ALERTED, palette_entry(240, 200, 30));  // amber — "something's wrong"
     p.set(MAT_PANICKED, palette_entry(255, 50,  120));// hot pink — "they know"
+    p.set(MAT_HP_GREEN,  palette_entry(60,  220, 80));  // bright green   — healthy bar
+    p.set(MAT_HP_YELLOW, palette_entry(230, 220, 40));  // bright yellow  — middle bar
+    p.set(MAT_HP_RED,    palette_entry(230, 50,  50));  // bright red     — critical bar
+    p.set(MAT_STEALTHED, palette_entry(110, 80, 130));  // muted purple   — rogue invisible
     p
 }
 
@@ -111,6 +123,9 @@ pub struct AgentSnapshot {
     /// 0 = calm; raises via missing-ally suspicion + ally-death broadcast +
     /// sound-on-damage. Heroes always read 0.
     pub alert: u32,
+    /// Absolute tick at which the rogue's Stealth ability expires (per
+    /// `stealth_until_tick` custom field). > current tick means stealthed.
+    pub stealth_until_tick: u32,
 }
 
 /// The viewer's host-side state. Owns the sim runtime, the CPU voxel
@@ -193,6 +208,7 @@ impl ViewerApp {
                     role: 0,
                     hp: 0.0,
                     alert: 0,
+                    stealth_until_tick: 0,
                 };
                 agent_count as usize
             ],
@@ -415,12 +431,14 @@ impl ViewerApp {
         let role_buf = self.state.agent_role_buf.clone();
         let hp_buf = self.state.agent_hp_buf.clone();
         let alert_buf = self.state.agent_alert_buf.clone();
+        let stealth_buf = self.state.agent_stealth_until_tick_buf.clone();
         let positions = read_positions(&mut self.state, n);
         let alive = read_agent_u32(&mut self.state, &alive_buf, n);
         let types = read_agent_u32(&mut self.state, &type_buf, n);
         let role  = read_agent_u32(&mut self.state, &role_buf, n);
         let hps   = read_agent_f32(&mut self.state, &hp_buf, n);
         let alert = read_agent_u32(&mut self.state, &alert_buf, n);
+        let stealth = read_agent_u32(&mut self.state, &stealth_buf, n);
         for slot in 0..n as usize {
             self.agents[slot] = AgentSnapshot {
                 pos: Vec3::new(positions[slot][0], positions[slot][1], positions[slot][2]),
@@ -429,6 +447,7 @@ impl ViewerApp {
                 role: role[slot],
                 hp: hps[slot],
                 alert: alert[slot],
+                stealth_until_tick: stealth[slot],
             };
         }
     }
@@ -555,8 +574,14 @@ impl VoxelBridge {
             if !agent.alive {
                 continue;
             }
+            let sim_tick = app.state.tick as u32;
+            let stealth_active = agent.creature_type == dungeon::CT_HERO
+                && agent.role == 5 /* Rogue */
+                && agent.stealth_until_tick > sim_tick;
             let mat = if app.boss_slot == Some(slot_idx as u32) {
                 MAT_BOSS
+            } else if stealth_active {
+                MAT_STEALTHED
             } else if agent.creature_type != dungeon::CT_HERO
                 && agent.alert >= ALERT_TINT_HI
             {
@@ -586,6 +611,41 @@ impl VoxelBridge {
                         }
                         self.cpu_grid.set(x, vert, depth, mat);
                         self.last_agent_cells.push((x, vert, depth));
+                    }
+                }
+            }
+
+            // HP bar — 3 stacked cells above heroes only. Green/yellow/red
+            // light up while the corresponding HP fraction is above
+            // the tier threshold (33% / 67%).
+            if agent.creature_type == dungeon::CT_HERO {
+                // Heroes' max_hp is 200 (sim init); but the boss-HP override
+                // doesn't apply to heroes, so use 200 as the divisor.
+                const HERO_MAX_HP: f32 = 200.0;
+                let frac = (agent.hp / HERO_MAX_HP).clamp(0.0, 1.0);
+                let cx = agent.pos.x.floor() as i32;
+                let cd = agent.pos.y.floor() as i32;
+                // Place bar one cell to the side of the head so it doesn't
+                // get overwritten on the next agent-cell clear (the splat
+                // clear only restores cells listed in last_agent_cells).
+                let bar_x = cx;
+                let bar_depth = cd;
+                for (tier, threshold, tier_mat) in [
+                    (0u32, 0.0f32, MAT_HP_RED),
+                    (1, 0.33, MAT_HP_YELLOW),
+                    (2, 0.67, MAT_HP_GREEN),
+                ] {
+                    if frac > threshold {
+                        let vert = (4 + tier) as i32;
+                        if bar_x >= 0 && bar_depth >= 0 {
+                            let (x, depth) = (bar_x as u32, bar_depth as u32);
+                            if x < BRIDGE_DIM_X && (vert as u32) < BRIDGE_DIM_Y
+                                && depth < BRIDGE_DIM_Z
+                            {
+                                self.cpu_grid.set(x, vert as u32, depth, tier_mat);
+                                self.last_agent_cells.push((x, vert as u32, depth));
+                            }
+                        }
                     }
                 }
             }
