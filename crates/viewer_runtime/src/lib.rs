@@ -85,6 +85,10 @@ pub const MAT_FLOOR_CLEARED: u8 = 43;
 /// red-tinted so the climax chamber's walls visibly match the
 /// MAT_BOSS_FLOOR floor tint instead of staying the default gray.
 pub const MAT_BOSS_WALL: u8 = 44;
+/// Floor tint for the warrior's currently-targeted room — surfaces the
+/// frontier-greedy AI's next-room choice. Updates per-tick from the
+/// warrior's `target_room_idx` GPU buffer.
+pub const MAT_FLOOR_TARGET: u8 = 45;
 /// All floor cells tint to this when the dungeon is cleared (every
 /// enemy dead, ≥1 hero alive). Replaces MAT_FLOOR / MAT_BOSS_FLOOR.
 pub const MAT_VICTORY_FLOOR: u8 = 39;
@@ -119,6 +123,7 @@ fn build_palette() -> MaterialPalette {
     p.set(MAT_AGENT_SHADOW, palette_entry(120, 105, 85));// dimmed tan    — shadow under agents
     p.set(MAT_FLOOR_CLEARED, palette_entry(140, 130, 110));// dim tan    — cleared room
     p.set(MAT_BOSS_WALL,  palette_entry(75,  55,  55));  // dark red-gray  — boss-room walls
+    p.set(MAT_FLOOR_TARGET, palette_entry(150, 170, 200));// faint blue   — warrior's next target room
     p.set(MAT_VICTORY_FLOOR, palette_entry(80,  180, 100));// muted green  — dungeon cleared
     p.set(MAT_DEFEAT_FLOOR,  palette_entry(180, 50,  50)); // muted red    — TPK
     p
@@ -246,6 +251,12 @@ pub struct ViewerApp {
     /// tint cleared-room floors with `MAT_FLOOR_CLEARED` so dungeon
     /// progress reads at a glance.
     pub cleared_rooms: std::collections::BTreeSet<u32>,
+    /// Warrior hero's `target_room_idx` — the next room the party is
+    /// heading toward via the role-based AI. None when warrior is
+    /// dead or the GPU buffer hasn't been read yet. Surfaced in the
+    /// voxel bridge as MAT_FLOOR_TARGET so the user can see where
+    /// the warrior is leading the party next.
+    pub warrior_target_room: Option<u32>,
 }
 
 /// Number of sim ticks an agent stays rendered after death before
@@ -389,6 +400,7 @@ impl ViewerApp {
             last_facing: vec![[0.0, 1.0]; agent_count as usize],
             death_ticks: vec![0u32; agent_count as usize],
             cleared_rooms: std::collections::BTreeSet::new(),
+            warrior_target_room: None,
         };
         viewer.refresh_snapshot();
         Some(viewer)
@@ -661,6 +673,17 @@ impl ViewerApp {
                 &self.state.agent_target_room_idx_buf, 0,
                 bytemuck::cast_slice(&targets),
             );
+        }
+
+        // Surface the warrior's target for the bridge to highlight.
+        // Only meaningful while the warrior is alive AND the target
+        // is a real present room (not the spawn-retreat sentinel
+        // unless we want to highlight the retreat destination too).
+        if warrior_alive {
+            let t = targets[hero_start + H_WARRIOR];
+            self.warrior_target_room = Some(t);
+        } else {
+            self.warrior_target_room = None;
         }
     }
 
@@ -1182,6 +1205,11 @@ fn floor_mat_for_cell(app: &ViewerApp, x: u32, y: u32) -> u8 {
     let room_idx = ry * dungeon::SLOTS_PER_ROW + rx;
     if rx == app.dungeon.boss_room.rx && ry == app.dungeon.boss_room.ry {
         return MAT_BOSS_FLOOR;
+    }
+    // Target highlight beats cleared so we can re-highlight a room
+    // the warrior chose to revisit.
+    if app.warrior_target_room == Some(room_idx) {
+        return MAT_FLOOR_TARGET;
     }
     if app.cleared_rooms.contains(&room_idx) {
         return MAT_FLOOR_CLEARED;
