@@ -191,6 +191,12 @@ pub struct MeshRendererGpu {
     instance_mem: vk::DeviceMemory,
     instance_capacity: u32,
     instance_mapped: *mut u8,
+    /// Depth attachment for mesh-to-mesh occlusion. Cleared per frame
+    /// (LOAD_OP_CLEAR) — voxel pass doesn't share depth, so values in
+    /// here only constrain mesh-vs-mesh ordering.
+    depth_image: vk::Image,
+    depth_view: vk::ImageView,
+    depth_mem: vk::DeviceMemory,
 }
 
 #[repr(C)]
@@ -216,8 +222,14 @@ impl MeshRendererGpu {
         max_instances: u32,
     ) -> Result<Self> {
         let device = ctx.device();
-        let render_pass = create_overlay_render_pass(device, swapchain_format)?;
-        let framebuffers = create_framebuffers(device, render_pass, swapchain_views, swapchain_extent)?;
+        const DEPTH_FORMAT: vk::Format = vk::Format::D32_SFLOAT;
+        let (depth_image, depth_mem, depth_view) =
+            alloc_depth_image(ctx, swapchain_extent, DEPTH_FORMAT)?;
+        let render_pass =
+            create_overlay_render_pass(device, swapchain_format, DEPTH_FORMAT)?;
+        let framebuffers = create_framebuffers(
+            device, render_pass, swapchain_views, depth_view, swapchain_extent,
+        )?;
 
         let pipeline = GraphicsPipelineBuilder::new(ctx)
             .vertex_shader(VERT_SPV)
@@ -232,9 +244,11 @@ impl MeshRendererGpu {
                 vk::DescriptorType::STORAGE_BUFFER,
                 vk::ShaderStageFlags::VERTEX,
             )
-            .depth_write(false)
+            // Depth on for mesh-to-mesh ordering. Builder's defaults
+            // (depth_test=true, depth_write=true, compare=LESS) match
+            // our needs.
+            .depth_write(true)
             .cull_mode(vk::CullModeFlags::NONE)
-            .no_depth_test()
             .build()?;
 
         let instance_bytes = (max_instances as u64) * std::mem::size_of::<InstanceData>() as u64;
@@ -292,6 +306,9 @@ impl MeshRendererGpu {
             instance_mem,
             instance_capacity: max_instances,
             instance_mapped,
+            depth_image,
+            depth_view,
+            depth_mem,
         })
     }
 
@@ -377,7 +394,16 @@ impl MeshRendererGpu {
             cursor += n;
         }
 
-        let clear_values = [];
+        // Color attachment is LOAD_OP_LOAD (no clear); depth is
+        // LOAD_OP_CLEAR with depth=1.0 (far plane). Vulkan still expects
+        // a clear value at each attachment's index when LOAD is LOAD,
+        // but ignores it; we still have to pass two entries.
+        let clear_values = [
+            vk::ClearValue { color: vk::ClearColorValue { float32: [0.0; 4] } },
+            vk::ClearValue {
+                depth_stencil: vk::ClearDepthStencilValue { depth: 1.0, stencil: 0 },
+            },
+        ];
         let rp_begin = vk::RenderPassBeginInfo::default()
             .render_pass(self.render_pass)
             .framebuffer(self.framebuffers[image_index])
@@ -458,6 +484,9 @@ impl MeshRendererGpu {
                 device.destroy_framebuffer(*fb, None);
             }
             self.framebuffers.clear();
+            device.destroy_image_view(self.depth_view, None);
+            device.destroy_image(self.depth_image, None);
+            device.free_memory(self.depth_mem, None);
             device.destroy_render_pass(self.render_pass, None);
         }
         self.pipeline.destroy(ctx);
@@ -467,6 +496,7 @@ impl MeshRendererGpu {
 fn create_overlay_render_pass(
     device: &ash::Device,
     color_format: vk::Format,
+    depth_format: vk::Format,
 ) -> Result<vk::RenderPass> {
     let color_att = vk::AttachmentDescription::default()
         .format(color_format)
@@ -477,15 +507,32 @@ fn create_overlay_render_pass(
         .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
         .initial_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
         .final_layout(vk::ImageLayout::PRESENT_SRC_KHR);
+    // Depth attachment: cleared on entry, discarded on exit. Image lives
+    // for the lifetime of MeshRendererGpu; first frame's UNDEFINED →
+    // CLEAR transition happens implicitly via the LOAD_OP_CLEAR.
+    let depth_att = vk::AttachmentDescription::default()
+        .format(depth_format)
+        .samples(vk::SampleCountFlags::TYPE_1)
+        .load_op(vk::AttachmentLoadOp::CLEAR)
+        .store_op(vk::AttachmentStoreOp::DONT_CARE)
+        .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
+        .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+        .initial_layout(vk::ImageLayout::UNDEFINED)
+        .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
     let color_ref = vk::AttachmentReference {
         attachment: 0,
         layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
     };
+    let depth_ref = vk::AttachmentReference {
+        attachment: 1,
+        layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    };
     let color_refs = [color_ref];
     let subpass = vk::SubpassDescription::default()
         .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-        .color_attachments(&color_refs);
-    let atts = [color_att];
+        .color_attachments(&color_refs)
+        .depth_stencil_attachment(&depth_ref);
+    let atts = [color_att, depth_att];
     let subpasses = [subpass];
     let rp_ci = vk::RenderPassCreateInfo::default()
         .attachments(&atts)
@@ -497,12 +544,13 @@ fn create_framebuffers(
     device: &ash::Device,
     render_pass: vk::RenderPass,
     swapchain_views: &[vk::ImageView],
+    depth_view: vk::ImageView,
     extent: vk::Extent2D,
 ) -> Result<Vec<vk::Framebuffer>> {
     swapchain_views
         .iter()
         .map(|view| {
-            let attachments = [*view];
+            let attachments = [*view, depth_view];
             let fb_ci = vk::FramebufferCreateInfo::default()
                 .render_pass(render_pass)
                 .attachments(&attachments)
@@ -512,6 +560,54 @@ fn create_framebuffers(
             unsafe { device.create_framebuffer(&fb_ci, None) }.context("create_framebuffer")
         })
         .collect()
+}
+
+fn alloc_depth_image(
+    ctx: &VulkanContext,
+    extent: vk::Extent2D,
+    format: vk::Format,
+) -> Result<(vk::Image, vk::DeviceMemory, vk::ImageView)> {
+    let device = ctx.device();
+    let img_ci = vk::ImageCreateInfo::default()
+        .image_type(vk::ImageType::TYPE_2D)
+        .format(format)
+        .extent(vk::Extent3D { width: extent.width, height: extent.height, depth: 1 })
+        .mip_levels(1)
+        .array_layers(1)
+        .samples(vk::SampleCountFlags::TYPE_1)
+        .tiling(vk::ImageTiling::OPTIMAL)
+        .usage(vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT)
+        .sharing_mode(vk::SharingMode::EXCLUSIVE)
+        .initial_layout(vk::ImageLayout::UNDEFINED);
+    let image = unsafe { device.create_image(&img_ci, None) }.context("create_image (depth)")?;
+    let req = unsafe { device.get_image_memory_requirements(image) };
+    let mem_props =
+        unsafe { ctx.instance().get_physical_device_memory_properties(ctx.physical_device()) };
+    let mem_idx = find_memory_type(
+        &mem_props,
+        req.memory_type_bits,
+        vk::MemoryPropertyFlags::DEVICE_LOCAL,
+    )?;
+    let alloc_info = vk::MemoryAllocateInfo::default()
+        .allocation_size(req.size)
+        .memory_type_index(mem_idx);
+    let memory = unsafe { device.allocate_memory(&alloc_info, None) }
+        .context("allocate_memory (depth)")?;
+    unsafe { device.bind_image_memory(image, memory, 0) }.context("bind_image_memory (depth)")?;
+    let view_ci = vk::ImageViewCreateInfo::default()
+        .image(image)
+        .view_type(vk::ImageViewType::TYPE_2D)
+        .format(format)
+        .subresource_range(vk::ImageSubresourceRange {
+            aspect_mask: vk::ImageAspectFlags::DEPTH,
+            base_mip_level: 0,
+            level_count: 1,
+            base_array_layer: 0,
+            layer_count: 1,
+        });
+    let view = unsafe { device.create_image_view(&view_ci, None) }
+        .context("create_image_view (depth)")?;
+    Ok((image, memory, view))
 }
 
 fn alloc_host_visible_buffer(
