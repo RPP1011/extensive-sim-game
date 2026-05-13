@@ -222,9 +222,9 @@ impl ViewerApp {
         // the .sim's `init { hp: 200 }`) make 5v226 take ~3 minutes
         // wall-clock — far too long for a demo reel. With these
         // overrides a typical run resolves in ~30-60s.
-        const ARCHER_HP: f32 = 45.0;
-        const BRUTE_HP:  f32 = 90.0;
-        const GOBLIN_HP: f32 = 30.0;
+        const ARCHER_HP: f32 = 22.0;
+        const BRUTE_HP:  f32 = 45.0;
+        const GOBLIN_HP: f32 = 15.0;
         // Heroes stay at the .sim default 200 — they need to tank a few
         // hits to survive crossing each room.
         let agent_count = dungeon.total_agent_count();
