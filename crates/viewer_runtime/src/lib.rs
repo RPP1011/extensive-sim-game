@@ -70,6 +70,12 @@ pub const MAT_STEALTHED: u8 = 37;
 /// Per-tick damage flash — agents tinted bright white for a few frames
 /// after taking meaningful damage so combat hits are individually visible.
 pub const MAT_FLASH: u8 = 38;
+/// All floor cells tint to this when the dungeon is cleared (every
+/// enemy dead, ≥1 hero alive). Replaces MAT_FLOOR / MAT_BOSS_FLOOR.
+pub const MAT_VICTORY_FLOOR: u8 = 39;
+/// All floor cells tint to this on TPK (every hero dead). Replaces
+/// MAT_FLOOR / MAT_BOSS_FLOOR.
+pub const MAT_DEFEAT_FLOOR: u8 = 40;
 
 fn build_palette() -> MaterialPalette {
     let mut p = MaterialPalette::new();
@@ -94,6 +100,8 @@ fn build_palette() -> MaterialPalette {
     p.set(MAT_HP_RED,    palette_entry(230, 50,  50));  // bright red     — critical bar
     p.set(MAT_STEALTHED, palette_entry(110, 80, 130));  // muted purple   — rogue invisible
     p.set(MAT_FLASH,     palette_entry(255, 255, 255)); // pure white     — damage hit flash
+    p.set(MAT_VICTORY_FLOOR, palette_entry(80,  180, 100));// muted green  — dungeon cleared
+    p.set(MAT_DEFEAT_FLOOR,  palette_entry(180, 50,  50)); // muted red    — TPK
     p
 }
 
@@ -163,6 +171,11 @@ pub struct ViewerApp {
     /// when > 0, the painter overrides the agent's material to MAT_FLASH.
     /// Set to FLASH_FRAMES whenever an HP drop ≥ FLASH_DELTA is observed.
     flash_ticks: Vec<u8>,
+    /// `Some(true)` = dungeon cleared (all enemies dead, ≥1 hero alive).
+    /// `Some(false)` = TPK (all heroes dead).
+    /// `None` = sim still running. Set in `step()` at termination so the
+    /// bridge can tint the whole floor green or red.
+    pub outcome: Option<bool>,
 }
 
 impl ViewerApp {
@@ -229,6 +242,7 @@ impl ViewerApp {
             boss_slot,
             prev_hp: vec![0.0; agent_count as usize],
             flash_ticks: vec![0u8; agent_count as usize],
+            outcome: None,
         };
         viewer.refresh_snapshot();
         Some(viewer)
@@ -272,6 +286,15 @@ impl ViewerApp {
         }
         if (heroes_alive == 0 || enemies_alive == 0) && self.terminated_at_tick.is_none() {
             self.terminated_at_tick = Some(self.state.tick);
+            // Victory = at least one hero alive at termination. (We get
+            // here when one side hits 0, so the other side is the winner.)
+            self.outcome = Some(heroes_alive > 0);
+            eprintln!(
+                "[viewer_runtime] sim terminated at tick={} — {} (heroes={}/{}, enemies={})",
+                self.state.tick,
+                if heroes_alive > 0 { "DUNGEON CLEARED" } else { "TPK" },
+                heroes_alive, dungeon::N_HEROES, enemies_alive,
+            );
         }
     }
 
@@ -562,6 +585,18 @@ impl VoxelBridge {
     /// Per-frame refresh: clear last frame's agent cells, paint new
     /// agent positions, re-upload texture (regenerates mips).
     pub fn refresh(&mut self, ctx: &VulkanContext, app: &ViewerApp) -> Result<()> {
+        // If the sim ended this frame (or any earlier frame and we
+        // haven't yet tinted the floor), repaint every floor cell with
+        // the outcome color. Run unconditionally per-frame because the
+        // cell count is tiny and the alternative (one-shot dirty flag)
+        // is more state to manage.
+        if let Some(victory) = app.outcome {
+            let outcome_mat = if victory { MAT_VICTORY_FLOOR } else { MAT_DEFEAT_FLOOR };
+            for &(x, y) in &app.floor_cells {
+                self.cpu_grid.set(x, 0, y, outcome_mat);
+            }
+        }
+
         // Clear last frame's agents — restore floor or air based on
         // dungeon membership. Walls aren't in the agent layer (they
         // sit at z ∈ [0, ROOM_INTERIOR_Z)) so we don't touch them.
@@ -571,12 +606,16 @@ impl VoxelBridge {
             // sim coords (x, sim_y) which now equals (x, depth).
             if app.floor_cells.contains(&(x, depth)) {
                 if vert == 0 {
-                    let boss_room = app.dungeon.boss_room;
-                    let in_boss = x >= boss_room.rx * dungeon::SLOT_WIDTH
-                        && x < (boss_room.rx + 1) * dungeon::SLOT_WIDTH
-                        && depth >= boss_room.ry * dungeon::SLOT_WIDTH
-                        && depth < (boss_room.ry + 1) * dungeon::SLOT_WIDTH;
-                    let mat = if in_boss { MAT_BOSS_FLOOR } else { MAT_FLOOR };
+                    let mat = if let Some(victory) = app.outcome {
+                        if victory { MAT_VICTORY_FLOOR } else { MAT_DEFEAT_FLOOR }
+                    } else {
+                        let boss_room = app.dungeon.boss_room;
+                        let in_boss = x >= boss_room.rx * dungeon::SLOT_WIDTH
+                            && x < (boss_room.rx + 1) * dungeon::SLOT_WIDTH
+                            && depth >= boss_room.ry * dungeon::SLOT_WIDTH
+                            && depth < (boss_room.ry + 1) * dungeon::SLOT_WIDTH;
+                        if in_boss { MAT_BOSS_FLOOR } else { MAT_FLOOR }
+                    };
                     self.cpu_grid.set(x, vert, depth, mat);
                 } else {
                     self.cpu_grid.set(x, vert, depth, MAT_AIR);
