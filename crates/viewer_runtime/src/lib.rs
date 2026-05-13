@@ -53,6 +53,12 @@ pub const MAT_DEAD: u8 = 30;
 /// Boss agent — singular Brute in the boss room with 4x HP. Painted
 /// in a brighter accent so the climax target is immediately visible.
 pub const MAT_BOSS: u8 = 31;
+/// Enemy with `alert >= ALERT_TINT_LO` — visible "I think something
+/// is wrong" state. Overrides creature-type color while alerted.
+pub const MAT_ALERTED: u8 = 32;
+/// Enemy with `alert >= ALERT_TINT_HI` — visible "I know exactly
+/// what's happening" state. Maximum saturation.
+pub const MAT_PANICKED: u8 = 33;
 
 fn build_palette() -> MaterialPalette {
     let mut p = MaterialPalette::new();
@@ -70,6 +76,8 @@ fn build_palette() -> MaterialPalette {
     p.set(MAT_GOBLIN, palette_entry(95,  140, 70));  // dim green
     p.set(MAT_DEAD,   palette_entry(50,  50,  50));  // gray
     p.set(MAT_BOSS,   palette_entry(255, 60,  20));  // bright orange-red — the boss
+    p.set(MAT_ALERTED, palette_entry(240, 200, 30));  // amber — "something's wrong"
+    p.set(MAT_PANICKED, palette_entry(255, 50,  120));// hot pink — "they know"
     p
 }
 
@@ -99,6 +107,10 @@ pub struct AgentSnapshot {
     pub creature_type: u32,
     pub role: u32,
     pub hp: f32,
+    /// Per-tick alert level for enemies (`alert` field in dungeon_horde.sim).
+    /// 0 = calm; raises via missing-ally suspicion + ally-death broadcast +
+    /// sound-on-damage. Heroes always read 0.
+    pub alert: u32,
 }
 
 /// The viewer's host-side state. Owns the sim runtime, the CPU voxel
@@ -180,6 +192,7 @@ impl ViewerApp {
                     creature_type: 0,
                     role: 0,
                     hp: 0.0,
+                    alert: 0,
                 };
                 agent_count as usize
             ],
@@ -401,11 +414,13 @@ impl ViewerApp {
         let type_buf = self.state.agent_creature_type_buf.clone();
         let role_buf = self.state.agent_role_buf.clone();
         let hp_buf = self.state.agent_hp_buf.clone();
+        let alert_buf = self.state.agent_alert_buf.clone();
         let positions = read_positions(&mut self.state, n);
         let alive = read_agent_u32(&mut self.state, &alive_buf, n);
         let types = read_agent_u32(&mut self.state, &type_buf, n);
         let role  = read_agent_u32(&mut self.state, &role_buf, n);
         let hps   = read_agent_f32(&mut self.state, &hp_buf, n);
+        let alert = read_agent_u32(&mut self.state, &alert_buf, n);
         for slot in 0..n as usize {
             self.agents[slot] = AgentSnapshot {
                 pos: Vec3::new(positions[slot][0], positions[slot][1], positions[slot][2]),
@@ -413,6 +428,7 @@ impl ViewerApp {
                 creature_type: types[slot],
                 role: role[slot],
                 hp: hps[slot],
+                alert: alert[slot],
             };
         }
     }
@@ -530,12 +546,25 @@ impl VoxelBridge {
         // Paint each alive agent as a 2x2x2 splat one cell above the
         // floor (z ∈ [1, 3)) so they sit visibly on the floor without
         // sinking. Out-of-bounds cells are skipped.
+        // Alert thresholds — config.stealth.alert_step_ally_death = 2 and
+        // alert_step_missing = 1, so a few events suffice to cross LO; HI
+        // takes sustained engagement.
+        const ALERT_TINT_LO: u32 = 4;
+        const ALERT_TINT_HI: u32 = 12;
         for (slot_idx, agent) in app.agents().iter().enumerate() {
             if !agent.alive {
                 continue;
             }
             let mat = if app.boss_slot == Some(slot_idx as u32) {
                 MAT_BOSS
+            } else if agent.creature_type != dungeon::CT_HERO
+                && agent.alert >= ALERT_TINT_HI
+            {
+                MAT_PANICKED
+            } else if agent.creature_type != dungeon::CT_HERO
+                && agent.alert >= ALERT_TINT_LO
+            {
+                MAT_ALERTED
             } else {
                 material_for(agent.creature_type, agent.role)
             };
