@@ -586,21 +586,20 @@ impl Dungeon {
                 .get(&idx)
                 .map(|v| v.len() as u32)
                 .unwrap_or(0);
-            // Density target: ~50% of floor cells occupied at boss, ~30%
-            // at deep rooms, ~15% at shallow. Capped at 100 for the
-            // boss to keep the test tractable.
+            // Density target: ~6-12 enemies per shallow/mid room, ~24
+            // in the boss chamber. Must stay in sync with
+            // `viewer_runtime::dungeon` — viewer and pin must render
+            // the same sim.
             let raw_count = if room == self.boss_room {
-                (n_floor / 2).min(100)
+                (n_floor / 4).min(30)
             } else if dist == 1 {
-                // Adjacent rooms: light scout-line population so heroes
-                // meet enemies within the first ~30 ticks.
-                n_floor / 12
+                n_floor / 16
             } else if dist == 2 {
-                n_floor / 6
+                n_floor / 12
             } else if dist == 3 {
-                n_floor / 4
+                n_floor / 10
             } else {
-                n_floor / 3
+                n_floor / 8
             };
             // Floor-cell occupancy hard cap to leave at least 4 cells free.
             let count = raw_count.min(n_floor.saturating_sub(4));

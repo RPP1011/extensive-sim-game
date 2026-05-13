@@ -83,18 +83,20 @@ impl Dungeon {
             let idx = room.idx();
             let dist = *self.bfs_dist.get(&idx).unwrap_or(&0);
             let n_floor = self.floor_cells.get(&idx).map(|v| v.len() as u32).unwrap_or(0);
-            // Density formula copied from dungeon_horde_pin so the viewer
-            // renders the same population profile the test asserts on.
+            // Density formula tuned for visual quality (~6-12 enemies per
+            // shallow/mid room, ~24 in the boss chamber). Must stay in
+            // sync with `dungeon_horde_pin.rs::enemy_placements` — drift
+            // means viewer and pin render different sims.
             let raw_count = if room == self.boss_room {
-                (n_floor / 2).min(100)
+                (n_floor / 4).min(30)
             } else if dist == 1 {
-                n_floor / 12
+                n_floor / 16
             } else if dist == 2 {
-                n_floor / 6
+                n_floor / 12
             } else if dist == 3 {
-                n_floor / 4
+                n_floor / 10
             } else {
-                n_floor / 3
+                n_floor / 8
             };
             let count = raw_count.min(n_floor.saturating_sub(4));
             for slot in 0..count {
