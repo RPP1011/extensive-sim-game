@@ -1,7 +1,10 @@
 #version 450
 
 layout(location = 0) in vec3 in_position;
-layout(location = 1) in vec4 in_color;
+// Per-vertex color removed — voxel_engine's GraphicsPipelineBuilder
+// hardcodes vertex input as position-only (stride=12). Color comes
+// from per-instance `tint` instead, which matches the existing
+// agent-tinting scheme.
 
 // Per-instance data. Layout MUST match
 // `viewer_runtime::mesh_renderer::InstanceData` (mat4 + vec4 + 4×u32).
@@ -27,5 +30,5 @@ void main() {
     InstanceData inst = instance_buf.instances[gl_InstanceIndex];
     vec4 world_pos = inst.model * vec4(in_position, 1.0);
     gl_Position = pc.view_proj * world_pos;
-    v_color = in_color * inst.tint;
+    v_color = inst.tint;
 }
