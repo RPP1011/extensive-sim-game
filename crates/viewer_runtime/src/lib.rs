@@ -429,9 +429,32 @@ impl ViewerApp {
             any_change = true;
         }
 
+        // Cleric medic logic: prefer the lowest-HP wounded teammate's
+        // current room over warrior-following. CLERIC_HEAL_FLOOR mirrors
+        // config.dungeon.cleric_heal_floor (130.0) — the threshold above
+        // which the cleric's heal verb doesn't fire, so there's no point
+        // chasing teammates healthier than that.
+        const H_CLERIC: usize = 1;
+        const CLERIC_HEAL_FLOOR: f32 = 130.0;
+        let cleric_medic_target: Option<u32> = {
+            let mut lowest: Option<(usize, f32)> = None;
+            for h in 0..dungeon::N_HEROES as usize {
+                if h == H_CLERIC { continue; }
+                if alive[hero_start + h] == 0 { continue; }
+                let hp = hps[hero_start + h];
+                if hp >= CLERIC_HEAL_FLOOR { continue; }
+                match lowest {
+                    Some((_, prev)) if hp >= prev => {}
+                    _ => lowest = Some((h, hp)),
+                }
+            }
+            lowest.and_then(|(h, _)| current[h]).map(|c| c.idx())
+        };
+
         // Pass 3: every other hero. Followers cluster with the warrior;
-        // the rogue scouts one step ahead. If the warrior is dead,
-        // everyone falls back to per-hero frontier-greedy.
+        // the rogue scouts one step ahead; the cleric peels off to heal
+        // the lowest-HP wounded teammate. Warrior dead → per-hero
+        // frontier-greedy fallback.
         for h in 0..dungeon::N_HEROES as usize {
             if h == H_WARRIOR { continue; }
             let cand = match current[h] {
@@ -462,8 +485,13 @@ impl ViewerApp {
             } else if h == H_ROGUE {
                 // Scout one room ahead of the party.
                 warrior_target_after
+            } else if h == H_CLERIC {
+                // Medic: chase the wounded; default to warrior's room.
+                cleric_medic_target.unwrap_or_else(|| {
+                    warrior_current.map_or(cur_target, |c| c.idx())
+                })
             } else {
-                // Cleric / Ranger / Mage — cluster with the warrior.
+                // Ranger / Mage — cluster with the warrior.
                 warrior_current.map_or(cur_target, |c| c.idx())
             };
             if new_target != cur_target {
