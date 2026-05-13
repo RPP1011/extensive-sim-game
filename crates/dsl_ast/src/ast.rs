@@ -148,12 +148,19 @@ pub enum DebugDepthLit {
 /// `agent_count * <elem_bytes>`.
 ///
 /// Today's supported primitives mirror the q8-free arms of
-/// `AgentFieldTy`: `u32`, `f32`, `bool`. `i16` / `vec3` / `enum_u8`
-/// / option types are deferred — fixtures needing those should add
-/// the necessary `parse_field_ty` arm + sizing/init coverage in a
+/// `AgentFieldTy`: `u32`, `f32`, `bool`, `vec3` (Gap
+/// dungeon_stealth#3-vec3, 2026-05-12). `i16` / `enum_u8` / option
+/// types are deferred — fixtures needing those should add the
+/// necessary `parse_field_ty` arm + sizing/init coverage in a
 /// follow-up. Mirrors the `init` block precedent: the decl is
 /// extracted by `dsl_compiler::build_helper` directly from the
 /// parsed Program; no Compilation IR slot.
+///
+/// Storage shape per primitive (set by the auto-allocated
+/// `agent_<name>_buf` in build_helper):
+///   * `u32` / `f32` / `bool` — `agent_count * 4` bytes (`array<...>`)
+///   * `vec3` — `agent_count * 16` bytes (`array<vec3<f32>>`,
+///     std430-padded)
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct AgentFieldDecl {
     pub annotations: Vec<Annotation>,
@@ -161,8 +168,8 @@ pub struct AgentFieldDecl {
     /// Validated against the closed built-in set + duplicate
     /// `field` decls in the same Program by the resolver.
     pub name: String,
-    /// `"u32"` / `"f32"` / `"bool"` — checked by the compiler-side
-    /// interner against the `AgentFieldTy` allowlist.
+    /// `"u32"` / `"f32"` / `"bool"` / `"vec3"` — checked by the
+    /// compiler-side interner against the `AgentFieldTy` allowlist.
     pub ty_name: String,
     pub span: Span,
 }

@@ -182,14 +182,27 @@ pub fn elem_bytes(ty: AgentFieldTy) -> u64 {
 }
 
 /// Parse the surface type name from `field <name>: <ty_name>`. Today
-/// supports `u32`, `f32`, `bool` — the q8-free arms of
-/// `AgentFieldTy`. Returns `None` for unsupported surface names so
-/// the caller can surface a typed error.
+/// supports `u32`, `f32`, `bool`, and `vec3` — the q8-free arms of
+/// `AgentFieldTy` that the registry's buffer-sizing + WGSL-emit
+/// paths can already handle generically.
+///
+/// `vec3` resolves to `AgentFieldTy::Vec3` (the same primitive the
+/// built-in `pos` / `vel` columns use). Storage shape: one
+/// `vec3<f32>` per agent, std430-padded to 16 bytes per slot — see
+/// [`elem_bytes`]. Reads (`agents.<field>(self)` /
+/// `self.<field>`) return `vec3<f32>`; writes
+/// (`agents.set_<field>(target, v)`) accept `vec3<f32>`. The
+/// per-axis-scalar workaround used by `dungeon_stealth.sim`
+/// (`patrol_origin_x` / `_y` etc.) is no longer required.
+///
+/// Returns `None` for unsupported surface names so the caller can
+/// surface a typed error.
 pub fn parse_field_ty(ty_name: &str) -> Option<AgentFieldTy> {
     Some(match ty_name {
         "u32" => AgentFieldTy::U32,
         "f32" => AgentFieldTy::F32,
         "bool" => AgentFieldTy::Bool,
+        "vec3" => AgentFieldTy::Vec3,
         _ => return None,
     })
 }
@@ -211,7 +224,7 @@ pub fn populate(program: &dsl_ast::ast::Program) -> Vec<CustomFieldId> {
             let ty = parse_field_ty(&d.ty_name).unwrap_or_else(|| {
                 panic!(
                     "unknown custom field type `{}` for `field {}` at {:?} \
-                     (supported: u32, f32, bool)",
+                     (supported: u32, f32, bool, vec3)",
                     d.ty_name, d.name, d.span
                 )
             });
@@ -260,7 +273,25 @@ mod tests {
         assert_eq!(parse_field_ty("u32"), Some(AgentFieldTy::U32));
         assert_eq!(parse_field_ty("f32"), Some(AgentFieldTy::F32));
         assert_eq!(parse_field_ty("bool"), Some(AgentFieldTy::Bool));
-        assert_eq!(parse_field_ty("vec3"), None);
+        assert_eq!(parse_field_ty("vec3"), Some(AgentFieldTy::Vec3));
         assert_eq!(parse_field_ty("blarg"), None);
+    }
+
+    #[test]
+    fn vec3_field_uses_padded_elem_bytes() {
+        // std430 vec3 → vec4-padded → 16 bytes per slot. Mirrors the
+        // built-in `Pos` / `Vel` columns the per-fixture buffer
+        // alloc loop already sizes correctly via the same table.
+        assert_eq!(elem_bytes(AgentFieldTy::Vec3), 16);
+    }
+
+    #[test]
+    fn intern_vec3_round_trips() {
+        let id = intern_field("test_vec3_round_trip_field", AgentFieldTy::Vec3);
+        assert_eq!(id.ty(), AgentFieldTy::Vec3);
+        let found =
+            lookup_by_snake("test_vec3_round_trip_field").expect("must be present");
+        assert_eq!(id, found);
+        assert_eq!(found.ty(), AgentFieldTy::Vec3);
     }
 }

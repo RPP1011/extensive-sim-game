@@ -223,7 +223,7 @@ fn decl(c: &mut Cursor) -> PResult<Decl> {
 // Grammar:
 //   field <name>: <type>
 //
-// Where `<type>` is one of `u32`, `f32`, `bool`. Trailing semicolon
+// Where `<type>` is one of `u32`, `f32`, `bool`, `vec3`. Trailing semicolon
 // optional. Multiple `field` decls allowed per file; each registers a
 // new column the rest of the .sim source can read via `self.<name>` /
 // write via `agents.set_<name>(target, value)`. See `AgentFieldDecl`.
