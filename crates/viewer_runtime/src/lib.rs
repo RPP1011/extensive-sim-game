@@ -67,6 +67,9 @@ pub const MAT_HP_RED: u8 = 36;
 /// Rogue while stealth is active (stealth_until_tick > world.tick).
 /// Desaturated purple so the hero is still locatable but visibly "ghosted".
 pub const MAT_STEALTHED: u8 = 37;
+/// Per-tick damage flash — agents tinted bright white for a few frames
+/// after taking meaningful damage so combat hits are individually visible.
+pub const MAT_FLASH: u8 = 38;
 
 fn build_palette() -> MaterialPalette {
     let mut p = MaterialPalette::new();
@@ -90,6 +93,7 @@ fn build_palette() -> MaterialPalette {
     p.set(MAT_HP_YELLOW, palette_entry(230, 220, 40));  // bright yellow  — middle bar
     p.set(MAT_HP_RED,    palette_entry(230, 50,  50));  // bright red     — critical bar
     p.set(MAT_STEALTHED, palette_entry(110, 80, 130));  // muted purple   — rogue invisible
+    p.set(MAT_FLASH,     palette_entry(255, 255, 255)); // pure white     — damage hit flash
     p
 }
 
@@ -152,6 +156,13 @@ pub struct ViewerApp {
     /// in the boss room). `None` if no brute landed in boss_room
     /// (very small dungeons or unlucky rolls).
     pub boss_slot: Option<u32>,
+    /// Per-agent HP from the previous refresh — diffed against
+    /// current HP to detect damage events and trigger a flash.
+    prev_hp: Vec<f32>,
+    /// Per-agent remaining damage-flash frames. Decremented each tick;
+    /// when > 0, the painter overrides the agent's material to MAT_FLASH.
+    /// Set to FLASH_FRAMES whenever an HP drop ≥ FLASH_DELTA is observed.
+    flash_ticks: Vec<u8>,
 }
 
 impl ViewerApp {
@@ -216,6 +227,8 @@ impl ViewerApp {
             terminated_at_tick: None,
             hero_state,
             boss_slot,
+            prev_hp: vec![0.0; agent_count as usize],
+            flash_ticks: vec![0u8; agent_count as usize],
         };
         viewer.refresh_snapshot();
         Some(viewer)
@@ -439,7 +452,23 @@ impl ViewerApp {
         let hps   = read_agent_f32(&mut self.state, &hp_buf, n);
         let alert = read_agent_u32(&mut self.state, &alert_buf, n);
         let stealth = read_agent_u32(&mut self.state, &stealth_buf, n);
+        // Per-tick damage diff: flash agents that lost meaningful HP since
+        // the last refresh. FLASH_FRAMES of 4 at the ~100ms sim tick gives
+        // a visible ~400ms white pop on each hit.
+        const FLASH_DELTA: f32 = 3.0;
+        const FLASH_FRAMES: u8 = 4;
         for slot in 0..n as usize {
+            // Tick down any in-progress flash first so this frame consumes
+            // one frame of the existing window before we test for a new hit.
+            if self.flash_ticks[slot] > 0 {
+                self.flash_ticks[slot] -= 1;
+            }
+            let prev = self.prev_hp[slot];
+            let cur = hps[slot];
+            if alive[slot] != 0 && prev - cur >= FLASH_DELTA {
+                self.flash_ticks[slot] = FLASH_FRAMES;
+            }
+            self.prev_hp[slot] = cur;
             self.agents[slot] = AgentSnapshot {
                 pos: Vec3::new(positions[slot][0], positions[slot][1], positions[slot][2]),
                 alive: alive[slot] != 0,
@@ -578,7 +607,10 @@ impl VoxelBridge {
             let stealth_active = agent.creature_type == dungeon::CT_HERO
                 && agent.role == 5 /* Rogue */
                 && agent.stealth_until_tick > sim_tick;
-            let mat = if app.boss_slot == Some(slot_idx as u32) {
+            let flashing = app.flash_ticks[slot_idx] > 0;
+            let mat = if flashing {
+                MAT_FLASH
+            } else if app.boss_slot == Some(slot_idx as u32) {
                 MAT_BOSS
             } else if stealth_active {
                 MAT_STEALTHED
