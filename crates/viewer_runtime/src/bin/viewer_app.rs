@@ -242,6 +242,7 @@ fn main() {
     let camera = observer_camera();
 
     let event_loop = EventLoop::new().expect("EventLoop::new failed");
+    event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
     let mut viewer = WindowedViewer {
         seed,
         app,
