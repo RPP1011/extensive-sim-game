@@ -29,7 +29,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use viewer_runtime::{ViewerApp, VoxelBridge, BRIDGE_DIM_X, BRIDGE_DIM_Y};
+use viewer_runtime::{ViewerApp, VoxelBridge, BRIDGE_DIM_X, BRIDGE_DIM_Z};
 use voxel_engine::camera::FreeCamera;
 use voxel_engine::render::VoxelRenderer;
 use voxel_engine::vulkan::instance::VulkanContext;
@@ -53,12 +53,12 @@ const DEFAULT_SEED: u64 = 0xD007_BEEF_5_7EA1;
 /// (Y, since voxel_engine is Y-up) is enough to frame the whole
 /// dungeon vertically.
 fn observer_camera() -> FreeCamera {
+    // Bridge grid is (X horizontal, Y vertical, Z depth) post axis-swap.
+    // Centroid in the X-Z plane; camera sits above on the Y axis.
     let cx = BRIDGE_DIM_X as f32 / 2.0;
-    let cz = BRIDGE_DIM_Y as f32 / 2.0;
-    // Top-down: position above (high Y), looking down at the centroid.
-    // Height = max(GRID_X, GRID_Y) ~= covers the full dungeon at the
-    // renderer's default ~60° vertical FOV.
-    let height = BRIDGE_DIM_X.max(BRIDGE_DIM_Y) as f32 + 8.0;
+    let cz = BRIDGE_DIM_Z as f32 / 2.0;
+    // Height covers the full X-Z floor at the renderer's default ~60° FOV.
+    let height = BRIDGE_DIM_X.max(BRIDGE_DIM_Z) as f32 + 8.0;
     FreeCamera::new(
         glam::Vec3::new(cx, height, cz),
         glam::Vec3::new(cx, 0.0, cz),

@@ -231,8 +231,8 @@ impl ViewerApp {
 /// `GRID_X × GRID_Y × GRID_Z` plus a few cells of vertical headroom
 /// for agent splats above the floor.
 pub const BRIDGE_DIM_X: u32 = GRID_X;
-pub const BRIDGE_DIM_Y: u32 = GRID_Y;
-pub const BRIDGE_DIM_Z: u32 = GRID_Z + 4; // 4 cells of headroom above the dungeon
+pub const BRIDGE_DIM_Y: u32 = GRID_Z + 4; // vertical (renderer Y-up); GRID_Z + headroom for agent splats
+pub const BRIDGE_DIM_Z: u32 = GRID_Y; // depth (sim's horizontal Y axis)
 
 /// World-space `(0, 0, 0)` corner of the bridge grid. We anchor at
 /// world origin; sim positions are in `[0, GRID_X)` so they map
@@ -267,10 +267,12 @@ impl VoxelBridge {
         for x in 0..GRID_X {
             for y in 0..GRID_Y {
                 if app.floor_cells.contains(&(x, y)) {
-                    cpu_grid.set(x, y, 0, MAT_FLOOR);
+                    // sim (x, y, 0) → renderer (x, 0, y): floor sits at vertical=0, depth=sim_y
+                    cpu_grid.set(x, 0, y, MAT_FLOOR);
                 } else {
-                    for z in 0..ROOM_INTERIOR_Z.min(GRID_Z) {
-                        cpu_grid.set(x, y, z, MAT_WALL);
+                    // walls extend up the vertical (renderer Y) axis
+                    for vert in 0..ROOM_INTERIOR_Z.min(GRID_Z) {
+                        cpu_grid.set(x, vert, y, MAT_WALL);
                     }
                 }
             }
@@ -293,21 +295,21 @@ impl VoxelBridge {
         // Clear last frame's agents — restore floor or air based on
         // dungeon membership. Walls aren't in the agent layer (they
         // sit at z ∈ [0, ROOM_INTERIOR_Z)) so we don't touch them.
-        for &(x, y, z) in &self.last_agent_cells {
-            // Floor layer (z=0): restore floor mat for floor cells,
-            // wall otherwise. Above-floor layers (z>0) restore to
-            // air for floor cells, wall otherwise.
-            if app.floor_cells.contains(&(x, y)) {
-                if z == 0 {
-                    self.cpu_grid.set(x, y, z, MAT_FLOOR);
+        for &(x, vert, depth) in &self.last_agent_cells {
+            // Restore each agent cell. Note: post axis-swap, the bridge
+            // grid is (x, vertical, depth). Floor occupancy is keyed on
+            // sim coords (x, sim_y) which now equals (x, depth).
+            if app.floor_cells.contains(&(x, depth)) {
+                if vert == 0 {
+                    self.cpu_grid.set(x, vert, depth, MAT_FLOOR);
                 } else {
-                    self.cpu_grid.set(x, y, z, MAT_AIR);
+                    self.cpu_grid.set(x, vert, depth, MAT_AIR);
                 }
             } else {
-                if z < ROOM_INTERIOR_Z.min(GRID_Z) {
-                    self.cpu_grid.set(x, y, z, MAT_WALL);
+                if vert < ROOM_INTERIOR_Z.min(GRID_Z) {
+                    self.cpu_grid.set(x, vert, depth, MAT_WALL);
                 } else {
-                    self.cpu_grid.set(x, y, z, MAT_AIR);
+                    self.cpu_grid.set(x, vert, depth, MAT_AIR);
                 }
             }
         }
@@ -322,24 +324,23 @@ impl VoxelBridge {
             }
             let mat = material_for(agent.creature_type, agent.role);
             let cx = agent.pos.x.floor() as i32;
-            let cy = agent.pos.y.floor() as i32;
-            // Ignore the sim's z (heroes/enemies sit at z=1 in dungeon
-            // coords; we paint at world cells z=1..3 above the floor).
+            let cd = agent.pos.y.floor() as i32; // sim_y → renderer depth
+            // 2x2x2 splat: span (x, x+1) × vertical (1..3) × depth (cd, cd+1)
             for dx in 0..2 {
-                for dy in 0..2 {
-                    for dz in 0..2 {
+                for d_depth in 0..2 {
+                    for d_vert in 0..2 {
                         let x = cx + dx;
-                        let y = cy + dy;
-                        let z = 1 + dz;
-                        if x < 0 || y < 0 || z < 0 {
+                        let depth = cd + d_depth;
+                        let vert = 1 + d_vert;
+                        if x < 0 || depth < 0 || vert < 0 {
                             continue;
                         }
-                        let (x, y, z) = (x as u32, y as u32, z as u32);
-                        if x >= BRIDGE_DIM_X || y >= BRIDGE_DIM_Y || z >= BRIDGE_DIM_Z {
+                        let (x, vert, depth) = (x as u32, vert as u32, depth as u32);
+                        if x >= BRIDGE_DIM_X || vert >= BRIDGE_DIM_Y || depth >= BRIDGE_DIM_Z {
                             continue;
                         }
-                        self.cpu_grid.set(x, y, z, mat);
-                        self.last_agent_cells.push((x, y, z));
+                        self.cpu_grid.set(x, vert, depth, mat);
+                        self.last_agent_cells.push((x, vert, depth));
                     }
                 }
             }
