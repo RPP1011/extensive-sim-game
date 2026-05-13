@@ -349,16 +349,32 @@ impl ApplicationHandler for WindowedViewer {
                     for i in 0..5 { bucket_slot[i] = gfx.hero_slots[i]; }
                     for i in 0..3 { bucket_slot[5 + i] = gfx.enemy_slots[i]; }
                     if gfx.mesh.is_some() {
-                        for agent in self.app.agents() {
+                        for (idx, agent) in self.app.agents().iter().enumerate() {
                             if !agent.alive { continue; }
                             // sim (x, y, z) -> renderer (x, z, y) — same swap
-                            // the voxel bridge applies. Without this, meshes
-                            // don't land on the same cells the splats use.
+                            // the voxel bridge applies.
                             let mesh_pos = glam::Vec3::new(
                                 agent.pos.x, agent.pos.z, agent.pos.y,
                             );
                             let tint = tint_for_agent(agent.creature_type, agent.role);
-                            let inst = InstanceData::from_position(mesh_pos, /*scale=*/ 0.8, tint);
+                            // Per-creature-type scale gives visible size
+                            // hierarchy: goblin < archer < hero < brute < BOSS.
+                            // Boss = matches the boss_slot the bridge
+                            // already tracks; gets a dramatic 2x.
+                            let scale = if Some(idx as u32) == self.app.boss_slot {
+                                1.8
+                            } else if agent.creature_type == 3 /*HERO*/ {
+                                0.85
+                            } else if agent.creature_type == 1 /*BRUTE*/ {
+                                1.1
+                            } else if agent.creature_type == 0 /*ARCHER*/ {
+                                0.80
+                            } else if agent.creature_type == 2 /*GOBLIN*/ {
+                                0.65
+                            } else {
+                                0.75
+                            };
+                            let inst = InstanceData::from_position(mesh_pos, scale, tint);
                             let bucket = if agent.creature_type == 3 /*HERO*/ {
                                 ((agent.role as i32) - 1).clamp(0, 4) as usize
                             } else if agent.creature_type <= 2 {
