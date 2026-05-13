@@ -25,10 +25,16 @@ layout(push_constant) uniform PushConstants {
 } pc;
 
 layout(location = 0) out vec4 v_color;
+// Local Y of the vertex — used by the fragment shader to fake vertical
+// lighting (top brighter than bottom). Cheap stand-in for proper
+// normal-based diffuse since voxel_engine's pipeline builder doesn't
+// support multi-attribute vertex input today.
+layout(location = 1) out float v_local_y;
 
 void main() {
     InstanceData inst = instance_buf.instances[gl_InstanceIndex];
     vec4 world_pos = inst.model * vec4(in_position, 1.0);
     gl_Position = pc.view_proj * world_pos;
     v_color = inst.tint;
+    v_local_y = in_position.y;
 }
