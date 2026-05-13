@@ -312,9 +312,18 @@ impl ApplicationHandler for WindowedViewer {
                         for agent in self.app.agents() {
                             if !agent.alive { continue; }
                             let tint = tint_for_agent(agent.creature_type, agent.role);
+                            // sim (x, y, z) -> renderer (x, z, y) — same Z↔Y
+                            // swap the voxel bridge applies when painting agent
+                            // cells, so meshes land on the same cells the splats
+                            // used to occupy.
+                            let mesh_pos = glam::Vec3::new(
+                                agent.pos.x,
+                                agent.pos.z,
+                                agent.pos.y,
+                            );
                             instances.push(InstanceData::from_position(
-                                agent.pos,
-                                /*scale=*/ 1.5,
+                                mesh_pos,
+                                /*scale=*/ 0.8,
                                 tint,
                             ));
                         }
