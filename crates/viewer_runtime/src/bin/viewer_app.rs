@@ -62,14 +62,16 @@ fn observer_camera() -> FreeCamera {
     // Centroid in the X-Z plane; camera sits above on the Y axis.
     let cx = BRIDGE_DIM_X as f32 / 2.0;
     let cz = BRIDGE_DIM_Z as f32 / 2.0;
-    // Height covers the full X-Z floor at the renderer's default ~60° FOV.
+    // 3/4 isometric-ish view: eye is pulled back ~0.7× height along +Z and
+    // the look-at target is lifted slightly off the floor so character
+    // meshes (~1 unit tall, planted at Y=1) sit mid-frame instead of
+    // being squashed at the bottom of a steep top-down. Tilt of ~35° off
+    // vertical gives a clear read of model 3D shape while still showing
+    // the dungeon layout.
     let height = BRIDGE_DIM_X.max(BRIDGE_DIM_Z) as f32 + 8.0;
-    // Tilt the camera off perfect vertical to avoid gimbal lock — straight-down
-    // (-Y forward) with up=+Y makes Mat4::look_at_rh degenerate. Pulling the eye
-    // back along +Z gives a high-angle bird's-eye view.
     FreeCamera::new(
-        glam::Vec3::new(cx, height, cz + height * 0.4),
-        glam::Vec3::new(cx, 0.0, cz),
+        glam::Vec3::new(cx, height, cz + height * 0.7),
+        glam::Vec3::new(cx, 1.5, cz),
     )
 }
 
