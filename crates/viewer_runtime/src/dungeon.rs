@@ -22,17 +22,17 @@ use sims::dungeon_horde::GeneratedRuntime;
 
 pub const N_HEROES: u32 = 5;
 
-pub const GRID_X: u32 = 126;
-pub const GRID_Y: u32 = 126;
+pub const GRID_X: u32 = 234;
+pub const GRID_Y: u32 = 234;
 pub const GRID_Z: u32 = 8;
-pub const SLOTS_PER_ROW: u32 = 7;
-pub const SLOT_WIDTH: u32 = 18;
+pub const SLOTS_PER_ROW: u32 = 9;
+pub const SLOT_WIDTH: u32 = 26;
 pub const ROOM_INTERIOR_Z: u32 = 6;
 pub const STONE: u8 = 1;
 
-pub const TARGET_ROOMS: usize = 22;
-pub const CA_INIT_WALL_PCT: u32 = 38;
-pub const CA_ITERATIONS: usize = 4;
+pub const TARGET_ROOMS: usize = 24;
+pub const CA_INIT_WALL_PCT: u32 = 48;
+pub const CA_ITERATIONS: usize = 5;
 
 pub const CT_ARCHER: u32 = 0;
 pub const CT_BRUTE: u32 = 1;
@@ -87,15 +87,15 @@ impl Dungeon {
             let dist = *self.bfs_dist.get(&idx).unwrap_or(&0);
             let n_floor = self.floor_cells.get(&idx).map(|v| v.len() as u32).unwrap_or(0);
             let raw_count = if room == self.boss_room {
-                (n_floor / 6).min(30)
+                (n_floor / 8).min(40)
             } else if dist == 1 {
-                n_floor / 48
+                n_floor / 64
             } else if dist == 2 {
-                n_floor / 24
+                n_floor / 36
             } else if dist == 3 {
-                n_floor / 16
+                n_floor / 24
             } else {
-                n_floor / 12
+                n_floor / 18
             };
             let count = raw_count.min(n_floor.saturating_sub(4));
             for slot in 0..count {
