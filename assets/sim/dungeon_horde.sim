@@ -363,7 +363,14 @@ physics HeroExplore {
     let dist = length(toward);
     if (dist > 1.0) {
       let step = (toward / dist) * config.dungeon.hero_move_speed;
-      agents.set_pos(self, self.pos + step);
+      let new_pos = self.pos + step;
+      // Voxel collision: only commit the step if a straight line from
+      // current to candidate position is clear. `terrain.line_of_sight`
+      // walks the voxel grid and returns false if any cell along the
+      // segment is a wall. Replaces the previous through-walls behavior.
+      if (terrain.line_of_sight(self.pos, new_pos)) {
+        agents.set_pos(self, new_pos);
+      }
     }
   }
 }
@@ -396,7 +403,9 @@ physics GoblinCharge {
     } else {
       self.pos
     };
-    agents.set_pos(self, new_pos);
+    if (terrain.line_of_sight(self.pos, new_pos)) {
+      agents.set_pos(self, new_pos);
+    }
   }
 }
 
@@ -419,7 +428,9 @@ physics BruteCharge {
     } else {
       self.pos
     };
-    agents.set_pos(self, new_pos);
+    if (terrain.line_of_sight(self.pos, new_pos)) {
+      agents.set_pos(self, new_pos);
+    }
   }
 }
 
