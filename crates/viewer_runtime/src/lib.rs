@@ -403,6 +403,22 @@ impl ViewerApp {
             warrior_target_room: None,
         };
         viewer.refresh_snapshot();
+        // Diagnostic: confirm host-seeded hero state. If creature_type
+        // != CT_HERO or role != 1..5 here, the mesh-pass bucketing
+        // can't find the right slot and heroes fall through to
+        // voxel splat only.
+        {
+            let n = viewer.agent_count as usize;
+            let hero_start = n - dungeon::N_HEROES as usize;
+            for h in 0..dungeon::N_HEROES as usize {
+                let a = &viewer.agents[hero_start + h];
+                eprintln!(
+                    "[viewer_runtime] hero[{h}] slot={} ct={} role={} alive={} pos=({:.1},{:.1},{:.1})",
+                    hero_start + h, a.creature_type, a.role, a.alive,
+                    a.pos.x, a.pos.y, a.pos.z,
+                );
+            }
+        }
         Some(viewer)
     }
 
