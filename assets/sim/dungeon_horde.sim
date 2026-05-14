@@ -363,14 +363,14 @@ physics HeroExplore {
     let dist = length(toward);
     if (dist > 1.0) {
       let step = (toward / dist) * config.dungeon.hero_move_speed;
-      let new_pos = self.pos + step;
-      // Voxel collision: only commit the step if a straight line from
-      // current to candidate position is clear. `terrain.line_of_sight`
-      // walks the voxel grid and returns false if any cell along the
-      // segment is a wall. Replaces the previous through-walls behavior.
-      if (terrain.line_of_sight(self.pos, new_pos)) {
-        agents.set_pos(self, new_pos);
-      }
+      // Wall-collision LoS check removed — heroes were getting stuck
+      // at room boundaries because the straight line from the spawn
+      // room centroid to the next room's centroid crosses the wall
+      // (the 2-cell door is at a random Y offset, not centered).
+      // Without door-aware pathfinding in the host AI, heroes
+      // freeze at the wall and combat stalls. Reverting to "walks
+      // through walls" until door pathfinding is wired up.
+      agents.set_pos(self, self.pos + step);
     }
   }
 }
