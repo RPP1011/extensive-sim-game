@@ -419,8 +419,8 @@ impl ApplicationHandler for WindowedViewer {
                 }
                 // Integrate held-key pan/zoom for this frame.
                 {
-                    const PAN_SPEED: f32 = 0.6;
-                    const ZOOM_RATE: f32 = 0.97;
+                    const PAN_SPEED: f32 = 0.1;
+                    const ZOOM_RATE: f32 = 0.99;
                     let mut dx = 0.0_f32;
                     let mut dz = 0.0_f32;
                     if self.held_keys.contains("w") || self.held_keys.contains("ArrowUp") { dz -= PAN_SPEED; }
