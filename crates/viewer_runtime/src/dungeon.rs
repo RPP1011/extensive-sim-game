@@ -688,6 +688,49 @@ impl HeroExploreState {
 /// fall back to any adjacent room if every neighbour was already
 /// visited (so heroes can retreat or loop). Tied to the hero's
 /// per-tick PCG so picks are deterministic across replays.
+/// Smart retreat target: nearest slot-adjacent room that's both
+/// cleared (no living enemies) AND known to the hero (in their
+/// knowledge bitmap). Falls back to `spawn_idx` if no qualifying
+/// neighbour exists. Lets wounded heroes recover one room back
+/// instead of backtracking the full path to spawn.
+pub fn pick_retreat_target(
+    dungeon: &Dungeon,
+    from: RoomSlot,
+    hero_known: u64,
+    cleared_rooms: &std::collections::BTreeSet<u32>,
+    spawn_idx: u32,
+) -> u32 {
+    let present_set: std::collections::BTreeSet<RoomSlot> =
+        dungeon.rooms.iter().copied().collect();
+    let cur_dist = dungeon.bfs_dist.get(&from.idx()).copied().unwrap_or(u32::MAX);
+    // Pick adjacent rooms that are present + known + cleared, prefer the
+    // one whose BFS distance from spawn is _smaller_ than current (i.e.
+    // toward spawn — feels like genuine retreat instead of side-stepping).
+    let mut best: Option<(u32, u32)> = None; // (room_idx, bfs_dist)
+    for (dx, dy) in [(0i32, 1i32), (0, -1), (1, 0), (-1, 0)] {
+        let nx = from.rx as i32 + dx;
+        let ny = from.ry as i32 + dy;
+        if nx < 0 || ny < 0
+            || (nx as u32) >= SLOTS_PER_ROW
+            || (ny as u32) >= SLOTS_PER_ROW
+        {
+            continue;
+        }
+        let n = RoomSlot::new(nx as u32, ny as u32);
+        if !present_set.contains(&n) { continue; }
+        let n_idx = n.idx();
+        if (hero_known & (1u64 << n_idx)) == 0 { continue; }
+        if !cleared_rooms.contains(&n_idx) { continue; }
+        let n_dist = dungeon.bfs_dist.get(&n_idx).copied().unwrap_or(u32::MAX);
+        if n_dist > cur_dist { continue; } // require step toward spawn
+        match best {
+            Some((_, bd)) if n_dist >= bd => {}
+            _ => best = Some((n_idx, n_dist)),
+        }
+    }
+    best.map(|(i, _)| i).unwrap_or(spawn_idx)
+}
+
 pub fn pick_next_target(
     dungeon: &Dungeon,
     from: RoomSlot,

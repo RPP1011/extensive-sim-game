@@ -642,7 +642,12 @@ impl ViewerApp {
                             )
                         }
                     } else if !retreating && hp < RETREAT_HP {
-                        spawn_idx
+                        dungeon::pick_retreat_target(
+                            &self.dungeon, cand,
+                            self.hero_known_rooms[H_WARRIOR],
+                            &self.cleared_rooms,
+                            spawn_idx,
+                        )
                     } else if boss_push && !retreating {
                         // Once 60%+ cleared, march to the climax instead
                         // of wandering frontier-greedy.
@@ -707,7 +712,12 @@ impl ViewerApp {
                     tick, h as u32, self.seed,
                 )
             } else if !retreating && hp < RETREAT_HP {
-                spawn_idx
+                dungeon::pick_retreat_target(
+                    &self.dungeon, cand,
+                    self.hero_known_rooms[h],
+                    &self.cleared_rooms,
+                    spawn_idx,
+                )
             } else if !warrior_alive {
                 // No leader — fall back to per-hero exploration.
                 if cand.idx() == cur_target {
