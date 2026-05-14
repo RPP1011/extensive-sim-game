@@ -16,11 +16,14 @@ use glam::{Vec3, Vec4};
 use std::path::Path;
 
 /// CPU-side static mesh loaded from a glTF file. Vertices are
-/// position + optional color; indices are u32. Triangle-list topology.
+/// position + normals + color + optional skinning data; indices are
+/// u32. Triangle-list topology.
 ///
-/// Future: skinning weights/joints + per-mesh bone-binding metadata.
-/// The current shape is the minimum-viable for "render N instances
-/// of one mesh"; we add skinning fields when actual animations land.
+/// Skinning is loaded but not yet consumed by the renderer — the
+/// vertex shader doesn't bind joint/weight attributes today. Having
+/// the data on disk + in MeshCpu lets us wire a skinning pipeline
+/// later (Phase 3) without re-touching the asset loader. The 4-joint
+/// limit matches the glTF spec's JOINTS_0/WEIGHTS_0 layout.
 pub struct MeshCpu {
     pub positions: Vec<Vec3>,
     /// Per-vertex normals from the glTF NORMAL_0 attribute. Defaults to
@@ -32,6 +35,13 @@ pub struct MeshCpu {
     /// the glTF doesn't ship colors — the renderer's per-instance tint
     /// is the primary recoloring channel anyway.
     pub colors: Vec<Vec4>,
+    /// Per-vertex joint indices (JOINTS_0). Each entry binds up to 4
+    /// bones; weights[i] holds the corresponding influence. Empty Vec
+    /// when the glTF has no skin — most non-character meshes skip this.
+    pub joints: Vec<[u16; 4]>,
+    /// Per-vertex skinning weights (WEIGHTS_0). Sums to ~1.0 per vertex
+    /// when normalised. Empty when no skin.
+    pub weights: Vec<[f32; 4]>,
     pub indices: Vec<u32>,
     /// Source file path for debug / error messages.
     pub source: String,
@@ -79,7 +89,20 @@ impl MeshCpu {
             None => vec![Vec4::ONE; positions.len()],
         };
 
-        Ok(Self { positions, normals, colors, indices, source: path_str })
+        // Skinning: JOINTS_0 + WEIGHTS_0 if the mesh has a skin. Kenney
+        // mini-characters do; static props won't. Loaded but not yet
+        // consumed by the shader — the vertex input is still
+        // position + normal only. Wire later when adding animation.
+        let joints: Vec<[u16; 4]> = match reader.read_joints(0) {
+            Some(j) => j.into_u16().collect(),
+            None => Vec::new(),
+        };
+        let weights: Vec<[f32; 4]> = match reader.read_weights(0) {
+            Some(w) => w.into_f32().collect(),
+            None => Vec::new(),
+        };
+
+        Ok(Self { positions, normals, colors, joints, weights, indices, source: path_str })
     }
 
     pub fn vertex_count(&self) -> usize { self.positions.len() }
