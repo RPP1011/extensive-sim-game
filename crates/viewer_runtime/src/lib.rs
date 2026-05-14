@@ -1091,22 +1091,35 @@ impl VoxelBridge {
             };
             let cx = agent.pos.x.floor() as i32;
             let cd = agent.pos.y.floor() as i32; // sim_y → renderer depth
-            // 2x2x2 splat: span (x, x+1) × vertical (1..3) × depth (cd, cd+1)
-            for dx in 0..2 {
-                for d_depth in 0..2 {
-                    for d_vert in 0..2 {
-                        let x = cx + dx;
-                        let depth = cd + d_depth;
-                        let vert = 1 + d_vert;
-                        if x < 0 || depth < 0 || vert < 0 {
-                            continue;
+            // Voxel splat painting: meshes are now the primary agent
+            // visualization, so we suppress the 2x2x2 cube for ordinary
+            // alive frames. Damage flash + heal flash + boss + alert
+            // states still paint the splat so combat events remain
+            // legible at the splat layer (the mesh-pass tint blends
+            // are subtle compared to a full bright cube).
+            let paint_splat = flashing
+                || healing
+                || app.boss_slot == Some(slot_idx as u32)
+                || (agent.creature_type != dungeon::CT_HERO
+                    && agent.alert >= ALERT_TINT_LO);
+            if paint_splat {
+                // 2x2x2 splat: span (x, x+1) × vertical (1..3) × depth (cd, cd+1)
+                for dx in 0..2 {
+                    for d_depth in 0..2 {
+                        for d_vert in 0..2 {
+                            let x = cx + dx;
+                            let depth = cd + d_depth;
+                            let vert = 1 + d_vert;
+                            if x < 0 || depth < 0 || vert < 0 {
+                                continue;
+                            }
+                            let (x, vert, depth) = (x as u32, vert as u32, depth as u32);
+                            if x >= BRIDGE_DIM_X || vert >= BRIDGE_DIM_Y || depth >= BRIDGE_DIM_Z {
+                                continue;
+                            }
+                            self.cpu_grid.set(x, vert, depth, mat);
+                            self.last_agent_cells.push((x, vert, depth));
                         }
-                        let (x, vert, depth) = (x as u32, vert as u32, depth as u32);
-                        if x >= BRIDGE_DIM_X || vert >= BRIDGE_DIM_Y || depth >= BRIDGE_DIM_Z {
-                            continue;
-                        }
-                        self.cpu_grid.set(x, vert, depth, mat);
-                        self.last_agent_cells.push((x, vert, depth));
                     }
                 }
             }

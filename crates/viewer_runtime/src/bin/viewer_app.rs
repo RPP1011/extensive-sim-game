@@ -442,18 +442,24 @@ impl ApplicationHandler for WindowedViewer {
                             // hierarchy: goblin < archer < hero < brute < BOSS.
                             // Boss = matches the boss_slot the bridge
                             // already tracks; gets a dramatic 2x.
+                            // Mesh scales — Kenney mini-characters are ~1
+                            // unit tall in source, so a scale of N gives an
+                            // N-unit-tall character. We need them visibly
+                            // larger than the 2-unit voxel splats they
+                            // replace, so all values multiplied ~3x from
+                            // their initial guess.
                             let base_scale = if Some(idx as u32) == self.app.boss_slot {
-                                1.8
+                                5.0
                             } else if agent.creature_type == 3 /*HERO*/ {
-                                0.85
+                                2.5
                             } else if agent.creature_type == 1 /*BRUTE*/ {
-                                1.1
+                                3.2
                             } else if agent.creature_type == 0 /*ARCHER*/ {
-                                0.80
+                                2.4
                             } else if agent.creature_type == 2 /*GOBLIN*/ {
-                                0.65
+                                1.9
                             } else {
-                                0.75
+                                2.2
                             };
                             // Death fade: scale shrinks from 1.0 → 0.0 over
                             // DEATH_FADE_TICKS, tint dims to 40%.
