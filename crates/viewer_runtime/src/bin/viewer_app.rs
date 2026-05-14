@@ -97,6 +97,16 @@ struct WindowedViewer {
     /// advance and auto-restart is suppressed; rendering still
     /// happens so the user can study the frozen frame.
     paused: bool,
+    /// Camera pan offset in renderer XZ. Added to the look-at target
+    /// each frame; eye position follows so the camera slides over the
+    /// dungeon. Reset on auto-restart / R.
+    pan_xz: glam::Vec2,
+    /// Camera zoom factor. Multiplicative on the base eye height; <1 =
+    /// closer, >1 = farther. Reset on auto-restart / R.
+    zoom: f32,
+    /// Held-key set for per-frame pan/zoom integration. Updated on
+    /// KeyboardInput Pressed/Released events.
+    held_keys: std::collections::HashSet<String>,
     /// Total runs completed in this session (incremented on each
     /// auto-restart). Drives the cross-run aggregate line.
     session_runs: u32,
@@ -246,9 +256,19 @@ impl ApplicationHandler for WindowedViewer {
     ) {
         match event {
             WindowEvent::KeyboardInput {
-                event: KeyEvent { logical_key, state: ElementState::Pressed, repeat: false, .. },
+                event: KeyEvent { ref logical_key, state, repeat: false, .. },
                 ..
             } => {
+                let key_name = key_to_name(logical_key);
+                match state {
+                    ElementState::Pressed => {
+                        if let Some(n) = key_name { self.held_keys.insert(n); }
+                    }
+                    ElementState::Released => {
+                        if let Some(n) = key_name { self.held_keys.remove(&n); }
+                        return; // don't trigger one-shots on release
+                    }
+                }
                 match logical_key {
                     Key::Named(NamedKey::Space) => {
                         self.paused = !self.paused;
@@ -272,6 +292,8 @@ impl ApplicationHandler for WindowedViewer {
                             self.last_tick = Instant::now();
                             self.terminated_at_wall = None;
                             self.paused = false;
+                            self.pan_xz = glam::Vec2::ZERO;
+                            self.zoom = 1.0;
                             if let Some(gfx) = self.gfx.as_mut() {
                                 let _ = unsafe { gfx.ctx.device().device_wait_idle() };
                                 let old_bridge = std::mem::replace(
@@ -395,6 +417,37 @@ impl ApplicationHandler for WindowedViewer {
                         }
                     }
                 }
+                // Integrate held-key pan/zoom for this frame.
+                {
+                    const PAN_SPEED: f32 = 0.6;
+                    const ZOOM_RATE: f32 = 0.97;
+                    let mut dx = 0.0_f32;
+                    let mut dz = 0.0_f32;
+                    if self.held_keys.contains("w") || self.held_keys.contains("ArrowUp") { dz -= PAN_SPEED; }
+                    if self.held_keys.contains("s") || self.held_keys.contains("ArrowDown") { dz += PAN_SPEED; }
+                    if self.held_keys.contains("a") || self.held_keys.contains("ArrowLeft") { dx -= PAN_SPEED; }
+                    if self.held_keys.contains("d") || self.held_keys.contains("ArrowRight") { dx += PAN_SPEED; }
+                    self.pan_xz.x += dx;
+                    self.pan_xz.y += dz;
+                    if self.held_keys.contains("=") || self.held_keys.contains("+") {
+                        self.zoom *= ZOOM_RATE;
+                    }
+                    if self.held_keys.contains("-") || self.held_keys.contains("_") {
+                        self.zoom /= ZOOM_RATE;
+                    }
+                    self.zoom = self.zoom.clamp(0.15, 3.0);
+
+                    // Rebuild the camera with the new pan + zoom each frame.
+                    let cx = BRIDGE_DIM_X as f32 / 2.0 + self.pan_xz.x;
+                    let cz = BRIDGE_DIM_Z as f32 / 2.0 + self.pan_xz.y;
+                    let base_height = BRIDGE_DIM_X.max(BRIDGE_DIM_Z) as f32 + 8.0;
+                    let height = base_height * self.zoom;
+                    self.camera = FreeCamera::new(
+                        glam::Vec3::new(cx, height, cz + height * 0.7),
+                        glam::Vec3::new(cx, 1.5, cz),
+                    );
+                }
+
                 let title = self.title_for_tick(self.app.sim_tick());
                 if let Some(gfx) = self.gfx.as_mut() {
                     gfx.window.set_title(&title);
@@ -658,6 +711,9 @@ fn main() {
         terminated_at_wall: None,
         bucket_diag_printed: false,
         paused: false,
+        pan_xz: glam::Vec2::ZERO,
+        zoom: 1.0,
+        held_keys: std::collections::HashSet::new(),
         session_runs: 0,
         session_wins: 0,
         session_tick_total: 0,
@@ -716,5 +772,26 @@ fn tint_for_agent(creature_type: u32, role: u32) -> [f32; 3] {
         [95.0 / 255.0, 140.0 / 255.0, 70.0 / 255.0]
     } else {
         [0.3, 0.3, 0.3]
+    }
+}
+
+
+/// Map a winit logical_key to a stable string name for `held_keys`.
+/// Returns None for keys we don't track (avoids polluting the set).
+fn key_to_name(k: &Key) -> Option<String> {
+    match k {
+        Key::Character(c) => {
+            let lower = c.to_lowercase();
+            // Track WASD + zoom keys (= - + _)
+            match lower.as_str() {
+                "w" | "a" | "s" | "d" | "=" | "-" | "+" | "_" => Some(lower),
+                _ => None,
+            }
+        }
+        Key::Named(NamedKey::ArrowUp)    => Some("ArrowUp".into()),
+        Key::Named(NamedKey::ArrowDown)  => Some("ArrowDown".into()),
+        Key::Named(NamedKey::ArrowLeft)  => Some("ArrowLeft".into()),
+        Key::Named(NamedKey::ArrowRight) => Some("ArrowRight".into()),
+        _ => None,
     }
 }
