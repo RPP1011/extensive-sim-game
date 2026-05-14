@@ -93,6 +93,12 @@ pub const MAT_FLOOR_TARGET: u8 = 45;
 /// knowledge bitmaps track which rooms each agent is "aware of"; the
 /// floor paints fog wherever the OR of all hero bitmaps doesn't cover.
 pub const MAT_FLOOR_FOG: u8 = 46;
+/// Projectile VFX cells — short-lived line segments from attacker to
+/// target painted in the bridge for ~PROJECTILE_TTL frames after each
+/// HP-delta-detected hit. Two flavors so hero-vs-enemy attacks read
+/// distinctly even at high density.
+pub const MAT_PROJECTILE_HERO: u8 = 47;   // hero firing on enemy
+pub const MAT_PROJECTILE_ENEMY: u8 = 48;  // enemy firing on hero
 /// All floor cells tint to this when the dungeon is cleared (every
 /// enemy dead, ≥1 hero alive). Replaces MAT_FLOOR / MAT_BOSS_FLOOR.
 pub const MAT_VICTORY_FLOOR: u8 = 39;
@@ -129,6 +135,8 @@ fn build_palette() -> MaterialPalette {
     p.set(MAT_BOSS_WALL,  palette_entry(75,  55,  55));  // dark red-gray  — boss-room walls
     p.set(MAT_FLOOR_TARGET, palette_entry(150, 170, 200));// faint blue   — warrior's next target room
     p.set(MAT_FLOOR_FOG,    palette_entry(60,  55,  45)); // very dim     — unexplored room (fog of war)
+    p.set(MAT_PROJECTILE_HERO,  palette_entry(180, 220, 255));// pale blue   — hero shot
+    p.set(MAT_PROJECTILE_ENEMY, palette_entry(255, 180, 100));// pale orange — enemy shot
     p.set(MAT_VICTORY_FLOOR, palette_entry(80,  180, 100));// muted green  — dungeon cleared
     p.set(MAT_DEFEAT_FLOOR,  palette_entry(180, 50,  50)); // muted red    — TPK
     p
@@ -272,7 +280,27 @@ pub struct ViewerApp {
     /// OR of all `hero_known_rooms` — the party's collective knowledge
     /// (which the bridge uses to paint fog-of-war on unknown rooms).
     pub party_known_rooms: u64,
+    /// Recently-fired projectile beams. Each entry holds source/target
+    /// positions in renderer space + TTL frames remaining + color
+    /// flag (true = hero shot, false = enemy shot). Painted as a line
+    /// of voxel cells in the bridge; decremented per refresh.
+    pub projectiles: Vec<Projectile>,
 }
+
+/// Visible attack beam for a few frames after an HP-delta hit. Source
+/// + target in renderer XYZ; color flag distinguishes hero/enemy
+/// attacks.
+#[derive(Clone, Copy, Debug)]
+pub struct Projectile {
+    pub source: Vec3,
+    pub target: Vec3,
+    pub ttl: u8,
+    pub hero_shot: bool,
+}
+
+/// Frames a projectile cell stays painted before being cleared. ~5
+/// frames at 50ms tick = 250ms — long enough to register as a flash.
+pub const PROJECTILE_TTL: u8 = 5;
 
 /// Number of sim ticks an agent stays rendered after death before
 /// disappearing from the mesh pass. ~8 ticks ≈ 400ms wall clock at
@@ -419,6 +447,7 @@ impl ViewerApp {
             warrior_target_room: None,
             hero_known_rooms: [spawn_bitmap; dungeon::N_HEROES as usize],
             party_known_rooms: spawn_bitmap,
+            projectiles: Vec::new(),
         };
         viewer.refresh_snapshot();
         // Diagnostic: confirm host-seeded hero state. If creature_type
@@ -899,6 +928,41 @@ impl ViewerApp {
             let cur = hps[slot];
             if alive[slot] != 0 && prev - cur >= FLASH_DELTA {
                 self.flash_ticks[slot] = FLASH_FRAMES;
+                // Find the nearest opposite-team alive agent as the
+                // (presumed) source of this hit. ~440 agents total ⇒
+                // 440² = 200k checks per tick worst case (one per
+                // damaged agent × all candidates) — but damage events
+                // are sparse (typically <10 per tick), so the
+                // amortized cost is fine.
+                let target_team_hero = types[slot] == dungeon::CT_HERO;
+                let target_pos = Vec3::new(
+                    positions[slot][0], positions[slot][1], positions[slot][2],
+                );
+                let mut best_d2 = f32::MAX;
+                let mut best_src: Option<Vec3> = None;
+                for s2 in 0..n as usize {
+                    if alive[s2] == 0 { continue; }
+                    let other_hero = types[s2] == dungeon::CT_HERO;
+                    if other_hero == target_team_hero { continue; }
+                    let dx = positions[s2][0] - positions[slot][0];
+                    let dy = positions[s2][1] - positions[slot][1];
+                    let dz = positions[s2][2] - positions[slot][2];
+                    let d2 = dx*dx + dy*dy + dz*dz;
+                    if d2 < best_d2 {
+                        best_d2 = d2;
+                        best_src = Some(Vec3::new(
+                            positions[s2][0], positions[s2][1], positions[s2][2],
+                        ));
+                    }
+                }
+                if let Some(src) = best_src {
+                    self.projectiles.push(Projectile {
+                        source: src,
+                        target: target_pos,
+                        ttl: PROJECTILE_TTL,
+                        hero_shot: !target_team_hero,
+                    });
+                }
             }
             // Heal flash: same FLASH_DELTA threshold (≥3 HP), but on HP
             // increase. Cleric's Mend / Heal verbs lift HP by 20+ at a
@@ -999,6 +1063,12 @@ impl ViewerApp {
                 self.cleared_rooms.insert(*room_idx);
             }
         }
+
+        // Tick down projectile TTLs; retain only live entries.
+        for proj in &mut self.projectiles {
+            proj.ttl = proj.ttl.saturating_sub(1);
+        }
+        self.projectiles.retain(|p| p.ttl > 0);
     }
 }
 
@@ -1260,6 +1330,43 @@ impl VoxelBridge {
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // Projectile beams — paint a sparse line of cells from each
+        // active projectile's source toward its target, at vert=2 (over
+        // the floor + agent splat layer). Cells tracked in
+        // last_agent_cells so they clear on the next frame.
+        for proj in &app.projectiles {
+            // sim (x,y,z) -> renderer (x, z, y) Z↔Y swap
+            let s_x = proj.source.x;
+            let s_z = proj.source.y;
+            let t_x = proj.target.x;
+            let t_z = proj.target.y;
+            let dx = t_x - s_x;
+            let dz = t_z - s_z;
+            let len = (dx * dx + dz * dz).sqrt();
+            if len < 0.5 { continue; }
+            // Step every ~1 cell along the line. Limited to 32 cells max
+            // to bound cost when projectile spans a long distance.
+            let steps = (len.ceil() as i32).min(32);
+            let mat = if proj.hero_shot {
+                MAT_PROJECTILE_HERO
+            } else {
+                MAT_PROJECTILE_ENEMY
+            };
+            for i in 0..=steps {
+                let t = i as f32 / steps as f32;
+                let px = (s_x + dx * t).floor() as i32;
+                let pz = (s_z + dz * t).floor() as i32;
+                if px < 0 || pz < 0 { continue; }
+                let (x, depth) = (px as u32, pz as u32);
+                if x >= BRIDGE_DIM_X || depth >= BRIDGE_DIM_Z { continue; }
+                let vert: u32 = 2;
+                if vert < BRIDGE_DIM_Y {
+                    self.cpu_grid.set(x, vert, depth, mat);
+                    self.last_agent_cells.push((x, vert, depth));
                 }
             }
         }
