@@ -36,8 +36,9 @@ use voxel_engine::render::VoxelRenderer;
 use voxel_engine::vulkan::instance::VulkanContext;
 use voxel_engine::vulkan::swapchain::SwapchainContext;
 use winit::application::ApplicationHandler;
-use winit::event::WindowEvent;
+use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowId};
 
 /// Wall-clock period between sim ticks. The .sim's `init { hp, etc }` and
@@ -88,6 +89,10 @@ struct WindowedViewer {
     /// auto-restart so the user can read the verdict + see the
     /// outcome tint before the next dungeon rolls in.
     terminated_at_wall: Option<Instant>,
+    /// Pause flag — toggled by Space. While true, sim ticks don't
+    /// advance and auto-restart is suppressed; rendering still
+    /// happens so the user can study the frozen frame.
+    paused: bool,
     /// Total runs completed in this session (incremented on each
     /// auto-restart). Drives the cross-run aggregate line.
     session_runs: u32,
@@ -236,6 +241,50 @@ impl ApplicationHandler for WindowedViewer {
         event: WindowEvent,
     ) {
         match event {
+            WindowEvent::KeyboardInput {
+                event: KeyEvent { logical_key, state: ElementState::Pressed, repeat: false, .. },
+                ..
+            } => {
+                match logical_key {
+                    Key::Named(NamedKey::Space) => {
+                        self.paused = !self.paused;
+                        eprintln!(
+                            "[viewer_app] {} @ tick {}",
+                            if self.paused { "PAUSED" } else { "RESUMED" },
+                            self.app.sim_tick(),
+                        );
+                    }
+                    Key::Character(c) if c.eq_ignore_ascii_case("r") => {
+                        // Manual reset — jump to the next seed immediately
+                        // without waiting for natural termination + hold.
+                        let next_seed = self.seed.wrapping_add(1);
+                        eprintln!(
+                            "[viewer_app] manual reset (R): seed 0x{:X} -> 0x{:X}",
+                            self.seed, next_seed,
+                        );
+                        if let Some(new_app) = ViewerApp::try_new(next_seed) {
+                            self.app = new_app;
+                            self.seed = next_seed;
+                            self.last_tick = Instant::now();
+                            self.terminated_at_wall = None;
+                            self.paused = false;
+                            if let Some(gfx) = self.gfx.as_mut() {
+                                let _ = unsafe { gfx.ctx.device().device_wait_idle() };
+                                let old_bridge = std::mem::replace(
+                                    &mut gfx.bridge,
+                                    VoxelBridge::new(&gfx.ctx, &self.app)
+                                        .expect("VoxelBridge::new (manual reset) failed"),
+                                );
+                                old_bridge.destroy(&gfx.ctx);
+                                if let Err(e) = gfx.bridge.refresh(&gfx.ctx, &self.app) {
+                                    eprintln!("[viewer_app] post-reset refresh failed: {e}");
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
             WindowEvent::CloseRequested => {
                 eprintln!(
                     "[viewer_app] CloseRequested — exit at tick={}",
@@ -262,10 +311,17 @@ impl ApplicationHandler for WindowedViewer {
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
-                // Catch up on fixed-step sim ticks. Bound at 4 to
-                // avoid runaway after a long pause.
+                // Catch up on fixed-step sim ticks. Bound at 8 to
+                // avoid runaway after a long pause. Pause flag freezes
+                // sim advancement but keeps render+present going.
                 let mut ticks_this_frame: u32 = 0;
-                while self.last_tick.elapsed() >= SIM_TICK_PERIOD && ticks_this_frame < 8 {
+                if self.paused {
+                    // Slide last_tick forward so resuming doesn't trigger
+                    // a flood of catch-up ticks (would burst-advance the
+                    // sim by however long the pause lasted).
+                    self.last_tick = Instant::now();
+                }
+                while !self.paused && self.last_tick.elapsed() >= SIM_TICK_PERIOD && ticks_this_frame < 8 {
                     self.app.step();
                     self.last_tick += SIM_TICK_PERIOD;
                     ticks_this_frame += 1;
@@ -281,11 +337,11 @@ impl ApplicationHandler for WindowedViewer {
                 // a fresh dungeon roll without the user having to relaunch
                 // the binary — the viewer becomes a continuous demo reel.
                 const POST_TERMINATION_HOLD: Duration = Duration::from_secs(3);
-                if self.app.terminated_at_tick.is_some() && self.terminated_at_wall.is_none() {
+                if !self.paused && self.app.terminated_at_tick.is_some() && self.terminated_at_wall.is_none() {
                     self.terminated_at_wall = Some(Instant::now());
                 }
                 if let Some(t) = self.terminated_at_wall {
-                    if t.elapsed() >= POST_TERMINATION_HOLD {
+                    if !self.paused && t.elapsed() >= POST_TERMINATION_HOLD {
                         // Capture this run's contribution to the session aggregate
                         // before we tear it down. `outcome` is Some by construction
                         // here (we only enter the hold path after termination).
@@ -570,6 +626,7 @@ fn main() {
         last_tick: Instant::now(),
         gfx: None,
         terminated_at_wall: None,
+        paused: false,
         session_runs: 0,
         session_wins: 0,
         session_tick_total: 0,
