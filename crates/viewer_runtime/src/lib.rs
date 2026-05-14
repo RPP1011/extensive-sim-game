@@ -691,6 +691,50 @@ impl ViewerApp {
             );
         }
 
+        // Per-tick hero waypoint computation. For each hero:
+        //   * if current room is None (out of bounds / corridor): keep
+        //     the existing waypoint (don't yank the hero around).
+        //   * if current room == target room: waypoint = target room
+        //     centroid (so heroes settle at the room's center).
+        //   * else if current room is slot-adjacent to target room:
+        //     waypoint = door cell between them.
+        //   * else (non-adjacent — shouldn't happen with frontier-greedy
+        //     advancement but possible after retreat): waypoint = current
+        //     room centroid (let the hero re-pick a target next tick).
+        let target_buf2 = self.state.agent_target_room_idx_buf.clone();
+        let targets_post = read_agent_u32(&mut self.state, &target_buf2, agent_count);
+        let wp_x_buf = self.state.agent_hero_waypoint_x_buf.clone();
+        let wp_y_buf = self.state.agent_hero_waypoint_y_buf.clone();
+        let mut wp_x = read_agent_f32(&mut self.state, &wp_x_buf, agent_count);
+        let mut wp_y = read_agent_f32(&mut self.state, &wp_y_buf, agent_count);
+        for h in 0..dungeon::N_HEROES as usize {
+            let cur = match current[h] {
+                Some(c) => c,
+                None => continue,
+            };
+            let target_idx = targets_post[hero_start + h];
+            let target_rx = (target_idx % dungeon::SLOTS_PER_ROW) as u32;
+            let target_ry = (target_idx / dungeon::SLOTS_PER_ROW) as u32;
+            let target_room = dungeon::RoomSlot::new(target_rx, target_ry);
+            let waypoint = if cur == target_room {
+                let c = target_room.centroid();
+                (c[0], c[1])
+            } else if let Some((dx, dy)) = dungeon::door_position(self.seed, cur, target_room) {
+                (dx, dy)
+            } else {
+                let c = cur.centroid();
+                (c[0], c[1])
+            };
+            wp_x[hero_start + h] = waypoint.0;
+            wp_y[hero_start + h] = waypoint.1;
+        }
+        self.state.gpu.queue.write_buffer(
+            &self.state.agent_hero_waypoint_x_buf, 0, bytemuck::cast_slice(&wp_x),
+        );
+        self.state.gpu.queue.write_buffer(
+            &self.state.agent_hero_waypoint_y_buf, 0, bytemuck::cast_slice(&wp_y),
+        );
+
         // Surface the warrior's target for the bridge to highlight.
         // Only meaningful while the warrior is alive AND the target
         // is a real present room (not the spawn-retreat sentinel

@@ -219,6 +219,18 @@ field patrol_origin_y:         f32
 field patrol_step_x:           f32
 field patrol_step_y:           f32
 
+// Hero waypoint — per-hero target (x, y) the host writes each tick.
+// HeroExplore moves the hero toward this point with LoS-gated steps,
+// so the host can route heroes through doors instead of running them
+// straight at the next room's centroid (which would clip through wall).
+//
+// Host fills these with either: (a) the next door cell on the BFS path
+// from current_room → target_room, or (b) the target room's centroid
+// once the hero is inside the target room. Heroes only ever target
+// _inside-room_ positions, so a straight LoS-gated step always works.
+field hero_waypoint_x:         f32
+field hero_waypoint_y:         f32
+
 config dungeon {
   // Move speeds (per 100ms tick).
   hero_move_speed:    f32 = 0.20,
@@ -353,24 +365,34 @@ physics HeroExplore {
   on Tick {} where (self.alive
                     && self.creature_type == Hero
                     && agents.stun_expires_at_tick(self) <= world.tick) {
+    // Hero waypoint = inside-room (x, y) the host wrote this tick.
+    // Either a door cell (when crossing room boundaries) or the
+    // target room's centroid (when already in the target room).
+    // Either way, the straight-line segment is clear of walls so the
+    // LoS gate doesn't lock the hero against a wall.
+    //
+    // Fallback to target_room_idx-derived centroid when the waypoint
+    // is uninitialised (zeroed). Two reasons: (1) defensive in case
+    // the host AI hasn't written for this hero yet, (2) keeps the
+    // target_room_idx buffer alive past dead-field elimination —
+    // the host advance_hero_exploration still reads/writes it as
+    // its primary frontier-greedy state.
+    let waypoint_x = agents.hero_waypoint_x(self);
+    let waypoint_y = agents.hero_waypoint_y(self);
     let target_idx = agents.target_room_idx(self);
-    let rx = target_idx % 6u;
-    let ry = target_idx / 6u;
-    let cx = (rx as f32) * 16.0 + 8.0;
-    let cy = (ry as f32) * 16.0 + 8.0;
-    let target_centroid = vec3(cx, cy, 1.0);
-    let toward = target_centroid - self.pos;
+    let cx = ((target_idx % 6u) as f32) * 16.0 + 8.0;
+    let cy = ((target_idx / 6u) as f32) * 16.0 + 8.0;
+    let wx = if (waypoint_x > 0.0) { waypoint_x } else { cx };
+    let wy = if (waypoint_y > 0.0) { waypoint_y } else { cy };
+    let target = vec3(wx, wy, 1.0);
+    let toward = target - self.pos;
     let dist = length(toward);
-    if (dist > 1.0) {
+    if (dist > 0.5) {
       let step = (toward / dist) * config.dungeon.hero_move_speed;
-      // Wall-collision LoS check removed — heroes were getting stuck
-      // at room boundaries because the straight line from the spawn
-      // room centroid to the next room's centroid crosses the wall
-      // (the 2-cell door is at a random Y offset, not centered).
-      // Without door-aware pathfinding in the host AI, heroes
-      // freeze at the wall and combat stalls. Reverting to "walks
-      // through walls" until door pathfinding is wired up.
-      agents.set_pos(self, self.pos + step);
+      let new_pos = self.pos + step;
+      if (terrain.line_of_sight(self.pos, new_pos)) {
+        agents.set_pos(self, new_pos);
+      }
     }
   }
 }

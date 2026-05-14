@@ -554,6 +554,25 @@ pub fn seed_topology(
         &state.agent_patrol_step_y_buf, 0, bytemuck::cast_slice(&patrol_step_y),
     );
 
+    // Initial hero waypoints: each hero's spawn position. The host's
+    // advance_hero_exploration overwrites these every tick from the
+    // first step() onward; this just ensures heroes don't dash to
+    // (0, 0) on tick 0 if the runtime's HeroExplore fires before the
+    // host AI does.
+    let mut hero_waypoint_x = vec![0.0f32; agent_count];
+    let mut hero_waypoint_y = vec![0.0f32; agent_count];
+    for h in 0..N_HEROES as usize {
+        let hi = (agent_count - N_HEROES as usize) + h;
+        hero_waypoint_x[hi] = positions[hi][0];
+        hero_waypoint_y[hi] = positions[hi][1];
+    }
+    state.gpu.queue.write_buffer(
+        &state.agent_hero_waypoint_x_buf, 0, bytemuck::cast_slice(&hero_waypoint_x),
+    );
+    state.gpu.queue.write_buffer(
+        &state.agent_hero_waypoint_y_buf, 0, bytemuck::cast_slice(&hero_waypoint_y),
+    );
+
     boss_slot
 }
 
@@ -585,6 +604,53 @@ fn pick_adjacent_present_room(dungeon: &Dungeon, from: RoomSlot) -> Option<RoomS
         }
     }
     None
+}
+
+/// Door midpoint between two slot-adjacent rooms `a` and `b`. Returns
+/// the world (x, y) at the *center* of the 2-cell-wide door gap that
+/// `seed_voxel_dungeon` carved between them. None if the two rooms are
+/// not slot-adjacent (caller must enforce adjacency).
+///
+/// Used by the host hero-exploration AI to set per-tick waypoints —
+/// heroes path to the door cell first, then to the target room's
+/// centroid once they cross. Without this they get stuck against the
+/// wall when the .sim's HeroExplore LoS check is enabled.
+pub fn door_position(seed: u64, a: RoomSlot, b: RoomSlot) -> Option<(f32, f32)> {
+    let seed32 = seed as u32;
+    // Normalize: lower (rx, ry) is the "from" room in seed_voxel_dungeon's
+    // door-key construction (it iterates rooms and writes east/south
+    // doors keyed on the from-room's idx).
+    let (from, to, axis) = if a.rx + 1 == b.rx && a.ry == b.ry {
+        (a, b, 'e')
+    } else if b.rx + 1 == a.rx && a.ry == b.ry {
+        (b, a, 'e')
+    } else if a.ry + 1 == b.ry && a.rx == b.rx {
+        (a, b, 's')
+    } else if b.ry + 1 == a.ry && a.rx == b.rx {
+        (b, a, 's')
+    } else {
+        return None;
+    };
+
+    let _ = to;
+    if axis == 'e' {
+        let door_y_off = engine::rng::per_agent_u32_pcg(
+            seed32, from.idx(), RoomSlot::new(from.rx + 1, from.ry).idx(), 3,
+        ) % (SLOT_WIDTH - 4);
+        let door_y = from.ry * SLOT_WIDTH + 2 + door_y_off;
+        // Center: x = boundary, y = door_y + 0.5 (door spans door_y..door_y+2)
+        let cx = ((from.rx + 1) * SLOT_WIDTH) as f32;
+        let cy = door_y as f32 + 1.0;
+        Some((cx, cy))
+    } else {
+        let door_x_off = engine::rng::per_agent_u32_pcg(
+            seed32, from.idx(), RoomSlot::new(from.rx, from.ry + 1).idx(), 4,
+        ) % (SLOT_WIDTH - 4);
+        let door_x = from.rx * SLOT_WIDTH + 2 + door_x_off;
+        let cx = door_x as f32 + 1.0;
+        let cy = ((from.ry + 1) * SLOT_WIDTH) as f32;
+        Some((cx, cy))
+    }
 }
 
 // ---------------------------------------------------------------------
