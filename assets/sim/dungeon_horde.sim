@@ -356,8 +356,8 @@ physics HeroExplore {
     let target_idx = agents.target_room_idx(self);
     let rx = target_idx % 6u;
     let ry = target_idx / 6u;
-    let cx = (rx as f32) * 12.0 + 6.0;
-    let cy = (ry as f32) * 12.0 + 6.0;
+    let cx = (rx as f32) * 16.0 + 8.0;
+    let cy = (ry as f32) * 16.0 + 8.0;
     let target_centroid = vec3(cx, cy, 1.0);
     let toward = target_centroid - self.pos;
     let dist = length(toward);

@@ -23,11 +23,11 @@ use sims::dungeon_horde::GeneratedRuntime;
 
 pub const N_HEROES: u32 = 5;
 
-pub const GRID_X: u32 = 72;
-pub const GRID_Y: u32 = 72;
+pub const GRID_X: u32 = 96;
+pub const GRID_Y: u32 = 96;
 pub const GRID_Z: u32 = 8;
 pub const SLOTS_PER_ROW: u32 = 6;
-pub const SLOT_WIDTH: u32 = 12;
+pub const SLOT_WIDTH: u32 = 16;
 pub const ROOM_INTERIOR_Z: u32 = 6;
 pub const STONE: u8 = 1;
 

@@ -49,11 +49,11 @@ const N_HEROES: u32 = 5;
 // Voxel grid + room layout constants — kept at 72×72×8 to stay inside
 // the spatial-grid extent of [-64, 64] (positions outside clamp to
 // the boundary cell, degrading culling).
-const GRID_X: u32 = 72;
-const GRID_Y: u32 = 72;
+const GRID_X: u32 = 96;
+const GRID_Y: u32 = 96;
 const GRID_Z: u32 = 8;
 const SLOTS_PER_ROW: u32 = 6;
-const SLOT_WIDTH: u32 = 12;
+const SLOT_WIDTH: u32 = 16;
 const ROOM_INTERIOR_Z: u32 = 6;
 const STONE: u8 = 1;
 
