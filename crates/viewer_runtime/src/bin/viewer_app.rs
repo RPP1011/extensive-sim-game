@@ -89,6 +89,10 @@ struct WindowedViewer {
     /// auto-restart so the user can read the verdict + see the
     /// outcome tint before the next dungeon rolls in.
     terminated_at_wall: Option<Instant>,
+    /// Whether we've printed the one-shot bucket diagnostic yet.
+    /// Set to true after first per-frame mesh-pass build so the log
+    /// doesn't spam.
+    bucket_diag_printed: bool,
     /// Pause flag — toggled by Space. While true, sim ticks don't
     /// advance and auto-restart is suppressed; rendering still
     /// happens so the user can study the frozen frame.
@@ -524,6 +528,14 @@ impl ApplicationHandler for WindowedViewer {
                             buckets[bucket].push(inst);
                         }
                     }
+                    if !self.bucket_diag_printed {
+                        let sizes: Vec<usize> = buckets.iter().map(|b| b.len()).collect();
+                        eprintln!(
+                            "[viewer_app] DIAG @ first-frame: bucket sizes = {:?}, slots = {:?}, mesh_present = {}",
+                            sizes, bucket_slot, gfx.mesh.is_some(),
+                        );
+                        self.bucket_diag_printed = true;
+                    }
                     let draws: Vec<MeshDraw> = (0..11)
                         .filter_map(|b| {
                             let slot = bucket_slot[b]?;
@@ -531,6 +543,18 @@ impl ApplicationHandler for WindowedViewer {
                             Some(MeshDraw { mesh_slot: slot, instances: &buckets[b] })
                         })
                         .collect();
+                    if !self.bucket_diag_printed { /* unreachable second branch */ } else if self.app.sim_tick() == 1 {
+                        eprintln!(
+                            "[viewer_app] DIAG @ tick=1: draws = {} entries (mesh_slot, count)",
+                            draws.len(),
+                        );
+                        for d in &draws {
+                            eprintln!(
+                                "  draw mesh_slot={} count={}",
+                                d.mesh_slot, d.instances.len(),
+                            );
+                        }
+                    }
                     let view_proj = view_proj_for_camera(&self.camera);
 
                     let mesh_renderer_opt = gfx.mesh.as_mut();
@@ -626,6 +650,7 @@ fn main() {
         last_tick: Instant::now(),
         gfx: None,
         terminated_at_wall: None,
+        bucket_diag_printed: false,
         paused: false,
         session_runs: 0,
         session_wins: 0,
