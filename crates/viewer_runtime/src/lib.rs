@@ -191,7 +191,7 @@ pub struct ViewerApp {
     pub seed: u64,
     /// Floor cells as 2D (x, y) tuples — painted on top of the
     /// stone fill each refresh.
-    floor_cells: std::collections::BTreeSet<(u32, u32)>,
+    pub floor_cells: std::collections::BTreeSet<(u32, u32)>,
     /// Per-agent latest readback. Index = sim slot id.
     agents: Vec<AgentSnapshot>,
     pub agent_count: u32,

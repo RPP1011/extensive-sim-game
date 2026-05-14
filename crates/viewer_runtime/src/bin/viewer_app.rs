@@ -474,12 +474,29 @@ impl ApplicationHandler for WindowedViewer {
                         // between 20 Hz sim ticks.
                         let interp_alpha = (self.last_tick.elapsed().as_secs_f32()
                             / SIM_TICK_PERIOD.as_secs_f32()).clamp(0.0, 1.0);
+                        // Camera eye for the occlusion ray-cast (renderer XYZ).
+                        let cam_eye = {
+                            let e = self.camera.eye_position();
+                            glam::Vec3::new(e[0], e[1], e[2])
+                        };
                         for (idx, agent) in self.app.agents().iter().enumerate() {
                             let death_tick = self.app.death_ticks[idx];
                             let is_dying = !agent.alive
                                 && death_tick > 0
                                 && death_tick < viewer_runtime::DEATH_FADE_TICKS;
                             if !agent.alive && !is_dying { continue; }
+                            // Wall occlusion: ray-cast from the agent toward
+                            // the camera. If a wall cell intercepts the ray
+                            // within wall vertical range, skip rendering this
+                            // agent — they're behind a wall.
+                            //
+                            // sim (x, y, z=1 above floor) → renderer (x, z, y)
+                            let agent_renderer = glam::Vec3::new(
+                                agent.pos.x, agent.pos.z, agent.pos.y,
+                            );
+                            if agent_occluded_by_wall(agent_renderer, cam_eye, &self.app) {
+                                continue;
+                            }
                             // Lerp sim-space position between previous and
                             // current tick using interp_alpha. prev_positions
                             // is [x, y, z] in sim space (Z-up).
@@ -794,4 +811,55 @@ fn key_to_name(k: &Key) -> Option<String> {
         Key::Named(NamedKey::ArrowRight) => Some("ArrowRight".into()),
         _ => None,
     }
+}
+
+
+/// Ray-cast occlusion check. Walks samples from the agent toward the
+/// camera, sampling at ~1 cell per step. Returns true if any sampled
+/// position falls inside a wall — i.e. a cell NOT in app.floor_cells
+/// and within the wall vertical range [0, ROOM_INTERIOR_Z].
+///
+/// Camera is high above the floor so most of the ray is above the
+/// wall heights; we cap the inner loop at the segment where renderer
+/// y ≤ ROOM_INTERIOR_Z. This keeps per-agent cost ~5 cell lookups.
+fn agent_occluded_by_wall(
+    agent_renderer: glam::Vec3,
+    cam_eye: glam::Vec3,
+    app: &ViewerApp,
+) -> bool {
+    let dir = cam_eye - agent_renderer;
+    let len = dir.length();
+    if len < 1e-3 { return false; }
+    let dir_norm = dir / len;
+    // Find t where the ray exits the wall vertical range.
+    // y(t) = agent.y + dy*t*len. Exit when y == ROOM_INTERIOR_Z.
+    let dy_per_unit = dir_norm.y;
+    let exit_y = viewer_runtime::dungeon::ROOM_INTERIOR_Z as f32;
+    let exit_t = if dy_per_unit.abs() > 1e-4 {
+        ((exit_y - agent_renderer.y) / dy_per_unit).max(0.0).min(len)
+    } else {
+        len
+    };
+    if exit_t < 0.5 {
+        return false;
+    }
+    // Sample at integer cell-width steps along the wall-height portion.
+    let steps = exit_t.ceil() as i32;
+    for i in 1..=steps {
+        let t = i as f32;
+        let p = agent_renderer + dir_norm * t;
+        let cx = p.x.floor() as i32;
+        let cz = p.z.floor() as i32;
+        if cx < 0 || cz < 0 { continue; }
+        let (sx, sz) = (cx as u32, cz as u32);
+        if sx >= viewer_runtime::dungeon::GRID_X
+            || sz >= viewer_runtime::dungeon::GRID_Y
+        {
+            continue;
+        }
+        if !app.floor_cells.contains(&(sx, sz)) {
+            return true;
+        }
+    }
+    false
 }
