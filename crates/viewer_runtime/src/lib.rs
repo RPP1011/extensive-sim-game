@@ -89,6 +89,10 @@ pub const MAT_BOSS_WALL: u8 = 44;
 /// frontier-greedy AI's next-room choice. Updates per-tick from the
 /// warrior's `target_room_idx` GPU buffer.
 pub const MAT_FLOOR_TARGET: u8 = 45;
+/// Fog-of-war floor tint for rooms no hero has discovered yet. Per-agent
+/// knowledge bitmaps track which rooms each agent is "aware of"; the
+/// floor paints fog wherever the OR of all hero bitmaps doesn't cover.
+pub const MAT_FLOOR_FOG: u8 = 46;
 /// All floor cells tint to this when the dungeon is cleared (every
 /// enemy dead, ≥1 hero alive). Replaces MAT_FLOOR / MAT_BOSS_FLOOR.
 pub const MAT_VICTORY_FLOOR: u8 = 39;
@@ -124,6 +128,7 @@ fn build_palette() -> MaterialPalette {
     p.set(MAT_FLOOR_CLEARED, palette_entry(140, 130, 110));// dim tan    — cleared room
     p.set(MAT_BOSS_WALL,  palette_entry(75,  55,  55));  // dark red-gray  — boss-room walls
     p.set(MAT_FLOOR_TARGET, palette_entry(150, 170, 200));// faint blue   — warrior's next target room
+    p.set(MAT_FLOOR_FOG,    palette_entry(60,  55,  45)); // very dim     — unexplored room (fog of war)
     p.set(MAT_VICTORY_FLOOR, palette_entry(80,  180, 100));// muted green  — dungeon cleared
     p.set(MAT_DEFEAT_FLOOR,  palette_entry(180, 50,  50)); // muted red    — TPK
     p
@@ -257,6 +262,16 @@ pub struct ViewerApp {
     /// voxel bridge as MAT_FLOOR_TARGET so the user can see where
     /// the warrior is leading the party next.
     pub warrior_target_room: Option<u32>,
+    /// Per-hero room-knowledge bitmaps. Each u64 holds 1 bit per room
+    /// slot (max 36 = 6×6 grid). A bit is set when the hero has
+    /// personally been in that room. Heroes start knowing only the
+    /// spawn room; subsequent rooms light up as they advance.
+    /// Information-asymmetric AI uses this to constrain pathfinding —
+    /// heroes can't target rooms they haven't discovered.
+    pub hero_known_rooms: [u64; dungeon::N_HEROES as usize],
+    /// OR of all `hero_known_rooms` — the party's collective knowledge
+    /// (which the bridge uses to paint fog-of-war on unknown rooms).
+    pub party_known_rooms: u64,
 }
 
 /// Number of sim ticks an agent stays rendered after death before
@@ -363,6 +378,7 @@ impl ViewerApp {
         }
 
         let hero_state = dungeon::HeroExploreState::new(&dungeon);
+        let spawn_bitmap = 1u64 << dungeon.spawn_room.idx();
         let mut viewer = Self {
             state,
             dungeon,
@@ -401,6 +417,8 @@ impl ViewerApp {
             death_ticks: vec![0u32; agent_count as usize],
             cleared_rooms: std::collections::BTreeSet::new(),
             warrior_target_room: None,
+            hero_known_rooms: [spawn_bitmap; dungeon::N_HEROES as usize],
+            party_known_rooms: spawn_bitmap,
         };
         viewer.refresh_snapshot();
         // Diagnostic: confirm host-seeded hero state. If creature_type
@@ -568,7 +586,12 @@ impl ViewerApp {
             self.hero_state.current_room[h] = Some(candidate.idx());
             let remap = self.dungeon.rooms.iter().position(|r| *r == candidate).unwrap();
             self.hero_state.rooms_visited[h] |= 1u32 << remap;
+            // Knowledge update: this hero now "knows" the room they're
+            // in. Slot indices range 0..36 so they fit in u64.
+            self.hero_known_rooms[h] |= 1u64 << candidate.idx();
         }
+        // Recompute party-OR after all heroes have updated.
+        self.party_known_rooms = self.hero_known_rooms.iter().fold(0u64, |a, b| a | b);
 
         // Pass 2: compute the warrior's target first — it anchors the
         // party formation. Followers + rogue read off this in pass 3.
@@ -1295,6 +1318,12 @@ fn floor_mat_for_cell(app: &ViewerApp, x: u32, y: u32) -> u8 {
     let rx = x / sw;
     let ry = y / sw;
     let room_idx = ry * dungeon::SLOTS_PER_ROW + rx;
+    // Fog of war: rooms no hero has personally entered render in
+    // MAT_FLOOR_FOG. Beats every other tint — even the boss floor's
+    // distinctive red is hidden until the party discovers it.
+    if (app.party_known_rooms & (1u64 << room_idx)) == 0 {
+        return MAT_FLOOR_FOG;
+    }
     if rx == app.dungeon.boss_room.rx && ry == app.dungeon.boss_room.ry {
         return MAT_BOSS_FLOOR;
     }
