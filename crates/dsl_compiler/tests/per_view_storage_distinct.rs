@@ -151,10 +151,14 @@ fn synthesize_two_view_fixture() -> String {
         MaterializedViewInfo {
             name: "damage_dealt".into(),
             pair_keyed: None,
+            ring_k: None,
+            cell_stride_u32: 1,
         },
         MaterializedViewInfo {
             name: "threat_taken".into(),
             pair_keyed: Some(PairKeyedSecondKey::Agent),
+            ring_k: None,
+            cell_stride_u32: 1,
         },
     ];
     let init_stmts: Vec<InitStmt> = Vec::new();

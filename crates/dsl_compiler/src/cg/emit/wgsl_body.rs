@@ -1374,6 +1374,11 @@ fn builtin_name(id: BuiltinId) -> String {
         // ring-walk reduction. The helper is emitted by
         // `compose_view_storage_prelude` and returns `u32` (AgentId).
         ThreatsNearest { view } => format!("view_{}_nearest", view.0),
+        // Sibling — same argmin walk, returns the unit vec3 pointing
+        // away from the closest cell's center.
+        ThreatsDirAwayFromNearest { view } => {
+            format!("view_{}_dir_away_from_nearest", view.0)
+        }
         // WGSL has a built-in `vec3<f32>` constructor; emit the call
         // as-is so `vec3(x, y, z)` lowers to `vec3<f32>(x, y, z)`.
         Vec3Ctor => "vec3<f32>".to_string(),

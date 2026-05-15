@@ -1083,6 +1083,7 @@ fn compose_view_storage_prelude(body: &str, prog: &CgProgram) -> String {
     // `view_nearest_seen` covers the threats-only argmin reduction.
     let mut view_get_seen: BTreeSet<u32> = BTreeSet::new();
     let mut view_nearest_seen: BTreeSet<u32> = BTreeSet::new();
+    let mut view_dir_seen: BTreeSet<u32> = BTreeSet::new();
     let mut search_pos = 0;
     while let Some(rel) = body[search_pos..].find("view_") {
         let abs = search_pos + rel;
@@ -1090,7 +1091,15 @@ fn compose_view_storage_prelude(body: &str, prog: &CgProgram) -> String {
         let id_end = after.bytes().take_while(|b| b.is_ascii_digit()).count();
         if id_end > 0 {
             let suffix = &after[id_end..];
-            if suffix.starts_with("_get(") {
+            // Order-sensitive prefix match — `_dir_away_from_nearest(`
+            // shares its `_nearest(` infix with the bare argmin
+            // helper, so we test the longer suffix first to avoid a
+            // false positive on the nearest path.
+            if suffix.starts_with("_dir_away_from_nearest(") {
+                if let Ok(view_id) = after[..id_end].parse::<u32>() {
+                    view_dir_seen.insert(view_id);
+                }
+            } else if suffix.starts_with("_get(") {
                 if let Ok(view_id) = after[..id_end].parse::<u32>() {
                     view_get_seen.insert(view_id);
                 }
@@ -1106,6 +1115,7 @@ fn compose_view_storage_prelude(body: &str, prog: &CgProgram) -> String {
     let mut seen_view_ids: BTreeSet<u32> = BTreeSet::new();
     seen_view_ids.extend(view_get_seen.iter().copied());
     seen_view_ids.extend(view_nearest_seen.iter().copied());
+    seen_view_ids.extend(view_dir_seen.iter().copied());
     if seen_view_ids.is_empty() {
         return String::new();
     }
@@ -1157,6 +1167,53 @@ fn compose_view_storage_prelude(body: &str, prog: &CgProgram) -> String {
         // whose view has the threats schema.
         let (ring_k, is_threat_layout) =
             shapes.get(view_id).copied().unwrap_or((None, false));
+        // `threats.dir_away_from_nearest(observer)` — same argmin
+        // pass as the nearest helper, returns the unit vec3 pointing
+        // AWAY from the closest cell's center. Lets a flee-style
+        // score pick a movement direction directly. Emitted ONLY when
+        // referenced AND the view carries the threat-zone struct
+        // layout; sentinel stub otherwise.
+        if view_dir_seen.contains(view_id) {
+            if let (Some(k), true) = (ring_k, is_threat_layout) {
+                let k = k as u32;
+                out.push_str(&format!(
+"fn view_{view_id}_dir_away_from_nearest(observer: u32) -> vec3<f32> {{
+    let observer_pos = agent_pos[observer];
+    var best_dist: f32 = 3.4028235e38;
+    var best_dx: f32 = 0.0;
+    var best_dy: f32 = 0.0;
+    for (var c: u32 = 0u; c < {k}u; c = c + 1u) {{
+        let base = (observer * {k}u + c) * 8u;
+        let zone_kind = view_storage_{view_name}_primary[base + 0u];
+        if (zone_kind == 0u) {{ continue; }}
+        let expires = view_storage_{view_name}_primary[base + 6u];
+        if (cfg.tick >= expires) {{ continue; }}
+        let cx_raw = i32(view_storage_{view_name}_primary[base + 1u]);
+        let cy_raw = i32(view_storage_{view_name}_primary[base + 2u]);
+        let cx = f32((cx_raw << 16u) >> 16u) / 256.0;
+        let cy = f32((cy_raw << 16u) >> 16u) / 256.0;
+        let dx = observer_pos.x - cx;
+        let dy = observer_pos.y - cy;
+        let dist = sqrt(dx * dx + dy * dy);
+        if (dist < best_dist) {{
+            best_dist = dist;
+            best_dx = dx;
+            best_dy = dy;
+        }}
+    }}
+    if (best_dist < 3.4028235e38 && best_dist > 0.0) {{
+        return vec3<f32>(best_dx / best_dist, best_dy / best_dist, 0.0);
+    }}
+    return vec3<f32>(0.0, 0.0, 0.0);
+}}
+"
+                ));
+            } else {
+                out.push_str(&format!(
+                    "fn view_{view_id}_dir_away_from_nearest(_observer: u32) -> vec3<f32> {{ return vec3<f32>(0.0, 0.0, 0.0); }}\n"
+                ));
+            }
+        }
         // `threats.nearest(observer)` — argmin reduction returning
         // the nearest live cell's `source` AgentId. Emitted ONLY when
         // a kernel body references `view_<id>_nearest(` AND the view
@@ -3092,6 +3149,110 @@ mod tests {
         assert!(
             !prelude.contains("fn view_0_get("),
             "intensity getter must not emit when only _nearest is referenced; got:\n{prelude}"
+        );
+    }
+
+    /// Plan G G3f follow-up — `view_<id>_dir_away_from_nearest(observer)`
+    /// ring-walk argmin returning the unit vec3 pointing AWAY from the
+    /// closest live cell's center. Sibling of the nearest helper but
+    /// returns `vec3<f32>` instead of `u32`. The body must:
+    ///   * walk K cells with the same live filter (zone_kind != 0,
+    ///     world.tick < expires)
+    ///   * track `(min_dist, dx, dy)` rather than `(min_dist, source)`
+    ///   * normalise the surviving (dx, dy) by `best_dist` at the end
+    ///   * fall through to vec3(0,0,0) when no live cell — caller's
+    ///     velocity update collapses to a no-op
+    ///
+    /// Crucially, the body-scan in `cg/emit/kernel.rs` must recognise
+    /// `_dir_away_from_nearest(` BEFORE matching `_nearest(` (longer
+    /// suffix wins) — otherwise `view_<id>_nearest_…` would
+    /// double-count and pull in the wrong helper.
+    #[test]
+    fn dir_away_from_nearest_helper_emits_for_threat_struct_layout() {
+        use crate::cg::data_handle::ViewId;
+        use crate::cg::program::{CgStorageHint, ViewLayout, ViewLayoutField, ViewSignature};
+        use std::collections::BTreeMap;
+
+        let mut prog = CgProgram::default();
+        prog.interner.views.insert(0, "threats".to_string());
+        let mut sigs: BTreeMap<u32, ViewSignature> = BTreeMap::new();
+        sigs.insert(
+            0,
+            ViewSignature {
+                args: vec![CgTy::AgentId],
+                result: CgTy::Vec3F32,
+                storage_hint: Some(CgStorageHint::PerEntityRing { k: 4 }),
+                fold_op: None,
+                belief_gated: false,
+            },
+        );
+        prog.view_signatures = sigs;
+        let fields = [
+            "zone_kind",
+            "center_x_q8",
+            "center_y_q8",
+            "radius_q8",
+            "dir_x_q8",
+            "dir_y_q8",
+            "expires_at_tick",
+            "source",
+        ];
+        prog.view_layouts.insert(
+            0,
+            ViewLayout {
+                fields: fields
+                    .iter()
+                    .map(|n| ViewLayoutField {
+                        name: (*n).to_string(),
+                        ty: CgTy::U32,
+                    })
+                    .collect(),
+            },
+        );
+
+        let body = "let flee_dir = view_0_dir_away_from_nearest(observer);";
+        let prelude = compose_view_storage_prelude(body, &prog);
+
+        // Positive pins.
+        assert!(
+            prelude.contains("fn view_0_dir_away_from_nearest(observer: u32) -> vec3<f32>"),
+            "helper signature must return vec3<f32>; got:\n{prelude}"
+        );
+        assert!(
+            prelude.contains("for (var c: u32 = 0u; c < 4u; c = c + 1u)"),
+            "must loop K=4 cells; got:\n{prelude}"
+        );
+        assert!(
+            prelude.contains("agent_pos[observer]"),
+            "must read observer's pos; got:\n{prelude}"
+        );
+        assert!(
+            prelude.contains("var best_dx: f32 = 0.0"),
+            "must accumulate the closest cell's dx; got:\n{prelude}"
+        );
+        assert!(
+            prelude.contains("var best_dy: f32 = 0.0"),
+            "must accumulate the closest cell's dy; got:\n{prelude}"
+        );
+        assert!(
+            prelude.contains("vec3<f32>(best_dx / best_dist, best_dy / best_dist, 0.0)"),
+            "must return the normalised away-from vector; got:\n{prelude}"
+        );
+        assert!(
+            prelude.contains("return vec3<f32>(0.0, 0.0, 0.0)"),
+            "must fall through to zero vec when no live cell; got:\n{prelude}"
+        );
+
+        // Negative pins: only the dir helper was referenced — the
+        // intensity getter and the bare nearest helper must NOT
+        // appear.
+        assert!(
+            !prelude.contains("fn view_0_get("),
+            "intensity getter must not emit when only _dir_away is referenced; got:\n{prelude}"
+        );
+        assert!(
+            !prelude.contains("fn view_0_nearest("),
+            "bare nearest helper must not emit when only _dir_away is referenced; got:\n{prelude}"
         );
     }
 

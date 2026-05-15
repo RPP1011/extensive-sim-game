@@ -858,17 +858,20 @@ pub fn kernel_topology_to_spec_and_body(
             let after = &wgsl_body[abs + 5..]; // skip "view_"
             // Parse the numeric id; stop on first non-digit.
             let id_end = after.bytes().take_while(|b| b.is_ascii_digit()).count();
-            // Both `_get(` (intensity / scalar getter) and `_nearest(`
-            // (argmin reduction) reference the same per-view storage
+            // Three suffixes reference the same per-view storage
             // primary buffer; the binding scan treats them uniformly.
-            // _nearest implies the ring-walk shape so it always needs
-            // agent_pos — no need to consult the view's storage hint.
+            // Both _nearest and _dir_away_from_nearest imply the
+            // ring-walk shape so they always need agent_pos. Order
+            // matters: `_dir_away_from_nearest(` shares its
+            // `_nearest(` infix with the bare argmin helper, so we
+            // test the longer suffix first to avoid double-counting.
             let suffix = &after[id_end..];
-            let is_get = suffix.starts_with("_get(");
-            let is_nearest = suffix.starts_with("_nearest(");
-            if id_end > 0 && (is_get || is_nearest) {
+            let is_dir = suffix.starts_with("_dir_away_from_nearest(");
+            let is_get = !is_dir && suffix.starts_with("_get(");
+            let is_nearest = !is_dir && suffix.starts_with("_nearest(");
+            if id_end > 0 && (is_get || is_nearest || is_dir) {
                 if let Ok(view_id) = after[..id_end].parse::<u32>() {
-                    if is_nearest {
+                    if is_nearest || is_dir {
                         needs_agent_pos = true;
                     }
                     if seen_view_ids.insert(view_id) {

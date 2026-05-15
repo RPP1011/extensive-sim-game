@@ -2315,13 +2315,31 @@ fn lower_builtin_call(
         }
         Builtin::ThreatsDirAwayFromNearest => {
             expect_arity(builtin, 1, args.len(), span)?;
-            // Stub: same blocker as ThreatsNearest — needs per-cell
-            // walk over a position-bearing struct payload.
-            add(
-                ctx,
-                CgExpr::Lit(LitValue::Vec3F32 { x: 0.0, y: 0.0, z: 0.0 }),
-                span,
-            )
+            // Plan G G3f follow-up — sibling of ThreatsNearest. Same
+            // argmin pass over the struct-cell ring; returns the unit
+            // vector pointing AWAY from the closest cell's center for
+            // direct use as a flee velocity. Falls back to the
+            // (0,0,0) sentinel when no threats view is declared so
+            // fixtures without the surface stay no-op.
+            match find_threats_view_id(ctx) {
+                Some(view_id) => {
+                    let arg_id = lower_expr(&args[0].value, ctx)?;
+                    add(
+                        ctx,
+                        CgExpr::Builtin {
+                            fn_id: BuiltinId::ThreatsDirAwayFromNearest { view: view_id },
+                            args: vec![arg_id],
+                            ty: CgTy::Vec3F32,
+                        },
+                        span,
+                    )
+                }
+                None => add(
+                    ctx,
+                    CgExpr::Lit(LitValue::Vec3F32 { x: 0.0, y: 0.0, z: 0.0 }),
+                    span,
+                ),
+            }
         }
         Builtin::NextWaypoint => {
             expect_arity(builtin, 1, args.len(), span)?;

@@ -556,6 +556,17 @@ pub enum BuiltinId {
     /// and the body's reduction is argmin, not sum.
     ThreatsNearest { view: ViewId },
 
+    /// Plan G G3f follow-up — `threats.dir_away_from_nearest(observer)`
+    /// ring-walk reduction. Same argmin pass as [`Self::ThreatsNearest`]
+    /// but the result is the unit vector pointing AWAY from the closest
+    /// cell's center (`normalize(observer.pos - cell.center)`), as
+    /// `vec3<f32>`. Lets a flee-style score pick a movement direction
+    /// directly from the threat-zone state without a follow-up
+    /// agents.pos lookup at the call site. Returns `vec3(0, 0, 0)` if
+    /// no live cell qualifies — the caller's velocity update collapses
+    /// to a no-op which is the correct fall-through behaviour.
+    ThreatsDirAwayFromNearest { view: ViewId },
+
     // --- Constructors ---
     /// `vec3(x, y, z)` — pack three F32 components into a Vec3F32.
     /// Lowers to WGSL `vec3<f32>(x, y, z)`. Added 2026-05-02 to give
@@ -654,6 +665,10 @@ impl BuiltinId {
                 args: vec![CgTy::AgentId],
                 result: CgTy::AgentId,
             },
+            ThreatsDirAwayFromNearest { view: _ } => BuiltinSignature::Fixed {
+                args: vec![CgTy::AgentId],
+                result: CgTy::Vec3F32,
+            },
             Vec3Ctor => BuiltinSignature::Fixed {
                 args: vec![CgTy::F32, CgTy::F32, CgTy::F32],
                 result: CgTy::Vec3F32,
@@ -698,6 +713,9 @@ impl BuiltinId {
             Entity => "entity".to_string(),
             ViewCall { view } => format!("view_call.#{}", view.0),
             ThreatsNearest { view } => format!("threats_nearest.#{}", view.0),
+            ThreatsDirAwayFromNearest { view } => {
+                format!("threats_dir_away_from_nearest.#{}", view.0)
+            }
             Vec3Ctor => "vec3".to_string(),
             AsF32(t) => format!("as_f32.{}", t.label()),
             AsU32(t) => format!("as_u32.{}", t.label()),
