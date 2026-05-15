@@ -567,6 +567,24 @@ pub enum BuiltinId {
     /// to a no-op which is the correct fall-through behaviour.
     ThreatsDirAwayFromNearest { view: ViewId },
 
+    /// Plan H slice 3 — `abilities.telegraph_kind(id)` returns the per-
+    /// ability shape discriminant from the PackedAbilityRegistry's
+    /// telegraph_kind column. Lowers to a WGSL helper
+    /// `ability_registry_telegraph_kind_at(id)` whose body reads
+    /// `ability_registry_telegraph_kind[id]`. Returns `u32` (sentinel
+    /// `TELEGRAPH_KIND_NONE = 0` for abilities without a `cast {
+    /// telegraph: ... }` declaration). Surfaced from .sim DSL via the
+    /// `abilities.telegraph_kind(<ability_id_expr>)` namespace call.
+    AbilityTelegraphKind,
+
+    /// Plan H slice 3 — `abilities.telegraph_param_0(id)` returns the
+    /// first param slot of the per-ability telegraph_params column
+    /// (slot 0 of the 4×f32 stride). For Circle this is the radius in
+    /// world units; for Line, the width. Returns 0.0 for abilities
+    /// without a telegraph (kind = TELEGRAPH_KIND_NONE). Future
+    /// AbilityTelegraphParam1/2/3 variants stack on this same shape.
+    AbilityTelegraphParam0,
+
     // --- Constructors ---
     /// `vec3(x, y, z)` — pack three F32 components into a Vec3F32.
     /// Lowers to WGSL `vec3<f32>(x, y, z)`. Added 2026-05-02 to give
@@ -669,6 +687,14 @@ impl BuiltinId {
                 args: vec![CgTy::AgentId],
                 result: CgTy::Vec3F32,
             },
+            AbilityTelegraphKind => BuiltinSignature::Fixed {
+                args: vec![CgTy::U32],
+                result: CgTy::U32,
+            },
+            AbilityTelegraphParam0 => BuiltinSignature::Fixed {
+                args: vec![CgTy::U32],
+                result: CgTy::F32,
+            },
             Vec3Ctor => BuiltinSignature::Fixed {
                 args: vec![CgTy::F32, CgTy::F32, CgTy::F32],
                 result: CgTy::Vec3F32,
@@ -716,6 +742,8 @@ impl BuiltinId {
             ThreatsDirAwayFromNearest { view } => {
                 format!("threats_dir_away_from_nearest.#{}", view.0)
             }
+            AbilityTelegraphKind => "abilities.telegraph_kind".to_string(),
+            AbilityTelegraphParam0 => "abilities.telegraph_param_0".to_string(),
             Vec3Ctor => "vec3".to_string(),
             AsF32(t) => format!("as_f32.{}", t.label()),
             AsU32(t) => format!("as_u32.{}", t.label()),

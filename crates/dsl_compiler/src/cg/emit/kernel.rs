@@ -989,6 +989,40 @@ pub fn kernel_topology_to_spec_and_body(
         }
     }
 
+    // 10b-extra. Plan H slice 3 — ability-registry telegraph reads.
+    // The body-scan above handled `view_<id>_*(` substrings; this pass
+    // handles `ability_registry_telegraph_<col>_at(` helper calls,
+    // emitted by `compose_ability_telegraph_prelude`. For each helper
+    // referenced, append the matching SoA binding so the helper body's
+    // `ability_registry_telegraph_<col>[id]` read resolves.
+    {
+        for (helper, binding_name, wgsl_ty) in [
+            (
+                "ability_registry_telegraph_kind_at(",
+                "ability_registry_telegraph_kind",
+                "array<u32>",
+            ),
+            (
+                "ability_registry_telegraph_param_0_at(",
+                "ability_registry_telegraph_params",
+                "array<f32>",
+            ),
+        ] {
+            if wgsl_body.contains(helper)
+                && !bindings.iter().any(|b| b.name == binding_name)
+            {
+                let slot = bindings.len() as u32;
+                bindings.push(KernelBinding {
+                    slot,
+                    name: binding_name.into(),
+                    access: AccessMode::ReadStorage,
+                    wgsl_ty: wgsl_ty.into(),
+                    bg_source: BgSource::External(binding_name.into()),
+                });
+            }
+        }
+    }
+
     // 10c. Push the cfg uniform LAST so its slot lands after every data
     //      binding (including any Phase 2 debug instrumentation buffers
     //      added in 10b above).

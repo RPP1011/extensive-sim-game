@@ -865,6 +865,15 @@ fn compose_wgsl_file(
         out.push('\n');
     }
 
+    // Plan H slice 3 — ability registry telegraph helpers. Independent
+    // from the view-storage helpers (different storage shape, different
+    // BGL bindings) so kept in a sibling composer.
+    let telegraph_prelude = compose_ability_telegraph_prelude(body);
+    if !telegraph_prelude.is_empty() {
+        out.push_str(&telegraph_prelude);
+        out.push('\n');
+    }
+
     // Emit the deterministic per-agent RNG primitive iff the kernel
     // body references it. Substring-keyed on `per_agent_u32(` so a
     // comment that incidentally names the function doesn't trigger
@@ -1072,6 +1081,46 @@ fn compose_namespace_prelude(body: &str, prog: &CgProgram) -> String {
 /// u32 at write time (`view_storage_primary[idx] = bitcast<u32>(value)`)
 /// and bitcast back at read time. This is the standard scalar-view
 /// storage convention.
+/// Plan H slice 3 — emit `ability_registry_telegraph_*_at(id)` helper
+/// fns when the kernel body references them. Sibling of
+/// [`compose_view_storage_prelude`] but for ability-registry indexed
+/// reads (per-ability scalars, single-arg lookup against the
+/// `PackedAbilityRegistryGpu` SoA columns).
+///
+/// The substring scan + helper-emit shape mirrors the view-storage
+/// pattern: detect `<helper>_at(` in the body, emit a bare
+/// `fn <helper>_at(id: u32) -> <ty> { return <binding>[id]; }`. The
+/// kernel body-scan in `cg/emit/kernel.rs` adds the matching
+/// `ability_registry_telegraph_*` BGL binding when it sees the same
+/// substring, so the helper's body resolves at WGSL compile time.
+///
+/// Stride-1 columns (`telegraph_kind`) read directly. Stride-N columns
+/// (`telegraph_params` is 4×f32 per ability) compose `id * stride +
+/// slot` inside the helper body — slot 0 hardcoded for the
+/// `telegraph_param_0` flavour.
+fn compose_ability_telegraph_prelude(body: &str) -> String {
+    let mut out = String::new();
+    if body.contains("ability_registry_telegraph_kind_at(") {
+        out.push_str(
+            "fn ability_registry_telegraph_kind_at(id: u32) -> u32 {\n\
+             \x20   return ability_registry_telegraph_kind[id];\n\
+             }\n",
+        );
+    }
+    if body.contains("ability_registry_telegraph_param_0_at(") {
+        // telegraph_params stride = 4 (4 × f32 per ability). Slot 0 is
+        // the primary param (radius for Circle, width for Line). Future
+        // _param_1 / _param_2 / _param_3 helpers stack on this same
+        // shape with a different `+ N` offset.
+        out.push_str(
+            "fn ability_registry_telegraph_param_0_at(id: u32) -> f32 {\n\
+             \x20   return ability_registry_telegraph_params[id * 4u + 0u];\n\
+             }\n",
+        );
+    }
+    out
+}
+
 fn compose_view_storage_prelude(body: &str, prog: &CgProgram) -> String {
     use std::collections::{BTreeMap, BTreeSet};
     // Two parallel sets per view: which helpers are referenced. A view
@@ -3253,6 +3302,68 @@ mod tests {
         assert!(
             !prelude.contains("fn view_0_nearest("),
             "bare nearest helper must not emit when only _dir_away is referenced; got:\n{prelude}"
+        );
+    }
+
+    /// Plan H slice 3 — `ability_registry_telegraph_kind_at(id)` and
+    /// `ability_registry_telegraph_param_0_at(id)` helper fns. Each
+    /// emits ONLY when the kernel body references its substring; the
+    /// matching `ability_registry_telegraph_*` BGL binding is added
+    /// by the body-scan in `cg/emit/kernel.rs`.
+    ///
+    /// telegraph_params is stride-4 (4×f32 per ability), so the param
+    /// helper must compose `id * 4u + 0u` to read slot 0.
+    #[test]
+    fn ability_telegraph_helpers_emit_when_referenced() {
+        let body = "let kind = ability_registry_telegraph_kind_at(my_id);\n\
+                    let radius = ability_registry_telegraph_param_0_at(my_id);";
+        let prelude = compose_ability_telegraph_prelude(body);
+
+        assert!(
+            prelude.contains("fn ability_registry_telegraph_kind_at(id: u32) -> u32"),
+            "telegraph_kind_at signature; got:\n{prelude}"
+        );
+        assert!(
+            prelude.contains("return ability_registry_telegraph_kind[id]"),
+            "telegraph_kind_at body must read the binding by id; got:\n{prelude}"
+        );
+        assert!(
+            prelude.contains("fn ability_registry_telegraph_param_0_at(id: u32) -> f32"),
+            "telegraph_param_0_at signature; got:\n{prelude}"
+        );
+        assert!(
+            prelude.contains("return ability_registry_telegraph_params[id * 4u + 0u]"),
+            "telegraph_param_0_at body must compose stride-4 index; got:\n{prelude}"
+        );
+    }
+
+    /// Negative arm — when neither helper substring is present, the
+    /// telegraph prelude is empty. Keeps every existing fixture's
+    /// emit byte-identical to pre-slice-3.
+    #[test]
+    fn ability_telegraph_prelude_empty_when_unreferenced() {
+        let body = "let x = view_0_get(observer);";
+        let prelude = compose_ability_telegraph_prelude(body);
+        assert!(
+            prelude.is_empty(),
+            "no telegraph reference → no prelude; got:\n{prelude}"
+        );
+    }
+
+    /// Selective emit — referencing only `telegraph_kind_at` must NOT
+    /// pull in the `_param_0_at` helper. Avoids dead WGSL functions
+    /// + spurious BGL bindings in kernels that touch only one column.
+    #[test]
+    fn ability_telegraph_prelude_emits_only_referenced_helpers() {
+        let body = "let kind = ability_registry_telegraph_kind_at(my_id);";
+        let prelude = compose_ability_telegraph_prelude(body);
+        assert!(
+            prelude.contains("fn ability_registry_telegraph_kind_at"),
+            "kind helper must emit; got:\n{prelude}"
+        );
+        assert!(
+            !prelude.contains("fn ability_registry_telegraph_param_0_at"),
+            "param helper must NOT emit when not referenced; got:\n{prelude}"
         );
     }
 

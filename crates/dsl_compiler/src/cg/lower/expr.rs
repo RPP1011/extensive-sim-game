@@ -3418,6 +3418,41 @@ fn lower_namespace_call(
 ) -> Result<CgExprId, LoweringError> {
     match (ns, method) {
         (NamespaceId::Rng, m) => lower_rng_call(m, args, span, ctx),
+        // Plan H slice 3 — abilities.telegraph_kind(id) /
+        // abilities.telegraph_param_0(id). Mirrors the AgentField
+        // single-arg shape: lower the index expression, type-check it
+        // as u32-or-AgentId (ability ids are u32 NonZero in the
+        // registry), then emit a typed Builtin call. The WGSL helper
+        // `ability_registry_telegraph_kind_at(id)` is auto-emitted by
+        // `compose_view_storage_prelude` when the substring is
+        // detected; the BGL composer body-scan in `cg/emit/kernel.rs`
+        // adds the matching `ability_registry_telegraph_*` binding.
+        (NamespaceId::Abilities, m) if args.len() == 1 && (m == "telegraph_kind" || m == "telegraph_param_0") => {
+            let target_expr = &args[0].value;
+            let target_id = lower_expr(target_expr, ctx)?;
+            let target_ty = typecheck_node(ctx, target_id, target_expr.span)?;
+            if !matches!(target_ty, CgTy::U32 | CgTy::AgentId) {
+                return Err(LoweringError::IllTypedExpression {
+                    expected: CgTy::U32,
+                    got: target_ty,
+                    span,
+                });
+            }
+            let (fn_id, ty) = match m {
+                "telegraph_kind" => (BuiltinId::AbilityTelegraphKind, CgTy::U32),
+                "telegraph_param_0" => (BuiltinId::AbilityTelegraphParam0, CgTy::F32),
+                _ => unreachable!("guard above narrowed to these two methods"),
+            };
+            add(
+                ctx,
+                CgExpr::Builtin {
+                    fn_id,
+                    args: vec![target_id],
+                    ty,
+                },
+                span,
+            )
+        }
         (NamespaceId::Items, field) if args.len() == 1 => {
             // `items.<field>(<expr>)` — typed Item-field read where the
             // target slot is computed by `<expr>`. Resolves `<field>`

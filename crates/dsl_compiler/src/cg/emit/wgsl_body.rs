@@ -1385,6 +1385,13 @@ fn builtin_name(id: BuiltinId) -> String {
         ThreatsDirAwayFromNearest { view } => {
             format!("view_{}_dir_away_from_nearest", view.0)
         }
+        // Plan H slice 3 — ability registry telegraph reads. Names
+        // suffixed `_at` so the body-scan in `cg/emit/kernel.rs` can
+        // distinguish the helper substring from the bare binding name
+        // `ability_registry_telegraph_kind` (would otherwise match
+        // both and double-trigger the BGL inclusion).
+        AbilityTelegraphKind => "ability_registry_telegraph_kind_at".to_string(),
+        AbilityTelegraphParam0 => "ability_registry_telegraph_param_0_at".to_string(),
         // WGSL has a built-in `vec3<f32>` constructor; emit the call
         // as-is so `vec3(x, y, z)` lowers to `vec3<f32>(x, y, z)`.
         Vec3Ctor => "vec3<f32>".to_string(),
