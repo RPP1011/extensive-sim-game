@@ -249,11 +249,18 @@ field hero_waypoint_x:         f32
 field hero_waypoint_y:         f32
 
 config dungeon {
-  // Move speeds (per 100ms tick).
-  hero_move_speed:    f32 = 0.20,
-  goblin_move_speed:  f32 = 0.15,
-  brute_move_speed:   f32 = 0.10,
-  patrol_speed:       f32 = 0.10,
+  // Move speeds (per 100ms tick). Bumped 2026-05-14 alongside the
+  // SLOT_WIDTH 12→16 / GRID 72→96 dungeon resize (commit d2a6dcc9):
+  // pre-bump, agents took 33% longer to cross a slot at the larger
+  // scale and visually appeared "stuck." 2x the prior values keeps
+  // the same cross-slot tick budget the pin was tuned against.
+  // Also helps the spawn-room observer: enemies wandering via
+  // PatrolBounce now reach detection range (and heroes reach
+  // adjacent-room exploration targets) in ~half the prior tick count.
+  hero_move_speed:    f32 = 0.40,
+  goblin_move_speed:  f32 = 0.30,
+  brute_move_speed:   f32 = 0.20,
+  patrol_speed:       f32 = 0.20,
 
   // Hero verb tuning.
   warrior_cleave_range: f32 = 4.0,
@@ -276,14 +283,16 @@ config dungeon {
 
   // Enemy verb tuning. Stage 3 task A — enemies fire faster +
   // melee-engage from longer range so the boss-room concentration
-  // produces TPK on bad rolls.
+  // produces TPK on bad rolls. 2026-05-14 — bumped charge / volley
+  // ranges to keep pace with SLOT_WIDTH 12→16 (charges that
+  // previously crossed a slot now barely span one).
   goblin_melee_range:   f32 = 3.0,
   goblin_melee_cd:      u32 = 3,
-  goblin_charge_range:  f32 = 18.0,
+  goblin_charge_range:  f32 = 24.0,
   brute_cleave_range:   f32 = 5.0,
   brute_cleave_cd:      u32 = 6,
-  brute_charge_range:   f32 = 16.0,
-  archer_volley_range:  f32 = 18.0,
+  brute_charge_range:   f32 = 22.0,
+  archer_volley_range:  f32 = 24.0,
   archer_volley_cd:     u32 = 4,
 
   // Role discriminants.
@@ -315,7 +324,14 @@ config stealth {
   // the hero is NOT stealthed AND terrain.line_of_sight passes.
   // Stage 3 task A — bumped base from 8 to 14 so heroes get
   // detected sooner by Archers + Brutes that share their LoS.
-  base_detect_range:        f32 = 14.0,
+  // 2026-05-14 — bumped 14 → 20 to keep pace with the SLOT_WIDTH
+  // 12→16 dungeon resize. At 14 cells, an enemy in one room rarely
+  // sees a hero in an adjacent room (rooms span 16 cells), so
+  // enemies stayed idle until heroes entered the same room. 20
+  // cells comfortably crosses one room + door, restoring the
+  // "enemies notice heroes one room away" behaviour the pin was
+  // tuned against pre-resize.
+  base_detect_range:        f32 = 20.0,
   detect_range_per_alert:   f32 = 0.5,
 
   // Per-ability sound radii (Gap dungeon_stealth#3-sound, closed
