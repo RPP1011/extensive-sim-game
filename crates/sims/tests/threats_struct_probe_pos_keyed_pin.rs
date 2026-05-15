@@ -315,3 +315,97 @@ fn read_scoring_utilities(state: &mut GeneratedRuntime, n: u32) -> Vec<f32> {
     staging.unmap();
     out
 }
+
+/// Plan G G3f follow-up — sign-extension regression for the q8 unpack.
+///
+/// The intensity helper unpacks each cell's `center_x_q8` via:
+///   `let cx = f32((cx_raw << 16u) >> 16u) / 256.0;`
+///
+/// Without the `<<16 >>16` sign-extend dance, a caster at `x = -2.0`
+/// (q8 = -512 = `0xFE00` in low 16 bits, packed as `0x0000FE00` in
+/// the u32 slot) would unpack to `+254.0` (raw integer interpretation)
+/// instead of `-2.0`. Distance computation would then be wildly wrong
+/// — a near-zero observer would see the negative-coord caster as
+/// 250+ units away and contribute 0 intensity instead of the real
+/// in-radius value.
+///
+/// This pin seeds caster 0 at `x = -2.0` and asserts the resulting
+/// intensities still match the mutual-distance lattice.
+#[test]
+fn pos_keyed_intensity_handles_negative_coord_casters() {
+    const N: u32 = 4;
+    let positions: [[f32; 4]; N as usize] = [
+        [-2.0, 0.0, 0.0, 0.0],   // caster 0 at -2.0 — exercises sign extend
+        [1.0, 0.0, 0.0, 0.0],
+        [3.5, 0.0, 0.0, 0.0],
+        [10.0, 0.0, 0.0, 0.0],
+    ];
+    // Mutual-distance matrix at radius=4:
+    //   obs 0 at (-2,0): d=[0, 3, 5.5, 12]   live=[T,T,F,F]  contrib=[4,1,0,0]   = 5.0
+    //   obs 1 at (1,0):  d=[3, 0, 2.5, 9]    live=[T,T,T,F]  contrib=[1,4,1.5,0] = 6.5
+    //   obs 2 at (3.5,0):d=[5.5, 2.5, 0, 6.5]live=[F,T,T,F]  contrib=[0,1.5,4,0] = 5.5
+    //   obs 3 at (10,0): d=[12, 9, 6.5, 0]   live=[F,F,F,T]  contrib=[0,0,0,4]   = 4.0
+    let expected_total: [f32; N as usize] = [5.0, 6.5, 5.5, 4.0];
+
+    let mut state = match try_runtime(0xCAFEBABE, N) {
+        Some(s) => s,
+        None => {
+            eprintln!("[neg_coord_intensity] skipping: no wgpu adapter on host.");
+            return;
+        }
+    };
+
+    let alive: Vec<u32> = vec![1u32; N as usize];
+    state
+        .gpu
+        .queue
+        .write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&alive));
+    state.gpu.queue.write_buffer(
+        &state.agent_pos_buf,
+        0,
+        bytemuck::cast_slice(&positions),
+    );
+
+    for _ in 0..3 {
+        state.step();
+    }
+
+    let utilities = read_scoring_utilities(&mut state, N);
+    let cells = read_threats_cells(&mut state, N, 4);
+    eprintln!("[neg_coord_intensity] utilities: {:?}", utilities);
+
+    // Pin the negative-coord cell content. center_x_q8 for caster 0
+    // packed as q8 of -2.0 = -512. The u32 slot holds the i16 in
+    // its low 16 bits, sign-bit propagated up by the `i32(...)`
+    // cast in the .sim's q8 expression: bit pattern is `0xFFFFFE00`
+    // when stored as u32 (the i32 -512 reinterpreted), or `0xFE00`
+    // (= 65024) when stored as a u16-clamped i16. The .sim writes
+    // via `u32(i32(caster_pos.x * 256.0))` which sign-extends to
+    // i32 first, then reinterprets as u32 — yielding 0xFFFFFE00.
+    let caster_0_cell = &cells[0]; // observer 0's first ring slot
+    assert_eq!(
+        caster_0_cell.center_x_q8, 0xFFFFFE00u32,
+        "caster 0's q8(-2.0) must store as 0xFFFFFE00 (i32 -512 reinterpreted as u32); got 0x{:08X}",
+        caster_0_cell.center_x_q8,
+    );
+
+    for (i, u) in utilities.iter().enumerate() {
+        assert!(
+            u.is_finite() && *u >= 0.0,
+            "observer {i} utility = {u} (must be finite + non-negative)",
+        );
+    }
+
+    for i in 0..(N as usize) {
+        let expected = expected_total[i];
+        let observed = utilities[i];
+        let delta = (observed - expected).abs();
+        assert!(
+            delta < 0.05,
+            "observer {i}: expected {expected}, got {observed} (delta {delta:.4}). \
+             Sign-extension may be broken — without `<<16 >>16` the negative-coord \
+             cell would unpack to +254 instead of -2 and observer 0's intensity \
+             would collapse to 0.",
+        );
+    }
+}
