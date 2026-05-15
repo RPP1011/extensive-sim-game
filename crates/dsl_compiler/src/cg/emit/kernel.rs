@@ -336,12 +336,50 @@ pub fn kernel_topology_to_spec_and_body(
                 _ => None,
             })
             .unwrap_or(false);
-        let bindings =
+        let mut bindings =
             build_view_fold_bindings(view_name, &cfg_struct, storage_hint, &dispatch, belief_gated);
         let cfg_struct_decl = build_view_fold_cfg_struct_decl(&cfg_struct);
         let cfg_build_expr = build_view_fold_cfg_build_expr(&cfg_struct);
         let wgsl_body =
             build_view_fold_wgsl_body(&body_ops, prog, ctx, storage_hint, &dispatch, belief_gated)?;
+
+        // Plan G G3f follow-up — gap (b/d): when the fold body reads
+        // a per-pair agent field (e.g. `agent_pos[per_pair_candidate]`
+        // produced by `agents.pos(source_candidate)` in the surface
+        // DSL), append the matching SoA binding so the WGSL compiles.
+        // build_view_fold_bindings only auto-includes
+        // agent_busy_with_ability_id (the busy-filter early-exit).
+        // Other fields land here via post-scan, mirroring the generic
+        // kernel path's body-scan extras pass.
+        //
+        // IMPORTANT: cfg is at slot 6 (between sim_cfg and the
+        // PerAgentEventScan-specific bindings at 7+), and the
+        // downstream runtime emit hardcodes slot 8 for beliefs_flags
+        // when belief_gated. Append new agent bindings at the END
+        // (slot 8 if not belief_gated, slot 9 if belief_gated) so
+        // the existing runtime emit's slot assignments stay valid.
+        for (snake, wgsl_ty) in [
+            ("pos", "array<vec3<f32>>"),
+            ("hp", "array<f32>"),
+            ("max_hp", "array<f32>"),
+            ("alive", "array<u32>"),
+            ("creature_type", "array<u32>"),
+        ] {
+            let needle = format!("agent_{snake}[");
+            let binding_name = format!("agent_{snake}");
+            if wgsl_body.contains(&needle)
+                && !bindings.iter().any(|b| b.name == binding_name)
+            {
+                let slot = bindings.len() as u32;
+                bindings.push(KernelBinding {
+                    slot,
+                    name: binding_name.clone(),
+                    access: AccessMode::ReadStorage,
+                    wgsl_ty: wgsl_ty.into(),
+                    bg_source: BgSource::External(binding_name),
+                });
+            }
+        }
         let spec = KernelSpec {
             name,
             pascal,

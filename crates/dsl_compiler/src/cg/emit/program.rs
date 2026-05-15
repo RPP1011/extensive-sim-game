@@ -2114,21 +2114,21 @@ fn compose_view_fold_record_method(spec: &KernelSpec) -> String {
     out.push_str(
         "                wgpu::BindGroupEntry { binding: 6, resource: bindings.cfg.as_entire_binding() },\n",
     );
-    // G3d: PerAgentEventScan adds an 8th binding for the busy-filter
-    // SoA read. The spec's binding-count classification (≥8 vs 7)
-    // tells us whether to emit the extra entry. Mirrors the BGL emit
-    // at `cg/emit/kernel.rs::build_view_fold_bindings`'s extra slot.
-    if spec.bindings.len() >= 8 {
-        out.push_str(
-            "                wgpu::BindGroupEntry { binding: 7, resource: bindings.agent_busy_with_ability_id.as_entire_binding() },\n",
-        );
-    }
-    // @belief_gated adds a 9th binding for per-(observer, source)
-    // belief lookup. Mirrors the BGL emit's slot 8.
-    if spec.bindings.len() >= 9 {
-        out.push_str(
-            "                wgpu::BindGroupEntry { binding: 8, resource: bindings.beliefs_flags.as_entire_binding() },\n",
-        );
+    // G3d + Plan G G3f follow-up: emit a BindGroupEntry per spec
+    // binding past the 7 standard ViewFold slots. The original
+    // hardcoded form covered the 8th slot (agent_busy_with_ability_id)
+    // and the 9th (beliefs_flags) but couldn't handle additional
+    // agent SoA bindings (e.g. agent_pos for fold bodies that read
+    // `agents.<field>(source_candidate)`). Iterating spec.bindings
+    // by their actual slot + name handles any number of extras and
+    // stays in lock-step with `cg/emit/kernel.rs`'s post-scan that
+    // appended them.
+    for b in spec.bindings.iter().skip(7) {
+        out.push_str(&format!(
+            "                wgpu::BindGroupEntry {{ binding: {slot}, resource: bindings.{name}.as_entire_binding() }},\n",
+            slot = b.slot,
+            name = b.name,
+        ));
     }
     out.push_str("            ],\n        });\n");
     out.push_str(&format!(

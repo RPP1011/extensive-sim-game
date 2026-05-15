@@ -30,22 +30,32 @@ fn try_runtime(seed: u64, n: u32) -> Option<GeneratedRuntime> {
 #[test]
 fn pos_keyed_intensity_decreases_with_distance_to_cell_center() {
     const N: u32 = 4;
-    const RADIUS: f32 = 4.0;
-    // Distances pinned to drive a strict monotone decrease + a
-    // beyond-radius zero. Each value covers a distinct regime: at
-    // center, just inside, near edge, beyond radius.
+    // Each agent is BOTH an observer and a caster (every alive agent
+    // gets stamped busy by MarkCasterBusy). Cell center for cell-c
+    // (allocated when source_candidate=c) reads `agents.pos(c)` and
+    // packs as q8 — see threats_struct_probe.sim's fold body.
+    //
+    // Per-observer intensity = sum over all 4 cells of
+    //   max(0, radius - distance(observer.pos, caster_c.pos))
+    //
+    // With observers/casters at the positions below and radius=4,
+    // the mutual-distance matrix produces non-monotone utilities
+    // (observer 1 outscores observer 0 because it's closer to the
+    // mass of casters). This is the surface-DSL proof that cell.center
+    // is varying per-cell — a constant-center fold would give every
+    // observer the same magnitude.
     let positions: [[f32; 4]; N as usize] = [
-        [0.0, 0.0, 0.0, 0.0],   // observer 0: dist=0
-        [1.0, 0.0, 0.0, 0.0],   // observer 1: dist=1
-        [3.5, 0.0, 0.0, 0.0],   // observer 2: dist=3.5
-        [10.0, 0.0, 0.0, 0.0],  // observer 3: dist=10 > radius
+        [0.0, 0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0, 0.0],
+        [3.5, 0.0, 0.0, 0.0],
+        [10.0, 0.0, 0.0, 0.0],
     ];
-    let expected_per_cell = [
-        RADIUS - 0.0,
-        RADIUS - 1.0,
-        RADIUS - 3.5,
-        0.0, // out of radius
-    ];
+    // Pre-computed expected intensity per observer.
+    //   observer 0 at (0,0):  d=[0, 1, 3.5, 10]   → contrib=[4, 3, 0.5, 0]   = 7.5
+    //   observer 1 at (1,0):  d=[1, 0, 2.5, 9]    → contrib=[3, 4, 1.5, 0]   = 8.5
+    //   observer 2 at (3.5,0):d=[3.5, 2.5, 0, 6.5]→ contrib=[0.5, 1.5, 4, 0] = 6.0
+    //   observer 3 at (10,0): d=[10, 9, 6.5, 0]   → contrib=[0, 0, 0, 4]     = 4.0
+    let expected_total: [f32; N as usize] = [7.5, 8.5, 6.0, 4.0];
 
     let mut state = match try_runtime(0xCAFEBABE, N) {
         Some(s) => s,
@@ -107,53 +117,40 @@ fn pos_keyed_intensity_decreases_with_distance_to_cell_center() {
         );
     }
 
-    // Strict monotone decrease with distance. The K=4 cells per
-    // observer all carry the same constant content, so utility = 4 *
-    // max(0, radius - distance). Pre-pin the ordering rather than the
-    // exact magnitudes — the Probe vs Idle argmax winner depends on
-    // whether utility > 0; what matters for the regression is that the
-    // helper actually responded to position.
-    assert!(
-        utilities[0] > utilities[1],
-        "observer 0 (dist=0) must outscore observer 1 (dist=1): {:?}",
-        utilities
-    );
-    assert!(
-        utilities[1] > utilities[2],
-        "observer 1 (dist=1) must outscore observer 2 (dist=3.5): {:?}",
-        utilities
-    );
-    assert!(
-        utilities[2] > utilities[3],
-        "observer 2 (dist=3.5) must outscore observer 3 (dist=10): {:?}",
-        utilities
-    );
-
-    // Beyond-radius observer must score exactly 0 — every cell falls
-    // through the `if (dist < radius)` accumulator gate, leaving the
-    // running sum untouched. (The Idle verb's score is also 0; the
-    // argmax tiebreak picks the lower action id, which here is Probe;
-    // but the utility magnitude is what we assert.)
-    assert_eq!(
-        utilities[3], 0.0,
-        "observer 3 (dist=10 > radius=4) must score 0; got {}",
-        utilities[3],
-    );
-
-    // Tighter cross-check: per-cell expected ≈ utility / K. Allow
-    // ULP-scale slack from the f32 distance + accumulator path.
+    // Per-observer exact-magnitude pin. The intensity helper sums
+    // `max(0, radius - distance)` over K=4 live cells with varying
+    // centers (one per caster). The expected matrix is derived from
+    // the mutual-distance lattice between observers and casters
+    // (computed in the comment above).
+    //
+    // f32 ULP slack: q8 packing rounds positions to 1/256 unit,
+    // distance computation chains 2 mults + 1 sqrt. Empirical drift
+    // observed at ~5e-3 max; pin at 0.05 to absorb future regression
+    // noise without masking real semantic regressions.
     for i in 0..(N as usize) {
-        if expected_per_cell[i] == 0.0 {
-            continue; // already pinned above
-        }
-        let expected_total = expected_per_cell[i] * 4.0; // K=4 cells per observer
+        let expected = expected_total[i];
         let observed = utilities[i];
-        let delta = (observed - expected_total).abs();
+        let delta = (observed - expected).abs();
         assert!(
             delta < 0.05,
-            "observer {i}: expected {expected_total}, got {observed} (delta {delta:.4})",
+            "observer {i}: expected {expected}, got {observed} (delta {delta:.4})",
         );
     }
+
+    // Independent invariants that don't depend on the exact
+    // magnitudes: observer 1 (closest to the mass of casters) must
+    // outscore the bookend observers; observer 3 (out of radius for
+    // every caster except itself) sees exactly the self-cast cell.
+    assert!(
+        utilities[1] > utilities[0],
+        "observer 1 sits among 3 in-range casters and must outscore observer 0 (only 2 in-range neighbours): {:?}",
+        utilities
+    );
+    assert!(
+        utilities[1] > utilities[3],
+        "observer 1 must outscore observer 3 (lone in-range cell = self): {:?}",
+        utilities
+    );
 
     // Plan G G3f follow-up — gap (b) verification. The fold body now
     // writes `source: source_candidate` (was hardcoded `0u`) so each
