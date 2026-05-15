@@ -950,6 +950,22 @@ pub struct MaterializedViewInfo {
     /// per-agent (single-key) views. Drives per-view buffer sizing
     /// in the synthesized `try_new`.
     pub pair_keyed: Option<PairKeyedSecondKey>,
+    /// Plan G G3f follow-up — `@per_entity_ring(K)` ring length, when
+    /// the view is annotated as a per-entity ring. Multiplied into the
+    /// per-view storage allocation alongside `cell_stride_u32` so
+    /// struct-cell ring views (e.g. `threats` with the 8-field
+    /// ThreatZoneCell layout) get `agent_count * K * 8 * 4` bytes
+    /// instead of the scalar-default `agent_count * 4`. `None` for
+    /// every other storage shape (per-agent scalar, pair-keyed map,
+    /// top-K).
+    pub ring_k: Option<u16>,
+    /// Per-cell u32 stride for struct-cell ring views. `1` for scalar
+    /// payloads (the existing `@per_entity_ring(K)` shape that
+    /// per_entity_ring_probe.sim exercises), `>= 2` for views whose
+    /// fold body uses `self.append(field1, field2, ...)` and the
+    /// lowering registered a `ViewLayout`. Combined with `ring_k`
+    /// above to size `view_storage_<view>_primary_buf`.
+    pub cell_stride_u32: u32,
 }
 
 /// Walk `comp.views` and return one [`MaterializedViewInfo`] per
@@ -963,7 +979,7 @@ pub fn collect_materialized_views(
     comp: &dsl_ast::ir::Compilation,
 ) -> Vec<MaterializedViewInfo> {
     use dsl_ast::ast::EntityRoot;
-    use dsl_ast::ir::{IrType, ViewKind};
+    use dsl_ast::ir::{IrType, StorageHint, ViewKind};
     let item_count = comp
         .entities
         .iter()
@@ -1007,9 +1023,43 @@ pub fn collect_materialized_views(
         } else {
             None
         };
+        // Plan G G3f follow-up — inspect the storage hint + fold body
+        // to surface ring-K and per-cell stride for `@per_entity_ring(K)`
+        // views with struct-cell payloads. The cell stride is implied
+        // by the first `self.append(field1, field2, ...)` statement in
+        // the fold body — same convention the CG-side `ViewLayout`
+        // registers post-lowering. Defaults: scalar payload (stride 1)
+        // for either non-ring storage or a `self += <expr>` body.
+        let ring_k = match v.kind {
+            ViewKind::Materialized(StorageHint::PerEntityRing { k }) => Some(k),
+            _ => None,
+        };
+        let cell_stride_u32: u32 = if let dsl_ast::ir::ViewBodyIR::Fold { handlers, .. } = &v.body {
+            let mut stride = 1u32;
+            for h in handlers {
+                for s in &h.body {
+                    if let dsl_ast::ir::IrStmt::SelfAppend { fields, .. } = s {
+                        // First-match wins; conflicting field counts
+                        // across handlers surface as a typed lowering
+                        // error during CG (ViewLayout register
+                        // returns the prior entry).
+                        stride = fields.len() as u32;
+                        break;
+                    }
+                }
+                if stride > 1 {
+                    break;
+                }
+            }
+            stride
+        } else {
+            1
+        };
         out.push(MaterializedViewInfo {
             name: v.name.clone(),
             pair_keyed,
+            ring_k,
+            cell_stride_u32,
         });
     }
     out
@@ -1612,6 +1662,16 @@ fn synthesize_generated_runtime_struct(
         .iter()
         .map(|v| (v.name.as_str(), v.pair_keyed))
         .collect();
+    // Plan G G3f follow-up — per-view ring storage shape. K=ring length;
+    // stride=u32 words per cell. Multiplied into the per-view buffer
+    // size below so `@per_entity_ring(K=N)` views with struct-cell
+    // payloads (e.g. threats with the 8-field ThreatZoneCell layout)
+    // get `agent_count * K * stride * 4` bytes instead of the scalar
+    // `agent_count * 4`.
+    let view_ring_shape: BTreeMap<&str, (Option<u16>, u32)> = materialized_views
+        .iter()
+        .map(|v| (v.name.as_str(), (v.ring_k, v.cell_stride_u32)))
+        .collect();
 
     // Plan G #244 bug 1 — fold consumer detection. Used to decide
     // whether to allocate the `prev_event_tail_buf` snapshot side
@@ -1694,6 +1754,14 @@ fn synthesize_generated_runtime_struct(
     // `owned`.
     let mut owned_view_buf_pair_keyed: BTreeMap<String, Option<PairKeyedSecondKey>> =
         BTreeMap::new();
+    // Plan G G3f follow-up — per-view ring shape captured during the
+    // binding-rename pass and consumed by the buffer-allocation pass
+    // below to size struct-cell ring views correctly. Keyed on the
+    // RENAMED `view_storage_<view>_primary` binding name so the
+    // buffer-sizing arm can look up shape by the same key it uses
+    // for `owned_view_buf_pair_keyed`.
+    let mut owned_view_buf_ring_shape: BTreeMap<String, (Option<u16>, u32)> =
+        BTreeMap::new();
     for spec in &artifacts.kernel_specs {
         let mut has_cfg = false;
         // Per-fold/decay kernel view-name extraction. The BGL slot
@@ -1744,6 +1812,11 @@ fn synthesize_generated_runtime_struct(
                     owned_view_buf_pair_keyed
                         .entry(effective_name.clone())
                         .or_insert(pk);
+                    if let Some(shape) = view_ring_shape.get(vname).copied() {
+                        owned_view_buf_ring_shape
+                            .entry(effective_name.clone())
+                            .or_insert(shape);
+                    }
                 }
             }
             // Standard agent columns ARE allocated as fixture-owned
@@ -1948,7 +2021,20 @@ fn synthesize_generated_runtime_struct(
         let slot_expr = if let Some(expr) = slot_count_expr_for_spatial_grid_buffer(name) {
             expr
         } else if let Some(pk) = owned_view_buf_pair_keyed.get(name) {
-            slot_count_expr_for_view_buf(*pk)
+            // Plan G G3f follow-up — for `@per_entity_ring(K)` views
+            // with struct-cell payloads (stride > 1), multiply the
+            // per-agent slot count by `K * stride` so the buffer
+            // covers `agent_count * K * stride` u32 words. Scalar
+            // ring views (stride == 1) and non-ring views fall
+            // through to the existing pair-keyed sizing.
+            let base = slot_count_expr_for_view_buf(*pk);
+            match owned_view_buf_ring_shape.get(name) {
+                Some((Some(k), stride)) if (*k as u32) * *stride > 1 => {
+                    let factor = (*k as u32) * *stride;
+                    format!("({base}) * {factor}u64")
+                }
+                _ => base,
+            }
         } else if let Some(view) = name
             .strip_prefix("view_storage_")
             .and_then(|s| s.strip_suffix("_anchor").or_else(|| s.strip_suffix("_ids")))

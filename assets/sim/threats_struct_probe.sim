@@ -165,3 +165,24 @@ view threats(observer: Agent) -> f32 {
     )
   }
 }
+
+// Plan G G3f follow-up — pos-keyed read-side smoke. The verb's score
+// expression `threats.intensity_at(self)` triggers emission of
+// `view_<id>_get(observer)` in the scoring kernel. With the
+// @per_entity_ring(K=4) + 8-field threat ViewLayout on `threats`,
+// the WGSL helper emits the distance-weighted ring walk
+// (compose_view_storage_prelude in cg/emit/program.rs), reading
+// agent_pos[observer] and accumulating max(0, radius - distance) over
+// every live cell. The runtime test reads scoring_output and asserts
+// observers near the (0, 0) cell center see higher utility than those
+// far from it. Idle is a constant baseline so the argmax winner shows
+// the magnitude difference.
+verb Probe(self) =
+  action ProbeAction
+  when (self.alive)
+  score (threats.intensity_at(self))
+
+verb Idle(self) =
+  action IdleAction
+  when (self.alive)
+  score (0.0)
