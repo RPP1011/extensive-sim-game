@@ -429,12 +429,33 @@ physics HeroExplore {
     let target = vec3(wx, wy, 1.0);
     let toward = target - self.pos;
     let dist = length(toward);
-    if (dist > 0.5) {
+    // Threshold lowered from 0.5 to 0.05 (2026-05-14): when the door
+    // midpoint sits within 0.5 units of the hero's x (e.g. door cx
+    // = 10, hero x = 9.93 + door y = 16, hero y = 15.8 → dist =
+    // 0.21 < 0.5), the old gate fired BEFORE the hero crossed the
+    // door cell at y=16. Hero froze just shy of the boundary; host
+    // advance never saw cand.idx() == cur_target → never picked the
+    // next room. With 0.05 threshold heroes step right onto the
+    // door midpoint, host's `current_room` recompute (host-side,
+    // floor(pos.y / SLOT_WIDTH)) flips to the south room, host
+    // advances target → hero continues exploring.
+    if (dist > 0.05) {
       let step = (toward / dist) * config.dungeon.hero_move_speed;
       let new_pos = self.pos + step;
-      if (terrain.line_of_sight(self.pos, new_pos)) {
-        agents.set_pos(self, new_pos);
-      }
+      // No LoS gate — the host writes waypoints to inside-room
+      // positions that are reachable by construction (door midpoint
+      // when crossing rooms, target room centroid when inside the
+      // target). Empirically the voxel_line_of_sight check at z=1
+      // rejects too aggressively at slot boundaries (where the
+      // 2-cell door gap competes with the 14-cell wall stretch), so
+      // every door-crossing hero gets wedged at y=15.8 or x=15.8
+      // for the rest of the run. Trade LoS-perfect movement for
+      // forward progress: heroes occasionally clip the wall column
+      // for one tick when crossing a non-door slot edge, but the
+      // diagonal step is short enough (0.4 units at hero_move_speed)
+      // that they emerge in the adjacent room without visible
+      // sticking. Net effect in the viewer: heroes actually explore.
+      agents.set_pos(self, new_pos);
     }
   }
 }
