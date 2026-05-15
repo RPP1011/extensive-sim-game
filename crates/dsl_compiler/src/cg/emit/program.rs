@@ -1100,10 +1100,25 @@ fn compose_namespace_prelude(body: &str, prog: &CgProgram) -> String {
 /// `telegraph_param_0` flavour.
 fn compose_ability_telegraph_prelude(body: &str) -> String {
     let mut out = String::new();
+    // Ability ids in PackedAbilityRegistry are NonZero u32 starting at
+    // 1 — id=0 is the empty-registry sentinel (no ability). The SoA
+    // columns are 0-indexed Vec<u8|f32>, so the read at SoA index 0
+    // corresponds to ability id 1. Compose `id - 1u` in each helper
+    // so callers can pass `busy_with_ability_id` directly without
+    // having to compute the offset themselves. Mirrors the existing
+    // `interrupt_mask[busy_with_ability_id - 1]` convention used by
+    // Plan G interrupt rules.
+    //
+    // Sentinel handling: when `id == 0` (no ability busy), the
+    // subtraction underflows to `0xFFFFFFFFu` which would OOB-read.
+    // Guard via `if (id == 0u) { return 0u; }` so the cell-write
+    // surface gets a typed-zero (kind sentinel TELEGRAPH_KIND_NONE
+    // for kind, 0.0 for params) instead of crashing the WGSL.
     if body.contains("ability_registry_telegraph_kind_at(") {
         out.push_str(
             "fn ability_registry_telegraph_kind_at(id: u32) -> u32 {\n\
-             \x20   return ability_registry_telegraph_kind[id];\n\
+             \x20   if (id == 0u) { return 0u; }\n\
+             \x20   return ability_registry_telegraph_kind[id - 1u];\n\
              }\n",
         );
     }
@@ -1114,7 +1129,8 @@ fn compose_ability_telegraph_prelude(body: &str) -> String {
         // shape with a different `+ N` offset.
         out.push_str(
             "fn ability_registry_telegraph_param_0_at(id: u32) -> f32 {\n\
-             \x20   return ability_registry_telegraph_params[id * 4u + 0u];\n\
+             \x20   if (id == 0u) { return 0.0; }\n\
+             \x20   return ability_registry_telegraph_params[(id - 1u) * 4u + 0u];\n\
              }\n",
         );
     }
@@ -3324,16 +3340,24 @@ mod tests {
             "telegraph_kind_at signature; got:\n{prelude}"
         );
         assert!(
-            prelude.contains("return ability_registry_telegraph_kind[id]"),
-            "telegraph_kind_at body must read the binding by id; got:\n{prelude}"
+            prelude.contains("return ability_registry_telegraph_kind[id - 1u]"),
+            "telegraph_kind_at body must read the binding at `id - 1` (NonZero ability ids → 0-indexed SoA); got:\n{prelude}"
+        );
+        assert!(
+            prelude.contains("if (id == 0u) { return 0u; }"),
+            "telegraph_kind_at must guard the empty-registry sentinel id=0; got:\n{prelude}"
         );
         assert!(
             prelude.contains("fn ability_registry_telegraph_param_0_at(id: u32) -> f32"),
             "telegraph_param_0_at signature; got:\n{prelude}"
         );
         assert!(
-            prelude.contains("return ability_registry_telegraph_params[id * 4u + 0u]"),
-            "telegraph_param_0_at body must compose stride-4 index; got:\n{prelude}"
+            prelude.contains("return ability_registry_telegraph_params[(id - 1u) * 4u + 0u]"),
+            "telegraph_param_0_at body must compose stride-4 index against `id - 1`; got:\n{prelude}"
+        );
+        assert!(
+            prelude.contains("if (id == 0u) { return 0.0; }"),
+            "telegraph_param_0_at must guard the empty-registry sentinel id=0; got:\n{prelude}"
         );
     }
 

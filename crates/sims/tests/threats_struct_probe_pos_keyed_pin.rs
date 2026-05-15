@@ -192,6 +192,38 @@ fn pos_keyed_intensity_decreases_with_distance_to_cell_center() {
             );
         }
     }
+
+    // Plan H slice 4 — cell.zone_kind + cell.radius_q8 verification.
+    // The fold now derives both from the ability registry via
+    // `abilities.telegraph_kind(busy_with_ability_id)` /
+    // `abilities.telegraph_param_0(busy_with_ability_id)`. Probe.ability
+    // declares `cast { telegraph: circle(radius: 4.0) }` so:
+    //   * zone_kind = 1 (Circle discriminant)
+    //   * radius_q8 = u32(i32(4.0 * 256.0)) = 1024
+    //
+    // A regression that swapped these back to constants would still
+    // produce the same numbers (the constants matched the registry by
+    // construction), but a regression that broke the registry read
+    // (e.g. wrong `id - 1u` offset, wrong stride-4 indexing for the
+    // param column) would produce 0 / wrong values — the helper's
+    // empty-registry sentinel guard returns 0 / 0.0 in those cases.
+    for obs in 0..(N as usize) {
+        for c in 0..4 {
+            let cell = &cells[obs * 4 + c];
+            assert_eq!(
+                cell.zone_kind, 1,
+                "observer {obs} cell {c}: zone_kind must read abilities.telegraph_kind \
+                 (Probe.ability → Circle = 1); got {got}",
+                got = cell.zone_kind,
+            );
+            assert_eq!(
+                cell.radius_q8, 1024,
+                "observer {obs} cell {c}: radius_q8 must read abilities.telegraph_param_0 \
+                 (Probe.ability → 4.0 → 1024 q8); got {got}",
+                got = cell.radius_q8,
+            );
+        }
+    }
 }
 
 /// One ThreatZoneCell: 8 u32 words per cell, K cells per observer.

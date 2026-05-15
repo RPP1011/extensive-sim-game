@@ -103,16 +103,20 @@ config probe {
   // Tick at which alive agents stamp `busy_with_ability_id`. Same
   // shape as threats_view_probe.sim's `cast_begin_tick`.
   cast_begin_tick: u32 = 0,
-  // Ability id stamped on the busy SoA. Any non-zero u32 marks the
-  // agent as casting (the busy-filter early-exits zero values).
-  cast_ability_id: u32 = 7,
-  // Hardcoded telegraph kind constant (1 = circle). When (c) lands,
-  // this is replaced by a read against
-  // `abilities.telegraph_kind(busy_with_ability_id)`.
-  zone_kind:        u32 = 1,
-  // Hardcoded telegraph radius (q8). 1024 q8 = 4.0 world units. When
-  // (c) lands, replaced by `abilities.telegraph_param_0(busy_with_ability_id)`.
-  zone_radius_q8:   u32 = 1024,
+  // Ability id stamped on the busy SoA. Matches the alphabetical
+  // first-and-only ability `Probe` in
+  // assets/ability_test/threats_struct_probe/Probe.ability (id = 1
+  // since NonZero ids start at 1; empty-registry sentinel is 0).
+  // The fold body's `abilities.telegraph_*(busy_with_ability_id)`
+  // reads resolve to Probe's `cast { telegraph: circle(radius: 4.0) }`.
+  cast_ability_id: u32 = 1,
+  // Plan H slice 4: zone_kind + zone_radius_q8 are NO LONGER read
+  // from this config — the fold body now reads them from the
+  // ability registry via `abilities.telegraph_kind(...)` /
+  // `abilities.telegraph_param_0(...)`. Kept here as documentation
+  // anchors for the values the registry returns (zone_kind = 1 from
+  // `cast { telegraph: circle(...) }`, radius = 4.0 from
+  // `radius: 4.0`).
   // Hardcoded zone duration (in ticks from now). When (d) lands,
   // replaced by `agents.busy_until_tick(source_candidate)`.
   zone_duration:    u32 = 100,
@@ -156,22 +160,22 @@ physics MarkCasterBusy {
 view threats(observer: Agent) -> f32 {
   initial: 0.0,
   on ThreatsFoldDriver { source: _, target: _, ability_id: _ } {
-    // Plan G G3f follow-up:
-    //   * gap (b) plumbed (32731b6a) — `source_candidate` reachable
-    //     from the fold body, so per-pair caster fields can drive
-    //     real cell content.
-    //   * gap (d) partial (this commit) — `expires_at_tick` reads the
-    //     per-caster `busy_until_tick` SoA column (Plan G busy-cast
-    //     state) instead of hardcoding `world.tick + 100`. A real
-    //     RecordCastBegin consumer populates this column from the
-    //     ability's duration_ticks; the probe's MarkCasterBusy stamps
-    //     it directly.
-    //   * gap (c) STILL placeholder for radius + zone_kind — needs
-    //     `abilities.telegraph_*` namespace methods (task #297) to
-    //     read real ability-registry metadata. Tracked as a
-    //     multi-subsystem follow-up.
-    let zone_kind        = config.probe.zone_kind
-    let radius           = config.probe.zone_radius_q8
+    // Plan G G3f / Plan H follow-up — every cell field now derives
+    // from real per-caster registry/SoA reads:
+    //   * gap (b) — `source_candidate` reachable from the fold body
+    //     (32731b6a).
+    //   * gap (d) — `expires_at_tick` reads `agents.busy_until_tick`
+    //     (d189b643).
+    //   * gap (c) — `zone_kind` + `radius` read from the ability
+    //     registry via the new `abilities.telegraph_*` namespace
+    //     methods (Plan H slice 3, c19a1f28). Probe.ability declares
+    //     `cast { telegraph: circle(self.pos, radius: 4.0) }` which
+    //     packs as `telegraph_kind = 1` (Circle) and
+    //     `telegraph_params[0] = 4.0`.
+    let busy_id          = agents.busy_with_ability_id(source_candidate)
+    let zone_kind        = abilities.telegraph_kind(busy_id)
+    let radius_f         = abilities.telegraph_param_0(busy_id)
+    let radius           = u32(i32(radius_f * 256.0))
     let expires_at_tick  = agents.busy_until_tick(source_candidate)
     let caster_pos       = agents.pos(source_candidate)
     let cx_q8            = u32(i32(caster_pos.x * 256.0))

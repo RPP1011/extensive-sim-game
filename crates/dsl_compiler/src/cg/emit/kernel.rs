@@ -382,6 +382,38 @@ pub fn kernel_topology_to_spec_and_body(
                 });
             }
         }
+        // Plan H slice 4 — same pattern for the ability-registry
+        // telegraph helpers. ViewFold kernels (the threats fold) need
+        // these bindings so `abilities.telegraph_*(busy_with_ability_id)`
+        // reads in the fold body resolve at WGSL compile time. Sibling
+        // of the generic kernel path's auto-binding pass below; the
+        // two paths stay independent so a future divergence in one
+        // doesn't silently break the other.
+        for (helper, binding_name, wgsl_ty) in [
+            (
+                "ability_registry_telegraph_kind_at(",
+                "ability_registry_telegraph_kind",
+                "array<u32>",
+            ),
+            (
+                "ability_registry_telegraph_param_0_at(",
+                "ability_registry_telegraph_params",
+                "array<f32>",
+            ),
+        ] {
+            if wgsl_body.contains(helper)
+                && !bindings.iter().any(|b| b.name == binding_name)
+            {
+                let slot = bindings.len() as u32;
+                bindings.push(KernelBinding {
+                    slot,
+                    name: binding_name.into(),
+                    access: AccessMode::ReadStorage,
+                    wgsl_ty: wgsl_ty.into(),
+                    bg_source: BgSource::External(binding_name.into()),
+                });
+            }
+        }
         let spec = KernelSpec {
             name,
             pascal,

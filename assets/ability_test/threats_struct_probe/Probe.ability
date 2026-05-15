@@ -1,0 +1,25 @@
+// Plan H slice 4 — exercise the abilities.telegraph_* namespace
+// methods end-to-end. The cast block lowers to:
+//   * EffectOp::CastBegin in `effects` (kind=46, dispatched as
+//     EffectKindId::EffectCastBeginApplied = 77)
+//   * `pending_program` populated from the `effect { ... }` body (a
+//     heal 0 placeholder so pending_program isn't empty — matching
+//     the firebolt_probe / palace_coup MVP convention)
+//   * `telegraph_kind = TelegraphKind::Circle (= 1)`
+//   * `telegraph_params[0] = 4.0` (radius in world units)
+//
+// Sole-ability convention: the alphabetical sort of the ability dir
+// places this at AbilityId 1 (NonZero ids start at 1; the empty-
+// registry sentinel is 0). The .sim's MarkCasterBusy stamps
+// `busy_with_ability_id = 1` so the fold body's
+// `abilities.telegraph_*(busy_with_ability_id)` reads resolve to
+// THIS ability's telegraph metadata.
+
+ability Probe {
+    target: self
+    cooldown: 10s
+    hint: utility
+
+    cast { duration: 100t telegraph: circle(self.pos, radius: 4.0) }
+    effect { heal 0 }
+}
