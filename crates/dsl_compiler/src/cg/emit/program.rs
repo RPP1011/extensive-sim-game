@@ -1073,22 +1073,68 @@ fn compose_namespace_prelude(body: &str, prog: &CgProgram) -> String {
 /// and bitcast back at read time. This is the standard scalar-view
 /// storage convention.
 fn compose_view_storage_prelude(body: &str, prog: &CgProgram) -> String {
-    use std::collections::BTreeSet;
-    let mut seen_view_ids: BTreeSet<u32> = BTreeSet::new();
+    use std::collections::{BTreeMap, BTreeSet};
+    // Two parallel sets per view: which helpers are referenced. A view
+    // that's only read via the scalar getter doesn't need the nearest
+    // helper, and vice versa — emitting only what's referenced keeps
+    // the kernel's WGSL surface minimal. `view_get_seen` covers both
+    // legacy scalar `view_<id>_get(` and the ring-walk
+    // `view_<id>_get(observer)` (same call site, different body).
+    // `view_nearest_seen` covers the threats-only argmin reduction.
+    let mut view_get_seen: BTreeSet<u32> = BTreeSet::new();
+    let mut view_nearest_seen: BTreeSet<u32> = BTreeSet::new();
     let mut search_pos = 0;
     while let Some(rel) = body[search_pos..].find("view_") {
         let abs = search_pos + rel;
         let after = &body[abs + 5..]; // skip "view_"
         let id_end = after.bytes().take_while(|b| b.is_ascii_digit()).count();
-        if id_end > 0 && after[id_end..].starts_with("_get(") {
-            if let Ok(view_id) = after[..id_end].parse::<u32>() {
-                seen_view_ids.insert(view_id);
+        if id_end > 0 {
+            let suffix = &after[id_end..];
+            if suffix.starts_with("_get(") {
+                if let Ok(view_id) = after[..id_end].parse::<u32>() {
+                    view_get_seen.insert(view_id);
+                }
+            } else if suffix.starts_with("_nearest(") {
+                if let Ok(view_id) = after[..id_end].parse::<u32>() {
+                    view_nearest_seen.insert(view_id);
+                }
             }
         }
         search_pos = abs + 5;
     }
+    // Combined unique set drives the per-view metadata lookup loop.
+    let mut seen_view_ids: BTreeSet<u32> = BTreeSet::new();
+    seen_view_ids.extend(view_get_seen.iter().copied());
+    seen_view_ids.extend(view_nearest_seen.iter().copied());
     if seen_view_ids.is_empty() {
         return String::new();
+    }
+    // Pre-resolve per-view shape so each helper-emit branch can
+    // consult the same flags without re-walking program metadata.
+    let mut shapes: BTreeMap<u32, (Option<u16>, bool)> = BTreeMap::new();
+    for view_id in &seen_view_ids {
+        let sig = prog.view_signatures.get(view_id);
+        let layout = prog.view_layouts.get(view_id);
+        let ring_k = sig.and_then(|s| match s.storage_hint {
+            Some(super::super::program::CgStorageHint::PerEntityRing { k }) => Some(k),
+            _ => None,
+        });
+        let is_threat_layout = layout
+            .map(|l| {
+                let names: Vec<&str> = l.fields.iter().map(|f| f.name.as_str()).collect();
+                names == [
+                    "zone_kind",
+                    "center_x_q8",
+                    "center_y_q8",
+                    "radius_q8",
+                    "dir_x_q8",
+                    "dir_y_q8",
+                    "expires_at_tick",
+                    "source",
+                ]
+            })
+            .unwrap_or(false);
+        shapes.insert(*view_id, (ring_k, is_threat_layout));
     }
     let mut out = String::new();
     for view_id in &seen_view_ids {
@@ -1109,31 +1155,64 @@ fn compose_view_storage_prelude(body: &str, prog: &CgProgram) -> String {
         // `cfg.tick` bindings are added by the body-scan in
         // `cg/emit/kernel.rs` when it sees `view_<id>_get(` in a kernel
         // whose view has the threats schema.
-        let sig = prog
-            .view_signatures
-            .get(view_id)
-            .cloned();
-        let layout = prog.view_layouts.get(view_id).cloned();
-        let ring_k = sig.as_ref().and_then(|s| match s.storage_hint {
-            Some(super::super::program::CgStorageHint::PerEntityRing { k }) => Some(k),
-            _ => None,
-        });
-        let is_threat_layout = layout
-            .as_ref()
-            .map(|l| {
-                let names: Vec<&str> = l.fields.iter().map(|f| f.name.as_str()).collect();
-                names == [
-                    "zone_kind",
-                    "center_x_q8",
-                    "center_y_q8",
-                    "radius_q8",
-                    "dir_x_q8",
-                    "dir_y_q8",
-                    "expires_at_tick",
-                    "source",
-                ]
-            })
-            .unwrap_or(false);
+        let (ring_k, is_threat_layout) =
+            shapes.get(view_id).copied().unwrap_or((None, false));
+        // `threats.nearest(observer)` — argmin reduction returning
+        // the nearest live cell's `source` AgentId. Emitted ONLY when
+        // a kernel body references `view_<id>_nearest(` AND the view
+        // actually carries the threat-zone struct layout. The walk
+        // mirrors the intensity getter: same per-cell live filter
+        // (zone_kind != 0 AND world.tick < expires), same q8 → f32
+        // unpack, but tracks `(min_dist, best_source)` instead of
+        // accumulating intensity.
+        if view_nearest_seen.contains(view_id) {
+            if let (Some(k), true) = (ring_k, is_threat_layout) {
+                let k = k as u32;
+                out.push_str(&format!(
+"fn view_{view_id}_nearest(observer: u32) -> u32 {{
+    let observer_pos = agent_pos[observer];
+    var best_dist: f32 = 3.4028235e38;
+    var best_source: u32 = 0xFFFFFFFFu;
+    for (var c: u32 = 0u; c < {k}u; c = c + 1u) {{
+        let base = (observer * {k}u + c) * 8u;
+        let zone_kind = view_storage_{view_name}_primary[base + 0u];
+        if (zone_kind == 0u) {{ continue; }}
+        let expires = view_storage_{view_name}_primary[base + 6u];
+        if (cfg.tick >= expires) {{ continue; }}
+        let cx_raw = i32(view_storage_{view_name}_primary[base + 1u]);
+        let cy_raw = i32(view_storage_{view_name}_primary[base + 2u]);
+        let cx = f32((cx_raw << 16u) >> 16u) / 256.0;
+        let cy = f32((cy_raw << 16u) >> 16u) / 256.0;
+        let dx = observer_pos.x - cx;
+        let dy = observer_pos.y - cy;
+        let dist = sqrt(dx * dx + dy * dy);
+        if (dist < best_dist) {{
+            best_dist = dist;
+            best_source = view_storage_{view_name}_primary[base + 7u];
+        }}
+    }}
+    return best_source;
+}}
+"
+                ));
+            } else {
+                // Sentinel — caller already had a graceful fallback at
+                // lowering time, but emitting a stub avoids a missing-
+                // function naga error if some future call path reaches
+                // here without the lowering's view-shape gate.
+                out.push_str(&format!(
+                    "fn view_{view_id}_nearest(_observer: u32) -> u32 {{ return 0xFFFFFFFFu; }}\n"
+                ));
+            }
+        }
+        // Skip the scalar/intensity helper if this view was only
+        // referenced via `view_<id>_nearest(` — emitting it
+        // unnecessarily would add an unused function and pull in the
+        // agent_pos binding (when ring-walk) for kernels that don't
+        // need it.
+        if !view_get_seen.contains(view_id) {
+            continue;
+        }
         if let (Some(k), true) = (ring_k, is_threat_layout) {
             let k = k as u32;
             // q8 fixed-point conversion: i16 packed in low 16 bits of
@@ -2913,6 +2992,106 @@ mod tests {
         assert!(
             !prelude.contains("return bitcast<f32>(view_storage_threats_primary[idx])"),
             "scalar fallback must NOT appear when ring-walk is selected; got:\n{prelude}"
+        );
+    }
+
+    /// Plan G G3f follow-up — `view_<id>_nearest(observer)` ring-walk
+    /// argmin reduction. Mirrors the intensity getter's shape (per-cell
+    /// live filter, q8 unpack, distance computation) but tracks the
+    /// closest live cell's `source` AgentId via `(min_dist, best_source)`
+    /// instead of accumulating intensity. Returns `0xFFFFFFFFu`
+    /// sentinel when no cell qualifies.
+    ///
+    /// The helper emits ONLY when a kernel body references
+    /// `view_<id>_nearest(`. A view referenced ONLY through `_nearest`
+    /// (no `_get` calls) does NOT get the intensity getter — emitting
+    /// it unnecessarily would add a dead WGSL function and pull in
+    /// agent_pos for kernels that don't need it.
+    #[test]
+    fn nearest_helper_emits_for_threat_struct_layout() {
+        use crate::cg::data_handle::ViewId;
+        use crate::cg::program::{CgStorageHint, ViewLayout, ViewLayoutField, ViewSignature};
+        use std::collections::BTreeMap;
+
+        let mut prog = CgProgram::default();
+        prog.interner.views.insert(0, "threats".to_string());
+        let mut sigs: BTreeMap<u32, ViewSignature> = BTreeMap::new();
+        sigs.insert(
+            0,
+            ViewSignature {
+                args: vec![CgTy::AgentId],
+                result: CgTy::F32,
+                storage_hint: Some(CgStorageHint::PerEntityRing { k: 4 }),
+                fold_op: None,
+                belief_gated: false,
+            },
+        );
+        prog.view_signatures = sigs;
+        let fields = [
+            "zone_kind",
+            "center_x_q8",
+            "center_y_q8",
+            "radius_q8",
+            "dir_x_q8",
+            "dir_y_q8",
+            "expires_at_tick",
+            "source",
+        ];
+        prog.view_layouts.insert(
+            0,
+            ViewLayout {
+                fields: fields
+                    .iter()
+                    .map(|n| ViewLayoutField {
+                        name: (*n).to_string(),
+                        ty: CgTy::U32,
+                    })
+                    .collect(),
+            },
+        );
+
+        let body = "let nearest_src = view_0_nearest(observer);";
+        let prelude = compose_view_storage_prelude(body, &prog);
+
+        // Positive pins: argmin shape.
+        assert!(
+            prelude.contains("fn view_0_nearest(observer: u32) -> u32"),
+            "nearest helper must take observer + return AgentId; got:\n{prelude}"
+        );
+        assert!(
+            prelude.contains("for (var c: u32 = 0u; c < 4u; c = c + 1u)"),
+            "must loop K=4 cells; got:\n{prelude}"
+        );
+        assert!(
+            prelude.contains("agent_pos[observer]"),
+            "must read observer's pos; got:\n{prelude}"
+        );
+        assert!(
+            prelude.contains("var best_source: u32 = 0xFFFFFFFFu"),
+            "must initialise best_source to sentinel; got:\n{prelude}"
+        );
+        assert!(
+            prelude.contains("var best_dist: f32 = 3.4028235e38"),
+            "must initialise best_dist to f32::MAX; got:\n{prelude}"
+        );
+        assert!(
+            prelude.contains("base + 7u"),
+            "argmin must read source field at `base + 7u`; got:\n{prelude}"
+        );
+        assert!(
+            prelude.contains("if (dist < best_dist)"),
+            "must reduce on minimum distance; got:\n{prelude}"
+        );
+        assert!(
+            prelude.contains("return best_source"),
+            "must return best_source; got:\n{prelude}"
+        );
+
+        // Negative pin: only `_nearest(` was referenced, so the
+        // intensity getter helper MUST NOT appear (dead-code surface).
+        assert!(
+            !prelude.contains("fn view_0_get("),
+            "intensity getter must not emit when only _nearest is referenced; got:\n{prelude}"
         );
     }
 

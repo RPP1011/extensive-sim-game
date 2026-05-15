@@ -546,6 +546,16 @@ pub enum BuiltinId {
     /// enclosing `CgExpr::Builtin { ty }` field.
     ViewCall { view: ViewId },
 
+    /// Plan G G3f follow-up — `threats.nearest(observer)` ring-walk
+    /// reduction. Lowers to a per-view helper `view_<id>_nearest` that
+    /// walks the per-observer ring of struct cells, tracks the live
+    /// cell with minimum distance from `agent_pos[observer]` to
+    /// `cell.center`, and returns the cell's `source` field as an
+    /// AgentId. Distinct from [`BuiltinId::ViewCall`] because the
+    /// helper signature returns `u32` (AgentId) not `f32` (intensity)
+    /// and the body's reduction is argmin, not sum.
+    ThreatsNearest { view: ViewId },
+
     // --- Constructors ---
     /// `vec3(x, y, z)` — pack three F32 components into a Vec3F32.
     /// Lowers to WGSL `vec3<f32>(x, y, z)`. Added 2026-05-02 to give
@@ -640,6 +650,10 @@ impl BuiltinId {
                 result: CgTy::AgentId,
             },
             ViewCall { view } => BuiltinSignature::ViewCall { view },
+            ThreatsNearest { view: _ } => BuiltinSignature::Fixed {
+                args: vec![CgTy::AgentId],
+                result: CgTy::AgentId,
+            },
             Vec3Ctor => BuiltinSignature::Fixed {
                 args: vec![CgTy::F32, CgTy::F32, CgTy::F32],
                 result: CgTy::Vec3F32,
@@ -683,6 +697,7 @@ impl BuiltinId {
             Log10 => "log10".to_string(),
             Entity => "entity".to_string(),
             ViewCall { view } => format!("view_call.#{}", view.0),
+            ThreatsNearest { view } => format!("threats_nearest.#{}", view.0),
             Vec3Ctor => "vec3".to_string(),
             AsF32(t) => format!("as_f32.{}", t.label()),
             AsU32(t) => format!("as_u32.{}", t.label()),

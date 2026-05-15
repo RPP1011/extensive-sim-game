@@ -2288,12 +2288,30 @@ fn lower_builtin_call(
         }
         Builtin::ThreatsNearest => {
             expect_arity(builtin, 1, args.len(), span)?;
-            // Stub: even when the threats view exists, computing
-            // "nearest" needs the per-cell ring walk (G3-follow-up).
-            // Today ViewCall returns the scalar count, not a target
-            // agent id. Until the struct-payload+walk lands, return
-            // sentinel.
-            add(ctx, CgExpr::Lit(LitValue::AgentId(0)), span)
+            // Plan G G3f follow-up — the ring-walk argmin over struct
+            // cells lands here. Lower to a typed
+            // `BuiltinId::ThreatsNearest { view }` so the WGSL helper
+            // (`compose_view_storage_prelude`) can emit a distinct
+            // signature returning `u32` (AgentId). Falls back to the
+            // sentinel if either (a) no threats view is declared, or
+            // (b) the threats view doesn't have @per_entity_ring +
+            // struct ViewLayout — the helper's body needs the per-cell
+            // walk, which is undefined for scalar-payload views.
+            match find_threats_view_id(ctx) {
+                Some(view_id) => {
+                    let arg_id = lower_expr(&args[0].value, ctx)?;
+                    add(
+                        ctx,
+                        CgExpr::Builtin {
+                            fn_id: BuiltinId::ThreatsNearest { view: view_id },
+                            args: vec![arg_id],
+                            ty: CgTy::AgentId,
+                        },
+                        span,
+                    )
+                }
+                None => add(ctx, CgExpr::Lit(LitValue::AgentId(0)), span),
+            }
         }
         Builtin::ThreatsDirAwayFromNearest => {
             expect_arity(builtin, 1, args.len(), span)?;
