@@ -2812,6 +2812,14 @@ fn build_view_fold_per_agent_event_scan_body(
     // shape so the field name matches its semantic.
     out.push_str("    let observer = gid.x;\n");
     out.push_str("    let source_candidate = gid.y;\n");
+    // Plan G G3f follow-up — alias source_candidate as
+    // per_pair_candidate so the AgentRef::PerPairCandidate emit path
+    // (cg/emit/wgsl_body.rs) resolves the same identifier the kernel
+    // preamble declared. Lets `agents.<field>(source_candidate)` in
+    // surface DSL flow through the existing per-pair WGSL idiom
+    // unchanged. WGSL hoists `let` so this declaration is in scope
+    // for the body below regardless of physical placement.
+    out.push_str("    let per_pair_candidate = source_candidate;\n");
     out.push_str("    if (observer >= cfg.event_count) { return; }\n");
     out.push_str("    if (source_candidate >= cfg.event_count) { return; }\n");
     if belief_gated {

@@ -1444,6 +1444,27 @@ fn resolve_bodies(
                 let mut scope = LocalScope::new();
                 let params = resolve_params(&d.params, &mut scope, symbols);
                 let return_ty = resolve_type(&d.return_ty, symbols);
+                // Plan G G3f follow-up — gap (b) from threats_struct_probe.sim.
+                // When @dispatch(per_agent_event_scan) is set, the WGSL emit
+                // already binds `source_candidate` as a per-(observer, source)
+                // pair-iteration kernel local (cg/emit/wgsl_body.rs). Surface
+                // it at the AST resolver layer so authors can write
+                // `agents.<field>(source_candidate)` in the fold body —
+                // unblocks real per-cell content (cell.source = caster id,
+                // cell.expires_at_tick from busy_until_tick, etc.) instead
+                // of the placeholder constants threats_struct_probe writes
+                // today.
+                let is_per_agent_event_scan = d.annotations.iter().any(|a| {
+                    a.name == "dispatch"
+                        && a.args.iter().any(|arg| {
+                            arg.key.is_none()
+                                && matches!(
+                                    &arg.value,
+                                    ast::AnnotationValue::Ident(name)
+                                        if name == "per_agent_event_scan"
+                                )
+                        })
+                });
                 let body = match &d.body {
                     ast::ViewBody::Expr(e) => ViewBodyIR::Expr(resolve_expr(e, &mut scope, symbols)?),
                     ast::ViewBody::Fold { initial, handlers, clamp } => {
@@ -1459,6 +1480,16 @@ fn resolve_bodies(
                                     inner.stack[0].push(binding.clone());
                                 }
                                 inner.next_id = scope.next_id;
+                                if is_per_agent_event_scan {
+                                    // Same emit identifier name the WGSL
+                                    // kernel uses (`let source_candidate =
+                                    // gid.y;`). Authors writing
+                                    // `agents.<field>(source_candidate)`
+                                    // therefore lower to the same SoA read
+                                    // the per-pair iteration's source slot
+                                    // already addresses.
+                                    inner.bind("source_candidate", IrType::AgentId);
+                                }
                                 let pattern =
                                     resolve_event_pattern(&h.pattern, &mut inner, symbols);
                                 let body = resolve_stmts(&h.body, &mut inner, symbols)?;

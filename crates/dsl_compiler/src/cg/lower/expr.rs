@@ -276,6 +276,14 @@ pub struct LoweringCtx<'a> {
     /// [`super::driver::lower_compilation_to_cg_with_opts`]. Today
     /// only `tom_probe_runtime`'s build.rs flips it on.
     pub belief_state: bool,
+    /// Plan G G3f follow-up — gap (b) from threats_struct_probe.sim:
+    /// when `true`, the bare-name resolver in `lower_bare_local`
+    /// admits `source_candidate` as the per-pair candidate id (same
+    /// kernel-local the WGSL emit declares for PerAgentEventScan
+    /// dispatch). Set by the view-fold body lowerer for fold handlers
+    /// of views with `@dispatch(per_agent_event_scan)`; restored on
+    /// exit so the surface stays scoped to that body.
+    pub per_agent_event_scan_local: bool,
 }
 
 /// Captured form of a `@lazy` view's resolved AST: enough to
@@ -335,6 +343,7 @@ impl<'a> LoweringCtx<'a> {
             // `lower_compilation_to_cg_with_opts(LowerOpts { belief_state: true })`
             // flips this for `tom_probe_runtime`'s ToM consumer rules.
             belief_state: false,
+            per_agent_event_scan_local: false,
         }
     }
 
@@ -1346,6 +1355,14 @@ fn lower_bare_local(
         // pair-bound context is active. See the matching arm in
         // `lower_field` for the field-access path.
         "target" | "candidate" if ctx.target_local => {
+            add(ctx, CgExpr::PerPairCandidateId, span)
+        }
+        // Plan G G3f follow-up — gap (b) from threats_struct_probe.sim.
+        // `source_candidate` is the synthetic AgentId binding the AST
+        // resolver injects into per_agent_event_scan view-fold bodies.
+        // Lower as the per-pair candidate id (same kernel-local the
+        // WGSL emit declares: `let source_candidate = gid.y;`).
+        "source_candidate" if ctx.per_agent_event_scan_local => {
             add(ctx, CgExpr::PerPairCandidateId, span)
         }
         // N²-fold body bare-binder read (`other != self` etc.). The

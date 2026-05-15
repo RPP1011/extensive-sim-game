@@ -154,6 +154,26 @@ fn pos_keyed_intensity_decreases_with_distance_to_cell_center() {
             "observer {i}: expected {expected_total}, got {observed} (delta {delta:.4})",
         );
     }
+
+    // Plan G G3f follow-up — gap (b) verification. The fold body now
+    // writes `source: source_candidate` (was hardcoded `0u`) so each
+    // cell carries the actual per-pair caster id. Every observer's
+    // K=4 ring should contain exactly the source ids {0, 1, 2, 3}
+    // (one per busy candidate) — this is the surface-DSL proof that
+    // the per_agent_event_scan local binding flows through to a real
+    // SoA-relative read.
+    let cells = read_threats_cells(&mut state, N, 4);
+    for obs in 0..(N as usize) {
+        let base = obs * 4;
+        let mut sources: Vec<u32> = (base..base + 4).map(|i| cells[i]._source).collect();
+        sources.sort();
+        assert_eq!(
+            sources,
+            vec![0u32, 1, 2, 3],
+            "observer {obs}: cell.source ids must equal {{0,1,2,3}} after gap-(b) plumb-through; \
+             got {sources:?}",
+        );
+    }
 }
 
 /// One ThreatZoneCell: 8 u32 words per cell, K cells per observer.

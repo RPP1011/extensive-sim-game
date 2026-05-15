@@ -161,7 +161,7 @@ view threats(observer: Agent) -> f32 {
       dir_x_q8:        0u,
       dir_y_q8:        0u,
       expires_at_tick: expires_at_tick,
-      source:          0u
+      source:          source_candidate
     )
   }
 }

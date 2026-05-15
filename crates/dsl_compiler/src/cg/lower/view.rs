@@ -519,7 +519,21 @@ fn lower_one_handler(
     // ids into a `CgStmtList`. The `lower_stmt` helper validates the
     // storage-slot invariant per `Assign` it produces — see
     // `lower_stmt`'s docstring.
-    let body_stmt_ids = lower_stmt_list(view_id, hint, decay, &handler.body, ctx)?;
+    //
+    // Plan G G3f follow-up — gap (b): when the dispatch override is
+    // PerAgentEventScan, the WGSL emit binds `source_candidate` as a
+    // kernel-local. Mark the lowering ctx so `lower_bare_local` admits
+    // the bare name and resolves it to PerPairCandidateId. The flag
+    // is restored on body-lower exit so the surface stays scoped to
+    // this fold body — sibling fold handlers (other views, physics
+    // rules) keep their existing semantics.
+    let prev_per_agent_event_scan_local = ctx.per_agent_event_scan_local;
+    if matches!(dispatch_override, Some(DispatchShape::PerAgentEventScan)) {
+        ctx.per_agent_event_scan_local = true;
+    }
+    let body_stmt_ids = lower_stmt_list(view_id, hint, decay, &handler.body, ctx);
+    ctx.per_agent_event_scan_local = prev_per_agent_event_scan_local;
+    let body_stmt_ids = body_stmt_ids?;
     prelude_stmt_ids.extend(body_stmt_ids);
     let stmt_ids = prelude_stmt_ids;
     let list = CgStmtList::new(stmt_ids);
