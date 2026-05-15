@@ -943,6 +943,12 @@ fn ability_registry_column_token(column: super::super::data_handle::AbilityRegis
         WhenPredField        => "when_pred_field",
         WhenPredOp           => "when_pred_op",
         WhenPredLiteral      => "when_pred_literal",
+        // Plan H slice 2 — telegraph metadata. Names mirror the
+        // PackedAbilityRegistryGpu field names so the BGL composer's
+        // `ability_registry_<token>` binding lookup resolves to the
+        // matching wgpu::Buffer at upload time.
+        TelegraphKind        => "telegraph_kind",
+        TelegraphParams      => "telegraph_params",
     }
 }
 

@@ -1555,6 +1555,13 @@ fn handle_to_binding_metadata(h: &DataHandle, prog: &CgProgram) -> Option<Bindin
                 WhenPredField        => ("when_pred_field",   "array<u32>"),
                 WhenPredOp           => ("when_pred_op",      "array<u32>"),
                 WhenPredLiteral      => ("when_pred_literal", "array<f32>"),
+                // Plan H slice 2 — telegraph metadata. Both columns
+                // are widened/flattened to u32-or-f32 by
+                // `PackedAbilityRegistryGpu::upload` (telegraph_kind
+                // = u8 → u32, telegraph_params = Vec<[f32;4]> → flat
+                // f32 with stride 4 in u32-indexed reads).
+                TelegraphKind        => ("telegraph_kind",   "array<u32>"),
+                TelegraphParams      => ("telegraph_params", "array<f32>"),
             };
             Some(BindingMetadata {
                 bg_source: BgSource::External(format!("ability_registry_{suffix}")),
@@ -1886,6 +1893,8 @@ fn structural_binding_name(h: &DataHandle, prog: Option<&CgProgram>) -> String {
                 WhenPredField        => "when_pred_field",
                 WhenPredOp           => "when_pred_op",
                 WhenPredLiteral      => "when_pred_literal",
+                TelegraphKind        => "telegraph_kind",
+                TelegraphParams      => "telegraph_params",
             };
             format!("ability_registry_{s}")
         }

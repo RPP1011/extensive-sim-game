@@ -1374,6 +1374,22 @@ pub enum AbilityRegistryColumn {
     WhenPredField   = 21,
     WhenPredOp      = 22,
     WhenPredLiteral = 23,
+
+    /// Plan H slice 2 — per-ability telegraph shape discriminant
+    /// (u8 widened to u32). Sentinel `TELEGRAPH_KIND_NONE` (0) marks
+    /// abilities with no `cast { telegraph: ... }` declaration; the
+    /// threats fold's per-cell walk skips zero-kind slots. Read at
+    /// `ability_registry_telegraph_kind[ability_id]` from a fold body
+    /// via the `abilities.telegraph_kind(id)` namespace method.
+    TelegraphKind   = 24,
+    /// Plan H slice 2 — per-ability telegraph shape params (4×f32 per
+    /// ability). Layout per kind: Circle = `[radius, 0, 0, 0]`,
+    /// Line = `[width, 0, 0, 0]`, None = `[0; 4]`. Stride = 4 in u32
+    /// indexing (= 16 bytes / ability). Read at
+    /// `ability_registry_telegraph_params[ability_id * 4 + slot]`.
+    /// Surfaced from a fold body via the `abilities.telegraph_param_N(id)`
+    /// namespace methods (where N = 0..3).
+    TelegraphParams = 25,
 }
 
 /// Kind tag for an interned id surfaced by [`DataHandle::fmt_with`].

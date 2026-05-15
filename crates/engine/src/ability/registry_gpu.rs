@@ -108,6 +108,23 @@ pub struct PackedAbilityRegistryGpu {
     /// u8 widened to u32. Sentinel `INTERRUPT_MASK_NONE_SENTINEL` (0xFF)
     /// → no `cast { interrupts: ... }` declaration; cast is uninterruptible.
     pub interrupt_mask: wgpu::Buffer,
+
+    // -- Telegraph metadata (per-ability, stride = 1). Plan G G3e
+    //    + Plan H gap (c). The threats fold reads
+    //    `(busy_with_ability_id ⇒ telegraph_kind)` to project the
+    //    right zone shape around the caster. Encoded as u8 widened to
+    //    u32 (matching the rest of the discriminant columns) plus a
+    //    flat 4×f32 params slab. Schema-hash-relevant (already listed
+    //    in `engine::schema_hash`); host-side mirrors live on
+    //    `PackedAbilityRegistry::telegraph_{kind,params}`.
+    /// u8 widened to u32. Sentinel `TELEGRAPH_KIND_NONE` (0) marks
+    /// abilities with no `cast { telegraph: ... }` declaration; the
+    /// threats fold's per-cell walk skips zero-kind slots.
+    pub telegraph_kind: wgpu::Buffer,
+    /// 4×f32 per ability. Layout per kind: Circle = `[radius, 0, 0, 0]`,
+    /// Line = `[width, 0, 0, 0]`, None = `[0; 4]`. Stride = 4 in u32
+    /// indexing (= 16 bytes / ability).
+    pub telegraph_params: wgpu::Buffer,
 }
 
 impl PackedAbilityRegistryGpu {
@@ -184,6 +201,24 @@ impl PackedAbilityRegistryGpu {
             pending_effect_payload_b: mk_u32("pending_effect_payload_b", &packed.pending_effect_payload_b),
 
             interrupt_mask: mk_u32("interrupt_mask", &widen_u8(&packed.interrupt_mask)),
+
+            telegraph_kind: mk_u32(
+                "telegraph_kind",
+                &widen_u8(&packed.telegraph_kind),
+            ),
+            // Flatten Vec<[f32; 4]> → Vec<f32> with stride 4 so the
+            // GPU read at `telegraph_params[ability_id * 4 + slot]`
+            // indexes into a contiguous array. Mirrors the layout the
+            // upcoming `AbilityRegistryColumn::TelegraphParams` BGL
+            // emit will expect.
+            telegraph_params: mk_f32(
+                "telegraph_params",
+                &packed
+                    .telegraph_params
+                    .iter()
+                    .flat_map(|p| p.iter().copied())
+                    .collect::<Vec<f32>>(),
+            ),
         }
     }
 }
@@ -242,6 +277,7 @@ mod tests {
             &gpu.when_pred_op, &gpu.when_pred_literal,
             &gpu.pending_effect_kinds, &gpu.pending_effect_payload_a,
             &gpu.pending_effect_payload_b, &gpu.interrupt_mask,
+            &gpu.telegraph_kind, &gpu.telegraph_params,
         );
     }
 }
