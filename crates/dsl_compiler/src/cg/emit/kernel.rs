@@ -851,6 +851,7 @@ pub fn kernel_topology_to_spec_and_body(
     {
         let mut seen_view_ids: std::collections::BTreeSet<u32> =
             std::collections::BTreeSet::new();
+        let mut needs_agent_pos = false;
         let mut search_pos = 0;
         while let Some(rel) = wgsl_body[search_pos..].find("view_") {
             let abs = search_pos + rel;
@@ -877,10 +878,60 @@ pub fn kernel_topology_to_spec_and_body(
                                 tuple_idx: 0,
                             },
                         });
+
+                        // Pos-keyed ring-walk variant of the helper
+                        // (`compose_view_storage_prelude`) reads
+                        // `agent_pos[observer]` per cell. Schedule the
+                        // `agent_pos` binding here so the kernel's BGL
+                        // covers the helper's needs.
+                        let sig = prog
+                            .view_signatures
+                            .get(&view_id);
+                        let layout = prog.view_layouts.get(&view_id);
+                        let is_ring = sig
+                            .map(|s| matches!(
+                                s.storage_hint,
+                                Some(crate::cg::program::CgStorageHint::PerEntityRing { .. }),
+                            ))
+                            .unwrap_or(false);
+                        let is_threat_layout = layout
+                            .map(|l| {
+                                let names: Vec<&str> = l
+                                    .fields
+                                    .iter()
+                                    .map(|f| f.name.as_str())
+                                    .collect();
+                                names == [
+                                    "zone_kind",
+                                    "center_x_q8",
+                                    "center_y_q8",
+                                    "radius_q8",
+                                    "dir_x_q8",
+                                    "dir_y_q8",
+                                    "expires_at_tick",
+                                    "source",
+                                ]
+                            })
+                            .unwrap_or(false);
+                        if is_ring && is_threat_layout {
+                            needs_agent_pos = true;
+                        }
                     }
                 }
             }
             search_pos = abs + 5;
+        }
+        if needs_agent_pos
+            && !bindings.iter().any(|b| b.name == "agent_pos")
+        {
+            let slot = bindings.len() as u32;
+            bindings.push(KernelBinding {
+                slot,
+                name: "agent_pos".into(),
+                access: AccessMode::ReadStorage,
+                wgsl_ty: "array<vec3<f32>>".into(),
+                bg_source: BgSource::External("agents".into()),
+            });
         }
     }
 

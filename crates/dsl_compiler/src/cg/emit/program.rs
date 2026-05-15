@@ -1096,16 +1096,88 @@ fn compose_view_storage_prelude(body: &str, prog: &CgProgram) -> String {
             .interner
             .get_view_name(crate::cg::data_handle::ViewId(*view_id))
             .unwrap_or("unnamed_view");
-        // Helper function: read u32 from the storage binding,
-        // bitcast to f32. The binding name + slot are pinned by
-        // `kernel_topology_to_spec_and_body`'s body-scan step which
-        // appends `view_storage_<view_name>_primary` to the kernel's
-        // BGL when the same substring is detected.
-        out.push_str(&format!(
-            "fn view_{view_id}_get(idx: u32) -> f32 {{\n\
-             \x20   return bitcast<f32>(view_storage_{view_name}_primary[idx]);\n\
-             }}\n"
-        ));
+        // Branch on the view's storage shape:
+        //   * scalar (the historical default): single-load + bitcast.
+        //   * @per_entity_ring(K) + struct ViewLayout matching the
+        //     8-field threat-zone schema: walk K cells, accumulate
+        //     distance-weighted intensity at the observer's pos.
+        //
+        // The ring-walk path lets `threats.intensity_at(self)` actually
+        // depend on (a) the observer's position and (b) the per-cell
+        // zone center+radius+expiry, instead of returning a per-observer
+        // scalar count of busy candidates. Required `agent_pos` /
+        // `cfg.tick` bindings are added by the body-scan in
+        // `cg/emit/kernel.rs` when it sees `view_<id>_get(` in a kernel
+        // whose view has the threats schema.
+        let sig = prog
+            .view_signatures
+            .get(view_id)
+            .cloned();
+        let layout = prog.view_layouts.get(view_id).cloned();
+        let ring_k = sig.as_ref().and_then(|s| match s.storage_hint {
+            Some(super::super::program::CgStorageHint::PerEntityRing { k }) => Some(k),
+            _ => None,
+        });
+        let is_threat_layout = layout
+            .as_ref()
+            .map(|l| {
+                let names: Vec<&str> = l.fields.iter().map(|f| f.name.as_str()).collect();
+                names == [
+                    "zone_kind",
+                    "center_x_q8",
+                    "center_y_q8",
+                    "radius_q8",
+                    "dir_x_q8",
+                    "dir_y_q8",
+                    "expires_at_tick",
+                    "source",
+                ]
+            })
+            .unwrap_or(false);
+        if let (Some(k), true) = (ring_k, is_threat_layout) {
+            let k = k as u32;
+            // q8 fixed-point conversion: i16 packed in low 16 bits of
+            // the u32 slot. Sign-extend with `<< 16 >> 16`, then
+            // divide by 256.0 to recover the f32. radius_q8 is a u16
+            // (always positive) so no sign extension needed.
+            out.push_str(&format!(
+"fn view_{view_id}_get(observer: u32) -> f32 {{
+    let observer_pos = agent_pos[observer];
+    var sum: f32 = 0.0;
+    for (var c: u32 = 0u; c < {k}u; c = c + 1u) {{
+        let base = (observer * {k}u + c) * 8u;
+        let zone_kind = view_storage_{view_name}_primary[base + 0u];
+        if (zone_kind == 0u) {{ continue; }}
+        let expires = view_storage_{view_name}_primary[base + 6u];
+        if (cfg.tick >= expires) {{ continue; }}
+        let cx_raw = i32(view_storage_{view_name}_primary[base + 1u]);
+        let cy_raw = i32(view_storage_{view_name}_primary[base + 2u]);
+        let cx = f32((cx_raw << 16u) >> 16u) / 256.0;
+        let cy = f32((cy_raw << 16u) >> 16u) / 256.0;
+        let radius = f32(view_storage_{view_name}_primary[base + 3u]) / 256.0;
+        let dx = observer_pos.x - cx;
+        let dy = observer_pos.y - cy;
+        let dist = sqrt(dx * dx + dy * dy);
+        if (dist < radius) {{
+            sum = sum + (radius - dist);
+        }}
+    }}
+    return sum;
+}}
+"
+            ));
+        } else {
+            // Scalar getter — read u32 from the storage binding,
+            // bitcast to f32. The binding name + slot are pinned by
+            // `kernel_topology_to_spec_and_body`'s body-scan step which
+            // appends `view_storage_<view_name>_primary` to the kernel's
+            // BGL when the same substring is detected.
+            out.push_str(&format!(
+                "fn view_{view_id}_get(idx: u32) -> f32 {{\n\
+                 \x20   return bitcast<f32>(view_storage_{view_name}_primary[idx]);\n\
+                 }}\n"
+            ));
+        }
     }
     out
 }
@@ -2731,6 +2803,146 @@ mod tests {
         assert!(
             kernels_checked > 0,
             "expected at least one non-ViewFold Bindings struct in spy_network's emit"
+        );
+    }
+
+    /// Plan H — pos-keyed ring-walk variant of the `view_<id>_get` helper.
+    ///
+    /// When a view declares `@per_entity_ring(K)` AND its struct cell
+    /// layout matches the 8-field threat-zone schema, the WGSL helper
+    /// must walk K cells reading center/radius/expires, computing
+    /// observer-relative distance, and accumulating max(0, radius -
+    /// distance). This is the read counterpart to the struct-cell
+    /// ring-append (G3a-G3d) — without it, `threats.intensity_at(self)`
+    /// stays a per-observer scalar count.
+    ///
+    /// Pin: presence of the ring loop (`for (var c: u32 = 0u; c < 4u`)
+    /// and the per-cell field reads at `base + N`. Negative pin: the
+    /// scalar `bitcast<f32>(view_storage_threats_primary[idx])` must
+    /// NOT appear (that's the wrong helper for this view shape).
+    #[test]
+    fn pos_keyed_ring_walk_helper_emits_for_threat_struct_layout() {
+        use crate::cg::data_handle::ViewId;
+        use crate::cg::program::{CgStorageHint, ViewLayout, ViewLayoutField, ViewSignature};
+        use std::collections::BTreeMap;
+
+        let mut prog = CgProgram::default();
+        prog.interner.views.insert(0, "threats".to_string());
+
+        // Register a PerEntityRing { k: 4 } signature for view 0.
+        let mut sigs: BTreeMap<u32, ViewSignature> = BTreeMap::new();
+        sigs.insert(
+            0,
+            ViewSignature {
+                args: vec![CgTy::AgentId],
+                result: CgTy::F32,
+                storage_hint: Some(CgStorageHint::PerEntityRing { k: 4 }),
+                fold_op: None,
+                belief_gated: false,
+            },
+        );
+        prog.view_signatures = sigs;
+
+        // Register the 8-field threat-zone cell layout.
+        let fields = [
+            "zone_kind",
+            "center_x_q8",
+            "center_y_q8",
+            "radius_q8",
+            "dir_x_q8",
+            "dir_y_q8",
+            "expires_at_tick",
+            "source",
+        ];
+        let layout = ViewLayout {
+            fields: fields
+                .iter()
+                .map(|n| ViewLayoutField {
+                    name: (*n).to_string(),
+                    ty: CgTy::U32,
+                })
+                .collect(),
+        };
+        prog.view_layouts.insert(0, layout);
+
+        // Body that triggers the helper emit (substring scan in
+        // `compose_view_storage_prelude` looks for `view_<id>_get(`).
+        let body = "let utility = view_0_get(observer);";
+        let prelude = compose_view_storage_prelude(body, &prog);
+
+        // Positive pins: ring-walk shape.
+        assert!(
+            prelude.contains("fn view_0_get(observer: u32) -> f32"),
+            "ring-walk helper must take `observer: u32`; got:\n{prelude}"
+        );
+        assert!(
+            prelude.contains("for (var c: u32 = 0u; c < 4u; c = c + 1u)"),
+            "must loop K=4 cells; got:\n{prelude}"
+        );
+        assert!(
+            prelude.contains("agent_pos[observer]"),
+            "must read observer's pos for distance calc; got:\n{prelude}"
+        );
+        // Distance-weighted intensity reads zone_kind (0), center_x_q8
+        // (1), center_y_q8 (2), radius_q8 (3), and expires_at_tick (6).
+        // dir_x_q8 (4), dir_y_q8 (5), source (7) are line/attribution
+        // metadata that the intensity formula doesn't consult — checked
+        // by future ThreatsNearest / DirAwayFromNearest paths.
+        for n in [0u32, 1, 2, 3, 6] {
+            let needle = format!("base + {n}u");
+            assert!(
+                prelude.contains(&needle),
+                "intensity formula must access cell field at `base + {n}u`; got:\n{prelude}"
+            );
+        }
+        assert!(
+            prelude.contains("if (zone_kind == 0u)"),
+            "must skip inactive cells (zone_kind sentinel 0); got:\n{prelude}"
+        );
+        assert!(
+            prelude.contains("if (cfg.tick >= expires)"),
+            "must skip expired cells via cfg.tick check; got:\n{prelude}"
+        );
+        assert!(
+            prelude.contains("sum = sum + (radius - dist)"),
+            "must accumulate distance-weighted intensity; got:\n{prelude}"
+        );
+
+        // Negative pin: the scalar getter MUST NOT appear — emitting
+        // both would cause a duplicate-function naga error.
+        assert!(
+            !prelude.contains("return bitcast<f32>(view_storage_threats_primary[idx])"),
+            "scalar fallback must NOT appear when ring-walk is selected; got:\n{prelude}"
+        );
+    }
+
+    /// Negative arm — when a view does NOT have the threats schema
+    /// (or has a non-PerEntityRing storage hint), the helper falls
+    /// back to the scalar getter. Pins the existing dodger / probe
+    /// fixtures' helper shape so the new branch stays additive.
+    #[test]
+    fn scalar_getter_remains_for_non_threats_views() {
+        use crate::cg::data_handle::ViewId;
+
+        let mut prog = CgProgram::default();
+        prog.interner.views.insert(0, "threats".to_string());
+        // No view_signatures + no view_layouts entries — the helper
+        // sees a scalar view and emits the bitcast getter.
+
+        let body = "let utility = view_0_get(observer);";
+        let prelude = compose_view_storage_prelude(body, &prog);
+
+        assert!(
+            prelude.contains("fn view_0_get(idx: u32) -> f32"),
+            "scalar getter signature; got:\n{prelude}"
+        );
+        assert!(
+            prelude.contains("return bitcast<f32>(view_storage_threats_primary[idx])"),
+            "scalar getter body; got:\n{prelude}"
+        );
+        assert!(
+            !prelude.contains("for (var c: u32 = 0u"),
+            "ring-walk loop must not appear for scalar views; got:\n{prelude}"
         );
     }
 }
