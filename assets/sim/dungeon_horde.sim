@@ -456,6 +456,54 @@ physics HeroExplore {
       // that they emerge in the adjacent room without visible
       // sticking. Net effect in the viewer: heroes actually explore.
       agents.set_pos(self, new_pos);
+    } else {
+      // Follower stranding fix (2026-05-15): the host's waypoint
+      // logic falls back to `cur.centroid()` when the warrior's
+      // current room is several hops away (door_position only
+      // returns Some for slot-adjacent pairs). Followers walk to
+      // their own room centroid, hit `dist < 0.05`, and sit. Mean-
+      // while warrior strolls to the boss area unaccompanied
+      // (warrior_path=160, follower_path=73 per
+      // tests/diag_hero_movement.rs).
+      //
+      // Fix without host-side BFS: when a non-warrior hero is at
+      // their waypoint (dist≈0), step directly toward the warrior's
+      // position at full hero_move_speed. The agent-scan sums the
+      // warrior's pos via the role==1 + alive filter (sum semantics:
+      // exactly one warrior contributes; zero contribute when dead).
+      // The step bypasses host routing — follower may briefly clip
+      // a wall during the cross-room drift, but the visual smear is
+      // far less jarring than a frozen follower five rooms behind.
+      // Once the follower enters a new slot (current_room flip via
+      // the host's per-tick recompute), the host re-routes through
+      // the standard waypoint path.
+      if (agents.role(self) != 1u) {
+        let warrior_alive_count = sum(h in agents where
+          if ((h != self) && (h.alive)
+              && (h.creature_type == Hero)
+              && (agents.role(h) == 1u)) {
+            1.0
+          } else {
+            0.0
+          });
+        if (warrior_alive_count > 0.5) {
+          let warrior_pos = sum(h in agents where
+            if ((h != self) && (h.alive)
+                && (h.creature_type == Hero)
+                && (agents.role(h) == 1u)) {
+              h.pos
+            } else {
+              vec3(0.0, 0.0, 0.0)
+            });
+          let toward_w = warrior_pos - self.pos;
+          let dist_w = length(toward_w);
+          if (dist_w > 0.5) {
+            let step_w = (toward_w / dist_w)
+              * config.dungeon.hero_move_speed;
+            agents.set_pos(self, self.pos + step_w);
+          }
+        }
+      }
     }
   }
 }
