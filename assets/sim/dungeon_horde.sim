@@ -170,6 +170,16 @@ event AllyDied {
   killer: AgentId,
 }
 
+// HeroFell — emitted from ApplyDamage when a hero transitions
+// alive 1→0. Drives BroadcastRallyOnHeroFell (party-wide HP regen
+// pulse). Symmetric to AllyDied but on the hero side; kept as a
+// distinct event so a single chronicle scan can tell hero-deaths
+// from enemy-deaths without re-reading creature_type.
+@replayable @gpu_amenable
+event HeroFell {
+  dead: AgentId,
+}
+
 // Entity discriminants pinned alphabetical (decl order = sort order):
 //   Archer = 0, Brute = 1, Goblin = 2, Hero = 3
 entity Archer : Agent { pos: vec3, vel: vec3 }
@@ -218,6 +228,13 @@ field patrol_origin_y:         f32
 // field. (Same registry gap as above forces the scalar encoding.)
 field patrol_step_x:           f32
 field patrol_step_y:           f32
+
+// rally_until_tick — per-hero buff window. Set to `world.tick +
+// rally.duration` by BroadcastRallyOnHeroFell when any hero dies;
+// while `world.tick < rally_until_tick`, HeroRallyRegen pulses HP
+// regen. "Vengeance for a fallen comrade" — pure addition that
+// only ever increases hero HP, never lowers it.
+field rally_until_tick:        u32
 
 // Hero waypoint — per-hero target (x, y) the host writes each tick.
 // HeroExplore moves the hero toward this point with LoS-gated steps,
@@ -281,6 +298,15 @@ config dungeon {
   ct_brute:  u32 = 1,
   ct_goblin: u32 = 2,
   ct_hero:   u32 = 3,
+
+  // Hero Rally on death — when any hero falls, every other alive
+  // hero within rally_radius gets `rally_until_tick = world.tick +
+  // rally_duration`, then `HeroRallyRegen` pulses +rally_regen_per_tick
+  // HP each tick during the window. Generous radius (24 cells ≈ 1.5
+  // rooms) so the cleric+warrior pair benefit even when split.
+  rally_radius:             f32 = 24.0,
+  rally_duration:           u32 = 50,
+  rally_regen_per_tick:     f32 = 0.8,
 }
 
 config stealth {
@@ -811,6 +837,8 @@ physics ApplyStealthFromChronicle {
 
 // HP drain + alive flip + AllyDied emission. Emits AllyDied when a
 // non-hero transitions alive 1→0 (drives BroadcastAlertOnAllyDeath).
+// Emits HeroFell when a hero transitions alive 1→0 (drives
+// BroadcastRallyOnHeroFell).
 @phase(post)
 physics ApplyDamage {
   on Damaged { source: src, target: t, amount: a } {
@@ -821,6 +849,8 @@ physics ApplyDamage {
       agents.set_alive(t, false);
       if (agents.creature_type(t) != Hero) {
         emit AllyDied { dead: t, killer: src }
+      } else {
+        emit HeroFell { dead: t }
       }
     }
   }
@@ -920,6 +950,49 @@ physics BroadcastAlertOnAllyDeath {
         agents.set_alert(slot, cur + config.stealth.alert_step_ally_death);
       }
     }
+  }
+}
+
+// BroadcastRallyOnHeroFell — symmetric to BroadcastAlertOnAllyDeath
+// but on the hero side. When a hero falls, every other alive hero
+// within rally_radius gains a buff window of `world.tick +
+// rally_duration` ticks. HeroRallyRegen consumes the window each tick.
+//
+// Mirrors the spatial.nearby walk pattern so the radius is gated by
+// the auto-injected 27-cell window — heroes typically cluster within
+// 1-2 rooms of each other so the 24-cell radius covers the party.
+@phase(post)
+physics BroadcastRallyOnHeroFell {
+  on HeroFell { dead: d } {
+    let dead_pos = agents.pos(d);
+    for slot in spatial.nearby(d) {
+      let slot_alive = agents.alive(slot);
+      let slot_type = agents.creature_type(slot);
+      let slot_pos = agents.pos(slot);
+      let delta = slot_pos - dead_pos;
+      let dist = length(delta);
+      if (slot_alive
+          && slot_type == Hero
+          && slot != d
+          && dist < config.dungeon.rally_radius) {
+        agents.set_rally_until_tick(slot, world.tick + config.dungeon.rally_duration);
+      }
+    }
+  }
+}
+
+// HeroRallyRegen — per-tick HP pulse for any hero within their rally
+// window. Capped at max_hp so a long-rallied hero just sits at full.
+// Pure addition: only ever raises hp, never lowers it.
+@phase(per_agent)
+physics HeroRallyRegen {
+  on Tick {} where (self.alive
+                    && self.creature_type == Hero
+                    && agents.rally_until_tick(self) > world.tick) {
+    let cur = agents.hp(self);
+    let cap = agents.max_hp(self);
+    let next = min(cur + config.dungeon.rally_regen_per_tick, cap);
+    agents.set_hp(self, next);
   }
 }
 
