@@ -125,6 +125,14 @@ physics MarkCasterBusy {
     && world.tick == config.probe.cast_begin_tick
   ) {
     agents.set_busy_with_ability_id(self, config.probe.cast_ability_id);
+    // Plan G G3f follow-up — gap (d) partial: stamp a real
+    // busy_until_tick alongside the busy_with_ability_id flip so the
+    // fold body's cell.expires_at_tick can read this column instead
+    // of hardcoding `world.tick + 100`. A real cast (Plan G's
+    // RecordCastBegin) populates this from the ability's
+    // duration_ticks; for the probe we stamp a tick comfortably past
+    // the test's 3-tick read window.
+    agents.set_busy_until_tick(self, world.tick + config.probe.zone_duration);
   }
 }
 
@@ -148,18 +156,23 @@ physics MarkCasterBusy {
 view threats(observer: Agent) -> f32 {
   initial: 0.0,
   on ThreatsFoldDriver { source: _, target: _, ability_id: _ } {
-    // Plan G G3f follow-up — gap (b) plumbed (32731b6a) so the fold
-    // body now references `source_candidate` directly. cell.center_*
-    // reads the per-pair caster's real position via `agents.pos(...)`
-    // and packs as q8 (256× scale, low-16 of the u32 slot, signed).
-    // The intensity helper unpacks via sign-extending shift, so
-    // negative-coord casters round-trip correctly. radius +
-    // expires_at_tick still placeholder constants — gap (c) needs
-    // `abilities.telegraph_*` namespace methods to read real
-    // ability-registry metadata.
+    // Plan G G3f follow-up:
+    //   * gap (b) plumbed (32731b6a) — `source_candidate` reachable
+    //     from the fold body, so per-pair caster fields can drive
+    //     real cell content.
+    //   * gap (d) partial (this commit) — `expires_at_tick` reads the
+    //     per-caster `busy_until_tick` SoA column (Plan G busy-cast
+    //     state) instead of hardcoding `world.tick + 100`. A real
+    //     RecordCastBegin consumer populates this column from the
+    //     ability's duration_ticks; the probe's MarkCasterBusy stamps
+    //     it directly.
+    //   * gap (c) STILL placeholder for radius + zone_kind — needs
+    //     `abilities.telegraph_*` namespace methods (task #297) to
+    //     read real ability-registry metadata. Tracked as a
+    //     multi-subsystem follow-up.
     let zone_kind        = config.probe.zone_kind
     let radius           = config.probe.zone_radius_q8
-    let expires_at_tick  = world.tick + config.probe.zone_duration
+    let expires_at_tick  = agents.busy_until_tick(source_candidate)
     let caster_pos       = agents.pos(source_candidate)
     let cx_q8            = u32(i32(caster_pos.x * 256.0))
     let cy_q8            = u32(i32(caster_pos.y * 256.0))

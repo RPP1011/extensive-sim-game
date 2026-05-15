@@ -171,6 +171,27 @@ fn pos_keyed_intensity_decreases_with_distance_to_cell_center() {
              got {sources:?}",
         );
     }
+
+    // Plan G G3f follow-up — gap (d) partial verification. cell.expires_at_tick
+    // reads `agents.busy_until_tick(source_candidate)` instead of the
+    // old `world.tick + 100` constant. MarkCasterBusy stamps
+    // `busy_until_tick = world.tick + zone_duration` at tick 0 (where
+    // zone_duration = 100 from config), so every cell's expires_at_tick
+    // should be exactly 100 (= 0 + 100). A regression that swapped the
+    // SoA read back to the constant would still produce 100-ish values
+    // (but at tick-of-fold + 100, e.g. 102 if the fold runs at tick 2)
+    // — the EXACT 100 pin distinguishes the two paths.
+    for obs in 0..(N as usize) {
+        for c in 0..4 {
+            let cell = &cells[obs * 4 + c];
+            assert_eq!(
+                cell.expires_at_tick, 100,
+                "observer {obs} cell {c}: expires_at_tick must read busy_until_tick (= 100), \
+                 got {got}",
+                got = cell.expires_at_tick,
+            );
+        }
+    }
 }
 
 /// One ThreatZoneCell: 8 u32 words per cell, K cells per observer.

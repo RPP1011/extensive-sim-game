@@ -364,6 +364,8 @@ pub fn kernel_topology_to_spec_and_body(
             ("max_hp", "array<f32>"),
             ("alive", "array<u32>"),
             ("creature_type", "array<u32>"),
+            ("busy_until_tick", "array<u32>"),
+            ("busy_target_pos", "array<vec3<f32>>"),
         ] {
             let needle = format!("agent_{snake}[");
             let binding_name = format!("agent_{snake}");
