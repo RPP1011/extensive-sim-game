@@ -388,9 +388,13 @@ pub fn lower_view(
 }
 
 /// Plan I slice I.3 — infer the [`StorageHint`] from a belief's
-/// signature.
+/// signature + annotations.
 ///
 /// Inference table:
+///   * `@per_entity_ring(K = N)` annotation → `PerEntityRing { k: N }`
+///     (slice I.3c, 2026-05-16). Overrides the signature-based
+///     inference because per-entity-ring storage is independent of
+///     param count — it's a per-observer ring of K struct cells.
 ///   * `(observer: Agent, subject: Agent) -> T` → `PairMap` (N² cells).
 ///   * `(observer: Agent) -> T` (slice I.3a) → also `PairMap` as the
 ///     AST-side hint. The per-view sizing path (`detect_pair_keyed_second_key`
@@ -403,6 +407,14 @@ pub fn lower_view(
 ///     allocator grows a `SingleKey-extended` variant that sizes
 ///     `agent_cap × key_pop` cells.
 fn infer_belief_storage_hint(view_id: ViewId, ir: &ViewIR) -> Result<StorageHint, LoweringError> {
+    // Annotation-driven storage hints win over signature inference.
+    // Today only `@per_entity_ring(K = N)` is recognized for beliefs;
+    // `@symmetric_pair_topk` and other view-shape annotations stay
+    // deferred (no shipping belief fixture needs them).
+    if let Some(ann) = ir.annotations.iter().find(|a| a.name == "per_entity_ring") {
+        let k = extract_k_arg(view_id, ir.span, ann)?;
+        return Ok(StorageHint::PerEntityRing { k });
+    }
     match ir.params.as_slice() {
         [first, second]
             if matches!(first.ty, IrType::AgentId) && matches!(second.ty, IrType::AgentId) =>
@@ -457,6 +469,62 @@ fn intern_view_name(
             error: e,
             span: ir.span,
         })
+}
+
+/// Plan I slice I.3c — extract the `K = <pos int>` argument from a
+/// view-shape annotation on a belief decl. Mirrors
+/// `dsl_ast::resolve::annotation_k_arg` (which serves the same
+/// purpose for `view` decls); duplicated here so the dsl_compiler
+/// side doesn't depend on a private resolver helper. Errors land as
+/// `UnsupportedBeliefShape` so the build.rs diagnostic surface is
+/// uniform.
+fn extract_k_arg(
+    view_id: ViewId,
+    ir_span: dsl_ast::ast::Span,
+    ann: &dsl_ast::ast::Annotation,
+) -> Result<u16, LoweringError> {
+    for arg in &ann.args {
+        let key = match &arg.key {
+            Some(k) => k.as_str(),
+            None => {
+                return Err(LoweringError::UnsupportedBeliefShape {
+                    view: view_id,
+                    detail: format!(
+                        "`@{}(...)` requires `key = value` args (e.g. `K = 8`); got a positional arg",
+                        ann.name
+                    ),
+                    span: arg.span,
+                });
+            }
+        };
+        if key == "K" {
+            let n = match &arg.value {
+                dsl_ast::ast::AnnotationValue::Int(n) => *n,
+                other => {
+                    return Err(LoweringError::UnsupportedBeliefShape {
+                        view: view_id,
+                        detail: format!(
+                            "`K` must be a positive integer literal; got {other:?}"
+                        ),
+                        span: arg.span,
+                    });
+                }
+            };
+            if n <= 0 || n > u16::MAX as i64 {
+                return Err(LoweringError::UnsupportedBeliefShape {
+                    view: view_id,
+                    detail: format!("`K = {n}` out of range; must satisfy 1 <= K <= {}", u16::MAX),
+                    span: arg.span,
+                });
+            }
+            return Ok(n as u16);
+        }
+    }
+    Err(LoweringError::UnsupportedBeliefShape {
+        view: view_id,
+        detail: format!("`@{}(...)` requires `K = N`; no `K` arg found", ann.name),
+        span: ir_span,
+    })
 }
 
 // ---------------------------------------------------------------------------

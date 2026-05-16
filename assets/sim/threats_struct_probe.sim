@@ -154,10 +154,15 @@ physics MarkCasterBusy {
 // this divergence: detects a registered `ViewLayout` for the view and
 // emits a struct-cell ring-append keyed on observer instead of the
 // hardcoded scalar CAS+add.
-@materialized(on_event = [ThreatsFoldDriver])
+// Plan I slice I.8 + I.3c (2026-05-16) — migrated to the `belief`
+// keyword. The `@per_entity_ring(K = 4)` storage hint is now
+// recognized by the belief lowering (slice I.3c) — overrides the
+// signature-based PairMap inference because per-entity-ring storage
+// is independent of param count (it's a per-observer ring of K
+// struct cells).
 @dispatch(per_agent_event_scan)
 @per_entity_ring(K = 4)
-view threats(observer: Agent) -> f32 {
+belief threats(observer: Agent) -> f32 {
   initial: 0.0,
   on ThreatsFoldDriver { source: _, target: _, ability_id: _ } {
     // Plan G G3f / Plan H follow-up — every cell field now derives

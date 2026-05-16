@@ -1034,8 +1034,29 @@ pub fn collect_materialized_views(
         // the fold body — same convention the CG-side `ViewLayout`
         // registers post-lowering. Defaults: scalar payload (stride 1)
         // for either non-ring storage or a `self += <expr>` body.
+        // Plan I slice I.3c — belief decls carry `@per_entity_ring(K=N)`
+        // on the annotation list rather than baked into the kind
+        // discriminant. Inspect both: materialized views via the
+        // hint, beliefs via the annotation arg.
         let ring_k = match v.kind {
             ViewKind::Materialized(StorageHint::PerEntityRing { k }) => Some(k),
+            ViewKind::Belief => v
+                .annotations
+                .iter()
+                .find(|a| a.name == "per_entity_ring")
+                .and_then(|ann| {
+                    ann.args.iter().find_map(|arg| {
+                        if arg.key.as_deref() == Some("K") {
+                            if let dsl_ast::ast::AnnotationValue::Int(n) = &arg.value {
+                                Some((*n).clamp(1, u16::MAX as i64) as u16)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                }),
             _ => None,
         };
         let cell_stride_u32: u32 = if let dsl_ast::ir::ViewBodyIR::Fold { handlers, .. } = &v.body {

@@ -2171,23 +2171,51 @@ fn populate_view_bodies_and_signatures(
                 // Only register the storage hint when inference would
                 // succeed; otherwise the lower_view pass surfaces the
                 // diagnostic and there's no hint to register.
-                let inferred = match view.params.as_slice() {
-                    [a, b]
-                        if matches!(a.ty, dsl_ast::ir::IrType::AgentId)
-                            && matches!(b.ty, dsl_ast::ir::IrType::AgentId) =>
-                    {
-                        Some(dsl_ast::ir::StorageHint::PairMap)
+                // Annotation-driven storage wins over signature-based
+                // inference (mirrors `infer_belief_storage_hint`).
+                let ring_ann = view
+                    .annotations
+                    .iter()
+                    .find(|a| a.name == "per_entity_ring");
+                let inferred = if let Some(ann) = ring_ann {
+                    // Parse `K = N` directly so the registry walk
+                    // doesn't depend on the cg/lower helper.
+                    ann.args
+                        .iter()
+                        .find_map(|arg| {
+                            if arg.key.as_deref() == Some("K") {
+                                if let dsl_ast::ast::AnnotationValue::Int(n) = &arg.value {
+                                    let k_u16 = (*n).clamp(1, u16::MAX as i64) as u16;
+                                    Some(dsl_ast::ir::StorageHint::PerEntityRing { k: k_u16 })
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        })
+                        // If the annotation is malformed the lower
+                        // pass surfaces the typed diagnostic; the
+                        // registry walk just skips registration.
+                } else {
+                    match view.params.as_slice() {
+                        [a, b]
+                            if matches!(a.ty, dsl_ast::ir::IrType::AgentId)
+                                && matches!(b.ty, dsl_ast::ir::IrType::AgentId) =>
+                        {
+                            Some(dsl_ast::ir::StorageHint::PairMap)
+                        }
+                        // Slice I.3a — single-key `(observer: Agent) -> T`
+                        // belief. The per-view sizing path (in
+                        // `build_helper::detect_pair_keyed_second_key`)
+                        // gates on param count, so the PairMap hint here
+                        // collapses to single-key sizing (N cells) at
+                        // allocation time.
+                        [a] if matches!(a.ty, dsl_ast::ir::IrType::AgentId) => {
+                            Some(dsl_ast::ir::StorageHint::PairMap)
+                        }
+                        _ => None,
                     }
-                    // Slice I.3a — single-key `(observer: Agent) -> T`
-                    // belief. The per-view sizing path (in
-                    // `build_helper::detect_pair_keyed_second_key`)
-                    // gates on param count, so the PairMap hint here
-                    // collapses to single-key sizing (N cells) at
-                    // allocation time.
-                    [a] if matches!(a.ty, dsl_ast::ir::IrType::AgentId) => {
-                        Some(dsl_ast::ir::StorageHint::PairMap)
-                    }
-                    _ => None,
                 };
                 if let Some(hint) = inferred {
                     let cg_hint = super::view::project_storage_hint(hint);

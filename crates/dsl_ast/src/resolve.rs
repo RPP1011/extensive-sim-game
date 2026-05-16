@@ -1760,6 +1760,24 @@ fn resolve_bodies(
                 let params = resolve_params(&d.params, &mut scope, symbols);
                 let return_ty = resolve_type(&d.return_ty, symbols);
                 validate_belief_signature(&d.name, &params, &return_ty, d.span)?;
+                // Mirror the view-decl resolver: `@dispatch(per_agent_event_scan)`
+                // surfaces `source_candidate` as an inner-scope binder
+                // so fold bodies can call `agents.<field>(source_candidate)`
+                // and have it lower to the per-pair iteration's source
+                // slot. Lets belief decls share the same fold-body
+                // surface as view decls (threats_struct_probe.sim relies
+                // on this).
+                let is_per_agent_event_scan = d.annotations.iter().any(|a| {
+                    a.name == "dispatch"
+                        && a.args.iter().any(|arg| {
+                            arg.key.is_none()
+                                && matches!(
+                                    &arg.value,
+                                    ast::AnnotationValue::Ident(name)
+                                        if name == "per_agent_event_scan"
+                                )
+                        })
+                });
                 let body = match &d.body {
                     ast::ViewBody::Expr(_) => {
                         // Parser only emits the Fold body for belief
@@ -1784,6 +1802,9 @@ fn resolve_bodies(
                                     inner.stack[0].push(binding.clone());
                                 }
                                 inner.next_id = scope.next_id;
+                                if is_per_agent_event_scan {
+                                    inner.bind("source_candidate", IrType::AgentId);
+                                }
                                 let pattern =
                                     resolve_event_pattern(&h.pattern, &mut inner, symbols);
                                 let body = resolve_stmts(&h.body, &mut inner, symbols)?;
@@ -1818,6 +1839,9 @@ fn resolve_bodies(
                             inner.stack[0].push(binding.clone());
                         }
                         inner.next_id = scope.next_id;
+                        if is_per_agent_event_scan {
+                            inner.bind("source_candidate", IrType::AgentId);
+                        }
                         let pattern = resolve_event_pattern(&m.pattern, &mut inner, symbols);
                         let where_clause = match &m.where_clause {
                             Some(e) => Some(resolve_expr(e, &mut inner, symbols)?),
