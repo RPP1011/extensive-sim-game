@@ -4822,16 +4822,60 @@ fn lower_op_body(
              classifier should have routed through ViewDecay path."
                 .to_string(),
         ),
-        // Plan I slice I.4 — BeliefSocialMerge stub. The IR + scheduler
-        // see the op (so dependencies + ordering are right) but the
-        // WGSL body is a TODO until the per-cell merge dispatch lands.
-        // Tagged with the op label so a subsequent slice can grep for
-        // the stub.
-        ComputeOpKind::BeliefSocialMerge { view, on_event, op } => Ok(format!(
-            "// TODO(plan-I.4b): belief_social_merge body — view=#{} on_event=#{} op={op} \
-             (per-cell merge dispatch lands in I.4b; today this kernel is a no-op).",
-            view.0, on_event.0
-        )),
+        // Plan I slice I.4a/b — BeliefSocialMerge kernel skeleton.
+        // The IR + scheduler see the op; this body emits the
+        // event-driven preamble (event_idx bounds check + tag
+        // filter + source-agent read) and a documented placeholder
+        // for the per-cell merge loop. The skeleton compiles to
+        // valid WGSL (so the runtime can dispatch the kernel) but
+        // doesn't yet mutate view storage — the full per-receiver ×
+        // per-cell merge loop lands in a follow-up slice once the
+        // event-field-offset lookup pulls the source-agent slot from
+        // the IR's `source_agent: LocalRef`.
+        //
+        // Hardcoded field offset 2 = first payload word (after the
+        // 2-word kind+seq header). Matches every shipping event with
+        // a single Agent payload field (e.g. AllyDied { dead:
+        // Agent }), which is the only shape the smoke probe + the
+        // dungeon_horde gossip pattern need today.
+        ComputeOpKind::BeliefSocialMerge { view, on_event, op } => {
+            let stride = ctx
+                .prog
+                .event_layouts
+                .get(&on_event.0)
+                .map(|l| l.record_stride_u32)
+                .unwrap_or(EVENT_RING_DEFAULT_STRIDE_U32);
+            let op_label = match op {
+                0 => "bit_or",
+                1 => "max",
+                2 => "min",
+                3 => "replace",
+                _ => "unknown",
+            };
+            Ok(format!(
+                "// Plan I.4 belief_social_merge skeleton — view=#{view} on_event=#{ek} op={op_label}\n\
+                 let event_idx = gid.x;\n\
+                 if (event_idx >= cfg.event_count) {{ return; }}\n\
+                 let kind = event_ring[event_idx * {stride}u + 0u];\n\
+                 if (kind != {ek}u) {{ return; }}\n\
+                 // Source agent — first payload word (offset 2).\n\
+                 // Field-offset lookup from the IR's `source_agent: LocalRef`\n\
+                 // is a follow-up slice; the smoke probe's AllyDied event has\n\
+                 // exactly one Agent payload field at this offset.\n\
+                 let source_agent = event_ring[event_idx * {stride}u + 2u];\n\
+                 let _ = source_agent; // suppress unused warning until merge loop lands\n\
+                 // TODO(plan-I.4b): per-receiver × per-cell merge loop.\n\
+                 // For each receiver R and key S:\n\
+                 //   atomicOr(&view_storage_primary[R * agent_cap + S],\n\
+                 //            atomicLoad(&view_storage_primary[source_agent * agent_cap + S]));\n\
+                 // Today this kernel dispatches as a no-op; receivers do not\n\
+                 // yet pick up the dying agent's belief row.\n",
+                view = view.0,
+                ek = on_event.0,
+                stride = stride,
+                op_label = op_label,
+            ))
+        }
     }
 }
 
