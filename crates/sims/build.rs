@@ -119,6 +119,7 @@ fn main() {
                 | "dungeon_layout"
                 | "dungeon_stealth"
                 | "dungeon_horde"
+                | "threat_horizon_stresstest"
         ) {
             continue;
         }

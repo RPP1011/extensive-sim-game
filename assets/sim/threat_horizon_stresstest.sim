@@ -1,0 +1,86 @@
+// threat_horizon_stresstest — Plan I 2026-05-16. A richer threat
+// stresstest than `threats_with_decay_probe.sim`. Single sim with
+// mixed-horizon threat sources: SHORT-FUSE casters spike then go
+// silent; LONG-FUSE casters stay busy across the run. Observers see
+// a single `threats` belief that aggregates both — decay distinguishes
+// the two horizons over time.
+//
+// **What this stresses beyond the existing tests:**
+//
+// 1. Both horizons in ONE simulation. The decay probe runs them as
+//    separate scenarios; this fixture has them coexist so an
+//    observer's perceived-threat trajectory is a SUPERPOSITION of
+//    sustained pressure (long-fuse) plus a decaying memory (short-
+//    fuse). That's the realistic shape: combat doesn't neatly
+//    partition into "always-on" vs "one-shot" — it's both at once.
+//
+// 2. The new `belief` keyword end-to-end (Plan I slice I.8). The
+//    `threats.intensity_at(observer)` Builtin wire-up resolves
+//    against the interned view name regardless of whether the decl
+//    was `view threats` or `belief threats`, so scoring still
+//    reads the same storage.
+//
+// 3. **Effectiveness reporting** — the runtime test pin
+//    (`threat_horizon_stresstest_pin.rs`) walks per-observer view
+//    values across all 64 ticks and reports:
+//      - Steady-state intensity contributed by long-fuse alone
+//      - Transient peak + decay slope of short-fuse alone
+//      - Crossover tick: when does the short-fuse memory fall below
+//        the long-fuse contribution?
+//    The crossover is the metric AI scoring relies on: it tells
+//    "which threat dominates the observer's current threat
+//    estimate?" — directly drives `Flee` vs `Hold` decisions when
+//    both signals coexist.
+//
+// **Behavioural shape.** N=8 agents:
+//   slot 0:   long-fuse caster (busy every tick)
+//   slot 1:   long-fuse caster (busy every tick)
+//   slot 2:   short-fuse caster (busy at tick 0 only, then idle)
+//   slot 3:   short-fuse caster (busy at tick 0 only, then idle)
+//   slot 4-7: observers (never cast — their `threats[obs]` accumulates
+//             from the 4 caster slots, with decay shaping the curve)
+//
+// Decay rate 0.85 per tick is chosen to make the crossover land
+// around tick 12 — late enough that the early-tick spike dominates,
+// soon enough that long-fuse takes over before the test horizon.
+
+event Tick { }
+event ScriptedCastBegin { source: AgentId, target: AgentId, ability_id: u32 }
+
+entity Subject : Agent { }
+
+config horizon {
+  // Slots 0..n_long_fuse are long-fuse casters.
+  n_long_fuse:  u32 = 2,
+  // Slots n_long_fuse..n_long_fuse+n_short_fuse are short-fuse casters.
+  n_short_fuse: u32 = 2,
+  // Short-fuse casters stay busy for exactly this many ticks then
+  // clear. Test pin enforces this by zeroing the SoA cells
+  // host-side (the busy SoA has no per-tick decrement rule today).
+  short_fuse_ticks: u32 = 1,
+  cast_ability_id:  u32 = 1,
+}
+
+// Stamp busy on every alive agent at tick 0. The test pin
+// distinguishes long-fuse from short-fuse host-side: after tick
+// `short_fuse_ticks`, it zeros slots [n_long_fuse, n_long_fuse +
+// n_short_fuse). Long-fuse slots stay busy.
+@phase(per_agent)
+physics MarkInitialBusy {
+  on Tick {} where (
+    self.alive && world.tick == 0
+  ) {
+    agents.set_busy_with_ability_id(self, config.horizon.cast_ability_id);
+  }
+}
+
+// The threats belief — per-observer scalar f32 counting busy
+// candidates. Decay multiplies the prior value by 0.85 BEFORE the
+// per-tick fold so short-fuse contributions decay geometrically once
+// the busy flag clears, while long-fuse contributions sustain.
+@dispatch(per_agent_event_scan)
+@decay(rate = 0.85, per = tick)
+belief threats(observer: Agent) -> f32 {
+  initial: 0.0,
+  on ScriptedCastBegin { source: _, target: _, ability_id: _ } { self += 1.0 }
+}
