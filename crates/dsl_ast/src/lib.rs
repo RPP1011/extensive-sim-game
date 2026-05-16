@@ -4,6 +4,7 @@
 //! interpreter can share one parse + resolve pipeline. See
 //! `docs/superpowers/specs/2026-04-22-dsl-authoring-engine-design.md` §4.1.
 
+pub mod ability_emit;
 pub mod ability_parser;
 pub mod ast;
 pub mod engine_events;
