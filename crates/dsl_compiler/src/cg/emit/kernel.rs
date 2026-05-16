@@ -498,8 +498,13 @@ pub fn kernel_topology_to_spec_and_body(
             .map(|l| l.record_stride_u32)
             .unwrap_or(EVENT_RING_DEFAULT_STRIDE_U32);
         let bindings = build_belief_social_merge_bindings(view_name, &cfg_struct);
-        // PerEventEmit cfg shape — has both `event_count` (for the
-        // bounds check) and `agent_cap` (for the merge loop's bounds).
+        // PerEventEmit cfg shape — slot 0 = event_count (patched
+        // per-dispatch by the indirect-consumer tail-copy to the
+        // current event ring tail). agent_cap (slot 3) reads 0
+        // from the runtime's static cfg-write — N is recovered from
+        // arrayLength(&view_storage_primary) in the body instead.
+        // (The "right" architectural fix would be a 5-element cfg
+        // layout extension; deferred — investigated in iter 17.)
         let cfg_struct_decl = build_per_event_emit_cfg_struct_decl(&cfg_struct, &[]);
         let cfg_build_expr = build_per_event_emit_cfg_build_expr(&cfg_struct, &[]);
         // Pick the merge-loop shape from the view signature's param
@@ -531,8 +536,10 @@ pub fn kernel_topology_to_spec_and_body(
             cfg_struct_decl,
             bindings,
             // PerEventEmit so `compose_wgsl_cfg_struct` picks the
-            // matching `event_count + tick + seed + agent_cap`
-            // layout (both fields the merge body references).
+            // `event_count + tick + seed + agent_cap` layout. The
+            // body reads cfg.event_count for the bounds check;
+            // n_agents comes from arrayLength of the storage
+            // buffer.
             kind: KernelKind::PerEventEmit,
             runtime_cfg_fields: Vec::new(),
         };
@@ -3987,22 +3994,17 @@ fn build_belief_social_merge_wgsl_body(
         3 => "atomicStore",
         _ => "atomicOr", // unknown discriminant — defensive default
     };
-    // Derive N from the view storage buffer length rather than
-    // cfg.agent_cap. The runtime's per-tick cfg-write path uses a
-    // 4-word layout `[slot0, tick, seed_or_pop, _pad_or_pair_off]`
-    // that doesn't carry agent_cap at PerEventEmit's slot 3 (slot 3
-    // reads 0). For PAIR-KEYED beliefs the storage is sized N² u32
-    // cells, so `sqrt(arrayLength(...))` recovers N. For SINGLE-KEY
-    // beliefs the storage is sized N cells directly, so
-    // `arrayLength(...)` IS N.
+    // N from arrayLength(&view_storage_primary): for pair-keyed
+    // beliefs storage is sized N², so sqrt recovers N; for
+    // single-key beliefs storage is sized N directly. The
+    // architectural alternative (cfg.agent_cap at a stable slot
+    // unclobbered by the indirect-consumer tail-copy) was
+    // investigated in iter 17 but interacts badly with the
+    // pending_event_count snapshot path — deferred.
     let merge_loop = if !matches!(op, 0..=3) {
-        // Unknown op discriminant — emit a documented stub. The
-        // resolver gates the surface to the four supported ops so
-        // this arm is unreachable from real source.
+        // Unknown op discriminant — defensive stub.
         "                _ = source_agent; // unknown op discriminant — defensive stub\n".to_string()
     } else if is_pair_keyed {
-        // Pair-keyed (Agent, Agent) → N² cells. 2D loop over
-        // (receiver, subject); each cell merged independently.
         format!(
             "                let storage_size = arrayLength(&view_storage_primary);\n\
              \x20               let n_agents = u32(sqrt(f32(storage_size)));\n\
@@ -4014,8 +4016,6 @@ fn build_belief_social_merge_wgsl_body(
              \x20               }}\n"
         )
     } else {
-        // Single-key (Agent) → N cells. 1D loop over receivers;
-        // each receiver inherits the source agent's single value.
         format!(
             "                let n_agents = arrayLength(&view_storage_primary);\n\
              \x20               let other_cell = atomicLoad(&view_storage_primary[source_agent]);\n\
