@@ -1,0 +1,71 @@
+// belief_merge_ops_probe — Plan I.4b e2e validation for the
+// non-bit_or merge ops (max / min / replace). Each op gets its own
+// belief decl + AllyDied event so the test can verify the merge
+// kernel uses the matching atomic primitive at runtime.
+//
+// Pre-seed agent 0 with a known value, fire AllyDied{dead:0}, and
+// verify each receiver picks up the value via the matching merge
+// semantics:
+//   * max     — receiver = max(receiver, source) — for non-zero
+//                source bigger than receiver, receiver picks it up
+//   * min     — receiver = min(receiver, source) — receiver picks
+//                up the SMALLER of the two values
+//   * replace — receiver = source unconditionally
+
+event Tick { }
+
+event AllyDiedMax {
+  dead: Agent,
+}
+
+event AllyDiedMin {
+  dead: Agent,
+}
+
+event AllyDiedReplace {
+  dead: Agent,
+}
+
+entity Agent_ : Agent { }
+
+@phase(per_agent)
+physics StampMaxOnly {
+  on Tick {} where (
+    self.alive && world.tick == 0
+  ) {
+    emit AllyDiedMax { dead: 0 }
+  }
+}
+
+@phase(per_agent)
+physics StampMinOnly {
+  on Tick {} where (
+    self.alive && world.tick == 0
+  ) {
+    emit AllyDiedMin { dead: 0 }
+  }
+}
+
+@phase(per_agent)
+physics StampReplaceOnly {
+  on Tick {} where (
+    self.alive && world.tick == 0
+  ) {
+    emit AllyDiedReplace { dead: 0 }
+  }
+}
+
+belief maxv(observer: Agent) -> u32 {
+  initial: 0,
+  on AllyDiedMax { dead: d } merge from d: max
+}
+
+belief minv(observer: Agent) -> u32 {
+  initial: 0,
+  on AllyDiedMin { dead: d } merge from d: min
+}
+
+belief replv(observer: Agent) -> u32 {
+  initial: 0,
+  on AllyDiedReplace { dead: d } merge from d: replace
+}
