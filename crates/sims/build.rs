@@ -126,6 +126,7 @@ fn main() {
                 | "belief_merge_ops_probe"
                 | "belief_key_typed_probe"
                 | "maze_explorer_belief_smart"
+                | "maze_explorer_multi"
                 | "maze_explorer_smart"
                 | "maze_explorer_visited"
                 | "maze_explorer"

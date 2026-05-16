@@ -1,0 +1,119 @@
+// maze_explorer_multi — fifth maze variant. N Adventurers explore
+// the same maze in parallel. Each agent runs the visited-aware
+// policy (from maze_explorer_belief_smart), but every tick they
+// also GOSSIP — emit a `Gossip { source: self }` event that the
+// belief's social-merge clause uses to OR-merge each source's full
+// visited row into every receiver's row.
+//
+// First fixture that genuinely exercises the I.3b stack as a
+// system: the K-indexed fold (writes), the K-indexed merge (cross-
+// agent reads from source's row into receiver's row), AND the
+// pair-keyed view-read (the per-tick rule's `visited(self, k)`
+// lookup). Single-agent fixtures couldn't expose merge correctness
+// because the merge had no sources to read from.
+//
+// Outcome metric: tick-to-first-found-key across N agents. With
+// shared knowledge, the team should converge on the key faster
+// than the slowest individual would alone — though for a small
+// 4×4 maze the floor is the SHORTEST path (6 ticks), so the win
+// is bounded.
+//
+// Schema mirrors maze_explorer_belief_smart but adds the Gossip
+// event + the merge clause:
+
+event Tick { }
+
+event EnteredRoom {
+  observer: Agent,
+  room: u32,
+}
+
+event Gossip {
+  source: Agent,
+}
+
+entity Adventurer : Agent { }
+
+field current_room: u32
+field found_key: u32
+field tick_found: u32
+
+table maze_doors: u32[16] = [
+  6, 14, 12, 10,
+  3,  7,  8,  3,
+  1,  3,  2,  3,
+  4, 13,  9,  1,
+]
+
+table dir_bit: u32[4] = [1, 2, 4, 8]
+
+config maze {
+  key_room: u32 = 15,
+}
+
+// Pair-keyed (Agent, u32) visited belief with K = 16.
+//   * Propagation handler: per-observer bit latch on EnteredRoom.
+//   * Social-merge clause: per-Gossip event, OR-merge source's
+//     16-cell row into every receiver's row. Symmetric — every
+//     agent's Gossip is processed by every receiver, so after
+//     one merge step every agent's row converges to the union
+//     of all individually-visited rooms.
+@key_pop(K = 16)
+belief visited(observer: Agent, room: u32) -> u32 {
+  initial: 0,
+  on EnteredRoom { observer: o, room: r } where (o == observer) {
+    self |= 1u
+  }
+  on Gossip { source: s } merge from s: bit_or
+}
+
+@phase(per_agent)
+physics Explore {
+  on Tick {} where (
+    self.alive
+    && self.found_key == 0u
+  ) {
+    let doors = tables.maze_doors(self.current_room);
+    let dir = rng.action() % 4u;
+    let bit = tables.dir_bit(dir);
+    if ((doors & bit) != 0u) {
+      let next_room = if (dir == 0u) {
+        self.current_room - 4u
+      } else {
+        if (dir == 1u) {
+          self.current_room + 4u
+        } else {
+          if (dir == 2u) {
+            self.current_room + 1u
+          } else {
+            self.current_room - 1u
+          }
+        }
+      };
+      // Pair-keyed view-read — same surface as the single-agent
+      // belief-smart variant, only now the cell can carry bits
+      // OR'd in from other agents' rows via the Gossip merge.
+      let was_visited = visited(self, next_room);
+      let reroll = rng.shuffle() % 2u;
+      if ((was_visited == 0u) || (reroll == 0u)) {
+        agents.set_current_room(self, next_room);
+        emit EnteredRoom {
+          observer: self,
+          room: next_room,
+        }
+        if (next_room == config.maze.key_room) {
+          agents.set_found_key(self, 1u);
+          agents.set_tick_found(self, world.tick);
+        }
+      }
+    }
+    // Gossip every tick. Each agent emits its own (source: self)
+    // event; the merge clause's per-receiver walk pulls every
+    // source's row into the receiver. N agents → N Gossip events
+    // per tick → N² atomicOr per (receiver, cell) per tick.
+    // Tiny at K=16, N≤8.
+    emit Gossip {
+      source: self,
+    }
+  }
+}
