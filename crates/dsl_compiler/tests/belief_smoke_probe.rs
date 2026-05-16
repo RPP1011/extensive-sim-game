@@ -117,15 +117,14 @@ fn belief_smoke_probe_parse_resolve_lower_emit_round_trip() {
          body excerpt: {}",
         &merge_body[..merge_body.len().min(800)]
     );
-    // Stub-marker: the merge LOOP body is deferred (binding
-    // synthesizer for view_storage_primary on BeliefSocialMerge
-    // kernels lands later). This anchor ensures a future change that
-    // forgets to wire the loop after enabling the storage binding
-    // notices the gap.
+    // Plan I.4b — the per-receiver × per-cell merge loop is now in
+    // place for bit_or. Spot-check for the atomic primitives the
+    // merge uses (atomicLoad from source_agent's row, atomicOr into
+    // receiver's row).
     assert!(
-        merge_body.contains("BeliefSocialMerge merge-loop deferred"),
-        "expected the I.4b deferred-loop marker in merge kernel body; \
-         body excerpt: {}",
+        merge_body.contains("atomicLoad") && merge_body.contains("atomicOr"),
+        "expected merge kernel body to use atomicLoad + atomicOr for the \
+         per-cell bit_or merge; body excerpt: {}",
         &merge_body[..merge_body.len().min(800)]
     );
 

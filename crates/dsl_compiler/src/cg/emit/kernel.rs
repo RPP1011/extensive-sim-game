@@ -478,6 +478,55 @@ pub fn kernel_topology_to_spec_and_body(
         return Ok((spec, wgsl_body));
     }
 
+    // Plan I slice I.4b — BeliefSocialMerge dedicated path. The
+    // generic handle aggregator doesn't emit `view_storage_primary`
+    // for non-ViewFold kernels (it only handles ViewStorage writes
+    // through the ViewFold-specific BGL builder), so the merge
+    // kernel needs its own binding synthesis to declare the storage
+    // handle as `array<atomic<u32>>` and let the body's atomicLoad +
+    // atomicOr resolve.
+    if let KernelKindClass::BeliefSocialMerge {
+        view_name,
+        view_id,
+        on_event_kind_id,
+        op,
+    } = &class
+    {
+        let stride = prog
+            .event_layouts
+            .get(on_event_kind_id)
+            .map(|l| l.record_stride_u32)
+            .unwrap_or(EVENT_RING_DEFAULT_STRIDE_U32);
+        let bindings = build_belief_social_merge_bindings(view_name, &cfg_struct);
+        // PerEventEmit cfg shape — has both `event_count` (for the
+        // bounds check) and `agent_cap` (for the merge loop's bounds).
+        let cfg_struct_decl = build_per_event_emit_cfg_struct_decl(&cfg_struct, &[]);
+        let cfg_build_expr = build_per_event_emit_cfg_build_expr(&cfg_struct, &[]);
+        let wgsl_body = build_belief_social_merge_wgsl_body(
+            *view_id,
+            *on_event_kind_id,
+            *op,
+            stride,
+        );
+        let spec = KernelSpec {
+            name,
+            pascal,
+            entry_point,
+            cfg_struct,
+            cfg_build_expr,
+            cfg_struct_decl,
+            bindings,
+            // PerEventEmit so `compose_wgsl_cfg_struct` picks the
+            // matching `event_count + tick + seed + agent_cap`
+            // layout (both fields the merge body references).
+            kind: KernelKind::PerEventEmit,
+            runtime_cfg_fields: Vec::new(),
+        };
+        spec.validate()
+            .map_err(|reason| KernelEmitError::InvalidKernelSpec { reason })?;
+        return Ok((spec, wgsl_body));
+    }
+
     // --- Generic (non-ViewFold) path ----------------------------------
 
     // 5. Collect every (handle, was_written) pair across all body ops.
@@ -1169,6 +1218,20 @@ enum KernelKindClass {
         /// `ComputeOpKind::ViewDecay::packing`.
         packing: u8,
     },
+    /// Plan I slice I.4b — singleton kernel emitting a `merge from
+    /// <agent>: <op>` clause's per-cell merge. Carries the view's
+    /// snake_case name + the source event kind + the merge-op
+    /// discriminant so the body composer can synthesise the per-
+    /// receiver × per-cell loop directly without going through the
+    /// generic handle-aggregation pipeline (which doesn't yet know
+    /// how to declare `view_storage_primary` on a non-ViewFold
+    /// kernel).
+    BeliefSocialMerge {
+        view_name: String,
+        view_id: u32,
+        on_event_kind_id: u32,
+        op: u8,
+    },
     /// Anything not detected as ViewFold or ViewDecay. Routes through
     /// the generic handle-aggregation pipeline + placeholder cfg shape.
     Generic,
@@ -1202,6 +1265,23 @@ fn classify_kernel(body_ops: &[&ComputeOp], prog: &CgProgram) -> KernelKindClass
                 sub_by: *sub_by,
                 gate_mask_id: gate.map(|m| m.0),
                 packing: *packing,
+            };
+        }
+        // Plan I slice I.4b — BeliefSocialMerge singleton detection.
+        // Same singleton-only shape as ViewDecay: a kernel with one
+        // BeliefSocialMerge op and nothing else routes through the
+        // dedicated build path that declares view_storage_primary as
+        // a binding and emits the per-cell merge body.
+        if let ComputeOpKind::BeliefSocialMerge { view, on_event, op } = &body_ops[0].kind {
+            let view_name = match prog.interner.get_view_name(*view) {
+                Some(name) => name.to_string(),
+                None => format!("view_{}", view.0),
+            };
+            return KernelKindClass::BeliefSocialMerge {
+                view_name,
+                view_id: view.0,
+                on_event_kind_id: on_event.0,
+                op: *op,
             };
         }
     }
@@ -3790,6 +3870,122 @@ fn build_view_decay_bindings(
     bindings
 }
 
+/// Plan I slice I.4b — bindings for the BeliefSocialMerge kernel.
+/// 5-binding fixed shape:
+///   slot 0: event_ring          (ReadStorage)
+///   slot 1: event_tail          (ReadStorage)
+///   slot 2: view_storage_primary (AtomicStorage)
+///   slot 3: sim_cfg             (ReadStorage)
+///   slot 4: cfg                 (Uniform)
+///
+/// Mirrors ViewFold's slot 0/1 (event_ring + event_tail) and slot 2
+/// (atomic view storage) so the runtime can route the same buffers
+/// to both ViewFold-style folds and BeliefSocialMerge kernels via
+/// the existing `fold_view_<view>_handles()` resident accessor.
+fn build_belief_social_merge_bindings(
+    view_name: &str,
+    cfg_struct: &str,
+) -> Vec<KernelBinding> {
+    let accessor = format!("fold_view_{view_name}_handles");
+    vec![
+        KernelBinding {
+            slot: 0,
+            name: "event_ring".into(),
+            access: AccessMode::ReadStorage,
+            wgsl_ty: "array<u32>".into(),
+            bg_source: BgSource::Resident("batch_events_ring".into()),
+        },
+        KernelBinding {
+            slot: 1,
+            name: "event_tail".into(),
+            access: AccessMode::ReadStorage,
+            wgsl_ty: "array<u32>".into(),
+            bg_source: BgSource::Resident("batch_events_tail".into()),
+        },
+        KernelBinding {
+            slot: 2,
+            name: "view_storage_primary".into(),
+            access: AccessMode::AtomicStorage,
+            wgsl_ty: "u32".into(),
+            bg_source: BgSource::ViewHandle {
+                accessor,
+                tuple_idx: 0,
+            },
+        },
+        KernelBinding {
+            slot: 3,
+            name: "sim_cfg".into(),
+            access: AccessMode::ReadStorage,
+            wgsl_ty: "array<u32>".into(),
+            bg_source: BgSource::External("sim_cfg".into()),
+        },
+        KernelBinding {
+            slot: 4,
+            name: "cfg".into(),
+            access: AccessMode::Uniform,
+            wgsl_ty: cfg_struct.to_string(),
+            bg_source: BgSource::Cfg,
+        },
+    ]
+}
+
+/// Plan I slice I.4b — per-cell merge body for the BeliefSocialMerge
+/// kernel. Single-thread serialization over (receiver, key) for the
+/// MVP shape; a 2D dispatch with the event-driven source as a side
+/// channel is the optimization for the N=200K scale.
+///
+/// Today only the `bit_or` op (discriminant 0) is fully wired —
+/// `max`/`min`/`replace` (1/2/3) fall through to a stub body that
+/// just consumes the source_agent. The op-table extension is a small
+/// follow-up.
+fn build_belief_social_merge_wgsl_body(
+    view_id: u32,
+    on_event_kind_id: u32,
+    op: u8,
+    stride: u32,
+) -> String {
+    let op_label = match op {
+        0 => "bit_or",
+        1 => "max",
+        2 => "min",
+        3 => "replace",
+        _ => "unknown",
+    };
+    let merge_loop = match op {
+        // bit_or — the workhorse: idempotent under repeated merge,
+        // safe under concurrent thread-per-event dispatch (atomicOr).
+        0 => format!(
+            "                let n_agents = cfg.agent_cap;\n\
+             \x20               for (var r: u32 = 0u; r < n_agents; r = r + 1u) {{\n\
+             \x20                   for (var s: u32 = 0u; s < n_agents; s = s + 1u) {{\n\
+             \x20                       let other_cell = atomicLoad(&view_storage_primary[source_agent * n_agents + s]);\n\
+             \x20                       atomicOr(&view_storage_primary[r * n_agents + s], other_cell);\n\
+             \x20                   }}\n\
+             \x20               }}\n"
+        ),
+        // max / min / replace — wired structurally but the per-cell
+        // body needs the matching atomic primitive (atomicMax,
+        // atomicMin, atomicStore). For today's smoke probe scope only
+        // bit_or fires; the others are stubbed with the same
+        // structural anchor (`source_agent` consumed) so they pass
+        // naga validation.
+        _ => "                _ = source_agent; // op variant deferred (only bit_or wired today)\n".to_string(),
+    };
+    format!(
+        "                // Plan I.4b belief_social_merge kernel — view=#{view_id} on_event=#{on_event_kind_id} op={op_label}\n\
+         \x20               let event_idx = gid.x;\n\
+         \x20               if (event_idx >= cfg.event_count) {{ return; }}\n\
+         \x20               let kind = event_ring[event_idx * {stride}u + 0u];\n\
+         \x20               if (kind != {on_event_kind_id}u) {{ return; }}\n\
+         \x20               // Source agent — first payload word (offset 2). IR-level\n\
+         \x20               // field-offset lookup from `source_agent: LocalRef` is\n\
+         \x20               // a follow-up slice; shipping events with one Agent\n\
+         \x20               // payload field (AllyDied, etc.) land at offset 2.\n\
+         \x20               let source_agent = event_ring[event_idx * {stride}u + 2u];\n\
+{merge_loop}",
+    )
+}
+
 /// Demote a binding's [`AccessMode`] to its read-only equivalent.
 /// `AtomicStorage` stays atomic (the prelude functions for the q8
 /// belief columns use `atomicLoad` even on the read side, so the
@@ -4822,69 +5018,21 @@ fn lower_op_body(
              classifier should have routed through ViewDecay path."
                 .to_string(),
         ),
-        // Plan I slice I.4a/b — BeliefSocialMerge kernel skeleton.
-        // The IR + scheduler see the op; this body emits the
-        // event-driven preamble (event_idx bounds check + tag
-        // filter + source-agent read) and a documented placeholder
-        // for the per-cell merge loop. The skeleton compiles to
-        // valid WGSL (so the runtime can dispatch the kernel) but
-        // doesn't yet mutate view storage — the full per-receiver ×
-        // per-cell merge loop lands in a follow-up slice once the
-        // event-field-offset lookup pulls the source-agent slot from
-        // the IR's `source_agent: LocalRef`.
-        //
-        // Hardcoded field offset 2 = first payload word (after the
-        // 2-word kind+seq header). Matches every shipping event with
-        // a single Agent payload field (e.g. AllyDied { dead:
-        // Agent }), which is the only shape the smoke probe + the
-        // dungeon_horde gossip pattern need today.
-        ComputeOpKind::BeliefSocialMerge { view, on_event, op } => {
-            let stride = ctx
-                .prog
-                .event_layouts
-                .get(&on_event.0)
-                .map(|l| l.record_stride_u32)
-                .unwrap_or(EVENT_RING_DEFAULT_STRIDE_U32);
-            let op_label = match op {
-                0 => "bit_or",
-                1 => "max",
-                2 => "min",
-                3 => "replace",
-                _ => "unknown",
-            };
-            Ok(format!(
-                "// Plan I.4 belief_social_merge skeleton — view=#{view} on_event=#{ek} op={op_label}\n\
-                 let event_idx = gid.x;\n\
-                 if (event_idx >= cfg.event_count) {{ return; }}\n\
-                 let kind = event_ring[event_idx * {stride}u + 0u];\n\
-                 if (kind != {ek}u) {{ return; }}\n\
-                 // Source agent — first payload word (offset 2).\n\
-                 // Field-offset lookup from the IR's `source_agent: LocalRef`\n\
-                 // is a follow-up slice; the smoke probe's AllyDied event has\n\
-                 // exactly one Agent payload field at this offset.\n\
-                 let source_agent = event_ring[event_idx * {stride}u + 2u];\n\
-                 // The per-receiver × per-cell merge loop is the\n\
-                 // semantic body — `atomicOr(view_storage_primary[r * agent_cap + s],\n\
-                 // atomicLoad(view_storage_primary[source_agent *\n\
-                 // agent_cap + s]))` for every receiver r and key s.\n\
-                 // Wiring the `view_storage_primary` binding into\n\
-                 // BeliefSocialMerge kernels (parallel path to\n\
-                 // ViewFold's `build_view_fold_bindings`) lands in a\n\
-                 // follow-up slice — until then the binding\n\
-                 // synthesizer wouldn't declare the storage handle\n\
-                 // and naga rejects the kernel. Today the body just\n\
-                 // consumes source_agent so the WGSL stays well-\n\
-                 // formed; the actual merge dispatches as a no-op\n\
-                 // (receivers don't yet pick up the dying ally's\n\
-                 // belief row). Plan I.4b WGSL TODO marker:\n\
-                 // [BeliefSocialMerge merge-loop deferred].\n\
-                 _ = source_agent;\n",
-                view = view.0,
-                ek = on_event.0,
-                stride = stride,
-                op_label = op_label,
-            ))
-        }
+        // Plan I slice I.4b — BeliefSocialMerge body is emitted by
+        // the dedicated `KernelKindClass::BeliefSocialMerge` arm in
+        // `kernel_topology_to_spec_and_body` (parallel path to
+        // ViewDecay). This `lower_op_body` arm is structurally
+        // unreachable for BeliefSocialMerge ops because the
+        // classifier routes singletons through the dedicated path
+        // before this function is called. Emit a stub for the
+        // defensive case where a future change makes the op land in
+        // the generic pipeline.
+        ComputeOpKind::BeliefSocialMerge { view, on_event, op } => Ok(format!(
+            "// BeliefSocialMerge in generic pipeline — should be \
+             routed through KernelKindClass::BeliefSocialMerge. \
+             view=#{} on_event=#{} op={}",
+            view.0, on_event.0, op,
+        )),
     }
 }
 
