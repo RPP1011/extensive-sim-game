@@ -1075,6 +1075,15 @@ pub struct CgProgram {
     /// runtime-tunable config goes through a future cfg-uniform
     /// extension; today every config field is a compile-time constant.
     pub config_const_values: BTreeMap<u32, ConfigConstValue>,
+    /// Static lookup tables from top-level `table <name>: u32[N] = […]`
+    /// decls. Mirrored from [`dsl_ast::ir::Compilation::tables`] by the
+    /// driver during lowering. Read by `compose_wgsl_file` to emit
+    /// module-level `const <name>: array<u32, N> = …;` declarations
+    /// for each table referenced by a kernel body (substring scan,
+    /// same pattern as `config_const_values`). Skip-if-empty for
+    /// snapshot stability.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tables: BTreeMap<String, Vec<u32>>,
     /// Plan G tunable cfg — `ConfigConstId`s whose source field carried
     /// a `@runtime` annotation. These IDs are routed through a per-kernel
     /// cfg-uniform field (`cfg.config_<block>_<field>`) instead of the
@@ -1604,6 +1613,7 @@ impl CgProgramBuilder {
                 }
                 Ok(())
             }
+            CgExpr::TableLookup { index, .. } => self.check_expr_id(*index),
         }
     }
 

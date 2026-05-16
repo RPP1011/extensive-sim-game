@@ -147,6 +147,7 @@ fn decl_annotations_mut(d: &mut Decl) -> Option<&mut Vec<Annotation>> {
         Decl::AgentField(x) => &mut x.annotations,
         Decl::SpatialQuery(x) => &mut x.annotations,
         Decl::Belief(x) => &mut x.annotations,
+        Decl::Table(x) => &mut x.annotations,
         // `query` does not currently accept annotations on the decl; trailing
         // `@`s after a `query` will fall through to the orphan-annotation
         // error path on the next iteration.
@@ -175,6 +176,7 @@ fn decl_span_mut(d: &mut Decl) -> &mut Span {
         Decl::Debug(x) => &mut x.span,
         Decl::AgentField(x) => &mut x.span,
         Decl::Belief(x) => &mut x.span,
+        Decl::Table(x) => &mut x.span,
     }
 }
 
@@ -210,6 +212,7 @@ fn decl(c: &mut Cursor) -> PResult<Decl> {
         Some("init") => init_decl(c, annotations, start).map(Decl::Init),
         Some("debug") => debug_decl(c, annotations, start).map(Decl::Debug),
         Some("field") => agent_field_decl(c, annotations, start).map(Decl::AgentField),
+        Some("table") => table_decl(c, annotations, start).map(Decl::Table),
         Some("spatial_query") => {
             spatial_query_decl(c, annotations, start).map(Decl::SpatialQuery)
         }
@@ -259,6 +262,103 @@ fn agent_field_decl(
         annotations,
         name,
         ty_name,
+        span: Span::new(start, c.pos),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// 2.18b table — top-level static lookup table
+//
+// Grammar:
+//   table <name>: <element_ty>[<length>] = [<v1>, <v2>, ..., <vN>]
+//
+// Where `<element_ty>` is `u32` (first cut) and `<length>` must equal
+// the initializer's element count (resolver-validated). Trailing
+// semicolon optional. Read in physics/view bodies as
+// `tables.<name>(<idx_expr>)`.
+// ---------------------------------------------------------------------------
+
+fn table_decl(
+    c: &mut Cursor,
+    annotations: Vec<Annotation>,
+    start: usize,
+) -> PResult<TableDecl> {
+    expect_keyword(c, "table")
+        .map_err(|e| e.with_context("parsing `table` declaration"))?;
+    c.skip_ws();
+    let name = ident(c).map_err(|e| e.with_context("parsing table name"))?;
+    c.skip_ws();
+    expect_char(c, ':')
+        .map_err(|e| e.with_context("parsing table decl (expected `:` after name)"))?;
+    c.skip_ws();
+    let element_ty_name = ident(c)
+        .map_err(|e| e.with_context("parsing table element type"))?;
+    c.skip_ws();
+    expect_char(c, '[')
+        .map_err(|e| e.with_context("parsing table decl (expected `[<length>]`)"))?;
+    c.skip_ws();
+    let (length_f, is_float) = number_literal(c)?;
+    if is_float || length_f < 1.0 || length_f > (u32::MAX as f64) {
+        return Err(ParseErr::at(
+            here(c),
+            format!(
+                "table length must be a positive integer ≤ u32::MAX; got {length_f}"
+            ),
+        ));
+    }
+    let length = length_f as u32;
+    c.skip_ws();
+    expect_char(c, ']')
+        .map_err(|e| e.with_context("parsing table decl (expected `]` after length)"))?;
+    c.skip_ws();
+    expect_char(c, '=')
+        .map_err(|e| e.with_context("parsing table decl (expected `=` before initializer)"))?;
+    c.skip_ws();
+    expect_char(c, '[')
+        .map_err(|e| e.with_context("parsing table initializer (expected `[`)"))?;
+    let mut values: Vec<i64> = Vec::with_capacity(length as usize);
+    loop {
+        c.skip_ws();
+        if c.starts_with_char(']') {
+            c.bump(1);
+            break;
+        }
+        // Optional leading minus for signed values (future-friendly;
+        // u32-only first cut rejects negatives at resolve time).
+        let negate = if c.starts_with_char('-') {
+            c.bump(1);
+            true
+        } else {
+            false
+        };
+        let (n, is_f) = number_literal(c)?;
+        if is_f {
+            return Err(ParseErr::at(
+                here(c),
+                "table initializer must be integer literals only (first cut)",
+            ));
+        }
+        let mut v = n as i64;
+        if negate {
+            v = -v;
+        }
+        values.push(v);
+        c.skip_ws();
+        if c.starts_with_char(',') {
+            c.bump(1);
+        }
+    }
+    c.skip_ws();
+    // Optional trailing semicolon.
+    if c.starts_with_char(';') {
+        c.bump(1);
+    }
+    Ok(TableDecl {
+        annotations,
+        name,
+        element_ty_name,
+        length,
+        values,
         span: Span::new(start, c.pos),
     })
 }

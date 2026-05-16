@@ -163,6 +163,9 @@ fn scoring_kernel_emits_action_selected_when_verb_present() {
             prog,
             naming: HandleNamingStrategy::Structural,
             tile_walk_index: std::cell::RefCell::new(None),
+            tables_referenced: std::cell::RefCell::new(
+                std::collections::BTreeSet::new(),
+            ),
             dispatch: std::cell::Cell::new(None),
             view_target_locals: std::cell::RefCell::new(Vec::new()),
             pending_target_lets: std::cell::RefCell::new(Vec::new()),

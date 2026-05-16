@@ -5690,6 +5690,9 @@ fn expr_references_per_pair_candidate(
                 || expr_references_per_pair_candidate(*then, ctx)
                 || expr_references_per_pair_candidate(*else_, ctx)
         }
+        CgExpr::TableLookup { index, .. } => {
+            expr_references_per_pair_candidate(*index, ctx)
+        }
     }
 }
 

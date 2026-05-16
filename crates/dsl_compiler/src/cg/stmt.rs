@@ -854,6 +854,13 @@ pub fn collect_expr_reads(id: CgExprId, exprs: &dyn ExprArena, out: &mut Vec<Dat
                 collect_expr_reads(*a, exprs, out);
             }
         }
+        CgExpr::TableLookup { index, .. } => {
+            // Static table reads have no `DataHandle::*` — the const
+            // array is baked into the WGSL module via the kernel
+            // composer; the index sub-expression's reads (if any)
+            // still need to surface for binding synthesis.
+            collect_expr_reads(*index, exprs, out);
+        }
     }
 }
 
@@ -929,6 +936,9 @@ pub fn collect_belief_state_calls_in_expr(
         | CgExpr::EventField { .. }
         | CgExpr::NamespaceField { .. } => {
             // Leaf nodes: no NamespaceCall sub-tree to recurse into.
+        }
+        CgExpr::TableLookup { index, .. } => {
+            collect_belief_state_calls_in_expr(*index, exprs, out);
         }
     }
 }

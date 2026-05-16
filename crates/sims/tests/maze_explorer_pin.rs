@@ -24,9 +24,6 @@ const AGENT_COUNT: u32 = 1;
 // Random-walk hitting time on a 16-room maze with average degree ≈
 // 2 is bounded by ~1000 ticks for this seed; we give 5× headroom.
 const TICK_BUDGET: u64 = 5000;
-// Spawn room's door bitmap (must match `config.maze.spawn_doors`).
-// Room 0's doors are E|S = 4|2 = 6.
-const SPAWN_DOORS: u32 = 6;
 
 fn read_u32_at(state: &GeneratedRuntime, buf: &wgpu::Buffer, slot: u32) -> u32 {
     let bytes = 4u64;
@@ -71,12 +68,8 @@ fn run_one(seed: u64) -> Option<u32> {
         0,
         bytemuck::cast_slice(&alive),
     );
-    let current_doors: [u32; 1] = [SPAWN_DOORS];
-    state.gpu.queue.write_buffer(
-        &state.agent_current_doors_buf,
-        0,
-        bytemuck::cast_slice(&current_doors),
-    );
+    // No more current_doors seeding needed — the per-tick rule reads
+    // door bitmaps directly from `tables.maze_doors(current_room)`.
     let mut ticks = 0u64;
     while ticks < TICK_BUDGET {
         state.step();

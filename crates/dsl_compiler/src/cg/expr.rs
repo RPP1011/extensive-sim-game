@@ -916,6 +916,26 @@ pub enum CgExpr {
         field: String,
         ty: CgTy,
     },
+    /// Static lookup table read — `tables.<name>(<idx_expr>)` in
+    /// surface text. The values are baked into the IR so the kernel
+    /// emit can prepend a `const <name>: array<u32, N> = array<u32, N>(…);`
+    /// declaration without a side-channel registry lookup; the body
+    /// is just `<name>[<index_expr>]`. World-data primitive — distinct
+    /// from `Read(AgentField)` (per-instance) and `Read(ConfigConst)`
+    /// (single scalar per cfg field).
+    TableLookup {
+        /// Snake_case table name (matches the `table <name>` decl).
+        name: String,
+        /// Element values in declaration order. Owned per-node so the
+        /// emit doesn't need a separate registry walk; size is bounded
+        /// by the table's `length` field.
+        values: Vec<u32>,
+        /// Index expression — must lower to U32 or AgentId.
+        index: CgExprId,
+        /// Element type. `U32` for the first cut; future cuts may
+        /// widen to `I32`/`F32`.
+        ty: CgTy,
+    },
 }
 
 /// Compute the type a `DataHandle` reads at. `Read(h)` has the type
@@ -1095,6 +1115,7 @@ impl CgExpr {
             CgExpr::EventField { ty, .. } => *ty,
             CgExpr::NamespaceCall { ty, .. } => *ty,
             CgExpr::NamespaceField { ty, .. } => *ty,
+            CgExpr::TableLookup { ty, .. } => *ty,
         }
     }
 }
@@ -1242,6 +1263,11 @@ fn pretty_into(expr: &CgExpr, arena: &dyn ExprArena, out: &mut String) -> fmt::R
         }
         CgExpr::NamespaceField { ns, field, ty } => {
             write!(out, "(ns_field {:?}.{} {})", ns, field, ty)
+        }
+        CgExpr::TableLookup { name, values, index, ty } => {
+            write!(out, "(table_lookup {} [N={}] ", name, values.len())?;
+            pretty_child(*index, arena, out)?;
+            write!(out, " {})", ty)
         }
     }
 }
@@ -1655,6 +1681,13 @@ pub fn type_check(
         // type) is a builder defect, not a typing one.
         CgExpr::NamespaceCall { ty, .. } => Ok(*ty),
         CgExpr::NamespaceField { ty, .. } => Ok(*ty),
+        // Index sub-expression's type was already validated at
+        // lowering time (must be U32 or AgentId); the table's
+        // element type is the node's claimed `ty`. No further
+        // structural checks needed — fabricated mismatch would
+        // require a malformed builder, which is a defect not a
+        // type-rule input.
+        CgExpr::TableLookup { ty, .. } => Ok(*ty),
     }
 }
 

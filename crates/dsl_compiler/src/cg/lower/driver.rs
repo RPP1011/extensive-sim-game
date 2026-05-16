@@ -524,6 +524,7 @@ pub fn lower_compilation_to_cg_with_opts(
     populate_view_bodies_and_signatures(comp, &mut ctx, &mut diagnostics);
     populate_namespace_registry(&mut ctx);
     populate_entity_field_catalog(comp, &mut ctx);
+    populate_tables(comp, &mut ctx);
 
     // Predicate-aware scoring (Wave 1.5#7 follow-on): mirror the
     // verb-name → ability_id map produced by `expand_verbs` into the
@@ -844,10 +845,17 @@ pub fn lower_compilation_to_cg_with_opts(
     let namespace_registry_snapshot = ctx.namespace_registry.clone();
     let entity_field_catalog_snapshot = ctx.entity_field_catalog.clone();
 
+    let tables_snapshot: std::collections::BTreeMap<String, Vec<u32>> = ctx
+        .tables
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+
     let mut prog = builder.finish();
     prog.event_layouts = event_layouts_snapshot;
     prog.namespace_registry = namespace_registry_snapshot;
     prog.entity_field_catalog = entity_field_catalog_snapshot;
+    prog.tables = tables_snapshot;
     // `view_signatures` was set on the builder's program BEFORE the
     // cycle gate (above); `finish()` preserves it. No re-snapshot
     // needed here.
@@ -1797,6 +1805,18 @@ fn populate_namespace_registry(ctx: &mut LoweringCtx<'_>) {
 /// list literals). Fields whose value is anything else are silently
 /// skipped — the resolver already accepts them, but they have no SoA
 /// shape today.
+/// Mirror `comp.tables` into `ctx.tables` so the expression-lowering
+/// arm for `tables.<name>(<idx>)` can bake values into the resulting
+/// `CgExpr::TableLookup` node. Each `i64` value was already bounds-
+/// checked against the declared `u32` element type by the resolver,
+/// so the `as u32` cast here is lossless.
+fn populate_tables(comp: &Compilation, ctx: &mut LoweringCtx<'_>) {
+    for t in &comp.tables {
+        let values: Vec<u32> = t.values.iter().map(|v| *v as u32).collect();
+        ctx.tables.insert(t.name.clone(), values);
+    }
+}
+
 fn populate_entity_field_catalog(comp: &Compilation, ctx: &mut LoweringCtx<'_>) {
     use crate::cg::data_handle::AgentFieldTy;
     use crate::cg::program::{EntityFieldCatalog, EntityFieldEntry, EntityFieldRecord};

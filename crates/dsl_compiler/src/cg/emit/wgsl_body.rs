@@ -129,6 +129,16 @@ pub struct EmitCtx<'a> {
     /// throughout, and routing every signature through `&mut` would
     /// touch dozens of call sites for a pure emit-time scratch flag.
     pub tile_walk_index: std::cell::RefCell<Option<String>>,
+    /// Set of static table names referenced by `CgExpr::TableLookup`
+    /// nodes within the current kernel body emit. Populated as a
+    /// side effect of `lower_cg_expr_to_wgsl`; the kernel composer
+    /// (`compose_wgsl_file`) reads this back to prepend a
+    /// `const <name>: array<u32, N> = array<u32, N>(…);` module-level
+    /// declaration for each referenced table. Interior mutability so
+    /// the emit path can stay `&EmitCtx` throughout. Cleared between
+    /// kernels by the composer.
+    pub tables_referenced:
+        std::cell::RefCell<std::collections::BTreeSet<String>>,
     /// Dispatch shape of the kernel currently being emitted, set by
     /// `lower_op_body` before each per-op body emit. Exists so the
     /// downstream `ForEachNeighbor` / fused-fold emitters can pick a
@@ -340,6 +350,9 @@ impl<'a> EmitCtx<'a> {
             prog,
             naming: HandleNamingStrategy::Structural,
             tile_walk_index: std::cell::RefCell::new(None),
+            tables_referenced: std::cell::RefCell::new(
+                std::collections::BTreeSet::new(),
+            ),
             dispatch: std::cell::Cell::new(None),
             view_target_locals: std::cell::RefCell::new(Vec::new()),
             pending_target_lets: std::cell::RefCell::new(Vec::new()),
@@ -599,6 +612,9 @@ fn expr_depends_on_upgraded_field(
         CgExpr::NamespaceCall { args, .. } => args
             .iter()
             .any(|a| expr_depends_on_upgraded_field(*a, field, chain_locals, prog)),
+        CgExpr::TableLookup { index, .. } => {
+            expr_depends_on_upgraded_field(*index, field, chain_locals, prog)
+        }
     }
 }
 
@@ -646,6 +662,9 @@ fn expr_reads_any_chain_local(
         CgExpr::NamespaceCall { args, .. } => args
             .iter()
             .any(|a| expr_reads_any_chain_local(*a, chain_locals, prog)),
+        CgExpr::TableLookup { index, .. } => {
+            expr_reads_any_chain_local(*index, chain_locals, prog)
+        }
     }
 }
 
@@ -784,6 +803,9 @@ fn expr_reads_agent_field_id(
         CgExpr::NamespaceCall { args, .. } => args
             .iter()
             .any(|a| expr_reads_agent_field_id(*a, field, prog)),
+        CgExpr::TableLookup { index, .. } => {
+            expr_reads_agent_field_id(*index, field, prog)
+        }
     }
 }
 
@@ -1913,6 +1935,17 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
                     format!("{}.{}", binding, field)
                 }
             })
+        }
+        // Static lookup table read — `tables.<name>(<idx>)`. Emit a
+        // module-level `const <name>: array<u32, N> = …;` declaration
+        // (via the side-channel `tables_referenced` set picked up by
+        // `compose_wgsl_file`); the body just indexes the const.
+        CgExpr::TableLookup { name, index, .. } => {
+            ctx.tables_referenced
+                .borrow_mut()
+                .insert(name.clone());
+            let idx_wgsl = lower_cg_expr_to_wgsl(*index, ctx)?;
+            Ok(format!("{name}[{idx_wgsl}]"))
         }
     }
 }
@@ -6279,6 +6312,12 @@ pub fn expr_is_pure_for_hoisting_in_prog(expr_id: CgExprId, prog: &CgProgram) ->
         CgExpr::NamespaceCall { args, .. } => args
             .iter()
             .all(|a| expr_is_pure_for_hoisting_in_prog(*a, prog)),
+        // Static-table reads are pure functions of the index
+        // expression — values are baked into the IR node, no
+        // runtime mutation possible.
+        CgExpr::TableLookup { index, .. } => {
+            expr_is_pure_for_hoisting_in_prog(*index, prog)
+        }
     }
 }
 

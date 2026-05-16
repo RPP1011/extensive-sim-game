@@ -1354,6 +1354,14 @@ pub enum NamespaceId {
     /// `event.tick`); `events` is the plural accessor over the trace
     /// stream as a whole.
     Events,
+    /// `tables::*` — static lookup tables declared at top level via
+    /// `table <name>: <ty>[N] = […]`. `tables.<name>(<idx_expr>)`
+    /// resolves to a typed `IrExpr::TableLookup { table, index }`
+    /// during the resolver pass; lowering emits a WGSL `const`
+    /// array prepended to each kernel that references the table
+    /// plus an array-index expression in the body. Read-only world
+    /// data — distinct from `Agents` (per-instance per-tick state).
+    Tables,
 }
 
 impl NamespaceId {
@@ -1385,6 +1393,7 @@ impl NamespaceId {
             NamespaceId::Quest => "quest",
             NamespaceId::Threats => "threats",
             NamespaceId::Events => "events",
+            NamespaceId::Tables => "tables",
         }
     }
 }
@@ -1643,5 +1652,41 @@ pub struct Compilation {
     /// shape stays additive on the snapshot side.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub spatial_queries: Vec<SpatialQueryIR>,
+    /// Static lookup tables declared by `table <name>: <ty>[N] = […]`
+    /// at the top level. World-data primitive — read-only at run
+    /// time, lowers to a WGSL `const` array prepended to every
+    /// kernel that references it via `tables.<name>(<idx_expr>)`.
+    ///
+    /// Right home for "rooms / terrain costs / faction stances /
+    /// item-tier loot tables" — data the simulation reads but does
+    /// not mutate. Skip-if-empty preserves JSON snapshot stability
+    /// for fixtures that don't declare any tables.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tables: Vec<TableIR>,
     pub spans: SpanTable,
 }
+
+/// Resolved `table <name>: <ty>[N] = […]` declaration. Mirrors
+/// `ast::TableDecl` but with the element type validated against
+/// the supported set + a typed `TableId` registered in the symbol
+/// table for downstream lookup.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TableIR {
+    pub name: String,
+    /// Element type — `u32` for the first cut, future cuts may
+    /// extend to `i32` / `f32`.
+    pub element_ty: IrType,
+    /// Declared length (validated == values.len() at resolve).
+    pub length: u32,
+    /// Element values as `i64` (resolver bounds-checks against
+    /// `element_ty` at registration).
+    pub values: Vec<i64>,
+    pub span: Span,
+}
+
+/// Typed handle for a [`TableIR`] entry within
+/// [`Compilation::tables`]. Stored in the symbol table by name; the
+/// CG lowering looks up via this handle when resolving
+/// `tables.<name>(idx)` namespace calls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+pub struct TableId(pub u32);

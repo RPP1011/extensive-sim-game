@@ -582,6 +582,9 @@ pub fn emit_cg_program_with_debug(
         prog,
         naming: HandleNamingStrategy::Structural,
         tile_walk_index: std::cell::RefCell::new(None),
+        tables_referenced: std::cell::RefCell::new(
+            std::collections::BTreeSet::new(),
+        ),
         dispatch: std::cell::Cell::new(None),
         view_target_locals: std::cell::RefCell::new(Vec::new()),
         pending_target_lets: std::cell::RefCell::new(Vec::new()),
@@ -822,6 +825,35 @@ fn compose_wgsl_file(
         }
     }
     if emitted_consts {
+        out.push('\n');
+    }
+
+    // Static lookup tables — `table <name>: u32[N] = […]`. For each
+    // registered table referenced by the kernel body (substring scan
+    // for `<name>[`), emit a module-level
+    // `const <name>: array<u32, N> = array<u32, N>(v0, v1, …);`
+    // declaration. The body's `<name>[<idx>]` expression then indexes
+    // the const. Same scan-based pattern as `config_<id>` above; the
+    // WGSL validator pins array length match at parse time, so a
+    // miss here would surface as a parse error, not a silent bug.
+    let mut emitted_tables = false;
+    for (name, values) in &prog.tables {
+        let needle = format!("{name}[");
+        if !body.contains(&needle) {
+            continue;
+        }
+        let n = values.len();
+        let init = values
+            .iter()
+            .map(|v| format!("{v}u"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!(
+            "const {name}: array<u32, {n}> = array<u32, {n}>({init});\n"
+        ));
+        emitted_tables = true;
+    }
+    if emitted_tables {
         out.push('\n');
     }
 

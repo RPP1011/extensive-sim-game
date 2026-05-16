@@ -208,6 +208,14 @@ pub struct LoweringCtx<'a> {
     /// the WGSL emit can resolve the layout per-kind without a
     /// separate registry walk.
     pub event_layouts: HashMap<EventKindId, super::super::program::EventLayout>,
+    /// Static lookup tables from `table <name>: u32[N] = […]` decls.
+    /// Keyed by snake_case table name; value is the materialised
+    /// element list (u32 only in the first cut) bounds-checked by
+    /// the resolver. Consulted by [`lower_namespace_call`]'s
+    /// `tables.<name>(<idx>)` arm to bake the values directly into
+    /// the resulting `CgExpr::TableLookup` node — so the kernel
+    /// emit doesn't need a separate registry walk.
+    pub tables: HashMap<String, Vec<u32>>,
     /// Stdlib namespace registry — schema for `CgExpr::NamespaceCall`
     /// and `CgExpr::NamespaceField` lowering. Populated by the driver's
     /// `populate_namespace_registry`; consumed by `lower_namespace_call`
@@ -329,6 +337,7 @@ impl<'a> LoweringCtx<'a> {
             lazy_view_bodies: HashMap::new(),
             local_tys: HashMap::new(),
             event_layouts: HashMap::new(),
+            tables: HashMap::new(),
             namespace_registry: super::super::program::NamespaceRegistry::default(),
             pending_pre_stmts: Vec::new(),
             fold_binder_name: None,
@@ -3418,6 +3427,53 @@ fn lower_namespace_call(
 ) -> Result<CgExprId, LoweringError> {
     match (ns, method) {
         (NamespaceId::Rng, m) => lower_rng_call(m, args, span, ctx),
+        (NamespaceId::Tables, m) => {
+            // `tables.<name>(<idx_expr>)` — read a static lookup
+            // table. Resolver registered the table in `ctx.tables`
+            // (name → bounds-checked u32 values). Bake the values
+            // into the CG node so the kernel emit can prepend a
+            // `const <name>: array<u32, N> = …;` declaration without
+            // a side-channel lookup.
+            if args.len() != 1 {
+                return Err(LoweringError::NamespaceCallArityMismatch {
+                    ns,
+                    method: m.to_string(),
+                    expected: 1,
+                    got: args.len(),
+                    span,
+                });
+            }
+            let values = match ctx.tables.get(m) {
+                Some(v) => v.clone(),
+                None => {
+                    return Err(LoweringError::UnsupportedNamespaceCall {
+                        ns,
+                        method: m.to_string(),
+                        span,
+                    });
+                }
+            };
+            let idx_expr = &args[0].value;
+            let idx_id = lower_expr(idx_expr, ctx)?;
+            let idx_ty = typecheck_node(ctx, idx_id, idx_expr.span)?;
+            if !matches!(idx_ty, CgTy::U32 | CgTy::AgentId) {
+                return Err(LoweringError::IllTypedExpression {
+                    expected: CgTy::U32,
+                    got: idx_ty,
+                    span,
+                });
+            }
+            add(
+                ctx,
+                CgExpr::TableLookup {
+                    name: m.to_string(),
+                    values,
+                    index: idx_id,
+                    ty: CgTy::U32,
+                },
+                span,
+            )
+        }
         // Plan H slice 3 — abilities.telegraph_kind(id) /
         // abilities.telegraph_param_0(id). Mirrors the AgentField
         // single-arg shape: lower the index expression, type-check it

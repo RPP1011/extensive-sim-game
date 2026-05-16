@@ -621,6 +621,9 @@ fn collect_subexpr_ids(arena: &[CgExpr], root: CgExprId, out: &mut Vec<CgExprId>
                     stack.push(*a);
                 }
             }
+            CgExpr::TableLookup { index, .. } => {
+                stack.push(*index);
+            }
             CgExpr::Lit(_)
             | CgExpr::Rng { .. }
             | CgExpr::AgentSelfId
@@ -2142,6 +2145,9 @@ fn event_field_scope_walk_expr(
             for a in args {
                 event_field_scope_walk_expr(*a, op_id, kind_label, shape_label, prog, errors);
             }
+        }
+        CgExpr::TableLookup { index, .. } => {
+            event_field_scope_walk_expr(*index, op_id, kind_label, shape_label, prog, errors);
         }
         CgExpr::Read(_)
         | CgExpr::Lit(_)

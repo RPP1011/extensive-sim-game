@@ -75,6 +75,15 @@ pub enum Decl {
     /// before lowering touches `self.<name>` reads or
     /// `agents.set_<name>(...)` writes (Gap plague_city#P-A).
     AgentField(AgentFieldDecl),
+    /// Top-level `table <name>: <element_ty>[<N>] = [<v1>, …, <vN>]` —
+    /// declares a static lookup table of fixed length and element
+    /// type. Lowers to a WGSL `const <name>: array<T, N> = …;`
+    /// declaration prepended to every kernel that references it,
+    /// readable as `tables.<name>(idx)` from physics / view bodies.
+    /// Right home for "world map data the simulation reads but does
+    /// not mutate" (room door bitmaps, terrain costs, faction
+    /// stances, etc.) — rooms ARE NOT agents.
+    Table(TableDecl),
 }
 
 /// Per-fixture initial-state declaration. Plan E-A6 escape hatch: lets
@@ -179,6 +188,37 @@ pub struct AgentFieldDecl {
     /// `"u32"` / `"f32"` / `"bool"` / `"vec3"` — checked by the
     /// compiler-side interner against the `AgentFieldTy` allowlist.
     pub ty_name: String,
+    pub span: Span,
+}
+
+/// Top-level `table <name>: <ty>[<N>] = [<v1>, …, <vN>]`.
+/// Static lookup table. Lowers to a WGSL `const <name>: array<T, N> = …;`
+/// declaration that the kernel emit prepends to every kernel body
+/// that references the table; the read surface is
+/// `tables.<name>(<idx_expr>)` in physics / view rules.
+///
+/// Element type is restricted to `u32` for the first cut — the
+/// surface generalises naturally to `i32`/`f32` when a fixture
+/// needs them. `length` is bounded by `u32::MAX` (the WGSL spec's
+/// `array<T, N>` length limit is implementation-defined; consumer
+/// GPUs commonly allow ≥ 64K which is well past any plausible
+/// world-table size).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TableDecl {
+    pub annotations: Vec<Annotation>,
+    /// Bare snake_case table name (`maze_doors`, `terrain_cost`, …).
+    pub name: String,
+    /// Element type name as written in source (`"u32"` for the
+    /// first-cut surface; future cuts may extend to `i32`/`f32`).
+    pub element_ty_name: String,
+    /// Declared length (must equal `values.len()` — checked at
+    /// resolve time, surfaces a typed error otherwise).
+    pub length: u32,
+    /// Element values in declaration order. Held as `i64` to fit
+    /// `u32` / `i32` / future signed shapes without lossy
+    /// conversion; the resolver bounds-checks against the declared
+    /// element type at registration time.
+    pub values: Vec<i64>,
     pub span: Span,
 }
 

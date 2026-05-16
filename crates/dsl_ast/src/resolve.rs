@@ -198,6 +198,13 @@ mod stdlib {
             // close the migration gap blocking `crowd_navigation` +
             // `predator_prey` from the `sims/` mega-crate.
             ("events", NamespaceId::Events),
+            // Static lookup tables — `tables.<name>(<idx>)` reads a
+            // u32 cell from a `table <name>: u32[N] = […]` decl.
+            // Per-name method routing happens in `resolve_call` via
+            // a fresh `Builtin::TableLookup` variant; the namespace
+            // entry exists so `tables.X(idx)` doesn't fall through
+            // to `UnsupportedNamespaceCall` at lower time.
+            ("tables", NamespaceId::Tables),
         ] {
             symbols.stdlib_namespaces.insert(name.to_string(), id);
         }
@@ -711,6 +718,11 @@ pub struct SymbolTable {
     /// in pass 1 so pass-2 body lowering can resolve `config.<block>.<field>`
     /// into a typed `NamespaceField { ns: Config, field: "<block>.<field>" }`.
     pub configs: HashMap<String, (ConfigRef, HashMap<String, IrType>)>,
+    /// Static lookup tables (`table <name>: <ty>[N] = […]`) declared
+    /// at top level. Name → typed `TableId` handle into
+    /// `Compilation::tables`. Looked up by namespace resolution
+    /// when the surface text reads `tables.<name>(<idx>)`.
+    pub tables: HashMap<String, crate::ir::TableId>,
     pub builtins: HashMap<String, Builtin>,
     pub stdlib_types: HashMap<String, IrType>,
     /// Sim-wide accessor namespaces: `world`, `cascade`, `event`, `mask`,
@@ -1189,6 +1201,25 @@ fn collect(
                 // name, and reset to "no custom fields" on each new
                 // compile via `clear_for_compile` at the build helper
                 // entry point.
+            }
+            Decl::Table(d) => {
+                check_dup(symbols, "table", &d.name, d.span, |s| {
+                    s.tables.contains_key(&d.name)
+                })?;
+                let idx = push_idx(comp.tables.len(), "table")?;
+                symbols
+                    .tables
+                    .insert(d.name.clone(), crate::ir::TableId(idx as u32));
+                symbols.record_first("table", &d.name, d.span);
+                // Reserve the IR slot with placeholder values; pass-2
+                // populates `element_ty` + bounds-checked `values`.
+                comp.tables.push(crate::ir::TableIR {
+                    name: d.name.clone(),
+                    element_ty: IrType::U32,
+                    length: d.length,
+                    values: Vec::new(),
+                    span: d.span,
+                });
             }
             Decl::Belief(d) => {
                 // Plan I — beliefs share the ViewIR slot table with
@@ -1747,6 +1778,49 @@ fn resolve_bodies(
                 // are interned process-locally by
                 // `dsl_compiler::custom_agent_fields::populate`
                 // BEFORE lowering. No IR pass-2 work here.
+            }
+            Decl::Table(d) => {
+                let TableId(idx) = symbols.tables[&d.name];
+                let element_ty = match d.element_ty_name.as_str() {
+                    "u32" => IrType::U32,
+                    other => {
+                        return Err(ResolveError::InvalidViewKind {
+                            view_name: d.name.clone(),
+                            detail: format!(
+                                "table `{}`: element type `{other}` not \
+                                 supported (first cut accepts only `u32`)",
+                                d.name
+                            ),
+                            span: d.span,
+                        });
+                    }
+                };
+                if d.values.len() as u32 != d.length {
+                    return Err(ResolveError::InvalidViewKind {
+                        view_name: d.name.clone(),
+                        detail: format!(
+                            "table `{}`: declared length {} ≠ initializer length {}",
+                            d.name,
+                            d.length,
+                            d.values.len()
+                        ),
+                        span: d.span,
+                    });
+                }
+                for (i, v) in d.values.iter().enumerate() {
+                    if *v < 0 || *v > u32::MAX as i64 {
+                        return Err(ResolveError::InvalidViewKind {
+                            view_name: d.name.clone(),
+                            detail: format!(
+                                "table `{}`: value at index {i} ({v}) out of range for u32",
+                                d.name
+                            ),
+                            span: d.span,
+                        });
+                    }
+                }
+                comp.tables[idx as usize].element_ty = element_ty;
+                comp.tables[idx as usize].values = d.values.clone();
             }
             Decl::Belief(d) => {
                 // Plan I — resolve the belief body into the reserved
