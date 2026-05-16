@@ -1622,6 +1622,18 @@ fn view_name_from_kernel_name(kernel_name: &str) -> Option<&str> {
     if let Some(rest) = kernel_name.strip_prefix("decay_") {
         return Some(rest);
     }
+    // Plan I slice I.4b — BeliefSocialMerge kernel name follows
+    // `merge_<view>_<event_snake>_<op>`. The view is a single
+    // identifier (no underscores allowed in view names by the
+    // parser); event names are PascalToSnake-converted and may
+    // contain internal underscores (e.g. "AllyDied" → "ally_died");
+    // op is one of {bit_or, max, min, replace}. Extract the view
+    // by taking the FIRST underscore-segment after the `merge_`
+    // prefix.
+    if let Some(rest) = kernel_name.strip_prefix("merge_") {
+        let first_us = rest.find('_')?;
+        return Some(&rest[..first_us]);
+    }
     None
 }
 
