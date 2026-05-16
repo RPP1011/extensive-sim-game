@@ -4863,13 +4863,22 @@ fn lower_op_body(
                  // is a follow-up slice; the smoke probe's AllyDied event has\n\
                  // exactly one Agent payload field at this offset.\n\
                  let source_agent = event_ring[event_idx * {stride}u + 2u];\n\
-                 let _ = source_agent; // suppress unused warning until merge loop lands\n\
-                 // TODO(plan-I.4b): per-receiver × per-cell merge loop.\n\
-                 // For each receiver R and key S:\n\
-                 //   atomicOr(&view_storage_primary[R * agent_cap + S],\n\
-                 //            atomicLoad(&view_storage_primary[source_agent * agent_cap + S]));\n\
-                 // Today this kernel dispatches as a no-op; receivers do not\n\
-                 // yet pick up the dying agent's belief row.\n",
+                 // The per-receiver × per-cell merge loop is the\n\
+                 // semantic body — `atomicOr(view_storage_primary[r * agent_cap + s],\n\
+                 // atomicLoad(view_storage_primary[source_agent *\n\
+                 // agent_cap + s]))` for every receiver r and key s.\n\
+                 // Wiring the `view_storage_primary` binding into\n\
+                 // BeliefSocialMerge kernels (parallel path to\n\
+                 // ViewFold's `build_view_fold_bindings`) lands in a\n\
+                 // follow-up slice — until then the binding\n\
+                 // synthesizer wouldn't declare the storage handle\n\
+                 // and naga rejects the kernel. Today the body just\n\
+                 // consumes source_agent so the WGSL stays well-\n\
+                 // formed; the actual merge dispatches as a no-op\n\
+                 // (receivers don't yet pick up the dying ally's\n\
+                 // belief row). Plan I.4b WGSL TODO marker:\n\
+                 // [BeliefSocialMerge merge-loop deferred].\n\
+                 _ = source_agent;\n",
                 view = view.0,
                 ek = on_event.0,
                 stride = stride,

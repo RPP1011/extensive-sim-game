@@ -107,11 +107,49 @@ fn belief_smoke_probe_parse_resolve_lower_emit_round_trip() {
         "expected a `merge_seen_*_bit_or` kernel for the social-merge clause; \
          emitted: {names:?}"
     );
-    let (_, merge_body) = merge_kernel.unwrap();
+    let (merge_name, merge_body) = merge_kernel.unwrap();
+    // Plan I.4b kernel preamble — confirms the event-driven structure
+    // is in place: bounds-checked event_idx, kind tag filter, source-
+    // agent read from the event payload.
     assert!(
-        merge_body.contains("plan-I.4b") || merge_body.contains("TODO"),
-        "expected the merge kernel body to carry the I.4b stub marker; \
+        merge_body.contains("source_agent") && merge_body.contains("event_ring"),
+        "expected merge kernel body to read source_agent from event_ring; \
          body excerpt: {}",
-        &merge_body[..merge_body.len().min(400)]
+        &merge_body[..merge_body.len().min(800)]
     );
+    // Stub-marker: the merge LOOP body is deferred (binding
+    // synthesizer for view_storage_primary on BeliefSocialMerge
+    // kernels lands later). This anchor ensures a future change that
+    // forgets to wire the loop after enabling the storage binding
+    // notices the gap.
+    assert!(
+        merge_body.contains("BeliefSocialMerge merge-loop deferred"),
+        "expected the I.4b deferred-loop marker in merge kernel body; \
+         body excerpt: {}",
+        &merge_body[..merge_body.len().min(800)]
+    );
+
+    // Naga validation — confirms the emitted WGSL is at least
+    // syntactically + structurally valid, even if the per-cell merge
+    // logic is still a TODO. Catches drift in the hand-emitted
+    // skeleton (e.g. a typo in the cfg-field name, or a missing
+    // binding declaration that would otherwise only surface at
+    // runtime dispatch).
+    let module = naga::front::wgsl::parse_str(merge_body).unwrap_or_else(|e| {
+        panic!(
+            "naga parse failed for merge kernel `{merge_name}`:\n{merge_body}\n\
+             error: {e:?}"
+        );
+    });
+    naga::valid::Validator::new(
+        naga::valid::ValidationFlags::default(),
+        naga::valid::Capabilities::default(),
+    )
+    .validate(&module)
+    .unwrap_or_else(|e| {
+        panic!(
+            "naga validate failed for merge kernel `{merge_name}`:\n{merge_body}\n\
+             error: {e:?}"
+        );
+    });
 }
