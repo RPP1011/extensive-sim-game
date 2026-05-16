@@ -121,6 +121,7 @@ fn main() {
                 | "dungeon_horde"
                 | "threat_horizon_stresstest"
                 | "belief_smoke_probe"
+                | "belief_merge_propagation_probe"
         ) {
             continue;
         }

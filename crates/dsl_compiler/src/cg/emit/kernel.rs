@@ -3972,9 +3972,17 @@ fn build_belief_social_merge_wgsl_body(
         3 => "atomicStore",
         _ => "atomicOr", // unknown discriminant — defensive default
     };
+    // Derive N from the view storage buffer length rather than
+    // cfg.agent_cap. The runtime's per-tick cfg-write path uses a
+    // 4-word layout `[slot0, tick, seed_or_pop, _pad_or_pair_off]`
+    // that doesn't carry agent_cap at PerEventEmit's slot 3 (slot 3
+    // reads 0). The view storage buffer IS sized for N² u32 cells,
+    // so `sqrt(arrayLength(...))` recovers N — one sqrt per kernel
+    // dispatch is cheap.
     let merge_loop = match op {
         0 | 1 | 2 | 3 => format!(
-            "                let n_agents = cfg.agent_cap;\n\
+            "                let storage_size = arrayLength(&view_storage_primary);\n\
+             \x20               let n_agents = u32(sqrt(f32(storage_size)));\n\
              \x20               for (var r: u32 = 0u; r < n_agents; r = r + 1u) {{\n\
              \x20                   for (var s: u32 = 0u; s < n_agents; s = s + 1u) {{\n\
              \x20                       let other_cell = atomicLoad(&view_storage_primary[source_agent * n_agents + s]);\n\

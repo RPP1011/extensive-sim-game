@@ -1,0 +1,51 @@
+// belief_merge_propagation_probe — Plan I.4b end-to-end pin for the
+// social-merge kernel. Dedicated fixture so the test path is clean:
+//   * No propagation handler interference (only an `initial:` value
+//     for the storage; no `on <Event> { self |= ... }` writes).
+//   * AllyDied event emitted by a physics rule at tick 0 for agent 0
+//     so the SCHEDULE's normal chronicle path drives the merge —
+//     no host-side `inject_chronicle_record` needed.
+//   * Test pre-seeds agent 0's belief row host-side via
+//     `write_buffer`; after one step, agent 1+ rows should reflect
+//     the bit_or merge of agent 0's pattern.
+
+event Tick { }
+
+event AllyDied {
+  dead: Agent,
+}
+
+entity Probe : Agent { }
+
+// Agent 0 is the "dying ally". Emit AllyDied { dead: 0 } at tick 0
+// from any alive agent (only need one event total). Restricting to
+// agent 0 (`self.slot == 0` via the filter — actually we filter by
+// agent_id since slot isn't a SoA field).
+//
+// The PerAgent dispatch fires once per agent. The where-clause
+// `(self.alive && world.tick == 0 && agent_id == 0)` would gate to
+// just one firing if `agent_id` were available. Without that, all
+// alive agents would emit (4 events). For the merge semantics
+// (`merge from d: bit_or` with `dead: d` field) it doesn't matter
+// — every emit has `dead: 0` so each one OR-merges agent 0's row
+// into receivers; the merge is idempotent under repetition.
+@phase(per_agent)
+physics StampAllyDied {
+  on Tick {} where (
+    self.alive && world.tick == 0
+  ) {
+    emit AllyDied {
+      dead: 0,
+    }
+  }
+}
+
+// The belief under test. Pair-keyed (observer, subject) -> u32
+// bitmap with ONLY the social-merge clause (no propagation
+// handler). The cells are pre-seeded host-side so the merge has
+// something to read; the merge OR-copies agent 0's row into every
+// receiver's row.
+belief seen(observer: Agent, subject: Agent) -> u32 {
+  initial: 0,
+  on AllyDied { dead: d } merge from d: bit_or
+}
