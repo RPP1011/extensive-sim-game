@@ -1602,14 +1602,38 @@ fn slot_count_expr_for_spatial_grid_buffer(binding_name: &str) -> Option<String>
     }
 }
 
-/// Extract the `<view>` name from a `fold_<view>` / `decay_<view>`
-/// kernel name. Returns `None` for kernels that don't follow either
-/// pattern (e.g. `physics_*`, `fused_*`, `scoring`). Used by the
-/// per-view storage rename pass in
-/// [`synthesize_generated_runtime_struct`] — the kernel name is the
-/// authoritative source of the view a fold/decay kernel writes
-/// (the legacy BGL binding name `view_storage_primary` is uniform
-/// across all fold/decay kernels and carries no per-view info).
+/// Extract the `<view>` name from a kernel by inspecting its
+/// `BgSource::ViewHandle` binding's resident accessor. The
+/// accessor format is `fold_view_<view_name>_handles` (stable
+/// across all kernel kinds that touch view storage: ViewFold,
+/// ViewDecay, BeliefSocialMerge). Strip the prefix + suffix and
+/// what remains IS the view name — view names with internal
+/// underscores (e.g. `room_known`, `damage_dealt`) round-trip
+/// correctly.
+///
+/// Falls back to the legacy [`view_name_from_kernel_name`] string
+/// parser for kernels with no ViewHandle binding (mostly defensive;
+/// view-storage-touching kernels always have one).
+fn view_name_from_kernel_spec(spec: &crate::kernel_binding_ir::KernelSpec) -> Option<&str> {
+    use crate::kernel_binding_ir::BgSource;
+    for b in &spec.bindings {
+        if let BgSource::ViewHandle { accessor, .. } = &b.bg_source {
+            // accessor = `fold_view_<view_name>_handles`
+            if let Some(rest) = accessor.strip_prefix("fold_view_") {
+                if let Some(name) = rest.strip_suffix("_handles") {
+                    return Some(name);
+                }
+            }
+        }
+    }
+    view_name_from_kernel_name(&spec.name)
+}
+
+/// Legacy string-parsing extractor — kept for kernels with no
+/// ViewHandle binding (mostly defensive). For
+/// view-storage-touching kernels the structured
+/// [`view_name_from_kernel_spec`] is preferred because it
+/// round-trips view names with internal underscores.
 fn view_name_from_kernel_name(kernel_name: &str) -> Option<&str> {
     if let Some(rest) = kernel_name.strip_prefix("fold_") {
         // Defensive: `fold_view_<id>` is the un-named-view fallback
@@ -1623,13 +1647,12 @@ fn view_name_from_kernel_name(kernel_name: &str) -> Option<&str> {
         return Some(rest);
     }
     // Plan I slice I.4b — BeliefSocialMerge kernel name follows
-    // `merge_<view>_<event_snake>_<op>`. The view is a single
-    // identifier (no underscores allowed in view names by the
-    // parser); event names are PascalToSnake-converted and may
-    // contain internal underscores (e.g. "AllyDied" → "ally_died");
-    // op is one of {bit_or, max, min, replace}. Extract the view
-    // by taking the FIRST underscore-segment after the `merge_`
-    // prefix.
+    // `merge_<view>_<event_snake>_<op>`. The view-name extraction
+    // here is fragile because event names may contain underscores
+    // — the structured `view_name_from_kernel_spec` (preferred)
+    // gets it right by reading the BgSource::ViewHandle accessor.
+    // This branch stays as a defensive fallback for tests that
+    // synthesise specs without a ViewHandle binding.
     if let Some(rest) = kernel_name.strip_prefix("merge_") {
         let first_us = rest.find('_')?;
         return Some(&rest[..first_us]);
@@ -1814,7 +1837,7 @@ fn synthesize_generated_runtime_struct(
         // names below so each fold/decay kernel allocates + binds to
         // its own per-view buffer instead of the legacy shared
         // `view_storage_primary_buf`.
-        let view_name_for_kernel = view_name_from_kernel_name(&spec.name);
+        let view_name_for_kernel = view_name_from_kernel_spec(spec);
         for b in &spec.bindings {
             if matches!(b.bg_source, BgSource::Cfg) {
                 has_cfg = true;
@@ -2727,7 +2750,7 @@ fn synthesize_generated_runtime_struct(
             // Without this, every fold kernel binds the same
             // `view_storage_primary_buf` and writes alias across
             // views (the 6-fixture aliasing gap).
-            let view_name_for_kernel = view_name_from_kernel_name(&spec.name);
+            let view_name_for_kernel = view_name_from_kernel_spec(spec);
             let mut binding_fields: Vec<String> = Vec::new();
             for b in &spec.bindings {
                 use crate::kernel_binding_ir::BgSource;
@@ -2895,7 +2918,7 @@ fn synthesize_generated_runtime_struct(
         // physics generic kernels (whose view-storage bindings carry
         // per-view names already from the compose_view_storage_prelude
         // pass).
-        let view_name_for_kernel = view_name_from_kernel_name(&spec.name);
+        let view_name_for_kernel = view_name_from_kernel_spec(spec);
         let mut extras_fields: Vec<String> = Vec::new();
         for b in &spec.bindings {
             let name = b.name.as_str();

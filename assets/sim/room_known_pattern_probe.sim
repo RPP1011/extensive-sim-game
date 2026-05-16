@@ -59,14 +59,13 @@ physics StampAllyDied {
 // stay wildcards). For the stresstest the propagation handler is
 // inactive — no RoomEntered events get emitted; only AllyDied
 // drives the test. Storage is pre-seeded host-side.
-// View name uses no underscores ("rooms" not "room_known") because
-// the auto-emitted `view_name_from_kernel_name` parser splits the
-// kernel name `merge_<view>_<event_snake>_<op>` on the FIRST
-// underscore after `merge_` — view names with internal underscores
-// would lose part of their name in routing. Documented gap in
-// build_helper.rs::view_name_from_kernel_name; the architectural
-// fix is a side-channel kernel→view map, follow-up slice.
-belief rooms(observer: Agent) -> u32 {
+// View name with internal underscore. Pre-fix this hit a kernel
+// naming routing gap (`view_name_from_kernel_name` split on the
+// first underscore after `merge_`, truncating multi-segment view
+// names). Post-fix `view_name_from_kernel_spec` reads the view
+// name from the structured `BgSource::ViewHandle.accessor`
+// (`fold_view_<view>_handles`) so internal underscores survive.
+belief room_known(observer: Agent) -> u32 {
   initial: 0,
   on AllyDied { dead: d } merge from d: bit_or
 }

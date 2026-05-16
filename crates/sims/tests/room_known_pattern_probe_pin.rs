@@ -33,7 +33,7 @@ fn read_view_storage(state: &mut GeneratedRuntime) -> Vec<u32> {
                 label: Some("room_known_pattern_probe::readback"),
             });
     encoder.copy_buffer_to_buffer(
-        &state.view_storage_rooms_primary_buf,
+        &state.view_storage_room_known_primary_buf,
         0,
         &staging,
         0,
@@ -84,7 +84,7 @@ fn ally_died_propagates_room_knowledge_to_party() {
     let mut storage_init: Vec<u32> = vec![0u32; n];
     storage_init[0] = initial_bits;
     state.gpu.queue.write_buffer(
-        &state.view_storage_rooms_primary_buf,
+        &state.view_storage_room_known_primary_buf,
         0,
         bytemuck::cast_slice(&storage_init),
     );
