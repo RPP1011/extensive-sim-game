@@ -153,6 +153,26 @@ pub enum ResolveError {
         detail: String,
         span: Span,
     },
+    /// Plan I — a `belief <name>(<params>) -> T` declaration uses a
+    /// signature shape the lowering's storage-hint inference table
+    /// can't service. `detail` names the specific violation (e.g.
+    /// "first param must be `Agent`", "return type `Vec3` not in the
+    /// supported set bool/u8/u32/f32/struct", "more than two key
+    /// params").
+    UnsupportedBeliefSignature {
+        belief_name: String,
+        detail: String,
+        span: Span,
+    },
+    /// Plan I — a `merge from <ident>: <op>` clause names an identifier
+    /// that isn't bound by the enclosing event pattern. `bound` lists
+    /// the in-scope event-binder names so the message is actionable.
+    UnknownSocialMergeSource {
+        belief_name: String,
+        source_name: String,
+        bound: Vec<String>,
+        span: Span,
+    },
 }
 
 impl std::fmt::Display for ResolveError {
@@ -292,6 +312,26 @@ impl std::fmt::Display for ResolveError {
                  (no matching `spatial_query <name>` declaration found)",
                 span.start, span.end
             ),
+            ResolveError::UnsupportedBeliefSignature { belief_name, detail, span } => write!(
+                f,
+                "belief `{belief_name}` at bytes {}..{}: {detail} \
+                 (supported shapes: `(observer: Agent) -> bool|u8|u32|f32|<struct>`, \
+                 `(observer: Agent, subject: Agent) -> bool|u8|u32|f32|<struct>`, \
+                 `(observer: Agent, key: u8|u32) -> bool|u8|u32|f32`)",
+                span.start, span.end
+            ),
+            ResolveError::UnknownSocialMergeSource { belief_name, source_name, bound, span } => {
+                write!(
+                    f,
+                    "belief `{belief_name}` social-merge `merge from {source_name}: …` at bytes {}..{}: \
+                     identifier `{source_name}` is not bound by the event pattern",
+                    span.start, span.end
+                )?;
+                if !bound.is_empty() {
+                    write!(f, " (in scope: {})", bound.join(", "))?;
+                }
+                Ok(())
+            }
         }
     }
 }

@@ -1190,9 +1190,36 @@ fn collect(
                 // compile via `clear_for_compile` at the build helper
                 // entry point.
             }
-            Decl::Belief(_) => {
-                // Slice I.2 — belief decls will register a ViewRef and
-                // reserve a ViewIR slot here. Currently pass-through.
+            Decl::Belief(d) => {
+                // Plan I — beliefs share the ViewIR slot table with
+                // views; lookups by name flow through the same
+                // `symbols.views` map so `belief.<name>(…)` and
+                // `<name>(…)` reads in expressions resolve uniformly.
+                // Storage hint is filled in by the lowering pass
+                // (`crates/dsl_compiler/src/cg/lower/view.rs`) from
+                // the signature shape, not from an annotation — so
+                // the slot starts with `ViewKind::Belief` and an empty
+                // social_merges list (populated in Pass-2 below).
+                check_dup(symbols, "view", &d.name, d.span, |s| s.views.contains_key(&d.name))?;
+                let idx = push_idx(comp.views.len(), "view")?;
+                symbols.views.insert(d.name.clone(), ViewRef(idx));
+                symbols.record_first("view", &d.name, d.span);
+                comp.views.push(ViewIR {
+                    name: d.name.clone(),
+                    params: Vec::new(),
+                    return_ty: IrType::Unknown,
+                    body: ViewBodyIR::Expr(IrExprNode {
+                        kind: IrExpr::LitBool(true),
+                        span: d.span,
+                    }),
+                    annotations: d.annotations.clone(),
+                    kind: ViewKind::Belief,
+                    decay: None,
+                    belief_gated: false,
+                    storage_packing: Packing::None,
+                    social_merges: Vec::new(),
+                    span: d.span,
+                });
             }
         }
     }
@@ -1721,8 +1748,118 @@ fn resolve_bodies(
                 // `dsl_compiler::custom_agent_fields::populate`
                 // BEFORE lowering. No IR pass-2 work here.
             }
-            Decl::Belief(_) => {
-                // Slice I.2 — belief body resolution lands here.
+            Decl::Belief(d) => {
+                // Plan I — resolve the belief body into the reserved
+                // ViewIR slot. Shape mirrors the `Decl::View` fold
+                // path: observer + key params in scope; each
+                // propagation handler gets the event-pattern binders
+                // in its inner scope. Social-merge handlers reuse the
+                // same event-pattern binder shape, then look up the
+                // named source-agent identifier among those binders.
+                let mut scope = LocalScope::new();
+                let params = resolve_params(&d.params, &mut scope, symbols);
+                let return_ty = resolve_type(&d.return_ty, symbols);
+                validate_belief_signature(&d.name, &params, &return_ty, d.span)?;
+                let body = match &d.body {
+                    ast::ViewBody::Expr(_) => {
+                        // Parser only emits the Fold body for belief
+                        // decls today; this arm is a defensive guard
+                        // in case the parser surface grows. Map to a
+                        // typed error so callers don't see a panic.
+                        return Err(ResolveError::UnsupportedBeliefSignature {
+                            belief_name: d.name.clone(),
+                            detail: "belief bodies must use `initial: … on … { … }` fold shape, \
+                                     not a single expression"
+                                .to_string(),
+                            span: d.span,
+                        });
+                    }
+                    ast::ViewBody::Fold { initial, handlers, clamp } => {
+                        let initial = resolve_expr(initial, &mut scope, symbols)?;
+                        let handlers_ir = handlers
+                            .iter()
+                            .map(|h| {
+                                let mut inner = LocalScope::new();
+                                for binding in scope.stack.iter().flatten() {
+                                    inner.stack[0].push(binding.clone());
+                                }
+                                inner.next_id = scope.next_id;
+                                let pattern =
+                                    resolve_event_pattern(&h.pattern, &mut inner, symbols);
+                                let body = resolve_stmts(&h.body, &mut inner, symbols)?;
+                                Ok::<_, ResolveError>(FoldHandlerIR {
+                                    pattern,
+                                    body,
+                                    span: h.span,
+                                })
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+                        let clamp = match clamp {
+                            Some((lo, hi)) => Some((
+                                resolve_expr(lo, &mut scope, symbols)?,
+                                resolve_expr(hi, &mut scope, symbols)?,
+                            )),
+                            None => None,
+                        };
+                        ViewBodyIR::Fold { initial, handlers: handlers_ir, clamp }
+                    }
+                };
+                if let ViewBodyIR::Fold { handlers, .. } = &body {
+                    for h in handlers {
+                        validate_fold_body(&d.name, &h.body)?;
+                    }
+                }
+                let social_merges = d
+                    .social_merges
+                    .iter()
+                    .map(|m| {
+                        let mut inner = LocalScope::new();
+                        for binding in scope.stack.iter().flatten() {
+                            inner.stack[0].push(binding.clone());
+                        }
+                        inner.next_id = scope.next_id;
+                        let pattern = resolve_event_pattern(&m.pattern, &mut inner, symbols);
+                        let where_clause = match &m.where_clause {
+                            Some(e) => Some(resolve_expr(e, &mut inner, symbols)?),
+                            None => None,
+                        };
+                        let source_agent = match inner.lookup(&m.source_agent_name) {
+                            Some(b) => b.local,
+                            None => {
+                                let bound: Vec<String> = inner
+                                    .stack
+                                    .iter()
+                                    .flatten()
+                                    .map(|b| b.name.clone())
+                                    .collect();
+                                return Err(ResolveError::UnknownSocialMergeSource {
+                                    belief_name: d.name.clone(),
+                                    source_name: m.source_agent_name.clone(),
+                                    bound,
+                                    span: m.span,
+                                });
+                            }
+                        };
+                        let op = match m.op {
+                            ast::SocialMergeOpName::BitOr => MergeOp::BitOr,
+                            ast::SocialMergeOpName::Max => MergeOp::Max,
+                            ast::SocialMergeOpName::Min => MergeOp::Min,
+                            ast::SocialMergeOpName::Replace => MergeOp::Replace,
+                        };
+                        Ok::<_, ResolveError>(SocialMergeHandler {
+                            pattern,
+                            where_clause,
+                            source_agent,
+                            op,
+                            span: m.span,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                comp.views[view_idx].params = params;
+                comp.views[view_idx].return_ty = return_ty;
+                comp.views[view_idx].body = body;
+                comp.views[view_idx].social_merges = social_merges;
+                view_idx += 1;
             }
         }
     }
@@ -3868,6 +4005,82 @@ fn parse_per_entity_topk_call(
 fn validate_fold_body(view_name: &str, body: &[IrStmt]) -> Result<(), ResolveError> {
     for s in body {
         validate_fold_stmt(view_name, s)?;
+    }
+    Ok(())
+}
+
+/// Plan I — gate `belief` signatures to the shapes the lowering's
+/// storage-hint inference table supports. Surfaces an actionable
+/// `UnsupportedBeliefSignature` for anything outside the matrix.
+fn validate_belief_signature(
+    name: &str,
+    params: &[IrParam],
+    return_ty: &IrType,
+    span: Span,
+) -> Result<(), ResolveError> {
+    if params.is_empty() {
+        return Err(ResolveError::UnsupportedBeliefSignature {
+            belief_name: name.to_string(),
+            detail: "belief must declare at least an observer param: `(observer: Agent, …)`"
+                .to_string(),
+            span,
+        });
+    }
+    if params.len() > 2 {
+        return Err(ResolveError::UnsupportedBeliefSignature {
+            belief_name: name.to_string(),
+            detail: format!(
+                "belief takes {} params; max is 2 (observer plus one optional key)",
+                params.len()
+            ),
+            span,
+        });
+    }
+    if !matches!(params[0].ty, IrType::AgentId) {
+        return Err(ResolveError::UnsupportedBeliefSignature {
+            belief_name: name.to_string(),
+            detail: format!(
+                "first param `{}` must have type `Agent`; got `{:?}`",
+                params[0].name, params[0].ty
+            ),
+            span: params[0].span,
+        });
+    }
+    if let Some(second) = params.get(1) {
+        let ok = matches!(
+            second.ty,
+            IrType::AgentId | IrType::U8 | IrType::U32 | IrType::I32
+        );
+        if !ok {
+            return Err(ResolveError::UnsupportedBeliefSignature {
+                belief_name: name.to_string(),
+                detail: format!(
+                    "second param `{}` must be `Agent` or a scalar key (u8 / u32 / i32); got `{:?}`",
+                    second.name, second.ty
+                ),
+                span: second.span,
+            });
+        }
+    }
+    let return_ok = matches!(
+        return_ty,
+        IrType::Bool
+            | IrType::U8
+            | IrType::U32
+            | IrType::I32
+            | IrType::F32
+            | IrType::EntityRef(_)
+    );
+    if !return_ok {
+        return Err(ResolveError::UnsupportedBeliefSignature {
+            belief_name: name.to_string(),
+            detail: format!(
+                "return type `{return_ty:?}` not supported; \
+                 belief cells must be `bool`, a scalar (u8/u32/i32/f32), \
+                 or a registered struct entity"
+            ),
+            span,
+        });
     }
     Ok(())
 }
