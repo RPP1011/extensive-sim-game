@@ -95,10 +95,13 @@ physics MarkCasterBusy {
 // explicitly diverge beliefs see the same behaviour as the previous
 // omniscient fold. New tests can call `seed_beliefs_flags` to
 // produce per-observer asymmetry.
-@materialized(on_event = [ScriptedCastBegin])
+// Plan I slice I.8 (2026-05-16) — migrated to `belief` keyword.
+// `@belief_gated` flips the source-candidate filter from omniscient
+// busy-lookup to per-(observer, source) belief lookup; carries over
+// verbatim since the belief Pass-1 reads the annotation.
 @dispatch(per_agent_event_scan)
 @belief_gated
-view threats(observer: Agent) -> f32 {
+belief threats(observer: Agent) -> f32 {
   initial: 0.0,
   on ScriptedCastBegin { source: _, target: _, ability_id: _ } { self += 1.0 }
 }

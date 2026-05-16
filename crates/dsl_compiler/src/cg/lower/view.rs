@@ -388,11 +388,20 @@ pub fn lower_view(
 }
 
 /// Plan I slice I.3 — infer the [`StorageHint`] from a belief's
-/// signature. Today supports the `(observer: Agent, subject: Agent)`
-/// pair-keyed shape that the [`StorageHint::PairMap`] backing serves.
-/// Single-key `(observer: Agent)` and key-typed `(observer: Agent,
-/// key: u32)` shapes surface as a typed [`LoweringError::UnsupportedBeliefShape`]
-/// pointing at the follow-up slice (I.3a) that adds dedicated storage.
+/// signature.
+///
+/// Inference table:
+///   * `(observer: Agent, subject: Agent) -> T` → `PairMap` (N² cells).
+///   * `(observer: Agent) -> T` (slice I.3a) → also `PairMap` as the
+///     AST-side hint. The per-view sizing path (`detect_pair_keyed_second_key`
+///     in `build_helper.rs`) skips 1-param views, so the auto-emitted
+///     buffer is sized for the single-key shape (N cells) — same path
+///     that `view threats(observer: Agent) -> f32` rides today
+///     without an explicit `storage = ...` annotation.
+///   * `(observer: Agent, key: u32 | u8 | i32) -> T` — key-typed
+///     second param shape stays deferred until the per-view storage
+///     allocator grows a `SingleKey-extended` variant that sizes
+///     `agent_cap × key_pop` cells.
 fn infer_belief_storage_hint(view_id: ViewId, ir: &ViewIR) -> Result<StorageHint, LoweringError> {
     match ir.params.as_slice() {
         [first, second]
@@ -401,14 +410,10 @@ fn infer_belief_storage_hint(view_id: ViewId, ir: &ViewIR) -> Result<StorageHint
             Ok(StorageHint::PairMap)
         }
         [first] if matches!(first.ty, IrType::AgentId) => {
-            Err(LoweringError::UnsupportedBeliefShape {
-                view: view_id,
-                detail: "single-key `(observer: Agent) -> T` shape needs a SingleKey \
-                         storage variant — slice I.3a deferred. Use the pair-keyed \
-                         `(observer: Agent, subject: Agent) -> T` shape today."
-                    .to_string(),
-                span: ir.span,
-            })
+            // Slice I.3a — single-key beliefs ride the same hint as
+            // pair-keyed because the per-view sizing path keys off
+            // param count, not the hint discriminant.
+            Ok(StorageHint::PairMap)
         }
         [first, second]
             if matches!(first.ty, IrType::AgentId)
@@ -418,7 +423,7 @@ fn infer_belief_storage_hint(view_id: ViewId, ir: &ViewIR) -> Result<StorageHint
                 view: view_id,
                 detail: format!(
                     "key-typed second param `{}: {:?}` needs a SingleKey-extended \
-                     storage variant — slice I.3a deferred. Use the pair-keyed \
+                     storage variant — slice I.3b deferred. Use the pair-keyed \
                      `(observer: Agent, subject: Agent) -> T` shape today.",
                     second.name, second.ty
                 ),

@@ -54,18 +54,29 @@ fn pair_keyed_belief_lowers_to_view_fold_op() {
 }
 
 #[test]
-fn single_key_belief_surfaces_unsupported_shape_diagnostic() {
+fn single_key_belief_lowers_via_pair_map_hint() {
+    // Slice I.3a — `(observer: Agent) -> T` beliefs now ride the
+    // same PairMap hint as pair-keyed beliefs. The per-view sizing
+    // path (`build_helper::detect_pair_keyed_second_key`) skips
+    // 1-param views, so the buffer collapses to single-key (N cells)
+    // at allocation time. End-to-end: the lower call must succeed
+    // and produce at least one ViewFold op for the propagation
+    // handler.
     let src = "\
         event Tick { observer: Agent }\n\
-        belief flag(observer: Agent) -> bool {\n\
-          initial: false,\n\
-          on Tick { observer: o } { true }\n\
+        belief flag(observer: Agent) -> u32 {\n\
+          initial: 0,\n\
+          on Tick { observer: o } { self |= 1 }\n\
         }\n";
-    let diags = lower_str(src).expect_err("expected lowering diagnostics");
-    let joined = diags.join(" | ");
+    let cg = lower_str(src).expect("single-key belief should lower cleanly");
+    let fold_op_count = cg
+        .ops
+        .iter()
+        .filter(|op| matches!(op.kind, ComputeOpKind::ViewFold { .. }))
+        .count();
     assert!(
-        joined.contains("single-key") && joined.contains("I.3a"),
-        "expected UnsupportedBeliefShape with slice pointer; got: {joined}"
+        fold_op_count >= 1,
+        "expected ≥1 ViewFold op for the single-key belief's propagation handler"
     );
 }
 
@@ -80,7 +91,7 @@ fn key_typed_second_param_surfaces_unsupported_shape_diagnostic() {
     let diags = lower_str(src).expect_err("expected lowering diagnostics");
     let joined = diags.join(" | ");
     assert!(
-        joined.contains("key-typed") && joined.contains("I.3a"),
+        joined.contains("key-typed") && joined.contains("I.3b"),
         "expected UnsupportedBeliefShape with slice pointer; got: {joined}"
     );
 }

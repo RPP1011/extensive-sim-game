@@ -55,10 +55,10 @@ physics MarkAllBusy {
   }
 }
 
-// The threats view at scale.
-@materialized(on_event = [ScriptedCastBegin])
+// The threats view at scale. Plan I slice I.8 (2026-05-16) —
+// migrated to the `belief` keyword.
 @dispatch(per_agent_event_scan)
-view threats(observer: Agent) -> f32 {
+belief threats(observer: Agent) -> f32 {
   initial: 0.0,
   on ScriptedCastBegin { source: _, target: _, ability_id: _ } { self += 1.0 }
 }

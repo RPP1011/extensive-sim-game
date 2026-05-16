@@ -1215,7 +1215,7 @@ fn collect(
                     annotations: d.annotations.clone(),
                     kind: ViewKind::Belief,
                     decay: None,
-                    belief_gated: false,
+                    belief_gated: d.annotations.iter().any(|a| a.name == "belief_gated"),
                     storage_packing: Packing::None,
                     social_merges: Vec::new(),
                     span: d.span,
@@ -1855,10 +1855,17 @@ fn resolve_bodies(
                         })
                     })
                     .collect::<Result<Vec<_>, _>>()?;
+                let decay = lower_decay_hint_for(
+                    &d.annotations,
+                    &d.body,
+                    symbols,
+                    /*is_belief=*/ true,
+                )?;
                 comp.views[view_idx].params = params;
                 comp.views[view_idx].return_ty = return_ty;
                 comp.views[view_idx].body = body;
                 comp.views[view_idx].social_merges = social_merges;
+                comp.views[view_idx].decay = decay;
                 view_idx += 1;
             }
         }
@@ -3301,14 +3308,24 @@ fn lower_decay_hint(
     body: &ast::ViewBody,
     symbols: &SymbolTable,
 ) -> Result<Option<DecayHint>, ResolveError> {
+    lower_decay_hint_for(annotations, body, symbols, /*is_belief=*/ false)
+}
+
+fn lower_decay_hint_for(
+    annotations: &[ast::Annotation],
+    body: &ast::ViewBody,
+    symbols: &SymbolTable,
+    is_belief: bool,
+) -> Result<Option<DecayHint>, ResolveError> {
     let ann = match annotations.iter().find(|a| a.name == "decay") {
         Some(a) => a,
         None => return Ok(None),
     };
 
-    // Must coexist with `@materialized`.
+    // Must coexist with `@materialized` — except on `belief` decls,
+    // where the materialized-ness is implicit in the keyword.
     let has_materialized = annotations.iter().any(|a| a.name == "materialized");
-    if !has_materialized {
+    if !has_materialized && !is_belief {
         return Err(ResolveError::InvalidDecayHint {
             detail:
                 "`@decay` requires a sibling `@materialized(...)` annotation on the same view"

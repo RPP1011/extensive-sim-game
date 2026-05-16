@@ -2178,6 +2178,15 @@ fn populate_view_bodies_and_signatures(
                     {
                         Some(dsl_ast::ir::StorageHint::PairMap)
                     }
+                    // Slice I.3a — single-key `(observer: Agent) -> T`
+                    // belief. The per-view sizing path (in
+                    // `build_helper::detect_pair_keyed_second_key`)
+                    // gates on param count, so the PairMap hint here
+                    // collapses to single-key sizing (N cells) at
+                    // allocation time.
+                    [a] if matches!(a.ty, dsl_ast::ir::IrType::AgentId) => {
+                        Some(dsl_ast::ir::StorageHint::PairMap)
+                    }
                     _ => None,
                 };
                 if let Some(hint) = inferred {

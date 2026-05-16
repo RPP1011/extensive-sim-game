@@ -64,10 +64,14 @@ physics MarkCasterBusy {
 // (`decay_threats`) that runs BEFORE the fold each tick. The fold
 // itself stays unchanged: PerAgentEventScan over (observer, source)
 // pairs, busy-filter, += 1.0 on every busy candidate.
-@materialized(on_event = [CastBeginMarker])
+// Plan I slice I.8 (2026-05-16) — migrated to the `belief` keyword.
+// PairMap hint inferred from the single-Agent signature collapses
+// to single-key sizing (N cells). `@decay` is now accepted on belief
+// decls (decay's `@materialized` co-requirement skipped for the
+// belief case in `lower_decay_hint_for`).
 @dispatch(per_agent_event_scan)
 @decay(rate = 0.9, per = tick)
-view threats(observer: Agent) -> f32 {
+belief threats(observer: Agent) -> f32 {
   initial: 0.0,
   on CastBeginMarker { source: _, target: _, ability_id: _ } { self += 1.0 }
 }

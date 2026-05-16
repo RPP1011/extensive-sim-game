@@ -75,9 +75,15 @@ physics MarkCasterBusy {
 // the event ring (the runtime drives the dispatch directly off
 // agent_cap), but the resolver requires `on_event = [...]` for
 // materialized fold views to validate.
-@materialized(on_event = [CastBeginMarker])
+// Plan I slice I.8 (2026-05-16) — migrated to the `belief` keyword.
+// The lowering's signature inference handles `(observer: Agent) -> f32`
+// as single-key storage (N cells) via the same per-view sizing path
+// `@materialized` views ride. `@dispatch(per_agent_event_scan)`
+// carries over verbatim; the `@materialized(on_event = [...])`
+// annotation retires (the on-event list was advisory; handler
+// patterns are the source of truth).
 @dispatch(per_agent_event_scan)
-view threats(observer: Agent) -> f32 {
+belief threats(observer: Agent) -> f32 {
   initial: 0.0,
   on CastBeginMarker { source: _, target: _, ability_id: _ } { self += 1.0 }
 }
