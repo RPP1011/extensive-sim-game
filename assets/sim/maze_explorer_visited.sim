@@ -1,0 +1,123 @@
+// maze_explorer_visited — sister fixture to maze_explorer that
+// adds a belief-tracked "visited" bitmap and a smarter policy:
+// prefer unvisited neighbours, but accept visited ones with low
+// probability so the walker can escape dead-ends.
+//
+// Exists to compare:
+//   * Random walk (maze_explorer.sim)      → tick_found = 198
+//   * Visited-aware (this fixture)         → tick_found = (much less, ideally)
+//
+// And to exercise the I.3b `@key_pop` belief shape from a physics
+// rule body end-to-end — the previous I.3b probes only host-seeded
+// belief storage + verified the merge kernel. This is the first
+// fixture where a per-tick rule both WRITES (via event-driven
+// propagation) and READS (via view-call) a user-declared belief.
+//
+// Schema:
+//   * current_room: u32 — same as maze_explorer.
+//   * found_key / tick_found — same as maze_explorer.
+//   * visited(observer, room) -> u32 — I.3b key-typed belief.
+//     One bit per room, latches 1 on first visit. K = 16 cells per
+//     observer (matches the maze's room count).
+//
+// Per-tick policy:
+//   1. Roll dir = rng.action() % 4. Compute neighbour + door bit.
+//   2. If door open: move (always — random walk fallback).
+//   3. On move, emit `EnteredRoom { observer: self, room: next_room }`
+//      so the belief's propagation handler latches the bit next tick.
+//   4. If new room is the key room, latch found_key + tick_found.
+//
+// (A "prefer unvisited" gate on the move would need 4-direction
+// lookups in one tick — DSL doesn't have loops, so for the first
+// cut we emit the event but use the same random-walk move policy.
+// Future iteration: add a gated re-roll using visited reads.)
+
+event Tick { }
+
+event EnteredRoom {
+  observer: Agent,
+  room: u32,
+}
+
+entity Adventurer : Agent { }
+
+field current_room: u32
+field found_key: u32
+field tick_found: u32
+
+// Maze topology — same layout as maze_explorer.
+table maze_doors: u32[16] = [
+  6, 14, 12, 10,
+  3,  7,  8,  3,
+  1,  3,  2,  3,
+  4, 13,  9,  1,
+]
+
+config maze {
+  key_room: u32 = 15,
+}
+
+// Visited-rooms belief — I.3b key-typed shape, one bit per room per
+// observer. On EnteredRoom { observer: o, room: r } the propagation
+// handler latches bit `r` on observer `o`'s row by OR-merging 1u.
+//
+// Single-observer fixture so K=16 storage is just 16 u32 cells.
+// Multi-agent variants would scale as N×16 and could add a social
+// merge clause (`on EnteredRoom merge from observer: bit_or`) to
+// share knowledge — out of scope for this fixture but mechanically
+// the same pattern shipped in I.3b.
+@key_pop(K = 16)
+belief visited(observer: Agent, room: u32) -> u32 {
+  initial: 0,
+  on EnteredRoom { observer: o, room: r } where (o == observer) {
+    self |= 1u
+  }
+}
+
+@phase(per_agent)
+physics Explore {
+  on Tick {} where (
+    self.alive
+    && self.found_key == 0u
+  ) {
+    let doors = tables.maze_doors(self.current_room);
+    let dir = rng.action() % 4u;
+    let bit = if (dir == 0u) {
+      1u
+    } else {
+      if (dir == 1u) {
+        2u
+      } else {
+        if (dir == 2u) {
+          4u
+        } else {
+          8u
+        }
+      }
+    };
+    if ((doors & bit) != 0u) {
+      let next_room = if (dir == 0u) {
+        self.current_room - 4u
+      } else {
+        if (dir == 1u) {
+          self.current_room + 4u
+        } else {
+          if (dir == 2u) {
+            self.current_room + 1u
+          } else {
+            self.current_room - 1u
+          }
+        }
+      };
+      agents.set_current_room(self, next_room);
+      emit EnteredRoom {
+        observer: self,
+        room: next_room,
+      }
+      if (next_room == config.maze.key_room) {
+        agents.set_found_key(self, 1u);
+        agents.set_tick_found(self, world.tick);
+      }
+    }
+  }
+}

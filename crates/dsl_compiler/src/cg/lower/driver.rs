@@ -2225,6 +2225,27 @@ fn populate_view_bodies_and_signatures(
                         {
                             Some(dsl_ast::ir::StorageHint::PairMap)
                         }
+                        // Plan I slice I.3b — `(observer: Agent, key:
+                        // u8|u32|i32)` is also PairMap-shaped (storage
+                        // is `agent_cap × K` cells via @key_pop(K=N)).
+                        // Without this arm the registry walk fell
+                        // through to `None`, the storage hint never
+                        // got registered, and the WGSL emit defaulted
+                        // to single-key indexing (`local_<last>` only)
+                        // — silently dropping the pair-key compose so
+                        // every (observer, *) event wrote to the same
+                        // cell as (observer, 0).
+                        [a, b]
+                            if matches!(a.ty, dsl_ast::ir::IrType::AgentId)
+                                && matches!(
+                                    b.ty,
+                                    dsl_ast::ir::IrType::U8
+                                        | dsl_ast::ir::IrType::U32
+                                        | dsl_ast::ir::IrType::I32
+                                ) =>
+                        {
+                            Some(dsl_ast::ir::StorageHint::PairMap)
+                        }
                         // Slice I.3a — single-key `(observer: Agent) -> T`
                         // belief. The per-view sizing path (in
                         // `build_helper::detect_pair_keyed_second_key`)

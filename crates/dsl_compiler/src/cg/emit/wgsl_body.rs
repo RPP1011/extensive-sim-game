@@ -2542,7 +2542,20 @@ fn lower_cg_stmt_body_to_wgsl(
             // `synthesize_pattern_binding_lets`), so the WGSL Let
             // statements emit in the same order — guaranteeing
             // `(by, prey)` lands as `(local_first, local_second)`.
-            if matches!(ty, CgTy::AgentId) {
+            // I.3b extension — also track `U32` binders so pair-keyed
+            // views with a key-typed second param (Agent, u8|u32|i32)
+            // compose the correct `(local_first * K + local_second)`
+            // index expression. The Agent×Agent shape only emitted
+            // AgentId binders, so a U32 binder appearing here can only
+            // come from an I.3b-style event payload field
+            // (`EnteredRoom { observer: o, room: r }`-style). Existing
+            // Agent×Agent fixtures bind two AgentIds and never bind a
+            // U32 event field that the fold body consumes, so the
+            // extension is additive on the binding-set front. Other
+            // U32 event-field reads in non-belief view bodies happen
+            // outside of view-storage Assigns and so don't get
+            // consumed by the index composition path.
+            if matches!(ty, CgTy::AgentId | CgTy::U32) {
                 if let Some(value_node) =
                     <CgProgram as ExprArena>::get(ctx.prog, *value)
                 {
