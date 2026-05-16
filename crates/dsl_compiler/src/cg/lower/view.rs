@@ -415,11 +415,33 @@ pub fn lower_view(
                     Some((layout.header_word_count + field.word_offset_in_payload).min(9) as u8)
                 })()
                 .unwrap_or(2);
+                // Plan I slice I.3b — when the belief is
+                // (Agent, u8|u32|i32) declared with @key_pop(K = N),
+                // bake K into the kernel as a literal so the merge
+                // body indexes `[r * K + s]` instead of the dynamic
+                // `cfg.agent_cap`. None for Agent×Agent (kernel reads
+                // cfg.agent_cap) and for single-key (no second dim).
+                let second_key_pop: Option<u32> = if ir.params.len() == 2
+                    && matches!(
+                        ir.params[1].ty,
+                        IrType::U8 | IrType::U32 | IrType::I32
+                    ) {
+                    ir.annotations
+                        .iter()
+                        .find(|a| a.name == "key_pop")
+                        .and_then(|a| {
+                            extract_k_arg(view_id, ir.span, a).ok()
+                        })
+                        .map(|k| k as u32)
+                } else {
+                    None
+                };
                 let kind = crate::cg::op::ComputeOpKind::BeliefSocialMerge {
                     view: view_id,
                     on_event: event_kind_id,
                     op: op_discriminant,
                     source_field_offset,
+                    second_key_pop,
                 };
                 // Iter 23 — 2D per-cell dispatch instead of per-event.
                 // Critical path drops from O(N²) serial → O(N) for the
@@ -504,16 +526,26 @@ fn infer_belief_storage_hint(view_id: ViewId, ir: &ViewIR) -> Result<StorageHint
             if matches!(first.ty, IrType::AgentId)
                 && matches!(second.ty, IrType::U8 | IrType::U32 | IrType::I32) =>
         {
-            Err(LoweringError::UnsupportedBeliefShape {
-                view: view_id,
-                detail: format!(
-                    "key-typed second param `{}: {:?}` needs a SingleKey-extended \
-                     storage variant — slice I.3b deferred. Use the pair-keyed \
-                     `(observer: Agent, subject: Agent) -> T` shape today.",
-                    second.name, second.ty
-                ),
-                span: ir.span,
-            })
+            // Plan I slice I.3b — key-typed second param is supported
+            // when the belief declares `@key_pop(K = N)` so the slot-
+            // count allocator can size `agent_cap * K` cells. Without
+            // the annotation we have no way to bound storage, so
+            // reject with a pointer to the fix.
+            if let Some(ann) = ir.annotations.iter().find(|a| a.name == "key_pop") {
+                let _ = extract_k_arg(view_id, ir.span, ann)?;
+                Ok(StorageHint::PairMap)
+            } else {
+                Err(LoweringError::UnsupportedBeliefShape {
+                    view: view_id,
+                    detail: format!(
+                        "key-typed second param `{}: {:?}` requires \
+                         `@key_pop(K = N)` on the belief decl so the per-view \
+                         allocator can size `agent_cap × K` cells. Slice I.3b.",
+                        second.name, second.ty
+                    ),
+                    span: ir.span,
+                })
+            }
         }
         _ => Err(LoweringError::UnsupportedBeliefShape {
             view: view_id,

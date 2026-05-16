@@ -1,0 +1,45 @@
+// belief_key_typed_probe — Plan I slice I.3b end-to-end pin for the
+// (Agent, key-typed) belief shape. Mirror of
+// belief_merge_propagation_probe but with the second key as a u32
+// `room_id` declared with `@key_pop(K = 8)`. Storage is
+// `agent_cap × 8`, not `agent_cap × agent_cap` — the "neighbourhood
+// belief" pattern where each agent only tracks a small fixed-size
+// keyspace.
+//
+// Semantic: each agent maintains a per-room bitmap (`seen_in_room`).
+// When an ally dies, OR-merge the dying ally's full row (8 bitmaps,
+// one per room) into the receiver's row. Pre-seeds agent 0's row
+// with distinct patterns per room; after one tick every alive agent
+// should have agent 0's row inherited.
+
+event Tick { }
+
+event AllyDied {
+  dead: Agent,
+}
+
+entity Probe : Agent { }
+
+// Same StampAllyDied pattern as the Agent×Agent probe: agent 0 acts
+// as the "dying ally" — every alive agent emits AllyDied{dead=0}
+// once at tick 0. The merge is idempotent under repetition.
+@phase(per_agent)
+physics StampAllyDied {
+  on Tick {} where (
+    self.alive && world.tick == 0
+  ) {
+    emit AllyDied {
+      dead: 0,
+    }
+  }
+}
+
+// Plan I slice I.3b — the new shape. K = 8 rooms; storage is
+// agent_cap × 8 cells, kernel uses literal 8 for second-dim bound +
+// index expression. No N² scaling; this is the canonical "small-K
+// neighbourhood" belief.
+@key_pop(K = 8)
+belief seen_in_room(observer: Agent, room: u32) -> u32 {
+  initial: 0,
+  on AllyDied { dead: d } merge from d: bit_or
+}

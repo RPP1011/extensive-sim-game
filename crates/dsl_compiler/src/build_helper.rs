@@ -897,6 +897,16 @@ pub enum PairKeyedSecondKey {
     /// Agent×Quest — second-key population is the static count of
     /// declared `entity X : Quest` decls in the .sim.
     Quest(u32),
+    /// Plan I slice I.3b — Agent×(u8|u32|i32). Second-key population
+    /// is declared explicitly via `@key_pop(K = N)` on the belief
+    /// decl. Use when the belief is keyed on something other than
+    /// an entity-rooted type (chunk_id, room_id, tag_bit, etc.) and
+    /// the population is bounded by the .sim author's domain (e.g.
+    /// `K = 64` for a 64-chunk world map). The runtime-side slot
+    /// count is `agent_count * K`, so storage scales O(N×K) instead
+    /// of O(N²) — the canonical pattern for "neighbourhood" beliefs
+    /// where each agent only tracks a small fixed-size keyspace.
+    KeyTyped(u32),
 }
 
 impl PairKeyedSecondKey {
@@ -907,7 +917,8 @@ impl PairKeyedSecondKey {
             PairKeyedSecondKey::Agent => None,
             PairKeyedSecondKey::Item(n)
             | PairKeyedSecondKey::Group(n)
-            | PairKeyedSecondKey::Quest(n) => Some(n),
+            | PairKeyedSecondKey::Quest(n)
+            | PairKeyedSecondKey::KeyTyped(n) => Some(n),
         }
     }
 
@@ -919,7 +930,8 @@ impl PairKeyedSecondKey {
             PairKeyedSecondKey::Agent => "(agent_count as u64)".to_string(),
             PairKeyedSecondKey::Item(n)
             | PairKeyedSecondKey::Group(n)
-            | PairKeyedSecondKey::Quest(n) => format!("{n}u64"),
+            | PairKeyedSecondKey::Quest(n)
+            | PairKeyedSecondKey::KeyTyped(n) => format!("{n}u64"),
         }
     }
 }
@@ -1015,6 +1027,15 @@ pub fn collect_materialized_views(
                 IrType::ItemId => Some(PairKeyedSecondKey::Item(item_count.max(1))),
                 IrType::GroupId => Some(PairKeyedSecondKey::Group(group_count.max(1))),
                 IrType::QuestId => Some(PairKeyedSecondKey::Quest(quest_count.max(1))),
+                // Plan I slice I.3b — key-typed second param keeps
+                // the per-view buffer sized at `agent_cap × K` cells.
+                // K comes from `@key_pop(K = N)` on the belief decl.
+                IrType::U8 | IrType::U32 | IrType::I32 => v
+                    .annotations
+                    .iter()
+                    .find(|a| a.name == "key_pop")
+                    .and_then(extract_annotation_k_arg)
+                    .map(|k| PairKeyedSecondKey::KeyTyped(k.max(1))),
                 IrType::Named(n) => match n.as_str() {
                     "Agent" => Some(PairKeyedSecondKey::Agent),
                     "Item" => Some(PairKeyedSecondKey::Item(item_count.max(1))),
@@ -1172,6 +1193,23 @@ pub fn detect_pair_keyed_second_key(
             IrType::ItemId => PairKeyedSecondKey::Item(item_count.max(1)),
             IrType::GroupId => PairKeyedSecondKey::Group(group_count.max(1)),
             IrType::QuestId => PairKeyedSecondKey::Quest(quest_count.max(1)),
+            // Plan I slice I.3b — key-typed second param (chunk_id,
+            // room_id, tag_bit, etc.). Population is declared by the
+            // .sim author via `@key_pop(K = N)` on the belief decl;
+            // mirrors `@per_entity_ring(K = N)`'s K argument shape.
+            // No annotation → skip (the storage-hint inferrer raises
+            // `UnsupportedBeliefShape` with a pointer to slice I.3b).
+            IrType::U8 | IrType::U32 | IrType::I32 => {
+                let k = v
+                    .annotations
+                    .iter()
+                    .find(|a| a.name == "key_pop")
+                    .and_then(|a| extract_annotation_k_arg(a));
+                match k {
+                    Some(k) => PairKeyedSecondKey::KeyTyped(k.max(1)),
+                    None => continue,
+                }
+            }
             IrType::Named(n) => match n.as_str() {
                 "Agent" => PairKeyedSecondKey::Agent,
                 "Item" => PairKeyedSecondKey::Item(item_count.max(1)),
@@ -1196,6 +1234,27 @@ pub fn detect_pair_keyed_second_key(
         }
     }
     best
+}
+
+/// Lightweight `K = <int>` extractor for build-side annotation lookup.
+/// Returns `Some(k)` only on the happy path; ill-formed annotations
+/// surface to the .sim author via the resolver's `annotation_k_arg`
+/// (which builds rich `ResolveError`s) or via the lower-side
+/// `extract_k_arg` (which builds `LoweringError::UnsupportedBeliefShape`).
+/// This helper exists so `detect_pair_keyed_second_key` can stay
+/// `Option`-returning without pulling either error type into
+/// `build_helper`.
+fn extract_annotation_k_arg(ann: &dsl_ast::ast::Annotation) -> Option<u32> {
+    for arg in &ann.args {
+        if arg.key.as_deref() == Some("K") {
+            if let dsl_ast::ast::AnnotationValue::Int(n) = &arg.value {
+                if *n > 0 && *n <= u32::MAX as i64 {
+                    return Some(*n as u32);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Plan E-A3.1 — placeholder generated runtime body, now with per-kernel

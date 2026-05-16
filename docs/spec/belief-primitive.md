@@ -17,7 +17,7 @@ belief <name>(observer: Agent [, subject: Agent]) -> <T> {
 }
 ```
 
-**Param shapes.** First param must be `Agent`. Second param (optional) is `Agent` (pair-keyed) or one of `u8|u32|i32` (key-typed second param — deferred, surfaces `LoweringError::UnsupportedBeliefShape` with slice pointer I.3b).
+**Param shapes.** First param must be `Agent`. Second param (optional) is `Agent` (pair-keyed) or one of `u8|u32|i32` (key-typed second param — must be declared with `@key_pop(K = N)` on the belief decl so the per-view allocator can size `agent_cap × K` cells; slice I.3b shipped).
 
 **Return types.** `bool`, `u8`, `u32`, `i32`, `f32`, or a registered struct entity (for struct-cell ring storage with `@per_entity_ring`).
 
@@ -30,7 +30,7 @@ belief <name>(observer: Agent [, subject: Agent]) -> <T> {
 | `(observer: Agent) -> T` | PairMap (collapses to single-key sizing) | N cells | `room_known_pattern_probe_pin` |
 | `(observer: Agent, subject: Agent) -> T` | PairMap | N² cells | `belief_merge_propagation_probe_pin` |
 | `(observer: Agent[, subject: Agent]) -> T` + `@per_entity_ring(K=…)` | PerEntityRing | N × K cells | `threats_struct_probe_pos_keyed_pin` |
-| `(observer: Agent, key: u32)` | Not yet | — | (I.3b deferred) |
+| `(observer: Agent, key: u8\|u32\|i32) -> T` + `@key_pop(K = N)` | PairMap (key-typed) | N × K cells | `belief_key_typed_probe_pin` |
 
 The lowering infers storage at `crates/dsl_compiler/src/cg/lower/view.rs::infer_belief_storage_hint`.
 
@@ -80,8 +80,9 @@ Multi-horizon stresstest (`crates/sims/tests/threat_horizon_stresstest_pin.rs`):
 | Item | Status | Path forward |
 |---|---|---|
 | `i32` / `u8` return types | Grammar-valid, lowering-rejected on type-mismatch | DSL literal-suffix surface needs `1i` / `1u8` parser support |
-| Key-typed second param (`(Agent, u32)`) | Surfaces `UnsupportedBeliefShape` | Slice I.3b — needs SingleKey-extended storage variant sized `agent_cap × key_pop` |
 | IR-level source-agent field offset lookup | Hardcoded offset 2 (works for single-Agent-field events like `AllyDied { dead: Agent }`) | Compute from `social_merge.source_agent: LocalRef` + event field layout |
+| Key-typed dispatch shape | Shipped storage shape launches (N, N) threads with early bounds-check at `s ≥ K` | Add a K-aware dispatch variant (`PerAgentKeyScan { k }`) that launches (N, K) threads — true wall-clock win at large N (storage win already realized; see `belief_key_typed_perf_bench` for the current data) |
+| Sparse-by-Agent ring merge | Not started | True ring storage for `(Agent, Agent)` beliefs: each observer's row is K most-recently-merged (subject, value) entries with FIFO eviction. Merge becomes find-or-insert. Distinct from `@key_pop` (which is sparse-by-key, not sparse-by-Agent) |
 | Plan I.6 viewer migration | Pattern probe shipped (`room_known_pattern_probe`); full dungeon_horde viewer rewrite deferred | Replace `hero_known_rooms: [u64; 5]` host field with GPU readback when the migration value justifies the Plan E hook bypass |
 
 ## Adding a new merge op

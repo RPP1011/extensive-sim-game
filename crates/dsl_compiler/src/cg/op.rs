@@ -746,6 +746,13 @@ pub enum ComputeOpKind {
         /// hardcoded behaviour for events with one Agent payload
         /// field).
         source_field_offset: u8,
+        /// Plan I slice I.3b — second-key population for key-typed
+        /// pair-keyed beliefs (`(Agent, u8|u32|i32)` declared with
+        /// `@key_pop(K = N)`). `Some(K)` ⇒ kernel uses literal K for
+        /// the second-dim bound + index. `None` ⇒ Agent×Agent shape
+        /// (kernel reads `cfg.agent_cap` for both dims) or single-key
+        /// shape (kernel doesn't use a second dim at all).
+        second_key_pop: Option<u32>,
     },
 
     /// One-shot scratch op. See [`PlumbingKind`].
@@ -970,7 +977,13 @@ impl ComputeOpKind {
                 format!("spatial_query({})", kind)
             }
             ComputeOpKind::Plumbing { kind } => format!("plumbing({})", kind.label()),
-            ComputeOpKind::BeliefSocialMerge { view, on_event, op, source_field_offset } => {
+            ComputeOpKind::BeliefSocialMerge {
+                view,
+                on_event,
+                op,
+                source_field_offset,
+                second_key_pop,
+            } => {
                 let op_label = match op {
                     0 => "bit_or",
                     1 => "max",
@@ -978,8 +991,12 @@ impl ComputeOpKind {
                     3 => "replace",
                     _ => "?",
                 };
+                let key_pop_label = match second_key_pop {
+                    Some(k) => format!(", key_pop={k}"),
+                    None => String::new(),
+                };
                 format!(
-                    "belief_social_merge(view=#{}, on_event=#{}, op={op_label}, src_offset={source_field_offset})",
+                    "belief_social_merge(view=#{}, on_event=#{}, op={op_label}, src_offset={source_field_offset}{key_pop_label})",
                     view.0, on_event.0
                 )
             }

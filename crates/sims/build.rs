@@ -124,6 +124,7 @@ fn main() {
                 | "belief_merge_propagation_probe"
                 | "room_known_pattern_probe"
                 | "belief_merge_ops_probe"
+                | "belief_key_typed_probe"
         ) {
             continue;
         }

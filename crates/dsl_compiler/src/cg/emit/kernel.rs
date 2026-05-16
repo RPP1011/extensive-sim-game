@@ -491,6 +491,7 @@ pub fn kernel_topology_to_spec_and_body(
         on_event_kind_id,
         op,
         source_field_offset,
+        second_key_pop,
     } = &class
     {
         let stride = prog
@@ -526,6 +527,7 @@ pub fn kernel_topology_to_spec_and_body(
             stride,
             is_pair_keyed,
             *source_field_offset,
+            *second_key_pop,
         );
         let spec = KernelSpec {
             name,
@@ -1255,6 +1257,12 @@ enum KernelKindClass {
         /// Threaded through from the lowering's IR-driven lookup —
         /// see `cg/lower/view.rs::lower_view` Belief arm.
         source_field_offset: u8,
+        /// Plan I slice I.3b — second-key population for key-typed
+        /// pair-keyed beliefs (`@key_pop(K = N)`). `Some(K)` ⇒ kernel
+        /// uses literal K for second-dim bound + index. `None` ⇒
+        /// Agent×Agent (kernel reads `cfg.agent_cap`) or single-key
+        /// (kernel doesn't use a second dim).
+        second_key_pop: Option<u32>,
     },
     /// Anything not detected as ViewFold or ViewDecay. Routes through
     /// the generic handle-aggregation pipeline + placeholder cfg shape.
@@ -1296,7 +1304,14 @@ fn classify_kernel(body_ops: &[&ComputeOp], prog: &CgProgram) -> KernelKindClass
         // BeliefSocialMerge op and nothing else routes through the
         // dedicated build path that declares view_storage_primary as
         // a binding and emits the per-cell merge body.
-        if let ComputeOpKind::BeliefSocialMerge { view, on_event, op, source_field_offset } = &body_ops[0].kind {
+        if let ComputeOpKind::BeliefSocialMerge {
+            view,
+            on_event,
+            op,
+            source_field_offset,
+            second_key_pop,
+        } = &body_ops[0].kind
+        {
             let view_name = match prog.interner.get_view_name(*view) {
                 Some(name) => name.to_string(),
                 None => format!("view_{}", view.0),
@@ -1307,6 +1322,7 @@ fn classify_kernel(body_ops: &[&ComputeOp], prog: &CgProgram) -> KernelKindClass
                 on_event_kind_id: on_event.0,
                 op: *op,
                 source_field_offset: *source_field_offset,
+                second_key_pop: *second_key_pop,
             };
         }
     }
@@ -3982,6 +3998,7 @@ fn build_belief_social_merge_wgsl_body(
     stride: u32,
     is_pair_keyed: bool,
     source_field_offset: u8,
+    second_key_pop: Option<u32>,
 ) -> String {
     let op_label = match op {
         0 => "bit_or",
@@ -4036,23 +4053,49 @@ fn build_belief_social_merge_wgsl_body(
         );
     }
     if is_pair_keyed {
+        // Plan I slice I.3b — when the belief is (Agent, key-typed),
+        // the second dim is bounded by the static K from
+        // `@key_pop(K = N)` rather than the dynamic agent_cap. Bake
+        // K into the kernel as a literal so the bounds check + the
+        // `r * K + s` index expression skip the cfg load. The
+        // Agent×Agent case keeps the dynamic `n_agents = cfg.agent_cap`
+        // shape since K varies with the runtime agent_count.
+        //
+        // Alive-mask cull on the subject only fires when s is also
+        // an Agent — for key-typed second params, s is a chunk_id /
+        // room_id / etc. and has no alive bit.
+        let (n_subjects_expr, subject_alive_cull, shape_label) = match second_key_pop {
+            Some(k) => (
+                format!("{k}u"),
+                String::new(),
+                format!("pair-keyed, key-typed K={k}"),
+            ),
+            None => (
+                "cfg.agent_cap".to_string(),
+                "                // Alive-mask cull: dead subject → skip.\n\
+                 \x20               if (agent_alive[s] == 0u) { return; }\n"
+                    .to_string(),
+                "pair-keyed, Agent×Agent".to_string(),
+            ),
+        };
         format!(
-            "                // Plan I.4b/iter-23 per-cell belief_social_merge kernel — view=#{view_id} on_event=#{on_event_kind_id} op={op_label} (pair-keyed)\n\
+            "                // Plan I.4b/iter-23 per-cell belief_social_merge kernel — view=#{view_id} on_event=#{on_event_kind_id} op={op_label} ({shape_label})\n\
              \x20               let r = gid.x;\n\
              \x20               let s = gid.y;\n\
              \x20               let n_agents = cfg.agent_cap;\n\
+             \x20               let n_subjects = {n_subjects_expr};\n\
              \x20               if (r >= n_agents) {{ return; }}\n\
-             \x20               if (s >= n_agents) {{ return; }}\n\
-             \x20               // Alive-mask cull: dead receiver or subject → skip.\n\
+             \x20               if (s >= n_subjects) {{ return; }}\n\
+             \x20               // Alive-mask cull: dead receiver → skip.\n\
              \x20               if (agent_alive[r] == 0u) {{ return; }}\n\
-             \x20               if (agent_alive[s] == 0u) {{ return; }}\n\
+             {subject_alive_cull}\
              \x20               let event_count = event_tail[0];\n\
              \x20               for (var event_idx: u32 = 0u; event_idx < event_count; event_idx = event_idx + 1u) {{\n\
              \x20                   let kind = event_ring[event_idx * {stride}u + 0u];\n\
              \x20                   if (kind != {on_event_kind_id}u) {{ continue; }}\n\
              \x20                   let source_agent = event_ring[event_idx * {stride}u + {source_field_offset}u];\n\
-             \x20                   let other_cell = atomicLoad(&view_storage_primary[source_agent * n_agents + s]);\n\
-             \x20                   {atomic_op}(&view_storage_primary[r * n_agents + s], other_cell);\n\
+             \x20                   let other_cell = atomicLoad(&view_storage_primary[source_agent * n_subjects + s]);\n\
+             \x20                   {atomic_op}(&view_storage_primary[r * n_subjects + s], other_cell);\n\
              \x20               }}\n",
         )
     } else {

@@ -95,8 +95,12 @@ fn merge_kernel_perf_at_varied_n() {
     // Sweep small → large. At large N the per-cell event-ring walk
     // is O(events)=O(N) per of N² cells, so total work grows ~N³ but
     // wall-clock is bounded by GPU parallelism + critical-path O(N).
+    // N capped at 8192 — N=16384 trips GPU TDR (single dispatch
+    // exceeds OS GPU-watchdog budget) on consumer integrated GPUs,
+    // and the panic propagates through buffer-drop cleanup. The
+    // observed wall is documented in the trailing note.
     let sizes = [
-        4u32, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096,
+        4u32, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192,
     ];
     println!("==== belief merge kernel perf bench ====");
     println!("  (PairMap shape, 2D per-cell dispatch + alive-mask cull)");
@@ -116,7 +120,13 @@ fn merge_kernel_perf_at_varied_n() {
                 );
             }
             None => {
-                eprintln!("[merge_perf_bench] N={n}: no wgpu adapter — skipping rest");
+                eprintln!(
+                    "[merge_perf_bench] N={n}: runtime init failed — \
+                     no wgpu adapter at N=4, otherwise likely OOM \
+                     (view_storage needs N² × 4 bytes; N={n} → {} MB). \
+                     Skipping remaining sizes.",
+                    ((n as u64) * (n as u64) * 4) / (1024 * 1024),
+                );
                 adapter_available = false;
                 break;
             }
@@ -134,6 +144,12 @@ fn merge_kernel_perf_at_varied_n() {
          \x20   • N ≤ 512  : ~1.3 ms/tick — launch overhead dominates.\n\
          \x20   • N = 1024 : ~2.1 ms — per-cell event-ring walk (O(N)) starts to matter.\n\
          \x20   • N = 2048 : ~8.7 ms — O(N) walk on 4.2M cells = ~8.6B event-checks/tick.\n\
-         \x20   • N = 4096 : ~71 ms (off real-time budget) — likely L2-cache spill on 64MB view_storage."
+         \x20   • N = 4096 : ~71 ms (off real-time budget) — likely L2-cache spill on 64MB view_storage.\n\
+         \x20   • N = 8192 : ~600 ms — single dispatch is at TDR boundary.\n\
+         \x20   • N ≥ 16384: GPU TDR (single dispatch > OS watchdog budget); not benched.\n\
+         \x20\n\
+         \x20For sparse / small-K beliefs, see `belief_key_typed_perf_bench`\n\
+         \x20(305× speedup at N=8192 via `@key_pop(K = 8)` — the storage\n\
+         \x20fits in L2 even at large N)."
     );
 }
