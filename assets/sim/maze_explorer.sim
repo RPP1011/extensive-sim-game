@@ -1,0 +1,149 @@
+// maze_explorer — one Adventurer agent random-walks a 4×4 maze of
+// rooms until it reaches the key room. The maze topology is encoded
+// inline in the .sim as a nested if-else over room id, so the
+// fixture is fully self-contained (no host-side maze setup needed).
+//
+// Outcome: ticks-to-key on a deterministic seed. The pin runs the
+// step loop until `found_key == 1` and asserts the tick is within
+// budget; a perf bench measures per-tick cost.
+//
+// Schema (single Adventurer agent):
+//   * current_room: u32 — room id 0..15 the Adventurer occupies.
+//   * current_doors: u32 — bitmap of cardinal exits from the
+//     current room (bit 0 = N, 1 = S, 2 = E, 3 = W). Updated on
+//     every move so the per-tick navigation rule doesn't need to
+//     re-derive it.
+//   * found_key: u32 — 0 while searching, 1 after reaching key
+//     room. Gates the per-tick rule so it's a no-op once done.
+//   * tick_found: u32 — the tick on which found_key flipped 0→1.
+//
+// Maze layout (4×4 grid; → is "has door to"):
+//
+//   0(0,0) ─── 1(1,0) ─── 2(2,0) ─── 3(3,0)
+//     │          │                      │
+//   4(0,1)    5(1,1) ─── 6(2,1)      7(3,1)
+//     │          │                      │
+//   8(0,2)    9(1,2)    10(2,2)     11(3,2)
+//                │          │           │
+//  12(0,3) ── 13(1,3) ── 14(2,3) ─── 15(3,3)*
+//
+//   (* = key room. 10 connects to 14 via S/N. 12 only connects E.)
+//
+//   Shortest path 0 → 15: 0→1→2→3→7→11→15 (6 steps).
+//
+// Door bitmaps per room:
+//   0:  E|S            = 6        8:  N              = 1
+//   1:  W|E|S          = 14       9:  N|S            = 3
+//   2:  W|E            = 12       10: S              = 2
+//   3:  W|S            = 10       11: N|S            = 3
+//   4:  N|S            = 3        12: E              = 4
+//   5:  N|E|S          = 7        13: N|E|W          = 13
+//   6:  W              = 8        14: N|W            = 9
+//   7:  N|S            = 3        15: N              = 1
+//
+// All door pairs are symmetric (if A has door to B, B has door to A);
+// the per-room bitmap table is hand-verified above.
+
+event Tick { }
+
+entity Adventurer : Agent { }
+
+field current_room: u32
+field current_doors: u32
+field found_key: u32
+field tick_found: u32
+
+config maze {
+  // Slot id of the key room. The per-tick rule reads this to know
+  // when to latch.
+  key_room: u32 = 15,
+  // Door bitmap of the spawn room (0). Set as a config so the host
+  // doesn't need to peek at the maze table — the same nested if-
+  // chain below would derive it, but at init the Adventurer hasn't
+  // run yet, so we seed it from config.
+  spawn_doors: u32 = 6,
+}
+
+@phase(per_agent)
+physics Explore {
+  on Tick {} where (
+    self.alive
+    && self.found_key == 0u
+  ) {
+    let doors = self.current_doors;
+    let dir = rng.action() % 4u;
+    // Direction → door-bit mapping. Nested if-else because the DSL
+    // surface doesn't accept `else if` chains today.
+    let bit = if (dir == 0u) {
+      1u  // N
+    } else {
+      if (dir == 1u) {
+        2u  // S
+      } else {
+        if (dir == 2u) {
+          4u  // E
+        } else {
+          8u  // W
+        }
+      }
+    };
+    if ((doors & bit) != 0u) {
+      let next_room = if (dir == 0u) {
+        self.current_room - 4u
+      } else {
+        if (dir == 1u) {
+          self.current_room + 4u
+        } else {
+          if (dir == 2u) {
+            self.current_room + 1u
+          } else {
+            self.current_room - 1u
+          }
+        }
+      };
+      // Door bitmap of the destination room — hand-authored table
+      // baked into the fixture. 16-way nested if-else over
+      // next_room ∈ [0, 16). Falls back to 0 for any out-of-bounds
+      // value (the door gate above prevents that from happening
+      // in practice, but the fall-through keeps the expression
+      // total).
+      let next_doors = if (next_room == 0u) { 6u } else {
+        if (next_room == 1u) { 14u } else {
+          if (next_room == 2u) { 12u } else {
+            if (next_room == 3u) { 10u } else {
+              if (next_room == 4u) { 3u } else {
+                if (next_room == 5u) { 7u } else {
+                  if (next_room == 6u) { 8u } else {
+                    if (next_room == 7u) { 3u } else {
+                      if (next_room == 8u) { 1u } else {
+                        if (next_room == 9u) { 3u } else {
+                          if (next_room == 10u) { 2u } else {
+                            if (next_room == 11u) { 3u } else {
+                              if (next_room == 12u) { 4u } else {
+                                if (next_room == 13u) { 13u } else {
+                                  if (next_room == 14u) { 9u } else {
+                                    if (next_room == 15u) { 1u } else { 0u }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      };
+      agents.set_current_room(self, next_room);
+      agents.set_current_doors(self, next_doors);
+      if (next_room == config.maze.key_room) {
+        agents.set_found_key(self, 1u);
+        agents.set_tick_found(self, world.tick);
+      }
+    }
+  }
+}
