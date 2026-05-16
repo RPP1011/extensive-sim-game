@@ -294,9 +294,9 @@ fn classify<'a>(comp: &'a Compilation, inv: &InvariantIR) -> InvariantShape<'a> 
         Some(v) => v,
         None => return InvariantShape::Skipped("view ref out of range (resolver bug?)"),
     };
-    if !matches!(view.kind, ViewKind::Materialized(_)) {
+    if !matches!(view.kind, ViewKind::Materialized(_) | ViewKind::Belief) {
         return InvariantShape::Skipped(
-            "view must be `@materialized` (lazy views aren't host-readback today)",
+            "view must be `@materialized` or `belief` (lazy views aren't host-readback today)",
         );
     }
     if !matches!(view.return_ty, IrType::F32) {

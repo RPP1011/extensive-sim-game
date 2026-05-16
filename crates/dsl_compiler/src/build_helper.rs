@@ -997,7 +997,11 @@ pub fn collect_materialized_views(
         .count() as u32;
     let mut out = Vec::new();
     for v in &comp.views {
-        if !matches!(v.kind, ViewKind::Materialized(_)) {
+        // Plan I (2026-05-15) — `belief` decls share the per-view
+        // storage allocator with materialized views; their PairMap
+        // sizing comes from the (Agent, Agent) signature inference
+        // rather than the kind discriminant.
+        if !matches!(v.kind, ViewKind::Materialized(_) | ViewKind::Belief) {
             continue;
         }
         let pair_keyed = if v.params.len() == 2
@@ -1111,7 +1115,12 @@ pub fn detect_pair_keyed_second_key(
     // the largest static count.
     let mut best: Option<PairKeyedSecondKey> = None;
     for v in &comp.views {
-        if !matches!(v.kind, ViewKind::Materialized(_)) {
+        // Plan I (2026-05-15) — `belief` decls share the per-view
+        // storage path with `@materialized` views; their PairMap
+        // hint is inferred from the (Agent, Agent) signature rather
+        // than carried on the kind enum. Treat both kinds the same
+        // for sizing purposes.
+        if !matches!(v.kind, ViewKind::Materialized(_) | ViewKind::Belief) {
             continue;
         }
         if v.params.len() != 2 {
