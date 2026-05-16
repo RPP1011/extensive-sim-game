@@ -146,6 +146,7 @@ fn decl_annotations_mut(d: &mut Decl) -> Option<&mut Vec<Annotation>> {
         Decl::Debug(x) => &mut x.annotations,
         Decl::AgentField(x) => &mut x.annotations,
         Decl::SpatialQuery(x) => &mut x.annotations,
+        Decl::Belief(x) => &mut x.annotations,
         // `query` does not currently accept annotations on the decl; trailing
         // `@`s after a `query` will fall through to the orphan-annotation
         // error path on the next iteration.
@@ -173,6 +174,7 @@ fn decl_span_mut(d: &mut Decl) -> &mut Span {
         Decl::Init(x) => &mut x.span,
         Decl::Debug(x) => &mut x.span,
         Decl::AgentField(x) => &mut x.span,
+        Decl::Belief(x) => &mut x.span,
     }
 }
 
@@ -192,6 +194,10 @@ fn decl(c: &mut Cursor) -> PResult<Decl> {
         Some("event") => event_decl(c, annotations, start).map(Decl::Event),
         Some("enum") => enum_decl(c, annotations, start).map(Decl::Enum),
         Some("view") => view_decl(c, annotations, start).map(Decl::View),
+        // Plan I — belief declaration. Mirrors view shape (signature
+        // + fold-body) plus `merge from <agent>: <op>` clauses
+        // interleaved with the fold handlers in the body.
+        Some("belief") => belief_decl(c, annotations, start).map(Decl::Belief),
         Some("query") => query_decl(c, annotations, start).map(Decl::Query),
         Some("physics") => physics_decl(c, annotations, start).map(Decl::Physics),
         Some("mask") => mask_decl(c, annotations, start).map(Decl::Mask),
@@ -923,6 +929,236 @@ fn view_decl(c: &mut Cursor, annotations: Vec<Annotation>, start: usize) -> PRes
     c.skip_ws();
     expect_char(c, '}').map_err(|e| e.with_context("parsing view body `}`"))?;
     Ok(ViewDecl { annotations, name, params, return_ty, body, span: Span::new(start, c.pos) })
+}
+
+/// Plan I — `belief <name>(observer: Agent[, key]) -> T { ... }`.
+/// Same surface as `view_decl` for the signature + fold-body, plus
+/// recognition of `merge from <agent>: <op>` clauses interleaved
+/// with the body's `on <Event> {...}` propagation handlers. The
+/// social-merge clauses split out into a separate list on
+/// [`BeliefDecl`]; the propagation handlers stay in [`ViewBody::Fold`].
+fn belief_decl(
+    c: &mut Cursor,
+    annotations: Vec<Annotation>,
+    start: usize,
+) -> PResult<BeliefDecl> {
+    expect_keyword(c, "belief").map_err(|e| e.with_context("parsing `belief` declaration"))?;
+    let name = ident(c).map_err(|e| e.with_context("parsing belief name"))?;
+    let params = parse_params(c)?;
+    c.skip_ws();
+    expect_str(c, "->").map_err(|e| e.with_context("parsing belief return-type arrow `->`"))?;
+    c.skip_ws();
+    let return_ty = type_ref(c)?;
+    c.skip_ws();
+    expect_char(c, '{').map_err(|e| e.with_context("parsing belief body `{`"))?;
+    // Custom body parser — mirrors parse_view_body's fold path but
+    // also recognises `merge from <agent>: <op>` clauses. We require
+    // beliefs to use the fold form (initial: + on/merge handlers);
+    // the lazy-expr form isn't meaningful for belief storage.
+    let (body, social_merges) = parse_belief_body(c)?;
+    c.skip_ws();
+    expect_char(c, '}').map_err(|e| e.with_context("parsing belief body `}`"))?;
+    Ok(BeliefDecl {
+        annotations,
+        name,
+        params,
+        return_ty,
+        body,
+        social_merges,
+        span: Span::new(start, c.pos),
+    })
+}
+
+/// Parse a belief body: `initial: <expr>` followed by zero or more
+/// `on <Event> { ... }` (propagation, lowered as fold handlers) AND
+/// `on <Event> { <pattern> } [where <expr>] merge from <agent>: <op>`
+/// (social-merge clauses, split out separately). Optional `decay:`
+/// + `clamp:` clauses are recognised by the same code paths as views.
+fn parse_belief_body(c: &mut Cursor) -> PResult<(ViewBody, Vec<SocialMergeClause>)> {
+    c.skip_ws();
+    expect_keyword(c, "initial")
+        .map_err(|e| e.with_context("parsing belief body — must start with `initial:`"))?;
+    c.skip_ws();
+    expect_char(c, ':').map_err(|e| e.with_context("parsing belief `initial:`"))?;
+    c.skip_ws();
+    let initial = parse_expr(c)?;
+    c.skip_ws();
+    if c.starts_with_char(',') {
+        c.bump(1);
+    }
+    let mut handlers = Vec::new();
+    let mut clamp = None;
+    let mut social_merges = Vec::new();
+    loop {
+        c.skip_ws();
+        if c.starts_with_char('}') {
+            break;
+        }
+        // clamp clause — same shape as view body.
+        if c.starts_with("clamp")
+            && c.src[c.pos + "clamp".len()..]
+                .chars()
+                .next()
+                .map_or(true, |ch| !is_ident_cont(ch))
+        {
+            c.bump("clamp".len());
+            c.skip_ws();
+            expect_char(c, ':').map_err(|e| e.with_context("parsing belief `clamp:`"))?;
+            c.skip_ws();
+            expect_char(c, '[').map_err(|e| e.with_context("parsing clamp bounds `[`"))?;
+            c.skip_ws();
+            let lo = parse_expr(c)?;
+            c.skip_ws();
+            expect_char(c, ',').map_err(|e| e.with_context("parsing clamp bounds `,`"))?;
+            c.skip_ws();
+            let hi = parse_expr(c)?;
+            c.skip_ws();
+            expect_char(c, ']').map_err(|e| e.with_context("parsing clamp bounds `]`"))?;
+            c.skip_ws();
+            if c.starts_with_char(',') {
+                c.bump(1);
+            }
+            clamp = Some((lo, hi));
+            continue;
+        }
+        // on-handler — could be a propagation handler (body is `{...}`)
+        // or a social-merge clause (body is `merge from <agent>: <op>`).
+        // Distinguish by peeking past the pattern.
+        if c.starts_with("on ") || c.starts_with("on\t") || c.starts_with("on\n") {
+            // Try social-merge first; if the post-pattern token isn't
+            // `merge` (or `where ... merge`), fall back to fold handler.
+            // To do this without backtracking, we parse a generalised
+            // belief handler that returns either variant.
+            let handler_or_merge = parse_belief_handler(c)?;
+            match handler_or_merge {
+                BeliefHandler::Propagation(h) => handlers.push(h),
+                BeliefHandler::SocialMerge(m) => social_merges.push(m),
+            }
+            continue;
+        }
+        // Fixture-extension fields like view body's parse-and-discard
+        // shape. Keep parity with parse_view_body.
+        if let Some(name) = peek_ident(c) {
+            let after = c.pos + name.len();
+            let mut look = Cursor { src: c.src, pos: after };
+            look.skip_ws();
+            if look.starts_with_char(':') {
+                c.bump(name.len());
+                c.skip_ws();
+                c.bump(1);
+                c.skip_ws();
+                let _ = parse_expr(c)?;
+                c.skip_ws();
+                if c.starts_with_char(',') {
+                    c.bump(1);
+                }
+                continue;
+            }
+        }
+        break;
+    }
+    Ok((ViewBody::Fold { initial, handlers, clamp }, social_merges))
+}
+
+enum BeliefHandler {
+    Propagation(FoldHandler),
+    SocialMerge(SocialMergeClause),
+}
+
+/// Parse one `on <Event> { <pattern> } [where <expr>] (body | merge from <agent>: <op>)`
+/// into either a propagation handler or a social-merge clause. The
+/// pattern + optional where-clause are shared; the trailing form
+/// (`{` body vs `merge from`) disambiguates. Mirrors `parse_fold_handler`'s
+/// where-clause + body shape so propagation handlers parse identically
+/// to view fold handlers.
+fn parse_belief_handler(c: &mut Cursor) -> PResult<BeliefHandler> {
+    let start = c.pos;
+    expect_keyword(c, "on").map_err(|e| e.with_context("parsing belief `on` handler"))?;
+    c.skip_ws();
+    let pattern = parse_event_pattern(c)?;
+    c.skip_ws();
+    // where-clause, terminated at `{` OR at `merge` keyword (so the
+    // bare expr parser doesn't consume the merge clause).
+    let where_clause = if c.starts_with("where") {
+        let after = c.pos + "where".len();
+        let next = c.src[after..].chars().next();
+        if next.map_or(true, |ch| !is_ident_cont(ch)) {
+            c.bump("where".len());
+            c.skip_ws();
+            // Bound at `{` (propagation body) OR `merge` (social-merge
+            // tail) so the predicate doesn't gobble the trailing
+            // form.
+            let expr = parse_expr_bounded(c, |ck| {
+                ck.starts_with_char('{')
+                    || (ck.starts_with("merge")
+                        && ck.src[ck.pos + "merge".len()..]
+                            .chars()
+                            .next()
+                            .map_or(true, |ch| !is_ident_cont(ch)))
+            })?;
+            c.skip_ws();
+            Some(expr)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    c.skip_ws();
+    // Disambiguate: `merge from <agent>: <op>` is a social-merge;
+    // `{ ... }` is a propagation handler body.
+    if c.starts_with("merge")
+        && c.src[c.pos + "merge".len()..]
+            .chars()
+            .next()
+            .map_or(true, |ch| !is_ident_cont(ch))
+    {
+        c.bump("merge".len());
+        c.skip_ws();
+        expect_keyword(c, "from")
+            .map_err(|e| e.with_context("parsing `merge from` clause"))?;
+        c.skip_ws();
+        let source_agent_name = ident(c)
+            .map_err(|e| e.with_context("parsing source-agent identifier in `merge from`"))?;
+        c.skip_ws();
+        expect_char(c, ':')
+            .map_err(|e| e.with_context("parsing `:` in `merge from <agent>:`"))?;
+        c.skip_ws();
+        let op_name = ident(c)
+            .map_err(|e| e.with_context("parsing merge op name (bit_or / max / min / replace)"))?;
+        let op = match op_name.as_str() {
+            "bit_or" => SocialMergeOpName::BitOr,
+            "max" => SocialMergeOpName::Max,
+            "min" => SocialMergeOpName::Min,
+            "replace" => SocialMergeOpName::Replace,
+            other => {
+                return Err(ParseErr::at(
+                    Span::new(start, c.pos),
+                    format!(
+                        "unknown merge op `{other}` — expected one of bit_or / max / min / replace"
+                    ),
+                ));
+            }
+        };
+        Ok(BeliefHandler::SocialMerge(SocialMergeClause {
+            pattern,
+            where_clause,
+            source_agent_name,
+            op,
+            span: Span::new(start, c.pos),
+        }))
+    } else {
+        // Propagation body — same shape as a view fold handler.
+        expect_char(c, '{').map_err(|e| e.with_context("parsing belief handler body `{`"))?;
+        let body = parse_stmt_block_until_close(c)?;
+        expect_char(c, '}').map_err(|e| e.with_context("parsing belief handler body `}`"))?;
+        Ok(BeliefHandler::Propagation(FoldHandler {
+            pattern,
+            where_clause,
+            body,
+            span: Span::new(start, c.pos),
+        }))
+    }
 }
 
 /// Parse `spatial_query <name>(<params>) = <filter_expr>`.

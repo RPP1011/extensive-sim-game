@@ -48,6 +48,14 @@ pub enum Decl {
     EventTag(EventTagDecl),
     Enum(EnumDecl),
     View(ViewDecl),
+    /// Plan I — `belief <name>(observer: Agent[, key]) -> T { ... }`
+    /// declaration. Mirrors `View` shape (params + return_ty + fold-body
+    /// propagation handlers + decay + clamp) plus a `social_merges`
+    /// list of `merge from <agent>: <op>` clauses. Resolved into a
+    /// `ViewIR` with `kind: ViewKind::Belief` and `social_merges`
+    /// populated; lowering at slice I.3 picks the storage hint from
+    /// the signature shape.
+    Belief(BeliefDecl),
     Query(QueryDecl),
     Physics(PhysicsDecl),
     Mask(MaskDecl),
@@ -367,6 +375,48 @@ pub struct ViewDecl {
     pub return_ty: TypeRef,
     pub body: ViewBody,
     pub span: Span,
+}
+
+/// Plan I — AST shape for the new `belief` declaration. Carries the
+/// same fields as [`ViewDecl`] plus a list of `social_merges` parsed
+/// from `merge from <agent>: <op>` clauses interleaved with the
+/// fold-body's `on <Event> {...}` handlers. The body still uses
+/// [`ViewBody::Fold`] for the propagation handlers — only the
+/// social-merge clauses split out into their own list.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct BeliefDecl {
+    pub annotations: Vec<Annotation>,
+    pub name: String,
+    pub params: Vec<Param>,
+    pub return_ty: TypeRef,
+    pub body: ViewBody,
+    pub social_merges: Vec<SocialMergeClause>,
+    pub span: Span,
+}
+
+/// Plan I — one `merge from <agent_field>: <op>` clause inside a
+/// belief body. Parser-side AST; the resolver maps `source_agent_name`
+/// to a `LocalRef` once the event pattern's bindings are in scope.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SocialMergeClause {
+    pub pattern: EventPattern,
+    pub where_clause: Option<Expr>,
+    /// The event-binder identifier naming the giver agent
+    /// (e.g. `dead` in `merge from dead: bit_or`).
+    pub source_agent_name: String,
+    pub op: SocialMergeOpName,
+    pub span: Span,
+}
+
+/// Plan I — parser-side spelling of [`crate::ir::MergeOp`]. Kept as a
+/// separate enum so the AST stays decoupled from the IR; resolver
+/// converts via a 1:1 mapping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum SocialMergeOpName {
+    BitOr,
+    Max,
+    Min,
+    Replace,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

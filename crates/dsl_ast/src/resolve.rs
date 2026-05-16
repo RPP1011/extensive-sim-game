@@ -1190,6 +1190,10 @@ fn collect(
                 // compile via `clear_for_compile` at the build helper
                 // entry point.
             }
+            Decl::Belief(_) => {
+                // Slice I.2 — belief decls will register a ViewRef and
+                // reserve a ViewIR slot here. Currently pass-through.
+            }
         }
     }
     Ok(())
@@ -1716,6 +1720,9 @@ fn resolve_bodies(
                 // are interned process-locally by
                 // `dsl_compiler::custom_agent_fields::populate`
                 // BEFORE lowering. No IR pass-2 work here.
+            }
+            Decl::Belief(_) => {
+                // Slice I.2 — belief body resolution lands here.
             }
         }
     }
