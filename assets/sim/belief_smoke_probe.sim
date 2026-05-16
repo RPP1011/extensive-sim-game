@@ -1,0 +1,69 @@
+// belief_smoke_probe — Plan I slice I.5 end-to-end fixture for the
+// `belief <name>(observer: Agent[, subject: Agent]) -> T { … }`
+// primitive landed in slices I.1 (parser + AST), I.2 (resolver +
+// signature validation), and I.3 (CG lowering + storage-hint
+// inference).
+//
+// **MVP scope.** Today's lowering supports the pair-keyed `(observer:
+// Agent, subject: Agent) -> u32` shape only — single-key and
+// key-typed second-param shapes surface as `UnsupportedBeliefShape`
+// (slice I.3a). Social-merge clauses round-trip on the IR but do not
+// yet emit additional compute ops (slice I.4). This fixture
+// therefore exercises the pair-keyed propagation-handler-only path —
+// the same surface `view beliefs_flags` already serves, but declared
+// through the new `belief` keyword.
+//
+// **What the fixture proves end-to-end:**
+//   1. `belief seen(observer, subject) -> u32` parses + resolves +
+//      lowers without falling back to `view`.
+//   2. The auto-emitted `view_storage_primary_buf` is sized for the
+//      full pair-map shape (agent_count^2 u32 cells, mirroring the
+//      tom_probe `pair_map` sizing pin).
+//   3. The propagation handler fires on `SubjectSeen` events and
+//      sets the matching `[observer, subject]` cell to a non-zero
+//      value the host can read back.
+//
+// **Behavioural pin shape (smoke).** AGENT_COUNT = 4. Each tick every
+// alive agent emits `SubjectSeen { observer: self, subject: 0, mark:
+// 1u }`. After one tick the `[i, 0]` column should be set on every
+// alive observer slot; cells off the column stay 0.
+
+event Tick { }
+
+event SubjectSeen {
+  observer: Agent,
+  subject: Agent,
+  mark: u32,
+}
+
+entity Probe : Agent {
+  // Implicit Agent payload (pos, alive, etc.). No extra fields needed
+  // — the fixture's only job is to fold SubjectSeen records into the
+  // belief's pair-keyed storage.
+}
+
+// Every alive agent emits one SubjectSeen against subject 0 per tick.
+// Dispatches per-agent so each slot fires its own event.
+@phase(per_agent)
+physics EmitSeen {
+  on Tick {} where (self.alive) {
+    emit SubjectSeen {
+      observer: self,
+      subject: 0,
+      mark: 1,
+    }
+  }
+}
+
+// The belief under test. Pair-keyed `(observer, subject) -> u32`
+// bitmap. Propagation handler folds the `mark` bit into the
+// `[observer, subject]` cell — same bit-OR shape as `view
+// beliefs_flags`, declared through the `belief` keyword.
+@materialized(on_event = [SubjectSeen], storage = pair_map)
+belief seen(observer: Agent, subject: Agent) -> u32 {
+  initial: 0,
+  on SubjectSeen { observer: o, subject: s, mark: m }
+    where (o == observer) && (s == subject)
+    { self |= m }
+  clamp: [0, 4294967295],
+}
