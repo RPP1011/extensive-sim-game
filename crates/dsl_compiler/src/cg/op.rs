@@ -737,6 +737,15 @@ pub enum ComputeOpKind {
         on_event: EventKindId,
         /// `MergeOp` discriminant — see variant docstring.
         op: u8,
+        /// Event-payload word offset where the source-agent id lives.
+        /// Computed at lowering time from the social-merge clause's
+        /// `source_agent: LocalRef` → matching pattern-binding field
+        /// → event's IR field index. Word offset = `2 + field_index`
+        /// (2 accounts for the kind + seq header words). Defaults to
+        /// 2 when the lookup fails (defensive — matches the prior
+        /// hardcoded behaviour for events with one Agent payload
+        /// field).
+        source_field_offset: u8,
     },
 
     /// One-shot scratch op. See [`PlumbingKind`].
@@ -954,7 +963,7 @@ impl ComputeOpKind {
                 format!("spatial_query({})", kind)
             }
             ComputeOpKind::Plumbing { kind } => format!("plumbing({})", kind.label()),
-            ComputeOpKind::BeliefSocialMerge { view, on_event, op } => {
+            ComputeOpKind::BeliefSocialMerge { view, on_event, op, source_field_offset } => {
                 let op_label = match op {
                     0 => "bit_or",
                     1 => "max",
@@ -963,7 +972,7 @@ impl ComputeOpKind {
                     _ => "?",
                 };
                 format!(
-                    "belief_social_merge(view=#{}, on_event=#{}, op={op_label})",
+                    "belief_social_merge(view=#{}, on_event=#{}, op={op_label}, src_offset={source_field_offset})",
                     view.0, on_event.0
                 )
             }

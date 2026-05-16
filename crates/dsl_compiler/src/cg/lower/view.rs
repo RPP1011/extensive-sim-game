@@ -389,10 +389,37 @@ pub fn lower_view(
                     dsl_ast::ir::MergeOp::Min => 2,
                     dsl_ast::ir::MergeOp::Replace => 3,
                 };
+                // Compute the source-agent's event-payload offset
+                // from the event layout. The merge clause's
+                // `source_agent: LocalRef` is bound by one of the
+                // event pattern's `Bind { local: ... }` arms; find
+                // that binding's `field` name, then look up its
+                // word offset in the event payload via
+                // `ctx.event_layouts`. Final word offset in the
+                // event ring = `header_word_count (=2) + payload_offset`.
+                // Falls back to offset 2 (the historic hardcoded
+                // value) when the lookup fails — matches the prior
+                // behaviour for events with the source field as the
+                // first payload word.
+                let source_field_offset: u8 = (|| {
+                    let binder_field = merge.pattern.bindings.iter().find_map(|b| {
+                        if let dsl_ast::ir::IrPattern::Bind { local, .. } = &b.value {
+                            if *local == merge.source_agent {
+                                return Some(b.field.as_str());
+                            }
+                        }
+                        None
+                    })?;
+                    let layout = ctx.event_layouts.get(&event_kind_id)?;
+                    let field = layout.fields.get(binder_field)?;
+                    Some((layout.header_word_count + field.word_offset_in_payload).min(9) as u8)
+                })()
+                .unwrap_or(2);
                 let kind = crate::cg::op::ComputeOpKind::BeliefSocialMerge {
                     view: view_id,
                     on_event: event_kind_id,
                     op: op_discriminant,
+                    source_field_offset,
                 };
                 let dispatch = crate::cg::dispatch::DispatchShape::PerEvent {
                     source_ring: crate::cg::data_handle::EventRingId(0),

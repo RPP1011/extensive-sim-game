@@ -490,6 +490,7 @@ pub fn kernel_topology_to_spec_and_body(
         view_id,
         on_event_kind_id,
         op,
+        source_field_offset,
     } = &class
     {
         let stride = prog
@@ -526,6 +527,7 @@ pub fn kernel_topology_to_spec_and_body(
             *op,
             stride,
             is_pair_keyed,
+            *source_field_offset,
         );
         let spec = KernelSpec {
             name,
@@ -1252,6 +1254,10 @@ enum KernelKindClass {
         view_id: u32,
         on_event_kind_id: u32,
         op: u8,
+        /// Event-payload word offset where the source-agent id lives.
+        /// Threaded through from the lowering's IR-driven lookup —
+        /// see `cg/lower/view.rs::lower_view` Belief arm.
+        source_field_offset: u8,
     },
     /// Anything not detected as ViewFold or ViewDecay. Routes through
     /// the generic handle-aggregation pipeline + placeholder cfg shape.
@@ -1293,7 +1299,7 @@ fn classify_kernel(body_ops: &[&ComputeOp], prog: &CgProgram) -> KernelKindClass
         // BeliefSocialMerge op and nothing else routes through the
         // dedicated build path that declares view_storage_primary as
         // a binding and emits the per-cell merge body.
-        if let ComputeOpKind::BeliefSocialMerge { view, on_event, op } = &body_ops[0].kind {
+        if let ComputeOpKind::BeliefSocialMerge { view, on_event, op, source_field_offset } = &body_ops[0].kind {
             let view_name = match prog.interner.get_view_name(*view) {
                 Some(name) => name.to_string(),
                 None => format!("view_{}", view.0),
@@ -1303,6 +1309,7 @@ fn classify_kernel(body_ops: &[&ComputeOp], prog: &CgProgram) -> KernelKindClass
                 view_id: view.0,
                 on_event_kind_id: on_event.0,
                 op: *op,
+                source_field_offset: *source_field_offset,
             };
         }
     }
@@ -2350,7 +2357,7 @@ fn single_op_kernel_name(kind: &ComputeOpKind, prog: &CgProgram) -> String {
         },
         ComputeOpKind::SpatialQuery { kind } => format!("spatial_{}", spatial_kind_name(*kind)),
         ComputeOpKind::Plumbing { kind } => plumbing_kind_name(kind),
-        ComputeOpKind::BeliefSocialMerge { view, on_event, op } => {
+        ComputeOpKind::BeliefSocialMerge { view, on_event, op, .. } => {
             let view_part = match prog.interner.get_view_name(*view) {
                 Some(name) => format!("merge_{name}"),
                 None => format!("merge_view_{}", view.0),
@@ -3965,6 +3972,7 @@ fn build_belief_social_merge_wgsl_body(
     op: u8,
     stride: u32,
     is_pair_keyed: bool,
+    source_field_offset: u8,
 ) -> String {
     let op_label = match op {
         0 => "bit_or",
@@ -4030,11 +4038,12 @@ fn build_belief_social_merge_wgsl_body(
          \x20               if (event_idx >= cfg.event_count) {{ return; }}\n\
          \x20               let kind = event_ring[event_idx * {stride}u + 0u];\n\
          \x20               if (kind != {on_event_kind_id}u) {{ return; }}\n\
-         \x20               // Source agent — first payload word (offset 2). IR-level\n\
-         \x20               // field-offset lookup from `source_agent: LocalRef` is\n\
-         \x20               // a follow-up slice; shipping events with one Agent\n\
-         \x20               // payload field (AllyDied, etc.) land at offset 2.\n\
-         \x20               let source_agent = event_ring[event_idx * {stride}u + 2u];\n\
+         \x20               // Source agent — event payload offset {source_field_offset} (computed\n\
+         \x20               // from the IR's `source_agent: LocalRef` ↔ event field map,\n\
+         \x20               // see cg/lower/view.rs::lower_view Belief arm). The hardcoded\n\
+         \x20               // `2u` historic fallback corresponds to events with the source\n\
+         \x20               // as the first payload word (AllyDied {{ dead: Agent }} etc.).\n\
+         \x20               let source_agent = event_ring[event_idx * {stride}u + {source_field_offset}u];\n\
 {merge_loop}",
     )
 }
@@ -5080,7 +5089,7 @@ fn lower_op_body(
         // before this function is called. Emit a stub for the
         // defensive case where a future change makes the op land in
         // the generic pipeline.
-        ComputeOpKind::BeliefSocialMerge { view, on_event, op } => Ok(format!(
+        ComputeOpKind::BeliefSocialMerge { view, on_event, op, .. } => Ok(format!(
             "// BeliefSocialMerge in generic pipeline — should be \
              routed through KernelKindClass::BeliefSocialMerge. \
              view=#{} on_event=#{} op={}",
