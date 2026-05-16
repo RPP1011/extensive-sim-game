@@ -120,6 +120,7 @@ fn main() {
                 | "dungeon_stealth"
                 | "dungeon_horde"
                 | "threat_horizon_stresstest"
+                | "belief_smoke_probe"
         ) {
             continue;
         }

@@ -164,6 +164,53 @@ fn belief_with_multiple_merge_ops_produces_all_three_variants() {
 }
 
 #[test]
+fn every_merge_op_emits_matching_atomic_primitive() {
+    // Plan I.4b — verify the WGSL kernel emit picks the right
+    // `atomicOr`/`atomicMax`/`atomicMin`/`atomicStore` per op
+    // discriminant.
+    use dsl_compiler::cg::emit::emit_cg_program;
+    use dsl_compiler::cg::schedule::{synthesize_schedule, ScheduleStrategy};
+
+    let cases = [
+        ("bit_or", "atomicOr"),
+        ("max", "atomicMax"),
+        ("min", "atomicMin"),
+        ("replace", "atomicStore"),
+    ];
+    for (op_name, expected_atomic) in cases {
+        let src = format!(
+            "\
+            event Trigger {{ giver: Agent }}\n\
+            belief b(observer: Agent, subject: Agent) -> u32 {{\n\
+              initial: 0,\n\
+              on Trigger {{ giver: g }} merge from g: {op_name}\n\
+            }}\n"
+        );
+        let cg = lower_str(&src).unwrap_or_else(|diags| {
+            panic!("op {op_name}: lower failed: {diags:?}")
+        });
+        let sched = synthesize_schedule(&cg, ScheduleStrategy::Default);
+        let art = emit_cg_program(&sched.schedule, &cg)
+            .unwrap_or_else(|e| panic!("op {op_name}: emit failed: {e:?}"));
+        let merge = art
+            .wgsl_files
+            .iter()
+            .find(|(n, _)| n.contains(&format!("merge_b_trigger_{op_name}")))
+            .unwrap_or_else(|| {
+                let names: Vec<&str> = art.wgsl_files.iter().map(|(n, _)| n.as_str()).collect();
+                panic!("op {op_name}: merge kernel not found; emitted: {names:?}")
+            });
+        let body = &merge.1;
+        assert!(
+            body.contains(expected_atomic),
+            "op {op_name}: kernel body should call `{expected_atomic}`; \
+             body excerpt: {}",
+            &body[..body.len().min(800)]
+        );
+    }
+}
+
+#[test]
 fn belief_interned_under_its_source_name() {
     // The lowering interns view names on the builder so call-site
     // lookup can resolve `BuiltinId::ViewCall { view: ViewId }`. The

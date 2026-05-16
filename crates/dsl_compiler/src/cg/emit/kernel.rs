@@ -3951,25 +3951,41 @@ fn build_belief_social_merge_wgsl_body(
         3 => "replace",
         _ => "unknown",
     };
+    // Per-op atomic primitive. Each variant is a single WGSL
+    // intrinsic that takes a `&atomic<u32>` ptr + the value to apply.
+    //   * bit_or  → atomicOr     (idempotent — safe under repeated
+    //                              merge; commutative)
+    //   * max     → atomicMax    (commutative + associative; receiver
+    //                              keeps the higher of the two)
+    //   * min     → atomicMin    (symmetric to Max)
+    //   * replace → atomicStore  (last-writer-wins — the FOLD semantics
+    //                              are "freshest observer overwrites";
+    //                              bare atomicStore is the right shape
+    //                              even though it's not commutative in
+    //                              the general case, because the merge
+    //                              clause's source_agent is the FRESH
+    //                              actor by construction).
+    let atomic_op = match op {
+        0 => "atomicOr",
+        1 => "atomicMax",
+        2 => "atomicMin",
+        3 => "atomicStore",
+        _ => "atomicOr", // unknown discriminant — defensive default
+    };
     let merge_loop = match op {
-        // bit_or — the workhorse: idempotent under repeated merge,
-        // safe under concurrent thread-per-event dispatch (atomicOr).
-        0 => format!(
+        0 | 1 | 2 | 3 => format!(
             "                let n_agents = cfg.agent_cap;\n\
              \x20               for (var r: u32 = 0u; r < n_agents; r = r + 1u) {{\n\
              \x20                   for (var s: u32 = 0u; s < n_agents; s = s + 1u) {{\n\
              \x20                       let other_cell = atomicLoad(&view_storage_primary[source_agent * n_agents + s]);\n\
-             \x20                       atomicOr(&view_storage_primary[r * n_agents + s], other_cell);\n\
+             \x20                       {atomic_op}(&view_storage_primary[r * n_agents + s], other_cell);\n\
              \x20                   }}\n\
              \x20               }}\n"
         ),
-        // max / min / replace — wired structurally but the per-cell
-        // body needs the matching atomic primitive (atomicMax,
-        // atomicMin, atomicStore). For today's smoke probe scope only
-        // bit_or fires; the others are stubbed with the same
-        // structural anchor (`source_agent` consumed) so they pass
-        // naga validation.
-        _ => "                _ = source_agent; // op variant deferred (only bit_or wired today)\n".to_string(),
+        // Unknown op discriminant — emit a documented stub. The
+        // resolver gates the surface to the four supported ops so
+        // this arm is unreachable from real source.
+        _ => "                _ = source_agent; // unknown op discriminant — defensive stub\n".to_string(),
     };
     format!(
         "                // Plan I.4b belief_social_merge kernel — view=#{view_id} on_event=#{on_event_kind_id} op={op_label}\n\
