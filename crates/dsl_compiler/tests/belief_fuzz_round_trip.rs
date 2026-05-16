@@ -62,6 +62,13 @@ impl Pcg {
 enum BeliefShape {
     SingleKey,
     PairKey,
+    /// Plan I slice I.3b — `(observer: Agent, key: u32) @key_pop(K=N)`.
+    /// Pair-keyed shape where the second param is a u32 key (not an
+    /// Agent), declared with `@key_pop(K=N)` for the per-view sizing
+    /// allocator. Storage is `agent_cap × K` cells indexed
+    /// `[observer * K + key]`. The fuzz emits with K ∈ [2, 128] to
+    /// exercise the range without hammering allocation.
+    KeyTyped { k: u32 },
 }
 
 #[derive(Clone, Copy)]
@@ -108,10 +115,20 @@ impl ReturnTy {
 }
 
 fn gen_belief_sim(rng: &mut Pcg, idx: usize) -> String {
-    let shape = if rng.bool_with_prob(0.5) {
+    // Three-way pick: 40% single-key, 40% pair-keyed Agent×Agent,
+    // 20% I.3b key-typed (Agent, u32) with random K. Skewed toward
+    // the existing shapes so the regression coverage stays dense
+    // while the new shape gets meaningful sample count (≥1000 of
+    // 10000 iterations).
+    let shape_roll = rng.next_u32() % 100;
+    let shape = if shape_roll < 40 {
         BeliefShape::SingleKey
-    } else {
+    } else if shape_roll < 80 {
         BeliefShape::PairKey
+    } else {
+        BeliefShape::KeyTyped {
+            k: rng.range_u32(2, 128),
+        }
     };
     // Restrict to the return types the lowering's fold-body type
     // checker accepts with the corresponding `update_op` literal.
@@ -136,8 +153,10 @@ fn gen_belief_sim(rng: &mut Pcg, idx: usize) -> String {
         src.push_str(&format!(
             "event Evt{idx}_{h} {{ observer: Agent"
         ));
-        if matches!(shape, BeliefShape::PairKey) {
-            src.push_str(", subject: Agent");
+        match shape {
+            BeliefShape::SingleKey => {}
+            BeliefShape::PairKey => src.push_str(", subject: Agent"),
+            BeliefShape::KeyTyped { .. } => src.push_str(", room: u32"),
         }
         src.push_str(", payload: u32 }\n");
     }
@@ -152,10 +171,18 @@ fn gen_belief_sim(rng: &mut Pcg, idx: usize) -> String {
     if with_decay {
         src.push_str("@decay(rate = 0.85, per = tick)\n");
     }
+    // I.3b — emit `@key_pop(K = N)` on the belief decl so the per-
+    // view allocator can size `agent_cap × K` cells. Without this
+    // the lowering rejects the (Agent, u32) shape with
+    // `UnsupportedBeliefShape`.
+    if let BeliefShape::KeyTyped { k } = shape {
+        src.push_str(&format!("@key_pop(K = {k})\n"));
+    }
     src.push_str(&format!("belief b{idx}("));
     match shape {
         BeliefShape::SingleKey => src.push_str("observer: Agent"),
         BeliefShape::PairKey => src.push_str("observer: Agent, subject: Agent"),
+        BeliefShape::KeyTyped { .. } => src.push_str("observer: Agent, room: u32"),
     }
     src.push_str(&format!(") -> {} {{\n", ret_ty.type_name()));
     src.push_str(&format!("  initial: {},\n", ret_ty.initial_literal()));
@@ -187,6 +214,12 @@ fn gen_belief_sim(rng: &mut Pcg, idx: usize) -> String {
                         ret_ty.update_op()
                     ));
                 }
+                BeliefShape::KeyTyped { .. } => {
+                    src.push_str(&format!(
+                        "  on Evt{idx}_{h} {{ observer: _, room: _, payload: _ }} {{ {} }}\n",
+                        ret_ty.update_op()
+                    ));
+                }
             }
         } else {
             // PerEvent: bind + where-gate against the params.
@@ -200,6 +233,15 @@ fn gen_belief_sim(rng: &mut Pcg, idx: usize) -> String {
                 BeliefShape::PairKey => {
                     src.push_str(&format!(
                         "  on Evt{idx}_{h} {{ observer: o, subject: s, payload: _ }} where (o == observer) && (s == subject) {{ {} }}\n",
+                        ret_ty.update_op()
+                    ));
+                }
+                BeliefShape::KeyTyped { .. } => {
+                    // I.3b — second binder is u32 `room`, not Agent.
+                    // The `r == room` gate exercises the same where-
+                    // clause pattern but on a u32 key.
+                    src.push_str(&format!(
+                        "  on Evt{idx}_{h} {{ observer: o, room: r, payload: _ }} where (o == observer) && (r == room) {{ {} }}\n",
                         ret_ty.update_op()
                     ));
                 }
