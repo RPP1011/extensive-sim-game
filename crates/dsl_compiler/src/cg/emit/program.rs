@@ -1400,16 +1400,42 @@ fn compose_view_storage_prelude(body: &str, prog: &CgProgram) -> String {
 "
             ));
         } else {
-            // Scalar getter — read u32 from the storage binding,
-            // bitcast to f32. The binding name + slot are pinned by
-            // `kernel_topology_to_spec_and_body`'s body-scan step which
-            // appends `view_storage_<view_name>_primary` to the kernel's
-            // BGL when the same substring is detected.
-            out.push_str(&format!(
-                "fn view_{view_id}_get(idx: u32) -> f32 {{\n\
-                 \x20   return bitcast<f32>(view_storage_{view_name}_primary[idx]);\n\
-                 }}\n"
-            ));
+            // Plan I slice I.3b extension — pair-keyed view-read.
+            // When the view's signature has 2 params (the lowering
+            // for `views.<name>(observer, key)` emits 2-arg form)
+            // and the second key has a static K, emit a 2-arg
+            // helper that composes the `observer * K + key` index.
+            // Untyped result currently returns u32 directly (no
+            // bitcast — pair-keyed beliefs are u32-typed in every
+            // shipping fixture). Future cuts may need an f32 variant.
+            //
+            // Single-arg single-key (Threats scalar) path is the
+            // historical default fall-through below.
+            let sig = prog.view_signatures.get(view_id);
+            let is_pair_keyed_2arg = sig
+                .map(|s| s.args.len() == 2)
+                .unwrap_or(false);
+            let pair_k = sig.and_then(|s| s.pair_keyed_k);
+            if is_pair_keyed_2arg && pair_k.is_some() {
+                let k = pair_k.unwrap();
+                out.push_str(&format!(
+                    "fn view_{view_id}_get(observer: u32, key: u32) -> u32 {{\n\
+                     \x20   return view_storage_{view_name}_primary[observer * {k}u + key];\n\
+                     }}\n"
+                ));
+            } else {
+                // Scalar getter — read u32 from the storage binding,
+                // bitcast to f32. The binding name + slot are pinned
+                // by `kernel_topology_to_spec_and_body`'s body-scan
+                // step which appends `view_storage_<view_name>_primary`
+                // to the kernel's BGL when the same substring is
+                // detected.
+                out.push_str(&format!(
+                    "fn view_{view_id}_get(idx: u32) -> f32 {{\n\
+                     \x20   return bitcast<f32>(view_storage_{view_name}_primary[idx]);\n\
+                     }}\n"
+                ));
+            }
         }
     }
     out
@@ -3085,6 +3111,7 @@ mod tests {
                 storage_hint: Some(CgStorageHint::PerEntityRing { k: 4 }),
                 fold_op: None,
                 belief_gated: false,
+                pair_keyed_k: None,
             },
         );
         prog.view_signatures = sigs;
@@ -3191,6 +3218,7 @@ mod tests {
                 storage_hint: Some(CgStorageHint::PerEntityRing { k: 4 }),
                 fold_op: None,
                 belief_gated: false,
+                pair_keyed_k: None,
             },
         );
         prog.view_signatures = sigs;
@@ -3294,6 +3322,7 @@ mod tests {
                 storage_hint: Some(CgStorageHint::PerEntityRing { k: 4 }),
                 fold_op: None,
                 belief_gated: false,
+                pair_keyed_k: None,
             },
         );
         prog.view_signatures = sigs;

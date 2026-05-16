@@ -4729,6 +4729,7 @@ mod tests {
                 storage_hint: None,
                 fold_op: None,
                 belief_gated: false,
+                pair_keyed_k: None,
             },
         );
         b.set_view_signatures(sigs);
@@ -4779,6 +4780,7 @@ mod tests {
                 storage_hint: None,
                 fold_op: None,
                 belief_gated: false,
+                pair_keyed_k: None,
             },
         );
         b.set_view_signatures(sigs);
@@ -4824,6 +4826,7 @@ mod tests {
                 storage_hint: None,
                 fold_op: None,
                 belief_gated: false,
+                pair_keyed_k: None,
             },
         );
         b.set_view_signatures(sigs);
@@ -4869,6 +4872,7 @@ mod tests {
                 storage_hint: None,
                 fold_op: None,
                 belief_gated: false,
+                pair_keyed_k: None,
             },
         );
         b.set_view_signatures(sigs);

@@ -1,0 +1,96 @@
+// maze_explorer_belief_smart — fourth maze variant. Same visited-
+// aware policy as maze_explorer_smart, but the visited bitmap is
+// backed by an I.3b key-typed belief (`(observer: Agent, room: u32)
+// @key_pop(K=16)`) instead of a u32 SoA field + room_bit table.
+//
+// First fixture to actually READ a user-declared pair-keyed belief
+// from a physics rule body — exercises the pair-keyed view-read
+// prelude (`view_<id>_get(observer, key)`) shipped alongside.
+//
+// Outcome should be comparable to maze_explorer_smart (median ~128,
+// mean ~263 over 16 seeds) — the policy is identical, only the
+// storage substrate differs. If tick_found drifts wildly the read
+// is broken.
+
+event Tick { }
+
+event EnteredRoom {
+  observer: Agent,
+  room: u32,
+}
+
+entity Adventurer : Agent { }
+
+field current_room: u32
+field found_key: u32
+field tick_found: u32
+
+table maze_doors: u32[16] = [
+  6, 14, 12, 10,
+  3,  7,  8,  3,
+  1,  3,  2,  3,
+  4, 13,  9,  1,
+]
+
+table dir_bit: u32[4] = [1, 2, 4, 8]
+
+config maze {
+  key_room: u32 = 15,
+}
+
+// The visited belief — one bit per (observer, room) cell. Initial
+// 0 everywhere; propagation handler latches 1 on each EnteredRoom.
+// Storage is `agent_cap × K = 1 × 16 = 16 u32 cells` for the
+// single-agent maze; the `views.visited(self, room)` read in the
+// per-tick rule walks the pair-keyed view-read prelude.
+@key_pop(K = 16)
+belief visited(observer: Agent, room: u32) -> u32 {
+  initial: 0,
+  on EnteredRoom { observer: o, room: r } where (o == observer) {
+    self |= 1u
+  }
+}
+
+@phase(per_agent)
+physics Explore {
+  on Tick {} where (
+    self.alive
+    && self.found_key == 0u
+  ) {
+    let doors = tables.maze_doors(self.current_room);
+    let dir = rng.action() % 4u;
+    let bit = tables.dir_bit(dir);
+    if ((doors & bit) != 0u) {
+      let next_room = if (dir == 0u) {
+        self.current_room - 4u
+      } else {
+        if (dir == 1u) {
+          self.current_room + 4u
+        } else {
+          if (dir == 2u) {
+            self.current_room + 1u
+          } else {
+            self.current_room - 1u
+          }
+        }
+      };
+      // Pair-keyed belief read — `views.visited(self, next_room)`
+      // emits as `view_<visited_id>_get(agent_id, next_room)` and
+      // the pair-keyed prelude resolves the helper to
+      // `view_storage_visited_primary[observer * 16u + key]`.
+      let was_visited = visited(self, next_room);
+      let reroll = rng.shuffle() % 2u;
+      if ((was_visited == 0u) || (reroll == 0u)) {
+        agents.set_current_room(self, next_room);
+        emit EnteredRoom {
+          observer: self,
+          room: next_room,
+        }
+        if (next_room == config.maze.key_room) {
+          agents.set_found_key(self, 1u);
+          agents.set_tick_found(self, world.tick);
+        }
+      }
+    }
+  }
+}

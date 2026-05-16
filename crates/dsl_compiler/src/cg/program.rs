@@ -426,6 +426,17 @@ pub struct ViewSignature {
     /// Plumbed from `dsl_ast::ir::ViewIR::belief_gated`.
     #[serde(default)]
     pub belief_gated: bool,
+    /// Plan I slice I.3b — second-key population for pair-keyed
+    /// views with a static K (Item/Group/Quest entity count, or
+    /// I.3b's `@key_pop(K=N)` literal). `None` ⇒ Agent×Agent (K =
+    /// `cfg.agent_cap` at runtime), or single-key view (no second
+    /// dim). The pair-keyed view-read prelude
+    /// (`compose_view_storage_prelude`) reads this to bake the
+    /// right K into the `view_<id>_get(observer, key)` helper —
+    /// without it, pair-keyed reads from physics rules can't
+    /// compose the right `observer * K + key` index expression.
+    #[serde(default)]
+    pub pair_keyed_k: Option<u32>,
 }
 
 /// CG-side fold operator — the `self <op> rhs` op recognized by the

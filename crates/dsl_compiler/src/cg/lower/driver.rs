@@ -805,6 +805,50 @@ pub fn lower_compilation_to_cg_with_opts(
                 .get(view_id.0 as usize)
                 .map(|v| v.belief_gated)
                 .unwrap_or(false);
+            // Plan I slice I.3b — pair-keyed K for views whose
+            // second key is static (Item/Group/Quest entity count,
+            // or `@key_pop(K=N)` literal). Agent×Agent stays None
+            // (K = agent_cap at runtime). Read from comp.views[idx]
+            // since `args` only carries types, not the source-level
+            // annotation list.
+            let pair_keyed_k: Option<u32> = comp
+                .views
+                .get(view_id.0 as usize)
+                .and_then(|v| match v.params.as_slice() {
+                    [a, b] if matches!(a.ty, dsl_ast::ir::IrType::AgentId) => {
+                        match &b.ty {
+                            dsl_ast::ir::IrType::U8
+                            | dsl_ast::ir::IrType::U32
+                            | dsl_ast::ir::IrType::I32 => {
+                                // I.3b — K from @key_pop(K = N).
+                                v.annotations
+                                    .iter()
+                                    .find(|a| a.name == "key_pop")
+                                    .and_then(|ann| {
+                                        ann.args.iter().find_map(|arg| {
+                                            if arg.key.as_deref() == Some("K") {
+                                                if let dsl_ast::ast::AnnotationValue::Int(n) = &arg.value {
+                                                    Some(*n as u32)
+                                                } else {
+                                                    None
+                                                }
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                    })
+                            }
+                            // Agent×Agent → None (runtime-variable K).
+                            // Item/Group/Quest static counts aren't
+                            // threaded here yet; they live in
+                            // build_helper's `MaterializedViewInfo`.
+                            // Add when a fixture needs reads from
+                            // (Agent, Item) views (none today).
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                });
             (
                 view_id.0,
                 crate::cg::program::ViewSignature {
@@ -813,6 +857,7 @@ pub fn lower_compilation_to_cg_with_opts(
                     storage_hint,
                     fold_op,
                     belief_gated,
+                    pair_keyed_k,
                 },
             )
         })
