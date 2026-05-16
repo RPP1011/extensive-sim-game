@@ -1,0 +1,115 @@
+// maze_explorer_smart — third maze variant. Adventurer tracks
+// visited rooms in a u32 bitmask SoA field and PREFERS unvisited
+// neighbours when choosing a direction. Same maze, same RNG keying
+// → comparable to the random-walk baseline (mean 268 ticks across
+// 16 seeds) and the belief-augmented variant (same 268 — bare-move
+// policy, just measuring belief overhead).
+//
+// The visited bitmask could equally be a `belief visited(observer:
+// Agent, room: u32) @key_pop(K=16)` — and is, in maze_explorer_visited
+// — but reading a user-declared pair-keyed belief from a physics
+// rule body needs the pair-keyed view-read prelude that isn't shipped
+// yet (the scalar getter `view_<id>_get(idx)` only handles single-
+// key f32 today; the 2-arg `view_<id>_get(observer, key) -> u32`
+// shape is on the todo). For now the SoA-field + `table room_bit`
+// combo gets the same per-cell membership query (`mask & room_bit[r]
+// != 0`) with primitives that exist today.
+//
+// Policy:
+//   1. Roll dir = rng.action() % 4u
+//   2. Compute door bit + neighbour room (via tables)
+//   3. If door is open:
+//      a. If neighbour is unvisited: move (prefer-unvisited gate)
+//      b. Else if a separate rng roll % 8 == 0 (12.5% chance):
+//         accept the visited move (escape-dead-end fallback)
+//      c. Otherwise: stay (skip the visited neighbour)
+//   4. On move, OR the new room's bit into visited_mask
+//   5. If new room == key room, latch found_key + tick_found
+
+event Tick { }
+
+entity Adventurer : Agent { }
+
+field current_room: u32
+field found_key: u32
+field tick_found: u32
+// One-bit-per-room visited bitmap. K = 16 fits in a single u32;
+// `tables.room_bit(r)` recovers `1 << r` without needing a shift
+// operator on the DSL surface.
+field visited_mask: u32
+
+// Maze topology — same layout as maze_explorer / maze_explorer_visited.
+table maze_doors: u32[16] = [
+  6, 14, 12, 10,
+  3,  7,  8,  3,
+  1,  3,  2,  3,
+  4, 13,  9,  1,
+]
+
+// Direction (0..3 = N/S/E/W) → cardinal door bit, replaces the
+// nested 4-way if-else from the earlier fixtures.
+table dir_bit: u32[4] = [1, 2, 4, 8]
+
+// Room id (0..15) → single-bit mask `1 << room`. Replaces the 16-way
+// nested if-else that would otherwise be needed without a `<<`
+// operator on the DSL surface.
+table room_bit: u32[16] = [
+       1,      2,      4,      8,
+      16,     32,     64,    128,
+     256,    512,   1024,   2048,
+    4096,   8192,  16384,  32768,
+]
+
+config maze {
+  key_room: u32 = 15,
+}
+
+@phase(per_agent)
+physics Explore {
+  on Tick {} where (
+    self.alive
+    && self.found_key == 0u
+  ) {
+    let doors = tables.maze_doors(self.current_room);
+    let dir = rng.action() % 4u;
+    let bit = tables.dir_bit(dir);
+    if ((doors & bit) != 0u) {
+      let next_room = if (dir == 0u) {
+        self.current_room - 4u
+      } else {
+        if (dir == 1u) {
+          self.current_room + 4u
+        } else {
+          if (dir == 2u) {
+            self.current_room + 1u
+          } else {
+            self.current_room - 1u
+          }
+        }
+      };
+      let next_bit = tables.room_bit(next_room);
+      let visited = self.visited_mask & next_bit;
+      // Use `rng.shuffle()` (purpose ≠ Action) for the escape gate
+      // so it draws from a different PCG stream than the direction
+      // roll. `rng.action()` would collide on the same per-tick
+      // draw, producing reroll == 0 ⇔ dir == 0 — pure dead-lock in
+      // any dead-end whose only escape is direction != N.
+      let reroll = rng.shuffle() % 2u;
+      // Prefer unvisited; accept visited with 50% probability. The
+      // earlier 1/8 rate dead-locked in saturated states (all
+      // neighbours visited → 8× slowdown over random walk on the
+      // tail). 50% keeps a meaningful preference for unvisited (a
+      // 2-of-3 choice between unvisited and visited still picks the
+      // unvisited path 75% of the time) while not crashing the
+      // exploration rate once the bitmap is full.
+      if ((visited == 0u) || (reroll == 0u)) {
+        agents.set_current_room(self, next_room);
+        agents.set_visited_mask(self, self.visited_mask | next_bit);
+        if (next_room == config.maze.key_room) {
+          agents.set_found_key(self, 1u);
+          agents.set_tick_found(self, world.tick);
+        }
+      }
+    }
+  }
+}
