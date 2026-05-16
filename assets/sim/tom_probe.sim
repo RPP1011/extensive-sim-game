@@ -86,8 +86,13 @@ entity Knower : Agent {
 // exceed 0xFFFFFFFFu). Renamed from `beliefs` → `beliefs_flags` in
 // Wave 3 ToM Phase 2 to disambiguate from the 5 other BeliefState
 // fields living runtime-side (see header).
-@materialized(on_event = [BeliefAcquired], storage = pair_map)
-view beliefs_flags(observer: Agent, subject: Agent) -> u32 {
+// Plan I (2026-05-15) — migrated from `view beliefs_flags` to
+// `belief beliefs_flags`. The lowering infers `PairMap` storage from
+// the `(observer: Agent, subject: Agent)` signature, so the explicit
+// `@materialized(... , storage = pair_map)` annotation retires. The
+// propagation handler carries over verbatim; this is the same WGSL
+// fold kernel under a different keyword.
+belief beliefs_flags(observer: Agent, subject: Agent) -> u32 {
   initial: 0,
   on BeliefAcquired { observer: o, subject: s, fact_bit: b } { self |= b }
   clamp: [0, 4294967295],

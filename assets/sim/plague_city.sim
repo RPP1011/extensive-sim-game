@@ -432,9 +432,9 @@ physics InfectionEdgeTrigger {
 // beliefs_flags — bit-OR fold from SymptomSeen. Bit 0 = "this subject
 // has been observed as currently sick at some point" (sick_q8 > 0).
 // Bit 1 = "this subject has been observed at all" (always set).
-// Bit-OR is idempotent. Storage = pair_map (N×N×u32).
-@materialized(on_event = [SymptomSeen], storage = pair_map)
-view beliefs_flags(observer: Agent, subject: Agent) -> u32 {
+// Bit-OR is idempotent. Plan I (2026-05-15) — migrated to the
+// `belief` keyword; PairMap storage inferred from the signature.
+belief beliefs_flags(observer: Agent, subject: Agent) -> u32 {
   initial: 0,
   on SymptomSeen { observer: o, subject: s, sick_q8: q }
     where o == observer && s == subject

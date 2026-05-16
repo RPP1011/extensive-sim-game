@@ -153,8 +153,10 @@ event BeliefUpdate {
   flags: u32,
 }
 
-@materialized(on_event = [BeliefUpdate], storage = pair_map)
-view beliefs_flags(observer: Agent, subject: Agent) -> u32 {
+// Plan I (2026-05-15) — migrated to the `belief` keyword. Lowering
+// infers PairMap storage from the (observer: Agent, subject: Agent)
+// signature; the propagation handler is unchanged.
+belief beliefs_flags(observer: Agent, subject: Agent) -> u32 {
   initial: 0,
   on BeliefUpdate { observer: o, subject: s, flags: f }
     where (o == observer) && (s == subject)
