@@ -93,4 +93,25 @@ fn belief_smoke_probe_parse_resolve_lower_emit_round_trip() {
         "expected the `seen` kernel body to use `atomicOr` (or `|=`); \
          emit may have refactored — files: {names:?}",
     );
+
+    // Plan I.4a — social-merge clause produces a separate kernel
+    // (named `merge_<view>_<event>_<op>`). Today the body is a
+    // documented stub (`// TODO(plan-I.4b)`); the kernel still emits
+    // and the runtime can dispatch it as a no-op until I.4b lands the
+    // per-cell merge logic.
+    let merge_kernel = art.wgsl_files.iter().find(|(name, _)| {
+        name.contains("merge") && name.contains("seen") && name.contains("bit_or")
+    });
+    assert!(
+        merge_kernel.is_some(),
+        "expected a `merge_seen_*_bit_or` kernel for the social-merge clause; \
+         emitted: {names:?}"
+    );
+    let (_, merge_body) = merge_kernel.unwrap();
+    assert!(
+        merge_body.contains("plan-I.4b") || merge_body.contains("TODO"),
+        "expected the merge kernel body to carry the I.4b stub marker; \
+         body excerpt: {}",
+        &merge_body[..merge_body.len().min(400)]
+    );
 }

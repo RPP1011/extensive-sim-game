@@ -1,17 +1,19 @@
-// belief_smoke_probe — Plan I slice I.5 end-to-end fixture for the
-// `belief <name>(observer: Agent[, subject: Agent]) -> T { … }`
-// primitive landed in slices I.1 (parser + AST), I.2 (resolver +
-// signature validation), and I.3 (CG lowering + storage-hint
-// inference).
+// belief_smoke_probe — Plan I end-to-end fixture for the `belief`
+// primitive across all 10 landed slices: I.1 (parser + AST), I.2
+// (resolver + signature validation), I.3 (CG lowering + PairMap
+// inference), I.3a (single-key shape via param-count gate), I.3c
+// (`@per_entity_ring` storage), I.4a (BeliefSocialMerge IR
+// wiring — kernel body still a stub for I.4b).
 //
-// **MVP scope.** Today's lowering supports the pair-keyed `(observer:
-// Agent, subject: Agent) -> u32` shape only — single-key and
-// key-typed second-param shapes surface as `UnsupportedBeliefShape`
-// (slice I.3a). Social-merge clauses round-trip on the IR but do not
-// yet emit additional compute ops (slice I.4). This fixture
-// therefore exercises the pair-keyed propagation-handler-only path —
-// the same surface `view beliefs_flags` already serves, but declared
-// through the new `belief` keyword.
+// **What this fixture covers as of Plan I.4a (2026-05-16):**
+//   * Pair-keyed propagation handler (`belief seen` → ViewFold op).
+//   * Social-merge clause (`belief seen` → BeliefSocialMerge op,
+//     stub WGSL body until I.4b).
+//
+// **MVP scope (today).** Pair-keyed `(observer: Agent, subject:
+// Agent) -> u32` storage. Single-key beliefs are also supported
+// (slice I.3a) but kept out of this smoke probe to keep the test
+// focused on a single belief shape.
 //
 // **What the fixture proves end-to-end:**
 //   1. `belief seen(observer, subject) -> u32` parses + resolves +
@@ -55,15 +57,31 @@ physics EmitSeen {
   }
 }
 
+// AllyDied event drives the social-merge clause below — when an ally
+// dies, every receiver bitwise-ORs the dying ally's seen-bitmap into
+// their own. Models the dungeon_horde party-wide gossip pattern that
+// I.6 will migrate.
+event AllyDied {
+  dead: Agent,
+}
+
 // The belief under test. Pair-keyed `(observer, subject) -> u32`
-// bitmap. Propagation handler folds the `mark` bit into the
-// `[observer, subject]` cell — same bit-OR shape as `view
-// beliefs_flags`, declared through the `belief` keyword.
+// bitmap with one propagation handler + one social-merge clause.
+//
+// * Propagation: every alive observer that emits SubjectSeen folds
+//   the `mark` bit into their own [observer, subject] cell (slice I.3
+//   ViewFold path).
+//
+// * Social-merge: when AllyDied fires with `dead: d`, every receiver
+//   merges the dying ally's row into their own via bit_or — `seen[r,
+//   *] |= seen[d, *]` for every r (I.4a IR wiring; the actual
+//   per-cell dispatch is stubbed until I.4b lands).
 @materialized(on_event = [SubjectSeen], storage = pair_map)
 belief seen(observer: Agent, subject: Agent) -> u32 {
   initial: 0,
   on SubjectSeen { observer: o, subject: s, mark: m }
     where (o == observer) && (s == subject)
     { self |= m }
+  on AllyDied { dead: d } merge from d: bit_or
   clamp: [0, 4294967295],
 }
