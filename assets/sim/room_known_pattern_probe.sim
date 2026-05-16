@@ -1,0 +1,72 @@
+// room_known_pattern_probe — Plan I.6 pattern fixture. Demonstrates
+// the single-key belief bitmap + AllyDied social-merge pattern that
+// dungeon_horde's `hero_known_rooms` host-side bitmap will eventually
+// migrate to. Lightweight standalone fixture so the pattern can be
+// validated independently of the viewer-crate migration's full
+// disruption.
+//
+// Shape:
+//   * `belief room_known(observer: Agent) -> u32` — single-key
+//     u32 bitmap (one bit per room, up to 32 rooms).
+//   * Propagation handler: on `RoomEntered { observer: o, room: r }`,
+//     set bit r on observer o's bitmap.
+//   * Social-merge handler: on `AllyDied { dead: d }`, every
+//     receiver bitwise-OR's the dying ally's bitmap into their own
+//     — party-wide gossip pattern.
+//
+// Test pattern (host-driven):
+//   1. Pre-seed hero 0's bitmap = {bits 0, 1, 2}.
+//   2. StampAllyDied physics rule fires AllyDied { dead: 0 } at
+//      tick 0.
+//   3. Merge kernel propagates hero 0's bitmap to every receiver.
+//   4. Read back: heroes 1-4 should now have bits {0, 1, 2} set.
+
+event Tick { }
+
+event RoomEntered {
+  observer: Agent,
+  room: u32,
+}
+
+event AllyDied {
+  dead: Agent,
+}
+
+entity Hero : Agent { }
+
+// Stamp AllyDied { dead: 0 } at tick 0 from a single emitter. Per-
+// agent dispatch fires once per alive agent, but each event has the
+// same payload (dead: 0) so the merge ends up idempotent under
+// repetition.
+@phase(per_agent)
+physics StampAllyDied {
+  on Tick {} where (
+    self.alive && world.tick == 0
+  ) {
+    emit AllyDied {
+      dead: 0,
+    }
+  }
+}
+
+// Belief under test. Single-key u32 bitmap. Propagation handler
+// reads `room` from the event and sets the matching bit on
+// `room_known[observer]`. Social-merge propagates the dying ally's
+// bitmap to every receiver.
+//
+// Note: the propagation handler relies on per_agent_event_scan
+// dispatch (so observer is bound directly and event-field binders
+// stay wildcards). For the stresstest the propagation handler is
+// inactive — no RoomEntered events get emitted; only AllyDied
+// drives the test. Storage is pre-seeded host-side.
+// View name uses no underscores ("rooms" not "room_known") because
+// the auto-emitted `view_name_from_kernel_name` parser splits the
+// kernel name `merge_<view>_<event_snake>_<op>` on the FIRST
+// underscore after `merge_` — view names with internal underscores
+// would lose part of their name in routing. Documented gap in
+// build_helper.rs::view_name_from_kernel_name; the architectural
+// fix is a side-channel kernel→view map, follow-up slice.
+belief rooms(observer: Agent) -> u32 {
+  initial: 0,
+  on AllyDied { dead: d } merge from d: bit_or
+}

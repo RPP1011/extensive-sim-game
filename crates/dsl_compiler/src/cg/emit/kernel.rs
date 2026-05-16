@@ -502,11 +502,25 @@ pub fn kernel_topology_to_spec_and_body(
         // bounds check) and `agent_cap` (for the merge loop's bounds).
         let cfg_struct_decl = build_per_event_emit_cfg_struct_decl(&cfg_struct, &[]);
         let cfg_build_expr = build_per_event_emit_cfg_build_expr(&cfg_struct, &[]);
+        // Pick the merge-loop shape from the view signature's param
+        // count: 1 param → single-key (storage sized N), 2 params →
+        // pair-keyed (storage sized N²). The storage_hint registry
+        // currently maps both shapes to PairMap (single-key collapses
+        // via the param-count gate in
+        // `build_helper::detect_pair_keyed_second_key`); checking
+        // arg_tys.len() bypasses that collapse and keys directly on
+        // the surface signature.
+        let is_pair_keyed = prog
+            .view_signatures
+            .get(&view_id)
+            .map(|sig| sig.args.len() == 2)
+            .unwrap_or(true);
         let wgsl_body = build_belief_social_merge_wgsl_body(
             *view_id,
             *on_event_kind_id,
             *op,
             stride,
+            is_pair_keyed,
         );
         let spec = KernelSpec {
             name,
@@ -3943,6 +3957,7 @@ fn build_belief_social_merge_wgsl_body(
     on_event_kind_id: u32,
     op: u8,
     stride: u32,
+    is_pair_keyed: bool,
 ) -> String {
     let op_label = match op {
         0 => "bit_or",
@@ -3976,11 +3991,19 @@ fn build_belief_social_merge_wgsl_body(
     // cfg.agent_cap. The runtime's per-tick cfg-write path uses a
     // 4-word layout `[slot0, tick, seed_or_pop, _pad_or_pair_off]`
     // that doesn't carry agent_cap at PerEventEmit's slot 3 (slot 3
-    // reads 0). The view storage buffer IS sized for N² u32 cells,
-    // so `sqrt(arrayLength(...))` recovers N — one sqrt per kernel
-    // dispatch is cheap.
-    let merge_loop = match op {
-        0 | 1 | 2 | 3 => format!(
+    // reads 0). For PAIR-KEYED beliefs the storage is sized N² u32
+    // cells, so `sqrt(arrayLength(...))` recovers N. For SINGLE-KEY
+    // beliefs the storage is sized N cells directly, so
+    // `arrayLength(...)` IS N.
+    let merge_loop = if !matches!(op, 0..=3) {
+        // Unknown op discriminant — emit a documented stub. The
+        // resolver gates the surface to the four supported ops so
+        // this arm is unreachable from real source.
+        "                _ = source_agent; // unknown op discriminant — defensive stub\n".to_string()
+    } else if is_pair_keyed {
+        // Pair-keyed (Agent, Agent) → N² cells. 2D loop over
+        // (receiver, subject); each cell merged independently.
+        format!(
             "                let storage_size = arrayLength(&view_storage_primary);\n\
              \x20               let n_agents = u32(sqrt(f32(storage_size)));\n\
              \x20               for (var r: u32 = 0u; r < n_agents; r = r + 1u) {{\n\
@@ -3989,11 +4012,17 @@ fn build_belief_social_merge_wgsl_body(
              \x20                       {atomic_op}(&view_storage_primary[r * n_agents + s], other_cell);\n\
              \x20                   }}\n\
              \x20               }}\n"
-        ),
-        // Unknown op discriminant — emit a documented stub. The
-        // resolver gates the surface to the four supported ops so
-        // this arm is unreachable from real source.
-        _ => "                _ = source_agent; // unknown op discriminant — defensive stub\n".to_string(),
+        )
+    } else {
+        // Single-key (Agent) → N cells. 1D loop over receivers;
+        // each receiver inherits the source agent's single value.
+        format!(
+            "                let n_agents = arrayLength(&view_storage_primary);\n\
+             \x20               let other_cell = atomicLoad(&view_storage_primary[source_agent]);\n\
+             \x20               for (var r: u32 = 0u; r < n_agents; r = r + 1u) {{\n\
+             \x20                   {atomic_op}(&view_storage_primary[r], other_cell);\n\
+             \x20               }}\n"
+        )
     };
     format!(
         "                // Plan I.4b belief_social_merge kernel — view=#{view_id} on_event=#{on_event_kind_id} op={op_label}\n\
