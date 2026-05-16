@@ -2454,13 +2454,18 @@ fn synthesize_generated_runtime_struct(
          \x20       // pair_offset=0 universally; chunked dispatch (megaswarm\n\
          \x20       // 10000) would override per-batch but uses a separate\n\
          \x20       // emit path.\n\
-         \x20       // A later slice can detect cfg shape per kernel and\n\
-         \x20       // write the proper seed for per-agent kernels — pinned\n\
-         \x20       // to the cooldown_probe staggered-fire test as a regression.\n\
+         \x20       // Slot 2 = seed for per-agent kernels (wires through to\n\
+         \x20       // `per_agent_u32(seed, agent_id, tick, purpose)` —\n\
+         \x20       // see P5). Was `1u32` historically; now uses\n\
+         \x20       // `self.seed as u32` so different `try_new(seed, …)`\n\
+         \x20       // calls actually produce different RNG streams.\n\
+         \x20       // ViewFold kernels get a slot-2 OVERRIDE below to\n\
+         \x20       // restore the `second_key_pop = K` semantic their\n\
+         \x20       // pair-keyed index expression depends on.\n\
          \x20       let cfg_words: [u32; 4] = [\n\
          \x20           self.agent_count,\n\
          \x20           self.tick as u32,\n\
-         \x20           1u32,\n\
+         \x20           self.seed as u32,\n\
          \x20           0u32,\n\
          \x20       ];\n\
          \x20       let cfg_bytes: &[u8] = bytemuck::cast_slice(&cfg_words);\n",
@@ -2468,6 +2473,44 @@ fn synthesize_generated_runtime_struct(
     for kernel_name in &cfg_buffer_names {
         out.push_str(&format!(
             "        self.gpu.queue.write_buffer(&self.cfg_{kernel_name}_buf, 0, cfg_bytes);\n",
+        ));
+    }
+
+    // Per-kernel slot-2 override for ViewFold kernels — their cfg
+    // shape is `{ event_count, tick, second_key_pop, _pad0 }`, so
+    // slot 2 needs the view's static K value (not the default `1u32`
+    // baked into cfg_words above). Without this override, pair-keyed
+    // ViewFolds (`(observer: Agent, subject: Agent)` or I.3b's
+    // `(observer: Agent, key: u32) @key_pop(K=N)`) compose their
+    // 2-D index as `local_first * 1 + local_second`, addressing the
+    // wrong storage cell at any non-trivial agent_count or K. Per-
+    // agent kernels keep slot 2 = seed (untouched by this override),
+    // so this loop strictly fixes ViewFold; for pair-keyed views
+    // whose second key is Agent (K = agent_count, runtime-variable)
+    // we emit `self.agent_count.to_le_bytes()`, for everything else
+    // (Item/Group/Quest/KeyTyped) the K is compile-time-constant.
+    for spec in &artifacts.kernel_specs {
+        if !matches!(spec.kind, crate::kernel_binding_ir::KernelKind::ViewFold) {
+            continue;
+        }
+        let view_name = spec.name.strip_prefix("fold_").unwrap_or("");
+        let Some(Some(pair_keyed)) = view_pair_keyed.get(view_name).copied() else {
+            continue;
+        };
+        let k_expr = match pair_keyed {
+            PairKeyedSecondKey::Agent => "self.agent_count".to_string(),
+            PairKeyedSecondKey::Item(n)
+            | PairKeyedSecondKey::Group(n)
+            | PairKeyedSecondKey::Quest(n)
+            | PairKeyedSecondKey::KeyTyped(n) => format!("{n}u32"),
+        };
+        out.push_str(&format!(
+            "        // ViewFold slot-2 override — sets cfg.second_key_pop = K for view `{view_name}`.\n\
+             \x20       {{\n\
+             \x20           let k_bytes: [u8; 4] = ({k_expr}).to_le_bytes();\n\
+             \x20           self.gpu.queue.write_buffer(&self.cfg_{kname}_buf, 8u64, &k_bytes);\n\
+             \x20       }}\n",
+            kname = spec.name,
         ));
     }
     // Indirect-consumer event-ring lifecycle — closes gaps 3 + 4

@@ -112,6 +112,60 @@ fn adventurer_random_walk_finds_key_within_budget() {
 }
 
 #[test]
+fn random_walk_distribution_across_seeds() {
+    // Now that `self.seed` actually wires through to the per-agent
+    // PCG (commit 12d902b2+: the runtime emitter's cfg-upload was
+    // previously hardcoded to `1u32` in slot 2, so every seed
+    // produced the same walk). 16 different seeds should produce
+    // a non-trivial distribution of tick_found values.
+    let seeds: Vec<u64> = (0..16u64).map(|i| SEED.wrapping_add(i * 0xDEADBEEFu64)).collect();
+    let mut samples: Vec<u32> = Vec::new();
+    let mut timeouts = 0usize;
+    let mut skipped = false;
+    for s in &seeds {
+        match run_one(*s) {
+            Some(t) => samples.push(t),
+            None => {
+                if GeneratedRuntime::try_new(*s, AGENT_COUNT).is_none() {
+                    eprintln!("[maze_explorer] skipping: no wgpu adapter");
+                    skipped = true;
+                    break;
+                }
+                timeouts += 1;
+            }
+        }
+    }
+    if skipped {
+        return;
+    }
+    samples.sort();
+    let unique: std::collections::BTreeSet<u32> = samples.iter().copied().collect();
+    let min = samples.first().copied().unwrap_or(0);
+    let max = samples.last().copied().unwrap_or(0);
+    let median = samples.get(samples.len() / 2).copied().unwrap_or(0);
+    let mean = samples.iter().map(|t| *t as f64).sum::<f64>() / samples.len() as f64;
+    println!(
+        "[maze_explorer] {} seeds: finished={}, timeouts={timeouts}, \
+         min={min}, median={median}, max={max}, mean={mean:.1}, unique={}",
+        seeds.len(),
+        samples.len(),
+        unique.len(),
+    );
+    assert!(
+        timeouts <= 1,
+        "{timeouts}/16 seeds timed out at {TICK_BUDGET} ticks"
+    );
+    // Real RNG variation should produce ≥ 4 distinct tick_found
+    // values across 16 seeds. (Pre-cfg-fix this was 1 — every seed
+    // collapsed to the same walk.)
+    assert!(
+        unique.len() >= 4,
+        "only {} distinct tick_found across 16 seeds — seed wiring may have regressed",
+        unique.len()
+    );
+}
+
+#[test]
 fn random_walk_is_reproducible_across_runs() {
     // Five independent runs at the reference seed — every one
     // should land on the same tick_found. Catches any non-
