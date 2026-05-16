@@ -289,8 +289,8 @@ fn gen_ability(rng: &mut Pcg, idx: usize) -> AbilityDecl {
 }
 
 #[test]
-fn fuzz_1000_random_abilities_parse_and_lower_clean() {
-    const N: usize = 1000;
+fn fuzz_10000_random_abilities_parse_and_lower_clean() {
+    const N: usize = 10_000;
     const SEED: u64 = 0xC0DE_BEEF_2026_0516;
 
     let mut rng = Pcg::new(SEED);
@@ -378,4 +378,53 @@ fn fuzz_1000_random_abilities_parse_and_lower_clean() {
         total_modifiers >= N,
         "expected ≥{N} modifier-slot uses on top (probabilistic gen); got {total_modifiers}"
     );
+}
+
+/// Verify the emitter is idempotent: `emit(parse(emit(X)))` produces
+/// the same source string as `emit(X)` for every generated ability.
+/// This catches subtle drift where the emitter and parser disagree on
+/// the canonical surface form (e.g. whitespace, modifier ordering,
+/// rounding of numeric literals).
+#[test]
+fn fuzz_emitter_idempotent_under_double_round_trip() {
+    const N: usize = 500;
+    const SEED: u64 = 0xCAFE_F00D_BABE_FACE;
+
+    let mut rng = Pcg::new(SEED);
+    let mut total = 0usize;
+    let mut idempotent = 0usize;
+    let mut first_drift: Option<(usize, String, String)> = None;
+
+    for i in 0..N {
+        let ability = gen_ability(&mut rng, i);
+        let src1 = emit_ability_file_single(&ability);
+        let parsed1 = match dsl_ast::parse_ability_file(&src1) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        total += 1;
+        if parsed1.abilities.len() != 1 {
+            continue;
+        }
+        let src2 = emit_ability_file_single(&parsed1.abilities[0]);
+        if src1 == src2 {
+            idempotent += 1;
+        } else if first_drift.is_none() {
+            first_drift = Some((i, src1.clone(), src2.clone()));
+        }
+    }
+
+    println!("==== emitter idempotence under double round-trip ====");
+    println!(
+        "  idempotent={idempotent}/{total} ({pct:.1}%)",
+        pct = (idempotent as f64) / (total as f64) * 100.0
+    );
+    println!("======================================================");
+
+    if let Some((i, src1, src2)) = first_drift {
+        panic!(
+            "[idempotence iter {i}] emit→parse→emit drifted:\n--- first emit ---\n{src1}\n--- second emit ---\n{src2}"
+        );
+    }
+    assert_eq!(idempotent, total, "every double-round-trip must be idempotent");
 }
