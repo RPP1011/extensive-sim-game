@@ -97,9 +97,11 @@ fn key_typed_second_param_surfaces_unsupported_shape_diagnostic() {
 }
 
 #[test]
-fn belief_with_social_merge_lowers_propagation_handler_only() {
-    // Social-merge clauses sit on ViewIR::social_merges for I.4 emit
-    // pass to consume — they do NOT yet add extra compute ops.
+fn belief_with_social_merge_lowers_one_view_fold_plus_one_merge_op() {
+    // Plan I slice I.4 (IR wiring landed) — social-merge clauses now
+    // produce one `ComputeOpKind::BeliefSocialMerge` op each, in
+    // addition to the propagation handler's ViewFold op. Kernel body
+    // is a stub (TODO marker) until I.4b.
     let src = "\
         event SubjectSeen { observer: Agent, subject: Agent, flags: u32 }\n\
         event AllyDied { dead: Agent }\n\
@@ -116,13 +118,49 @@ fn belief_with_social_merge_lowers_propagation_handler_only() {
         .iter()
         .filter(|op| matches!(op.kind, ComputeOpKind::ViewFold { .. }))
         .count();
-    // Exactly one ViewFold op — the propagation handler. The social-
-    // merge clause does NOT yet produce its own op (slice I.4
-    // territory).
-    assert_eq!(
-        fold_op_count, 1,
-        "exactly one ViewFold op expected (propagation handler); social-merge stays on IR until I.4"
-    );
+    let merge_op_count = cg
+        .ops
+        .iter()
+        .filter(|op| matches!(op.kind, ComputeOpKind::BeliefSocialMerge { .. }))
+        .count();
+    assert_eq!(fold_op_count, 1, "one ViewFold op for the propagation handler");
+    assert_eq!(merge_op_count, 1, "one BeliefSocialMerge op for the merge clause");
+    // Verify the merge op carries the bit_or discriminant (=0).
+    let merge_op = cg
+        .ops
+        .iter()
+        .find(|op| matches!(op.kind, ComputeOpKind::BeliefSocialMerge { .. }))
+        .expect("BeliefSocialMerge present");
+    if let ComputeOpKind::BeliefSocialMerge { op, .. } = &merge_op.kind {
+        assert_eq!(*op, 0, "bit_or merge op must serialize to discriminant 0");
+    }
+}
+
+#[test]
+fn belief_with_multiple_merge_ops_produces_all_three_variants() {
+    // Three social-merge clauses with distinct ops → three ops with
+    // distinct discriminants.
+    let src = "\
+        event Tick { giver: Agent }\n\
+        event Tock { giver: Agent }\n\
+        event Tack { giver: Agent }\n\
+        belief test(observer: Agent, subject: Agent) -> u32 {\n\
+          initial: 0,\n\
+          on Tick { giver: g } merge from g: bit_or\n\
+          on Tock { giver: g } merge from g: max\n\
+          on Tack { giver: g } merge from g: replace\n\
+        }\n";
+    let cg = lower_str(src).expect("lower succeeds");
+    let mut ops: Vec<u8> = cg
+        .ops
+        .iter()
+        .filter_map(|op| match &op.kind {
+            ComputeOpKind::BeliefSocialMerge { op, .. } => Some(*op),
+            _ => None,
+        })
+        .collect();
+    ops.sort();
+    assert_eq!(ops, vec![0u8, 1u8, 3u8], "expect bit_or(0) + max(1) + replace(3)");
 }
 
 #[test]

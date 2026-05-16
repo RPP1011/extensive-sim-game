@@ -3908,6 +3908,9 @@ fn body_list_for_op_kind(kind: &ComputeOpKind) -> Option<CgStmtListId> {
         // hand-synthesised at emit time from the `(view, rate_bits)`
         // payload, so there's no Emit-walker work to do here.
         ComputeOpKind::ViewDecay { .. } => None,
+        // BeliefSocialMerge ditto — the per-cell merge body is
+        // hand-emitted from `(view, on_event, op)`.
+        ComputeOpKind::BeliefSocialMerge { .. } => None,
     }
 }
 

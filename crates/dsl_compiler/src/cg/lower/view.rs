@@ -371,6 +371,40 @@ pub fn lower_view(
                 ctx,
             )?;
             op_ids.extend(fold_ids);
+            // Plan I slice I.4 — synthesise one
+            // `ComputeOpKind::BeliefSocialMerge` op per `merge from
+            // <agent>: <op>` clause. Each op references the same
+            // view storage as the propagation handlers; the schedule
+            // serialises them after the per-event fold via the
+            // Op-id ordering. The kernel body is a stub (TODO marker)
+            // until I.4b lands the per-cell merge dispatch.
+            for merge in &ir.social_merges {
+                let event_kind_id = match merge.pattern.event {
+                    Some(event_ref) => crate::cg::op::EventKindId(event_ref.0 as u32),
+                    None => continue,
+                };
+                let op_discriminant: u8 = match merge.op {
+                    dsl_ast::ir::MergeOp::BitOr => 0,
+                    dsl_ast::ir::MergeOp::Max => 1,
+                    dsl_ast::ir::MergeOp::Min => 2,
+                    dsl_ast::ir::MergeOp::Replace => 3,
+                };
+                let kind = crate::cg::op::ComputeOpKind::BeliefSocialMerge {
+                    view: view_id,
+                    on_event: event_kind_id,
+                    op: op_discriminant,
+                };
+                let dispatch = crate::cg::dispatch::DispatchShape::PerEvent {
+                    source_ring: crate::cg::data_handle::EventRingId(0),
+                };
+                let op_id = ctx.builder.add_op(kind, dispatch, merge.span).map_err(|e| {
+                    LoweringError::BuilderRejected {
+                        error: e,
+                        span: merge.span,
+                    }
+                })?;
+                op_ids.push(op_id);
+            }
             Ok(op_ids)
         }
         (ViewKind::Belief, ViewBodyIR::Expr(_)) => {

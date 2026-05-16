@@ -1812,6 +1812,10 @@ impl CgProgramBuilder {
             // from `PlumbingKind::dependencies()` as typed
             // `DataHandle`s); nothing to validate.
             ComputeOpKind::Plumbing { .. } => Ok(()),
+            // Plan I slice I.4 — BeliefSocialMerge carries no
+            // `CgExprId` / `CgStmtListId` (kernel hand-emitted from
+            // `(view, on_event, op)`). Nothing to validate.
+            ComputeOpKind::BeliefSocialMerge { .. } => Ok(()),
         }
     }
 

@@ -820,6 +820,12 @@ fn cross_domain_split_decision(
         | (ComputeOpKind::PhysicsRule { .. }, ComputeOpKind::MaskPredicate { .. })
         | (ComputeOpKind::PhysicsRule { .. }, ComputeOpKind::ScoringArgmax { .. })
         | (ComputeOpKind::PhysicsRule { .. }, ComputeOpKind::Plumbing { .. }) => None,
+        // Plan I slice I.4 — BeliefSocialMerge can't fuse with
+        // anything today (the merge has a specialized 2D dispatch
+        // that doesn't share kernel layout with ViewFold). Defer
+        // to WAW.
+        (ComputeOpKind::BeliefSocialMerge { .. }, _)
+        | (_, ComputeOpKind::BeliefSocialMerge { .. }) => None,
     }
 }
 
@@ -861,11 +867,13 @@ fn same_view_view_fold_accumulator(
         | (ComputeOpKind::SpatialQuery { .. }, _)
         | (ComputeOpKind::Plumbing { .. }, _)
         | (ComputeOpKind::ViewDecay { .. }, _)
+        | (ComputeOpKind::BeliefSocialMerge { .. }, _)
         | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::MaskPredicate { .. })
         | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::ScoringArgmax { .. })
         | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::PhysicsRule { .. })
         | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::SpatialQuery { .. })
         | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::Plumbing { .. })
+        | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::BeliefSocialMerge { .. })
         | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::ViewDecay { .. }) => return false,
     };
     match conflict_key {
@@ -988,6 +996,9 @@ fn event_round_trip_witness(
     let consumed = match &consumer.kind {
         ComputeOpKind::ViewFold { on_event, .. } => *on_event,
         ComputeOpKind::PhysicsRule { on_event: Some(k), .. } => *k,
+        // BeliefSocialMerge IS event-driven — same shape as ViewFold's
+        // on_event consumption; surface the consumed kind.
+        ComputeOpKind::BeliefSocialMerge { on_event, .. } => *on_event,
         // PerAgent PhysicsRule (on_event=None), or any non-event-
         // consuming kind, can't be a same-tick consumer of a ring
         // event.
@@ -1007,6 +1018,7 @@ fn event_round_trip_witness(
         | ComputeOpKind::ScoringArgmax { .. }
         | ComputeOpKind::ViewDecay { .. }
         | ComputeOpKind::SpatialQuery { .. }
+        | ComputeOpKind::BeliefSocialMerge { .. }
         | ComputeOpKind::Plumbing { .. } => return None,
     };
     let mut emits: Vec<EventKindId> = Vec::new();

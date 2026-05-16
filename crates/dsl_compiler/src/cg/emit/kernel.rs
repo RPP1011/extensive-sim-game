@@ -1224,7 +1224,8 @@ fn classify_kernel(body_ops: &[&ComputeOp], prog: &CgProgram) -> KernelKindClass
             | ComputeOpKind::ScoringArgmax { .. }
             | ComputeOpKind::SpatialQuery { .. }
             | ComputeOpKind::Plumbing { .. }
-            | ComputeOpKind::ViewDecay { .. } => {
+            | ComputeOpKind::ViewDecay { .. }
+            | ComputeOpKind::BeliefSocialMerge { .. } => {
                 return KernelKindClass::Generic;
             }
         }
@@ -2104,7 +2105,8 @@ fn view_fold_fused_kernel_name(body_ops: &[&ComputeOp], prog: &CgProgram) -> Opt
             | ComputeOpKind::PhysicsRule { .. }
             | ComputeOpKind::SpatialQuery { .. }
             | ComputeOpKind::Plumbing { .. }
-            | ComputeOpKind::ViewDecay { .. } => return None,
+            | ComputeOpKind::ViewDecay { .. }
+            | ComputeOpKind::BeliefSocialMerge { .. } => return None,
         }
     }
     let view = view?;
@@ -2149,7 +2151,8 @@ fn physics_rule_fused_kernel_name(
             | ComputeOpKind::ViewFold { .. }
             | ComputeOpKind::SpatialQuery { .. }
             | ComputeOpKind::Plumbing { .. }
-            | ComputeOpKind::ViewDecay { .. } => return None,
+            | ComputeOpKind::ViewDecay { .. }
+            | ComputeOpKind::BeliefSocialMerge { .. } => return None,
         }
     }
     if rules.is_empty() {
@@ -2246,6 +2249,24 @@ fn single_op_kernel_name(kind: &ComputeOpKind, prog: &CgProgram) -> String {
         },
         ComputeOpKind::SpatialQuery { kind } => format!("spatial_{}", spatial_kind_name(*kind)),
         ComputeOpKind::Plumbing { kind } => plumbing_kind_name(kind),
+        ComputeOpKind::BeliefSocialMerge { view, on_event, op } => {
+            let view_part = match prog.interner.get_view_name(*view) {
+                Some(name) => format!("merge_{name}"),
+                None => format!("merge_view_{}", view.0),
+            };
+            let event_part = match prog.interner.get_event_kind_name(*on_event) {
+                Some(name) => pascal_to_snake(name),
+                None => format!("event_{}", on_event.0),
+            };
+            let op_part = match op {
+                0 => "bit_or",
+                1 => "max",
+                2 => "min",
+                3 => "replace",
+                _ => "unknown",
+            };
+            format!("{view_part}_{event_part}_{op_part}")
+        }
     }
 }
 
@@ -2310,6 +2331,7 @@ fn compute_op_kind_short(kind: &ComputeOpKind) -> &'static str {
         ComputeOpKind::ViewDecay { .. } => "view_decay",
         ComputeOpKind::SpatialQuery { .. } => "spatial_query",
         ComputeOpKind::Plumbing { .. } => "plumbing",
+        ComputeOpKind::BeliefSocialMerge { .. } => "belief_social_merge",
     }
 }
 
@@ -2790,7 +2812,8 @@ fn build_view_fold_wgsl_body(
             | ComputeOpKind::ScoringArgmax { .. }
             | ComputeOpKind::SpatialQuery { .. }
             | ComputeOpKind::Plumbing { .. }
-            | ComputeOpKind::ViewDecay { .. } => {
+            | ComputeOpKind::ViewDecay { .. }
+            | ComputeOpKind::BeliefSocialMerge { .. } => {
                 // Reachable only if the classifier admitted a non-ViewFold
                 // op into a ViewFold-classed kernel — the classifier
                 // returns Generic in that case, so this is structurally
@@ -3122,7 +3145,8 @@ fn build_view_fold_per_agent_event_scan_body(
             | ComputeOpKind::ScoringArgmax { .. }
             | ComputeOpKind::SpatialQuery { .. }
             | ComputeOpKind::Plumbing { .. }
-            | ComputeOpKind::ViewDecay { .. } => {
+            | ComputeOpKind::ViewDecay { .. }
+            | ComputeOpKind::BeliefSocialMerge { .. } => {
                 // Same structural-unreachable defense as
                 // `build_view_fold_wgsl_body` — the classifier
                 // returns Generic for non-ViewFold ops.
@@ -3412,6 +3436,7 @@ fn per_event_op_kind_tag(
     let on_event = match kind {
         ComputeOpKind::ViewFold { on_event, .. } => Some(*on_event),
         ComputeOpKind::PhysicsRule { on_event, .. } => *on_event,
+        ComputeOpKind::BeliefSocialMerge { on_event, .. } => Some(*on_event),
         ComputeOpKind::MaskPredicate { .. }
         | ComputeOpKind::ScoringArgmax { .. }
         | ComputeOpKind::SpatialQuery { .. }
@@ -4797,6 +4822,16 @@ fn lower_op_body(
              classifier should have routed through ViewDecay path."
                 .to_string(),
         ),
+        // Plan I slice I.4 — BeliefSocialMerge stub. The IR + scheduler
+        // see the op (so dependencies + ordering are right) but the
+        // WGSL body is a TODO until the per-cell merge dispatch lands.
+        // Tagged with the op label so a subsequent slice can grep for
+        // the stub.
+        ComputeOpKind::BeliefSocialMerge { view, on_event, op } => Ok(format!(
+            "// TODO(plan-I.4b): belief_social_merge body — view=#{} on_event=#{} op={op} \
+             (per-cell merge dispatch lands in I.4b; today this kernel is a no-op).",
+            view.0, on_event.0
+        )),
     }
 }
 

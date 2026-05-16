@@ -453,6 +453,7 @@ fn kind_label(kind: &ComputeOpKind) -> &'static str {
         ComputeOpKind::ViewDecay { .. } => "view_decay",
         ComputeOpKind::SpatialQuery { .. } => "spatial_query",
         ComputeOpKind::Plumbing { .. } => "plumbing",
+        ComputeOpKind::BeliefSocialMerge { .. } => "belief_social_merge",
     }
 }
 
@@ -540,6 +541,13 @@ fn allowed_shapes_for_kind(kind: &ComputeOpKind) -> &'static [DispatchShapeLabel
             | PlumbingKind::KickSnapshot
             | PlumbingKind::SeedIndirectArgs { .. } => &[DispatchShapeLabel::OneShot],
         },
+        // Plan I slice I.4 — social-merge dispatches once per event
+        // firing × per receiver × per cell key. Today wired as
+        // PerEvent (the event-driven outer loop); the per-receiver
+        // / per-key inner loops are implicit in the (stub) kernel
+        // body. When the full kernel lands this list may grow to
+        // include a 2D PerAgentEventScan-like shape.
+        ComputeOpKind::BeliefSocialMerge { .. } => &[DispatchShapeLabel::PerEvent],
     }
 }
 
@@ -827,6 +835,10 @@ fn check_op(
         // ViewDecay via the auto-walker arm in `compute_dependencies`).
         // Nothing to walk.
         ComputeOpKind::Plumbing { .. } | ComputeOpKind::ViewDecay { .. } => {}
+        // Plan I slice I.4 — social-merge has no embedded CgExpr /
+        // CgStmt today; the per-cell merge logic is hand-emitted by
+        // the WGSL generator from (view, on_event, op) directly.
+        ComputeOpKind::BeliefSocialMerge { .. } => {}
     }
 
     // Validate AgentRef::Target ids on every read/write handle.
@@ -868,8 +880,11 @@ fn check_op(
         | ComputeOpKind::ScoringArgmax { .. }
         | ComputeOpKind::SpatialQuery { .. } => {}
         // Plumbing + ViewDecay reference no `CgStmtListId` — no list-range
-        // check to perform.
-        ComputeOpKind::Plumbing { .. } | ComputeOpKind::ViewDecay { .. } => {}
+        // check to perform. Belief social-merge same — no embedded
+        // CgStmtListId today (hand-emitted WGSL body).
+        ComputeOpKind::Plumbing { .. }
+        | ComputeOpKind::ViewDecay { .. }
+        | ComputeOpKind::BeliefSocialMerge { .. } => {}
     }
 
     // --- DataHandle structural consistency on reads + writes ---------
@@ -1359,13 +1374,14 @@ fn type_check_op(
                 }
             }
         }
-        ComputeOpKind::Plumbing { .. } | ComputeOpKind::ViewDecay { .. } => {
-            // Plumbing + ViewDecay kinds carry no embedded expressions;
-            // their structural reads/writes are typed `DataHandle`s
-            // synthesised at construction (Plumbing via
-            // `PlumbingKind::dependencies()`, ViewDecay via the auto-
-            // walker arm in `ComputeOpKind::compute_dependencies`).
-            // Nothing to walk.
+        ComputeOpKind::Plumbing { .. }
+        | ComputeOpKind::ViewDecay { .. }
+        | ComputeOpKind::BeliefSocialMerge { .. } => {
+            // Plumbing + ViewDecay + BeliefSocialMerge carry no
+            // embedded expressions; their structural reads/writes are
+            // typed `DataHandle`s synthesised at construction
+            // (BeliefSocialMerge via the auto-walker arm in
+            // `ComputeOpKind::compute_dependencies`). Nothing to walk.
         }
     }
 }
@@ -1819,6 +1835,7 @@ fn p6_check_op(op: &ComputeOp, op_id: OpId, prog: &CgProgram, errors: &mut Vec<C
         // recorded; there is no `CgStmt::Assign` to police.
         ComputeOpKind::ViewDecay { .. } => {}
         ComputeOpKind::Plumbing { .. } => {}
+        ComputeOpKind::BeliefSocialMerge { .. } => {}
     }
 }
 
@@ -1936,7 +1953,8 @@ fn event_field_scope_check_op(
         | ComputeOpKind::ScoringArgmax { .. }
         | ComputeOpKind::SpatialQuery { .. }
         | ComputeOpKind::Plumbing { .. }
-        | ComputeOpKind::ViewDecay { .. } => return,
+        | ComputeOpKind::ViewDecay { .. }
+        | ComputeOpKind::BeliefSocialMerge { .. } => return,
     };
     let kind = kind_label(&op.kind);
     let shape = DispatchShapeLabel::from_shape(&op.shape).snake();
@@ -2160,7 +2178,8 @@ fn match_uniqueness_check_op(
         | ComputeOpKind::ScoringArgmax { .. }
         | ComputeOpKind::SpatialQuery { .. }
         | ComputeOpKind::Plumbing { .. }
-        | ComputeOpKind::ViewDecay { .. } => return,
+        | ComputeOpKind::ViewDecay { .. }
+        | ComputeOpKind::BeliefSocialMerge { .. } => return,
     };
     match_uniqueness_walk_list(body, op, op_id, prog, errors);
 }
@@ -2799,6 +2818,11 @@ fn tick_phase_position(prog: &CgProgram, op: &crate::cg::op::ComputeOp) -> u8 {
             }
         }
         ComputeOpKind::ViewFold { .. } | ComputeOpKind::ViewDecay { .. } => 3,
+        // BeliefSocialMerge runs alongside ViewFold over the same
+        // belief storage — share its phase position so the schedule
+        // sequences them after physics writes but before per-agent
+        // sweeps.
+        ComputeOpKind::BeliefSocialMerge { .. } => 3,
         ComputeOpKind::PhysicsRule {
             on_event: None, ..
         } => 5,

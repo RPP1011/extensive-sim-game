@@ -522,6 +522,10 @@ fn compute_event_ring_kind_facts(
         | ComputeOpKind::SpatialQuery { .. }
         | ComputeOpKind::Plumbing { .. }
         | ComputeOpKind::ViewDecay { .. } => None,
+        // BeliefSocialMerge consumes an event kind (the merge fires
+        // on the named event). Surface it like ViewFold's on_event
+        // so the scheduler can serialize against the producer.
+        ComputeOpKind::BeliefSocialMerge { on_event, .. } => Some(*on_event),
     };
     EventRingKindFacts { emitted, consumed }
 }

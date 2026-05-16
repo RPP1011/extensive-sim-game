@@ -715,6 +715,30 @@ pub enum ComputeOpKind {
     /// query-walk.
     SpatialQuery { kind: SpatialQueryKind },
 
+    /// Plan I slice I.4 — per-event belief social-merge. Lowered
+    /// from the `merge from <agent>: <op>` clause inside a
+    /// `belief <name>(...) -> T { ... }` declaration.
+    ///
+    /// Semantically: when the source event fires, for each receiver
+    /// (agent) and each cell key, set
+    /// `storage[receiver, key] = merge_op(storage[receiver, key], storage[source_agent, key])`
+    /// where `source_agent` is taken from the named event field.
+    ///
+    /// Today this op is wired through the IR + scheduler but emits
+    /// only a stub WGSL kernel — full per-cell merge dispatch lands
+    /// in a follow-up slice. The op exists so the schedule, fusion
+    /// analyzer, and dependency walker can already see beliefs with
+    /// social-merge clauses without the kernel logic ready.
+    ///
+    /// `op` discriminator: `0` = BitOr, `1` = Max, `2` = Min, `3` =
+    /// Replace. Mirrors `dsl_ast::ir::MergeOp`.
+    BeliefSocialMerge {
+        view: ViewId,
+        on_event: EventKindId,
+        /// `MergeOp` discriminant — see variant docstring.
+        op: u8,
+    },
+
     /// One-shot scratch op. See [`PlumbingKind`].
     Plumbing { kind: PlumbingKind },
 }
@@ -848,6 +872,29 @@ impl ComputeOpKind {
                 reads.extend(r);
                 writes.extend(w);
             }
+            ComputeOpKind::BeliefSocialMerge { view, .. } => {
+                // Plan I slice I.4 (IR-only) — the FULL merge reads
+                // view_storage[source_agent, key] and writes
+                // view_storage[receiver, key] for every receiver, so
+                // the read/write pair conceptually self-edges on the
+                // same Primary slot. The cycle detector treats
+                // ViewDecay's identical pattern as a permitted
+                // self-edge, but multiple BeliefSocialMerge ops on
+                // the same view chain into a multi-op cycle the
+                // detector flags.
+                //
+                // Until the I.4b kernel lands, model the op as
+                // write-only against view storage. The dependency
+                // walker still surfaces the write so the schedule
+                // serialises against producers; the read shape
+                // returns when the kernel actually performs the
+                // cross-cell load.
+                let handle = DataHandle::ViewStorage {
+                    view: *view,
+                    slot: super::data_handle::ViewStorageSlot::Primary,
+                };
+                writes.push(handle);
+            }
         }
         (reads, writes)
     }
@@ -907,6 +954,19 @@ impl ComputeOpKind {
                 format!("spatial_query({})", kind)
             }
             ComputeOpKind::Plumbing { kind } => format!("plumbing({})", kind.label()),
+            ComputeOpKind::BeliefSocialMerge { view, on_event, op } => {
+                let op_label = match op {
+                    0 => "bit_or",
+                    1 => "max",
+                    2 => "min",
+                    3 => "replace",
+                    _ => "?",
+                };
+                format!(
+                    "belief_social_merge(view=#{}, on_event=#{}, op={op_label})",
+                    view.0, on_event.0
+                )
+            }
         }
     }
 }
