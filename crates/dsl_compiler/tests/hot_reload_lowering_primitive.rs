@@ -169,6 +169,69 @@ fn lower_ability_meets_live_edit_perf_budget() {
 }
 
 #[test]
+fn live_edit_mutation_propagates_through_re_lower() {
+    // Live-edit cycle: take a baseline ability, mutate one effect's
+    // numeric arg, re-lower, and assert the lowered AbilityProgram
+    // actually reflects the change. This is the "would a hot-reloaded
+    // edit take effect?" property — proves the lowering is structural
+    // (re-runs the verb dispatch pass over the new args) rather than
+    // memoizing on the source string.
+    let baseline = fixture_ability("LiveEditProbe");
+    let baseline_program = lower_ability_decl(&baseline).expect("baseline lowers");
+
+    let mut mutated = baseline.clone();
+    // Bump the damage from 120 to 250.
+    if let EffectArg::Number(n) = &mut mutated.effects[0].args[0] {
+        *n = 250.0;
+    }
+    let mutated_program = lower_ability_decl(&mutated).expect("mutated lowers");
+
+    let baseline_dump = format!("{baseline_program:?}");
+    let mutated_dump = format!("{mutated_program:?}");
+    assert_ne!(
+        baseline_dump, mutated_dump,
+        "mutation must propagate — the lowered programs should differ"
+    );
+    // Confirm the change is "120 → 250" semantically: the baseline
+    // dump must contain the old value, the mutated dump the new.
+    assert!(
+        baseline_dump.contains("120"),
+        "baseline dump should mention the original 120 amount"
+    );
+    assert!(
+        mutated_dump.contains("250"),
+        "mutated dump should mention the new 250 amount"
+    );
+}
+
+#[test]
+fn live_edit_revert_returns_to_baseline_program() {
+    // Round-trip: mutate, then mutate back to original, re-lower.
+    // The final program should be identical to the unmodified
+    // baseline. Catches any path-dependent state that would make
+    // the lowering non-idempotent under round-trip.
+    let baseline = fixture_ability("LiveEditRevertProbe");
+    let baseline_program = lower_ability_decl(&baseline).expect("baseline lowers");
+    let baseline_dump = format!("{baseline_program:?}");
+
+    let mut scratch = baseline.clone();
+    if let EffectArg::Number(n) = &mut scratch.effects[0].args[0] {
+        *n = 999.0;
+    }
+    let _ = lower_ability_decl(&scratch).expect("mutated lowers");
+    // Revert.
+    if let EffectArg::Number(n) = &mut scratch.effects[0].args[0] {
+        *n = 120.0;
+    }
+    let reverted_program = lower_ability_decl(&scratch).expect("reverted lowers");
+    let reverted_dump = format!("{reverted_program:?}");
+    assert_eq!(
+        baseline_dump, reverted_dump,
+        "revert-after-mutation must produce the original program"
+    );
+}
+
+#[test]
 fn effect_op_size_stays_within_p4_budget() {
     // P4 constitution invariant: every EffectOp variant must fit in
     // ≤16 bytes after Rust enum tagging. The build-time

@@ -211,8 +211,8 @@ fn gen_belief_sim(rng: &mut Pcg, idx: usize) -> String {
 }
 
 #[test]
-fn fuzz_1000_random_belief_decls_parse_resolve_lower() {
-    const N: usize = 1000;
+fn fuzz_10000_random_belief_decls_parse_resolve_lower() {
+    const N: usize = 10_000;
     const SEED: u64 = 0xBE11_C0DE_F00D_BABE;
 
     let mut rng = Pcg::new(SEED);

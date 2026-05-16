@@ -71,6 +71,34 @@ Once `belief` is a recognized declaration, the four bespoke instances above migr
 
 Sized for one commit per slice. Each closes with a verified commit (P9).
 
+## Status (as of 2026-05-16)
+
+| Slice | Status | Closing commit |
+|---|---|---|
+| I.0 | ✓ landed | `aa884989` (contract freeze) |
+| I.1 | ✓ landed | `774243ca` (parser + AST + 6 tests) |
+| I.2 | ✓ landed | `5742788f` (resolver + signature validation + 8 tests) |
+| I.3 | ✓ landed | `d6a5c559` (CG lowering, PairMap inference + 5 tests) |
+| **I.3a** | ✓ landed | `bc541d09` (single-key `(observer: Agent) -> T` shape) |
+| **I.3c** | ✓ landed | `19d669df` (`@per_entity_ring(K=N)` belief storage) |
+| I.4 | ⏳ **pending** | Social-merge WGSL emit — heavy lift, ~3-5 hr scope. Needs new `ComputeOpKind::BeliefSocialMerge` variant (touches ~30+ exhaustive match sites) + new WGSL kernel template + schedule wiring. |
+| I.5 | ✓ landed (compile-pin only) | `05e96ce4` — full sims-runtime pin still blocked on rest of plan. |
+| I.6 | ⏳ **pending** | dungeon_horde `hero_known_rooms` → `belief room_known(observer: Agent, room: u32) -> bool`. Needs **I.3b** (key-typed second-param storage variant) AND **I.4** (social-merge for AllyDied gossip). |
+| I.7 | ✓ landed | `040c5fc6` (4 fixtures: tom_probe, dungeon_horde, dungeon_stealth, plague_city) |
+| I.8 | ✓ landed | `bc541d09` + `19d669df` (5 fixtures: threats_view_probe, threats_with_decay_probe, threat_stresstest, dodger_probe, threats_struct_probe) |
+
+**Coverage shipped on top of the plan slices:**
+- 10K random ability fuzz harness (parse + lower) — `e23de325`
+- 10K random belief decl fuzz harness (parse + resolve + lower) — `iter 6`
+- Hot-reload lowering primitive (determinism, reentrancy, perf budget, mutation-propagation) — `fc1edefd` + `iter 6`
+- Multi-horizon threat stresstest sim with effectiveness reporting — `b640fd5a`
+- Tree walker (per-variant + lowering + emitter idempotence) — `f8561c36`, `e23de325`
+
+**Remaining design questions for I.4 (social-merge emit):**
+- Dispatch shape: per-event × per-receiver, or per-pair (receiver × subject) gated by event?
+- Where to wire the `where` clause predicate evaluation in the kernel preamble?
+- Whether to introduce a new `ComputeOpKind::BeliefSocialMerge` variant or model as a specialized `PhysicsRule`. The latter is cheaper to wire but loses the "this is a belief copy" semantic for fusion analysis.
+
 ### I.1 — Parser + AST recognition for `belief` keyword
 
 - `crates/dsl_ast/src/parser.rs:194` — add `Some("belief") => belief_decl(c, annotations, start).map(Decl::View)`. The body parser `parse_view_body` is reused verbatim. The `belief_decl` helper validates the signature shape (first param must be `Agent`, return type must be `bool` / `u8` / `u32` / `f32` / a registered struct) and rejects unsupported forms with a clear error.
