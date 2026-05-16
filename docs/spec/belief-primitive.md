@@ -81,9 +81,7 @@ Multi-horizon stresstest (`crates/sims/tests/threat_horizon_stresstest_pin.rs`):
 |---|---|---|
 | `i32` / `u8` return types | Grammar-valid, lowering-rejected on type-mismatch | DSL literal-suffix surface needs `1i` / `1u8` parser support |
 | Key-typed second param (`(Agent, u32)`) | Surfaces `UnsupportedBeliefShape` | Slice I.3b — needs SingleKey-extended storage variant sized `agent_cap × key_pop` |
-| 2D dispatch for merge kernel | Single-thread serialized N² loop | Optimization for N≥1000 scale; needs dispatch shape change to per-(receiver, key) |
 | IR-level source-agent field offset lookup | Hardcoded offset 2 (works for single-Agent-field events like `AllyDied { dead: Agent }`) | Compute from `social_merge.source_agent: LocalRef` + event field layout |
-| `cfg.agent_cap` direct read in merge kernel | Workaround: `sqrt(arrayLength)` for N derivation | Cfg-layout extension for PerEventEmit shape — investigated in iter 17, deferred as bigger refactor |
 | Plan I.6 viewer migration | Pattern probe shipped (`room_known_pattern_probe`); full dungeon_horde viewer rewrite deferred | Replace `hero_known_rooms: [u64; 5]` host field with GPU readback when the migration value justifies the Plan E hook bypass |
 
 ## Adding a new merge op

@@ -1,7 +1,8 @@
-//! Plan I.4b perf bench — measures merge kernel wall-clock at varied N
-//! so future optimization work (2D dispatch, tiled per-cell parallelism)
-//! has concrete baseline numbers to beat. Documents the current
-//! single-thread serialized N² loop's scaling characteristic.
+//! Plan I.4b perf bench — measures merge kernel wall-clock at varied N.
+//! Captures post-2D-dispatch numbers: kernel now launches N² threads
+//! (one per (receiver, subject) cell) for pair-keyed beliefs with an
+//! alive-mask cull on the receiver row, so per-tick latency is roughly
+//! flat across N=4..64 instead of climbing.
 //!
 //! Reports per-tick wall-clock as N grows from 4 → 64. Doesn't enforce a
 //! perf budget — the merge kernel is functionally correct at every N
@@ -93,19 +94,20 @@ fn read_view_storage(state: &mut GeneratedRuntime, n: usize) -> Vec<u32> {
 fn merge_kernel_perf_at_varied_n() {
     let sizes = [4u32, 8, 16, 32, 64];
     println!("==== belief merge kernel perf bench ====");
-    println!("  (PairMap shape, single-thread serialized N² inner loop)");
+    println!("  (PairMap shape, 2D per-cell dispatch + alive-mask cull)");
     println!("  Warmup={WARMUP_TICKS} ticks, measured={MEASURE_TICKS} ticks per N");
-    println!("  N      mean ms/tick    p95 ms/tick    ops/tick (≈N²×events)");
+    println!("  N      mean ms/tick    p95 ms/tick    threads/dispatch (=N²)");
     let mut adapter_available = true;
     for &n in &sizes {
         match run_at_n(n) {
             Some((mean, p95)) => {
-                // physics_StampAllyDied emits 1 AllyDied per alive
-                // agent = N events. Per-event work in the merge: N²
-                // atomicOps. Total ops per tick ≈ N × N² = N³.
-                let approx_ops = (n as u64).pow(3);
+                // 2D dispatch: one thread per (receiver, subject) cell =
+                // N² threads. Each thread walks the event ring once
+                // (critical path = O(events)), gated by an alive-mask
+                // check on the receiver row.
+                let threads = (n as u64).pow(2);
                 println!(
-                    "  {n:>4}   {mean:>9.3}      {p95:>9.3}      {approx_ops}"
+                    "  {n:>4}   {mean:>9.3}      {p95:>9.3}      {threads}"
                 );
             }
             None => {
@@ -121,9 +123,9 @@ fn merge_kernel_perf_at_varied_n() {
     println!("======================================================");
     println!(
         "  Note: kernel is functionally correct at every N (see \
-         belief_merge_propagation_probe_pin). N³ scaling reflects the \
-         current single-thread serialized loop; a 2D per-cell dispatch \
-         would drop per-tick latency to O(events) at the cost of N² \
-         threads launched."
+         belief_merge_propagation_probe_pin). 2D dispatch replaces the \
+         former single-thread serialized loop — per-tick latency is now \
+         roughly flat in N (critical path = O(events) per cell), bounded \
+         by the N²-thread launch cost rather than N³ serialized work."
     );
 }

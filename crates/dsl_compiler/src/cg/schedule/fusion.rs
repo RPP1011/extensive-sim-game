@@ -820,12 +820,21 @@ fn cross_domain_split_decision(
         | (ComputeOpKind::PhysicsRule { .. }, ComputeOpKind::MaskPredicate { .. })
         | (ComputeOpKind::PhysicsRule { .. }, ComputeOpKind::ScoringArgmax { .. })
         | (ComputeOpKind::PhysicsRule { .. }, ComputeOpKind::Plumbing { .. }) => None,
-        // Plan I slice I.4 — BeliefSocialMerge can't fuse with
-        // anything today (the merge has a specialized 2D dispatch
-        // that doesn't share kernel layout with ViewFold). Defer
-        // to WAW.
-        (ComputeOpKind::BeliefSocialMerge { .. }, _)
-        | (_, ComputeOpKind::BeliefSocialMerge { .. }) => None,
+        // Plan I.4b / iter 23 — BeliefSocialMerge kernels are
+        // singleton-only: each has its own hand-emitted WGSL body,
+        // distinct cfg shape (Generic), distinct bindings
+        // (event_ring/event_tail/view_storage_primary/sim_cfg/cfg/
+        // agent_alive), and per-view storage routing. Fusing two
+        // BeliefSocialMerge ops or a BeliefSocialMerge with any
+        // sibling op produces an incoherent kernel that drops
+        // bindings (observed in iter 23: two merge ops with
+        // PerAgentEventScan dispatch were fusion-grouped because
+        // they matched DispatchShapeKey + had disjoint writes; the
+        // fused kernel lost the agent_alive binding for the first
+        // merge). Force SplitShape so the analyser never even
+        // considers fusing merge ops with anything.
+        (ComputeOpKind::BeliefSocialMerge { .. }, _) => Some(JoinDecision::SplitShape),
+        (_, ComputeOpKind::BeliefSocialMerge { .. }) => Some(JoinDecision::SplitShape),
     }
 }
 

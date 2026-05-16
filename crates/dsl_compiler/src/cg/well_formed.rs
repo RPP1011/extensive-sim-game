@@ -541,13 +541,14 @@ fn allowed_shapes_for_kind(kind: &ComputeOpKind) -> &'static [DispatchShapeLabel
             | PlumbingKind::KickSnapshot
             | PlumbingKind::SeedIndirectArgs { .. } => &[DispatchShapeLabel::OneShot],
         },
-        // Plan I slice I.4 — social-merge dispatches once per event
-        // firing × per receiver × per cell key. Today wired as
-        // PerEvent (the event-driven outer loop); the per-receiver
-        // / per-key inner loops are implicit in the (stub) kernel
-        // body. When the full kernel lands this list may grow to
-        // include a 2D PerAgentEventScan-like shape.
-        ComputeOpKind::BeliefSocialMerge { .. } => &[DispatchShapeLabel::PerEvent],
+        // Plan I.4b / iter 23 — per-cell-outer dispatch. Pair-keyed
+        // beliefs use 2D PerAgentEventScan (one thread per
+        // (receiver, subject) cell); single-key beliefs use
+        // PerAgent (one thread per receiver).
+        ComputeOpKind::BeliefSocialMerge { .. } => &[
+            DispatchShapeLabel::PerAgent,
+            DispatchShapeLabel::PerAgentEventScan,
+        ],
     }
 }
 

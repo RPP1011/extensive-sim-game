@@ -881,23 +881,30 @@ impl ComputeOpKind {
                 reads.extend(r);
                 writes.extend(w);
             }
-            ComputeOpKind::BeliefSocialMerge { view, .. } => {
-                // Plan I slice I.4 (IR-only) — the FULL merge reads
-                // view_storage[source_agent, key] and writes
-                // view_storage[receiver, key] for every receiver, so
-                // the read/write pair conceptually self-edges on the
-                // same Primary slot. The cycle detector treats
-                // ViewDecay's identical pattern as a permitted
-                // self-edge, but multiple BeliefSocialMerge ops on
-                // the same view chain into a multi-op cycle the
-                // detector flags.
+            ComputeOpKind::BeliefSocialMerge { view, on_event, .. } => {
+                // Per-cell dispatch shape (iter 23) walks event_ring
+                // and event_tail in the kernel body. Record those as
+                // reads so the scheduler orders the merge AFTER any
+                // physics rule that emits the source event (the
+                // chronicle producer's `Append` on the matching
+                // event ring).
                 //
-                // Until the I.4b kernel lands, model the op as
-                // write-only against view storage. The dependency
-                // walker still surfaces the write so the schedule
-                // serialises against producers; the read shape
-                // returns when the kernel actually performs the
-                // cross-cell load.
+                // Without these reads, the schedule could place the
+                // merge BEFORE its event producers (a real bug
+                // surfaced at iter 23 when the dispatch shape moved
+                // from PerEvent/Indirect → PerAgentEventScan/Direct
+                // and lost the implicit ordering on event_tail that
+                // Indirect topology gave for free).
+                let _ = on_event; // kind dependency captured via EventRing handle's ring id
+                reads.push(DataHandle::EventRing {
+                    ring: super::data_handle::EventRingId(0),
+                    kind: super::data_handle::EventRingAccess::Read,
+                });
+                // View storage write — same semantics as before. The
+                // FULL merge also reads the source agent's cells, but
+                // modelling read+write of the same slot creates a
+                // self-edge that the cycle detector flags on
+                // multi-merge-op fixtures; keep it write-only here.
                 let handle = DataHandle::ViewStorage {
                     view: *view,
                     slot: super::data_handle::ViewStorageSlot::Primary,

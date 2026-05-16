@@ -499,15 +499,13 @@ pub fn kernel_topology_to_spec_and_body(
             .map(|l| l.record_stride_u32)
             .unwrap_or(EVENT_RING_DEFAULT_STRIDE_U32);
         let bindings = build_belief_social_merge_bindings(view_name, &cfg_struct);
-        // PerEventEmit cfg shape — slot 0 = event_count (patched
-        // per-dispatch by the indirect-consumer tail-copy to the
-        // current event ring tail). agent_cap (slot 3) reads 0
-        // from the runtime's static cfg-write — N is recovered from
-        // arrayLength(&view_storage_primary) in the body instead.
-        // (The "right" architectural fix would be a 5-element cfg
-        // layout extension; deferred — investigated in iter 17.)
-        let cfg_struct_decl = build_per_event_emit_cfg_struct_decl(&cfg_struct, &[]);
-        let cfg_build_expr = build_per_event_emit_cfg_build_expr(&cfg_struct, &[]);
+        // Iter 23 — Generic cfg shape now that the kernel reads
+        // event_count from `event_tail[0]` directly (no longer
+        // needs cfg.event_count to be patched). N is still derived
+        // from arrayLength(&view_storage_primary) — for the merge
+        // body we don't strictly need cfg.agent_cap either.
+        let cfg_struct_decl = build_generic_cfg_struct_decl(&cfg_struct, &[]);
+        let cfg_build_expr = build_generic_cfg_build_expr(&cfg_struct, &[]);
         // Pick the merge-loop shape from the view signature's param
         // count: 1 param → single-key (storage sized N), 2 params →
         // pair-keyed (storage sized N²). The storage_hint registry
@@ -537,12 +535,11 @@ pub fn kernel_topology_to_spec_and_body(
             cfg_build_expr,
             cfg_struct_decl,
             bindings,
-            // PerEventEmit so `compose_wgsl_cfg_struct` picks the
-            // `event_count + tick + seed + agent_cap` layout. The
-            // body reads cfg.event_count for the bounds check;
-            // n_agents comes from arrayLength of the storage
-            // buffer.
-            kind: KernelKind::PerEventEmit,
+            // Generic so `compose_wgsl_cfg_struct` picks the
+            // `agent_cap + tick + seed + _pad0` layout. The merge
+            // kernel reads event_count from event_tail[0] in the
+            // body; the cfg shape itself is mostly unused.
+            kind: KernelKind::Generic,
             runtime_cfg_fields: Vec::new(),
         };
         spec.validate()
@@ -3954,6 +3951,18 @@ fn build_belief_social_merge_bindings(
             wgsl_ty: cfg_struct.to_string(),
             bg_source: BgSource::Cfg,
         },
+        // Iter 23 — agent_alive enables the dead-cell mask cull at
+        // the start of the per-cell kernel body. For sparse-alive
+        // scenarios (e.g. dungeon_horde: 55 alive out of 1024) this
+        // cuts merge work by >99% — only alive×alive cells do the
+        // atomic merge.
+        KernelBinding {
+            slot: 5,
+            name: "agent_alive".into(),
+            access: AccessMode::ReadStorage,
+            wgsl_ty: "array<u32>".into(),
+            bg_source: BgSource::External("agents".into()),
+        },
     ]
 }
 
@@ -4002,50 +4011,67 @@ fn build_belief_social_merge_wgsl_body(
         3 => "atomicStore",
         _ => "atomicOr", // unknown discriminant — defensive default
     };
-    // N from arrayLength(&view_storage_primary): for pair-keyed
-    // beliefs storage is sized N², so sqrt recovers N; for
-    // single-key beliefs storage is sized N directly. The
-    // architectural alternative (cfg.agent_cap at a stable slot
-    // unclobbered by the indirect-consumer tail-copy) was
-    // investigated in iter 17 but interacts badly with the
-    // pending_event_count snapshot path — deferred.
-    let merge_loop = if !matches!(op, 0..=3) {
+    // Iter 23 — per-cell-outer dispatch (gid = (r, s) for pair-key,
+    // gid.x = r for single-key). Outer = N² (or N) threads in
+    // parallel; inner = walk event_ring sequentially looking for
+    // matching events. Critical path drops from O(N²) serial (the
+    // old per-event-outer + per-cell-inner shape) to O(events) with
+    // N² parallelism.
+    //
+    // Alive-mask cull: skip threads where receiver or subject is
+    // dead. For sparse-alive scenarios (dungeon_horde: ~5% alive)
+    // this culls >99% of the merge work before any atomic op fires.
+    //
+    // event_count comes from `event_tail[0]` directly — the dispatch
+    // is no longer Indirect (it's PerAgentEventScan / PerAgent
+    // Direct), so the per-dispatch cfg.event_count patch doesn't
+    // fire. Reading event_tail[0] is one atomic load per thread (or
+    // less — uniform branch prediction folds it across the
+    // workgroup).
+    if !matches!(op, 0..=3) {
         // Unknown op discriminant — defensive stub.
-        "                _ = source_agent; // unknown op discriminant — defensive stub\n".to_string()
-    } else if is_pair_keyed {
+        return format!(
+            "                // BeliefSocialMerge kernel — unknown op discriminant {op}\n\
+             \x20               _ = gid;\n",
+        );
+    }
+    if is_pair_keyed {
         format!(
-            "                let storage_size = arrayLength(&view_storage_primary);\n\
-             \x20               let n_agents = u32(sqrt(f32(storage_size)));\n\
-             \x20               for (var r: u32 = 0u; r < n_agents; r = r + 1u) {{\n\
-             \x20                   for (var s: u32 = 0u; s < n_agents; s = s + 1u) {{\n\
-             \x20                       let other_cell = atomicLoad(&view_storage_primary[source_agent * n_agents + s]);\n\
-             \x20                       {atomic_op}(&view_storage_primary[r * n_agents + s], other_cell);\n\
-             \x20                   }}\n\
-             \x20               }}\n"
+            "                // Plan I.4b/iter-23 per-cell belief_social_merge kernel — view=#{view_id} on_event=#{on_event_kind_id} op={op_label} (pair-keyed)\n\
+             \x20               let r = gid.x;\n\
+             \x20               let s = gid.y;\n\
+             \x20               let n_agents = cfg.agent_cap;\n\
+             \x20               if (r >= n_agents) {{ return; }}\n\
+             \x20               if (s >= n_agents) {{ return; }}\n\
+             \x20               // Alive-mask cull: dead receiver or subject → skip.\n\
+             \x20               if (agent_alive[r] == 0u) {{ return; }}\n\
+             \x20               if (agent_alive[s] == 0u) {{ return; }}\n\
+             \x20               let event_count = event_tail[0];\n\
+             \x20               for (var event_idx: u32 = 0u; event_idx < event_count; event_idx = event_idx + 1u) {{\n\
+             \x20                   let kind = event_ring[event_idx * {stride}u + 0u];\n\
+             \x20                   if (kind != {on_event_kind_id}u) {{ continue; }}\n\
+             \x20                   let source_agent = event_ring[event_idx * {stride}u + {source_field_offset}u];\n\
+             \x20                   let other_cell = atomicLoad(&view_storage_primary[source_agent * n_agents + s]);\n\
+             \x20                   {atomic_op}(&view_storage_primary[r * n_agents + s], other_cell);\n\
+             \x20               }}\n",
         )
     } else {
         format!(
-            "                let n_agents = arrayLength(&view_storage_primary);\n\
-             \x20               let other_cell = atomicLoad(&view_storage_primary[source_agent]);\n\
-             \x20               for (var r: u32 = 0u; r < n_agents; r = r + 1u) {{\n\
+            "                // Plan I.4b/iter-23 per-cell belief_social_merge kernel — view=#{view_id} on_event=#{on_event_kind_id} op={op_label} (single-key)\n\
+             \x20               let r = gid.x;\n\
+             \x20               let n_agents = cfg.agent_cap;\n\
+             \x20               if (r >= n_agents) {{ return; }}\n\
+             \x20               if (agent_alive[r] == 0u) {{ return; }}\n\
+             \x20               let event_count = event_tail[0];\n\
+             \x20               for (var event_idx: u32 = 0u; event_idx < event_count; event_idx = event_idx + 1u) {{\n\
+             \x20                   let kind = event_ring[event_idx * {stride}u + 0u];\n\
+             \x20                   if (kind != {on_event_kind_id}u) {{ continue; }}\n\
+             \x20                   let source_agent = event_ring[event_idx * {stride}u + {source_field_offset}u];\n\
+             \x20                   let other_cell = atomicLoad(&view_storage_primary[source_agent]);\n\
              \x20                   {atomic_op}(&view_storage_primary[r], other_cell);\n\
-             \x20               }}\n"
+             \x20               }}\n",
         )
-    };
-    format!(
-        "                // Plan I.4b belief_social_merge kernel — view=#{view_id} on_event=#{on_event_kind_id} op={op_label}\n\
-         \x20               let event_idx = gid.x;\n\
-         \x20               if (event_idx >= cfg.event_count) {{ return; }}\n\
-         \x20               let kind = event_ring[event_idx * {stride}u + 0u];\n\
-         \x20               if (kind != {on_event_kind_id}u) {{ return; }}\n\
-         \x20               // Source agent — event payload offset {source_field_offset} (computed\n\
-         \x20               // from the IR's `source_agent: LocalRef` ↔ event field map,\n\
-         \x20               // see cg/lower/view.rs::lower_view Belief arm). The hardcoded\n\
-         \x20               // `2u` historic fallback corresponds to events with the source\n\
-         \x20               // as the first payload word (AllyDied {{ dead: Agent }} etc.).\n\
-         \x20               let source_agent = event_ring[event_idx * {stride}u + {source_field_offset}u];\n\
-{merge_loop}",
-    )
+    }
 }
 
 /// Demote a binding's [`AccessMode`] to its read-only equivalent.

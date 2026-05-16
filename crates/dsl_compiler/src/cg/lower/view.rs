@@ -421,8 +421,20 @@ pub fn lower_view(
                     op: op_discriminant,
                     source_field_offset,
                 };
-                let dispatch = crate::cg::dispatch::DispatchShape::PerEvent {
-                    source_ring: crate::cg::data_handle::EventRingId(0),
+                // Iter 23 — 2D per-cell dispatch instead of per-event.
+                // Critical path drops from O(N²) serial → O(N) for the
+                // event-loop scan, with N² parallel threads doing one
+                // atomicOp each per matching event. Single-key beliefs
+                // use 1D per-agent dispatch (N threads) since storage
+                // is N cells, not N². The body reads event_count from
+                // event_tail[0] inside the kernel since the dispatch
+                // is no longer Indirect and the per-dispatch cfg patch
+                // doesn't fire.
+                let is_pair_keyed_belief = ir.params.len() == 2;
+                let dispatch = if is_pair_keyed_belief {
+                    crate::cg::dispatch::DispatchShape::PerAgentEventScan
+                } else {
+                    crate::cg::dispatch::DispatchShape::PerAgent
                 };
                 let op_id = ctx.builder.add_op(kind, dispatch, merge.span).map_err(|e| {
                     LoweringError::BuilderRejected {
