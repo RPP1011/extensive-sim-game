@@ -338,6 +338,20 @@ pub fn lower_view(
                 span: ir.span,
             })
         }
+        // Plan I — `belief` declarations land in this arm. The full
+        // lowering (storage-hint inference + propagation handler →
+        // ViewFold ops + social_merges → BeliefSocialMerge ops + auto-
+        // registered query Builtin) is slice I.3. Until then, the
+        // parser at slice I.1 doesn't yet emit ViewKind::Belief — so
+        // this arm is unreachable at HEAD.
+        (ViewKind::Belief, _) => {
+            Err(LoweringError::ViewKindBodyMismatch {
+                view: view_id,
+                kind_label: "belief",
+                body_label: "(slice I.3 not yet landed)",
+                span: ir.span,
+            })
+        }
     }
 }
 
@@ -1118,6 +1132,8 @@ mod tests {
             decay: None,
             belief_gated: false,
             storage_packing: dsl_ast::ir::Packing::None,
+
+            social_merges: Vec::new(),
             span: span(0, 0),
         }
     }
@@ -1133,6 +1149,8 @@ mod tests {
             decay: None,
             belief_gated: false,
             storage_packing: dsl_ast::ir::Packing::None,
+
+            social_merges: Vec::new(),
             span: span(0, 0),
         }
     }

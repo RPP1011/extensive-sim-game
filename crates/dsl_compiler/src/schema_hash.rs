@@ -352,6 +352,14 @@ pub fn views_hash(views: &[ViewIR]) -> [u8; 32] {
                     }
                 }
             }
+            // Plan I — `belief` marker variant. Storage hint is
+            // inferred by the lowering at slice I.3; this hash slot
+            // is reserved (0x03) so the regen at slice I.5 doesn't
+            // collide with the post-I.3 layout. Until inference
+            // ships, beliefs hash to a bare discriminant — at HEAD
+            // no `belief` declarations exist so this byte never
+            // contributes to a real fixture's hash.
+            ViewKind::Belief => h.update([0x03u8]),
         }
         // Decay hint.
         match v.decay {

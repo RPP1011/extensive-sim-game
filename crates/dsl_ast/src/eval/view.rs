@@ -777,6 +777,8 @@ mod tests {
             decay: None,
             belief_gated: false,
             storage_packing: crate::ir::Packing::None,
+
+            social_merges: Vec::new(),
             span: dummy_span(),
         }
     }
@@ -825,6 +827,8 @@ mod tests {
             decay: None,
             belief_gated: false,
             storage_packing: crate::ir::Packing::None,
+
+            social_merges: Vec::new(),
             span: dummy_span(),
         }
     }
@@ -881,6 +885,8 @@ mod tests {
             decay: None,
             belief_gated: false,
             storage_packing: crate::ir::Packing::None,
+
+            social_merges: Vec::new(),
             span: dummy_span(),
         };
 
@@ -1065,6 +1071,8 @@ mod tests {
             decay: None,
             belief_gated: false,
             storage_packing: crate::ir::Packing::None,
+
+            social_merges: Vec::new(),
             span: dummy_span(),
         };
 
@@ -1145,6 +1153,8 @@ mod tests {
             decay: None,
             belief_gated: false,
             storage_packing: crate::ir::Packing::None,
+
+            social_merges: Vec::new(),
             span: dummy_span(),
         };
 

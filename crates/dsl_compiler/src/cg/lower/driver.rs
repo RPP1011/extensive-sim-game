@@ -2152,6 +2152,11 @@ fn populate_view_bodies_and_signatures(
             // them so the diagnostic isn't doubled.
             (ViewKind::Lazy, ViewBodyIR::Fold { .. })
             | (ViewKind::Materialized(_), ViewBodyIR::Expr(_)) => {}
+            // Plan I — belief-kind registry walk lands in slice I.3
+            // (storage-hint inference + auto-register query Builtin).
+            // Until then no `belief` declarations reach this loop
+            // (parser at slice I.1 doesn't yet emit ViewKind::Belief).
+            (ViewKind::Belief, _) => {}
         }
     }
 }
@@ -2529,6 +2534,16 @@ fn build_view_handler_resolutions(
         // ViewKindBodyMismatch diagnostic.
         (ViewKind::Lazy, ViewBodyIR::Fold { .. })
         | (ViewKind::Materialized(_), ViewBodyIR::Expr(_)) => Ok(Vec::new()),
+        // Plan I — beliefs reuse the fold-handler resolution shape for
+        // their propagation handlers (the parser-side I.1 emits
+        // ViewBodyIR::Fold for belief bodies). When the parser lands
+        // ViewKind::Belief, this arm walks the fold handlers via the
+        // existing helper. Until I.1 lands no beliefs reach here.
+        (ViewKind::Belief, ViewBodyIR::Fold { handlers, .. }) => handlers
+            .iter()
+            .map(|h| build_fold_handler_resolution(view, h, events, event_rings))
+            .collect(),
+        (ViewKind::Belief, ViewBodyIR::Expr(_)) => Ok(Vec::new()),
     }
 }
 
@@ -4486,6 +4501,7 @@ mod tests {
             decay: None,
             belief_gated: false,
             storage_packing: dsl_ast::ir::Packing::None,
+            social_merges: Vec::new(),
             span: dsl_ast::ast::Span::dummy(),
         });
 

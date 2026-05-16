@@ -893,7 +893,51 @@ pub struct ViewIR {
     /// Plumbed from the AST `@storage(packed_q8)` annotation —
     /// see `lower_storage_annotation` in `resolve.rs`.
     pub storage_packing: Packing,
+    /// Plan I — social-merge handlers for the `belief` declaration
+    /// shape. Each entry encodes a `merge from <agent>: <op>` clause
+    /// — receiver bitwise-merges the named agent's belief storage
+    /// into their own when the event fires + the predicate passes.
+    /// Empty for every `view` declaration (only beliefs populate it).
+    /// Lowered by the (future) belief-arm of `lower_view` to a
+    /// `ComputeOpKind::BeliefSocialMerge` op kind.
+    pub social_merges: Vec<SocialMergeHandler>,
     pub span: Span,
+}
+
+/// Plan I — one `merge from <agent>: <op>` clause inside a `belief`
+/// declaration. The pattern + predicate gate when the merge fires;
+/// `source_agent` is the LocalRef of the event field carrying the
+/// belief-giver agent (e.g. `dead` in `on AllyDied { dead: d, ... }`).
+/// `op` picks the per-cell merge operation.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SocialMergeHandler {
+    pub pattern: IrEventPattern,
+    pub where_clause: Option<IrExprNode>,
+    pub source_agent: LocalRef,
+    pub op: MergeOp,
+    pub span: Span,
+}
+
+/// Plan I — per-cell merge operation for a social-merge handler. All
+/// variants are commutative + associative under the per-event ordering
+/// the chronicle's `seq` field provides, so cross-backend determinism
+/// (P11) is bit-exact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum MergeOp {
+    /// Bitwise OR — receiver gains every bit the giver has set.
+    /// Used for bitmap-shape beliefs (e.g. room knowledge: receiver
+    /// learns every room the giver knew).
+    BitOr,
+    /// Per-cell max — receiver takes the higher confidence/value
+    /// between their own and the giver's. Used for scalar beliefs
+    /// where higher = stronger evidence.
+    Max,
+    /// Per-cell min — symmetric to Max, lower = stronger evidence.
+    Min,
+    /// Per-cell replace — receiver overwrites their cell with the
+    /// giver's. Used when freshness matters more than aggregation
+    /// (the most recent observer wins).
+    Replace,
 }
 
 /// View-storage packing discriminator. Drives the WGSL emit's per-cell
@@ -920,10 +964,20 @@ pub enum Packing {
 
 /// Top-level view kind — lazy (pure fn, evaluated at read) or materialized
 /// (event-fold with persistent storage). Spec §2.3.
+///
+/// **Plan I (`docs/superpowers/plans/2026-05-15-belief-primitive.md`)** —
+/// `Belief` is a marker variant for the new `belief <name>(observer:
+/// Agent[, key]) -> T { ... }` declaration. It stays a marker (no
+/// payload) so `ViewKind` keeps its `Copy` impl; the social-merge
+/// handlers + storage-shape inference inputs live on dedicated
+/// [`ViewIR`] fields (`social_merges`, future inference flags).
+/// Storage hint is filled in by the lowering's signature-based
+/// inference table — author doesn't pick it for beliefs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ViewKind {
     Lazy,
     Materialized(StorageHint),
+    Belief,
 }
 
 /// Storage hint for `@materialized` views. Parsed from
