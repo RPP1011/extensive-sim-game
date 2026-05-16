@@ -2018,9 +2018,13 @@ fn compose_view_fold_bindings_struct_fields(spec: &KernelSpec) -> String {
     // + PerAgentEventScan dispatch adds slot 7 = `agent_busy_with_ability_id` (→ 8).
     // + `@belief_gated` (only valid alongside PerAgentEventScan) adds
     //   slot 8 = `beliefs_flags` (→ 9). See `build_view_fold_bindings`.
+    // + struct-cell folds (Plan H slice 3) read additional agent SoA
+    //   / ability registry columns (busy_until_tick, pos,
+    //   telegraph_kind/param_0, …) — one extra binding per column.
+    //   Threads_struct_probe lands at 12 bindings on the threats view.
     debug_assert!(
-        matches!(spec.bindings.len(), 7 | 8 | 9),
-        "compose_view_fold_bindings_struct_fields: ViewFold spec must carry 7, 8, or 9 bindings; got {}",
+        spec.bindings.len() >= 7,
+        "compose_view_fold_bindings_struct_fields: ViewFold spec must carry ≥7 bindings; got {}",
         spec.bindings.len()
     );
     let mut out = String::new();
@@ -2075,8 +2079,8 @@ fn compose_view_fold_bindings_struct_fields(spec: &KernelSpec) -> String {
 #[allow(dead_code)]
 fn compose_view_fold_bind_method(spec: &KernelSpec) -> String {
     debug_assert!(
-        matches!(spec.bindings.len(), 7 | 8 | 9),
-        "compose_view_fold_bind_method: ViewFold spec must carry 7, 8, or 9 bindings; got {}",
+        spec.bindings.len() >= 7,
+        "compose_view_fold_bind_method: ViewFold spec must carry ≥7 bindings; got {}",
         spec.bindings.len()
     );
     let accessor = view_fold_accessor(spec).expect("ViewFold spec must carry an accessor");
@@ -2131,10 +2135,13 @@ fn compose_view_fold_record_method(spec: &KernelSpec) -> String {
     // for the busy-filter early-exit, bringing the total to 8.
     // `@belief_gated` (PerAgentEventScan only) adds slot 8 =
     // `beliefs_flags` for the per-(observer, source) gate read,
-    // bringing the total to 9.
+    // bringing the total to 9. Struct-cell fold bodies (Plan H slice
+    // 3) append one binding per extra agent SoA / ability registry
+    // column they read, so totals beyond 9 are valid (threats view
+    // hits 12 in `threats_struct_probe.sim`).
     debug_assert!(
-        matches!(spec.bindings.len(), 7 | 8 | 9),
-        "compose_view_fold_record_method: ViewFold spec must carry 7, 8, or 9 bindings; got {}",
+        spec.bindings.len() >= 7,
+        "compose_view_fold_record_method: ViewFold spec must carry ≥7 bindings; got {}",
         spec.bindings.len()
     );
     let mut out = String::new();
@@ -2212,10 +2219,16 @@ fn compose_view_fold_record_method(spec: &KernelSpec) -> String {
     out.push_str("        // args wiring via seed_indirect_0 would replace this with\n");
     out.push_str("        // dispatch_workgroups_indirect against the args buffer.\n");
     // G3d: PerAgentEventScan needs a 2-D dispatch (workgroup_size 8×8,
-    // covering agent_cap × agent_cap pairs). Detect via the 8-or-9-
-    // binding shape (PerAgentEventScan ViewFold has 8 bindings today;
-    // 9 when @belief_gated adds the beliefs_flags read).
-    if spec.bindings.len() == 8 || spec.bindings.len() == 9 {
+    // covering agent_cap × agent_cap pairs). Detect via the presence
+    // of the `agent_busy_with_ability_id` binding (slot 7) rather
+    // than total binding count — struct-cell fold bodies (Plan H
+    // slice 3) add more bindings on top, so a count-based check
+    // would mis-route them to the 1-D dispatch.
+    let is_per_agent_event_scan = spec
+        .bindings
+        .iter()
+        .any(|b| b.name == "agent_busy_with_ability_id");
+    if is_per_agent_event_scan {
         out.push_str(
             "        // PerAgentEventScan: 2-D dispatch over (observer, source) pairs.\n",
         );
