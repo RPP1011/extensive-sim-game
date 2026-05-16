@@ -2152,11 +2152,40 @@ fn populate_view_bodies_and_signatures(
             // them so the diagnostic isn't doubled.
             (ViewKind::Lazy, ViewBodyIR::Fold { .. })
             | (ViewKind::Materialized(_), ViewBodyIR::Expr(_)) => {}
-            // Plan I — belief-kind registry walk lands in slice I.3
-            // (storage-hint inference + auto-register query Builtin).
-            // Until then no `belief` declarations reach this loop
-            // (parser at slice I.1 doesn't yet emit ViewKind::Belief).
-            (ViewKind::Belief, _) => {}
+            // Plan I (slice I.3) — register the belief's call
+            // signature + storage hint with the CG context so
+            // `belief.<name>(observer, subject)` reads through the
+            // same BuiltinId::ViewCall lowering as `view.<name>(...)`.
+            // The hint is inferred from the signature (today only the
+            // pair-keyed (Agent, Agent) → PairMap shape is supported;
+            // single-key shapes surface a typed UnsupportedBeliefShape
+            // diagnostic at `lower_view` time so the build.rs sees it).
+            (ViewKind::Belief, ViewBodyIR::Fold { .. }) => {
+                let arg_tys: Vec<crate::cg::expr::CgTy> = view
+                    .params
+                    .iter()
+                    .map(|p| super::expr::ir_type_to_cg_ty(&p.ty))
+                    .collect();
+                let result_ty = super::expr::ir_type_to_cg_ty(&view.return_ty);
+                ctx.register_view_signature(view_id, arg_tys, result_ty);
+                // Only register the storage hint when inference would
+                // succeed; otherwise the lower_view pass surfaces the
+                // diagnostic and there's no hint to register.
+                let inferred = match view.params.as_slice() {
+                    [a, b]
+                        if matches!(a.ty, dsl_ast::ir::IrType::AgentId)
+                            && matches!(b.ty, dsl_ast::ir::IrType::AgentId) =>
+                    {
+                        Some(dsl_ast::ir::StorageHint::PairMap)
+                    }
+                    _ => None,
+                };
+                if let Some(hint) = inferred {
+                    let cg_hint = super::view::project_storage_hint(hint);
+                    ctx.register_view_storage_hint(view_id, cg_hint);
+                }
+            }
+            (ViewKind::Belief, ViewBodyIR::Expr(_)) => {}
         }
     }
 }

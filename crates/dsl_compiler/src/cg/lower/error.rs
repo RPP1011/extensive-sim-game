@@ -915,6 +915,22 @@ pub enum LoweringError {
         available: Vec<String>,
         span: Span,
     },
+
+    // -- Belief primitive (Plan I, 2026-05-15) --------------------------
+
+    /// A `belief <name>(<params>) -> T` declaration's signature is
+    /// resolver-valid but the lowering's storage-hint inference table
+    /// doesn't yet support this exact shape. `detail` names the
+    /// missing combination (e.g. "single-key (Agent) -> T shape needs
+    /// SingleKey storage hint — slice I.3a deferred"). Surfaces here
+    /// rather than panicking so a fixture that depends on a deferred
+    /// shape gets an actionable build-time diagnostic with a slice
+    /// pointer for tracking.
+    UnsupportedBeliefShape {
+        view: ViewId,
+        detail: String,
+        span: Span,
+    },
 }
 
 /// Closed-set discriminant for which sub-expression of a scoring row
@@ -1510,6 +1526,11 @@ impl fmt::Display for LoweringError {
                 span.start,
                 span.end,
                 available.join(", "),
+            ),
+            LoweringError::UnsupportedBeliefShape { view, detail, span } => write!(
+                f,
+                "view#{} (belief) at {}..{}: {detail}",
+                view.0, span.start, span.end
             ),
         }
     }

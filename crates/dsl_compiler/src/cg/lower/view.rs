@@ -135,7 +135,7 @@
 //!   (Task 2.8 / driver-IR shape change).
 
 use dsl_ast::ir::{
-    DecayHint, FoldHandlerIR, IrStmt, StorageHint, ViewBodyIR, ViewIR, ViewKind,
+    DecayHint, FoldHandlerIR, IrStmt, IrType, StorageHint, ViewBodyIR, ViewIR, ViewKind,
 };
 
 use crate::cg::data_handle::{CgExprId, DataHandle, EventRingId, ViewId, ViewStorageSlot};
@@ -338,20 +338,102 @@ pub fn lower_view(
                 span: ir.span,
             })
         }
-        // Plan I — `belief` declarations land in this arm. The full
-        // lowering (storage-hint inference + propagation handler →
-        // ViewFold ops + social_merges → BeliefSocialMerge ops + auto-
-        // registered query Builtin) is slice I.3. Until then, the
-        // parser at slice I.1 doesn't yet emit ViewKind::Belief — so
-        // this arm is unreachable at HEAD.
-        (ViewKind::Belief, _) => {
+        // Plan I (slice I.3) — `belief` declarations infer their
+        // storage hint from the signature and reuse the materialized
+        // ViewFold lowering for propagation handlers. Social-merge
+        // clauses stay on `ir.social_merges` for the WGSL emit pass
+        // (slice I.4) to consume; they do not become separate compute
+        // ops yet.
+        (ViewKind::Belief, ViewBodyIR::Fold { handlers, .. }) => {
+            if handler_resolutions.len() != handlers.len() {
+                return Err(LoweringError::ViewHandlerResolutionLengthMismatch {
+                    view: view_id,
+                    expected: handlers.len(),
+                    got: handler_resolutions.len(),
+                    span: ir.span,
+                });
+            }
+            let hint = infer_belief_storage_hint(view_id, ir)?;
+            intern_view_name(view_id, ir, ctx)?;
+            let dispatch_override = view_dispatch_override(ir);
+            let mut op_ids = Vec::with_capacity(handlers.len() + 1);
+            if let Some(decay) = ir.decay.as_ref() {
+                let decay_op = lower_decay_op(view_id, decay, ir.storage_packing, ctx)?;
+                op_ids.push(decay_op);
+            }
+            let fold_ids = lower_fold_handlers(
+                view_id,
+                hint,
+                ir.decay.as_ref(),
+                handlers,
+                handler_resolutions,
+                dispatch_override,
+                ctx,
+            )?;
+            op_ids.extend(fold_ids);
+            Ok(op_ids)
+        }
+        (ViewKind::Belief, ViewBodyIR::Expr(_)) => {
+            // Parser at slice I.1 only emits Fold bodies for belief
+            // decls; this arm is a defensive gate matching the
+            // resolver's own UnsupportedBeliefSignature path.
             Err(LoweringError::ViewKindBodyMismatch {
                 view: view_id,
                 kind_label: "belief",
-                body_label: "(slice I.3 not yet landed)",
+                body_label: "expr",
                 span: ir.span,
             })
         }
+    }
+}
+
+/// Plan I slice I.3 — infer the [`StorageHint`] from a belief's
+/// signature. Today supports the `(observer: Agent, subject: Agent)`
+/// pair-keyed shape that the [`StorageHint::PairMap`] backing serves.
+/// Single-key `(observer: Agent)` and key-typed `(observer: Agent,
+/// key: u32)` shapes surface as a typed [`LoweringError::UnsupportedBeliefShape`]
+/// pointing at the follow-up slice (I.3a) that adds dedicated storage.
+fn infer_belief_storage_hint(view_id: ViewId, ir: &ViewIR) -> Result<StorageHint, LoweringError> {
+    match ir.params.as_slice() {
+        [first, second]
+            if matches!(first.ty, IrType::AgentId) && matches!(second.ty, IrType::AgentId) =>
+        {
+            Ok(StorageHint::PairMap)
+        }
+        [first] if matches!(first.ty, IrType::AgentId) => {
+            Err(LoweringError::UnsupportedBeliefShape {
+                view: view_id,
+                detail: "single-key `(observer: Agent) -> T` shape needs a SingleKey \
+                         storage variant — slice I.3a deferred. Use the pair-keyed \
+                         `(observer: Agent, subject: Agent) -> T` shape today."
+                    .to_string(),
+                span: ir.span,
+            })
+        }
+        [first, second]
+            if matches!(first.ty, IrType::AgentId)
+                && matches!(second.ty, IrType::U8 | IrType::U32 | IrType::I32) =>
+        {
+            Err(LoweringError::UnsupportedBeliefShape {
+                view: view_id,
+                detail: format!(
+                    "key-typed second param `{}: {:?}` needs a SingleKey-extended \
+                     storage variant — slice I.3a deferred. Use the pair-keyed \
+                     `(observer: Agent, subject: Agent) -> T` shape today.",
+                    second.name, second.ty
+                ),
+                span: ir.span,
+            })
+        }
+        _ => Err(LoweringError::UnsupportedBeliefShape {
+            view: view_id,
+            detail: format!(
+                "belief signature shape not recognised (params: {:?}) — the resolver \
+                 should have rejected this; treat as a defect.",
+                ir.params.iter().map(|p| (&p.name, &p.ty)).collect::<Vec<_>>()
+            ),
+            span: ir.span,
+        }),
     }
 }
 
