@@ -24,6 +24,11 @@ rustc-hash = "2.1"
 
 [dev-dependencies]
 tempfile = "3"
+# Glob for locating engine_voxel rlib by hash suffix in terrain_emit_compiles test.
+glob = "0.3"
+# Syn fallback for terrain_emit_compiles: parse emitted source as valid Rust
+# when rustc extern-resolution fails (e.g. missing Vulkan rlibs in CI).
+syn = { version = "2", features = ["full"] }
 # WGSL parse/validate for emit_view_wgsl / emit_scoring_wgsl tests.
 # Pinned to match engine_gpu's `=26.0.0` so the same WGSL dialect
 # stays authoritative across the DSL + runtime sides.
