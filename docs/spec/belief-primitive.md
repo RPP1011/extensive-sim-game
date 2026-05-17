@@ -81,8 +81,14 @@ Multi-horizon stresstest (`crates/sims/tests/threat_horizon_stresstest_pin.rs`):
 |---|---|---|
 | `i32` / `u8` return types | Grammar-valid, lowering-rejected on type-mismatch | DSL literal-suffix surface needs `1i` / `1u8` parser support |
 | IR-level source-agent field offset lookup | Hardcoded offset 2 (works for single-Agent-field events like `AllyDied { dead: Agent }`) | Compute from `social_merge.source_agent: LocalRef` + event field layout |
-| Sparse-by-Agent ring merge | Not started | True ring storage for `(Agent, Agent)` beliefs: each observer's row is K most-recently-merged (subject, value) entries with FIFO eviction. Merge becomes find-or-insert. Distinct from `@key_pop` (which is sparse-by-key, not sparse-by-Agent) |
 | Plan I.6 viewer migration | Pattern probe shipped (`room_known_pattern_probe`); full dungeon_horde viewer rewrite deferred | Replace `hero_known_rooms: [u64; 5]` host field with GPU readback when the migration value justifies the Plan E hook bypass |
+
+(Sparse-by-Agent ring was previously listed here as a deferred item.
+Dropped 2026-05-16 — no shipped fixture has needed identity-preserved
+K-slot subject storage with K << N. Every belief use case in the
+repo today lands in one of the three shapes covered above. If a
+real fixture surfaces that needs it, the ring is the right shape;
+until then it's aspirational and shouldn't imply an obligation.)
 
 ## Maze sim story arc (canonical worked example)
 
