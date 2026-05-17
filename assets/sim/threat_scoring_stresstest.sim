@@ -1,0 +1,121 @@
+// threat_scoring_stresstest — short+long-horizon threat impact on
+// scoring decisions.
+//
+// **What this stresses, in one fixture, that the existing threat
+// fixtures cover only piecewise:**
+//
+//   * `threat_horizon_stresstest.sim` mixes short+long-fuse casters
+//     in one observer's belief but never reads the belief from a
+//     scoring expression — it just reports per-tick view values.
+//   * `dodger_probe.sim` scores `Flee` by `threats.intensity_at(self)`
+//     vs `Idle` constant 0.5 — single horizon (all casters busy
+//     forever), no decay shape, binary outcome.
+//   * `threat_impact.sim` uses a `@runtime flee_strength` knob to
+//     compare hare-position outcomes between threat-aware (1.0) and
+//     threat-blind (0.0) runs — but the decision is movement, not
+//     argmax-scored verb selection.
+//
+// This fixture combines all three so a single test pin can report
+// "across mixed-horizon threats, how does the scoring kernel's
+// per-tick verb pick distribution differ between threat-aware and
+// threat-blind modes?" That's the headline "effectiveness of threat
+// impact on scoring" metric the user spec asked for.
+//
+// **Composition (N=8 alive)**
+//
+//   slot 0..1: Caster (long-fuse — host keeps busy every tick)
+//   slot 2..3: Caster (short-fuse — host clears busy after tick 0)
+//   slot 4..7: Dodger (observer; decides Flee vs Hold each tick)
+//
+// (Entity decl order = alphabetical, so Caster=0 / Dodger=1.)
+//
+// **Decay** rate 0.85/tick. With 2 long-fuse casters contributing
+// +1/tick each, steady-state ≈ 2/(1-0.85) = 13.33 — well above
+// Hold's 0.5 baseline. The 2 short-fuse casters add a +2 spike on
+// tick 0 that decays geometrically; their decay shape is observable
+// in the per-tick utility trajectory but doesn't flip the argmax
+// because the long-fuse steady-state dominates.
+//
+// **The decision-impact knob** is `flee_weight` (@runtime). The
+// pin sweeps it across {1.0, 0.5, 0.0}:
+//
+//   weight=1.0 → Flee scores ≈ 13.33  → argmax picks Flee always
+//   weight=0.5 → Flee scores ≈ 6.67   → argmax picks Flee always
+//   weight=0.0 → Flee scores  0.0     → argmax picks Hold always
+//
+// The interesting cell is the **0.05 weight**: Flee scores ≈ 0.67
+// at steady-state but during the early-tick growth phase (before the
+// fold has built up) it dwells below 0.5 → Hold wins. The crossover
+// tick = first tick the cumulative-folded threats * 0.05 exceeds
+// 0.5. The pin reports this crossover as the "effectiveness of
+// threat horizon shape on scoring" metric.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event ScriptedCastBegin {
+  source:     AgentId,
+  target:     AgentId,
+  ability_id: u32,
+}
+
+entity Caster : Agent { }
+entity Dodger : Agent { }
+
+init {
+  alive: 1,
+  hp:    100,
+}
+
+config scoring {
+  cast_ability_id: u32 = 1,
+  // The decision-impact knob. Multiplied into Flee's score
+  // expression so a single .sim can be exercised twice from the host
+  // — once with flee_weight=1.0 (threat-aware) and once with
+  // flee_weight=0.0 (threat-blind) — without recompiling.
+  flee_weight:     f32 = 1.0 @runtime,
+  // Hold's constant baseline score. Stays at 0.5 (canonical "do
+  // nothing is mildly preferable to fleeing into nothing") — the
+  // weight sweep above is what shifts the argmax.
+  hold_score:      f32 = 0.5,
+}
+
+// MarkInitialBusy — at tick 0, every alive Caster gets a non-zero
+// `busy_with_ability_id`. The PerAgentEventScan fold for the
+// `threats` belief reads `agent_busy_with_ability_id[source]` to
+// decide which (observer, source) pairs contribute +1/tick. The
+// test pin host-zeros slots 2..3 (short-fuse) after tick 0 so only
+// the long-fuse slots stay busy from tick 1+.
+@phase(per_agent)
+physics MarkInitialBusy {
+  on Tick {} where (
+    self.alive && world.tick == 0 && self.creature_type == Caster
+  ) {
+    agents.set_busy_with_ability_id(self, config.scoring.cast_ability_id);
+  }
+}
+
+// The threats belief — per-observer scalar f32 counting busy
+// candidates each tick. Decay 0.85/tick gives short-fuse memory a
+// half-life ~4 ticks, while long-fuse contributions sustain.
+@dispatch(per_agent_event_scan)
+@decay(rate = 0.85, per = tick)
+belief threats(observer: Agent) -> f32 {
+  initial: 0.0,
+  on ScriptedCastBegin { source: _, target: _, ability_id: _ } { self += 1.0 }
+}
+
+// Flee — competes against Hold. Score reads the per-observer
+// threats intensity, multiplied by the @runtime weight so the host
+// can dial the threat-impact knob without recompiling.
+verb Flee(self) =
+  action FleeAction
+  when (self.alive && self.creature_type == Dodger)
+  score (threats.intensity_at(self) * config.scoring.flee_weight)
+
+// Hold — constant baseline. With threats * weight > hold_score,
+// Flee wins; otherwise Hold wins.
+verb Hold(self) =
+  action HoldAction
+  when (self.alive && self.creature_type == Dodger)
+  score (config.scoring.hold_score)

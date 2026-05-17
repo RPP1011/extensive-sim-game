@@ -131,6 +131,7 @@ fn main() {
                 | "maze_explorer_visited"
                 | "maze_explorer"
                 | "assassination_threat_test"
+                | "threat_scoring_stresstest"
         ) {
             continue;
         }
