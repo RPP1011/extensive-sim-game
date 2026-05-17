@@ -76,6 +76,7 @@ pub mod program;
 /// the kernel-side WGSL prelude; runtime crates consume `cells_bytes`
 /// / `offsets_bytes` / `num_cells` to size their `wgpu::Buffer`s.
 pub mod spatial;
+pub mod terrain;
 pub mod wgsl_body;
 
 // Phase 7 boids GPU pipeline (2026-05-02): the wolf-sim runtime
@@ -95,6 +96,7 @@ pub use probes::{emit_cg_program_with_invariants_metrics_and_probes, synthesize_
 pub use program::{
     emit_cg_program, emit_cg_program_with_debug, EmittedArtifacts, ProgramEmitError,
 };
+pub use terrain::emit_terrain;
 pub use wgsl_body::{
     lower_cg_expr_to_wgsl, lower_cg_stmt_list_to_wgsl, lower_cg_stmt_to_wgsl, EmitCtx, EmitError,
     HandleNamingStrategy,

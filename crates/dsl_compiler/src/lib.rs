@@ -29,6 +29,10 @@ pub mod cg;
 // downstream crates can write `dsl_compiler::lower::lower_terrain`.
 pub use cg::lower as lower;
 
+// Re-export the CG emit module at the crate root so that tests and
+// downstream crates can write `dsl_compiler::emit::emit_terrain`.
+pub use cg::emit as emit;
+
 // Re-export terrain lowering error at the crate root for test ergonomics.
 pub use cg::lower::LowerError;
 
