@@ -5109,8 +5109,137 @@ fn peek_word_for_error(c: &Cursor) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// terrain { extent, cell_size, seed_purpose }
+// terrain { extent, cell_size, seed_purpose, materials { ... }, layers { ... } }
 // ---------------------------------------------------------------------------
+
+fn parse_material_decl(c: &mut Cursor) -> PResult<crate::terrain::MaterialDecl> {
+    c.skip_ws();
+    let name_span = here(c);
+    let name = ident(c).map_err(|e| e.with_context("parsing material entry name"))?;
+    c.skip_ws();
+    expect_char(c, '{')
+        .map_err(|e| e.with_context("parsing material entry body (expected `{`)"))?;
+
+    let mut id: Option<u8> = None;
+    let mut walkable: Option<bool> = None;
+    let mut hardness: Option<u8> = None;
+    let mut biome_tag: Option<String> = None;
+    let mut color: Option<u32> = None;
+    let mut movement_cost: Option<f32> = None;
+
+    loop {
+        c.skip_ws();
+        if c.starts_with_char('}') {
+            c.bump(1);
+            break;
+        }
+        let prop_span = here(c);
+        let prop = ident(c).map_err(|e| e.with_context("parsing material property name"))?;
+        c.skip_ws();
+        expect_char(c, ':')
+            .map_err(|e| e.with_context("parsing material property (expected `:` after name)"))?;
+        c.skip_ws();
+        match prop.as_str() {
+            "id" => {
+                let num_span = here(c);
+                let (v, is_float) = number_literal(c)
+                    .map_err(|e| e.with_context("parsing material `id` value"))?;
+                if is_float {
+                    return Err(ParseErr::at(num_span, "material `id` must be an integer"));
+                }
+                if v < 0.0 || v > 255.0 {
+                    return Err(ParseErr::at(num_span, "material id must be 1..=255"));
+                }
+                id = Some(v as u8);
+            }
+            "walkable" => {
+                let bool_span = here(c);
+                if starts_with_keyword(c, "true") {
+                    c.bump("true".len());
+                    walkable = Some(true);
+                } else if starts_with_keyword(c, "false") {
+                    c.bump("false".len());
+                    walkable = Some(false);
+                } else {
+                    return Err(ParseErr::at(bool_span, "expected `true` or `false` for `walkable`"));
+                }
+            }
+            "hardness" => {
+                let num_span = here(c);
+                let (v, is_float) = number_literal(c)
+                    .map_err(|e| e.with_context("parsing material `hardness` value"))?;
+                if is_float {
+                    return Err(ParseErr::at(num_span, "material `hardness` must be an integer"));
+                }
+                if v < 0.0 || v > 255.0 {
+                    return Err(ParseErr::at(num_span, "material `hardness` out of u8 range (0..=255)"));
+                }
+                hardness = Some(v as u8);
+            }
+            "biome_tag" => {
+                let tag = ident(c).map_err(|e| e.with_context("parsing material `biome_tag` value"))?;
+                biome_tag = Some(tag);
+            }
+            "color" => {
+                let num_span = here(c);
+                let (v, is_float) = number_literal(c)
+                    .map_err(|e| e.with_context("parsing material `color` value"))?;
+                if is_float {
+                    return Err(ParseErr::at(num_span, "material `color` must be an integer"));
+                }
+                if v < 0.0 || v > u32::MAX as f64 {
+                    return Err(ParseErr::at(num_span, "material `color` out of u32 range"));
+                }
+                color = Some(v as u32);
+            }
+            "movement_cost" => {
+                let (v, _) = number_literal(c)
+                    .map_err(|e| e.with_context("parsing material `movement_cost` value"))?;
+                movement_cost = Some(v as f32);
+            }
+            other => {
+                return Err(ParseErr::at(
+                    prop_span,
+                    format!(
+                        "unknown material property `{other}`; expected one of id, walkable, hardness, biome_tag, color, movement_cost"
+                    ),
+                ));
+            }
+        }
+        c.skip_ws();
+        // optional trailing comma between properties
+        if c.starts_with_char(',') {
+            c.bump(1);
+        }
+    }
+
+    let id_val = id.ok_or_else(|| {
+        ParseErr::at(name_span, format!("material `{name}` missing required field `id`"))
+    })?;
+    // Validate id >= 1 (0 is reserved/invalid)
+    if id_val == 0 {
+        return Err(ParseErr::at(name_span, "material id must be 1..=255"));
+    }
+    let walkable_val = walkable.ok_or_else(|| {
+        ParseErr::at(name_span, format!("material `{name}` missing required field `walkable`"))
+    })?;
+    let hardness_val = hardness.ok_or_else(|| {
+        ParseErr::at(name_span, format!("material `{name}` missing required field `hardness`"))
+    })?;
+    let color_val = color.ok_or_else(|| {
+        ParseErr::at(name_span, format!("material `{name}` missing required field `color`"))
+    })?;
+
+    Ok(crate::terrain::MaterialDecl {
+        name,
+        id: id_val,
+        walkable: walkable_val,
+        hardness: hardness_val,
+        biome_tag,
+        color: color_val,
+        movement_cost: movement_cost.unwrap_or(1.0),
+    })
+}
 
 fn parse_terrain(c: &mut Cursor) -> PResult<crate::terrain::TerrainBlock> {
     expect_keyword(c, "terrain")
@@ -5122,6 +5251,7 @@ fn parse_terrain(c: &mut Cursor) -> PResult<crate::terrain::TerrainBlock> {
     let mut extent: Option<u32> = None;
     let mut cell_size: Option<f32> = None;
     let mut seed_purpose: Option<u32> = None;
+    let mut materials: Vec<crate::terrain::MaterialDecl> = Vec::new();
 
     loop {
         c.skip_ws();
@@ -5132,59 +5262,94 @@ fn parse_terrain(c: &mut Cursor) -> PResult<crate::terrain::TerrainBlock> {
         let field_span = here(c);
         let field = ident(c).map_err(|e| e.with_context("parsing terrain field name"))?;
         c.skip_ws();
-        expect_char(c, ':')
-            .map_err(|e| e.with_context("parsing terrain field (expected `:` after name)"))?;
-        c.skip_ws();
         match field.as_str() {
-            "extent" => {
-                let num_span = here(c);
-                let (v, is_float) = number_literal(c)
-                    .map_err(|e| e.with_context("parsing terrain extent value"))?;
-                if is_float {
-                    return Err(ParseErr::at(num_span, "`extent` must be an integer"));
+            "materials" => {
+                // Sub-block: materials { <ident> { ... }* }
+                expect_char(c, '{')
+                    .map_err(|e| e.with_context("parsing `materials` block (expected `{`)"))?;
+                loop {
+                    c.skip_ws();
+                    if c.starts_with_char('}') {
+                        c.bump(1);
+                        break;
+                    }
+                    let mat = parse_material_decl(c)
+                        .map_err(|e| e.with_context("parsing material entry"))?;
+                    materials.push(mat);
+                    c.skip_ws();
+                    // optional comma between entries
+                    if c.starts_with_char(',') {
+                        c.bump(1);
+                    }
                 }
-                if v < 0.0 || v > u32::MAX as f64 {
-                    return Err(ParseErr::at(num_span, "`extent` out of u32 range"));
+                // Validate: no duplicate ids
+                let mut seen_ids = std::collections::HashSet::new();
+                for mat in &materials {
+                    if !seen_ids.insert(mat.id) {
+                        return Err(ParseErr::at(
+                            field_span,
+                            format!("duplicate material id {} in `materials` block", mat.id),
+                        ));
+                    }
                 }
-                extent = Some(v as u32);
             }
-            "cell_size" => {
-                let (v, _) = number_literal(c)
-                    .map_err(|e| e.with_context("parsing terrain cell_size value"))?;
-                cell_size = Some(v as f32);
-            }
-            "seed_purpose" => {
-                let num_span = here(c);
-                let (v, is_float) = number_literal(c)
-                    .map_err(|e| e.with_context("parsing terrain seed_purpose value"))?;
-                if is_float {
-                    return Err(ParseErr::at(num_span, "`seed_purpose` must be an integer"));
+            _ => {
+                // All scalar fields require `:` after the name
+                expect_char(c, ':')
+                    .map_err(|e| e.with_context("parsing terrain field (expected `:` after name)"))?;
+                c.skip_ws();
+                match field.as_str() {
+                    "extent" => {
+                        let num_span = here(c);
+                        let (v, is_float) = number_literal(c)
+                            .map_err(|e| e.with_context("parsing terrain extent value"))?;
+                        if is_float {
+                            return Err(ParseErr::at(num_span, "`extent` must be an integer"));
+                        }
+                        if v < 0.0 || v > u32::MAX as f64 {
+                            return Err(ParseErr::at(num_span, "`extent` out of u32 range"));
+                        }
+                        extent = Some(v as u32);
+                    }
+                    "cell_size" => {
+                        let (v, _) = number_literal(c)
+                            .map_err(|e| e.with_context("parsing terrain cell_size value"))?;
+                        cell_size = Some(v as f32);
+                    }
+                    "seed_purpose" => {
+                        let num_span = here(c);
+                        let (v, is_float) = number_literal(c)
+                            .map_err(|e| e.with_context("parsing terrain seed_purpose value"))?;
+                        if is_float {
+                            return Err(ParseErr::at(num_span, "`seed_purpose` must be an integer"));
+                        }
+                        if v < 0.0 || v > u32::MAX as f64 {
+                            return Err(ParseErr::at(num_span, "`seed_purpose` out of u32 range"));
+                        }
+                        let val = v as u32;
+                        if val == 0 {
+                            return Err(ParseErr::at(
+                                num_span,
+                                "`seed_purpose` must be non-zero",
+                            ));
+                        }
+                        seed_purpose = Some(val);
+                    }
+                    other => {
+                        return Err(ParseErr::at(
+                            field_span,
+                            format!(
+                                "unknown terrain field `{other}`; expected one of extent, cell_size, seed_purpose, materials"
+                            ),
+                        ));
+                    }
                 }
-                if v < 0.0 || v > u32::MAX as f64 {
-                    return Err(ParseErr::at(num_span, "`seed_purpose` out of u32 range"));
+                c.skip_ws();
+                // optional trailing comma or newline-separated (no comma needed)
+                if c.starts_with_char(',') {
+                    c.bump(1);
                 }
-                let val = v as u32;
-                if val == 0 {
-                    return Err(ParseErr::at(
-                        num_span,
-                        "`seed_purpose` must be non-zero",
-                    ));
-                }
-                seed_purpose = Some(val);
             }
-            other => {
-                return Err(ParseErr::at(
-                    field_span,
-                    format!(
-                        "unknown terrain field `{other}`; expected one of extent, cell_size, seed_purpose"
-                    ),
-                ));
-            }
-        }
-        c.skip_ws();
-        // optional trailing comma or newline-separated (no comma needed)
-        if c.starts_with_char(',') {
-            c.bump(1);
         }
     }
 
@@ -5202,7 +5367,7 @@ fn parse_terrain(c: &mut Cursor) -> PResult<crate::terrain::TerrainBlock> {
         extent,
         cell_size,
         seed_purpose,
-        materials: vec![],
+        materials,
         layers: vec![],
     })
 }
