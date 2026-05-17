@@ -109,6 +109,10 @@ pub use region::{
     VoxelRegionRegistry,
 };
 
+/// Layer helpers called by emitter-generated `generate_terrain(seed)` functions.
+/// See `terrain_layers.rs` for design notes.
+pub mod terrain_layers;
+
 /// Per-material property table — holds one `MaterialRow` per non-air
 /// material id. Produced by the DSL emitter (T8) and stored on
 /// `VoxelTerrain`. See `materials.rs` for the full design notes.
