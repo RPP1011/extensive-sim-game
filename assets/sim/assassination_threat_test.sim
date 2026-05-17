@@ -1,0 +1,295 @@
+// assassination_threat_test — Phase 5 closeout of the voxel-region-
+// indices spec (`docs/superpowers/specs/2026-04-25-voxel-region-
+// indices-design.md`). Exercises the parser+resolver surface for
+// `region_kind` / `index` / `region_indices`, the I.3b @key_pop K=4
+// threat-belief shape with decay, and a 50-attempt host-orchestrated
+// adaptation loop where the planner relocates guards toward the
+// quadrants that historically saw the most assassin activity.
+//
+// ## Behavioural shape (matches the user's spec)
+//
+//   * 1 Assassin with autowin combat against any single guard or
+//     the king (oneshot damage). Tunnels in a straight line at the
+//     king — "perfect-info movement", no obstacle pathing. Stealth =
+//     only detected within `detection_radius` of a guard (4 cells).
+//   * 8 Guards initially distributed across the 4 city quadrants.
+//     Between attempts, the host re-distributes them weighted by
+//     the planner's `threat(planner, quadrant)` belief.
+//   * 1 King at the city centre (the assassination target + planner).
+//
+// ## Phase 5 simplifications (documented; deferred to follow-ups)
+//
+//   * **Host-side planner adaptation.** The user's spec was "DSL
+//     physics rule reads threat belief, picks max + places defense".
+//     Reading key-typed beliefs (the `@key_pop(K=4)` shape below) at
+//     a specific quadrant from a physics rule needs a
+//     `belief.at(self, key)` accessor that doesn't exist yet. For
+//     Phase 5 the *fold side* of the belief runs in the sim (proof
+//     of the @key_pop pipeline end-to-end), and the *read side* runs
+//     host-side between attempts (read `view_storage_threat_primary`
+//     directly, pick the argmax quadrant, re-seed guard positions).
+//     Track: belief-read-by-key DSL surface → future slice.
+//
+//   * **Navgrid build is host-side, decoration-only.** The
+//     `region_kind Settlement { … }` + `index Navgrid(…)` +
+//     `region_indices Settlement { Navgrid }` decls below parse and
+//     resolve clean (Phase 1+2 surface) but no kernel consumes the
+//     index today. The test pin still calls
+//     `engine_voxel::build_navgrid(&region, |x,y,z| …)` per attempt
+//     to prove the Phase 4a build pipeline plumbs end-to-end against
+//     a real fixture. The Assassin's `AssassinAdvance` rule tunnels
+//     directly toward the king instead of gradient-descending on a
+//     believed-distance belief over the navgrid (would need the
+//     belief-read-by-key surface + a host-seeded BFS distance map).
+//     Both reads land in Phase 6+; the user spec explicitly framed
+//     gradient-steering as the "ideal" form.
+//
+//   * **No `terrain.line_of_sight` gate on detection.** Pure radius
+//     test. The user spec called out "tunneling" as the assassin's
+//     primitive, so neither side needs LoS for Phase 5's narrative.
+//
+// ## Outcome contract (assassination_threat_test_pin.rs)
+//
+//   1. 50 attempts run without panic.
+//   2. Per-attempt success rate decline is visible across the run:
+//      attempts 1..10 mostly succeed (untrained planner), attempts
+//      40..50 succeed less often (planner has re-clustered guards
+//      toward the dominant approach quadrant).
+//   3. `view_storage_threat_primary` accumulates non-zero values in
+//      at least 2 quadrants after 50 attempts (proof the @key_pop
+//      K=4 storage shape held + the decay didn't zero everything).
+//   4. Navgrid build returns a 16×16 grid for the city region
+//      without error (proof Phase 4a's `engine_voxel::build_navgrid`
+//      plumbs against a real fixture's voxel terrain).
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event EffectDamageApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Defeated {
+  combatant: AgentId,
+}
+
+// ThreatSighted — emitted by a guard when the assassin enters its
+// detection radius. The `planner` field is the King's slot (=9, the
+// only king with the entity-decl alphabetical layout below). The
+// `quadrant` is 0..3 by (x,z) sign relative to the city centre
+// (origin). The fold below accumulates +1.0 per detection per tick
+// per guard; decay 0.95/tick keeps the memory bounded.
+@replayable @gpu_amenable
+event ThreatSighted {
+  planner:  AgentId,
+  quadrant: u32,
+}
+
+// Entity decl order is alphabetical, so the creature_type
+// discriminants are: Assassin=0, Guard=1, King=2.
+entity Assassin : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Guard : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity King : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+init {
+  alive: 1,
+  hp:    100,
+}
+
+config city {
+  ct_assassin: u32 = 0,
+  ct_guard:    u32 = 1,
+  ct_king:     u32 = 2,
+
+  // Layout pins. N=10 agents total: 1 Assassin (slot 0), 8 Guards
+  // (slots 1..9), 1 King (slot 9). The planner_slot is the King's.
+  planner_slot: u32 = 9,
+
+  // Movement & combat.
+  assassin_step:    f32 = 0.5,
+  detection_radius: f32 = 4.0,
+  strike_radius:    f32 = 1.5,
+  assassin_damage:  f32 = 999.0,  // autowin vs hp 100
+  guard_damage:     f32 = 999.0,  // autowin vs hp 100
+
+  // City is centred at (0,0,0) and spans roughly [-8, +8] in x and z.
+  // Used only by the test pin (host-side) to compute spawn quadrants.
+  half_extent: f32 = 8.0,
+}
+
+// Detection ring — used by both GuardDetect and the strike rules. The
+// 4-unit radius is generous so detection lands at least 8 ticks
+// before strike range.
+@spatial(radius = 4.0, kind = [Agent])
+spatial_query nearby_detect(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+@spatial(radius = 1.5, kind = [Agent])
+spatial_query nearby_melee(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// The threat belief — 4 cells per planner. Each tick a guard sees
+// the assassin, +1.0 folds into `threat(planner, q)` for that
+// quadrant. Decay 0.95/tick gives ~14 ticks of half-life, so within
+// one attempt the belief reflects the *current* attempt's approach
+// (~100 ticks/attempt), and across attempts the decay leaks the old
+// signal so the planner can't just relive ancient memories.
+@decay(rate = 0.95, per = tick)
+@key_pop(K = 4)
+belief threat(planner: Agent, quadrant: u32) -> f32 {
+  initial: 0.0,
+  on ThreatSighted { planner: p, quadrant: q } where (p == planner) {
+    self += 1.0
+  }
+}
+
+// AssassinAdvance — Assassin tunnels in a straight line at the king
+// each tick. Same normalize-direction form palace_coup uses (raw
+// sum*step recurrence diverges to NaN within ~4 ticks).
+@phase(per_agent)
+physics AssassinAdvance {
+  on Tick {} where (self.alive && self.creature_type == Assassin) {
+    let toward_king = sum(k in agents where
+      if (k != self) && (k.alive) && (k.creature_type == King) {
+        k.pos - self.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let dist = length(toward_king);
+    let new_pos = if (dist > 0.001) {
+      self.pos + (toward_king / dist) * config.city.assassin_step
+    } else {
+      self.pos
+    };
+    agents.set_pos(self, new_pos);
+  }
+}
+
+// AssassinStrike — assassin in melee range of any king → apply the
+// assassin's strike ability (id 1, alphabetical first in
+// assets/ability_test/assassination_threat_test/). Autowin damage
+// kills the king on the first hit.
+@phase(per_agent)
+physics AssassinStrike {
+  on Tick {} where (self.alive && self.creature_type == Assassin) {
+    for candidate in spatial.nearby_melee(self) {
+      if (candidate.alive && candidate.creature_type == King) {
+        apply_ability 1 by self target candidate
+      }
+    }
+  }
+}
+
+// GuardDetect — every alive guard with the assassin in detection
+// radius emits ThreatSighted. The quadrant is computed from the
+// assassin's pos relative to the city centre (origin):
+//
+//   q=0   if x >= 0 && z >= 0   (NE, +x +z)
+//   q=1   if x <  0 && z >= 0   (NW, -x +z)
+//   q=2   if x <  0 && z <  0   (SW, -x -z)
+//   q=3   if x >= 0 && z <  0   (SE, +x -z)
+//
+// (Same convention the test pin uses host-side to pick the next
+// attempt's spawn quadrant.)
+@phase(per_agent)
+physics GuardDetect {
+  on Tick {} where (self.alive && self.creature_type == Guard) {
+    for candidate in spatial.nearby_detect(self) {
+      if (candidate.alive && candidate.creature_type == Assassin) {
+        let cpos = agents.pos(candidate);
+        let dx = cpos.x;
+        let dz = cpos.z;
+        let q_top = if (dx >= 0.0) { 0u } else { 1u };
+        let q_bot = if (dx >= 0.0) { 3u } else { 2u };
+        let q = if (dz >= 0.0) { q_top } else { q_bot };
+        emit ThreatSighted { planner: 9, quadrant: q }
+      }
+    }
+  }
+}
+
+// GuardStrike — Guards in melee range of the assassin → strike
+// (ability 2). Autowin damage kills the assassin on the first hit.
+// Whichever side reaches melee range first wins the encounter.
+@phase(per_agent)
+physics GuardStrike {
+  on Tick {} where (self.alive && self.creature_type == Guard) {
+    for candidate in spatial.nearby_melee(self) {
+      if (candidate.alive && candidate.creature_type == Assassin) {
+        apply_ability 2 by self target candidate
+      }
+    }
+  }
+}
+
+// Chronicle drain — re-emit EffectDamageApplied as Damaged for the
+// unified ApplyDamage pipe. Same shape palace_coup uses.
+@phase(post)
+physics ApplyDamageFromChronicle {
+  on EffectDamageApplied { actor: a, target: t, amount: amt } {
+    emit Damaged { source: a, target: t, amount: amt }
+  }
+}
+
+@phase(post)
+physics ApplyDamage {
+  on Damaged { source: src, target: t, amount: a } {
+    let old_hp = agents.hp(t);
+    let new_hp = old_hp - a;
+    agents.set_hp(t, new_hp);
+    if (old_hp > 0.0 && new_hp <= 0.0) {
+      agents.set_alive(t, false);
+      emit Defeated { combatant: t }
+    }
+  }
+}
+
+// ===================================================================
+// Phase 5 declaration surface — `region_kind` + `index` +
+// `region_indices` for the city. The decls parse and resolve clean
+// (Phase 1+2 of the voxel-region-indices spec, tests at
+// `dsl_compiler/tests/region_kind_decl_smoke.rs`). No codegen
+// consumes them today: the host-side fixture pin builds the navgrid
+// directly via `engine_voxel::build_navgrid(&region, …)` (Phase 4a).
+// Phase 4b will wire `navgrid.walkable(region, cell)` for in-rule
+// reads.
+//
+// max_active = 1 because the fixture has exactly one Settlement
+// region (the whole 16×16 city). max_cells = 256 fits the 16×16
+// grid; the spec's 16384 ceiling leaves headroom for ≤128×128.
+// ===================================================================
+
+region_kind Settlement { max_active = 1 }
+
+index Navgrid(region: VoxelRegion) -> per_cell_2d {
+  storage: per_cell_2d(max_cells = 256, bytes_per_cell = 4),
+  cost_class: Cheap,
+  rebuild_on: chunk_epoch_advance(region.chunks),
+  build {
+    let height = engine::column_reduce_xz(region, AGENT_STEP_HEIGHT);
+    engine::per_cell_classify(height, AGENT_STEP_HEIGHT)
+  }
+}
+
+region_indices Settlement { Navgrid }

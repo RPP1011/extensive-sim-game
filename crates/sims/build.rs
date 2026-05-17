@@ -130,6 +130,7 @@ fn main() {
                 | "maze_explorer_smart"
                 | "maze_explorer_visited"
                 | "maze_explorer"
+                | "assassination_threat_test"
         ) {
             continue;
         }

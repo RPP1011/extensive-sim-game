@@ -1,0 +1,13 @@
+// Guard's strike — same autowin damage profile. AbilityId 2
+// (alphabetical, after Assassinate). Guards' only way to stop an
+// assassination is reaching melee range before the assassin reaches
+// the king.
+
+ability Strike {
+    target: enemy
+    range: 1.5
+    cooldown: 1s
+    hint: damage
+
+    damage 999.0 [PHYSICAL: 100]
+}

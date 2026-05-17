@@ -1,0 +1,12 @@
+// Assassin's strike — autowin damage (999 vs hp 100) per the Phase 5
+// design: the spec says "the stats to autowin a combat encounter with
+// any 1 city NPC". AbilityId 1 (alphabetical: Assassinate < Strike).
+
+ability Assassinate {
+    target: enemy
+    range: 1.5
+    cooldown: 1s
+    hint: damage
+
+    damage 999.0 [PHYSICAL: 100]
+}
