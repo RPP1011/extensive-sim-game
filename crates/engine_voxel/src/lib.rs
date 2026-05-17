@@ -100,6 +100,15 @@ pub use engine::state::agent::MovementMode;
 /// methods without taking a direct dependency on `voxel_engine`.
 pub use voxel_engine::voxel::grid::VoxelGrid;
 
+/// Voxel-region runtime — per spec
+/// `docs/superpowers/specs/2026-04-25-voxel-region-indices-design.md`
+/// §6.1. See `region.rs` for full design notes.
+pub mod region;
+pub use region::{
+    Aabb, VoxelRegion, VoxelRegionBounds, VoxelRegionId, VoxelRegionKind,
+    VoxelRegionRegistry,
+};
+
 /// Default grid extent in voxel cells. 256³ cells (= 256 world-unit
 /// cube) is enough for the Phase B `voxel_probe` fixture and the
 /// Phase E `wave_defense` opt-in. Larger worlds will need a chunked
