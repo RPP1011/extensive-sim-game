@@ -731,6 +731,12 @@ pub struct SymbolTable {
     /// + `region_indices` decl pair lives in one IR slot, keyed by
     /// name.
     pub region_kinds: HashMap<String, crate::ir::VoxelRegionKindId>,
+    /// Region-attached indices — per spec §7.2. Name (PascalCase,
+    /// e.g. `Navgrid`) → typed [`crate::ir::IndexId`] into
+    /// [`crate::ir::Compilation::indices`]. Looked up by the
+    /// `region_indices Settlement { Navgrid }` resolver to bind
+    /// each index-kind reference to its declared `index navgrid(…)`.
+    pub indices: HashMap<String, crate::ir::IndexId>,
     pub builtins: HashMap<String, Builtin>,
     pub stdlib_types: HashMap<String, IrType>,
     /// Sim-wide accessor namespaces: `world`, `cascade`, `event`, `mask`,
@@ -1253,6 +1259,26 @@ fn collect(
             Decl::RegionIndices(_) => {
                 // Handled in pass-2 — needs the `region_kind` IR slot
                 // to exist first. Pass-1 leaves it for pass-2 to merge.
+            }
+            Decl::Index(d) => {
+                check_dup(symbols, "index", &d.name, d.span, |s| {
+                    s.indices.contains_key(&d.name)
+                })?;
+                let idx = push_idx(comp.indices.len(), "index")?;
+                symbols
+                    .indices
+                    .insert(d.name.clone(), crate::ir::IndexId(idx as u32));
+                symbols.record_first("index", &d.name, d.span);
+                comp.indices.push(crate::ir::IndexIR {
+                    name: d.name.clone(),
+                    region_param_name: d.region_param_name.clone(),
+                    output_type_name: d.output_type_name.clone(),
+                    storage: d.storage.clone(),
+                    cost_class: d.cost_class,
+                    rebuild_on: d.rebuild_on.clone(),
+                    build_body: d.build_body.clone(),
+                    span: d.span,
+                });
             }
             Decl::Belief(d) => {
                 // Plan I — beliefs share the ViewIR slot table with
@@ -1817,6 +1843,11 @@ fn resolve_bodies(
                 // no-op for the kind decl itself; `RegionIndices`
                 // below merges into the same slot.
             }
+            Decl::Index(_) => {
+                // Pass-1 fully populated the IR slot. Phase 2b will
+                // add a build-body parse + engine-helper resolution
+                // pass here.
+            }
             Decl::RegionIndices(d) => {
                 // Pair `region_indices <Name> { … }` with its
                 // matching `region_kind <Name>` slot from pass-1.
@@ -1847,11 +1878,36 @@ fn resolve_bodies(
                     });
                 }
                 slot.index_kind_names = d.index_kinds.clone();
-                // Note: per Phase 1 scope, we DON'T yet validate that
-                // each `index_kind` name resolves to a declared
-                // `index <name>` decl (Phase 2 grammar). When Phase 2
-                // lands, add a cross-decl name check here that fires
-                // `ResolveError::UnknownIndexKind` on misses.
+                // Phase 2a cross-decl validation: every name in the
+                // `region_indices` body must resolve to a declared
+                // `index <name>(...)` decl. Case-insensitive match
+                // against the symbol table — spec example writes
+                // both `region_indices Settlement { Navgrid }`
+                // (PascalCase) and `index navgrid(...)` (lowercase),
+                // suggesting either style is conventionally
+                // acceptable; we accept both and TODO-mark the
+                // canonicalisation choice for tightening once a
+                // real fixture forces it.
+                let known_indices_lc: Vec<String> = symbols
+                    .indices
+                    .keys()
+                    .map(|k| k.to_lowercase())
+                    .collect();
+                for kind in &d.index_kinds {
+                    let kind_lc = kind.to_lowercase();
+                    if !known_indices_lc.contains(&kind_lc) {
+                        return Err(ResolveError::InvalidViewKind {
+                            view_name: d.name.clone(),
+                            detail: format!(
+                                "`region_indices {} {{ {} }}` references unknown index `{}` — \
+                                 declare an `index {}(region: VoxelRegion) -> <Output> {{ … }}` decl, \
+                                 or remove from the region_indices body",
+                                d.name, kind, kind, kind_lc
+                            ),
+                            span: d.span,
+                        });
+                    }
+                }
             }
             Decl::Table(d) => {
                 let TableId(idx) = symbols.tables[&d.name];

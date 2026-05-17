@@ -91,6 +91,9 @@ pub enum Decl {
     /// Per spec §6.1.2 — maps a `VoxelRegionKind` to its default set
     /// of region-attached indices (Navgrid, Vismap, ...).
     RegionIndices(RegionIndicesDecl),
+    /// Per spec §7.2 — `index <name>(region: VoxelRegion) -> Output
+    /// { storage, cost_class, rebuild_on, build { … } }`.
+    Index(IndexDecl),
 }
 
 /// Per-fixture initial-state declaration. Plan E-A6 escape hatch: lets
@@ -252,6 +255,91 @@ pub struct RegionKindDecl {
     /// declares.
     pub max_active: u32,
     pub span: Span,
+}
+
+/// Top-level `index <name>(region: VoxelRegion) -> <Output> {
+/// storage: SHAPE, cost_class: CLASS, rebuild_on: TRIGGER,
+/// build { BODY } }` — per spec
+/// `docs/superpowers/specs/2026-04-25-voxel-region-indices-design.md`
+/// §7.2. Declares a region-attached index with bounded storage
+/// and a deterministic build/rebuild pipeline.
+///
+/// Phase 2a (this decl shape) stores `build_body` as raw source
+/// text — Phase 2b parses it into an expression tree, Phase 4
+/// lowers it to a build kernel.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct IndexDecl {
+    pub annotations: Vec<Annotation>,
+    /// PascalCase index-kind name as it appears in `region_indices`
+    /// bodies (`Navgrid`, `Vismap`, `CoverMap`, `SurfaceMesh`). By
+    /// convention, the declared identifier is the kind's name in
+    /// PascalCase; the spec example writes it lowercase
+    /// (`index navgrid(...)`), which we treat as a stylistic choice
+    /// — the resolver name-matches case-insensitively against
+    /// `region_indices` entries (with a non-strict TODO marker
+    /// pending tightening once a real fixture forces the
+    /// canonicalisation).
+    pub name: String,
+    /// The region-parameter identifier — by convention `region`,
+    /// surfaces in the build body as `region.chunks`, etc. Stored
+    /// so the build-body resolver can bind it correctly when
+    /// Phase 2b lands.
+    pub region_param_name: String,
+    /// Return type, e.g. `Walkable` for Navgrid, `Vismap` for
+    /// PVS. Today opaque — Phase 2b registers known output types.
+    pub output_type_name: String,
+    pub storage: IndexStorageShape,
+    pub cost_class: IndexCostClass,
+    pub rebuild_on: IndexRebuildTrigger,
+    /// Raw text of the `build { ... }` body, captured between
+    /// matched braces. Phase 2b parses this into an expression
+    /// tree.
+    pub build_body: String,
+    pub span: Span,
+}
+
+/// Storage shape per spec §7.2. Each variant carries its own
+/// bound arguments; the resolver does compile-time arithmetic on
+/// these to enforce the per-kind memory budget.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum IndexStorageShape {
+    /// `per_cell_2d(max_cells = N, bytes_per_cell = M)` — 2D
+    /// texture, peak `N × M` bytes per region instance.
+    PerCell2d { max_cells: u32, bytes_per_cell: u32 },
+    /// `per_cell_3d(max_cells = N, bytes_per_cell = M)` — 3D
+    /// texture.
+    PerCell3d { max_cells: u32, bytes_per_cell: u32 },
+    /// `bitset_pairs(max_cells = N)` — pair-membership bitset,
+    /// peak `N² / 8` bytes.
+    BitsetPairs { max_cells: u32 },
+    /// `mesh_buffer(max_vertices = V, max_indices = I)` —
+    /// vertex/index buffer pair.
+    MeshBuffer { max_vertices: u32, max_indices: u32 },
+    /// `sparse_grid(max_cells = N, bytes_per_cell = M)` —
+    /// hash-table-backed sparse storage.
+    SparseGrid { max_cells: u32, bytes_per_cell: u32 },
+}
+
+/// Cost class per spec §7.2. Drives scheduling priority + budget
+/// allocation in the registry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum IndexCostClass {
+    Cheap,
+    Medium,
+    Heavy,
+}
+
+/// What triggers a rebuild of this index. Per spec §7.2 today's
+/// only documented trigger is `chunk_epoch_advance(region.chunks)`
+/// — the region's covering chunks bumped their epoch (voxel write).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum IndexRebuildTrigger {
+    /// `chunk_epoch_advance(region.<field>)` — the named field on
+    /// the region (typically `chunks`) had its epoch advance.
+    ChunkEpochAdvance { region_field: String },
+    /// `manual` — rebuild only on explicit `rebuild_index` event.
+    /// Future shape; Phase 2a parses but doesn't validate.
+    Manual,
 }
 
 /// Top-level `region_indices <Name> { Navgrid, Vismap, ... }` — per

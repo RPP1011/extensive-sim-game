@@ -150,6 +150,7 @@ fn decl_annotations_mut(d: &mut Decl) -> Option<&mut Vec<Annotation>> {
         Decl::Table(x) => &mut x.annotations,
         Decl::RegionKind(x) => &mut x.annotations,
         Decl::RegionIndices(x) => &mut x.annotations,
+        Decl::Index(x) => &mut x.annotations,
         // `query` does not currently accept annotations on the decl; trailing
         // `@`s after a `query` will fall through to the orphan-annotation
         // error path on the next iteration.
@@ -181,6 +182,7 @@ fn decl_span_mut(d: &mut Decl) -> &mut Span {
         Decl::Table(x) => &mut x.span,
         Decl::RegionKind(x) => &mut x.span,
         Decl::RegionIndices(x) => &mut x.span,
+        Decl::Index(x) => &mut x.span,
     }
 }
 
@@ -219,6 +221,7 @@ fn decl(c: &mut Cursor) -> PResult<Decl> {
         Some("table") => table_decl(c, annotations, start).map(Decl::Table),
         Some("region_kind") => region_kind_decl(c, annotations, start).map(Decl::RegionKind),
         Some("region_indices") => region_indices_decl(c, annotations, start).map(Decl::RegionIndices),
+        Some("index") => index_decl(c, annotations, start).map(Decl::Index),
         Some("spatial_query") => {
             spatial_query_decl(c, annotations, start).map(Decl::SpatialQuery)
         }
@@ -459,6 +462,299 @@ fn region_indices_decl(
         index_kinds,
         span: Span::new(start, c.pos),
     })
+}
+
+// ---------------------------------------------------------------------------
+// 2.18d index (voxel-region-indices spec §7.2) — Phase 2a
+//
+// Grammar:
+//   index <name>(region: VoxelRegion) -> <Output> {
+//       storage: <shape>(<args...>),
+//       cost_class: <Cheap|Medium|Heavy>,
+//       rebuild_on: chunk_epoch_advance(region.<field>) | manual,
+//       build { <raw body> }
+//   }
+//
+// Phase 2a captures the decl SHELL — body is preserved as raw
+// text (between matched braces), Phase 2b parses it into an
+// expression tree.
+// ---------------------------------------------------------------------------
+
+fn index_decl(
+    c: &mut Cursor,
+    annotations: Vec<Annotation>,
+    start: usize,
+) -> PResult<IndexDecl> {
+    expect_keyword(c, "index")
+        .map_err(|e| e.with_context("parsing `index` declaration"))?;
+    c.skip_ws();
+    let name = ident(c).map_err(|e| e.with_context("parsing index name"))?;
+    c.skip_ws();
+    expect_char(c, '(')
+        .map_err(|e| e.with_context("parsing index params (expected `(`)"))?;
+    c.skip_ws();
+    let region_param_name = ident(c)
+        .map_err(|e| e.with_context("parsing index region-param name"))?;
+    c.skip_ws();
+    expect_char(c, ':')
+        .map_err(|e| e.with_context("parsing index params (expected `:` after region param)"))?;
+    c.skip_ws();
+    let ty = ident(c).map_err(|e| e.with_context("parsing index region-param type"))?;
+    if ty != "VoxelRegion" {
+        return Err(ParseErr::at(
+            here(c),
+            format!("index region param type must be `VoxelRegion`; got `{ty}`"),
+        ));
+    }
+    c.skip_ws();
+    expect_char(c, ')')
+        .map_err(|e| e.with_context("parsing index params (expected `)`)"))?;
+    c.skip_ws();
+    expect_char(c, '-')
+        .map_err(|e| e.with_context("parsing index return arrow (expected `->`)"))?;
+    expect_char(c, '>')
+        .map_err(|e| e.with_context("parsing index return arrow (expected `->`)"))?;
+    c.skip_ws();
+    let output_type_name = ident(c)
+        .map_err(|e| e.with_context("parsing index return type"))?;
+    c.skip_ws();
+    expect_char(c, '{')
+        .map_err(|e| e.with_context("parsing index body (expected `{`)"))?;
+    c.skip_ws();
+
+    // Field order is enforced: storage → cost_class → rebuild_on →
+    // build. Single occurrence each. Keeps the grammar predictable
+    // and the resolver simple; a future cut could relax to any
+    // order if real fixtures want it.
+    let storage = parse_index_storage_clause(c)?;
+    c.skip_ws();
+    let cost_class = parse_index_cost_class_clause(c)?;
+    c.skip_ws();
+    let rebuild_on = parse_index_rebuild_trigger_clause(c)?;
+    c.skip_ws();
+    let build_body = parse_index_build_clause(c)?;
+    c.skip_ws();
+    expect_char(c, '}')
+        .map_err(|e| e.with_context("parsing index body (expected `}` after build)"))?;
+
+    Ok(IndexDecl {
+        annotations,
+        name,
+        region_param_name,
+        output_type_name,
+        storage,
+        cost_class,
+        rebuild_on,
+        build_body,
+        span: Span::new(start, c.pos),
+    })
+}
+
+fn parse_index_storage_clause(c: &mut Cursor) -> PResult<IndexStorageShape> {
+    expect_keyword(c, "storage")
+        .map_err(|e| e.with_context("parsing index storage clause (expected `storage:`)"))?;
+    c.skip_ws();
+    expect_char(c, ':')
+        .map_err(|e| e.with_context("parsing index storage clause (expected `:`)"))?;
+    c.skip_ws();
+    let shape_name = ident(c).map_err(|e| e.with_context("parsing index storage shape name"))?;
+    c.skip_ws();
+    expect_char(c, '(')
+        .map_err(|e| e.with_context("parsing index storage shape args (expected `(`)"))?;
+    let kv: Vec<(String, u32)> = parse_named_u32_args(c)?;
+    c.skip_ws();
+    expect_char(c, ')')
+        .map_err(|e| e.with_context("parsing index storage shape args (expected `)`)"))?;
+    // Optional trailing comma.
+    c.skip_ws();
+    if c.starts_with_char(',') {
+        c.bump(1);
+    }
+    let lookup = |k: &str| -> PResult<u32> {
+        kv.iter()
+            .find(|(name, _)| name == k)
+            .map(|(_, v)| *v)
+            .ok_or_else(|| {
+                ParseErr::at(
+                    here(c),
+                    format!("index storage shape missing arg `{k}`"),
+                )
+            })
+    };
+    let shape = match shape_name.as_str() {
+        "per_cell_2d" => IndexStorageShape::PerCell2d {
+            max_cells: lookup("max_cells")?,
+            bytes_per_cell: lookup("bytes_per_cell")?,
+        },
+        "per_cell_3d" => IndexStorageShape::PerCell3d {
+            max_cells: lookup("max_cells")?,
+            bytes_per_cell: lookup("bytes_per_cell")?,
+        },
+        "bitset_pairs" => IndexStorageShape::BitsetPairs {
+            max_cells: lookup("max_cells")?,
+        },
+        "mesh_buffer" => IndexStorageShape::MeshBuffer {
+            max_vertices: lookup("max_vertices")?,
+            max_indices: lookup("max_indices")?,
+        },
+        "sparse_grid" => IndexStorageShape::SparseGrid {
+            max_cells: lookup("max_cells")?,
+            bytes_per_cell: lookup("bytes_per_cell")?,
+        },
+        other => {
+            return Err(ParseErr::at(
+                here(c),
+                format!(
+                    "unknown index storage shape `{other}` (expected per_cell_2d / per_cell_3d / bitset_pairs / mesh_buffer / sparse_grid)"
+                ),
+            ));
+        }
+    };
+    Ok(shape)
+}
+
+fn parse_named_u32_args(c: &mut Cursor) -> PResult<Vec<(String, u32)>> {
+    let mut out: Vec<(String, u32)> = Vec::new();
+    loop {
+        c.skip_ws();
+        if c.starts_with_char(')') {
+            break;
+        }
+        let key = ident(c).map_err(|e| e.with_context("parsing arg name"))?;
+        c.skip_ws();
+        expect_char(c, '=')
+            .map_err(|e| e.with_context("parsing arg (expected `=`)"))?;
+        c.skip_ws();
+        let (n, is_float) = number_literal(c)?;
+        if is_float || n < 0.0 || n > (u32::MAX as f64) {
+            return Err(ParseErr::at(
+                here(c),
+                format!("arg `{key}` must be a non-negative integer ≤ u32::MAX; got {n}"),
+            ));
+        }
+        out.push((key, n as u32));
+        c.skip_ws();
+        if c.starts_with_char(',') {
+            c.bump(1);
+        }
+    }
+    Ok(out)
+}
+
+fn parse_index_cost_class_clause(c: &mut Cursor) -> PResult<IndexCostClass> {
+    expect_keyword(c, "cost_class")
+        .map_err(|e| e.with_context("parsing index cost_class clause (expected `cost_class:`)"))?;
+    c.skip_ws();
+    expect_char(c, ':')
+        .map_err(|e| e.with_context("parsing index cost_class clause (expected `:`)"))?;
+    c.skip_ws();
+    let cls = ident(c).map_err(|e| e.with_context("parsing index cost class"))?;
+    c.skip_ws();
+    if c.starts_with_char(',') {
+        c.bump(1);
+    }
+    match cls.as_str() {
+        "Cheap" => Ok(IndexCostClass::Cheap),
+        "Medium" => Ok(IndexCostClass::Medium),
+        "Heavy" => Ok(IndexCostClass::Heavy),
+        other => Err(ParseErr::at(
+            here(c),
+            format!("unknown cost class `{other}` (expected Cheap / Medium / Heavy)"),
+        )),
+    }
+}
+
+fn parse_index_rebuild_trigger_clause(c: &mut Cursor) -> PResult<IndexRebuildTrigger> {
+    expect_keyword(c, "rebuild_on")
+        .map_err(|e| e.with_context("parsing index rebuild_on clause (expected `rebuild_on:`)"))?;
+    c.skip_ws();
+    expect_char(c, ':')
+        .map_err(|e| e.with_context("parsing index rebuild_on clause (expected `:`)"))?;
+    c.skip_ws();
+    let trigger = ident(c).map_err(|e| e.with_context("parsing rebuild trigger name"))?;
+    let result = match trigger.as_str() {
+        "chunk_epoch_advance" => {
+            c.skip_ws();
+            expect_char(c, '(')
+                .map_err(|e| e.with_context("parsing `chunk_epoch_advance(region.<field>)` (expected `(`)"))?;
+            c.skip_ws();
+            // Expect `region.<field>` — the `region` token must match
+            // the index decl's region-param name; not validated at
+            // parse time (deferred to resolve).
+            let head = ident(c)
+                .map_err(|e| e.with_context("parsing rebuild trigger arg (expected `region.<field>`)"))?;
+            c.skip_ws();
+            expect_char(c, '.')
+                .map_err(|e| e.with_context("parsing rebuild trigger arg (expected `.`)"))?;
+            c.skip_ws();
+            let field = ident(c)
+                .map_err(|e| e.with_context("parsing rebuild trigger field name"))?;
+            // Use `head` to construct the qualified name; the actual
+            // resolver-time check happens elsewhere.
+            let _ = head; // accept any identifier for the head; checked at resolve
+            c.skip_ws();
+            expect_char(c, ')')
+                .map_err(|e| e.with_context("parsing rebuild trigger arg (expected `)`)"))?;
+            IndexRebuildTrigger::ChunkEpochAdvance { region_field: field }
+        }
+        "manual" => IndexRebuildTrigger::Manual,
+        other => {
+            return Err(ParseErr::at(
+                here(c),
+                format!(
+                    "unknown rebuild trigger `{other}` (expected `chunk_epoch_advance(region.chunks)` or `manual`)"
+                ),
+            ));
+        }
+    };
+    c.skip_ws();
+    if c.starts_with_char(',') {
+        c.bump(1);
+    }
+    Ok(result)
+}
+
+fn parse_index_build_clause(c: &mut Cursor) -> PResult<String> {
+    expect_keyword(c, "build")
+        .map_err(|e| e.with_context("parsing index build clause (expected `build {`)"))?;
+    c.skip_ws();
+    expect_char(c, '{')
+        .map_err(|e| e.with_context("parsing index build clause (expected `{`)"))?;
+    // Scan to matching brace. Tracks depth across nested braces;
+    // doesn't try to parse strings/comments (Phase 2b handles those
+    // with the full expression parser).
+    let body_start = c.pos;
+    let mut depth = 1usize;
+    let src = c.src;
+    while depth > 0 {
+        if c.pos >= src.len() {
+            return Err(ParseErr::at(
+                here(c),
+                "unterminated `build { ... }` body".to_string(),
+            ));
+        }
+        let b = src.as_bytes()[c.pos];
+        match b {
+            b'{' => depth += 1,
+            b'}' => depth -= 1,
+            _ => {}
+        }
+        if depth == 0 {
+            break;
+        }
+        c.bump(1);
+    }
+    let body_end = c.pos;
+    let body = src[body_start..body_end].to_string();
+    // Consume the closing `}` of the build block.
+    expect_char(c, '}')
+        .map_err(|e| e.with_context("parsing index build clause (expected `}`)"))?;
+    // Optional trailing comma after the build block.
+    c.skip_ws();
+    if c.starts_with_char(',') {
+        c.bump(1);
+    }
+    Ok(body)
 }
 
 // ---------------------------------------------------------------------------

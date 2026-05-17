@@ -1672,8 +1672,43 @@ pub struct Compilation {
     /// match during pass-2.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub region_kinds: Vec<RegionKindIR>,
+    /// Region-attached indices declared via `index <name>(region:
+    /// VoxelRegion) -> <Output> { … }`. Per spec
+    /// `docs/superpowers/specs/2026-04-25-voxel-region-indices-design.md`
+    /// §7.2 — each index gets bounded storage, cost class, rebuild
+    /// trigger, and (post-Phase-2b) a build expression tree. Phase
+    /// 2a stores the build body as raw text; Phase 2b will resolve
+    /// it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub indices: Vec<IndexIR>,
     pub spans: SpanTable,
 }
+
+/// Resolved `index <name>(region: VoxelRegion) -> <Output> { … }`
+/// declaration. Mirrors [`ast::IndexDecl`] field-for-field; future
+/// cuts may resolve `output_type_name` into a typed handle once
+/// the index-output-type registry lands.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct IndexIR {
+    pub name: String,
+    pub region_param_name: String,
+    pub output_type_name: String,
+    pub storage: ast::IndexStorageShape,
+    pub cost_class: ast::IndexCostClass,
+    pub rebuild_on: ast::IndexRebuildTrigger,
+    /// Raw text of the `build { … }` body — Phase 2b parses this
+    /// into an expression tree; Phase 4 lowers it to a WGSL build
+    /// kernel.
+    pub build_body: String,
+    pub span: Span,
+}
+
+/// Typed handle for [`IndexIR`] entries in
+/// [`Compilation::indices`]. Stored in the symbol table by name;
+/// downstream code (region-indices cross-validation, Phase 4 build
+/// kernel emit) routes through this id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+pub struct IndexId(pub u32);
 
 /// Resolved `region_kind <Name> { max_active = N } + region_indices
 /// <Name> { …idx kinds… }` pair. Two source-level decls collapse
