@@ -109,6 +109,14 @@ pub use region::{
     VoxelRegionRegistry,
 };
 
+/// Navgrid index — per spec §7.2 + §7.3. See `navgrid.rs` for
+/// design notes + the CPU-side build pipeline.
+pub mod navgrid;
+pub use navgrid::{
+    build_navgrid, NavgridBuildError, NavgridCell, NavgridIndex,
+    AGENT_STEP_HEIGHT, NAVGRID_BYTES_PER_CELL, NAVGRID_MAX_CELLS,
+};
+
 /// Default grid extent in voxel cells. 256³ cells (= 256 world-unit
 /// cube) is enough for the Phase B `voxel_probe` fixture and the
 /// Phase E `wave_defense` opt-in. Larger worlds will need a chunked

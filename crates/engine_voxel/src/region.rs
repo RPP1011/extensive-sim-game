@@ -58,6 +58,15 @@ impl VoxelRegionId {
     fn pack(gen: u32, slot: u32) -> Self {
         Self(((gen as u64) << 32) | (slot as u64))
     }
+
+    /// Test-only constructor. Real ids should always come from
+    /// [`VoxelRegionRegistry::register`] so the generation +
+    /// slot are sound; use this for synthetic test fixtures that
+    /// construct a [`VoxelRegion`] directly without a registry.
+    #[doc(hidden)]
+    pub fn from_raw_for_test() -> Self {
+        Self(0)
+    }
 }
 
 /// Opaque region-kind tag. The DSL compiler assigns one of these
