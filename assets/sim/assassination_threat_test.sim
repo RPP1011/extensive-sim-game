@@ -201,12 +201,24 @@ physics AssassinAdvance {
 // assassin's strike ability (id 1, alphabetical first in
 // assets/ability_test/assassination_threat_test/). Autowin damage
 // kills the king on the first hit.
+//
+// **Distance gate**: `spatial.nearby_melee` is cell-bucketed (returns
+// agents in the same / adjacent spatial cells regardless of exact
+// distance), not distance-filtered. Without the explicit
+// length-check here, the strike would fire on any king/assassin pair
+// in adjacent cells — observable in `assassination_visualize.rs`
+// where the assassin would die on tick 0 to a guard 2.1 units away.
+// The per-pair `length(diff) < strike_radius` filter restores honest
+// melee semantics.
 @phase(per_agent)
 physics AssassinStrike {
   on Tick {} where (self.alive && self.creature_type == Assassin) {
     for candidate in spatial.nearby_melee(self) {
       if (candidate.alive && candidate.creature_type == King) {
-        apply_ability 1 by self target candidate
+        let diff = candidate.pos - self.pos;
+        if (length(diff) < config.city.strike_radius) {
+          apply_ability 1 by self target candidate
+        }
       }
     }
   }
@@ -243,12 +255,21 @@ physics GuardDetect {
 // GuardStrike — Guards in melee range of the assassin → strike
 // (ability 2). Autowin damage kills the assassin on the first hit.
 // Whichever side reaches melee range first wins the encounter.
+//
+// **Distance gate**: same rationale as AssassinStrike — the spatial
+// query is cell-bucketed, so we re-check the exact distance per
+// pair to ensure strikes only fire when the assassin is genuinely
+// within `strike_radius`. Pre-fix this rule was the reason every
+// assassin died on tick 0 against guards at radius 3.
 @phase(per_agent)
 physics GuardStrike {
   on Tick {} where (self.alive && self.creature_type == Guard) {
     for candidate in spatial.nearby_melee(self) {
       if (candidate.alive && candidate.creature_type == Assassin) {
-        apply_ability 2 by self target candidate
+        let diff = candidate.pos - self.pos;
+        if (length(diff) < config.city.strike_radius) {
+          apply_ability 2 by self target candidate
+        }
       }
     }
   }

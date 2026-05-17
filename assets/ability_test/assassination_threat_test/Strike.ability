@@ -1,7 +1,18 @@
-// Guard's strike — same autowin damage profile. AbilityId 2
-// (alphabetical, after Assassinate). Guards' only way to stop an
-// assassination is reaching melee range before the assassin reaches
-// the king.
+// Guard's strike — partial damage so the assassin (per the user's
+// "stats to autowin a 1v1" spec) survives a single guard's hits long
+// enough to reach the king. With assassin hp=100 and strike damage
+// 20, a lone guard needs 5 ticks to drop the assassin. The assassin's
+// step speed is 0.5/tick — that's 2.5 units of forward motion per
+// guard-encounter, enough to slip past a lone guard but not enough
+// to survive two guards firing simultaneously (40 damage/tick → 3
+// ticks to kill). AbilityId 2 (alphabetical, after Assassinate).
+//
+// **Why this matters for the fixture**: pre-fix, guards did 999
+// damage and one-shot the assassin on first contact, making the
+// planner's redistribution effectively cosmetic — the assassin always
+// died at the first guard regardless of how many were in that
+// quadrant. The reduced damage gives the multi-guard / single-guard
+// distinction observable behavioural weight.
 
 ability Strike {
     target: enemy
@@ -9,5 +20,5 @@ ability Strike {
     cooldown: 1s
     hint: damage
 
-    damage 999.0 [PHYSICAL: 100]
+    damage 10.0 [PHYSICAL: 100]
 }

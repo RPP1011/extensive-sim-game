@@ -33,9 +33,38 @@
 //! (a guard reached strike range first OR the attempt timed out at
 //! `MAX_TICKS_PER_ATTEMPT`). The pin reports per-quadrant attack
 //! counts, per-quadrant success counts, and the success-rate trend
-//! across the 50-attempt run. The expected shape: untrained planner
-//! → high early success → adaptation re-clusters guards → success
-//! rate declines.
+//! across the 50-attempt run. The expected shape: proportional
+//! guard allocation by threat → quadrants the assassin frequents
+//! get heavy defense → low-threat quadrants left exposed → wide
+//! per-quadrant success-rate spread.
+//!
+//! ## History (the bug `assassination_visualize.rs` caught)
+//!
+//! Pre-2026-05-17 this pin reported 74% success but the assassin
+//! never actually reached the king — those "successes" were
+//! chronicle bleed surviving the drain, and the strike rules fired
+//! via cell-bucketed `spatial.nearby_melee` instead of a real
+//! distance check. The visualizer rendered the assassin frozen one
+//! step from spawn while the king "died" at the origin, distance
+//! 9.3 away. Two fixes restored honesty:
+//!
+//!   1. `.sim` AssassinStrike + GuardStrike now gate on
+//!      `length(candidate.pos - self.pos) < strike_radius` in
+//!      addition to the cell-bucketed spatial scan (the spatial
+//!      query is correct as a coarse filter; the distance check is
+//!      the exact gate).
+//!   2. `redistribute_guards` was a cyclic-fill that always
+//!      produced [2,2,2,2] regardless of threat — replaced with
+//!      proportional allocation + largest-remainder rounding. Now
+//!      the planner genuinely concentrates guards in believed-high
+//!      quadrants and leaves zero-threat quadrants undefended.
+//!
+//! Post-fix: 18% real success rate with 100pp per-quadrant spread
+//! (q=3 is the planner's blind spot — 8/8 = 100% — because the
+//! assassin's cycling logic spawns there less frequently than q=0,
+//! so q=3's threat never accumulates and the proportional allocator
+//! gives it zero guards). q=0 with 24/50 attempts gets all the
+//! defense → 0% success there. The 100pp spread is real, not noise.
 //!
 //! Pins (load-bearing):
 //!   1. All 50 attempts complete without panic.
@@ -43,6 +72,8 @@
 //!      quadrants by the end of the run (proves @key_pop K=4 storage
 //!      held + decay didn't zero everything).
 //!   3. The navgrid build returns Ok for the 16×16 city region.
+//!   4. Per-quadrant success spread ≥ 30pp (proves the planner's
+//!      proportional allocation genuinely shapes outcomes).
 
 #![allow(non_snake_case)]
 
@@ -347,37 +378,57 @@ fn argmax(v: &[f32; 4]) -> u32 {
     best_i
 }
 
-/// Distribute the 8 guards proportionally to the planner's threat
-/// belief, rounded with a minimum of 1 per quadrant to avoid an
-/// undefended approach. The remainder goes to the top-threat
-/// quadrants in decreasing order. Pure function of `threat`.
+/// Distribute the 8 guards across 4 quadrants weighted by threat,
+/// with NO floor — quadrants with zero threat get zero guards,
+/// freeing all 8 to defend the believed approaches. This creates
+/// real asymmetry (the bug-fix replacement for the prior cyclic-fill
+/// version which always allocated [2, 2, 2, 2] regardless of
+/// threat). Pure function of `threat`.
+///
+/// **Why no floor**: with a 1-guard floor + cyclic distribution of
+/// the remaining 4, every quadrant ended up with 2 guards regardless
+/// of the threat ranking. The assassin's odds were identical in
+/// every quadrant → the planner's "adaptation" was theatre. Removing
+/// the floor + scaling proportionally lets the planner over-commit
+/// to high-threat quadrants and genuinely leave low-threat
+/// quadrants exposed.
 fn redistribute_guards(threat: &[f32; 4]) -> [u32; N_GUARDS as usize] {
     let sum: f32 = threat.iter().sum();
-    let mut counts: [u32; 4] = [1, 1, 1, 1]; // floor: 1 guard / quadrant
-    let mut remaining: u32 = N_GUARDS - 4;
-    if sum > 0.0 {
-        // Sort quadrants by threat desc, assign remaining to top.
-        let mut ranked: Vec<(usize, f32)> =
-            threat.iter().copied().enumerate().collect();
-        ranked.sort_by(|a, b| {
+    let counts: [u32; 4] = if sum > 0.0 {
+        // Proportional allocation with largest-remainder rounding so
+        // the total stays exactly N_GUARDS.
+        let exact: [f32; 4] = [
+            threat[0] / sum * (N_GUARDS as f32),
+            threat[1] / sum * (N_GUARDS as f32),
+            threat[2] / sum * (N_GUARDS as f32),
+            threat[3] / sum * (N_GUARDS as f32),
+        ];
+        let mut floors: [u32; 4] = [
+            exact[0].floor() as u32,
+            exact[1].floor() as u32,
+            exact[2].floor() as u32,
+            exact[3].floor() as u32,
+        ];
+        let allocated: u32 = floors.iter().sum();
+        let remainder = N_GUARDS - allocated;
+        // Distribute remainder to quadrants with the largest
+        // fractional part.
+        let mut fracs: Vec<(usize, f32)> = exact
+            .iter()
+            .enumerate()
+            .map(|(i, v)| (i, v - v.floor()))
+            .collect();
+        fracs.sort_by(|a, b| {
             b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
         });
-        // Greedy: each "extra" guard goes to the next quadrant by
-        // weight, cycling. This biases toward q0 (top) without
-        // over-stacking.
-        let mut i = 0;
-        while remaining > 0 {
-            counts[ranked[i % 4].0] += 1;
-            remaining -= 1;
-            i += 1;
+        for i in 0..(remainder as usize).min(4) {
+            floors[fracs[i].0] += 1;
         }
+        floors
     } else {
-        // Untrained planner: spread evenly.
-        for q in 0..4 {
-            counts[q] += 1;
-        }
-        counts[0] -= 1; // sum back to 8
-    }
+        // Untrained planner: evenly distributed.
+        [2, 2, 2, 2]
+    };
     let mut out = [0u32; N_GUARDS as usize];
     let mut idx = 0usize;
     for q in 0..NUM_QUADRANTS {
