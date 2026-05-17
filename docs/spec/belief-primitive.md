@@ -81,9 +81,26 @@ Multi-horizon stresstest (`crates/sims/tests/threat_horizon_stresstest_pin.rs`):
 |---|---|---|
 | `i32` / `u8` return types | Grammar-valid, lowering-rejected on type-mismatch | DSL literal-suffix surface needs `1i` / `1u8` parser support |
 | IR-level source-agent field offset lookup | Hardcoded offset 2 (works for single-Agent-field events like `AllyDied { dead: Agent }`) | Compute from `social_merge.source_agent: LocalRef` + event field layout |
-| Key-typed dispatch shape | Shipped storage shape launches (N, N) threads with early bounds-check at `s ≥ K` | Add a K-aware dispatch variant (`PerAgentKeyScan { k }`) that launches (N, K) threads — true wall-clock win at large N (storage win already realized; see `belief_key_typed_perf_bench` for the current data) |
 | Sparse-by-Agent ring merge | Not started | True ring storage for `(Agent, Agent)` beliefs: each observer's row is K most-recently-merged (subject, value) entries with FIFO eviction. Merge becomes find-or-insert. Distinct from `@key_pop` (which is sparse-by-key, not sparse-by-Agent) |
 | Plan I.6 viewer migration | Pattern probe shipped (`room_known_pattern_probe`); full dungeon_horde viewer rewrite deferred | Replace `hero_known_rooms: [u64; 5]` host field with GPU readback when the migration value justifies the Plan E hook bypass |
+
+## Maze sim story arc (canonical worked example)
+
+The `assets/sim/maze_explorer*.sim` family demonstrates the I.3b
+stack as a complete pipeline. Five fixtures, same maze + same RNG
+keying, increasing belief use:
+
+| Fixture | Substrate | Reference tick_found | Notes |
+|---|---|---|---|
+| `maze_explorer` | random walk | 329 | Baseline; no belief |
+| `maze_explorer_visited` | belief writes + event emit (no read) | 329 | Pure event/fold overhead measurement (+0.7%) |
+| `maze_explorer_smart` | u32 SoA + `table room_bit` | 20 (median 197) | Visited-aware policy via SoA field |
+| `maze_explorer_belief_smart` | I.3b belief + pair-keyed view-read | 359 (median 172) | First fixture to read user-declared pair-keyed beliefs from a physics rule body |
+| `maze_explorer_multi` | I.3b belief + social-merge + gossip | 79 (4-agent team) | Full stack: K-indexed fold + K-indexed merge + pair-keyed read + K-aware dispatch |
+
+After `eed5106c` the multi-agent gossip merge propagates fully across
+K cells (per-agent visited rows converge to the union — strict-equality
+assertion in `multi_agent_gossip_propagates_visited_rows`).
 
 ## Adding a new merge op
 
