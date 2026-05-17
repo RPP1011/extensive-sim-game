@@ -87,6 +87,7 @@ fn populate_registers_field_decls_from_program() {
                 span: AstSpan::new(0, 0),
             }),
         ],
+        terrain: None,
     };
     let ids = populate(&program);
     assert_eq!(ids.len(), 3);

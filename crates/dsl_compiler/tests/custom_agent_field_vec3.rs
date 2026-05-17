@@ -89,6 +89,7 @@ fn populate_accepts_vec3_decls() {
                 span: AstSpan::new(0, 0),
             }),
         ],
+        terrain: None,
     };
     let ids = populate(&program);
     assert_eq!(ids.len(), 2);

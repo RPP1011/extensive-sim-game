@@ -39,6 +39,9 @@ impl<T> Spanned<T> {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Program {
     pub decls: Vec<Decl>,
+    /// Optional singleton `terrain { ... }` block. `None` if the source
+    /// does not contain a `terrain` block.
+    pub terrain: Option<crate::terrain::TerrainBlock>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

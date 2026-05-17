@@ -41,7 +41,30 @@ pub fn parse_program(source: &str) -> Result<Program, ParseError> {
     let mut c = Cursor::new(source);
     c.skip_ws();
     let mut decls = Vec::new();
+    let mut terrain: Option<crate::terrain::TerrainBlock> = None;
     while !c.eof() {
+        // `terrain { ... }` is a singleton top-level block, not a Decl variant.
+        // Handle it here before the general Decl dispatcher.
+        if peek_ident(&c).as_deref() == Some("terrain") {
+            match parse_terrain(&mut c) {
+                Ok(t) => {
+                    if terrain.is_some() {
+                        return Err(ParseError::new(
+                            source,
+                            here(&c),
+                            vec!["parsing `terrain` block".to_string()],
+                            "duplicate `terrain` block; only one is allowed per file",
+                        ));
+                    }
+                    terrain = Some(t);
+                }
+                Err(e) => {
+                    return Err(ParseError::new(source, e.span, e.context, e.message));
+                }
+            }
+            c.skip_ws();
+            continue;
+        }
         match decl(&mut c) {
             Ok(mut d) => {
                 if let Err(e) = absorb_trailing_annotations(&mut c, &mut d) {
@@ -55,7 +78,7 @@ pub fn parse_program(source: &str) -> Result<Program, ParseError> {
         }
         c.skip_ws();
     }
-    Ok(Program { decls })
+    Ok(Program { decls, terrain })
 }
 
 /// Parse a single expression from a free-floating source string. Used
@@ -5083,4 +5106,103 @@ fn peek_word_for_error(c: &Cursor) -> String {
     let rem = c.remaining();
     let end = rem.find(|ch: char| ch.is_whitespace() || ch == '{' || ch == '(' || ch == ';').unwrap_or(rem.len());
     rem[..end].to_string()
+}
+
+// ---------------------------------------------------------------------------
+// terrain { extent, cell_size, seed_purpose }
+// ---------------------------------------------------------------------------
+
+fn parse_terrain(c: &mut Cursor) -> PResult<crate::terrain::TerrainBlock> {
+    expect_keyword(c, "terrain")
+        .map_err(|e| e.with_context("parsing `terrain` block"))?;
+    c.skip_ws();
+    expect_char(c, '{')
+        .map_err(|e| e.with_context("parsing terrain body (expected `{`)"))?;
+
+    let mut extent: Option<u32> = None;
+    let mut cell_size: Option<f32> = None;
+    let mut seed_purpose: Option<u32> = None;
+
+    loop {
+        c.skip_ws();
+        if c.starts_with_char('}') {
+            c.bump(1);
+            break;
+        }
+        let field_span = here(c);
+        let field = ident(c).map_err(|e| e.with_context("parsing terrain field name"))?;
+        c.skip_ws();
+        expect_char(c, ':')
+            .map_err(|e| e.with_context("parsing terrain field (expected `:` after name)"))?;
+        c.skip_ws();
+        match field.as_str() {
+            "extent" => {
+                let num_span = here(c);
+                let (v, is_float) = number_literal(c)
+                    .map_err(|e| e.with_context("parsing terrain extent value"))?;
+                if is_float {
+                    return Err(ParseErr::at(num_span, "`extent` must be an integer"));
+                }
+                if v < 0.0 || v > u32::MAX as f64 {
+                    return Err(ParseErr::at(num_span, "`extent` out of u32 range"));
+                }
+                extent = Some(v as u32);
+            }
+            "cell_size" => {
+                let (v, _) = number_literal(c)
+                    .map_err(|e| e.with_context("parsing terrain cell_size value"))?;
+                cell_size = Some(v as f32);
+            }
+            "seed_purpose" => {
+                let num_span = here(c);
+                let (v, is_float) = number_literal(c)
+                    .map_err(|e| e.with_context("parsing terrain seed_purpose value"))?;
+                if is_float {
+                    return Err(ParseErr::at(num_span, "`seed_purpose` must be an integer"));
+                }
+                if v < 0.0 || v > u32::MAX as f64 {
+                    return Err(ParseErr::at(num_span, "`seed_purpose` out of u32 range"));
+                }
+                let val = v as u32;
+                if val == 0 {
+                    return Err(ParseErr::at(
+                        num_span,
+                        "`seed_purpose` must be non-zero",
+                    ));
+                }
+                seed_purpose = Some(val);
+            }
+            other => {
+                return Err(ParseErr::at(
+                    field_span,
+                    format!(
+                        "unknown terrain field `{other}`; expected one of extent, cell_size, seed_purpose"
+                    ),
+                ));
+            }
+        }
+        c.skip_ws();
+        // optional trailing comma or newline-separated (no comma needed)
+        if c.starts_with_char(',') {
+            c.bump(1);
+        }
+    }
+
+    let extent = extent.ok_or_else(|| {
+        ParseErr::at(here(c), "terrain block missing required field `extent`")
+    })?;
+    let cell_size = cell_size.ok_or_else(|| {
+        ParseErr::at(here(c), "terrain block missing required field `cell_size`")
+    })?;
+    let seed_purpose = seed_purpose.ok_or_else(|| {
+        ParseErr::at(here(c), "terrain block missing required field `seed_purpose`")
+    })?;
+
+    Ok(crate::terrain::TerrainBlock {
+        extent,
+        cell_size,
+        seed_purpose,
+        materials: vec![],
+        layers: vec![],
+    })
 }
