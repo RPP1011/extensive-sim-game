@@ -1822,6 +1822,46 @@ fn populate_namespace_registry(ctx: &mut LoweringCtx<'_>) {
     );
     registry.namespaces.insert(NamespaceId::Terrain, terrain);
 
+    // -- navgrid namespace --
+    //
+    // Voxel-region-indices spec Phase 4b (2026-05-16). Mirrors the
+    // terrain.* pattern: a single in-rule accessor that the kernel
+    // composer synthesizes a `navgrid` storage binding for via a
+    // substring scan on `navgrid_walkable(`. The runtime owns a
+    // single global navgrid buffer keyed by cell index
+    // `cz * size_x + cx`; the host fills it from a
+    // `engine_voxel::NavgridIndex` and reads its packed u32 layout
+    // (low 8 bits walkable, next 16 height) via a `voxel_navgrid_*`
+    // helper prepended by `compose_wgsl_file`.
+    //
+    // # Multi-region note
+    //
+    // The spec calls for per-region navgrids
+    // (`navgrid.walkable(region, cx, cz)`) but Phase 4b ships the
+    // single-implicit-region shape only — every active region kind
+    // today has `max_active = 1`. Multi-region dispatch lands when
+    // a fixture has distinct co-active region instances and needs
+    // them differentiated; the buffer + extent metadata stays
+    // single-instance for now.
+    let mut navgrid = NamespaceDef {
+        name: "navgrid".to_string(),
+        ..NamespaceDef::default()
+    };
+    navgrid.methods.insert(
+        "walkable".to_string(),
+        MethodDef {
+            return_ty: CgTy::Bool,
+            arg_tys: vec![CgTy::U32, CgTy::U32],
+            wgsl_fn_name: "navgrid_walkable".to_string(),
+            wgsl_stub:
+                "fn navgrid_walkable(cx: u32, cz: u32) -> bool {\n    \
+                 return voxel_navgrid_walkable(cx, cz);\n\
+                 }"
+                .to_string(),
+        },
+    );
+    registry.namespaces.insert(NamespaceId::Navgrid, navgrid);
+
     ctx.namespace_registry = registry;
 }
 

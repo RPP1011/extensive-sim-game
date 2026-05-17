@@ -174,6 +174,7 @@ fn synthesize_two_view_fixture() -> String {
         Some(PairKeyedSecondKey::Agent),
         &materialized_views,
         false,
+        false, // binds_navgrid
         &[],
         0,
         0,

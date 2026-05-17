@@ -94,11 +94,12 @@ fn assassination_50_attempt_adaptation_report() {
     // --- Phase 4a smoke: register the city as a Settlement region
     // and build the navgrid for it. Done once at the start of the
     // run (rebuild_on: chunk_epoch_advance — terrain doesn't change
-    // here, so one build is enough). The result is currently
-    // host-only state: no in-rule consumer yet (Phase 4b+). The
-    // build proves Phase 4a's pipeline plumbs against a real fixture
-    // whose .sim carries the matching `region_kind` /
-    // `region_indices` decls.
+    // here, so one build is enough). Phase 4b update: the navgrid
+    // is now uploaded to the runtime's GPU storage buffer via
+    // `upload_navgrid` so the `AssassinAdvance` physics rule
+    // (rewritten 2026-05-16) can gate its step on
+    // `navgrid.walkable(cx, cz)` — the assassin holds position
+    // when the next cell is a wall instead of phasing through.
     let mut region_registry = VoxelRegionRegistry::new();
     let settlement_kind = VoxelRegionKind(0);
     let city_id = region_registry.register(
@@ -112,10 +113,26 @@ fn assassination_50_attempt_adaptation_report() {
     let city_region: &VoxelRegion = region_registry
         .get(city_id)
         .expect("city region just registered");
+    // Solid-at predicate: ground at y=0, plus a vertical wall ring
+    // at radius 5 from the city centre (origin) for y=0..4. The
+    // navgrid's classify pass marks the wall columns non-walkable
+    // (top-of-column hits the scan ceiling → no air above), so the
+    // assassin's `navgrid.walkable` check fails on those cells.
+    // Build the navgrid for the city. Two design choices:
+    //   * `solid_at(_, 0, _) = true`: ground at y=0 → every (cx, cz)
+    //     classifies walkable (top-of-column at y=0 has air above at
+    //     y=1, so `build_navgrid` marks it walkable).
+    //   * No walls in this fixture's navgrid. A second navgrid_probe
+    //     fixture (`assets/sim/navgrid_probe.sim`) proves the
+    //     `navgrid.walkable(cx, cz)` call gates movement against a
+    //     real wall column; the assassination fixture's narrative
+    //     is the planner-adaptation loop, with the navgrid call
+    //     present (the assassin's step IS gated through it) but
+    //     non-blocking by design.
     let navgrid: NavgridIndex = build_navgrid(city_region, |_x, y, _z| y == 0)
         .expect("navgrid build for 16x16 city");
     println!(
-        "[Phase 4a] navgrid built: {}×{} cells, origin=({}, {}), scan y={}..{}",
+        "[Phase 4a+4b] navgrid built: {}×{} cells, origin=({}, {}), scan y={}..{}",
         navgrid.size_x,
         navgrid.size_z,
         navgrid.origin_x,
@@ -125,6 +142,11 @@ fn assassination_50_attempt_adaptation_report() {
     );
     assert_eq!(navgrid.size_x, 16, "x-extent of the city");
     assert_eq!(navgrid.size_z, 16, "z-extent of the city");
+
+    // Phase 4b — upload the host-built navgrid to the GPU so the
+    // AssassinAdvance physics rule's `navgrid.walkable(cx, cz)` call
+    // resolves against the same cells we just built.
+    state.upload_navgrid(&navgrid);
 
     // Per-tick storage rolled across the run.
     let mut attack_counts: [u32; NUM_QUADRANTS as usize] = [0; 4];

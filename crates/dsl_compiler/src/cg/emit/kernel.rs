@@ -987,6 +987,37 @@ pub fn kernel_topology_to_spec_and_body(
         });
     }
 
+    // 10b''. Voxel-region-indices Phase 4b: synthesize the navgrid
+    //        storage binding + a per-navgrid extent uniform when the
+    //        body lowered a `navgrid.*` namespace call. Mirrors the
+    //        terrain.* path above. Runtime contract: any kernel whose
+    //        body calls a navgrid method MUST be dispatched through a
+    //        context with `navgrid: Some(...)` AND
+    //        `navgrid_cfg: Some(...)` set. `navgrid_cfg` is a 4-u32
+    //        uniform `[size_x, size_z, origin_x, origin_z]` that the
+    //        WGSL helper reads via `voxel_navgrid_dim()` /
+    //        `voxel_navgrid_origin()`. Single global navgrid for now
+    //        (spec calls for per-region but every active region kind
+    //        has `max_active = 1` so it collapses).
+    if wgsl_body.contains("navgrid_walkable(") {
+        let slot = bindings.len() as u32;
+        bindings.push(KernelBinding {
+            slot,
+            name: "navgrid".into(),
+            access: AccessMode::ReadStorage,
+            wgsl_ty: "array<u32>".into(),
+            bg_source: BgSource::External("navgrid".into()),
+        });
+        let slot_cfg = bindings.len() as u32;
+        bindings.push(KernelBinding {
+            slot: slot_cfg,
+            name: "navgrid_cfg".into(),
+            access: AccessMode::Uniform,
+            wgsl_ty: "vec4<u32>".into(),
+            bg_source: BgSource::External("navgrid_cfg".into()),
+        });
+    }
+
     // 10c-extra. View-storage cross-kernel reads (Plan G G3f-deep, audit task #288).
     //
     // The threats.* Builtin lowering emits `view_<id>_get(idx)` calls

@@ -93,6 +93,7 @@ fn synthesize_with_init(init_stmts: &[InitStmt]) -> String {
         None,
         &[],
         false,
+        false, // binds_navgrid
         &[],
         0,
         0,

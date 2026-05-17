@@ -169,6 +169,22 @@ pub struct KernelBindingsContext<'a> {
     /// queries to GPU. Future fixtures opt in by passing
     /// `Some(mirror.buffer())`.
     pub voxel_grid: Option<&'a wgpu::Buffer>,
+    /// **Voxel-region-indices Phase 4b** — optional GPU-resident
+    /// navgrid buffer. Resolves the `navgrid` binding name. `None`
+    /// for runtimes that don't lower `navgrid.*` namespace calls
+    /// (most fixtures today). The compiler-emitted `from_context`
+    /// bodies `.expect(...)` unwrap when a kernel binds `navgrid`,
+    /// so leaving this `None` is safe for fixtures that don't use
+    /// the navgrid abstraction. Per-cell layout matches
+    /// `engine_voxel::NavgridCell` (low 8 bits walkable + mid 16
+    /// height + top 8 reserved).
+    pub navgrid: Option<&'a wgpu::Buffer>,
+    /// Phase 4b sibling — 4-u32 uniform buffer holding
+    /// `[size_x, size_z, origin_x, origin_z]` for the navgrid above.
+    /// The WGSL `voxel_navgrid_walkable` helper reads this for cell
+    /// index + bounds checks. `None` is safe; auto-emitted
+    /// `.expect(...)` if a kernel binds it.
+    pub navgrid_cfg: Option<&'a wgpu::Buffer>,
 }
 
 #[cfg(test)]

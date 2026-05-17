@@ -205,6 +205,12 @@ mod stdlib {
             // entry exists so `tables.X(idx)` doesn't fall through
             // to `UnsupportedNamespaceCall` at lower time.
             ("tables", NamespaceId::Tables),
+            // Voxel-region-indices spec Phase 4b — navgrid index reads.
+            // `navgrid.walkable(cx, cz) -> bool` resolves the per-region
+            // navgrid the engine_voxel::build_navgrid built at host time.
+            // Registered 2026-05-16. Phase 5 fixture uses this in a
+            // physics rule to gate movement by terrain walkability.
+            ("navgrid", NamespaceId::Navgrid),
         ] {
             symbols.stdlib_namespaces.insert(name.to_string(), id);
         }
@@ -467,6 +473,12 @@ mod stdlib {
             (NamespaceId::Terrain, "line_of_sight") => Some((2, IrType::Bool)),
             (NamespaceId::Terrain, "height_at") => Some((2, IrType::F32)),
             (NamespaceId::Terrain, "walkable") => Some((2, IrType::Bool)),
+            // Voxel-region-indices Phase 4b — `navgrid.walkable(cx,
+            // cz) -> bool`. Reads the per-region navgrid built host-
+            // side via `engine_voxel::build_navgrid`. Cells outside
+            // the navgrid extent return `false` (consistent with the
+            // CPU-side `cell_at` returning None / non-walkable).
+            (NamespaceId::Navgrid, "walkable") => Some((2, IrType::Bool)),
             // Engagement accessor — wraps `state.agent_engaged_with(id)`,
             // returning `Option<AgentId>` so the mask predicate can
             // compare against `None` (the engagement-lock clause in

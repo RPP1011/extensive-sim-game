@@ -164,9 +164,14 @@ belief threat(planner: Agent, quadrant: u32) -> f32 {
   }
 }
 
-// AssassinAdvance — Assassin tunnels in a straight line at the king
-// each tick. Same normalize-direction form palace_coup uses (raw
-// sum*step recurrence diverges to NaN within ~4 ticks).
+// AssassinAdvance — Phase 4b update: the assassin still steers
+// toward the king (no path planner) but the *step* is now gated by
+// `navgrid.walkable(cx, cz)`. If the candidate cell ahead is
+// non-walkable per the host-uploaded navgrid (e.g. a wall), the
+// assassin holds position that tick instead of phasing through.
+// Same normalize-direction form palace_coup uses (raw sum*step
+// recurrence diverges to NaN within ~4 ticks); the new bit is the
+// `navgrid.walkable` check on the candidate new pos.
 @phase(per_agent)
 physics AssassinAdvance {
   on Tick {} where (self.alive && self.creature_type == Assassin) {
@@ -177,11 +182,17 @@ physics AssassinAdvance {
         vec3(0.0, 0.0, 0.0)
       });
     let dist = length(toward_king);
-    let new_pos = if (dist > 0.001) {
+    let proposed = if (dist > 0.001) {
       self.pos + (toward_king / dist) * config.city.assassin_step
     } else {
       self.pos
     };
+    // City origin is (-half_extent, _, -half_extent); offset into
+    // navgrid cell coords by adding half_extent so cx, cz ∈ [0, 16).
+    let proposed_cx = u32(i32(proposed.x + config.city.half_extent));
+    let proposed_cz = u32(i32(proposed.z + config.city.half_extent));
+    let walk = navgrid.walkable(proposed_cx, proposed_cz);
+    let new_pos = if (walk) { proposed } else { self.pos };
     agents.set_pos(self, new_pos);
   }
 }

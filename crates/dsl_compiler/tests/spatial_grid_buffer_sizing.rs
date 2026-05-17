@@ -117,6 +117,7 @@ fn synthesize_spatial_fixture() -> String {
         None,
         &[],
         false,
+        false, // binds_navgrid
         &[],
         0,
         0,

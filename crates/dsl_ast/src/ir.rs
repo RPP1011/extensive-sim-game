@@ -1362,6 +1362,18 @@ pub enum NamespaceId {
     /// plus an array-index expression in the body. Read-only world
     /// data — distinct from `Agents` (per-instance per-tick state).
     Tables,
+    /// `navgrid::*` — voxel-region-indices spec Phase 4b
+    /// (`docs/superpowers/specs/2026-04-25-voxel-region-indices-design.md`).
+    /// Per-region 2D walkability + cell-height index built by
+    /// `engine_voxel::build_navgrid` at host time and uploaded to a
+    /// `navgrid` storage binding. Sole method today:
+    /// `navgrid.walkable(cx: u32, cz: u32) -> bool` (the registry
+    /// holds a single global navgrid; multi-region dispatch
+    /// `navgrid.walkable(region, cx, cz)` lands when fixtures need
+    /// it). Cells are u32-packed (low 8 bits walkable flag, mid 16
+    /// bits height, top 8 reserved) per
+    /// `engine_voxel::navgrid::NavgridCell`.
+    Navgrid,
 }
 
 impl NamespaceId {
@@ -1394,6 +1406,7 @@ impl NamespaceId {
             NamespaceId::Threats => "threats",
             NamespaceId::Events => "events",
             NamespaceId::Tables => "tables",
+            NamespaceId::Navgrid => "navgrid",
         }
     }
 }

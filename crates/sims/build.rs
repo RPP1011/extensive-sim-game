@@ -132,6 +132,7 @@ fn main() {
                 | "maze_explorer"
                 | "assassination_threat_test"
                 | "threat_scoring_stresstest"
+                | "navgrid_probe"
         ) {
             continue;
         }

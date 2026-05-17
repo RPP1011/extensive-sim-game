@@ -1,0 +1,82 @@
+// navgrid_probe — Phase 4b end-to-end pin for the voxel-region-
+// indices spec's `navgrid.walkable(cx, cz)` in-rule accessor.
+//
+// **What this proves vs Phase 4a:**
+//
+//   * Phase 4a shipped `engine_voxel::build_navgrid(...)` as a
+//     host-side function; no kernel consumed the result. The
+//     `region_kind`/`region_indices`/`index` decls in
+//     `assassination_threat_test.sim` parsed and resolved but were
+//     decoration only.
+//   * Phase 4b wires the navgrid through to GPU-side reads. A
+//     physics rule below calls `navgrid.walkable(cx, cz)` per agent
+//     per tick; the result is captured on the agent's SoA so the
+//     host can read it back and assert "the kernel actually
+//     consulted the navgrid the host uploaded".
+//
+// **Topology**
+//
+// N=4 agents in a 4×1×4 city (slot-based positions). Slots 0..2 sit
+// on walkable cells (ground at y=0, air at y=1+); slot 3 sits on a
+// wall column (column full of solid — top-of-column reaches the
+// scan ceiling so the cell is non-walkable in `build_navgrid`'s
+// classify pass). After one tick, every slot's
+// `agent.busy_with_ability_id` field carries `1u` if `navgrid.
+// walkable(cx, cz)` was true at its current pos, else `0u`. The
+// test pin reads this column back and pins the per-slot results
+// against the host-built navgrid.
+
+event Tick { }
+
+entity Probe : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+init {
+  alive: 1,
+  hp:    100,
+}
+
+config probe {
+  // Cell coordinates per slot. Hardcoded so the .sim can derive
+  // (cx, cz) without `floor(pos.x)` — the parser doesn't have the
+  // `agents.pos(slot).x` -> u32 cast path lit up yet. The test pin
+  // host-seeds positions matching these cell coords so the navgrid
+  // read still lands on the right cell.
+  pad: u32 = 0,
+}
+
+// NavgridProbe — for every alive agent, sample
+// `navgrid.walkable(cx, cz)` at the agent's current cell. Capture
+// the result by re-using `agents.busy_with_ability_id` as a 1/0
+// flag (no need to add a new SoA column for a smoke probe). The
+// cell coords come from the agent's own pos quantised to u32.
+@phase(per_agent)
+physics NavgridProbe {
+  on Tick {} where (self.alive) {
+    let pos = agents.pos(self);
+    let cx = u32(i32(pos.x));
+    let cz = u32(i32(pos.z));
+    let walk = navgrid.walkable(cx, cz);
+    let flag = if (walk) { 1u } else { 0u };
+    agents.set_busy_with_ability_id(self, flag);
+  }
+}
+
+// Declarations from Phase 1+2 — parse + resolve + emit. The .sim's
+// Settlement region holds the 4×1×4 city navgrid the host uploads
+// via `runtime.upload_navgrid(&idx)` in the test pin.
+region_kind Settlement { max_active = 1 }
+
+index Navgrid(region: VoxelRegion) -> per_cell_2d {
+  storage: per_cell_2d(max_cells = 256, bytes_per_cell = 4),
+  cost_class: Cheap,
+  rebuild_on: chunk_epoch_advance(region.chunks),
+  build {
+    let height = engine::column_reduce_xz(region, AGENT_STEP_HEIGHT);
+    engine::per_cell_classify(height, AGENT_STEP_HEIGHT)
+  }
+}
+
+region_indices Settlement { Navgrid }

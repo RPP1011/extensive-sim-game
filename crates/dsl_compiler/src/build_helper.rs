@@ -565,6 +565,17 @@ fn emit_into(
         .kernel_specs
         .iter()
         .any(|spec| spec.bindings.iter().any(|b| b.name == "voxel_grid"));
+    // Voxel-region-indices Phase 4b — sibling of `binds_voxel_grid`.
+    // Detects whether any kernel binds the `navgrid` storage emitted
+    // by the `navgrid.walkable(...)` namespace surface. The runtime
+    // allocates `navgrid_buf` + `navgrid_cfg_buf` when true, and the
+    // KernelBindingsContext routes them via the `binds_navgrid` arm
+    // of the from_context template. Zero-overhead when no fixture
+    // calls navgrid.*.
+    let binds_navgrid = artifacts
+        .kernel_specs
+        .iter()
+        .any(|spec| spec.bindings.iter().any(|b| b.name == "navgrid"));
 
     // Walk the synthesized schedule and collect the set of kernel names
     // that classify as `KernelTopology::Indirect` consumers — the
@@ -628,6 +639,7 @@ fn emit_into(
         pair_keyed_second_key,
         &materialized_views,
         binds_voxel_grid,
+        binds_navgrid,
         &indirect_consumer_kernel_names,
         item_entity_count,
         group_entity_count,
@@ -1296,6 +1308,7 @@ pub fn synthesize_runtime_core_a2(
     pair_keyed_second_key: Option<PairKeyedSecondKey>,
     materialized_views: &[MaterializedViewInfo],
     binds_voxel_grid: bool,
+    binds_navgrid: bool,
     indirect_consumer_kernel_names: &[String],
     // Gap T2 fix (2026-05-12): per-Item / per-Group field bindings
     // (named `item_<field>` / `group_<field>`) need their backing
@@ -1384,6 +1397,7 @@ pub fn synthesize_runtime_core_a2(
         pair_keyed_second_key,
         materialized_views,
         binds_voxel_grid,
+        binds_navgrid,
         indirect_consumer_kernel_names,
         item_entity_count,
         group_entity_count,
@@ -1429,6 +1443,12 @@ fn is_infra_binding(binding_name: &str) -> bool {
     if matches!(
         binding_name,
         "sim_cfg" | "event_ring" | "event_tail" | "cfg" | "voxel_grid"
+        // Voxel-region-indices Phase 4b — `navgrid` + `navgrid_cfg`
+        // route through the shared KernelBindingsContext (mirrors
+        // `voxel_grid`). The runtime owns the buffers on its own
+        // fields (gated by `binds_navgrid` above), so the per-binding
+        // alloc loop must NOT re-declare them as fixture-owned.
+        | "navgrid" | "navgrid_cfg"
     ) {
         return true;
     }
@@ -1771,6 +1791,7 @@ fn synthesize_generated_runtime_struct(
     pair_keyed_second_key: Option<PairKeyedSecondKey>,
     materialized_views: &[MaterializedViewInfo],
     binds_voxel_grid: bool,
+    binds_navgrid: bool,
     indirect_consumer_kernel_names: &[String],
     item_entity_count: u32,
     group_entity_count: u32,
@@ -2010,6 +2031,16 @@ fn synthesize_generated_runtime_struct(
         out.push_str("    pub voxel_terrain: engine_voxel::VoxelTerrain,\n");
         out.push_str("    pub voxel_mirror: engine_voxel::VoxelMirror,\n");
     }
+    // Voxel-region-indices Phase 4b — navgrid storage + extent uniform.
+    // Only allocated when a kernel binds the `navgrid` namespace (the
+    // `binds_navgrid` flag). Host fills both via `upload_navgrid(&idx)`
+    // emitted below; the WGSL `voxel_navgrid_walkable(cx, cz)` helper
+    // reads `navgrid_cfg.x` (size_x) for the bounds check + cell index.
+    // Cap is `NAVGRID_MAX_CELLS=16384` cells × 4 bytes = 64 KB.
+    if binds_navgrid {
+        out.push_str("    pub navgrid_buf: wgpu::Buffer,\n");
+        out.push_str("    pub navgrid_cfg_buf: wgpu::Buffer,\n");
+    }
     // Plan E-A6 — `@runtime` config field values, mirrored host-side.
     // The .sim's `flee_strength: f32 = 1.0 @runtime` lands here as
     // `pub flee_strength: f32`. Host setters write the value to every
@@ -2038,6 +2069,28 @@ fn synthesize_generated_runtime_struct(
         out.push_str(
             "        let voxel_terrain = engine_voxel::VoxelTerrain::new();\n\
              \x20       let voxel_mirror = engine_voxel::VoxelMirror::new(&gpu, voxel_terrain.grid());\n",
+        );
+    }
+    // Voxel-region-indices Phase 4b — alloc the navgrid + cfg buffers
+    // at the spec's cap (NAVGRID_MAX_CELLS=16384). The host populates
+    // the cells via `upload_navgrid(&NavgridIndex)` after try_new
+    // returns. Both buffers stay zero-initialized — out-of-bounds reads
+    // through the WGSL helper return false, so an unpopulated navgrid
+    // shows everywhere as non-walkable (safe default).
+    if binds_navgrid {
+        out.push_str(
+            "        let navgrid_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {\n\
+             \x20           label: Some(\"navgrid\"),\n\
+             \x20           size: (engine_voxel::NAVGRID_MAX_CELLS as u64) * (engine_voxel::NAVGRID_BYTES_PER_CELL as u64),\n\
+             \x20           usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,\n\
+             \x20           mapped_at_creation: false,\n\
+             \x20       });\n\
+             \x20       let navgrid_cfg_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {\n\
+             \x20           label: Some(\"navgrid_cfg\"),\n\
+             \x20           size: 16, // vec4<u32> = [size_x, size_z, origin_x, origin_z]\n\
+             \x20           usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,\n\
+             \x20           mapped_at_creation: false,\n\
+             \x20       });\n",
         );
     }
     // Registry construction. Two paths:
@@ -2343,6 +2396,10 @@ fn synthesize_generated_runtime_struct(
         out.push_str("            voxel_terrain,\n");
         out.push_str("            voxel_mirror,\n");
     }
+    if binds_navgrid {
+        out.push_str("            navgrid_buf,\n");
+        out.push_str("            navgrid_cfg_buf,\n");
+    }
     for (name, def) in runtime_config_defaults {
         let lit_typed = match def.scalar_ty.as_str() {
             "f32" => format!("{}_f32", def.default_lit),
@@ -2387,6 +2444,38 @@ fn synthesize_generated_runtime_struct(
             ));
         }
         out.push_str("    }\n\n");
+    }
+
+    // Voxel-region-indices Phase 4b — host-side navgrid uploader.
+    // Copies a `NavgridIndex`'s cells into the storage buffer and
+    // writes the matching `[size_x, size_z, origin_x, origin_z]`
+    // uniform. Bounds-checks at the cap (NAVGRID_MAX_CELLS). Idempotent
+    // — call once per navgrid rebuild (typically at fixture setup or
+    // when terrain changes invalidate the cells).
+    if binds_navgrid {
+        out.push_str(
+            "    pub fn upload_navgrid(&mut self, idx: &engine_voxel::NavgridIndex) {\n\
+             \x20       let cell_count = idx.cells.len();\n\
+             \x20       assert!(\n\
+             \x20           cell_count <= engine_voxel::NAVGRID_MAX_CELLS as usize,\n\
+             \x20           \"navgrid index has {} cells but the runtime buffer caps at NAVGRID_MAX_CELLS = {}\",\n\
+             \x20           cell_count,\n\
+             \x20           engine_voxel::NAVGRID_MAX_CELLS,\n\
+             \x20       );\n\
+             \x20       let cells_raw: Vec<u32> = idx.cells.iter().map(|c| c.0).collect();\n\
+             \x20       self.gpu.queue.write_buffer(\n\
+             \x20           &self.navgrid_buf,\n\
+             \x20           0,\n\
+             \x20           bytemuck::cast_slice(&cells_raw),\n\
+             \x20       );\n\
+             \x20       let cfg: [u32; 4] = [idx.size_x, idx.size_z, idx.origin_x as u32, idx.origin_z as u32];\n\
+             \x20       self.gpu.queue.write_buffer(\n\
+             \x20           &self.navgrid_cfg_buf,\n\
+             \x20           0,\n\
+             \x20           bytemuck::cast_slice(&cfg),\n\
+             \x20       );\n\
+             \x20   }\n\n",
+        );
     }
 
     // Plan E-A4 — default step() body.
@@ -2732,13 +2821,42 @@ fn synthesize_generated_runtime_struct(
         "            ..Default::default()\n\
          \x20       };\n",
     );
-    if binds_voxel_grid {
+    // Voxel-region-indices Phase 4b — the runtime owns `navgrid_buf`
+    // + `navgrid_cfg_buf` only when a fixture binds the navgrid
+    // namespace (auto-detected like `binds_voxel_grid`). The
+    // `binds_navgrid` flag is computed alongside, and lets the
+    // generator either pass `Some(&self.navgrid_buf)` or `None`.
+    if binds_voxel_grid && binds_navgrid {
         out.push_str(
             "        let _ctx = engine::gpu::KernelBindingsContext {\n\
              \x20           state: &agent_buffers,\n\
              \x20           event_ring: &self.event_ring,\n\
              \x20           registry: &self.registry_gpu,\n\
              \x20           voxel_grid: Some(self.voxel_mirror.buffer()),\n\
+             \x20           navgrid: Some(&self.navgrid_buf),\n\
+             \x20           navgrid_cfg: Some(&self.navgrid_cfg_buf),\n\
+             \x20       };\n",
+        );
+    } else if binds_voxel_grid {
+        out.push_str(
+            "        let _ctx = engine::gpu::KernelBindingsContext {\n\
+             \x20           state: &agent_buffers,\n\
+             \x20           event_ring: &self.event_ring,\n\
+             \x20           registry: &self.registry_gpu,\n\
+             \x20           voxel_grid: Some(self.voxel_mirror.buffer()),\n\
+             \x20           navgrid: None,\n\
+             \x20           navgrid_cfg: None,\n\
+             \x20       };\n",
+        );
+    } else if binds_navgrid {
+        out.push_str(
+            "        let _ctx = engine::gpu::KernelBindingsContext {\n\
+             \x20           state: &agent_buffers,\n\
+             \x20           event_ring: &self.event_ring,\n\
+             \x20           registry: &self.registry_gpu,\n\
+             \x20           voxel_grid: None,\n\
+             \x20           navgrid: Some(&self.navgrid_buf),\n\
+             \x20           navgrid_cfg: Some(&self.navgrid_cfg_buf),\n\
              \x20       };\n",
         );
     } else {
@@ -2748,6 +2866,8 @@ fn synthesize_generated_runtime_struct(
              \x20           event_ring: &self.event_ring,\n\
              \x20           registry: &self.registry_gpu,\n\
              \x20           voxel_grid: None,\n\
+             \x20           navgrid: None,\n\
+             \x20           navgrid_cfg: None,\n\
              \x20       };\n",
         );
     }
@@ -3026,7 +3146,15 @@ fn synthesize_generated_runtime_struct(
             let name = b.name.as_str();
             // ctx-routed (NOT in Extras): same name list as
             // classify_binding's special cases.
-            if matches!(name, "event_ring" | "event_tail" | "voxel_grid") {
+            if matches!(
+                name,
+                "event_ring" | "event_tail" | "voxel_grid"
+                // Voxel-region-indices Phase 4b — navgrid +
+                // navgrid_cfg ride the shared KernelBindingsContext
+                // (same as voxel_grid), so they're not in the
+                // per-kernel Extras struct.
+                | "navgrid" | "navgrid_cfg"
+            ) {
                 continue;
             }
             if let Some(suffix) = name.strip_prefix("agent_") {
@@ -3370,6 +3498,7 @@ mod tests {
             None,
             &[],
             false,
+            false, // binds_navgrid
             &[],
             0,
             0,
@@ -3447,6 +3576,7 @@ mod tests {
             None,
             &[],
             false,
+            false, // binds_navgrid
             &[],
             0,
             0,
@@ -3514,6 +3644,7 @@ mod tests {
             None,
             &[],
             false,
+            false, // binds_navgrid
             &[],
             0,
             0,

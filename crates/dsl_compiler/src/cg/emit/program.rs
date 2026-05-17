@@ -443,6 +443,41 @@ fn voxel_line_of_sight(seg_from: vec3<f32>, seg_to: vec3<f32>) -> bool {
 
 ";
 
+/// Voxel-region-indices Phase 4b — navgrid WGSL prelude.
+///
+/// Substring-injected into any kernel whose body references
+/// `voxel_navgrid_walkable(`. Reads from a `navgrid` storage buffer
+/// (one u32 per cell, row-major by `cz * size_x + cx`) sized by the
+/// `navgrid_cfg` uniform = `vec4<u32>(size_x, size_z, origin_x,
+/// origin_z)`. Cell layout matches `engine_voxel::NavgridCell`:
+///   bits  0..7  — walkable flag (0 = blocked, 1 = walkable)
+///   bits  8..23 — top-of-column height (u16)
+///   bits 24..31 — reserved
+///
+/// Out-of-bounds cells return `false` — consistent with
+/// `NavgridIndex::cell_at` returning None and treating off-navgrid
+/// as "not navigable" (opposite of the voxel grid's FlatPlane
+/// default which treats off-grid as walkable).
+const NAVGRID_WGSL_PRELUDE: &str = "\
+// Navgrid helper — emitted when the body references
+// `voxel_navgrid_walkable(`. Phase 4b of the voxel-region-indices
+// spec. Reads `navgrid` storage (one u32 per cell) sized by
+// `navgrid_cfg.x` × `navgrid_cfg.y`. Out-of-bounds returns false.
+fn voxel_navgrid_walkable(cx: u32, cz: u32) -> bool {
+    let size_x: u32 = navgrid_cfg.x;
+    let size_z: u32 = navgrid_cfg.y;
+    if (cx >= size_x || cz >= size_z) {
+        return false;
+    }
+    let idx: u32 = cz * size_x + cx;
+    if (idx >= arrayLength(&navgrid)) {
+        return false;
+    }
+    let cell: u32 = navgrid[idx];
+    return (cell & 0xFFu) != 0u;
+}
+";
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -960,6 +995,21 @@ fn compose_wgsl_file(
         .any(|needle| body.contains(needle) || prelude.contains(needle));
     if needs_voxel_helpers {
         out.push_str(VOXEL_GRID_WGSL_PRELUDE);
+        out.push('\n');
+    }
+
+    // Voxel-region-indices Phase 4b — navgrid helper prelude. Inject
+    // when the body or any namespace stub references
+    // `voxel_navgrid_walkable(`. Mirrors the voxel-grid pattern but
+    // reads a separate `navgrid` storage buffer + a 4-u32 uniform
+    // `navgrid_cfg = [size_x, size_z, origin_x, origin_z]`. The
+    // resolver-side `navgrid.walkable(cx, cz)` lowers to a call into
+    // `navgrid_walkable` (in `compose_namespace_prelude`), which
+    // delegates to `voxel_navgrid_walkable` below.
+    let needs_navgrid_helpers = body.contains("voxel_navgrid_walkable(")
+        || prelude.contains("voxel_navgrid_walkable(");
+    if needs_navgrid_helpers {
+        out.push_str(NAVGRID_WGSL_PRELUDE);
         out.push('\n');
     }
 
@@ -1685,6 +1735,16 @@ enum BindingSource<'a> {
     /// didn't supply ctx.voxel_grid")`. Optional on the context so
     /// non-voxel fixtures don't pay the buffer alloc.
     VoxelGrid,
+    /// Voxel-region-indices Phase 4b — `navgrid` resolves to
+    /// `ctx.navgrid.expect(...)`. Storage buffer for the per-region
+    /// navgrid index built by `engine_voxel::build_navgrid`.
+    Navgrid,
+    /// Phase 4b sibling — `navgrid_cfg` is a 4-u32 uniform
+    /// `[size_x, size_z, origin_x, origin_z]` the WGSL helper reads
+    /// to compute the cell index + bounds-check. Synthesised
+    /// alongside `Navgrid` in the kernel substring scan; routed
+    /// through `ctx.navgrid_cfg.expect(...)`.
+    NavgridCfg,
     Cfg,
     Extras,
 }
@@ -1722,6 +1782,12 @@ fn classify_binding(name: &str) -> BindingSource<'_> {
     if name == "voxel_grid" {
         return BindingSource::VoxelGrid;
     }
+    if name == "navgrid" {
+        return BindingSource::Navgrid;
+    }
+    if name == "navgrid_cfg" {
+        return BindingSource::NavgridCfg;
+    }
     if let Some(col) = name.strip_prefix("ability_registry_") {
         return BindingSource::Registry(col);
     }
@@ -1746,6 +1812,8 @@ fn render_from_context_expr(src: &BindingSource<'_>, name: &str) -> String {
         ),
         BindingSource::Registry(col) => format!("&ctx.registry.{col}"),
         BindingSource::VoxelGrid => "ctx.voxel_grid.expect(\"kernel binds voxel_grid but the runtime didn't supply ctx.voxel_grid\")".to_string(),
+        BindingSource::Navgrid => "ctx.navgrid.expect(\"kernel binds navgrid but the runtime didn't supply ctx.navgrid\")".to_string(),
+        BindingSource::NavgridCfg => "ctx.navgrid_cfg.expect(\"kernel binds navgrid_cfg but the runtime didn't supply ctx.navgrid_cfg\")".to_string(),
         BindingSource::Cfg => "extras.cfg".to_string(),
         BindingSource::Extras => format!("extras.{name}"),
     }

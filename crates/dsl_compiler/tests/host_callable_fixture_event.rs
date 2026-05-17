@@ -106,6 +106,7 @@ fn host_callable_fixture_event_emits_typed_injector_with_sequential_kind_id() {
         None,
         &[],
         false,
+        false, // binds_navgrid
         &[],
         0,
         0,
@@ -210,6 +211,7 @@ fn host_callable_engine_aliased_event_still_uses_engine_kind_id() {
         None,
         &[],
         false,
+        false, // binds_navgrid
         &[],
         0,
         0,

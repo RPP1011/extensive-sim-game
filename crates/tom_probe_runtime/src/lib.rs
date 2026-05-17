@@ -933,6 +933,8 @@ impl TomProbeState {
             event_ring: &self.event_ring,
             registry: &self.registry_gpu,
             voxel_grid: None,
+            navgrid: None,
+            navgrid_cfg: None,
         };
         let extras = physics_ApplyObserveBeliefUpdate::PhysicsApplyObserveBeliefUpdateExtras {
             agent_disguise_expires_at_tick: &self.agent_disguise_expires_at_tick_buf,
@@ -1017,6 +1019,8 @@ impl TomProbeState {
             event_ring: &self.event_ring,
             registry: &self.registry_gpu,
             voxel_grid: None,
+            navgrid: None,
+            navgrid_cfg: None,
         };
         let extras = physics_ApplyScryBeliefUpdate::PhysicsApplyScryBeliefUpdateExtras {
             beliefs_pos: &self.beliefs_pos_primary,
@@ -1107,6 +1111,8 @@ impl TomProbeState {
             event_ring: &self.event_ring,
             registry: &self.registry_gpu,
             voxel_grid: None,
+            navgrid: None,
+            navgrid_cfg: None,
         };
         let extras = physics_ApplyRevealBeliefUpdate::PhysicsApplyRevealBeliefUpdateExtras {
             beliefs_pos: &self.beliefs_pos_primary,
@@ -1198,6 +1204,8 @@ impl TomProbeState {
             event_ring: &self.event_ring,
             registry: &self.registry_gpu,
             voxel_grid: None,
+            navgrid: None,
+            navgrid_cfg: None,
         };
         let extras = physics_ApplyDecoyBeliefUpdate::PhysicsApplyDecoyBeliefUpdateExtras {
             beliefs_pos: &self.beliefs_pos_primary,
@@ -1282,6 +1290,8 @@ impl TomProbeState {
             event_ring: &self.event_ring,
             registry: &self.registry_gpu,
             voxel_grid: None,
+            navgrid: None,
+            navgrid_cfg: None,
         };
         let extras = physics_ApplyEraseBeliefUpdate_and_ApplyDisguise::PhysicsApplyEraseBeliefUpdateAndApplyDisguiseExtras {
             agent_disguise_expires_at_tick: &self.agent_disguise_expires_at_tick_buf,
@@ -1369,6 +1379,8 @@ impl TomProbeState {
             event_ring: &self.event_ring,
             registry: &self.registry_gpu,
             voxel_grid: None,
+            navgrid: None,
+            navgrid_cfg: None,
         };
         let extras = physics_ApplyEraseBeliefUpdate_and_ApplyDisguise::PhysicsApplyEraseBeliefUpdateAndApplyDisguiseExtras {
             agent_disguise_expires_at_tick: &self.agent_disguise_expires_at_tick_buf,
@@ -1580,6 +1592,8 @@ impl CompiledSim for TomProbeState {
                 event_ring: &self.event_ring,
                 registry: &self.registry_gpu,
                 voxel_grid: None,
+                navgrid: None,
+                navgrid_cfg: None,
             };
             let physics_extras = physics_WhatIBelieve::PhysicsWhatIBelieveExtras {
                 cfg: &self.physics_cfg_buf,

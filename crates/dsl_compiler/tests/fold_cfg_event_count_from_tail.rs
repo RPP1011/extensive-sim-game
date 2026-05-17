@@ -137,6 +137,7 @@ fn fold_step_snapshot_copies_event_tail_into_cfg_event_count() {
         None,
         &[],
         false,
+        false, // binds_navgrid
         // CRITICAL: empty indirect_consumer_kernel_names — the fold
         // kernel goes through the `Kernel(...)` arm, NOT the indirect
         // arm. Pre-fix this guaranteed no cfg copy. Post-fix the
@@ -272,6 +273,7 @@ fn non_event_ring_kernel_does_not_get_snapshot_copy() {
         None,
         &[],
         false,
+        false, // binds_navgrid
         &[],
         0,
         0,
