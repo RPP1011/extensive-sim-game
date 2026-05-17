@@ -445,6 +445,111 @@ fn effect_nested_block_round_trips() {
 }
 
 // ============================================================
+// EffectCondition (when / else) — verbatim-text slot, round-trip via
+// emitter `when <cond>` + optional `else <cond>` rendering.
+// ============================================================
+
+#[test]
+fn effect_condition_when_only_round_trips() {
+    let mut e = base_effect("damage");
+    e.args.push(EffectArg::Number(50.0));
+    e.condition = Some(EffectCondition {
+        when_cond: "target.hp < 30".to_string(),
+        else_cond: None,
+        span: span(),
+    });
+    let d = base_ability("WhenOnlyProbe", Vec::new(), vec![e]);
+    let parsed = round_trip(d);
+    let got = parsed.effects[0]
+        .condition
+        .as_ref()
+        .expect("condition present");
+    assert_eq!(got.when_cond.trim(), "target.hp < 30");
+    assert!(got.else_cond.is_none());
+}
+
+#[test]
+fn effect_condition_when_else_round_trips() {
+    let mut e = base_effect("damage");
+    e.args.push(EffectArg::Number(80.0));
+    e.condition = Some(EffectCondition {
+        when_cond: "target.hp < 50".to_string(),
+        else_cond: Some("target.hp >= 50".to_string()),
+        span: span(),
+    });
+    let d = base_ability("WhenElseProbe", Vec::new(), vec![e]);
+    let parsed = round_trip(d);
+    let got = parsed.effects[0]
+        .condition
+        .as_ref()
+        .expect("condition present");
+    assert_eq!(got.when_cond.trim(), "target.hp < 50");
+    assert_eq!(
+        got.else_cond
+            .as_ref()
+            .expect("else_cond present")
+            .trim(),
+        "target.hp >= 50"
+    );
+}
+
+#[test]
+fn effect_condition_with_parens_round_trips() {
+    // The parser's `capture_cond_text` balances `()` so an inner
+    // `)` doesn't terminate the body. This pins that nesting
+    // semantic against accidental regressions.
+    let mut e = base_effect("execute");
+    e.args.push(EffectArg::Number(25.0));
+    e.condition = Some(EffectCondition {
+        when_cond: "(target.hp < 30) and (self.alive)".to_string(),
+        else_cond: None,
+        span: span(),
+    });
+    let d = base_ability("WhenParenProbe", Vec::new(), vec![e]);
+    let parsed = round_trip(d);
+    let got = parsed.effects[0]
+        .condition
+        .as_ref()
+        .expect("condition present");
+    assert!(
+        got.when_cond.contains("(target.hp < 30)"),
+        "balanced parens preserved; got {:?}",
+        got.when_cond
+    );
+}
+
+// ============================================================
+// Header coverage holes — variants that were only ever tested in
+// combination with another header.
+// ============================================================
+
+#[test]
+fn header_toggle_alone_round_trips() {
+    // Toggle was only tested paired with Charges; pin the
+    // standalone path too so a `cost: …` change can't break the
+    // toggle-only emit grammar.
+    let d = base_ability(
+        "ToggleAloneProbe",
+        vec![AbilityHeader::Toggle],
+        vec![base_effect("damage")],
+    );
+    let parsed = round_trip(d);
+    assert!(parsed.headers.iter().any(|h| matches!(h, AbilityHeader::Toggle)));
+}
+
+#[test]
+fn header_recharge_alone_round_trips() {
+    // Recharge was only ever paired with Cast; pin standalone.
+    let d = base_ability(
+        "RechargeAloneProbe",
+        vec![AbilityHeader::Recharge(dur(8_000))],
+        vec![base_effect("damage")],
+    );
+    let parsed = round_trip(d);
+    assert!(parsed.headers.iter().any(|h| matches!(h, AbilityHeader::Recharge(_))));
+}
+
+// ============================================================
 // Compound — header set + multi-effect bodies + every modifier
 // firing together. The "kitchen-sink" cases that catch interaction
 // regressions a single-variant test would miss.

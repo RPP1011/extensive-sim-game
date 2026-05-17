@@ -245,6 +245,80 @@ fn scaling_terms_lower() {
 }
 
 #[test]
+fn effect_condition_when_only_lowers() {
+    // The opaque-text `when <cond>` clause lowers as an effect-level
+    // mask predicate; the body text is consumed by the verb-to-IR
+    // pipeline. Pin the lowering path against a regression where a
+    // `when` slot would round-trip the parse walker but fail to lower.
+    let mut e = base_effect("damage");
+    e.args.push(EffectArg::Number(50.0));
+    e.condition = Some(EffectCondition {
+        when_cond: "target.hp < 30".to_string(),
+        else_cond: None,
+        span: span(),
+    });
+    let d = base_ability(
+        "WhenLowerProbe",
+        vec![
+            AbilityHeader::Target(TargetMode::Enemy),
+            AbilityHeader::Range(500.0),
+        ],
+        vec![e],
+    );
+    round_trip_and_lower(d, "when_only");
+}
+
+#[test]
+fn effect_duration_modifier_lowers() {
+    let mut e = base_effect("stun");
+    e.duration = Some(EffectDuration {
+        duration: dur(1500),
+        span: span(),
+    });
+    let d = base_ability(
+        "DurationProbe",
+        vec![
+            AbilityHeader::Target(TargetMode::Enemy),
+            AbilityHeader::Range(500.0),
+        ],
+        vec![e],
+    );
+    round_trip_and_lower(d, "duration_modifier");
+}
+
+#[test]
+fn effect_chance_modifier_lowers() {
+    let mut e = base_effect("damage");
+    e.args.push(EffectArg::Number(50.0));
+    e.chance = Some(EffectChance { p: 0.25, span: span() });
+    let d = base_ability(
+        "ChanceProbe",
+        vec![
+            AbilityHeader::Target(TargetMode::Enemy),
+            AbilityHeader::Range(500.0),
+        ],
+        vec![e],
+    );
+    round_trip_and_lower(d, "chance_modifier");
+}
+
+#[test]
+fn effect_lifetime_until_caster_dies_lowers() {
+    let mut e = base_effect("shield");
+    e.args.push(EffectArg::Number(150.0));
+    e.lifetime = Some(EffectLifetime::UntilCasterDies { span: span() });
+    let d = base_ability(
+        "LifetimeUcdProbe",
+        vec![
+            AbilityHeader::Target(TargetMode::Self_),
+            AbilityHeader::Range(0.0),
+        ],
+        vec![e],
+    );
+    round_trip_and_lower(d, "lifetime_until_caster_dies");
+}
+
+#[test]
 fn kitchen_sink_ability_lowers() {
     let mut e = base_effect("damage");
     e.args.push(EffectArg::Number(120.0));
