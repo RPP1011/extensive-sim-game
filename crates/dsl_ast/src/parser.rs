@@ -5252,6 +5252,7 @@ fn parse_terrain(c: &mut Cursor) -> PResult<crate::terrain::TerrainBlock> {
     let mut cell_size: Option<f32> = None;
     let mut seed_purpose: Option<u32> = None;
     let mut materials: Vec<crate::terrain::MaterialDecl> = Vec::new();
+    let mut layers: Vec<crate::terrain::LayerDecl> = Vec::new();
 
     loop {
         c.skip_ws();
@@ -5292,6 +5293,51 @@ fn parse_terrain(c: &mut Cursor) -> PResult<crate::terrain::TerrainBlock> {
                         ));
                     }
                 }
+            }
+            "layer" => {
+                // `layer <kind> { ... }` — kind ident follows without colon
+                let kind_span = here(c);
+                let kind_name = ident(c).map_err(|e| e.with_context("parsing layer kind"))?;
+                c.skip_ws();
+                let kind = match kind_name.as_str() {
+                    "fill" => {
+                        expect_char(c, '{')
+                            .map_err(|e| e.with_context("parsing `layer fill` body (expected `{`)"))?;
+                        c.skip_ws();
+                        // Only property: `material: <ident>`
+                        let prop_span = here(c);
+                        let prop = ident(c).map_err(|e| e.with_context("parsing `layer fill` property name"))?;
+                        if prop != "material" {
+                            return Err(ParseErr::at(
+                                prop_span,
+                                format!("unknown property `{prop}` in `layer fill`; expected `material`"),
+                            ));
+                        }
+                        c.skip_ws();
+                        expect_char(c, ':')
+                            .map_err(|e| e.with_context("parsing `layer fill` material (expected `:`)"))?;
+                        c.skip_ws();
+                        let material = ident(c)
+                            .map_err(|e| e.with_context("parsing `layer fill` material name"))?;
+                        c.skip_ws();
+                        // optional trailing comma inside block
+                        if c.starts_with_char(',') {
+                            c.bump(1);
+                        }
+                        c.skip_ws();
+                        expect_char(c, '}')
+                            .map_err(|e| e.with_context("parsing `layer fill` body (expected `}`)"))?;
+                        crate::terrain::LayerKind::Fill { material }
+                    }
+                    other => {
+                        return Err(ParseErr::at(
+                            kind_span,
+                            format!("unknown layer kind: {other}"),
+                        ));
+                    }
+                };
+                let index = layers.len() as u32 + 1;
+                layers.push(crate::terrain::LayerDecl { index, kind });
             }
             _ => {
                 // All scalar fields require `:` after the name
@@ -5368,6 +5414,6 @@ fn parse_terrain(c: &mut Cursor) -> PResult<crate::terrain::TerrainBlock> {
         cell_size,
         seed_purpose,
         materials,
-        layers: vec![],
+        layers,
     })
 }
