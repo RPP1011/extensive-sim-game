@@ -208,6 +208,16 @@ pub struct LoweringCtx<'a> {
     /// the WGSL emit can resolve the layout per-kind without a
     /// separate registry walk.
     pub event_layouts: HashMap<EventKindId, super::super::program::EventLayout>,
+    /// Per-rule rng-call counter, keyed by `RngPurpose`. Each call to
+    /// `lower_rng_call` looks up the current count for the purpose,
+    /// assigns it as the resulting `CgExpr::Rng.extra`, then bumps.
+    /// Reset by `reset_rng_counter()` at every rule-body entry. The
+    /// first occurrence of each purpose gets `extra = 0` (renders as
+    /// the bare `per_agent_u32(...)` — backwards compat preserved);
+    /// subsequent occurrences get distinct `extra` values so the
+    /// WGSL emit routes them through `per_agent_u32_with_extra(...,
+    /// extra)`, giving them independent PCG streams.
+    pub rng_purpose_count: HashMap<RngPurpose, u32>,
     /// Static lookup tables from `table <name>: u32[N] = […]` decls.
     /// Keyed by snake_case table name; value is the materialised
     /// element list (u32 only in the first cut) bounds-checked by
@@ -337,6 +347,7 @@ impl<'a> LoweringCtx<'a> {
             lazy_view_bodies: HashMap::new(),
             local_tys: HashMap::new(),
             event_layouts: HashMap::new(),
+            rng_purpose_count: HashMap::new(),
             tables: HashMap::new(),
             namespace_registry: super::super::program::NamespaceRegistry::default(),
             pending_pre_stmts: Vec::new(),
@@ -480,6 +491,15 @@ impl<'a> LoweringCtx<'a> {
         result: CgTy,
     ) -> Option<(Vec<CgTy>, CgTy)> {
         self.view_signatures.insert(view_id, (args, result))
+    }
+
+    /// Reset the per-rule rng-call counter. Called by every rule-body
+    /// lowering entry point so each rule's RNG-call indexing starts
+    /// fresh. Without this, cross-rule rng-call counts would shift
+    /// every existing fixture's first-call extra=0 to extra=N
+    /// silently, breaking determinism across compiles.
+    pub fn reset_rng_counter(&mut self) {
+        self.rng_purpose_count.clear();
     }
 
     /// Register the CG-side storage hint of `view_id`. Materialized-only;
@@ -3140,6 +3160,19 @@ fn lower_fold_over_agents(
 /// [`LoweringError::NamespaceCallArityMismatch`] and
 /// [`LoweringError::IllTypedExpression`] respectively, using the
 /// same shape the surrounding namespace dispatch uses.
+/// Look up the per-rule rng-call count for `purpose`, return it as the
+/// `extra` value for the call's `CgExpr::Rng` node, and bump the
+/// counter. First call of each purpose in a rule returns 0 (which
+/// the WGSL emit renders as the bare `per_agent_u32(...)` form,
+/// preserving every existing fixture's stream). Subsequent calls
+/// return distinct values that route through `per_agent_u32_with_extra`.
+fn bump_rng_extra(ctx: &mut LoweringCtx<'_>, purpose: RngPurpose) -> u32 {
+    let n = ctx.rng_purpose_count.entry(purpose).or_insert(0);
+    let extra = *n;
+    *n += 1;
+    extra
+}
+
 fn lower_rng_call(
     method: &str,
     args: &[IrCallArg],
@@ -3164,10 +3197,12 @@ fn lower_rng_call(
                 span,
             });
         }
+        let extra = bump_rng_extra(ctx, purpose);
         return add(
             ctx,
             CgExpr::Rng {
                 purpose,
+                extra,
                 ty: CgTy::U32,
             },
             span,
@@ -3189,10 +3224,12 @@ fn lower_rng_call(
                     span,
                 });
             }
+            let extra = bump_rng_extra(ctx, RngPurpose::Coin);
             add(
                 ctx,
                 CgExpr::Rng {
                     purpose: RngPurpose::Coin,
+                    extra,
                     ty: CgTy::Bool,
                 },
                 span,
@@ -3287,10 +3324,12 @@ fn lower_rng_scaled_f32(
         }
     }
     // Build `draw = CgExpr::Rng { purpose, F32 }`.
+    let extra = bump_rng_extra(ctx, purpose);
     let draw_id = add(
         ctx,
         CgExpr::Rng {
             purpose,
+            extra,
             ty: CgTy::F32,
         },
         span,
@@ -3373,10 +3412,12 @@ fn lower_rng_uniform_int(
         }
     }
     // `draw = CgExpr::Rng { UniformInt, U32 }`.
+    let extra = bump_rng_extra(ctx, RngPurpose::UniformInt);
     let draw_id = add(
         ctx,
         CgExpr::Rng {
             purpose: RngPurpose::UniformInt,
+            extra,
             ty: CgTy::U32,
         },
         span,

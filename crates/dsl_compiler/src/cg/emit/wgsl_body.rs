@@ -1734,7 +1734,7 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
             }
             Ok(format!("{}({})", builtin_name(*fn_id), parts.join(", ")))
         }
-        CgExpr::Rng { purpose, ty: _ } => {
+        CgExpr::Rng { purpose, extra, ty: _ } => {
             // `per_agent_u32(seed, agent_id, tick, <purpose_id>u)` —
             // calls the WGSL prelude function emitted by
             // [`super::program::compose_rng_prelude`] when any kernel
@@ -1775,10 +1775,27 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
             //     guards against `log(0) = -inf`.
             //   - UniformInt → bare u32 (post Gap #C the surface IS
             //     u32; no bitcast needed).
-            let raw = format!(
-                "per_agent_u32(seed, agent_id, tick, {}u)",
-                purpose.wgsl_id()
-            );
+            // Plan I/rng-collision fix: when `extra == 0` (the first
+            // call of this purpose in the rule body), emit the bare
+            // `per_agent_u32(...)` form to preserve every existing
+            // fixture's RNG stream. When `extra > 0`, emit the
+            // `per_agent_u32_with_extra(..., extra)` form to draw
+            // from a distinct stream — prevents two
+            // `rng.action()` calls in the same body from collapsing
+            // to the same draw (the surface bug surfaced by
+            // maze_explorer_smart).
+            let raw = if *extra == 0 {
+                format!(
+                    "per_agent_u32(seed, agent_id, tick, {}u)",
+                    purpose.wgsl_id()
+                )
+            } else {
+                format!(
+                    "per_agent_u32_with_extra(seed, agent_id, tick, {}u, {}u)",
+                    purpose.wgsl_id(),
+                    *extra
+                )
+            };
             match purpose {
                 RngPurpose::Coin => Ok(format!("(({} & 1u) == 0u)", raw)),
                 RngPurpose::Uniform => {
@@ -7220,6 +7237,7 @@ mod tests {
             let id = push_expr(
                 &mut prog,
                 CgExpr::Rng {
+            extra: 0,
                     purpose,
                     ty: CgTy::U32,
                 },

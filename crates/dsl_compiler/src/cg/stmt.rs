@@ -1506,6 +1506,7 @@ mod tests {
     #[test]
     fn collect_expr_reads_rng_records_handle() {
         let exprs: Vec<CgExpr> = vec![CgExpr::Rng {
+            extra: 0,
             purpose: RngPurpose::Action,
             ty: CgTy::U32,
         }];

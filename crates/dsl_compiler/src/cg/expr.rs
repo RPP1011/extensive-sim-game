@@ -801,7 +801,21 @@ pub enum CgExpr {
         ty: CgTy,
     },
     /// Per-agent RNG draw. `purpose` differentiates streams.
-    Rng { purpose: RngPurpose, ty: CgTy },
+    /// `rng.<method>()` call site. `purpose` selects the PCG stream
+    /// (Action / Sample / Shuffle / ...); `extra` disambiguates
+    /// repeated calls of the SAME purpose within one kernel body —
+    /// without it, two `rng.action()` calls in the same source body
+    /// collide on the same `per_agent_u32(seed, agent, tick, Action)`
+    /// output (surfaced by `maze_explorer_smart` where the second
+    /// roll had to be `rng.shuffle()` to avoid dead-lock).
+    ///
+    /// Backwards-compat invariant: the FIRST occurrence of each
+    /// purpose in a rule body gets `extra = 0`, which the WGSL emit
+    /// renders as the bare `per_agent_u32(...)` call (existing
+    /// stream, unchanged). The Nth (>=2nd) occurrence gets
+    /// `extra = N - 1` and emits as `per_agent_u32_with_extra(...,
+    /// extra)` — distinct PCG stream per call site.
+    Rng { purpose: RngPurpose, extra: u32, ty: CgTy },
     /// Conditional select (if-then-else as expression, not stmt).
     Select {
         cond: CgExprId,
@@ -1589,7 +1603,7 @@ pub fn type_check(
             }
         },
 
-        CgExpr::Rng { purpose, ty } => {
+        CgExpr::Rng { purpose, extra: _, ty } => {
             // Each `RngPurpose` has a natural result type:
             //  - `Action` / `Sample` / `Shuffle` / `Conception` →
             //    `U32` (the raw `per_agent_u32` draw, exposed by the
@@ -2066,6 +2080,7 @@ mod tests {
     #[test]
     fn cg_expr_rng_roundtrip_and_ty() {
         let e = CgExpr::Rng {
+            extra: 0,
             purpose: RngPurpose::Action,
             ty: CgTy::U32,
         };
@@ -2141,6 +2156,7 @@ mod tests {
     #[test]
     fn pretty_rng() {
         let e = CgExpr::Rng {
+            extra: 0,
             purpose: RngPurpose::Sample,
             ty: CgTy::U32,
         };
@@ -2438,6 +2454,7 @@ mod tests {
     #[test]
     fn type_check_rejects_rng_claimed_non_u32() {
         let arena: Vec<CgExpr> = vec![CgExpr::Rng {
+            extra: 0,
             purpose: RngPurpose::Action,
             ty: CgTy::F32,
         }];
@@ -2477,6 +2494,7 @@ mod tests {
         for (purpose, expected_ty) in cases {
             // Positive: claimed ty matches purpose.result_ty().
             let arena: Vec<CgExpr> = vec![CgExpr::Rng {
+            extra: 0,
                 purpose,
                 ty: expected_ty,
             }];
@@ -2491,6 +2509,7 @@ mod tests {
                 CgTy::U32
             };
             let arena: Vec<CgExpr> = vec![CgExpr::Rng {
+            extra: 0,
                 purpose,
                 ty: wrong_ty,
             }];

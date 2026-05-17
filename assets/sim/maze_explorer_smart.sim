@@ -89,12 +89,14 @@ physics Explore {
       };
       let next_bit = tables.room_bit(next_room);
       let visited = self.visited_mask & next_bit;
-      // Use `rng.shuffle()` (purpose ≠ Action) for the escape gate
-      // so it draws from a different PCG stream than the direction
-      // roll. `rng.action()` would collide on the same per-tick
-      // draw, producing reroll == 0 ⇔ dir == 0 — pure dead-lock in
-      // any dead-end whose only escape is direction != N.
-      let reroll = rng.shuffle() % 2u;
+      // Second `rng.action()` call in the same body. Pre-fix this
+      // would collide with the direction roll above (same purpose
+      // → same draw → `reroll == 0 ⇔ dir == 0` → dead-lock in any
+      // dead-end whose only escape is direction != N). Now the
+      // lowering's per-rule rng counter assigns this call extra=1,
+      // routing it through `per_agent_u32_with_extra` for a
+      // distinct stream.
+      let reroll = rng.action() % 2u;
       // Prefer unvisited; accept visited with 50% probability. The
       // earlier 1/8 rate dead-locked in saturated states (all
       // neighbours visited → 8× slowdown over random walk on the

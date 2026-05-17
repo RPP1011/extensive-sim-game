@@ -2653,6 +2653,11 @@ fn lower_all_views(
 ) {
     for (i, view) in comp.views.iter().enumerate() {
         let view_id = ViewId(i as u32);
+        // Reset per-rule rng counter — same reasoning as
+        // `lower_all_physics` above. Each view body's rng calls
+        // (typically in propagation handlers) get their own
+        // 0-based extra sequence.
+        ctx.reset_rng_counter();
         let resolutions = match build_view_handler_resolutions(view, &comp.events, event_rings) {
             Ok(r) => r,
             Err(e) => {
@@ -2751,6 +2756,10 @@ fn lower_all_physics(
         if rule.cpu_only {
             continue;
         }
+        // Reset per-rule rng counter so the first `rng.<method>()`
+        // in each rule body gets `extra = 0` (bare per_agent_u32
+        // form — preserves every existing fixture's RNG stream).
+        ctx.reset_rng_counter();
         let resolutions = match build_physics_handler_resolutions(rule, &comp.events, event_rings) {
             Ok(r) => r,
             Err(e) => {

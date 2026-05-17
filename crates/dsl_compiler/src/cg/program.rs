@@ -2124,6 +2124,7 @@ mod tests {
         let mut b = CgProgramBuilder::new();
         b.add_expr(lit_f32(2.5)).unwrap();
         b.add_expr(CgExpr::Rng {
+            extra: 0,
             purpose: RngPurpose::Action,
             ty: CgTy::U32,
         })
