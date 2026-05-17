@@ -70,6 +70,7 @@ fn physics_shape_kernel_spec(name: &str, pascal: &str) -> KernelSpec {
             },
         ],
         kind: KernelKind::Generic,
+        y_dim_override: None,
         runtime_cfg_fields: Vec::new(),
     }
 }

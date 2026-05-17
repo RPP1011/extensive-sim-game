@@ -93,6 +93,7 @@ fn spatial_consumer_kernel() -> KernelSpec {
             },
         ],
         kind: KernelKind::Generic,
+        y_dim_override: None,
         runtime_cfg_fields: Vec::new(),
     }
 }

@@ -424,6 +424,7 @@ pub fn kernel_topology_to_spec_and_body(
             bindings,
             kind: KernelKind::ViewFold,
             runtime_cfg_fields: Vec::new(),
+            y_dim_override: None,
         };
         spec.validate()
             .map_err(|reason| KernelEmitError::InvalidKernelSpec { reason })?;
@@ -472,6 +473,7 @@ pub fn kernel_topology_to_spec_and_body(
             bindings,
             kind: KernelKind::ViewDecay,
             runtime_cfg_fields: Vec::new(),
+            y_dim_override: None,
         };
         spec.validate()
             .map_err(|reason| KernelEmitError::InvalidKernelSpec { reason })?;
@@ -543,6 +545,15 @@ pub fn kernel_topology_to_spec_and_body(
             // body; the cfg shape itself is mostly unused.
             kind: KernelKind::Generic,
             runtime_cfg_fields: Vec::new(),
+            // Plan I slice I.3b — for key-typed pair-keyed beliefs
+            // (`second_key_pop = Some(K)`) the merge kernel's 2-D
+            // dispatch y axis must cover [0..K) cells, not [0..N).
+            // Without this override, the gossip merge under-
+            // dispatches when K > N — cells s ∈ [N..K) get no
+            // thread → those bits never propagate cross-agent.
+            // Visible in maze_explorer_multi's relaxed gossip-
+            // window assertion before this override landed.
+            y_dim_override: *second_key_pop,
         };
         spec.validate()
             .map_err(|reason| KernelEmitError::InvalidKernelSpec { reason })?;
@@ -1157,6 +1168,7 @@ pub fn kernel_topology_to_spec_and_body(
         bindings,
         kind: kernel_kind,
         runtime_cfg_fields,
+        y_dim_override: None,
     };
 
     spec.validate()

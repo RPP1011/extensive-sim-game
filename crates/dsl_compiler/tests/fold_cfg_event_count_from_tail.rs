@@ -93,6 +93,7 @@ fn fold_shape_kernel_spec(name: &str) -> KernelSpec {
         ),
         bindings,
         kind: KernelKind::ViewFold,
+        y_dim_override: None,
         runtime_cfg_fields: Vec::new(),
     }
 }
@@ -252,6 +253,7 @@ fn non_event_ring_kernel_does_not_get_snapshot_copy() {
         cfg_struct_decl: "#[repr(C)]\n#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]\npub struct PhysicsPerAgentCfg { pub agent_cap: u32, pub tick: u32, pub seed: u32, pub _pad: u32 }\n".into(),
         bindings,
         kind: KernelKind::Generic,
+        y_dim_override: None,
         runtime_cfg_fields: Vec::new(),
     };
     artifacts.kernel_index.push(spec.name.clone());

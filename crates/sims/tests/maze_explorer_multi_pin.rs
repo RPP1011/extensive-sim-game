@@ -161,27 +161,23 @@ fn multi_agent_gossip_propagates_visited_rows() {
         "[maze_multi] after 30 ticks: per-agent visited masks = {:04X?}, union = 0x{union:04X}",
         masks
     );
-    // Weaker invariant: every agent's mask is a subset of the union
-    // (i.e., gossip only ADDS bits, never invents them). This holds
-    // regardless of the K-dispatch gap.
+    // Sanity: every agent's mask is a subset of the union (gossip
+    // only ADDS bits, never invents them).
     for (a, m) in masks.iter().enumerate() {
         assert_eq!(
             *m & union, *m,
             "agent {a}'s mask 0x{m:04X} has bits not in union 0x{union:04X} — merge invented bits?"
         );
     }
-    // Stronger invariant we CAN assert today: in the gossip-reachable
-    // window s ∈ [0..N=4), every agent's bits match the union's
-    // bits in that window. This is what PerAgentEventScan's (N/8, N/8)
-    // dispatch can reach.
-    let window_mask: u32 = (1u32 << N_AGENTS) - 1; // bits 0..N
+    // Strict invariant (post K-aware dispatch fix): every agent's
+    // visited row equals the union across ALL K cells. The
+    // KernelSpec.y_dim_override = Some(K) routes the merge kernel
+    // through `dispatch_workgroups(N/8, K/8, 1)` instead of
+    // `(N/8, N/8, 1)`, so cells s ∈ [N..K) now have a thread.
     for (a, m) in masks.iter().enumerate() {
         assert_eq!(
-            *m & window_mask,
-            union & window_mask,
-            "agent {a}'s in-window mask 0x{:04X} ≠ union 0x{:04X} (dispatch s ∈ [0..{N_AGENTS}))",
-            *m & window_mask,
-            union & window_mask
+            *m, union,
+            "agent {a}'s mask 0x{m:04X} ≠ union 0x{union:04X} — gossip merge incomplete (K-dispatch gap regressed?)"
         );
     }
 }

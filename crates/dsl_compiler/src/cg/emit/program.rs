@@ -1934,7 +1934,7 @@ fn compose_kernel_trait_impl(spec: &KernelSpec, topology: &KernelTopology) -> St
         ));
         out.push_str("        pass.set_pipeline(&self.pipeline);\n");
         out.push_str("        pass.set_bind_group(0, &bg, &[]);\n");
-        out.push_str(&compose_dispatch_call(topology));
+        out.push_str(&compose_dispatch_call(topology, spec));
         out.push_str("    }\n");
     }
 
@@ -2320,8 +2320,11 @@ fn dispatch_is_one_shot(topology: &KernelTopology) -> bool {
 }
 
 /// Pick the `pass.dispatch_workgroups(...)` line for a kernel based on
-/// its topology's [`DispatchShape`].
-fn compose_dispatch_call(topology: &KernelTopology) -> String {
+/// its topology's [`DispatchShape`]. `spec` carries per-kernel
+/// metadata (today: `y_dim_override` for I.3b key-typed merge
+/// kernels whose 2-D dispatch y axis covers K cells with K !=
+/// agent_cap).
+fn compose_dispatch_call(topology: &KernelTopology, spec: &KernelSpec) -> String {
     let dispatch = match topology {
         KernelTopology::Fused { dispatch, .. } => *dispatch,
         KernelTopology::Split { dispatch, .. } => *dispatch,
@@ -2392,13 +2395,29 @@ fn compose_dispatch_call(topology: &KernelTopology) -> String {
             // in exactly one thread, with the busy-filter dropping any
             // (observer, non-busy-source) combination at the kernel
             // preamble.
+            //
+            // Plan I slice I.3b — when the kernel sets
+            // `y_dim_override = Some(K)` (today: only the
+            // BeliefSocialMerge kernel for key-typed beliefs), the
+            // y axis dispatches `ceil(K / wg.y)` workgroups instead
+            // of `ceil(agent_cap / wg.y)`. This closes the
+            // s ∈ [N..K) propagation gap in maze_explorer_multi.
             let wg = dispatch.workgroup_size();
+            let y_expr = match spec.y_dim_override {
+                Some(k) => {
+                    let chunks = k.div_ceil(wg.y);
+                    format!("{chunks}u32")
+                }
+                None => format!(
+                    "(agent_cap + {wg_y_minus_one}u32) / {wg_y}u32",
+                    wg_y = wg.y,
+                    wg_y_minus_one = wg.y - 1,
+                ),
+            };
             format!(
-                "        pass.dispatch_workgroups((agent_cap + {wg_x_minus_one}u32) / {wg_x}u32, (agent_cap + {wg_y_minus_one}u32) / {wg_y}u32, 1);\n",
+                "        pass.dispatch_workgroups((agent_cap + {wg_x_minus_one}u32) / {wg_x}u32, {y_expr}, 1);\n",
                 wg_x = wg.x,
                 wg_x_minus_one = wg.x - 1,
-                wg_y = wg.y,
-                wg_y_minus_one = wg.y - 1,
             )
         }
     }
@@ -2746,6 +2765,7 @@ mod tests {
             bindings,
             kind: KernelKind::Generic,
             runtime_cfg_fields: Vec::new(),
+            y_dim_override: None,
         }
     }
 

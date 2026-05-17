@@ -75,6 +75,7 @@ fn synthesize_with_init(init_stmts: &[InitStmt]) -> String {
             },
         ],
         kind: KernelKind::Generic,
+        y_dim_override: None,
         runtime_cfg_fields: Vec::new(),
     };
     let artifacts = EmittedArtifacts {

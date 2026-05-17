@@ -172,6 +172,7 @@ fn synthesize_runtime_allocates_vec3_buf() {
             },
         ],
         kind: KernelKind::Generic,
+        y_dim_override: None,
         runtime_cfg_fields: Vec::new(),
     };
     let artifacts = EmittedArtifacts {

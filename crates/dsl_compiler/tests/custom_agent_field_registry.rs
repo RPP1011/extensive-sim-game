@@ -180,6 +180,7 @@ fn synthesize_runtime_allocates_agent_buf_for_custom_field() {
             },
         ],
         kind: KernelKind::Generic,
+        y_dim_override: None,
         runtime_cfg_fields: Vec::new(),
     };
     let artifacts = EmittedArtifacts {

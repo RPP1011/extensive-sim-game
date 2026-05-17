@@ -115,6 +115,7 @@ fn fold_spec(view_name: &str) -> KernelSpec {
             },
         ],
         kind: KernelKind::ViewFold,
+        y_dim_override: None,
         runtime_cfg_fields: Vec::new(),
     }
 }

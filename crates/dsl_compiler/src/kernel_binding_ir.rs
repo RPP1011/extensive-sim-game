@@ -157,6 +157,17 @@ pub struct KernelSpec {
     /// Empty for kernels with no `@runtime` config refs (the default
     /// shape).
     pub runtime_cfg_fields: Vec<(String, String)>,
+    /// Plan I slice I.3b — y-axis dispatch override for kernels
+    /// whose 2-D dispatch grid covers `(agent_cap, K)` cells with
+    /// K != agent_cap. The default `PerAgentEventScan` emit sizes
+    /// both axes by agent_cap, which under-dispatches when K > N
+    /// (cells s ∈ [N..K) get no thread → bits there don't
+    /// propagate). The merge-kernel synth sets this to Some(K) for
+    /// key-typed beliefs; `compose_dispatch_call` uses it for the
+    /// y dim instead of agent_cap when present. None ⇒ existing
+    /// agent_cap-sized y dispatch (Agent×Agent or non-PerAgentEventScan
+    /// kernels).
+    pub y_dim_override: Option<u32>,
 }
 
 impl KernelSpec {
@@ -241,6 +252,7 @@ mod tests {
             ],
             kind: KernelKind::Generic,
             runtime_cfg_fields: Vec::new(),
+            y_dim_override: None,
         };
         assert!(spec.validate().is_ok());
     }
@@ -261,6 +273,7 @@ mod tests {
             ],
             kind: KernelKind::Generic,
             runtime_cfg_fields: Vec::new(),
+            y_dim_override: None,
         };
         assert!(spec.validate().is_err());
     }
@@ -282,6 +295,7 @@ mod tests {
             ],
             kind: KernelKind::Generic,
             runtime_cfg_fields: Vec::new(),
+            y_dim_override: None,
         };
         assert!(spec.validate().is_err());
     }
