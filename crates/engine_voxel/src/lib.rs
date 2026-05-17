@@ -119,6 +119,11 @@ pub mod terrain_layers;
 pub mod materials;
 pub use materials::{MaterialRow, MaterialTable};
 
+/// Worker-thread harness for off-tick terrain generation. See
+/// `terrain_gen.rs` for design notes.
+pub mod terrain_gen;
+pub use terrain_gen::{TerrainGenHandle, TerrainGenError};
+
 /// Navgrid index — per spec §7.2 + §7.3. See `navgrid.rs` for
 /// design notes + the CPU-side build pipeline.
 pub mod navgrid;
@@ -349,6 +354,14 @@ impl VoxelTerrain {
 impl Default for VoxelTerrain {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl std::fmt::Debug for VoxelTerrain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VoxelTerrain")
+            .field("extent", &self.extent)
+            .finish_non_exhaustive()
     }
 }
 
