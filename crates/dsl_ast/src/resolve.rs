@@ -1277,6 +1277,7 @@ fn collect(
                     cost_class: d.cost_class,
                     rebuild_on: d.rebuild_on.clone(),
                     build_body: d.build_body.clone(),
+                    build_body_ast: d.build_body_ast.clone(),
                     span: d.span,
                 });
             }
@@ -1318,6 +1319,143 @@ fn collect(
 
 fn push_idx(len: usize, kind: &'static str) -> Result<u16, ResolveError> {
     u16::try_from(len).map_err(|_| ResolveError::TooManyDecls { kind })
+}
+
+/// Known engine helpers callable from an `index` build body.
+/// Closed set per spec §7.2 worked examples. Adding a new helper
+/// is a 2-line edit here + the engine-side implementation in
+/// Phase 4. Per spec design: the engine intrinsics are a fixed
+/// catalog rather than a plug-in surface, so the validation point
+/// can stay here (vs needing a per-runtime registry hook).
+const KNOWN_INDEX_ENGINE_HELPERS: &[&str] = &[
+    // §7.2 navgrid example
+    "column_reduce_xz",
+    "per_cell_classify",
+    "connect_neighbors",
+    // §7.2 vismap example
+    "raycast_batch",
+    "subdivide_view_cells",
+    "pairs_within_radius",
+    "sample_rays_between",
+];
+
+/// Known top-level constants exposed to index build bodies.
+/// Spec §7.2 references `AGENT_STEP_HEIGHT`, `MAX_VIS_RANGE`,
+/// `VIEW_CELL_SIZE`, `RAYS_PER_PAIR` — host-side constants the
+/// engine surfaces into the build environment.
+const KNOWN_INDEX_BUILD_CONSTS: &[&str] = &[
+    "AGENT_STEP_HEIGHT",
+    "MAX_VIS_RANGE",
+    "VIEW_CELL_SIZE",
+    "RAYS_PER_PAIR",
+];
+
+fn validate_index_build_body(d: &ast::IndexDecl) -> Result<(), ResolveError> {
+    use ast::IndexBuildStmt;
+
+    // Build the local-binding scope incrementally as we walk the
+    // stmts. The region param is always in scope; lets add their
+    // names. Top-level constants are a flat set checked separately.
+    let mut locals: Vec<String> = vec![d.region_param_name.clone()];
+    let mut saw_return = false;
+
+    for stmt in &d.build_body_ast.stmts {
+        if saw_return {
+            return Err(ResolveError::InvalidViewKind {
+                view_name: d.name.clone(),
+                detail: format!(
+                    "index `{}` build body has stmts after the return expression",
+                    d.name
+                ),
+                span: d.span,
+            });
+        }
+        match stmt {
+            IndexBuildStmt::Let { name, value, span } => {
+                validate_index_build_expr(d, value, &locals, *span)?;
+                locals.push(name.clone());
+            }
+            IndexBuildStmt::Return { value, span } => {
+                validate_index_build_expr(d, value, &locals, *span)?;
+                saw_return = true;
+            }
+        }
+    }
+
+    // Empty body is allowed (Phase 2a fixtures use it as a stub);
+    // Phase 4 will require a non-empty body when wiring the build
+    // kernel. Track here for future tightening.
+    Ok(())
+}
+
+fn validate_index_build_expr(
+    d: &ast::IndexDecl,
+    expr: &ast::IndexBuildExpr,
+    locals: &[String],
+    parent_span: Span,
+) -> Result<(), ResolveError> {
+    use ast::IndexBuildExpr;
+    match expr {
+        IndexBuildExpr::EngineCall { name, args, span } => {
+            if !KNOWN_INDEX_ENGINE_HELPERS.contains(&name.as_str()) {
+                return Err(ResolveError::InvalidViewKind {
+                    view_name: d.name.clone(),
+                    detail: format!(
+                        "index `{}` build body calls unknown engine helper `engine::{}` — \
+                         known helpers: {}",
+                        d.name,
+                        name,
+                        KNOWN_INDEX_ENGINE_HELPERS.join(", ")
+                    ),
+                    span: *span,
+                });
+            }
+            for arg in args {
+                validate_index_build_expr(d, arg, locals, *span)?;
+            }
+            Ok(())
+        }
+        IndexBuildExpr::Var { name, span } => {
+            if locals.contains(name) || KNOWN_INDEX_BUILD_CONSTS.contains(&name.as_str()) {
+                Ok(())
+            } else {
+                Err(ResolveError::InvalidViewKind {
+                    view_name: d.name.clone(),
+                    detail: format!(
+                        "index `{}` build body references unknown identifier `{}` — \
+                         expected a let-bound local, the region param `{}`, or one of: {}",
+                        d.name,
+                        name,
+                        d.region_param_name,
+                        KNOWN_INDEX_BUILD_CONSTS.join(", ")
+                    ),
+                    span: *span,
+                })
+            }
+        }
+        IndexBuildExpr::Member { base, field, span } => {
+            // Member access is restricted to `region.<field>` form.
+            // Field is opaque — Phase 3 (region runtime) will
+            // catalog the valid VoxelRegion fields.
+            if base != &d.region_param_name {
+                return Err(ResolveError::InvalidViewKind {
+                    view_name: d.name.clone(),
+                    detail: format!(
+                        "index `{}` build body has member access on `{}` — only `{}.<field>` is supported",
+                        d.name, base, d.region_param_name
+                    ),
+                    span: *span,
+                });
+            }
+            let _ = field;
+            Ok(())
+        }
+        IndexBuildExpr::Int { .. } => {
+            // Plain integer literals are always fine.
+            let _ = parent_span;
+            Ok(())
+        }
+    }
 }
 
 fn check_dup(
@@ -1843,10 +1981,12 @@ fn resolve_bodies(
                 // no-op for the kind decl itself; `RegionIndices`
                 // below merges into the same slot.
             }
-            Decl::Index(_) => {
-                // Pass-1 fully populated the IR slot. Phase 2b will
-                // add a build-body parse + engine-helper resolution
-                // pass here.
+            Decl::Index(d) => {
+                // Phase 2b — validate build body: every engine
+                // helper call must name a known helper, every bare
+                // identifier must be either the region param,
+                // a let-bound local, or a known top-level constant.
+                validate_index_build_body(d)?;
             }
             Decl::RegionIndices(d) => {
                 // Pair `region_indices <Name> { … }` with its

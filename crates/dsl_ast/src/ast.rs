@@ -292,10 +292,69 @@ pub struct IndexDecl {
     pub cost_class: IndexCostClass,
     pub rebuild_on: IndexRebuildTrigger,
     /// Raw text of the `build { ... }` body, captured between
-    /// matched braces. Phase 2b parses this into an expression
-    /// tree.
+    /// matched braces. Preserved alongside the parsed form
+    /// (`build_body_ast`) so error reports can quote the original
+    /// source verbatim.
     pub build_body: String,
+    /// Phase 2b — parsed expression tree for the build body. Phase
+    /// 4 lowers this to a build kernel.
+    pub build_body_ast: IndexBuildBody,
     pub span: Span,
+}
+
+/// Mini-AST for the `build { ... }` body of an `index` decl. Each
+/// statement is either a `let` binding or the trailing return
+/// expression. Engine helpers (`engine::column_reduce_xz`, etc.)
+/// are first-class call shapes; bindings flow as locals; integer
+/// literals carry their own variant.
+///
+/// **Design decision**: dedicated mini-AST rather than reusing
+/// `IrExpr` from view-fold bodies — the build body operates over
+/// voxel/region space (with `region.<field>`, `engine::<helper>`,
+/// per-cell maps), not per-agent SoA. Reusing the agent-IR would
+/// either muddle scoping (`self` doesn't bind here) or require a
+/// parallel set of agent-typed wrappers. A purpose-built AST is
+/// ~150 LoC and matches the spec's worked examples exactly.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum IndexBuildStmt {
+    /// `let <name> = <value>;` — bindings flow into the surrounding
+    /// scope for subsequent stmts.
+    Let { name: String, value: IndexBuildExpr, span: Span },
+    /// Trailing expression — the index's output. Per spec §7.2 the
+    /// last expression in the body is the return value.
+    Return { value: IndexBuildExpr, span: Span },
+}
+
+/// Expression shapes for the build body. Closed set per spec
+/// §7.2's worked examples; the resolver validates that called
+/// engine helpers + referenced identifiers resolve.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum IndexBuildExpr {
+    /// `engine::<helper>(<arg>, <arg>, ...)` — built-in engine
+    /// primitive (column_reduce_xz, per_cell_classify,
+    /// connect_neighbors, etc.).
+    EngineCall { name: String, args: Vec<IndexBuildExpr>, span: Span },
+    /// Bare identifier: refers to either a `let`-bound local
+    /// (within this build body), the region parameter (default
+    /// name `region`), or a top-level constant (e.g.
+    /// `AGENT_STEP_HEIGHT` — host-side constants the engine
+    /// exposes).
+    Var { name: String, span: Span },
+    /// Member access on an identifier: `region.chunks`. Limited
+    /// to single-level paths — nested member access would require
+    /// a full expression grammar.
+    Member { base: String, field: String, span: Span },
+    /// Integer literal — passed to helpers that take counts /
+    /// dimensions.
+    Int { value: i64, span: Span },
+}
+
+/// Top-level container for the build body — a sequence of stmts.
+/// Validated at resolve time to end in exactly one
+/// [`IndexBuildStmt::Return`].
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct IndexBuildBody {
+    pub stmts: Vec<IndexBuildStmt>,
 }
 
 /// Storage shape per spec §7.2. Each variant carries its own

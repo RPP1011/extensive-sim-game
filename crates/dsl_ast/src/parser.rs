@@ -532,7 +532,7 @@ fn index_decl(
     c.skip_ws();
     let rebuild_on = parse_index_rebuild_trigger_clause(c)?;
     c.skip_ws();
-    let build_body = parse_index_build_clause(c)?;
+    let (build_body, build_body_ast) = parse_index_build_clause(c)?;
     c.skip_ws();
     expect_char(c, '}')
         .map_err(|e| e.with_context("parsing index body (expected `}` after build)"))?;
@@ -546,6 +546,7 @@ fn index_decl(
         cost_class,
         rebuild_on,
         build_body,
+        build_body_ast,
         span: Span::new(start, c.pos),
     })
 }
@@ -714,38 +715,46 @@ fn parse_index_rebuild_trigger_clause(c: &mut Cursor) -> PResult<IndexRebuildTri
     Ok(result)
 }
 
-fn parse_index_build_clause(c: &mut Cursor) -> PResult<String> {
+fn parse_index_build_clause(c: &mut Cursor) -> PResult<(String, IndexBuildBody)> {
     expect_keyword(c, "build")
         .map_err(|e| e.with_context("parsing index build clause (expected `build {`)"))?;
     c.skip_ws();
     expect_char(c, '{')
         .map_err(|e| e.with_context("parsing index build clause (expected `{`)"))?;
-    // Scan to matching brace. Tracks depth across nested braces;
-    // doesn't try to parse strings/comments (Phase 2b handles those
-    // with the full expression parser).
+    // Capture raw text + parse AST in one pass. The raw text scans
+    // to matching brace; the AST parser runs over the same range
+    // (rewinding the cursor first so position tracking stays
+    // accurate inside the body).
     let body_start = c.pos;
     let mut depth = 1usize;
     let src = c.src;
+    let mut scan_pos = c.pos;
     while depth > 0 {
-        if c.pos >= src.len() {
+        if scan_pos >= src.len() {
             return Err(ParseErr::at(
                 here(c),
                 "unterminated `build { ... }` body".to_string(),
             ));
         }
-        let b = src.as_bytes()[c.pos];
+        let b = src.as_bytes()[scan_pos];
         match b {
             b'{' => depth += 1,
-            b'}' => depth -= 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
             _ => {}
         }
-        if depth == 0 {
-            break;
-        }
-        c.bump(1);
+        scan_pos += 1;
     }
-    let body_end = c.pos;
-    let body = src[body_start..body_end].to_string();
+    let body_end = scan_pos;
+    let body_raw = src[body_start..body_end].to_string();
+    // Parse the body AST. Cursor is at body_start; parser advances
+    // it through the body. After parsing we assert the cursor lands
+    // at body_end (modulo trailing whitespace).
+    let body_ast = parse_index_build_body(c, body_end)?;
     // Consume the closing `}` of the build block.
     expect_char(c, '}')
         .map_err(|e| e.with_context("parsing index build clause (expected `}`)"))?;
@@ -754,7 +763,165 @@ fn parse_index_build_clause(c: &mut Cursor) -> PResult<String> {
     if c.starts_with_char(',') {
         c.bump(1);
     }
-    Ok(body)
+    Ok((body_raw, body_ast))
+}
+
+/// Parse the body AST. Called with cursor positioned immediately
+/// after the opening `{`; consumes characters up to (but not
+/// including) the closing `}`.
+///
+/// Grammar:
+///   body  := stmt* (return_expr)?
+///   stmt  := `let` IDENT `=` expr `;`
+///   return_expr := expr
+///   expr  := IDENT (`.` IDENT)? | IDENT `(` expr_list `)` | `engine::` IDENT `(` expr_list `)` | INT
+fn parse_index_build_body(c: &mut Cursor, body_end: usize) -> PResult<IndexBuildBody> {
+    let mut stmts: Vec<IndexBuildStmt> = Vec::new();
+    loop {
+        c.skip_ws();
+        if c.pos >= body_end {
+            break;
+        }
+        let stmt_start = c.pos;
+        // Detect `let` keyword vs trailing expression.
+        if starts_with_keyword(c, "let") {
+            c.bump(3);
+            c.skip_ws();
+            let name = ident(c)
+                .map_err(|e| e.with_context("parsing index build `let` name"))?;
+            c.skip_ws();
+            expect_char(c, '=')
+                .map_err(|e| e.with_context("parsing index build `let` (expected `=`)"))?;
+            c.skip_ws();
+            let value = parse_index_build_expr(c, body_end)?;
+            c.skip_ws();
+            expect_char(c, ';')
+                .map_err(|e| e.with_context("parsing index build `let` (expected `;`)"))?;
+            stmts.push(IndexBuildStmt::Let {
+                name,
+                value,
+                span: Span::new(stmt_start, c.pos),
+            });
+        } else {
+            // Trailing expression — must be the last thing in the body.
+            let value = parse_index_build_expr(c, body_end)?;
+            stmts.push(IndexBuildStmt::Return {
+                value,
+                span: Span::new(stmt_start, c.pos),
+            });
+            // After the return expr, only whitespace + optional
+            // trailing semicolon should remain before body_end.
+            c.skip_ws();
+            if c.starts_with_char(';') {
+                c.bump(1);
+                c.skip_ws();
+            }
+            if c.pos < body_end {
+                return Err(ParseErr::at(
+                    here(c),
+                    "trailing tokens after build body return expression".to_string(),
+                ));
+            }
+            break;
+        }
+    }
+    Ok(IndexBuildBody { stmts })
+}
+
+fn parse_index_build_expr(c: &mut Cursor, body_end: usize) -> PResult<IndexBuildExpr> {
+    let start = c.pos;
+    c.skip_ws();
+    // Integer literal?
+    if c.pos < body_end && (c.starts_with_char('-') || peek_number(c)) {
+        let negate = if c.starts_with_char('-') {
+            c.bump(1);
+            true
+        } else {
+            false
+        };
+        let (n, is_float) = number_literal(c)?;
+        if is_float {
+            return Err(ParseErr::at(
+                here(c),
+                "index build body integer literal only (float NYI)".to_string(),
+            ));
+        }
+        let mut v = n as i64;
+        if negate {
+            v = -v;
+        }
+        return Ok(IndexBuildExpr::Int { value: v, span: Span::new(start, c.pos) });
+    }
+    // Identifier — could be a bare var, a member access, a call,
+    // or `engine::<helper>`.
+    let head = ident(c).map_err(|e| e.with_context("parsing index build expr head"))?;
+    // `engine::<name>(...)` — engine helper call.
+    if head == "engine" && c.starts_with_char(':') && c.src.as_bytes().get(c.pos + 1) == Some(&b':') {
+        c.bump(2);
+        let helper = ident(c)
+            .map_err(|e| e.with_context("parsing index build `engine::` helper name"))?;
+        c.skip_ws();
+        expect_char(c, '(')
+            .map_err(|e| e.with_context("parsing engine call (expected `(`)"))?;
+        let args = parse_index_build_arg_list(c, body_end)?;
+        c.skip_ws();
+        expect_char(c, ')')
+            .map_err(|e| e.with_context("parsing engine call (expected `)`)"))?;
+        return Ok(IndexBuildExpr::EngineCall {
+            name: helper,
+            args,
+            span: Span::new(start, c.pos),
+        });
+    }
+    // Bare ident followed by `(` — a user-defined call (rejected
+    // today; the only call form is `engine::<name>(...)`). Allow
+    // it as a syntactic shape but surface a typed error.
+    if c.starts_with_char('(') {
+        return Err(ParseErr::at(
+            here(c),
+            format!(
+                "bare-name call `{head}(...)` not allowed in index build body — \
+                 use `engine::{head}(...)` for engine helpers; user-defined \
+                 helpers are not yet a thing"
+            ),
+        ));
+    }
+    // `region.chunks`-style member access. Single level only.
+    if c.starts_with_char('.') {
+        c.bump(1);
+        let field = ident(c)
+            .map_err(|e| e.with_context("parsing index build member access"))?;
+        return Ok(IndexBuildExpr::Member {
+            base: head,
+            field,
+            span: Span::new(start, c.pos),
+        });
+    }
+    // Bare identifier — local binding or top-level constant.
+    Ok(IndexBuildExpr::Var {
+        name: head,
+        span: Span::new(start, c.pos),
+    })
+}
+
+fn parse_index_build_arg_list(
+    c: &mut Cursor,
+    body_end: usize,
+) -> PResult<Vec<IndexBuildExpr>> {
+    let mut args: Vec<IndexBuildExpr> = Vec::new();
+    loop {
+        c.skip_ws();
+        if c.starts_with_char(')') {
+            break;
+        }
+        let expr = parse_index_build_expr(c, body_end)?;
+        args.push(expr);
+        c.skip_ws();
+        if c.starts_with_char(',') {
+            c.bump(1);
+        }
+    }
+    Ok(args)
 }
 
 // ---------------------------------------------------------------------------

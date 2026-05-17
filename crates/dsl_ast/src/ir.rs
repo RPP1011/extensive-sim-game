@@ -1696,10 +1696,12 @@ pub struct IndexIR {
     pub storage: ast::IndexStorageShape,
     pub cost_class: ast::IndexCostClass,
     pub rebuild_on: ast::IndexRebuildTrigger,
-    /// Raw text of the `build { … }` body — Phase 2b parses this
-    /// into an expression tree; Phase 4 lowers it to a WGSL build
-    /// kernel.
+    /// Raw text of the `build { … }` body — preserved for error
+    /// reporting alongside the parsed AST.
     pub build_body: String,
+    /// Phase 2b — parsed build body. Phase 4 lowers this to a
+    /// build kernel.
+    pub build_body_ast: ast::IndexBuildBody,
     pub span: Span,
 }
 
