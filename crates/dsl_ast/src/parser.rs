@@ -148,6 +148,8 @@ fn decl_annotations_mut(d: &mut Decl) -> Option<&mut Vec<Annotation>> {
         Decl::SpatialQuery(x) => &mut x.annotations,
         Decl::Belief(x) => &mut x.annotations,
         Decl::Table(x) => &mut x.annotations,
+        Decl::RegionKind(x) => &mut x.annotations,
+        Decl::RegionIndices(x) => &mut x.annotations,
         // `query` does not currently accept annotations on the decl; trailing
         // `@`s after a `query` will fall through to the orphan-annotation
         // error path on the next iteration.
@@ -177,6 +179,8 @@ fn decl_span_mut(d: &mut Decl) -> &mut Span {
         Decl::AgentField(x) => &mut x.span,
         Decl::Belief(x) => &mut x.span,
         Decl::Table(x) => &mut x.span,
+        Decl::RegionKind(x) => &mut x.span,
+        Decl::RegionIndices(x) => &mut x.span,
     }
 }
 
@@ -213,6 +217,8 @@ fn decl(c: &mut Cursor) -> PResult<Decl> {
         Some("debug") => debug_decl(c, annotations, start).map(Decl::Debug),
         Some("field") => agent_field_decl(c, annotations, start).map(Decl::AgentField),
         Some("table") => table_decl(c, annotations, start).map(Decl::Table),
+        Some("region_kind") => region_kind_decl(c, annotations, start).map(Decl::RegionKind),
+        Some("region_indices") => region_indices_decl(c, annotations, start).map(Decl::RegionIndices),
         Some("spatial_query") => {
             spatial_query_decl(c, annotations, start).map(Decl::SpatialQuery)
         }
@@ -359,6 +365,98 @@ fn table_decl(
         element_ty_name,
         length,
         values,
+        span: Span::new(start, c.pos),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// 2.18c region_kind / region_indices (voxel-region-indices spec §6.1.2)
+//
+// Grammar:
+//   region_kind <Name> { max_active = <N> }
+//   region_indices <Name> { <IndexKind>, <IndexKind>, ... }
+//
+// Pairs by `<Name>` — every `region_indices` body's kind name must
+// match a declared `region_kind`. The resolver enforces the cross-
+// decl link. Index-kind names defer to Phase 2's `index` decl
+// resolution.
+// ---------------------------------------------------------------------------
+
+fn region_kind_decl(
+    c: &mut Cursor,
+    annotations: Vec<Annotation>,
+    start: usize,
+) -> PResult<RegionKindDecl> {
+    expect_keyword(c, "region_kind")
+        .map_err(|e| e.with_context("parsing `region_kind` declaration"))?;
+    c.skip_ws();
+    let name = ident(c).map_err(|e| e.with_context("parsing region_kind name"))?;
+    c.skip_ws();
+    expect_char(c, '{')
+        .map_err(|e| e.with_context("parsing region_kind body (expected `{`)"))?;
+    c.skip_ws();
+    expect_keyword(c, "max_active")
+        .map_err(|e| e.with_context("parsing region_kind body (expected `max_active = N`)"))?;
+    c.skip_ws();
+    expect_char(c, '=')
+        .map_err(|e| e.with_context("parsing region_kind body (expected `=` after `max_active`)"))?;
+    c.skip_ws();
+    let (n, is_float) = number_literal(c)?;
+    if is_float || n < 1.0 || n > (u32::MAX as f64) {
+        return Err(ParseErr::at(
+            here(c),
+            format!("`max_active` must be a positive integer ≤ u32::MAX; got {n}"),
+        ));
+    }
+    let max_active = n as u32;
+    c.skip_ws();
+    // Optional trailing comma — visual symmetry with config field
+    // syntax (`name: type = N,`).
+    if c.starts_with_char(',') {
+        c.bump(1);
+        c.skip_ws();
+    }
+    expect_char(c, '}')
+        .map_err(|e| e.with_context("parsing region_kind body (expected `}`)"))?;
+    Ok(RegionKindDecl {
+        annotations,
+        name,
+        max_active,
+        span: Span::new(start, c.pos),
+    })
+}
+
+fn region_indices_decl(
+    c: &mut Cursor,
+    annotations: Vec<Annotation>,
+    start: usize,
+) -> PResult<RegionIndicesDecl> {
+    expect_keyword(c, "region_indices")
+        .map_err(|e| e.with_context("parsing `region_indices` declaration"))?;
+    c.skip_ws();
+    let name = ident(c).map_err(|e| e.with_context("parsing region_indices kind name"))?;
+    c.skip_ws();
+    expect_char(c, '{')
+        .map_err(|e| e.with_context("parsing region_indices body (expected `{`)"))?;
+    let mut index_kinds: Vec<String> = Vec::new();
+    loop {
+        c.skip_ws();
+        if c.starts_with_char('}') {
+            c.bump(1);
+            break;
+        }
+        let kind = ident(c)
+            .map_err(|e| e.with_context("parsing index-kind name in region_indices body"))?;
+        index_kinds.push(kind);
+        c.skip_ws();
+        if c.starts_with_char(',') {
+            c.bump(1);
+        }
+    }
+    Ok(RegionIndicesDecl {
+        annotations,
+        name,
+        index_kinds,
         span: Span::new(start, c.pos),
     })
 }

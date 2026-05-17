@@ -723,6 +723,14 @@ pub struct SymbolTable {
     /// `Compilation::tables`. Looked up by namespace resolution
     /// when the surface text reads `tables.<name>(<idx>)`.
     pub tables: HashMap<String, crate::ir::TableId>,
+    /// Voxel-region kinds — per spec
+    /// `docs/superpowers/specs/2026-04-25-voxel-region-indices-design.md`
+    /// §6.1.2. Name (PascalCase, e.g. `Settlement`) → typed
+    /// [`crate::ir::VoxelRegionKindId`] into
+    /// [`crate::ir::Compilation::region_kinds`]. The `region_kind`
+    /// + `region_indices` decl pair lives in one IR slot, keyed by
+    /// name.
+    pub region_kinds: HashMap<String, crate::ir::VoxelRegionKindId>,
     pub builtins: HashMap<String, Builtin>,
     pub stdlib_types: HashMap<String, IrType>,
     /// Sim-wide accessor namespaces: `world`, `cascade`, `event`, `mask`,
@@ -1220,6 +1228,31 @@ fn collect(
                     values: Vec::new(),
                     span: d.span,
                 });
+            }
+            Decl::RegionKind(d) => {
+                // Reserve the IR slot keyed by the kind name. The
+                // sibling `Decl::RegionIndices` decl is matched in
+                // pass-2 and merges its `index_kinds` into the same
+                // slot.
+                check_dup(symbols, "region_kind", &d.name, d.span, |s| {
+                    s.region_kinds.contains_key(&d.name)
+                })?;
+                let idx = push_idx(comp.region_kinds.len(), "region_kind")?;
+                symbols.region_kinds.insert(
+                    d.name.clone(),
+                    crate::ir::VoxelRegionKindId(idx as u32),
+                );
+                symbols.record_first("region_kind", &d.name, d.span);
+                comp.region_kinds.push(crate::ir::RegionKindIR {
+                    name: d.name.clone(),
+                    max_active: d.max_active,
+                    index_kind_names: Vec::new(),
+                    span: d.span,
+                });
+            }
+            Decl::RegionIndices(_) => {
+                // Handled in pass-2 — needs the `region_kind` IR slot
+                // to exist first. Pass-1 leaves it for pass-2 to merge.
             }
             Decl::Belief(d) => {
                 // Plan I — beliefs share the ViewIR slot table with
@@ -1778,6 +1811,47 @@ fn resolve_bodies(
                 // are interned process-locally by
                 // `dsl_compiler::custom_agent_fields::populate`
                 // BEFORE lowering. No IR pass-2 work here.
+            }
+            Decl::RegionKind(_) => {
+                // Pass-1 already populated the IR slot. Pass-2 is a
+                // no-op for the kind decl itself; `RegionIndices`
+                // below merges into the same slot.
+            }
+            Decl::RegionIndices(d) => {
+                // Pair `region_indices <Name> { … }` with its
+                // matching `region_kind <Name>` slot from pass-1.
+                let Some(VoxelRegionKindId(idx)) = symbols.region_kinds.get(&d.name).copied()
+                else {
+                    return Err(ResolveError::InvalidViewKind {
+                        view_name: d.name.clone(),
+                        detail: format!(
+                            "`region_indices {}` references kind `{}` with no `region_kind` decl — \
+                             every `region_indices` must pair with a `region_kind` of the same name",
+                            d.name, d.name
+                        ),
+                        span: d.span,
+                    });
+                };
+                let slot = &mut comp.region_kinds[idx as usize];
+                if !slot.index_kind_names.is_empty() {
+                    // Duplicate `region_indices` for the same kind —
+                    // spec §6.1.2 implies a 1:1 mapping (one
+                    // `region_kind` + one `region_indices` per name).
+                    return Err(ResolveError::InvalidViewKind {
+                        view_name: d.name.clone(),
+                        detail: format!(
+                            "duplicate `region_indices {}` — each region kind may have at most one `region_indices` decl",
+                            d.name
+                        ),
+                        span: d.span,
+                    });
+                }
+                slot.index_kind_names = d.index_kinds.clone();
+                // Note: per Phase 1 scope, we DON'T yet validate that
+                // each `index_kind` name resolves to a declared
+                // `index <name>` decl (Phase 2 grammar). When Phase 2
+                // lands, add a cross-decl name check here that fires
+                // `ResolveError::UnknownIndexKind` on misses.
             }
             Decl::Table(d) => {
                 let TableId(idx) = symbols.tables[&d.name];

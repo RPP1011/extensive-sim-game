@@ -1663,8 +1663,41 @@ pub struct Compilation {
     /// for fixtures that don't declare any tables.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tables: Vec<TableIR>,
+    /// Voxel-region kinds declared via `region_kind <Name> {
+    /// max_active = N }`. Per spec
+    /// `docs/superpowers/specs/2026-04-25-voxel-region-indices-design.md`
+    /// §6.1.2 — each kind gets its name + max-active count
+    /// resolved into a typed [`VoxelRegionKindId`]. The matching
+    /// `region_indices` decl is paired into the same slot via name
+    /// match during pass-2.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub region_kinds: Vec<RegionKindIR>,
     pub spans: SpanTable,
 }
+
+/// Resolved `region_kind <Name> { max_active = N } + region_indices
+/// <Name> { …idx kinds… }` pair. Two source-level decls collapse
+/// into one IR entry keyed by `name` after pass-2 cross-decl
+/// validation.
+///
+/// `index_kind_names` are kept as `String`s for now — Phase 2 will
+/// resolve them into typed [`IndexId`] handles once the `index`
+/// decl grammar lands. Pre-Phase-2 the resolver leaves them
+/// un-validated (any identifier is accepted) so Phase 1 can ship +
+/// be exercised by a smoke probe.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RegionKindIR {
+    pub name: String,
+    pub max_active: u32,
+    pub index_kind_names: Vec<String>,
+    pub span: Span,
+}
+
+/// Typed handle for [`RegionKindIR`] entries in
+/// [`Compilation::region_kinds`]. Stored in the symbol table by
+/// name; downstream code (Phase 3+) routes through this id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+pub struct VoxelRegionKindId(pub u32);
 
 /// Resolved `table <name>: <ty>[N] = […]` declaration. Mirrors
 /// `ast::TableDecl` but with the element type validated against

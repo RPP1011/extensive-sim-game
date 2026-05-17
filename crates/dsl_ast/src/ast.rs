@@ -84,6 +84,13 @@ pub enum Decl {
     /// not mutate" (room door bitmaps, terrain costs, faction
     /// stances, etc.) — rooms ARE NOT agents.
     Table(TableDecl),
+    /// Per spec `docs/superpowers/specs/2026-04-25-voxel-region-indices-design.md`
+    /// §6.1.2 — declares a `VoxelRegionKind` tag + its `max_active`
+    /// instance cap.
+    RegionKind(RegionKindDecl),
+    /// Per spec §6.1.2 — maps a `VoxelRegionKind` to its default set
+    /// of region-attached indices (Navgrid, Vismap, ...).
+    RegionIndices(RegionIndicesDecl),
 }
 
 /// Per-fixture initial-state declaration. Plan E-A6 escape hatch: lets
@@ -219,6 +226,56 @@ pub struct TableDecl {
     /// conversion; the resolver bounds-checks against the declared
     /// element type at registration time.
     pub values: Vec<i64>,
+    pub span: Span,
+}
+
+/// Top-level `region_kind <Name> { max_active = N }` — per spec
+/// §6.1.2 of `docs/superpowers/specs/2026-04-25-voxel-region-indices-design.md`.
+/// Declares a named `VoxelRegionKind` tag that physics rules use when
+/// emitting `VoxelRegionRegistered` events. `max_active` sizes the
+/// per-region storage pool at compile time (the registry refuses
+/// further registrations once `count(kind) == max_active`).
+///
+/// Pairs with [`RegionIndicesDecl`] (same kind name) which maps the
+/// kind to its default index set.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RegionKindDecl {
+    pub annotations: Vec<Annotation>,
+    /// PascalCase kind name (`Settlement`, `Building`, `BattleSite`,
+    /// `WildernessTile`). Validated for non-duplication by the
+    /// resolver; the same name must appear in exactly one
+    /// `region_indices` decl.
+    pub name: String,
+    /// Compile-time upper bound on simultaneously-active regions of
+    /// this kind. Drives static pool sizing
+    /// (`max_active × per_region_storage`) for the indices the kind
+    /// declares.
+    pub max_active: u32,
+    pub span: Span,
+}
+
+/// Top-level `region_indices <Name> { Navgrid, Vismap, ... }` — per
+/// spec §6.1.2. Maps a `VoxelRegionKind` (declared via
+/// [`RegionKindDecl`] with the same `name`) to its default index
+/// set. The compiler emits a `static REGION_INDEX_MAP` so the
+/// registry can schedule the appropriate index builds at
+/// `register_region` time.
+///
+/// All instances of a given kind get the same indices by design —
+/// per-instance variation is deferred (spec §6.1.2 migration note).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RegionIndicesDecl {
+    pub annotations: Vec<Annotation>,
+    /// PascalCase kind name — must match a declared `region_kind`.
+    /// Cross-decl name resolution happens in the resolver.
+    pub name: String,
+    /// Index-kind names in declaration order (`Navgrid`, `Vismap`,
+    /// `CoverMap`, `SurfaceMesh`). Each must resolve to a declared
+    /// `index <name>(region: VoxelRegion)` decl from Phase 2;
+    /// today's parser accepts any identifier and defers validation
+    /// to the resolver (which will fire `ResolveError::UnknownIndexKind`
+    /// once `index` decls land).
+    pub index_kinds: Vec<String>,
     pub span: Span,
 }
 
