@@ -582,6 +582,7 @@ pub fn emit_cg_program_with_debug(
         prog,
         naming: HandleNamingStrategy::Structural,
         tile_walk_index: std::cell::RefCell::new(None),
+        rng_loop_iter_var: std::cell::RefCell::new(None),
         tables_referenced: std::cell::RefCell::new(
             std::collections::BTreeSet::new(),
         ),

@@ -129,6 +129,19 @@ pub struct EmitCtx<'a> {
     /// throughout, and routing every signature through `&mut` would
     /// touch dozens of call sites for a pure emit-time scratch flag.
     pub tile_walk_index: std::cell::RefCell<Option<String>>,
+    /// Name of the WGSL iteration variable for the currently-emitting
+    /// ForEach* loop body. `Some("per_pair_candidate")` when emit is
+    /// inside a `ForEachAgentBody` / `ForEachNeighborBody`; `None` at
+    /// kernel-body top level. `CgExpr::Rng` reads this; when set, it
+    /// routes through `per_agent_u32_with_extra(..., loop_var)` so
+    /// each iteration draws from a distinct PCG stream (closes the
+    /// forest_fire-style bug where `rng.action()` inside a spatial
+    /// walk gave the same draw to every neighbour).
+    ///
+    /// Interior mutability so emit stays `&EmitCtx`. Save/restored
+    /// at every loop-body emit so nested loops see only the
+    /// innermost iter var.
+    pub rng_loop_iter_var: std::cell::RefCell<Option<String>>,
     /// Set of static table names referenced by `CgExpr::TableLookup`
     /// nodes within the current kernel body emit. Populated as a
     /// side effect of `lower_cg_expr_to_wgsl`; the kernel composer
@@ -350,6 +363,7 @@ impl<'a> EmitCtx<'a> {
             prog,
             naming: HandleNamingStrategy::Structural,
             tile_walk_index: std::cell::RefCell::new(None),
+            rng_loop_iter_var: std::cell::RefCell::new(None),
             tables_referenced: std::cell::RefCell::new(
                 std::collections::BTreeSet::new(),
             ),
@@ -1775,26 +1789,44 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
             //     guards against `log(0) = -inf`.
             //   - UniformInt → bare u32 (post Gap #C the surface IS
             //     u32; no bitcast needed).
-            // Plan I/rng-collision fix: when `extra == 0` (the first
-            // call of this purpose in the rule body), emit the bare
-            // `per_agent_u32(...)` form to preserve every existing
-            // fixture's RNG stream. When `extra > 0`, emit the
-            // `per_agent_u32_with_extra(..., extra)` form to draw
-            // from a distinct stream — prevents two
-            // `rng.action()` calls in the same body from collapsing
-            // to the same draw (the surface bug surfaced by
-            // maze_explorer_smart).
-            let raw = if *extra == 0 {
-                format!(
+            // Three-arm RNG emit:
+            //   1. Outside loops, extra==0 → bare `per_agent_u32(...)`
+            //      (preserves every existing fixture's RNG stream).
+            //   2. Outside loops, extra>0 → `per_agent_u32_with_extra(
+            //      ..., extra_const)` for multi-same-purpose calls
+            //      in one rule body (fixes maze_explorer_smart's
+            //      `rng.action()` collision).
+            //   3. Inside a ForEach* loop body → `per_agent_u32_with_extra(
+            //      ..., loop_iter_var + extra_const)` so each
+            //      iteration draws from a distinct stream. Closes
+            //      the forest_fire-style bug where every neighbour
+            //      candidate saw the same `rng.action()` draw.
+            //
+            // The loop-iter var (e.g. `per_pair_candidate`) is set by
+            // `emit_for_each_{neighbor,agent}_body` before lowering
+            // the body, and cleared on exit.
+            let loop_var = ctx.rng_loop_iter_var.borrow().clone();
+            let raw = match (loop_var, *extra) {
+                (None, 0) => format!(
                     "per_agent_u32(seed, agent_id, tick, {}u)",
                     purpose.wgsl_id()
-                )
-            } else {
-                format!(
+                ),
+                (None, e) => format!(
                     "per_agent_u32_with_extra(seed, agent_id, tick, {}u, {}u)",
                     purpose.wgsl_id(),
-                    *extra
-                )
+                    e
+                ),
+                (Some(var), 0) => format!(
+                    "per_agent_u32_with_extra(seed, agent_id, tick, {}u, {})",
+                    purpose.wgsl_id(),
+                    var
+                ),
+                (Some(var), e) => format!(
+                    "per_agent_u32_with_extra(seed, agent_id, tick, {}u, {} + {}u)",
+                    purpose.wgsl_id(),
+                    var,
+                    e
+                ),
             };
             match purpose {
                 RngPurpose::Coin => Ok(format!("(({} & 1u) == 0u)", raw)),
@@ -6584,7 +6616,13 @@ fn emit_for_each_agent_body(
     body_list: crate::cg::stmt::CgStmtListId,
     ctx: &EmitCtx,
 ) -> Result<String, EmitError> {
+    // Set the per-iteration RNG iter var so any `rng.<method>()`
+    // inside the body routes through `per_agent_u32_with_extra(...,
+    // per_pair_candidate)`. Save/restore so nested loops + non-loop
+    // emit don't see this var.
+    let prev = ctx.rng_loop_iter_var.borrow_mut().replace("per_pair_candidate".to_string());
     let body_wgsl = lower_cg_stmt_list_to_wgsl(body_list, ctx)?;
+    *ctx.rng_loop_iter_var.borrow_mut() = prev;
     // Indent the body so it nests under the per-iteration alive guard
     // (one outer loop level + one if-guard level → two indents = 8
     // spaces).
@@ -6621,7 +6659,11 @@ fn emit_for_each_neighbor_body(
     origin: CgExprId,
     ctx: &EmitCtx,
 ) -> Result<String, EmitError> {
+    // Set the per-iteration RNG iter var — see
+    // `emit_for_each_agent_body` for rationale.
+    let prev = ctx.rng_loop_iter_var.borrow_mut().replace("per_pair_candidate".to_string());
     let body_wgsl = lower_cg_stmt_list_to_wgsl(body_list, ctx)?;
+    *ctx.rng_loop_iter_var.borrow_mut() = prev;
     let r = radius_cells as i32;
     // Gap dungeon_horde#1: lower the caller-supplied origin expression
     // to WGSL. For `spatial.<...>(self)` this is `agent_id`, matching
