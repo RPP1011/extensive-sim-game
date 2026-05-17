@@ -25,6 +25,13 @@ pub use dsl_ast::tokens;
 // Compute-Graph IR — the canonical emission path.
 pub mod cg;
 
+// Re-export the CG lower module at the crate root so that tests and
+// downstream crates can write `dsl_compiler::lower::lower_terrain`.
+pub use cg::lower as lower;
+
+// Re-export terrain lowering error at the crate root for test ergonomics.
+pub use cg::lower::LowerError;
+
 // Wave 1.6 — `.ability` AST -> engine-runtime `AbilityProgram` lowering.
 // See `ability_lower.rs` for scope (only the 8 currently-implemented
 // `EffectOp` variants and the 5 Wave-1 header keys are wired today).
