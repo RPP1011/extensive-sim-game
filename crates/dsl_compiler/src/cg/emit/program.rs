@@ -3485,6 +3485,98 @@ mod tests {
         );
     }
 
+    /// Plan I slice I.3b — pair-keyed view-read prelude. When the
+    /// view's signature is `args.len() == 2` and `pair_keyed_k =
+    /// Some(K)`, the helper takes `(observer, key)` and indexes
+    /// `view_storage_<name>_primary[observer * K + key]`. Direct
+    /// u32 return (no bitcast — pair-keyed beliefs are u32-typed
+    /// in every shipping fixture).
+    ///
+    /// Pins the shape shipped in `3e3e9792` so a regression in
+    /// the prelude composer's branch logic (signature inspection
+    /// + literal K bake) gets caught.
+    #[test]
+    fn pair_keyed_get_emitted_for_i3b_belief() {
+        use crate::cg::data_handle::ViewId;
+        use crate::cg::expr::CgTy;
+        use crate::cg::program::ViewSignature;
+
+        let mut prog = CgProgram::default();
+        prog.interner.views.insert(0, "visited".to_string());
+        // Mirror the registration done by the driver for I.3b
+        // beliefs: args = [Agent, U32], result = U32, pair_keyed_k
+        // = Some(16) (the @key_pop(K=16) value).
+        prog.view_signatures.insert(
+            ViewId(0).0,
+            ViewSignature {
+                args: vec![CgTy::AgentId, CgTy::U32],
+                result: CgTy::U32,
+                storage_hint: None,
+                fold_op: None,
+                belief_gated: false,
+                pair_keyed_k: Some(16),
+            },
+        );
+
+        let body = "let was_visited = view_0_get(agent_id, next_room);";
+        let prelude = compose_view_storage_prelude(body, &prog);
+
+        // Signature: (observer, key) returning u32 — not the
+        // single-arg (idx) -> f32 scalar shape.
+        assert!(
+            prelude.contains("fn view_0_get(observer: u32, key: u32) -> u32"),
+            "pair-keyed helper must take (observer, key) → u32; got:\n{prelude}"
+        );
+        // Body: `view_storage_visited_primary[observer * 16u + key]`
+        // with the K literal baked in.
+        assert!(
+            prelude.contains("view_storage_visited_primary[observer * 16u + key]"),
+            "pair-keyed helper must bake K=16 into the index expression; got:\n{prelude}"
+        );
+        // Should NOT fall through to the scalar shape — the scalar
+        // (idx) -> f32 form would silently lose the second key.
+        assert!(
+            !prelude.contains("fn view_0_get(idx: u32) -> f32"),
+            "pair-keyed view must NOT also emit the scalar fallback; got:\n{prelude}"
+        );
+    }
+
+    /// Negative arm — pair-keyed view WITHOUT `pair_keyed_k` falls
+    /// back to the scalar form. (Today this happens for Agent×Agent
+    /// beliefs whose K is `cfg.agent_cap` at runtime — the prelude
+    /// can't bake an unknown K, so it emits scalar; the caller is
+    /// expected to compose the index expression at the call site.
+    /// Future cuts may add a `view_X_get_pair(observer, key)`
+    /// dynamic-K variant.)
+    #[test]
+    fn pair_keyed_without_static_k_falls_back_to_scalar() {
+        use crate::cg::data_handle::ViewId;
+        use crate::cg::expr::CgTy;
+        use crate::cg::program::ViewSignature;
+
+        let mut prog = CgProgram::default();
+        prog.interner.views.insert(0, "seen".to_string());
+        prog.view_signatures.insert(
+            ViewId(0).0,
+            ViewSignature {
+                args: vec![CgTy::AgentId, CgTy::AgentId],
+                result: CgTy::U32,
+                storage_hint: None,
+                fold_op: None,
+                belief_gated: false,
+                pair_keyed_k: None, // Agent×Agent — K is dynamic
+            },
+        );
+
+        let body = "let cell = view_0_get(some_idx);";
+        let prelude = compose_view_storage_prelude(body, &prog);
+
+        assert!(
+            prelude.contains("fn view_0_get(idx: u32) -> f32"),
+            "without static K, helper falls back to scalar shape; got:\n{prelude}"
+        );
+    }
+
     /// Negative arm — when a view does NOT have the threats schema
     /// (or has a non-PerEntityRing storage hint), the helper falls
     /// back to the scalar getter. Pins the existing dodger / probe
