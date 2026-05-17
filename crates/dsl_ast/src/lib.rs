@@ -7,6 +7,7 @@
 pub mod ability_emit;
 pub mod ability_parser;
 pub mod ast;
+pub mod terrain;
 pub mod engine_events;
 pub mod tokens;
 pub mod error;
