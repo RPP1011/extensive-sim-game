@@ -109,6 +109,12 @@ pub use region::{
     VoxelRegionRegistry,
 };
 
+/// Per-material property table — holds one `MaterialRow` per non-air
+/// material id. Produced by the DSL emitter (T8) and stored on
+/// `VoxelTerrain`. See `materials.rs` for the full design notes.
+pub mod materials;
+pub use materials::{MaterialRow, MaterialTable};
+
 /// Navgrid index — per spec §7.2 + §7.3. See `navgrid.rs` for
 /// design notes + the CPU-side build pipeline.
 pub mod navgrid;
@@ -139,6 +145,7 @@ pub const DEFAULT_EXTENT: u32 = 256;
 pub struct VoxelTerrain {
     grid: VoxelGrid,
     extent: u32,
+    materials: MaterialTable,
 }
 
 impl VoxelTerrain {
@@ -156,7 +163,26 @@ impl VoxelTerrain {
         Self {
             grid: VoxelGrid::new(extent, extent, extent),
             extent,
+            materials: materials::EMPTY,
         }
+    }
+
+    /// Construct an empty voxel world at a caller-chosen cubic extent
+    /// with a pre-populated material table. Used by DSL-emitted terrain
+    /// initializers (T8) that call
+    /// `VoxelTerrain::with_extent_and_materials(EXTENT, MATERIALS)`.
+    pub fn with_extent_and_materials(extent: u32, materials: MaterialTable) -> Self {
+        Self {
+            grid: VoxelGrid::new(extent, extent, extent),
+            extent,
+            materials,
+        }
+    }
+
+    /// Return the material table for this terrain. The table is `Copy`
+    /// so this is a cheap by-value return.
+    pub fn materials(&self) -> MaterialTable {
+        self.materials
     }
 
     /// Cubic extent (in cells) of the underlying grid. Cells outside
