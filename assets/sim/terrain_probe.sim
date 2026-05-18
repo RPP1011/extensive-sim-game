@@ -1,0 +1,43 @@
+// terrain_probe — end-to-end fixture for the terrain DSL block (T12).
+//
+// Exercises:
+//   - `terrain { extent, cell_size, seed_purpose, materials { ... }, layer fill { ... } }`
+//     parse → lower → emit (terrain_gen.rs) pipeline.
+//   - `sims::terrain_probe::generate_terrain`, `::MATERIALS`, `::EXTENT`
+//     exposed via the megacrate.
+//
+// The minimal `entity` + `init` + `physics` block satisfies runtime_core.rs
+// codegen which requires at least one agent entity. The physics rule is a
+// no-op but keeps the rule table non-empty so emit_namespaced produces a
+// valid runtime_core.rs.
+
+event Tick { }
+
+entity Probe : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+init {
+  alive: 1,
+  hp:    10,
+}
+
+terrain {
+  extent: 8
+  cell_size: 1.0
+  seed_purpose: 0xBA5E_7E55
+  materials {
+    grass { id: 1, walkable: true,  hardness: 1, color: 0x4A8B3A }
+    stone { id: 2, walkable: false, hardness: 8, color: 0x808080 }
+  }
+  layer fill { material: stone }
+}
+
+// Minimal no-op physics rule — required so runtime_core.rs codegen
+// produces a non-empty dispatch table.
+@phase(per_agent)
+physics TerrainProbeNoop {
+  on Tick {} where (self.alive) {
+  }
+}

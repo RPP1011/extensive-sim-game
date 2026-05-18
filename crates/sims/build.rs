@@ -133,6 +133,7 @@ fn main() {
                 | "assassination_threat_test"
                 | "threat_scoring_stresstest"
                 | "navgrid_probe"
+                | "terrain_probe"
         ) {
             continue;
         }
@@ -159,13 +160,19 @@ fn main() {
          // Do not edit by hand.\n\n",
     );
     for f in &fixtures {
+        let has_terrain = out_dir.join(format!("{f}/terrain_gen.rs")).exists();
         stub.push_str(&format!(
             "#[allow(non_snake_case, unused_imports, unused_variables, dead_code, clippy::all)]\n\
              pub mod {f} {{\n\
              \x20   include!(concat!(env!(\"OUT_DIR\"), \"/{f}/generated.rs\"));\n\
-             \x20   include!(concat!(env!(\"OUT_DIR\"), \"/{f}/runtime_core.rs\"));\n\
-             }}\n\n",
+             \x20   include!(concat!(env!(\"OUT_DIR\"), \"/{f}/runtime_core.rs\"));\n",
         ));
+        if has_terrain {
+            stub.push_str(&format!(
+                "\x20   include!(concat!(env!(\"OUT_DIR\"), \"/{f}/terrain_gen.rs\"));\n",
+            ));
+        }
+        stub.push_str("}\n\n");
     }
     fs::write(out_dir.join("sim_modules.rs"), stub)
         .unwrap_or_else(|e| panic!("write sim_modules.rs: {e}"));
