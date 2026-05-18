@@ -31,6 +31,7 @@ pub mod error;
 pub mod event_binding;
 pub mod expr;
 pub mod mask;
+pub mod param_rules;
 pub mod physics;
 pub mod plumbing;
 pub mod scoring;
