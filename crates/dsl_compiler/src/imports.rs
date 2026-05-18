@@ -57,6 +57,7 @@ pub fn parse_with_imports(
     let mut visited: HashSet<PathBuf> = HashSet::new();
     let mut stack: Vec<PathBuf> = Vec::new();
     let mut merged_decls: Vec<dsl_ast::ast::Decl> = Vec::new();
+    let mut merged_decl_sources: Vec<PathBuf> = Vec::new();
     let mut merged_terrain: Option<dsl_ast::terrain::TerrainBlock> = None;
     let mut imports_resolved: Vec<PathBuf> = Vec::new();
 
@@ -67,6 +68,7 @@ pub fn parse_with_imports(
         &mut visited,
         &mut stack,
         &mut merged_decls,
+        &mut merged_decl_sources,
         &mut merged_terrain,
         &mut imports_resolved,
     )?;
@@ -74,21 +76,23 @@ pub fn parse_with_imports(
     // Post-merge collision pass: detect duplicate (kind, name) pairs.
     // Terrain singleton collisions are caught eagerly in `visit`; this pass
     // covers all named Decl variants.
+    // `merged_decl_sources` is a parallel vec (one entry per decl) recording
+    // which file contributed each decl, enabling accurate attribution.
     {
         let mut seen: HashMap<(&'static str, String), PathBuf> = HashMap::new();
-        let fallback = imports_resolved.last().cloned().unwrap_or_default();
-        for decl in &merged_decls {
+        for (i, decl) in merged_decls.iter().enumerate() {
             if let Some((kind, name)) = decl_kind_and_name(decl) {
                 let key = (kind, name.clone());
+                let this_source = merged_decl_sources[i].clone();
                 if let Some(first_path) = seen.get(&key) {
                     return Err(ImportError::DuplicateDefinition {
                         kind: kind.to_string(),
                         name,
                         first_seen_at: first_path.clone(),
-                        second_seen_at: fallback.clone(),
+                        second_seen_at: this_source,
                     });
                 }
-                seen.insert(key, fallback.clone());
+                seen.insert(key, this_source);
             }
         }
     }
@@ -108,6 +112,7 @@ fn visit(
     visited: &mut HashSet<PathBuf>,
     stack: &mut Vec<PathBuf>,
     merged_decls: &mut Vec<dsl_ast::ast::Decl>,
+    merged_decl_sources: &mut Vec<PathBuf>,
     merged_terrain: &mut Option<dsl_ast::terrain::TerrainBlock>,
     imports_resolved: &mut Vec<PathBuf>,
 ) -> Result<(), ImportError> {
@@ -142,13 +147,17 @@ fn visit(
             visited,
             stack,
             merged_decls,
+            merged_decl_sources,
             merged_terrain,
             imports_resolved,
         )?;
     }
 
-    // Append this file's own decls.
-    merged_decls.extend(program.decls);
+    // Append this file's own decls, tracking source per decl.
+    for decl in program.decls {
+        merged_decls.push(decl);
+        merged_decl_sources.push(path.to_path_buf());
+    }
     if let Some(t) = program.terrain {
         if merged_terrain.is_some() {
             // Singleton collision — handled by Task 7's collision pass,

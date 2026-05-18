@@ -12,9 +12,12 @@ fn duplicate_entity_across_files_is_error() {
     std::fs::write(&a, "import ./b.sim;\nentity Wolf : Agent { hp: 99.0 }\n").unwrap();
     let err = parse_with_imports(&a, &stdlib, tmp.path()).err().unwrap();
     match err {
-        ImportError::DuplicateDefinition { kind, name, .. } => {
+        ImportError::DuplicateDefinition { kind, name, first_seen_at, second_seen_at } => {
             assert_eq!(kind, "entity");
             assert_eq!(name, "Wolf");
+            // depth-first post-order: b.sim is merged first (imported), then a.sim's own decl.
+            assert_eq!(first_seen_at.file_name().unwrap(), "b.sim");
+            assert_eq!(second_seen_at.file_name().unwrap(), "a.sim");
         }
         other => panic!("expected DuplicateDefinition, got: {other:?}"),
     }
