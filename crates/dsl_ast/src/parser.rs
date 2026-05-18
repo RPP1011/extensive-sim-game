@@ -92,6 +92,15 @@ pub fn parse_program(source: &str) -> Result<Program, ParseError> {
     let mut decls = Vec::new();
     let mut terrain: Option<crate::terrain::TerrainBlock> = None;
     while !c.eof() {
+        // Reject `import` that appears after a non-import top-level decl.
+        if starts_with_keyword(&c, "import") {
+            return Err(ParseError::new(
+                source,
+                here(&c),
+                vec!["parsing top-level declarations".to_string()],
+                "`import` statements must appear before any other top-level decl; found `import` after a decl",
+            ));
+        }
         // `terrain { ... }` is a singleton top-level block, not a Decl variant.
         // Handle it here before the general Decl dispatcher.
         if peek_ident(&c).as_deref() == Some("terrain") {
