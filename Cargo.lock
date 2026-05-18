@@ -806,7 +806,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "smallvec",
- "syn",
  "tempfile",
  "thiserror 1.0.69",
  "winnow 0.7.14",
