@@ -229,6 +229,11 @@ fn emit_into(
         })
         .flatten()
         .collect();
+    // T11 — extract `terrain { ... }` block before resolve consumes the
+    // Program. `TerrainBlock` derives Clone so we take a cheap copy here;
+    // `emit_into` uses it after all the CG pipeline writes to conditionally
+    // emit `terrain_gen.rs` alongside `generated.rs` and `runtime_core.rs`.
+    let terrain_block: Option<dsl_ast::terrain::TerrainBlock> = program.terrain.clone();
     // Compiler-debug-mode opt-in (#242 follow-up). A `.sim` file may
     // declare `debug { depth: kernel, wgsl_event_kind_histogram: true,
     // ... }` — we extract the parsed values BEFORE resolve consumes the
@@ -646,6 +651,17 @@ fn emit_into(
     );
     fs::write(out_dir.join("runtime_core.rs"), runtime_core)
         .unwrap_or_else(|e| panic!("write runtime_core.rs: {e}"));
+
+    // T11 — conditional terrain_gen.rs emit. Present only when the source
+    // has a `terrain { ... }` block; skipped entirely for all existing
+    // fixtures that don't declare terrain (so their OUT_DIR stays clean).
+    if let Some(tb) = terrain_block {
+        let ir = crate::cg::lower::lower_terrain(&tb)
+            .unwrap_or_else(|e| panic!("lower terrain for `{fixture_name}`: {e:?}"));
+        let body = crate::cg::emit::emit_terrain(&ir);
+        fs::write(out_dir.join("terrain_gen.rs"), body)
+            .unwrap_or_else(|e| panic!("write {fixture_name}/terrain_gen.rs: {e}"));
+    }
 }
 
 /// Per-kernel `@runtime` config field. Carried from the resolved
