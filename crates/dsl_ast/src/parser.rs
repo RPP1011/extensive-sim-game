@@ -2179,10 +2179,70 @@ fn parse_params(c: &mut Cursor) -> PResult<Vec<Param>> {
 // 2.4 physics
 // ---------------------------------------------------------------------------
 
+fn parse_param_type(c: &mut Cursor) -> PResult<crate::ast::ParamType> {
+    let pstart = here(c);
+    let type_ident = ident(c).map_err(|e| e.with_context("parsing parameter type"))?;
+    match type_ident.as_str() {
+        "f32" => Ok(crate::ast::ParamType::F32),
+        "i32" => Ok(crate::ast::ParamType::I32),
+        "u32" => Ok(crate::ast::ParamType::U32),
+        "bool" => Ok(crate::ast::ParamType::Bool),
+        "EntityKind" => Ok(crate::ast::ParamType::EntityKind),
+        other => Err(ParseErr::at(
+            pstart,
+            format!("unknown parameter type `{other}`; expected one of f32, i32, u32, bool, EntityKind"),
+        )),
+    }
+}
+
+fn parse_rule_params(c: &mut Cursor) -> PResult<Vec<crate::ast::ParamDecl>> {
+    c.skip_ws();
+    if !c.starts_with_char('(') {
+        return Ok(Vec::new());
+    }
+    c.bump(1); // consume '('
+    let mut params: Vec<crate::ast::ParamDecl> = Vec::new();
+    let mut seen_names = std::collections::HashSet::new();
+    loop {
+        c.skip_ws();
+        if c.starts_with_char(')') {
+            c.bump(1);
+            break;
+        }
+        let pstart = c.pos;
+        let pname = ident(c).map_err(|e| e.with_context("parsing rule parameter name"))?;
+        if !seen_names.insert(pname.clone()) {
+            return Err(ParseErr::at(
+                Span::new(pstart, c.pos),
+                format!("duplicate parameter name `{pname}`"),
+            ));
+        }
+        c.skip_ws();
+        expect_char(c, ':').map_err(|e| e.with_context("parsing rule parameter `:`"))?;
+        c.skip_ws();
+        let ty = parse_param_type(c)?;
+        params.push(crate::ast::ParamDecl { name: pname, ty, span: Span::new(pstart, c.pos) });
+        c.skip_ws();
+        if c.starts_with_char(',') {
+            c.bump(1);
+            continue;
+        }
+        if c.starts_with_char(')') {
+            c.bump(1);
+            break;
+        }
+        return Err(ParseErr::at(here(c), "expected `,` or `)` in rule parameter list"));
+    }
+    Ok(params)
+}
+
 fn physics_decl(c: &mut Cursor, annotations: Vec<Annotation>, start: usize) -> PResult<PhysicsDecl> {
     expect_keyword(c, "physics").map_err(|e| e.with_context("parsing `physics` declaration"))?;
     let name = ident(c).map_err(|e| e.with_context("parsing physics name"))?;
-    // Annotations may appear after the name: `physics foo @phase(event) { ... }`.
+    // Parse optional parameterised rule params: `physics chase(target: EntityKind, ...) { ... }`.
+    c.skip_ws();
+    let params = parse_rule_params(c)?;
+    // Annotations may appear after the name (or params): `physics foo @phase(event) { ... }`.
     c.skip_ws();
     let mut extra_ann = parse_annotations(c)?;
     let mut all = annotations;
@@ -2202,7 +2262,7 @@ fn physics_decl(c: &mut Cursor, annotations: Vec<Annotation>, start: usize) -> P
     Ok(PhysicsDecl {
         annotations: all,
         name,
-        params: vec![],
+        params,
         handlers,
         cpu_only,
         span: Span::new(start, c.pos),
