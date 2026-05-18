@@ -291,7 +291,7 @@ fn decl(c: &mut Cursor) -> PResult<Decl> {
         // interleaved with the fold handlers in the body.
         Some("belief") => belief_decl(c, annotations, start).map(Decl::Belief),
         Some("query") => query_decl(c, annotations, start).map(Decl::Query),
-        Some("physics") => physics_decl(c, annotations, start).map(Decl::Physics),
+        Some("physics") => physics_any_decl(c, annotations, start),
         Some("mask") => mask_decl(c, annotations, start).map(Decl::Mask),
         Some("verb") => verb_decl(c, annotations, start).map(Decl::Verb),
         Some("scoring") => scoring_decl(c, annotations, start).map(Decl::Scoring),
@@ -2236,9 +2236,90 @@ fn parse_rule_params(c: &mut Cursor) -> PResult<Vec<crate::ast::ParamDecl>> {
     Ok(params)
 }
 
-fn physics_decl(c: &mut Cursor, annotations: Vec<Annotation>, start: usize) -> PResult<PhysicsDecl> {
+/// Dispatch: returns either `Decl::Physics` (template or concrete rule) or
+/// `Decl::PhysicsApply` (the `physics X = template(args);` apply form).
+fn physics_any_decl(c: &mut Cursor, annotations: Vec<Annotation>, start: usize) -> PResult<Decl> {
     expect_keyword(c, "physics").map_err(|e| e.with_context("parsing `physics` declaration"))?;
     let name = ident(c).map_err(|e| e.with_context("parsing physics name"))?;
+    c.skip_ws();
+    // Mutually exclusive: `=` → apply form; `(` → param list; else → concrete rule.
+    if c.starts_with_char('=') {
+        c.bump(1); // consume `=`
+        c.skip_ws();
+        let template = ident(c).map_err(|e| e.with_context("parsing apply template name"))?;
+        expect_char(c, '(').map_err(|e| e.with_context("parsing apply arg list `(`"))?;
+        let mut args: Vec<crate::ast::ApplyArg> = Vec::new();
+        loop {
+            c.skip_ws();
+            if c.starts_with_char(')') {
+                break;
+            }
+            let astart = c.pos;
+            let arg_name = ident(c).map_err(|e| e.with_context("parsing apply arg name"))?;
+            expect_char(c, ':').map_err(|e| e.with_context("parsing `:` after apply arg name"))?;
+            c.skip_ws();
+            let value = parse_apply_arg_value(c)?;
+            args.push(crate::ast::ApplyArg {
+                name: arg_name,
+                value,
+                span: Span::new(astart, c.pos),
+            });
+            c.skip_ws();
+            if c.starts_with_char(',') {
+                c.bump(1);
+                continue;
+            }
+            break;
+        }
+        expect_char(c, ')').map_err(|e| e.with_context("parsing apply arg list `)`"))?;
+        expect_char(c, ';').map_err(|e| e.with_context("parsing apply `;`"))?;
+        return Ok(Decl::PhysicsApply(crate::ast::PhysicsApplyDecl {
+            annotations,
+            name,
+            template,
+            args,
+            span: Span::new(start, c.pos),
+        }));
+    }
+    // Regular physics (template with params, or concrete rule without params).
+    // Reconstruct the cursor state as if we entered physics_decl normally but
+    // already consumed `physics <name>`.  We pass the already-parsed name
+    // through to a helper that continues from after the name.
+    physics_decl_after_name(c, annotations, name, start).map(Decl::Physics)
+}
+
+fn parse_apply_arg_value(c: &mut Cursor) -> PResult<crate::ast::ApplyArgValue> {
+    c.skip_ws();
+    // Numeric literal (f32, i32, u32).
+    if peek_number(c) {
+        let (n, is_float) = number_literal(c)?;
+        if is_float {
+            return Ok(crate::ast::ApplyArgValue::F32(n as f32));
+        }
+        // Integer: prefer I32, fall back to U32 for large values.
+        if n >= 0.0 && n <= (i32::MAX as f64) {
+            return Ok(crate::ast::ApplyArgValue::I32(n as i32));
+        }
+        if n >= 0.0 && n <= (u32::MAX as f64) {
+            return Ok(crate::ast::ApplyArgValue::U32(n as u32));
+        }
+        return Err(ParseErr::at(here(c), format!("integer literal {n} out of range for i32/u32")));
+    }
+    // Boolean literals.
+    if starts_with_keyword(c, "true") {
+        expect_keyword(c, "true")?;
+        return Ok(crate::ast::ApplyArgValue::Bool(true));
+    }
+    if starts_with_keyword(c, "false") {
+        expect_keyword(c, "false")?;
+        return Ok(crate::ast::ApplyArgValue::Bool(false));
+    }
+    // Bare identifier → EntityKind reference.
+    let id = ident(c).map_err(|e| e.with_context("parsing apply arg value (expected literal or identifier)"))?;
+    Ok(crate::ast::ApplyArgValue::EntityKind(id))
+}
+
+fn physics_decl_after_name(c: &mut Cursor, annotations: Vec<Annotation>, name: String, start: usize) -> PResult<PhysicsDecl> {
     // Parse optional parameterised rule params: `physics chase(target: EntityKind, ...) { ... }`.
     c.skip_ws();
     let params = parse_rule_params(c)?;
