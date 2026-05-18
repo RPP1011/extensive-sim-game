@@ -134,6 +134,7 @@ fn main() {
                 | "threat_scoring_stresstest"
                 | "navgrid_probe"
                 | "terrain_probe"
+                | "terrain_probe_imported"
         ) {
             continue;
         }

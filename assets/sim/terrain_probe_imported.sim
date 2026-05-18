@@ -1,0 +1,28 @@
+// terrain_probe_imported — smoke fixture: validates that a real fixture can
+// pull terrain (including its materials) from stdlib via `import`. The merged
+// Program's MATERIALS table should come from `stdlib/materials/basic.sim`.
+//
+// No `terrain {}` block here — the terrain block is inherited entirely from
+// the imported stdlib file, exercising the import-merger terrain path.
+
+import std/materials/basic.sim;
+
+event Tick { }
+
+entity Probe : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+init {
+  alive: 1,
+  hp:    10,
+}
+
+// Minimal no-op physics rule — required so runtime_core.rs codegen
+// produces a non-empty dispatch table.
+@phase(per_agent)
+physics TerrainProbeImportedNoop {
+  on Tick {} where (self.alive) {
+  }
+}
