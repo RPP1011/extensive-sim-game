@@ -236,6 +236,8 @@ fn decl_annotations_mut(d: &mut Decl) -> Option<&mut Vec<Annotation>> {
         // `@`s after a `query` will fall through to the orphan-annotation
         // error path on the next iteration.
         Decl::Query(_) => return None,
+        // apply-form: annotations not yet surfaced in parser; fall through.
+        Decl::PhysicsApply(x) => &mut x.annotations,
     })
 }
 
@@ -264,6 +266,7 @@ fn decl_span_mut(d: &mut Decl) -> &mut Span {
         Decl::RegionKind(x) => &mut x.span,
         Decl::RegionIndices(x) => &mut x.span,
         Decl::Index(x) => &mut x.span,
+        Decl::PhysicsApply(x) => &mut x.span,
     }
 }
 

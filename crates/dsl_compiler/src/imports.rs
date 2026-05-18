@@ -192,6 +192,7 @@ fn decl_kind_and_name(decl: &dsl_ast::ast::Decl) -> Option<(&'static str, String
         Belief(d)       => Some(("belief",       d.name.clone())),
         Query(d)        => Some(("query",        d.name.clone())),
         Physics(d)      => Some(("physics",      d.name.clone())),
+        PhysicsApply(d) => Some(("physics",      d.name.clone())),
         Verb(d)         => Some(("verb",         d.name.clone())),
         Invariant(d)    => Some(("invariant",    d.name.clone())),
         Probe(d)        => Some(("probe",        d.name.clone())),

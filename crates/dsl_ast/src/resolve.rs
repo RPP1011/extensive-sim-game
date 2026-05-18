@@ -1293,6 +1293,9 @@ fn collect(
                     span: d.span,
                 });
             }
+            Decl::PhysicsApply(_) => {
+                // apply-form: ignored in pass 1 — handled by param_rules lowering (T5+).
+            }
             Decl::Belief(d) => {
                 // Plan I — beliefs share the ViewIR slot table with
                 // views; lookups by name flow through the same
@@ -2247,6 +2250,9 @@ fn resolve_bodies(
                 comp.views[view_idx].social_merges = social_merges;
                 comp.views[view_idx].decay = decay;
                 view_idx += 1;
+            }
+            Decl::PhysicsApply(_) => {
+                // apply-form: ignored in pass 2 — handled by param_rules lowering (T5+).
             }
         }
     }

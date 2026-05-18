@@ -80,6 +80,7 @@ pub enum Decl {
     Belief(BeliefDecl),
     Query(QueryDecl),
     Physics(PhysicsDecl),
+    PhysicsApply(PhysicsApplyDecl),
     Mask(MaskDecl),
     Verb(VerbDecl),
     Scoring(ScoringDecl),
@@ -779,6 +780,31 @@ pub struct ParamDecl {
     pub name: String,
     pub ty: ParamType,
     pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PhysicsApplyDecl {
+    pub annotations: Vec<Annotation>,
+    pub name: String,        // the new concrete-rule name (e.g. "HunterChase")
+    pub template: String,    // the parameterised-rule name (e.g. "chase")
+    pub args: Vec<ApplyArg>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ApplyArg {
+    pub name: String,        // by-name args; positional not supported in v1
+    pub value: ApplyArgValue,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum ApplyArgValue {
+    F32(f32),
+    I32(i32),
+    U32(u32),
+    Bool(bool),
+    EntityKind(String),  // identifier; resolved to a known entity decl in validation
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
