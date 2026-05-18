@@ -205,10 +205,21 @@ fn emit_into(
     println!("cargo:rerun-if-changed={}", sim_path.display());
     println!("cargo:rerun-if-changed=build.rs");
 
-    let src = fs::read_to_string(&sim_path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", sim_path.display()));
-    let program = crate::parse(&src)
-        .unwrap_or_else(|e| panic!("parse {fixture_name}.sim: {e:?}"));
+    // Resolve stdlib and sandbox roots from env vars (with workspace_root defaults).
+    // WORLDSIM_STDLIB_ROOT / WORLDSIM_SANDBOX_ROOT are set by test harnesses and
+    // can be overridden by per-runtime build.rs scripts; absent → conventional paths
+    // relative to the workspace root.
+    let stdlib_root: PathBuf = match env::var_os("WORLDSIM_STDLIB_ROOT") {
+        Some(s) => PathBuf::from(s),
+        None    => workspace_root.join("stdlib"),
+    };
+    let sandbox_root: PathBuf = match env::var_os("WORLDSIM_SANDBOX_ROOT") {
+        Some(s) => PathBuf::from(s),
+        None    => workspace_root.to_path_buf(),
+    };
+    let program = crate::imports::parse_with_imports(
+        &sim_path, &stdlib_root, &sandbox_root,
+    ).unwrap_or_else(|e| panic!("parse {sim_path:?} with imports: {e}"));
     // Gap plague_city#P-A — populate the custom-agent-field registry
     // BEFORE resolve / lower runs. Every `field <name>: <ty>` decl
     // becomes a leaked `CustomFieldDesc`; subsequent `lower_field` /
