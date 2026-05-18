@@ -75,6 +75,7 @@ fn populate_accepts_vec3_decls() {
     // Pre-fix a `vec3` decl panicked here. Now it interns cleanly.
     use dsl_ast::ast::Program;
     let program = Program {
+        imports: vec![],
         decls: vec![
             Decl::AgentField(AgentFieldDecl {
                 annotations: vec![],

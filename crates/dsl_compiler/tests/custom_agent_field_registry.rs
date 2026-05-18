@@ -67,6 +67,7 @@ fn lookup_by_snake_returns_none_for_unknown_name() {
 fn populate_registers_field_decls_from_program() {
     use dsl_ast::ast::Program;
     let program = Program {
+        imports: vec![],
         decls: vec![
             Decl::AgentField(AgentFieldDecl {
                 annotations: vec![],

@@ -36,8 +36,15 @@ impl<T> Spanned<T> {
 // Program / top-level declarations
 // ---------------------------------------------------------------------------
 
+/// A single `import "<path>";` statement at the top of a `.sim` file.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Import {
+    pub path: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Program {
+    pub imports: Vec<Import>,
     pub decls: Vec<Decl>,
     /// Optional singleton `terrain { ... }` block. `None` if the source
     /// does not contain a `terrain` block.

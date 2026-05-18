@@ -78,7 +78,7 @@ pub fn parse_program(source: &str) -> Result<Program, ParseError> {
         }
         c.skip_ws();
     }
-    Ok(Program { decls, terrain })
+    Ok(Program { imports: vec![], decls, terrain })
 }
 
 /// Parse a single expression from a free-floating source string. Used
