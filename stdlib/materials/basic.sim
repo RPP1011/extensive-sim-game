@@ -1,0 +1,14 @@
+// Basic outdoor materials palette: grass, stone, sand.
+// Imported via `import std/materials/basic.sim;`.
+
+terrain {
+  extent: 8
+  cell_size: 1.0
+  seed_purpose: 0xBA51_C001
+  materials {
+    grass { id: 1, walkable: true,  hardness: 1, color: 0x4A8B3A }
+    stone { id: 2, walkable: false, hardness: 8, color: 0x808080 }
+    sand  { id: 3, walkable: true,  hardness: 2, color: 0xD9C28A, movement_cost: 1.5 }
+  }
+  layer fill { material: stone }
+}
