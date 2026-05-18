@@ -40,6 +40,55 @@ impl ParseErr {
 pub fn parse_program(source: &str) -> Result<Program, ParseError> {
     let mut c = Cursor::new(source);
     c.skip_ws();
+
+    // Parse leading `import <path>;` directives before any other declarations.
+    let mut imports: Vec<crate::ast::Import> = Vec::new();
+    loop {
+        if c.eof() {
+            break;
+        }
+        if !starts_with_keyword(&c, "import") {
+            break;
+        }
+        // Consume `import` keyword.
+        if let Err(e) = expect_keyword(&mut c, "import") {
+            return Err(ParseError::new(source, e.span, e.context, e.message));
+        }
+        c.skip_ws();
+        // Consume the bare path: all non-whitespace, non-`;` characters.
+        let path_start = c.pos;
+        loop {
+            match c.peek_char() {
+                None => break,
+                Some(ch) if ch.is_whitespace() || ch == ';' => break,
+                Some(ch) => c.bump(ch.len_utf8()),
+            }
+        }
+        let path = c.src[path_start..c.pos].to_string();
+        if path.is_empty() {
+            return Err(ParseError::new(
+                source,
+                here(&c),
+                vec!["parsing `import` directive".to_string()],
+                "expected import path after `import`",
+            ));
+        }
+        if !path.ends_with(".sim") {
+            return Err(ParseError::new(
+                source,
+                here(&c),
+                vec!["parsing `import` directive".to_string()],
+                "import path must end in `.sim`",
+            ));
+        }
+        // Consume `;`.
+        if let Err(e) = expect_char(&mut c, ';') {
+            return Err(ParseError::new(source, e.span, e.context, e.message));
+        }
+        imports.push(crate::ast::Import { path });
+        c.skip_ws();
+    }
+
     let mut decls = Vec::new();
     let mut terrain: Option<crate::terrain::TerrainBlock> = None;
     while !c.eof() {
@@ -78,7 +127,7 @@ pub fn parse_program(source: &str) -> Result<Program, ParseError> {
         }
         c.skip_ws();
     }
-    Ok(Program { imports: vec![], decls, terrain })
+    Ok(Program { imports, decls, terrain })
 }
 
 /// Parse a single expression from a free-floating source string. Used
