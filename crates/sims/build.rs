@@ -142,9 +142,35 @@ fn main() {
     }
     fixtures.sort();
 
+    // Resolve stdlib and sandbox roots once (same logic as build_helper::emit_into).
+    let stdlib_root: PathBuf = match env::var_os("WORLDSIM_STDLIB_ROOT") {
+        Some(s) => PathBuf::from(s),
+        None    => workspace_root.join("stdlib"),
+    };
+    let sandbox_root: PathBuf = match env::var_os("WORLDSIM_SANDBOX_ROOT") {
+        Some(s) => PathBuf::from(s),
+        None    => workspace_root.to_path_buf(),
+    };
+
     // Emit each fixture's artifacts into `OUT_DIR/<fixture>/`.
     for f in &fixtures {
         dsl_compiler::build_helper::emit_namespaced(f);
+
+        // Re-parse to discover imported files so edits to stdlib or
+        // local-relative imports trigger an incremental rebuild (Option B:
+        // one extra parse per fixture; .sim files are <1KB so cost is trivial).
+        let sim_path = sims_dir.join(format!("{f}.sim"));
+        match dsl_compiler::parse_with_imports(&sim_path, &stdlib_root, &sandbox_root) {
+            Ok(program) => {
+                for p in &program.imports_resolved {
+                    println!("cargo:rerun-if-changed={}", p.display());
+                }
+            }
+            Err(_e) => {
+                // emit_namespaced already panicked/surfaced the error above;
+                // we just skip the rerun-if-changed lines for this fixture.
+            }
+        }
     }
 
     // Synthesise a single include-stub that lib.rs pulls in. One
