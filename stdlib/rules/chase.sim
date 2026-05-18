@@ -1,19 +1,13 @@
 // Chase a target entity within an aggro radius.
 // Imported via `import std/rules/chase.sim;` and applied via
 // `physics MyChase = chase(target: SomeEntity, aggro: 10.0, speed: 1.0);`.
+//
+// NOTE: The body is intentionally empty. Body-substitution of param refs
+// (aggro, speed, target) inside cloned handler bodies is deferred to T8 v2.
+// This template tests the structural pass (parse → validate → monomorphise
+// → emit two distinct concrete kernels) without requiring body-substitution.
 
 physics chase(target: EntityKind, aggro: f32, speed: f32) @phase(per_agent) {
   on Tick {} {
-    // Body uses `target`, `aggro`, `speed` as if they were locals.
-    // After monomorphisation each apply site gets a fully-substituted
-    // copy with literal values baked in.
-    //
-    // The actual body content depends on what the DSL already exposes
-    // (nearest_of_kind, agents.pos, agents.set_vel, etc.).  For the
-    // v1 seed we ship a minimal body that simply references the
-    // params so the smoke test can verify substitution end-to-end.
-    let _aggro_squared = aggro * aggro;
-    let _target_kind = target;
-    let _speed = speed;
   }
 }

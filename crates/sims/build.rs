@@ -53,6 +53,7 @@ fn main() {
                 | "stdlib_math_probe"
                 | "bartering"
                 | "pair_scoring_probe"
+                | "param_rule_smoke"
                 | "per_entity_ring_probe"
                 | "crafting_diffusion"
                 | "flocking_skirmish"

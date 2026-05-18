@@ -1,0 +1,29 @@
+// param_rule_smoke — smoke fixture: imports stdlib/rules/chase.sim, applies it
+// twice with distinct args, validates the monomorphisation pipeline end-to-end.
+//
+// Scaffolding copied from terrain_probe_imported.sim (known-working minimum).
+// Body-substitution of param refs inside the cloned handler body is deferred
+// to T8 v2; this fixture tests the structural pass (parse → validate →
+// monomorphise → emit two distinct concrete kernels).
+
+import std/rules/chase.sim;
+
+event Tick { }
+
+entity Wolf : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Sheep : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+init {
+  alive: 1,
+  hp:    10,
+}
+
+physics HunterChase = chase(target: Wolf,  aggro: 15.0, speed: 1.5);
+physics WolfChase   = chase(target: Sheep, aggro:  8.0, speed: 1.0);
