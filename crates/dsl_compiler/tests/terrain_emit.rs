@@ -21,8 +21,7 @@ terrain {
     // (ahash drift caveat); these substring assertions are stable.
     assert!(rust_src.contains("pub const EXTENT: u32 = 16"), "extent missing");
     assert!(rust_src.contains("pub const CELL_SIZE: f32 = 0.5"), "cell_size missing");
-    assert!(rust_src.contains("pub const SEED_PURPOSE: u32 = 0xBA5E_7E55") ||
-            rust_src.contains("pub const SEED_PURPOSE: u32 = 3126641749"),
+    assert!(rust_src.contains("pub const SEED_PURPOSE: u32 = 0xBA5E_7E55"),
             "seed_purpose missing");
     assert!(rust_src.contains("pub static MATERIALS: ::engine_voxel::MaterialTable"),
             "MATERIALS static missing");
