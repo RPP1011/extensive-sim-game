@@ -2199,6 +2199,7 @@ fn physics_decl(c: &mut Cursor, annotations: Vec<Annotation>, start: usize) -> P
     Ok(PhysicsDecl {
         annotations: all,
         name,
+        params: vec![],
         handlers,
         cpu_only,
         span: Span::new(start, c.pos),

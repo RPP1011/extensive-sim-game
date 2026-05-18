@@ -21,9 +21,10 @@ pub use ability_parser::parse_ability_file;
 pub use ast::{
     AbilityDecl, AbilityFile, AbilityHeader, CostAmount, CostResource, CostSpec, Decl,
     DeliverBlock, Duration, EffectArea, EffectArg, EffectChance, EffectCondition, EffectDuration,
-    EffectLifetime, EffectScaling, EffectStmt, EffectTag, HintName, Import, MorphBlock, PassiveDecl,
-    PassiveHeader, Program, RecastValue, Span, Spanned, StackingMode, StructureDecl, TargetMode,
-    TemplateArg, TemplateDecl, TemplateInstantiation, TemplateParam, TemplateParamTy,
+    EffectLifetime, EffectScaling, EffectStmt, EffectTag, HintName, Import, MorphBlock, ParamDecl,
+    ParamType, PassiveDecl, PassiveHeader, Program, RecastValue, Span, Spanned, StackingMode,
+    StructureDecl, TargetMode, TemplateArg, TemplateDecl, TemplateInstantiation, TemplateParam,
+    TemplateParamTy,
 };
 pub use error::ParseError;
 pub use ir::Compilation;

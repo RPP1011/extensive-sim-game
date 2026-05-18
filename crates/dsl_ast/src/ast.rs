@@ -20,6 +20,12 @@ impl Span {
     }
 }
 
+impl Default for Span {
+    fn default() -> Self {
+        Span::dummy()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Spanned<T> {
     pub node: T,
@@ -760,9 +766,26 @@ pub struct QueryDecl {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum ParamType {
+    F32,
+    I32,
+    U32,
+    Bool,
+    EntityKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ParamDecl {
+    pub name: String,
+    pub ty: ParamType,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PhysicsDecl {
     pub annotations: Vec<Annotation>,
     pub name: String,
+    pub params: Vec<ParamDecl>,
     pub handlers: Vec<PhysicsHandler>,
     /// Intentionally-CPU-only rule. Set when the source carries the
     /// `@cpu_only` annotation. The compiler emits the CPU handler but
