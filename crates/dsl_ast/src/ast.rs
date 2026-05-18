@@ -45,6 +45,12 @@ pub struct Import {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Program {
     pub imports: Vec<Import>,
+    /// Canonicalised absolute paths of every `.sim` file that contributed to
+    /// this `Program`, including the top-level file itself.  Populated by
+    /// `parse_with_imports`; always empty when constructed directly by the
+    /// parser (`parse(src)`).
+    #[serde(skip)]
+    pub imports_resolved: Vec<std::path::PathBuf>,
     pub decls: Vec<Decl>,
     /// Optional singleton `terrain { ... }` block. `None` if the source
     /// does not contain a `terrain` block.

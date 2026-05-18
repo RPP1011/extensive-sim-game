@@ -95,10 +95,10 @@ pub fn parse_with_imports(
 
     Ok(dsl_ast::ast::Program {
         imports: Vec::new(), // merged file has no further imports
+        imports_resolved,
         decls: merged_decls,
         terrain: merged_terrain,
     })
-    // Note: imports_resolved is exposed in Task 8 (separate field on Program).
 }
 
 fn visit(

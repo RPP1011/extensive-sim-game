@@ -76,6 +76,7 @@ fn populate_accepts_vec3_decls() {
     use dsl_ast::ast::Program;
     let program = Program {
         imports: vec![],
+        imports_resolved: vec![],
         decls: vec![
             Decl::AgentField(AgentFieldDecl {
                 annotations: vec![],

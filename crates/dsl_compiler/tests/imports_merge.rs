@@ -17,7 +17,8 @@ fn import_free_file_equivalent_to_parse() {
 
     assert_eq!(via_pwi.decls.len(), via_pure.decls.len());
     assert_eq!(via_pwi.terrain, via_pure.terrain);
-    // T8: imports_resolved assertions added when Program gains that field.
+    assert_eq!(via_pwi.imports_resolved.len(), 1);
+    assert!(via_pure.imports_resolved.is_empty());
 }
 
 #[test]

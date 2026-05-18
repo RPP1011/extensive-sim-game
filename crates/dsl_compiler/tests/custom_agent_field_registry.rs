@@ -68,6 +68,7 @@ fn populate_registers_field_decls_from_program() {
     use dsl_ast::ast::Program;
     let program = Program {
         imports: vec![],
+        imports_resolved: vec![],
         decls: vec![
             Decl::AgentField(AgentFieldDecl {
                 annotations: vec![],
