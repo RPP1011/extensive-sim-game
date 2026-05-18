@@ -1,6 +1,7 @@
 //! Filesystem-aware import resolver + merger for `.sim` files.
 //! See `docs/superpowers/specs/2026-05-17-terrain-dsl-multifile-design.md`.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
@@ -40,6 +41,109 @@ impl std::fmt::Display for ImportError {
 }
 
 impl std::error::Error for ImportError {}
+
+/// Parse a top-level `.sim` file, recursively follow `import` statements,
+/// and return a merged `Program`. Decls are merged depth-first post-order:
+/// imports are appended before the importing file's own decls.
+pub fn parse_with_imports(
+    top_path: &Path,
+    stdlib_root: &Path,
+    sandbox_root: &Path,
+) -> Result<dsl_ast::ast::Program, ImportError> {
+    let top_canonical = top_path.canonicalize().map_err(|e| ImportError::IoError {
+        path: top_path.to_path_buf(),
+        source: e,
+    })?;
+    let mut visited: HashSet<PathBuf> = HashSet::new();
+    let mut stack: Vec<PathBuf> = Vec::new();
+    let mut merged_decls: Vec<dsl_ast::ast::Decl> = Vec::new();
+    let mut merged_terrain: Option<dsl_ast::terrain::TerrainBlock> = None;
+    let mut imports_resolved: Vec<PathBuf> = Vec::new();
+
+    visit(
+        &top_canonical,
+        stdlib_root,
+        sandbox_root,
+        &mut visited,
+        &mut stack,
+        &mut merged_decls,
+        &mut merged_terrain,
+        &mut imports_resolved,
+    )?;
+
+    Ok(dsl_ast::ast::Program {
+        imports: Vec::new(), // merged file has no further imports
+        decls: merged_decls,
+        terrain: merged_terrain,
+    })
+    // Note: imports_resolved is exposed in Task 8 (separate field on Program).
+}
+
+fn visit(
+    path: &Path,
+    stdlib_root: &Path,
+    sandbox_root: &Path,
+    visited: &mut HashSet<PathBuf>,
+    stack: &mut Vec<PathBuf>,
+    merged_decls: &mut Vec<dsl_ast::ast::Decl>,
+    merged_terrain: &mut Option<dsl_ast::terrain::TerrainBlock>,
+    imports_resolved: &mut Vec<PathBuf>,
+) -> Result<(), ImportError> {
+    if stack.iter().any(|p| p == path) {
+        let mut chain = stack.clone();
+        chain.push(path.to_path_buf());
+        return Err(ImportError::Cycle { path_chain: chain });
+    }
+    if !visited.insert(path.to_path_buf()) {
+        // Already merged in a sibling branch — diamond import.
+        return Ok(());
+    }
+    stack.push(path.to_path_buf());
+    imports_resolved.push(path.to_path_buf());
+
+    let src = std::fs::read_to_string(path).map_err(|e| ImportError::IoError {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+    let program = dsl_ast::parse(&src).map_err(|e| ImportError::Parse {
+        path: path.to_path_buf(),
+        inner: format!("{e}"),
+    })?;
+
+    // Recurse into imports first (depth-first post-order).
+    for imp in &program.imports {
+        let resolved = resolve_import_path(&imp.path, path, stdlib_root, sandbox_root)?;
+        visit(
+            &resolved,
+            stdlib_root,
+            sandbox_root,
+            visited,
+            stack,
+            merged_decls,
+            merged_terrain,
+            imports_resolved,
+        )?;
+    }
+
+    // Append this file's own decls.
+    merged_decls.extend(program.decls);
+    if let Some(t) = program.terrain {
+        if merged_terrain.is_some() {
+            // Singleton collision — handled by Task 7's collision pass,
+            // but emit the same error here so it surfaces at parse time.
+            return Err(ImportError::DuplicateDefinition {
+                kind: "terrain".to_string(),
+                name: "<singleton>".to_string(),
+                first_seen_at: imports_resolved[0].clone(),
+                second_seen_at: path.to_path_buf(),
+            });
+        }
+        *merged_terrain = Some(t);
+    }
+
+    stack.pop();
+    Ok(())
+}
 
 /// Resolves an import path string to a canonicalised absolute path on disk.
 ///

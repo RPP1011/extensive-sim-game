@@ -39,6 +39,7 @@ pub use cg::lower::LowerError;
 // Multi-file import resolver — `ImportError` enum + `resolve_import_path`.
 // See `docs/superpowers/specs/2026-05-17-terrain-dsl-multifile-design.md`.
 pub mod imports;
+pub use imports::{parse_with_imports, ImportError};
 
 // Wave 1.6 — `.ability` AST -> engine-runtime `AbilityProgram` lowering.
 // See `ability_lower.rs` for scope (only the 8 currently-implemented
