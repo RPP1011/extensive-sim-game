@@ -1,7 +1,7 @@
 //! Filesystem-aware import resolver + merger for `.sim` files.
 //! See `docs/superpowers/specs/2026-05-17-terrain-dsl-multifile-design.md`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
@@ -70,6 +70,28 @@ pub fn parse_with_imports(
         &mut merged_terrain,
         &mut imports_resolved,
     )?;
+
+    // Post-merge collision pass: detect duplicate (kind, name) pairs.
+    // Terrain singleton collisions are caught eagerly in `visit`; this pass
+    // covers all named Decl variants.
+    {
+        let mut seen: HashMap<(&'static str, String), PathBuf> = HashMap::new();
+        let fallback = imports_resolved.last().cloned().unwrap_or_default();
+        for decl in &merged_decls {
+            if let Some((kind, name)) = decl_kind_and_name(decl) {
+                let key = (kind, name.clone());
+                if let Some(first_path) = seen.get(&key) {
+                    return Err(ImportError::DuplicateDefinition {
+                        kind: kind.to_string(),
+                        name,
+                        first_seen_at: first_path.clone(),
+                        second_seen_at: fallback.clone(),
+                    });
+                }
+                seen.insert(key, fallback.clone());
+            }
+        }
+    }
 
     Ok(dsl_ast::ast::Program {
         imports: Vec::new(), // merged file has no further imports
@@ -143,6 +165,37 @@ fn visit(
 
     stack.pop();
     Ok(())
+}
+
+/// Returns a `(kind_tag, name)` pair for decls that carry a top-level name.
+/// The kind tag is a static string so that `entity Wolf` and `event Wolf`
+/// live in separate namespaces and do NOT collide with each other.
+/// Decl variants without a top-level name (Init, Debug, Mask, Scoring,
+/// Metric) return `None` and bypass the collision check.
+fn decl_kind_and_name(decl: &dsl_ast::ast::Decl) -> Option<(&'static str, String)> {
+    use dsl_ast::ast::Decl::*;
+    match decl {
+        Entity(d)       => Some(("entity",       d.name.clone())),
+        Event(d)        => Some(("event",        d.name.clone())),
+        EventTag(d)     => Some(("event_tag",    d.name.clone())),
+        Enum(d)         => Some(("enum",         d.name.clone())),
+        View(d)         => Some(("view",         d.name.clone())),
+        Belief(d)       => Some(("belief",       d.name.clone())),
+        Query(d)        => Some(("query",        d.name.clone())),
+        Physics(d)      => Some(("physics",      d.name.clone())),
+        Verb(d)         => Some(("verb",         d.name.clone())),
+        Invariant(d)    => Some(("invariant",    d.name.clone())),
+        Probe(d)        => Some(("probe",        d.name.clone())),
+        Config(d)       => Some(("config",       d.name.clone())),
+        SpatialQuery(d) => Some(("spatial_query", d.name.clone())),
+        AgentField(d)   => Some(("agent_field",  d.name.clone())),
+        Table(d)        => Some(("table",        d.name.clone())),
+        RegionKind(d)   => Some(("region_kind",  d.name.clone())),
+        RegionIndices(d) => Some(("region_indices", d.name.clone())),
+        Index(d)        => Some(("index",        d.name.clone())),
+        // Variants without a top-level name bypass collision detection.
+        Init(_) | Debug(_) | Mask(_) | Scoring(_) | Metric(_) => None,
+    }
 }
 
 /// Resolves an import path string to a canonicalised absolute path on disk.
