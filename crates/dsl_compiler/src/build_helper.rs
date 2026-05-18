@@ -220,6 +220,9 @@ fn emit_into(
     let program = crate::imports::parse_with_imports(
         &sim_path, &stdlib_root, &sandbox_root,
     ).unwrap_or_else(|e| panic!("parse {sim_path:?} with imports: {e}"));
+    let mut program = program;
+    crate::cg::lower::param_rules::monomorphise(&mut program)
+        .unwrap_or_else(|e| panic!("monomorphise param-rules in {sim_path:?}: {e}"));
     // Gap plague_city#P-A — populate the custom-agent-field registry
     // BEFORE resolve / lower runs. Every `field <name>: <ty>` decl
     // becomes a leaked `CustomFieldDesc`; subsequent `lower_field` /
