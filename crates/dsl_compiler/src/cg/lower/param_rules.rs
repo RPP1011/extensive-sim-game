@@ -68,3 +68,93 @@ pub fn build_param_rule_catalog(program: &Program) -> HashMap<String, &PhysicsDe
     }
     catalog
 }
+
+/// Validates every `Decl::PhysicsApply` against its parameterised rule.
+pub fn validate_applications(program: &Program) -> Result<(), ParamRuleError> {
+    use dsl_ast::ast::{ApplyArgValue, ParamType};
+    use std::collections::HashSet;
+
+    let catalog = build_param_rule_catalog(program);
+    let entity_names: HashSet<String> = program.decls.iter().filter_map(|d| {
+        if let Decl::Entity(e) = d { Some(e.name.clone()) } else { None }
+    }).collect();
+
+    for decl in &program.decls {
+        if let Decl::PhysicsApply(apply) = decl {
+            let rule = catalog.get(&apply.template).ok_or_else(|| {
+                ParamRuleError::UnknownParameterisedRule {
+                    name: apply.template.clone(),
+                    site: apply.name.clone(),
+                }
+            })?;
+
+            // Missing / extra / duplicate arg names.
+            let expected_names: HashSet<&str> =
+                rule.params.iter().map(|p| p.name.as_str()).collect();
+            let mut provided_names: HashSet<&str> = HashSet::new();
+            let mut duplicates: Vec<String> = Vec::new();
+            for arg in &apply.args {
+                if !provided_names.insert(arg.name.as_str()) {
+                    duplicates.push(arg.name.clone());
+                }
+            }
+            let missing: Vec<String> = rule.params.iter()
+                .filter(|p| !provided_names.contains(p.name.as_str()))
+                .map(|p| p.name.clone())
+                .collect();
+            let extra: Vec<String> = apply.args.iter()
+                .filter(|a| !expected_names.contains(a.name.as_str()))
+                .map(|a| a.name.clone())
+                .collect();
+            if !missing.is_empty() || !extra.is_empty() || !duplicates.is_empty() {
+                return Err(ParamRuleError::ApplicationParamMismatch {
+                    rule: apply.template.clone(),
+                    missing,
+                    extra,
+                    duplicates,
+                });
+            }
+
+            // Per-arg type check.
+            for arg in &apply.args {
+                let param = rule.params.iter()
+                    .find(|p| p.name == arg.name)
+                    .expect("missing/extra already checked");
+
+                let (matches, actual_kind) = match (&param.ty, &arg.value) {
+                    (ParamType::F32, ApplyArgValue::F32(_)) => (true, "f32"),
+                    (ParamType::F32, ApplyArgValue::I32(_)) => (true, "i32→f32"),
+                    (ParamType::F32, ApplyArgValue::U32(_)) => (true, "u32→f32"),
+                    (ParamType::I32, ApplyArgValue::I32(_)) => (true, "i32"),
+                    (ParamType::U32, ApplyArgValue::U32(_)) => (true, "u32"),
+                    (ParamType::U32, ApplyArgValue::I32(v)) if *v >= 0 => (true, "i32→u32"),
+                    (ParamType::Bool, ApplyArgValue::Bool(_)) => (true, "bool"),
+                    (ParamType::EntityKind, ApplyArgValue::EntityKind(name)) => {
+                        if !entity_names.contains(name) {
+                            return Err(ParamRuleError::UnknownEntityKind {
+                                rule: rule.name.clone(),
+                                param: param.name.clone(),
+                                name: name.clone(),
+                            });
+                        }
+                        (true, "EntityKind")
+                    }
+                    (_, ApplyArgValue::F32(_)) => (false, "f32"),
+                    (_, ApplyArgValue::I32(_)) => (false, "i32"),
+                    (_, ApplyArgValue::U32(_)) => (false, "u32"),
+                    (_, ApplyArgValue::Bool(_)) => (false, "bool"),
+                    (_, ApplyArgValue::EntityKind(_)) => (false, "EntityKind"),
+                };
+                if !matches {
+                    return Err(ParamRuleError::ApplicationTypeMismatch {
+                        rule: rule.name.clone(),
+                        param: param.name.clone(),
+                        expected: format!("{:?}", param.ty),
+                        actual_kind,
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
+}
