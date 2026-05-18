@@ -108,8 +108,12 @@ pub fn monomorphise(program: &mut Program) -> Result<(), ParamRuleError> {
         });
     }
 
-    // Remove all PhysicsApply decls, then append the new concrete rules.
-    program.decls.retain(|d| !matches!(d, Decl::PhysicsApply(_)));
+    // Remove all PhysicsApply decls and parameterised templates, then append the new concrete rules.
+    program.decls.retain(|d| match d {
+        Decl::PhysicsApply(_) => false,
+        Decl::Physics(p) if !p.params.is_empty() => false,  // strip parameterised templates
+        _ => true,
+    });
     for d in new_decls {
         program.decls.push(Decl::Physics(d));
     }
