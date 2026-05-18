@@ -1,7 +1,7 @@
 //! Validation + monomorphisation pass for parameterised rules.
 //! See `docs/superpowers/specs/2026-05-17-parameterised-rules-design.md`.
 
-use dsl_ast::ast::{Decl, PhysicsDecl, Program};
+use dsl_ast::ast::{Decl, PhysicsApplyDecl, PhysicsDecl, PhysicsHandler, Program};
 use std::collections::HashMap;
 
 #[derive(Debug)]
@@ -67,6 +67,53 @@ pub fn build_param_rule_catalog(program: &Program) -> HashMap<String, &PhysicsDe
         }
     }
     catalog
+}
+
+/// Walk applications, substitute param references in the template body
+/// with the application's arg values, and push the resulting concrete
+/// rule into `program.decls`. Removes all `Decl::PhysicsApply` decls
+/// after processing.
+pub fn monomorphise(program: &mut Program) -> Result<(), ParamRuleError> {
+    // First, validate all applications.
+    validate_applications(program)?;
+
+    // Build the catalog: clone parameterised rules so we can mutate program.decls.
+    let catalog: HashMap<String, PhysicsDecl> = program.decls.iter().filter_map(|d| match d {
+        Decl::Physics(p) if !p.params.is_empty() => Some((p.name.clone(), p.clone())),
+        _ => None,
+    }).collect();
+
+    // Collect all applications.
+    let applications: Vec<PhysicsApplyDecl> = program.decls.iter().filter_map(|d| match d {
+        Decl::PhysicsApply(a) => Some(a.clone()),
+        _ => None,
+    }).collect();
+
+    // Build new concrete rules.
+    let mut new_decls: Vec<PhysicsDecl> = Vec::with_capacity(applications.len());
+    for apply in &applications {
+        let template = catalog.get(&apply.template).expect("validated above");
+        // TODO(param-rules-v2): substitute param refs in handler bodies with literal
+        // values. v1 clones the template body unchanged. Once a fixture actually
+        // uses param refs inside a body, the substitution pass becomes necessary
+        // for correct emit.
+        let handlers: Vec<PhysicsHandler> = template.handlers.clone();
+        new_decls.push(PhysicsDecl {
+            annotations: template.annotations.clone(),
+            name: apply.name.clone(),
+            params: Vec::new(), // concrete rule — no params
+            handlers,
+            cpu_only: template.cpu_only,
+            span: apply.span,
+        });
+    }
+
+    // Remove all PhysicsApply decls, then append the new concrete rules.
+    program.decls.retain(|d| !matches!(d, Decl::PhysicsApply(_)));
+    for d in new_decls {
+        program.decls.push(Decl::Physics(d));
+    }
+    Ok(())
 }
 
 /// Validates every `Decl::PhysicsApply` against its parameterised rule.
