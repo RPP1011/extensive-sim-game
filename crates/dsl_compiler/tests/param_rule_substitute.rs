@@ -121,3 +121,123 @@ fn apply_arg_to_expr_kind_covers_all_variants() {
     let wolf = ApplyArgValue::EntityKind("Wolf".into());
     assert!(matches!(apply_arg_to_expr_kind(&wolf), ExprKind::Ident(_)));
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Stmt-level tests (BS-T2)
+// ────────────────────────────────────────────────────────────────────────────
+use dsl_compiler::lower::param_rules::substitute_stmt;
+use dsl_ast::ast::Stmt;
+
+#[test]
+fn let_stmt_substitutes_in_value() {
+    let stmt = Stmt::Let {
+        name: "x".into(),
+        value: ident("aggro"),
+        span: Span::dummy(),
+    };
+    let item = ("aggro", ApplyArgValue::F32(15.0));
+    let args = args_map(std::slice::from_ref(&item));
+    let out = substitute_stmt(&stmt, &args);
+    match out {
+        Stmt::Let { value, .. } => assert!(matches!(value.kind, ExprKind::Float(15.0))),
+        other => panic!("expected Let, got {other:?}"),
+    }
+}
+
+#[test]
+fn for_each_agent_binder_does_not_shadow_unrelated_param() {
+    // for_each_agent a { let _ = aggro; } — `a` doesn't match `aggro`, so
+    // `aggro` substitutes normally.
+    let stmt = Stmt::ForEachAgent {
+        binder: "a".into(),
+        body: vec![Stmt::Let {
+            name: "_".into(),
+            value: ident("aggro"),
+            span: Span::dummy(),
+        }],
+        span: Span::dummy(),
+    };
+    let item = ("aggro", ApplyArgValue::F32(15.0));
+    let args = args_map(std::slice::from_ref(&item));
+    let out = substitute_stmt(&stmt, &args);
+    match out {
+        Stmt::ForEachAgent { body, .. } => match &body[0] {
+            Stmt::Let { value, .. } => assert!(matches!(value.kind, ExprKind::Float(15.0))),
+            other => panic!("expected inner Let, got {other:?}"),
+        }
+        other => panic!("expected ForEachAgent, got {other:?}"),
+    }
+}
+
+#[test]
+fn for_each_agent_binder_shadows_matching_param() {
+    // for_each_agent aggro { let _ = aggro; } — inner `aggro` is the binder.
+    let stmt = Stmt::ForEachAgent {
+        binder: "aggro".into(),
+        body: vec![Stmt::Let {
+            name: "_".into(),
+            value: ident("aggro"),
+            span: Span::dummy(),
+        }],
+        span: Span::dummy(),
+    };
+    let item = ("aggro", ApplyArgValue::F32(15.0));
+    let args = args_map(std::slice::from_ref(&item));
+    let out = substitute_stmt(&stmt, &args);
+    match out {
+        Stmt::ForEachAgent { body, .. } => match &body[0] {
+            Stmt::Let { value, .. } => assert!(matches!(value.kind, ExprKind::Ident(ref s) if s == "aggro"),
+                                               "binder should shadow param"),
+            other => panic!("expected inner Let, got {other:?}"),
+        }
+        other => panic!("expected ForEachAgent, got {other:?}"),
+    }
+}
+
+#[test]
+fn if_stmt_substitutes_in_cond_and_bodies() {
+    let stmt = Stmt::If {
+        cond: Expr {
+            kind: ExprKind::Binary {
+                op: BinOp::Gt,
+                lhs: Box::new(ident("aggro")),
+                rhs: Box::new(float_lit(0.0)),
+            },
+            span: Span::dummy(),
+        },
+        then_body: vec![Stmt::Let {
+            name: "_".into(),
+            value: ident("aggro"),
+            span: Span::dummy(),
+        }],
+        else_body: Some(vec![Stmt::Let {
+            name: "_".into(),
+            value: ident("aggro"),
+            span: Span::dummy(),
+        }]),
+        span: Span::dummy(),
+    };
+    let item = ("aggro", ApplyArgValue::F32(15.0));
+    let args = args_map(std::slice::from_ref(&item));
+    let out = substitute_stmt(&stmt, &args);
+    match out {
+        Stmt::If { cond, then_body, else_body, .. } => {
+            match cond.kind {
+                ExprKind::Binary { lhs, .. } =>
+                    assert!(matches!(lhs.kind, ExprKind::Float(15.0))),
+                _ => panic!("cond should be Binary"),
+            }
+            match &then_body[0] {
+                Stmt::Let { value, .. } =>
+                    assert!(matches!(value.kind, ExprKind::Float(15.0))),
+                _ => panic!("then_body[0] should be Let"),
+            }
+            match &else_body.as_ref().unwrap()[0] {
+                Stmt::Let { value, .. } =>
+                    assert!(matches!(value.kind, ExprKind::Float(15.0))),
+                _ => panic!("else_body[0] should be Let"),
+            }
+        }
+        other => panic!("expected If, got {other:?}"),
+    }
+}

@@ -372,3 +372,98 @@ pub fn substitute_expr<'a>(expr: &Expr, args: &HashMap<&'a str, ApplyArgValue>) 
     };
     Expr { kind: new_kind, span: expr.span }
 }
+
+/// Substitute parameter references in a statement tree with the applied arg
+/// values. Binder-introducing constructs (`For`, `ForEachAgent`) shadow params
+/// by removing the binder name from the map before recursing into the body.
+pub fn substitute_stmt<'a>(stmt: &dsl_ast::ast::Stmt, args: &HashMap<&'a str, ApplyArgValue>) -> dsl_ast::ast::Stmt {
+    use dsl_ast::ast::{Stmt, EmitStmt, FieldInit, MatchArm, BeliefObserveStmt, ApplyAbilityStmt};
+    match stmt {
+        Stmt::Let { name, value, span } => Stmt::Let {
+            name: name.clone(),
+            value: substitute_expr(value, args),
+            span: *span,
+        },
+        Stmt::Emit(es) => Stmt::Emit(EmitStmt {
+            event_name: es.event_name.clone(),
+            fields: es.fields.iter().map(|fi| FieldInit {
+                name: fi.name.clone(),
+                value: substitute_expr(&fi.value, args),
+                span: fi.span,
+            }).collect(),
+            span: es.span,
+        }),
+        Stmt::For { binder, iter, filter, body, span } => {
+            let new_iter = substitute_expr(iter, args);
+            let new_filter = filter.as_ref().map(|f| substitute_expr(f, args));
+            let mut inner_args = args.clone();
+            inner_args.remove(binder.as_str());
+            let new_body = body.iter().map(|s| substitute_stmt(s, &inner_args)).collect();
+            Stmt::For {
+                binder: binder.clone(),
+                iter: new_iter,
+                filter: new_filter,
+                body: new_body,
+                span: *span,
+            }
+        }
+        Stmt::ForEachAgent { binder, body, span } => {
+            let mut inner_args = args.clone();
+            inner_args.remove(binder.as_str());
+            let new_body = body.iter().map(|s| substitute_stmt(s, &inner_args)).collect();
+            Stmt::ForEachAgent {
+                binder: binder.clone(),
+                body: new_body,
+                span: *span,
+            }
+        }
+        Stmt::If { cond, then_body, else_body, span } => Stmt::If {
+            cond: substitute_expr(cond, args),
+            then_body: then_body.iter().map(|s| substitute_stmt(s, args)).collect(),
+            else_body: else_body.as_ref().map(|eb|
+                eb.iter().map(|s| substitute_stmt(s, args)).collect()
+            ),
+            span: *span,
+        },
+        Stmt::Match { scrutinee, arms, span } => Stmt::Match {
+            scrutinee: substitute_expr(scrutinee, args),
+            arms: arms.iter().map(|a| MatchArm {
+                pattern: a.pattern.clone(),
+                body: a.body.iter().map(|s| substitute_stmt(s, args)).collect(),
+                span: a.span,
+            }).collect(),
+            span: *span,
+        },
+        Stmt::SelfUpdate { op, value, span } => Stmt::SelfUpdate {
+            op: op.clone(),
+            value: substitute_expr(value, args),
+            span: *span,
+        },
+        Stmt::SelfAppend { fields, span } => Stmt::SelfAppend {
+            fields: fields.iter().map(|fi| FieldInit {
+                name: fi.name.clone(),
+                value: substitute_expr(&fi.value, args),
+                span: fi.span,
+            }).collect(),
+            span: *span,
+        },
+        Stmt::Expr(e) => Stmt::Expr(substitute_expr(e, args)),
+        Stmt::BeliefObserve(b) => Stmt::BeliefObserve(BeliefObserveStmt {
+            observer: b.observer.clone(),
+            target: b.target.clone(),
+            fields: b.fields.iter().map(|fi| FieldInit {
+                name: fi.name.clone(),
+                value: substitute_expr(&fi.value, args),
+                span: fi.span,
+            }).collect(),
+            span: b.span,
+        }),
+        Stmt::ApplyAbility(a) => Stmt::ApplyAbility(ApplyAbilityStmt {
+            ability: substitute_expr(&a.ability, args),
+            ability_name: a.ability_name.clone(),
+            caster: a.caster.as_ref().map(|c| substitute_expr(c, args)),
+            target: a.target.as_ref().map(|t| substitute_expr(t, args)),
+            span: a.span,
+        }),
+    }
+}
