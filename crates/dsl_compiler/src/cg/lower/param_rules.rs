@@ -93,11 +93,19 @@ pub fn monomorphise(program: &mut Program) -> Result<(), ParamRuleError> {
     let mut new_decls: Vec<PhysicsDecl> = Vec::with_capacity(applications.len());
     for apply in &applications {
         let template = catalog.get(&apply.template).expect("validated above");
-        // TODO(param-rules-v2): substitute param refs in handler bodies with literal
-        // values. v1 clones the template body unchanged. Once a fixture actually
-        // uses param refs inside a body, the substitution pass becomes necessary
-        // for correct emit.
-        let handlers: Vec<PhysicsHandler> = template.handlers.clone();
+        // Build the per-decl substitution map.
+        let arg_map: HashMap<&str, ApplyArgValue> = apply.args.iter()
+            .map(|a| (a.name.as_str(), a.value.clone()))
+            .collect();
+        // Substitute param refs in every handler's where_clause + body.
+        let handlers: Vec<PhysicsHandler> = template.handlers.iter().map(|h| {
+            PhysicsHandler {
+                pattern: h.pattern.clone(),
+                where_clause: h.where_clause.as_ref().map(|w| substitute_expr(w, &arg_map)),
+                body: h.body.iter().map(|s| substitute_stmt(s, &arg_map)).collect(),
+                span: h.span,
+            }
+        }).collect();
         new_decls.push(PhysicsDecl {
             annotations: template.annotations.clone(),
             name: apply.name.clone(),

@@ -78,3 +78,63 @@ physics HunterChase = chase(target: Wolf, aggro: 15.0);
     assert!(names.contains(&"HunterChase"), "concrete rule present");
     assert!(!names.contains(&"chase"), "template should be stripped after mono; got: {:?}", names);
 }
+
+use dsl_ast::ast::ExprKind;
+
+#[test]
+fn monomorphise_substitutes_param_refs_in_body() {
+    // The template body uses `aggro` and `target` directly. After
+    // monomorphisation, the concrete rule's body should contain literal
+    // 15.0 (for aggro) and Ident("Wolf") (for target), NOT the original
+    // Ident("aggro") / Ident("target").
+    let src = r#"
+entity Wolf : Agent {}
+
+physics chase(target: EntityKind, aggro: f32) @phase(per_agent) {
+  on Tick {} {
+    let aggro_squared = aggro * aggro;
+    let target_kind = target;
+  }
+}
+
+physics HunterChase = chase(target: Wolf, aggro: 15.0);
+"#;
+    let mut program = parse(src).expect("parse");
+    monomorphise(&mut program).expect("ok");
+
+    let hunter = program.decls.iter().find_map(|d| match d {
+        Decl::Physics(p) if p.name == "HunterChase" => Some(p),
+        _ => None,
+    }).expect("HunterChase should exist");
+
+    let body = &hunter.handlers[0].body;
+    // First stmt: let aggro_squared = aggro * aggro
+    let first = &body[0];
+    match first {
+        dsl_ast::ast::Stmt::Let { name, value, .. } => {
+            assert_eq!(name, "aggro_squared");
+            match &value.kind {
+                ExprKind::Binary { lhs, rhs, .. } => {
+                    assert!(matches!(lhs.kind, ExprKind::Float(15.0)),
+                            "lhs should be Float(15.0), got {:?}", lhs.kind);
+                    assert!(matches!(rhs.kind, ExprKind::Float(15.0)),
+                            "rhs should be Float(15.0), got {:?}", rhs.kind);
+                }
+                other => panic!("expected Binary, got {other:?}"),
+            }
+        }
+        other => panic!("expected first stmt to be Let, got {other:?}"),
+    }
+    // Second stmt: let target_kind = target → Ident("Wolf").
+    let second = &body[1];
+    match second {
+        dsl_ast::ast::Stmt::Let { name, value, .. } => {
+            assert_eq!(name, "target_kind");
+            match &value.kind {
+                ExprKind::Ident(s) => assert_eq!(s, "Wolf"),
+                other => panic!("expected Ident, got {other:?}"),
+            }
+        }
+        other => panic!("expected second stmt to be Let, got {other:?}"),
+    }
+}
