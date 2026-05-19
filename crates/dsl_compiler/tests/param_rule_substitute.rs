@@ -241,3 +241,40 @@ fn if_stmt_substitutes_in_cond_and_bodies() {
         other => panic!("expected If, got {other:?}"),
     }
 }
+
+#[test]
+fn for_filter_uses_binder_shadowed_args() {
+    // for aggro in foo where aggro > 0 { let _ = aggro; }
+    // The `aggro` in the where clause is the BINDER, not the param.
+    // Substitution must NOT replace it with the literal.
+    let stmt = Stmt::For {
+        binder: "aggro".into(),
+        iter: ident("foo"),
+        filter: Some(Expr {
+            kind: ExprKind::Binary {
+                op: BinOp::Gt,
+                lhs: Box::new(ident("aggro")),  // binder use, NOT param
+                rhs: Box::new(Expr { kind: ExprKind::Int(0), span: Span::dummy() }),
+            },
+            span: Span::dummy(),
+        }),
+        body: vec![],
+        span: Span::dummy(),
+    };
+    let item = ("aggro", ApplyArgValue::F32(15.0));
+    let args = args_map(std::slice::from_ref(&item));
+    let out = substitute_stmt(&stmt, &args);
+    match out {
+        Stmt::For { filter, .. } => {
+            let filter = filter.expect("filter present");
+            match filter.kind {
+                ExprKind::Binary { lhs, .. } => {
+                    assert!(matches!(lhs.kind, ExprKind::Ident(ref s) if s == "aggro"),
+                            "filter's `aggro` is the binder, should NOT be substituted; got {:?}", lhs.kind);
+                }
+                other => panic!("expected Binary, got {other:?}"),
+            }
+        }
+        other => panic!("expected For, got {other:?}"),
+    }
+}

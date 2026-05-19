@@ -403,9 +403,9 @@ pub fn substitute_stmt<'a>(stmt: &dsl_ast::ast::Stmt, args: &HashMap<&'a str, Ap
         }),
         Stmt::For { binder, iter, filter, body, span } => {
             let new_iter = substitute_expr(iter, args);
-            let new_filter = filter.as_ref().map(|f| substitute_expr(f, args));
             let mut inner_args = args.clone();
             inner_args.remove(binder.as_str());
+            let new_filter = filter.as_ref().map(|f| substitute_expr(f, &inner_args));
             let new_body = body.iter().map(|s| substitute_stmt(s, &inner_args)).collect();
             Stmt::For {
                 binder: binder.clone(),
