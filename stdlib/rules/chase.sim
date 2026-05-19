@@ -2,12 +2,18 @@
 // Imported via `import std/rules/chase.sim;` and applied via
 // `physics MyChase = chase(target: SomeEntity, aggro: 10.0, speed: 1.0);`.
 //
-// NOTE: The body is intentionally empty. Body-substitution of param refs
-// (aggro, speed, target) inside cloned handler bodies is deferred to T8 v2.
-// This template tests the structural pass (parse → validate → monomorphise
-// → emit two distinct concrete kernels) without requiring body-substitution.
+// After monomorphisation each apply site gets a fully-substituted body
+// with literal values baked in — the emitted WGSL kernel contains the
+// constants directly (e.g. aggro*aggro folds to 225.0 for aggro=15.0).
 
 physics chase(target: EntityKind, aggro: f32, speed: f32) @phase(per_agent) {
   on Tick {} {
+    // Param refs (aggro / target / speed) become literal values via
+    // monomorphisation. The body below uses simple bindings that exist
+    // in the DSL today — fancier nearest-target / move-toward logic
+    // is left to the user to extend per-fixture.
+    let _aggro_squared = aggro * aggro;
+    let _target_kind   = target;
+    let _move_speed    = speed;
   }
 }
