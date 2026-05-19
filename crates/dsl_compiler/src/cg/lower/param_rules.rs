@@ -1,7 +1,7 @@
 //! Validation + monomorphisation pass for parameterised rules.
 //! See `docs/superpowers/specs/2026-05-17-parameterised-rules-design.md`.
 
-use dsl_ast::ast::{Decl, PhysicsApplyDecl, PhysicsDecl, PhysicsHandler, Program};
+use dsl_ast::ast::{ApplyArgValue, Decl, Expr, ExprKind, PhysicsApplyDecl, PhysicsDecl, PhysicsHandler, Program};
 use std::collections::HashMap;
 
 #[derive(Debug)]
@@ -122,7 +122,7 @@ pub fn monomorphise(program: &mut Program) -> Result<(), ParamRuleError> {
 
 /// Validates every `Decl::PhysicsApply` against its parameterised rule.
 pub fn validate_applications(program: &Program) -> Result<(), ParamRuleError> {
-    use dsl_ast::ast::{ApplyArgValue, ParamType};
+    use dsl_ast::ast::ParamType;
     use std::collections::HashSet;
 
     let catalog = build_param_rule_catalog(program);
@@ -208,4 +208,167 @@ pub fn validate_applications(program: &Program) -> Result<(), ParamRuleError> {
         }
     }
     Ok(())
+}
+
+/// Convert an `ApplyArgValue` into the corresponding `ExprKind` literal.
+/// Used by `substitute_expr` when it finds an `Ident` matching a param name.
+///
+/// EntityKind args become `Ident(<entity_name>)` — the resolver will later
+/// bind the entity name to its decl just like any other entity reference.
+pub fn apply_arg_to_expr_kind(value: &ApplyArgValue) -> ExprKind {
+    match value {
+        ApplyArgValue::F32(v) => ExprKind::Float(*v as f64),
+        ApplyArgValue::I32(v) => ExprKind::Int(*v as i64),
+        ApplyArgValue::U32(v) => ExprKind::Int(*v as i64),
+        ApplyArgValue::Bool(v) => ExprKind::Bool(*v),
+        ApplyArgValue::EntityKind(name) => ExprKind::Ident(name.clone()),
+    }
+}
+
+/// Substitute parameter references in an expression tree with the applied
+/// arg values. Binder-introducing constructs (Quantifier / Fold / Block)
+/// shadow params by removing the binder name from the map before recursing
+/// into the body.
+pub fn substitute_expr<'a>(expr: &Expr, args: &HashMap<&'a str, ApplyArgValue>) -> Expr {
+    let new_kind = match &expr.kind {
+        // ----- Base cases: literals are unchanged. -----
+        ExprKind::Int(v)    => ExprKind::Int(*v),
+        ExprKind::Float(v)  => ExprKind::Float(*v),
+        ExprKind::Bool(v)   => ExprKind::Bool(*v),
+        ExprKind::String(s) => ExprKind::String(s.clone()),
+
+        // ----- THE substitution point. -----
+        ExprKind::Ident(name) => {
+            if let Some(value) = args.get(name.as_str()) {
+                apply_arg_to_expr_kind(value)
+            } else {
+                ExprKind::Ident(name.clone())
+            }
+        }
+
+        // ----- Pure-recursive variants. -----
+        ExprKind::Field(inner, field) => ExprKind::Field(
+            Box::new(substitute_expr(inner, args)),
+            field.clone(),
+        ),
+        ExprKind::Index(a, b) => ExprKind::Index(
+            Box::new(substitute_expr(a, args)),
+            Box::new(substitute_expr(b, args)),
+        ),
+        ExprKind::Call(callee, call_args) => ExprKind::Call(
+            Box::new(substitute_expr(callee, args)),
+            call_args.iter().map(|ca| dsl_ast::ast::CallArg {
+                name: ca.name.clone(),
+                value: substitute_expr(&ca.value, args),
+                span: ca.span,
+            }).collect(),
+        ),
+        ExprKind::Binary { op, lhs, rhs } => ExprKind::Binary {
+            op: *op,
+            lhs: Box::new(substitute_expr(lhs, args)),
+            rhs: Box::new(substitute_expr(rhs, args)),
+        },
+        ExprKind::Unary { op, rhs } => ExprKind::Unary {
+            op: *op,
+            rhs: Box::new(substitute_expr(rhs, args)),
+        },
+        ExprKind::In { item, set } => ExprKind::In {
+            item: Box::new(substitute_expr(item, args)),
+            set: Box::new(substitute_expr(set, args)),
+        },
+        ExprKind::Contains { set, item } => ExprKind::Contains {
+            set: Box::new(substitute_expr(set, args)),
+            item: Box::new(substitute_expr(item, args)),
+        },
+        ExprKind::List(items) => ExprKind::List(
+            items.iter().map(|e| substitute_expr(e, args)).collect()
+        ),
+        ExprKind::Tuple(items) => ExprKind::Tuple(
+            items.iter().map(|e| substitute_expr(e, args)).collect()
+        ),
+        ExprKind::Struct { name, fields } => ExprKind::Struct {
+            name: name.clone(),
+            fields: fields.iter().map(|fi| dsl_ast::ast::FieldInit {
+                name: fi.name.clone(),
+                value: substitute_expr(&fi.value, args),
+                span: fi.span,
+            }).collect(),
+        },
+        ExprKind::Ctor { name, args: ctor_args } => ExprKind::Ctor {
+            name: name.clone(),
+            args: ctor_args.iter().map(|e| substitute_expr(e, args)).collect(),
+        },
+        ExprKind::Match { scrutinee, arms } => ExprKind::Match {
+            scrutinee: Box::new(substitute_expr(scrutinee, args)),
+            arms: arms.iter().map(|a| dsl_ast::ast::MatchExprArm {
+                pattern: a.pattern.clone(),
+                body: substitute_expr(&a.body, args),
+                span: a.span,
+            }).collect(),
+        },
+        ExprKind::If { cond, then_expr, else_expr } => ExprKind::If {
+            cond: Box::new(substitute_expr(cond, args)),
+            then_expr: Box::new(substitute_expr(then_expr, args)),
+            else_expr: else_expr.as_ref().map(|e| Box::new(substitute_expr(e, args))),
+        },
+        ExprKind::PerUnit { expr: inner, delta } => ExprKind::PerUnit {
+            expr: Box::new(substitute_expr(inner, args)),
+            delta: Box::new(substitute_expr(delta, args)),
+        },
+        ExprKind::BeliefsAccessor { observer, target, field } => ExprKind::BeliefsAccessor {
+            observer: Box::new(substitute_expr(observer, args)),
+            target: Box::new(substitute_expr(target, args)),
+            field: field.clone(),
+        },
+        ExprKind::BeliefsConfidence { observer, target } => ExprKind::BeliefsConfidence {
+            observer: Box::new(substitute_expr(observer, args)),
+            target: Box::new(substitute_expr(target, args)),
+        },
+        ExprKind::BeliefsView { observer, view_name } => ExprKind::BeliefsView {
+            observer: Box::new(substitute_expr(observer, args)),
+            view_name: view_name.clone(),
+        },
+
+        // ----- Binder-introducing variants (shadow params). -----
+        ExprKind::Quantifier { kind, binder, iter, body } => {
+            let new_iter = substitute_expr(iter, args);
+            let mut inner_args = args.clone();
+            inner_args.remove(binder.as_str());
+            let new_body = substitute_expr(body, &inner_args);
+            ExprKind::Quantifier {
+                kind: *kind,
+                binder: binder.clone(),
+                iter: Box::new(new_iter),
+                body: Box::new(new_body),
+            }
+        }
+        ExprKind::Fold { kind, binder, iter, body } => {
+            let new_iter = iter.as_ref().map(|i| Box::new(substitute_expr(i, args)));
+            let mut inner_args = args.clone();
+            if let Some(b) = binder.as_ref() {
+                inner_args.remove(b.as_str());
+            }
+            let new_body = substitute_expr(body, &inner_args);
+            ExprKind::Fold {
+                kind: *kind,
+                binder: binder.clone(),
+                iter: new_iter,
+                body: Box::new(new_body),
+            }
+        }
+        ExprKind::Block { bindings, expr: tail } => {
+            let mut inner_args = args.clone();
+            let new_bindings: Vec<(String, Expr)> = bindings.iter().map(|(name, value)| {
+                let new_value = substitute_expr(value, &inner_args);
+                inner_args.remove(name.as_str());
+                (name.clone(), new_value)
+            }).collect();
+            let new_tail = substitute_expr(tail, &inner_args);
+            ExprKind::Block {
+                bindings: new_bindings,
+                expr: Box::new(new_tail),
+            }
+        }
+    };
+    Expr { kind: new_kind, span: expr.span }
 }
