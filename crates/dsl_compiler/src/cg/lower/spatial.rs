@@ -173,11 +173,15 @@ pub fn lower_spatial_queries(
         //     into 256-cell scan chunks (`PerScanChunk`).
         //   - ScanCarry is a tiny serial fix-up (~42 entries for
         //     boids' 10 648-cell grid) and runs single-threaded.
-        // Every other spatial-query kind is per-agent today.
+        // BuildHashScatter dispatches OneShot: a single thread iterates
+        // agents in agent_id order so intra-cell slot assignments are
+        // monotonic, making per_agent_u32 RNG inputs deterministic.
+        // Every other spatial-query kind is per-agent.
         let shape = match kind {
             SpatialQueryKind::BuildHashScanLocal
             | SpatialQueryKind::BuildHashScanAdd => DispatchShape::PerScanChunk,
-            SpatialQueryKind::BuildHashScanCarry => DispatchShape::OneShot,
+            SpatialQueryKind::BuildHashScanCarry
+            | SpatialQueryKind::BuildHashScatter => DispatchShape::OneShot,
             _ => DispatchShape::PerAgent,
         };
         let op_id = ctx

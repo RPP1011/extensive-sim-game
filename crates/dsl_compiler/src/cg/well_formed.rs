@@ -524,7 +524,7 @@ fn allowed_shapes_for_kind(kind: &ComputeOpKind) -> &'static [DispatchShapeLabel
             SpatialQueryKind::BuildHashScanLocal => &[DispatchShapeLabel::PerScanChunk],
             SpatialQueryKind::BuildHashScanCarry => &[DispatchShapeLabel::OneShot],
             SpatialQueryKind::BuildHashScanAdd => &[DispatchShapeLabel::PerScanChunk],
-            SpatialQueryKind::BuildHashScatter => &[DispatchShapeLabel::PerAgent],
+            SpatialQueryKind::BuildHashScatter => &[DispatchShapeLabel::OneShot],
         },
         // Plumbing kinds each have a single canonical dispatch shape,
         // pinned by `PlumbingKind::dispatch_shape`. The well-formed

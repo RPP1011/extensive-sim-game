@@ -178,8 +178,8 @@ struct SortCfg {{ target_word_offset: u32, agent_cap: u32, _pad0: u32, _pad1: u3
 fn radix_stage_b_scatter(@builtin(local_invocation_id) lid: vec3<u32>) {{
     let count = atomicLoad(&event_tail);
     for (var tid = 0u; tid < count; tid = tid + 1u) {{
-        let target = atomicLoad(&event_ring_in[tid * {stride}u + cfg.target_word_offset]);
-        let bucket = select(target, cfg.agent_cap, target >= cfg.agent_cap);
+        let tgt = atomicLoad(&event_ring_in[tid * {stride}u + cfg.target_word_offset]);
+        let bucket = select(tgt, cfg.agent_cap, tgt >= cfg.agent_cap);
         let intra = atomicAdd(&target_histogram[bucket], 1u);
         let dst = target_offsets[bucket] + intra;
         for (var w = 0u; w < {stride}u; w = w + 1u) {{

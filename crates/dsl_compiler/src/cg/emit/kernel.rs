@@ -4989,16 +4989,20 @@ fn spatial_build_hash_scan_add_body() -> String {
 
 /// Real counting sort, **phase 3** (`SpatialQueryKind::BuildHashScatter`).
 ///
-/// Per-agent dispatch: each agent computes its cell again, claims a
-/// per-cell slot via `atomicAdd(&offsets[cell], 1u)` (offsets reset
-/// to zero by phase 2; here it acts as a write cursor in
-/// `[0 .. count)`), then writes its id at the absolute slot
-/// `starts[cell] + local_slot` in `spatial_grid_cells`. After this
-/// kernel `spatial_grid_cells` holds every agent id grouped by cell.
+/// OneShot dispatch: a single thread iterates all agents in agent_id
+/// order. Each agent computes its cell, claims a per-cell slot via
+/// `atomicAdd(&offsets[cell], 1u)` (offsets reset to zero by phase 2;
+/// here it acts as a write cursor in `[0 .. count)`), then writes its
+/// id at the absolute slot `starts[cell] + local_slot` in
+/// `spatial_grid_cells`. After this kernel `spatial_grid_cells` holds
+/// every agent id grouped by cell, with intra-cell order monotonic in
+/// agent_id — making downstream per_agent_u32 RNG inputs deterministic.
 const SPATIAL_BUILD_HASH_SCATTER_BODY: &str =
-    "let cell = pos_to_cell(agent_pos[agent_id]);\n\
-     let local_slot = atomicAdd(&spatial_grid_offsets[cell], 1u);\n\
-     spatial_grid_cells[spatial_grid_starts[cell] + local_slot] = agent_id;";
+    "for (var agent_id = 0u; agent_id < cfg.agent_cap; agent_id = agent_id + 1u) {\n\
+     \x20   let cell = pos_to_cell(agent_pos[agent_id]);\n\
+     \x20   let local_slot = atomicAdd(&spatial_grid_offsets[cell], 1u);\n\
+     \x20   spatial_grid_cells[spatial_grid_starts[cell] + local_slot] = agent_id;\n\
+     }";
 
 /// WGSL body template for [`SpatialQueryKind::FilteredWalk`].
 ///
