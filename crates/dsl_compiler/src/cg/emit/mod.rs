@@ -76,6 +76,7 @@ pub mod program;
 /// the kernel-side WGSL prelude; runtime crates consume `cells_bytes`
 /// / `offsets_bytes` / `num_cells` to size their `wgpu::Buffer`s.
 pub mod spatial;
+pub(crate) mod sort_kernel;
 pub mod terrain;
 pub mod wgsl_body;
 
