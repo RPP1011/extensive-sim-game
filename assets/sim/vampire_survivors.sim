@@ -61,6 +61,15 @@ config vs {
   nova_damage_per_level: f32 = 1.0,
   bolt_cap:           f32 = 5.0,
   nova_cap:           f32 = 5.0,
+  // --- Phase A: spawner role + wave ramp ---
+  spawner_mana_min:   f32 = 2.5,
+  spawner_mana_max:   f32 = 3.5,
+  wave_period:        u32 = 30,
+  small_to_medium:    u32 = 1000,
+  medium_to_large:    u32 = 2500,
+  large_to_horde:     u32 = 4000,
+  enemy_spawn_hp:     f32 = 12.0,
+  enemy_lifetime:     u32 = 0,
 }
 
 @spatial(radius = config.vs.perception_radius, kind = [Agent])
