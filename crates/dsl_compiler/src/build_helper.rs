@@ -1307,6 +1307,17 @@ pub fn detect_pair_keyed_second_key(
 /// or `None` when no such view exists. The layout carries the record stride
 /// used to size the sort scratch buffer and the field map used to find the
 /// `target` word offset for `SortCfg`.
+/// Returns `true` when `cg` contains at least one `ViewFold` op whose view
+/// has an f32 result type and an Add or Sub fold operator — the condition
+/// that triggers sort-kernel injection.
+///
+/// Exposed for integration tests that compile a CG program directly (without
+/// going through a build.rs `emit` call) and want to assert whether the 15
+/// radix sort kernels would be injected for that fixture.
+pub fn fixture_needs_sort_kernels(cg: &crate::cg::program::CgProgram) -> bool {
+    sort_layout_for_fixture(cg).is_some()
+}
+
 fn sort_layout_for_fixture(
     cg: &crate::cg::program::CgProgram,
 ) -> Option<crate::cg::program::EventLayout> {
