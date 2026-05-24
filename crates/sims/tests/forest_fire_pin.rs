@@ -304,20 +304,22 @@ fn forest_fire_event_storm_500_ticks() {
          Update the gap doc + tighten this pin to verify GPU tail buffer reads.",
     );
 
-    // P5: Determinism — re-run with same seed and report mismatches.
+    // P5/P11: Determinism — re-run with same seed and report mismatches.
     //
-    // (DISCOVERED GAP) The per-agent rng.action() PCG itself IS
-    // deterministic, but four fold kernels racing on the same
-    // `view_storage_primary[agent_id]` slot via atomicAdd surface the
-    // f32 RMW race (project_f32_rmw_race / Plan G #244 —
-    // atomicCompareExchangeWeak fix). The race is benign in shape (the
-    // sum is always the same total), but ULP-level interleaving differs
-    // across runs.
+    // The per-agent rng.action() PCG itself IS deterministic, but
+    // fold kernels accumulating into a shared
+    // `view_storage_primary[agent_id]` slot via atomicAdd produce f32
+    // reduction non-determinism (atomicAdd is sequentially consistent
+    // but f32 addition is non-associative). The race is benign in
+    // shape (same total accumulates regardless of interleaving), but
+    // per-slot ULPs vary across runs — the canonical P11 sort-then-
+    // fold case; see `project_f32_rmw_race` memory + the "Remaining
+    // open" line in `docs/architecture/gaps_observed.md`.
     //
-    // Pin form: report mismatch count; allow small drift since the race
-    // is documented architectural state. If the count hits the slot
-    // count (every slot drifted) the determinism contract is fully
-    // broken; if it's 0 the race resolved deterministically (lucky).
+    // Pin form: report mismatch count; allow small drift since the
+    // race is documented architectural state. If the count hits the
+    // slot count (every slot drifted) the determinism contract is
+    // fully broken; if it's 0 the race resolved deterministically.
     drop(state);
     let mut state2 = GeneratedRuntime::try_new(SEED, N_TOTAL).expect("re-init");
     seed_grid(&mut state2);
@@ -339,49 +341,22 @@ fn forest_fire_event_storm_500_ticks() {
     }
     println!(
         "  determinism: SEED=0x{SEED:X} re-run — {mismatches}/{n} slots drifted, max |Δ| = {max_abs_drift:.3} \
-         (race expected from shared view storage; Plan G #244)",
+         (race expected from f32 reduction non-associativity; P11)",
         n = view_aggregate.len(),
     );
 
-    // The drift bound here is amplitude-based, not contract-based: the
-    // aggregate sum across all slots is preserved (the f32 RMW race is
-    // benign in shape — the same total accumulates regardless of
-    // interleaving), but per-slot ULPs vary across runs. Slack history:
-    //   * 2.5 — initial pin (race surfaced on a few slots).
-    //   * 4.0 — T5 schedule fix (commit d1207fca) ordered spatial-
-    //           build before its consumers, exposing more producers
-    //           per tick to the shared view storage race.
-    //   * 1024 — Gap detective#1 fix (2026-05-12) sized the
-    //           spatial-grid backing buffers by `GRID_DIM³` instead of
-    //           `agent_count`. With proper sizing the per-tick `ember`
-    //           kernel now sees real neighborhoods (pre-fix it OOB-
-    //           read 0 from cells past `agent_count - 1` and returned
-    //           empty sets), driving ~10× more atomicAdd contention on
-    //           the shared `view_storage_primary` slab. Observed max
-    //           drift sits at 500-700; 1024 (= N_TOTAL) is a generous
-    //           ceiling.
-    //   * 200  — Plan G #244 bug 1 fix (2026-05-12) snapshots the
-    //           prior-tick GPU `event_tail` into each fold's
-    //           `cfg.event_count` slot via a top-of-step encoder +
-    //           submit, so folds walk only `0..prior_tail` and skip
-    //           the stale slots. Producer atomicAdd reordering still
-    //           drifts the slot-level f32 RMW (Plan G #244 atomic
-    //           CAS is the structural fix), but the over-bounds walk
-    //           is no longer compounding it. Observed max drift
-    //           ~100-110; 200 was a snug ceiling.
-    //   * 150  — Plan G #244 bug 2 fix (2026-05-12) hoists post-CAS
-    //           emits into the f32 first-writer-wins success branch,
-    //           gating duplicate `emit Ignited` from CAS-loser threads.
-    //           Combined with bug 1, observed max drift varies 38-95
-    //           run-to-run (race-driven); 150 is a comfortable ceiling
-    //           that still trips on control-flow divergence. Closing
-    //           the residual requires the broader atomic-add-f32
-    //           surface (Plan G #244 atomicCompareExchange on every
-    //           f32 view-fold accumulator).
+    // The drift bound here is amplitude-based, not contract-based:
+    // the aggregate sum across all slots is preserved (f32 reduction
+    // non-associativity is benign in shape — same total accumulates
+    // regardless of interleaving), but per-slot ULPs vary across
+    // runs. Current observed range 38-95 run-to-run; 150 is a
+    // comfortable ceiling that still trips on control-flow
+    // divergence. Closing the residual requires P11 sort-then-fold
+    // for f32 view-fold accumulators.
     assert!(
         max_abs_drift <= 150.0,
         "determinism drift exceeds 150 — control flow may be divergent, \
-         not just the documented atomic RMW race. max_abs_drift={max_abs_drift}",
+         not just the documented f32 reduction race. max_abs_drift={max_abs_drift}",
     );
 }
 

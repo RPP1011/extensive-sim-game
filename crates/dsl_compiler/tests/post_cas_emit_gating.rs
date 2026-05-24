@@ -1,5 +1,4 @@
-//! Plan G #244 bug 2 regression — post-CAS emit gating for the
-//! "first-writer-wins" f32 RMW shape.
+//! Post-CAS emit gating for the "first-writer-wins" f32 RMW shape.
 //!
 //! Background
 //! ----------
@@ -33,8 +32,8 @@
 //! wrap subsequent stmts in `if (_f32_cas_did_transition_<sid>) { ... }`
 //! so only the winning thread fires post-write side-effects.
 //!
-//! Mirror: alive-CAS handling (Gap N, plague_city / wave_defense)
-//! does the same wrapping for `set_alive(t, false)` writes —
+//! Mirror: alive-CAS handling does the same wrapping for
+//! `set_alive(t, false)` writes —
 //! `wgsl_body.rs::is_alive_cas_site` detection + `if
 //! (_alive_cas_<sid>.exchanged) { ... }` wrap. The f32 path is the
 //! generalization to literal-F32 writes guarded by an f32 field
@@ -83,7 +82,7 @@ fn find_kernel_body<'a>(art: &'a EmittedArtifacts, needle: &str) -> &'a str {
         })
 }
 
-/// Positive pin: the canonical Plan G #244 bug 2 shape — a chronicle
+/// Positive pin: the canonical first-writer-wins shape — a chronicle
 /// consumer that catches a healthy target and transitions hp from
 /// `>=100.0` to a literal `99.0`, emitting an event on the
 /// transition. The emit MUST be hoisted into the post-CAS gating
@@ -301,9 +300,9 @@ physics Resetter {
     );
 }
 
-/// Cross-check: the alive-CAS hoisting (Gap N) still works for
-/// `set_alive(self, false)` patterns — the new f32 gate is
-/// orthogonal and must not regress alive-CAS detection.
+/// Cross-check: the alive-CAS hoisting still works for
+/// `set_alive(self, false)` patterns — the f32 gate is orthogonal
+/// and must not regress alive-CAS detection.
 #[test]
 fn alive_cas_hoisting_still_works_alongside_f32_gate() {
     let src = r#"

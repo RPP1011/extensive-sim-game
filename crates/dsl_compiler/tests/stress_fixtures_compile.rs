@@ -2598,11 +2598,7 @@ fn duel_1v1_compile_gate() {
     );
 
     // ApplyDamage_and_ApplyHeal kernel must emit the atomicCAS guard
-    // for `set_alive(t, false)` (Gap N fix —
-    // `docs/superpowers/notes/2026-05-04-duel_25v25.md`). The
-    // pre-Gap-N shape `agent_alive[t] = select(0u, 1u, false);`
-    // (post-duel_1v1 Bool LHS rewrite) is now superseded: the kill-
-    // transition write lowers to
+    // for `set_alive(t, false)`. The kill-transition write lowers to
     // `let _alive_cas_<N> = atomicCompareExchangeWeak(...)` so only
     // the thread that flips alive 1→0 fires the guarded
     // `emit Defeated`. The agent_alive binding is also upgraded to
@@ -2616,18 +2612,17 @@ fn duel_1v1_compile_gate() {
     assert!(
         apply_body.contains("atomicCompareExchangeWeak(&agent_alive["),
         "ApplyDamage must lower `set_alive(t, false)` as atomicCAS \
-         (Gap N atomicCAS guard); got body:\n{apply_body}",
+         guard; got body:\n{apply_body}",
     );
     assert!(
         apply_body.contains(".exchanged"),
         "ApplyDamage must gate the post-set_alive emit on \
-         `_alive_cas_<N>.exchanged` (Gap N atomicCAS guard); got \
-         body:\n{apply_body}",
+         `_alive_cas_<N>.exchanged`; got body:\n{apply_body}",
     );
     assert!(
         apply_body.contains("array<atomic<u32>>") && apply_body.contains("agent_alive: array<atomic<u32>>"),
         "ApplyDamage must declare agent_alive as array<atomic<u32>> \
-         under the Gap N atomicCAS guard; got body:\n{apply_body}",
+         under the atomicCAS guard; got body:\n{apply_body}",
     );
     // The lvalue must NOT be wrapped in the read-form coercion `(x != 0u)` —
     // that would produce an invalid WGSL assignment. Locks the

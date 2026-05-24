@@ -1,4 +1,4 @@
-//! Memory-ordering regression test (#284 sub-item #8).
+//! Memory-ordering regression test.
 //!
 //! Pins the `atomicCompareExchangeWeak` CAS-loop emit for f32 SoA
 //! RMW writes inside chronicle-consumer physics rules. Without this
@@ -6,12 +6,8 @@
 //! race on the f32 RMW (last-writer-wins on plain
 //! `agent_hp[t] = agent_hp[t] - x`), and the same seed produces
 //! different results across reruns — a P5 (deterministic / replay-
-//! equivalent) violation.
-//!
-//! Closes the regression-test half of `#244` (memory entry
-//! `project_f32_rmw_race.md`). The implementation half — the
-//! `f32_atomic_field_writes` bitset that drives the upgrade — landed
-//! earlier; this test prevents future drift.
+//! equivalent) violation. The `f32_atomic_field_writes` bitset
+//! drives the upgrade; this test prevents future drift.
 //!
 //! Pin shape (assertions below mirror the canonical CAS-loop):
 //!

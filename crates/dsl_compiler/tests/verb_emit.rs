@@ -178,7 +178,7 @@ fn scoring_kernel_emits_action_selected_when_verb_present() {
             // Compiler debug mode Phase 2: mirror the program-level
             // bitset (default `NONE`); test fixtures here don't opt in.
             debug_wgsl: prog.debug_wgsl,
-            // Plan G #244 bug 2: post-CAS emit gating defaults to off.
+            // Post-CAS emit gating defaults to off.
             f32_first_writer_gate: std::cell::Cell::new(None),
         }
     }

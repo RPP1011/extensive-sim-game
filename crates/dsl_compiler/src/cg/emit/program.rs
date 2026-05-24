@@ -627,14 +627,14 @@ pub fn emit_cg_program_with_debug(
         bound_target_exprs: std::cell::RefCell::new(std::collections::HashSet::new()),
         event_ring_atomic_loads: std::cell::Cell::new(false),
         alive_atomic_writes: std::cell::Cell::new(false),
-        // f32 RMW (task #244): per-kernel bitset of upgraded f32 SoA
-        // fields. Set by the kernel emit before each kernel's body
-        // emit; restored on exit. Default 0 (no upgrades) preserves
-        // the existing per-stmt emit shape verbatim.
+        // f32 RMW: per-kernel bitset of upgraded f32 SoA fields. Set
+        // by the kernel emit before each kernel's body emit; restored
+        // on exit. Default 0 (no upgrades) preserves the existing
+        // per-stmt emit shape verbatim.
         f32_atomic_field_writes: std::cell::Cell::new(0),
-        // f32 RMW (task #244): set of LocalIds whose Let stmt should
-        // emit as `local_N = V;` (assignment to a var declared above
-        // the active CAS loop). Populated only inside
+        // f32 RMW: set of LocalIds whose Let stmt should emit as
+        // `local_N = V;` (assignment to a var declared above the
+        // active CAS loop). Populated only inside
         // `lower_cg_stmt_list_to_wgsl` for the duration of a CAS-loop
         // body emit; restored on exit.
         var_promoted_locals: std::cell::RefCell::new(std::collections::HashSet::new()),
@@ -644,11 +644,11 @@ pub fn emit_cg_program_with_debug(
         // existing emit shape; per-runtime build.rs opt-in via
         // `LowerOpts.debug_wgsl` flows through `CgProgram.debug_wgsl`.
         debug_wgsl: prog.debug_wgsl,
-        // Plan G #244 bug 2 (post-CAS emit gating): the f32
-        // first-writer-wins gate. Default `None` keeps the existing
-        // CAS-loop shape verbatim; the `If`-arm of the per-stmt
-        // emit toggles it for the inner Assign whose `(field, target)`
-        // is also read by the outer cond.
+        // Post-CAS emit gating: the f32 first-writer-wins gate.
+        // Default `None` keeps the existing CAS-loop shape verbatim;
+        // the `If`-arm of the per-stmt emit toggles it for the inner
+        // Assign whose `(field, target)` is also read by the outer
+        // cond.
         f32_first_writer_gate: std::cell::Cell::new(None),
     };
 

@@ -239,11 +239,10 @@ pub struct EmitCtx<'a> {
     /// `atomicCompareExchangeWeak(&agent_alive[t], 1u, 0u)` and any
     /// subsequent statements in the SAME stmt-list are wrapped in
     /// `if (cas.exchanged) { ... }` so the "first kill wins" semantics
-    /// hold under within-tick contention. Gap N fix
-    /// (`docs/superpowers/notes/2026-05-04-duel_25v25.md`): multiple
-    /// Damaged threads landing on one target in one tick all observed
-    /// the same `old_hp > 0.0` and all emitted Defeated; the atomic-
-    /// CAS guard collapses the redundant emits to one.
+    /// hold under within-tick contention: multiple Damaged threads
+    /// landing on one target in one tick would otherwise all observe
+    /// the same `old_hp > 0.0` and all emit Defeated; the atomic-CAS
+    /// guard collapses the redundant emits to one.
     ///
     /// Set by the kernel emit when the body contains the
     /// `Assign(AgentField::Alive, _, Lit(Bool(false)))` pattern
@@ -334,8 +333,8 @@ pub struct EmitCtx<'a> {
     /// the thread that caused the actual state transition fires the
     /// post-write side effects.
     ///
-    /// Plan G #244 bug 2 fix: the bare CAS loop's natural retry covers
-    /// per-thread RHS shapes (`set_hp(t, hp - 1)`) — every thread sees
+    /// The bare CAS loop's natural retry covers per-thread RHS shapes
+    /// (`set_hp(t, hp - 1)`) — every thread sees
     /// a real transition because each contribution is real. But for
     /// a `set_hp(t, 99)` literal-RHS shape guarded by `if (hp == 100)`,
     /// CAS losers retry, see hp==99, and CAS(99→99) succeeds with NO
@@ -414,8 +413,8 @@ impl<'a> EmitCtx<'a> {
 }
 
 /// True when `stmt` is `Assign(AgentField::Alive, _, Lit(Bool(false)))` —
-/// the "kill transition" pattern targeted by the atomicCAS guard
-/// (Gap N). The check is structural: the assigned value resolves
+/// the "kill transition" pattern targeted by the atomicCAS guard.
+/// The check is structural: the assigned value resolves
 /// through the expression arena to a literal `false`. Used both by
 /// the kernel emit (to upgrade the `agent_alive` binding to
 /// AtomicStorage and set [`EmitCtx::alive_atomic_writes`]) and by
@@ -731,8 +730,8 @@ fn stmt_reads_any_chain_local(
 }
 
 /// True when `stmt` is `Assign(AgentField{f32, …}, target, Lit(F32(_)))`
-/// — the "first-writer-wins" candidate shape (Plan G #244 bug 2).
-/// Returns the field id and target ref so the caller can correlate
+/// — the "first-writer-wins" candidate shape. Returns the field id
+/// and target ref so the caller can correlate
 /// against an enclosing `If` cond reading the same field.
 ///
 /// Restricting to literal-F32 RHS is the load-bearing safety filter:
@@ -764,9 +763,9 @@ pub(crate) fn stmt_is_f32_const_assign(
 
 /// True when `expr_id` (or any descendant CgExpr) reads
 /// `Read(AgentField { field: <field>, .. })` — without requiring the
-/// `target` to match. Used by the post-CAS emit-gating detection
-/// (Plan G #244 bug 2): when the inner `Assign` writes an f32 field
-/// with a literal RHS AND the enclosing `If`'s cond reads the same
+/// `target` to match. Used by the post-CAS emit-gating detection:
+/// when the inner `Assign` writes an f32 field with a literal RHS
+/// AND the enclosing `If`'s cond reads the same
 /// field id (any target), we infer "first-writer-wins" intent and
 /// gate subsequent stmts on actual transition.
 ///
@@ -2321,7 +2320,7 @@ fn lower_cg_stmt_body_to_wgsl(
             // `agent_<field>[target_expr_<N>] = <value>;` with the
             // target index hoisted to a stmt-prefix `let`.
             if let DataHandle::AgentField { field, target: agent_ref } = target {
-                // Gap N atomicCAS guard: when the kernel has been
+                // AtomicCAS guard: when the kernel has been
                 // marked as needing atomic alive-writes (the kernel
                 // emit's body scan found the
                 // `Assign(Alive, _, Lit(Bool(false)))` pattern and
@@ -2334,9 +2333,7 @@ fn lower_cg_stmt_body_to_wgsl(
                 // and wraps subsequent stmts in
                 // `if (_alive_cas_<stmt_id>.exchanged) { ... }` so
                 // only the thread that won the transition runs the
-                // post-kill side effects (e.g. `emit Defeated`). See
-                // `docs/superpowers/notes/2026-05-04-duel_25v25.md`
-                // Gap N for the within-tick race this collapses.
+                // post-kill side effects (e.g. `emit Defeated`).
                 let is_alive_false_cas = ctx.alive_atomic_writes.get()
                     && matches!(field, AgentFieldId::Alive)
                     && matches!(
@@ -2423,8 +2420,8 @@ fn lower_cg_stmt_body_to_wgsl(
                         AgentRef::Target(id) => format!("target_expr_{}", id.0),
                     };
                     let snake = field.snake();
-                    // Plan G #244 bug 2: when the enclosing `If` arm
-                    // marked this Assign as a "first-writer-wins"
+                    // When the enclosing `If` arm marked this Assign
+                    // as a "first-writer-wins"
                     // candidate (literal-RHS f32 write inside an If
                     // whose cond reads the same field), emit the
                     // CAS-loop variant that captures the transition
@@ -2496,7 +2493,7 @@ fn lower_cg_stmt_body_to_wgsl(
         CgStmt::Emit { event, fields } => lower_emit_to_wgsl(event.0, fields, ctx),
         CgStmt::If { cond, then, else_ } => {
             let c = lower_cg_expr_to_wgsl(*cond, ctx)?;
-            // Plan G #244 bug 2: detect the "first-writer-wins" shape
+            // Detect the "first-writer-wins" shape
             // — an inner Assign of a literal F32 to an f32 SoA column
             // whose field is also read by THIS If's cond. If matched,
             // set the per-stmt gate to the inner Assign's stmt_id so
@@ -2863,7 +2860,7 @@ fn lower_cg_stmt_body_to_wgsl(
             // upgraded one or more f32 SoA columns to atomic, the
             // dispatcher's stat-dispatch reads must wrap in
             // `bitcast<f32>(atomicLoad(…))`. `dispatcher_f32_field_read`
-            // does that conditionally. P5 fix (task #244).
+            // does that conditionally (P5).
             let stat_case_0 = dispatcher_f32_field_read(AgentFieldId::AttackDamage, "caster_slot", ctx);
             let stat_case_1 = dispatcher_f32_field_read(AgentFieldId::AbilityPower, "caster_slot", ctx);
             let stat_case_2 = dispatcher_f32_field_read(AgentFieldId::MaxHp, "caster_slot", ctx);
@@ -6008,7 +6005,7 @@ pub fn lower_cg_stmt_list_to_wgsl(
     // original order. Each is emitted via the per-stmt path which
     // handles its own (non-fused) ForEachNeighbor singleton case.
     //
-    // Gap N atomicCAS guard: when the kernel was flagged for atomic
+    // AtomicCAS guard: when the kernel was flagged for atomic
     // alive-writes (the kernel emit's body scan found
     // `Assign(Alive, _, Lit(Bool(false)))`), an Assign matching that
     // pattern at residual index `i` lowers to a CAS let-binding
@@ -6035,7 +6032,7 @@ pub fn lower_cg_stmt_list_to_wgsl(
     let mut wrapped: Vec<String> = Vec::new();
     let mut cas_loop_body: Vec<String> = Vec::new();
     let mut cas_loop_parts_idx: Option<usize> = None;
-    // Plan G #244 bug 2: post-CAS emit gating accumulator. When the
+    // Post-CAS emit gating accumulator. When the
     // per-stmt path emits the gated CAS variant for the f32
     // first-writer-wins shape, subsequent residual stmts collect into
     // `f32_wrapped` and are emitted at the end of the list as
@@ -6153,8 +6150,8 @@ pub fn lower_cg_stmt_list_to_wgsl(
                 };
                 cas_loop_parts_idx = Some(parts.len());
                 parts.push(composed);
-                // Plan G #244 bug 2: if this Assign was the gated
-                // first-writer-wins write (per `EmitCtx::f32_first_writer_gate`),
+                // If this Assign was the gated first-writer-wins
+                // write (per `EmitCtx::f32_first_writer_gate`),
                 // open the post-CAS emit-gating wrap. Subsequent
                 // residual stmts collect into `f32_wrapped` and emit
                 // as `if (_f32_cas_did_transition_<sid>) { ... }` at
@@ -6182,8 +6179,8 @@ pub fn lower_cg_stmt_list_to_wgsl(
             wrap_open = Some(stmt_id.0);
             continue;
         }
-        // Plan G #244 bug 2: if a gated f32 first-writer-wins CAS is
-        // open, route this suffix stmt into the gating wrap instead of
+        // If a gated f32 first-writer-wins CAS is open, route this
+        // suffix stmt into the gating wrap instead of
         // the normal `parts` (or alive-CAS `wrapped`). Subsequent
         // alive-CAS sites can still appear inside the gated tail (the
         // alive flip + Defeated emit chain), and the per-stmt emit will

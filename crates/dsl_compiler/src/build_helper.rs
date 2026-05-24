@@ -1848,7 +1848,7 @@ fn synthesize_generated_runtime_struct(
         .map(|v| (v.name.as_str(), (v.ring_k, v.cell_stride_u32)))
         .collect();
 
-    // Plan G #244 bug 1 — fold consumer detection. Used to decide
+    // Fold consumer detection. Used to decide
     // whether to allocate the `prev_event_tail_buf` snapshot side
     // buffer + emit the snapshot stage at the top of step(). Hoisted
     // here so the struct + try_new emit can gate the side-buffer field
@@ -2039,7 +2039,7 @@ fn synthesize_generated_runtime_struct(
     for kernel_name in &cfg_buffer_names {
         out.push_str(&format!("    pub cfg_{kernel_name}_buf: wgpu::Buffer,\n"));
     }
-    // Plan G #244 bug 1 — 4-byte side buffer holding the snapshotted
+    // 4-byte side buffer holding the snapshotted
     // GPU `event_tail` value from the END of the previous tick. Only
     // allocated when the fixture has at least one fold consumer (a
     // kernel that binds `event_ring`/`event_tail` and is NOT an
@@ -2358,7 +2358,7 @@ fn synthesize_generated_runtime_struct(
              \x20       }});\n",
         ));
     }
-    // Plan G #244 bug 1 — allocate the prev_event_tail snapshot side
+    // Allocate the prev_event_tail snapshot side
     // buffer when the fixture has fold consumers. 4 bytes (one u32),
     // STORAGE so it can be a copy_buffer_to_buffer source AND
     // destination across two encoders.
@@ -2699,7 +2699,7 @@ fn synthesize_generated_runtime_struct(
              \x20       let pending_event_count: u32 = self.event_ring.tail_value();\n",
         );
     }
-    // Plan G #244 bug 1 — fold consumer prior-tick tail snapshot.
+    // Fold consumer prior-tick tail snapshot.
     //
     // Folds bind `event_ring`/`event_tail` and consume PRIOR-tick
     // records (the ViewFold contract: a fold at tick T sees emits from
@@ -2741,7 +2741,7 @@ fn synthesize_generated_runtime_struct(
         // would otherwise sequence before any subsequent encoder
         // command and clobber what event_tail holds.
         out.push_str(
-            "        // Plan G #244 bug 1 — capture prior-tick GPU event_tail\n\
+            "        // Capture prior-tick GPU event_tail\n\
              \x20       // into prev_event_tail_buf via its own submit BEFORE the\n\
              \x20       // main step encoder enqueues anything that overwrites the\n\
              \x20       // GPU tail (clear_tail_in or pending_event_count write).\n\
@@ -2799,7 +2799,7 @@ fn synthesize_generated_runtime_struct(
     // submit, so slot 0 ends up holding the snapshot value.
     for kname in &fold_consumer_kernel_names {
         out.push_str(&format!(
-            "        // Fold cfg.event_count from prev-tick snapshot (Plan G #244 bug 1).\n\
+            "        // Fold cfg.event_count from prev-tick snapshot.\n\
              \x20       encoder.copy_buffer_to_buffer(\n\
              \x20           &self.prev_event_tail_buf,\n\
              \x20           0,\n\
@@ -3104,10 +3104,9 @@ fn synthesize_generated_runtime_struct(
             // PRIOR-tick records (the docstring contract: "folds at
             // tick T see emits from tick T-1") — so they get their
             // event_count snapshotted at the TOP of step() before
-            // clear_tail_in zeroes the GPU tail. See Plan G #244 bug
-            // 1: the prev-tick snapshot lives in `prev_event_tail_buf`
-            // and is copied into each fold's cfg.event_count there,
-            // not here.
+            // clear_tail_in zeroes the GPU tail: the prev-tick
+            // snapshot lives in `prev_event_tail_buf` and is copied
+            // into each fold's cfg.event_count there, not here.
             //
             // FixedPoint kernels skip the cfg-copy block — today no
             // `@cascade`-annotated kernel is also an Indirect chronicle

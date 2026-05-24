@@ -29,7 +29,7 @@
 //!   the bitmap on the next tick's pack pass.
 //! - WGSL emit: kernels that contain `set_alive(_, false)` upgrade
 //!   `agent_alive` to `array<atomic<u32>>` and emit the
-//!   `atomicCompareExchangeWeak` CAS (Gap N race fix). Kernels that
+//!   `atomicCompareExchangeWeak` CAS. Kernels that
 //!   only contain `set_alive(_, true)` keep `array<u32>` and emit a
 //!   plain indexed store (`agent_alive[idx] = select(0u, 1u, true);`).
 //!   Both forms write to the SAME underlying buffer (wgpu doesn't
@@ -101,8 +101,8 @@ fn kernel_wgsl<'a>(
 }
 
 /// `set_alive(self, false)` in a per_agent rule lowers to the
-/// atomicCompareExchangeWeak kill-transition pattern (Gap N race fix).
-/// The `agent_alive` binding is upgraded to `array<atomic<u32>>`.
+/// atomicCompareExchangeWeak kill-transition pattern. The
+/// `agent_alive` binding is upgraded to `array<atomic<u32>>`.
 #[test]
 fn set_alive_self_false_emits_atomic_cas_kill_pattern() {
     let src = r#"
@@ -127,7 +127,7 @@ physics Reaper {
     // 2. The CAS itself: 1u → 0u (kill direction).
     assert!(
         body.contains("atomicCompareExchangeWeak(&agent_alive["),
-        "expected atomicCompareExchangeWeak on agent_alive (Gap N race fix); got body:\n{body}",
+        "expected atomicCompareExchangeWeak on agent_alive; got body:\n{body}",
     );
     assert!(
         body.contains(", 1u, 0u)"),
@@ -199,7 +199,7 @@ physics Revive {
 
     // 3. NO atomic CAS — the revive shape is a single-writer plain
     //    store; the CAS is only needed when contending threads race
-    //    on the kill transition (Gap N).
+    //    on the kill transition.
     assert!(
         !body.contains("atomicCompareExchangeWeak(&agent_alive["),
         "revive kernel must NOT emit a CAS on agent_alive; got body:\n{body}",

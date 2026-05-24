@@ -35,10 +35,9 @@ fn staggered_init_drives_per_slot_fire_pattern() {
         // event_ring BEFORE the fold dispatch. Slot s fires when
         // `tick >= s` (init `cooldown_next_ready_tick: slot`).
         //
-        // Plan G #244 bug 1 (2026-05-12) snapshots event_tail at
-        // start-of-tick into each fold's cfg.event_count slot to fix
-        // the over-bounds-walk-into-stale-records drift in
-        // forest_fire. As a side effect, folds in any fixture now
+        // The fold cfg snapshot (event_tail captured at start-of-tick
+        // into each fold's cfg.event_count slot, fixing the
+        // over-bounds-walk-into-stale-records drift) means folds now
         // see PRIOR-tick events (the snapshot is taken before this
         // tick's producer atomicAdds run), so each tick's fire is
         // folded one tick LATER. Over TICKS ticks slot s contributes

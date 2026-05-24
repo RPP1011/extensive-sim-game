@@ -2,7 +2,7 @@
 //! the live GPU `event_tail` BEFORE clear_tail_in zeroes it for the
 //! current tick.
 //!
-//! Plan G #244, bug 1. Pre-fix, fold kernels' per-tick cfg uniform
+//! Pre-fix, fold kernels' per-tick cfg uniform
 //! was `[agent_count, tick, 1, agent_count]` with `event_count =
 //! agent_count` (1024 typical). Folds then walked the FULL
 //! `agent_count` slots of the unified `event_ring`, including stale

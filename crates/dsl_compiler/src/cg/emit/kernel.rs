@@ -767,9 +767,7 @@ pub fn kernel_topology_to_spec_and_body(
         }
     }
 
-    // Gap N atomicCAS guard
-    // (`docs/superpowers/notes/2026-05-04-duel_25v25.md`): when the
-    // kernel body contains
+    // AtomicCAS guard: when the kernel body contains
     // `Assign(AgentField::Alive, _, Lit(Bool(false)))` (the kill-
     // transition pattern), upgrade `agent_alive` to AtomicStorage
     // (`array<atomic<u32>>`) so the per-stmt emit can lower the
@@ -799,8 +797,8 @@ pub fn kernel_topology_to_spec_and_body(
         }
     }
 
-    // f32 RMW atomic-CAS upgrade (P5 fix, task #244): when the kernel
-    // body contains an `Assign(AgentField{f32, …}, …)` chronicle-
+    // f32 RMW atomic-CAS upgrade (P5): when the kernel body
+    // contains an `Assign(AgentField{f32, …}, …)` chronicle-
     // consumer write (`agents.set_<f>(t, agents.<f>(t) ± x)` and
     // friends), upgrade the `agent_<f>` binding to AtomicStorage
     // (`array<atomic<u32>>`) so the per-stmt Assign emit can lower
@@ -879,13 +877,13 @@ pub fn kernel_topology_to_spec_and_body(
     // restore on exit — defensive scoping in case the same `EmitCtx`
     // instance is reused across multiple kernels.
     let prior_atomic_loads = ctx.event_ring_atomic_loads.replace(is_per_event_emit);
-    // Gap N: stash the alive-CAS flag for the duration of the body
+    // Stash the alive-CAS flag for the duration of the body
     // emit so the per-stmt Assign arm + `lower_cg_stmt_list_to_wgsl`
     // wrap pick the atomicCAS shape; restore on exit so the same
     // EmitCtx instance can drive multiple kernels safely.
     let prior_alive_cas = ctx.alive_atomic_writes.replace(has_alive_cas);
-    // f32 RMW (task #244): stash the per-kernel f32 atomic-write
-    // bitset. The per-stmt Read / Assign arms gate their atomicLoad /
+    // Stash the per-kernel f32 atomic-write bitset. The per-stmt
+    // Read / Assign arms gate their atomicLoad /
     // CAS-loop emit shapes on this; the kernel's binding upgrades
     // above (the `agent_<f>` -> AtomicStorage) and the body emit MUST
     // agree on which fields are upgraded — both consult this bitset.
@@ -3652,8 +3650,7 @@ fn body_ops_have_emit(body_ops: &[OpId], prog: &CgProgram) -> bool {
 /// Walk every body op's statement list and return `true` if any
 /// reachable `Assign(AgentField::Alive, _, Lit(Bool(false)))` exists.
 /// Used by the binding-synthesis path to upgrade `agent_alive` to
-/// `AtomicStorage` when the kernel's body needs the atomicCAS guard
-/// (Gap N — `docs/superpowers/notes/2026-05-04-duel_25v25.md`).
+/// `AtomicStorage` when the kernel's body needs the atomicCAS guard.
 fn body_ops_have_set_alive_false(body_ops: &[OpId], prog: &CgProgram) -> bool {
     for op_id in body_ops {
         let Ok(op) = resolve_op(prog, *op_id) else {
@@ -3678,8 +3675,8 @@ fn body_ops_have_set_alive_false(body_ops: &[OpId], prog: &CgProgram) -> bool {
 /// produced by [`crate::cg::emit::wgsl_body::f32_field_atomic_bit`].
 /// Each set bit triggers an `agent_<f>` binding upgrade to
 /// `AtomicStorage` (`array<atomic<u32>>`) so the per-stmt Assign
-/// emit can lower the write as a CAS-loop (P5 fix, task #244 —
-/// chronicle-consumer RMW races on naked f32 RMW).
+/// emit can lower the write as a CAS-loop (P5 — chronicle-consumer
+/// RMW races on naked f32 RMW).
 fn body_ops_collect_f32_atomic_writes(body_ops: &[OpId], prog: &CgProgram) -> u64 {
     let mut bits = 0u64;
     for op_id in body_ops {
@@ -6598,8 +6595,8 @@ mod tests {
 
         let agent = spec.bindings.iter().find(|b| b.name == "agent_hp").unwrap();
         // Physics rule writes hp (an f32 SoA column) → upgraded to
-        // AtomicStorage (`array<atomic<u32>>`) by the f32 RMW pass
-        // (task #244 P5 fix). Pre-upgrade was ReadWriteStorage; the
+        // AtomicStorage (`array<atomic<u32>>`) by the f32 RMW P5
+        // pass. Pre-upgrade was ReadWriteStorage; the
         // upgrade is unconditional whenever the body assigns to an
         // f32 AgentField, so that N>1 chronicle events targeting the
         // same agent slot drive the per-stmt CAS-loop emit instead

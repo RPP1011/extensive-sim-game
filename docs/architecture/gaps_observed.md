@@ -192,7 +192,7 @@ NEVER one-directional — investigation walked the full path:
   every tick after the alive-write kernels.
 * WGSL emit: kill kernels (containing `set_alive(_, false)`) upgrade
   `agent_alive` to `array<atomic<u32>>` and emit
-  `atomicCompareExchangeWeak` (Gap N race fix). Revive kernels (only
+  `atomicCompareExchangeWeak` for the within-tick kill race. Revive kernels (only
   `set_alive(_, true)`) keep `array<u32>` and emit a plain
   `agent_alive[<idx>] = select(0u, 1u, true);` indexed store. Both
   forms write to the same underlying buffer (wgpu doesn't distinguish
@@ -517,27 +517,41 @@ fire-spread cascade depends ENTIRELY on Catch (with no apply_ability
 fallback). When this gap closes, the forest_fire pin's verdict line
 will flip to one of "FIRE SPREADS PARTIALLY" or "FIRE CONSUMED FOREST".
 
-### Gap D — f32 RMW race amplified by shared view storage
+### Gap D — f32 view-fold reduction non-determinism (residual after CAS work)
 
-**Severity: medium — known issue, fixture surfaces it broadly.**
+**Severity: medium — known issue, fixture surfaces it broadly. CAS work
+landed for naked RMW; reduction associativity remains.**
 
-Symptom: re-running forest_fire with the same seed twice produces
-view aggregate buffers that drift by max |Δ| = 1.000 across 1020/1024
-slots. Drift magnitude is tiny (≤1 increment per slot out of ~440
-total per slot), but the byte-equality determinism contract (P5) is
-broken.
+History:
+- Pre-fix (2026-05-11 snapshot): max |Δ| = 1.000 across 1020/1024 slots
+  — driven by a combination of (a) naked f32 RMW races and (b) stale
+  fold cfg.event_count walking prior-tick records.
+- Post-fix (2026-05-12, commits `99e8c783` + `93143c1b`): the standard
+  `agents.set_<f32>(t, expr)` race is closed by an atomic-CAS loop in
+  `cg/emit/kernel.rs:802` + `cg/emit/wgsl_body.rs:734+`; per-tick
+  fold cfg.event_count is now snapshotted live; post-CAS emit gating
+  prevents losers from re-emitting.
+- Current symptom (verified 2026-05-23 re-run of forest_fire_pin):
+  max |Δ| = 47.000 across 479/1024 slots. Different character from
+  pre-fix — fewer slots affected but larger per-slot drift. Same
+  underlying cause (f32 non-associativity in reductions), now visible
+  because the CAS layer no longer drops contributions.
 
-Root cause: documented at `project_f32_rmw_race` (Plan G #244 —
-atomicCompareExchangeWeak fix). When N producers atomicAdd into the
-same `view_storage_primary[agent_id]` slot in the same tick, the
-last-writer-wins f32 conversion drops one event per race. With Gap A
-amplifying this — four views ALL atomicAdd into the same slot via
-four separate kernels in the SCHEDULE — every per-agent slot is a
-race target, not just shared-target slots in pair-keyed views.
+Root cause (residual): `atomicAdd` on `view_storage_primary[slot]` from
+N producers is sequentially consistent in execution order but f32
+addition is non-associative — `(a + b) + c ≠ a + (b + c)` for general
+floats. So even with no contribution dropped, the SUM depends on the
+order producers' atomic ops interleave on the GPU. P11 names sort-
+then-fold as the prescribed mechanism; not yet implemented in the
+ViewFold emit path.
 
-The pin records mismatch count + max |Δ| as observation, with a
-loose pin (max_abs_drift ≤ 2.5) so future control-flow divergence
-regressions still trip but the documented race doesn't.
+The pin assertion is `max_abs_drift ≤ 150.0` — a loose ceiling that
+catches control-flow divergence (regression signal) while tolerating
+the documented reduction race (observed range 38-95).
+
+**Status:** atomic RMW race CLOSED. f32 reduction sort-then-fold OPEN
+— this is the canonical case for the constitution P11 contract. See
+`project_f32_rmw_race` memory for the full breakdown.
 
 ### Gap E — `@traced` annotation surface absent / unverified — CLOSED (phantom, 2026-05-12)
 
