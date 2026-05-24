@@ -24,6 +24,8 @@ config vs {
   drift_speed:        f32 = 0.01,
   perception_radius:  f32 = 12.0,
   enemy_speed:        f32 = 0.1,
+  flee_radius:        f32 = 8.0,
+  player_speed:       f32 = 0.12,
 }
 
 @spatial(radius = config.vs.perception_radius, kind = [Agent])
@@ -37,6 +39,27 @@ sort_by distance(self, _) limit 8 {
 physics IdleDrift @phase(per_agent) {
   on Tick {} where (self.alive) {
     let new_pos = self.pos + self.vel * config.vs.drift_speed;
+    agents.set_pos(self, new_pos);
+  }
+}
+
+// Players flee nearby enemy-band agents (separation steering).
+physics KitePlayer @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && self.mana >= config.vs.player_mana_min
+                    && self.mana <= config.vs.player_mana_max) {
+    let flee = sum(other in spatial.nearby_agents(self, config.vs.flee_radius) where
+      if other.mana >= config.vs.enemy_mana_min
+         && other.mana <= config.vs.enemy_mana_max
+         && other.alive
+         && distance(self.pos, other.pos) < config.vs.flee_radius {
+        self.pos - other.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let new_vel = self.vel + flee * config.vs.player_speed;
+    let new_pos = self.pos + new_vel;
+    agents.set_vel(self, new_vel);
     agents.set_pos(self, new_pos);
   }
 }

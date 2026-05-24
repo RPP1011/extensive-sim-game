@@ -60,3 +60,15 @@ fn enemy_chase_emits_neighbour_walk() {
         "expected bounded-neighbour walk in ChasePlayer body; got:\n{body}",
     );
 }
+
+#[test]
+fn player_kite_emits_neighbour_walk() {
+    let path = workspace_path("assets/sim/vampire_survivors.sim");
+    let art = compile_sim(&path).expect("compiles");
+    let body = kernel_body_containing(&art, "KitePlayer")
+        .unwrap_or_else(|| panic!("no KitePlayer kernel; have {:?}", art.wgsl_files.keys().collect::<Vec<_>>()));
+    assert!(
+        body.contains("spatial_grid_offsets") || body.contains("grid_starts"),
+        "expected bounded-neighbour walk in KitePlayer body; got:\n{body}",
+    );
+}
