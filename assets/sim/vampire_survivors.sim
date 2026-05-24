@@ -1,9 +1,30 @@
-// vampire_survivors — DSL-as-engine benchmark fixture (Slice 1 foundation).
-// See docs/superpowers/specs/2026-05-24-vampire-survivors-design.md.
+// vampire_survivors — DSL-as-engine benchmark fixture (Slice 1).
+// A Vampire-Survivors-shaped combat loop: auto-firing player vs escalating
+// swarm, XP-on-kill, discrete leveling math, and fixed-priority upgrade
+// selection. Vehicle + deliberate DSL-gap probe; ledger at spec §8.
 //
-// Roles are mana-band tagged (tower_defense precedent): player ∈ [0.5,1.5],
-// enemy ∈ [1.5,2.5]. Subkind-identity gating in `where` has no corpus
-// precedent (Gap: see spec §2); mana-band is the proven discriminant.
+// Rules:  ChasePlayer (enemy movement), KitePlayer (player kiting),
+//         BoltFire (nearest-enemy periodic bolt), NovaFire (AOE nova burst),
+//         ApplyDamage (HP deduction + kill credit), ChooseUpgrade (selection).
+// Views:  xp(by: Agent) — per-kill XP fold; upgrades_total(player) — upgrade
+//         tally (un-split; per-kind fold guard walls — see #3c below).
+//
+// Role tagging: player ∈ mana [0.5,1.5], enemy ∈ mana [1.5,2.5]
+// (mana-band idiom from tower_defense; entity subkind gating has no
+// corpus precedent so mana-band is the proven discriminant).
+//
+// Gap-probe findings (see spec §8 for detail):
+//   #1  view read in a physics emit amount            → PASS (BoltFire reads xp)
+//   #2  floor() on a view (discrete level math)       → PASS compiled; interp
+//                                                         arm in builtins.rs absent
+//   #3  value-returning if/else → u32 selection       → PASS via nested form;
+//                                                         else-if sugar fails parse
+//   #3a standalone enum surface                       → PASS (no prior corpus)
+//   #3b view read in an if *condition*                → PASS
+//   #3c fold where-guard on payload field             → WALL (silent drop in
+//                                                         resolver; IR-plumbing fix)
+//
+// See docs/superpowers/specs/2026-05-24-vampire-survivors-design.md.
 
 event Tick { }
 
@@ -24,7 +45,6 @@ config vs {
   player_mana_max:    f32 = 1.5,
   enemy_mana_min:     f32 = 1.5,
   enemy_mana_max:     f32 = 2.5,
-  drift_speed:        f32 = 0.01,
   perception_radius:  f32 = 12.0,
   enemy_speed:        f32 = 0.1,
   flee_radius:        f32 = 8.0,
@@ -47,14 +67,6 @@ config vs {
 query nearby_agents(self: Agent, radius: f32) -> [Agent]
 sort_by distance(self, _) limit 8 {
   candidate != self
-}
-
-// Trivial seed rule so the pipeline emits at least one kernel.
-physics IdleDrift @phase(per_agent) {
-  on Tick {} where (self.alive) {
-    let new_pos = self.pos + self.vel * config.vs.drift_speed;
-    agents.set_pos(self, new_pos);
-  }
 }
 
 // @phase(per_agent) (not post): two pos-writing rules at the same phase form a write->write cycle; per_agent + the disjoint where-guard breaks the SCC.
