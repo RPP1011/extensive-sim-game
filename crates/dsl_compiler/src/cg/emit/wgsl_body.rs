@@ -352,6 +352,24 @@ pub struct EmitCtx<'a> {
     /// `.exchanged) { break; }` substring assertion still holds for
     /// the chronicle-damage shape).
     pub f32_first_writer_gate: std::cell::Cell<Option<u32>>,
+
+    /// P11: dense producer-kernel-id map built by `assign_producer_kernel_ids`
+    /// before the kernel loop. Keyed by `(stage, kernel)` index.
+    /// Looked up in `lower_emit_to_wgsl` to fill the seq trailer's
+    /// `kernel_id` nibble.
+    pub producer_kernel_ids:
+        std::collections::BTreeMap<crate::cg::emit::program::KernelIndex, u32>,
+
+    /// P11: index of the kernel currently being emitted — set before each
+    /// kernel body emit, cleared (None) outside. Used with `producer_kernel_ids`
+    /// to resolve the current kernel's producer id.
+    pub current_kernel_index: std::cell::Cell<Option<crate::cg::emit::program::KernelIndex>>,
+
+    /// P11: per-kernel intra-emit index. Reset to 0 before each kernel body
+    /// emit; incremented by `lower_emit_to_wgsl` for each `CgStmt::Emit`
+    /// encountered during the kernel walk. Packs into the low 4 bits of
+    /// the seq trailer `(kernel_id << 24) | (thread_idx << 4) | emit_idx`.
+    pub intra_emit_idx: std::cell::Cell<u32>,
 }
 
 impl<'a> EmitCtx<'a> {
@@ -382,6 +400,9 @@ impl<'a> EmitCtx<'a> {
             // the existing emit shape unchanged.
             debug_wgsl: prog.debug_wgsl,
             f32_first_writer_gate: std::cell::Cell::new(None),
+            producer_kernel_ids: std::collections::BTreeMap::new(),
+            current_kernel_index: std::cell::Cell::new(None),
+            intra_emit_idx: std::cell::Cell::new(0),
         }
     }
 
@@ -4099,6 +4120,18 @@ fn lower_emit_to_wgsl(
         }
     }
 
+    // For the seq trailer, use the correct per-thread index expression:
+    // PerEvent dispatch loops over `event_idx`; all others use `agent_id`.
+    let thread_idx_expr = match ctx.dispatch.get() {
+        Some(crate::cg::dispatch::DispatchShape::PerEvent { .. }) => "event_idx",
+        _ => "agent_id",
+    };
+    // P11: resolve the producer kernel id and intra-emit index.
+    let producer_kernel_id = ctx.current_kernel_index.get()
+        .and_then(|ki| ctx.producer_kernel_ids.get(&ki).copied())
+        .unwrap_or(0);
+    let emit_idx = ctx.intra_emit_idx.get();
+    ctx.intra_emit_idx.set(emit_idx + 1);
     Ok(emit_chronicle_append_skeleton(
         event_id,
         buf,
@@ -4106,8 +4139,9 @@ fn lower_emit_to_wgsl(
         fields.len(),
         &field_writes,
         ctx.debug_wgsl,
-        // TODO(P11 task 1.5): wire real producer_kernel_id + intra_emit_idx
-        0, 0,
+        producer_kernel_id,
+        emit_idx,
+        thread_idx_expr,
     ))
 }
 
@@ -4164,6 +4198,11 @@ pub(crate) fn emit_chronicle_append_skeleton(
     debug_wgsl: DebugWgslFlags,
     producer_kernel_id: u32,
     intra_emit_idx: u32,
+    // WGSL expression for the per-thread producer index used in the seq
+    // trailer packing (`(kernel_id << 24) | (thread_idx << 4) | emit_idx`).
+    // For `PerAgent` dispatch kernels this is `"agent_id"`. For `PerEvent`
+    // dispatch kernels (`@phase(post)`) this is `"event_idx"`.
+    thread_idx_expr: &str,
 ) -> String {
     let mut out = String::new();
     out.push_str(&format!("// emit event#{event_id} ({field_count} fields)\n"));
@@ -4193,14 +4232,16 @@ pub(crate) fn emit_chronicle_append_skeleton(
         out.push_str(&format!("    {line}\n"));
     }
     // P11 seq trailer: deterministic ordering key for the per-tick sort.
-    // `agent_id` is the producer thread's per-kernel index. The packing
-    // matches the Rust `compute_event_seq` helper byte-for-byte:
-    //   (kernel_id << 24) | (agent_id << 4) | emit_idx
+    // `thread_idx_expr` is the producer thread's per-kernel index
+    // (`agent_id` for PerAgent dispatch, `event_idx` for PerEvent dispatch).
+    // The packing matches the Rust `compute_event_seq` helper byte-for-byte:
+    //   (kernel_id << 24) | (thread_idx << 4) | emit_idx
     out.push_str(&format!(
         "        atomicStore(&{buf}[slot * {stride}u + {seq_offset}u], \
-         ({kernel_id}u << 24u) | (agent_id << 4u) | {emit_idx}u);\n",
+         ({kernel_id}u << 24u) | ({thread_idx} << 4u) | {emit_idx}u);\n",
         seq_offset = stride - 1,
         kernel_id = producer_kernel_id,
+        thread_idx = thread_idx_expr,
         emit_idx = intra_emit_idx,
     ));
     out.push_str("    }\n");
@@ -9339,6 +9380,7 @@ mod tests {
             DebugWgslFlags::NONE,
             // TODO(P11 task 1.5): wire real producer_kernel_id + intra_emit_idx
             0, 0,
+            "agent_id",
         );
 
         // Header comment carries event id + field count for capture
@@ -9382,6 +9424,7 @@ mod tests {
             DebugWgslFlags::NONE,
             // TODO(P11 task 1.5): wire real producer_kernel_id + intra_emit_idx
             0, 0,
+            "agent_id",
         );
         assert!(wgsl.contains("atomicAdd(&event_tail[0], 1u);"));
         assert!(wgsl.contains("atomicStore(&ring[slot * 2u + 0u], 2u);"));
@@ -9405,6 +9448,7 @@ mod tests {
             DebugWgslFlags::NONE,
             // TODO(P11 task 1.5): wire real producer_kernel_id + intra_emit_idx
             0, 0,
+            "agent_id",
         );
         assert!(
             !baseline.contains("event_kind_counts"),
@@ -9426,6 +9470,7 @@ mod tests {
             },
             // TODO(P11 task 1.5): wire real producer_kernel_id + intra_emit_idx
             0, 0,
+            "agent_id",
         );
         assert!(
             flagged.contains("atomicAdd(&event_kind_counts[27u], 1u);"),

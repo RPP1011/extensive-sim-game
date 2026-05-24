@@ -180,6 +180,10 @@ fn scoring_kernel_emits_action_selected_when_verb_present() {
             debug_wgsl: prog.debug_wgsl,
             // Post-CAS emit gating defaults to off.
             f32_first_writer_gate: std::cell::Cell::new(None),
+            // P11: no producer-kernel-id map in this test fixture.
+            producer_kernel_ids: std::collections::BTreeMap::new(),
+            current_kernel_index: std::cell::Cell::new(None),
+            intra_emit_idx: std::cell::Cell::new(0),
         }
     }
 

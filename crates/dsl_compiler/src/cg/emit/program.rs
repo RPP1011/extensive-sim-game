@@ -569,6 +569,101 @@ impl fmt::Display for ProgramEmitError {
 impl std::error::Error for ProgramEmitError {}
 
 // ---------------------------------------------------------------------------
+// P11 producer-kernel-id allocation
+// ---------------------------------------------------------------------------
+
+/// Stable (stage, kernel) index pair — key for the producer-kernel-id map.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct KernelIndex {
+    pub stage: usize,
+    pub kernel: usize,
+}
+
+/// Pre-emit pass: walk every kernel topology and assign a dense
+/// `producer_kernel_id` (0..K) to each kernel whose body contains at
+/// least one `CgStmt::Emit`. Non-emitting kernels carry `None`.
+///
+/// Stable per compilation: kernels visited in schedule stage + intra-stage order.
+pub(crate) fn assign_producer_kernel_ids(
+    schedule: &ComputeSchedule,
+    prog: &CgProgram,
+) -> BTreeMap<KernelIndex, u32> {
+    let mut next_id: u32 = 0;
+    let mut out = BTreeMap::new();
+    for (stage_idx, stage) in schedule.stages.iter().enumerate() {
+        for (kernel_idx, topology) in stage.kernels.iter().enumerate() {
+            if kernel_topology_has_emits(topology, prog) {
+                let key = KernelIndex { stage: stage_idx, kernel: kernel_idx };
+                assert!(next_id < 256, "P11 seq packing only supports 256 emit-producer kernels");
+                out.insert(key, next_id);
+                next_id += 1;
+            }
+        }
+    }
+    out
+}
+
+fn kernel_topology_has_emits(topology: &KernelTopology, prog: &CgProgram) -> bool {
+    use crate::cg::op::ComputeOpKind;
+    for op_id in topology.ops() {
+        let Some(op) = prog.ops.get(op_id.0 as usize) else { continue; };
+        let body_list = match &op.kind {
+            ComputeOpKind::PhysicsRule { body, .. } => *body,
+            ComputeOpKind::ViewFold { body, .. } => *body,
+            _ => continue,
+        };
+        if stmt_list_contains_emit(prog, body_list) {
+            return true;
+        }
+    }
+    false
+}
+
+fn stmt_list_contains_emit(
+    prog: &CgProgram,
+    list_id: crate::cg::stmt::CgStmtListId,
+) -> bool {
+    use crate::cg::stmt::{CgStmt, StmtArena, StmtListArena};
+    let Some(list) = <CgProgram as StmtListArena>::get(prog, list_id) else {
+        return false;
+    };
+    for stmt_id in &list.stmts {
+        let Some(stmt) = <CgProgram as StmtArena>::get(prog, *stmt_id) else {
+            continue;
+        };
+        if matches!(stmt, CgStmt::Emit { .. }) {
+            return true;
+        }
+        match stmt {
+            CgStmt::If { then, else_, .. } => {
+                if stmt_list_contains_emit(prog, *then) {
+                    return true;
+                }
+                if let Some(e) = else_ {
+                    if stmt_list_contains_emit(prog, *e) {
+                        return true;
+                    }
+                }
+            }
+            CgStmt::Match { arms, .. } => {
+                for arm in arms {
+                    if stmt_list_contains_emit(prog, arm.body) {
+                        return true;
+                    }
+                }
+            }
+            CgStmt::ForEachNeighborBody { body, .. } => {
+                if stmt_list_contains_emit(prog, *body) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -650,10 +745,20 @@ pub fn emit_cg_program_with_debug(
         // Assign whose `(field, target)` is also read by the outer
         // cond.
         f32_first_writer_gate: std::cell::Cell::new(None),
+        // P11: populate the producer-kernel-id map before the loop.
+        producer_kernel_ids: assign_producer_kernel_ids(schedule, prog),
+        current_kernel_index: std::cell::Cell::new(None),
+        intra_emit_idx: std::cell::Cell::new(0),
     };
 
     for (stage_idx, stage) in schedule.stages.iter().enumerate() {
         for (kernel_idx, topology) in stage.kernels.iter().enumerate() {
+            // P11: set current kernel index before body emit so lower_emit_to_wgsl
+            // can resolve the producer_kernel_id. Reset intra_emit_idx to 0 for
+            // each kernel (each kernel's emits get their own 0-based idx).
+            let ki = KernelIndex { stage: stage_idx, kernel: kernel_idx };
+            ctx.current_kernel_index.set(Some(ki));
+            ctx.intra_emit_idx.set(0);
             let (spec, body) = kernel_topology_to_spec_and_body(topology, prog, &ctx).map_err(
                 |error| ProgramEmitError::KernelLowering {
                     stage_index: stage_idx,
@@ -661,6 +766,7 @@ pub fn emit_cg_program_with_debug(
                     error,
                 },
             )?;
+            ctx.current_kernel_index.set(None);
 
             if let Some(prior) = seen_names.get(&spec.name) {
                 return Err(ProgramEmitError::KernelNameCollision {
