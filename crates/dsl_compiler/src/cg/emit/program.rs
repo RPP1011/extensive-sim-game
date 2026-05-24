@@ -569,7 +569,7 @@ impl fmt::Display for ProgramEmitError {
 impl std::error::Error for ProgramEmitError {}
 
 // ---------------------------------------------------------------------------
-// P11 producer-kernel-id allocation
+// Producer-kernel-id allocation
 // ---------------------------------------------------------------------------
 
 /// Stable (stage, kernel) index pair — key for the producer-kernel-id map.
@@ -594,7 +594,7 @@ pub(crate) fn assign_producer_kernel_ids(
         for (kernel_idx, topology) in stage.kernels.iter().enumerate() {
             if kernel_topology_has_emits(topology, prog) {
                 let key = KernelIndex { stage: stage_idx, kernel: kernel_idx };
-                assert!(next_id < 256, "P11 seq packing only supports 256 emit-producer kernels");
+                assert!(next_id < 256, "seq packing supports at most 256 emit-producer kernels");
                 out.insert(key, next_id);
                 next_id += 1;
             }
@@ -701,7 +701,6 @@ pub fn emit_cg_program_with_debug(
         // Assign whose `(field, target)` is also read by the outer
         // cond.
         f32_first_writer_gate: std::cell::Cell::new(None),
-        // P11: populate the producer-kernel-id map before the loop.
         producer_kernel_ids: assign_producer_kernel_ids(schedule, prog),
         current_kernel_index: std::cell::Cell::new(None),
         intra_emit_idx: std::cell::Cell::new(0),
@@ -709,7 +708,7 @@ pub fn emit_cg_program_with_debug(
 
     for (stage_idx, stage) in schedule.stages.iter().enumerate() {
         for (kernel_idx, topology) in stage.kernels.iter().enumerate() {
-            // P11: set current kernel index before body emit so lower_emit_to_wgsl
+            // Set current kernel index before body emit so lower_emit_to_wgsl
             // can resolve the producer_kernel_id. Reset intra_emit_idx to 0 for
             // each kernel (each kernel's emits get their own 0-based idx).
             let ki = KernelIndex { stage: stage_idx, kernel: kernel_idx };

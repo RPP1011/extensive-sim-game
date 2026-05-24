@@ -353,19 +353,19 @@ pub struct EmitCtx<'a> {
     /// the chronicle-damage shape).
     pub f32_first_writer_gate: std::cell::Cell<Option<u32>>,
 
-    /// P11: dense producer-kernel-id map built by `assign_producer_kernel_ids`
+    /// Dense producer-kernel-id map built by `assign_producer_kernel_ids`
     /// before the kernel loop. Keyed by `(stage, kernel)` index.
     /// Looked up in `lower_emit_to_wgsl` to fill the seq trailer's
     /// `kernel_id` nibble.
     pub producer_kernel_ids:
         std::collections::BTreeMap<crate::cg::emit::program::KernelIndex, u32>,
 
-    /// P11: index of the kernel currently being emitted — set before each
+    /// Index of the kernel currently being emitted — set before each
     /// kernel body emit, cleared (None) outside. Used with `producer_kernel_ids`
     /// to resolve the current kernel's producer id.
     pub current_kernel_index: std::cell::Cell<Option<crate::cg::emit::program::KernelIndex>>,
 
-    /// P11: per-kernel intra-emit index. Reset to 0 before each kernel body
+    /// Per-kernel intra-emit index. Reset to 0 before each kernel body
     /// emit; incremented by `lower_emit_to_wgsl` for each `CgStmt::Emit`
     /// encountered during the kernel walk. Packs into the low 4 bits of
     /// the seq trailer `(kernel_id << 24) | (thread_idx << 4) | emit_idx`.
@@ -4126,7 +4126,6 @@ fn lower_emit_to_wgsl(
         Some(crate::cg::dispatch::DispatchShape::PerEvent { .. }) => "event_idx",
         _ => "agent_id",
     };
-    // P11: resolve the producer kernel id and intra-emit index.
     let producer_kernel_id = ctx.current_kernel_index.get()
         .and_then(|ki| ctx.producer_kernel_ids.get(&ki).copied())
         .unwrap_or(0);
@@ -4231,7 +4230,7 @@ pub(crate) fn emit_chronicle_append_skeleton(
     for line in field_writes {
         out.push_str(&format!("    {line}\n"));
     }
-    // P11 seq trailer: deterministic ordering key for the per-tick sort.
+    // Seq trailer: deterministic ordering key for the per-tick sort.
     // `thread_idx_expr` is the producer thread's per-kernel index
     // (`agent_id` for PerAgent dispatch, `event_idx` for PerEvent dispatch).
     // The packing matches the Rust `compute_event_seq` helper byte-for-byte:
@@ -9378,7 +9377,6 @@ mod tests {
             /*field_count*/ 2,
             &field_writes,
             DebugWgslFlags::NONE,
-            // TODO(P11 task 1.5): wire real producer_kernel_id + intra_emit_idx
             0, 0,
             "agent_id",
         );
@@ -9422,7 +9420,6 @@ mod tests {
             0,
             &[],
             DebugWgslFlags::NONE,
-            // TODO(P11 task 1.5): wire real producer_kernel_id + intra_emit_idx
             0, 0,
             "agent_id",
         );
@@ -9446,7 +9443,6 @@ mod tests {
             0,
             &[],
             DebugWgslFlags::NONE,
-            // TODO(P11 task 1.5): wire real producer_kernel_id + intra_emit_idx
             0, 0,
             "agent_id",
         );
@@ -9468,7 +9464,6 @@ mod tests {
                 event_kind_histogram: true,
                 ..crate::cg::lower::driver::DebugWgslFlags::NONE
             },
-            // TODO(P11 task 1.5): wire real producer_kernel_id + intra_emit_idx
             0, 0,
             "agent_id",
         );

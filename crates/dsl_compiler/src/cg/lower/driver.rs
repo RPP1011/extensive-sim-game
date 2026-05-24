@@ -1160,7 +1160,7 @@ fn populate_event_kinds(
         // binder surface — `tick` is implicit, never named in `on
         // <Event> { ... }` bindings).
         let layout = EventLayout {
-            // P11: stride 11 (= 2 header + 8 payload + 1 seq trailer).
+            // stride 11 = 2 header + 8 payload + 1 seq trailer.
             // See `crates/engine_gpu/src/event_ring.rs` PAYLOAD_WORDS = 8.
             record_stride_u32: 11,
             header_word_count: 2,
