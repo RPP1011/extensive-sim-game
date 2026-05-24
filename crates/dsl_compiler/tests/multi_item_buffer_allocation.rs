@@ -170,6 +170,8 @@ fn multi_item_shared_field_runtime_struct_has_one_buffer_per_field() {
         &[],
         item_entity_count,
         group_entity_count,
+        false,
+        None,
     );
 
     // Exactly ONE `item_base_price_buf` field on the struct (field-

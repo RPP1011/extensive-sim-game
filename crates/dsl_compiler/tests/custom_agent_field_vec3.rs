@@ -197,6 +197,8 @@ fn synthesize_runtime_allocates_vec3_buf() {
         &[],
         0,
         0,
+        false,
+        None,
     );
 
     // The runtime struct must own the per-agent buffer for the

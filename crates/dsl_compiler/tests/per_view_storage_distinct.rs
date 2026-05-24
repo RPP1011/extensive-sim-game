@@ -178,6 +178,8 @@ fn synthesize_two_view_fixture() -> String {
         &[],
         0,
         0,
+        false,
+        None,
     )
 }
 

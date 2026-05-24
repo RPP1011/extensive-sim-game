@@ -128,6 +128,8 @@ fn synthesize(artifacts: &EmittedArtifacts) -> String {
         &[],
         0,
         0,
+        false,
+        None,
     )
 }
 

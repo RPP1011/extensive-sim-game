@@ -454,12 +454,29 @@ fn emit_into(
         strategy,
         built_registry.as_ref().map(|r| &r.registry),
     );
-    let artifacts = crate::cg::emit::emit_cg_program_with_debug(
+    let mut artifacts = crate::cg::emit::emit_cg_program_with_debug(
         &schedule_result.schedule,
         &cg,
         lower_debug_depth,
     )
     .unwrap_or_else(|e| panic!("emit {fixture_name} CG program: {e:?}"));
+
+    // Sort-kernel opt-in: inject 15 sort kernels (4 × 3 Stage A passes +
+    // 3 Stage B kernels) for any fixture that has at least one f32 view
+    // fold. The kernels are complete WGSL files (own bindings + entry
+    // point) emitted by cg::emit::sort_kernel; they bypass the normal
+    // kernel_topology_to_spec_and_body pipeline.
+    let sort_layout = sort_layout_for_fixture(&cg);
+    let needs_sort = sort_layout.is_some();
+    if let Some(ref layout) = sort_layout {
+        inject_sort_kernels(&mut artifacts, layout);
+        println!(
+            "cargo:warning=[{fixture_name} sort-kernels] injected 15 radix sort kernels \
+             (stride={stride}, target_word={tgt})",
+            stride = layout.record_stride_u32,
+            tgt = sort_target_word_offset(layout),
+        );
+    }
 
     println!(
         "cargo:warning=[{fixture_name} emit-stats] {} kernels, schedule has {} stages",
@@ -662,6 +679,8 @@ fn emit_into(
         &indirect_consumer_kernel_names,
         item_entity_count,
         group_entity_count,
+        needs_sort,
+        sort_layout.as_ref(),
     );
     fs::write(out_dir.join("runtime_core.rs"), runtime_core)
         .unwrap_or_else(|e| panic!("write runtime_core.rs: {e}"));
@@ -1278,6 +1297,120 @@ pub fn detect_pair_keyed_second_key(
     best
 }
 
+// ---------------------------------------------------------------------------
+// Sort kernel detection + injection helpers
+// ---------------------------------------------------------------------------
+
+/// Detect whether a fixture needs the radix sort pass.
+///
+/// Returns the `EventLayout` of the first f32+Add view fold's source event,
+/// or `None` when no such view exists. The layout carries the record stride
+/// used to size the sort scratch buffer and the field map used to find the
+/// `target` word offset for `SortCfg`.
+fn sort_layout_for_fixture(
+    cg: &crate::cg::program::CgProgram,
+) -> Option<crate::cg::program::EventLayout> {
+    use crate::cg::expr::CgTy;
+    use crate::cg::op::ComputeOpKind;
+    use crate::cg::program::ViewFoldOp;
+
+    // Find the first ViewFold op whose view has f32 result and Add/Sub fold.
+    for op in &cg.ops {
+        if let ComputeOpKind::ViewFold { view, on_event, .. } = &op.kind {
+            let sig = cg.view_signatures.get(&view.0)?;
+            let is_f32 = matches!(sig.result, CgTy::F32);
+            let is_add_or_sub = matches!(
+                sig.fold_op,
+                Some(ViewFoldOp::Add) | Some(ViewFoldOp::Sub)
+            );
+            if is_f32 && is_add_or_sub {
+                // Found a qualifying fold — return the event layout.
+                if let Some(layout) = cg.event_layouts.get(&on_event.0) {
+                    return Some(layout.clone());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Compute the `target_word_offset` for the `SortCfg` uniform from an event
+/// layout.
+///
+/// The offset is `header_word_count + field.word_offset_in_payload` for the
+/// field named `"target"`. Falls back to `header_word_count + 1` (the second
+/// payload word, a reasonable default for two-AgentId events) when the
+/// layout has no field named `"target"`.
+fn sort_target_word_offset(layout: &crate::cg::program::EventLayout) -> u32 {
+    if let Some(field) = layout.fields.get("target") {
+        return layout.header_word_count + field.word_offset_in_payload;
+    }
+    // Fall back: second payload word after the header.
+    layout.header_word_count + 1
+}
+
+/// Inject 15 sort kernel WGSL files (4 × Stage A passes × 3 phases + 3
+/// Stage B phases) and minimal Rust stub modules into `artifacts`.
+///
+/// The 15 kernels are complete WGSL files produced by
+/// `cg::emit::sort_kernel::{emit_stage_a_pass, emit_stage_b}`; they
+/// include their own `@group(0) @binding(N)` declarations and
+/// `@compute @workgroup_size(...)` entry points. They therefore bypass
+/// the normal `compose_wgsl_file` wrapper and are inserted directly into
+/// `artifacts.wgsl_files`.
+///
+/// Each kernel also gets a minimal Rust stub in `artifacts.rust_files` and
+/// an entry in `artifacts.kernel_index` so `emit_into`'s
+/// `wrap_module` loop finds the stub file.
+fn inject_sort_kernels(
+    artifacts: &mut crate::cg::emit::EmittedArtifacts,
+    layout: &crate::cg::program::EventLayout,
+) {
+    use crate::cg::emit::sort_kernel::{emit_stage_a_pass, emit_stage_b};
+
+    // Stage A: 4 passes × 3 phases = 12 kernels.
+    for pass_idx in 0..4u32 {
+        let (hist_wgsl, scan_wgsl, scatter_wgsl) = emit_stage_a_pass(pass_idx, layout);
+        for (phase, wgsl) in [
+            ("histogram", hist_wgsl),
+            ("scan", scan_wgsl),
+            ("scatter", scatter_wgsl),
+        ] {
+            let name = format!("radix_stage_a_pass{}_{}", pass_idx, phase);
+            artifacts.wgsl_files.insert(format!("{name}.wgsl"), wgsl);
+            artifacts.rust_files.insert(format!("{name}.rs"), sort_kernel_stub_rs(&name));
+            artifacts.kernel_index.push(name);
+        }
+    }
+
+    // Stage B: 3 phases = 3 kernels.
+    let (count_wgsl, scan_wgsl, scatter_wgsl) = emit_stage_b(layout);
+    for (phase, wgsl) in [
+        ("count", count_wgsl),
+        ("scan", scan_wgsl),
+        ("scatter", scatter_wgsl),
+    ] {
+        let name = format!("radix_stage_b_{}", phase);
+        artifacts.wgsl_files.insert(format!("{name}.wgsl"), wgsl);
+        artifacts.rust_files.insert(format!("{name}.rs"), sort_kernel_stub_rs(&name));
+        artifacts.kernel_index.push(name);
+    }
+}
+
+/// Minimal Rust stub for a sort kernel module. The stub compiles cleanly
+/// inside `pub mod {name} { ... }` (the `wrap_module` wrapper in `emit_into`)
+/// and provides a `SHADER_SRC` const so any code scanning for that pattern
+/// can find the associated WGSL file. No Kernel trait impl is emitted —
+/// sort kernels are driven directly by the runtime without going through the
+/// compiler-synthesized dispatch plumbing.
+fn sort_kernel_stub_rs(name: &str) -> String {
+    format!(
+        "// Sort kernel stub — WGSL is a complete shader, not a body fragment.\n\
+         // Dispatch and buffer binding are managed by the runtime directly.\n\
+         pub const SHADER_SRC: &str = include_str!(\"{name}.wgsl\");\n",
+    )
+}
+
 /// Lightweight `K = <int>` extractor for build-side annotation lookup.
 /// Returns `Some(k)` only on the happy path; ill-formed annotations
 /// surface to the .sim author via the resolver's `annotation_k_arg`
@@ -1350,6 +1483,12 @@ pub fn synthesize_runtime_core_a2(
     // BTreeMap), silently dropping the rest.
     item_entity_count: u32,
     group_entity_count: u32,
+    // Whether this fixture has at least one f32+Add view fold —
+    // gates sort-scratch buffer allocation in the generated runtime.
+    needs_sort: bool,
+    // Event layout for the first f32+Add fold's source event. Carries
+    // the record stride used to size `event_ring_sort_scratch_buf`.
+    sort_event_layout: Option<&crate::cg::program::EventLayout>,
 ) -> String {
     let kernel_count = artifacts.kernel_index.len();
     let mut out = String::new();
@@ -1431,6 +1570,8 @@ pub fn synthesize_runtime_core_a2(
         indirect_consumer_kernel_names,
         item_entity_count,
         group_entity_count,
+        needs_sort,
+        sort_event_layout,
     ));
 
     out
@@ -1825,6 +1966,8 @@ fn synthesize_generated_runtime_struct(
     indirect_consumer_kernel_names: &[String],
     item_entity_count: u32,
     group_entity_count: u32,
+    needs_sort: bool,
+    sort_event_layout: Option<&crate::cg::program::EventLayout>,
 ) -> String {
     use crate::kernel_binding_ir::BgSource;
     use std::collections::BTreeMap;
@@ -2071,6 +2214,18 @@ fn synthesize_generated_runtime_struct(
         out.push_str("    pub navgrid_buf: wgpu::Buffer,\n");
         out.push_str("    pub navgrid_cfg_buf: wgpu::Buffer,\n");
     }
+    // Radix sort scratch buffers — allocated only when the fixture has
+    // at least one f32+Add view fold. The sort runs in the schedule
+    // between producer phase and consumer phase so fold consumers read
+    // target-grouped, seq-ordered events.
+    if needs_sort {
+        out.push_str("    pub event_ring_sort_scratch_buf: wgpu::Buffer,\n");
+        out.push_str("    pub radix_histogram_buf: wgpu::Buffer,\n");
+        out.push_str("    pub radix_bucket_offsets_buf: wgpu::Buffer,\n");
+        out.push_str("    pub target_histogram_buf: wgpu::Buffer,\n");
+        out.push_str("    pub target_offsets_buf: wgpu::Buffer,\n");
+        out.push_str("    pub sort_cfg_buf: wgpu::Buffer,\n");
+    }
     // Plan E-A6 — `@runtime` config field values, mirrored host-side.
     // The .sim's `flee_strength: f32 = 1.0 @runtime` lands here as
     // `pub flee_strength: f32`. Host setters write the value to every
@@ -2122,6 +2277,63 @@ fn synthesize_generated_runtime_struct(
              \x20           mapped_at_creation: false,\n\
              \x20       });\n",
         );
+    }
+    // Radix sort scratch buffers. Sizes:
+    //   - sort scratch: same capacity as event_ring
+    //     (EVENT_RING_CAP_SLOTS * stride * 4 bytes)
+    //   - radix_histogram / radix_bucket_offsets: 256 × 4 = 1024 bytes
+    //   - target_histogram / target_offsets: (agent_count + 1) × 4 bytes
+    //   - sort_cfg: 16 bytes (4 × u32 = { target_word_offset, agent_cap, _pad0, _pad1 })
+    if needs_sort {
+        let stride = sort_event_layout
+            .map(|l| l.record_stride_u32)
+            .unwrap_or(10); // default engine stride
+        let target_word = sort_event_layout
+            .map(sort_target_word_offset)
+            .unwrap_or(3);
+        // engine::gpu::event_ring::EVENT_RING_CAP_SLOTS = 1_048_576
+        let sort_scratch_bytes = 1_048_576_u64 * (stride as u64) * 4;
+        out.push_str(&format!(
+            "        let event_ring_sort_scratch_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {{\n\
+             \x20           label: Some(\"{fixture_name}::event_ring_sort_scratch\"),\n\
+             \x20           size: {sort_scratch_bytes}u64,\n\
+             \x20           usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,\n\
+             \x20           mapped_at_creation: false,\n\
+             \x20       }});\n\
+             \x20       let radix_histogram_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {{\n\
+             \x20           label: Some(\"{fixture_name}::radix_histogram\"),\n\
+             \x20           size: 256u64 * 4u64,\n\
+             \x20           usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,\n\
+             \x20           mapped_at_creation: false,\n\
+             \x20       }});\n\
+             \x20       let radix_bucket_offsets_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {{\n\
+             \x20           label: Some(\"{fixture_name}::radix_bucket_offsets\"),\n\
+             \x20           size: 256u64 * 4u64,\n\
+             \x20           usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,\n\
+             \x20           mapped_at_creation: false,\n\
+             \x20       }});\n\
+             \x20       let target_histogram_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {{\n\
+             \x20           label: Some(\"{fixture_name}::target_histogram\"),\n\
+             \x20           size: (agent_count as u64 + 1u64) * 4u64,\n\
+             \x20           usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,\n\
+             \x20           mapped_at_creation: false,\n\
+             \x20       }});\n\
+             \x20       let target_offsets_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {{\n\
+             \x20           label: Some(\"{fixture_name}::target_offsets\"),\n\
+             \x20           size: (agent_count as u64 + 1u64) * 4u64,\n\
+             \x20           usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,\n\
+             \x20           mapped_at_creation: false,\n\
+             \x20       }});\n\
+             \x20       let sort_cfg_init: [u32; 4] = [{target_word}u32, agent_count, 0u32, 0u32];\n\
+             \x20       let sort_cfg_buf = wgpu::util::DeviceExt::create_buffer_init(\n\
+             \x20           &gpu.device,\n\
+             \x20           &wgpu::util::BufferInitDescriptor {{\n\
+             \x20               label: Some(\"{fixture_name}::sort_cfg\"),\n\
+             \x20               contents: bytemuck::cast_slice(&sort_cfg_init),\n\
+             \x20               usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,\n\
+             \x20           }},\n\
+             \x20       );\n",
+        ));
     }
     // Registry construction. Two paths:
     // (a) Fixture has a companion `assets/ability_test/<fixture>/`
@@ -2429,6 +2641,14 @@ fn synthesize_generated_runtime_struct(
     if binds_navgrid {
         out.push_str("            navgrid_buf,\n");
         out.push_str("            navgrid_cfg_buf,\n");
+    }
+    if needs_sort {
+        out.push_str("            event_ring_sort_scratch_buf,\n");
+        out.push_str("            radix_histogram_buf,\n");
+        out.push_str("            radix_bucket_offsets_buf,\n");
+        out.push_str("            target_histogram_buf,\n");
+        out.push_str("            target_offsets_buf,\n");
+        out.push_str("            sort_cfg_buf,\n");
     }
     for (name, def) in runtime_config_defaults {
         let lit_typed = match def.scalar_ty.as_str() {
@@ -3531,6 +3751,8 @@ mod tests {
             &[],
             0,
             0,
+            false,
+            None,
         );
 
         // Braces balance.
@@ -3609,6 +3831,8 @@ mod tests {
             &[],
             0,
             0,
+            false,
+            None,
         );
 
         // Typed signature with snake_case method name + matching params.
@@ -3677,6 +3901,8 @@ mod tests {
             &[],
             0,
             0,
+            false,
+            None,
         );
 
         // The generic helper still lands.
