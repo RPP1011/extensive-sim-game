@@ -1160,10 +1160,9 @@ fn populate_event_kinds(
         // binder surface — `tick` is implicit, never named in `on
         // <Event> { ... }` bindings).
         let layout = EventLayout {
-            // Today's runtime: shared ring with stride 10 (= 2 header
-            // + 8 payload words). See `crates/engine_gpu/src/event_ring.rs`
-            // PAYLOAD_WORDS = 8.
-            record_stride_u32: 10,
+            // P11: stride 11 (= 2 header + 8 payload + 1 seq trailer).
+            // See `crates/engine_gpu/src/event_ring.rs` PAYLOAD_WORDS = 8.
+            record_stride_u32: 11,
             header_word_count: 2,
             // Post-iter-2 every event kind reads from the shared
             // `EventRingId(0)` ring; the structural namer drops the
