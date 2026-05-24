@@ -43,6 +43,7 @@ physics IdleDrift @phase(per_agent) {
   }
 }
 
+// @phase(per_agent) (not post): two pos-writing rules at the same phase form a write->write cycle; per_agent + the disjoint where-guard breaks the SCC.
 // Players flee nearby enemy-band agents (separation steering).
 physics KitePlayer @phase(per_agent) {
   on Tick {} where (self.alive
@@ -64,9 +65,9 @@ physics KitePlayer @phase(per_agent) {
   }
 }
 
+// @phase(per_agent) (not post): two pos-writing rules at the same phase form a write->write cycle; per_agent + the disjoint where-guard breaks the SCC.
 // Enemies steer toward the nearest player-band agent (the moving player).
-@phase(post)
-physics ChasePlayer {
+physics ChasePlayer @phase(per_agent) {
   on Tick {} where (self.alive
                     && self.mana >= config.vs.enemy_mana_min
                     && self.mana <= config.vs.enemy_mana_max) {
