@@ -3125,7 +3125,7 @@ fn lower_cg_stmt_body_to_wgsl(
 /// Why the spatial-walk lives at this layer (rather than in the
 /// per-cast caller): the chronicle arm chain consumes `target_slot`
 /// at every chronicle-bearing variant (`atomicStore(...&event_ring[_slot
-/// * 10u + 3u], (target_slot))`), so the per-target shadow has to
+/// * 11u + 3u], (target_slot))`), so the per-target shadow has to
 /// surround the entire arm chain (primary + nested). Hoisting the
 /// spatial walk out would require lifting target_slot into a parameter
 /// of `emit_chronicle_arm_chain` — strictly more code, and the chain
@@ -7589,7 +7589,7 @@ mod tests {
         prog.event_layouts.insert(
             7,
             EventLayout {
-                record_stride_u32: 10,
+                record_stride_u32: 11,
                 header_word_count: 2,
                 buffer_name: "event_ring".to_string(),
                 fields,
@@ -7635,15 +7635,15 @@ mod tests {
             "expected atomicAdd-to-tail; got:\n{wgsl}"
         );
         assert!(
-            wgsl.contains("atomicStore(&event_ring[slot * 10u + 0u], 7u);"),
+            wgsl.contains("atomicStore(&event_ring[slot * 11u + 0u], 7u);"),
             "expected tag (event id 7) write; got:\n{wgsl}"
         );
         assert!(
-            wgsl.contains("atomicStore(&event_ring[slot * 10u + 2u], bitcast<u32>(agent_hp[agent_id]));"),
+            wgsl.contains("atomicStore(&event_ring[slot * 11u + 2u], bitcast<u32>(agent_hp[agent_id]));"),
             "expected hp f32 bitcast write at offset 2; got:\n{wgsl}"
         );
         assert!(
-            wgsl.contains("atomicStore(&event_ring[slot * 10u + 3u], bitcast<u32>(0.0));"),
+            wgsl.contains("atomicStore(&event_ring[slot * 11u + 3u], bitcast<u32>(0.0));"),
             "expected zero f32 bitcast write at offset 3; got:\n{wgsl}"
         );
     }
@@ -8140,10 +8140,10 @@ mod tests {
     // ---- Task 1 (CG Lowering Gap Closure): EventField emit ----
 
     /// `CgExpr::EventField` produces a schema-driven access expression.
-    /// With the today-default layout (stride=10, header=2,
+    /// With the today-default layout (stride=11, header=2,
     /// buffer="event_ring") and a `target` field at payload offset 1
     /// typed as `AgentId`, the WGSL renders to
-    /// `event_ring[event_idx * 10u + 3u]`.
+    /// `event_ring[event_idx * 11u + 3u]`.
     #[test]
     fn event_field_emits_schema_driven_wgsl_access_for_agent_id() {
         use crate::cg::program::{EventLayout, FieldLayout};
@@ -8160,7 +8160,7 @@ mod tests {
         prog.event_layouts.insert(
             7,
             EventLayout {
-                record_stride_u32: 10,
+                record_stride_u32: 11,
                 header_word_count: 2,
                 buffer_name: "event_ring".to_string(),
                 fields,
@@ -8177,7 +8177,7 @@ mod tests {
         );
         let ctx = EmitCtx::structural(&prog);
         let wgsl = lower_cg_expr_to_wgsl(id, &ctx).expect("EventField lowers");
-        assert_eq!(wgsl, "event_ring[event_idx * 10u + 3u]");
+        assert_eq!(wgsl, "event_ring[event_idx * 11u + 3u]");
     }
 
     /// F32-typed `EventField` emits a `bitcast<f32>` access. The
@@ -8200,7 +8200,7 @@ mod tests {
         prog.event_layouts.insert(
             3,
             EventLayout {
-                record_stride_u32: 10,
+                record_stride_u32: 11,
                 header_word_count: 2,
                 buffer_name: "event_ring".to_string(),
                 fields,
@@ -8217,7 +8217,7 @@ mod tests {
         );
         let ctx = EmitCtx::structural(&prog);
         let wgsl = lower_cg_expr_to_wgsl(id, &ctx).expect("EventField F32 lowers");
-        assert_eq!(wgsl, "bitcast<f32>(event_ring[event_idx * 10u + 4u])");
+        assert_eq!(wgsl, "bitcast<f32>(event_ring[event_idx * 11u + 4u])");
     }
 
     /// An `EventField` whose `event_kind` has no entry in
@@ -8246,7 +8246,7 @@ mod tests {
     /// constructor with three independent `bitcast<f32>` reads at
     /// `total_offset`, `total_offset+1`, `total_offset+2`. With
     /// `header_word_count=2` and a Vec3F32 field at
-    /// `word_offset_in_payload=4` (stride=10), the first base is
+    /// `word_offset_in_payload=4` (stride=11), the first base is
     /// `2 + 4 = 6`; the three accesses land at offsets `6`, `7`, `8`.
     /// This is the most error-prone CgTy arm because the format
     /// string carries `o2 = total_offset + 1` / `o3 = total_offset + 2`
@@ -8268,7 +8268,7 @@ mod tests {
         prog.event_layouts.insert(
             5,
             EventLayout {
-                record_stride_u32: 10,
+                record_stride_u32: 11,
                 header_word_count: 2,
                 buffer_name: "event_ring".to_string(),
                 fields,
@@ -8287,15 +8287,15 @@ mod tests {
         let wgsl = lower_cg_expr_to_wgsl(id, &ctx).expect("EventField Vec3F32 lowers");
         assert_eq!(
             wgsl,
-            "vec3<f32>(bitcast<f32>(event_ring[event_idx * 10u + 6u]), bitcast<f32>(event_ring[event_idx * 10u + 7u]), bitcast<f32>(event_ring[event_idx * 10u + 8u]))"
+            "vec3<f32>(bitcast<f32>(event_ring[event_idx * 11u + 6u]), bitcast<f32>(event_ring[event_idx * 11u + 7u]), bitcast<f32>(event_ring[event_idx * 11u + 8u]))"
         );
     }
 
     /// `Bool`-typed `EventField` emits a `(... != 0u)` predicate form.
     /// The payload word is u32 on the GPU side; non-zero u32 reads as
     /// `true`. With `header_word_count=2` and a Bool field at
-    /// `word_offset_in_payload=0` (stride=10), the read lands at offset
-    /// `2`, producing `(event_ring[event_idx * 10u + 2u] != 0u)`.
+    /// `word_offset_in_payload=0` (stride=11), the read lands at offset
+    /// `2`, producing `(event_ring[event_idx * 11u + 2u] != 0u)`.
     #[test]
     fn event_field_emits_bool_predicate_form() {
         use crate::cg::program::{EventLayout, FieldLayout};
@@ -8312,7 +8312,7 @@ mod tests {
         prog.event_layouts.insert(
             6,
             EventLayout {
-                record_stride_u32: 10,
+                record_stride_u32: 11,
                 header_word_count: 2,
                 buffer_name: "event_ring".to_string(),
                 fields,
@@ -8329,7 +8329,7 @@ mod tests {
         );
         let ctx = EmitCtx::structural(&prog);
         let wgsl = lower_cg_expr_to_wgsl(id, &ctx).expect("EventField Bool lowers");
-        assert_eq!(wgsl, "(event_ring[event_idx * 10u + 2u] != 0u)");
+        assert_eq!(wgsl, "(event_ring[event_idx * 11u + 2u] != 0u)");
     }
 
     /// `I32`-typed `EventField` emits a `bitcast<i32>` access. The
@@ -8337,7 +8337,7 @@ mod tests {
     /// the bit pattern as the typed signed int — same shape
     /// `pack_event` writes via `i32::to_ne_bytes`-style reinterpretation
     /// on the CPU. With `header_word_count=2` and an I32 field at
-    /// `word_offset_in_payload=3` (stride=10), the read lands at offset
+    /// `word_offset_in_payload=3` (stride=11), the read lands at offset
     /// `5`.
     #[test]
     fn event_field_emits_i32_signed_cast() {
@@ -8355,7 +8355,7 @@ mod tests {
         prog.event_layouts.insert(
             8,
             EventLayout {
-                record_stride_u32: 10,
+                record_stride_u32: 11,
                 header_word_count: 2,
                 buffer_name: "event_ring".to_string(),
                 fields,
@@ -8372,7 +8372,7 @@ mod tests {
         );
         let ctx = EmitCtx::structural(&prog);
         let wgsl = lower_cg_expr_to_wgsl(id, &ctx).expect("EventField I32 lowers");
-        assert_eq!(wgsl, "bitcast<i32>(event_ring[event_idx * 10u + 5u])");
+        assert_eq!(wgsl, "bitcast<i32>(event_ring[event_idx * 11u + 5u])");
     }
 
     // ---- Task 4 (CG Lowering Gap Closure): NamespaceCall / NamespaceField emit ----
@@ -8531,7 +8531,7 @@ mod tests {
         prog.event_layouts.insert(
             1,
             EventLayout {
-                record_stride_u32: 10,
+                record_stride_u32: 11,
                 header_word_count: 2,
                 buffer_name: "event_ring".to_string(),
                 fields,
@@ -8568,22 +8568,22 @@ mod tests {
         );
         // Tag write at offset 0 (event_id is 1) via atomicStore.
         assert!(
-            wgsl.contains("atomicStore(&event_ring[slot * 10u + 0u], 1u);"),
+            wgsl.contains("atomicStore(&event_ring[slot * 11u + 0u], 1u);"),
             "expected tag write at offset 0; got:\n{wgsl}"
         );
         // Tick write at offset 1.
         assert!(
-            wgsl.contains("atomicStore(&event_ring[slot * 10u + 1u], tick);"),
+            wgsl.contains("atomicStore(&event_ring[slot * 11u + 1u], tick);"),
             "expected tick write at offset 1; got:\n{wgsl}"
         );
         // by AgentId at payload offset 0 (header+0 = 2).
         assert!(
-            wgsl.contains("atomicStore(&event_ring[slot * 10u + 2u], (agent_id));"),
+            wgsl.contains("atomicStore(&event_ring[slot * 11u + 2u], (agent_id));"),
             "expected `by` at offset 2; got:\n{wgsl}"
         );
         // prey AgentId at payload offset 1 (header+1 = 3).
         assert!(
-            wgsl.contains("atomicStore(&event_ring[slot * 10u + 3u], (agent_id));"),
+            wgsl.contains("atomicStore(&event_ring[slot * 11u + 3u], (agent_id));"),
             "expected `prey` at offset 3; got:\n{wgsl}"
         );
         // Vec3 pos with bitcast<u32>(.x/.y/.z) at offsets 4/5/6.
@@ -8592,11 +8592,11 @@ mod tests {
             "expected vec3 .x bitcast; got:\n{wgsl}"
         );
         assert!(
-            wgsl.contains("atomicStore(&event_ring[slot * 10u + 4u], bitcast<u32>(_emit_v_1_2.x));"),
+            wgsl.contains("atomicStore(&event_ring[slot * 11u + 4u], bitcast<u32>(_emit_v_1_2.x));"),
             "expected vec3 .x at offset 4; got:\n{wgsl}"
         );
         assert!(
-            wgsl.contains("atomicStore(&event_ring[slot * 10u + 6u], bitcast<u32>(_emit_v_1_2.z));"),
+            wgsl.contains("atomicStore(&event_ring[slot * 11u + 6u], bitcast<u32>(_emit_v_1_2.z));"),
             "expected vec3 .z at offset 6; got:\n{wgsl}"
         );
         // No phony discard left over from the old B1 placeholder.

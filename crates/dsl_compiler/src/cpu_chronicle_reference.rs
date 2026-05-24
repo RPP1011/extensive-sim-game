@@ -32,8 +32,9 @@
 //!     `cg::emit::wgsl_body`) corresponds to exactly one variant
 //!     handled below; variants outside the table return `None`
 //!     (no chronicle counterpart today).
-//!   - Stride is 10 u32-words to match the engine's runtime ring
-//!     (see `cg::lower::driver`'s `record_stride_u32: 10` constant).
+//!   - Stride is 11 u32-words to match the engine's runtime ring
+//!     (see `EVENT_STRIDE_U32` in `engine::gpu::event_ring`). Word 10
+//!     is the seq trailer added by the sort-then-fold pass.
 //!   - Header layout: word 0 = kind tag, word 1 = tick.
 
 use engine::ability::apply::ApplyEvent;

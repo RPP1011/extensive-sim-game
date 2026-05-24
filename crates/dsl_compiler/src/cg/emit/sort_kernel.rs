@@ -262,7 +262,7 @@ mod tests {
     fn stage_a_reads_seq_at_last_word() {
         let lay = test_layout();
         let (h, _, _) = emit_stage_a_pass(0, &lay);
-        // seq_offset = stride - 1 = 10
+        // seq_offset = stride - 1 = 10 (stride=11, last word index=10)
         assert!(h.contains("tid * 11u + 10u"));
     }
 

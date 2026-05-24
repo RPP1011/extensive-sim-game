@@ -2954,8 +2954,8 @@ fn build_view_fold_wgsl_body(
                 let body_wgsl =
                     lower_cg_stmt_list_to_wgsl(*body, ctx).map_err(KernelEmitError::from)?;
                 // Stride for the kind tag offset. The runtime today
-                // packs every kind into a single ring with stride 10
-                // (= 2 header + 8 payload); per-kind layouts may
+                // packs every kind into a single ring with stride 11
+                // (= 2 header + 8 payload + 1 seq trailer); per-kind layouts may
                 // diverge once ring fanout lands. Look up the per-kind
                 // stride when registered, fall back to the runtime's
                 // hard-coded constant otherwise (test harnesses that
@@ -7282,7 +7282,7 @@ mod tests {
         // Register the ActionSelected event kind on the program — the
         // shape verb_expand + populate_event_kinds produce in the live
         // pipeline. Layout matches `populate_event_kinds`'s defaults
-        // (stride=10, header=2) and the verb expander's payload order
+        // (stride=11, header=2) and the verb expander's payload order
         // (`actor, action_id, target` as offsets 0/1/2 of the payload).
         let action_selected_id: u32 = 7;
         prog.interner.event_kinds.insert(
@@ -7317,7 +7317,7 @@ mod tests {
         prog.event_layouts.insert(
             action_selected_id,
             EventLayout {
-                record_stride_u32: 10,
+                record_stride_u32: 11,
                 header_word_count: 2,
                 buffer_name: "event_ring".to_string(),
                 fields,
@@ -7380,27 +7380,27 @@ mod tests {
         );
         // Tag write: kind id 7, header offset 0.
         assert!(
-            body.contains("atomicStore(&event_ring[slot * 10u + 0u], 7u);"),
+            body.contains("atomicStore(&event_ring[slot * 11u + 0u], 7u);"),
             "missing kind-tag store; body: {body}"
         );
         // Tick: header offset 1.
         assert!(
-            body.contains("atomicStore(&event_ring[slot * 10u + 1u], tick);"),
+            body.contains("atomicStore(&event_ring[slot * 11u + 1u], tick);"),
             "missing tick store; body: {body}"
         );
         // actor=agent_id @ payload offset 0 → record offset 2.
         assert!(
-            body.contains("atomicStore(&event_ring[slot * 10u + 2u], agent_id);"),
+            body.contains("atomicStore(&event_ring[slot * 11u + 2u], agent_id);"),
             "missing actor store; body: {body}"
         );
         // action_id=best_action @ payload offset 1 → record offset 3.
         assert!(
-            body.contains("atomicStore(&event_ring[slot * 10u + 3u], best_action);"),
+            body.contains("atomicStore(&event_ring[slot * 11u + 3u], best_action);"),
             "missing action_id store; body: {body}"
         );
         // target=best_target @ payload offset 2 → record offset 4.
         assert!(
-            body.contains("atomicStore(&event_ring[slot * 10u + 4u], best_target);"),
+            body.contains("atomicStore(&event_ring[slot * 11u + 4u], best_target);"),
             "missing target store; body: {body}"
         );
         // Bounds check.

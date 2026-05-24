@@ -871,8 +871,8 @@ pub enum CgExpr {
     /// Schema-driven: `event_kind` keys into
     /// [`super::program::CgProgram::event_layouts`] to resolve
     /// `(record_stride_u32, header_word_count, buffer_name,
-    /// field_offset)`. Today every kind shares one ring with stride 10
-    /// (2 header + 8 payload, sized for `AgentMoved` / `AgentFled`);
+    /// field_offset)`. Today every kind shares one ring with stride 11
+    /// (2 header + 8 payload + 1 seq trailer, sized for `AgentMoved` / `AgentFled`);
     /// future per-kind ring fanout returns per-kind buffer + stride
     /// without any IR shape change. The `word_offset_in_payload` is
     /// the field's 0-based u32-word offset within the event's payload

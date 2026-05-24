@@ -3114,7 +3114,7 @@ mod tests {
         ctx.register_event_layout(
             EventKindId(7),
             EventLayout {
-                record_stride_u32: 10,
+                record_stride_u32: 11,
                 header_word_count: 2,
                 buffer_name: "event_ring".to_string(),
                 fields: layout_fields,
@@ -3189,7 +3189,7 @@ mod tests {
         ctx.register_event_layout(
             EventKindId(7),
             EventLayout {
-                record_stride_u32: 10,
+                record_stride_u32: 11,
                 header_word_count: 2,
                 buffer_name: "event_ring".to_string(),
                 fields: std::collections::BTreeMap::new(),

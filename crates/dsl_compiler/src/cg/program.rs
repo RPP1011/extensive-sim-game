@@ -305,7 +305,7 @@ impl Interner {
 /// + offset]` accesses.
 ///
 /// **Forward-compat with per-kind ring fanout.** Today every kind
-/// shares one ring (`event_ring`, stride 10 = 2 header + 8 payload,
+/// shares one ring (`event_ring`, stride 11 = 2 header + 8 payload + 1 seq,
 /// sized for `AgentMoved` / `AgentFled`). When an event variant blows
 /// past 8 payload words (e.g., `AgentSpawned` with template +
 /// equipment list, `EffectAreaApplied` with hit_targets[N],

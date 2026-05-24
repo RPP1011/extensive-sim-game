@@ -816,7 +816,7 @@ mod tests {
     fn apply_voxel_chronicle_record_unknown_kind_returns_none() {
         let mut t = VoxelTerrain::new();
         // Header kind=42 (some non-voxel event) → no-op, returns None.
-        let mut rec = [0u32; 10];
+        let mut rec = [0u32; 11];
         rec[0] = 42;
         rec[2] = 0;
         rec[3] = 0xCAFEBABE;
@@ -833,7 +833,7 @@ mod tests {
     #[test]
     fn place_voxel_record_writes_cell_at_caster_pos() {
         let mut t = VoxelTerrain::with_extent(16);
-        let mut rec = [0u32; 10];
+        let mut rec = [0u32; 11];
         rec[0] = 60; // EffectPlaceVoxelApplied
         rec[2] = 0; // caster_slot
         rec[3] = 0x12345678; // kind_hash
@@ -849,7 +849,7 @@ mod tests {
     #[test]
     fn place_voxel_lifts_height_at() {
         let mut t = VoxelTerrain::with_extent(16);
-        let mut rec = [0u32; 10];
+        let mut rec = [0u32; 11];
         rec[0] = 60;
         rec[3] = 1;
         // Drive the consumer at world origin (caster on z=0 cell).
@@ -863,7 +863,7 @@ mod tests {
         let mut t = VoxelTerrain::with_extent(16);
         // Place via the consumer so the material code byte matches
         // what the harvest path looks for.
-        let mut place = [0u32; 10];
+        let mut place = [0u32; 11];
         place[0] = 60;
         place[3] = 7; // kind_hash → value 0x07 | 1 = 7
         let pos = Vec3::new(2.5, 2.5, 0.0);
@@ -871,7 +871,7 @@ mod tests {
         assert_eq!(t.cell_at(2, 2, 0), 7);
 
         // Now harvest matching kind, amount=1.
-        let mut harv = [0u32; 10];
+        let mut harv = [0u32; 11];
         harv[0] = 59;
         harv[3] = 7;
         harv[4] = 1;
@@ -883,14 +883,14 @@ mod tests {
     fn harvest_record_does_not_clear_mismatched_kind() {
         let mut t = VoxelTerrain::with_extent(16);
         // Place kind_hash=7 (material 7).
-        let mut place = [0u32; 10];
+        let mut place = [0u32; 11];
         place[0] = 60;
         place[3] = 7;
         let pos = Vec3::new(2.5, 2.5, 0.0);
         t.apply_voxel_chronicle_record(&place, pos);
         // Harvest a DIFFERENT kind (low-byte 9 → material 9). Same cell
         // is not material 9, so it stays.
-        let mut harv = [0u32; 10];
+        let mut harv = [0u32; 11];
         harv[0] = 59;
         harv[3] = 9;
         harv[4] = 5;
@@ -908,7 +908,7 @@ mod tests {
             t.set_cell(2, 2 + i, 0, target_value);
         }
         // Harvest with amount=2 → only 2 cleared.
-        let mut harv = [0u32; 10];
+        let mut harv = [0u32; 11];
         harv[0] = 59;
         harv[3] = 3;
         harv[4] = 2;

@@ -2693,12 +2693,7 @@ fn synthesize_generated_runtime_struct(
     // and caches them in self.sort_pipelines. Each subsequent tick just
     // creates the per-tick bind groups and records dispatches.
     if needs_sort {
-        // Use the engine's actual ring buffer stride (EVENT_STRIDE_U32 = 10)
-        // for the ring ↔ scratch copy size. The CG event layout stride (11)
-        // includes a seq trailer word that extends beyond what EventRing
-        // allocates; the copy must not exceed the ring's physical size.
-        // The engine constant is 10; use it directly as a literal.
-        let engine_stride: u64 = 10;
+        let engine_stride: u64 = 11;
         let ring_bytes = 1_048_576_u64 * engine_stride * 4;
 
         // Build pipeline creation snippet for one kernel given:
@@ -3929,8 +3924,8 @@ fn synthesize_generated_runtime_struct(
          \x20   /// Generic host-side chronicle injection helper.\n\
          \x20   /// Resets the event_ring tail and appends a single synthetic\n\
          \x20   /// chronicle record. Caller is responsible for the kind+tick+payload\n\
-         \x20   /// layout of the 10-word record.\n\
-         \x20   pub fn inject_chronicle_record(&mut self, record: &[u32; 10]) {\n\
+         \x20   /// layout of the 11-word record (slots 0..=9 + seq trailer at 10).\n\
+         \x20   pub fn inject_chronicle_record(&mut self, record: &[u32; 11]) {\n\
          \x20       let zero = 0u32;\n\
          \x20       self.gpu.queue.write_buffer(self.event_ring.tail(), 0, bytemuck::bytes_of(&zero));\n\
          \x20       self.event_ring.reset_tail_estimate();\n\
@@ -4042,7 +4037,7 @@ fn synthesize_generated_runtime_struct(
              \x20   /// [`Self::inject_chronicle_record`]. The matching consumer kernel\n\
              \x20   /// fires on the next [`Self::step`] call.\n\
              \x20   pub fn {method_name}(&mut self{params_joined}) {{\n\
-             \x20       let mut record = [0u32; 10];\n\
+             \x20       let mut record = [0u32; 11];\n\
              \x20       record[0] = {kind_id};\n\
              \x20       record[1] = self.tick as u32;\n\
              {writes}        self.inject_chronicle_record(&record);\n\

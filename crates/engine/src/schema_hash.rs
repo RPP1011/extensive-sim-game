@@ -81,15 +81,17 @@ pub fn schema_hash() -> [u8; 32] {
     h.update(b"RngPurpose:Action=1,Sample=2,Shuffle=3,Conception=4,Uniform=5,Gauss=6,Coin=7,UniformInt=8,GaussB=9,Chance=10");
     // GPU chronicle record layout (compiler-emitted in
     // `cg::emit::wgsl_body::emit_chronicle_arm_chain`). Per-record
-    // stride = 10 u32 words; layout:
+    // stride = 11 u32 words; layout:
     //   [0]=kind_tag, [1]=tick, [2]=actor, [3]=target,
-    //   [4..6]=per-variant payload, [6]=ability_id, [7..9]=reserved.
+    //   [4..6]=per-variant payload, [6]=ability_id, [7..9]=reserved,
+    //   [10]=seq (sort-then-fold sequence trailer, written by producers).
     // Slot 6 was added 2026-05-12 (Gap detective#6) so chronicle
-    // consumers can discriminate ability source. Bumping any of these
-    // values requires updating every per-arm `atomicStore` in
+    // consumers can discriminate ability source. Slot 10 (seq) was
+    // added for the sort-then-fold pass. Bumping any of these values
+    // requires updating every per-arm `atomicStore` in
     // `emit_chronicle_arm_chain` AND the CPU reference in
     // `cpu_chronicle_reference::apply_event_to_chronicle_record`.
-    h.update(b"ChronicleRecord:stride=10u32{kind=0,tick=1,actor=2,target=3,payload_a=4,payload_b=5,ability_id=6,reserved=7..=9}");
+    h.update(b"ChronicleRecord:stride=11u32{kind=0,tick=1,actor=2,target=3,payload_a=4,payload_b=5,ability_id=6,reserved=7..=9,seq=10}");
     // Plan 3 surface — snapshot format, observation packer, probe harness.
     // Bumping any of these strings invalidates older snapshot files and
     // forces a migration registration.

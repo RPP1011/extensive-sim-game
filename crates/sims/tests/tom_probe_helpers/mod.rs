@@ -41,7 +41,7 @@
 
 use sims::tom_probe::GeneratedRuntime;
 
-pub const EVENT_STRIDE_U32: usize = 10;
+pub const EVENT_STRIDE_U32: usize = 11;
 
 /// Construct a `GeneratedRuntime` if the host has a wgpu adapter; return
 /// `None` otherwise so the test logs a skip message and exits 0. Mirrors

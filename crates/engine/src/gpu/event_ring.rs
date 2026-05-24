@@ -34,7 +34,7 @@ use wgpu::util::DeviceExt;
 /// Default slot capacity of the per-tick event ring. Mirrors the
 /// `if (_slot < 1048576u)` gate the WGSL emit writes per producer
 /// site (47 sites in `cg/emit/wgsl_body.rs`). 1 048 576 slots ×
-/// 10 u32/slot × 4 bytes = 40 MB per fixture.
+/// 11 u32/slot × 4 bytes = 44 MB per fixture.
 ///
 /// Bumped 65 536 → 1 048 576 (16×) on 2026-05-09 (Task #239) after
 /// stress fixtures (`crates/stress_cast_density_runtime/`) showed the
@@ -47,10 +47,12 @@ use wgpu::util::DeviceExt;
 /// slots (640 MB, 1% of 24 GB VRAM) or per-event-kind ring fanout.
 pub const EVENT_RING_CAP_SLOTS: u32 = 1_048_576;
 
-/// u32 words per event record (2 header + 8 payload). Matches
-/// `populate_event_kinds` in the CG lowering driver. Future
-/// per-kind ring fanout would surface a per-kind override.
-pub const EVENT_STRIDE_U32: u32 = 10;
+/// u32 words per event record (2 header + 8 payload + 1 seq trailer).
+/// Matches `populate_event_kinds` in the CG lowering driver. The 11th
+/// word (index 10) is the per-record sequence number written by the CG
+/// sort-then-fold pass. Future per-kind ring fanout would surface a
+/// per-kind override.
+pub const EVENT_STRIDE_U32: u32 = 11;
 
 /// Per-fixture event-ring infrastructure: ring + tail + the
 /// pre-built tail-clear source + indirect-args output + a

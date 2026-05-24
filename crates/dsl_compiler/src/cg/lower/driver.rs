@@ -1117,8 +1117,8 @@ fn populate_event_kinds(
         // are mirrored from `pack_event` here so the WGSL emit reads
         // the same layout the CPU writes.
         //
-        // Today every kind shares the global stride 10 (2 header + 8
-        // payload — sized for `AgentMoved`/`AgentFled`); when the
+        // Today every kind shares the global stride 11 (2 header + 8
+        // payload + 1 seq trailer — sized for `AgentMoved`/`AgentFled`); when the
         // runtime moves to per-kind ring fanout, this is where the
         // per-kind values populate.
         let mut fields = BTreeMap::new();
