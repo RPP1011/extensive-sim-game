@@ -324,7 +324,8 @@ fn forest_fire_event_storm_500_ticks() {
     let mut state2 = GeneratedRuntime::try_new(SEED, N_TOTAL).expect("re-init");
     seed_grid(&mut state2);
     seed_ignition_cluster(&mut state2);
-    let _ = read_shared_view_storage(&mut state2);  // warmup sync
+    state2.step();
+    let _ = read_shared_view_storage(&mut state2);  // warmup sync, mirrors run 1
     for _ in 0..TICKS {
         state2.step();
     }

@@ -4174,9 +4174,26 @@ fn lower_emit_to_wgsl(
 
     // For the seq trailer, use the correct per-thread index expression:
     // PerEvent dispatch loops over `event_idx`; all others use `agent_id`.
-    let thread_idx_expr = match ctx.dispatch.get() {
+    // Inside a ForEach* loop body `rng_loop_iter_var` is set to the loop
+    // variable name (e.g. `per_pair_candidate`).  When that var is present
+    // we fold it into the thread index so that every emit in the same loop
+    // body gets a unique seq, making Stage A's counting sort stable for
+    // equal-key events and eliminating per-iteration non-determinism.
+    // Packing: `(agent_id << 10) | loop_iter` fits in the 20-bit thread_idx
+    // field (bits 23..4 of the u32 seq word) for agent caps up to 2^10 = 1024.
+    let thread_idx_expr_owned: String;
+    let thread_idx_expr: &str = match ctx.dispatch.get() {
         Some(crate::cg::dispatch::DispatchShape::PerEvent { .. }) => "event_idx",
-        _ => "agent_id",
+        _ => {
+            match ctx.rng_loop_iter_var.borrow().as_deref() {
+                Some(loop_var) => {
+                    thread_idx_expr_owned =
+                        format!("((agent_id << 10u) | {})", loop_var);
+                    &thread_idx_expr_owned
+                }
+                None => "agent_id",
+            }
+        }
     };
     let producer_kernel_id = ctx.current_kernel_index.get()
         .and_then(|ki| ctx.producer_kernel_ids.get(&ki).copied())
