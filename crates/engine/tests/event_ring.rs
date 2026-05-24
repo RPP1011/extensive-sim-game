@@ -179,3 +179,35 @@ fn golden_hash_anchors_format() {
     assert_eq!(hex, "a6e663e9d88b14d850e0aa121906cc19c5db4de7e8046789962a9ea2a9e20ffd",
                "hash drift detected — see comment");
 }
+
+/// Pin: `emit_seq` is a sidecar field and must not influence `replayable_sha256`.
+///
+/// Two rings with identical events but different emit_seq values must produce
+/// the same hash. This confirms the sidecar is invisible to the determinism
+/// hash (P5) and that adding seq didn't inadvertently change the hash format.
+#[test]
+fn emit_seq_sidecar_does_not_affect_hash() {
+    let a = AgentId::new(1).unwrap();
+    let b = AgentId::new(2).unwrap();
+
+    let mut ring_default = EventRing::<Event>::with_cap(8);
+    ring_default.push(Event::AgentAttacked { actor: a, target: b, damage: 10.0, tick: 1 });
+    ring_default.push(Event::AgentDied { agent_id: b, tick: 2 });
+
+    let mut ring_with_seq = EventRing::<Event>::with_cap(8);
+    // push_with_emit_seq injects a non-zero seq; hash must still match.
+    ring_with_seq.push_with_emit_seq(
+        Event::AgentAttacked { actor: a, target: b, damage: 10.0, tick: 1 },
+        0xDEAD_BEEF,
+    );
+    ring_with_seq.push_with_emit_seq(
+        Event::AgentDied { agent_id: b, tick: 2 },
+        0xCAFE_BABE,
+    );
+
+    assert_eq!(
+        ring_default.replayable_sha256(),
+        ring_with_seq.replayable_sha256(),
+        "emit_seq sidecar must not affect replayable hash",
+    );
+}
