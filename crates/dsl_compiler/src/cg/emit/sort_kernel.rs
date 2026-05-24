@@ -8,14 +8,9 @@
 //! `event_ring_sort_scratch`. After Stage B, all events with the same
 //! `target` are adjacent, intra-target seq-ordered.
 
-// STABILITY: scatter kernels use a single-workgroup serial chunk-loop
-// pattern with atomicAdd-based intra-bucket position. For the FINAL
-// bucket (events with identical full sort keys), order doesn't affect
-// fold determinism (a + b == b + a within a bucket). For INTERMEDIATE
-// passes, intra-bucket atomicAdd race is a known stability gap; the
-// proptest in tests/proptest_radix_sort.rs is the catch gate. If it
-// surfaces drift, replace the atomicAdd with a workgroup-scoped
-// exclusive scan over a per-bucket mask (warp-level scan pattern).
+// Scatter kernels dispatch as @workgroup_size(1) for full
+// determinism: a single thread iterates events sequentially, so the
+// atomicAdd intra-bucket position is monotonic in input order.
 
 use crate::cg::program::EventLayout;
 
@@ -87,7 +82,7 @@ fn radix_stage_a_pass{pass_idx}_scan(@builtin(local_invocation_id) lid: vec3<u32
 }}
 "#);
 
-    // -- Scatter kernel — single-workgroup serial chunk loop for stability.
+    // -- Scatter kernel — single-thread sequential iteration for determinism.
     let scatter = format!(r#"
 @group(0) @binding(0) var<storage, read> event_ring_in: array<atomic<u32>>;
 @group(0) @binding(1) var<storage, read> event_tail: atomic<u32>;
@@ -95,28 +90,18 @@ fn radix_stage_a_pass{pass_idx}_scan(@builtin(local_invocation_id) lid: vec3<u32
 @group(0) @binding(3) var<storage, read> radix_bucket_offsets: array<u32>;
 @group(0) @binding(4) var<storage, read_write> event_ring_out: array<atomic<u32>>;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(1)
 fn radix_stage_a_pass{pass_idx}_scatter(@builtin(local_invocation_id) lid: vec3<u32>) {{
     let count = atomicLoad(&event_tail);
-
-    var chunk_base: u32 = 0u;
-    loop {{
-        if (chunk_base >= count) {{ break; }}
-        let tid = chunk_base + lid.x;
-        let is_active = tid < count;
-
-        if (is_active) {{
-            let seq = atomicLoad(&event_ring_in[tid * {stride}u + {seq_offset}u]);
-            let bucket = (seq >> {bit_shift}u) & {bucket_mask}u;
-            let wg_chunk_pos = atomicAdd(&radix_histogram[bucket], 1u);
-            let dst = radix_bucket_offsets[bucket] + wg_chunk_pos;
-            for (var w = 0u; w < {stride}u; w = w + 1u) {{
-                let v = atomicLoad(&event_ring_in[tid * {stride}u + w]);
-                atomicStore(&event_ring_out[dst * {stride}u + w], v);
-            }}
+    for (var tid = 0u; tid < count; tid = tid + 1u) {{
+        let seq = atomicLoad(&event_ring_in[tid * {stride}u + {seq_offset}u]);
+        let bucket = (seq >> {bit_shift}u) & {bucket_mask}u;
+        let intra = atomicAdd(&radix_histogram[bucket], 1u);
+        let dst = radix_bucket_offsets[bucket] + intra;
+        for (var w = 0u; w < {stride}u; w = w + 1u) {{
+            let v = atomicLoad(&event_ring_in[tid * {stride}u + w]);
+            atomicStore(&event_ring_out[dst * {stride}u + w], v);
         }}
-        workgroupBarrier();
-        chunk_base = chunk_base + 256u;
     }}
 }}
 "#);
@@ -189,28 +174,18 @@ struct SortCfg {{ target_word_offset: u32, agent_cap: u32, _pad0: u32, _pad1: u3
 @group(0) @binding(4) var<storage, read_write> event_ring_out: array<atomic<u32>>;
 @group(0) @binding(5) var<uniform> cfg: SortCfg;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(1)
 fn radix_stage_b_scatter(@builtin(local_invocation_id) lid: vec3<u32>) {{
     let count = atomicLoad(&event_tail);
-
-    var chunk_base: u32 = 0u;
-    loop {{
-        if (chunk_base >= count) {{ break; }}
-        let tid = chunk_base + lid.x;
-        let is_active = tid < count;
-
-        if (is_active) {{
-            let tgt = atomicLoad(&event_ring_in[tid * {stride}u + cfg.target_word_offset]);
-            let bucket = select(tgt, cfg.agent_cap, tgt >= cfg.agent_cap);
-            let wg_chunk_pos = atomicAdd(&target_histogram[bucket], 1u);
-            let dst = target_offsets[bucket] + wg_chunk_pos;
-            for (var w = 0u; w < {stride}u; w = w + 1u) {{
-                let v = atomicLoad(&event_ring_in[tid * {stride}u + w]);
-                atomicStore(&event_ring_out[dst * {stride}u + w], v);
-            }}
+    for (var tid = 0u; tid < count; tid = tid + 1u) {{
+        let target = atomicLoad(&event_ring_in[tid * {stride}u + cfg.target_word_offset]);
+        let bucket = select(target, cfg.agent_cap, target >= cfg.agent_cap);
+        let intra = atomicAdd(&target_histogram[bucket], 1u);
+        let dst = target_offsets[bucket] + intra;
+        for (var w = 0u; w < {stride}u; w = w + 1u) {{
+            let v = atomicLoad(&event_ring_in[tid * {stride}u + w]);
+            atomicStore(&event_ring_out[dst * {stride}u + w], v);
         }}
-        workgroupBarrier();
-        chunk_base = chunk_base + 256u;
     }}
 }}
 "#);
