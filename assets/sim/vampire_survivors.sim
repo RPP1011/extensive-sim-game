@@ -32,6 +32,7 @@ config vs {
   nova_radius:        f32 = 6.0,
   nova_period:        u32 = 40,
   nova_damage:        f32 = 3.0,
+  bolt_ramp:          f32 = 0.5,
 }
 
 @spatial(radius = config.vs.perception_radius, kind = [Agent])
@@ -120,7 +121,7 @@ physics BoltFire {
                     && self.mana <= config.vs.player_mana_max
                     && world.tick % config.vs.bolt_period == 0) {
     for target in spatial.closest_enemy(self) {
-      emit Damaged { source: self, target: target, amount: config.vs.bolt_damage }
+      emit Damaged { source: self, target: target, amount: config.vs.bolt_damage + xp(self) * config.vs.bolt_ramp }
     }
   }
 }
@@ -136,6 +137,14 @@ physics NovaFire {
       emit Damaged { source: self, target: target, amount: config.vs.nova_damage }
     }
   }
+}
+
+// XP-on-kill: attributed to the agent that dealt the killing blow.
+@materialized(on_event = [Killed])
+view xp(by: Agent) -> f32 {
+  initial: 0.0,
+  on Killed { by: p, prey: _, pos: _ } { self += 1.0 }
+  clamp: [0.0, 1000000.0],
 }
 
 // On Damaged: subtract HP; at <=0 mark dead and credit the killer (source s).

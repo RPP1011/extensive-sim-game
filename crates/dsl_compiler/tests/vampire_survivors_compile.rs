@@ -86,6 +86,7 @@ fn bolt_fires_and_damage_applies() {
     let apply = kernel_body_containing(&art, "ApplyDamage")
         .unwrap_or_else(|| panic!("no ApplyDamage kernel; have {:?}", art.wgsl_files.keys().collect::<Vec<_>>()));
     assert!(apply.contains("agent_hp"), "ApplyDamage should write agent_hp; got:\n{apply}");
+    assert!(bolt.contains("view_storage"), "BoltFire amount should read the xp view; got:\n{bolt}");
 }
 
 #[test]
@@ -102,4 +103,13 @@ fn nova_fires_aoe_neighbour_walk() {
         nova.contains("atomicStore(&event_ring") || nova.contains("atomicAdd(&event_tail"),
         "NovaFire should emit Damaged per enemy in radius; got:\n{nova}",
     );
+}
+
+#[test]
+fn xp_view_folds_kills() {
+    let path = workspace_path("assets/sim/vampire_survivors.sim");
+    let art = compile_sim(&path).expect("compiles");
+    let xp = kernel_body_containing(&art, "xp")
+        .unwrap_or_else(|| panic!("no xp fold kernel; have {:?}", art.wgsl_files.keys().collect::<Vec<_>>()));
+    assert!(xp.contains("view_storage"), "xp fold should write view storage; got:\n{xp}");
 }
