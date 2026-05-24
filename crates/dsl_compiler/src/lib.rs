@@ -60,9 +60,7 @@ pub mod kernel_lowerings;
 // (P2: schema-hash bumps on layout change).
 pub mod schema_hash;
 
-// P11 sort-then-fold — shared deterministic seq computation for event payloads.
-// Both GPU emit (inlined into WGSL) and CPU cascade dispatch call this with
-// identical inputs and get identical u32 outputs.
+// Shared seq packing for deterministic event ordering (P11).
 pub mod seq;
 
 // Plan E-A1 — shared build-script helper. Each `crates/*_runtime/build.rs`
