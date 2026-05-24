@@ -2965,6 +2965,7 @@ dependencies = [
  "dsl_ast",
  "dsl_compiler",
  "engine",
+ "engine_data",
  "engine_voxel",
  "glam",
  "pollster",

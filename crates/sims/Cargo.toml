@@ -38,6 +38,11 @@ pollster = "0.4"
 dsl_ast = { path = "../dsl_ast" }
 dsl_compiler = { path = "../dsl_compiler" }
 
+[dev-dependencies]
+# cpu_determinism_forest_fire integration test uses engine_data::events::Event
+# and engine_data::ids::AgentId directly to drive the CPU fold path.
+engine_data = { path = "../engine_data" }
+
 [build-dependencies]
 dsl_ast = { path = "../dsl_ast" }
 dsl_compiler = { path = "../dsl_compiler" }

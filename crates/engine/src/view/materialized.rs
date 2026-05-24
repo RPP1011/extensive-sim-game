@@ -55,8 +55,19 @@ impl crate::cascade::handler::__sealed::Sealed for DamageTaken {}
 
 impl MaterializedView<engine_data::events::Event> for DamageTaken {
     fn fold_since(&mut self, events: &EventRing<engine_data::events::Event>, events_before: usize) {
-        for e in events.iter_since(events_before) {
-            if let engine_data::events::Event::AgentAttacked { target, damage, .. } = e {
+        // Deterministic reduction order: sort by (target, emit_seq) before
+        // accumulating so f32 addition folds in the same sequence across
+        // same-seed reruns regardless of producer push order.
+        let mut entries: Vec<_> = events.iter_since_entries(events_before).collect();
+        entries.sort_by_key(|entry| {
+            let target_raw = match &entry.event {
+                engine_data::events::Event::AgentAttacked { target, .. } => target.raw(),
+                _ => u32::MAX,
+            };
+            (target_raw, entry.emit_seq)
+        });
+        for entry in &entries {
+            if let engine_data::events::Event::AgentAttacked { target, damage, .. } = &entry.event {
                 let slot = (target.raw() - 1) as usize;
                 if let Some(v) = self.per_agent.get_mut(slot) {
                     *v += *damage;

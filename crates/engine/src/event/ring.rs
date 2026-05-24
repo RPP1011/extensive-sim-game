@@ -113,6 +113,17 @@ impl<E: EventLike> EventRing<E> {
         self.entries.iter().skip(skip).map(|e| &e.event)
     }
 
+    /// Iterate full [`Entry`] records (event + sidecar) pushed with monotonic
+    /// index `>= start_idx`. Equivalent to [`iter_since`] but exposes
+    /// `emit_seq` so callers can sort by `(target, emit_seq)` before folding.
+    ///
+    /// Evicted entries are silently skipped, matching [`iter_since`] behaviour.
+    pub fn iter_since_entries(&self, start_idx: usize) -> impl Iterator<Item = &Entry<E>> {
+        let first = self.total_pushed.saturating_sub(self.entries.len());
+        let skip = start_idx.saturating_sub(first);
+        self.entries.iter().skip(skip)
+    }
+
     /// The index of the next undispatched event. Used by the cascade dispatcher
     /// to resume scanning across multiple `run_fixed_point` calls.
     pub fn dispatched(&self) -> usize { self.dispatched }
