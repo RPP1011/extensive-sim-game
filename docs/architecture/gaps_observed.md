@@ -549,9 +549,21 @@ The pin assertion is `max_abs_drift ≤ 150.0` — a loose ceiling that
 catches control-flow divergence (regression signal) while tolerating
 the documented reduction race (observed range 38-95).
 
-**Status:** atomic RMW race CLOSED. f32 reduction sort-then-fold OPEN
-— this is the canonical case for the constitution P11 contract. See
-`project_f32_rmw_race` memory for the full breakdown.
+**Status (2026-05-24, CLOSED):** P11 sort-then-fold landed. Mechanism:
+deterministic `seq` field on every event payload + GPU radix sort by
+`(target_id, seq)` before fold consumers + CPU `Vec::sort_by_key` mirror
+for the serial backend. Five distinct P11 violations were closed during
+the implementation: engine `EVENT_STRIDE_U32` mismatch (latent off-by-one
+in original chronicle layout), spatial scatter cell ordering, radix sort
+scatter intra-bucket ordering, fold path CAS+add retry race, and
+post-CAS-gating kernel parallel-thread race (Catch-style PerEvent
+kernels). The f32_reduction probe pins byte-equal output across
+same-seed reruns. The forest_fire pin's `max_abs_drift` threshold
+tightened from `≤150` to `≤100`; residual drift (30-84 observed) comes
+from upstream parallel atomic-append slot acquisition in non-CAS-gated
+emit kernels (Spread, Reaper, WindEvent, RainEvent), which would
+require single-threaded dispatch of the whole physics emit layer to
+close — out of scope for the P11 sort-then-fold work proper.
 
 ### Gap E — `@traced` annotation surface absent / unverified — CLOSED (phantom, 2026-05-12)
 
@@ -828,7 +840,10 @@ Status overview (gap → resolution SHA):
 **Remaining open:**
 - Squad_skirmish E pair-view in scoring expression
 - Squad_skirmish residual zero-damage (chronicle pipeline OK; predicate / level binding investigation needed)
-- P11 sort-then-fold for f32 reductions (residual ~38 drift in forest_fire)
+- Parallel atomic-append slot acquisition non-determinism in non-CAS-gated
+  emit kernels (residual 30-84 drift in forest_fire). Would require @ws=1
+  across the whole physics emit layer to close; tracked as a perf/scope
+  tradeoff rather than a P11 violation per se.
 - EventLayout-level `is_traced` wiring (no runtime consumer yet)
 - Hill_raid LoS-occluded shots (gameplay-side, voxel terrain queries from spatial walk work)
 

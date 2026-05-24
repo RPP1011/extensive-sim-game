@@ -417,7 +417,7 @@ impl TomProbeState {
             event_count: 0,
             tick: 0,
             second_key_pop: agent_count,
-            _pad: 0,
+            agent_cap: 0,
         };
         let fold_cfg_buf =
             gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -1618,7 +1618,7 @@ impl CompiledSim for TomProbeState {
             event_count: event_count_estimate,
             tick: self.tick as u32,
             second_key_pop: self.agent_count,
-            _pad: 0,
+            agent_cap: 0,
         };
         self.gpu.queue.write_buffer(
             &self.fold_cfg_buf,
