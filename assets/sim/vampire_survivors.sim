@@ -1,0 +1,33 @@
+// vampire_survivors — DSL-as-engine benchmark fixture (Slice 1 foundation).
+// See docs/superpowers/specs/2026-05-24-vampire-survivors-design.md.
+//
+// Roles are mana-band tagged (tower_defense precedent): player ∈ [0.5,1.5],
+// enemy ∈ [1.5,2.5]. Subkind-identity gating in `where` has no corpus
+// precedent (Gap: see spec §2); mana-band is the proven discriminant.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged { source: AgentId, target: AgentId, amount: f32 }
+
+@replayable @gpu_amenable
+event Killed { by: AgentId, prey: AgentId, pos: vec3 }
+
+entity Player : Agent { pos: vec3, vel: vec3 }
+entity Enemy  : Agent { pos: vec3, vel: vec3 }
+
+config vs {
+  player_mana_min: f32 = 0.5,
+  player_mana_max: f32 = 1.5,
+  enemy_mana_min:  f32 = 1.5,
+  enemy_mana_max:  f32 = 2.5,
+  drift_speed:     f32 = 0.01,
+}
+
+// Trivial seed rule so the pipeline emits at least one kernel.
+physics IdleDrift @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    let new_pos = self.pos + self.vel * config.vs.drift_speed;
+    agents.set_pos(self, new_pos);
+  }
+}
