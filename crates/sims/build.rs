@@ -67,6 +67,7 @@ fn main() {
                 | "duel_1v1"
                 | "duel_abilities"
                 | "dungeon_crawl"
+                | "f32_reduction_probe"
                 | "firebolt_interrupt_probe"
                 | "firebolt_probe"
                 | "foraging_colony"

@@ -1,0 +1,70 @@
+// f32_reduction_probe — minimal sort-then-fold determinism probe.
+//
+// 1 Target slot + N Producer slots, each Producer emits one Damaged
+// event per tick directed at the Target (slot 0). A single f32 view
+// fold accumulates the contributions into the Target's damage_taken
+// slot. Run twice with the same seed; assert byte-equal view storage.
+//
+// PURPOSE: pinpoints the seq+sort+fold logic in isolation, separated
+// from the forest_fire cascade dynamics (Spread → Catch → Ignited →
+// Spread). Forest_fire residual drift (30-84) is from non-CAS-gated
+// parallel emit kernels; this probe has no such cascades — it should
+// resolve byte-equal.
+//
+// SHAPE: slot 0 = Target (creature_type = 0, alive = 1);
+//        slots 1..N = Producers (creature_type = 1, alive = 1).
+// Each Producer fires once per tick unconditionally, emitting a
+// Damaged { source: self, target: 0, amount } event.  The Target
+// only receives and accumulates; it never emits.
+//
+// ENTITY TYPE TABLE (declaration-order alphabetical):
+//   Producer = 0, Target = 1.
+//   (Host must write creature_type = 1 for Target slot 0.)
+//
+// EXPECTED FULL-FIRE (TICKS=100, N_PRODUCERS=50):
+//   damage_taken[0] = 100 ticks × 50 producers × amount_per_hit
+//   All other slots: 0.0 (non-Target agents do not accumulate)
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+entity Producer : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Target : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config probe {
+  // Per-hit amount folded into damage_taken.  Kept small so the
+  // accumulated float stays well within the safe integer range.
+  amount_per_hit: f32 = 0.1,
+}
+
+// Each alive Producer emits Damaged targeting agent slot 0 every tick.
+// No RNG, no gating beyond alive-check — fully deterministic emit
+// pattern so any fold non-determinism surfaces cleanly.
+@phase(per_agent)
+physics Strike {
+  on Tick {} where (self.alive && self.creature_type == 0) {
+    emit Damaged { source: self, target: 0u, amount: config.probe.amount_per_hit }
+  }
+}
+
+// Per-agent damage accumulator — fed by Damaged events.
+// Only the Target (slot 0) will have non-zero damage_taken after the run.
+@materialized(on_event = [Damaged])
+view damage_taken(t: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: _, target: tgt, amount: a } where tgt == t { self += a }
+  clamp: [0.0, 1000000.0],
+}
