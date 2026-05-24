@@ -50,15 +50,16 @@ fn merge_source_field_offset_reads_from_correct_event_payload_word() {
     // The kernel should read the source agent from offset 3 (= 2
     // header + 1 payload index for `victim`), NOT offset 2 (which
     // would be `killer`).
+    // (stride 10→11: P11 seq trailer word added at record offset 10)
     assert!(
-        body.contains("event_ring[event_idx * 10u + 3u]"),
+        body.contains("event_ring[event_idx * 11u + 3u]"),
         "expected merge kernel to read source_agent from event payload \
          offset 3 (= header 2 + victim's field index 1); body excerpt:\n{}",
         &body[..body.len().min(1200)],
     );
     // Defensive: should NOT read from offset 2 (the killer field).
     assert!(
-        !body.contains("let source_agent = event_ring[event_idx * 10u + 2u]"),
+        !body.contains("let source_agent = event_ring[event_idx * 11u + 2u]"),
         "merge kernel still reads source_agent from offset 2 (killer field) — \
          IR field-offset lookup didn't propagate. Body excerpt:\n{}",
         &body[..body.len().min(1200)],
@@ -88,8 +89,9 @@ fn merge_source_field_offset_defaults_to_2_for_first_payload_field() {
         .expect("merge kernel emitted");
     let body = &merge_kernel.1;
 
+    // (stride 10→11: P11 seq trailer word added at record offset 10)
     assert!(
-        body.contains("event_ring[event_idx * 10u + 2u]"),
+        body.contains("event_ring[event_idx * 11u + 2u]"),
         "single-Agent-payload event (dead at offset 2) should still emit \
          offset 2; body excerpt:\n{}",
         &body[..body.len().min(800)],

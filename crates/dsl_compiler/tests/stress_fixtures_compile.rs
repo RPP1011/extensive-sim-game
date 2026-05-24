@@ -366,9 +366,9 @@ fn bartering_emits_item_id_in_trade_payload() {
     // The Trade event has 3 payload fields (giver, receiver, item)
     // — the producer should issue 3 atomicStore-into-payload-slot
     // ops past the standard kind+tick header (slots 0 + 1).
-    let payload_stores = body.matches("atomicStore(&event_ring[slot * 10u + 2u]").count()
-        + body.matches("atomicStore(&event_ring[slot * 10u + 3u]").count()
-        + body.matches("atomicStore(&event_ring[slot * 10u + 4u]").count();
+    let payload_stores = body.matches("atomicStore(&event_ring[slot * 11u + 2u]").count()
+        + body.matches("atomicStore(&event_ring[slot * 11u + 3u]").count()
+        + body.matches("atomicStore(&event_ring[slot * 11u + 4u]").count();
     assert_eq!(
         payload_stores, 3,
         "expected 3 payload stores (giver, receiver, item) into the event ring; got {payload_stores} in:\n{body}",
@@ -383,7 +383,7 @@ fn bartering_emits_item_id_in_trade_payload() {
         );
     });
     assert!(
-        fold_body.contains("event_ring[event_idx * 10u +"),
+        fold_body.contains("event_ring[event_idx * 11u +"),
         "fold should index event ring by event_idx; got:\n{fold_body}",
     );
 }
@@ -452,7 +452,7 @@ fn ecosystem_cascade_compiles() {
             panic!("expected {kernel_name} kernel");
         });
         assert!(
-            body.contains("if (event_ring[event_idx * 10u + 0u] =="),
+            body.contains("if (event_ring[event_idx * 11u + 0u] =="),
             "{kernel_name} body must guard on per-handler event-kind tag; got:\n{body}",
         );
     }
@@ -559,9 +559,9 @@ fn auction_market_compiles() {
                 art.wgsl_files.keys().collect::<Vec<_>>()
             );
         });
-    let payload_stores = bid_producer.matches("atomicStore(&event_ring[slot * 10u + 2u]").count()
-        + bid_producer.matches("atomicStore(&event_ring[slot * 10u + 3u]").count()
-        + bid_producer.matches("atomicStore(&event_ring[slot * 10u + 4u]").count();
+    let payload_stores = bid_producer.matches("atomicStore(&event_ring[slot * 11u + 2u]").count()
+        + bid_producer.matches("atomicStore(&event_ring[slot * 11u + 3u]").count()
+        + bid_producer.matches("atomicStore(&event_ring[slot * 11u + 4u]").count();
     assert_eq!(
         payload_stores, 3,
         "expected 3 Bid payload stores (trader, good, amount); got {payload_stores}",
@@ -637,10 +637,10 @@ fn event_kind_filter_probe_compiles_with_tag_guard() {
     });
 
     // Each fold body must guard its handler block with a tag check:
-    // `if (event_ring[event_idx * 10u + 0u] == <kind>u)`. The exact
+    // `if (event_ring[event_idx * 11u + 0u] == <kind>u)`. The exact
     // kind id is allocator-determined; just confirm the structural
     // shape is present.
-    let guard_pattern = "if (event_ring[event_idx * 10u + 0u] ==";
+    let guard_pattern = "if (event_ring[event_idx * 11u + 0u] ==";
     assert!(
         fold_a.contains(guard_pattern),
         "kind_a_count fold body must contain per-handler tag check; got:\n{fold_a}",
@@ -670,7 +670,7 @@ fn event_kind_filter_probe_compiles_with_tag_guard() {
     // Sanity: the producer (EmitBoth) writes BOTH kind tags into
     // the same ring, so the per-fold filter is the only thing
     // separating which view sees which event. Confirm the producer
-    // body has two `atomicStore(&event_ring[slot * 10u + 0u], <id>u)`
+    // body has two `atomicStore(&event_ring[slot * 11u + 0u], <id>u)`
     // tag stores corresponding to KindA vs KindB.
     let producer = kernel_body_containing(&art, "EmitBoth")
         .or_else(|| kernel_body_containing(&art, "physics"))
@@ -681,7 +681,7 @@ fn event_kind_filter_probe_compiles_with_tag_guard() {
             );
         });
     let tag_stores = producer
-        .matches("atomicStore(&event_ring[slot * 10u + 0u]")
+        .matches("atomicStore(&event_ring[slot * 11u + 0u]")
         .count();
     assert_eq!(
         tag_stores, 2,
@@ -733,7 +733,7 @@ fn event_kind_filter_probe_compiles_with_tag_guard() {
 ///     (price_belief, trader_volume, hub_volume) + 1 decay kernel
 ///     (trader_volume only — hub_volume has no @decay) + 5 admin.
 ///   - The producer body has TWO tag stores at offset 0
-///     (`atomicStore(&event_ring[slot * 10u + 0u], <kind>u)`) —
+///     (`atomicStore(&event_ring[slot * 11u + 0u], <kind>u)`) —
 ///     one per emit, distinct kind ids.
 ///   - Each fold body guards on the per-handler kind tag at offset
 ///     0 (the cb24fd69 multi-kind ring partition shape).
@@ -829,7 +829,7 @@ fn trade_market_probe_combines_landed_surfaces() {
             );
         });
     let tag_stores = producer
-        .matches("atomicStore(&event_ring[slot * 10u + 0u]")
+        .matches("atomicStore(&event_ring[slot * 11u + 0u]")
         .count();
     assert_eq!(
         tag_stores, 2,
@@ -838,7 +838,7 @@ fn trade_market_probe_combines_landed_surfaces() {
 
     // Per-handler tag filter (cb24fd69) — every fold body must
     // guard on the kind tag at offset 0.
-    let guard_pattern = "if (event_ring[event_idx * 10u + 0u] ==";
+    let guard_pattern = "if (event_ring[event_idx * 11u + 0u] ==";
     for view_name in ["price_belief", "trader_volume", "hub_volume"] {
         let kernel_name = format!("fold_{view_name}");
         let body = kernel_body_containing(&art, &kernel_name).unwrap_or_else(|| {

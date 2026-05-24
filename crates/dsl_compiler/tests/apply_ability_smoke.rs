@@ -348,16 +348,17 @@ fn apply_ability_verb_chronicle_consumer_compiles_with_tolerated_p6() {
          time. Kernel:\n{consumer}"
     );
     // Belt-and-braces guard against the pre-fix `== 1u)` filter on the
-    // consumer's atomicLoad of `event_ring[event_idx * 10u + 0u]`
+    // consumer's atomicLoad of `event_ring[event_idx * 11u + 0u]`
     // (kind word). The fused kernel contains many `== 1u)` instances
     // for unrelated reasons (Heal effect kind, action_id branch, etc.),
     // so a flat `!contains("== 1u)")` is too aggressive. Instead pin
     // the consumer's specific filter shape: the op#1 emit reads
-    // `event_ring[event_idx * 10u + 0u]` and gates on `== 26u)`. If
+    // `event_ring[event_idx * 11u + 0u]` and gates on `== 26u)`. If
     // engine-event aliasing breaks, that filter would emit `== 1u)`.
+    // (stride 10→11: P11 seq trailer word added at record offset 10)
     assert!(
-        consumer.contains("event_ring[event_idx * 10u + 0u]) == 26u)"),
-        "consumer's kind-filter must be `event_ring[event_idx * 10u + 0u]) \
+        consumer.contains("event_ring[event_idx * 11u + 0u]) == 26u)"),
+        "consumer's kind-filter must be `event_ring[event_idx * 11u + 0u]) \
          == 26u)` — exact pre-fix regression target. Kernel:\n{consumer}"
     );
 }

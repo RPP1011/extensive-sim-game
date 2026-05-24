@@ -81,7 +81,7 @@ fn cast_resolved_emit_writes_chronicle_kind_79() {
         });
 
     assert!(
-        resolve_wgsl.contains("atomicStore(&event_ring[slot * 10u + 0u], 79u);"),
+        resolve_wgsl.contains("atomicStore(&event_ring[slot * 11u + 0u], 79u);"),
         "expected chronicle kind tag = 79u (EventKindId::CastResolved); WGSL was:\n{resolve_wgsl}"
     );
 
@@ -89,7 +89,7 @@ fn cast_resolved_emit_writes_chronicle_kind_79() {
     // sentinel, no zero. Catches a future regression where the emit
     // path stops binding the `self` ident.
     assert!(
-        resolve_wgsl.contains("atomicStore(&event_ring[slot * 10u + 2u], (agent_id));"),
+        resolve_wgsl.contains("atomicStore(&event_ring[slot * 11u + 2u], (agent_id));"),
         "expected actor (slot 2) = agent_id; WGSL was:\n{resolve_wgsl}"
     );
 }

@@ -177,7 +177,8 @@ fn fuzz_500_random_merge_clauses_pick_correct_source_field_offset() {
         // The expected event_ring read is the line:
         //   `let source_agent = event_ring[event_idx * 10u + <offset>u];`
         let expected_read = format!(
-            "let source_agent = event_ring[event_idx * 10u + {expected_offset}u];"
+            // stride 10→11: P11 seq trailer word added at record offset 10
+            "let source_agent = event_ring[event_idx * 11u + {expected_offset}u];"
         );
         if !body.contains(&expected_read) {
             if first_failure.is_none() {
