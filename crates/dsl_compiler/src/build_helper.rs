@@ -470,6 +470,11 @@ fn emit_into(
     let needs_sort = sort_layout.is_some();
     if let Some(ref layout) = sort_layout {
         inject_sort_kernels(&mut artifacts, layout);
+        // Rewrite f32+Add fold kernels to use per-slot serial scan instead of
+        // per-event CAS loop. After sort, events are ordered by (target, seq),
+        // so each slot is a single writer — the CAS is unnecessary and causes
+        // non-deterministic f32 accumulation order under parallel dispatch.
+        rewrite_fold_wgsl_for_post_sort(&mut artifacts.wgsl_files);
         println!(
             "cargo:warning=[{fixture_name} sort-kernels] injected 15 radix sort kernels \
              (stride={stride}, target_word={tgt})",
@@ -1409,6 +1414,182 @@ fn sort_kernel_stub_rs(name: &str) -> String {
          // Dispatch and buffer binding are managed by the runtime directly.\n\
          pub const SHADER_SRC: &str = include_str!(\"{name}.wgsl\");\n",
     )
+}
+
+/// Rewrite f32+Add view-fold WGSL files in-place to use a per-slot serial scan
+/// instead of a per-event CAS loop. Called only when `needs_sort` is true.
+///
+/// The pre-sort fold dispatches one thread per event (gid.x = event_idx) and
+/// uses `atomicCompareExchangeWeak` to accumulate f32 values, which races when
+/// multiple events target the same slot. Post-sort, events are ordered by
+/// (target, seq) so each slot's events are adjacent. We switch to one thread
+/// per slot (gid.x = my_slot) with a sequential scan over the full sorted ring
+/// — single-writer per slot, no race, deterministic sum.
+///
+/// The cfg struct keeps the same layout `{ event_count, tick, second_key_pop,
+/// _pad0 }`. The runtime writes `agent_count` into `_pad0` (slot 3) so the
+/// per-slot bounds check `my_slot >= cfg._pad0` works correctly. The inner loop
+/// uses `cfg.event_count` (set to the prev-tick tail via encoder
+/// copy_buffer_to_buffer before dispatch) for the event count so it scans
+/// exactly the sorted ring from the prior tick.
+///
+/// Only WGSL files whose body contains the f32 CAS pattern are modified; other
+/// fold shapes (u32 atomicAdd, PerAgentEventScan, etc.) are left unchanged.
+fn rewrite_fold_wgsl_for_post_sort(wgsl_files: &mut std::collections::BTreeMap<String, String>) {
+    for (_name, body) in wgsl_files.iter_mut() {
+        // Only rewrite kernels that contain the f32 CAS+add loop.
+        if !body.contains("atomicCompareExchangeWeak") {
+            continue;
+        }
+        if !body.contains("let event_idx = gid.x;") {
+            continue;
+        }
+        // Step 1: replace per-event preamble with per-slot preamble.
+        // cfg.event_count is set to the prev-tick tail via encoder copy_buffer_to_buffer
+        // so it holds the correct count for the inner loop. cfg._pad0 is written at
+        // runtime with agent_count so the per-slot bounds check is correct.
+        // The preamble always occupies these two lines immediately after the
+        // fn signature opening brace.
+        *body = body.replace(
+            "    let event_idx = gid.x;\n    if (event_idx >= cfg.event_count) { return; }\n    let tick = cfg.tick;\n",
+            "    let my_slot = gid.x;\n    if (my_slot >= cfg._pad0) { return; }\n    let tick = cfg.tick;\n",
+        );
+        // Step 2: rewrite each per-op CAS block. Each block has the form:
+        //   if (event_ring[event_idx * STRIDEu + 0u] == KINDu) {
+        //       let local_0: u32 = event_ring[event_idx * STRIDEu + TARGETu];
+        //       loop {
+        //           let _idx = local_0;
+        //           let old = atomicLoad(&view_storage_primary[_idx]);
+        //           let new_val = bitcast<u32>(bitcast<f32>(old) + (RHS));
+        //           let result = atomicCompareExchangeWeak(...);
+        //           if (result.exchanged) { break; }
+        //       }
+        //   }
+        // We extract STRIDE, KIND, TARGET, RHS and emit a serial scan.
+        *body = rewrite_cas_blocks_to_serial_scan(body);
+    }
+}
+
+/// Replace every CAS+add f32 block in `wgsl` with a per-slot serial scan body.
+/// Returns the rewritten string.
+fn rewrite_cas_blocks_to_serial_scan(wgsl: &str) -> String {
+    use std::fmt::Write;
+
+    // Pattern markers we look for:
+    //   "if (event_ring[event_idx * STRIDEu + 0u] == KINDu) {"
+    //   "let local_0: u32 = event_ring[event_idx * STRIDEu + TARGETu];"
+    //   "let new_val = bitcast<u32>(bitcast<f32>(old) + (RHS));"
+    // We do a line-by-line scan and replace the matching block.
+
+    let lines: Vec<&str> = wgsl.lines().collect();
+    let mut out = String::with_capacity(wgsl.len() + 256);
+    let mut i = 0;
+
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim();
+
+        // Detect the tag-check line: "if (event_ring[event_idx * STRIDEu + 0u] == KINDu) {"
+        if trimmed.starts_with("if (event_ring[event_idx * ") && trimmed.contains("+ 0u] == ") {
+            // Extract STRIDE from "event_ring[event_idx * STRIDEu + 0u]"
+            let stride = extract_u32_after(trimmed, "event_idx * ", "u + 0u]").unwrap_or(11);
+            // Extract KIND from "== KINDu)"
+            let kind = extract_u32_after(trimmed, "== ", "u)").unwrap_or(0);
+
+            // Detect the leading indent from the original line.
+            let indent = leading_spaces(line);
+
+            // Expect the next line: "let local_0: u32 = event_ring[event_idx * STRIDEu + TARGETu];"
+            let target_word = if i + 1 < lines.len() {
+                let t = lines[i + 1].trim();
+                extract_u32_after(t, &format!("event_idx * {stride}u + "), "u];").unwrap_or(stride - 1)
+            } else {
+                stride - 1
+            };
+
+            // Find the RHS in the new_val line: "let new_val = bitcast<u32>(bitcast<f32>(old) + (RHS));"
+            let rhs = find_cas_rhs(&lines[i..]).unwrap_or_else(|| "1.0".to_string());
+
+            // Count how many lines to skip (the whole tag-check + local_0 + loop block).
+            // We skip until we find the closing "}" that matches the outer "if" block.
+            let skip = count_block_lines(&lines[i..]);
+
+            // Emit the replacement: per-slot serial scan.
+            // cfg.event_count holds the prev-tick event tail (set via encoder
+            // copy_buffer_to_buffer before dispatch) — use it for the inner
+            // loop bound so we scan exactly the sorted ring from the prior tick.
+            let _ = writeln!(
+                out,
+                "{indent}// Post-sort: per-slot serial scan over sorted ring — single writer, no CAS.\n\
+                 {indent}{{\n\
+                 {indent}    var _accum: f32 = bitcast<f32>(atomicLoad(&view_storage_primary[my_slot]));\n\
+                 {indent}    for (var _i = 0u; _i < cfg.event_count; _i = _i + 1u) {{\n\
+                 {indent}        if (event_ring[_i * {stride}u + 0u] == {kind}u) {{\n\
+                 {indent}            if (event_ring[_i * {stride}u + {target_word}u] == my_slot) {{\n\
+                 {indent}                _accum = _accum + ({rhs});\n\
+                 {indent}            }}\n\
+                 {indent}        }}\n\
+                 {indent}    }}\n\
+                 {indent}    atomicStore(&view_storage_primary[my_slot], bitcast<u32>(_accum));\n\
+                 {indent}}}"
+            );
+            i += skip;
+            continue;
+        }
+
+        out.push_str(line);
+        out.push('\n');
+        i += 1;
+    }
+    out
+}
+
+/// Extract a u32 literal from `s` that appears after `prefix` and before `suffix`.
+fn extract_u32_after(s: &str, prefix: &str, suffix: &str) -> Option<u32> {
+    let start = s.find(prefix)? + prefix.len();
+    let rest = &s[start..];
+    let end = rest.find(suffix)?;
+    rest[..end].parse().ok()
+}
+
+/// Count the leading spaces (indent) of a line.
+fn leading_spaces(s: &str) -> &str {
+    let n = s.len() - s.trim_start().len();
+    &s[..n]
+}
+
+/// Find the RHS expression in the CAS loop body within the given line slice.
+/// Looks for `let new_val = bitcast<u32>(bitcast<f32>(old) + (RHS));`.
+fn find_cas_rhs(lines: &[&str]) -> Option<String> {
+    for line in lines.iter().take(20) {
+        let t = line.trim();
+        if t.starts_with("let new_val = bitcast<u32>(bitcast<f32>(old) + (") {
+            let after = t.strip_prefix("let new_val = bitcast<u32>(bitcast<f32>(old) + (")?;
+            let rhs = after.strip_suffix("));")?;
+            return Some(rhs.to_string());
+        }
+    }
+    None
+}
+
+/// Count lines to skip for the outer `if` block starting at `lines[0]`.
+/// Counts from the opening `{` to the matching `}` at the same indent level,
+/// including the closing `}` line itself. Returns 1 if no block is found.
+fn count_block_lines(lines: &[&str]) -> usize {
+    let mut depth: i32 = 0;
+    for (idx, line) in lines.iter().enumerate() {
+        for ch in line.chars() {
+            if ch == '{' {
+                depth += 1;
+            } else if ch == '}' {
+                depth -= 1;
+                if depth == 0 {
+                    return idx + 1;
+                }
+            }
+        }
+    }
+    lines.len()
 }
 
 /// Lightweight `K = <int>` extractor for build-side annotation lookup.
@@ -3131,6 +3312,29 @@ fn synthesize_generated_runtime_struct(
              \x20       }}\n",
             kname = spec.name,
         ));
+    }
+    // Post-sort fold slot-3 override — when events are sorted before the fold
+    // (needs_sort), the fold kernels switch from per-event dispatch to per-slot
+    // dispatch and use cfg._pad0 (slot 3, offset 12) as the agent_cap bound for
+    // the per-slot gid.x check. Write agent_count there so the WGSL
+    // `if (my_slot >= cfg._pad0) { return; }` exits threads beyond the agent
+    // population. Without this, threads in workgroup tail-padding (slots
+    // agent_count..ceil(agent_count/64)*64) would attempt to accumulate into
+    // out-of-bounds storage slots.
+    if needs_sort {
+        for spec in &artifacts.kernel_specs {
+            if !matches!(spec.kind, crate::kernel_binding_ir::KernelKind::ViewFold) {
+                continue;
+            }
+            out.push_str(&format!(
+                "        // ViewFold slot-3 override (post-sort) — sets cfg._pad0 = agent_count for per-slot bounds.\n\
+                 \x20       {{\n\
+                 \x20           let cap_bytes: [u8; 4] = self.agent_count.to_le_bytes();\n\
+                 \x20           self.gpu.queue.write_buffer(&self.cfg_{kname}_buf, 12u64, &cap_bytes);\n\
+                 \x20       }}\n",
+                kname = spec.name,
+            ));
+        }
     }
     // Indirect-consumer event-ring lifecycle — closes gaps 3 + 4
     // from commit 353527e6's Indirect-arm doc block, and folds in the
