@@ -37,6 +37,7 @@ event Killed { by: AgentId, prey: AgentId, pos: vec3 }
 // Sub-probe 3a: does a standalone user enum parse/resolve?
 enum UpgradeKind { BoltDamage, NovaRadius, BoltRate, MoveSpeed }
 
+// Player/Enemy subkinds declared for the 3a subkind-surface probe; actual role gating is via mana-band (no corpus precedent for subkind-identity gates).
 entity Player : Agent { pos: vec3, vel: vec3 }
 entity Enemy  : Agent { pos: vec3, vel: vec3 }
 

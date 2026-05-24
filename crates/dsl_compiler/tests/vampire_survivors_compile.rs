@@ -126,10 +126,6 @@ fn xp_view_folds_kills() {
 fn upgrade_choice_compiles() {
     let path = workspace_path("assets/sim/vampire_survivors.sim");
     let art = compile_sim(&path).expect("compiles");
-    assert!(
-        kernel_body_containing(&art, "ChooseUpgrade").is_some()
-            || kernel_body_containing(&art, "upgrade").is_some(),
-        "expected an upgrade-selection or tally kernel; have {:?}",
-        art.wgsl_files.keys().collect::<Vec<_>>(),
-    );
+    let body = kernel_body_containing(&art, "ChooseUpgrade").unwrap_or_else(|| panic!("no ChooseUpgrade kernel; have {:?}", art.wgsl_files.keys().collect::<Vec<_>>()));
+    assert!(body.contains("view_storage"), "ChooseUpgrade should read upgrades_total view storage in its select condition; got:\n{body}");
 }
