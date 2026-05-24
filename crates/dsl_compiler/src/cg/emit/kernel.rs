@@ -2666,13 +2666,18 @@ fn build_view_fold_cfg_struct_decl(cfg_struct: &str) -> String {
     // (`view_storage_primary[k1 * cfg.second_key_pop + k2]`). For
     // single-key views the runtime sets it to 1 so the index reduces
     // to `k1 * 1 + 0` ≡ `k1` — the WGSL template uses the field
-    // unconditionally, the runtime supplies the discriminator. The
-    // fourth slot stays as `_pad: u32` to preserve the 16-byte uniform
-    // alignment.
+    // unconditionally, the runtime supplies the discriminator.
+    //
+    // The fourth slot is `agent_cap: u32`, populated by the runtime
+    // with the current agent count.  The serial PerAgent scan body
+    // reads it as the bounds-check limit (`if (observer_slot >=
+    // cfg.agent_cap) { return; }`).  For runtimes that keep the legacy
+    // PerEvent CAS path this slot is written as 0 and never read by
+    // the kernel — the field is present for layout stability.
     format!(
         "#[repr(C)]\n\
          #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]\n\
-         pub struct {cfg_struct} {{ pub event_count: u32, pub tick: u32, pub second_key_pop: u32, pub _pad: u32 }}"
+         pub struct {cfg_struct} {{ pub event_count: u32, pub tick: u32, pub second_key_pop: u32, pub agent_cap: u32 }}"
     )
 }
 
@@ -2683,8 +2688,11 @@ fn build_view_fold_cfg_build_expr(cfg_struct: &str) -> String {
     // Agent×Item, …) when they upload the cfg per-tick. The compile-
     // time default is harmless for non-PairMap views since their fold
     // body indexes `local_<k> * 1 + 0 ≡ local_<k>`.
+    // `agent_cap = 0` at compile time; the runtime overwrites slot 3
+    // via write_buffer before each step() so the serial scan body
+    // gets the real agent count for its bounds check.
     format!(
-        "{cfg_struct} {{ event_count: 0, tick: state.tick, second_key_pop: 1, _pad: 0 }}"
+        "{cfg_struct} {{ event_count: 0, tick: state.tick, second_key_pop: 1, agent_cap: 0 }}"
     )
 }
 
@@ -2867,6 +2875,135 @@ fn build_view_fold_bindings(
     bindings
 }
 
+/// Attempt to build a serial PerAgent scan body for a ViewFold kernel whose
+/// every op is a single-key f32+Add fold.  Returns `None` when any op is not
+/// a qualifying fold (falls through to the PerEvent CAS path).
+///
+/// The emitted body is shaped as follows:
+///
+/// ```wgsl
+/// let observer_slot = gid.x;
+/// if (observer_slot >= cfg.agent_cap) { return; }
+/// let tick = cfg.tick;
+/// var accum: f32 = bitcast<f32>(atomicLoad(&view_storage_primary[observer_slot]));
+/// let _ec = cfg.event_count;
+/// for (var _ei = 0u; _ei < _ec; _ei = _ei + 1u) {
+///     // op#N (view_fold)
+///     {
+///         if (event_ring[_ei * <stride>u + 0u] == <kind_tag>u) {
+///             let local_0: u32 = event_ring[_ei * <stride>u + <tgt_off>u];
+///             if (local_0 == observer_slot) {
+///                 accum = accum + (<rhs>);
+///             }
+///         }
+///     }
+/// }
+/// atomicStore(&view_storage_primary[observer_slot], bitcast<u32>(accum));
+/// ```
+///
+/// Each thread is the sole writer for `observer_slot` — no contention,
+/// no CAS retry loop, deterministic accumulation in sort order.
+fn try_build_serial_scan_body(
+    body_ops: &[OpId],
+    prog: &CgProgram,
+    ctx: &EmitCtx<'_>,
+) -> Result<Option<String>, KernelEmitError> {
+    use crate::cg::expr::CgTy;
+    use crate::cg::program::ViewFoldOp;
+
+    // Require every op in this kernel to be a single-key f32+Add ViewFold.
+    // Mixed-op kernels (f32+Add fused with a u32 fold) are uncommon; falling
+    // through to the PerEvent CAS path is safe for those.
+    for op_id in body_ops {
+        let op = resolve_op(prog, *op_id)?;
+        match &op.kind {
+            ComputeOpKind::ViewFold { view, .. } => {
+                let sig = prog.view_signatures.get(&view.0);
+                let is_f32_add = sig.map_or(false, |s| {
+                    matches!(s.result, CgTy::F32)
+                        && matches!(s.fold_op, Some(ViewFoldOp::Add))
+                    // Single-key views (one Agent binder) also get PairMap
+                    // storage_hint from the lowering; that's fine — the serial
+                    // scan is safe for them because local_0 is the sole target
+                    // slot index.  Real 2-D pair views are excluded by the
+                    // multi-binder check further down, not by the hint.
+                });
+                if !is_f32_add {
+                    return Ok(None);
+                }
+            }
+            _ => return Ok(None),
+        }
+    }
+
+    let mut out = String::new();
+    out.push_str("    let observer_slot = gid.x;\n");
+    out.push_str("    if (observer_slot >= cfg.agent_cap) { return; }\n");
+    out.push_str("    let tick = cfg.tick;\n");
+    out.push_str(
+        "    var accum: f32 = bitcast<f32>(atomicLoad(&view_storage_primary[observer_slot]));\n",
+    );
+    out.push_str("    let _ec = cfg.event_count;\n");
+    out.push_str("    for (var _ei = 0u; _ei < _ec; _ei = _ei + 1u) {\n");
+
+    for (i, op_id) in body_ops.iter().enumerate() {
+        if i > 0 {
+            out.push_str("\n");
+        }
+        let op = resolve_op(prog, *op_id)?;
+        let (kind_tag, stride) = match &op.kind {
+            ComputeOpKind::ViewFold { on_event, .. } => {
+                let stride = prog
+                    .event_layouts
+                    .get(&on_event.0)
+                    .map(|l| l.record_stride_u32)
+                    .unwrap_or(EVENT_RING_DEFAULT_STRIDE_U32);
+                (on_event.0, stride)
+            }
+            _ => unreachable!("guarded above"),
+        };
+        writeln!(out, "        // op#{} (view_fold)", op.id.0).expect("write to String");
+        out.push_str("        {\n");
+        out.push_str(&format!(
+            "            if (event_ring[_ei * {stride}u + 0u] == {kind_tag}u) {{\n"
+        ));
+
+        // Lower the per-op body with in_serial_fold_body=true so that
+        // EventField reads use `_ei` and the ViewStorage Assign emits the
+        // serial accumulator check.
+        let body_list_id = match &op.kind {
+            ComputeOpKind::ViewFold { body, .. } => *body,
+            _ => unreachable!(),
+        };
+        ctx.in_serial_fold_body.set(true);
+        let body_wgsl =
+            lower_cg_stmt_list_to_wgsl(body_list_id, ctx).map_err(KernelEmitError::from)?;
+        ctx.in_serial_fold_body.set(false);
+
+        let indented = body_wgsl
+            .lines()
+            .map(|l| {
+                if l.is_empty() {
+                    String::new()
+                } else {
+                    format!("                {l}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        out.push_str(&indented);
+        out.push_str("\n            }"); // close if (tag == kind)
+        out.push_str("\n        }"); // close per-op brace
+    }
+
+    out.push_str("\n    }\n"); // close for loop
+    out.push_str(
+        "    atomicStore(&view_storage_primary[observer_slot], bitcast<u32>(accum));\n",
+    );
+
+    Ok(Some(out))
+}
+
 /// Compose the ViewFold-specific WGSL body. Adds the per-kind preamble
 /// (`if event_idx >= cfg.event_count { return; }`) and concatenates the
 /// per-handler bodies through Task 4.1's [`lower_cg_stmt_list_to_wgsl`].
@@ -2921,6 +3058,18 @@ fn build_view_fold_wgsl_body(
     // assert ring-append semantics without G3b's struct-payload work.
     if let Some(CgStorageHint::PerEntityRing { k }) = storage_hint {
         return build_view_fold_ring_append_body(body_ops, prog, ctx, k as u32);
+    }
+    // Serial PerAgent scan: when the program contains at least one f32+Add
+    // single-key ViewFold, all such folds in this kernel switch to a
+    // per-observer-slot loop that accumulates matching events locally and
+    // writes the result once.  Each thread is the sole writer for its slot
+    // (observer_slot == gid.x), so no CAS retry is needed.
+    if ctx.serial_f32_fold.get() {
+        if let Some(serial_body) =
+            try_build_serial_scan_body(body_ops, prog, ctx)?
+        {
+            return Ok(serial_body);
+        }
     }
     let mut out = String::new();
     out.push_str("    let event_idx = gid.x;\n");
@@ -8152,11 +8301,13 @@ mod tests {
         };
         let ctx = EmitCtx::structural(&prog);
         let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
-        // ViewFold cfg fields: event_count, tick, second_key_pop, _pad.
+        // ViewFold cfg fields: event_count, tick, second_key_pop, agent_cap.
         // `second_key_pop` joined the layout with the pair_map storage
         // emit gap fix (2026-05-03) — drives the 2-D `(k1 *
         // second_key_pop + k2)` index. Single-key views set the field
         // to 1 at runtime so the index reduces to `k_last`.
+        // `agent_cap` is written by the runtime for sort-enabled
+        // fixtures so the serial PerAgent scan body can bounds-check.
         assert!(
             spec.cfg_struct_decl.contains("event_count: u32"),
             "decl: {}",
@@ -8173,7 +8324,7 @@ mod tests {
             spec.cfg_struct_decl
         );
         assert!(
-            spec.cfg_struct_decl.contains("_pad: u32"),
+            spec.cfg_struct_decl.contains("agent_cap: u32"),
             "decl: {}",
             spec.cfg_struct_decl
         );
@@ -8637,11 +8788,11 @@ mod tests {
         // emit gap fix (2026-05-03) — fold body composes
         // `[k1 * cfg.second_key_pop + k2]` for 2-D pair views.
         assert!(spec.cfg_struct_decl.contains(
-            "event_count: u32, pub tick: u32, pub second_key_pop: u32, pub _pad: u32"
+            "event_count: u32, pub tick: u32, pub second_key_pop: u32, pub agent_cap: u32"
         ));
         assert_eq!(
             spec.cfg_build_expr,
-            "FoldThreatLevelCfg { event_count: 0, tick: state.tick, second_key_pop: 1, _pad: 0 }"
+            "FoldThreatLevelCfg { event_count: 0, tick: state.tick, second_key_pop: 1, agent_cap: 0 }"
         );
     }
 

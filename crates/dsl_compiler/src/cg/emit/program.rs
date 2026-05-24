@@ -619,6 +619,29 @@ fn kernel_topology_has_emits(topology: &KernelTopology, prog: &CgProgram) -> boo
     false
 }
 
+/// Returns `true` when `prog` contains at least one `ViewFold` op whose view
+/// has an f32 result type and an `Add` fold operator.  Used by the emit layer
+/// to decide whether to produce the serial PerAgent scan body (which avoids
+/// the CAS+add retry loop and is always deterministic) for those folds.
+fn has_f32_add_view_fold(prog: &CgProgram) -> bool {
+    use crate::cg::expr::CgTy;
+    use crate::cg::op::ComputeOpKind;
+    use crate::cg::program::ViewFoldOp;
+    for op in &prog.ops {
+        if let ComputeOpKind::ViewFold { view, .. } = &op.kind {
+            let Some(sig) = prog.view_signatures.get(&view.0) else {
+                continue;
+            };
+            if matches!(sig.result, CgTy::F32)
+                && matches!(sig.fold_op, Some(ViewFoldOp::Add))
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -704,6 +727,12 @@ pub fn emit_cg_program_with_debug(
         producer_kernel_ids: assign_producer_kernel_ids(schedule, prog),
         current_kernel_index: std::cell::Cell::new(None),
         intra_emit_idx: std::cell::Cell::new(0),
+        // Enable serial PerAgent scan for f32+Add ViewFold kernels when the
+        // program contains at least one such fold.  Each agent slot gets its
+        // own thread that accumulates events locally then writes once — no
+        // CAS retry loop, no cross-thread contention on view_storage_primary.
+        serial_f32_fold: std::cell::Cell::new(has_f32_add_view_fold(prog)),
+        in_serial_fold_body: std::cell::Cell::new(false),
     };
 
     for (stage_idx, stage) in schedule.stages.iter().enumerate() {
@@ -875,10 +904,10 @@ fn compose_wgsl_file(
     // The cfg uniform is referenced by name (e.g. `cfg: MaskHoldCfg`),
     // so the WGSL must declare the matching struct inline before the
     // uniform binding. Shape mirrors the Rust cfg_struct_decl:
-    //   ViewFold:  { event_count, tick, _pad0, _pad1 }
-    //   Generic:   { agent_cap, _pad0, _pad1, _pad2 }
+    //   ViewFold:  { event_count, tick, second_key_pop, agent_cap }
+    //   Generic:   { agent_cap, tick, seed, _pad }
     // (WGSL doesn't accept `[u32; N]` array members in uniforms the way
-    // Rust does; the padding is unrolled into scalar `_padN` fields.)
+    // Rust does; the fields are individual u32 scalars.)
     out.push_str(&compose_wgsl_cfg_struct(spec));
     out.push('\n');
 
@@ -1557,12 +1586,8 @@ fn compose_view_storage_prelude(body: &str, prog: &CgProgram) -> String {
 /// reference from the cfg uniform binding. Sourced from the cfg
 /// binding's WGSL type name; field shape branches on
 /// [`KernelKind`] to mirror the Rust [`KernelSpec::cfg_struct_decl`]:
-///   - `ViewFold`: `{ event_count, tick, _pad0, _pad1 }`
-///   - `Generic`:  `{ agent_cap, _pad0, _pad1, _pad2 }`
-///
-/// WGSL doesn't accept `[u32; N]` array members in uniform-shaped
-/// structs the same way Rust does, so the padding is unrolled into
-/// scalar `_padN` fields.
+///   - `ViewFold`: `{ event_count, tick, second_key_pop, agent_cap }`
+///   - `Generic`:  `{ agent_cap, tick, seed, _pad }`
 ///
 /// # Limitations
 ///
@@ -1588,7 +1613,7 @@ fn compose_wgsl_cfg_struct(spec: &KernelSpec) -> String {
         // 2-D views; single-key views set the field to 1 so the index
         // reduces to `k_last`. Mirrors the Rust `FoldXxxCfg` struct
         // (build_view_fold_cfg_struct_decl).
-        KernelKind::ViewFold => "event_count: u32, tick: u32, second_key_pop: u32, _pad0: u32",
+        KernelKind::ViewFold => "event_count: u32, tick: u32, second_key_pop: u32, agent_cap: u32",
         // `slot_count` joined the layout in lockstep — pair_map views
         // over-allocate `agent_cap × second_pop` slots; the decay
         // kernel iterates `slot_count` instead of `agent_cap` so the

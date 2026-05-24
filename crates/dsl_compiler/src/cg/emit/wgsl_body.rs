@@ -370,6 +370,33 @@ pub struct EmitCtx<'a> {
     /// encountered during the kernel walk. Packs into the low 4 bits of
     /// the seq trailer `(kernel_id << 24) | (thread_idx << 4) | emit_idx`.
     pub intra_emit_idx: std::cell::Cell<u32>,
+
+    /// When set, f32+Add single-key ViewFold kernels emit a PerAgent serial
+    /// scan (one thread per observer slot, inner loop over all events) instead
+    /// of the default PerEvent CAS+add loop.  Each thread is the sole writer
+    /// for its slot — no contention, no retry, deterministic accumulation.
+    ///
+    /// Computed by the program emitter by scanning `prog.ops` for any
+    /// `ViewFold` with f32 result type and `Add` fold op; set to `true` when
+    /// such an op exists.  Set by `emit_cg_program_with_debug`; default
+    /// `false` leaves the existing PerEvent CAS path unchanged for programs
+    /// that have no f32+Add folds.
+    pub serial_f32_fold: std::cell::Cell<bool>,
+
+    /// When set, the current stmt-list emit is inside a serial fold's inner
+    /// event-scan loop.  Two emission behaviours change:
+    ///
+    /// 1. `CgExpr::EventField` reads use `_ei` (the scan loop variable)
+    ///    instead of `event_idx`.
+    /// 2. `CgStmt::Assign { target: ViewStorage(f32+Add) }` emits
+    ///    `if (local_N == observer_slot) { accum = accum + rhs; }`
+    ///    instead of the CAS retry loop — the serial scan guarantees
+    ///    single-writer per slot so no atomics are needed.
+    ///
+    /// Set by `build_view_fold_wgsl_body`'s serial-scan path around the
+    /// `lower_cg_stmt_list_to_wgsl` call; restored to `false` on return.
+    /// Default `false` preserves the existing per-event CAS path verbatim.
+    pub in_serial_fold_body: std::cell::Cell<bool>,
 }
 
 impl<'a> EmitCtx<'a> {
@@ -403,6 +430,8 @@ impl<'a> EmitCtx<'a> {
             producer_kernel_ids: std::collections::BTreeMap::new(),
             current_kernel_index: std::cell::Cell::new(None),
             intra_emit_idx: std::cell::Cell::new(0),
+            serial_f32_fold: std::cell::Cell::new(false),
+            in_serial_fold_body: std::cell::Cell::new(false),
         }
     }
 
@@ -1929,11 +1958,14 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
             // ViewFold's path keeps this `false` (its `event_ring`
             // binding stays plain `array<u32>`), so the existing
             // plain-index reads continue to compile.
+            // Serial fold body uses `_ei` (the per-op inner scan loop
+            // variable) instead of the kernel-preamble `event_idx`.
+            let idx_var = if ctx.in_serial_fold_body.get() { "_ei" } else { "event_idx" };
             let read_word = |off: u32| -> String {
                 if ctx.event_ring_atomic_loads.get() {
-                    format!("atomicLoad(&{}[event_idx * {}u + {}u])", buf, stride, off)
+                    format!("atomicLoad(&{}[{} * {}u + {}u])", buf, idx_var, stride, off)
                 } else {
-                    format!("{}[event_idx * {}u + {}u]", buf, stride, off)
+                    format!("{}[{} * {}u + {}u]", buf, idx_var, stride, off)
                 }
             };
             Ok(match ty {
@@ -2317,6 +2349,17 @@ fn lower_cg_stmt_body_to_wgsl(
                             "{{\n\
                              \x20   let _idx = {idx_expr};\n\
                              \x20   atomicStore(&{storage}[_idx], {stored});\n\
+                             }}"
+                        ));
+                    }
+                    // Serial fold path: each thread owns its observer_slot
+                    // and accumulates matching events into a local `accum`
+                    // var declared in the surrounding scan loop.  No atomics
+                    // needed — single writer per slot by construction.
+                    if ctx.in_serial_fold_body.get() {
+                        return Ok(format!(
+                            "if ({idx_expr} == observer_slot) {{\n\
+                             \x20   accum = accum + ({rhs});\n\
                              }}"
                         ));
                     }

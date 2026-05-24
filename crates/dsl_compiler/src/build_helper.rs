@@ -3048,7 +3048,7 @@ fn synthesize_generated_runtime_struct(
          \x20       // the kernel's event-kind check on each row falls through.\n\
          \x20       // Cfg layout per kernel:\n\
          \x20       //   per-agent: { agent_cap, tick, seed, _pad0 }\n\
-         \x20       //   ViewFold:  { event_count, tick, second_key_pop, _pad0 }\n\
+         \x20       //   ViewFold:  { event_count, tick, second_key_pop, agent_cap }\n\
          \x20       //   PerPair:   { agent_cap, tick, seed, pair_offset }\n\
          \x20       // Slot 2 is `seed` (per-agent — most kernels ignore it,\n\
          \x20       // they key PCG off tick+agent+purpose) or `second_key_pop`\n\
@@ -3056,7 +3056,9 @@ fn synthesize_generated_runtime_struct(
          \x20       // the per-(observer, source) index calc divides by 0 or\n\
          \x20       // wraps and the fold writes to wrong slots). Writing 1\n\
          \x20       // is correct for ViewFolds and harmless for per-agent.\n\
-         \x20       // Slot 3 is _pad0 for per-agent/ViewFold (unused) and\n\
+         \x20       // Slot 3 is agent_cap for ViewFold (overridden below for\n\
+         \x20       // sort-enabled fixtures; 0 otherwise — the serial scan\n\
+         \x20       // body reads it as the observer_slot bounds check) and\n\
          \x20       // `pair_offset` for PerPair fused-mask kernels — those\n\
          \x20       // emit `let pair = gid.x + cfg._pad0` to chunk\n\
          \x20       // agent_cap²-sized dispatches that exceed\n\
@@ -3096,7 +3098,7 @@ fn synthesize_generated_runtime_struct(
     }
 
     // Per-kernel slot-2 override for ViewFold kernels — their cfg
-    // shape is `{ event_count, tick, second_key_pop, _pad0 }`, so
+    // shape is `{ event_count, tick, second_key_pop, agent_cap }`, so
     // slot 2 needs the view's static K value (not the default `1u32`
     // baked into cfg_words above). Without this override, pair-keyed
     // ViewFolds (`(observer: Agent, subject: Agent)` or I.3b's
@@ -3131,6 +3133,27 @@ fn synthesize_generated_runtime_struct(
              \x20       }}\n",
             kname = spec.name,
         ));
+    }
+    // Per-kernel slot-3 override for ViewFold kernels in sort-enabled
+    // fixtures.  The serial PerAgent scan body reads `cfg.agent_cap`
+    // (slot 3) as the per-thread bounds check.  The initial cfg_words
+    // write sets slot 3 = 0; override it to `agent_count` for every
+    // fold kernel so the scan body's `if (observer_slot >= cfg.agent_cap)
+    // { return; }` guard is correct at runtime.
+    if needs_sort {
+        for spec in &artifacts.kernel_specs {
+            if !matches!(spec.kind, crate::kernel_binding_ir::KernelKind::ViewFold) {
+                continue;
+            }
+            out.push_str(&format!(
+                "        // ViewFold slot-3 override — sets cfg.agent_cap = agent_count for `{kname}`.\n\
+                 \x20       {{\n\
+                 \x20           let ac_bytes: [u8; 4] = self.agent_count.to_le_bytes();\n\
+                 \x20           self.gpu.queue.write_buffer(&self.cfg_{kname}_buf, 12u64, &ac_bytes);\n\
+                 \x20       }}\n",
+                kname = spec.name,
+            ));
+        }
     }
     // Indirect-consumer event-ring lifecycle — closes gaps 3 + 4
     // from commit 353527e6's Indirect-arm doc block, and folds in the

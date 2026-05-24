@@ -1,30 +1,28 @@
 //! Phase 8 lock-in: the view-fold storage write-back WGSL emit.
 //!
-//! Pins the atomic CAS-loop accumulator-update shape:
+//! Pins the serial PerAgent scan shape for f32+Add view folds:
 //!
 //! ```text
-//! loop {
-//!     let old = atomicLoad(&view_storage_<slot>[local_<N>]);
-//!     let new_val = bitcast<u32>(bitcast<f32>(old) + (rhs));
-//!     let result = atomicCompareExchangeWeak(&view_storage_<slot>[local_<N>], old, new_val);
-//!     if (result.exchanged) { break; }
+//! let observer_slot = gid.x;
+//! if (observer_slot >= cfg.agent_cap) { return; }
+//! var accum: f32 = bitcast<f32>(atomicLoad(&view_storage_primary[observer_slot]));
+//! for (var _ei = 0u; _ei < _ec; _ei = _ei + 1u) {
+//!     if (event_ring[_ei * stride + 0u] == <kind>) {
+//!         let local_0: u32 = event_ring[_ei * stride + <field_off>];
+//!         if (local_0 == observer_slot) {
+//!             accum = accum + (1.0);
+//!         }
+//!     }
 //! }
+//! atomicStore(&view_storage_primary[observer_slot], bitcast<u32>(accum));
 //! ```
 //!
-//! The per-row index is captured from the immediately-preceding
-//! `Let local_<N>: AgentId = EventField(…)` in the fold body — the
-//! binder-extraction pattern `on Killed { by: predator } { self +=
-//! 1.0 }` produces. Without the capture the assign would fall back
-//! to the phony `_ = (rhs);` discard.
-//!
-//! Catches regressions in either the EmitCtx capture wiring or the
-//! ViewStorage assign emit. Replaces the prior non-atomic RMW which
-//! lost increments under contention (B1 — P11 Reduction Determinism
-//! violation surfaced by the ses_app stress fixture).
+//! After sort, events for each target slot are contiguous; one thread per
+//! observer slot owns that slot, scans all events, and commits with a single
+//! atomicStore.  No CAS retry loop, no multi-writer races.
 //!
 //! Also pins the BGL declaration: `view_storage_primary` must be
-//! declared `array<atomic<u32>>` so the CAS-loop's `atomicLoad` /
-//! `atomicCompareExchangeWeak` calls type-check under naga.
+//! declared `array<atomic<u32>>` so the atomic ops type-check under naga.
 
 #[test]
 fn predator_prey_kill_count_fold_emits_storage_writeback() {
@@ -50,43 +48,51 @@ fn predator_prey_kill_count_fold_emits_storage_writeback() {
         .get("fold_kill_count.wgsl")
         .expect("fold_kill_count.wgsl emitted");
 
-    // The Let binder lowers to `local_0` (the by-id from the Killed
-    // event field). The Assign-to-ViewStorage then writes through a
-    // CAS loop indexed by `_idx = local_0` (single-key shape — the
-    // PairMap gap fix added the `_idx` binding so the 2-D pair_map
-    // path can compose `_idx = (local_<k1> * cfg.second_key_pop +
-    // local_<k2>)`; single-key views like kill_count keep `_idx =
-    // local_<single>`).
+    // Serial PerAgent scan: one thread per observer slot.
     assert!(
-        fold_wgsl.contains("let _idx = local_0;"),
-        "fold_kill_count should bind the row index `_idx = local_0` for single-key shape — got:\n{fold_wgsl}"
+        fold_wgsl.contains("let observer_slot = gid.x;"),
+        "fold_kill_count should use observer_slot as the outer index — got:\n{fold_wgsl}"
     );
     assert!(
-        fold_wgsl.contains("atomicLoad(&view_storage_primary[_idx])"),
-        "fold_kill_count should emit atomicLoad on view_storage_primary[_idx] — got:\n{fold_wgsl}"
+        fold_wgsl.contains("cfg.agent_cap"),
+        "fold_kill_count should bound on cfg.agent_cap — got:\n{fold_wgsl}"
     );
     assert!(
-        fold_wgsl.contains("atomicCompareExchangeWeak(&view_storage_primary[_idx]"),
-        "fold_kill_count should emit atomicCompareExchangeWeak on view_storage_primary[_idx] — got:\n{fold_wgsl}"
-    );
-    assert!(
-        fold_wgsl.contains("bitcast<u32>(bitcast<f32>(old) + (1.0))"),
-        "fold_kill_count should bitcast through f32 for the +1.0 add — got:\n{fold_wgsl}"
-    );
-    assert!(
-        fold_wgsl.contains("if (result.exchanged) { break; }"),
-        "fold_kill_count CAS loop should retry until atomicCompareExchangeWeak succeeds — got:\n{fold_wgsl}"
+        fold_wgsl.contains("var accum"),
+        "fold_kill_count should use a local accumulator — got:\n{fold_wgsl}"
     );
 
-    // BGL declaration must be atomic so the CAS-loop's atomic ops
-    // type-check. Lock the WGSL binding line.
+    // Inner loop over events with the event-ring index variable `_ei`.
+    assert!(
+        fold_wgsl.contains("for (var _ei = 0u;"),
+        "fold_kill_count should loop over events with _ei — got:\n{fold_wgsl}"
+    );
+
+    // The condition check compares target slot against observer_slot.
+    assert!(
+        fold_wgsl.contains("== observer_slot"),
+        "fold_kill_count inner body should filter by target == observer_slot — got:\n{fold_wgsl}"
+    );
+
+    // Commit with a plain atomicStore (not CAS).
+    assert!(
+        fold_wgsl.contains("atomicStore(&view_storage_primary[observer_slot]"),
+        "fold_kill_count should commit with atomicStore on view_storage_primary[observer_slot] — got:\n{fold_wgsl}"
+    );
+
+    // No CAS retry loop on view_storage_primary.
+    assert!(
+        !fold_wgsl.contains("atomicCompareExchangeWeak(&view_storage_primary"),
+        "fold_kill_count must NOT use CAS on view_storage_primary (serial scan replaced it) — got:\n{fold_wgsl}"
+    );
+
+    // BGL declaration must be atomic so the atomic ops type-check.
     assert!(
         fold_wgsl.contains("var<storage, read_write> view_storage_primary: array<atomic<u32>>;"),
         "view_storage_primary binding must be array<atomic<u32>> — got:\n{fold_wgsl}"
     );
 
-    // No phony discard left over (would indicate the per-row capture
-    // didn't fire for this body).
+    // No phony discard left over.
     assert!(
         !fold_wgsl.contains("_ = (1.0);"),
         "fold_kill_count should not emit the phony discard placeholder — got:\n{fold_wgsl}"

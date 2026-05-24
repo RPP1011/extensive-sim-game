@@ -183,6 +183,8 @@ fn scoring_kernel_emits_action_selected_when_verb_present() {
             producer_kernel_ids: std::collections::BTreeMap::new(),
             current_kernel_index: std::cell::Cell::new(None),
             intra_emit_idx: std::cell::Cell::new(0),
+            serial_f32_fold: std::cell::Cell::new(false),
+            in_serial_fold_body: std::cell::Cell::new(false),
         }
     }
 

@@ -382,9 +382,11 @@ fn bartering_emits_item_id_in_trade_payload() {
             art.wgsl_files.keys().collect::<Vec<_>>()
         );
     });
+    // After the serial scan landing, the fold body uses `_ei` (inner event
+    // loop variable) instead of `event_idx` (outer PerEvent thread index).
     assert!(
-        fold_body.contains("event_ring[event_idx * 11u +"),
-        "fold should index event ring by event_idx; got:\n{fold_body}",
+        fold_body.contains("event_ring[_ei * 11u +"),
+        "fold should index event ring by _ei (serial scan inner loop); got:\n{fold_body}",
     );
 }
 
@@ -451,8 +453,13 @@ fn ecosystem_cascade_compiles() {
         let body = kernel_body_containing(&art, &kernel_name).unwrap_or_else(|| {
             panic!("expected {kernel_name} kernel");
         });
+        // Serial scan uses `_ei` (inner event loop var); PerEvent shape
+        // used `event_idx` (outer thread id).  Accept either so this gate
+        // works both before and after the scan landing.
+        let has_guard = body.contains("if (event_ring[_ei * 11u + 0u] ==")
+            || body.contains("if (event_ring[event_idx * 11u + 0u] ==");
         assert!(
-            body.contains("if (event_ring[event_idx * 11u + 0u] =="),
+            has_guard,
             "{kernel_name} body must guard on per-handler event-kind tag; got:\n{body}",
         );
     }
@@ -636,17 +643,17 @@ fn event_kind_filter_probe_compiles_with_tag_guard() {
         );
     });
 
-    // Each fold body must guard its handler block with a tag check:
-    // `if (event_ring[event_idx * 11u + 0u] == <kind>u)`. The exact
-    // kind id is allocator-determined; just confirm the structural
-    // shape is present.
-    let guard_pattern = "if (event_ring[event_idx * 11u + 0u] ==";
+    // Each fold body must guard its handler block with a tag check.
+    // Serial scan shape uses `_ei`; PerEvent shape used `event_idx`.
+    // Accept either to keep the gate forward-compatible.
+    let guard_pattern_ei = "if (event_ring[_ei * 11u + 0u] ==";
+    let guard_pattern_eidx = "if (event_ring[event_idx * 11u + 0u] ==";
     assert!(
-        fold_a.contains(guard_pattern),
+        fold_a.contains(guard_pattern_ei) || fold_a.contains(guard_pattern_eidx),
         "kind_a_count fold body must contain per-handler tag check; got:\n{fold_a}",
     );
     assert!(
-        fold_b.contains(guard_pattern),
+        fold_b.contains(guard_pattern_ei) || fold_b.contains(guard_pattern_eidx),
         "kind_b_count fold body must contain per-handler tag check; got:\n{fold_b}",
     );
 
@@ -655,8 +662,9 @@ fn event_kind_filter_probe_compiles_with_tag_guard() {
     // wouldn't distinguish KindA vs KindB. Pull the kind id from
     // each guard line.
     let extract_kind = |body: &str| -> Option<String> {
-        let pat_idx = body.find(guard_pattern)?;
-        let after = &body[pat_idx + guard_pattern.len()..];
+        let pat = if body.contains(guard_pattern_ei) { guard_pattern_ei } else { guard_pattern_eidx };
+        let pat_idx = body.find(pat)?;
+        let after = &body[pat_idx + pat.len()..];
         let close = after.find(')')?;
         Some(after[..close].trim().trim_end_matches('u').trim().to_string())
     };
@@ -836,16 +844,17 @@ fn trade_market_probe_combines_landed_surfaces() {
         "expected 2 tag stores in WanderAndTrade producer (one per emit); got {tag_stores} in:\n{producer}",
     );
 
-    // Per-handler tag filter (cb24fd69) — every fold body must
-    // guard on the kind tag at offset 0.
-    let guard_pattern = "if (event_ring[event_idx * 11u + 0u] ==";
+    // Per-handler tag filter — every fold body must guard on the kind tag
+    // at offset 0.  Serial scan uses `_ei`; PerEvent shape used `event_idx`.
     for view_name in ["price_belief", "trader_volume", "hub_volume"] {
         let kernel_name = format!("fold_{view_name}");
         let body = kernel_body_containing(&art, &kernel_name).unwrap_or_else(|| {
             panic!("expected {kernel_name} kernel");
         });
+        let has_guard = body.contains("if (event_ring[_ei * 11u + 0u] ==")
+            || body.contains("if (event_ring[event_idx * 11u + 0u] ==");
         assert!(
-            body.contains(guard_pattern),
+            has_guard,
             "{kernel_name} body must guard on per-handler event-kind tag; got:\n{body}",
         );
     }
@@ -863,19 +872,21 @@ fn trade_market_probe_combines_landed_surfaces() {
         "expected NO CAS loop in u32 fold body; got:\n{pb_body}",
     );
 
-    // The two f32 view folds DO use the CAS+add loop (no atomic
-    // float add in WGSL; the `+= a` accumulator on a `-> f32` view
-    // routes through the CAS loop). We pick the fold kernel by
-    // exact-name lookup because `kernel_body_containing("trader_volume")`
-    // would also match `decay_trader_volume` (substring containment).
+    // The two f32 view folds use the serial PerAgent scan (atomicStore,
+    // not CAS+add).  The serial scan is the replacement for the old
+    // multi-writer CAS retry loop on f32 views.
     let tv_body = art
         .wgsl_files
         .get("fold_trader_volume.wgsl")
         .map(|s| s.as_str())
         .expect("fold_trader_volume.wgsl missing");
     assert!(
-        tv_body.contains("atomicCompareExchangeWeak"),
-        "expected CAS+add loop in fold_trader_volume body (f32 view); got:\n{tv_body}",
+        tv_body.contains("atomicStore(&view_storage_primary[observer_slot]"),
+        "expected serial atomicStore in fold_trader_volume body (f32 view); got:\n{tv_body}",
+    );
+    assert!(
+        !tv_body.contains("atomicCompareExchangeWeak(&view_storage_primary"),
+        "f32 fold_trader_volume must NOT use CAS on view_storage_primary; got:\n{tv_body}",
     );
     let hv_body = art
         .wgsl_files
@@ -883,8 +894,12 @@ fn trade_market_probe_combines_landed_surfaces() {
         .map(|s| s.as_str())
         .expect("fold_hub_volume.wgsl missing");
     assert!(
-        hv_body.contains("atomicCompareExchangeWeak"),
-        "expected CAS+add loop in fold_hub_volume body (f32 view); got:\n{hv_body}",
+        hv_body.contains("atomicStore(&view_storage_primary[observer_slot]"),
+        "expected serial atomicStore in fold_hub_volume body (f32 view); got:\n{hv_body}",
+    );
+    assert!(
+        !hv_body.contains("atomicCompareExchangeWeak(&view_storage_primary"),
+        "f32 fold_hub_volume must NOT use CAS on view_storage_primary; got:\n{hv_body}",
     );
 
     eprintln!(
