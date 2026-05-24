@@ -38,52 +38,51 @@
 
 use engine::ability::apply::ApplyEvent;
 
-/// Per-record stride in u32-words. Mirrors
-/// `cg::lower::driver::populate_event_kinds`'s shared
-/// `record_stride_u32: 10`.
-pub const CHRONICLE_RECORD_STRIDE_U32: usize = 10;
+/// Per-record stride in u32-words.
+///
+/// Words 0..9 are the same 10-word header + payload layout used before
+/// P11; word 10 is the new seq trailer added in P11 sort-then-fold.
+/// The GPU `apply_ability` dispatcher still uses stride 10 for its
+/// hardcoded `_slot * 10u + N` writes (separate code path). This
+/// constant covers the CPU reference for `@replayable @gpu_amenable`
+/// events emitted via `emit Xxx {}` in DSL physics rules — those use
+/// stride 11 with seq at the last word.
+pub const CHRONICLE_RECORD_STRIDE_U32: usize = 11;
 
-/// Translate one [`ApplyEvent`] into the chronicle record the GPU
-/// dispatcher writes for it, or `None` if the variant has no
+/// Translate one [`ApplyEvent`] into the 11-word chronicle record the CPU
+/// cascade dispatch writes for it, or `None` if the variant has no
 /// chronicle counterpart in the engine's `EventKindId` enum today.
 ///
-/// Returns a `[u32; 10]` mirroring the dispatcher's per-slot
-/// `atomicStore` writes:
-///   - `[0]` = kind tag (e.g. `26` for EffectDamageApplied)
-///   - `[1]` = tick
+/// Record layout:
+///   - `[0]`  = kind tag (e.g. `26` for EffectDamageApplied)
+///   - `[1]`  = tick
 ///   - `[2..6]` = per-variant payload (see variant arms below)
-///   - `[6]` = ability_id (Gap detective#6, 2026-05-12) — the
-///     id of the ability whose dispatcher emitted this record.
-///     Downstream consumers (chronicle re-emit rules) read this
-///     to discriminate verb source.
+///   - `[6]`  = ability_id (Gap detective#6, 2026-05-12)
+///   - `[7..9]` = reserved (zero)
+///   - `[10]` = seq trailer: `(kernel_id << 24) | (thread_id << 4) | emit_idx`
 ///
 /// `caster_id` and `target_id` are written into the actor (slot 2)
 /// and target (slot 3) chronicle payload words respectively. Both
 /// are u32 raw AgentIds. For self-cast callers (the slice-γ
-/// default), pass `target_id == caster_id`. See module docs for
-/// the slice-ε plumbing context.
+/// default), pass `target_id == caster_id`.
 ///
 /// `ability_id` is the registry id of the ability dispatched by the
-/// `apply_ability` call site. The GPU dispatcher reads it from the
-/// `ability_id__u32` outer-scope identifier and writes it at slot 6
-/// of every chronicle record. CPU callers must pass the same id so
-/// the byte layout matches.
+/// `apply_ability` call site. Written at slot 6 on every arm so
+/// downstream consumers can discriminate verb source.
 ///
-/// `tick` is the runtime tick counter at cast time; mirrors the
-/// `tick` preamble local the dispatcher reads from the kernel cfg.
-///
-/// **Slice ε part 1 update**: now takes `target_id: u32` separately
-/// from `caster_id`. The GPU dispatcher writes the `target` operand
-/// (lowered from `apply_ability ... target <expr>` source) into
-/// chronicle payload word 3 distinct from the caster slot in
-/// payload word 2. For self-cast callers (slice-γ default), pass
-/// `target_id == caster_id` to preserve the prior byte layout.
+/// `intra_emit_idx` is the per-emit counter within the same handler
+/// invocation (start at 0, increment per successive emit). On the CPU
+/// side, `kernel_id` and `thread_id` are both 0 (no dense kernel table
+/// today); seq = `intra_emit_idx & 0xF`.
 pub fn apply_event_to_chronicle_record(
     event: ApplyEvent,
     tick: u32,
     caster_id: u32,
     target_id: u32,
     ability_id: u32,
+    // Per-emit counter within the same handler invocation (start at 0,
+    // increment per successive emit call). CPU kernel_id = 0 placeholder.
+    intra_emit_idx: u32,
 ) -> Option<[u32; CHRONICLE_RECORD_STRIDE_U32]> {
     let mut rec = [0u32; CHRONICLE_RECORD_STRIDE_U32];
     rec[1] = tick;
@@ -92,6 +91,10 @@ pub fn apply_event_to_chronicle_record(
     // `atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32)`
     // suffix on every arm.
     rec[6] = ability_id;
+    // Slot 10 = seq trailer. Matches the GPU emitter's last-word write:
+    //   `(kernel_id << 24) | (thread_id << 4) | emit_idx`
+    // CPU kernel_id and thread_id are 0 (no dense kernel table today).
+    rec[CHRONICLE_RECORD_STRIDE_U32 - 1] = crate::seq::compute_event_seq(0, 0, intra_emit_idx);
     match event {
         // --- Damage = 0 → EventKindId::EffectDamageApplied = 26.
         ApplyEvent::Damage { source: _, target: _, amount } => {
@@ -819,6 +822,7 @@ mod tests {
             ApplyEvent::Damage { source: aid(7), target: aid(11), amount: 42.0 },
             /*tick*/ 100,
             /*caster_id*/ 7, /*target_id*/ 7, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("Damage has chronicle counterpart");
         assert_eq!(rec[0], 26, "kind tag — EffectDamageApplied");
@@ -827,7 +831,7 @@ mod tests {
         assert_eq!(rec[3], 7, "target slot — slice γ self-cast (was target=11)");
         assert_eq!(rec[4], 42.0_f32.to_bits(), "amount as bitcast<u32>");
         // Tail words zeroed.
-        for i in 7..CHRONICLE_RECORD_STRIDE_U32 {
+        for i in 7..(CHRONICLE_RECORD_STRIDE_U32 - 1) {
             assert_eq!(rec[i], 0, "tail word {i} should be zero");
         }
     }
@@ -838,6 +842,7 @@ mod tests {
             ApplyEvent::Heal { source: aid(1), target: aid(2), amount: 12.5 },
             /*tick*/ 50,
             /*caster_id*/ 3, /*target_id*/ 3, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("Heal has chronicle counterpart");
         assert_eq!(rec[0], 27);
@@ -855,6 +860,7 @@ mod tests {
             ApplyEvent::Stun { target: aid(99), duration_ticks: 17 },
             /*tick*/ 100,
             /*caster_id*/ 4, /*target_id*/ 4, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("Stun has chronicle counterpart");
         assert_eq!(rec[0], 29);
@@ -871,6 +877,7 @@ mod tests {
             },
             /*tick*/ 100,
             /*caster_id*/ 8, /*target_id*/ 8, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("Slow has chronicle counterpart");
         assert_eq!(rec[0], 30);
@@ -885,6 +892,7 @@ mod tests {
             ApplyEvent::Shield { source: aid(1), target: aid(2), amount: 25.0 },
             /*tick*/ 50,
             /*caster_id*/ 3, /*target_id*/ 3, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("Shield has chronicle counterpart");
         assert_eq!(rec[0], 28);
@@ -901,6 +909,7 @@ mod tests {
             /*tick*/ 50,
             /*caster_id*/ 7,
             /*target_id*/ 11, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .unwrap();
         assert_eq!(rec[2], 7, "actor slot uses caster_id");
@@ -908,7 +917,7 @@ mod tests {
         // Self-cast call site preserves slice-γ behavior: caster=target.
         let rec_self = apply_event_to_chronicle_record(
             ApplyEvent::Damage { source: aid(1), target: aid(2), amount: 100.0 },
-            50, 7, 7, 1,
+            50, 7, 7, 1, 0,
         ).unwrap();
         assert_eq!(rec_self[2], rec_self[3], "self-cast collapses both slots");
     }
@@ -950,6 +959,7 @@ mod tests {
             /*tick*/ 50,
             /*caster_id*/ 1,
             /*target_id*/ 1, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         );
         assert!(
             rec.is_some(),
@@ -976,6 +986,7 @@ mod tests {
             /*tick*/ 100,
             /*caster_id*/ 7,
             /*target_id*/ 7, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("Summon has chronicle counterpart");
         assert_eq!(rec[0], 62, "Summon: kind tag — EffectSummonApplied");
@@ -984,7 +995,7 @@ mod tests {
         assert_eq!(rec[3], 0xDEADBEEF, "Summon: template_hash at payload word 1");
         assert_eq!(rec[4], 3, "Summon: count (u8 widened to u32) at payload word 2");
         assert_eq!(rec[5], 120, "Summon: lifetime_ticks (raw u32) at payload word 3");
-        for i in 7..CHRONICLE_RECORD_STRIDE_U32 {
+        for i in 7..(CHRONICLE_RECORD_STRIDE_U32 - 1) {
             assert_eq!(rec[i], 0, "Summon: tail word {i} should be zero");
         }
     }
@@ -1023,6 +1034,7 @@ mod tests {
             /*tick*/ 100,
             /*caster_id*/ 7,
             /*target_id*/ 11, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("Buff has chronicle counterpart");
         assert_eq!(rec[0], 58, "Buff: kind tag — EffectBuffApplied");
@@ -1039,7 +1051,7 @@ mod tests {
              negative magnitude must sign-extend i16 → i32 before shift"
         );
         assert_eq!(rec[5], 50, "Buff: payload_b = duration_ticks (raw u32)");
-        for i in 7..CHRONICLE_RECORD_STRIDE_U32 {
+        for i in 7..(CHRONICLE_RECORD_STRIDE_U32 - 1) {
             assert_eq!(rec[i], 0, "Buff: tail word {i} should be zero");
         }
 
@@ -1049,6 +1061,7 @@ mod tests {
             /*tick*/ 200,
             /*caster_id*/ 7,
             /*target_id*/ 7, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("Harvest has chronicle counterpart");
         assert_eq!(rec[0], 59, "Harvest: kind tag — EffectHarvestApplied");
@@ -1056,7 +1069,7 @@ mod tests {
         assert_eq!(rec[2], 7, "Harvest: actor slot — caster_id");
         assert_eq!(rec[3], 0xCAFEBABE, "Harvest: kind_hash at payload word 1");
         assert_eq!(rec[4], 5, "Harvest: amount at payload word 2 (u16 widened to u32)");
-        for i in 7..CHRONICLE_RECORD_STRIDE_U32 {
+        for i in 7..(CHRONICLE_RECORD_STRIDE_U32 - 1) {
             assert_eq!(rec[i], 0, "Harvest: tail word {i} should be zero");
         }
 
@@ -1066,13 +1079,14 @@ mod tests {
             /*tick*/ 300,
             /*caster_id*/ 7,
             /*target_id*/ 7, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("PlaceVoxel has chronicle counterpart");
         assert_eq!(rec[0], 60, "PlaceVoxel: kind tag — EffectPlaceVoxelApplied");
         assert_eq!(rec[1], 300, "PlaceVoxel: tick");
         assert_eq!(rec[2], 7, "PlaceVoxel: actor slot — caster_id");
         assert_eq!(rec[3], 0xFACEFEED, "PlaceVoxel: kind_hash at payload word 1");
-        for i in 4..CHRONICLE_RECORD_STRIDE_U32 {
+        for i in 4..(CHRONICLE_RECORD_STRIDE_U32 - 1) {
             if i == 6 { continue; } // slot 6 = ability_id (Gap detective#6)
             assert_eq!(rec[i], 0, "PlaceVoxel: tail word {i} should be zero");
         }
@@ -1085,6 +1099,7 @@ mod tests {
             /*tick*/ 400,
             /*caster_id*/ 7,
             /*target_id*/ 11, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("Reflect has chronicle counterpart");
         assert_eq!(rec[0], 61, "Reflect: kind tag — EffectReflectApplied");
@@ -1101,7 +1116,7 @@ mod tests {
             "Reflect: payload_b's low 16 bits carry fraction_q8 (i16 → u16 → u32, \
              zero-extend); consumer sign-extends low 16 to recover negative value"
         );
-        for i in 7..CHRONICLE_RECORD_STRIDE_U32 {
+        for i in 7..(CHRONICLE_RECORD_STRIDE_U32 - 1) {
             assert_eq!(rec[i], 0, "Reflect: tail word {i} should be zero");
         }
     }
@@ -1125,13 +1140,14 @@ mod tests {
             /*tick*/ 100,
             /*caster_id*/ 7,
             /*target_id*/ 7, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("Stealth has chronicle counterpart");
         assert_eq!(rec[0], 54, "Stealth: kind tag — EffectStealthApplied");
         assert_eq!(rec[1], 100, "Stealth: tick");
         assert_eq!(rec[2], 7, "Stealth: actor slot — caster_id");
         assert_eq!(rec[3], 50, "Stealth: duration_ticks at payload word 1 (raw u32)");
-        for i in 4..CHRONICLE_RECORD_STRIDE_U32 {
+        for i in 4..(CHRONICLE_RECORD_STRIDE_U32 - 1) {
             if i == 6 { continue; } // slot 6 = ability_id (Gap detective#6)
             assert_eq!(rec[i], 0, "Stealth: tail word {i} should be zero");
         }
@@ -1142,6 +1158,7 @@ mod tests {
             /*tick*/ 200,
             /*caster_id*/ 7,
             /*target_id*/ 11, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("Charm has chronicle counterpart");
         assert_eq!(rec[0], 55, "Charm: kind tag — EffectCharmApplied");
@@ -1149,7 +1166,7 @@ mod tests {
         assert_eq!(rec[2], 7, "Charm: actor slot — caster_id");
         assert_eq!(rec[3], 11, "Charm: target slot — target_id");
         assert_eq!(rec[4], 30, "Charm: duration_ticks at payload word 2 (raw u32)");
-        for i in 7..CHRONICLE_RECORD_STRIDE_U32 {
+        for i in 7..(CHRONICLE_RECORD_STRIDE_U32 - 1) {
             assert_eq!(rec[i], 0, "Charm: tail word {i} should be zero");
         }
 
@@ -1159,6 +1176,7 @@ mod tests {
             /*tick*/ 300,
             /*caster_id*/ 7,
             /*target_id*/ 11, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("Grounded has chronicle counterpart");
         assert_eq!(rec[0], 56, "Grounded: kind tag — EffectGroundedApplied");
@@ -1166,7 +1184,7 @@ mod tests {
         assert_eq!(rec[2], 7, "Grounded: actor slot — caster_id");
         assert_eq!(rec[3], 11, "Grounded: target slot — target_id");
         assert_eq!(rec[4], 25, "Grounded: duration_ticks at payload word 2");
-        for i in 7..CHRONICLE_RECORD_STRIDE_U32 {
+        for i in 7..(CHRONICLE_RECORD_STRIDE_U32 - 1) {
             assert_eq!(rec[i], 0, "Grounded: tail word {i} should be zero");
         }
 
@@ -1176,6 +1194,7 @@ mod tests {
             /*tick*/ 400,
             /*caster_id*/ 7,
             /*target_id*/ 11, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("Suppress has chronicle counterpart");
         assert_eq!(rec[0], 57, "Suppress: kind tag — EffectSuppressApplied");
@@ -1183,7 +1202,7 @@ mod tests {
         assert_eq!(rec[2], 7, "Suppress: actor slot — caster_id");
         assert_eq!(rec[3], 11, "Suppress: target slot — target_id");
         assert_eq!(rec[4], 40, "Suppress: duration_ticks at payload word 2");
-        for i in 7..CHRONICLE_RECORD_STRIDE_U32 {
+        for i in 7..(CHRONICLE_RECORD_STRIDE_U32 - 1) {
             assert_eq!(rec[i], 0, "Suppress: tail word {i} should be zero");
         }
     }
@@ -1206,6 +1225,7 @@ mod tests {
             /*tick*/ 100,
             /*caster_id*/ 7,
             /*target_id*/ 11, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("DamageOverTime has chronicle counterpart");
         assert_eq!(rec[0], 51, "DamageOverTime: kind tag — EffectDamageOverTimeApplied");
@@ -1214,7 +1234,7 @@ mod tests {
         assert_eq!(rec[3], 11, "DamageOverTime: target slot — target_id");
         assert_eq!(rec[4], 6.5_f32.to_bits(), "DamageOverTime: amount-per-tick at payload word 2");
         assert_eq!(rec[5], 30, "DamageOverTime: duration_ticks at payload word 3 (raw u32)");
-        for i in 7..CHRONICLE_RECORD_STRIDE_U32 {
+        for i in 7..(CHRONICLE_RECORD_STRIDE_U32 - 1) {
             assert_eq!(rec[i], 0, "DamageOverTime: tail word {i} should be zero");
         }
 
@@ -1229,6 +1249,7 @@ mod tests {
             /*tick*/ 200,
             /*caster_id*/ 7,
             /*target_id*/ 11, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("HealOverTime has chronicle counterpart");
         assert_eq!(rec[0], 52, "HealOverTime: kind tag — EffectHealOverTimeApplied");
@@ -1237,7 +1258,7 @@ mod tests {
         assert_eq!(rec[3], 11, "HealOverTime: target slot — target_id");
         assert_eq!(rec[4], 4.0_f32.to_bits(), "HealOverTime: amount-per-tick at payload word 2");
         assert_eq!(rec[5], 50, "HealOverTime: duration_ticks at payload word 3 (raw u32)");
-        for i in 7..CHRONICLE_RECORD_STRIDE_U32 {
+        for i in 7..(CHRONICLE_RECORD_STRIDE_U32 - 1) {
             assert_eq!(rec[i], 0, "HealOverTime: tail word {i} should be zero");
         }
 
@@ -1252,6 +1273,7 @@ mod tests {
             /*tick*/ 300,
             /*caster_id*/ 7,
             /*target_id*/ 11, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("TimedShield has chronicle counterpart");
         assert_eq!(rec[0], 53, "TimedShield: kind tag — EffectTimedShieldApplied");
@@ -1260,7 +1282,7 @@ mod tests {
         assert_eq!(rec[3], 11, "TimedShield: target slot — target_id");
         assert_eq!(rec[4], 25.0_f32.to_bits(), "TimedShield: amount at payload word 2");
         assert_eq!(rec[5], 100, "TimedShield: duration_ticks at payload word 3 (raw u32)");
-        for i in 7..CHRONICLE_RECORD_STRIDE_U32 {
+        for i in 7..(CHRONICLE_RECORD_STRIDE_U32 - 1) {
             assert_eq!(rec[i], 0, "TimedShield: tail word {i} should be zero");
         }
     }
@@ -1283,13 +1305,14 @@ mod tests {
             /*tick*/ 100,
             /*caster_id*/ 7,
             /*target_id*/ 7, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("Dash has chronicle counterpart");
         assert_eq!(rec[0], 47, "Dash: kind tag — EffectDashApplied");
         assert_eq!(rec[1], 100, "Dash: tick");
         assert_eq!(rec[2], 7, "Dash: actor slot — caster_id");
         assert_eq!(rec[3], 12.5_f32.to_bits(), "Dash: distance at payload word 1");
-        for i in 4..CHRONICLE_RECORD_STRIDE_U32 {
+        for i in 4..(CHRONICLE_RECORD_STRIDE_U32 - 1) {
             if i == 6 { continue; } // slot 6 = ability_id (Gap detective#6)
             assert_eq!(rec[i], 0, "Dash: tail word {i} should be zero");
         }
@@ -1300,13 +1323,14 @@ mod tests {
             /*tick*/ 50,
             /*caster_id*/ 7,
             /*target_id*/ 7, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("Blink has chronicle counterpart");
         assert_eq!(rec[0], 48, "Blink: kind tag — EffectBlinkApplied");
         assert_eq!(rec[1], 50, "Blink: tick");
         assert_eq!(rec[2], 7, "Blink: actor slot — caster_id");
         assert_eq!(rec[3], 8.0_f32.to_bits(), "Blink: distance at payload word 1");
-        for i in 4..CHRONICLE_RECORD_STRIDE_U32 {
+        for i in 4..(CHRONICLE_RECORD_STRIDE_U32 - 1) {
             if i == 6 { continue; } // slot 6 = ability_id (Gap detective#6)
             assert_eq!(rec[i], 0, "Blink: tail word {i} should be zero");
         }
@@ -1317,6 +1341,7 @@ mod tests {
             /*tick*/ 200,
             /*caster_id*/ 7,
             /*target_id*/ 11, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("Knockback has chronicle counterpart");
         assert_eq!(rec[0], 49, "Knockback: kind tag — EffectKnockbackApplied");
@@ -1324,7 +1349,7 @@ mod tests {
         assert_eq!(rec[2], 7, "Knockback: actor slot — caster_id");
         assert_eq!(rec[3], 11, "Knockback: target slot — target_id");
         assert_eq!(rec[4], 5.0_f32.to_bits(), "Knockback: distance at payload word 2");
-        for i in 7..CHRONICLE_RECORD_STRIDE_U32 {
+        for i in 7..(CHRONICLE_RECORD_STRIDE_U32 - 1) {
             assert_eq!(rec[i], 0, "Knockback: tail word {i} should be zero");
         }
 
@@ -1334,6 +1359,7 @@ mod tests {
             /*tick*/ 300,
             /*caster_id*/ 7,
             /*target_id*/ 11, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("Pull has chronicle counterpart");
         assert_eq!(rec[0], 50, "Pull: kind tag — EffectPullApplied");
@@ -1341,7 +1367,7 @@ mod tests {
         assert_eq!(rec[2], 7, "Pull: actor slot — caster_id");
         assert_eq!(rec[3], 11, "Pull: target slot — target_id");
         assert_eq!(rec[4], 3.5_f32.to_bits(), "Pull: distance at payload word 2");
-        for i in 7..CHRONICLE_RECORD_STRIDE_U32 {
+        for i in 7..(CHRONICLE_RECORD_STRIDE_U32 - 1) {
             assert_eq!(rec[i], 0, "Pull: tail word {i} should be zero");
         }
     }
@@ -1364,6 +1390,7 @@ mod tests {
                 /*tick*/ 100,
                 /*caster_id*/ 7,
                 /*target_id*/ 11, /*ability_id*/ 1,
+            /*intra_emit_idx*/ 0,
             )
             .unwrap_or_else(|| panic!("{name} has chronicle counterpart"));
             assert_eq!(rec[0], *expected_kind, "{name}: kind tag");
@@ -1371,7 +1398,7 @@ mod tests {
             assert_eq!(rec[2], 7, "{name}: actor slot — caster_id");
             assert_eq!(rec[3], 11, "{name}: target slot — target_id");
             assert_eq!(rec[4], 150, "{name}: expires_at_tick = tick(100) + duration(50)");
-            for i in 7..CHRONICLE_RECORD_STRIDE_U32 {
+            for i in 7..(CHRONICLE_RECORD_STRIDE_U32 - 1) {
                 assert_eq!(rec[i], 0, "{name}: tail word {i} should be zero");
             }
         }
@@ -1386,6 +1413,7 @@ mod tests {
             ApplyEvent::SelfDamage { source: aid(7), amount: 10.0 },
             /*tick*/ 100,
             /*caster_id*/ 7, /*target_id*/ 7, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("SelfDamage has chronicle counterpart");
         assert_eq!(rec[0], 39, "kind tag — EffectSelfDamageApplied");
@@ -1397,7 +1425,7 @@ mod tests {
         );
         assert_eq!(rec[4], 10.0_f32.to_bits(), "amount as bitcast<u32>");
         // Tail words zeroed.
-        for i in 7..CHRONICLE_RECORD_STRIDE_U32 {
+        for i in 7..(CHRONICLE_RECORD_STRIDE_U32 - 1) {
             assert_eq!(rec[i], 0, "tail word {i} should be zero");
         }
     }
@@ -1416,6 +1444,7 @@ mod tests {
             },
             /*tick*/ 100,
             /*caster_id*/ 7, /*target_id*/ 7, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("LifeSteal has chronicle counterpart");
         assert_eq!(rec[0], 40, "kind tag — EffectLifeStealApplied");
@@ -1425,7 +1454,7 @@ mod tests {
         assert_eq!(rec[4], 150, "expires_at_tick = tick(100) + duration(50)");
         assert_eq!(rec[5], 128, "fraction_q8 = 128 (= 0.5×) sign-widened");
         // Tail words zeroed.
-        for i in 7..CHRONICLE_RECORD_STRIDE_U32 {
+        for i in 7..(CHRONICLE_RECORD_STRIDE_U32 - 1) {
             assert_eq!(rec[i], 0, "tail word {i} should be zero");
         }
 
@@ -1436,7 +1465,7 @@ mod tests {
                 duration_ticks: 10,
                 fraction_q8: -64,
             },
-            50, 3, 3, 1,
+            50, 3, 3, 1, 0,
         ).unwrap();
         assert_eq!(rec_neg[0], 40);
         assert_eq!(rec_neg[4], 60, "expires_at_tick = 50 + 10");
@@ -1463,6 +1492,7 @@ mod tests {
             /*tick*/ 100,
             /*caster_id*/ 7,
             /*target_id*/ 11, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("Execute has chronicle counterpart");
         assert_eq!(rec[0], 42, "kind tag — EffectExecuteApplied");
@@ -1471,7 +1501,7 @@ mod tests {
         assert_eq!(rec[3], 11, "target slot — target_id");
         assert_eq!(rec[4], 20.0_f32.to_bits(), "hp_threshold as bitcast<u32>");
         // Tail words zeroed.
-        for i in 7..CHRONICLE_RECORD_STRIDE_U32 {
+        for i in 7..(CHRONICLE_RECORD_STRIDE_U32 - 1) {
             assert_eq!(rec[i], 0, "tail word {i} should be zero");
         }
 
@@ -1481,7 +1511,7 @@ mod tests {
                 target: aid(7),
                 hp_threshold: 50.0,
             },
-            50, 7, 7, 1,
+            50, 7, 7, 1, 0,
         ).unwrap();
         assert_eq!(rec_self[0], 42);
         assert_eq!(rec_self[2], rec_self[3], "self-cast collapses both slots");
@@ -1502,6 +1532,7 @@ mod tests {
             },
             /*tick*/ 100,
             /*caster_id*/ 7, /*target_id*/ 7, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("DamageModify has chronicle counterpart");
         assert_eq!(rec[0], 41, "kind tag — EffectDamageModifyApplied");
@@ -1511,7 +1542,7 @@ mod tests {
         assert_eq!(rec[4], 150, "expires_at_tick = tick(100) + duration(50)");
         assert_eq!(rec[5], 128, "multiplier_q8 = 128 (= 0.5×) sign-widened");
         // Tail words zeroed.
-        for i in 7..CHRONICLE_RECORD_STRIDE_U32 {
+        for i in 7..(CHRONICLE_RECORD_STRIDE_U32 - 1) {
             assert_eq!(rec[i], 0, "tail word {i} should be zero");
         }
 
@@ -1522,7 +1553,7 @@ mod tests {
                 duration_ticks: 10,
                 multiplier_q8: -64,
             },
-            50, 3, 3, 1,
+            50, 3, 3, 1, 0,
         ).unwrap();
         assert_eq!(rec_neg[0], 41);
         assert_eq!(rec_neg[4], 60, "expires_at_tick = 50 + 10");
@@ -1610,7 +1641,7 @@ mod tests {
 
         for &(effect_kind, expected_event_kind_id) in EFFECT_KIND_TO_EVENT_KIND_ID {
             let ev = ev_for_kind(effect_kind);
-            let rec = apply_event_to_chronicle_record(ev, 0, 0, 0, 0)
+            let rec = apply_event_to_chronicle_record(ev, 0, 0, 0, 0, 0)
                 .unwrap_or_else(|| {
                     panic!(
                         "EFFECT_KIND_TO_EVENT_KIND_ID entry effect_kind={effect_kind} \
@@ -1631,6 +1662,7 @@ mod tests {
             ApplyEvent::TransferGold { source: aid(1), target: aid(2), amount: 42 },
             /*tick*/ 100,
             /*caster_id*/ 9, /*target_id*/ 9, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("TransferGold has chronicle counterpart");
         assert_eq!(rec[0], 31, "EffectGoldTransfer kind tag");
@@ -1643,7 +1675,7 @@ mod tests {
         // negative value.
         let rec_neg = apply_event_to_chronicle_record(
             ApplyEvent::TransferGold { source: aid(1), target: aid(2), amount: -7 },
-            100, 9, 9, 1,
+            100, 9, 9, 1, 0,
         ).unwrap();
         assert_eq!(rec_neg[4], (-7_i32) as u32, "negative amount sign-widens correctly");
     }
@@ -1654,6 +1686,7 @@ mod tests {
             ApplyEvent::ModifyStanding { source: aid(1), target: aid(2), delta: -25 },
             /*tick*/ 100,
             /*caster_id*/ 4, /*target_id*/ 4, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("ModifyStanding has chronicle counterpart");
         assert_eq!(rec[0], 32, "EffectStandingDelta kind tag");
@@ -1673,6 +1706,7 @@ mod tests {
             ApplyEvent::TravelTo { source: aid(1), dest_x: 5.0, dest_y: 5.0, eta_ticks: 50 },
             /*tick*/ 100,
             /*caster_id*/ 7, /*target_id*/ 7, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("TravelTo has chronicle counterpart");
         assert_eq!(rec[0], 70, "EffectTravelToApplied kind tag");
@@ -1695,6 +1729,7 @@ mod tests {
             ApplyEvent::TravelTo { source: aid(1), dest_x: 1.0, dest_y: -1.0, eta_ticks: 25 },
             /*tick*/ 50,
             /*caster_id*/ 3, /*target_id*/ 3, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("TravelTo has chronicle counterpart");
         assert_eq!(rec[0], 70);
@@ -1715,6 +1750,7 @@ mod tests {
             ApplyEvent::Recipe { source: aid(1), recipe_id: 42, target_tool: 0xFF },
             /*tick*/ 100,
             /*caster_id*/ 7, /*target_id*/ 7, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("Recipe has chronicle counterpart");
         assert_eq!(rec[0], 71, "EffectRecipeApplied kind tag");
@@ -1734,6 +1770,7 @@ mod tests {
             ApplyEvent::Recipe { source: aid(1), recipe_id: 7, target_tool: 3 },
             /*tick*/ 50,
             /*caster_id*/ 4, /*target_id*/ 4, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("Recipe has chronicle counterpart");
         assert_eq!(rec[0], 71);
@@ -1750,6 +1787,7 @@ mod tests {
             ApplyEvent::WearTool { source: aid(1), tool_kind: 3, amount: 64 },
             /*tick*/ 100,
             /*caster_id*/ 5, /*target_id*/ 5, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("WearTool has chronicle counterpart");
         assert_eq!(rec[0], 72, "EffectWearToolApplied kind tag");
@@ -1770,6 +1808,7 @@ mod tests {
             ApplyEvent::WearTool { source: aid(1), tool_kind: 1, amount: 0xFFFF },
             /*tick*/ 25,
             /*caster_id*/ 9, /*target_id*/ 9, /*ability_id*/ 1,
+        /*intra_emit_idx*/ 0,
         )
         .expect("WearTool has chronicle counterpart");
         assert_eq!(rec[0], 72);

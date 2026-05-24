@@ -638,9 +638,19 @@ impl CascadeContext for EngineCascadeCtx<'_> {
     }
 
     fn emit(&mut self, event_name: &str, fields: &[(&str, EvalValue)]) {
+        // CPU side has no dense kernel id today; use 0 as placeholder until
+        // parity test surfaces drift.  intra_emit_idx is not tracked per-call
+        // site yet — use 0 throughout this path.
+        // TODO: thread per-agent id (producer_thread_id) and per-call counter
+        //       (intra_emit_idx) through the interpreter dispatch when the
+        //       sort-then-fold pass graduates to CPU parity.
+        //
+        // Seq packing mirrors `dsl_compiler::seq::compute_event_seq`:
+        //   (kernel_id << 24) | (thread_id << 4) | emit_idx
+        let emit_seq: u32 = (0u32 << 24) | (0u32 << 4) | 0u32;
         let default_tick = self.state.tick;
         if let Some(e) = fields_to_event(event_name, fields, default_tick) {
-            self.events.push(e);
+            self.events.push_with_emit_seq(e, emit_seq);
         }
     }
 }

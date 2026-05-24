@@ -5,10 +5,21 @@ use std::collections::VecDeque;
 
 /// An entry in the `EventRing`. The `event` is the replay payload; `id` and
 /// `cause` form the sidecar metadata (never folded into `replayable_sha256`).
+///
+/// `emit_seq` carries the producer-side sort key for P11 sort-then-fold.
+/// Computed via `dsl_compiler::seq::compute_event_seq`; stored here so the
+/// CPU cascade path can participate in the same ordering scheme as the GPU
+/// emitters. Never folded into `replayable_sha256` — it is a sidecar just
+/// like `id` and `cause`.
 pub struct Entry<E: EventLike> {
-    pub event: E,
-    pub id:    EventId,
-    pub cause: Option<EventId>,
+    pub event:     E,
+    pub id:        EventId,
+    pub cause:     Option<EventId>,
+    /// Packed producer seq: `(kernel_id << 24) | (thread_id << 4) | emit_idx`.
+    /// Matches the u32 trailer written at `slot * stride + (stride-1)` by
+    /// GPU emitters.  CPU side has no dense kernel id today; use
+    /// `compute_event_seq(0, 0, intra_emit_idx)` as placeholder.
+    pub emit_seq:  u32,
 }
 
 pub struct EventRing<E: EventLike> {
@@ -38,17 +49,30 @@ impl<E: EventLike> EventRing<E> {
     }
 
     /// Push a root-cause event. Returns the assigned `EventId`.
+    /// `emit_seq` defaults to 0 (no producer identity); callers that know
+    /// their `(kernel_id, thread_id, intra_emit_idx)` should use
+    /// [`push_with_emit_seq`] instead.
     pub fn push(&mut self, e: E) -> EventId {
-        self.push_impl(e, None)
+        self.push_impl(e, None, 0)
+    }
+
+    /// Push a root-cause event with an explicit producer seq key.
+    ///
+    /// Compute `emit_seq` via `dsl_compiler::seq::compute_event_seq`.
+    /// CPU cascade dispatch should pass `compute_event_seq(0, 0, intra_emit_idx)`
+    /// — kernel id 0 is the placeholder until the CPU side has parity with
+    /// the GPU's dense kernel table.
+    pub fn push_with_emit_seq(&mut self, e: E, emit_seq: u32) -> EventId {
+        self.push_impl(e, None, emit_seq)
     }
 
     /// Push an event caused by an earlier event. The `cause` pointer lives in
     /// the sidecar — it does NOT affect `replayable_sha256`.
     pub fn push_caused_by(&mut self, e: E, cause: EventId) -> EventId {
-        self.push_impl(e, Some(cause))
+        self.push_impl(e, Some(cause), 0)
     }
 
-    fn push_impl(&mut self, e: E, cause: Option<EventId>) -> EventId {
+    fn push_impl(&mut self, e: E, cause: Option<EventId>, emit_seq: u32) -> EventId {
         let tick = e.tick();
         if tick != self.current_tick {
             self.current_tick = tick;
@@ -60,7 +84,7 @@ impl<E: EventLike> EventRing<E> {
         let id = EventId { tick, seq: self.next_seq };
         self.next_seq += 1;
         self.total_pushed += 1;
-        self.entries.push_back(Entry { event: e, id, cause });
+        self.entries.push_back(Entry { event: e, id, cause, emit_seq });
         id
     }
 

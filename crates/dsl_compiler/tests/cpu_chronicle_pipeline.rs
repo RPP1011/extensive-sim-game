@@ -8,7 +8,7 @@
 //!     ability_id + (caster, target, tick) on CPU
 //!       → apply_program → Vec<ApplyEvent>
 //!       → for each: apply_event_to_chronicle_record(...)
-//!       → Vec<[u32; 10]>   (== same chronicle records the GPU writes)
+//!       → Vec<[u32; 11]>   (== same chronicle records the GPU writes, stride 11 with seq trailer)
 //!
 //! This is the foundation for #133 (CPU↔GPU parity): once a runtime
 //! crate drives the GPU dispatcher kernel, comparing the GPU's
@@ -21,7 +21,7 @@
 //! integration assertions in `apply_ability_smoke.rs`) is wired to
 //! emit.
 
-use dsl_compiler::cpu_chronicle_reference::apply_event_to_chronicle_record;
+use dsl_compiler::cpu_chronicle_reference::{apply_event_to_chronicle_record, CHRONICLE_RECORD_STRIDE_U32};
 use engine::ability::apply::apply_program;
 use engine::ability::program::{AbilityProgram, CasterStats, EffectOp, Gate};
 use engine::ids::AgentId;
@@ -42,7 +42,7 @@ fn run_pipeline(
     caster: AgentId,
     target: AgentId,
     tick: u32,
-) -> Vec<[u32; 10]> {
+) -> Vec<[u32; CHRONICLE_RECORD_STRIDE_U32]> {
     let events = apply_program(
         program,
         caster,
@@ -59,7 +59,7 @@ fn run_pipeline(
         // caster=target — chronicle records keep their existing
         // per-record byte layout. New tests can vary target_id to
         // exercise the explicit-target path.
-        .filter_map(|e| apply_event_to_chronicle_record(e, tick, caster.raw(), caster.raw(), TEST_ABILITY_ID))
+        .filter_map(|e| apply_event_to_chronicle_record(e, tick, caster.raw(), caster.raw(), TEST_ABILITY_ID, 0))
         .collect()
 }
 
@@ -809,7 +809,7 @@ fn execute_pipeline_emits_kind_42_record() {
     let records: Vec<_> = events
         .into_iter()
         .filter_map(|e| {
-            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID)
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID, 0)
         })
         .collect();
     assert_eq!(records.len(), 1, "one Execute effect → one chronicle record");
@@ -887,7 +887,7 @@ fn distinct_caster_and_target_pipeline_writes_both_slots() {
     let records: Vec<_> = events
         .into_iter()
         .filter_map(|e| {
-            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID)
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID, 0)
         })
         .collect();
 
@@ -927,7 +927,7 @@ fn distinct_caster_and_target_pipeline_handles_stun_payload_shape() {
     let records: Vec<_> = events
         .into_iter()
         .filter_map(|e| {
-            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID)
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID, 0)
         })
         .collect();
 
@@ -966,7 +966,7 @@ fn distinct_caster_and_target_pipeline_handles_friendly_heal() {
     let records: Vec<_> = events
         .into_iter()
         .filter_map(|e| {
-            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID)
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID, 0)
         })
         .collect();
 
@@ -1016,7 +1016,7 @@ fn distinct_caster_and_target_pipeline_preserves_routing_across_multi_effect() {
     let records: Vec<_> = events
         .into_iter()
         .filter_map(|e| {
-            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID)
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID, 0)
         })
         .collect();
 
@@ -1073,7 +1073,7 @@ fn distinct_caster_and_target_pipeline_handles_modify_standing() {
     let records: Vec<_> = events
         .into_iter()
         .filter_map(|e| {
-            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID)
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID, 0)
         })
         .collect();
 
@@ -1114,7 +1114,7 @@ fn distinct_caster_and_target_pipeline_handles_transfer_gold() {
     let records: Vec<_> = events
         .into_iter()
         .filter_map(|e| {
-            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID)
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID, 0)
         })
         .collect();
 
@@ -1154,7 +1154,7 @@ fn distinct_caster_and_target_pipeline_transfer_gold_negative_amount() {
     let records: Vec<_> = events
         .into_iter()
         .filter_map(|e| {
-            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID)
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID, 0)
         })
         .collect();
 
@@ -1193,7 +1193,7 @@ fn distinct_caster_and_target_pipeline_handles_shield() {
     let records: Vec<_> = events
         .into_iter()
         .filter_map(|e| {
-            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID)
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID, 0)
         })
         .collect();
 
@@ -1232,7 +1232,7 @@ fn distinct_caster_and_target_pipeline_handles_slow_4_field_payload() {
     let records: Vec<_> = events
         .into_iter()
         .filter_map(|e| {
-            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID)
+            apply_event_to_chronicle_record(e, tick, caster.raw(), target.raw(), TEST_ABILITY_ID, 0)
         })
         .collect();
 

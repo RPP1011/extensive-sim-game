@@ -118,6 +118,7 @@ fn cpu_reference_writes_ability_id_at_slot_6() {
         /*caster_id*/ 7,
         /*target_id*/ 11,
         /*ability_id*/ 42,
+    /*intra_emit_idx*/ 0,
     )
     .expect("Damage has chronicle counterpart");
     assert_eq!(rec[0], 26, "kind tag — EffectDamageApplied");
@@ -142,6 +143,7 @@ fn cpu_reference_writes_ability_id_at_slot_6() {
         /*caster_id*/ 1,
         /*target_id*/ 2,
         /*ability_id*/ 7,
+    /*intra_emit_idx*/ 0,
     )
     .expect("Heal has chronicle counterpart");
     assert_eq!(rec_heal[0], 27, "kind tag — EffectHealApplied");
@@ -156,6 +158,7 @@ fn cpu_reference_writes_ability_id_at_slot_6() {
         /*caster_id*/ 4,
         /*target_id*/ 3,
         /*ability_id*/ 99,
+    /*intra_emit_idx*/ 0,
     )
     .expect("Stun has chronicle counterpart");
     assert_eq!(rec_stun[0], 29, "kind tag — EffectStunApplied");
@@ -195,6 +198,7 @@ fn downstream_consumer_recovers_ability_id_from_slot_6() {
             1,
             2,
             ACCUSE_ID,
+        /*intra_emit_idx*/ 0,
         )
         .unwrap(),
         apply_event_to_chronicle_record(
@@ -207,6 +211,7 @@ fn downstream_consumer_recovers_ability_id_from_slot_6() {
             1,
             2,
             INVESTIGATE_ID,
+        /*intra_emit_idx*/ 0,
         )
         .unwrap(),
         apply_event_to_chronicle_record(
@@ -219,6 +224,7 @@ fn downstream_consumer_recovers_ability_id_from_slot_6() {
             1,
             2,
             OBSERVE_ID,
+        /*intra_emit_idx*/ 0,
         )
         .unwrap(),
     ];
