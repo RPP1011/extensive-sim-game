@@ -121,3 +121,15 @@ fn xp_view_folds_kills() {
         .unwrap_or_else(|| panic!("no xp fold kernel; have {:?}", art.wgsl_files.keys().collect::<Vec<_>>()));
     assert!(xp.contains("view_storage"), "xp fold should write view storage; got:\n{xp}");
 }
+
+#[test]
+fn upgrade_choice_compiles() {
+    let path = workspace_path("assets/sim/vampire_survivors.sim");
+    let art = compile_sim(&path).expect("compiles");
+    assert!(
+        kernel_body_containing(&art, "ChooseUpgrade").is_some()
+            || kernel_body_containing(&art, "upgrade").is_some(),
+        "expected an upgrade-selection or tally kernel; have {:?}",
+        art.wgsl_files.keys().collect::<Vec<_>>(),
+    );
+}

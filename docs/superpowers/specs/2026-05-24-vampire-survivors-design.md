@@ -59,12 +59,12 @@ We try A first; whichever holds is the finding.
 
 ## 6. Upgrade choice — probe: branching selection among options (the big gap)
 
-The genuinely hard, previously-deferred gap. Modeled minimally but truthfully:
+The genuinely hard, previously-deferred gap. Modeled minimally but truthfully. **Outcome (Task 8): the gap was narrower than feared — runtime-varying priority selection lowers; only two narrow walls remain.** See §8 rows #3/#3a/#3b/#3c for the precise results.
 
-- **Sub-probe 3a — enum surface:** attempt `enum UpgradeKind { BoltDamage, NovaRadius, BoltRate, MoveSpeed }`. No `.sim` in the corpus declares a standalone `enum`, so this may not parse. If it walls, model kinds as **distinct events** (`UpgradeBolt`, `UpgradeNova`, …) or `u32` kind-id literals instead, and log "no user enum surface" as a finding.
-- Per-kind tally via a tally view keyed on the kind (kind-keyed `pair_map` à la `predator_focus(a, b)` / foraging's Item-population-keyed `pheromone_trail`). Weapon bodies read it: e.g. `bolt_damage = base + bolt_upgrades(self) * step`.
-- On each `LevelUp`, **select one upgrade by fixed priority among eligible options** (eligible = below its per-kind cap), emitting `UpgradeChosen` to bump the tally.
-- **The headline probe (3):** "pick the highest-priority upgrade not yet at cap" requires selecting among a fixed option set with a state-dependent filter. If the DSL has no `choose` / `match`-argmax-over-literal-options construct, that's the gap confirmed → candidate primitive: a priority-cascade `select` expression. We attempt it; the wall (if any) is the headline benchmark result.
+- **Sub-probe 3a — enum surface:** attempted `enum UpgradeKind { BoltDamage, NovaRadius, BoltRate, MoveSpeed }`. **PASSES** — parses and resolves with no corpus precedent. (Left declared but unused; the emit uses `u32` kind ids.)
+- **The headline probe (3) — branching selection:** "pick the highest-priority upgrade not yet at cap" was expressed as a value-returning `if/else` chain producing a `u32`. **PASSES** via the *nested* form `if c0 { 0u } else { if c1 { 1u } else { 2u } }`, lowering to nested WGSL `select`. The only sub-wall is the chained `else if` *syntax* (parser requires `{` straight after `else`), which the nested form sidesteps losslessly. So there IS a usable priority-cascade `select` surface today — the candidate primitive (a dedicated `select`/`match`-argmax) would only be ergonomic sugar, not a missing capability.
+- **Sub-probe 3b — view read in the `if` condition:** reading `upgrades_total(self) < cap` inside the selection condition (not just an emit amount) **PASSES**.
+- **Sub-probe 3c — per-kind tally via a fold `where` guard:** the intended design (a tally view per kind, gated by `where k == 0u` on the `UpgradeChosen.kind` payload, à la `predator_focus`'s `where`) **WALLS** — `FoldHandlerIR` has no `where_clause` field and the resolver silently drops the guard, so the per-kind split is unachievable by fold guard. Landed fallback: a single un-split `upgrades_total(player)` tally.
 
 ## 7. DSL-owned vs runtime-owned split
 
@@ -73,14 +73,18 @@ The genuinely hard, previously-deferred gap. Modeled minimally but truthfully:
 
 ## 8. Gap ledger (the deliverable — updated during implementation)
 
-| # | Probe | Expectation | Candidate primitive if it walls |
+| # | Probe | Result | Candidate primitive if it walls |
 |---|---|---|---|
 | 1 | View-value read inside a physics-body emit amount | **PASS** — lowers; BoltFire amount reads xp view storage | — |
 | 2 | `floor` on a view → discrete level | **PASS** — `floor(xp(self)/k)` lowers to WGSL `floor(` in NovaFire emit amount (compiled path); interp arm in `eval/builtins.rs` still absent | `floor` arm in `eval/builtins.rs` (interp only) |
-| 3 | Branching selection among upgrade options | **Likely gap (the big one)** | `select` / priority-`match` expr |
-| 3a | Standalone `enum` surface (UpgradeKind) | Possibly absent (no corpus precedent) | user `enum` decl |
+| 3 | Branching selection among upgrade options (value-returning `if/else → u32`) | **PASS (narrower than feared)** — the *nested* `if cond { 0u } else { if cond { 1u } else { 2u } }` lowers to nested WGSL `select(select(2u, 1u, …), 0u, …)`. Runtime-varying, state-dependent priority selection over a fixed option set IS expressible. **One sub-wall:** chained `else if` does **not** parse — the parser's if-expr `else` form (`crates/dsl_ast/src/parser.rs:4742`) requires `{` directly after `else`, so `else if …` fails with `parse error: expected `{` … parsing `else` expr `{``. Workaround is the equivalent nested `else { if … }` (no semantic loss). | `else if` sugar in the if-expr parser (else: nest manually) |
+| 3a | Standalone `enum` surface (`UpgradeKind`) | **PASS** — `enum UpgradeKind { BoltDamage, NovaRadius, BoltRate, MoveSpeed }` parses and resolves cleanly with no corpus precedent. (Declared but unused in the landed fixture; kinds are `u32` ids in the emit.) | — |
+| 3b | View read in an `if` *condition* in a physics body (`upgrades_total(self) < cap`) | **PASS** — lowers to `view_1_get(agent_id) < config_N` inside the `select`; the view storage read inside a condition (not just an amount) lowers fine. | — |
+| 3c | Event-fold `where` guard on a u32 payload field (`on UpgradeChosen { kind: k } where k == 0u`) | **WALL (silent drop, no error)** — `FoldHandlerIR` (`crates/dsl_ast/src/ir.rs:1113`) has **no `where_clause` field**; the resolver (`crates/dsl_ast/src/resolve.rs:1771`) builds `FoldHandlerIR { pattern, body, span }` and **silently discards `h.where_clause`**. The guard never lowers — every matching event folds identically, so per-kind tallies are unachievable via a fold guard. (The `predator_prey` `where predator == a && victim == b` "precedent" only appears to work because those are key-param equalities aligned with pair-map indexing, not because the guard is evaluated.) Landed fallback: a single un-split `upgrades_total(player)` view (drop the per-kind split). | `where_clause` field on `FoldHandlerIR` + a guard arm in `lower_one_handler` (`crates/dsl_compiler/src/cg/lower/view.rs:764`) |
 | 4 | Spawn / infinite ramp | Known gap (runtime-owned today) | DSL `summon`/spawn primitive |
 | 5 | Entity-subkind scalar accumulator field (`level`) — leveling fallback B | Unknown | — |
+
+**Landed shape (Task 8).** `enum UpgradeKind` declared (3a PASS, unused). One `event UpgradeChosen { player, kind: u32 }`, one `view upgrades_total(player)` fold (un-split because the per-kind `where` guard walls — 3c), and a `physics ChooseUpgrade` whose body is a nested value-returning `if/else` over view-gated conditions selecting a `u32` kind (3 + 3b PASS). Net: **fixed-priority, runtime-varying upgrade selection IS expressible today**; the only true walls are the `else if` parser sugar (cosmetic — nest manually) and the fold `where`-guard drop (substantive — blocks per-kind tally-by-fold-guard).
 
 ## 9. Verification & determinism pin
 

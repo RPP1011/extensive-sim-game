@@ -13,6 +13,9 @@ event Damaged { source: AgentId, target: AgentId, amount: f32 }
 @replayable @gpu_amenable
 event Killed { by: AgentId, prey: AgentId, pos: vec3 }
 
+// Sub-probe 3a: does a standalone user enum parse/resolve?
+enum UpgradeKind { BoltDamage, NovaRadius, BoltRate, MoveSpeed }
+
 entity Player : Agent { pos: vec3, vel: vec3 }
 entity Enemy  : Agent { pos: vec3, vel: vec3 }
 
@@ -35,6 +38,8 @@ config vs {
   bolt_ramp:          f32 = 0.5,
   xp_per_level:       f32 = 5.0,
   nova_damage_per_level: f32 = 1.0,
+  bolt_cap:           f32 = 5.0,
+  nova_cap:           f32 = 5.0,
 }
 
 @spatial(radius = config.vs.perception_radius, kind = [Agent])
@@ -147,6 +152,47 @@ view xp(by: Agent) -> f32 {
   initial: 0.0,
   on Killed { by: p, prey: _, pos: _ } { self += 1.0 }
   clamp: [0.0, 1000000.0],
+}
+
+// ---------------------------------------------------------------------------
+// Upgrade choice — probe: branching selection among options (ledger §6, #3/#3b/#3c)
+// ---------------------------------------------------------------------------
+
+@replayable @gpu_amenable
+event UpgradeChosen { player: AgentId, kind: u32 }
+
+// Sub-probe 3c (WALL): a per-kind tally needs a `where k == 0u` guard on the
+// u32 payload field. `FoldHandlerIR` (crates/dsl_ast/src/ir.rs:1113) carries NO
+// `where_clause` field; resolve.rs:1771 silently drops `h.where_clause` when
+// building the IR — so the guard never lowers and every UpgradeChosen counts
+// identically. Fallback: a single un-split total tally (no per-kind guard).
+@materialized(on_event = [UpgradeChosen])
+view upgrades_total(player: Agent) -> f32 {
+  initial: 0.0,
+  on UpgradeChosen { player: p, kind: k } { self += 1.0 }
+  clamp: [0.0, 100.0],
+}
+
+// Per-tick: pick the highest-priority not-yet-capped upgrade (fixed priority).
+// Sub-probe 3 (value-returning if/else -> u32) + 3b (view read in if cond).
+@phase(event)
+physics ChooseUpgrade {
+  on Tick {} where (self.alive
+                    && self.mana >= config.vs.player_mana_min
+                    && self.mana <= config.vs.player_mana_max) {
+    // Sub-probe 3: chained `else if` does NOT parse (parser if-expr `else`
+    // form requires `{` directly — parser.rs:4742). The supported shape is the
+    // nested `else { if ... }` below, which still yields runtime-varying,
+    // view-gated priority selection (lowers to nested WGSL `select`).
+    // Both arms read `upgrades_total(self)` in the if-condition (sub-probe 3b).
+    let chosen =
+      if upgrades_total(self) < config.vs.bolt_cap { 0u }
+      else {
+        if upgrades_total(self) < config.vs.nova_cap { 1u }
+        else { 2u }
+      };
+    emit UpgradeChosen { player: self, kind: chosen }
+  }
 }
 
 // On Damaged: subtract HP; at <=0 mark dead and credit the killer (source s).
