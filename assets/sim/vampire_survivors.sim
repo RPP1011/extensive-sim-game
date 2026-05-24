@@ -29,6 +29,9 @@ config vs {
   bolt_range:         f32 = 18.0,
   bolt_period:        u32 = 12,
   bolt_damage:        f32 = 6.0,
+  nova_radius:        f32 = 6.0,
+  nova_period:        u32 = 40,
+  nova_damage:        f32 = 3.0,
 }
 
 @spatial(radius = config.vs.perception_radius, kind = [Agent])
@@ -99,6 +102,16 @@ physics ChasePlayer @phase(per_agent) {
   }
 }
 
+@spatial(radius = config.vs.nova_radius, kind = [Agent])
+@top_k(32)
+query enemies_in_radius(self: Agent) -> [Agent]
+sort_by distance(self, _) limit 32 {
+  candidate != self
+  && candidate.alive
+  && candidate.mana >= config.vs.enemy_mana_min
+  && candidate.mana <= config.vs.enemy_mana_max
+}
+
 // Bolt: every bolt_period ticks, the player strikes the nearest enemy.
 @phase(event)
 physics BoltFire {
@@ -108,6 +121,19 @@ physics BoltFire {
                     && world.tick % config.vs.bolt_period == 0) {
     for target in spatial.closest_enemy(self) {
       emit Damaged { source: self, target: target, amount: config.vs.bolt_damage }
+    }
+  }
+}
+
+// @phase(event); player bursts every nova_period ticks, damaging all enemies in radius.
+@phase(event)
+physics NovaFire {
+  on Tick {} where (self.alive
+                    && self.mana >= config.vs.player_mana_min
+                    && self.mana <= config.vs.player_mana_max
+                    && world.tick % config.vs.nova_period == 0) {
+    for target in spatial.enemies_in_radius(self) {
+      emit Damaged { source: self, target: target, amount: config.vs.nova_damage }
     }
   }
 }

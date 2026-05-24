@@ -87,3 +87,19 @@ fn bolt_fires_and_damage_applies() {
         .unwrap_or_else(|| panic!("no ApplyDamage kernel; have {:?}", art.wgsl_files.keys().collect::<Vec<_>>()));
     assert!(apply.contains("agent_hp"), "ApplyDamage should write agent_hp; got:\n{apply}");
 }
+
+#[test]
+fn nova_fires_aoe_neighbour_walk() {
+    let path = workspace_path("assets/sim/vampire_survivors.sim");
+    let art = compile_sim(&path).expect("compiles");
+    let nova = kernel_body_containing(&art, "NovaFire")
+        .unwrap_or_else(|| panic!("no NovaFire kernel; have {:?}", art.wgsl_files.keys().collect::<Vec<_>>()));
+    assert!(
+        nova.contains("spatial_grid_offsets") || nova.contains("grid_starts"),
+        "NovaFire should iterate enemies in radius via neighbour walk; got:\n{nova}",
+    );
+    assert!(
+        nova.contains("atomicStore(&event_ring") || nova.contains("atomicAdd(&event_tail"),
+        "NovaFire should emit Damaged per enemy in radius; got:\n{nova}",
+    );
+}
