@@ -72,3 +72,18 @@ fn player_kite_emits_neighbour_walk() {
         "expected bounded-neighbour walk in KitePlayer body; got:\n{body}",
     );
 }
+
+#[test]
+fn bolt_fires_and_damage_applies() {
+    let path = workspace_path("assets/sim/vampire_survivors.sim");
+    let art = compile_sim(&path).expect("compiles");
+    let bolt = kernel_body_containing(&art, "BoltFire")
+        .unwrap_or_else(|| panic!("no BoltFire kernel; have {:?}", art.wgsl_files.keys().collect::<Vec<_>>()));
+    assert!(
+        bolt.contains("atomicStore(&event_ring") || bolt.contains("atomicAdd(&event_tail"),
+        "BoltFire should emit a Damaged event; got:\n{bolt}",
+    );
+    let apply = kernel_body_containing(&art, "ApplyDamage")
+        .unwrap_or_else(|| panic!("no ApplyDamage kernel; have {:?}", art.wgsl_files.keys().collect::<Vec<_>>()));
+    assert!(apply.contains("agent_hp"), "ApplyDamage should write agent_hp; got:\n{apply}");
+}

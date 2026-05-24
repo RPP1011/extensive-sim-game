@@ -26,6 +26,9 @@ config vs {
   enemy_speed:        f32 = 0.1,
   flee_radius:        f32 = 8.0,
   player_speed:       f32 = 0.12,
+  bolt_range:         f32 = 18.0,
+  bolt_period:        u32 = 12,
+  bolt_damage:        f32 = 6.0,
 }
 
 @spatial(radius = config.vs.perception_radius, kind = [Agent])
@@ -65,6 +68,16 @@ physics KitePlayer @phase(per_agent) {
   }
 }
 
+@spatial(radius = config.vs.bolt_range, kind = [Agent])
+@top_k(1)
+query closest_enemy(self: Agent) -> [Agent]
+sort_by distance(self, _) limit 1 {
+  candidate != self
+  && candidate.alive
+  && candidate.mana >= config.vs.enemy_mana_min
+  && candidate.mana <= config.vs.enemy_mana_max
+}
+
 // @phase(per_agent) (not post): two pos-writing rules at the same phase form a write->write cycle; per_agent + the disjoint where-guard breaks the SCC.
 // Enemies steer toward the nearest player-band agent (the moving player).
 physics ChasePlayer @phase(per_agent) {
@@ -83,5 +96,31 @@ physics ChasePlayer @phase(per_agent) {
     let new_pos = self.pos + new_vel;
     agents.set_vel(self, new_vel);
     agents.set_pos(self, new_pos);
+  }
+}
+
+// Bolt: every bolt_period ticks, the player strikes the nearest enemy.
+@phase(event)
+physics BoltFire {
+  on Tick {} where (self.alive
+                    && self.mana >= config.vs.player_mana_min
+                    && self.mana <= config.vs.player_mana_max
+                    && world.tick % config.vs.bolt_period == 0) {
+    for target in spatial.closest_enemy(self) {
+      emit Damaged { source: self, target: target, amount: config.vs.bolt_damage }
+    }
+  }
+}
+
+// On Damaged: subtract HP; at <=0 mark dead and credit the killer (source s).
+@phase(post)
+physics ApplyDamage {
+  on Damaged { source: s, target: t, amount: a } {
+    let new_hp = agents.hp(t) - a;
+    agents.set_hp(t, new_hp);
+    if (new_hp <= 0.0) {
+      agents.set_alive(t, false);
+      emit Killed { by: s, prey: t, pos: agents.pos(t) }
+    }
   }
 }
