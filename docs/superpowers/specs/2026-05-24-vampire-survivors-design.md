@@ -76,7 +76,7 @@ The genuinely hard, previously-deferred gap. Modeled minimally but truthfully:
 | # | Probe | Expectation | Candidate primitive if it walls |
 |---|---|---|---|
 | 1 | View-value read inside a physics-body emit amount | **PASS** — lowers; BoltFire amount reads xp view storage | — |
-| 2 | `floor` on a view → discrete level | Lowers in compiled path; **interp arm missing** | `floor` arm in `eval/builtins.rs` |
+| 2 | `floor` on a view → discrete level | **PASS** — `floor(xp(self)/k)` lowers to WGSL `floor(` in NovaFire emit amount (compiled path); interp arm in `eval/builtins.rs` still absent | `floor` arm in `eval/builtins.rs` (interp only) |
 | 3 | Branching selection among upgrade options | **Likely gap (the big one)** | `select` / priority-`match` expr |
 | 3a | Standalone `enum` surface (UpgradeKind) | Possibly absent (no corpus precedent) | user `enum` decl |
 | 4 | Spawn / infinite ramp | Known gap (runtime-owned today) | DSL `summon`/spawn primitive |

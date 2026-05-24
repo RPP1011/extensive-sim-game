@@ -106,6 +106,14 @@ fn nova_fires_aoe_neighbour_walk() {
 }
 
 #[test]
+fn nova_damage_scales_with_floor_level() {
+    let path = workspace_path("assets/sim/vampire_survivors.sim");
+    let art = compile_sim(&path).expect("compiles");
+    let nova = kernel_body_containing(&art, "NovaFire").expect("NovaFire kernel");
+    assert!(nova.contains("floor("), "NovaFire amount should contain floor(...); got:\n{nova}");
+}
+
+#[test]
 fn xp_view_folds_kills() {
     let path = workspace_path("assets/sim/vampire_survivors.sim");
     let art = compile_sim(&path).expect("compiles");
