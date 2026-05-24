@@ -352,11 +352,6 @@ impl EventLayout {
         v
     }
 
-    /// u32-word offset (from start of record) of the seq trailer.
-    /// Always the last word: header(2) + payload(8) = 10.
-    pub fn seq_word_offset(&self) -> u32 {
-        self.record_stride_u32 - 1
-    }
 }
 
 /// Per-field layout entry within an [`EventLayout`].
