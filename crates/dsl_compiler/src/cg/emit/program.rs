@@ -612,52 +612,8 @@ fn kernel_topology_has_emits(topology: &KernelTopology, prog: &CgProgram) -> boo
             ComputeOpKind::ViewFold { body, .. } => *body,
             _ => continue,
         };
-        if stmt_list_contains_emit(prog, body_list) {
+        if super::kernel::stmt_list_has_emit(body_list, prog) {
             return true;
-        }
-    }
-    false
-}
-
-fn stmt_list_contains_emit(
-    prog: &CgProgram,
-    list_id: crate::cg::stmt::CgStmtListId,
-) -> bool {
-    use crate::cg::stmt::{CgStmt, StmtArena, StmtListArena};
-    let Some(list) = <CgProgram as StmtListArena>::get(prog, list_id) else {
-        return false;
-    };
-    for stmt_id in &list.stmts {
-        let Some(stmt) = <CgProgram as StmtArena>::get(prog, *stmt_id) else {
-            continue;
-        };
-        if matches!(stmt, CgStmt::Emit { .. }) {
-            return true;
-        }
-        match stmt {
-            CgStmt::If { then, else_, .. } => {
-                if stmt_list_contains_emit(prog, *then) {
-                    return true;
-                }
-                if let Some(e) = else_ {
-                    if stmt_list_contains_emit(prog, *e) {
-                        return true;
-                    }
-                }
-            }
-            CgStmt::Match { arms, .. } => {
-                for arm in arms {
-                    if stmt_list_contains_emit(prog, arm.body) {
-                        return true;
-                    }
-                }
-            }
-            CgStmt::ForEachNeighborBody { body, .. } => {
-                if stmt_list_contains_emit(prog, *body) {
-                    return true;
-                }
-            }
-            _ => {}
         }
     }
     false

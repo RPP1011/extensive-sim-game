@@ -3785,10 +3785,8 @@ fn replace_isolated_token(haystack: &str, needle: &str, replacement: &str) -> St
 
 /// Recursive walk: `true` iff the statement list named by `list_id`
 /// contains at least one [`CgStmt::Emit`], descending through `If`
-/// arms, `Match` arms, and `ForEachNeighborBody`. See
-/// [`body_ops_have_emit`] for the dead-code rationale.
-#[allow(dead_code)]
-fn stmt_list_has_emit(list_id: crate::cg::stmt::CgStmtListId, prog: &CgProgram) -> bool {
+/// arms, `Match` arms, `ForEachNeighborBody`, and `ForEachAgentBody`.
+pub(crate) fn stmt_list_has_emit(list_id: crate::cg::stmt::CgStmtListId, prog: &CgProgram) -> bool {
     use crate::cg::stmt::CgStmt;
     let Some(list) = prog.stmt_lists.get(list_id.0 as usize) else {
         return false;
