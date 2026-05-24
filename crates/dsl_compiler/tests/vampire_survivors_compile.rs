@@ -129,3 +129,20 @@ fn upgrade_choice_compiles() {
     let body = kernel_body_containing(&art, "ChooseUpgrade").unwrap_or_else(|| panic!("no ChooseUpgrade kernel; have {:?}", art.wgsl_files.keys().collect::<Vec<_>>()));
     assert!(body.contains("view_storage"), "ChooseUpgrade should read upgrades_total view storage in its select condition; got:\n{body}");
 }
+
+#[test]
+fn spawn_verbs_emit_summon_chronicle() {
+    let path = workspace_path("assets/sim/vampire_survivors.sim");
+    let art = compile_sim(&path).expect("compiles");
+    // The apply_ability dispatcher must emit an EffectSummonApplied chronicle
+    // (kind 62) into the event ring. Kind tag appears as `62u` in the
+    // atomicStore tag write.
+    let has_summon_emit = art.wgsl_files.values().any(|body| {
+        body.contains("62u") && (body.contains("atomicStore(&event_ring") || body.contains("atomicAdd(&event_tail"))
+    });
+    assert!(
+        has_summon_emit,
+        "expected an EffectSummonApplied (kind 62) chronicle emit; kernels: {:?}",
+        art.kernel_index,
+    );
+}

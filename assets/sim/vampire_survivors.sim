@@ -217,6 +217,62 @@ physics ChooseUpgrade {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Spawner Summon verbs — Phase A: tier-ramped enemy waves every wave_period ticks.
+// Spawner role ∈ mana [2.5,3.5]. Ability slot indices are 1-based, alphabetically
+// sorted from assets/ability_test/vampire_survivors/:
+//   SpawnHorde.ability  → slot 1 (summon 64)
+//   SpawnLarge.ability  → slot 2 (summon 32)
+//   SpawnMedium.ability → slot 3 (summon 16)
+//   SpawnSmall.ability  → slot 4 (summon 8)
+// ---------------------------------------------------------------------------
+
+verb SpawnSmall(self, target: Agent) =
+  action SpawnSmallAction
+  when (self.alive
+        && target == self
+        && self.mana >= config.vs.spawner_mana_min
+        && self.mana <= config.vs.spawner_mana_max
+        && (world.tick < config.vs.small_to_medium)
+        && (world.tick % config.vs.wave_period == 0))
+  apply_ability 4 by self target self
+  score 500.0
+
+verb SpawnMedium(self, target: Agent) =
+  action SpawnMediumAction
+  when (self.alive
+        && target == self
+        && self.mana >= config.vs.spawner_mana_min
+        && self.mana <= config.vs.spawner_mana_max
+        && (world.tick >= config.vs.small_to_medium)
+        && (world.tick < config.vs.medium_to_large)
+        && (world.tick % config.vs.wave_period == 0))
+  apply_ability 3 by self target self
+  score 500.0
+
+verb SpawnLarge(self, target: Agent) =
+  action SpawnLargeAction
+  when (self.alive
+        && target == self
+        && self.mana >= config.vs.spawner_mana_min
+        && self.mana <= config.vs.spawner_mana_max
+        && (world.tick >= config.vs.medium_to_large)
+        && (world.tick < config.vs.large_to_horde)
+        && (world.tick % config.vs.wave_period == 0))
+  apply_ability 2 by self target self
+  score 500.0
+
+verb SpawnHorde(self, target: Agent) =
+  action SpawnHordeAction
+  when (self.alive
+        && target == self
+        && self.mana >= config.vs.spawner_mana_min
+        && self.mana <= config.vs.spawner_mana_max
+        && (world.tick >= config.vs.large_to_horde)
+        && (world.tick % config.vs.wave_period == 0))
+  apply_ability 1 by self target self
+  score 500.0
+
 // On Damaged: subtract HP; at <=0 mark dead and credit the killer (source s).
 @phase(post)
 physics ApplyDamage {
