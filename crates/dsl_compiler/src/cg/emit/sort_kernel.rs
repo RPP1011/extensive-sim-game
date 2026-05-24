@@ -24,6 +24,13 @@ use crate::cg::program::EventLayout;
 /// Returns the (histogram_wgsl, scan_wgsl, scatter_wgsl) triple.
 #[allow(dead_code)] // wired into the schedule by the build_helper in Task 3.6
 pub(crate) fn emit_stage_a_pass(pass_idx: u32, layout: &EventLayout) -> (String, String, String) {
+    // Four passes cover the full 32-bit seq field:
+    //   pass 0 → bits  0–7   (bit_shift =  0)
+    //   pass 1 → bits  8–15  (bit_shift =  8)
+    //   pass 2 → bits 16–23  (bit_shift = 16)
+    //   pass 3 → bits 24–31  (bit_shift = 24)
+    // LSD order (low-to-high) guarantees stability: the final pass
+    // leaves records in ascending seq order within each bucket.
     let stride = layout.record_stride_u32;
     let seq_offset = stride - 1;  // seq trailer is last word
     let bit_shift = pass_idx * 8;
