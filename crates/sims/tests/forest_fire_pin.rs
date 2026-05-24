@@ -346,18 +346,22 @@ fn forest_fire_event_storm_500_ticks() {
         n = view_aggregate.len(),
     );
 
-    // The drift bound here is amplitude-based, not contract-based:
-    // the aggregate sum across all slots is preserved (f32 reduction
-    // non-associativity is benign in shape — same total accumulates
-    // regardless of interleaving), but per-slot ULPs vary across
-    // runs. Current observed range 38-95 run-to-run; 150 is a
-    // comfortable ceiling that still trips on control-flow
-    // divergence. Closing the residual requires P11 sort-then-fold
-    // for f32 view-fold accumulators.
+    // Slack history:
+    //   * Pre-P11-work: max drift 47-95 observed; threshold 150.
+    //   * Post-P11-work (5 violations closed: engine stride, spatial scatter,
+    //     sort scatter, fold serial-scan, Catch post-CAS gating + seq loop_iter):
+    //     max drift 30-84 across same-seed reruns (9-run sample); threshold
+    //     tightened to 100 (~10-unit margin above observed worst-case of 84).
+    //
+    // Residual drift (30-84) is from parallel atomic-append slot acquisition in
+    // non-CAS-gated emit kernels (Spread, Reaper, etc.). Closing it would require
+    // @ws=1 across the entire physics emit layer — out of scope; would tank perf
+    // for large fixtures.
     assert!(
-        max_abs_drift <= 150.0,
-        "determinism drift exceeds 150 — control flow may be divergent, \
-         not just the documented f32 reduction race. max_abs_drift={max_abs_drift}",
+        max_abs_drift <= 100.0,
+        "determinism drift exceeds 100 — control flow regression or a new \
+         violation appeared. max_abs_drift={max_abs_drift}, mismatches={mismatches}/{n}",
+        n = view_aggregate.len(),
     );
 }
 
