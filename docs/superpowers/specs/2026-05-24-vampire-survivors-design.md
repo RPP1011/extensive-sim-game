@@ -5,7 +5,7 @@
 
 ## 1. Goal & deliverable
 
-A recognizable Vampire-Survivors-shaped fixture, authored as `assets/sim/vampire_survivors.sim`, run through the interpreted-rules path. It is the next DSL-as-engine benchmark after `tower_defense` in the **DSL → full engine** progression: new game-shaped fixtures are deliberate probes that surface where the DSL falls short of "real engine" expressivity.
+A recognizable Vampire-Survivors-shaped fixture, authored as `assets/sim/vampire_survivors.sim`, gated by `dsl_compiler` compile-tests (see §9). It is the next DSL-as-engine benchmark after `tower_defense` in the **DSL → full engine** progression: new game-shaped fixtures are deliberate probes that surface where the DSL falls short of "real engine" expressivity.
 
 **Two co-equal outputs:**
 1. A deterministic fixture that runs to player-death (the vehicle / the game).
@@ -41,7 +41,7 @@ Every row below reuses a pattern already exercised in-tree. Citations are to `as
 | Player kiting (flee swarm) | per-agent physics; role-filtered separation sum over enemy neighbors | `MoveHare` (predator_prey 189–204) | No |
 | Enemy chase moving player | per-agent physics; nearest-of-role neighbor reduction toward player | `MoveWolf` (predator_prey 210–223) | No |
 | Bolt — nearest enemy, periodic | `@phase(event) physics`, gate `world.tick % bolt_period == 0`, `for e in closest_enemy(self) { emit Damaged }` | `StrikePrey` + `cooldown_probe` tick-gate | No |
-| Nova — AOE around player, periodic | same, but iterate `enemies_in_radius(self, r)` — AOE *is* the spatial-query iteration | `@spatial` query, no `@top_k` cap | No (no `EffectOp` AOE needed on the interp path) |
+| Nova — AOE around player, periodic | same, but iterate `enemies_in_radius(self, r)` — AOE *is* the spatial-query iteration | `@spatial` query, no `@top_k` cap | No (no `EffectOp` AOE needed) |
 | XP on kill, attributed to player | `emit Killed { by: self }` → `view xp(by)` fold | `Killed` / `kill_count` (predator_prey 33–167) | No |
 | Player death / termination | enemy contact `emit Damaged { target: player }` → `ApplyDamage` flips `alive=false` at ≤0 | `tower_defense` `ApplyDamage` | No |
 | Power ramp (damage scales with progress) | read `xp(self)` / `upgrade_count(self, …)` in the damage amount | `score 1.0 + 0.5*kill_count(self)` (predator_prey 282) | **Verify** — proven in *scoring*, unverified inside a *physics emit amount* |
@@ -52,19 +52,19 @@ Every row below reuses a pattern already exercised in-tree. Citations are to `as
 
 `view xp(player) -> f32` folds `Killed { by: player }`. Level is `floor(xp / xp_per_level)`. The observed builtin set is `min / max / saturating_add / distance` — **no `floor` / int-cast / integer-division observed** — so this is a real probe, attempted in order:
 
-- **Attempt A (interp-friendly):** `floor(xp(self) / k)` directly in a body/scoring expression. If `floor` does not lower → logged gap; candidate primitive: `floor` / `trunc` builtin, or `//` integer division.
-- **Fallback B (schema change → full rebuild):** a `level: u32` field on `entity Player`, bumped by a `LevelUp` event whenever `xp >= (level+1)*k` (comparison + increment, no `floor`). Probes whether entity-subkind-declared scalar accumulator fields work, at the cost of leaving the interp-only path (rule class F).
+- **Attempt A:** `floor(xp(self) / k)` directly in a body/scoring expression. `Builtin::Floor`/`Ceil`/`Round` *do* lower in the compiled path (`crates/dsl_compiler/src/cg/lower/expr.rs:2021` → `BuiltinId::Floor`), so via the compile-gate harness (§9) this is expected to **pass**. The narrower finding: the interpreter's `eval_numeric_builtin` (`crates/dsl_ast/src/eval/builtins.rs`, known set `min/max/saturating_add/distance`) lacks a `floor` arm — so if/when the fixture is run on the *interpreted-rules* path, that arm is the gap (a one-line add per the world-sim-dsl coverage discipline).
+- **Fallback B (only if A surprises us):** a `level: u32` field on `entity Player`, bumped by a `LevelUp` event whenever `xp >= (level+1)*k` (comparison + increment, no `floor`). Probes whether entity-subkind-declared scalar accumulator fields work, at the cost of a schema-hash regen (rule class F).
 
-We try A first; whichever holds is the finding. (If B is needed, the `level` field is a routine schema-hash regen — per project convention not an AIS impact line.)
+We try A first; whichever holds is the finding.
 
 ## 6. Upgrade choice — probe: branching selection among options (the big gap)
 
 The genuinely hard, previously-deferred gap. Modeled minimally but truthfully:
 
-- `enum UpgradeKind { BoltDamage, NovaRadius, BoltRate, MoveSpeed }`.
-- Per-`(player, kind)` tally via a **keyed view**: `view upgrade_count(player, kind)` — the pair-keyed-view pattern (`predator_focus(a, b)`, predator_prey 175–181). Weapon bodies read it: e.g. `bolt_damage = base + upgrade_count(self, BoltDamage) * step`.
-- On each `LevelUp`, **select one upgrade by fixed priority among eligible options** (eligible = below its per-kind cap). The selected `UpgradeChosen { player, kind }` bumps the tally.
-- **The probe:** expressing "pick the highest-priority upgrade not yet at cap" requires selecting among a fixed option set with a state-dependent filter. If the DSL has no `choose` / `match`-argmax-over-literal-options construct, that's the gap confirmed → candidate primitive: a priority-cascade `select` expression. We attempt it; the wall (if any) is the headline benchmark result.
+- **Sub-probe 3a — enum surface:** attempt `enum UpgradeKind { BoltDamage, NovaRadius, BoltRate, MoveSpeed }`. No `.sim` in the corpus declares a standalone `enum`, so this may not parse. If it walls, model kinds as **distinct events** (`UpgradeBolt`, `UpgradeNova`, …) or `u32` kind-id literals instead, and log "no user enum surface" as a finding.
+- Per-kind tally via a tally view keyed on the kind (kind-keyed `pair_map` à la `predator_focus(a, b)` / foraging's Item-population-keyed `pheromone_trail`). Weapon bodies read it: e.g. `bolt_damage = base + bolt_upgrades(self) * step`.
+- On each `LevelUp`, **select one upgrade by fixed priority among eligible options** (eligible = below its per-kind cap), emitting `UpgradeChosen` to bump the tally.
+- **The headline probe (3):** "pick the highest-priority upgrade not yet at cap" requires selecting among a fixed option set with a state-dependent filter. If the DSL has no `choose` / `match`-argmax-over-literal-options construct, that's the gap confirmed → candidate primitive: a priority-cascade `select` expression. We attempt it; the wall (if any) is the headline benchmark result.
 
 ## 7. DSL-owned vs runtime-owned split
 
@@ -76,15 +76,16 @@ The genuinely hard, previously-deferred gap. Modeled minimally but truthfully:
 | # | Probe | Expectation | Candidate primitive if it walls |
 |---|---|---|---|
 | 1 | View-value read inside a physics-body emit amount | Likely OK (proven in scoring) | extend body-expr view reads |
-| 2 | `floor` / int math on a view → discrete level | **Likely gap** | `floor` / `trunc` / `//` |
+| 2 | `floor` on a view → discrete level | Lowers in compiled path; **interp arm missing** | `floor` arm in `eval/builtins.rs` |
 | 3 | Branching selection among upgrade options | **Likely gap (the big one)** | `select` / priority-`match` expr |
+| 3a | Standalone `enum` surface (UpgradeKind) | Possibly absent (no corpus precedent) | user `enum` decl |
 | 4 | Spawn / infinite ramp | Known gap (runtime-owned today) | DSL `summon`/spawn primitive |
 | 5 | Entity-subkind scalar accumulator field (`level`) — leveling fallback B | Unknown | — |
 
 ## 9. Verification & determinism pin
 
-- Run via the interpreted-rules path for fast iteration. **Open implementation question:** the exact harness entry point for a crate-less standalone fixture — `predator_prey` and `tower_defense` are the templates; pin this first in the plan.
-- **Determinism pin:** same seed → same `death_tick` and same per-tick `Killed`-count trace. A behavioral `probe` block (à la `predator_prey`'s probes) asserts the death tick and that level/upgrade milestones fire at fixed ticks.
+- **Harness (resolved):** crate-less fixtures like `predator_prey`/`tower_defense` are exercised by **`dsl_compiler` compile-gate tests** — a `compile_sim()` helper drives `parse → resolve → lower → schedule → emit` and asserts emitted-kernel shapes (see `crates/dsl_compiler/tests/stress_fixtures_compile.rs`). "Did it lower cleanly?" *is* the gap test; an unsupported construct surfaces as a typed compiler error, not a silent pass. The engine `interpreted-rules` path is a secondary, behavior-level runner coupled to the wolves+humans engine runtime and is **not** how these fixtures gate — so it is out of scope for this slice (and is where the `floor` interp-arm finding (§5) would land if pursued later).
+- **Determinism pin:** the compile-gate is deterministic by construction (same source → same kernels). A behavioral death-tick pin (à la `predator_prey`'s `probe` blocks) is deferred to the runtime-crate slice (Slice 9), since there is no runtime executing this `.sim` until then.
 - All RNG (spawn positions, spawn-timing jitter) flows through `per_agent_u32` (P5).
 
 ## 10. Constitution check (for the implementation plan's AIS / P8)
@@ -93,7 +94,7 @@ The genuinely hard, previously-deferred gap. Modeled minimally but truthfully:
 - **P5 keyed-PCG** ✅ — spawns via `per_agent_u32`.
 - **P6 / P7 events** ✅ — mutation via flagged events (mirrors `predator_prey`).
 - **P2 schema-hash** — N/A unless leveling fallback B adds a `level` field (then a routine regen, not an AIS line).
-- **P3 parity** — fixture targets the interp path first; cross-backend deferred (like `wave_defense`) until the GPU-runtime slice.
+- **P3 parity** — compile-gate slice emits kernels but executes nothing; cross-backend behavioral parity deferred (like `wave_defense`) until the GPU-runtime slice (Slice 9).
 - **P8 AIS** — the implementation plan carries the full statement.
 
 ---
