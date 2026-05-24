@@ -47,3 +47,16 @@ fn vampire_survivors_compiles() {
         art.kernel_index,
     );
 }
+
+#[test]
+fn enemy_chase_emits_neighbour_walk() {
+    let path = workspace_path("assets/sim/vampire_survivors.sim");
+    let art = compile_sim(&path).expect("compiles");
+    let body = kernel_body_containing(&art, "ChasePlayer")
+        .or_else(|| kernel_body_containing(&art, "physics"))
+        .unwrap_or_else(|| panic!("no chase kernel; have {:?}", art.wgsl_files.keys().collect::<Vec<_>>()));
+    assert!(
+        body.contains("spatial_grid_offsets") || body.contains("grid_starts"),
+        "expected bounded-neighbour walk in ChasePlayer body; got:\n{body}",
+    );
+}

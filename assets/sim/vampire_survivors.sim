@@ -17,17 +17,47 @@ entity Player : Agent { pos: vec3, vel: vec3 }
 entity Enemy  : Agent { pos: vec3, vel: vec3 }
 
 config vs {
-  player_mana_min: f32 = 0.5,
-  player_mana_max: f32 = 1.5,
-  enemy_mana_min:  f32 = 1.5,
-  enemy_mana_max:  f32 = 2.5,
-  drift_speed:     f32 = 0.01,
+  player_mana_min:    f32 = 0.5,
+  player_mana_max:    f32 = 1.5,
+  enemy_mana_min:     f32 = 1.5,
+  enemy_mana_max:     f32 = 2.5,
+  drift_speed:        f32 = 0.01,
+  perception_radius:  f32 = 12.0,
+  enemy_speed:        f32 = 0.1,
+}
+
+@spatial(radius = config.vs.perception_radius, kind = [Agent])
+@top_k(8)
+query nearby_agents(self: Agent, radius: f32) -> [Agent]
+sort_by distance(self, _) limit 8 {
+  candidate != self
 }
 
 // Trivial seed rule so the pipeline emits at least one kernel.
 physics IdleDrift @phase(per_agent) {
   on Tick {} where (self.alive) {
     let new_pos = self.pos + self.vel * config.vs.drift_speed;
+    agents.set_pos(self, new_pos);
+  }
+}
+
+// Enemies steer toward the nearest player-band agent (the moving player).
+@phase(post)
+physics ChasePlayer {
+  on Tick {} where (self.alive
+                    && self.mana >= config.vs.enemy_mana_min
+                    && self.mana <= config.vs.enemy_mana_max) {
+    let toward = sum(other in spatial.nearby_agents(self, config.vs.perception_radius) where
+      if other.mana >= config.vs.player_mana_min
+         && other.mana <= config.vs.player_mana_max
+         && other.alive {
+        other.pos - self.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let new_vel = self.vel + toward * config.vs.enemy_speed;
+    let new_pos = self.pos + new_vel;
+    agents.set_vel(self, new_vel);
     agents.set_pos(self, new_pos);
   }
 }
