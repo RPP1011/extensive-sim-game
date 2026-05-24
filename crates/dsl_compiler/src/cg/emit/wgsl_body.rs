@@ -4106,6 +4106,8 @@ fn lower_emit_to_wgsl(
         fields.len(),
         &field_writes,
         ctx.debug_wgsl,
+        // TODO(P11 task 1.5): wire real producer_kernel_id + intra_emit_idx
+        0, 0,
     ))
 }
 
@@ -4160,6 +4162,8 @@ pub(crate) fn emit_chronicle_append_skeleton(
     field_count: usize,
     field_writes: &[String],
     debug_wgsl: DebugWgslFlags,
+    producer_kernel_id: u32,
+    intra_emit_idx: u32,
 ) -> String {
     let mut out = String::new();
     out.push_str(&format!("// emit event#{event_id} ({field_count} fields)\n"));
@@ -4188,6 +4192,17 @@ pub(crate) fn emit_chronicle_append_skeleton(
     for line in field_writes {
         out.push_str(&format!("    {line}\n"));
     }
+    // P11 seq trailer: deterministic ordering key for the per-tick sort.
+    // `agent_id` is the producer thread's per-kernel index. The packing
+    // matches the Rust `compute_event_seq` helper byte-for-byte:
+    //   (kernel_id << 24) | (agent_id << 4) | emit_idx
+    out.push_str(&format!(
+        "        atomicStore(&{buf}[slot * {stride}u + {seq_offset}u], \
+         ({kernel_id}u << 24u) | (agent_id << 4u) | {emit_idx}u);\n",
+        seq_offset = stride - 1,
+        kernel_id = producer_kernel_id,
+        emit_idx = intra_emit_idx,
+    ));
     out.push_str("    }\n");
     out.push_str("}");
     out
@@ -9322,6 +9337,8 @@ mod tests {
             /*field_count*/ 2,
             &field_writes,
             DebugWgslFlags::NONE,
+            // TODO(P11 task 1.5): wire real producer_kernel_id + intra_emit_idx
+            0, 0,
         );
 
         // Header comment carries event id + field count for capture
@@ -9363,6 +9380,8 @@ mod tests {
             0,
             &[],
             DebugWgslFlags::NONE,
+            // TODO(P11 task 1.5): wire real producer_kernel_id + intra_emit_idx
+            0, 0,
         );
         assert!(wgsl.contains("atomicAdd(&event_tail[0], 1u);"));
         assert!(wgsl.contains("atomicStore(&ring[slot * 2u + 0u], 2u);"));
@@ -9384,6 +9403,8 @@ mod tests {
             0,
             &[],
             DebugWgslFlags::NONE,
+            // TODO(P11 task 1.5): wire real producer_kernel_id + intra_emit_idx
+            0, 0,
         );
         assert!(
             !baseline.contains("event_kind_counts"),
@@ -9403,6 +9424,8 @@ mod tests {
                 event_kind_histogram: true,
                 ..crate::cg::lower::driver::DebugWgslFlags::NONE
             },
+            // TODO(P11 task 1.5): wire real producer_kernel_id + intra_emit_idx
+            0, 0,
         );
         assert!(
             flagged.contains("atomicAdd(&event_kind_counts[27u], 1u);"),
