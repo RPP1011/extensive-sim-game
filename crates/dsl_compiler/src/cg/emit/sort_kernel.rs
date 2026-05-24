@@ -128,6 +128,13 @@ fn radix_stage_a_pass{pass_idx}_scatter(@builtin(local_invocation_id) lid: vec3<
 /// (count_wgsl, scan_wgsl, scatter_wgsl).
 #[allow(dead_code)] // wired into the schedule by the build_helper in Task 3.6
 pub(crate) fn emit_stage_b(layout: &EventLayout) -> (String, String, String) {
+    // Stage B is a counting sort keyed on target_id. The sort is stable
+    // because it preserves the seq ordering established by Stage A.
+    // The scan kernel runs single-threaded (workgroup_size(1)) because
+    // agent_cap is typically ≤ 4096 — a serial loop is faster than
+    // spinning up a parallel scan and paying the launch overhead.
+    // Target values that exceed agent_cap are clamped to the sentinel
+    // bucket so invalid/stale events don't corrupt the scatter.
     let stride = layout.record_stride_u32;
 
     let count = format!(r#"
