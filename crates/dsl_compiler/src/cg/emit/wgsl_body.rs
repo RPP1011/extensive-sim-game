@@ -2850,10 +2850,19 @@ fn lower_cg_stmt_body_to_wgsl(
             } else {
                 ("        ",         "            ")
             };
+            // P11 seq trailer: resolve kernel id and reserve 46 emit-idx slots per
+            // arm chain (primary) + 46 (nested) = 92 total.
+            let _chain_kernel_id = ctx.current_kernel_index.get()
+                .and_then(|ki| ctx.producer_kernel_ids.get(&ki).copied())
+                .unwrap_or(0);
+            let _primary_first_emit_idx = ctx.intra_emit_idx.get();
+            ctx.intra_emit_idx.set(_primary_first_emit_idx + 46);
+            let _nested_first_emit_idx = ctx.intra_emit_idx.get();
+            ctx.intra_emit_idx.set(_nested_first_emit_idx + 46);
             let primary_arm_chain =
-                emit_chronicle_arm_chain(primary_indent, "scale_bonus", ctx.debug_wgsl);
+                emit_chronicle_arm_chain(primary_indent, "scale_bonus", ctx.debug_wgsl, _chain_kernel_id, _primary_first_emit_idx);
             let nested_arm_chain =
-                emit_chronicle_arm_chain(nested_indent, "nested_scale_bonus", ctx.debug_wgsl);
+                emit_chronicle_arm_chain(nested_indent, "nested_scale_bonus", ctx.debug_wgsl, _chain_kernel_id, _nested_first_emit_idx);
             // Engine pins MAX_EFFECTS_PER_PROGRAM = 6 + EFFECT_KIND_EMPTY = 0xFFu
             // (see crates/engine/src/ability/program.rs:28 +
             // crates/engine/src/ability/packed.rs). Inlining the
@@ -4560,7 +4569,7 @@ pub(crate) fn event_kind_id_for_effect_kind(effect_kind: u32) -> Option<u32> {
 ///
 /// **Slot 6 = ability_id (Gap detective#6, 2026-05-12).** Every arm's
 /// chronicle write ends with
-/// `atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);`.
+/// `atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);`.
 /// Downstream chronicle consumers (e.g. detective_investigation's
 /// `ApplyDamageFromChronicle` rule that re-emits Accused on damage)
 /// read this slot to discriminate which verb produced the record.
@@ -4601,6 +4610,8 @@ fn emit_chronicle_arm_chain(
     indent: &str,
     scale_bonus_var: &str,
     debug_wgsl: DebugWgslFlags,
+    producer_kernel_id: u32,
+    first_emit_idx: u32,
 ) -> String {
     let damage_event_id = event_kind_id_for_effect_kind(0)
         .expect("EFFECT_KIND_TO_EVENT_KIND_ID must contain Damage=0");
@@ -4732,12 +4743,15 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(damage_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {damage_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {damage_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], bitcast<u32>(amount));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 0));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -4750,12 +4764,15 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(heal_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {heal_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {heal_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], bitcast<u32>(amount));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 1));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -4768,12 +4785,15 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(shield_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {shield_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {shield_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], bitcast<u32>(amount));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 2));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -4787,12 +4807,15 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(stun_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {stun_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (expires_at_tick));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {stun_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (expires_at_tick));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 3));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -4808,13 +4831,16 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(slow_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {slow_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (expires_at_tick));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], bitcast<u32>(factor_q8));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {slow_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (expires_at_tick));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 5u], bitcast<u32>(factor_q8));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 4));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -4833,12 +4859,15 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(root_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {root_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (expires_at_tick));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {root_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (expires_at_tick));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 5));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -4852,12 +4881,15 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(silence_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {silence_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (expires_at_tick));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {silence_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (expires_at_tick));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 6));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -4871,12 +4903,15 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(fear_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {fear_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (expires_at_tick));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {fear_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (expires_at_tick));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 7));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -4890,12 +4925,15 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(taunt_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {taunt_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (expires_at_tick));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {taunt_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (expires_at_tick));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 8));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -4920,11 +4958,14 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(dash_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {dash_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], bitcast<u32>(distance));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {dash_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], bitcast<u32>(distance));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 9));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -4938,11 +4979,14 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(blink_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {blink_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], bitcast<u32>(distance));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {blink_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], bitcast<u32>(distance));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 10));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -4956,12 +5000,15 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(knockback_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {knockback_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(distance));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {knockback_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], bitcast<u32>(distance));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 11));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -4975,12 +5022,15 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(pull_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {pull_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(distance));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {pull_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], bitcast<u32>(distance));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 12));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5010,11 +5060,14 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(stealth_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {stealth_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {stealth_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 13));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5027,12 +5080,15 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(charm_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {charm_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {charm_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 14));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5045,12 +5101,15 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(grounded_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {grounded_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {grounded_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 15));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5063,12 +5122,15 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(suppress_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {suppress_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {suppress_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 16));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5086,12 +5148,15 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(transfer_gold_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {transfer_gold_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount_i32));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {transfer_gold_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], bitcast<u32>(amount_i32));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 17));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5105,12 +5170,15 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(modify_standing_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {modify_standing_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(delta_i32));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {modify_standing_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], bitcast<u32>(delta_i32));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 18));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5130,12 +5198,15 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(execute_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {execute_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(hp_threshold));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {execute_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], bitcast<u32>(hp_threshold));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 19));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5152,12 +5223,15 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(self_damage_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {self_damage_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {self_damage_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], bitcast<u32>(amount));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 20));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5175,13 +5249,16 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(life_steal_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {life_steal_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (expires_at_tick));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], bitcast<u32>(fraction_q8));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {life_steal_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (expires_at_tick));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 5u], bitcast<u32>(fraction_q8));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 21));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5199,13 +5276,16 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(damage_modify_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {damage_modify_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (expires_at_tick));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], bitcast<u32>(multiplier_q8));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {damage_modify_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (expires_at_tick));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 5u], bitcast<u32>(multiplier_q8));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 22));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5237,13 +5317,16 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(damage_over_time_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {damage_over_time_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {damage_over_time_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], bitcast<u32>(amount));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 23));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5258,13 +5341,16 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(heal_over_time_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {heal_over_time_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {heal_over_time_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], bitcast<u32>(amount));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 24));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5279,13 +5365,16 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(timed_shield_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {timed_shield_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {timed_shield_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], bitcast<u32>(amount));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 25));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5323,13 +5412,16 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(buff_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {buff_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {buff_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 26));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5351,13 +5443,16 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(summon_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {summon_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], summon_count);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], summon_lifetime);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {summon_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], summon_count);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 5u], summon_lifetime);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 27));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5372,12 +5467,15 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(harvest_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {harvest_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_b));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {harvest_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (payload_b));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 28));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5392,11 +5490,14 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(place_voxel_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {place_voxel_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {place_voxel_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 29));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5411,13 +5512,16 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(reflect_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {reflect_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {reflect_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 30));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5440,13 +5544,16 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(plant_belief_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {plant_belief_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {plant_belief_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 31));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5466,12 +5573,15 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(observe_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {observe_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {observe_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 32));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5491,13 +5601,16 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(scry_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {scry_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {scry_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 33));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5514,12 +5627,15 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(reveal_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {reveal_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {reveal_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 34));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5538,12 +5654,15 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(disguise_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {disguise_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {disguise_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 35));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5561,13 +5680,16 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(decoy_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {decoy_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {decoy_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 36));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5584,13 +5706,16 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(erase_belief_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {erase_belief_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {erase_belief_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 37));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5613,13 +5738,16 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(travel_to_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {travel_to_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {travel_to_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 38));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5640,13 +5768,16 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(recipe_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {recipe_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {recipe_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 39));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5667,13 +5798,16 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(wear_tool_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {wear_tool_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {wear_tool_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 40));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5690,13 +5824,16 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(propose_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {propose_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {propose_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 41));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5714,13 +5851,16 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(announce_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {announce_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {announce_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 42));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5737,13 +5877,16 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(gain_skill_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {gain_skill_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {gain_skill_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 43));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5761,13 +5904,16 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(create_obligation_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {create_obligation_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {create_obligation_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 44));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -5784,13 +5930,16 @@ fn emit_chronicle_arm_chain(
     s.push_str(&format!("{i12}let _slot: u32 = atomicAdd(&event_tail[0], 1u);\n"));
     s.push_str(&hist_bump(cast_begin_event_id));
     s.push_str(&format!("{i12}if (_slot < 1048576u) {{\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 0u], {cast_begin_event_id}u);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 1u], tick);\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));\n"));
-    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 0u], {cast_begin_event_id}u);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 1u], tick);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 4u], (payload_a));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 5u], (payload_b));\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);\n"));
+    s.push_str(&format!("{i16}atomicStore(&event_ring[_slot * 11u + 10u], ({kernel_id}u << 24u) | (caster_slot << 4u) | {emit_idx}u);\n",
+        kernel_id = producer_kernel_id,
+        emit_idx = first_emit_idx + 45));
     s.push_str(&format!("{i12}}}\n"));
     s.push_str(&format!("{i8}}}\n"));
 
@@ -8878,7 +9027,7 @@ mod tests {
             );
             assert!(
                 wgsl.contains(&format!(
-                    "atomicStore(&event_ring[_slot * 10u + 0u], {expected_event_id}u);"
+                    "atomicStore(&event_ring[_slot * 11u + 0u], {expected_event_id}u);"
                 )),
                 "{name} arm must store kind={expected_event_id};\n{wgsl}"
             );
@@ -8908,7 +9057,7 @@ mod tests {
             );
             assert!(
                 wgsl.contains(&format!(
-                    "atomicStore(&event_ring[_slot * 10u + 0u], {expected_event_id}u);"
+                    "atomicStore(&event_ring[_slot * 11u + 0u], {expected_event_id}u);"
                 )),
                 "{name} arm must store kind={expected_event_id};\n{wgsl}"
             );
@@ -8920,11 +9069,11 @@ mod tests {
         // slot offset 3) since the engine event has no target field.
         // Pin both shapes so a regression that swaps them surfaces here.
         assert!(
-            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 3u], bitcast<u32>(distance));"),
+            wgsl.contains("atomicStore(&event_ring[_slot * 11u + 3u], bitcast<u32>(distance));"),
             "Dash/Blink arms must store distance at payload word 1 (ring offset 3);\n{wgsl}"
         );
         assert!(
-            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(distance));"),
+            wgsl.contains("atomicStore(&event_ring[_slot * 11u + 4u], bitcast<u32>(distance));"),
             "Knockback/Pull arms must store distance at payload word 2 (ring offset 4);\n{wgsl}"
         );
 
@@ -8960,7 +9109,7 @@ mod tests {
             );
             assert!(
                 wgsl.contains(&format!(
-                    "atomicStore(&event_ring[_slot * 10u + 0u], {expected_event_id}u);"
+                    "atomicStore(&event_ring[_slot * 11u + 0u], {expected_event_id}u);"
                 )),
                 "{name} arm must store kind={expected_event_id};\n{wgsl}"
             );
@@ -8970,7 +9119,7 @@ mod tests {
         // duration write — distinct from the q8 / expires_at_tick
         // shapes so it surfaces here on swap regressions.
         assert!(
-            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));"),
+            wgsl.contains("atomicStore(&event_ring[_slot * 11u + 5u], (payload_b));"),
             "DoT/HoT/TimedShield arms must store duration_ticks at payload \
              word 3 (ring offset 5) as raw u32 (= payload_b);\n{wgsl}"
         );
@@ -9001,7 +9150,7 @@ mod tests {
             );
             assert!(
                 wgsl.contains(&format!(
-                    "atomicStore(&event_ring[_slot * 10u + 0u], {expected_event_id}u);"
+                    "atomicStore(&event_ring[_slot * 11u + 0u], {expected_event_id}u);"
                 )),
                 "{name} arm must store kind={expected_event_id};\n{wgsl}"
             );
@@ -9011,12 +9160,12 @@ mod tests {
         // 4 (raw u32 from payload_a, target at slot 3). Pin both shapes
         // so a regression that swaps them surfaces here.
         assert!(
-            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 3u], (payload_a));"),
+            wgsl.contains("atomicStore(&event_ring[_slot * 11u + 3u], (payload_a));"),
             "Stealth arm must store duration_ticks at payload word 1 \
              (ring offset 3) as raw u32 (= payload_a, no target field);\n{wgsl}"
         );
         assert!(
-            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 4u], (payload_a));"),
+            wgsl.contains("atomicStore(&event_ring[_slot * 11u + 4u], (payload_a));"),
             "Charm/Grounded/Suppress arms must store duration_ticks at \
              payload word 2 (ring offset 4) as raw u32 (= payload_a);\n{wgsl}"
         );
@@ -9064,7 +9213,7 @@ mod tests {
             );
             assert!(
                 wgsl.contains(&format!(
-                    "atomicStore(&event_ring[_slot * 10u + 0u], {expected_event_id}u);"
+                    "atomicStore(&event_ring[_slot * 11u + 0u], {expected_event_id}u);"
                 )),
                 "{name} arm must store kind={expected_event_id};\n{wgsl}"
             );
@@ -9079,7 +9228,7 @@ mod tests {
         // having additional sites for Buff/Reflect just reuses the
         // same pattern.
         assert!(
-            wgsl.matches("atomicStore(&event_ring[_slot * 10u + 5u], (payload_b));").count() >= 5,
+            wgsl.matches("atomicStore(&event_ring[_slot * 11u + 5u], (payload_b));").count() >= 5,
             "expected ≥5 raw payload_b writes at slot 5 (DoT + HoT + TimedShield + \
              Buff + Reflect);\n{wgsl}"
         );
@@ -9101,28 +9250,28 @@ mod tests {
         );
         // Header tag — EventKindId::EffectDamageApplied = 26.
         assert!(
-            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 0u], 26u);"),
+            wgsl.contains("atomicStore(&event_ring[_slot * 11u + 0u], 26u);"),
             "Damage arm must store kind=26 (EffectDamageApplied);\n{wgsl}"
         );
         // Header tick.
         assert!(
-            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 1u], tick);"),
+            wgsl.contains("atomicStore(&event_ring[_slot * 11u + 1u], tick);"),
             "Damage arm must store tick at header word 1;\n{wgsl}"
         );
         // Self-cast caster + target (slice γ uses agent_id for both;
         // explicit caster/target arrives when CgStmt::ApplyAbility
         // grows those fields).
         assert!(
-            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 2u], (caster_slot));"),
+            wgsl.contains("atomicStore(&event_ring[_slot * 11u + 2u], (caster_slot));"),
             "Damage arm must store caster=agent_id at payload word 0;\n{wgsl}"
         );
         assert!(
-            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));"),
+            wgsl.contains("atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));"),
             "Damage arm must store target=agent_id at payload word 1 (slice γ self-cast);\n{wgsl}"
         );
         // Amount payload — bitcast f32 → u32.
         assert!(
-            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 4u], bitcast<u32>(amount));"),
+            wgsl.contains("atomicStore(&event_ring[_slot * 11u + 4u], bitcast<u32>(amount));"),
             "Damage arm must store amount as bitcast<u32>(f32);\n{wgsl}"
         );
         // Bounds check against DEFAULT_EVENT_RING_CAP_SLOTS.
@@ -9167,7 +9316,7 @@ mod tests {
             ("Execute",         42u32),
         ] {
             let needle = format!(
-                "atomicStore(&event_ring[_slot * 10u + 0u], {expected_kind_tag}u);"
+                "atomicStore(&event_ring[_slot * 11u + 0u], {expected_kind_tag}u);"
             );
             assert!(
                 wgsl.contains(&needle),
@@ -9179,13 +9328,13 @@ mod tests {
         // Slow's 4-field payload — factor_q8 lives at payload word 3
         // (= ring slot offset 5). Pin it explicitly.
         assert!(
-            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 5u], bitcast<u32>(factor_q8));"),
+            wgsl.contains("atomicStore(&event_ring[_slot * 11u + 5u], bitcast<u32>(factor_q8));"),
             "Slow arm must store factor_q8 at payload word 3 (ring offset 5);\n{wgsl}"
         );
         // LifeSteal's 4-field payload — fraction_q8 lives at payload
         // word 3 (= ring slot offset 5), same shape as Slow.
         assert!(
-            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 5u], bitcast<u32>(fraction_q8));"),
+            wgsl.contains("atomicStore(&event_ring[_slot * 11u + 5u], bitcast<u32>(fraction_q8));"),
             "LifeSteal arm must store fraction_q8 at payload word 3 (ring offset 5);\n{wgsl}"
         );
         // DamageModify's 4-field payload — multiplier_q8 lives at
@@ -9193,7 +9342,7 @@ mod tests {
         // LifeSteal. (Fortify verb swap, Task #138 follow-on, mirror
         // of Vampirize.)
         assert!(
-            wgsl.contains("atomicStore(&event_ring[_slot * 10u + 5u], bitcast<u32>(multiplier_q8));"),
+            wgsl.contains("atomicStore(&event_ring[_slot * 11u + 5u], bitcast<u32>(multiplier_q8));"),
             "DamageModify arm must store multiplier_q8 at payload word 3 (ring offset 5);\n{wgsl}"
         );
 

@@ -10,7 +10,7 @@
 //!
 //! Post-fix (2026-05-12, this change): every chronicle arm in
 //! `emit_chronicle_arm_chain` ends with
-//! `atomicStore(&event_ring[_slot * 10u + 6u], ability_id__u32);`,
+//! `atomicStore(&event_ring[_slot * 11u + 6u], ability_id__u32);`,
 //! so downstream WGSL consumers can read slot 6 to discriminate ability
 //! source. The 10-word stride is unchanged; slot 6 was previously
 //! unused for every arm (slots 7..9 stay reserved for future fields).
@@ -91,7 +91,7 @@ fn dispatcher_emits_slot_6_ability_id_write() {
     // nested chain another 46 = 92. We pin >= 40 to leave headroom for
     // future arm-removals while still catching a regression that drops
     // the entire suffix.
-    let count = dispatch.matches("event_ring[_slot * 10u + 6u], ability_id__u32").count();
+    let count = dispatch.matches("event_ring[_slot * 11u + 6u], ability_id__u32").count();
     assert!(
         count >= 40,
         "Dispatcher must emit slot-6 ability_id writes on every chronicle arm; \

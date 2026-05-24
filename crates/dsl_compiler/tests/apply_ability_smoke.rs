@@ -421,7 +421,7 @@ fn apply_ability_smoke_emits_dispatcher_loop_in_kernel_body() {
         ("Execute",         42u32),
     ] {
         let needle = format!(
-            "atomicStore(&event_ring[_slot * 10u + 0u], {expected_kind_tag}u);"
+            "atomicStore(&event_ring[_slot * 11u + 0u], {expected_kind_tag}u);"
         );
         assert!(
             body.contains(&needle),
@@ -925,7 +925,7 @@ fn apply_ability_per_event_with_target_lowers_distinctly() {
     );
     // Chronicle payload word 3 (target slot) reads target_slot.
     assert!(
-        body.contains("atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));"),
+        body.contains("atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));"),
         "chronicle word 3 must write target_slot when distinct target is supplied;\n{body}"
     );
 
@@ -1511,7 +1511,7 @@ fn per_agent_apply_ability_with_soa_field_target_validates() {
          target operand;\n{body}"
     );
     assert!(
-        body.contains("atomicStore(&event_ring[_slot * 10u + 3u], (target_slot));"),
+        body.contains("atomicStore(&event_ring[_slot * 11u + 3u], (target_slot));"),
         "chronicle word 3 must write target_slot (not agent_id) when \
          the source supplies a non-self target;\n{body}"
     );
