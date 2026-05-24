@@ -103,9 +103,9 @@ fn radix_stage_a_pass{pass_idx}_scatter(@builtin(local_invocation_id) lid: vec3<
     loop {{
         if (chunk_base >= count) {{ break; }}
         let tid = chunk_base + lid.x;
-        let active = tid < count;
+        let is_active = tid < count;
 
-        if (active) {{
+        if (is_active) {{
             let seq = atomicLoad(&event_ring_in[tid * {stride}u + {seq_offset}u]);
             let bucket = (seq >> {bit_shift}u) & {bucket_mask}u;
             let wg_chunk_pos = atomicAdd(&radix_histogram[bucket], 1u);
@@ -151,8 +151,8 @@ fn radix_stage_b_count(@builtin(global_invocation_id) gid: vec3<u32>) {{
     let count = atomicLoad(&event_tail);
     if (tid >= count) {{ return; }}
 
-    let target = atomicLoad(&event_ring_in[tid * {stride}u + cfg.target_word_offset]);
-    let bucket = select(target, cfg.agent_cap, target >= cfg.agent_cap);
+    let tgt = atomicLoad(&event_ring_in[tid * {stride}u + cfg.target_word_offset]);
+    let bucket = select(tgt, cfg.agent_cap, tgt >= cfg.agent_cap);
     atomicAdd(&target_histogram[bucket], 1u);
 }}
 "#);
@@ -197,11 +197,11 @@ fn radix_stage_b_scatter(@builtin(local_invocation_id) lid: vec3<u32>) {{
     loop {{
         if (chunk_base >= count) {{ break; }}
         let tid = chunk_base + lid.x;
-        let active = tid < count;
+        let is_active = tid < count;
 
-        if (active) {{
-            let target = atomicLoad(&event_ring_in[tid * {stride}u + cfg.target_word_offset]);
-            let bucket = select(target, cfg.agent_cap, target >= cfg.agent_cap);
+        if (is_active) {{
+            let tgt = atomicLoad(&event_ring_in[tid * {stride}u + cfg.target_word_offset]);
+            let bucket = select(tgt, cfg.agent_cap, tgt >= cfg.agent_cap);
             let wg_chunk_pos = atomicAdd(&target_histogram[bucket], 1u);
             let dst = target_offsets[bucket] + wg_chunk_pos;
             for (var w = 0u; w < {stride}u; w = w + 1u) {{
@@ -286,6 +286,6 @@ mod tests {
     fn stage_b_handles_target_overflow_with_sentinel() {
         let lay = test_layout();
         let (c, _, _) = emit_stage_b(&lay);
-        assert!(c.contains("target >= cfg.agent_cap"));
+        assert!(c.contains("tgt >= cfg.agent_cap"));
     }
 }

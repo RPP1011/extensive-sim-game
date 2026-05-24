@@ -2150,6 +2150,30 @@ fn synthesize_generated_runtime_struct(
     }
 
     let mut out = String::new();
+    // Radix sort pipeline cache struct — emitted only for fixtures that opt
+    // into the sort pass. Defined before GeneratedRuntime so it can appear
+    // as a field type.
+    if needs_sort {
+        out.push_str(
+            "struct SortPipelines {\n\
+             \x20   // Stage A: 4 passes × (histogram, scan, scatter) = 12 pipelines\n",
+        );
+        for pass in 0..4u32 {
+            for phase in &["histogram", "scan", "scatter"] {
+                out.push_str(&format!(
+                    "    stage_a_pass{pass}_{phase}: (wgpu::ComputePipeline, wgpu::BindGroupLayout),\n",
+                ));
+            }
+        }
+        out.push_str(
+            "    // Stage B: count, scan, scatter = 3 pipelines\n\
+             \x20   stage_b_count: (wgpu::ComputePipeline, wgpu::BindGroupLayout),\n\
+             \x20   stage_b_scan:  (wgpu::ComputePipeline, wgpu::BindGroupLayout),\n\
+             \x20   stage_b_scatter: (wgpu::ComputePipeline, wgpu::BindGroupLayout),\n\
+             }\n\n",
+        );
+    }
+
     out.push_str(
         "// Plan E-A3.2 — fixture-owned buffer struct + try_new constructor.\n\
          //\n\
@@ -2225,6 +2249,7 @@ fn synthesize_generated_runtime_struct(
         out.push_str("    pub target_histogram_buf: wgpu::Buffer,\n");
         out.push_str("    pub target_offsets_buf: wgpu::Buffer,\n");
         out.push_str("    pub sort_cfg_buf: wgpu::Buffer,\n");
+        out.push_str("    sort_pipelines: Option<SortPipelines>,\n");
     }
     // Plan E-A6 — `@runtime` config field values, mirrored host-side.
     // The .sim's `flee_strength: f32 = 1.0 @runtime` lands here as
@@ -2291,7 +2316,7 @@ fn synthesize_generated_runtime_struct(
         let target_word = sort_event_layout
             .map(sort_target_word_offset)
             .unwrap_or(3);
-        // engine::gpu::event_ring::EVENT_RING_CAP_SLOTS = 1_048_576
+        // engine::gpu::EVENT_RING_CAP_SLOTS = 1_048_576
         let sort_scratch_bytes = 1_048_576_u64 * (stride as u64) * 4;
         out.push_str(&format!(
             "        let event_ring_sort_scratch_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {{\n\
@@ -2649,6 +2674,7 @@ fn synthesize_generated_runtime_struct(
         out.push_str("            target_histogram_buf,\n");
         out.push_str("            target_offsets_buf,\n");
         out.push_str("            sort_cfg_buf,\n");
+        out.push_str("            sort_pipelines: None,\n");
     }
     for (name, def) in runtime_config_defaults {
         let lit_typed = match def.scalar_ty.as_str() {
@@ -2661,6 +2687,265 @@ fn synthesize_generated_runtime_struct(
     }
     out.push_str("        })\n");
     out.push_str("    }\n\n");
+
+    // Radix sort dispatch method — synthesized only for fixtures that need
+    // the sort pass. Lazily builds all 15 ComputePipelines on first call
+    // and caches them in self.sort_pipelines. Each subsequent tick just
+    // creates the per-tick bind groups and records dispatches.
+    if needs_sort {
+        // Use the engine's actual ring buffer stride (EVENT_STRIDE_U32 = 10)
+        // for the ring ↔ scratch copy size. The CG event layout stride (11)
+        // includes a seq trailer word that extends beyond what EventRing
+        // allocates; the copy must not exceed the ring's physical size.
+        // The engine constant is 10; use it directly as a literal.
+        let engine_stride: u64 = 10;
+        let ring_bytes = 1_048_576_u64 * engine_stride * 4;
+
+        // Build pipeline creation snippet for one kernel given:
+        //   name = "radix_stage_a_pass0_histogram"
+        //   entry = "radix_stage_a_pass0_histogram"
+        //   bgl_entries = "engine::gpu::bgl_storage(0, true), ..."
+        let make_pipeline = |kernel_name: &str, bgl_entries: &str| -> String {
+            format!(
+                "            {{\n\
+                 \x20               let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {{\n\
+                 \x20                   label: Some(\"{kernel_name}::wgsl\"),\n\
+                 \x20                   source: wgpu::ShaderSource::Wgsl({kernel_name}::SHADER_SRC.into()),\n\
+                 \x20               }});\n\
+                 \x20               let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {{\n\
+                 \x20                   label: Some(\"{kernel_name}::bgl\"),\n\
+                 \x20                   entries: &[{bgl_entries}],\n\
+                 \x20               }});\n\
+                 \x20               let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {{\n\
+                 \x20                   label: Some(\"{kernel_name}::pl\"),\n\
+                 \x20                   bind_group_layouts: &[&bgl],\n\
+                 \x20                   push_constant_ranges: &[],\n\
+                 \x20               }});\n\
+                 \x20               let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {{\n\
+                 \x20                   label: Some(\"{kernel_name}::pipeline\"),\n\
+                 \x20                   layout: Some(&pl),\n\
+                 \x20                   module: &shader,\n\
+                 \x20                   entry_point: Some(\"{kernel_name}\"),\n\
+                 \x20                   compilation_options: Default::default(),\n\
+                 \x20                   cache: None,\n\
+                 \x20               }});\n\
+                 \x20               (pipeline, bgl)\n\
+                 \x20           }}",
+            )
+        };
+
+        // Stage A histogram/scatter share 3 bindings:
+        //   0: event_ring_in (storage read)
+        //   1: event_tail (storage read)
+        //   2: radix_histogram (storage read_write)
+        // Stage A scan has 2 bindings:
+        //   0: radix_histogram (storage read_write)
+        //   1: radix_bucket_offsets (storage read_write)
+        // Stage A scatter has 5 bindings:
+        //   0: event_ring_in (storage read)
+        //   1: event_tail (storage read)
+        //   2: radix_histogram (storage read_write)
+        //   3: radix_bucket_offsets (storage read)
+        //   4: event_ring_out (storage read_write)
+        // Stage B count:
+        //   0: event_ring_in (storage read)
+        //   1: event_tail (storage read)
+        //   2: target_histogram (storage read_write)
+        //   3: cfg (uniform)
+        // Stage B scan:
+        //   0: target_histogram (storage read_write)
+        //   1: target_offsets (storage read_write)
+        //   2: cfg (uniform)
+        // Stage B scatter:
+        //   0: event_ring_in (storage read)
+        //   1: event_tail (storage read)
+        //   2: target_histogram (storage read_write)
+        //   3: target_offsets (storage read)
+        //   4: event_ring_out (storage read_write)
+        //   5: cfg (uniform)
+
+        let histogram_bgl = "engine::gpu::bgl_storage(0, true), engine::gpu::bgl_storage(1, true), engine::gpu::bgl_storage(2, false)";
+        let scan_bgl_a    = "engine::gpu::bgl_storage(0, false), engine::gpu::bgl_storage(1, false)";
+        let scatter_bgl_a = "engine::gpu::bgl_storage(0, true), engine::gpu::bgl_storage(1, true), engine::gpu::bgl_storage(2, false), engine::gpu::bgl_storage(3, true), engine::gpu::bgl_storage(4, false)";
+        let count_bgl_b   = "engine::gpu::bgl_storage(0, true), engine::gpu::bgl_storage(1, true), engine::gpu::bgl_storage(2, false), engine::gpu::bgl_uniform(3)";
+        let scan_bgl_b    = "engine::gpu::bgl_storage(0, false), engine::gpu::bgl_storage(1, false), engine::gpu::bgl_uniform(2)";
+        let scatter_bgl_b = "engine::gpu::bgl_storage(0, true), engine::gpu::bgl_storage(1, true), engine::gpu::bgl_storage(2, false), engine::gpu::bgl_storage(3, true), engine::gpu::bgl_storage(4, false), engine::gpu::bgl_uniform(5)";
+
+        let mut method = String::new();
+        method.push_str(
+            "    fn run_radix_sort(&mut self, encoder: &mut wgpu::CommandEncoder) {\n\
+             \x20       let device = &self.gpu.device;\n\
+             \x20       // Lazily build + cache all 15 sort pipelines on first call.\n\
+             \x20       if self.sort_pipelines.is_none() {\n\
+             \x20           self.sort_pipelines = Some(SortPipelines {\n",
+        );
+        for pass in 0..4u32 {
+            let h_name = format!("radix_stage_a_pass{pass}_histogram");
+            let s_name = format!("radix_stage_a_pass{pass}_scan");
+            let sc_name = format!("radix_stage_a_pass{pass}_scatter");
+            method.push_str(&format!(
+                "                stage_a_pass{pass}_histogram: {h_body},\n\
+                 \x20               stage_a_pass{pass}_scan: {s_body},\n\
+                 \x20               stage_a_pass{pass}_scatter: {sc_body},\n",
+                h_body  = make_pipeline(&h_name,  histogram_bgl),
+                s_body  = make_pipeline(&s_name,  scan_bgl_a),
+                sc_body = make_pipeline(&sc_name, scatter_bgl_a),
+            ));
+        }
+        method.push_str(&format!(
+            "                stage_b_count:   {count_body},\n\
+             \x20               stage_b_scan:    {scan_body},\n\
+             \x20               stage_b_scatter: {scatter_body},\n",
+            count_body   = make_pipeline("radix_stage_b_count",   count_bgl_b),
+            scan_body    = make_pipeline("radix_stage_b_scan",    scan_bgl_b),
+            scatter_body = make_pipeline("radix_stage_b_scatter", scatter_bgl_b),
+        ));
+        method.push_str(
+            "            });\n\
+             \x20       }\n\
+             \x20       let p = self.sort_pipelines.as_ref().unwrap();\n\n\
+             \x20       // Stage A: 4 LSD radix passes on the seq field (32 bits, 8 bits/pass).\n\
+             \x20       // Ping-pong: even passes  read ring  → write scratch;\n\
+             \x20       //            odd  passes  read scratch → write ring.\n\
+             \x20       // After 4 passes (even count) data ends in event_ring (ring).\n",
+        );
+
+        // Stage A passes — ping-pong between ring and scratch.
+        // .as_entire_binding() takes &self so no & prefix needed;
+        // self.event_ring.ring() already returns &Buffer.
+        for pass in 0..4u32 {
+            let (in_buf, out_buf) = if pass % 2 == 0 {
+                ("self.event_ring.ring()", "self.event_ring_sort_scratch_buf")
+            } else {
+                ("self.event_ring_sort_scratch_buf", "self.event_ring.ring()")
+            };
+            let h_field = format!("stage_a_pass{pass}_histogram");
+            let s_field = format!("stage_a_pass{pass}_scan");
+            let sc_field = format!("stage_a_pass{pass}_scatter");
+
+            method.push_str(&format!(
+                "\n\
+                 \x20       // --- Stage A pass {pass} ---\n\
+                 \x20       // Histogram\n\
+                 \x20       {{\n\
+                 \x20           let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {{\n\
+                 \x20               label: Some(\"sort::a{pass}_histogram\"),\n\
+                 \x20               layout: &p.{h_field}.1,\n\
+                 \x20               entries: &[\n\
+                 \x20                   wgpu::BindGroupEntry {{ binding: 0, resource: {in_buf}.as_entire_binding() }},\n\
+                 \x20                   wgpu::BindGroupEntry {{ binding: 1, resource: self.event_ring.tail().as_entire_binding() }},\n\
+                 \x20                   wgpu::BindGroupEntry {{ binding: 2, resource: self.radix_histogram_buf.as_entire_binding() }},\n\
+                 \x20               ],\n\
+                 \x20           }});\n\
+                 \x20           let mut pass_enc = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {{ label: Some(\"sort::a{pass}_hist\"), timestamp_writes: None }});\n\
+                 \x20           pass_enc.set_pipeline(&p.{h_field}.0);\n\
+                 \x20           pass_enc.set_bind_group(0, &bg, &[]);\n\
+                 \x20           pass_enc.dispatch_workgroups((engine::gpu::EVENT_RING_CAP_SLOTS + 63) / 64, 1, 1);\n\
+                 \x20       }}\n\
+                 \x20       // Scan\n\
+                 \x20       {{\n\
+                 \x20           let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {{\n\
+                 \x20               label: Some(\"sort::a{pass}_scan\"),\n\
+                 \x20               layout: &p.{s_field}.1,\n\
+                 \x20               entries: &[\n\
+                 \x20                   wgpu::BindGroupEntry {{ binding: 0, resource: self.radix_histogram_buf.as_entire_binding() }},\n\
+                 \x20                   wgpu::BindGroupEntry {{ binding: 1, resource: self.radix_bucket_offsets_buf.as_entire_binding() }},\n\
+                 \x20               ],\n\
+                 \x20           }});\n\
+                 \x20           let mut pass_enc = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {{ label: Some(\"sort::a{pass}_scan\"), timestamp_writes: None }});\n\
+                 \x20           pass_enc.set_pipeline(&p.{s_field}.0);\n\
+                 \x20           pass_enc.set_bind_group(0, &bg, &[]);\n\
+                 \x20           pass_enc.dispatch_workgroups(1, 1, 1);\n\
+                 \x20       }}\n\
+                 \x20       // Scatter\n\
+                 \x20       {{\n\
+                 \x20           let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {{\n\
+                 \x20               label: Some(\"sort::a{pass}_scatter\"),\n\
+                 \x20               layout: &p.{sc_field}.1,\n\
+                 \x20               entries: &[\n\
+                 \x20                   wgpu::BindGroupEntry {{ binding: 0, resource: {in_buf}.as_entire_binding() }},\n\
+                 \x20                   wgpu::BindGroupEntry {{ binding: 1, resource: self.event_ring.tail().as_entire_binding() }},\n\
+                 \x20                   wgpu::BindGroupEntry {{ binding: 2, resource: self.radix_histogram_buf.as_entire_binding() }},\n\
+                 \x20                   wgpu::BindGroupEntry {{ binding: 3, resource: self.radix_bucket_offsets_buf.as_entire_binding() }},\n\
+                 \x20                   wgpu::BindGroupEntry {{ binding: 4, resource: {out_buf}.as_entire_binding() }},\n\
+                 \x20               ],\n\
+                 \x20           }});\n\
+                 \x20           let mut pass_enc = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {{ label: Some(\"sort::a{pass}_scatter\"), timestamp_writes: None }});\n\
+                 \x20           pass_enc.set_pipeline(&p.{sc_field}.0);\n\
+                 \x20           pass_enc.set_bind_group(0, &bg, &[]);\n\
+                 \x20           pass_enc.dispatch_workgroups(1, 1, 1);\n\
+                 \x20       }}\n",
+            ));
+        }
+
+        // Stage B: counting sort on target_id. After stage A (4 even passes),
+        // data is in event_ring. Stage B reads from ring, writes to scratch,
+        // then we copy scratch → ring so fold consumers always read from ring.
+        method.push_str(
+            "\n\
+             \x20       // --- Stage B: counting sort by target_id ---\n\
+             \x20       // Count\n\
+             \x20       {\n\
+             \x20           let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {\n\
+             \x20               label: Some(\"sort::b_count\"),\n\
+             \x20               layout: &p.stage_b_count.1,\n\
+             \x20               entries: &[\n\
+             \x20                   wgpu::BindGroupEntry { binding: 0, resource: self.event_ring.ring().as_entire_binding() },\n\
+             \x20                   wgpu::BindGroupEntry { binding: 1, resource: self.event_ring.tail().as_entire_binding() },\n\
+             \x20                   wgpu::BindGroupEntry { binding: 2, resource: self.target_histogram_buf.as_entire_binding() },\n\
+             \x20                   wgpu::BindGroupEntry { binding: 3, resource: self.sort_cfg_buf.as_entire_binding() },\n\
+             \x20               ],\n\
+             \x20           });\n\
+             \x20           let mut pass_enc = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some(\"sort::b_count\"), timestamp_writes: None });\n\
+             \x20           pass_enc.set_pipeline(&p.stage_b_count.0);\n\
+             \x20           pass_enc.set_bind_group(0, &bg, &[]);\n\
+             \x20           pass_enc.dispatch_workgroups((engine::gpu::EVENT_RING_CAP_SLOTS + 63) / 64, 1, 1);\n\
+             \x20       }\n\
+             \x20       // Scan\n\
+             \x20       {\n\
+             \x20           let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {\n\
+             \x20               label: Some(\"sort::b_scan\"),\n\
+             \x20               layout: &p.stage_b_scan.1,\n\
+             \x20               entries: &[\n\
+             \x20                   wgpu::BindGroupEntry { binding: 0, resource: self.target_histogram_buf.as_entire_binding() },\n\
+             \x20                   wgpu::BindGroupEntry { binding: 1, resource: self.target_offsets_buf.as_entire_binding() },\n\
+             \x20                   wgpu::BindGroupEntry { binding: 2, resource: self.sort_cfg_buf.as_entire_binding() },\n\
+             \x20               ],\n\
+             \x20           });\n\
+             \x20           let mut pass_enc = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some(\"sort::b_scan\"), timestamp_writes: None });\n\
+             \x20           pass_enc.set_pipeline(&p.stage_b_scan.0);\n\
+             \x20           pass_enc.set_bind_group(0, &bg, &[]);\n\
+             \x20           pass_enc.dispatch_workgroups(1, 1, 1);\n\
+             \x20       }\n\
+             \x20       // Scatter: ring → scratch\n\
+             \x20       {\n\
+             \x20           let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {\n\
+             \x20               label: Some(\"sort::b_scatter\"),\n\
+             \x20               layout: &p.stage_b_scatter.1,\n\
+             \x20               entries: &[\n\
+             \x20                   wgpu::BindGroupEntry { binding: 0, resource: self.event_ring.ring().as_entire_binding() },\n\
+             \x20                   wgpu::BindGroupEntry { binding: 1, resource: self.event_ring.tail().as_entire_binding() },\n\
+             \x20                   wgpu::BindGroupEntry { binding: 2, resource: self.target_histogram_buf.as_entire_binding() },\n\
+             \x20                   wgpu::BindGroupEntry { binding: 3, resource: self.target_offsets_buf.as_entire_binding() },\n\
+             \x20                   wgpu::BindGroupEntry { binding: 4, resource: self.event_ring_sort_scratch_buf.as_entire_binding() },\n\
+             \x20                   wgpu::BindGroupEntry { binding: 5, resource: self.sort_cfg_buf.as_entire_binding() },\n\
+             \x20               ],\n\
+             \x20           });\n\
+             \x20           let mut pass_enc = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some(\"sort::b_scatter\"), timestamp_writes: None });\n\
+             \x20           pass_enc.set_pipeline(&p.stage_b_scatter.0);\n\
+             \x20           pass_enc.set_bind_group(0, &bg, &[]);\n\
+             \x20           pass_enc.dispatch_workgroups(1, 1, 1);\n\
+             \x20       }\n\
+             \x20       // Copy sorted result (scratch) back to event_ring so fold consumers\n\
+             \x20       // always read from the canonical ring buffer.\n",
+        );
+        method.push_str(&format!(
+            "        encoder.copy_buffer_to_buffer(&self.event_ring_sort_scratch_buf, 0, self.event_ring.ring(), 0, {ring_bytes}u64);\n",
+        ));
+        method.push_str("    }\n\n");
+
+        out.push_str(&method);
+    }
 
     // Plan E-A6 — host-side setters for `@runtime` config fields. Each
     // setter updates the host-side mirror AND writes the value to every
@@ -2960,27 +3245,74 @@ fn synthesize_generated_runtime_struct(
         // the queue.write_buffer of pending_event_count, both of which
         // would otherwise sequence before any subsequent encoder
         // command and clobber what event_tail holds.
+        if needs_sort {
+            // When the fixture has both fold consumers and a sort pass,
+            // the sort runs in the snap_encoder so it sees the prior-tick
+            // GPU tail value. The main encoder resets the tail to
+            // pending_event_count (a queue.write_buffer that lands before
+            // main-encoder commands on submit), so running the sort in the
+            // main encoder would see tail=0 and sort nothing.
+            out.push_str(
+                "        // Capture prior-tick GPU event_tail and sort prior-tick\n\
+                 \x20       // events by (target, seq) — both in the snap encoder so\n\
+                 \x20       // sort kernels see the prior-tick tail before the main\n\
+                 \x20       // encoder's write_buffer resets it to pending_event_count.\n\
+                 \x20       {\n\
+                 \x20           let mut snap_encoder = self.gpu.device.create_command_encoder(\n\
+                 \x20               &wgpu::CommandEncoderDescriptor {\n\
+                 \x20                   label: Some(concat!(env!(\"CARGO_PKG_NAME\"), \"::fold_tail_snapshot\")),\n\
+                 \x20               },\n\
+                 \x20           );\n\
+                 \x20           snap_encoder.copy_buffer_to_buffer(\n\
+                 \x20               self.event_ring.tail(),\n\
+                 \x20               0,\n\
+                 \x20               &self.prev_event_tail_buf,\n\
+                 \x20               0,\n\
+                 \x20               4,\n\
+                 \x20           );\n\
+                 \x20           self.run_radix_sort(&mut snap_encoder);\n\
+                 \x20           self.gpu.queue.submit(Some(snap_encoder.finish()));\n\
+                 \x20       }\n",
+            );
+        } else {
+            out.push_str(
+                "        // Capture prior-tick GPU event_tail\n\
+                 \x20       // into prev_event_tail_buf via its own submit BEFORE the\n\
+                 \x20       // main step encoder enqueues anything that overwrites the\n\
+                 \x20       // GPU tail (clear_tail_in or pending_event_count write).\n\
+                 \x20       // The captured value drives each fold consumer's\n\
+                 \x20       // cfg.event_count for THIS tick (folds-at-T see T-1 emits).\n\
+                 \x20       {\n\
+                 \x20           let mut snap_encoder = self.gpu.device.create_command_encoder(\n\
+                 \x20               &wgpu::CommandEncoderDescriptor {\n\
+                 \x20                   label: Some(concat!(env!(\"CARGO_PKG_NAME\"), \"::fold_tail_snapshot\")),\n\
+                 \x20               },\n\
+                 \x20           );\n\
+                 \x20           snap_encoder.copy_buffer_to_buffer(\n\
+                 \x20               self.event_ring.tail(),\n\
+                 \x20               0,\n\
+                 \x20               &self.prev_event_tail_buf,\n\
+                 \x20               0,\n\
+                 \x20               4,\n\
+                 \x20           );\n\
+                 \x20           self.gpu.queue.submit(Some(snap_encoder.finish()));\n\
+                 \x20       }\n",
+            );
+        }
+    }
+    // Fallback: needs_sort but no fold consumers (unusual; normally
+    // needs_sort => has_fold_consumers). Submit sort in its own encoder
+    // before the main encoder to preserve prior-tick tail semantics.
+    if needs_sort && !has_fold_consumers {
         out.push_str(
-            "        // Capture prior-tick GPU event_tail\n\
-             \x20       // into prev_event_tail_buf via its own submit BEFORE the\n\
-             \x20       // main step encoder enqueues anything that overwrites the\n\
-             \x20       // GPU tail (clear_tail_in or pending_event_count write).\n\
-             \x20       // The captured value drives each fold consumer's\n\
-             \x20       // cfg.event_count for THIS tick (folds-at-T see T-1 emits).\n\
-             \x20       {\n\
-             \x20           let mut snap_encoder = self.gpu.device.create_command_encoder(\n\
+            "        {\n\
+             \x20           let mut sort_encoder = self.gpu.device.create_command_encoder(\n\
              \x20               &wgpu::CommandEncoderDescriptor {\n\
-             \x20                   label: Some(concat!(env!(\"CARGO_PKG_NAME\"), \"::fold_tail_snapshot\")),\n\
+             \x20                   label: Some(concat!(env!(\"CARGO_PKG_NAME\"), \"::sort\")),\n\
              \x20               },\n\
              \x20           );\n\
-             \x20           snap_encoder.copy_buffer_to_buffer(\n\
-             \x20               self.event_ring.tail(),\n\
-             \x20               0,\n\
-             \x20               &self.prev_event_tail_buf,\n\
-             \x20               0,\n\
-             \x20               4,\n\
-             \x20           );\n\
-             \x20           self.gpu.queue.submit(Some(snap_encoder.finish()));\n\
+             \x20           self.run_radix_sort(&mut sort_encoder);\n\
+             \x20           self.gpu.queue.submit(Some(sort_encoder.finish()));\n\
              \x20       }\n",
         );
     }
