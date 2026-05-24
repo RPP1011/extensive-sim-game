@@ -1,0 +1,9 @@
+// vampire_survivors fixture: enemy spawn wave (count=32).
+
+ability SpawnLarge {
+    target: self
+    cooldown: 3s
+    hint: utility
+
+    summon "enemy" 32 [UTILITY: 100]
+}

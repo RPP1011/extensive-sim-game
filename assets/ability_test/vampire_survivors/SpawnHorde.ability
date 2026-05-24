@@ -1,0 +1,9 @@
+// vampire_survivors fixture: enemy spawn wave (count=64).
+
+ability SpawnHorde {
+    target: self
+    cooldown: 3s
+    hint: utility
+
+    summon "enemy" 64 [UTILITY: 100]
+}
