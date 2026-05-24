@@ -30,3 +30,4 @@ glob = "0.3"
 # Pinned to match engine_gpu's `=26.0.0` so the same WGSL dialect
 # stays authoritative across the DSL + runtime sides.
 naga = { version = "=26.0.0", features = ["wgsl-in"] }
+proptest = "1.5"
