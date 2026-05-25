@@ -30,7 +30,7 @@
   - P10 (No Runtime Panic): PASS — gated by the headless driver.
   - P8: PASS — this section.
 - **Runtime gate:**
-  - `player_tracks_input` at `crates/sims/tests/vampire_survivors_exec.rs` — `set_ctl_move_x(1.0)` for K ticks moves the player +X; `-1.0` moves it −X.
+  - `player_tracks_input` at `crates/sims/tests/vampire_survivors_exec.rs` — `set_config_ctl_move_x(1.0)` for K ticks moves the player +X; `-1.0` moves it −X.
   - `playable_loop_survivable` (same file) — T ticks with weapons enabled: no panic; enemy count rises then stays bounded (kills happen).
 - **Re-evaluation:** [x] AIS reviewed at design phase.  [ ] AIS reviewed post-design.
 
@@ -75,12 +75,12 @@ physics PlayerControl @phase(per_agent) {
 #[test]
 fn player_tracks_input() {
     let Some(mut rt) = build_seeded_vs(0x1234) else { return; }; // existing seed helper or seed_initial_state
-    rt.set_ctl_move_x(1.0); rt.set_ctl_move_y(0.0);
+    rt.set_config_ctl_move_x(1.0); rt.set_config_ctl_move_y(0.0);
     let x0 = read_pos(&mut rt, 1).0;
     for _ in 0..10 { rt.step(); }
     let x1 = read_pos(&mut rt, 1).0;
     assert!(x1 > x0 + 1.0, "player should move +X under move_x=1: {x0}->{x1}");
-    rt.set_ctl_move_x(-1.0);
+    rt.set_config_ctl_move_x(-1.0);
     for _ in 0..10 { rt.step(); }
     let x2 = read_pos(&mut rt, 1).0;
     assert!(x2 < x1, "player should reverse under move_x=-1: {x1}->{x2}");
@@ -189,9 +189,9 @@ physics WhipSweep @phase(per_agent) {
 #[test]
 fn playable_loop_survivable() {
     let Some(mut rt) = build_seeded_vs(0x99) else { return; };
-    rt.set_ctl_bolt_level(2.0); rt.set_ctl_nova_level(1.0);
-    rt.set_ctl_garlic_level(1.0); rt.set_ctl_whip_level(1.0);
-    rt.set_ctl_move_x(0.3); rt.set_ctl_move_y(0.2);
+    rt.set_config_ctl_bolt_level(2.0); rt.set_config_ctl_nova_level(1.0);
+    rt.set_config_ctl_garlic_level(1.0); rt.set_config_ctl_whip_level(1.0);
+    rt.set_config_ctl_move_x(0.3); rt.set_config_ctl_move_y(0.2);
     let mut max_enemies = 0usize;
     for t in 0..600u32 {
         rt.step();
@@ -212,4 +212,4 @@ git commit -m "feat(vs): garlic aura + whip sweep weapons gated by ctl levels"
 ```
 
 ## Self-review note
-The `xp` view stays materialized via the BoltFire passive ramp read — Plan 4's HUD depends on `view_storage_xp_primary_buf` existing. Setter names used here (`set_ctl_move_x`, `set_ctl_bolt_level`, …) must match Plan 1's generated setters; if Plan 1 named them differently (e.g. `set_config_ctl_move_x`), reconcile to Plan 1's actual output.
+The `xp` view stays materialized via the BoltFire passive ramp read — Plan 4's HUD depends on `view_storage_xp_primary_buf` existing. Setter names used here (`set_config_ctl_move_x`, `set_config_ctl_bolt_level`, …) must match Plan 1's generated setters; if Plan 1 named them differently (e.g. `set_config_ctl_move_x`), reconcile to Plan 1's actual output.

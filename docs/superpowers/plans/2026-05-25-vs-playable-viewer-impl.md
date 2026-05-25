@@ -4,7 +4,7 @@
 
 **Goal:** Turn `vs_viewer` into a playable game: WASD drives the player, a follow-camera tracks them, an egui HUD shows HP/timer/level/XP/kills/enemies, level-ups open a 3-card upgrade menu, and death shows a run summary + restart — all via the `engine_ui` framework (Plan 2) and the `config.ctl` setters (Plan 1).
 
-**Architecture:** `vs_viewer` already calls `present_blit_with_overlay` with a no-op closure (`bin/vs_viewer.rs:338`). Wire `voxel_engine::EguiState` into that closure. A new `vs_ui.rs` owns the host-side game state: per-tick WASD→`set_ctl_move_*`, the `PlayerProgress` upgrade levels, the level-up/menu/death state machine, and builds a `UiModel` + per-frame `UiData` from sim readback. `engine_ui::draw` renders it and returns `UiAction`s the host applies (increment a level → push via `set_ctl_*`; restart → re-seed).
+**Architecture:** `vs_viewer` already calls `present_blit_with_overlay` with a no-op closure (`bin/vs_viewer.rs:338`). Wire `voxel_engine::EguiState` into that closure. A new `vs_ui.rs` owns the host-side game state: per-tick WASD→`set_config_ctl_move_*`, the `PlayerProgress` upgrade levels, the level-up/menu/death state machine, and builds a `UiModel` + per-frame `UiData` from sim readback. `engine_ui::draw` renders it and returns `UiAction`s the host applies (increment a level → push via `set_config_ctl_*`; restart → re-seed).
 
 **Tech Stack:** Rust, `voxel_engine` (winit + ash + egui), `egui = "0.33"`, `engine_ui`. **Depends on Plan 1 (setters) + Plan 2 (engine_ui).**
 
@@ -168,15 +168,15 @@ let (mut mx, mut my) = (0.0f32, 0.0f32);
 if self.held_keys.contains("w") { my += 1.0; } if self.held_keys.contains("s") { my -= 1.0; }
 if self.held_keys.contains("d") { mx += 1.0; } if self.held_keys.contains("a") { mx -= 1.0; }
 let len = (mx*mx+my*my).sqrt(); if len > 1e-3 { mx/=len; my/=len; }
-self.app.state.set_ctl_move_x(mx);
-self.app.state.set_ctl_move_y(my);
+self.app.state.set_config_ctl_move_x(mx);
+self.app.state.set_config_ctl_move_y(my);
 // also push current progress levels so weapons reflect picks:
-self.app.state.set_ctl_bolt_level(self.progress.bolt_level);
-self.app.state.set_ctl_bolt_rate_level(self.progress.bolt_rate_level);
-self.app.state.set_ctl_nova_level(self.progress.nova_level);
-self.app.state.set_ctl_move_level(self.progress.move_level);
-self.app.state.set_ctl_garlic_level(self.progress.garlic_level);
-self.app.state.set_ctl_whip_level(self.progress.whip_level);
+self.app.state.set_config_ctl_bolt_level(self.progress.bolt_level);
+self.app.state.set_config_ctl_bolt_rate_level(self.progress.bolt_rate_level);
+self.app.state.set_config_ctl_nova_level(self.progress.nova_level);
+self.app.state.set_config_ctl_move_level(self.progress.move_level);
+self.app.state.set_config_ctl_garlic_level(self.progress.garlic_level);
+self.app.state.set_config_ctl_whip_level(self.progress.whip_level);
 ```
 Follow-cam: re-target `self.camera` on the player's voxel position each frame (use `vs::vs_world_to_voxel(player.pos)` mapped to renderer XZ). In the `run` closure, replace the probe with `engine_ui::draw(ectx, &self.ui_model, &self.ui_data, self.active_screen.as_deref())` (build `self.ui_data` via `build_data` just before).
 
@@ -256,4 +256,4 @@ git commit -m "feat(viewer): death summary screen + restart"
 ```
 
 ## Self-review note
-Setter names (`set_ctl_*`) and the `view_storage_xp_primary_buf` field/`fold_view_xp_handles()` accessor must match Plans 1/3 and the generated runtime; reconcile against actual generated output. `XP_PER_LEVEL` mirrors `config.vs.xp_per_level` (5.0) — keep in sync. `active_screen`, `paused`, `progress`, `ui_model`, `ui_data` are new fields on the `WindowedVsViewer` struct.
+Setter names (`set_config_ctl_*`) and the `view_storage_xp_primary_buf` field/`fold_view_xp_handles()` accessor must match Plans 1/3 and the generated runtime; reconcile against actual generated output. `XP_PER_LEVEL` mirrors `config.vs.xp_per_level` (5.0) — keep in sync. `active_screen`, `paused`, `progress`, `ui_model`, `ui_data` are new fields on the `WindowedVsViewer` struct.
