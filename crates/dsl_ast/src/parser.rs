@@ -1074,58 +1074,153 @@ fn init_decl(
     annotations: Vec<Annotation>,
     start: usize,
 ) -> PResult<InitDecl> {
+    use crate::ast::{CountExpr, SpawnBlock};
     expect_keyword(c, "init")
         .map_err(|e| e.with_context("parsing `init` declaration"))?;
     c.skip_ws();
     expect_char(c, '{')
         .map_err(|e| e.with_context("parsing init body (expected `{`)"))?;
     let mut stmts = Vec::new();
+    let mut spawns = Vec::new();
     loop {
         c.skip_ws();
         if c.starts_with_char('}') {
             c.bump(1);
             break;
         }
-        let stmt_start = c.pos;
-        let field = ident(c).map_err(|e| e.with_context("parsing init field name"))?;
-        c.skip_ws();
-        expect_char(c, ':')
-            .map_err(|e| e.with_context("parsing init stmt (expected `:` after field)"))?;
-        c.skip_ws();
-        let expr = if let Some(name) = peek_ident(c) {
-            if name == "slot" {
-                c.bump(name.len());
-                InitExpr::Slot
+        // Per-subkind population block: `spawn <Subkind> count <N> { … }`.
+        if starts_with_keyword(c, "spawn") {
+            let spawn_start = c.pos;
+            c.bump("spawn".len());
+            let subkind = ident(c)
+                .map_err(|e| e.with_context("parsing `spawn` subkind name"))?;
+            expect_keyword(c, "count")
+                .map_err(|e| e.with_context("parsing `spawn` count keyword"))?;
+            c.skip_ws();
+            let count = if starts_with_keyword(c, "config") {
+                c.bump("config".len());
+                expect_char(c, '.')
+                    .map_err(|e| e.with_context("parsing spawn count config `.`"))?;
+                let block = ident(c)
+                    .map_err(|e| e.with_context("parsing spawn count config block"))?;
+                expect_char(c, '.')
+                    .map_err(|e| e.with_context("parsing spawn count config `.`"))?;
+                let field = ident(c)
+                    .map_err(|e| e.with_context("parsing spawn count config field"))?;
+                CountExpr::Config(format!("{block}.{field}"))
+            } else if peek_number(c) {
+                let (n, is_float) = number_literal(c)?;
+                if is_float {
+                    return Err(ParseErr::at(
+                        here(c),
+                        "spawn count must be an integer literal or config.<block>.<field>",
+                    ));
+                }
+                CountExpr::Lit(n as u32)
             } else {
                 return Err(ParseErr::at(
                     here(c),
-                    format!(
-                        "expected `slot` or integer literal as init expression; got `{name}`"
-                    ),
+                    "expected integer literal or config.<block>.<field> as spawn count",
                 ));
+            };
+            expect_char(c, '{')
+                .map_err(|e| e.with_context("parsing spawn block body `{`"))?;
+            let mut fields = Vec::new();
+            loop {
+                c.skip_ws();
+                if c.starts_with_char('}') {
+                    c.bump(1);
+                    break;
+                }
+                fields.push(init_field_stmt(c)?);
+                c.skip_ws();
+                if c.starts_with_char(',') {
+                    c.bump(1);
+                }
             }
-        } else if peek_number(c) {
-            let (n, is_float) = number_literal(c)?;
-            if is_float {
-                return Err(ParseErr::at(
-                    here(c),
-                    "init expression must be an integer (no float fills)",
-                ));
+            spawns.push(SpawnBlock {
+                subkind,
+                count,
+                fields,
+                span: Span::new(spawn_start, c.pos),
+            });
+            c.skip_ws();
+            if c.starts_with_char(',') {
+                c.bump(1);
             }
-            InitExpr::Const(n as i64)
-        } else {
-            return Err(ParseErr::at(
-                here(c),
-                "expected `slot` or integer literal as init expression",
-            ));
-        };
-        stmts.push(InitStmt { field, expr, span: Span::new(stmt_start, c.pos) });
+            continue;
+        }
+        // Flat uniform form: `field: <value>` applied to every slot.
+        stmts.push(init_field_stmt(c)?);
         c.skip_ws();
         if c.starts_with_char(',') {
             c.bump(1);
         }
     }
-    Ok(InitDecl { annotations, stmts, span: Span::new(start, c.pos) })
+    Ok(InitDecl { annotations, stmts, spawns, span: Span::new(start, c.pos) })
+}
+
+/// Parse one `field: <value>` init statement. `<value>` is `slot`,
+/// an integer literal, a float literal (→ `InitExpr::Float`), or — for a
+/// `pos:` field — a position builtin (`origin` / `scatter(r)` / `ring(r)`).
+/// Shared by the flat `init { field: v }` form and each `spawn` block body.
+fn init_field_stmt(c: &mut Cursor) -> PResult<InitStmt> {
+    use crate::ast::PosBuiltin;
+    let stmt_start = c.pos;
+    let field = ident(c).map_err(|e| e.with_context("parsing init field name"))?;
+    c.skip_ws();
+    expect_char(c, ':')
+        .map_err(|e| e.with_context("parsing init stmt (expected `:` after field)"))?;
+    c.skip_ws();
+    let expr = if let Some(name) = peek_ident(c) {
+        match name.as_str() {
+            "slot" => {
+                c.bump(name.len());
+                InitExpr::Slot
+            }
+            "origin" => {
+                c.bump(name.len());
+                InitExpr::Pos(PosBuiltin::Origin)
+            }
+            "scatter" | "ring" => {
+                c.bump(name.len());
+                expect_char(c, '(').map_err(|e| {
+                    e.with_context("parsing position builtin `(`")
+                })?;
+                let r = parse_f64(c)?;
+                expect_char(c, ')').map_err(|e| {
+                    e.with_context("parsing position builtin `)`")
+                })?;
+                let pb = if name == "scatter" {
+                    PosBuiltin::Scatter(r)
+                } else {
+                    PosBuiltin::Ring(r)
+                };
+                InitExpr::Pos(pb)
+            }
+            other => {
+                return Err(ParseErr::at(
+                    here(c),
+                    format!(
+                        "expected `slot`, `origin`, `scatter(r)`, `ring(r)`, or a numeric literal as init expression; got `{other}`"
+                    ),
+                ));
+            }
+        }
+    } else if peek_number(c) {
+        let (n, is_float) = number_literal(c)?;
+        if is_float {
+            InitExpr::Float(n)
+        } else {
+            InitExpr::Const(n as i64)
+        }
+    } else {
+        return Err(ParseErr::at(
+            here(c),
+            "expected `slot`, `origin`, `scatter(r)`, `ring(r)`, or a numeric literal as init expression",
+        ));
+    };
+    Ok(InitStmt { field, expr, span: Span::new(stmt_start, c.pos) })
 }
 
 // ---------------------------------------------------------------------------
@@ -3631,17 +3726,33 @@ fn parse_color(c: &mut Cursor) -> PResult<[u8; 3]> {
     Ok([r, g, b])
 }
 
-/// Parse `when <field> in [lo, hi]` into a `FieldRangeDecl`.
+/// Parse a field-range selector. Two surface forms:
+///   * `when <field> in [lo, hi]` — explicit numeric range.
+///   * `when creature_type is <Subkind>` — subkind selector; lowered to
+///     `field:"creature_type", lo == hi == <subkind ordinal>` at JSON emit.
 fn parse_field_range(c: &mut Cursor) -> PResult<crate::ast::FieldRangeDecl> {
     expect_keyword(c, "when").map_err(|e| e.with_context("parsing field range `when`"))?;
     let field = ident(c).map_err(|e| e.with_context("parsing field range column name"))?;
+    c.skip_ws();
+    // `creature_type is <Subkind>` selector — resolve to an ordinal later.
+    if starts_with_keyword(c, "is") {
+        c.bump("is".len());
+        let subkind = ident(c)
+            .map_err(|e| e.with_context("parsing `creature_type is <Subkind>` subkind name"))?;
+        return Ok(crate::ast::FieldRangeDecl {
+            field,
+            lo: 0.0,
+            hi: 0.0,
+            subkind: Some(subkind),
+        });
+    }
     expect_keyword(c, "in").map_err(|e| e.with_context("parsing field range `in`"))?;
     expect_char(c, '[').map_err(|e| e.with_context("parsing field range `[`"))?;
     let lo = parse_f64(c)?;
     expect_char(c, ',').map_err(|e| e.with_context("parsing field range `,`"))?;
     let hi = parse_f64(c)?;
     expect_char(c, ']').map_err(|e| e.with_context("parsing field range `]`"))?;
-    Ok(crate::ast::FieldRangeDecl { field, lo, hi })
+    Ok(crate::ast::FieldRangeDecl { field, lo, hi, subkind: None })
 }
 
 /// ```text

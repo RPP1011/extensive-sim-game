@@ -135,8 +135,39 @@ pub enum Decl {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct InitDecl {
     pub annotations: Vec<Annotation>,
+    /// Flat uniform form: `field: <value>` applied to every agent slot.
+    /// Retained for back-compat (`play_probe`, etc.).
     pub stmts: Vec<InitStmt>,
+    /// Per-subkind population blocks: `spawn <Subkind> count <N> { … }`.
+    /// The compiler assigns contiguous slot ranges (skipping slot 0, the
+    /// AgentId NonZeroU32 sentinel) and stamps each seeded agent's
+    /// `creature_type` = the subkind ordinal + `alive: 1` (overridable).
+    pub spawns: Vec<SpawnBlock>,
     pub span: Span,
+}
+
+/// A `spawn <Subkind> count <N> { <field: value,>* }` population block.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SpawnBlock {
+    /// The `entity X : Agent` subkind name; resolved to its declaration-order
+    /// `creature_type` ordinal when stamping seeded agents.
+    pub subkind: String,
+    pub count: CountExpr,
+    /// Per-block field fills (int/f32/slot/pos), applied to the block's
+    /// slot range on top of the auto-stamped `creature_type` + `alive`.
+    pub fields: Vec<InitStmt>,
+    pub span: Span,
+}
+
+/// `count` value for a `spawn` block — a literal or a `config.*` reference.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum CountExpr {
+    /// `count 16` — literal slot count.
+    Lit(u32),
+    /// `count config.waves.cap` — dotted `config.<block>.<field>` reference,
+    /// stored as the joined name (`waves.cap`). Resolved to the runtime
+    /// config default at codegen.
+    Config(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -154,8 +185,27 @@ pub struct InitStmt {
 pub enum InitExpr {
     /// Constant fill: every slot gets this value.
     Const(i64),
+    /// Float constant fill: every slot gets this value. Written into an
+    /// f32 column as its bit pattern (`(v as f32).to_bits()`); written
+    /// into a u32/bool column as `(v as f32) as u32` (truncated).
+    Float(f64),
     /// Staggered fill: slot N gets value N (per-agent slot index).
     Slot,
+    /// Position builtin for the `pos` field — seeded at `try_new` via
+    /// `per_agent_u32` (P5-deterministic per `(seed, slot)`).
+    Pos(PosBuiltin),
+}
+
+/// Initial-position builtins for the `pos:` init field. Seeded host-side
+/// at `try_new` so positions are deterministic for a given `(seed, slot)`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub enum PosBuiltin {
+    /// `origin` — every seeded slot at `[0, 0, 0]`.
+    Origin,
+    /// `scatter(r)` — uniform point in a radius-`r` disc (XY plane).
+    Scatter(f64),
+    /// `ring(r)` — on the radius-`r` circle (XY plane).
+    Ring(f64),
 }
 
 /// Per-fixture compiler-debug-mode opt-in. Lets a `.sim` author surface
@@ -237,12 +287,22 @@ pub struct RenderDecl {
     pub span: Span,
 }
 
-/// `[lo, hi]` range over a named agent column.
+/// `[lo, hi]` range over a named agent column. Two surface forms:
+///   * `when <field> in [lo, hi]` — explicit numeric range.
+///   * `when creature_type is <Subkind>` — subkind selector; `field` is
+///     `"creature_type"`, `subkind` carries the name, and `lo`/`hi` are
+///     filled in at JSON-emit time with the subkind's declaration-order
+///     ordinal (`lo == hi == ordinal`) — no new descriptor variant.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FieldRangeDecl {
     pub field: String,
     pub lo: f64,
     pub hi: f64,
+    /// `Some(name)` for the `creature_type is <Subkind>` selector; the
+    /// compiler resolves `name` → ordinal and stamps `lo == hi == ordinal`.
+    /// `None` for the numeric `in [lo, hi]` form.
+    #[serde(default)]
+    pub subkind: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
