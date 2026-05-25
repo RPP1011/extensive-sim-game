@@ -456,3 +456,48 @@ metric pack_aggression {
   emit_every:      10,
   alert_when:      pack_aggression > 50.0,
 }
+
+// ---------------------------------------------------------------------------
+// Plan F — player-facing descriptor blocks. The compiler lowers each to a
+// &'static str JSON descriptor on the generated runtime (render/controls via
+// engine_play_api, ui via engine_ui), consumed by the generic player
+// (`engine_play::play`). Structurally different from vampire_survivors:
+// EVADE (no weapons / no vfx), entity-subkind identity keyed on
+// `creature_type` (Hare green, Wolf red) rather than a mana band, and a
+// survive-timer HUD instead of an XP/level loop.
+// ---------------------------------------------------------------------------
+
+// Player intent: WASD writes config.ctl.move_{x,y} (the @runtime channel
+// HareControl reads). w/s = +/-Y, a/d = -/+X (matches the VS binding).
+controls {
+  key "w" -> ctl.move_y:  1.0
+  key "s" -> ctl.move_y: -1.0
+  key "a" -> ctl.move_x: -1.0
+  key "d" -> ctl.move_x:  1.0
+}
+
+// Camera follows the player Hare (the lowest-slot Hare, `mana == 0`, the only
+// agent in the [0.0, 0.5] mana band the `init { mana: slot }` seed produces).
+// Agents are colored by `creature_type` (the snapshot column the entity
+// subkind resolves to): Hare = 0 → green, Wolf = 1 → red. NO vfx — this is an
+// evade game with no weapons (the deliberate difference from VS that proves
+// the vfx surface is optional).
+render {
+  arena_radius 42.0
+  camera follow when mana in [0.0, 0.5]
+  agent when creature_type in [0.0, 0.5] { color (80, 200, 90) }
+  agent when creature_type in [1.0, 1.5] { color (210, 60, 50) }
+}
+
+// Survive-timer HUD: how long the Hare has evaded (`{time}s`, the universally
+// bound tick×0.1 readout) + the live creature count (`{enemies}`, the player's
+// "danger nearby" gauge — the closest host-bound readout for a Hare, which has
+// no kill-count of its own). A death screen ends the run when the player Hare
+// dies (the host shows it on the followed-agent's death), summarising survival
+// time. No level-up menu — this game has no upgrade loop.
+ui {
+  hud {
+    text "Survive {time}s   Creatures nearby {enemies}"
+  }
+  screen dead "Caught!" { summary time  restart "Restart (R)" }
+}
