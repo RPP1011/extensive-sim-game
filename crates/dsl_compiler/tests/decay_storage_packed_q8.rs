@@ -156,7 +156,14 @@ physics Tickle @phase(per_agent) {
   }
 }
 
-physics SetSomeBelief @phase(post) {
+// @phase(per_agent), not @phase(post): the body reads `self`, and a
+// non-per_agent phase dispatches PerEvent (no per-agent `agent_id` in
+// scope), which the G2 well-formed check rejects (SelfRefInPerEventBody).
+// per_agent binds `self`/`agent_id`. The rule only feeds beliefs_tick for
+// the decay gate below — its phase doesn't affect what this test asserts
+// (the decay kernel's packed-q8 predicate inlining). Mirrors the G2
+// close-out's fix to the sibling decay_mode_sub_and_gate fixture.
+physics SetSomeBelief @phase(per_agent) {
   on Tick {} {
     agents.set_beliefs_last_seen_tick(self, self, world.tick);
   }
