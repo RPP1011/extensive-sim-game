@@ -143,8 +143,7 @@ sort_by distance(self, _) limit 32 {
 }
 
 // Bolt: every bolt_period ticks, the player strikes the nearest enemy.
-@phase(event)
-physics BoltFire {
+physics BoltFire @phase(per_agent) {
   on Tick {} where (self.alive
                     && self.mana >= config.vs.player_mana_min
                     && self.mana <= config.vs.player_mana_max
@@ -155,9 +154,8 @@ physics BoltFire {
   }
 }
 
-// @phase(event); player bursts every nova_period ticks, damaging all enemies in radius.
-@phase(event)
-physics NovaFire {
+// @phase(per_agent); player bursts every nova_period ticks, damaging all enemies in radius.
+physics NovaFire @phase(per_agent) {
   on Tick {} where (self.alive
                     && self.mana >= config.vs.player_mana_min
                     && self.mana <= config.vs.player_mana_max
@@ -197,8 +195,7 @@ view upgrades_total(player: Agent) -> f32 {
 
 // Per-tick: pick the highest-priority not-yet-capped upgrade (fixed priority).
 // Sub-probe 3 (value-returning if/else -> u32) + 3b (view read in if cond).
-@phase(event)
-physics ChooseUpgrade {
+physics ChooseUpgrade @phase(per_agent) {
   on Tick {} where (self.alive
                     && self.mana >= config.vs.player_mana_min
                     && self.mana <= config.vs.player_mana_max) {

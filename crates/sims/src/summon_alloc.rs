@@ -90,7 +90,13 @@ pub fn drain_summons(ctx: DrainCtx) -> usize {
     const KIND_SUMMON: u32 = 62;
     let stride = engine::gpu::EVENT_STRIDE_U32 as usize;
 
-    let n_slots = ctx.event_ring.tail_value();
+    // tail_value() is a host-side estimate that step() resets to 0 at the
+    // start of every tick (via reset_tail_estimate). After step() returns
+    // the GPU has already run and the real tail is in the GPU buffer, so
+    // we always read it back directly rather than trusting the (stale) host
+    // estimate.
+    let tail_words = readback_u32(ctx.device, ctx.queue, ctx.event_ring.tail(), 4);
+    let n_slots = tail_words.first().copied().unwrap_or(0);
     if n_slots == 0 {
         return 0;
     }
