@@ -90,6 +90,9 @@ fn populate_registers_field_decls_from_program() {
             }),
         ],
         terrain: None,
+        controls: None,
+        render: None,
+        ui: None,
     };
     let ids = populate(&program);
     assert_eq!(ids.len(), 3);

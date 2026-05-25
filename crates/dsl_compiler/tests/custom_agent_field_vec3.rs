@@ -92,6 +92,9 @@ fn populate_accepts_vec3_decls() {
             }),
         ],
         terrain: None,
+        controls: None,
+        render: None,
+        ui: None,
     };
     let ids = populate(&program);
     assert_eq!(ids.len(), 2);

@@ -61,6 +61,12 @@ pub struct Program {
     /// Optional singleton `terrain { ... }` block. `None` if the source
     /// does not contain a `terrain` block.
     pub terrain: Option<crate::terrain::TerrainBlock>,
+    /// Plan A — optional singleton player-facing descriptor blocks. Each is
+    /// parsed onto the Program (not a `Decl`), so the resolver ignores them;
+    /// the build helper lowers each to a `&'static str` JSON descriptor.
+    pub controls: Option<ControlsDecl>,
+    pub render: Option<RenderDecl>,
+    pub ui: Option<UiDecl>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -186,6 +192,137 @@ pub enum DebugDepthLit {
     StageMemory,
     Kernel,
     DslMapped,
+}
+
+// ---------------------------------------------------------------------------
+// Plan A — player-facing descriptor blocks (`controls {}` / `render {}` /
+// `ui {}`). Each is a singleton top-level block (like `terrain {}`), parsed
+// onto `Program` rather than into a `Decl` variant (the resolver never sees
+// them). The build helper extracts them before `resolve` consumes the Program
+// and lowers each to a `&'static str` JSON descriptor on the generated
+// runtime, matching the `engine_play_api` / `engine_ui` serde shapes.
+// ---------------------------------------------------------------------------
+
+/// `controls { key "w" -> ctl.move_y: 1.0  press? … }`. Each binding maps a
+/// keyboard key to a write of `value` into the `@runtime` field `<block>.<field>`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ControlsDecl {
+    pub bindings: Vec<ControlBinding>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ControlBinding {
+    /// Lowercased key name (e.g. `"w"`, `"space"`).
+    pub key: String,
+    /// `@runtime` block name (e.g. `ctl`).
+    pub block: String,
+    /// `@runtime` field name within the block (e.g. `move_y`).
+    pub field: String,
+    pub value: f64,
+    /// `true` = fire once on key-down (`BindMode::Press`); `false` = apply
+    /// every frame held (`BindMode::Hold`).
+    pub press: bool,
+    pub span: Span,
+}
+
+/// `render { arena_radius <r>  camera …  agent when … { color … }  vfx … }`.
+/// Mirrors the `engine_play_api::RenderDescriptor` schema.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RenderDecl {
+    pub arena_radius: f64,
+    pub camera: CameraDecl,
+    pub agents: Vec<AgentVisualDecl>,
+    pub vfx: Vec<VfxDecl>,
+    pub span: Span,
+}
+
+/// `[lo, hi]` range over a named agent column.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FieldRangeDecl {
+    pub field: String,
+    pub lo: f64,
+    pub hi: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum CameraDecl {
+    /// `camera follow when <field> in [lo, hi]`.
+    Follow(FieldRangeDecl),
+    /// `camera observer`.
+    Observer,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct AgentVisualDecl {
+    /// `agent when <field> in [lo, hi] { color (r,g,b) }`.
+    pub when: FieldRangeDecl,
+    pub color: [u8; 3],
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum VfxKindDecl {
+    /// `ring radius <r> color (r,g,b)`.
+    Ring,
+    /// `beam_to_nearest when <field> in [lo, hi] color (r,g,b)`.
+    BeamToNearest { target: FieldRangeDecl },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct VfxDecl {
+    /// `vfx on <RuleName> period <n> { … }`.
+    pub on_rule: String,
+    pub period: u32,
+    pub kind: VfxKindDecl,
+    pub radius: f64,
+    pub color: [u8; 3],
+}
+
+/// `ui { hud { … }  menu <name> "title" { … }  screen <name> "title" { … } }`.
+/// Mirrors the `engine_ui::UiModel` serde shape.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct UiDecl {
+    pub hud: Vec<UiWidget>,
+    pub screens: Vec<UiScreen>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum UiWidget {
+    /// `bar "HP" value hp max hp_max color (220,40,40)`.
+    Bar {
+        label: String,
+        value: String,
+        max: String,
+        color: [u8; 3],
+    },
+    /// `text "Lv {level}  Kills {kills}"`.
+    Text { template: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct UiCard {
+    pub label: String,
+    /// `card "Bolt +" -> bolt_level` increments host-side counter `bolt_level`.
+    pub action_field: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum UiScreen {
+    /// `menu <name> "title" { card … }` — modal upgrade menu.
+    Menu {
+        name: String,
+        title: String,
+        cards: Vec<UiCard>,
+    },
+    /// `screen <name> "title" { summary <key> … restart "label" }` — modal end
+    /// screen with summary rows + a restart button.
+    End {
+        name: String,
+        title: String,
+        summary: Vec<(String, String)>,
+        restart_label: String,
+    },
 }
 
 /// Top-level `field <name>: <type>` declaration — registers a custom

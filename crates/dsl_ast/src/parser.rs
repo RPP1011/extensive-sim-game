@@ -91,6 +91,9 @@ pub fn parse_program(source: &str) -> Result<Program, ParseError> {
 
     let mut decls = Vec::new();
     let mut terrain: Option<crate::terrain::TerrainBlock> = None;
+    let mut controls: Option<crate::ast::ControlsDecl> = None;
+    let mut render: Option<crate::ast::RenderDecl> = None;
+    let mut ui: Option<crate::ast::UiDecl> = None;
     while !c.eof() {
         // Reject `import` that appears after a non-import top-level decl.
         if starts_with_keyword(&c, "import") {
@@ -123,6 +126,60 @@ pub fn parse_program(source: &str) -> Result<Program, ParseError> {
             c.skip_ws();
             continue;
         }
+        // Plan A — player-facing descriptor blocks are singleton top-level
+        // blocks (like `terrain`), parsed onto the Program rather than into
+        // a `Decl`. The resolver never sees them.
+        match peek_ident(&c).as_deref() {
+            Some("controls") => {
+                let start = c.pos;
+                match controls_decl(&mut c, start) {
+                    Ok(d) => {
+                        if controls.is_some() {
+                            return Err(ParseError::new(source, here(&c),
+                                vec!["parsing `controls` block".to_string()],
+                                "duplicate `controls` block; only one is allowed per file"));
+                        }
+                        controls = Some(d);
+                    }
+                    Err(e) => return Err(ParseError::new(source, e.span, e.context, e.message)),
+                }
+                c.skip_ws();
+                continue;
+            }
+            Some("render") => {
+                let start = c.pos;
+                match render_decl(&mut c, start) {
+                    Ok(d) => {
+                        if render.is_some() {
+                            return Err(ParseError::new(source, here(&c),
+                                vec!["parsing `render` block".to_string()],
+                                "duplicate `render` block; only one is allowed per file"));
+                        }
+                        render = Some(d);
+                    }
+                    Err(e) => return Err(ParseError::new(source, e.span, e.context, e.message)),
+                }
+                c.skip_ws();
+                continue;
+            }
+            Some("ui") => {
+                let start = c.pos;
+                match ui_decl(&mut c, start) {
+                    Ok(d) => {
+                        if ui.is_some() {
+                            return Err(ParseError::new(source, here(&c),
+                                vec!["parsing `ui` block".to_string()],
+                                "duplicate `ui` block; only one is allowed per file"));
+                        }
+                        ui = Some(d);
+                    }
+                    Err(e) => return Err(ParseError::new(source, e.span, e.context, e.message)),
+                }
+                c.skip_ws();
+                continue;
+            }
+            _ => {}
+        }
         match decl(&mut c) {
             Ok(mut d) => {
                 if let Err(e) = absorb_trailing_annotations(&mut c, &mut d) {
@@ -136,7 +193,7 @@ pub fn parse_program(source: &str) -> Result<Program, ParseError> {
         }
         c.skip_ws();
     }
-    Ok(Program { imports, imports_resolved: vec![], decls, terrain })
+    Ok(Program { imports, imports_resolved: vec![], decls, terrain, controls, render, ui })
 }
 
 /// Parse a single expression from a free-floating source string. Used
@@ -3521,6 +3578,352 @@ fn parse_config_default(c: &mut Cursor) -> PResult<ConfigDefault> {
         // Unsigned by default; the type declaration decides how it's emitted.
         Ok(ConfigDefault::Uint(v as u64))
     }
+}
+
+// ---------------------------------------------------------------------------
+// Plan A — player-facing descriptor blocks (`controls` / `render` / `ui`).
+// Each lowers to a `&'static str` JSON descriptor on the generated runtime.
+// ---------------------------------------------------------------------------
+
+/// Parse a non-negative or signed f64 number (no `@runtime`-style suffix).
+fn parse_f64(c: &mut Cursor) -> PResult<f64> {
+    c.skip_ws();
+    let negative = if c.starts_with_char('-') {
+        c.bump(1);
+        c.skip_ws();
+        true
+    } else {
+        false
+    };
+    let (v, _is_float) = number_literal(c)?;
+    Ok(if negative { -v } else { v })
+}
+
+/// Parse a `u32` literal (rejects negatives / out-of-range).
+fn parse_u32(c: &mut Cursor) -> PResult<u32> {
+    c.skip_ws();
+    let (v, is_float) = number_literal(c)?;
+    if is_float || v < 0.0 || v > u32::MAX as f64 {
+        return Err(ParseErr::at(here(c), "expected a u32 integer literal"));
+    }
+    Ok(v as u32)
+}
+
+/// Parse a `u8` color channel (0..=255).
+fn parse_u8_channel(c: &mut Cursor) -> PResult<u8> {
+    c.skip_ws();
+    let (v, is_float) = number_literal(c)?;
+    if is_float || v < 0.0 || v > 255.0 {
+        return Err(ParseErr::at(here(c), "color channel must be an integer 0..=255"));
+    }
+    Ok(v as u8)
+}
+
+/// Parse `(r, g, b)` into `[u8; 3]`.
+fn parse_color(c: &mut Cursor) -> PResult<[u8; 3]> {
+    expect_char(c, '(').map_err(|e| e.with_context("parsing color `(`"))?;
+    let r = parse_u8_channel(c)?;
+    expect_char(c, ',').map_err(|e| e.with_context("parsing color `,`"))?;
+    let g = parse_u8_channel(c)?;
+    expect_char(c, ',').map_err(|e| e.with_context("parsing color `,`"))?;
+    let b = parse_u8_channel(c)?;
+    expect_char(c, ')').map_err(|e| e.with_context("parsing color `)`"))?;
+    Ok([r, g, b])
+}
+
+/// Parse `when <field> in [lo, hi]` into a `FieldRangeDecl`.
+fn parse_field_range(c: &mut Cursor) -> PResult<crate::ast::FieldRangeDecl> {
+    expect_keyword(c, "when").map_err(|e| e.with_context("parsing field range `when`"))?;
+    let field = ident(c).map_err(|e| e.with_context("parsing field range column name"))?;
+    expect_keyword(c, "in").map_err(|e| e.with_context("parsing field range `in`"))?;
+    expect_char(c, '[').map_err(|e| e.with_context("parsing field range `[`"))?;
+    let lo = parse_f64(c)?;
+    expect_char(c, ',').map_err(|e| e.with_context("parsing field range `,`"))?;
+    let hi = parse_f64(c)?;
+    expect_char(c, ']').map_err(|e| e.with_context("parsing field range `]`"))?;
+    Ok(crate::ast::FieldRangeDecl { field, lo, hi })
+}
+
+/// ```text
+/// controls {
+///   key "w" -> ctl.move_y: 1.0
+///   key "space" -> ctl.bolt_rate_level: 1.0 press
+/// }
+/// ```
+fn controls_decl(c: &mut Cursor, start: usize) -> PResult<crate::ast::ControlsDecl> {
+    expect_keyword(c, "controls").map_err(|e| e.with_context("parsing `controls` block"))?;
+    expect_char(c, '{').map_err(|e| e.with_context("parsing controls body `{`"))?;
+    let mut bindings = Vec::new();
+    loop {
+        c.skip_ws();
+        if c.starts_with_char('}') {
+            break;
+        }
+        let bstart = c.pos;
+        expect_keyword(c, "key").map_err(|e| e.with_context("parsing controls binding `key`"))?;
+        c.skip_ws();
+        // Key name: quoted string or bare identifier.
+        let key = if c.starts_with_char('"') {
+            string_lit(c)?
+        } else {
+            ident(c).map_err(|e| e.with_context("parsing controls key name"))?
+        };
+        expect_str(c, "->").map_err(|e| e.with_context("parsing controls binding `->`"))?;
+        let block = ident(c).map_err(|e| e.with_context("parsing controls target block name"))?;
+        expect_char(c, '.').map_err(|e| e.with_context("parsing controls target `.`"))?;
+        let field = ident(c).map_err(|e| e.with_context("parsing controls target field name"))?;
+        expect_char(c, ':').map_err(|e| e.with_context("parsing controls value `:`"))?;
+        let value = parse_f64(c)?;
+        // Optional trailing `press` keyword → Press mode; else Hold.
+        let after_value = c.pos;
+        c.skip_ws();
+        let press = if starts_with_keyword(c, "press") {
+            c.bump("press".len());
+            true
+        } else {
+            c.pos = after_value;
+            false
+        };
+        bindings.push(crate::ast::ControlBinding {
+            key,
+            block,
+            field,
+            value,
+            press,
+            span: Span::new(bstart, c.pos),
+        });
+        c.skip_ws();
+        if c.starts_with_char(',') {
+            c.bump(1);
+        }
+    }
+    expect_char(c, '}').map_err(|e| e.with_context("parsing controls body `}`"))?;
+    Ok(crate::ast::ControlsDecl { bindings, span: Span::new(start, c.pos) })
+}
+
+/// ```text
+/// render {
+///   arena_radius 120.0
+///   camera follow when mana in [0.5, 1.5]
+///   agent when mana in [0.5, 1.5] { color (0, 220, 220) }
+///   vfx on NovaFire period 40 { ring radius 6.0 color (255, 255, 120) }
+///   vfx on Bolt period 12 { beam_to_nearest when mana in [1.5, 9.9] color (120, 200, 255) }
+/// }
+/// ```
+fn render_decl(c: &mut Cursor, start: usize) -> PResult<crate::ast::RenderDecl> {
+    use crate::ast::{AgentVisualDecl, CameraDecl, VfxDecl, VfxKindDecl};
+    expect_keyword(c, "render").map_err(|e| e.with_context("parsing `render` block"))?;
+    expect_char(c, '{').map_err(|e| e.with_context("parsing render body `{`"))?;
+    let mut arena_radius: Option<f64> = None;
+    let mut camera: Option<CameraDecl> = None;
+    let mut agents: Vec<AgentVisualDecl> = Vec::new();
+    let mut vfx: Vec<VfxDecl> = Vec::new();
+    loop {
+        c.skip_ws();
+        if c.starts_with_char('}') {
+            break;
+        }
+        match peek_ident(c).as_deref() {
+            Some("arena_radius") => {
+                expect_keyword(c, "arena_radius")?;
+                arena_radius = Some(parse_f64(c)?);
+            }
+            Some("camera") => {
+                expect_keyword(c, "camera")?;
+                c.skip_ws();
+                if starts_with_keyword(c, "follow") {
+                    c.bump("follow".len());
+                    let range = parse_field_range(c)?;
+                    camera = Some(CameraDecl::Follow(range));
+                } else if starts_with_keyword(c, "observer") {
+                    c.bump("observer".len());
+                    camera = Some(CameraDecl::Observer);
+                } else {
+                    return Err(ParseErr::at(here(c),
+                        "expected `follow when …` or `observer` after `camera`"));
+                }
+            }
+            Some("agent") => {
+                expect_keyword(c, "agent")?;
+                let when = parse_field_range(c)?;
+                expect_char(c, '{').map_err(|e| e.with_context("parsing agent visual `{`"))?;
+                expect_keyword(c, "color").map_err(|e| e.with_context("parsing agent visual `color`"))?;
+                let color = parse_color(c)?;
+                expect_char(c, '}').map_err(|e| e.with_context("parsing agent visual `}`"))?;
+                agents.push(AgentVisualDecl { when, color });
+            }
+            Some("vfx") => {
+                expect_keyword(c, "vfx")?;
+                expect_keyword(c, "on").map_err(|e| e.with_context("parsing vfx `on`"))?;
+                let on_rule = ident(c).map_err(|e| e.with_context("parsing vfx rule name"))?;
+                expect_keyword(c, "period").map_err(|e| e.with_context("parsing vfx `period`"))?;
+                let period = parse_u32(c)?;
+                expect_char(c, '{').map_err(|e| e.with_context("parsing vfx body `{`"))?;
+                c.skip_ws();
+                let (kind, radius, color) = if starts_with_keyword(c, "ring") {
+                    c.bump("ring".len());
+                    expect_keyword(c, "radius").map_err(|e| e.with_context("parsing vfx ring `radius`"))?;
+                    let radius = parse_f64(c)?;
+                    expect_keyword(c, "color").map_err(|e| e.with_context("parsing vfx ring `color`"))?;
+                    let color = parse_color(c)?;
+                    (VfxKindDecl::Ring, radius, color)
+                } else if starts_with_keyword(c, "beam_to_nearest") {
+                    c.bump("beam_to_nearest".len());
+                    let target = parse_field_range(c)?;
+                    expect_keyword(c, "color").map_err(|e| e.with_context("parsing vfx beam `color`"))?;
+                    let color = parse_color(c)?;
+                    (VfxKindDecl::BeamToNearest { target }, 0.0, color)
+                } else {
+                    return Err(ParseErr::at(here(c),
+                        "expected `ring radius … color …` or `beam_to_nearest when … color …` in vfx body"));
+                };
+                expect_char(c, '}').map_err(|e| e.with_context("parsing vfx body `}`"))?;
+                vfx.push(VfxDecl { on_rule, period, kind, radius, color });
+            }
+            other => {
+                return Err(ParseErr::at(here(c), format!(
+                    "unexpected `{}` in render block; expected arena_radius / camera / agent / vfx",
+                    other.unwrap_or("<eof>"),
+                )));
+            }
+        }
+    }
+    expect_char(c, '}').map_err(|e| e.with_context("parsing render body `}`"))?;
+    let arena_radius = arena_radius.ok_or_else(|| {
+        ParseErr::at(Span::new(start, c.pos), "render block missing required `arena_radius <n>`")
+    })?;
+    let camera = camera.ok_or_else(|| {
+        ParseErr::at(Span::new(start, c.pos),
+            "render block missing required `camera follow when … | observer`")
+    })?;
+    Ok(crate::ast::RenderDecl { arena_radius, camera, agents, vfx, span: Span::new(start, c.pos) })
+}
+
+/// ```text
+/// ui {
+///   hud {
+///     bar "HP" value hp max hp_max color (220, 40, 40)
+///     text "Lv {level}  Kills {kills}"
+///   }
+///   menu level_up "Level Up!" {
+///     card "Bolt Damage +" -> bolt_level
+///   }
+///   screen dead "You Died" { summary time level kills  restart "Restart (R)" }
+/// }
+/// ```
+fn ui_decl(c: &mut Cursor, start: usize) -> PResult<crate::ast::UiDecl> {
+    use crate::ast::{UiCard, UiScreen, UiWidget};
+    expect_keyword(c, "ui").map_err(|e| e.with_context("parsing `ui` block"))?;
+    expect_char(c, '{').map_err(|e| e.with_context("parsing ui body `{`"))?;
+    let mut hud: Vec<UiWidget> = Vec::new();
+    let mut screens: Vec<UiScreen> = Vec::new();
+    loop {
+        c.skip_ws();
+        if c.starts_with_char('}') {
+            break;
+        }
+        match peek_ident(c).as_deref() {
+            Some("hud") => {
+                expect_keyword(c, "hud")?;
+                expect_char(c, '{').map_err(|e| e.with_context("parsing hud body `{`"))?;
+                loop {
+                    c.skip_ws();
+                    if c.starts_with_char('}') {
+                        break;
+                    }
+                    match peek_ident(c).as_deref() {
+                        Some("bar") => {
+                            expect_keyword(c, "bar")?;
+                            let label = string_lit(c).map_err(|e| e.with_context("parsing bar label"))?;
+                            expect_keyword(c, "value").map_err(|e| e.with_context("parsing bar `value`"))?;
+                            let value = ident(c).map_err(|e| e.with_context("parsing bar value key"))?;
+                            expect_keyword(c, "max").map_err(|e| e.with_context("parsing bar `max`"))?;
+                            let max = ident(c).map_err(|e| e.with_context("parsing bar max key"))?;
+                            expect_keyword(c, "color").map_err(|e| e.with_context("parsing bar `color`"))?;
+                            let color = parse_color(c)?;
+                            hud.push(UiWidget::Bar { label, value, max, color });
+                        }
+                        Some("text") => {
+                            expect_keyword(c, "text")?;
+                            let template = string_lit(c).map_err(|e| e.with_context("parsing text template"))?;
+                            hud.push(UiWidget::Text { template });
+                        }
+                        other => {
+                            return Err(ParseErr::at(here(c), format!(
+                                "unexpected `{}` in hud block; expected bar / text",
+                                other.unwrap_or("<eof>"),
+                            )));
+                        }
+                    }
+                }
+                expect_char(c, '}').map_err(|e| e.with_context("parsing hud body `}`"))?;
+            }
+            Some("menu") => {
+                expect_keyword(c, "menu")?;
+                let name = ident(c).map_err(|e| e.with_context("parsing menu name"))?;
+                let title = string_lit(c).map_err(|e| e.with_context("parsing menu title"))?;
+                expect_char(c, '{').map_err(|e| e.with_context("parsing menu body `{`"))?;
+                let mut cards = Vec::new();
+                loop {
+                    c.skip_ws();
+                    if c.starts_with_char('}') {
+                        break;
+                    }
+                    expect_keyword(c, "card").map_err(|e| e.with_context("parsing menu `card`"))?;
+                    let label = string_lit(c).map_err(|e| e.with_context("parsing card label"))?;
+                    expect_str(c, "->").map_err(|e| e.with_context("parsing card `->`"))?;
+                    let action_field = ident(c).map_err(|e| e.with_context("parsing card action field"))?;
+                    cards.push(UiCard { label, action_field });
+                }
+                expect_char(c, '}').map_err(|e| e.with_context("parsing menu body `}`"))?;
+                screens.push(UiScreen::Menu { name, title, cards });
+            }
+            Some("screen") => {
+                expect_keyword(c, "screen")?;
+                let name = ident(c).map_err(|e| e.with_context("parsing screen name"))?;
+                let title = string_lit(c).map_err(|e| e.with_context("parsing screen title"))?;
+                expect_char(c, '{').map_err(|e| e.with_context("parsing screen body `{`"))?;
+                let mut summary: Vec<(String, String)> = Vec::new();
+                let mut restart_label: Option<String> = None;
+                loop {
+                    c.skip_ws();
+                    if c.starts_with_char('}') {
+                        break;
+                    }
+                    if starts_with_keyword(c, "summary") {
+                        c.bump("summary".len());
+                        // One or more bare-ident summary keys until `restart` or `}`.
+                        loop {
+                            c.skip_ws();
+                            if c.starts_with_char('}') || starts_with_keyword(c, "restart") {
+                                break;
+                            }
+                            let key = ident(c).map_err(|e| e.with_context("parsing summary key"))?;
+                            // Summary row label defaults to the key (host substitutes the value).
+                            summary.push((key.clone(), key));
+                        }
+                    } else if starts_with_keyword(c, "restart") {
+                        c.bump("restart".len());
+                        restart_label = Some(string_lit(c).map_err(|e| e.with_context("parsing restart label"))?);
+                    } else {
+                        return Err(ParseErr::at(here(c),
+                            "expected `summary <keys…>` or `restart \"label\"` in screen body"));
+                    }
+                }
+                expect_char(c, '}').map_err(|e| e.with_context("parsing screen body `}`"))?;
+                let restart_label = restart_label.unwrap_or_else(|| "Restart".to_string());
+                screens.push(UiScreen::End { name, title, summary, restart_label });
+            }
+            other => {
+                return Err(ParseErr::at(here(c), format!(
+                    "unexpected `{}` in ui block; expected hud / menu / screen",
+                    other.unwrap_or("<eof>"),
+                )));
+            }
+        }
+    }
+    expect_char(c, '}').map_err(|e| e.with_context("parsing ui body `}`"))?;
+    Ok(crate::ast::UiDecl { hud, screens, span: Span::new(start, c.pos) })
 }
 
 // ---------------------------------------------------------------------------
