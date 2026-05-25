@@ -73,6 +73,28 @@ config vs {
   enemy_lifetime:     u32 = 0,
 }
 
+// --- Player input channel (Plan 1 contract block) -------------------------
+// Host-writable @runtime config fields: the interactive runtime sets these
+// per tick via the generated setters (`set_config_ctl_move_x(f32)` …
+// `set_config_ctl_bolt_rate_level(u32)`) and the rules read them as
+// `cfg.config_ctl_<field>` uniforms. FROZEN field-name contract — Plans 3
+// (gameplay rules) and 4 (viewer) build against these names. Additive only;
+// rule bodies that consume these land in Plan 3.
+//
+// Type rule (avoids unverified f32<->u32 casts): fields feeding float
+// arithmetic (damage/speed/`> 0.0` gates) are f32; only bolt_rate_level
+// (an integer modulo divisor) is u32.
+config ctl {
+  move_x:          f32 = 0.0 @runtime,   // player intent X, normalized [-1,1]
+  move_y:          f32 = 0.0 @runtime,   // player intent Y, normalized [-1,1]
+  move_level:      f32 = 0.0 @runtime,   // +speed per level (f32 math)
+  bolt_level:      f32 = 0.0 @runtime,   // +bolt damage per level (f32 math)
+  bolt_rate_level: u32 = 0   @runtime,   // -bolt period per level (u32 modulo)
+  nova_level:      f32 = 0.0 @runtime,   // +nova damage/radius per level (f32 math)
+  garlic_level:    f32 = 0.0 @runtime,   // 0.0 = inert; >0.0 enables garlic aura
+  whip_level:      f32 = 0.0 @runtime,   // 0.0 = inert; >0.0 enables whip
+}
+
 @spatial(radius = config.vs.perception_radius, kind = [Agent])
 @top_k(8)
 query nearby_agents(self: Agent, radius: f32) -> [Agent]
