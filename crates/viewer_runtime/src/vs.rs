@@ -44,6 +44,35 @@ impl VsViewerApp {
     }
     pub fn sim_tick(&self) -> u64 { self.state.tick }
     pub fn agents(&self) -> &[VsAgent] { &self.agents }
+
+    /// Player HP from the host snapshot (0.0 if no live player).
+    pub fn player_hp(&self) -> f32 {
+        self.agents
+            .iter()
+            .find(|a| a.role == VsRole::Player)
+            .map(|a| a.hp)
+            .unwrap_or(0.0)
+    }
+    /// Number of live enemy agents.
+    pub fn enemy_count(&self) -> usize {
+        self.agents.iter().filter(|a| a.role == VsRole::Enemy).count()
+    }
+    /// True while a player agent is alive.
+    pub fn alive(&self) -> bool {
+        self.agents.iter().any(|a| a.role == VsRole::Player)
+    }
+    /// Player XP from the materialized `xp` view at PLAYER_SLOT.
+    ///
+    /// The `xp` fold (`assets/sim/vampire_survivors.sim`) accumulates `self +=
+    /// 1.0` into an `f32` indexed by agent slot, stored as f32-bits via
+    /// `bitcast<u32>` (see generated `fold_xp.wgsl`). So we decode with
+    /// `f32::from_bits` — the view value equals the player's cumulative kills.
+    pub fn player_xp(&mut self) -> f32 {
+        let buf = self.state.view_storage_xp_primary_buf.clone();
+        let slot = sims::vampire_survivors_seed::PLAYER_SLOT as usize;
+        let raw = read_u32(&mut self.state, &buf, (slot as u32) + 1);
+        f32::from_bits(raw[slot])
+    }
     pub fn step(&mut self) {
         self.state.step();
         let _ = {

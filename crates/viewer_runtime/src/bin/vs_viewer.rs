@@ -29,6 +29,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use viewer_runtime::vs::{VsViewerApp, VsBridge, VsRole};
+use viewer_runtime::vs_ui;
 use viewer_runtime::{BRIDGE_DIM_X, BRIDGE_DIM_Z};
 use voxel_engine::camera::FreeCamera;
 use voxel_engine::render::VoxelRenderer;
@@ -82,6 +83,15 @@ struct WindowedVsViewer {
     session_runs: u32,
     /// Total ticks accumulated across runs.
     session_tick_total: u64,
+    /// Host-side game-UI state.
+    progress: vs_ui::PlayerProgress,
+    /// HUD + modal-screen declaration (rebuilt per run; menus injected live).
+    ui_model: engine_ui::UiModel,
+    /// Per-frame HUD values (rebuilt each frame from sim readback).
+    ui_data: engine_ui::UiData,
+    /// Name of the active modal screen, if any ("level_up" / "dead"). While
+    /// `Some`, the sim is paused and `engine_ui` renders that screen.
+    active_screen: Option<String>,
 }
 
 struct Gfx {
@@ -206,32 +216,7 @@ impl ApplicationHandler for WindowedVsViewer {
                         );
                     }
                     Key::Character(c) if c.eq_ignore_ascii_case("r") => {
-                        let next_seed = self.seed.wrapping_add(1);
-                        eprintln!(
-                            "[vs_viewer] manual reset (R): seed 0x{:X} -> 0x{:X}",
-                            self.seed, next_seed,
-                        );
-                        if let Some(new_app) = VsViewerApp::try_new(next_seed) {
-                            self.app = new_app;
-                            self.seed = next_seed;
-                            self.last_tick = Instant::now();
-                            self.terminated_at_wall = None;
-                            self.paused = false;
-                            self.pan_xz = glam::Vec2::ZERO;
-                            self.zoom = 1.0;
-                            if let Some(gfx) = self.gfx.as_mut() {
-                                let _ = unsafe { gfx.ctx.device().device_wait_idle() };
-                                let old_bridge = std::mem::replace(
-                                    &mut gfx.bridge,
-                                    VsBridge::new(&gfx.ctx)
-                                        .expect("VsBridge::new (manual reset) failed"),
-                                );
-                                old_bridge.destroy(&gfx.ctx);
-                                if let Err(e) = gfx.bridge.refresh(&gfx.ctx, &self.app) {
-                                    eprintln!("[vs_viewer] post-reset refresh failed: {e}");
-                                }
-                            }
-                        }
+                        self.restart_run();
                     }
                     _ => {}
                 }
@@ -264,12 +249,39 @@ impl ApplicationHandler for WindowedVsViewer {
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
+                // The sim is frozen while a modal screen (level-up / death) is
+                // up; treat that like a pause for stepping purposes.
+                let frozen = self.paused || self.active_screen.is_some();
+
+                // Push the player's intent + current upgrade levels into the
+                // sim's runtime config (`config.ctl.*`) before this frame's
+                // ticks. WASD → normalized move vector; progress → weapons.
+                {
+                    let (mut mx, mut my) = (0.0f32, 0.0f32);
+                    if self.held_keys.contains("w") { my += 1.0; }
+                    if self.held_keys.contains("s") { my -= 1.0; }
+                    if self.held_keys.contains("d") { mx += 1.0; }
+                    if self.held_keys.contains("a") { mx -= 1.0; }
+                    // Freeze movement while a modal is up.
+                    if frozen { mx = 0.0; my = 0.0; }
+                    let len = (mx * mx + my * my).sqrt();
+                    if len > 1e-3 { mx /= len; my /= len; }
+                    self.app.state.set_config_ctl_move_x(mx);
+                    self.app.state.set_config_ctl_move_y(my);
+                    self.app.state.set_config_ctl_bolt_level(self.progress.bolt_level);
+                    self.app.state.set_config_ctl_bolt_rate_level(self.progress.bolt_rate_level);
+                    self.app.state.set_config_ctl_nova_level(self.progress.nova_level);
+                    self.app.state.set_config_ctl_move_level(self.progress.move_level);
+                    self.app.state.set_config_ctl_garlic_level(self.progress.garlic_level);
+                    self.app.state.set_config_ctl_whip_level(self.progress.whip_level);
+                }
+
                 // Catch up on fixed-step sim ticks. Bound at 8 to avoid runaway.
-                if self.paused {
+                if frozen {
                     self.last_tick = Instant::now();
                 }
                 let mut ticks_this_frame: u32 = 0;
-                while !self.paused
+                while !frozen
                     && self.last_tick.elapsed() >= SIM_TICK_PERIOD
                     && ticks_this_frame < 8
                 {
@@ -283,6 +295,44 @@ impl ApplicationHandler for WindowedVsViewer {
                     }
                 }
 
+                // Read the player's XP from the materialized view and drive the
+                // level-up / death state machine.
+                let xp = self.app.player_xp();
+                self.progress.kills = xp as u32;
+                if self.active_screen.is_none()
+                    && self.app.alive()
+                    && self.progress.check_level_up(xp)
+                {
+                    // Open a fresh seeded 3-card menu and pause the run.
+                    self.ui_model.screens =
+                        vec![vs_ui::menu_screen(self.app.seed, self.progress.last_level)];
+                    self.active_screen = Some("level_up".into());
+                    eprintln!(
+                        "[vs_viewer] level up -> {} (xp={xp:.0}) — menu open",
+                        self.progress.last_level,
+                    );
+                }
+                // Death: show the summary screen instead of (or before) the
+                // auto-restart hold.
+                if self.active_screen.is_none() && !self.app.alive() {
+                    self.ui_model.screens = vec![vs_ui::death_screen()];
+                    self.active_screen = Some("dead".into());
+                }
+
+                // Build this frame's HUD values from the snapshot.
+                let hp = self.app.player_hp();
+                let enemies = self.app.enemy_count();
+                let tick = self.app.sim_tick();
+                vs_ui::build_data(
+                    &mut self.ui_data,
+                    hp,
+                    vs_ui::PLAYER_HP_MAX,
+                    xp,
+                    self.progress.kills,
+                    tick,
+                    enemies,
+                );
+
                 // Auto-restart when the player is dead (terminated_at_tick is Some).
                 const POST_TERMINATION_HOLD: Duration = Duration::from_secs(3);
                 if !self.paused
@@ -295,6 +345,10 @@ impl ApplicationHandler for WindowedVsViewer {
                         self.app.sim_tick(),
                     );
                 }
+                // Fallback auto-restart: if the player leaves the death screen
+                // up (or it never opened), re-seed after the hold so the demo
+                // reel keeps cycling. The death-screen Restart button does the
+                // same thing immediately via `restart_run`.
                 if let Some(t) = self.terminated_at_wall {
                     if !self.paused && t.elapsed() >= POST_TERMINATION_HOLD {
                         self.session_runs += 1;
@@ -304,46 +358,22 @@ impl ApplicationHandler for WindowedVsViewer {
                             "[vs_viewer] session: {} runs, mean {} ticks",
                             self.session_runs, mean_ticks,
                         );
-
-                        let next_seed = self.seed.wrapping_add(1);
-                        eprintln!(
-                            "[vs_viewer] auto-restart: seed 0x{:X} -> 0x{:X}",
-                            self.seed, next_seed,
-                        );
-                        if let Some(new_app) = VsViewerApp::try_new(next_seed) {
-                            self.app = new_app;
-                            self.seed = next_seed;
-                            self.last_tick = Instant::now();
-                            self.terminated_at_wall = None;
-                            if let Some(gfx) = self.gfx.as_mut() {
-                                let _ = unsafe { gfx.ctx.device().device_wait_idle() };
-                                let old_bridge = std::mem::replace(
-                                    &mut gfx.bridge,
-                                    VsBridge::new(&gfx.ctx)
-                                        .expect("VsBridge::new (auto-restart) failed"),
-                                );
-                                old_bridge.destroy(&gfx.ctx);
-                                if let Err(e) = gfx.bridge.refresh(&gfx.ctx, &self.app) {
-                                    eprintln!("[vs_viewer] post-restart refresh failed: {e}");
-                                }
-                            }
-                        } else {
-                            eprintln!("[vs_viewer] auto-restart failed -- holding on current run.");
-                            self.terminated_at_wall = Some(Instant::now());
-                        }
+                        self.restart_run();
                     }
                 }
 
-                // Integrate held-key pan/zoom.
+                // Integrate held-key camera pan/zoom. WASD now drives the
+                // player (see the movement push before the step loop); the
+                // arrow keys retain camera pan.
                 {
                     const PAN_SPEED: f32 = 0.1;
                     const ZOOM_RATE: f32 = 0.99;
                     let mut dx = 0.0_f32;
                     let mut dz = 0.0_f32;
-                    if self.held_keys.contains("w") || self.held_keys.contains("ArrowUp") { dz -= PAN_SPEED; }
-                    if self.held_keys.contains("s") || self.held_keys.contains("ArrowDown") { dz += PAN_SPEED; }
-                    if self.held_keys.contains("a") || self.held_keys.contains("ArrowLeft") { dx -= PAN_SPEED; }
-                    if self.held_keys.contains("d") || self.held_keys.contains("ArrowRight") { dx += PAN_SPEED; }
+                    if self.held_keys.contains("ArrowUp") { dz -= PAN_SPEED; }
+                    if self.held_keys.contains("ArrowDown") { dz += PAN_SPEED; }
+                    if self.held_keys.contains("ArrowLeft") { dx -= PAN_SPEED; }
+                    if self.held_keys.contains("ArrowRight") { dx += PAN_SPEED; }
                     self.pan_xz.x += dx;
                     self.pan_xz.y += dz;
                     if self.held_keys.contains("=") || self.held_keys.contains("+") {
@@ -375,6 +405,10 @@ impl ApplicationHandler for WindowedVsViewer {
                 }
 
                 let title = self.title_for_tick(self.app.sim_tick());
+                // The UI action the user triggered this frame (card click /
+                // restart button), captured out of the egui closure and applied
+                // after the `gfx` borrow ends.
+                let mut ui_action: Option<engine_ui::UiAction> = None;
                 if let Some(gfx) = self.gfx.as_mut() {
                     gfx.window.set_title(&title);
                     let objects: Vec<_> = gfx.bridge.render_object().into_iter().collect();
@@ -387,12 +421,11 @@ impl ApplicationHandler for WindowedVsViewer {
                     }
                     // egui overlay: run the UI for this frame, then paint it on
                     // top of the voxel render inside present_blit's overlay pass.
+                    let model = &self.ui_model;
+                    let data = &self.ui_data;
+                    let active = self.active_screen.as_deref();
                     gfx.egui.run(&gfx.window, |ectx| {
-                        egui::Area::new(egui::Id::new("hud_probe"))
-                            .fixed_pos(egui::pos2(12.0, 12.0))
-                            .show(ectx, |ui| {
-                                ui.label("HUD online");
-                            });
+                        ui_action = engine_ui::draw(ectx, model, data, active);
                     });
                     // Capture the fields the FnOnce overlay closure needs so the
                     // borrow of `gfx.swapchain` doesn't conflict with `gfx.egui`.
@@ -419,6 +452,21 @@ impl ApplicationHandler for WindowedVsViewer {
                         eprintln!("[vs_viewer] present_blit_with_overlay failed: {e}");
                     }
                 }
+
+                // Apply the UI action (outside the `gfx` borrow). A menu card
+                // raises an upgrade level and closes the menu (unpausing); the
+                // death-screen Restart re-seeds the run.
+                match ui_action {
+                    Some(action @ engine_ui::UiAction::Increment(_)) => {
+                        self.progress.apply(&action);
+                        self.active_screen = None;
+                        self.ui_model.screens.clear();
+                    }
+                    Some(engine_ui::UiAction::Restart) => {
+                        self.restart_run();
+                    }
+                    None => {}
+                }
             }
             _ => {}
         }
@@ -426,6 +474,44 @@ impl ApplicationHandler for WindowedVsViewer {
 }
 
 impl WindowedVsViewer {
+    /// Re-seed into a fresh run: new sim app, reset progress + UI screens,
+    /// rebuild the render bridge. Shared by the R key, the death-screen
+    /// Restart button, and the auto-restart-on-death hold.
+    fn restart_run(&mut self) {
+        let next_seed = self.seed.wrapping_add(1);
+        eprintln!(
+            "[vs_viewer] restart: seed 0x{:X} -> 0x{:X}",
+            self.seed, next_seed,
+        );
+        let Some(new_app) = VsViewerApp::try_new(next_seed) else {
+            eprintln!("[vs_viewer] restart failed -- holding on current run.");
+            self.terminated_at_wall = Some(Instant::now());
+            return;
+        };
+        self.app = new_app;
+        self.seed = next_seed;
+        self.last_tick = Instant::now();
+        self.terminated_at_wall = None;
+        self.paused = false;
+        self.pan_xz = glam::Vec2::ZERO;
+        self.zoom = 1.0;
+        self.progress = vs_ui::PlayerProgress::default();
+        self.active_screen = None;
+        self.ui_model = vs_ui::hud_model();
+        self.ui_data = engine_ui::UiData::new();
+        if let Some(gfx) = self.gfx.as_mut() {
+            let _ = unsafe { gfx.ctx.device().device_wait_idle() };
+            let old_bridge = std::mem::replace(
+                &mut gfx.bridge,
+                VsBridge::new(&gfx.ctx).expect("VsBridge::new (restart) failed"),
+            );
+            old_bridge.destroy(&gfx.ctx);
+            if let Err(e) = gfx.bridge.refresh(&gfx.ctx, &self.app) {
+                eprintln!("[vs_viewer] post-restart refresh failed: {e}");
+            }
+        }
+    }
+
     fn title_for_tick(&self, tick: u64) -> String {
         let agents = self.app.agents();
         let players = agents.iter().filter(|a| a.role == VsRole::Player).count();
@@ -487,6 +573,10 @@ fn main() {
         held_keys: std::collections::HashSet::new(),
         session_runs: 0,
         session_tick_total: 0,
+        progress: vs_ui::PlayerProgress::default(),
+        ui_model: vs_ui::hud_model(),
+        ui_data: engine_ui::UiData::new(),
+        active_screen: None,
     };
     event_loop
         .run_app(&mut viewer)

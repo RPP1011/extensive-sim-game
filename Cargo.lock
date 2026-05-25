@@ -983,6 +983,13 @@ name = "engine_gpu_rules"
 version = "0.1.0"
 
 [[package]]
+name = "engine_ui"
+version = "0.1.0"
+dependencies = [
+ "egui 0.33.3",
+]
+
+[[package]]
 name = "engine_voxel"
 version = "0.1.0"
 dependencies = [
@@ -3481,7 +3488,9 @@ dependencies = [
  "anyhow",
  "ash",
  "bytemuck",
+ "egui 0.33.3",
  "engine",
+ "engine_ui",
  "engine_voxel",
  "glam",
  "gltf",
