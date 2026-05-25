@@ -47,7 +47,7 @@ Status: **OPEN** / **CLOSING** / **CLOSED** / **PLANNED**.
 
 | # | Gap | Sev | Status | Evidence / locus |
 |---|-----|-----|--------|------------------|
-| G1 | **Fold-handler `where`-guard silently dropped.** A `where` on a `@materialized` / belief fold handler is parsed and stored on the AST, but never carried into `FoldHandlerIR` and never emitted. The guard is 100% ignored. | S1 | CLOSING | **Verified 2026-05-24 with WGSL evidence** (below). |
+| G1 | **Fold-handler `where`-guard silently dropped.** A `where` on a `@materialized` / belief fold handler is parsed and stored on the AST, but never carried into `FoldHandlerIR` and never emitted. The guard is 100% ignored. | S1 | PLANNED | **Verified 2026-05-24 with WGSL evidence** (below); close-out scope larger than one-shot — see "G1 close-out scope". |
 | G2 | **`@phase(event)` + `self.*` → undefined `agent_id`.** A rule phased on an event that references `self` emits WGSL referencing an `agent_id` local the PerEvent preamble never binds → naga panic at first `step()`. | S2 | OPEN | Foundation rules (BoltFire/NovaFire) hit this; re-phased to `@phase(per_agent)` as a workaround. Locus: `cg/emit/kernel.rs` PerEvent preamble. Needs re-confirm + typed error. |
 | G3 | **`top_k` spatial query under-fill → slot-0 sentinel.** An under-filled `spatial.closest_enemy(self)` yields slot 0 (the AgentId-absent sentinel) as a "result"; the loop body then treats slot 0 as a live agent. Player bolted *itself* (hp 100→94→−230) at tick 13. | S1/S2 | OPEN | Worked around with an in-rule re-check guard (`target.alive && band`). Locus: spatial top_k emit; pad entries are not marked invalid. |
 | G4 | **No global / singleton agent read.** Spatial queries are the *only* cross-agent read primitive. "Every enemy homes on the player" needed a per-agent `engaged_with` AgentId pre-seeded to a fixed slot + `agents.pos(self.engaged_with)`. There is no `the_player.pos` / singleton-row read. | S3 | OPEN | Cross-indexed read works (target_chaser precedent) but is a workaround for a missing primitive. |
@@ -89,14 +89,49 @@ The kernel is **byte-identical with and without the `where`-clause** (confirmed 
 
 **Production impact:** `crowd_navigation.sim`'s `stuck_ticks` has two `on Tick {}` handlers distinguished *only* by `where w.last_progress < thresh` vs `>= thresh`. With the guard dropped, both fold unconditionally every tick (`self += 1` then `self = 0`) → the view is pinned near 0 and stuck-detection never fires. It compiles green; no test catches it. This is the meta-lesson made flesh.
 
-Probe / TDD anchor: `crates/dsl_compiler/tests/fold_where_guard_emit.rs`.
+Probe / TDD anchor: `crates/dsl_compiler/tests/fold_where_guard_emit.rs` (`#[ignore]`d regression pin — un-ignore when honored).
+
+### G1 close-out scope (why it's PLANNED, not closed inline)
+
+Closing G1 *correctly* means **honoring** the guard, not erroring on it. A
+scoped "reject genuine guards at resolve" close is a dead-end for the compiled
+corpus: `crowd_navigation.sim`'s `stuck_ticks` (`where w.last_progress < … `,
+two branches) and `walker_mode`'s `where w.group_id == g` genuinely *need* the
+guard to filter per-walker — the logic is inexpressible without it, so erroring
+would leave the sim unbuildable rather than fixed. All four affected sims
+(`crowd_navigation`, `dsl_stress_coverage`, `assassination_threat_test`,
+`belief_merge_propagation_probe`) compile via `crates/sims/build.rs`.
+
+Honoring has two viable shapes, both more than a single-session inline edit:
+
+- **Side-table (lower-ripple, preferred):** lower the resolved `where` to a
+  `CgExprId`, store it in a map keyed by the handler's body `CgStmtListId`, and
+  have the accumulate emit AND the guard into the existing keying guard at
+  `cg/emit/wgsl_body.rs:2359` (`if (idx == observer_slot && (guard)) { … }`).
+  Avoids touching the central `ComputeOpKind::ViewFold` enum (~80 match sites).
+- **Op field (higher-ripple):** add `guard: Option<CgExprId>` to `ViewFold`;
+  updates every construction site + the `Eq/Hash/Ord` derivations.
+
+**Open question to verify first:** can the fold-body expr lowering already
+lower a key-param agent-field read (`w.last_progress` → `agent_last_progress[observer_slot]`)?
+Current fold bodies never read `w.field` (only `self += …`), so this path is
+untested. `@dispatch(per_agent_event_scan)` already lowers
+`agents.<field>(source_candidate)`, which is the precedent to follow.
+
+Steps when scheduled: (1) `FoldHandlerIR` gains `where_clause: Option<IrExprNode>`
+(`ir.rs:1112`); (2) resolve carries it in the inner scope at `resolve.rs:1771`
+(views) + `:2170` (belief); (3) confirm the open question, lowering the guard
+expr; (4) side-table + emit AND; (5) interpreter arm (`dsl_ast/src/eval/view.rs`)
+for P3 parity; (6) re-run wolves+humans parity baseline; (7) un-ignore the probe
++ add a behavioral pin that a guarded fold filters; (8) the now-correct
+`stuck_ticks`/`walker_mode` should change crowd_navigation behavior — gate it.
 
 ## Close-out plan (the "close" half of the goal)
 
 Priority order = (silent-wrong first) × (tractable first):
 
-1. **G1 — honor the fold `where`-guard.** Carry `where_clause` into `FoldHandlerIR`; resolve it in the inner (binder + param) scope; lower it to a guard expression; wrap the handler body emit in `if (guard) { … }` at the op level (parallel to the existing keying guard at `wgsl_body.rs:2359`); add the interpreter arm (`dsl_ast/src/eval/view.rs`) for parity. Pure keying-equality terms (`binder == key_param`) are already handled by the emitter, so the guard wrapper is additive, not a replacement. Gate: `fold_where_guard_emit.rs` (emit) + a behavioral pin that a guarded fold filters.
-2. **G2 — `@phase(event)` + `self.*` → typed compile error.** Lowest-risk silent→loud conversion: reject `self.*` in an event-phased rule at resolve/lower with a diagnostic pointing at `@phase(per_agent)`. Gate: a compile test asserting the typed error.
+1. **G2 — `@phase(event)` + `self.*` → typed compile error.** *(Closed first — lowest-risk silent→loud conversion.)* Reject `self.*` in an event-phased rule at resolve/lower with a diagnostic pointing at `@phase(per_agent)`. Gate: a compile test asserting the typed error.
+2. **G1 — honor the fold `where`-guard.** *(PLANNED — see "G1 close-out scope" above; needs its own spec/plan because the correct fix is honoring, which ripples through the central `ViewFold` op or a side-table + an unverified key-param-read lowering, and changes crowd_navigation behavior.)*
 3. **G3 — `top_k` under-fill.** Mark padded query entries invalid (or emit a result count and bound the loop), so the loop body never sees slot 0. Gate: emit test + a behavioral pin (no self-target when no enemy in range).
 4. **G4 — global/singleton agent read.** Larger; design a `the_<entity>` singleton-row read primitive. Spec separately before implementing.
 5. **G5 — generic Summon→GPU allocation.** Larger; fold the `drain_summons` logic into an emitted engine pass keyed on `EffectSummonApplied`. Spec separately.
