@@ -4,4 +4,6 @@
 //! `crates/*_runtime` sprawl for new fixtures. See `build.rs` for the
 //! auto-discovery + emit logic.
 
+pub mod summon_alloc;
+
 include!(concat!(env!("OUT_DIR"), "/sim_modules.rs"));
