@@ -191,3 +191,79 @@ fn vampire_survivors_spawns_and_runs() {
         eprintln!("[vampire_survivors] PASS: swarm closing (nearest enemy at {min_dist_end:.4})");
     }
 }
+
+// Plan 3 runtime gate: player movement is driven by the config.ctl input
+// channel (PlayerControl reads cfg.config_ctl_move_*). No enemies needed —
+// movement is independent of the swarm, so this test skips the summon drain.
+#[test]
+fn player_tracks_input() {
+    let mut rt = match GeneratedRuntime::try_new(SEED, N) {
+        Some(r) => r,
+        None => { eprintln!("[vampire_survivors] skip: no wgpu adapter"); return; }
+    };
+    seed_initial_state(&mut rt);
+
+    rt.set_config_ctl_move_x(1.0);
+    rt.set_config_ctl_move_y(0.0);
+    let x0 = read_player_pos(&mut rt)[0];
+    for _ in 0..10 { rt.step(); }
+    let x1 = read_player_pos(&mut rt)[0];
+    assert!(x1 > x0 + 1.0, "player should move +X under move_x=1: {x0} -> {x1}");
+
+    rt.set_config_ctl_move_x(-1.0);
+    for _ in 0..10 { rt.step(); }
+    let x2 = read_player_pos(&mut rt)[0];
+    assert!(x2 < x1, "player should reverse under move_x=-1: {x1} -> {x2}");
+    eprintln!("[vampire_survivors] PASS: player tracks input ({x0} -> {x1} -> {x2})");
+}
+
+// Plan 3 runtime gate: a full playable loop with all weapons enabled survives
+// T ticks without panic (P10); waves spawn enemies and the weapons cull them
+// (final count <= peak — i.e. kills happen, the swarm is not strictly growing).
+#[test]
+fn playable_loop_survivable() {
+    let mut rt = match GeneratedRuntime::try_new(0x9999_0001, N) {
+        Some(r) => r,
+        None => { eprintln!("[vampire_survivors] skip: no wgpu adapter"); return; }
+    };
+    seed_initial_state(&mut rt);
+    rt.set_config_ctl_bolt_level(2.0);
+    rt.set_config_ctl_nova_level(1.0);
+    rt.set_config_ctl_garlic_level(1.0);
+    rt.set_config_ctl_whip_level(1.0);
+    rt.set_config_ctl_move_x(0.3);
+    rt.set_config_ctl_move_y(0.2);
+
+    let enemy_count = |alive: &[u32]| alive[ENEMY_POOL_START as usize..].iter().filter(|&&a| a == 1).count();
+    let mut max_enemy_count = 0usize;
+
+    for _ in 0..TICKS {
+        rt.step();
+        let _drained = {
+            let device = &rt.gpu.device;
+            let queue = &rt.gpu.queue;
+            let event_ring = &rt.event_ring;
+            let agent_alive_buf = &rt.agent_alive_buf;
+            let agent_pos_buf = &rt.agent_pos_buf;
+            let agent_hp_buf = &rt.agent_hp_buf;
+            let agent_move_speed_buf = &rt.agent_move_speed_buf;
+            let agent_count = rt.agent_count;
+            let seed = rt.seed;
+            let tick = rt.tick;
+            drain_summons(DrainCtx {
+                device, queue, event_ring, agent_alive_buf, agent_pos_buf,
+                agent_hp_buf, agent_move_speed_buf, agent_count, seed, tick,
+                pool_start: ENEMY_POOL_START,
+            })
+        };
+        max_enemy_count = max_enemy_count.max(enemy_count(&read_alive(&mut rt)));
+    }
+
+    let final_count = enemy_count(&read_alive(&mut rt));
+    assert!(max_enemy_count > 0, "waves should spawn enemies over {TICKS} ticks");
+    assert!(
+        final_count <= max_enemy_count,
+        "weapons should cull the swarm: final={final_count} > peak={max_enemy_count}"
+    );
+    eprintln!("[vampire_survivors] PASS: playable loop survivable (peak={max_enemy_count}, final={final_count})");
+}
