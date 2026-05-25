@@ -141,6 +141,33 @@ config hunt {
   predator_speed:       f32 = 0.6,
   predator_max_kills:   u32 = 32,
   aggression_per_kill:  f32 = 1.0,
+  // Radial arena bound (units): the player Hare is clamped inside this
+  // radius of origin (mirrors VS's `arena_radius`). Also the literal the
+  // `render {}` block keys its arena ring on.
+  arena_radius:         f32 = 42.0,
+}
+
+// --- Player input channel (Plan F contract block) -------------------------
+// Host-writable @runtime config fields: the interactive runtime sets these
+// per tick via the generated setters (`set_config_ctl_move_x(f32)` /
+// `set_config_ctl_move_y(f32)`) and the `HareControl` rule reads them as
+// `config.ctl.move_*`. WASD writes them (see `controls {}` below). The
+// normalized intent is in [-1, 1] per axis.
+config ctl {
+  move_x:  f32 = 0.0 @runtime,   // player intent X, normalized [-1,1]
+  move_y:  f32 = 0.0 @runtime,   // player intent Y, normalized [-1,1]
+}
+
+// Seed every agent alive and stamp each slot's index into `mana` so the
+// lowest-slot agent (slot 0, `mana == 0`) is the human-driven player Hare,
+// distinguished by the `mana < 0.5` band below (the mana-band player idiom
+// from vampire_survivors/tower_defense — `agent_id`/slot is not a SoA field,
+// so a seeded band is the proven per-slot discriminant). Every agent's
+// `creature_type` stays its declared-default 0 (Hare) under the generic
+// `make_playable` seed; no Wolf is seeded through that path (see report gap).
+init {
+  alive: 1,
+  mana:  slot,
 }
 
 // ---------------------------------------------------------------------------
@@ -184,10 +211,32 @@ view predator_focus(a: Agent, b: Agent) -> f32 {
 // Per-tick physics
 // ---------------------------------------------------------------------------
 
+// Player Hare: driven by human intent (config.ctl.move_*), NOT autonomous
+// flee-steering. @phase(per_agent) + the player-band where-guard keeps it
+// disjoint from MoveHare's prey-band pos write (the same idiom VS's
+// PlayerControl used to replace KitePlayer — breaks the write->write SCC).
+// The player is the lowest-slot Hare (`mana == 0`, the only agent in the
+// `mana < 0.5` band under the seed above). Moves at prey_speed and is
+// clamped inside the radial arena, so the human can kite the wolves.
+physics HareControl @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && self.creature_type == Hare
+                    && self.mana < 0.5) {
+    let raw = self.pos + vec3(config.ctl.move_x, config.ctl.move_y, 0.0) * config.hunt.prey_speed;
+    let center = vec3(0.0, 0.0, 0.0);
+    let r = distance(center, raw);
+    let factor = min(1.0, config.hunt.arena_radius / (r + 0.001));
+    agents.set_pos(self, raw * factor);
+  }
+}
+
 // Hares flee predators within flee_radius (separation-only steering).
+// Player-Hare-excluded: the `mana >= 0.5` guard makes this disjoint from
+// HareControl above (slot 0 = player keeps its input-driven movement; every
+// other Hare keeps autonomous flee-steering).
 @phase(post)
 physics MoveHare {
-  on Tick {} where self.creature_type == Hare {
+  on Tick {} where (self.creature_type == Hare && self.mana >= 0.5) {
     let flee_force = sum(other in spatial.nearby_agents(self, config.hunt.flee_radius) where
       if is_prey_of(self, other) && distance(self.pos, other.pos) < config.hunt.flee_radius {
         self.pos - other.pos
@@ -224,8 +273,21 @@ physics MoveWolf {
 
 // Per-tick strike: each wolf checks for the closest hare within
 // strike_radius, emits Killed (+ DeathCry, + AggressionTick) if found.
-// @phase(event) so it runs after all movement (post phase) commits.
-@phase(event)
+//
+// GAP/FIX (Plan F): was `@phase(event)`, but the body reads `self`
+// (`self.creature_type`, `self.pos`) — a per-EVENT kernel dispatches on
+// event records and has NO per-agent `self`/`agent_id` in scope, so the
+// emitter produced invalid WGSL (`agent_creature_type[agent_id]` with
+// `agent_id` undefined → shader parse error at runtime). This was the
+// exact failure the lowerer's `op#... self referenced ... per_event`
+// diagnostic warned about (memory gap G2), but warn-and-drop is off by
+// default, so the broken kernel was emitted and only surfaced once the
+// fixture ran through a real GPU path. Rephased to `@phase(per_agent)`
+// per the diagnostic's own recommendation: each wolf scans `closest_prey`
+// and emits — the author's stated "each wolf checks for the closest hare"
+// intent, now with a valid per-agent `self` (the vampire_survivors
+// `BoltFire @phase(per_agent)` shape: on Tick + spatial query + emit).
+@phase(per_agent)
 @must_preserve(no_double_kill)
 physics StrikePrey {
   on Tick {} where self.creature_type == Wolf {
@@ -279,7 +341,24 @@ verb Strike(self, target: Agent) =
   when  is_prey_of(self, target)
       ∧ distance(self.pos, target.pos) < config.hunt.strike_radius
   emit  Killed { by: self, prey: target, pos: self.pos }
-  score 1.0 + 0.5 * kill_count(self) + 0.2 * predator_focus(self, target)
+  // GAP (Plan F): the `predator_focus(self, target)` pair-view read was
+  // dropped from this score. An Agent×Agent `@materialized(storage =
+  // pair_map)` view has no valid scalar accessor when read in a
+  // scoring/physics expression: the emitter only generates the 2-arg
+  // `view_N_get(observer, key)` form when the view carries a STATIC
+  // `@key_pop(K = N)` (Plan I belief-typed pairs); for Agent×Agent the
+  // second-key population is the per-tick `agent_count` (no static K), so
+  // it falls through to the 1-arg `view_N_get(idx)` def — yet the call
+  // site still passes 2 args, producing invalid WGSL (arity 1 vs 2) that
+  // fails shader validation at runtime. This is a LATENT bug on main
+  // (the standalone `scoring` kernel was never GPU-validated); it blocks
+  // predator_prey from running through the generic `make_playable` path.
+  // The `predator_focus` view itself + its fold/decay kernels are kept
+  // (still exercising the pair-storage emit path); only the broken
+  // scoring read is removed so the fixture is playable. Fix: plumb the
+  // runtime `agent_count` into a 2-arg accessor for Agent×Agent pair
+  // views — a compiler change, out of scope for this zero-Rust plan.
+  score 1.0 + 0.5 * kill_count(self)
 
 // ---------------------------------------------------------------------------
 // Scoring (utility backend)
