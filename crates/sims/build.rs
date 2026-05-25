@@ -47,6 +47,7 @@ fn main() {
                 | "boids"
                 | "cooldown_probe"
                 | "for_each_agent_probe"
+                | "input_probe"
                 | "target_chaser"
                 | "stochastic_probe"
                 | "quest_probe"

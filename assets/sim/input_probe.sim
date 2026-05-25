@@ -1,0 +1,31 @@
+// input_probe — minimal @runtime config probe (Plan 1 characterization).
+//
+// A single per-agent physics rule that moves every alive agent by a
+// `@runtime`-annotated config field each tick. This exercises the full
+// "Plan G tunable cfg" / "Plan E-A6 setter" path end-to-end:
+//
+//   1. `drive: f32 @runtime` is parsed with the runtime flag set
+//      (`ConfigField.runtime`), marked via `mark_config_const_runtime`.
+//   2. The body read `config.probe.drive` is NOT baked as an inline
+//      `const`; it lowers to a `cfg.config_probe_drive` uniform read
+//      (program.rs skips runtime consts; kernel.rs synthesises the
+//      `RuntimeCfgField`).
+//   3. The generated runtime exposes a host mirror `pub config_probe_drive: f32`
+//      and a generated setter `set_config_probe_drive(f32)` that writes
+//      the value into every referencing kernel's cfg buffer at the
+//      per-kernel runtime-field offset.
+//
+// Behavioural pin (input_probe_exec.rs): after `set_config_probe_drive(2.0)`
+// + one `step()`, agent 0's `pos.x` increases by ~2.0.
+
+event Tick { }
+
+config probe {
+  drive: f32 = 0.0 @runtime,
+}
+
+physics DriveX @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    agents.set_pos(self, self.pos + vec3(config.probe.drive, 0.0, 0.0));
+  }
+}
