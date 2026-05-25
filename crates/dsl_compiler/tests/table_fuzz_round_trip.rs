@@ -79,7 +79,14 @@ fn gen_table_sim(rng: &mut Pcg, idx: usize) -> String {
 
     src.push_str("@phase(per_agent)\n");
     src.push_str(&format!("physics Read{idx} {{\n"));
-    src.push_str("  on Tick {} where (self.alive) {\n");
+    // No `where (self.alive)` guard: an emit-only rule (no agent-state
+    // write) classifies PerEvent, and reading `self` in a PerEvent body is
+    // rejected by the G2 well-formedness check (SelfRefInPerEventBody, added
+    // in 7d02f20c). The guard was incidental to this fuzz's purpose (table
+    // reads); dropping the self-read keeps every generated rule lowerable
+    // while the `emit … { value: acc }` below still keeps the table lookups
+    // live (no dead-code elimination).
+    src.push_str("  on Tick {} {\n");
     src.push_str("    let acc = ");
     for (i, (name, length)) in table_specs.iter().enumerate() {
         if i > 0 {
