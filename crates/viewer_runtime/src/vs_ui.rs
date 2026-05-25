@@ -63,7 +63,11 @@ impl PlayerProgress {
         if let UiAction::Increment(k) = action {
             match k.as_str() {
                 "bolt_level" => self.bolt_level += 1.0,
-                "bolt_rate_level" => self.bolt_rate_level += 1,
+                // Capped: the DSL computes the bolt period as
+                // `bolt_period(12) - bolt_rate_level`; without a cap this
+                // underflows the u32 (period 0 = GPU modulo-by-zero). Cap at 8
+                // → minimum period 4 (fires every 4 ticks).
+                "bolt_rate_level" => self.bolt_rate_level = (self.bolt_rate_level + 1).min(8),
                 "nova_level" => self.nova_level += 1.0,
                 "move_level" => self.move_level += 1.0,
                 "garlic_level" => self.garlic_level += 1.0,
