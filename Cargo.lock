@@ -805,6 +805,8 @@ version = "0.1.0"
 dependencies = [
  "dsl_ast",
  "engine",
+ "engine_play_api",
+ "engine_ui",
  "glob",
  "naga",
  "proptest",
@@ -995,6 +997,8 @@ name = "engine_ui"
 version = "0.1.0"
 dependencies = [
  "egui 0.33.3",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3000,6 +3004,8 @@ dependencies = [
  "dsl_compiler",
  "engine",
  "engine_data",
+ "engine_play_api",
+ "engine_ui",
  "engine_voxel",
  "glam",
  "pollster",
