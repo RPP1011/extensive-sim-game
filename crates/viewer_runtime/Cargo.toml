@@ -46,3 +46,8 @@ pollster = "0.4"
 # build light; we don't need extras since the kit is plain
 # vertices + indices + (optional) colors.
 gltf = { version = "1.4", default-features = false, features = ["import", "names", "utils"] }
+
+[dev-dependencies]
+# Headless top-down GIF capture of the VS sim (examples/vs_capture.rs) —
+# renders agent positions/roles to frames without a display. gif codec only.
+image = { version = "0.25", default-features = false, features = ["gif", "png"] }
