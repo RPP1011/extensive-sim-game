@@ -5,5 +5,6 @@
 //! auto-discovery + emit logic.
 
 pub mod summon_alloc;
+pub mod vampire_survivors_seed;
 
 include!(concat!(env!("OUT_DIR"), "/sim_modules.rs"));
