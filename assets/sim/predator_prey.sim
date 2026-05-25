@@ -133,7 +133,7 @@ sort_by distance(self, _) limit 8 {
 query closest_prey(self: Agent) -> [Agent]
 sort_by distance(self, _) limit 1 {
   candidate != self
-  && predator_prey(self.creature_type, candidate.creature_type)
+  && (candidate.creature_type == Hare || candidate.creature_type == PlayerHare)
   && candidate.alive
 }
 
@@ -225,16 +225,15 @@ view predator_focus(a: Agent, b: Agent) -> f32 {
 // ---------------------------------------------------------------------------
 
 // Player Hare: driven by human intent (config.ctl.move_*), NOT autonomous
-// flee-steering. @phase(per_agent) + the player-band where-guard keeps it
-// disjoint from MoveHare's prey-band pos write (the same idiom VS's
-// PlayerControl used to replace KitePlayer — breaks the write->write SCC).
-// The player is the lowest-slot Hare (`mana == 0`, the only agent in the
-// `mana < 0.5` band under the seed above). Moves at prey_speed and is
+// flee-steering. @phase(per_agent) + the `creature_type == PlayerHare` guard
+// keeps it disjoint from MoveHare's `creature_type == Hare` pos write (the
+// subkind split replaces the retired `mana < 0.5` slot-band hack — PlayerHare
+// and Hare are now distinct subkinds, so the write->write SCC is partitioned
+// by creature_type). The single seeded PlayerHare moves at prey_speed and is
 // clamped inside the radial arena, so the human can kite the wolves.
 physics HareControl @phase(per_agent) {
   on Tick {} where (self.alive
-                    && self.creature_type == Hare
-                    && self.mana < 0.5) {
+                    && self.creature_type == PlayerHare) {
     let raw = self.pos + vec3(config.ctl.move_x, config.ctl.move_y, 0.0) * config.hunt.prey_speed;
     let center = vec3(0.0, 0.0, 0.0);
     let r = distance(center, raw);
@@ -243,13 +242,14 @@ physics HareControl @phase(per_agent) {
   }
 }
 
-// Hares flee predators within flee_radius (separation-only steering).
-// Player-Hare-excluded: the `mana >= 0.5` guard makes this disjoint from
-// HareControl above (slot 0 = player keeps its input-driven movement; every
-// other Hare keeps autonomous flee-steering).
+// Autonomous Hares flee predators within flee_radius (separation-only
+// steering). Disjoint from HareControl by subkind: HareControl owns the
+// PlayerHare's pos write, this rule owns every `creature_type == Hare` slot's
+// pos write — the subkind partition replaces the old `mana >= 0.5` SCC-split
+// guard (PlayerHare and Hare are now distinct creature_types).
 @phase(post)
 physics MoveHare {
-  on Tick {} where (self.creature_type == Hare && self.mana >= 0.5) {
+  on Tick {} where (self.creature_type == Hare) {
     let flee_force = sum(other in spatial.nearby_agents(self, config.hunt.flee_radius) where
       if is_prey_of(self, other) && distance(self.pos, other.pos) < config.hunt.flee_radius {
         self.pos - other.pos
