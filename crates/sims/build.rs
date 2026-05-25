@@ -139,6 +139,10 @@ fn main() {
                 | "terrain_probe"
                 | "terrain_probe_imported"
                 | "vampire_survivors"
+                // Plan D — minimal end-to-end probe for the generic `play`
+                // binary (all three player-facing blocks + one host-driven
+                // movement rule). Drives `sims::make_playable("play_probe")`.
+                | "play_probe"
         ) {
             continue;
         }
