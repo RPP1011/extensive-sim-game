@@ -105,6 +105,14 @@ entity Wolf : Agent {
   predator_prey:        { prey_of: [], preys_on: [Hare] },
 }
 
+// The human-controlled hare — a distinct subkind from the autonomous `Hare`
+// so the player's input-driven movement is gated by `creature_type` rather
+// than the retired `mana < 0.5` slot-band hack. Declared AFTER Wolf so the
+// existing ordinals stay stable (Hare = 0, Wolf = 1); PlayerHare = 2. Seeded
+// count 1 by the `init { spawn … }` block below; driven by the
+// `HareControl @phase(per_agent)` rule reading `config.ctl.move_*`.
+entity PlayerHare : Agent { pos: vec3, vel: vec3 }
+
 // ---------------------------------------------------------------------------
 // Spatial queries
 // ---------------------------------------------------------------------------
@@ -158,16 +166,21 @@ config ctl {
   move_y:  f32 = 0.0 @runtime,   // player intent Y, normalized [-1,1]
 }
 
-// Seed every agent alive and stamp each slot's index into `mana` so the
-// lowest-slot agent (slot 0, `mana == 0`) is the human-driven player Hare,
-// distinguished by the `mana < 0.5` band below (the mana-band player idiom
-// from vampire_survivors/tower_defense — `agent_id`/slot is not a SoA field,
-// so a seeded band is the proven per-slot discriminant). Every agent's
-// `creature_type` stays its declared-default 0 (Hare) under the generic
-// `make_playable` seed; no Wolf is seeded through that path (see report gap).
+// Declarative subkind seeding (Plan A grammar). The whole population is
+// seeded here — predator_prey has no wave drain (no summon). Counts:
+// 1 PlayerHare + 199 Hare + 8 Wolf = 208 seeded slots (+ 1 AgentId sentinel
+// at slot 0) ≤ the make_playable agent_count. The compiler stamps each
+// slot's `creature_type` (PlayerHare = 2 / Hare = 0 / Wolf = 1, declaration
+// order) + `alive = 1` automatically. The PlayerHare sits at the origin (the
+// human-driven hare); autonomous Hares + Wolves scatter inside the arena
+// radius so the player has somewhere to kite. The scatter radius is the
+// literal 42.0 — it mirrors `config.hunt.arena_radius`'s default value
+// because the frozen Plan A `scatter(r)` grammar takes a numeric literal
+// (only the spawn `count` accepts `config.<block>.<field>`; see report gap).
 init {
-  alive: 1,
-  mana:  slot,
+  spawn PlayerHare count 1   { pos: origin }
+  spawn Hare       count 199 { pos: scatter(42.0) }
+  spawn Wolf       count 8   { pos: scatter(42.0) }
 }
 
 // ---------------------------------------------------------------------------
