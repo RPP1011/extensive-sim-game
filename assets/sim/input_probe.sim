@@ -22,10 +22,19 @@ event Tick { }
 
 config probe {
   drive: f32 = 0.0 @runtime,
+  // A u32 @runtime field. Exercises the type-correct setter: a u32
+  // field must generate `set_config_probe_gate(u32)` and write u32 bits
+  // into the cfg slot (NOT f32 bits). `gate` toggles the X drive on/off
+  // via a modulo (u32 arithmetic in WGSL).
+  gate: u32 = 1 @runtime,
 }
 
 physics DriveX @phase(per_agent) {
   on Tick {} where (self.alive) {
-    agents.set_pos(self, self.pos + vec3(config.probe.drive, 0.0, 0.0));
+    // (gate % 2) is 1u when gate is odd (enabled), 0u when even (off).
+    // Multiplying the f32 drive by the u32-derived gate keeps the drive
+    // host-toggleable through the u32 channel.
+    let on = f32(config.probe.gate % 2);
+    agents.set_pos(self, self.pos + vec3(config.probe.drive * on, 0.0, 0.0));
   }
 }

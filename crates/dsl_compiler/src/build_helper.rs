@@ -300,7 +300,21 @@ fn emit_into(
                 let block = c.name.clone();
                 c.fields.iter().filter(|f| f.runtime).map(move |f| {
                     let key = format!("config_{block}_{}", f.name);
+                    // The host mirror + setter scalar type MUST match the
+                    // WGSL cfg-uniform scalar type (synthesized from the
+                    // same config field via `RuntimeCfgField`), so the
+                    // setter writes the right bit pattern into the slot.
+                    // Scalar config fields resolve to `IrType::{U32,I32,F32}`
+                    // (not `Named`), so the previous `Named => n, _ => f32`
+                    // arm collapsed every numeric field — including `u32` —
+                    // to an `f32` setter. That wrote f32 bits into a slot
+                    // the WGSL reads as `u32` (e.g. `set_..._gate(1)` →
+                    // `0x3F800000`, so `% 2u` flipped the wrong way). Pin
+                    // the integer variants to their real scalar token.
                     let scalar_ty = match &f.ty {
+                        dsl_ast::ir::IrType::U32 => "u32".to_string(),
+                        dsl_ast::ir::IrType::I32 => "i32".to_string(),
+                        dsl_ast::ir::IrType::F32 => "f32".to_string(),
                         dsl_ast::ir::IrType::Named(n) => n.clone(),
                         _ => "f32".to_string(),
                     };

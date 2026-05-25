@@ -130,3 +130,40 @@ fn input_probe_setter_drives_per_tick() {
 
     eprintln!("[input_probe] per-tick drive: {p0} -> {p1} (+1.5) -> {p2} (-0.5) PASS");
 }
+
+/// Third pin: a `u32` `@runtime` field must generate a `u32`-typed setter
+/// that writes u32 bits (not the f32 bit pattern) into the cfg slot the
+/// WGSL reads as `u32`. `gate % 2` toggles the X drive: odd = on, even =
+/// off. This is the property the VS contract's `bolt_rate_level: u32`
+/// (an integer modulo divisor) depends on.
+#[test]
+fn input_probe_u32_gate_toggles_drive() {
+    let Some(mut rt) = GeneratedRuntime::try_new(0xABCD, 8) else {
+        eprintln!("[input_probe] no GPU adapter; skipping");
+        return;
+    };
+
+    seed_agent_alive_at_origin(&mut rt, 0);
+    rt.set_config_probe_drive(2.0);
+
+    // gate = 1 (odd) -> drive ON: agent moves +2.0.
+    rt.set_config_probe_gate(1);
+    let p0 = read_pos_x(&mut rt, 0);
+    rt.step();
+    let p1 = read_pos_x(&mut rt, 0);
+    assert!(
+        (p1 - p0 - 2.0).abs() < 1e-3,
+        "gate=1 (odd) should enable drive: expected +2.0, got {p0} -> {p1}"
+    );
+
+    // gate = 2 (even) -> drive OFF: agent stays put.
+    rt.set_config_probe_gate(2);
+    rt.step();
+    let p2 = read_pos_x(&mut rt, 0);
+    assert!(
+        (p2 - p1).abs() < 1e-3,
+        "gate=2 (even) should disable drive: expected no move, got {p1} -> {p2}"
+    );
+
+    eprintln!("[input_probe] u32 gate toggle: gate=1 +2.0 ({p0}->{p1}), gate=2 hold ({p1}->{p2}) PASS");
+}
