@@ -9,9 +9,11 @@
 // Views:  xp(by: Agent) — per-kill XP fold; upgrades_total(player) — upgrade
 //         tally (un-split; per-kind fold guard walls — see #3c below).
 //
-// Role tagging: player ∈ mana [0.5,1.5], enemy ∈ mana [1.5,2.5]
-// (mana-band idiom from tower_defense; entity subkind gating has no
-// corpus precedent so mana-band is the proven discriminant).
+// Role tagging: by entity subkind via `creature_type` (declaration order:
+// Player = 0, Enemy = 1). The population is seeded declaratively in the
+// `init { spawn … }` block below — a live Player at the origin plus a dormant
+// Enemy pool (alive: 0) the wave drain claims. The old mana-band idiom (and
+// its config fields) was retired with subkind seeding (Plan A grammar).
 //
 // Gap-probe findings (see spec §8 for detail):
 //   #1  view read in a physics emit amount            → PASS (BoltFire reads xp)
@@ -37,15 +39,29 @@ event Killed { by: AgentId, prey: AgentId, pos: vec3 }
 // Sub-probe 3a: does a standalone user enum parse/resolve?
 enum UpgradeKind { BoltDamage, NovaRadius, BoltRate, MoveSpeed }
 
-// Player/Enemy subkinds declared for the 3a subkind-surface probe; actual role gating is via mana-band (no corpus precedent for subkind-identity gates).
+// Player/Enemy subkinds. Declaration order fixes the creature_type ordinal:
+// Player = 0, Enemy = 1 (the same map the seeder + the `self.creature_type ==
+// <Subkind>` rule guards resolve against).
 entity Player : Agent { pos: vec3, vel: vec3 }
 entity Enemy  : Agent { pos: vec3, vel: vec3 }
 
+// Declarative initial population (Plan A `init { spawn … }`). Slot 0 is the
+// AgentId NonZeroU32 sentinel (skipped), so the single Player lands at slot 1
+// and the Enemy pool occupies slots 2..N. The pool is seeded `alive: 0` — a
+// dormant reservoir the host wave drain (summon_alloc) claims, flipping
+// `alive: 1` while leaving the seeded `creature_type = Enemy` intact (the drain
+// never writes creature_type). `engaged_with: 1` points every enemy at the
+// player slot so ChasePlayer's `agents.pos(self.engaged_with)` homes directly.
+// Enemy count = agent_count(512) − 1 player − 1 slot-0 sentinel = 510.
+// `hp: 100.0` mirrors `config.vs.player_hp` (the frozen Plan A init grammar
+// takes only literals / pos builtins as field values, not `config.*` — that
+// form is reserved for `count config.<b>.<f>`).
+init {
+  spawn Player count 1   { hp: 100.0, pos: origin }
+  spawn Enemy  count 510 { alive: 0, engaged_with: 1 }
+}
+
 config vs {
-  player_mana_min:    f32 = 0.5,
-  player_mana_max:    f32 = 1.5,
-  enemy_mana_min:     f32 = 1.5,
-  enemy_mana_max:     f32 = 2.5,
   perception_radius:  f32 = 12.0,
   // Player kite speed (units/tick); enemies use a PER-AGENT move_speed set by
   // the summon drain per enemy type, so types move at different speeds.
@@ -111,8 +127,7 @@ config ctl {
 // the write->write SCC, same idiom as before).
 physics PlayerControl @phase(per_agent) {
   on Tick {} where (self.alive
-                    && self.mana >= config.vs.player_mana_min
-                    && self.mana <= config.vs.player_mana_max) {
+                    && self.creature_type == Player) {
     let speed = config.vs.player_speed + config.ctl.move_level * config.vs.speed_per_level;
     let raw = self.pos + vec3(config.ctl.move_x, config.ctl.move_y, 0.0) * speed;
     let center = vec3(0.0, 0.0, 0.0);
@@ -128,21 +143,19 @@ query closest_enemy(self: Agent) -> [Agent]
 sort_by distance(self, _) limit 1 {
   candidate != self
   && candidate.alive
-  && candidate.mana >= config.vs.enemy_mana_min
-  && candidate.mana <= config.vs.enemy_mana_max
+  && candidate.creature_type == Enemy
 }
 
 // Enemies ALWAYS know where the player is (the VS homing property) by reading
 // the player's position DIRECTLY — no spatial query. Each enemy's `engaged_with`
-// AgentId field is pre-seeded to the player's slot (runtime, seed_initial_state),
-// so `agents.pos(self.engaged_with)` is a direct cross-agent read (the
+// AgentId field is seeded to the player's slot (1) in the `init` block, so
+// `agents.pos(self.engaged_with)` is a direct cross-agent read (the
 // target_chaser precedent). Spatial queries stay reserved for genuine proximity
 // logic (bolt/nova). Proportional seek: step a fraction toward the player each
 // tick (slows smoothly as it closes; no normalisation/distance needed).
 physics ChasePlayer @phase(per_agent) {
   on Tick {} where (self.alive
-                    && self.mana >= config.vs.enemy_mana_min
-                    && self.mana <= config.vs.enemy_mana_max) {
+                    && self.creature_type == Enemy) {
     // Constant-speed homing: unit direction toward the player × enemy_speed
     // (units/tick). Normalised via the tower_defense march form v*(speed/|v|).
     let pp = agents.pos(self.engaged_with);
@@ -167,22 +180,19 @@ query enemies_in_radius(self: Agent) -> [Agent]
 sort_by distance(self, _) limit 32 {
   candidate != self
   && candidate.alive
-  && candidate.mana >= config.vs.enemy_mana_min
-  && candidate.mana <= config.vs.enemy_mana_max
+  && candidate.creature_type == Enemy
 }
 
 // Bolt: every bolt_period ticks, the player strikes the nearest enemy.
 physics BoltFire @phase(per_agent) {
   on Tick {} where (self.alive
-                    && self.mana >= config.vs.player_mana_min
-                    && self.mana <= config.vs.player_mana_max
+                    && self.creature_type == Player
                     && world.tick % (config.vs.bolt_period - config.ctl.bolt_rate_level) == 0) {
     for target in spatial.closest_enemy(self) {
       // Guard against under-filled top_k yielding a slot-0 sentinel (which
       // would self-damage the player): only strike a genuine live enemy.
       if (target.alive
-          && target.mana >= config.vs.enemy_mana_min
-          && target.mana <= config.vs.enemy_mana_max) {
+          && target.creature_type == Enemy) {
         emit Damaged { source: self, target: target, amount: config.vs.bolt_damage + config.ctl.bolt_level * config.vs.bolt_dmg_per_level + xp(self) * config.vs.bolt_ramp }
       }
     }
@@ -192,14 +202,12 @@ physics BoltFire @phase(per_agent) {
 // @phase(per_agent); player bursts every nova_period ticks, damaging all enemies in radius.
 physics NovaFire @phase(per_agent) {
   on Tick {} where (self.alive
-                    && self.mana >= config.vs.player_mana_min
-                    && self.mana <= config.vs.player_mana_max
+                    && self.creature_type == Player
                     && world.tick % config.vs.nova_period == 0) {
     for target in spatial.enemies_in_radius(self) {
       // Guard against under-filled top_k yielding a slot-0 sentinel.
       if (target.alive
-          && target.mana >= config.vs.enemy_mana_min
-          && target.mana <= config.vs.enemy_mana_max) {
+          && target.creature_type == Enemy) {
         emit Damaged { source: self, target: target, amount: config.vs.nova_damage + config.ctl.nova_level * config.vs.nova_damage_per_level }
       }
     }
@@ -228,19 +236,16 @@ query garlic_targets(self: Agent) -> [Agent]
 sort_by distance(self, _) limit 32 {
   candidate != self
   && candidate.alive
-  && candidate.mana >= config.vs.enemy_mana_min
-  && candidate.mana <= config.vs.enemy_mana_max
+  && candidate.creature_type == Enemy
 }
 
 physics GarlicAura @phase(per_agent) {
   on Tick {} where (self.alive
-                    && self.mana >= config.vs.player_mana_min
-                    && self.mana <= config.vs.player_mana_max
+                    && self.creature_type == Player
                     && config.ctl.garlic_level > 0.0) {
     for target in spatial.garlic_targets(self) {
       if (target.alive
-          && target.mana >= config.vs.enemy_mana_min
-          && target.mana <= config.vs.enemy_mana_max) {
+          && target.creature_type == Enemy) {
         emit Damaged { source: self, target: target, amount: config.vs.garlic_damage * config.ctl.garlic_level }
       }
     }
@@ -254,20 +259,17 @@ query whip_targets(self: Agent) -> [Agent]
 sort_by distance(self, _) limit 16 {
   candidate != self
   && candidate.alive
-  && candidate.mana >= config.vs.enemy_mana_min
-  && candidate.mana <= config.vs.enemy_mana_max
+  && candidate.creature_type == Enemy
 }
 
 physics WhipSweep @phase(per_agent) {
   on Tick {} where (self.alive
-                    && self.mana >= config.vs.player_mana_min
-                    && self.mana <= config.vs.player_mana_max
+                    && self.creature_type == Player
                     && config.ctl.whip_level > 0.0
                     && world.tick % config.vs.whip_period == 0) {
     for target in spatial.whip_targets(self) {
       if (target.alive
-          && target.mana >= config.vs.enemy_mana_min
-          && target.mana <= config.vs.enemy_mana_max) {
+          && target.creature_type == Enemy) {
         emit Damaged { source: self, target: target, amount: config.vs.whip_damage * config.ctl.whip_level }
       }
     }
@@ -276,8 +278,9 @@ physics WhipSweep @phase(per_agent) {
 
 // ---------------------------------------------------------------------------
 // Spawner Summon verbs — Phase A: tier-ramped enemy waves every wave_period ticks.
-// Spawner role ∈ mana [2.5,3.5]. Ability slot indices are 1-based, alphabetically
-// sorted from assets/ability_test/vampire_survivors/:
+// The Player casts the waves on itself (`target == self`); the host drain places
+// the summoned enemies in a ring around the player. Ability slot indices are
+// 1-based, alphabetically sorted from assets/ability_test/vampire_survivors/:
 //   SpawnHorde.ability  → slot 1 (summon 64)
 //   SpawnLarge.ability  → slot 2 (summon 32)
 //   SpawnMedium.ability → slot 3 (summon 16)
@@ -288,8 +291,7 @@ verb SpawnSmall(self, target: Agent) =
   action SpawnSmallAction
   when (self.alive
         && target == self
-        && self.mana >= config.vs.player_mana_min
-        && self.mana <= config.vs.player_mana_max
+        && self.creature_type == Player
         && (world.tick < config.vs.small_to_medium)
         && (world.tick % config.vs.wave_period == 0))
   apply_ability 4 by self target self
@@ -299,8 +301,7 @@ verb SpawnMedium(self, target: Agent) =
   action SpawnMediumAction
   when (self.alive
         && target == self
-        && self.mana >= config.vs.player_mana_min
-        && self.mana <= config.vs.player_mana_max
+        && self.creature_type == Player
         && (world.tick >= config.vs.small_to_medium)
         && (world.tick < config.vs.medium_to_large)
         && (world.tick % config.vs.wave_period == 0))
@@ -311,8 +312,7 @@ verb SpawnLarge(self, target: Agent) =
   action SpawnLargeAction
   when (self.alive
         && target == self
-        && self.mana >= config.vs.player_mana_min
-        && self.mana <= config.vs.player_mana_max
+        && self.creature_type == Player
         && (world.tick >= config.vs.medium_to_large)
         && (world.tick < config.vs.large_to_horde)
         && (world.tick % config.vs.wave_period == 0))
@@ -323,8 +323,7 @@ verb SpawnHorde(self, target: Agent) =
   action SpawnHordeAction
   when (self.alive
         && target == self
-        && self.mana >= config.vs.player_mana_min
-        && self.mana <= config.vs.player_mana_max
+        && self.creature_type == Player
         && (world.tick >= config.vs.large_to_horde)
         && (world.tick % config.vs.wave_period == 0))
   apply_ability 1 by self target self
@@ -347,8 +346,8 @@ physics ApplyDamage {
 // Plan A — player-facing descriptor blocks. The compiler lowers each to a
 // &'static str JSON descriptor on the generated runtime (render/controls via
 // engine_play_api, ui via engine_ui), consumed by the generic player. Agents
-// are classified by mana band (player: [0.5,1.5], enemy: [1.5,2.5]), matching
-// the viewer's `role_for_mana`.
+// are classified by `creature_type` subkind (Player = 0, Enemy = 1), the same
+// discriminant the rule guards use.
 // ---------------------------------------------------------------------------
 
 // Player intent: WASD writes config.ctl.move_{x,y}.
@@ -359,15 +358,15 @@ controls {
   key "d" -> ctl.move_x:  1.0
 }
 
-// Camera follows the player (the [0.5,1.5] mana band); enemies render orange,
-// player cyan. Nova bursts a ring; bolt beams to the nearest enemy.
+// Camera follows the Player subkind; enemies render orange, player cyan.
+// Nova bursts a ring; bolt beams to the nearest enemy.
 render {
   arena_radius 42.0
-  camera follow when mana in [0.5, 1.5]
-  agent when mana in [0.5, 1.5] { color (0, 220, 220) }
-  agent when mana in [1.5, 2.5] { color (220, 80, 40) }
+  camera follow when creature_type is Player
+  agent when creature_type is Player { color (0, 220, 220) }
+  agent when creature_type is Enemy { color (220, 80, 40) }
   vfx on NovaFire period 40 { ring radius 6.0 color (255, 255, 120) }
-  vfx on BoltFire period 12 { beam_to_nearest when mana in [1.5, 2.5] color (120, 200, 255) }
+  vfx on BoltFire period 12 { beam_to_nearest when creature_type is Enemy color (120, 200, 255) }
 }
 
 // HUD bars + run text, a level-up upgrade menu (full pool; host samples 3),

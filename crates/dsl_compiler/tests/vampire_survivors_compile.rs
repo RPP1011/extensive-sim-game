@@ -76,6 +76,45 @@ fn player_control_reads_input() {
 }
 
 #[test]
+fn render_descriptor_keys_on_creature_type() {
+    // Subkind-seeding migration (Plan B): the render block's camera follow +
+    // agent color selectors + bolt beam target now key on the `creature_type`
+    // subkind (Player = 0 / Enemy = 1), NOT the retired mana band. Lower the
+    // render block to its descriptor JSON the same way build_helper does and
+    // assert it carries `"field":"creature_type"` and no `"field":"mana"`.
+    use std::collections::BTreeMap;
+    let path = workspace_path("assets/sim/vampire_survivors.sim");
+    let src = std::fs::read_to_string(&path).expect("read sim");
+    let program = dsl_compiler::parse(&src).expect("parse");
+    // Declaration-order entity ordinals — the same map build_helper builds.
+    let entity_ordinals: BTreeMap<String, u32> = program
+        .decls
+        .iter()
+        .filter_map(|d| match d {
+            dsl_ast::ast::Decl::Entity(e) => Some(e.name.clone()),
+            _ => None,
+        })
+        .enumerate()
+        .map(|(i, name)| (name, i as u32))
+        .collect();
+    let render = program.render.as_ref().expect("vampire_survivors declares a render block");
+    let json = dsl_compiler::cg::emit::render::render_decl_to_json(render, &entity_ordinals);
+    assert!(
+        json.contains("\"field\":\"creature_type\""),
+        "render descriptor should key on creature_type after the subkind migration; got:\n{json}",
+    );
+    assert!(
+        !json.contains("\"field\":\"mana\""),
+        "render descriptor must NOT use the retired mana band; got:\n{json}",
+    );
+    // Player ordinal 0, Enemy ordinal 1 — the camera/agent selectors lower to
+    // lo==hi==ordinal, so both must appear.
+    assert_eq!(entity_ordinals.get("Player"), Some(&0));
+    assert_eq!(entity_ordinals.get("Enemy"), Some(&1));
+    eprintln!("[vampire_survivors] PASS render keys on creature_type: {json}");
+}
+
+#[test]
 fn bolt_fires_and_damage_applies() {
     let path = workspace_path("assets/sim/vampire_survivors.sim");
     let art = compile_sim(&path).expect("compiles");
