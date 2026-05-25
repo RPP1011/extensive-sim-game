@@ -71,6 +71,117 @@ fn seeded_offset(seed: u64, new_slot: u32, tick: u64) -> u32 {
     engine::rng::per_agent_u32_pcg(seed as u32, new_slot, tick as u32, 5)
 }
 
+/// Minimal surface the GPU drain needs. The generated GeneratedRuntime
+/// exposes all of these as public fields.
+pub struct DrainCtx<'a> {
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub event_ring: &'a engine::gpu::EventRing,
+    pub agent_alive_buf: &'a wgpu::Buffer,
+    pub agent_pos_buf: &'a wgpu::Buffer,
+    pub agent_count: u32,
+    pub seed: u64,
+    pub tick: u64,
+}
+
+/// Read EffectSummonApplied (kind 62) records from the ring, plan dead-slot
+/// allocations, and write `alive=1` + pos for each. Returns count allocated.
+pub fn drain_summons(ctx: DrainCtx) -> usize {
+    const KIND_SUMMON: u32 = 62;
+    let stride = engine::gpu::EVENT_STRIDE_U32 as usize;
+
+    let n_slots = ctx.event_ring.tail_value();
+    if n_slots == 0 {
+        return 0;
+    }
+    let ring_bytes = ((n_slots as u64) * stride as u64 * 4).max(16);
+    let ring_words = readback_u32(ctx.device, ctx.queue, ctx.event_ring.ring(), ring_bytes);
+
+    let mut records = Vec::new();
+    for s in 0..n_slots as usize {
+        let base = s * stride;
+        if ring_words.get(base).copied() == Some(KIND_SUMMON) {
+            records.push(SummonRecord {
+                actor_slot: ring_words[base + 2],
+                template_hash: ring_words[base + 3],
+                count: ring_words[base + 4],
+                seq: ring_words[base + 10],
+            });
+        }
+    }
+    if records.is_empty() {
+        return 0;
+    }
+
+    let alive = readback_u32(
+        ctx.device,
+        ctx.queue,
+        ctx.agent_alive_buf,
+        (ctx.agent_count as u64 * 4).max(16),
+    );
+    let pos_words = readback_u32(
+        ctx.device,
+        ctx.queue,
+        ctx.agent_pos_buf,
+        (ctx.agent_count as u64 * 16).max(16),
+    );
+    let read_pos = |slot: u32| -> Vec3 {
+        let b = slot as usize * 4; // vec3 stored as 4 f32 (xyz + pad)
+        Vec3::new(
+            f32::from_bits(pos_words[b]),
+            f32::from_bits(pos_words[b + 1]),
+            f32::from_bits(pos_words[b + 2]),
+        )
+    };
+
+    let plan = plan_allocations(&alive, &records, read_pos, ctx.seed, ctx.tick);
+    if plan.is_empty() {
+        return 0;
+    }
+    let mut alive_out = alive.clone();
+    let mut pos_out = pos_words.clone();
+    for a in &plan {
+        alive_out[a.slot as usize] = 1;
+        let b = a.slot as usize * 4;
+        pos_out[b] = a.pos.x.to_bits();
+        pos_out[b + 1] = a.pos.y.to_bits();
+        pos_out[b + 2] = a.pos.z.to_bits();
+    }
+    ctx.queue
+        .write_buffer(ctx.agent_alive_buf, 0, bytemuck::cast_slice(&alive_out));
+    ctx.queue
+        .write_buffer(ctx.agent_pos_buf, 0, bytemuck::cast_slice(&pos_out));
+    plan.len()
+}
+
+fn readback_u32(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    buf: &wgpu::Buffer,
+    bytes: u64,
+) -> Vec<u32> {
+    let staging = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("summon_alloc::readback"),
+        size: bytes,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("summon_alloc::rb"),
+    });
+    enc.copy_buffer_to_buffer(buf, 0, &staging, 0, bytes);
+    queue.submit(Some(enc.finish()));
+    let slice = staging.slice(..bytes);
+    slice.map_async(wgpu::MapMode::Read, |r| r.expect("map_async"));
+    device.poll(wgpu::PollType::Wait).expect("poll");
+    let out = {
+        let view = slice.get_mapped_range();
+        bytemuck::cast_slice::<u8, u32>(&view).to_vec()
+    };
+    staging.unmap();
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
