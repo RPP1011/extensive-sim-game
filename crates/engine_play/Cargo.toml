@@ -15,6 +15,10 @@ edition = "2021"
 engine_play_api = { path = "../engine_play_api" }
 # Declarative game-UI layer (HUD widgets / menu / death screens).
 engine_ui = { path = "../engine_ui" }
+# The compiled-`.sim` registry (`make_playable`). Acyclic:
+# engine_play_api ← sims ← engine_play (sims depends on the contract, the
+# binary depends on the registry; the contract crate depends on neither).
+sims = { path = "../sims" }
 
 # voxel_engine path dep with `app-harness` enabled (winit + egui).
 # Path matches the dep in viewer_runtime so cargo unifies the build.

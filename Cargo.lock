@@ -995,6 +995,7 @@ dependencies = [
  "engine_ui",
  "glam",
  "serde_json",
+ "sims",
  "voxel_engine",
  "winit",
 ]
