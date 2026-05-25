@@ -71,6 +71,15 @@ config vs {
   large_to_horde:     u32 = 4000,
   enemy_spawn_hp:     f32 = 12.0,
   enemy_lifetime:     u32 = 0,
+  // --- Plan 3: input-driven gameplay tuning ---
+  speed_per_level:       f32 = 0.15,
+  bolt_dmg_per_level:    f32 = 2.0,
+  garlic_radius:         f32 = 3.5,
+  garlic_damage:         f32 = 0.6,
+  whip_range:            f32 = 9.0,
+  whip_period:           u32 = 18,
+  whip_damage:           f32 = 4.0,
+  player_hp:             f32 = 100.0,
 }
 
 // --- Player input channel (Plan 1 contract block) -------------------------
@@ -95,41 +104,21 @@ config ctl {
   whip_level:      f32 = 0.0 @runtime,   // 0.0 = inert; >0.0 enables whip
 }
 
-@spatial(radius = config.vs.perception_radius, kind = [Agent])
-@top_k(8)
-query nearby_agents(self: Agent, radius: f32) -> [Agent]
-sort_by distance(self, _) limit 8 {
-  candidate != self
-}
-
-// @phase(per_agent) (not post): two pos-writing rules at the same phase form a write->write cycle; per_agent + the disjoint where-guard breaks the SCC.
-// Players flee nearby enemy-band agents (separation steering).
-physics KitePlayer @phase(per_agent) {
+// Player moves by human intent (config.ctl.move_*); speed scales with move_level.
+// Input-driven (Plan 3) — replaces the old autonomous KitePlayer flee-steering
+// (and its now-unused nearby_agents query). @phase(per_agent) + the player-band
+// where-guard keeps it disjoint from ChasePlayer's enemy-band pos write (breaks
+// the write->write SCC, same idiom as before).
+physics PlayerControl @phase(per_agent) {
   on Tick {} where (self.alive
                     && self.mana >= config.vs.player_mana_min
                     && self.mana <= config.vs.player_mana_max) {
-    let flee = sum(other in spatial.nearby_agents(self, config.vs.flee_radius) where
-      if other.mana >= config.vs.enemy_mana_min
-         && other.mana <= config.vs.enemy_mana_max
-         && other.alive
-         && distance(self.pos, other.pos) < config.vs.flee_radius {
-        self.pos - other.pos
-      } else {
-        vec3(0.0, 0.0, 0.0)
-      });
-    // Constant-speed kite: unit flee direction × player_speed (units/tick),
-    // normalised via v*(speed/|v|). A surrounded player's flee vectors cancel
-    // (|flee|→0, guarded) so it stays put instead of jittering/escaping.
-    let d = distance(self.pos, self.pos + flee);
-    if (d > 0.001) {
-      let step = flee * (config.vs.player_speed / d);
-      let raw = self.pos + step;
-      // Radial arena clamp (same as enemies): stay within arena_radius.
-      let center = vec3(0.0, 0.0, 0.0);
-      let r = distance(center, raw);
-      let factor = min(1.0, config.vs.arena_radius / (r + 0.001));
-      agents.set_pos(self, raw * factor);
-    }
+    let speed = config.vs.player_speed + config.ctl.move_level * config.vs.speed_per_level;
+    let raw = self.pos + vec3(config.ctl.move_x, config.ctl.move_y, 0.0) * speed;
+    let center = vec3(0.0, 0.0, 0.0);
+    let r = distance(center, raw);
+    let factor = min(1.0, config.vs.arena_radius / (r + 0.001));
+    agents.set_pos(self, raw * factor);
   }
 }
 
@@ -187,14 +176,14 @@ physics BoltFire @phase(per_agent) {
   on Tick {} where (self.alive
                     && self.mana >= config.vs.player_mana_min
                     && self.mana <= config.vs.player_mana_max
-                    && world.tick % config.vs.bolt_period == 0) {
+                    && world.tick % (config.vs.bolt_period - config.ctl.bolt_rate_level) == 0) {
     for target in spatial.closest_enemy(self) {
       // Guard against under-filled top_k yielding a slot-0 sentinel (which
       // would self-damage the player): only strike a genuine live enemy.
       if (target.alive
           && target.mana >= config.vs.enemy_mana_min
           && target.mana <= config.vs.enemy_mana_max) {
-        emit Damaged { source: self, target: target, amount: config.vs.bolt_damage + xp(self) * config.vs.bolt_ramp }
+        emit Damaged { source: self, target: target, amount: config.vs.bolt_damage + config.ctl.bolt_level * config.vs.bolt_dmg_per_level + xp(self) * config.vs.bolt_ramp }
       }
     }
   }
@@ -211,7 +200,7 @@ physics NovaFire @phase(per_agent) {
       if (target.alive
           && target.mana >= config.vs.enemy_mana_min
           && target.mana <= config.vs.enemy_mana_max) {
-        emit Damaged { source: self, target: target, amount: config.vs.nova_damage + floor(xp(self) / config.vs.xp_per_level) * config.vs.nova_damage_per_level }
+        emit Damaged { source: self, target: target, amount: config.vs.nova_damage + config.ctl.nova_level * config.vs.nova_damage_per_level }
       }
     }
   }
@@ -226,42 +215,62 @@ view xp(by: Agent) -> f32 {
 }
 
 // ---------------------------------------------------------------------------
-// Upgrade choice — probe: branching selection among options (ledger §6, #3/#3b/#3c)
+// New weapons (Plan 3) — gated by host-driven config.ctl level fields.
+// Replaces the old auto-ChooseUpgrade probe: upgrades are now host-driven via
+// the ctl input channel (the level-up menu writes config.ctl.<weapon>_level).
 // ---------------------------------------------------------------------------
 
-@replayable @gpu_amenable
-event UpgradeChosen { player: AgentId, kind: u32 }
-
-// Sub-probe 3c (WALL): a per-kind tally needs a `where k == 0u` guard on the
-// u32 payload field. `FoldHandlerIR` (crates/dsl_ast/src/ir.rs:1113) carries NO
-// `where_clause` field; resolve.rs:1771 silently drops `h.where_clause` when
-// building the IR — so the guard never lowers and every UpgradeChosen counts
-// identically. Fallback: a single un-split total tally (no per-kind guard).
-@materialized(on_event = [UpgradeChosen])
-view upgrades_total(player: Agent) -> f32 {
-  initial: 0.0,
-  on UpgradeChosen { player: p, kind: k } { self += 1.0 }
-  clamp: [0.0, 100.0],
+// Garlic aura: continuous radial damage to every enemy in a tight radius, each
+// tick, once garlic_level > 0.
+@spatial(radius = config.vs.garlic_radius, kind = [Agent])
+@top_k(32)
+query garlic_targets(self: Agent) -> [Agent]
+sort_by distance(self, _) limit 32 {
+  candidate != self
+  && candidate.alive
+  && candidate.mana >= config.vs.enemy_mana_min
+  && candidate.mana <= config.vs.enemy_mana_max
 }
 
-// Per-tick: pick the highest-priority not-yet-capped upgrade (fixed priority).
-// Sub-probe 3 (value-returning if/else -> u32) + 3b (view read in if cond).
-physics ChooseUpgrade @phase(per_agent) {
+physics GarlicAura @phase(per_agent) {
   on Tick {} where (self.alive
                     && self.mana >= config.vs.player_mana_min
-                    && self.mana <= config.vs.player_mana_max) {
-    // Sub-probe 3: chained `else if` does NOT parse (parser if-expr `else`
-    // form requires `{` directly — parser.rs:4742). The supported shape is the
-    // nested `else { if ... }` below, which still yields runtime-varying,
-    // view-gated priority selection (lowers to nested WGSL `select`).
-    // Both arms read `upgrades_total(self)` in the if-condition (sub-probe 3b).
-    let chosen =
-      if upgrades_total(self) < config.vs.bolt_cap { 0u }
-      else {
-        if upgrades_total(self) < config.vs.nova_cap { 1u }
-        else { 2u }
-      };
-    emit UpgradeChosen { player: self, kind: chosen }
+                    && self.mana <= config.vs.player_mana_max
+                    && config.ctl.garlic_level > 0.0) {
+    for target in spatial.garlic_targets(self) {
+      if (target.alive
+          && target.mana >= config.vs.enemy_mana_min
+          && target.mana <= config.vs.enemy_mana_max) {
+        emit Damaged { source: self, target: target, amount: config.vs.garlic_damage * config.ctl.garlic_level }
+      }
+    }
+  }
+}
+
+// Whip sweep: a wider periodic radial burst, once whip_level > 0.
+@spatial(radius = config.vs.whip_range, kind = [Agent])
+@top_k(16)
+query whip_targets(self: Agent) -> [Agent]
+sort_by distance(self, _) limit 16 {
+  candidate != self
+  && candidate.alive
+  && candidate.mana >= config.vs.enemy_mana_min
+  && candidate.mana <= config.vs.enemy_mana_max
+}
+
+physics WhipSweep @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && self.mana >= config.vs.player_mana_min
+                    && self.mana <= config.vs.player_mana_max
+                    && config.ctl.whip_level > 0.0
+                    && world.tick % config.vs.whip_period == 0) {
+    for target in spatial.whip_targets(self) {
+      if (target.alive
+          && target.mana >= config.vs.enemy_mana_min
+          && target.mana <= config.vs.enemy_mana_max) {
+        emit Damaged { source: self, target: target, amount: config.vs.whip_damage * config.ctl.whip_level }
+      }
+    }
   }
 }
 

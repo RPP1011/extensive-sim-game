@@ -62,14 +62,16 @@ fn enemy_chase_emits_neighbour_walk() {
 }
 
 #[test]
-fn player_kite_emits_neighbour_walk() {
+fn player_control_reads_input() {
+    // Plan 3: KitePlayer's autonomous flee was replaced by PlayerControl, which
+    // moves the player by the @runtime input channel (cfg.config_ctl_move_*).
     let path = workspace_path("assets/sim/vampire_survivors.sim");
     let art = compile_sim(&path).expect("compiles");
-    let body = kernel_body_containing(&art, "KitePlayer")
-        .unwrap_or_else(|| panic!("no KitePlayer kernel; have {:?}", art.wgsl_files.keys().collect::<Vec<_>>()));
+    let body = kernel_body_containing(&art, "PlayerControl")
+        .unwrap_or_else(|| panic!("no PlayerControl kernel; have {:?}", art.wgsl_files.keys().collect::<Vec<_>>()));
     assert!(
-        body.contains("spatial_grid_offsets") || body.contains("grid_starts"),
-        "expected bounded-neighbour walk in KitePlayer body; got:\n{body}",
+        body.contains("config_ctl_move_x") && body.contains("config_ctl_move_y"),
+        "PlayerControl should read the runtime input channel (cfg.config_ctl_move_*); got:\n{body}",
     );
 }
 
@@ -106,11 +108,16 @@ fn nova_fires_aoe_neighbour_walk() {
 }
 
 #[test]
-fn nova_damage_scales_with_floor_level() {
+fn nova_scales_with_ctl_level() {
+    // Plan 3: nova damage now scales off the host-driven ctl nova_level input
+    // (replacing the old floor(xp/xp_per_level) auto-ramp).
     let path = workspace_path("assets/sim/vampire_survivors.sim");
     let art = compile_sim(&path).expect("compiles");
     let nova = kernel_body_containing(&art, "NovaFire").expect("NovaFire kernel");
-    assert!(nova.contains("floor("), "NovaFire amount should contain floor(...); got:\n{nova}");
+    assert!(
+        nova.contains("config_ctl_nova_level"),
+        "NovaFire amount should scale off the ctl nova_level input; got:\n{nova}",
+    );
 }
 
 #[test]
@@ -123,11 +130,23 @@ fn xp_view_folds_kills() {
 }
 
 #[test]
-fn upgrade_choice_compiles() {
+fn new_weapons_gated_by_ctl_level() {
+    // Plan 3: the auto-ChooseUpgrade probe was replaced by host-driven upgrades.
+    // Two new weapons (garlic aura, whip sweep) are gated by their ctl level.
     let path = workspace_path("assets/sim/vampire_survivors.sim");
     let art = compile_sim(&path).expect("compiles");
-    let body = kernel_body_containing(&art, "ChooseUpgrade").unwrap_or_else(|| panic!("no ChooseUpgrade kernel; have {:?}", art.wgsl_files.keys().collect::<Vec<_>>()));
-    assert!(body.contains("view_storage"), "ChooseUpgrade should read upgrades_total view storage in its select condition; got:\n{body}");
+    let garlic = kernel_body_containing(&art, "GarlicAura")
+        .unwrap_or_else(|| panic!("no GarlicAura kernel; have {:?}", art.wgsl_files.keys().collect::<Vec<_>>()));
+    assert!(
+        garlic.contains("config_ctl_garlic_level"),
+        "GarlicAura should be gated by the ctl garlic_level input; got:\n{garlic}",
+    );
+    let whip = kernel_body_containing(&art, "WhipSweep")
+        .unwrap_or_else(|| panic!("no WhipSweep kernel; have {:?}", art.wgsl_files.keys().collect::<Vec<_>>()));
+    assert!(
+        whip.contains("config_ctl_whip_level"),
+        "WhipSweep should be gated by the ctl whip_level input; got:\n{whip}",
+    );
 }
 
 #[test]
