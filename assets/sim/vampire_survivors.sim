@@ -342,3 +342,50 @@ physics ApplyDamage {
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Plan A — player-facing descriptor blocks. The compiler lowers each to a
+// &'static str JSON descriptor on the generated runtime (render/controls via
+// engine_play_api, ui via engine_ui), consumed by the generic player. Agents
+// are classified by mana band (player: [0.5,1.5], enemy: [1.5,2.5]), matching
+// the viewer's `role_for_mana`.
+// ---------------------------------------------------------------------------
+
+// Player intent: WASD writes config.ctl.move_{x,y}.
+controls {
+  key "w" -> ctl.move_y:  1.0
+  key "s" -> ctl.move_y: -1.0
+  key "a" -> ctl.move_x: -1.0
+  key "d" -> ctl.move_x:  1.0
+}
+
+// Camera follows the player (the [0.5,1.5] mana band); enemies render orange,
+// player cyan. Nova bursts a ring; bolt beams to the nearest enemy.
+render {
+  arena_radius 42.0
+  camera follow when mana in [0.5, 1.5]
+  agent when mana in [0.5, 1.5] { color (0, 220, 220) }
+  agent when mana in [1.5, 2.5] { color (220, 80, 40) }
+  vfx on NovaFire period 40 { ring radius 6.0 color (255, 255, 120) }
+  vfx on BoltFire period 12 { beam_to_nearest when mana in [1.5, 2.5] color (120, 200, 255) }
+}
+
+// HUD bars + run text, a level-up upgrade menu (full pool; host samples 3),
+// and the death screen. Bind keys (hp/xp_into/level/...) resolve against the
+// viewer's per-frame UiData. Mirrors viewer_runtime::vs_ui's hand-built model.
+ui {
+  hud {
+    bar "HP" value hp max hp_max color (220, 40, 40)
+    bar "XP" value xp_into max xp_per_level color (40, 160, 240)
+    text "Lv {level}   Kills {kills}   {time}s   Enemies {enemies}"
+  }
+  menu level_up "Level Up!" {
+    card "Bolt Damage +" -> bolt_level
+    card "Bolt Rate +" -> bolt_rate_level
+    card "Nova +" -> nova_level
+    card "Move Speed +" -> move_level
+    card "Garlic +" -> garlic_level
+    card "Whip +" -> whip_level
+  }
+  screen dead "You Died" { summary time level kills  restart "Restart (R)" }
+}
