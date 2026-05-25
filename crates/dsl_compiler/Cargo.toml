@@ -24,6 +24,11 @@ rustc-hash = "2.1"
 
 [dev-dependencies]
 tempfile = "3"
+# Plan A — the descriptor compile-gate test parses each emitted JSON back
+# through the consumer crates' `from_json` to prove the hand-emitted shape
+# matches the frozen serde contracts.
+engine_play_api = { path = "../engine_play_api" }
+engine_ui = { path = "../engine_ui" }
 # Glob for locating engine_voxel rlib by hash suffix in terrain_emit_compiles test.
 glob = "0.3"
 # WGSL parse/validate for emit_view_wgsl / emit_scoring_wgsl tests.
