@@ -99,6 +99,9 @@ fn synthesize_with_init(init_stmts: &[InitStmt]) -> String {
         0,
         false,
         None,
+        "{\"bindings\":[]}",
+        "{\"arena_radius\":0.0,\"camera\":\"Observer\",\"agents\":[],\"vfx\":[]}",
+        "{\"hud\":[],\"screens\":[]}",
     )
 }
 

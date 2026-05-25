@@ -248,6 +248,26 @@ fn emit_into(
     // `emit_into` uses it after all the CG pipeline writes to conditionally
     // emit `terrain_gen.rs` alongside `generated.rs` and `runtime_core.rs`.
     let terrain_block: Option<dsl_ast::terrain::TerrainBlock> = program.terrain.clone();
+    // Plan A — lower the player-facing descriptor blocks to JSON BEFORE
+    // resolve consumes the Program. Each falls back to the empty-but-valid
+    // descriptor so the generated `*_descriptor()` accessors + the
+    // `PlayableRuntime` impl always return parseable JSON, even for fixtures
+    // that declare no player blocks.
+    let controls_json = program
+        .controls
+        .as_ref()
+        .map(crate::cg::emit::controls::controls_decl_to_json)
+        .unwrap_or_else(crate::cg::emit::controls::empty_controls_json);
+    let render_json = program
+        .render
+        .as_ref()
+        .map(crate::cg::emit::render::render_decl_to_json)
+        .unwrap_or_else(crate::cg::emit::render::empty_render_json);
+    let ui_json = program
+        .ui
+        .as_ref()
+        .map(crate::cg::emit::ui_model::ui_decl_to_json)
+        .unwrap_or_else(crate::cg::emit::ui_model::empty_ui_json);
     // Compiler-debug-mode opt-in (#242 follow-up). A `.sim` file may
     // declare `debug { depth: kernel, wgsl_event_kind_histogram: true,
     // ... }` — we extract the parsed values BEFORE resolve consumes the
@@ -335,7 +355,15 @@ fn emit_into(
                         dsl_ast::ast::ConfigDefault::Bool(b) => format!("{b}"),
                         dsl_ast::ast::ConfigDefault::String(s) => format!("\"{s}\""),
                     };
-                    (key, RuntimeConfigDefault { scalar_ty, default_lit })
+                    (
+                        key,
+                        RuntimeConfigDefault {
+                            scalar_ty,
+                            default_lit,
+                            block: block.clone(),
+                            field: f.name.clone(),
+                        },
+                    )
                 })
             })
             .collect();
@@ -695,6 +723,9 @@ fn emit_into(
         group_entity_count,
         needs_sort,
         sort_layout.as_ref(),
+        &controls_json,
+        &render_json,
+        &ui_json,
     );
     fs::write(out_dir.join("runtime_core.rs"), runtime_core)
         .unwrap_or_else(|e| panic!("write runtime_core.rs: {e}"));
@@ -719,6 +750,14 @@ fn emit_into(
 pub struct RuntimeConfigDefault {
     pub scalar_ty: String,
     pub default_lit: String,
+    /// The `config <block> {}` block name (e.g. `ctl`). With `field`,
+    /// gives the `set_input("<block>.<field>", ..)` dispatch key the
+    /// frozen `PlayableRuntime::set_input` contract uses — derived here
+    /// rather than parsed back out of the `config_<block>_<field>`
+    /// host-mirror key (block names may themselves contain `_`).
+    pub block: String,
+    /// The field name within the block (e.g. `move_x`).
+    pub field: String,
 }
 
 /// AOE auto-detect: scan the .ability corpus for any program with a
@@ -1514,6 +1553,12 @@ pub fn synthesize_runtime_core_a2(
     // Event layout for the first f32+Add fold's source event. Carries
     // the record stride used to size `event_ring_sort_scratch_buf`.
     sort_event_layout: Option<&crate::cg::program::EventLayout>,
+    // Plan A — pre-lowered player-facing descriptor JSON (empty-but-valid
+    // when the .sim declares no `controls`/`render`/`ui` block). Emitted as
+    // `&'static str` accessors + surfaced through the `PlayableRuntime` impl.
+    controls_json: &str,
+    render_json: &str,
+    ui_json: &str,
 ) -> String {
     let kernel_count = artifacts.kernel_index.len();
     let mut out = String::new();
@@ -1597,6 +1642,9 @@ pub fn synthesize_runtime_core_a2(
         group_entity_count,
         needs_sort,
         sort_event_layout,
+        controls_json,
+        render_json,
+        ui_json,
     ));
 
     out
@@ -1993,6 +2041,11 @@ fn synthesize_generated_runtime_struct(
     group_entity_count: u32,
     needs_sort: bool,
     sort_event_layout: Option<&crate::cg::program::EventLayout>,
+    // Plan A — pre-lowered player-facing descriptor JSON (empty-but-valid
+    // default when the .sim has no matching block).
+    controls_json: &str,
+    render_json: &str,
+    ui_json: &str,
 ) -> String {
     use crate::kernel_binding_ir::BgSource;
     use std::collections::BTreeMap;
@@ -4095,7 +4148,249 @@ fn synthesize_generated_runtime_struct(
         ));
     }
 
+    // Plan A — player-facing descriptor accessors. Each returns the
+    // pre-lowered JSON string (empty-but-valid when the .sim declared no
+    // matching block). `r####"…"####` raw delimiters survive the quotes +
+    // braces in the JSON. (JSON never contains `"####`, so the delimiter is
+    // safe; the emitters escape interior quotes, and JSON has no raw `#`
+    // runs adjacent to a quote.)
+    out.push_str(&format!(
+        "\n\
+         \x20   /// Plan A — `render {{}}` descriptor JSON (engine_play_api::RenderDescriptor).\n\
+         \x20   pub fn render_descriptor(&self) -> &'static str {{ r####\"{render_json}\"#### }}\n\
+         \x20   /// Plan A — `controls {{}}` descriptor JSON (engine_play_api::ControlsDescriptor).\n\
+         \x20   pub fn controls_descriptor(&self) -> &'static str {{ r####\"{controls_json}\"#### }}\n\
+         \x20   /// Plan A — `ui {{}}` descriptor JSON (engine_ui::UiModel).\n\
+         \x20   pub fn ui_descriptor(&self) -> &'static str {{ r####\"{ui_json}\"#### }}\n",
+    ));
+
     out.push_str("}\n");
+
+    // Plan A — `impl engine_play_api::PlayableRuntime for GeneratedRuntime`.
+    // The uniform seam one generic player binary uses to drive any compiled
+    // `.sim`. Delegates `tick`/`step`/descriptors to the inherent methods
+    // above; `set_input` dispatches the `"<block>.<field>"` key to the
+    // matching `set_config_<block>_<field>` setter; `agent_snapshot` reads
+    // back the standard agent columns this fixture actually owns;
+    // `view_value` reads a materialized view's primary storage at a slot.
+    out.push_str(&synthesize_playable_runtime_impl(
+        artifacts,
+        runtime_config_defaults,
+        materialized_views,
+        &owned,
+    ));
+
+    out
+}
+
+/// Plan A — emit the `impl engine_play_api::PlayableRuntime for
+/// GeneratedRuntime` block. Separated from the inherent-impl emit so the
+/// readback helpers + dispatch tables read clearly. `owned` is the actual
+/// fixture-owned buffer set (name → wgsl_ty) — used to gate `agent_snapshot`
+/// column readbacks + `view_value` arms to buffers that EXIST as struct
+/// fields. `runtime_config_defaults` drives `set_input`, but only fields that
+/// some kernel actually references get a `set_config_*` setter (mirrors the
+/// setter-emit `if writes.is_empty()` skip), so the dispatch arm is gated the
+/// same way.
+fn synthesize_playable_runtime_impl(
+    artifacts: &crate::cg::emit::EmittedArtifacts,
+    runtime_config_defaults: &std::collections::BTreeMap<String, RuntimeConfigDefault>,
+    materialized_views: &[MaterializedViewInfo],
+    owned: &std::collections::BTreeMap<String, String>,
+) -> String {
+    // Which standard agent columns does this fixture actually own a buffer
+    // field for? `owned` keys are the buffer base names (`agent_pos`,
+    // `view_storage_xp_primary`, …); the struct field is `<key>_buf`. We gate
+    // every readback on the field existing so the generated impl compiles for
+    // fixtures missing a given column.
+    let has = |col: &str| owned.contains_key(&format!("agent_{col}"));
+
+    let mut out = String::new();
+    out.push_str(
+        "\n#[allow(dead_code, non_snake_case, clippy::all)]\n\
+         impl engine_play_api::PlayableRuntime for GeneratedRuntime {\n\
+         \x20   fn tick(&self) -> u64 { self.tick }\n\
+         \x20   fn step(&mut self) { GeneratedRuntime::step(self); }\n",
+    );
+
+    // set_input: dispatch `"<block>.<field>"` → `set_config_<block>_<field>`.
+    // u32/i32 fields cast from the f32 arg; f32 fields pass through.
+    out.push_str(
+        "    fn set_input(&mut self, field: &str, value: f32) {\n\
+         \x20       match field {\n",
+    );
+    for (key, def) in runtime_config_defaults {
+        // A `set_config_*` setter is emitted ONLY when some kernel references
+        // the field in its `runtime_cfg_fields` (the setter-emit skips fields
+        // with no writes). Gate the dispatch arm the same way so we never
+        // call a setter that wasn't generated.
+        let has_setter = artifacts
+            .kernel_specs
+            .iter()
+            .any(|spec| spec.runtime_cfg_fields.iter().any(|(n, _)| n == key));
+        if !has_setter {
+            continue;
+        }
+        // `key` is `config_<block>_<field>`; the public key is `<block>.<field>`.
+        let cast = match def.scalar_ty.as_str() {
+            "f32" => "value".to_string(),
+            "u32" => "value as u32".to_string(),
+            "i32" => "value as i32".to_string(),
+            other => format!("value as {other}"),
+        };
+        out.push_str(&format!(
+            "            \"{block}.{field}\" => self.set_{key}({cast}),\n",
+            block = def.block,
+            field = def.field,
+        ));
+    }
+    out.push_str(
+        "            _ => {}\n\
+         \x20       }\n\
+         \x20   }\n",
+    );
+
+    // agent_snapshot: read back the standard columns this fixture owns;
+    // missing columns default per `AgentView`. `creature_type` maps to the
+    // `agent_creature_type` column when present (u32). Only emit readbacks
+    // for buffers that exist (otherwise the field reference wouldn't compile).
+    out.push_str("    fn agent_snapshot(&mut self) -> Vec<engine_play_api::AgentView> {\n");
+    out.push_str("        let n = self.agent_count;\n");
+    out.push_str("        if n == 0 { return Vec::new(); }\n");
+    // Readback closures, inlined per present column.
+    if has("pos") {
+        out.push_str("        let pos = playable_read_vec4(self, &self.agent_pos_buf.clone(), n);\n");
+    }
+    if has("alive") {
+        out.push_str("        let alive = playable_read_u32(self, &self.agent_alive_buf.clone(), n);\n");
+    }
+    if has("hp") {
+        out.push_str("        let hp = playable_read_f32(self, &self.agent_hp_buf.clone(), n);\n");
+    }
+    if has("mana") {
+        out.push_str("        let mana = playable_read_f32(self, &self.agent_mana_buf.clone(), n);\n");
+    }
+    if has("move_speed") {
+        out.push_str("        let move_speed = playable_read_f32(self, &self.agent_move_speed_buf.clone(), n);\n");
+    }
+    if has("creature_type") {
+        out.push_str("        let creature_type = playable_read_u32(self, &self.agent_creature_type_buf.clone(), n);\n");
+    }
+    out.push_str("        let mut views = Vec::with_capacity(n as usize);\n");
+    out.push_str("        for i in 0..n as usize {\n");
+    out.push_str("            views.push(engine_play_api::AgentView {\n");
+    if has("pos") {
+        out.push_str("                pos: [pos[i][0], pos[i][1], pos[i][2]],\n");
+    } else {
+        out.push_str("                pos: [0.0, 0.0, 0.0],\n");
+    }
+    if has("alive") {
+        out.push_str("                alive: alive[i] == 1,\n");
+    } else {
+        out.push_str("                alive: true,\n");
+    }
+    if has("hp") {
+        out.push_str("                hp: hp[i],\n");
+    } else {
+        out.push_str("                hp: 0.0,\n");
+    }
+    if has("mana") {
+        out.push_str("                mana: mana[i],\n");
+    } else {
+        out.push_str("                mana: 0.0,\n");
+    }
+    if has("move_speed") {
+        out.push_str("                move_speed: move_speed[i],\n");
+    } else {
+        out.push_str("                move_speed: 0.0,\n");
+    }
+    if has("creature_type") {
+        out.push_str("                creature_type: creature_type[i],\n");
+    } else {
+        out.push_str("                creature_type: 0,\n");
+    }
+    out.push_str("            });\n");
+    out.push_str("        }\n");
+    out.push_str("        views\n");
+    out.push_str("    }\n");
+
+    // view_value: read a materialized view's primary storage at `slot`.
+    // Each view's storage is `view_storage_<view>_primary_buf` (f32-bits).
+    // Only views whose fold/decay kernels were emitted have an owned per-view
+    // buffer field; gate each arm on the field existing so missing-buffer
+    // views fall through to the `0.0` default instead of failing to compile.
+    let view_arms: Vec<&MaterializedViewInfo> = materialized_views
+        .iter()
+        .filter(|v| owned.contains_key(&format!("view_storage_{}_primary", v.name)))
+        .collect();
+    out.push_str("    fn view_value(&mut self, view: &str, slot: u32) -> f32 {\n");
+    if view_arms.is_empty() {
+        out.push_str("        let _ = (view, slot);\n        0.0\n");
+    } else {
+        out.push_str("        match view {\n");
+        for v in view_arms {
+            // Per-agent scalar views only (the snapshot-keyed shape the
+            // player reads, e.g. `xp`). Pair-keyed / ring views still expose
+            // their slot-0 word; callers that need the full layout read the
+            // buffer directly.
+            out.push_str(&format!(
+                "            \"{name}\" => {{\n\
+                 \x20               let raw = playable_read_u32(self, &self.view_storage_{name}_primary_buf.clone(), slot + 1);\n\
+                 \x20               f32::from_bits(raw[slot as usize])\n\
+                 \x20           }}\n",
+                name = v.name,
+            ));
+        }
+        out.push_str("            _ => 0.0,\n");
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n");
+
+    // Descriptors delegate to the inherent accessors emitted above.
+    out.push_str(
+        "    fn render_descriptor(&self) -> &'static str { GeneratedRuntime::render_descriptor(self) }\n\
+         \x20   fn controls_descriptor(&self) -> &'static str { GeneratedRuntime::controls_descriptor(self) }\n\
+         \x20   fn ui_descriptor(&self) -> &'static str { GeneratedRuntime::ui_descriptor(self) }\n\
+         }\n",
+    );
+
+    // Free-function readback helpers (mirror viewer_runtime/src/vs.rs). One
+    // copy per fixture module; `#[allow(dead_code)]` since a fixture with no
+    // present columns + no views never calls them.
+    out.push_str(
+        "\n#[allow(dead_code, clippy::all)]\n\
+         fn playable_read_raw_u32(rt: &mut GeneratedRuntime, buf: &wgpu::Buffer, bytes: u64) -> Vec<u32> {\n\
+         \x20   let bytes = bytes.max(16);\n\
+         \x20   let staging = rt.gpu.device.create_buffer(&wgpu::BufferDescriptor {\n\
+         \x20       label: Some(\"playable::rb\"),\n\
+         \x20       size: bytes,\n\
+         \x20       usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,\n\
+         \x20       mapped_at_creation: false,\n\
+         \x20   });\n\
+         \x20   let mut enc = rt.gpu.device.create_command_encoder(&Default::default());\n\
+         \x20   enc.copy_buffer_to_buffer(buf, 0, &staging, 0, bytes);\n\
+         \x20   rt.gpu.queue.submit(Some(enc.finish()));\n\
+         \x20   let slice = staging.slice(..bytes);\n\
+         \x20   slice.map_async(wgpu::MapMode::Read, |r| r.expect(\"map\"));\n\
+         \x20   rt.gpu.device.poll(wgpu::PollType::Wait).expect(\"poll\");\n\
+         \x20   let out = bytemuck::cast_slice::<u8, u32>(&slice.get_mapped_range()).to_vec();\n\
+         \x20   staging.unmap();\n\
+         \x20   out\n\
+         }\n\
+         #[allow(dead_code, clippy::all)]\n\
+         fn playable_read_u32(rt: &mut GeneratedRuntime, buf: &wgpu::Buffer, n: u32) -> Vec<u32> {\n\
+         \x20   playable_read_raw_u32(rt, buf, n as u64 * 4)\n\
+         }\n\
+         #[allow(dead_code, clippy::all)]\n\
+         fn playable_read_f32(rt: &mut GeneratedRuntime, buf: &wgpu::Buffer, n: u32) -> Vec<f32> {\n\
+         \x20   playable_read_raw_u32(rt, buf, n as u64 * 4).into_iter().map(f32::from_bits).collect()\n\
+         }\n\
+         #[allow(dead_code, clippy::all)]\n\
+         fn playable_read_vec4(rt: &mut GeneratedRuntime, buf: &wgpu::Buffer, n: u32) -> Vec<[f32; 4]> {\n\
+         \x20   let raw = playable_read_raw_u32(rt, buf, n as u64 * 16);\n\
+         \x20   raw.chunks_exact(4).map(|c| [f32::from_bits(c[0]), f32::from_bits(c[1]), f32::from_bits(c[2]), f32::from_bits(c[3])]).collect()\n\
+         }\n",
+    );
 
     out
 }
@@ -4128,6 +4423,9 @@ mod tests {
             0,
             false,
             None,
+            "{\"bindings\":[]}",
+            "{\"arena_radius\":0.0,\"camera\":\"Observer\",\"agents\":[],\"vfx\":[]}",
+            "{\"hud\":[],\"screens\":[]}",
         );
 
         // Braces balance.
@@ -4154,9 +4452,17 @@ mod tests {
 
         // Empty fixture has no External bindings → no buffer alloc
         // lines in try_new (only the gpu init + Some(Self {{...}})).
+        // Scope to the try_new region: the Plan A `PlayableRuntime` readback
+        // helpers (`playable_read_raw_u32`) always `create_buffer` a staging
+        // buffer, so the unscoped check no longer holds for the whole source.
+        let try_new_start = out.find("pub fn try_new").expect("try_new present");
+        let try_new_region = &out[try_new_start..];
+        let try_new_end = try_new_region
+            .find("pub fn render_descriptor")
+            .unwrap_or(try_new_region.len());
         assert!(
-            !out.contains("create_buffer"),
-            "minimal fixture should not emit buffer alloc lines\n{out}"
+            !try_new_region[..try_new_end].contains("create_buffer"),
+            "minimal fixture should not emit buffer alloc lines in try_new\n{out}"
         );
     }
 
@@ -4208,6 +4514,9 @@ mod tests {
             0,
             false,
             None,
+            "{\"bindings\":[]}",
+            "{\"arena_radius\":0.0,\"camera\":\"Observer\",\"agents\":[],\"vfx\":[]}",
+            "{\"hud\":[],\"screens\":[]}",
         );
 
         // Typed signature with snake_case method name + matching params.
@@ -4278,6 +4587,9 @@ mod tests {
             0,
             false,
             None,
+            "{\"bindings\":[]}",
+            "{\"arena_radius\":0.0,\"camera\":\"Observer\",\"agents\":[],\"vfx\":[]}",
+            "{\"hud\":[],\"screens\":[]}",
         );
 
         // The generic helper still lands.

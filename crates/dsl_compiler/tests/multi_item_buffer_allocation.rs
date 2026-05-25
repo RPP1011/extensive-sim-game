@@ -172,6 +172,9 @@ fn multi_item_shared_field_runtime_struct_has_one_buffer_per_field() {
         group_entity_count,
         false,
         None,
+        "{\"bindings\":[]}",
+        "{\"arena_radius\":0.0,\"camera\":\"Observer\",\"agents\":[],\"vfx\":[]}",
+        "{\"hud\":[],\"screens\":[]}",
     );
 
     // Exactly ONE `item_base_price_buf` field on the struct (field-

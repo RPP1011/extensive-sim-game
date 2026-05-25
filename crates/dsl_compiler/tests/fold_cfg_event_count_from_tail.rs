@@ -150,6 +150,9 @@ fn fold_step_snapshot_copies_event_tail_into_cfg_event_count() {
         0,
         false,
         None,
+        "{\"bindings\":[]}",
+        "{\"arena_radius\":0.0,\"camera\":\"Observer\",\"agents\":[],\"vfx\":[]}",
+        "{\"hud\":[],\"screens\":[]}",
     );
 
     // (a) Side buffer is allocated + threaded through the struct.
@@ -281,6 +284,9 @@ fn non_event_ring_kernel_does_not_get_snapshot_copy() {
         0,
         false,
         None,
+        "{\"bindings\":[]}",
+        "{\"arena_radius\":0.0,\"camera\":\"Observer\",\"agents\":[],\"vfx\":[]}",
+        "{\"hud\":[],\"screens\":[]}",
     );
 
     // No fold consumers → no prev_event_tail_buf field, no
