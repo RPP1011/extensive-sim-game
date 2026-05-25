@@ -8,10 +8,10 @@ fn vs_viewer_constructs_steps_and_spawns() {
         None => { eprintln!("[vs_viewer] skip: no wgpu adapter"); return; }
     };
     let players = app.agents().iter().filter(|a| a.role == VsRole::Player).count();
-    let spawners = app.agents().iter().filter(|a| a.role == VsRole::Spawner).count();
     let enemies0 = app.agents().iter().filter(|a| a.role == VsRole::Enemy).count();
+    // No spawner agents now — the player emits the waves; the drain spawns
+    // enemies in a ring around it.
     assert_eq!(players, 1, "exactly one player; got {players}");
-    assert!(spawners >= 1, "at least one spawner; got {spawners}");
     assert_eq!(enemies0, 0, "no live enemies before any wave; got {enemies0}");
 
     let mut max_enemies = 0;

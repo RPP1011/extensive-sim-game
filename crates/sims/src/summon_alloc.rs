@@ -4,6 +4,17 @@
 
 use glam::Vec3;
 
+/// Radius of the ring around the player on which summoned enemies appear.
+pub const SPAWN_RING_RADIUS: f32 = 30.0;
+
+/// Enemy types: (hp, move_speed). 0 Grunt (baseline), 1 Swift (fast/fragile),
+/// 2 Brute (slow/tanky). Indexed by `SlotAssignment::kind`.
+pub const ENEMY_TYPES: [(f32, f32); 3] = [
+    (12.0, 0.40), // Grunt
+    (6.0, 0.75),  // Swift
+    (30.0, 0.22), // Brute
+];
+
 /// One decoded EffectSummonApplied record (event ring kind 62).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SummonRecord {
@@ -18,6 +29,8 @@ pub struct SummonRecord {
 pub struct SlotAssignment {
     pub slot: u32,
     pub pos: Vec3,
+    /// Enemy type index into ENEMY_TYPES (0 Grunt / 1 Swift / 2 Brute).
+    pub kind: u8,
 }
 
 /// Pure allocation planning. Deterministic: records are processed in `seq`
@@ -51,11 +64,18 @@ pub fn plan_allocations(
             claimed[cursor] = true;
             let new_slot = cursor as u32;
             let off = seeded_offset(seed, new_slot, tick);
+            // Spawn on a RING around the summoner (the player): random angle,
+            // radius ~SPAWN_RING_RADIUS. This is the VS "enemies appear around
+            // you" pattern (the actor pos is the player; see drain_summons).
             let ang = (off & 0xFFFF) as f32 / 65535.0 * std::f32::consts::TAU;
-            let rad = 1.0 + ((off >> 16) & 0xFF) as f32 / 255.0 * 3.0;
+            let jitter = ((off >> 16) & 0xFF) as f32 / 255.0 * 6.0 - 3.0;
+            let rad = SPAWN_RING_RADIUS + jitter;
+            // Enemy type from independent high bits → 0 Grunt / 1 Swift / 2 Brute.
+            let kind = ((off >> 28) % 3) as u8;
             out.push(SlotAssignment {
                 slot: new_slot,
                 pos: base + Vec3::new(rad * ang.cos(), rad * ang.sin(), 0.0),
+                kind,
             });
             cursor += 1;
         }
@@ -82,6 +102,8 @@ pub struct DrainCtx<'a> {
     pub event_ring: &'a engine::gpu::EventRing,
     pub agent_alive_buf: &'a wgpu::Buffer,
     pub agent_pos_buf: &'a wgpu::Buffer,
+    pub agent_hp_buf: &'a wgpu::Buffer,
+    pub agent_move_speed_buf: &'a wgpu::Buffer,
     pub agent_count: u32,
     pub seed: u64,
     pub tick: u64,
@@ -168,6 +190,11 @@ pub fn drain_summons(ctx: DrainCtx) -> usize {
             a.slot as u64 * 16,
             bytemuck::cast_slice(&pos_one),
         );
+        // Per enemy type: hp + move_speed.
+        let (hp, spd) = ENEMY_TYPES[a.kind as usize];
+        ctx.queue.write_buffer(ctx.agent_hp_buf, a.slot as u64 * 4, bytemuck::cast_slice(&[hp]));
+        ctx.queue
+            .write_buffer(ctx.agent_move_speed_buf, a.slot as u64 * 4, bytemuck::cast_slice(&[spd]));
     }
     plan.len()
 }
@@ -226,11 +253,12 @@ mod tests {
         ];
         let pos_of = |actor: u32| Vec3::new(actor as f32, 0.0, 0.0); // actor_slot doubles as x
         let got = plan_allocations(&alive, &recs, pos_of, 7, 1, 0);
-        // seq=1 (actor 100) processed first -> first 2 assignments near x=100
-        assert!((got[0].pos.x - 100.0).abs() <= 4.0, "first spawn should come from seq=1 record (x~100); got {}", got[0].pos.x);
-        assert!((got[1].pos.x - 100.0).abs() <= 4.0, "second spawn should come from seq=1 record (x~100); got {}", got[1].pos.x);
-        // then seq=10 (actor 200) -> next 2 near x=200
-        assert!((got[2].pos.x - 200.0).abs() <= 4.0, "third spawn should come from seq=10 record (x~200); got {}", got[2].pos.x);
+        // seq=1 (actor 100) first -> first 2 spawns ring around x=100 (±ring+jitter)
+        let tol = SPAWN_RING_RADIUS + 4.0;
+        assert!((got[0].pos.x - 100.0).abs() <= tol, "first spawn should come from seq=1 record (x~100±ring); got {}", got[0].pos.x);
+        assert!((got[1].pos.x - 100.0).abs() <= tol, "second spawn should come from seq=1 record (x~100±ring); got {}", got[1].pos.x);
+        // then seq=10 (actor 200) -> next 2 ring around x=200
+        assert!((got[2].pos.x - 200.0).abs() <= tol, "third spawn should come from seq=10 record (x~200±ring); got {}", got[2].pos.x);
         // slots claimed ascending
         let slots: Vec<u32> = got.iter().map(|a| a.slot).collect();
         assert_eq!(slots, vec![0, 1, 2, 3]);

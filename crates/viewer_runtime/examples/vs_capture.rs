@@ -15,7 +15,7 @@
 
 use image::codecs::gif::{GifEncoder, Repeat};
 use image::{Delay, Frame, Rgba, RgbaImage};
-use viewer_runtime::vs::{VsRole, VsViewerApp};
+use viewer_runtime::vs::{VsAgent, VsRole, VsViewerApp};
 
 const GRID: f32 = 96.0; // matches GRID_X/GRID_Y; agents live in [-48,48] world coords
 const SCALE: u32 = 4; // px per grid unit -> 384x384 frames
@@ -34,18 +34,22 @@ fn world_to_px(p: [f32; 3], dim: u32) -> Option<(i32, i32)> {
     Some((px, py))
 }
 
-fn color(role: VsRole) -> Rgba<u8> {
-    match role {
-        VsRole::Player => Rgba([0, 220, 220, 255]),   // cyan
-        VsRole::Enemy => Rgba([230, 100, 20, 255]),   // orange-red
-        VsRole::Spawner => Rgba([160, 60, 220, 255]), // purple
+fn color(a: &VsAgent) -> Rgba<u8> {
+    match a.role {
+        VsRole::Player => Rgba([0, 220, 220, 255]),    // cyan
+        VsRole::Spawner => Rgba([160, 60, 220, 255]),  // purple (unused now)
+        // Enemy color by type (move_speed): Swift=yellow, Brute=red, Grunt=orange.
+        VsRole::Enemy if a.move_speed > 0.6 => Rgba([240, 230, 40, 255]), // Swift
+        VsRole::Enemy if a.move_speed < 0.3 => Rgba([220, 40, 40, 255]),  // Brute
+        VsRole::Enemy => Rgba([230, 110, 20, 255]),                       // Grunt
     }
 }
 
-fn dot_radius(role: VsRole) -> i32 {
-    match role {
+fn dot_radius(a: &VsAgent) -> i32 {
+    match a.role {
         VsRole::Player => 4,
         VsRole::Spawner => 3,
+        VsRole::Enemy if a.move_speed < 0.3 => 3, // Brute bigger
         VsRole::Enemy => 2,
     }
 }
@@ -92,8 +96,8 @@ fn main() {
                 VsRole::Spawner => ns += 1,
             }
             if let Some((cx, cy)) = world_to_px(a.pos, dim) {
-                let r = dot_radius(a.role);
-                let col = color(a.role);
+                let r = dot_radius(a);
+                let col = color(a);
                 for dy in -r..=r {
                     for dx in -r..=r {
                         let (px, py) = (cx + dx, cy + dy);

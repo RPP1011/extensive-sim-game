@@ -24,7 +24,7 @@ pub fn role_for_mana(mana: f32) -> VsRole {
 }
 
 #[derive(Clone, Copy)]
-pub struct VsAgent { pub pos: [f32; 3], pub hp: f32, pub role: VsRole }
+pub struct VsAgent { pub pos: [f32; 3], pub hp: f32, pub role: VsRole, pub move_speed: f32 }
 
 pub struct VsViewerApp {
     pub state: GeneratedRuntime,
@@ -52,6 +52,8 @@ impl VsViewerApp {
             let event_ring = &self.state.event_ring;
             let agent_alive_buf = &self.state.agent_alive_buf;
             let agent_pos_buf = &self.state.agent_pos_buf;
+            let agent_hp_buf = &self.state.agent_hp_buf;
+            let agent_move_speed_buf = &self.state.agent_move_speed_buf;
             let agent_count = self.state.agent_count;
             let seed = self.state.seed;
             let tick = self.state.tick;
@@ -61,6 +63,8 @@ impl VsViewerApp {
                 event_ring,
                 agent_alive_buf,
                 agent_pos_buf,
+                agent_hp_buf,
+                agent_move_speed_buf,
                 agent_count,
                 seed,
                 tick,
@@ -79,10 +83,12 @@ impl VsViewerApp {
         let alive_buf = self.state.agent_alive_buf.clone();
         let hp_buf   = self.state.agent_hp_buf.clone();
         let mana_buf = self.state.agent_mana_buf.clone();
+        let ms_buf   = self.state.agent_move_speed_buf.clone();
         let pos  = read_vec4(&mut self.state, &pos_buf, n);
         let alive = read_u32(&mut self.state, &alive_buf, n);
         let hp   = read_f32(&mut self.state, &hp_buf, n);
         let mana = read_f32(&mut self.state, &mana_buf, n);
+        let ms   = read_f32(&mut self.state, &ms_buf, n);
         self.agents.clear();
         for i in 0..n as usize {
             if alive[i] == 1 {
@@ -90,6 +96,7 @@ impl VsViewerApp {
                     pos: [pos[i][0], pos[i][1], pos[i][2]],
                     hp: hp[i],
                     role: role_for_mana(mana[i]),
+                    move_speed: ms[i],
                 });
             }
         }

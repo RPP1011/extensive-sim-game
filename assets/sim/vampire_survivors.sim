@@ -47,11 +47,12 @@ config vs {
   enemy_mana_min:     f32 = 1.5,
   enemy_mana_max:     f32 = 2.5,
   perception_radius:  f32 = 12.0,
-  // Constant movement speeds (units/tick): normalised direction × speed.
-  // Player slightly faster than enemies so it can kite the closing swarm.
-  enemy_speed:        f32 = 0.4,
+  // Player kite speed (units/tick); enemies use a PER-AGENT move_speed set by
+  // the summon drain per enemy type, so types move at different speeds.
   flee_radius:        f32 = 8.0,
   player_speed:       f32 = 0.5,
+  // Radial arena bound: agents are clamped to within this radius of origin.
+  arena_radius:       f32 = 42.0,
   bolt_range:         f32 = 18.0,
   bolt_period:        u32 = 12,
   bolt_damage:        f32 = 6.0,
@@ -63,9 +64,7 @@ config vs {
   nova_damage_per_level: f32 = 1.0,
   bolt_cap:           f32 = 5.0,
   nova_cap:           f32 = 5.0,
-  // --- Phase A: spawner role + wave ramp ---
-  spawner_mana_min:   f32 = 2.5,
-  spawner_mana_max:   f32 = 3.5,
+  // --- wave ramp (player-cast; drain spawns enemies in a ring around player) ---
   wave_period:        u32 = 30,
   small_to_medium:    u32 = 1000,
   medium_to_large:    u32 = 2500,
@@ -102,8 +101,12 @@ physics KitePlayer @phase(per_agent) {
     let d = distance(self.pos, self.pos + flee);
     if (d > 0.001) {
       let step = flee * (config.vs.player_speed / d);
-      agents.set_vel(self, step);
-      agents.set_pos(self, self.pos + step);
+      let raw = self.pos + step;
+      // Radial arena clamp (same as enemies): stay within arena_radius.
+      let center = vec3(0.0, 0.0, 0.0);
+      let r = distance(center, raw);
+      let factor = min(1.0, config.vs.arena_radius / (r + 0.001));
+      agents.set_pos(self, raw * factor);
     }
   }
 }
@@ -135,8 +138,14 @@ physics ChasePlayer @phase(per_agent) {
     let to_player = pp - self.pos;
     let d = distance(self.pos, pp);
     if (d > 0.001) {
-      let step = to_player * (config.vs.enemy_speed / d);
-      agents.set_pos(self, self.pos + step);
+      // Per-enemy move_speed (set by the drain per enemy type), unit direction.
+      let step = to_player * (self.move_speed / d);
+      let raw = self.pos + step;
+      // Radial arena clamp: scale back inside arena_radius (min keeps it <= 1).
+      let center = vec3(0.0, 0.0, 0.0);
+      let r = distance(center, raw);
+      let factor = min(1.0, config.vs.arena_radius / (r + 0.001));
+      agents.set_pos(self, raw * factor);
     }
   }
 }
@@ -248,8 +257,8 @@ verb SpawnSmall(self, target: Agent) =
   action SpawnSmallAction
   when (self.alive
         && target == self
-        && self.mana >= config.vs.spawner_mana_min
-        && self.mana <= config.vs.spawner_mana_max
+        && self.mana >= config.vs.player_mana_min
+        && self.mana <= config.vs.player_mana_max
         && (world.tick < config.vs.small_to_medium)
         && (world.tick % config.vs.wave_period == 0))
   apply_ability 4 by self target self
@@ -259,8 +268,8 @@ verb SpawnMedium(self, target: Agent) =
   action SpawnMediumAction
   when (self.alive
         && target == self
-        && self.mana >= config.vs.spawner_mana_min
-        && self.mana <= config.vs.spawner_mana_max
+        && self.mana >= config.vs.player_mana_min
+        && self.mana <= config.vs.player_mana_max
         && (world.tick >= config.vs.small_to_medium)
         && (world.tick < config.vs.medium_to_large)
         && (world.tick % config.vs.wave_period == 0))
@@ -271,8 +280,8 @@ verb SpawnLarge(self, target: Agent) =
   action SpawnLargeAction
   when (self.alive
         && target == self
-        && self.mana >= config.vs.spawner_mana_min
-        && self.mana <= config.vs.spawner_mana_max
+        && self.mana >= config.vs.player_mana_min
+        && self.mana <= config.vs.player_mana_max
         && (world.tick >= config.vs.medium_to_large)
         && (world.tick < config.vs.large_to_horde)
         && (world.tick % config.vs.wave_period == 0))
@@ -283,8 +292,8 @@ verb SpawnHorde(self, target: Agent) =
   action SpawnHordeAction
   when (self.alive
         && target == self
-        && self.mana >= config.vs.spawner_mana_min
-        && self.mana <= config.vs.spawner_mana_max
+        && self.mana >= config.vs.player_mana_min
+        && self.mana <= config.vs.player_mana_max
         && (world.tick >= config.vs.large_to_horde)
         && (world.tick % config.vs.wave_period == 0))
   apply_ability 1 by self target self

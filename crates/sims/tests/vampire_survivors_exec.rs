@@ -84,6 +84,8 @@ fn vampire_survivors_spawns_and_runs() {
             let event_ring = &rt.event_ring;
             let agent_alive_buf = &rt.agent_alive_buf;
             let agent_pos_buf = &rt.agent_pos_buf;
+            let agent_hp_buf = &rt.agent_hp_buf;
+            let agent_move_speed_buf = &rt.agent_move_speed_buf;
             let agent_count = rt.agent_count;
             let seed = rt.seed;
             let tick = rt.tick;
@@ -93,6 +95,8 @@ fn vampire_survivors_spawns_and_runs() {
                 event_ring,
                 agent_alive_buf,
                 agent_pos_buf,
+                agent_hp_buf,
+                agent_move_speed_buf,
                 agent_count,
                 seed,
                 tick,
