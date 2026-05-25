@@ -137,6 +137,7 @@ fn main() {
                 | "navgrid_probe"
                 | "terrain_probe"
                 | "terrain_probe_imported"
+                | "vampire_survivors"
         ) {
             continue;
         }
