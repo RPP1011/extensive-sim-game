@@ -28,7 +28,10 @@ fn play_probe_declares_all_three_blocks() {
 #[test]
 fn play_probe_render_parses_and_is_non_empty() {
     let p = program();
-    let json = render::render_decl_to_json(p.render.as_ref().unwrap());
+    let json = render::render_decl_to_json(
+        p.render.as_ref().unwrap(),
+        &std::collections::BTreeMap::new(),
+    );
     let d = RenderDescriptor::from_json(&json)
         .unwrap_or_else(|e| panic!("render from_json failed ({e}) for:\n{json}"));
     assert_eq!(d.arena_radius, 24.0);

@@ -168,6 +168,7 @@ fn synthesize_two_view_fixture() -> String {
         "two_view_fixture",
         &artifacts,
         &init_stmts,
+        &[],
         &std::collections::BTreeMap::new(),
         &[],
         &[],

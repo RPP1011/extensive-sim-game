@@ -243,11 +243,40 @@ fn emit_into(
         })
         .flatten()
         .collect();
+    // Subkind seeding (Plan A) — extract `spawn <Subkind> count <N> { … }`
+    // population blocks alongside the flat init stmts. Threaded into
+    // synthesize_runtime_core so try_new seeds per-subkind slot ranges
+    // (creature_type + alive + fields + pos) instead of zero-init.
+    let init_spawns: Vec<dsl_ast::ast::SpawnBlock> = program
+        .decls
+        .iter()
+        .filter_map(|d| match d {
+            dsl_ast::ast::Decl::Init(i) => Some(i.spawns.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
     // T11 — extract `terrain { ... }` block before resolve consumes the
     // Program. `TerrainBlock` derives Clone so we take a cheap copy here;
     // `emit_into` uses it after all the CG pipeline writes to conditionally
     // emit `terrain_gen.rs` alongside `generated.rs` and `runtime_core.rs`.
     let terrain_block: Option<dsl_ast::terrain::TerrainBlock> = program.terrain.clone();
+    // Subkind seeding (Plan A) — the subkind→creature_type ordinal map.
+    // Declaration order of `entity X : Agent` decls in `program.decls` is
+    // the SAME order `resolve` assigns `EntityRef(idx)` (and the
+    // `self.creature_type == <Subkind>` guard compares against), so the
+    // seeder's stamp + the render selector's lo==hi==ordinal match the
+    // rule-guard value exactly. Built before resolve consumes the Program.
+    let entity_ordinals: std::collections::BTreeMap<String, u32> = program
+        .decls
+        .iter()
+        .filter_map(|d| match d {
+            dsl_ast::ast::Decl::Entity(e) => Some(e.name.clone()),
+            _ => None,
+        })
+        .enumerate()
+        .map(|(i, name)| (name, i as u32))
+        .collect();
     // Plan A — lower the player-facing descriptor blocks to JSON BEFORE
     // resolve consumes the Program. Each falls back to the empty-but-valid
     // descriptor so the generated `*_descriptor()` accessors + the
@@ -261,7 +290,7 @@ fn emit_into(
     let render_json = program
         .render
         .as_ref()
-        .map(crate::cg::emit::render::render_decl_to_json)
+        .map(|r| crate::cg::emit::render::render_decl_to_json(r, &entity_ordinals))
         .unwrap_or_else(crate::cg::emit::render::empty_render_json);
     let ui_json = program
         .ui
@@ -707,10 +736,66 @@ fn emit_into(
         .iter()
         .filter(|e| matches!(e.root, dsl_ast::ast::EntityRoot::Group))
         .count() as u32;
+    // Subkind seeding (Plan A) — resolve each `spawn` block's subkind to its
+    // creature_type ordinal and its `count` to a u32. Config-driven counts
+    // (`count config.<b>.<f>`) resolve against the .sim's config defaults.
+    let resolved_spawns: Vec<ResolvedSpawnBlock> = init_spawns
+        .iter()
+        .map(|sb| {
+            let creature_type_ord = *entity_ordinals.get(&sb.subkind).unwrap_or_else(|| {
+                panic!(
+                    "init `spawn {}`: unknown entity subkind in {fixture_name}.sim \
+                     (declared entities: {:?})",
+                    sb.subkind,
+                    entity_ordinals.keys().collect::<Vec<_>>(),
+                )
+            });
+            let count = match &sb.count {
+                dsl_ast::ast::CountExpr::Lit(n) => *n,
+                dsl_ast::ast::CountExpr::Config(dotted) => {
+                    let (block, field) = dotted.split_once('.').unwrap_or_else(|| {
+                        panic!(
+                            "init `spawn {}` count `config.{dotted}`: expected \
+                             `config.<block>.<field>` in {fixture_name}.sim",
+                            sb.subkind,
+                        )
+                    });
+                    let cfg = comp
+                        .configs
+                        .iter()
+                        .find(|c| c.name == block)
+                        .and_then(|c| c.fields.iter().find(|f| f.name == field))
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "init `spawn {}` count `config.{dotted}`: no such config \
+                                 field in {fixture_name}.sim",
+                                sb.subkind,
+                            )
+                        });
+                    match &cfg.default {
+                        dsl_ast::ast::ConfigDefault::Int(n) => *n as u32,
+                        dsl_ast::ast::ConfigDefault::Uint(n) => *n as u32,
+                        other => panic!(
+                            "init `spawn {}` count `config.{dotted}`: config field must be \
+                             an integer (got {other:?}) in {fixture_name}.sim",
+                            sb.subkind,
+                        ),
+                    }
+                }
+            };
+            ResolvedSpawnBlock {
+                subkind: sb.subkind.clone(),
+                creature_type_ord,
+                count,
+                fields: sb.fields.clone(),
+            }
+        })
+        .collect();
     let runtime_core = synthesize_runtime_core_a2(
         fixture_name,
         &artifacts,
         &init_stmts,
+        &resolved_spawns,
         &runtime_config_defaults,
         &ability_file_names,
         &comp.events,
@@ -758,6 +843,20 @@ pub struct RuntimeConfigDefault {
     pub block: String,
     /// The field name within the block (e.g. `move_x`).
     pub field: String,
+}
+
+/// Subkind seeding (Plan A) — a `spawn <Subkind> count N { … }` block with
+/// its subkind name resolved to a `creature_type` ordinal and its `count`
+/// resolved to a `u32` (literals as-is; `config.<b>.<f>` looked up against
+/// the resolved Compilation's config defaults at codegen time). Threaded
+/// into the runtime-core synth so the per-binding alloc loop can seed each
+/// block's contiguous slot range.
+#[derive(Clone)]
+pub struct ResolvedSpawnBlock {
+    pub subkind: String,
+    pub creature_type_ord: u32,
+    pub count: u32,
+    pub fields: Vec<dsl_ast::ast::InitStmt>,
 }
 
 /// AOE auto-detect: scan the .ability corpus for any program with a
@@ -1529,6 +1628,10 @@ pub fn synthesize_runtime_core_a2(
     fixture_name: &str,
     artifacts: &crate::cg::emit::EmittedArtifacts,
     init_stmts: &[dsl_ast::ast::InitStmt],
+    // Subkind seeding (Plan A) — per-subkind population blocks with their
+    // subkind→creature_type ordinal + count pre-resolved. Empty for fixtures
+    // that use only the flat `init { field: v }` form (back-compat).
+    init_spawns: &[ResolvedSpawnBlock],
     runtime_config_defaults: &std::collections::BTreeMap<String, RuntimeConfigDefault>,
     ability_file_names: &[String],
     events: &[dsl_ast::ir::EventIR],
@@ -1630,6 +1733,7 @@ pub fn synthesize_runtime_core_a2(
         fixture_name,
         artifacts,
         init_stmts,
+        init_spawns,
         runtime_config_defaults,
         ability_file_names,
         events,
@@ -2009,6 +2113,201 @@ fn view_storage_per_view_name(binding_name: &str, view_name: Option<&str>) -> St
     }
 }
 
+/// Subkind seeding (Plan A) — emit the per-column init-Vec precompute for
+/// the `init { spawn … }` population blocks into `try_new`'s body, and
+/// return the set of `agent_<col>` columns the spawns touch (so the alloc
+/// loop routes those bindings to `create_buffer_init` with the matching
+/// `agent_<col>_init` Vec).
+///
+/// Slot assignment: contiguous ranges starting at slot 1 — slot 0 is the
+/// `AgentId` `NonZeroU32` "absent" sentinel and is never seeded. The total
+/// `1 + Σcount` must fit in `agent_count`; a runtime assert in the emitted
+/// code surfaces an overflow at `try_new` (counts are compile-time
+/// constants, so this fires deterministically the first time the fixture
+/// is constructed with too few agents).
+///
+/// For each block's range we stamp:
+///   * `creature_type` = the subkind's declaration-order ordinal (the same
+///     value the `self.creature_type == <Subkind>` rule guard compares),
+///   * `alive` = 1 (unless the block overrides it — a pool is `alive: 0`),
+///   * each declared field (int → u32/f32; float → f32 bits or truncated
+///     u32; `pos` → `origin` / `scatter(r)` / `ring(r)` seeded host-side
+///     via `engine::rng::per_agent_u32(seed, AgentId(slot), 0, purpose)`
+///     so positions are P5-deterministic per `(seed, slot)`).
+fn emit_spawn_seeding(
+    out: &mut String,
+    fixture_name: &str,
+    spawns: &[ResolvedSpawnBlock],
+) -> std::collections::BTreeSet<String> {
+    use crate::cg::data_handle::{AgentFieldId, AgentFieldTy};
+    use std::collections::BTreeSet;
+
+    let mut touched: BTreeSet<String> = BTreeSet::new();
+    if spawns.is_empty() {
+        return touched;
+    }
+
+    // Compile-time slot ranges. Slot 0 is the AgentId sentinel — skip it.
+    let mut ranges: Vec<(u32, u32, &ResolvedSpawnBlock)> = Vec::new();
+    let mut next = 1u32;
+    for sb in spawns {
+        ranges.push((next, sb.count, sb));
+        next = next.saturating_add(sb.count);
+    }
+    let total = next; // 1 + Σcount
+
+    // Every block touches creature_type + alive; collect declared fields too.
+    touched.insert("creature_type".to_string());
+    touched.insert("alive".to_string());
+    for sb in spawns {
+        for f in &sb.fields {
+            touched.insert(f.field.clone());
+        }
+    }
+
+    // Rust elem type per touched column (pos is the special Vec3 case).
+    let col_rust_ty = |col: &str| -> &'static str {
+        if col == "pos" {
+            "[f32; 4]"
+        } else {
+            match AgentFieldId::from_snake(col).map(AgentFieldId::ty) {
+                Some(AgentFieldTy::F32) => "f32",
+                _ => "u32",
+            }
+        }
+    };
+    let col_zero = |col: &str| -> &'static str {
+        if col == "pos" {
+            "[0.0_f32; 4]"
+        } else {
+            match AgentFieldId::from_snake(col).map(AgentFieldId::ty) {
+                Some(AgentFieldTy::F32) => "0.0_f32",
+                _ => "0u32",
+            }
+        }
+    };
+
+    out.push_str("        // --- subkind seeding (init { spawn … }) ---\n");
+    out.push_str(&format!(
+        "        assert!(\n\
+         \x20           {total}u32 <= agent_count,\n\
+         \x20           \"{fixture_name}: init spawn blocks need {{}} agent slots (1 sentinel + {{}} seeded) but agent_count = {{}}\",\n\
+         \x20           {total}u32, {seeded}u32, agent_count,\n\
+         \x20       );\n",
+        seeded = total - 1,
+    ));
+
+    // Per-column init Vec, filled per slot range.
+    for col in &touched {
+        let rty = col_rust_ty(col);
+        let zero = col_zero(col);
+        let buf_name = format!("agent_{col}_init");
+        out.push_str(&format!(
+            "        let mut {buf_name}: Vec<{rty}> = vec![{zero}; agent_count as usize];\n",
+        ));
+        // Default-stamp creature_type + alive across each range; then apply
+        // the block's explicit fields (which may override alive / pos / etc.).
+        for (start, count, sb) in &ranges {
+            // Per-column default for this range.
+            let default_fill: Option<String> = match col.as_str() {
+                "creature_type" => Some(format!("{}u32", sb.creature_type_ord)),
+                "alive" => Some("1u32".to_string()),
+                _ => None,
+            };
+            // Field override for this column in this block (last wins).
+            let field_override = sb.fields.iter().rev().find(|f| &f.field == col);
+
+            // Position columns: seed per-slot (origin/scatter/ring) when set.
+            if col == "pos" {
+                if let Some(stmt) = field_override {
+                    if let dsl_ast::ast::InitExpr::Pos(pb) = &stmt.expr {
+                        emit_pos_fill(out, &buf_name, *start, *count, *pb);
+                    }
+                }
+                continue;
+            }
+
+            // Scalar columns: pick the override value, else the default.
+            let fill_expr: Option<String> = if let Some(stmt) = field_override {
+                Some(scalar_init_value(col, &stmt.expr, col_rust_ty(col)))
+            } else {
+                default_fill
+            };
+            if let Some(val) = fill_expr {
+                out.push_str(&format!(
+                    "        for __s in {start}u32..{end}u32 {{ {buf_name}[__s as usize] = {val}; }}\n",
+                    end = start + count,
+                ));
+            }
+        }
+    }
+    touched
+}
+
+/// Scalar init value for a touched column, routed by the column's Rust elem
+/// type (`f32` vs `u32`). Mirrors the flat-init type routing (`InitExpr` →
+/// f32 bits for f32 cols, truncated u32 otherwise). `Pos` is handled
+/// separately (per-slot) and `Slot` stamps the slot index.
+fn scalar_init_value(col: &str, expr: &dsl_ast::ast::InitExpr, rust_ty: &str) -> String {
+    match (expr, rust_ty) {
+        (dsl_ast::ast::InitExpr::Const(n), "f32") => format!("{n}.0_f32"),
+        (dsl_ast::ast::InitExpr::Const(n), _) => format!("{n}u32"),
+        (dsl_ast::ast::InitExpr::Float(v), "f32") => format!("{v}_f32"),
+        (dsl_ast::ast::InitExpr::Float(v), _) => format!("({v}_f32) as u32"),
+        (dsl_ast::ast::InitExpr::Slot, "f32") => "__s as f32".to_string(),
+        (dsl_ast::ast::InitExpr::Slot, _) => "__s".to_string(),
+        (dsl_ast::ast::InitExpr::Pos(_), _) => panic!(
+            "init field `{col}`: position builtins are only valid for the `pos` column"
+        ),
+    }
+}
+
+/// Emit a per-slot position fill for a `spawn` block's slot range.
+/// `origin` writes `[0,0,0,0]`; `scatter(r)` draws a uniform point in a
+/// radius-`r` disc (XY plane); `ring(r)` places the slot on the radius-`r`
+/// circle. Both stochastic forms use `engine::rng::per_agent_u32(seed,
+/// AgentId(slot), 0, purpose)` so the position is deterministic per
+/// `(seed, slot)` (P5). `AgentId::new(slot)` is always `Some` here — the
+/// range starts at slot 1, never the slot-0 NonZeroU32 sentinel.
+fn emit_pos_fill(
+    out: &mut String,
+    buf_name: &str,
+    start: u32,
+    count: u32,
+    pb: dsl_ast::ast::PosBuiltin,
+) {
+    let end = start + count;
+    match pb {
+        dsl_ast::ast::PosBuiltin::Origin => {
+            out.push_str(&format!(
+                "        for __s in {start}u32..{end}u32 {{ {buf_name}[__s as usize] = [0.0_f32; 4]; }}\n",
+            ));
+        }
+        dsl_ast::ast::PosBuiltin::Scatter(r) => {
+            out.push_str(&format!(
+                "        for __s in {start}u32..{end}u32 {{\n\
+                 \x20           let __aid = engine::ids::AgentId::new(__s).expect(\"seeded slot is non-zero\");\n\
+                 \x20           let __u = engine::rng::per_agent_u32(seed, __aid, 0, b\"seed_pos_r\") as f32 / (u32::MAX as f32);\n\
+                 \x20           let __v = engine::rng::per_agent_u32(seed, __aid, 0, b\"seed_pos_a\") as f32 / (u32::MAX as f32);\n\
+                 \x20           let __rad = ({r}_f32) * __u.sqrt();\n\
+                 \x20           let __ang = __v * std::f32::consts::TAU;\n\
+                 \x20           {buf_name}[__s as usize] = [__rad * __ang.cos(), __rad * __ang.sin(), 0.0, 0.0];\n\
+                 \x20       }}\n",
+            ));
+        }
+        dsl_ast::ast::PosBuiltin::Ring(r) => {
+            out.push_str(&format!(
+                "        for __s in {start}u32..{end}u32 {{\n\
+                 \x20           let __aid = engine::ids::AgentId::new(__s).expect(\"seeded slot is non-zero\");\n\
+                 \x20           let __v = engine::rng::per_agent_u32(seed, __aid, 0, b\"seed_pos_a\") as f32 / (u32::MAX as f32);\n\
+                 \x20           let __ang = __v * std::f32::consts::TAU;\n\
+                 \x20           {buf_name}[__s as usize] = [({r}_f32) * __ang.cos(), ({r}_f32) * __ang.sin(), 0.0, 0.0];\n\
+                 \x20       }}\n",
+            ));
+        }
+    }
+}
+
 /// `pair_keyed_second_key` — see [`synthesize_runtime_core_a2`]'s
 /// same-named param. Read by [`slot_count_expr`] to up-size
 /// `view_storage_primary` to `agent_count * <second_key_population>`
@@ -2029,6 +2328,7 @@ fn synthesize_generated_runtime_struct(
     fixture_name: &str,
     artifacts: &crate::cg::emit::EmittedArtifacts,
     init_stmts: &[dsl_ast::ast::InitStmt],
+    init_spawns: &[ResolvedSpawnBlock],
     runtime_config_defaults: &std::collections::BTreeMap<String, RuntimeConfigDefault>,
     ability_file_names: &[String],
     events: &[dsl_ast::ir::EventIR],
@@ -2513,6 +2813,16 @@ fn synthesize_generated_runtime_struct(
     out.push_str(
         "        let cache = dispatch::KernelCache::default();\n",
     );
+    // Subkind seeding (Plan A) — when `init { spawn … }` blocks are present,
+    // precompute the per-slot init Vecs for every column the spawns touch
+    // (`creature_type` + `alive` always; `pos` + each declared field). The
+    // per-binding alloc loop below routes a touched `agent_<col>` binding to
+    // `create_buffer_init` with the matching `agent_<col>_init` Vec instead
+    // of zero-init. Slots are assigned contiguously starting at slot 1 (the
+    // slot-0 AgentId NonZeroU32 sentinel is never seeded). Counts are
+    // compile-time constants (literals or resolved `config.*`).
+    let spawn_seeded_cols: std::collections::BTreeSet<String> =
+        emit_spawn_seeding(&mut out, fixture_name, init_spawns);
     for (name, ty) in &owned {
         let elem_bytes = match elem_bytes_for_wgsl_ty(ty) {
             Some(b) => b,
@@ -2576,6 +2886,27 @@ fn synthesize_generated_runtime_struct(
         // to create_buffer_init with the computed slice. This is how
         // fixture-owned init state lives in the .sim source instead of
         // a hand-written *_runtime/lib.rs.
+        // Subkind seeding (Plan A) — a column touched by a `spawn` block is
+        // seeded from its precomputed `agent_<col>_init` Vec (emitted above
+        // by `emit_spawn_seeding`). Takes precedence over the flat-init path.
+        // `pos` is Vec3 (16-byte, vec4-padded); its Vec is `[f32; 4]` per
+        // slot — bytemuck-castable to the std430 layout the GPU reads.
+        let spawn_seeded = name
+            .strip_prefix("agent_")
+            .is_some_and(|col| spawn_seeded_cols.contains(col));
+        if spawn_seeded {
+            out.push_str(&format!(
+                "        let {name}_buf = wgpu::util::DeviceExt::create_buffer_init(\n\
+                 \x20           &gpu.device,\n\
+                 \x20           &wgpu::util::BufferInitDescriptor {{\n\
+                 \x20               label: Some(\"{fixture_name}::{name}\"),\n\
+                 \x20               contents: bytemuck::cast_slice(&{name}_init),\n\
+                 \x20               usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,\n\
+                 \x20           }},\n\
+                 \x20       );\n",
+            ));
+            continue;
+        }
         let init_match = name.strip_prefix("agent_").and_then(|col| {
             init_stmts.iter().find(|s| s.field == col).map(|s| (col, s))
         });
@@ -2629,11 +2960,31 @@ fn synthesize_generated_runtime_struct(
                 (dsl_ast::ast::InitExpr::Const(n), _) => {
                     format!("vec![{n}u32; agent_count as usize]")
                 }
+                // Subkind seeding Task 1 — float fills. f32 columns get the
+                // value directly; u32/bool columns truncate `(v as f32) as u32`.
+                (dsl_ast::ast::InitExpr::Float(v), "f32") => {
+                    format!("vec![{v}_f32; agent_count as usize]")
+                }
+                (dsl_ast::ast::InitExpr::Float(v), _) => {
+                    format!("vec![({v}_f32) as u32; agent_count as usize]")
+                }
                 (dsl_ast::ast::InitExpr::Slot, "f32") => {
                     "(0..agent_count).map(|i| i as f32).collect::<Vec<f32>>()".to_string()
                 }
                 (dsl_ast::ast::InitExpr::Slot, _) => {
                     "(0..agent_count).collect::<Vec<u32>>()".to_string()
+                }
+                // Position builtins are only meaningful in a `spawn` block
+                // (per-slot seeded ranges). The flat `init { pos: … }` form
+                // would seed every slot identically (origin) or with an
+                // ambiguous all-agent scatter — disallow it with a pointed
+                // compile-time panic rather than emit a surprising fill.
+                (dsl_ast::ast::InitExpr::Pos(_), _) => {
+                    panic!(
+                        "init field `{col}`: position builtins (origin/scatter/ring) \
+                         are only valid inside a `spawn <Subkind> count N {{ pos: … }}` \
+                         block, not the flat `init {{ … }}` form ({fixture_name}.sim)"
+                    );
                 }
             };
             out.push_str(&format!(
@@ -4411,6 +4762,7 @@ mod tests {
             "smoke_fixture",
             &artifacts,
             &[],
+            &[],
             &std::collections::BTreeMap::new(),
             &[],
             &[],
@@ -4502,6 +4854,7 @@ mod tests {
             "host_callable_smoke",
             &artifacts,
             &[],
+            &[],
             &std::collections::BTreeMap::new(),
             &[],
             &[event],
@@ -4574,6 +4927,7 @@ mod tests {
         let out = super::synthesize_runtime_core_a2(
             "no_host_callable",
             &artifacts,
+            &[],
             &[],
             &std::collections::BTreeMap::new(),
             &[],

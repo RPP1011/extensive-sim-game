@@ -118,6 +118,7 @@ fn synthesize(artifacts: &EmittedArtifacts) -> String {
         "cascade_fp_dispatch_test",
         artifacts,
         &[],
+        &[],
         &std::collections::BTreeMap::new(),
         &[],
         &[],

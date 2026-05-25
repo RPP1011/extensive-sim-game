@@ -12,11 +12,36 @@
 //!  "vfx":[{"on_rule":"NovaFire","period":40,"kind":"Ring","radius":6.0,"color":[255,255,120]}]}
 //! ```
 
+use std::collections::BTreeMap;
+
 use dsl_ast::ast::{CameraDecl, FieldRangeDecl, RenderDecl, VfxKindDecl};
 
 use super::json::{json_escape, json_f32};
 
-fn field_range_json(r: &FieldRangeDecl) -> String {
+/// Lower a `FieldRangeDecl` to the `RenderDescriptor` `FieldRange` JSON.
+///
+/// Subkind selectors (`when creature_type is <Subkind>`) resolve the
+/// subkind name to its declaration-order `creature_type` ordinal via
+/// `entity_ordinals` and emit `field:"creature_type", lo == hi == ordinal`
+/// — the exact value the `self.creature_type == <Subkind>` rule guard
+/// compares against (so the player's existing field-range renderer matches
+/// the seeded agents; no new descriptor variant).
+fn field_range_json(r: &FieldRangeDecl, entity_ordinals: &BTreeMap<String, u32>) -> String {
+    if let Some(subkind) = &r.subkind {
+        let ord = entity_ordinals.get(subkind).copied().unwrap_or_else(|| {
+            panic!(
+                "render `creature_type is {subkind}`: unknown entity subkind \
+                 (declared entities: {:?})",
+                entity_ordinals.keys().collect::<Vec<_>>(),
+            )
+        });
+        let ord_f = ord as f32;
+        return format!(
+            "{{\"field\":\"creature_type\",\"lo\":{lo},\"hi\":{hi}}}",
+            lo = json_f32(ord_f),
+            hi = json_f32(ord_f),
+        );
+    }
     format!(
         "{{\"field\":\"{field}\",\"lo\":{lo},\"hi\":{hi}}}",
         field = json_escape(&r.field),
@@ -30,9 +55,18 @@ fn color_json(c: &[u8; 3]) -> String {
 }
 
 /// Serialize a `RenderDecl` into the `RenderDescriptor` JSON string.
-pub fn render_decl_to_json(d: &RenderDecl) -> String {
+///
+/// `entity_ordinals` maps each `entity X : Agent` subkind name to its
+/// declaration-order `creature_type` ordinal, used to lower the
+/// `when creature_type is <Subkind>` selector (see [`field_range_json`]).
+pub fn render_decl_to_json(
+    d: &RenderDecl,
+    entity_ordinals: &BTreeMap<String, u32>,
+) -> String {
     let camera = match &d.camera {
-        CameraDecl::Follow(r) => format!("{{\"Follow\":{}}}", field_range_json(r)),
+        CameraDecl::Follow(r) => {
+            format!("{{\"Follow\":{}}}", field_range_json(r, entity_ordinals))
+        }
         CameraDecl::Observer => "\"Observer\"".to_string(),
     };
     let mut agents = String::from("[");
@@ -42,7 +76,7 @@ pub fn render_decl_to_json(d: &RenderDecl) -> String {
         }
         agents.push_str(&format!(
             "{{\"when\":{when},\"color\":{color}}}",
-            when = field_range_json(&a.when),
+            when = field_range_json(&a.when, entity_ordinals),
             color = color_json(&a.color),
         ));
     }
@@ -55,7 +89,10 @@ pub fn render_decl_to_json(d: &RenderDecl) -> String {
         let kind = match &v.kind {
             VfxKindDecl::Ring => "\"Ring\"".to_string(),
             VfxKindDecl::BeamToNearest { target } => {
-                format!("{{\"BeamToNearest\":{{\"target\":{}}}}}", field_range_json(target))
+                format!(
+                    "{{\"BeamToNearest\":{{\"target\":{}}}}}",
+                    field_range_json(target, entity_ordinals)
+                )
             }
         };
         vfx.push_str(&format!(

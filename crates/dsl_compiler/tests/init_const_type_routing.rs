@@ -87,6 +87,7 @@ fn synthesize_with_init(init_stmts: &[InitStmt]) -> String {
         "init_routing_test",
         &artifacts,
         init_stmts,
+        &[],
         &std::collections::BTreeMap::new(),
         &[],
         &[],

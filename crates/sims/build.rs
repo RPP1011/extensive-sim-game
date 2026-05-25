@@ -143,6 +143,8 @@ fn main() {
                 // binary (all three player-facing blocks + one host-driven
                 // movement rule). Drives `sims::make_playable("play_probe")`.
                 | "play_probe"
+                // Subkind seeding (Plan A) — `init { spawn … }` runtime gate.
+                | "subkind_seeding_probe"
         ) {
             continue;
         }

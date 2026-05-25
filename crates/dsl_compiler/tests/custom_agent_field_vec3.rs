@@ -190,6 +190,7 @@ fn synthesize_runtime_allocates_vec3_buf() {
         "custom_field_vec3_test",
         &artifacts,
         &[],
+        &[],
         &std::collections::BTreeMap::new(),
         &[],
         &[],

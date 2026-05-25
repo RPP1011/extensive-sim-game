@@ -198,6 +198,7 @@ fn synthesize_runtime_allocates_agent_buf_for_custom_field() {
         "custom_field_registry_test",
         &artifacts,
         &[],
+        &[],
         &std::collections::BTreeMap::new(),
         &[],
         &[],

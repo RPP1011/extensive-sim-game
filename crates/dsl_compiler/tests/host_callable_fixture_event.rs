@@ -100,6 +100,7 @@ fn host_callable_fixture_event_emits_typed_injector_with_sequential_kind_id() {
         "plague_city_smoke",
         &artifacts,
         &[],
+        &[],
         &std::collections::BTreeMap::new(),
         &[],
         &events,
@@ -209,6 +210,7 @@ fn host_callable_engine_aliased_event_still_uses_engine_kind_id() {
     let out = synthesize_runtime_core_a2(
         "mixed_smoke",
         &artifacts,
+        &[],
         &[],
         &std::collections::BTreeMap::new(),
         &[],

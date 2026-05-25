@@ -111,6 +111,7 @@ fn synthesize_spatial_fixture() -> String {
         "spatial_smoke",
         &artifacts,
         &[],
+        &[],
         &std::collections::BTreeMap::new(),
         &[],
         &[],

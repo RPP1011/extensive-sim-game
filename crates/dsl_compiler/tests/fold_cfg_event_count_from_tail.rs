@@ -131,6 +131,7 @@ fn fold_step_snapshot_copies_event_tail_into_cfg_event_count() {
         "fold_cfg_copy_smoke",
         &artifacts,
         &[],
+        &[],
         &std::collections::BTreeMap::new(),
         &[],
         &[],
@@ -271,6 +272,7 @@ fn non_event_ring_kernel_does_not_get_snapshot_copy() {
     let out = dsl_compiler::build_helper::synthesize_runtime_core_a2(
         "no_event_ring_smoke",
         &artifacts,
+        &[],
         &[],
         &std::collections::BTreeMap::new(),
         &[],
