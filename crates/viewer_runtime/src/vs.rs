@@ -187,6 +187,29 @@ pub const MAT_VS_SPAWNER: u8 = 203; // purple — spawner beacons (unused)
 pub const MAT_VS_ENEMY_SWIFT: u8 = 204; // yellow — fast/fragile enemy
 pub const MAT_VS_ENEMY_BRUTE: u8 = 205; // red — slow/tanky enemy
 pub const MAT_VS_NOVA: u8 = 206;       // bright nova VFX ring
+pub const MAT_VS_BOLT:   u8 = 207;     // bolt beam (player -> nearest enemy)
+pub const MAT_VS_GARLIC: u8 = 208;     // garlic aura ring (continuous while active)
+pub const MAT_VS_WHIP:   u8 = 209;     // whip sweep ring (on fire ticks)
+
+// Mirror of the weapon constants in `config vs {}` (assets/sim/vampire_survivors.sim).
+// Keep in sync — used only to time/space the cosmetic VFX, not gameplay.
+pub const BOLT_PERIOD: u32 = 12;
+pub const BOLT_RANGE: f32 = 18.0;
+pub const NOVA_PERIOD: u64 = 40;
+pub const NOVA_RADIUS: f32 = 6.0;
+pub const GARLIC_RADIUS: f32 = 3.5;
+pub const WHIP_PERIOD: u32 = 18;
+pub const WHIP_RANGE: f32 = 9.0;
+
+/// Per-frame weapon-VFX state the viewer pushes into the bridge (the bridge
+/// knows tick + agent positions; the host knows which upgrades are active).
+#[derive(Default, Clone, Copy)]
+pub struct VfxState {
+    /// Effective bolt period (config bolt_period − bolt_rate_level); 0 disables.
+    pub bolt_period: u32,
+    pub garlic_active: bool,
+    pub whip_active: bool,
+}
 
 /// Map a VsRole to its palette material index.
 pub fn material_for_vs(role: VsRole) -> u8 {
@@ -231,7 +254,10 @@ fn build_vs_palette() -> [[u8; 4]; 256] {
     p.set(MAT_VS_SPAWNER, vs_palette_entry(160,  60, 220)); // purple
     p.set(MAT_VS_ENEMY_SWIFT, vs_palette_entry(240, 230,  40)); // yellow
     p.set(MAT_VS_ENEMY_BRUTE, vs_palette_entry(220,  40,  40)); // red
-    p.set(MAT_VS_NOVA,        vs_palette_entry(255, 255, 120)); // nova ring
+    p.set(MAT_VS_NOVA,        vs_palette_entry(255, 255, 120)); // nova ring (pale yellow)
+    p.set(MAT_VS_BOLT,        vs_palette_entry(200, 255, 255)); // bolt beam (bright cyan-white)
+    p.set(MAT_VS_GARLIC,      vs_palette_entry(150, 255, 150)); // garlic aura (pale green)
+    p.set(MAT_VS_WHIP,        vs_palette_entry(255, 120, 200)); // whip sweep (pink)
     p.to_rgba()
 }
 
@@ -245,6 +271,9 @@ pub struct VsBridge {
     gpu_tex: Option<GpuVoxelTexture>,
     alloc: VulkanAllocator,
     palette_rgba: [[u8; 4]; 256],
+    /// Weapon VFX state, refreshed by the viewer each frame (defaults to no
+    /// active weapons / bolt disabled until the host sets it).
+    vfx: VfxState,
 }
 
 impl VsBridge {
@@ -269,7 +298,28 @@ impl VsBridge {
             gpu_tex: Some(gpu_tex),
             alloc,
             palette_rgba,
+            vfx: VfxState::default(),
         })
+    }
+
+    /// Set the per-frame weapon-VFX state (which weapons are active + the
+    /// effective bolt period). Call before `refresh` each frame.
+    pub fn set_vfx(&mut self, vfx: VfxState) {
+        self.vfx = vfx;
+    }
+
+    /// Paint a flat ring of `mat` voxels at `radius` (world units) around
+    /// `center`, tagged for next-frame clearing via `last_agent_cells`.
+    fn paint_ring(&mut self, center: [f32; 3], radius: f32, segments: u32, mat: u8) {
+        for i in 0..segments {
+            let ang = std::f32::consts::TAU * (i as f32) / (segments as f32);
+            let wx = center[0] + radius * ang.cos();
+            let wy = center[1] + radius * ang.sin();
+            if let Some((x, _, depth)) = vs_world_to_voxel([wx, wy, 0.0]) {
+                self.cpu_grid.set(x, 1, depth, mat);
+                self.last_agent_cells.push((x, 1, depth));
+            }
+        }
     }
 
     /// Per-frame refresh: clear last frame's agent cells, paint new agent
@@ -311,6 +361,44 @@ impl VsBridge {
                         self.last_agent_cells.push((x, 1, depth));
                     }
                 }
+            }
+        }
+
+        let player_pos = app.agents().iter().find(|a| a.role == VsRole::Player).map(|p| p.pos);
+
+        // Bolt VFX: a beam from the player to the nearest enemy on bolt-fire ticks.
+        if let Some(ppos) = player_pos {
+            if self.vfx.bolt_period > 0 && app.sim_tick() % self.vfx.bolt_period as u64 == 0 {
+                let mut best: Option<(f32, [f32; 3])> = None;
+                for e in app.agents().iter().filter(|a| a.role == VsRole::Enemy) {
+                    let (dx, dy) = (e.pos[0] - ppos[0], e.pos[1] - ppos[1]);
+                    let d2 = dx * dx + dy * dy;
+                    if d2 <= BOLT_RANGE * BOLT_RANGE && best.map_or(true, |(bd, _)| d2 < bd) {
+                        best = Some((d2, e.pos));
+                    }
+                }
+                if let Some((_, epos)) = best {
+                    let steps = 48;
+                    for i in 0..=steps {
+                        let t = i as f32 / steps as f32;
+                        let wx = ppos[0] + (epos[0] - ppos[0]) * t;
+                        let wy = ppos[1] + (epos[1] - ppos[1]) * t;
+                        if let Some((x, _, depth)) = vs_world_to_voxel([wx, wy, 0.0]) {
+                            self.cpu_grid.set(x, 1, depth, MAT_VS_BOLT);
+                            self.last_agent_cells.push((x, 1, depth));
+                        }
+                    }
+                }
+            }
+
+            // Garlic VFX: a continuous aura ring at garlic_radius while active.
+            if self.vfx.garlic_active {
+                self.paint_ring(ppos, GARLIC_RADIUS, 28, MAT_VS_GARLIC);
+            }
+
+            // Whip VFX: a wide sweep ring at whip_range on whip-fire ticks.
+            if self.vfx.whip_active && app.sim_tick() % WHIP_PERIOD as u64 == 0 {
+                self.paint_ring(ppos, WHIP_RANGE, 44, MAT_VS_WHIP);
             }
         }
 

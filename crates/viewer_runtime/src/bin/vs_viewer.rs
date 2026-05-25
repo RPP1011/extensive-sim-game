@@ -28,7 +28,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use viewer_runtime::vs::{VsViewerApp, VsBridge, VsRole};
+use viewer_runtime::vs::{VsViewerApp, VsBridge, VsRole, VfxState, BOLT_PERIOD};
 use viewer_runtime::vs_ui;
 use viewer_runtime::{BRIDGE_DIM_X, BRIDGE_DIM_Z};
 use voxel_engine::camera::FreeCamera;
@@ -288,7 +288,16 @@ impl ApplicationHandler for WindowedVsViewer {
                     self.app.step();
                     self.last_tick += SIM_TICK_PERIOD;
                     ticks_this_frame += 1;
+                    // Weapon VFX mirrors the active upgrades (bolt always on;
+                    // garlic/whip once their level > 0). Computed before the
+                    // mutable gfx borrow.
+                    let vfx = VfxState {
+                        bolt_period: BOLT_PERIOD.saturating_sub(self.progress.bolt_rate_level).max(1),
+                        garlic_active: self.progress.garlic_level > 0.0,
+                        whip_active: self.progress.whip_level > 0.0,
+                    };
                     if let Some(gfx) = self.gfx.as_mut() {
+                        gfx.bridge.set_vfx(vfx);
                         if let Err(e) = gfx.bridge.refresh(&gfx.ctx, &self.app) {
                             eprintln!("[vs_viewer] VsBridge::refresh failed: {e}");
                         }
