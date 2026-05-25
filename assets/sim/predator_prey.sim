@@ -341,24 +341,15 @@ verb Strike(self, target: Agent) =
   when  is_prey_of(self, target)
       ∧ distance(self.pos, target.pos) < config.hunt.strike_radius
   emit  Killed { by: self, prey: target, pos: self.pos }
-  // GAP (Plan F): the `predator_focus(self, target)` pair-view read was
-  // dropped from this score. An Agent×Agent `@materialized(storage =
-  // pair_map)` view has no valid scalar accessor when read in a
-  // scoring/physics expression: the emitter only generates the 2-arg
-  // `view_N_get(observer, key)` form when the view carries a STATIC
-  // `@key_pop(K = N)` (Plan I belief-typed pairs); for Agent×Agent the
-  // second-key population is the per-tick `agent_count` (no static K), so
-  // it falls through to the 1-arg `view_N_get(idx)` def — yet the call
-  // site still passes 2 args, producing invalid WGSL (arity 1 vs 2) that
-  // fails shader validation at runtime. This is a LATENT bug on main
-  // (the standalone `scoring` kernel was never GPU-validated); it blocks
-  // predator_prey from running through the generic `make_playable` path.
-  // The `predator_focus` view itself + its fold/decay kernels are kept
-  // (still exercising the pair-storage emit path); only the broken
-  // scoring read is removed so the fixture is playable. Fix: plumb the
-  // runtime `agent_count` into a 2-arg accessor for Agent×Agent pair
-  // views — a compiler change, out of scope for this zero-Rust plan.
-  score 1.0 + 0.5 * kill_count(self)
+  // Restored: the `predator_focus(self, target)` Agent×Agent pair-view read.
+  // It was dropped in Plan F as a workaround for a latent compiler bug — the
+  // emitter only generated a 2-arg `view_N_get(observer, key)` accessor for
+  // STATIC `@key_pop` belief pairs, so a dynamic-K Agent×Agent view fell
+  // through to a 1-arg `view_N_get(idx)` def while this 2-arg call site
+  // produced invalid WGSL. Fixed in `cg/emit/program.rs` (the dynamic-K
+  // accessor now uses the runtime `cfg.agent_cap` stride). This score read
+  // exercises that fix end-to-end through the scoring kernel.
+  score 1.0 + 0.5 * kill_count(self) + 0.2 * predator_focus(self, target)
 
 // ---------------------------------------------------------------------------
 // Scoring (utility backend)
