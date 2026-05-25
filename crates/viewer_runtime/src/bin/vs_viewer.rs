@@ -54,9 +54,10 @@ fn observer_camera(bridge_dim_x: u32, bridge_dim_z: u32) -> FreeCamera {
     let cx = bridge_dim_x as f32 / 2.0;
     let cz = bridge_dim_z as f32 / 2.0;
     let height = bridge_dim_x.max(bridge_dim_z) as f32 + 8.0;
+    // Top-down isometric: eye above + equal diagonal X/Z offset (45deg azimuth).
     FreeCamera::new(
-        glam::Vec3::new(cx, height, cz + height * 0.7),
-        glam::Vec3::new(cx, 1.5, cz),
+        glam::Vec3::new(cx + height * 0.5, height, cz + height * 0.5),
+        glam::Vec3::new(cx, 0.0, cz),
     )
 }
 
@@ -302,13 +303,23 @@ impl ApplicationHandler for WindowedVsViewer {
                     }
                     self.zoom = self.zoom.clamp(0.15, 3.0);
 
-                    let cx = BRIDGE_DIM_X as f32 / 2.0 + self.pan_xz.x;
-                    let cz = BRIDGE_DIM_Z as f32 / 2.0 + self.pan_xz.y;
+                    // Follow the player: its world pos maps to a voxel cell via the
+                    // same +DIM/2 offset the bridge uses, so the camera centers on it.
+                    let (pcx, pcz) = self
+                        .app
+                        .agents()
+                        .iter()
+                        .find(|a| a.role == VsRole::Player)
+                        .map(|pl| (pl.pos[0], pl.pos[1]))
+                        .unwrap_or((0.0, 0.0));
+                    let cx = BRIDGE_DIM_X as f32 / 2.0 + pcx + self.pan_xz.x;
+                    let cz = BRIDGE_DIM_Z as f32 / 2.0 + pcz + self.pan_xz.y;
                     let base_height = BRIDGE_DIM_X.max(BRIDGE_DIM_Z) as f32 + 8.0;
                     let height = base_height * self.zoom;
+                    // Top-down isometric, recentred on the player each frame.
                     self.camera = FreeCamera::new(
-                        glam::Vec3::new(cx, height, cz + height * 0.7),
-                        glam::Vec3::new(cx, 1.5, cz),
+                        glam::Vec3::new(cx + height * 0.5, height, cz + height * 0.5),
+                        glam::Vec3::new(cx, 0.0, cz),
                     );
                 }
 

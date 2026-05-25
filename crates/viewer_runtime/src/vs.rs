@@ -154,7 +154,10 @@ fn read_vec4(rt: &mut GeneratedRuntime, buf: &wgpu::Buffer, n: u32) -> Vec<[f32;
 pub const MAT_VS_FLOOR:   u8 = 200; // grey flat floor
 pub const MAT_VS_PLAYER:  u8 = 201; // cyan — the player
 pub const MAT_VS_ENEMY:   u8 = 202; // orange-red — enemies
-pub const MAT_VS_SPAWNER: u8 = 203; // purple — spawner beacons
+pub const MAT_VS_SPAWNER: u8 = 203; // purple — spawner beacons (unused)
+pub const MAT_VS_ENEMY_SWIFT: u8 = 204; // yellow — fast/fragile enemy
+pub const MAT_VS_ENEMY_BRUTE: u8 = 205; // red — slow/tanky enemy
+pub const MAT_VS_NOVA: u8 = 206;       // bright nova VFX ring
 
 /// Map a VsRole to its palette material index.
 pub fn material_for_vs(role: VsRole) -> u8 {
@@ -197,6 +200,9 @@ fn build_vs_palette() -> [[u8; 4]; 256] {
     p.set(MAT_VS_PLAYER,  vs_palette_entry(0,   220, 220)); // cyan
     p.set(MAT_VS_ENEMY,   vs_palette_entry(230, 100,  20)); // orange-red
     p.set(MAT_VS_SPAWNER, vs_palette_entry(160,  60, 220)); // purple
+    p.set(MAT_VS_ENEMY_SWIFT, vs_palette_entry(240, 230,  40)); // yellow
+    p.set(MAT_VS_ENEMY_BRUTE, vs_palette_entry(220,  40,  40)); // red
+    p.set(MAT_VS_NOVA,        vs_palette_entry(255, 255, 120)); // nova ring
     p.to_rgba()
 }
 
@@ -253,9 +259,30 @@ impl VsBridge {
         // Paint each agent as a single voxel cell at its computed grid position.
         for agent in app.agents() {
             let Some((x, vert, depth)) = vs_world_to_voxel(agent.pos) else { continue };
-            let mat = material_for_vs(agent.role);
+            let mat = match agent.role {
+                VsRole::Enemy if agent.move_speed > 0.6 => MAT_VS_ENEMY_SWIFT,
+                VsRole::Enemy if agent.move_speed < 0.3 => MAT_VS_ENEMY_BRUTE,
+                _ => material_for_vs(agent.role),
+            };
             self.cpu_grid.set(x, vert, depth, mat);
             self.last_agent_cells.push((x, vert, depth));
+        }
+
+        // Nova VFX: on nova ticks (every nova_period=40), draw a bright ring at
+        // nova_radius=6 around the player (cleared next frame via last_agent_cells).
+        if app.sim_tick() % 40 == 0 {
+            for agent in app.agents().iter().filter(|a| a.role == VsRole::Player) {
+                let n_ring = 36;
+                for i in 0..n_ring {
+                    let ang = std::f32::consts::TAU * (i as f32) / (n_ring as f32);
+                    let wx = agent.pos[0] + 6.0 * ang.cos();
+                    let wy = agent.pos[1] + 6.0 * ang.sin();
+                    if let Some((x, _, depth)) = vs_world_to_voxel([wx, wy, 0.0]) {
+                        self.cpu_grid.set(x, 1, depth, MAT_VS_NOVA);
+                        self.last_agent_cells.push((x, 1, depth));
+                    }
+                }
+            }
         }
 
         // Destroy old texture + re-upload to refresh the mip chain, exactly as
