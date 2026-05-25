@@ -89,6 +89,25 @@ mod tests {
     }
 
     #[test]
+    fn seq_ordering_is_respected() {
+        let alive = [0u32; 8];
+        let recs = [
+            SummonRecord { actor_slot: 200, template_hash: 1, count: 2, seq: 10 },
+            SummonRecord { actor_slot: 100, template_hash: 2, count: 2, seq: 1 },
+        ];
+        let pos_of = |actor: u32| Vec3::new(actor as f32, 0.0, 0.0); // actor_slot doubles as x
+        let got = plan_allocations(&alive, &recs, pos_of, 7, 1);
+        // seq=1 (actor 100) processed first -> first 2 assignments near x=100
+        assert!((got[0].pos.x - 100.0).abs() <= 4.0, "first spawn should come from seq=1 record (x~100); got {}", got[0].pos.x);
+        assert!((got[1].pos.x - 100.0).abs() <= 4.0, "second spawn should come from seq=1 record (x~100); got {}", got[1].pos.x);
+        // then seq=10 (actor 200) -> next 2 near x=200
+        assert!((got[2].pos.x - 200.0).abs() <= 4.0, "third spawn should come from seq=10 record (x~200); got {}", got[2].pos.x);
+        // slots claimed ascending
+        let slots: Vec<u32> = got.iter().map(|a| a.slot).collect();
+        assert_eq!(slots, vec![0, 1, 2, 3]);
+    }
+
+    #[test]
     fn deterministic_across_runs() {
         let alive = [0u32; 8];
         let recs = [SummonRecord { actor_slot: 0, template_hash: 1, count: 4, seq: 0 }];
