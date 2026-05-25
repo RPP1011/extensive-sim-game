@@ -1,13 +1,13 @@
 //! Task C3 — keystone integration test: DSL waves → chronicle → host allocator → live GPU enemies.
 //!
 //! Verifies the full spawner pipeline end-to-end:
-//!   1. seed_initial_state puts player (slot 0), 6 spawners (slots 1..=6), enemy pool dead (slots 7..N)
+//!   1. seed_initial_state: slot 0 unused (AgentId sentinel), player (slot 1), 6 spawners (slots 2..=7), enemy pool dead (slots 8..N)
 //!   2. step() drives DSL kernels including SpawnSmall verb chronicle emission
 //!   3. drain_summons() reads kind-62 ring records, claims dead slots, writes alive=1+pos
 //!   4. After TICKS steps (covering ticks 30, 60, 90 where wave_period=30 fires), enemy_count > 0
 
 use sims::vampire_survivors::GeneratedRuntime;
-use sims::vampire_survivors_seed::seed_initial_state;
+use sims::vampire_survivors_seed::{seed_initial_state, ENEMY_POOL_START, PLAYER_SLOT};
 use sims::summon_alloc::{drain_summons, DrainCtx};
 
 const SEED: u64 = 0x5_F00D_CAFE_0001;
@@ -15,8 +15,9 @@ const N: u32 = 512;
 const TICKS: u64 = 120; // > wave_period (30): several SpawnSmall waves fire
 
 fn read_player_pos(rt: &mut GeneratedRuntime) -> [f32; 3] {
-    // agent_pos_buf stride: 16 bytes (vec3<f32> padded to vec4). Slot 0 = player.
+    // agent_pos_buf stride: 16 bytes (vec3<f32> padded to vec4). Player at PLAYER_SLOT.
     let bytes: u64 = 16; // one vec4 (4 × f32)
+    let player_off: u64 = PLAYER_SLOT as u64 * 16;
     let staging = rt.gpu.device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("test::player_pos_rb"),
         size: bytes,
@@ -24,7 +25,7 @@ fn read_player_pos(rt: &mut GeneratedRuntime) -> [f32; 3] {
         mapped_at_creation: false,
     });
     let mut enc = rt.gpu.device.create_command_encoder(&Default::default());
-    enc.copy_buffer_to_buffer(&rt.agent_pos_buf, 0, &staging, 0, bytes);
+    enc.copy_buffer_to_buffer(&rt.agent_pos_buf, player_off, &staging, 0, bytes);
     rt.gpu.queue.submit(Some(enc.finish()));
     let slice = staging.slice(..bytes);
     slice.map_async(wgpu::MapMode::Read, |r| r.expect("map"));
@@ -66,7 +67,7 @@ fn vampire_survivors_spawns_and_runs() {
     let p0 = read_player_pos(&mut rt);
     eprintln!("[vampire_survivors] player start pos: {:?}", p0);
 
-    let enemy_count = |alive: &[u32]| alive[7..].iter().filter(|&&a| a == 1).count();
+    let enemy_count = |alive: &[u32]| alive[ENEMY_POOL_START as usize..].iter().filter(|&&a| a == 1).count();
 
     let alive0 = read_alive(&mut rt);
     assert_eq!(enemy_count(&alive0), 0, "no enemies before any wave");
@@ -95,6 +96,7 @@ fn vampire_survivors_spawns_and_runs() {
                 agent_count,
                 seed,
                 tick,
+                pool_start: ENEMY_POOL_START,
             })
         };
 
@@ -158,8 +160,8 @@ fn vampire_survivors_spawns_and_runs() {
         let all_floats = bytemuck::cast_slice::<u8, f32>(&slice_pos.get_mapped_range()).to_vec();
         staging_pos.unmap();
 
-        // Find min distance of any live enemy (slots 7+) to the player (origin).
-        let min_dist_end: f32 = (7..N as usize)
+        // Find min distance of any live enemy (enemy pool) to the player (origin).
+        let min_dist_end: f32 = (ENEMY_POOL_START as usize..N as usize)
             .filter(|&i| alive_end[i] == 1)
             .map(|i| {
                 let base = i * 4;

@@ -30,12 +30,15 @@ pub fn plan_allocations(
     spawner_pos: impl Fn(u32) -> Vec3,
     seed: u64,
     tick: u64,
+    pool_start: u32,
 ) -> Vec<SlotAssignment> {
     let mut sorted: Vec<SummonRecord> = records.to_vec();
     sorted.sort_by_key(|r| (r.seq, r.actor_slot));
     let mut claimed = vec![false; alive.len()];
     let mut out = Vec::new();
-    let mut cursor = 0usize;
+    // Only claim slots in the enemy pool — never the reserved sentinel/player/
+    // spawner slots below pool_start (even if they read alive==0).
+    let mut cursor = pool_start as usize;
     for rec in &sorted {
         let base = spawner_pos(rec.actor_slot);
         for _ in 0..rec.count {
@@ -82,6 +85,9 @@ pub struct DrainCtx<'a> {
     pub agent_count: u32,
     pub seed: u64,
     pub tick: u64,
+    /// First claimable slot — the enemy pool start. Slots below this
+    /// (sentinel/player/spawners) are never allocated to summoned enemies.
+    pub pool_start: u32,
 }
 
 /// Read EffectSummonApplied (kind 62) records from the ring, plan dead-slot
@@ -140,23 +146,29 @@ pub fn drain_summons(ctx: DrainCtx) -> usize {
         )
     };
 
-    let plan = plan_allocations(&alive, &records, read_pos, ctx.seed, ctx.tick);
+    let plan = plan_allocations(&alive, &records, read_pos, ctx.seed, ctx.tick, ctx.pool_start);
     if plan.is_empty() {
         return 0;
     }
-    let mut alive_out = alive.clone();
-    let mut pos_out = pos_words.clone();
+    // Write ONLY the newly-claimed slots — never rewrite the whole buffer.
+    // Clobbering all N agents each tick races with the runtime's own
+    // per-tick agent state (it desyncs e.g. the player slot against the
+    // pack/unpack cycle); targeted sub-range writes touch only the new
+    // enemies and leave every other agent's GPU state untouched.
     for a in &plan {
-        alive_out[a.slot as usize] = 1;
-        let b = a.slot as usize * 4;
-        pos_out[b] = a.pos.x.to_bits();
-        pos_out[b + 1] = a.pos.y.to_bits();
-        pos_out[b + 2] = a.pos.z.to_bits();
+        let alive_one = [1u32];
+        ctx.queue.write_buffer(
+            ctx.agent_alive_buf,
+            a.slot as u64 * 4,
+            bytemuck::cast_slice(&alive_one),
+        );
+        let pos_one = [a.pos.x.to_bits(), a.pos.y.to_bits(), a.pos.z.to_bits(), 0u32];
+        ctx.queue.write_buffer(
+            ctx.agent_pos_buf,
+            a.slot as u64 * 16,
+            bytemuck::cast_slice(&pos_one),
+        );
     }
-    ctx.queue
-        .write_buffer(ctx.agent_alive_buf, 0, bytemuck::cast_slice(&alive_out));
-    ctx.queue
-        .write_buffer(ctx.agent_pos_buf, 0, bytemuck::cast_slice(&pos_out));
     plan.len()
 }
 
@@ -196,12 +208,12 @@ mod tests {
     fn claims_dead_slots_in_order_and_truncates() {
         let alive = [1u32, 1, 0, 0, 0, 0];
         let recs = [SummonRecord { actor_slot: 1, template_hash: 7, count: 3, seq: 0 }];
-        let got = plan_allocations(&alive, &recs, |_| Vec3::ZERO, 0xABCD, 5);
+        let got = plan_allocations(&alive, &recs, |_| Vec3::ZERO, 0xABCD, 5, 0);
         let slots: Vec<u32> = got.iter().map(|a| a.slot).collect();
         assert_eq!(slots, vec![2, 3, 4], "claims first 3 dead slots in order");
 
         let recs2 = [SummonRecord { actor_slot: 1, template_hash: 7, count: 10, seq: 0 }];
-        let got2 = plan_allocations(&alive, &recs2, |_| Vec3::ZERO, 0xABCD, 5);
+        let got2 = plan_allocations(&alive, &recs2, |_| Vec3::ZERO, 0xABCD, 5, 0);
         assert_eq!(got2.len(), 4, "truncates at pool exhaustion, no panic");
     }
 
@@ -213,7 +225,7 @@ mod tests {
             SummonRecord { actor_slot: 100, template_hash: 2, count: 2, seq: 1 },
         ];
         let pos_of = |actor: u32| Vec3::new(actor as f32, 0.0, 0.0); // actor_slot doubles as x
-        let got = plan_allocations(&alive, &recs, pos_of, 7, 1);
+        let got = plan_allocations(&alive, &recs, pos_of, 7, 1, 0);
         // seq=1 (actor 100) processed first -> first 2 assignments near x=100
         assert!((got[0].pos.x - 100.0).abs() <= 4.0, "first spawn should come from seq=1 record (x~100); got {}", got[0].pos.x);
         assert!((got[1].pos.x - 100.0).abs() <= 4.0, "second spawn should come from seq=1 record (x~100); got {}", got[1].pos.x);
@@ -228,8 +240,8 @@ mod tests {
     fn deterministic_across_runs() {
         let alive = [0u32; 8];
         let recs = [SummonRecord { actor_slot: 0, template_hash: 1, count: 4, seq: 0 }];
-        let a = plan_allocations(&alive, &recs, |_| Vec3::new(10.0, 0.0, 0.0), 42, 1);
-        let b = plan_allocations(&alive, &recs, |_| Vec3::new(10.0, 0.0, 0.0), 42, 1);
+        let a = plan_allocations(&alive, &recs, |_| Vec3::new(10.0, 0.0, 0.0), 42, 1, 0);
+        let b = plan_allocations(&alive, &recs, |_| Vec3::new(10.0, 0.0, 0.0), 42, 1, 0);
         assert_eq!(a, b, "same inputs -> same plan (P5)");
     }
 }

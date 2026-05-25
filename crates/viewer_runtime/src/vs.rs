@@ -64,6 +64,7 @@ impl VsViewerApp {
                 agent_count,
                 seed,
                 tick,
+                pool_start: sims::vampire_survivors_seed::ENEMY_POOL_START,
             })
         };
         self.refresh_snapshot();

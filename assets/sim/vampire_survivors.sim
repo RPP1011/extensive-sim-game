@@ -47,9 +47,11 @@ config vs {
   enemy_mana_min:     f32 = 1.5,
   enemy_mana_max:     f32 = 2.5,
   perception_radius:  f32 = 12.0,
-  enemy_speed:        f32 = 0.1,
+  // Constant movement speeds (units/tick): normalised direction × speed.
+  // Player slightly faster than enemies so it can kite the closing swarm.
+  enemy_speed:        f32 = 0.4,
   flee_radius:        f32 = 8.0,
-  player_speed:       f32 = 0.12,
+  player_speed:       f32 = 0.5,
   bolt_range:         f32 = 18.0,
   bolt_period:        u32 = 12,
   bolt_damage:        f32 = 6.0,
@@ -94,10 +96,15 @@ physics KitePlayer @phase(per_agent) {
       } else {
         vec3(0.0, 0.0, 0.0)
       });
-    let new_vel = self.vel + flee * config.vs.player_speed;
-    let new_pos = self.pos + new_vel;
-    agents.set_vel(self, new_vel);
-    agents.set_pos(self, new_pos);
+    // Constant-speed kite: unit flee direction × player_speed (units/tick),
+    // normalised via v*(speed/|v|). A surrounded player's flee vectors cancel
+    // (|flee|→0, guarded) so it stays put instead of jittering/escaping.
+    let d = distance(self.pos, self.pos + flee);
+    if (d > 0.001) {
+      let step = flee * (config.vs.player_speed / d);
+      agents.set_vel(self, step);
+      agents.set_pos(self, self.pos + step);
+    }
   }
 }
 
@@ -111,24 +118,26 @@ sort_by distance(self, _) limit 1 {
   && candidate.mana <= config.vs.enemy_mana_max
 }
 
-// @phase(per_agent) (not post): two pos-writing rules at the same phase form a write->write cycle; per_agent + the disjoint where-guard breaks the SCC.
-// Enemies steer toward the nearest player-band agent (the moving player).
+// Enemies ALWAYS know where the player is (the VS homing property) by reading
+// the player's position DIRECTLY — no spatial query. Each enemy's `engaged_with`
+// AgentId field is pre-seeded to the player's slot (runtime, seed_initial_state),
+// so `agents.pos(self.engaged_with)` is a direct cross-agent read (the
+// target_chaser precedent). Spatial queries stay reserved for genuine proximity
+// logic (bolt/nova). Proportional seek: step a fraction toward the player each
+// tick (slows smoothly as it closes; no normalisation/distance needed).
 physics ChasePlayer @phase(per_agent) {
   on Tick {} where (self.alive
                     && self.mana >= config.vs.enemy_mana_min
                     && self.mana <= config.vs.enemy_mana_max) {
-    let toward = sum(other in spatial.nearby_agents(self, config.vs.perception_radius) where
-      if other.mana >= config.vs.player_mana_min
-         && other.mana <= config.vs.player_mana_max
-         && other.alive {
-        other.pos - self.pos
-      } else {
-        vec3(0.0, 0.0, 0.0)
-      });
-    let new_vel = self.vel + toward * config.vs.enemy_speed;
-    let new_pos = self.pos + new_vel;
-    agents.set_vel(self, new_vel);
-    agents.set_pos(self, new_pos);
+    // Constant-speed homing: unit direction toward the player × enemy_speed
+    // (units/tick). Normalised via the tower_defense march form v*(speed/|v|).
+    let pp = agents.pos(self.engaged_with);
+    let to_player = pp - self.pos;
+    let d = distance(self.pos, pp);
+    if (d > 0.001) {
+      let step = to_player * (config.vs.enemy_speed / d);
+      agents.set_pos(self, self.pos + step);
+    }
   }
 }
 
@@ -149,7 +158,13 @@ physics BoltFire @phase(per_agent) {
                     && self.mana <= config.vs.player_mana_max
                     && world.tick % config.vs.bolt_period == 0) {
     for target in spatial.closest_enemy(self) {
-      emit Damaged { source: self, target: target, amount: config.vs.bolt_damage + xp(self) * config.vs.bolt_ramp }
+      // Guard against under-filled top_k yielding a slot-0 sentinel (which
+      // would self-damage the player): only strike a genuine live enemy.
+      if (target.alive
+          && target.mana >= config.vs.enemy_mana_min
+          && target.mana <= config.vs.enemy_mana_max) {
+        emit Damaged { source: self, target: target, amount: config.vs.bolt_damage + xp(self) * config.vs.bolt_ramp }
+      }
     }
   }
 }
@@ -161,7 +176,12 @@ physics NovaFire @phase(per_agent) {
                     && self.mana <= config.vs.player_mana_max
                     && world.tick % config.vs.nova_period == 0) {
     for target in spatial.enemies_in_radius(self) {
-      emit Damaged { source: self, target: target, amount: config.vs.nova_damage + floor(xp(self) / config.vs.xp_per_level) * config.vs.nova_damage_per_level }
+      // Guard against under-filled top_k yielding a slot-0 sentinel.
+      if (target.alive
+          && target.mana >= config.vs.enemy_mana_min
+          && target.mana <= config.vs.enemy_mana_max) {
+        emit Damaged { source: self, target: target, amount: config.vs.nova_damage + floor(xp(self) / config.vs.xp_per_level) * config.vs.nova_damage_per_level }
+      }
     }
   }
 }
