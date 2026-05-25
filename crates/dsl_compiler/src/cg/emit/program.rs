@@ -1604,13 +1604,53 @@ fn compose_view_storage_prelude(body: &str, prog: &CgProgram) -> String {
                 .map(|s| s.args.len() == 2)
                 .unwrap_or(false);
             let pair_k = sig.and_then(|s| s.pair_keyed_k);
-            if is_pair_keyed_2arg && pair_k.is_some() {
-                let k = pair_k.unwrap();
-                out.push_str(&format!(
-                    "fn view_{view_id}_get(observer: u32, key: u32) -> u32 {{\n\
-                     \x20   return view_storage_{view_name}_primary[observer * {k}u + key];\n\
-                     }}\n"
-                ));
+            if is_pair_keyed_2arg {
+                // 2-arg pair-keyed accessor. The row stride between observers
+                // is the second-key population: a STATIC K for `@key_pop`
+                // belief pairs (u32-typed), or the RUNTIME agent_count for
+                // Agent×Agent `pair_map` views (f32-typed). The fold/decay
+                // WRITE side composes `local_a * cfg.second_key_pop + local_b`
+                // (`cg/emit/wgsl_body.rs`), and `build_helper` sets that
+                // ViewFold `cfg.second_key_pop = self.agent_count` for the
+                // Agent case — which equals this (generic/per-agent) reading
+                // kernel's `cfg.agent_cap` (also `self.agent_count`). We index
+                // with `cfg.agent_cap` here because the reading kernel's cfg
+                // struct is `{ agent_cap, tick, seed, _pad }` and has no
+                // `second_key_pop` field. Before this, a dynamic-K view
+                // (`pair_k == None`) fell through to the 1-arg scalar form
+                // below while its call site passed 2 args → `ArgumentCount`
+                // invalid WGSL (the predator_prey `predator_focus(self,
+                // target)` failure).
+                match pair_k {
+                    Some(k) => out.push_str(&format!(
+                        "fn view_{view_id}_get(observer: u32, key: u32) -> u32 {{\n\
+                         \x20   return view_storage_{view_name}_primary[observer * {k}u + key];\n\
+                         }}\n"
+                    )),
+                    None => {
+                        // Dynamic-K (Agent×Agent): stride is `cfg.agent_cap`
+                        // (= agent_count). Respect the view's result type —
+                        // f32 views (e.g. predator_focus, a decaying float
+                        // tally) bitcast from the u32 storage cell; u32 views
+                        // return the cell directly.
+                        let result_is_f32 = sig
+                            .map(|s| matches!(s.result, crate::cg::expr::CgTy::F32))
+                            .unwrap_or(false);
+                        if result_is_f32 {
+                            out.push_str(&format!(
+                                "fn view_{view_id}_get(observer: u32, key: u32) -> f32 {{\n\
+                                 \x20   return bitcast<f32>(view_storage_{view_name}_primary[observer * cfg.agent_cap + key]);\n\
+                                 }}\n"
+                            ));
+                        } else {
+                            out.push_str(&format!(
+                                "fn view_{view_id}_get(observer: u32, key: u32) -> u32 {{\n\
+                                 \x20   return view_storage_{view_name}_primary[observer * cfg.agent_cap + key];\n\
+                                 }}\n"
+                            ));
+                        }
+                    }
+                }
             } else {
                 // Scalar getter — read u32 from the storage binding,
                 // bitcast to f32. The binding name + slot are pinned
@@ -3751,15 +3791,17 @@ mod tests {
         );
     }
 
-    /// Negative arm — pair-keyed view WITHOUT `pair_keyed_k` falls
-    /// back to the scalar form. (Today this happens for Agent×Agent
-    /// beliefs whose K is `cfg.agent_cap` at runtime — the prelude
-    /// can't bake an unknown K, so it emits scalar; the caller is
-    /// expected to compose the index expression at the call site.
-    /// Future cuts may add a `view_X_get_pair(observer, key)`
-    /// dynamic-K variant.)
+    /// Pair-keyed view WITHOUT `pair_keyed_k` (Agent×Agent — the second
+    /// key is dynamic, = agent_count). Emits a 2-arg accessor indexing
+    /// with the runtime `cfg.agent_cap` stride (which equals the fold's
+    /// `cfg.second_key_pop = self.agent_count`), respecting the view's
+    /// result type (here U32 → no bitcast). Before the fix, this fell
+    /// back to the 1-arg `(idx) -> f32` scalar form while call sites
+    /// pass 2 args → `ArgumentCount` invalid WGSL (predator_prey's
+    /// `predator_focus(self, target)` failure). This is the "future
+    /// dynamic-K variant" the old fallback comment anticipated.
     #[test]
-    fn pair_keyed_without_static_k_falls_back_to_scalar() {
+    fn pair_keyed_dynamic_k_uses_agent_cap_stride() {
         use crate::cg::data_handle::ViewId;
         use crate::cg::expr::CgTy;
         use crate::cg::program::ViewSignature;
@@ -3778,12 +3820,24 @@ mod tests {
             },
         );
 
-        let body = "let cell = view_0_get(some_idx);";
+        let body = "let cell = view_0_get(observer, key);";
         let prelude = compose_view_storage_prelude(body, &prog);
 
+        // 2-arg accessor (matches the 2-arg call site), u32 result (the
+        // view's declared type — no bitcast).
         assert!(
-            prelude.contains("fn view_0_get(idx: u32) -> f32"),
-            "without static K, helper falls back to scalar shape; got:\n{prelude}"
+            prelude.contains("fn view_0_get(observer: u32, key: u32) -> u32"),
+            "dynamic-K pair view must emit a 2-arg accessor; got:\n{prelude}"
+        );
+        // Runtime stride = cfg.agent_cap (= agent_count = the fold's second_key_pop).
+        assert!(
+            prelude.contains("view_storage_seen_primary[observer * cfg.agent_cap + key]"),
+            "dynamic-K stride must be cfg.agent_cap; got:\n{prelude}"
+        );
+        // Must NOT fall back to the 1-arg scalar form (the old bug).
+        assert!(
+            !prelude.contains("fn view_0_get(idx: u32)"),
+            "dynamic-K pair view must NOT emit the 1-arg scalar fallback; got:\n{prelude}"
         );
     }
 
