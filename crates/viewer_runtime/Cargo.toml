@@ -21,6 +21,13 @@ engine_voxel = { path = "../engine_voxel" }
 # dungeon_horde. We use `sims::dungeon_horde::GeneratedRuntime`.
 sims = { path = "../sims" }
 
+# Declarative game-UI layer (HUD widgets / menu / death screens) the
+# vs_viewer renders over the voxel scene via egui. Plan 4.
+engine_ui = { path = "../engine_ui" }
+# egui for the playable HUD/menu/death overlay. Must match the version
+# voxel_engine's `app-harness` feature pulls in so cargo unifies.
+egui = "0.33"
+
 # voxel_engine path dep with `app-harness` enabled (winit + egui).
 # Path matches the dep in `engine_voxel` so cargo unifies the dep
 # rather than building two copies. The `app-harness` feature is

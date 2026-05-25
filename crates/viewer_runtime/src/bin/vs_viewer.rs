@@ -90,6 +90,13 @@ struct Gfx {
     swapchain: SwapchainContext,
     renderer: VoxelRenderer,
     bridge: VsBridge,
+    /// egui overlay state (HUD / menu / death screens).
+    egui: voxel_engine::ui::EguiState,
+    /// Command pool for egui's texture-staging submits (cmd_paint needs one;
+    /// VulkanContext exposes no accessor, so we own one here). Graphics family.
+    egui_cmd_pool: ash::vk::CommandPool,
+    /// Graphics queue used for egui texture uploads.
+    egui_queue: ash::vk::Queue,
 }
 
 impl ApplicationHandler for WindowedVsViewer {
@@ -119,9 +126,39 @@ impl ApplicationHandler for WindowedVsViewer {
             .refresh(&ctx, &self.app)
             .expect("VsBridge::refresh (initial) failed");
 
+        // egui overlay: matches the swapchain's format/views/extent.
+        let egui = voxel_engine::ui::EguiState::new(
+            &ctx,
+            swapchain.surface_format(),
+            swapchain.image_views(),
+            swapchain.extent(),
+            &window,
+        )
+        .expect("EguiState::new failed");
+        // egui's cmd_paint needs a graphics queue + a command pool for its
+        // texture-staging submits. VulkanContext exposes no command-pool
+        // accessor, so we own one on the graphics family.
+        let gq = ctx
+            .graphics_queue()
+            .expect("graphics queue required for egui overlay");
+        let pool_ci = ash::vk::CommandPoolCreateInfo::default()
+            .queue_family_index(gq.family_index)
+            .flags(ash::vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER);
+        let egui_cmd_pool = unsafe { ctx.device().create_command_pool(&pool_ci, None) }
+            .expect("egui command pool");
+
         window.request_redraw();
 
-        self.gfx = Some(Gfx { window, ctx, swapchain, renderer, bridge });
+        self.gfx = Some(Gfx {
+            window,
+            ctx,
+            swapchain,
+            renderer,
+            bridge,
+            egui,
+            egui_cmd_pool,
+            egui_queue: gq.queue,
+        });
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
@@ -136,6 +173,14 @@ impl ApplicationHandler for WindowedVsViewer {
         _id: WindowId,
         event: WindowEvent,
     ) {
+        // Route the event into egui first. If egui consumed it (e.g. a click
+        // on a menu card or a hovered window), don't also process it here.
+        if let Some(gfx) = self.gfx.as_mut() {
+            let resp = gfx.egui.handle_window_event(&gfx.window, &event);
+            if resp.consumed {
+                return;
+            }
+        }
         match event {
             WindowEvent::KeyboardInput {
                 event: KeyEvent { ref logical_key, state, repeat: false, .. },
@@ -206,6 +251,12 @@ impl ApplicationHandler for WindowedVsViewer {
                 }
                 if let Some(mut gfx) = self.gfx.take() {
                     let _ = unsafe { gfx.ctx.device().device_wait_idle() };
+                    unsafe {
+                        gfx.ctx
+                            .device()
+                            .destroy_command_pool(gfx.egui_cmd_pool, None);
+                    }
+                    gfx.egui.destroy(&gfx.ctx);
                     gfx.bridge.destroy(&gfx.ctx);
                     gfx.swapchain.destroy(&gfx.ctx);
                     gfx.renderer.destroy(&gfx.ctx);
@@ -334,14 +385,35 @@ impl ApplicationHandler for WindowedVsViewer {
                         eprintln!("[vs_viewer] render_frame_gpu failed: {e}");
                         return;
                     }
-                    // No mesh-overlay pass -- voxel splats are sufficient for VS.
-                    let present_result = gfx.swapchain.present_blit_with_overlay(
-                        &gfx.ctx,
-                        gfx.renderer.light_output_image(),
+                    // egui overlay: run the UI for this frame, then paint it on
+                    // top of the voxel render inside present_blit's overlay pass.
+                    gfx.egui.run(&gfx.window, |ectx| {
+                        egui::Area::new(egui::Id::new("hud_probe"))
+                            .fixed_pos(egui::pos2(12.0, 12.0))
+                            .show(ectx, |ui| {
+                                ui.label("HUD online");
+                            });
+                    });
+                    // Capture the fields the FnOnce overlay closure needs so the
+                    // borrow of `gfx.swapchain` doesn't conflict with `gfx.egui`.
+                    let Gfx {
+                        ref ctx,
+                        ref mut swapchain,
+                        ref renderer,
+                        ref mut egui,
+                        egui_cmd_pool,
+                        egui_queue,
+                        ..
+                    } = *gfx;
+                    let present_result = swapchain.present_blit_with_overlay(
+                        ctx,
+                        renderer.light_output_image(),
                         WINDOW_W,
                         WINDOW_H,
                         ash::vk::Semaphore::null(),
-                        |_cmd, _image_index| Ok(()),
+                        |cmd, image_index| {
+                            egui.cmd_paint(ctx, cmd, image_index, egui_queue, egui_cmd_pool)
+                        },
                     );
                     if let Err(e) = present_result {
                         eprintln!("[vs_viewer] present_blit_with_overlay failed: {e}");
