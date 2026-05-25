@@ -985,6 +985,21 @@ name = "engine_gpu_rules"
 version = "0.1.0"
 
 [[package]]
+name = "engine_play"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ash",
+ "egui 0.33.3",
+ "engine_play_api",
+ "engine_ui",
+ "glam",
+ "serde_json",
+ "voxel_engine",
+ "winit",
+]
+
+[[package]]
 name = "engine_play_api"
 version = "0.1.0"
 dependencies = [
