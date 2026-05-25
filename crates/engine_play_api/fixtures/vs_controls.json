@@ -1,0 +1,8 @@
+{
+  "bindings": [
+    { "key": "w", "field": "ctl.move_y", "value":  1.0, "mode": "Hold" },
+    { "key": "s", "field": "ctl.move_y", "value": -1.0, "mode": "Hold" },
+    { "key": "d", "field": "ctl.move_x", "value":  1.0, "mode": "Hold" },
+    { "key": "a", "field": "ctl.move_x", "value": -1.0, "mode": "Hold" }
+  ]
+}
