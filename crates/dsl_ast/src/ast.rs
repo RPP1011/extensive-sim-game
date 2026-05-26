@@ -194,18 +194,33 @@ pub enum InitExpr {
     /// Position builtin for the `pos` field — seeded at `try_new` via
     /// `per_agent_u32` (P5-deterministic per `(seed, slot)`).
     Pos(PosBuiltin),
+    /// `config.<block>.<field>` — resolved to that config field's DEFAULT
+    /// value at codegen time (a compile-time constant; mirrors how a spawn
+    /// `count config.x` resolves). Stores the dotted `"<block>.<field>"`.
+    ConfigRef(String),
+}
+
+/// The radius argument of `scatter(r)` / `ring(r)`: a numeric literal or a
+/// `config.<block>.<field>` reference (resolved to the field's default at
+/// codegen, like a spawn `count`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum RadiusArg {
+    Lit(f64),
+    /// Dotted `"<block>.<field>"`.
+    Config(String),
 }
 
 /// Initial-position builtins for the `pos:` init field. Seeded host-side
 /// at `try_new` so positions are deterministic for a given `(seed, slot)`.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+/// (Not `Copy` — `RadiusArg::Config` carries a `String`.)
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum PosBuiltin {
     /// `origin` — every seeded slot at `[0, 0, 0]`.
     Origin,
     /// `scatter(r)` — uniform point in a radius-`r` disc (XY plane).
-    Scatter(f64),
+    Scatter(RadiusArg),
     /// `ring(r)` — on the radius-`r` circle (XY plane).
-    Ring(f64),
+    Ring(RadiusArg),
 }
 
 /// Per-fixture compiler-debug-mode opt-in. Lets a `.sim` author surface

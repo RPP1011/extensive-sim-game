@@ -53,11 +53,8 @@ entity Enemy  : Agent { pos: vec3, vel: vec3 }
 // never writes creature_type). `engaged_with: 1` points every enemy at the
 // player slot so ChasePlayer's `agents.pos(self.engaged_with)` homes directly.
 // Enemy count = agent_count(512) − 1 player − 1 slot-0 sentinel = 510.
-// `hp: 100.0` mirrors `config.vs.player_hp` (the frozen Plan A init grammar
-// takes only literals / pos builtins as field values, not `config.*` — that
-// form is reserved for `count config.<b>.<f>`).
 init {
-  spawn Player count 1   { hp: 100.0, pos: origin }
+  spawn Player count 1   { hp: config.vs.player_hp, pos: origin }
   spawn Enemy  count 510 { alive: 0, engaged_with: 1 }
 }
 

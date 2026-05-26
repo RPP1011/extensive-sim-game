@@ -173,14 +173,13 @@ config ctl {
 // slot's `creature_type` (PlayerHare = 2 / Hare = 0 / Wolf = 1, declaration
 // order) + `alive = 1` automatically. The PlayerHare sits at the origin (the
 // human-driven hare); autonomous Hares + Wolves scatter inside the arena
-// radius so the player has somewhere to kite. The scatter radius is the
-// literal 42.0 — it mirrors `config.hunt.arena_radius`'s default value
-// because the frozen Plan A `scatter(r)` grammar takes a numeric literal
-// (only the spawn `count` accepts `config.<block>.<field>`; see report gap).
+// radius so the player has somewhere to kite. The scatter radius is
+// `config.hunt.arena_radius` — resolved to its default at codegen, the same
+// way a spawn `count config.<b>.<f>` resolves.
 init {
   spawn PlayerHare count 1   { pos: origin }
-  spawn Hare       count 199 { pos: scatter(42.0) }
-  spawn Wolf       count 8   { pos: scatter(42.0) }
+  spawn Hare       count 199 { pos: scatter(config.hunt.arena_radius) }
+  spawn Wolf       count 8   { pos: scatter(config.hunt.arena_radius) }
 }
 
 // ---------------------------------------------------------------------------

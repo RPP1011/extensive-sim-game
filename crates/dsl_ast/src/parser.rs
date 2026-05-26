@@ -1160,12 +1160,24 @@ fn init_decl(
     Ok(InitDecl { annotations, stmts, spawns, span: Span::new(start, c.pos) })
 }
 
+/// Parse `config.<block>.<field>` with the cursor positioned at `config`,
+/// returning the dotted `"<block>.<field>"`. Shared by init field values and
+/// `scatter`/`ring` radii. Caller gates on `starts_with_keyword(c, "config")`.
+fn parse_config_dotted(c: &mut Cursor) -> PResult<String> {
+    expect_keyword(c, "config").map_err(|e| e.with_context("parsing config reference"))?;
+    expect_char(c, '.').map_err(|e| e.with_context("parsing config `.`"))?;
+    let block = ident(c).map_err(|e| e.with_context("parsing config block name"))?;
+    expect_char(c, '.').map_err(|e| e.with_context("parsing config `.`"))?;
+    let field = ident(c).map_err(|e| e.with_context("parsing config field name"))?;
+    Ok(format!("{block}.{field}"))
+}
+
 /// Parse one `field: <value>` init statement. `<value>` is `slot`,
 /// an integer literal, a float literal (→ `InitExpr::Float`), or — for a
 /// `pos:` field — a position builtin (`origin` / `scatter(r)` / `ring(r)`).
 /// Shared by the flat `init { field: v }` form and each `spawn` block body.
 fn init_field_stmt(c: &mut Cursor) -> PResult<InitStmt> {
-    use crate::ast::PosBuiltin;
+    use crate::ast::{PosBuiltin, RadiusArg};
     let stmt_start = c.pos;
     let field = ident(c).map_err(|e| e.with_context("parsing init field name"))?;
     c.skip_ws();
@@ -1187,22 +1199,33 @@ fn init_field_stmt(c: &mut Cursor) -> PResult<InitStmt> {
                 expect_char(c, '(').map_err(|e| {
                     e.with_context("parsing position builtin `(`")
                 })?;
-                let r = parse_f64(c)?;
+                // Radius: a numeric literal or `config.<block>.<field>`.
+                let radius = if starts_with_keyword(c, "config") {
+                    RadiusArg::Config(parse_config_dotted(c)?)
+                } else {
+                    RadiusArg::Lit(parse_f64(c)?)
+                };
                 expect_char(c, ')').map_err(|e| {
                     e.with_context("parsing position builtin `)`")
                 })?;
                 let pb = if name == "scatter" {
-                    PosBuiltin::Scatter(r)
+                    PosBuiltin::Scatter(radius)
                 } else {
-                    PosBuiltin::Ring(r)
+                    PosBuiltin::Ring(radius)
                 };
                 InitExpr::Pos(pb)
+            }
+            "config" => {
+                // `config.<block>.<field>` value — resolved to that config
+                // field's default at codegen time (mirrors `count config.x`).
+                // (Cursor is at `config`; the helper consumes the whole path.)
+                InitExpr::ConfigRef(parse_config_dotted(c)?)
             }
             other => {
                 return Err(ParseErr::at(
                     here(c),
                     format!(
-                        "expected `slot`, `origin`, `scatter(r)`, `ring(r)`, or a numeric literal as init expression; got `{other}`"
+                        "expected `slot`, `origin`, `scatter(r)`, `ring(r)`, `config.<block>.<field>`, or a numeric literal as init expression; got `{other}`"
                     ),
                 ));
             }

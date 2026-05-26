@@ -783,11 +783,23 @@ fn emit_into(
                     }
                 }
             };
+            // Resolve any `config.<block>.<field>` in field values / scatter
+            // & ring radii to a literal against the .sim's config defaults,
+            // so the emit path only ever sees literals (mirrors `count`).
+            let fields = sb
+                .fields
+                .iter()
+                .map(|stmt| dsl_ast::ast::InitStmt {
+                    field: stmt.field.clone(),
+                    expr: resolve_init_expr_config(&stmt.expr, &comp, fixture_name, &sb.subkind),
+                    span: stmt.span,
+                })
+                .collect();
             ResolvedSpawnBlock {
                 subkind: sb.subkind.clone(),
                 creature_type_ord,
                 count,
-                fields: sb.fields.clone(),
+                fields,
             }
         })
         .collect();
@@ -857,6 +869,90 @@ pub struct ResolvedSpawnBlock {
     pub creature_type_ord: u32,
     pub count: u32,
     pub fields: Vec<dsl_ast::ast::InitStmt>,
+}
+
+/// Resolve a spawn-block init value's `config.<block>.<field>` reference to a
+/// literal against the .sim's config DEFAULTS (compile-time), mirroring how a
+/// spawn `count config.x` resolves. Covers field values (`InitExpr::ConfigRef`)
+/// and `scatter`/`ring` radii. Non-config exprs pass through unchanged.
+fn resolve_init_expr_config(
+    expr: &dsl_ast::ast::InitExpr,
+    comp: &dsl_ast::ir::Compilation,
+    fixture_name: &str,
+    subkind: &str,
+) -> dsl_ast::ast::InitExpr {
+    use dsl_ast::ast::{ConfigDefault, InitExpr, PosBuiltin};
+    match expr {
+        InitExpr::ConfigRef(dotted) => {
+            match config_default_for(comp, dotted, fixture_name, subkind, "field value") {
+                ConfigDefault::Float(v) => InitExpr::Float(v),
+                ConfigDefault::Int(n) => InitExpr::Const(n),
+                ConfigDefault::Uint(n) => InitExpr::Const(n as i64),
+                other => panic!(
+                    "init `spawn {subkind}` value `config.{dotted}`: config field must be numeric \
+                     (got {other:?}) in {fixture_name}.sim"
+                ),
+            }
+        }
+        InitExpr::Pos(PosBuiltin::Scatter(r)) => {
+            InitExpr::Pos(PosBuiltin::Scatter(resolve_radius_config(r, comp, fixture_name, subkind)))
+        }
+        InitExpr::Pos(PosBuiltin::Ring(r)) => {
+            InitExpr::Pos(PosBuiltin::Ring(resolve_radius_config(r, comp, fixture_name, subkind)))
+        }
+        other => other.clone(),
+    }
+}
+
+fn resolve_radius_config(
+    r: &dsl_ast::ast::RadiusArg,
+    comp: &dsl_ast::ir::Compilation,
+    fixture_name: &str,
+    subkind: &str,
+) -> dsl_ast::ast::RadiusArg {
+    use dsl_ast::ast::{ConfigDefault, RadiusArg};
+    match r {
+        RadiusArg::Lit(v) => RadiusArg::Lit(*v),
+        RadiusArg::Config(dotted) => {
+            let v = match config_default_for(comp, dotted, fixture_name, subkind, "scatter/ring radius") {
+                ConfigDefault::Float(v) => v,
+                ConfigDefault::Int(n) => n as f64,
+                ConfigDefault::Uint(n) => n as f64,
+                other => panic!(
+                    "init `spawn {subkind}` radius `config.{dotted}`: config field must be numeric \
+                     (got {other:?}) in {fixture_name}.sim"
+                ),
+            };
+            RadiusArg::Lit(v)
+        }
+    }
+}
+
+/// Look up `config.<block>.<field>`'s DEFAULT in the resolved Compilation.
+fn config_default_for(
+    comp: &dsl_ast::ir::Compilation,
+    dotted: &str,
+    fixture_name: &str,
+    subkind: &str,
+    ctx: &str,
+) -> dsl_ast::ast::ConfigDefault {
+    let (block, field) = dotted.split_once('.').unwrap_or_else(|| {
+        panic!(
+            "init `spawn {subkind}` {ctx} `config.{dotted}`: expected \
+             `config.<block>.<field>` in {fixture_name}.sim"
+        )
+    });
+    comp.configs
+        .iter()
+        .find(|c| c.name == block)
+        .and_then(|c| c.fields.iter().find(|f| f.name == field))
+        .map(|f| f.default.clone())
+        .unwrap_or_else(|| {
+            panic!(
+                "init `spawn {subkind}` {ctx} `config.{dotted}`: no such config field \
+                 in {fixture_name}.sim"
+            )
+        })
 }
 
 /// AOE auto-detect: scan the .ability corpus for any program with a
@@ -2221,7 +2317,7 @@ fn emit_spawn_seeding(
             if col == "pos" {
                 if let Some(stmt) = field_override {
                     if let dsl_ast::ast::InitExpr::Pos(pb) = &stmt.expr {
-                        emit_pos_fill(out, &buf_name, *start, *count, *pb);
+                        emit_pos_fill(out, &buf_name, *start, *count, pb);
                     }
                 }
                 continue;
@@ -2259,6 +2355,11 @@ fn scalar_init_value(col: &str, expr: &dsl_ast::ast::InitExpr, rust_ty: &str) ->
         (dsl_ast::ast::InitExpr::Pos(_), _) => panic!(
             "init field `{col}`: position builtins are only valid for the `pos` column"
         ),
+        // `config.<block>.<field>` values are resolved to a literal
+        // (Const/Float) in `resolved_spawns` before emit.
+        (dsl_ast::ast::InitExpr::ConfigRef(_), _) => unreachable!(
+            "init field `{col}`: config-ref must be resolved to a literal before emit"
+        ),
     }
 }
 
@@ -2274,16 +2375,22 @@ fn emit_pos_fill(
     buf_name: &str,
     start: u32,
     count: u32,
-    pb: dsl_ast::ast::PosBuiltin,
+    pb: &dsl_ast::ast::PosBuiltin,
 ) {
+    use dsl_ast::ast::{PosBuiltin, RadiusArg};
     let end = start + count;
+    // `config.<block>.<field>` radii are resolved to a literal in
+    // `resolved_spawns` before emit, so only `RadiusArg::Lit` reaches here.
     match pb {
-        dsl_ast::ast::PosBuiltin::Origin => {
+        PosBuiltin::Scatter(RadiusArg::Config(_)) | PosBuiltin::Ring(RadiusArg::Config(_)) => {
+            unreachable!("scatter/ring config radius must be resolved to a literal before emit")
+        }
+        PosBuiltin::Origin => {
             out.push_str(&format!(
                 "        for __s in {start}u32..{end}u32 {{ {buf_name}[__s as usize] = [0.0_f32; 4]; }}\n",
             ));
         }
-        dsl_ast::ast::PosBuiltin::Scatter(r) => {
+        PosBuiltin::Scatter(RadiusArg::Lit(r)) => {
             out.push_str(&format!(
                 "        for __s in {start}u32..{end}u32 {{\n\
                  \x20           let __aid = engine::ids::AgentId::new(__s).expect(\"seeded slot is non-zero\");\n\
@@ -2295,7 +2402,7 @@ fn emit_pos_fill(
                  \x20       }}\n",
             ));
         }
-        dsl_ast::ast::PosBuiltin::Ring(r) => {
+        PosBuiltin::Ring(RadiusArg::Lit(r)) => {
             out.push_str(&format!(
                 "        for __s in {start}u32..{end}u32 {{\n\
                  \x20           let __aid = engine::ids::AgentId::new(__s).expect(\"seeded slot is non-zero\");\n\
@@ -2984,6 +3091,16 @@ fn synthesize_generated_runtime_struct(
                         "init field `{col}`: position builtins (origin/scatter/ring) \
                          are only valid inside a `spawn <Subkind> count N {{ pos: … }}` \
                          block, not the flat `init {{ … }}` form ({fixture_name}.sim)"
+                    );
+                }
+                // `config.<block>.<field>` values resolve per spawn block
+                // (against config defaults); the flat uniform form takes
+                // literals only.
+                (dsl_ast::ast::InitExpr::ConfigRef(_), _) => {
+                    panic!(
+                        "init field `{col}`: `config.<block>.<field>` values are supported \
+                         inside a `spawn <Subkind> count N {{ … }}` block, not the flat \
+                         `init {{ … }}` form ({fixture_name}.sim)"
                     );
                 }
             };

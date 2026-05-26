@@ -4,7 +4,7 @@
 //! `render {} agent when creature_type is <Subkind>` selector. Pins the
 //! surface grammar + parsed AST shape; codegen is covered in `sims`.
 
-use dsl_ast::ast::{CountExpr, Decl, InitExpr, PosBuiltin};
+use dsl_ast::ast::{CountExpr, Decl, InitExpr, PosBuiltin, RadiusArg};
 
 fn first_init(src: &str) -> dsl_ast::ast::InitDecl {
     let p = dsl_ast::parse(src).expect("parse program");
@@ -77,8 +77,33 @@ fn position_builtins_parse() {
         }\n";
     let init = first_init(src);
     assert_eq!(init.spawns[0].fields[0].expr, InitExpr::Pos(PosBuiltin::Origin));
-    assert_eq!(init.spawns[1].fields[0].expr, InitExpr::Pos(PosBuiltin::Scatter(40.0)));
-    assert_eq!(init.spawns[2].fields[0].expr, InitExpr::Pos(PosBuiltin::Ring(12.5)));
+    assert_eq!(init.spawns[1].fields[0].expr, InitExpr::Pos(PosBuiltin::Scatter(RadiusArg::Lit(40.0))));
+    assert_eq!(init.spawns[2].fields[0].expr, InitExpr::Pos(PosBuiltin::Ring(RadiusArg::Lit(12.5))));
+}
+
+#[test]
+fn config_ref_init_values_parse() {
+    // Grammar-gap close: `config.<block>.<field>` as an init field VALUE and
+    // as a `scatter`/`ring` radius (resolved to the config default at codegen,
+    // the same way a spawn `count config.x` resolves).
+    let src = "\
+        init {\n\
+          spawn A count 1 { hp: config.vs.player_hp, pos: scatter(config.hunt.arena_radius) }\n\
+          spawn B count 2 { pos: ring(config.hunt.arena_radius) }\n\
+        }\n";
+    let init = first_init(src);
+    assert_eq!(
+        init.spawns[0].fields[0].expr,
+        InitExpr::ConfigRef("vs.player_hp".into())
+    );
+    assert_eq!(
+        init.spawns[0].fields[1].expr,
+        InitExpr::Pos(PosBuiltin::Scatter(RadiusArg::Config("hunt.arena_radius".into())))
+    );
+    assert_eq!(
+        init.spawns[1].fields[0].expr,
+        InitExpr::Pos(PosBuiltin::Ring(RadiusArg::Config("hunt.arena_radius".into())))
+    );
 }
 
 #[test]
