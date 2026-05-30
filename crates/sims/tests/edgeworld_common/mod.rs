@@ -164,6 +164,90 @@ pub fn seed_world(
         .write_buffer(&state.agent_hp_buf, 0, bytemuck::cast_slice(&hp));
 }
 
+/// Seed a REPRODUCTION world deterministically (Phase 3 Task 1).
+///
+/// Each "breeder" survivor is pre-linked 1:1 to a unique DEAD "offspring"
+/// slot via the `engaged_with` column. A well-fed breeder revives ITS OWN
+/// offspring slot (Reproduce → Born → BornRevive), so no two breeders ever
+/// target the same slot — the revive is allocation-race-free.
+///
+/// Slot layout (total N = `n_food + 2 * n_breeders`):
+///   `[0..n_food)`                              FoodNodes (type 0, alive),
+///   `[n_food..n_food+n_breeders)`              Breeders (type 1, alive,
+///                                              hunger 0, clustered on the
+///                                              food oasis so they stay fed),
+///   `[n_food+n_breeders..n_food+2*n_breeders)` Offspring slots (type 1,
+///                                              **alive = 0**, hunger 0).
+///
+/// Breeder N's `engaged_with` cell (written as a raw u32 absolute slot
+/// index — edgeworld reads it directly, no OptAgentId +1 sentinel) points
+/// at offspring slot N. Deterministic, no rng / time.
+pub fn seed_repro_world(
+    state: &mut GeneratedRuntime,
+    n_breeders: usize,
+    n_food: usize,
+    world_half: f32,
+) {
+    let n = n_food + 2 * n_breeders;
+    let food_base = 0usize;
+    let breeder_base = n_food;
+    let offspring_base = n_food + n_breeders;
+
+    let mut positions: Vec<[f32; 4]> = vec![[0.0; 4]; n];
+    let mut types: Vec<u32> = vec![CT_FOOD; n];
+    let mut alive: Vec<u32> = vec![1u32; n];
+    let hunger: Vec<f32> = vec![0.0f32; n];
+    let mut mana: Vec<f32> = vec![0.0f32; n];
+    let hp: Vec<f32> = vec![1.0f32; n];
+    let mut engaged: Vec<u32> = vec![0u32; n];
+
+    // Food on a tight oasis ring near the origin so the breeders co-located
+    // with it stay well-fed (hunger below the birth threshold).
+    let food_span = 2.0;
+    for f in 0..n_food {
+        let slot = food_base + f;
+        let theta = (f as f32) / (n_food.max(1) as f32) * std::f32::consts::TAU;
+        let r = if n_food <= 1 { 0.0 } else { food_span };
+        positions[slot] = [r * theta.cos(), 0.0, r * theta.sin(), 0.0];
+        types[slot] = CT_FOOD;
+        mana[slot] = FOOD_MAX; // full larder — breeders never go hungry.
+    }
+
+    // Breeders clustered tightly on the oasis (inside eat_radius) at zero
+    // hunger, alive. Each points at its unique offspring slot.
+    let breeder_span = 1.0;
+    let denom = (n_breeders.max(1)) as f32;
+    for b in 0..n_breeders {
+        let slot = breeder_base + b;
+        let theta = (b as f32) / denom * std::f32::consts::TAU;
+        let r = if n_breeders <= 1 { 0.0 } else { breeder_span };
+        positions[slot] = [r * theta.cos(), 0.0, r * theta.sin(), 0.0];
+        types[slot] = CT_SURVIVOR;
+        // engaged_with = absolute offspring slot index (raw, no sentinel).
+        engaged[slot] = (offspring_base + b) as u32;
+    }
+
+    // Offspring slots: type 1, DEAD (alive = 0), hunger 0. Parked off the
+    // oasis so they don't pre-feed; BornRevive teleports them onto the
+    // parent's position on birth.
+    for o in 0..n_breeders {
+        let slot = offspring_base + o;
+        let theta = (o as f32) / denom * std::f32::consts::TAU;
+        positions[slot] = [world_half * 0.5 * theta.cos(), 0.0, world_half * 0.5 * theta.sin(), 0.0];
+        types[slot] = CT_SURVIVOR;
+        alive[slot] = 0; // dead until a breeder revives it.
+    }
+
+    let q = &state.gpu.queue;
+    q.write_buffer(&state.agent_pos_buf, 0, bytemuck::cast_slice(&positions));
+    q.write_buffer(&state.agent_creature_type_buf, 0, bytemuck::cast_slice(&types));
+    q.write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&alive));
+    q.write_buffer(&state.agent_hunger_buf, 0, bytemuck::cast_slice(&hunger));
+    q.write_buffer(&state.agent_mana_buf, 0, bytemuck::cast_slice(&mana));
+    q.write_buffer(&state.agent_hp_buf, 0, bytemuck::cast_slice(&hp));
+    q.write_buffer(&state.agent_engaged_with_buf, 0, bytemuck::cast_slice(&engaged));
+}
+
 /// Staging-buffer readback of `state.agent_hunger_buf` as f32.
 pub fn read_hunger(state: &mut GeneratedRuntime, count: usize) -> Vec<f32> {
     read_f32(state, &state.agent_hunger_buf.clone(), count, "hunger")

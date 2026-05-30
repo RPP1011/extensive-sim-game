@@ -794,3 +794,55 @@ fn edgeworld_lingering_fear_after_wolf_leaves() {
 
 /// fear_threshold from config.edgeworld (mirrors the .sim constant).
 fn config_fear_threshold() -> f32 { 1.5 }
+
+// Phase 3 Task 1 — REPRODUCTION. Well-fed breeders revive their own
+// pre-linked (engaged_with) DEAD offspring slots, so the alive-survivor
+// population GROWS past the seeded breeder count. No wolves; food plentiful
+// so breeders stay below birth_hunger_max and birth on the cooldown tick.
+#[test]
+fn edgeworld_reproduction_grows_population() {
+    let n_breeders: usize = 8;
+    let n_food: usize = 6;
+    let n = n_food + 2 * n_breeders; // 8 breeders + 8 offspring slots + food
+    let mut state = match GeneratedRuntime::try_new(SEED, n as u32) {
+        Some(s) => s,
+        None => {
+            eprintln!("[edgeworld] skipping reproduction: no wgpu adapter.");
+            return;
+        }
+    };
+    seed_repro_world(&mut state, n_breeders, n_food, 12.0);
+
+    // Baseline: exactly n_breeders alive survivors at seed (offspring dead).
+    let types0 = read_creature_types(&mut state, n);
+    let alive0 = read_alive(&mut state, n);
+    let start_survivors: usize = (0..n)
+        .filter(|&i| types0[i] == CT_SURVIVOR && alive0[i] == 1)
+        .count();
+    println!("[edgeworld] reproduction start: {start_survivors} alive survivors");
+    assert_eq!(start_survivors, n_breeders, "should start with n_breeders alive survivors");
+
+    for _ in 0..200 {
+        state.step();
+    }
+
+    let types = read_creature_types(&mut state, n);
+    let alive = read_alive(&mut state, n);
+    let hunger = read_hunger(&mut state, n);
+    let end_survivors: usize = (0..n)
+        .filter(|&i| types[i] == CT_SURVIVOR && alive[i] == 1)
+        .count();
+    println!(
+        "[edgeworld] reproduction after 200 ticks: {end_survivors} alive survivors (was {start_survivors}); \
+         hunger sample {:?}",
+        &hunger[n_food..n_food + n_breeders.min(4)]
+    );
+
+    // Births happened: the alive-survivor population GREW above the seeded
+    // breeder count (toward 2*n_breeders as each breeder revives its
+    // offspring slot).
+    assert!(
+        end_survivors > start_survivors,
+        "population should grow past {start_survivors} breeders via reproduction, got {end_survivors}"
+    );
+}
