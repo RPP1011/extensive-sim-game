@@ -186,6 +186,44 @@ pub fn read_creature_types(state: &mut GeneratedRuntime, count: usize) -> Vec<u3
     read_u32(state, &state.agent_creature_type_buf.clone(), count, "creature_type")
 }
 
+/// Staging-buffer readback of the `threats` belief storage —
+/// `view_storage_threats_primary_buf` holds `count` packed f32 cells
+/// (one per agent slot, keyed on the observer). Mirrors the readback in
+/// `threat_stresstest_pin.rs::read_threats_primary_*`. Phase 2 Task 1
+/// reads this to assert the per-survivor threat level rises on wolf
+/// sightings and decays once the wolf leaves; Task 2/3 will read the
+/// same buffer to gate flee behaviour.
+pub fn read_threats(state: &mut GeneratedRuntime, count: usize) -> Vec<f32> {
+    let bytes = (count as u64 * 4).max(16);
+    let staging = state.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("edgeworld::threats_staging"),
+        size: bytes,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut encoder = state.gpu.device.create_command_encoder(
+        &wgpu::CommandEncoderDescriptor { label: Some("edgeworld::threats_readback") },
+    );
+    encoder.copy_buffer_to_buffer(
+        &state.view_storage_threats_primary_buf,
+        0,
+        &staging,
+        0,
+        bytes,
+    );
+    state.gpu.queue.submit(Some(encoder.finish()));
+    let slice = staging.slice(..bytes);
+    slice.map_async(wgpu::MapMode::Read, |r| r.expect("map_async"));
+    state.gpu.device.poll(wgpu::PollType::Wait).expect("poll");
+    let out = {
+        let view = slice.get_mapped_range();
+        let words: &[f32] = bytemuck::cast_slice(&view);
+        words[..count].to_vec()
+    };
+    staging.unmap();
+    out
+}
+
 /// Staging-buffer readback of `state.agent_pos_buf` as stride-16
 /// `[f32; 4]` rows (x, y, z, pad).
 pub fn read_positions(state: &mut GeneratedRuntime, count: usize) -> Vec<[f32; 4]> {

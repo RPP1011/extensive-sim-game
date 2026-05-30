@@ -303,6 +303,103 @@ fn edgeworld_wolf_pursues_distant_survivor() {
 /// kill_range from config.edgeworld (mirrors the .sim constant).
 fn config_kill_range() -> f32 { 1.2 }
 
+// Phase 2 Task 1 — decaying THREAT BELIEF fed by wolf perception.
+//
+// The `threats(observer: Agent) -> f32` belief (@materialized(on_event =
+// [WolfSpotted]) @decay(rate = 0.90, per = tick)) is a per-survivor threat
+// level that RISES when a survivor sees a wolf (the Perceive rule emits
+// WolfSpotted{observer: self} for every alive wolf inside its 6-unit
+// perception ring) and DECAYS 10%/tick once the sightings stop. No
+// behaviour change yet — Flee still triggers off raw proximity; Task 2
+// will gate it on this belief.
+//
+// Slot layout: slot0 = Survivor (type 1), slot1 = Wolf (type 2). Both
+// alive, survivor seeded at zero hunger so it neither starves nor seeks
+// food. During the RISE phase the survivor flees the wolf (Flee fires at
+// proximity), so we RE-STAMP both positions adjacent each tick to keep
+// the wolf inside perception and the sightings flowing. During the DECAY
+// phase we move the wolf far beyond the 6-unit perception ring (and clear
+// its alive bit) so no new WolfSpotted is emitted and only @decay acts.
+#[test]
+fn edgeworld_threat_belief_rises_then_decays() {
+    let mut state = match GeneratedRuntime::try_new(SEED, 2) {
+        Some(s) => s,
+        None => {
+            eprintln!("[edgeworld] skip: no adapter.");
+            return;
+        }
+    };
+    state.gpu.queue.write_buffer(&state.agent_creature_type_buf, 0, bytemuck::cast_slice(&[CT_SURVIVOR, CT_WOLF]));
+    state.gpu.queue.write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&[1u32, 1u32]));
+    state.gpu.queue.write_buffer(&state.agent_hunger_buf, 0, bytemuck::cast_slice(&[0.0f32, 0.0f32]));
+    state.gpu.queue.write_buffer(&state.agent_mana_buf, 0, bytemuck::cast_slice(&[0.0f32, 0.0f32]));
+
+    // Survivor at origin, wolf 3 units away (inside the 6-unit perception
+    // ring → Perceive sees it and emits WolfSpotted every tick).
+    let near = [[0.0f32, 0.0, 0.0, 0.0], [3.0, 0.0, 0.0, 0.0]];
+
+    // RISE: hold the pair adjacent so the survivor keeps sighting the wolf.
+    // The fold lags the emit by one tick (SCHEDULE runs Fold before the
+    // Flee/Perceive emit kernel), so threat starts climbing at tick 1.
+    const RISE_TICKS: usize = 10;
+    for _ in 0..RISE_TICKS {
+        // Re-stamp positions BEFORE stepping so Perceive sees the wolf in
+        // range this tick (Flee would otherwise have driven the survivor
+        // out of the perception ring).
+        state.gpu.queue.write_buffer(&state.agent_pos_buf, 0, bytemuck::cast_slice(&near));
+        // Keep both alive (Flee/WolfHunt etc. don't kill here, but be safe).
+        state.gpu.queue.write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&[1u32, 1u32]));
+        state.step();
+    }
+    let peak = read_threats(&mut state, 2)[0];
+    println!("[edgeworld] threat peak after {RISE_TICKS} sighting ticks: {peak}");
+    assert!(
+        peak > 0.0,
+        "survivor's threat belief should have RISEN above 0 from wolf sightings, got {peak}"
+    );
+    // Sanity: with +1/tick and 0.9 decay, the rise approaches the
+    // steady-state 1/(1-0.9)=10. After ~9 effective sighting ticks it
+    // should be well above 1.
+    assert!(
+        peak > 1.0,
+        "threat should have accumulated several sightings (expected >1), got {peak}"
+    );
+
+    // DECAY: remove the wolf — move it far beyond perception AND clear its
+    // alive bit so Perceive emits no more WolfSpotted. Only @decay acts now.
+    let far = [[0.0f32, 0.0, 0.0, 0.0], [100.0, 0.0, 0.0, 0.0]];
+    state.gpu.queue.write_buffer(&state.agent_pos_buf, 0, bytemuck::cast_slice(&far));
+    state.gpu.queue.write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&[1u32, 0u32]));
+
+    const DECAY_TICKS: usize = 20;
+    for _ in 0..DECAY_TICKS {
+        // Keep re-stamping the wolf out of range + dead so no sightings
+        // creep back in (Flee re-stamping is unnecessary now).
+        state.gpu.queue.write_buffer(&state.agent_pos_buf, 0, bytemuck::cast_slice(&far));
+        state.gpu.queue.write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&[1u32, 0u32]));
+        state.step();
+    }
+    let decayed = read_threats(&mut state, 2)[0];
+    println!("[edgeworld] threat after {DECAY_TICKS} decay ticks (wolf gone): {decayed}");
+
+    // The belief decayed well below its peak. 0.9^20 ≈ 0.12, so the
+    // decayed value should be a small fraction of the peak. Allow a
+    // generous ceiling (peak * 0.5) to stay robust to the exact
+    // emit/fold/decay tick phasing.
+    assert!(
+        decayed < peak * 0.5,
+        "threat should have DECAYED well below its peak ({peak}) once the wolf left, got {decayed}"
+    );
+    assert!(
+        decayed >= 0.0,
+        "threat should stay non-negative (clamp floor 0.0), got {decayed}"
+    );
+    println!(
+        "[edgeworld] threat belief rise+decay confirmed: peak={peak:.4} -> decayed={decayed:.4} (ratio {:.3})",
+        decayed / peak
+    );
+}
+
 // Phase 2 dynamics pin: BOUNDED predator-prey coupling is REAL and ends in
 // COEXISTENCE, not extinction. Run two 600-tick scenarios from the SAME
 // seed/world via the shared seeder — one with no wolves, one with K wolves

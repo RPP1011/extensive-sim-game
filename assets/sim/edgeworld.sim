@@ -12,6 +12,19 @@
 
 event Tick { }
 
+// WolfSpotted — emitted by a Survivor (Perceive) when it sees an alive
+// Wolf inside its perception ring. The `observer` field is the spotting
+// survivor's own slot; the `threats` belief folds +1.0 into
+// `threats(observer)` for every WolfSpotted whose observer matches.
+// Modelled on assassination_threat_test.sim::ThreatSighted (a perception
+// rule emitting a replayable/gpu_amenable event that a decaying belief
+// folds over). Phase 2 Task 1: belief RISE + DECAY only, no behaviour
+// wiring (Task 2 gates Flee on this belief).
+@replayable @gpu_amenable
+event WolfSpotted {
+  observer: AgentId,
+}
+
 entity FoodNode : Agent {
   pos: vec3,
   vel: vec3,
@@ -335,4 +348,52 @@ physics Flee @phase(per_agent) {
       }
     }
   }
+}
+
+// Perceive — each alive Survivor (creature_type 1) walks its perception
+// ring (reuse threat_in_sight, the same 6-unit ring Flee uses) and, for
+// each alive Wolf (creature_type 2) it sees, emits a WolfSpotted record
+// tagged with its OWN slot as the observer. The `threats` belief below
+// folds those records into a per-survivor decaying threat level. This is
+// the perception SOURCE — it has no movement/scalar write (the emit is
+// the observable effect, like assassination_threat_test::GuardDetect, so
+// no DCE anchor is needed). No behaviour change in Task 1: Flee still
+// triggers off raw proximity; Task 2 will gate it on this belief.
+physics Perceive @phase(per_agent) {
+  on Tick {} where (self.alive && self.creature_type == 1) {
+    for candidate in spatial.threat_in_sight(self) {
+      if (candidate.alive && candidate.creature_type == 2) {
+        emit WolfSpotted { observer: self }
+      }
+    }
+  }
+}
+
+// threats — first-class decaying belief: a per-survivor threat level
+// that RISES (+1.0) on every WolfSpotted whose observer matches this
+// slot, and DECAYS by the @decay rate each tick BEFORE the fold runs.
+// View name MUST be exactly `threats` (the scoring wire-up keys on it —
+// Task 2 reads it). Single-Agent key → single-key (N cells) storage at
+// view_storage_threats_primary_buf, read back like threat_stresstest_pin.
+//
+// DISPATCH CHOICE — this is the load-bearing decision for Task 1.
+// The dodger_probe / threats_with_decay_probe `@dispatch(per_agent_event_scan)`
+// shape does NOT read emitted events: its fold pair-scans (observer,
+// source) agent slots and gates on the omniscient `agent_busy_with_ability_id`
+// column — it ignores `emit WolfSpotted` entirely (verified: the
+// generated fold_threats.wgsl never touches event_ring; it loops gid.x/gid.y
+// over agent slots). To get a belief that genuinely RISES from spatial
+// wolf SIGHTINGS (the Perceive emit), use the `@materialized(on_event=[...])`
+// per-event dispatch instead — the same shape plague_city's
+// `contagion_pressure(source: Agent) -> f32` and trade_market_probe's
+// `trader_volume(buyer: Agent) -> f32` use: it dispatches per emitted
+// event, reads the payload's `observer` field, and folds +1.0 into that
+// observer's cell. @decay then drains it each tick. (Belief keyword +
+// single-Agent f32 + @materialized + @decay all compose; see plague_city.)
+@materialized(on_event = [WolfSpotted])
+@decay(rate = 0.90, per = tick)
+belief threats(observer: Agent) -> f32 {
+  initial: 0.0,
+  on WolfSpotted { observer: o } where (o == observer) { self += 1.0 }
+  clamp: [0.0, 100.0],
 }
