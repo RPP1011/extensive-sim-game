@@ -181,6 +181,17 @@ pub fn read_alive(state: &mut GeneratedRuntime, count: usize) -> Vec<u32> {
     read_u32(state, &state.agent_alive_buf.clone(), count, "alive")
 }
 
+/// Staging-buffer readback of the hand-rolled FEAR column — Phase 2 Task 2
+/// repurposes the free `shield_hp` f32 SoA column as each survivor's
+/// decaying fear level (RISES +1.0 per wolf sighting via Perceive, DECAYS
+/// *0.90/tick via DecayFear). The behaviour gates (Flee / SeekFood-
+/// suppression) read THIS column — the `threats` belief's value is not
+/// readable from a physics rule (see edgeworld.sim PATH B finding), so the
+/// belief stays a host-readable observable while the column drives action.
+pub fn read_fear(state: &mut GeneratedRuntime, count: usize) -> Vec<f32> {
+    read_f32(state, &state.agent_shield_hp_buf.clone(), count, "fear")
+}
+
 /// Staging-buffer readback of `state.agent_creature_type_buf` as u32.
 pub fn read_creature_types(state: &mut GeneratedRuntime, count: usize) -> Vec<u32> {
     read_u32(state, &state.agent_creature_type_buf.clone(), count, "creature_type")
