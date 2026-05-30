@@ -1,8 +1,12 @@
 //! edgeworld Phase 0 behavioral pin. Phase 0 = hunger + food +
-//! forage/eat/starve/regrow. This file grows task-by-task; Task 1
-//! only asserts the fixture compiles and the runtime constructs.
+//! forage/eat/starve/regrow + seek-food movement. Shared constants and
+//! GPU readback helpers live in the sibling `edgeworld_common` module so
+//! the (future Task 6) render test can reuse them.
 
 use sims::edgeworld::GeneratedRuntime;
+
+mod edgeworld_common;
+use edgeworld_common::*;
 
 const SEED: u64 = 0xED6E_0001;
 const N_TOTAL: u32 = 4;
@@ -31,7 +35,7 @@ fn edgeworld_hunger_rises() {
         }
     };
     let n = N_TOTAL as usize;
-    state.gpu.queue.write_buffer(&state.agent_creature_type_buf, 0, bytemuck::cast_slice(&vec![1u32; n]));
+    state.gpu.queue.write_buffer(&state.agent_creature_type_buf, 0, bytemuck::cast_slice(&vec![CT_SURVIVOR; n]));
     state.gpu.queue.write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&vec![1u32; n]));
     state.gpu.queue.write_buffer(&state.agent_hunger_buf, 0, bytemuck::cast_slice(&vec![0.0f32; n]));
     for _ in 0..10 {
@@ -56,7 +60,7 @@ fn edgeworld_starvation_kills() {
         }
     };
     let n = N_TOTAL as usize;
-    state.gpu.queue.write_buffer(&state.agent_creature_type_buf, 0, bytemuck::cast_slice(&vec![1u32; n]));
+    state.gpu.queue.write_buffer(&state.agent_creature_type_buf, 0, bytemuck::cast_slice(&vec![CT_SURVIVOR; n]));
     state.gpu.queue.write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&vec![1u32; n]));
     state.gpu.queue.write_buffer(&state.agent_hunger_buf, 0, bytemuck::cast_slice(&vec![0.0f32; n]));
     state.gpu.queue.write_buffer(&state.agent_hp_buf, 0, bytemuck::cast_slice(&vec![1.0f32; n])); // for fallback path
@@ -80,7 +84,7 @@ fn edgeworld_eating_feeds_and_depletes() {
         }
     };
     // slot 0 = FoodNode (type 0), slot 1 = Survivor (type 1), co-located within eat_radius.
-    state.gpu.queue.write_buffer(&state.agent_creature_type_buf, 0, bytemuck::cast_slice(&[0u32, 1u32]));
+    state.gpu.queue.write_buffer(&state.agent_creature_type_buf, 0, bytemuck::cast_slice(&[CT_FOOD, CT_SURVIVOR]));
     state.gpu.queue.write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&[1u32, 1u32]));
     state.gpu.queue.write_buffer(&state.agent_pos_buf, 0,
         bytemuck::cast_slice(&[[0.0f32,0.0,0.0,0.0],[0.5,0.0,0.0,0.0]]));
@@ -96,94 +100,24 @@ fn edgeworld_eating_feeds_and_depletes() {
     assert!(mana[0] < 5.0, "food node should have been depleted by eating, got {}", mana[0]);
 }
 
-/// Staging-buffer readback of `state.agent_mana_buf` as f32 — the
-/// FoodNode-quantity twin of `read_hunger` (quantity is repurposed
-/// onto the `mana` f32 SoA column per the Task 4 decision).
-fn read_mana(state: &mut GeneratedRuntime, count: usize) -> Vec<f32> {
-    let bytes = (count as u64 * 4).max(16);
-    let staging = state.gpu.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("edgeworld::mana_staging"),
-        size: bytes,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-    let mut encoder = state.gpu.device.create_command_encoder(
-        &wgpu::CommandEncoderDescriptor {
-            label: Some("edgeworld::mana_readback"),
-        },
-    );
-    let buf = state.agent_mana_buf.clone();
-    encoder.copy_buffer_to_buffer(&buf, 0, &staging, 0, bytes);
-    state.gpu.queue.submit(Some(encoder.finish()));
-    let slice = staging.slice(..bytes);
-    slice.map_async(wgpu::MapMode::Read, |r| r.expect("map_async"));
-    state.gpu.device.poll(wgpu::PollType::Wait).expect("poll");
-    let out = {
-        let view = slice.get_mapped_range();
-        let words: &[f32] = bytemuck::cast_slice(&view);
-        words[..count].to_vec()
+#[test]
+fn edgeworld_seekfood_moves_toward_food() {
+    let mut state = match GeneratedRuntime::try_new(SEED, 2) {
+        Some(s) => s,
+        None => {
+            eprintln!("[edgeworld] skip: no adapter.");
+            return;
+        }
     };
-    staging.unmap();
-    out
-}
-
-/// Staging-buffer readback of `state.agent_alive_buf` as u32 — the
-/// `read_hunger` helper's integer twin.
-fn read_alive(state: &mut GeneratedRuntime, count: usize) -> Vec<u32> {
-    let bytes = (count as u64 * 4).max(16);
-    let staging = state.gpu.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("edgeworld::alive_staging"),
-        size: bytes,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-    let mut encoder = state.gpu.device.create_command_encoder(
-        &wgpu::CommandEncoderDescriptor {
-            label: Some("edgeworld::alive_readback"),
-        },
-    );
-    let buf = state.agent_alive_buf.clone();
-    encoder.copy_buffer_to_buffer(&buf, 0, &staging, 0, bytes);
-    state.gpu.queue.submit(Some(encoder.finish()));
-    let slice = staging.slice(..bytes);
-    slice.map_async(wgpu::MapMode::Read, |r| r.expect("map_async"));
-    state.gpu.device.poll(wgpu::PollType::Wait).expect("poll");
-    let out = {
-        let view = slice.get_mapped_range();
-        let words: &[u32] = bytemuck::cast_slice(&view);
-        words[..count].to_vec()
-    };
-    staging.unmap();
-    out
-}
-
-/// Staging-buffer readback of `state.agent_hunger_buf` as f32, modeled
-/// on the `readback_u32`/`read_positions` helpers in
-/// `detective_investigation_pin.rs`.
-fn read_hunger(state: &mut GeneratedRuntime, count: usize) -> Vec<f32> {
-    let bytes = (count as u64 * 4).max(16);
-    let staging = state.gpu.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("edgeworld::hunger_staging"),
-        size: bytes,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-    let mut encoder = state.gpu.device.create_command_encoder(
-        &wgpu::CommandEncoderDescriptor {
-            label: Some("edgeworld::hunger_readback"),
-        },
-    );
-    let buf = state.agent_hunger_buf.clone();
-    encoder.copy_buffer_to_buffer(&buf, 0, &staging, 0, bytes);
-    state.gpu.queue.submit(Some(encoder.finish()));
-    let slice = staging.slice(..bytes);
-    slice.map_async(wgpu::MapMode::Read, |r| r.expect("map_async"));
-    state.gpu.device.poll(wgpu::PollType::Wait).expect("poll");
-    let out = {
-        let view = slice.get_mapped_range();
-        let words: &[f32] = bytemuck::cast_slice(&view);
-        words[..count].to_vec()
-    };
-    staging.unmap();
-    out
+    state.gpu.queue.write_buffer(&state.agent_creature_type_buf, 0, bytemuck::cast_slice(&[CT_FOOD, CT_SURVIVOR]));
+    state.gpu.queue.write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&[1u32, 1u32]));
+    state.gpu.queue.write_buffer(&state.agent_pos_buf, 0,
+        bytemuck::cast_slice(&[[0.0f32,0.0,0.0,0.0],[8.0,0.0,0.0,0.0]])); // food at origin, survivor 8 away
+    state.gpu.queue.write_buffer(&state.agent_hunger_buf, 0, bytemuck::cast_slice(&[0.0f32, 0.5f32]));
+    state.gpu.queue.write_buffer(&state.agent_mana_buf, 0, bytemuck::cast_slice(&[5.0f32, 0.0f32]));
+    let start = read_positions(&mut state, 2)[1][0];
+    for _ in 0..10 { state.step(); }
+    let end = read_positions(&mut state, 2)[1][0];
+    println!("[edgeworld] survivor x: {start} -> {end}");
+    assert!(end < start - 1.0, "hungry survivor should move toward food (x decreasing), {start}->{end}");
 }
