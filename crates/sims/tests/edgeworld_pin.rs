@@ -154,9 +154,13 @@ fn edgeworld_boom_then_bust_then_remnant() {
 }
 
 // Wolf-presence smoke: with the Wolf entity added (creature_type 2),
-// a mixed world of survivors + food + wolves seeds and steps cleanly,
-// the three creature_types are distinguishable, and nothing dies in a
-// short window (5 ticks is well under any starvation horizon).
+// a mixed world of survivors + food + wolves seeds and steps cleanly and
+// the three creature_types are distinguishable. With Task 2 (WolfHunt)
+// live, wolves now pursue and kill survivors that fall inside their
+// 6-unit perception ring, so the survivor count may drop — the
+// assertions only require all three types to coexist and the predators +
+// larder to persist (no starvation in this short window, all hunger
+// seeded to 0).
 #[test]
 fn edgeworld_wolves_present() {
     const N_SURV: usize = 6;
@@ -173,11 +177,11 @@ fn edgeworld_wolves_present() {
     };
     seed_world(&mut state, N_SURV, N_FOOD, N_WOLF, 8.0);
     // seed_world applies a graded hunger ramp (up to 2.8) to survivors to
-    // drive the boom/bust crash. This smoke test only checks that the new
-    // Wolf entity seeds + steps cleanly and the three types coexist, so
-    // override all agent hunger to a benign 0.0 — nothing should die in
-    // the short window from starvation, and Task 2 (wolves hunt) is not
-    // yet implemented so no wolf kills occur.
+    // drive the boom/bust crash. This smoke test only checks that the
+    // mixed world seeds + steps cleanly and the three types coexist, so
+    // override all agent hunger to a benign 0.0 — nothing dies from
+    // starvation in this short window. (Wolves may now kill survivors via
+    // Task 2 WolfHunt, so the survivor count is allowed to drop.)
     state.gpu.queue.write_buffer(
         &state.agent_hunger_buf,
         0,
@@ -201,11 +205,85 @@ fn edgeworld_wolves_present() {
     let food = count(CT_FOOD);
     println!("[edgeworld] survivors={survivors} wolves={wolves} food={food} types={types:?}");
 
-    assert_eq!(survivors, N_SURV, "all survivors should be alive after 5 ticks");
+    // Wolves are slow to starve and never get eaten; the larder never
+    // starves. Survivors may be culled by the wolves, but at least one
+    // should still stand after only 5 ticks.
+    assert!(survivors >= 1, "some survivors should still be alive after 5 ticks, got {survivors}");
     assert_eq!(wolves, N_WOLF, "all wolves should be alive after 5 ticks");
     assert_eq!(food, N_FOOD, "all food nodes should be present after 5 ticks");
 
     // The three creature_types must be distinguishable.
     assert!(types.contains(&CT_FOOD) && types.contains(&CT_SURVIVOR) && types.contains(&CT_WOLF),
         "all three creature_types should be present, got {types:?}");
+}
+
+// Task 2 kill pin: a wolf adjacent to a survivor (within kill_range = 1.2)
+// kills it and feeds (resets its own hunger to 0). Both seeded manually at
+// LOW hunger so the dead survivor cannot be confused with a starvation
+// death — Starvation only fires at hunger >= hunger_max (1.0), and these
+// are seeded at 0.0. Slot layout: slot0 = Wolf (type 2), slot1 = Survivor
+// (type 1), no food.
+#[test]
+fn edgeworld_wolf_kills_close_survivor() {
+    let mut state = match GeneratedRuntime::try_new(SEED, 2) {
+        Some(s) => s,
+        None => {
+            eprintln!("[edgeworld] skip: no adapter.");
+            return;
+        }
+    };
+    // slot0 = Wolf at origin, slot1 = Survivor 0.5 away (inside kill_range 1.2).
+    state.gpu.queue.write_buffer(&state.agent_creature_type_buf, 0, bytemuck::cast_slice(&[CT_WOLF, CT_SURVIVOR]));
+    state.gpu.queue.write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&[1u32, 1u32]));
+    state.gpu.queue.write_buffer(&state.agent_pos_buf, 0,
+        bytemuck::cast_slice(&[[0.0f32,0.0,0.0,0.0],[0.5,0.0,0.0,0.0]]));
+    // Seed both at zero hunger so the only death channel is a wolf kill.
+    state.gpu.queue.write_buffer(&state.agent_hunger_buf, 0, bytemuck::cast_slice(&[0.0f32, 0.0f32]));
+    state.gpu.queue.write_buffer(&state.agent_mana_buf, 0, bytemuck::cast_slice(&[0.0f32, 0.0f32]));
+    for _ in 0..3 {
+        state.step();
+    }
+    let alive = read_alive(&mut state, 2);
+    let hunger = read_hunger(&mut state, 2);
+    println!("[edgeworld] kill: wolf_alive={} surv_alive={} wolf_hunger={}", alive[0], alive[1], hunger[0]);
+    assert_eq!(alive[1], 0, "survivor within kill_range should be dead, got alive={}", alive[1]);
+    assert_eq!(alive[0], 1, "wolf should still be alive after the kill, got alive={}", alive[0]);
+    // The wolf fed on the kill → its own hunger reset to 0 (then WolfHunger
+    // adds ~0.03/tick afterward; after the kill tick it stays near 0).
+    assert!(hunger[0] < 0.1, "wolf should have fed (hunger near 0), got {}", hunger[0]);
+}
+
+// Task 2 pursuit pin: a wolf beyond kill_range but inside the 6-unit
+// perception ring steers toward a survivor. Survivor seeded at zero hunger
+// so it neither flees (Flee lands in Task 3) nor seeks food (SeekFood's
+// hunger > 0.2 gate stays shut), keeping it stationary; the wolf should
+// close the gap. Slot layout: slot0 = Wolf at origin, slot1 = Survivor at
+// x = 4.0.
+#[test]
+fn edgeworld_wolf_pursues_distant_survivor() {
+    let mut state = match GeneratedRuntime::try_new(SEED, 2) {
+        Some(s) => s,
+        None => {
+            eprintln!("[edgeworld] skip: no adapter.");
+            return;
+        }
+    };
+    state.gpu.queue.write_buffer(&state.agent_creature_type_buf, 0, bytemuck::cast_slice(&[CT_WOLF, CT_SURVIVOR]));
+    state.gpu.queue.write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&[1u32, 1u32]));
+    state.gpu.queue.write_buffer(&state.agent_pos_buf, 0,
+        bytemuck::cast_slice(&[[0.0f32,0.0,0.0,0.0],[4.0,0.0,0.0,0.0]]));
+    state.gpu.queue.write_buffer(&state.agent_hunger_buf, 0, bytemuck::cast_slice(&[0.0f32, 0.0f32]));
+    state.gpu.queue.write_buffer(&state.agent_mana_buf, 0, bytemuck::cast_slice(&[0.0f32, 0.0f32]));
+    let start = read_positions(&mut state, 2);
+    let wolf_x0 = start[0][0];
+    let surv_x0 = start[1][0];
+    for _ in 0..8 { state.step(); }
+    let end = read_positions(&mut state, 2);
+    let wolf_x1 = end[0][0];
+    let surv_x1 = end[1][0];
+    let d0 = (surv_x0 - wolf_x0).abs();
+    let d1 = (surv_x1 - wolf_x1).abs();
+    println!("[edgeworld] pursuit: wolf_x {wolf_x0}->{wolf_x1} surv_x {surv_x0}->{surv_x1} dist {d0}->{d1}");
+    assert!(wolf_x1 > wolf_x0, "wolf should move toward survivor (x increasing), {wolf_x0}->{wolf_x1}");
+    assert!(d1 < d0, "wolf-survivor distance should shrink, {d0}->{d1}");
 }

@@ -210,3 +210,45 @@ physics Starvation @phase(per_agent) {
     agents.set_alive(self, false);
   }
 }
+
+// Spatial-grid filter for wolf hunting — a 6-unit perception ring (well
+// inside the 12-unit survivor SeekFood ring) so wolves spot and pursue
+// nearby survivors. Body-form pattern: the body-side `if` does the
+// creature_type + alive filter on the candidate.
+@spatial(radius = 6.0, kind = [Agent])
+spatial_query prey_in_sight(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// WolfHunt — each alive Wolf (creature_type 2) walks its perception ring
+// and, for each alive Survivor (creature_type 1) it sees, either:
+//   * KILLS it if within kill_range (direct neighbour `set_alive(candidate,
+//     false)` — same neighbour-column-write path Eat uses on `set_mana`)
+//     and resets its OWN hunger to 0.0 (it has fed); or
+//   * PURSUES it otherwise, stepping toward the survivor at wolf_move_speed
+//     via the proven neighbour-pos steering (`candidate.pos - self.pos`).
+//
+// DCE ANCHOR (carried from SeekFood): the pursue branch's only write is
+// the vec3 `set_pos` — silently dead-code-eliminated unless paired with a
+// recognised scalar self-write. The identity `set_hunger(self,
+// agents.hunger(self))` is that anchor (WolfHunger runs in an earlier
+// kernel stage, so writing the current hunger back is a true no-op that
+// merely marks the rule effectful). The kill branch already carries a
+// real scalar self-write (`set_hunger(self, 0.0)`), so only the else
+// branch needs the anchor.
+physics WolfHunt @phase(per_agent) {
+  on Tick {} where (self.alive && self.creature_type == 2) {
+    for candidate in spatial.prey_in_sight(self) {
+      if (candidate.alive && candidate.creature_type == 1) {
+        let d = distance(self.pos, candidate.pos);
+        if (d < config.edgeworld.kill_range) {
+          agents.set_alive(candidate, false);
+          agents.set_hunger(self, 0.0);
+        } else {
+          let dir = candidate.pos - self.pos;
+          agents.set_pos(self, self.pos + dir * config.edgeworld.wolf_move_speed);
+          agents.set_hunger(self, agents.hunger(self));
+        }
+      }
+    }
+  }
+}
