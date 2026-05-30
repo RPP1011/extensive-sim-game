@@ -1,0 +1,27 @@
+// edgeworld — zero-player survival world sim. Phase 0: a band of
+// Survivors forage FoodNodes against rising hunger; food regrows;
+// starvation kills. FoodNode is declared `: Agent` (not `: Item`)
+// so survivors can read/deplete its quantity via the spatial-
+// neighbour SoA-read pattern proven in detective_investigation.sim
+// (the Item-SoA cross-entity field read is still a gap — see
+// foraging_colony.sim:59-67).
+//
+// Entity decl order is alphabetical → FoodNode = 0, Survivor = 1.
+
+event Tick { }
+
+entity FoodNode : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Survivor : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config edgeworld {
+  // placeholder so the config block exists; real tunables land in
+  // later tasks.
+  unused: u32 = 0,
+}
