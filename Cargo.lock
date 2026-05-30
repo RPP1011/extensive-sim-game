@@ -2969,6 +2969,7 @@ dependencies = [
  "engine_data",
  "engine_voxel",
  "glam",
+ "image",
  "pollster",
  "wgpu",
 ]
