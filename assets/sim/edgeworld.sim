@@ -252,3 +252,37 @@ physics WolfHunt @phase(per_agent) {
     }
   }
 }
+
+// Spatial-grid filter for survivor flight — a 6-unit perception ring (the
+// mirror of prey_in_sight; identical signature). The body-side `if` does
+// the creature_type + alive filter on the candidate wolf.
+@spatial(radius = 6.0, kind = [Agent])
+spatial_query threat_in_sight(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// Flee — each alive Survivor (creature_type 1) walks its perception ring
+// and, for each alive Wolf (creature_type 2) within flee_range, steps
+// directly AWAY from it at flee_speed (faster than wolf_move_speed so the
+// survivor outpaces a single pursuer). Mirror of WolfHunt's pursue branch
+// with the steering vector negated (away = self.pos - candidate.pos).
+//
+// DCE ANCHOR (carried from SeekFood/WolfHunt): the only write here is the
+// vec3 `set_pos` — silently dead-code-eliminated unless paired with a
+// recognised scalar self-write. The identity `set_hunger(self,
+// agents.hunger(self))` is that anchor (Hunger runs in an earlier kernel
+// stage, so writing the current hunger back is a true no-op that merely
+// marks the rule effectful).
+physics Flee @phase(per_agent) {
+  on Tick {} where (self.alive && self.creature_type == 1) {
+    for candidate in spatial.threat_in_sight(self) {
+      if (candidate.alive && candidate.creature_type == 2) {
+        let d = distance(self.pos, candidate.pos);
+        if (d < config.edgeworld.flee_range) {
+          let away = self.pos - candidate.pos;
+          agents.set_pos(self, self.pos + away * config.edgeworld.flee_speed);
+          agents.set_hunger(self, agents.hunger(self));
+        }
+      }
+    }
+  }
+}

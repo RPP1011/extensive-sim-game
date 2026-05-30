@@ -253,12 +253,18 @@ fn edgeworld_wolf_kills_close_survivor() {
     assert!(hunger[0] < 0.1, "wolf should have fed (hunger near 0), got {}", hunger[0]);
 }
 
-// Task 2 pursuit pin: a wolf beyond kill_range but inside the 6-unit
-// perception ring steers toward a survivor. Survivor seeded at zero hunger
-// so it neither flees (Flee lands in Task 3) nor seeks food (SeekFood's
-// hunger > 0.2 gate stays shut), keeping it stationary; the wolf should
-// close the gap. Slot layout: slot0 = Wolf at origin, slot1 = Survivor at
-// x = 4.0.
+// Task 2 pursuit pin (re-pinned for Task 3 Flee): a wolf inside its 6-unit
+// perception ring steers toward a survivor. With Flee now live, the
+// composed behavior is a CHASE: the wolf pursues at wolf_move_speed (0.18)
+// while the survivor, once the wolf closes inside flee_range (5.0), flees
+// at flee_speed (0.25). Seeded at separation 5.5 (just outside flee_range,
+// inside wolf perception) the wolf takes the first step alone, drops the
+// gap under flee_range, and from then on both move in the +x direction with
+// the survivor staying ahead — a stable chase, never a kill. We assert the
+// wolf actively pursues (its x climbs well past its start), the survivor is
+// driven along ahead of it (survivor x climbs too), and the gap holds above
+// kill_range (no capture). Slot layout: slot0 = Wolf at origin, slot1 =
+// Survivor at x = 5.5.
 #[test]
 fn edgeworld_wolf_pursues_distant_survivor() {
     let mut state = match GeneratedRuntime::try_new(SEED, 2) {
@@ -271,7 +277,7 @@ fn edgeworld_wolf_pursues_distant_survivor() {
     state.gpu.queue.write_buffer(&state.agent_creature_type_buf, 0, bytemuck::cast_slice(&[CT_WOLF, CT_SURVIVOR]));
     state.gpu.queue.write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&[1u32, 1u32]));
     state.gpu.queue.write_buffer(&state.agent_pos_buf, 0,
-        bytemuck::cast_slice(&[[0.0f32,0.0,0.0,0.0],[4.0,0.0,0.0,0.0]]));
+        bytemuck::cast_slice(&[[0.0f32,0.0,0.0,0.0],[5.5,0.0,0.0,0.0]]));
     state.gpu.queue.write_buffer(&state.agent_hunger_buf, 0, bytemuck::cast_slice(&[0.0f32, 0.0f32]));
     state.gpu.queue.write_buffer(&state.agent_mana_buf, 0, bytemuck::cast_slice(&[0.0f32, 0.0f32]));
     let start = read_positions(&mut state, 2);
@@ -283,7 +289,58 @@ fn edgeworld_wolf_pursues_distant_survivor() {
     let surv_x1 = end[1][0];
     let d0 = (surv_x0 - wolf_x0).abs();
     let d1 = (surv_x1 - wolf_x1).abs();
-    println!("[edgeworld] pursuit: wolf_x {wolf_x0}->{wolf_x1} surv_x {surv_x0}->{surv_x1} dist {d0}->{d1}");
-    assert!(wolf_x1 > wolf_x0, "wolf should move toward survivor (x increasing), {wolf_x0}->{wolf_x1}");
-    assert!(d1 < d0, "wolf-survivor distance should shrink, {d0}->{d1}");
+    let alive = read_alive(&mut state, 2);
+    println!("[edgeworld] pursuit: wolf_x {wolf_x0}->{wolf_x1} surv_x {surv_x0}->{surv_x1} dist {d0}->{d1} surv_alive={}", alive[1]);
+    // Wolf actively pursues — drives well past its start in +x.
+    assert!(wolf_x1 > wolf_x0 + 1.0, "wolf should pursue (x climbing), {wolf_x0}->{wolf_x1}");
+    // Survivor is driven ahead of the wolf (flees in +x, staying ahead).
+    assert!(surv_x1 > surv_x0, "survivor should be driven ahead by the chase, {surv_x0}->{surv_x1}");
+    // Stable chase: the survivor is never caught.
+    assert_eq!(alive[1], 1, "chased survivor should still be alive, got alive={}", alive[1]);
+    assert!(d1 > config_kill_range(), "gap should hold above kill_range (no capture), got {d1}");
+}
+
+/// kill_range from config.edgeworld (mirrors the .sim constant).
+fn config_kill_range() -> f32 { 1.2 }
+
+// Task 3 flee pin: a survivor with a wolf inside flee_range = 5.0 steps
+// directly AWAY from the wolf at flee_speed = 0.25 (> wolf_move_speed 0.18,
+// so it outpaces a single pursuer). Both seeded at zero hunger so neither
+// starves nor (the survivor) seeks food. Slot layout: slot0 = Survivor at
+// origin, slot1 = Wolf at x = 3.0 (separation 3.0 < flee_range 5.0). The
+// flee vector is away = survivor.pos - wolf.pos = (0 - 3) = -3 → the
+// survivor steps in the -x direction.
+#[test]
+fn edgeworld_survivor_flees_nearby_wolf() {
+    let mut state = match GeneratedRuntime::try_new(SEED, 2) {
+        Some(s) => s,
+        None => {
+            eprintln!("[edgeworld] skip: no adapter.");
+            return;
+        }
+    };
+    // slot0 = Survivor at origin, slot1 = Wolf at x = 3.0 (inside flee_range).
+    state.gpu.queue.write_buffer(&state.agent_creature_type_buf, 0, bytemuck::cast_slice(&[CT_SURVIVOR, CT_WOLF]));
+    state.gpu.queue.write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&[1u32, 1u32]));
+    state.gpu.queue.write_buffer(&state.agent_pos_buf, 0,
+        bytemuck::cast_slice(&[[0.0f32,0.0,0.0,0.0],[3.0,0.0,0.0,0.0]]));
+    state.gpu.queue.write_buffer(&state.agent_hunger_buf, 0, bytemuck::cast_slice(&[0.0f32, 0.0f32]));
+    state.gpu.queue.write_buffer(&state.agent_mana_buf, 0, bytemuck::cast_slice(&[0.0f32, 0.0f32]));
+    let start = read_positions(&mut state, 2);
+    let surv_x0 = start[0][0];
+    let wolf_x0 = start[1][0];
+    let d0 = (wolf_x0 - surv_x0).abs();
+    for _ in 0..8 { state.step(); }
+    let end = read_positions(&mut state, 2);
+    let surv_x1 = end[0][0];
+    let wolf_x1 = end[1][0];
+    let d1 = (wolf_x1 - surv_x1).abs();
+    let alive = read_alive(&mut state, 2);
+    println!("[edgeworld] flee: surv_x {surv_x0}->{surv_x1} wolf_x {wolf_x0}->{wolf_x1} dist {d0}->{d1} surv_alive={}", alive[0]);
+    // The survivor flees away from the wolf in the -x direction.
+    assert!(surv_x1 < surv_x0 - 0.1, "survivor should flee away from wolf (x decreasing below 0), {surv_x0}->{surv_x1}");
+    // Flight succeeded: the survivor is never caught (flee_speed > wolf_move_speed).
+    assert_eq!(alive[0], 1, "fleeing survivor should still be alive (outran the wolf), got alive={}", alive[0]);
+    // The gap did not collapse to a kill.
+    assert!(d1 >= d0 - 0.5, "survivor should not be overtaken; gap {d0}->{d1} should hold or widen");
 }
