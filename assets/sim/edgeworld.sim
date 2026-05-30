@@ -21,7 +21,18 @@ entity Survivor : Agent {
 }
 
 config edgeworld {
-  // placeholder so the config block exists; real tunables land in
-  // later tasks.
-  unused: u32 = 0,
+  // Hunger units added per tick per survivor. At 0.05/tick a
+  // survivor that never eats crosses the starvation threshold
+  // (1.0) in 20 ticks.
+  hunger_rate:     f32 = 0.05,
+  // Starvation threshold — hunger at or above this kills.
+  hunger_max:      f32 = 1.0,
+}
+
+// Per-Survivor hunger accrual. creature_type == 1 is Survivor.
+physics Hunger @phase(per_agent) {
+  on Tick {} where (self.alive && self.creature_type == 1) {
+    let prev = agents.hunger(self);
+    agents.set_hunger(self, prev + config.edgeworld.hunger_rate);
+  }
 }
