@@ -141,17 +141,21 @@ config edgeworld {
   flee_range:       f32 = 5.0,
   // Phase 2 Task 2 — fear threshold on the decaying FEAR column.
   //
-  // PATH B (hand-rolled fear column). DSL COVERAGE FINDING: reading the
-  // decaying `threats` belief from a @phase(per_agent) PHYSICS rule does
-  // NOT work — `threats.intensity_at(self)` lowers cleanly (no compile
-  // error) but the ViewCall read is SILENTLY ELIDED from the physics
-  // kernel: with the clause in Flee's where-guard, the emitted
-  // fused_Flee.wgsl guard collapsed to `(alive && creature_type == 1)`
-  // with zero references to any threats/view_storage binding (the
-  // view-read prelude is only wired into SCORING kernels, not physics
-  // kernels). This matches the `assassination_threat_test.sim` "no belief
-  // read from physics rule" gap. So the belief's VALUE is not readable
-  // where the gate needs it. We hand-roll the same decaying threat as a
+  // PATH B (hand-rolled fear column). HISTORICAL DSL COVERAGE FINDING
+  // (NOW CLOSED on branch dsl-belief-read-in-physics): reading the decaying
+  // `threats` belief from a @phase(per_agent) PHYSICS rule USED to be
+  // silently elided — `threats.intensity_at(self)` lowered cleanly (no
+  // compile error) but the ViewCall read dropped from the physics kernel,
+  // and an early build's stale `fused_Flee.wgsl` showed the guard collapsed
+  // to `(alive && creature_type == 1)` with no threats/view_storage binding.
+  // That is FIXED: the active scheduler now emits the view read in physics
+  // kernels exactly like scoring kernels (see the Flee guard below — its
+  // `threats.intensity_at(self)` term emits `view_0_get`, binds
+  // `view_storage_threats_primary`, and composes the helper prelude;
+  // naga-valid, pins green). The PATH B shield_hp column is retained as the
+  // primary behavioural driver (it predates the fix and the pins are tuned
+  // to it), but the belief VALUE is now readable from physics. We hand-roll
+  // the same decaying threat as a
   // free survivor f32 SoA column (`shield_hp`, unused by edgeworld) using
   // proven column reads/writes: Perceive RISES it +1.0/sighting, DecayFear
   // drains it *0.90/tick, and Flee/SeekFood gate on it crossing this
@@ -380,10 +384,23 @@ spatial_query threat_in_sight(self: AgentId, candidate: AgentId) =
 // agents.hunger(self))` is that anchor (Hunger runs in an earlier kernel
 // stage, so writing the current hunger back is a true no-op that merely
 // marks the rule effectful).
+// BELIEF-READ-IN-PHYSICS PROOF (branch dsl-belief-read-in-physics): the
+// final guard term `threats.intensity_at(self) >= 0.0` reads the real
+// `threats` belief view from a @phase(per_agent) PHYSICS rule. This was
+// historically the SILENTLY-ELIDED case (the PATH B note at fear_threshold
+// describes when it dropped from the physics kernel). It now wires
+// end-to-end: the active scheduled kernel (physics_Flee_and_Reproduce.wgsl)
+// emits `view_0_get(agent_id)` in op#9's guard, binds
+// `view_storage_threats_primary`, and composes the `fn view_0_get` prelude
+// helper — naga-valid (the runtime constructs the pipeline) and all
+// edgeworld pins stay green. The `>= 0.0` predicate is always true, so the
+// shield_hp FEAR column stays the behavioural driver; this term is the
+// load-bearing PROOF that the belief value now reaches physics WGSL.
 physics Flee @phase(per_agent) {
   on Tick {} where (self.alive
                     && self.creature_type == 1
-                    && agents.shield_hp(self) > config.edgeworld.fear_threshold) {
+                    && agents.shield_hp(self) > config.edgeworld.fear_threshold
+                    && threats.intensity_at(self) >= 0.0) {
     for candidate in spatial.threat_in_sight(self) {
       if (candidate.alive && candidate.creature_type == 2) {
         let d = distance(self.pos, candidate.pos);
