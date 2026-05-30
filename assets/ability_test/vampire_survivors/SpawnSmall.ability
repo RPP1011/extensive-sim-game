@@ -1,0 +1,9 @@
+// vampire_survivors fixture: enemy spawn wave (count=8).
+
+ability SpawnSmall {
+    target: self
+    cooldown: 3s
+    hint: utility
+
+    summon "enemy" 8 [UTILITY: 100]
+}

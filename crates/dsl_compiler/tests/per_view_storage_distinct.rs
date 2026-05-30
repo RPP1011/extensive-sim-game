@@ -168,6 +168,7 @@ fn synthesize_two_view_fixture() -> String {
         "two_view_fixture",
         &artifacts,
         &init_stmts,
+        &[],
         &std::collections::BTreeMap::new(),
         &[],
         &[],
@@ -180,6 +181,9 @@ fn synthesize_two_view_fixture() -> String {
         0,
         false,
         None,
+        "{\"bindings\":[]}",
+        "{\"arena_radius\":0.0,\"camera\":\"Observer\",\"agents\":[],\"vfx\":[]}",
+        "{\"hud\":[],\"screens\":[]}",
     )
 }
 

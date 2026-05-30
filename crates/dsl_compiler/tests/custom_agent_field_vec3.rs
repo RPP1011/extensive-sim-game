@@ -92,6 +92,9 @@ fn populate_accepts_vec3_decls() {
             }),
         ],
         terrain: None,
+        controls: None,
+        render: None,
+        ui: None,
     };
     let ids = populate(&program);
     assert_eq!(ids.len(), 2);
@@ -187,6 +190,7 @@ fn synthesize_runtime_allocates_vec3_buf() {
         "custom_field_vec3_test",
         &artifacts,
         &[],
+        &[],
         &std::collections::BTreeMap::new(),
         &[],
         &[],
@@ -199,6 +203,9 @@ fn synthesize_runtime_allocates_vec3_buf() {
         0,
         false,
         None,
+        "{\"bindings\":[]}",
+        "{\"arena_radius\":0.0,\"camera\":\"Observer\",\"agents\":[],\"vfx\":[]}",
+        "{\"hud\":[],\"screens\":[]}",
     );
 
     // The runtime struct must own the per-agent buffer for the

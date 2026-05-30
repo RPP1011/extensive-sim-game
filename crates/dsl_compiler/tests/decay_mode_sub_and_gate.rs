@@ -343,7 +343,7 @@ physics Tickle @phase(per_agent) {
   }
 }
 
-physics SetSomeBelief @phase(post) {
+physics SetSomeBelief @phase(per_agent) {
   on Tick {} {
     agents.set_beliefs_last_seen_tick(self, self, world.tick);
   }

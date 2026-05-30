@@ -1,0 +1,12 @@
+{
+  "arena_radius": 42.0,
+  "camera": { "Follow": { "field": "mana", "lo": 0.5, "hi": 1.5 } },
+  "agents": [
+    { "when": { "field": "mana", "lo": 0.5, "hi": 1.5 }, "color": [0, 220, 220] },
+    { "when": { "field": "mana", "lo": 1.5, "hi": 2.5 }, "color": [230, 100, 20] }
+  ],
+  "vfx": [
+    { "on_rule": "NovaFire", "period": 40, "kind": "Ring", "radius": 6.0, "color": [255, 255, 120] },
+    { "on_rule": "BoltFire", "period": 12, "kind": { "BeamToNearest": { "target": { "field": "mana", "lo": 1.5, "hi": 2.5 } } }, "radius": 0.0, "color": [200, 255, 255] }
+  ]
+}

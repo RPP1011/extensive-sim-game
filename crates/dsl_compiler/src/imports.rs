@@ -59,6 +59,10 @@ pub fn parse_with_imports(
     let mut merged_decls: Vec<dsl_ast::ast::Decl> = Vec::new();
     let mut merged_decl_sources: Vec<PathBuf> = Vec::new();
     let mut merged_terrain: Option<dsl_ast::terrain::TerrainBlock> = None;
+    // Plan A — player-facing descriptor singletons. Merged like `terrain`.
+    let mut merged_controls: Option<dsl_ast::ast::ControlsDecl> = None;
+    let mut merged_render: Option<dsl_ast::ast::RenderDecl> = None;
+    let mut merged_ui: Option<dsl_ast::ast::UiDecl> = None;
     let mut imports_resolved: Vec<PathBuf> = Vec::new();
 
     visit(
@@ -70,6 +74,9 @@ pub fn parse_with_imports(
         &mut merged_decls,
         &mut merged_decl_sources,
         &mut merged_terrain,
+        &mut merged_controls,
+        &mut merged_render,
+        &mut merged_ui,
         &mut imports_resolved,
     )?;
 
@@ -102,6 +109,9 @@ pub fn parse_with_imports(
         imports_resolved,
         decls: merged_decls,
         terrain: merged_terrain,
+        controls: merged_controls,
+        render: merged_render,
+        ui: merged_ui,
     })
 }
 
@@ -114,6 +124,9 @@ fn visit(
     merged_decls: &mut Vec<dsl_ast::ast::Decl>,
     merged_decl_sources: &mut Vec<PathBuf>,
     merged_terrain: &mut Option<dsl_ast::terrain::TerrainBlock>,
+    merged_controls: &mut Option<dsl_ast::ast::ControlsDecl>,
+    merged_render: &mut Option<dsl_ast::ast::RenderDecl>,
+    merged_ui: &mut Option<dsl_ast::ast::UiDecl>,
     imports_resolved: &mut Vec<PathBuf>,
 ) -> Result<(), ImportError> {
     if stack.iter().any(|p| p == path) {
@@ -149,6 +162,9 @@ fn visit(
             merged_decls,
             merged_decl_sources,
             merged_terrain,
+            merged_controls,
+            merged_render,
+            merged_ui,
             imports_resolved,
         )?;
     }
@@ -170,6 +186,40 @@ fn visit(
             });
         }
         *merged_terrain = Some(t);
+    }
+    // Plan A singletons — same collision policy as `terrain`.
+    if let Some(d) = program.controls {
+        if merged_controls.is_some() {
+            return Err(ImportError::DuplicateDefinition {
+                kind: "controls".to_string(),
+                name: "<singleton>".to_string(),
+                first_seen_at: imports_resolved[0].clone(),
+                second_seen_at: path.to_path_buf(),
+            });
+        }
+        *merged_controls = Some(d);
+    }
+    if let Some(d) = program.render {
+        if merged_render.is_some() {
+            return Err(ImportError::DuplicateDefinition {
+                kind: "render".to_string(),
+                name: "<singleton>".to_string(),
+                first_seen_at: imports_resolved[0].clone(),
+                second_seen_at: path.to_path_buf(),
+            });
+        }
+        *merged_render = Some(d);
+    }
+    if let Some(d) = program.ui {
+        if merged_ui.is_some() {
+            return Err(ImportError::DuplicateDefinition {
+                kind: "ui".to_string(),
+                name: "<singleton>".to_string(),
+                first_seen_at: imports_resolved[0].clone(),
+                second_seen_at: path.to_path_buf(),
+            });
+        }
+        *merged_ui = Some(d);
     }
 
     stack.pop();

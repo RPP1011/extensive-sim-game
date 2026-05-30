@@ -1,0 +1,387 @@
+// vampire_survivors — DSL-as-engine benchmark fixture (Slice 1).
+// A Vampire-Survivors-shaped combat loop: auto-firing player vs escalating
+// swarm, XP-on-kill, discrete leveling math, and fixed-priority upgrade
+// selection. Vehicle + deliberate DSL-gap probe; ledger at spec §8.
+//
+// Rules:  ChasePlayer (enemy movement), KitePlayer (player kiting),
+//         BoltFire (nearest-enemy periodic bolt), NovaFire (AOE nova burst),
+//         ApplyDamage (HP deduction + kill credit), ChooseUpgrade (selection).
+// Views:  xp(by: Agent) — per-kill XP fold; upgrades_total(player) — upgrade
+//         tally (un-split; per-kind fold guard walls — see #3c below).
+//
+// Role tagging: by entity subkind via `creature_type` (declaration order:
+// Player = 0, Enemy = 1). The population is seeded declaratively in the
+// `init { spawn … }` block below — a live Player at the origin plus a dormant
+// Enemy pool (alive: 0) the wave drain claims. The old mana-band idiom (and
+// its config fields) was retired with subkind seeding (Plan A grammar).
+//
+// Gap-probe findings (see spec §8 for detail):
+//   #1  view read in a physics emit amount            → PASS (BoltFire reads xp)
+//   #2  floor() on a view (discrete level math)       → PASS compiled; interp
+//                                                         arm in builtins.rs absent
+//   #3  value-returning if/else → u32 selection       → PASS via nested form;
+//                                                         else-if sugar fails parse
+//   #3a standalone enum surface                       → PASS (no prior corpus)
+//   #3b view read in an if *condition*                → PASS
+//   #3c fold where-guard on payload field             → WALL (silent drop in
+//                                                         resolver; IR-plumbing fix)
+//
+// See docs/superpowers/specs/2026-05-24-vampire-survivors-design.md.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged { source: AgentId, target: AgentId, amount: f32 }
+
+@replayable @gpu_amenable
+event Killed { by: AgentId, prey: AgentId, pos: vec3 }
+
+// Sub-probe 3a: does a standalone user enum parse/resolve?
+enum UpgradeKind { BoltDamage, NovaRadius, BoltRate, MoveSpeed }
+
+// Player/Enemy subkinds. Declaration order fixes the creature_type ordinal:
+// Player = 0, Enemy = 1 (the same map the seeder + the `self.creature_type ==
+// <Subkind>` rule guards resolve against).
+entity Player : Agent { pos: vec3, vel: vec3 }
+entity Enemy  : Agent { pos: vec3, vel: vec3 }
+
+// Declarative initial population (Plan A `init { spawn … }`). Slot 0 is the
+// AgentId NonZeroU32 sentinel (skipped), so the single Player lands at slot 1
+// and the Enemy pool occupies slots 2..N. The pool is seeded `alive: 0` — a
+// dormant reservoir the host wave drain (summon_alloc) claims, flipping
+// `alive: 1` while leaving the seeded `creature_type = Enemy` intact (the drain
+// never writes creature_type). `engaged_with: 1` points every enemy at the
+// player slot so ChasePlayer's `agents.pos(self.engaged_with)` homes directly.
+// Enemy count = agent_count(512) − 1 player − 1 slot-0 sentinel = 510.
+init {
+  spawn Player count 1   { hp: config.vs.player_hp, pos: origin }
+  spawn Enemy  count 510 { alive: 0, engaged_with: 1 }
+}
+
+config vs {
+  perception_radius:  f32 = 12.0,
+  // Player kite speed (units/tick); enemies use a PER-AGENT move_speed set by
+  // the summon drain per enemy type, so types move at different speeds.
+  flee_radius:        f32 = 8.0,
+  player_speed:       f32 = 0.5,
+  // Radial arena bound: agents are clamped to within this radius of origin.
+  arena_radius:       f32 = 42.0,
+  bolt_range:         f32 = 18.0,
+  bolt_period:        u32 = 12,
+  bolt_damage:        f32 = 6.0,
+  nova_radius:        f32 = 6.0,
+  nova_period:        u32 = 40,
+  nova_damage:        f32 = 3.0,
+  bolt_ramp:          f32 = 0.5,
+  xp_per_level:       f32 = 5.0,
+  nova_damage_per_level: f32 = 1.0,
+  bolt_cap:           f32 = 5.0,
+  nova_cap:           f32 = 5.0,
+  // --- wave ramp (player-cast; drain spawns enemies in a ring around player) ---
+  wave_period:        u32 = 30,
+  small_to_medium:    u32 = 1000,
+  medium_to_large:    u32 = 2500,
+  large_to_horde:     u32 = 4000,
+  enemy_spawn_hp:     f32 = 12.0,
+  enemy_lifetime:     u32 = 0,
+  // --- Plan 3: input-driven gameplay tuning ---
+  speed_per_level:       f32 = 0.15,
+  bolt_dmg_per_level:    f32 = 2.0,
+  garlic_radius:         f32 = 3.5,
+  garlic_damage:         f32 = 0.6,
+  whip_range:            f32 = 9.0,
+  whip_period:           u32 = 18,
+  whip_damage:           f32 = 4.0,
+  player_hp:             f32 = 100.0,
+}
+
+// --- Player input channel (Plan 1 contract block) -------------------------
+// Host-writable @runtime config fields: the interactive runtime sets these
+// per tick via the generated setters (`set_config_ctl_move_x(f32)` …
+// `set_config_ctl_bolt_rate_level(u32)`) and the rules read them as
+// `cfg.config_ctl_<field>` uniforms. FROZEN field-name contract — Plans 3
+// (gameplay rules) and 4 (viewer) build against these names. Additive only;
+// rule bodies that consume these land in Plan 3.
+//
+// Type rule (avoids unverified f32<->u32 casts): fields feeding float
+// arithmetic (damage/speed/`> 0.0` gates) are f32; only bolt_rate_level
+// (an integer modulo divisor) is u32.
+config ctl {
+  move_x:          f32 = 0.0 @runtime,   // player intent X, normalized [-1,1]
+  move_y:          f32 = 0.0 @runtime,   // player intent Y, normalized [-1,1]
+  move_level:      f32 = 0.0 @runtime,   // +speed per level (f32 math)
+  bolt_level:      f32 = 0.0 @runtime,   // +bolt damage per level (f32 math)
+  bolt_rate_level: u32 = 0   @runtime,   // -bolt period per level (u32 modulo)
+  nova_level:      f32 = 0.0 @runtime,   // +nova damage/radius per level (f32 math)
+  garlic_level:    f32 = 0.0 @runtime,   // 0.0 = inert; >0.0 enables garlic aura
+  whip_level:      f32 = 0.0 @runtime,   // 0.0 = inert; >0.0 enables whip
+}
+
+// Player moves by human intent (config.ctl.move_*); speed scales with move_level.
+// Input-driven (Plan 3) — replaces the old autonomous KitePlayer flee-steering
+// (and its now-unused nearby_agents query). @phase(per_agent) + the player-band
+// where-guard keeps it disjoint from ChasePlayer's enemy-band pos write (breaks
+// the write->write SCC, same idiom as before).
+physics PlayerControl @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && self.creature_type == Player) {
+    let speed = config.vs.player_speed + config.ctl.move_level * config.vs.speed_per_level;
+    let raw = self.pos + vec3(config.ctl.move_x, config.ctl.move_y, 0.0) * speed;
+    let center = vec3(0.0, 0.0, 0.0);
+    let r = distance(center, raw);
+    let factor = min(1.0, config.vs.arena_radius / (r + 0.001));
+    agents.set_pos(self, raw * factor);
+  }
+}
+
+@spatial(radius = config.vs.bolt_range, kind = [Agent])
+@top_k(1)
+query closest_enemy(self: Agent) -> [Agent]
+sort_by distance(self, _) limit 1 {
+  candidate != self
+  && candidate.alive
+  && candidate.creature_type == Enemy
+}
+
+// Enemies ALWAYS know where the player is (the VS homing property) by reading
+// the player's position DIRECTLY — no spatial query. Each enemy's `engaged_with`
+// AgentId field is seeded to the player's slot (1) in the `init` block, so
+// `agents.pos(self.engaged_with)` is a direct cross-agent read (the
+// target_chaser precedent). Spatial queries stay reserved for genuine proximity
+// logic (bolt/nova). Proportional seek: step a fraction toward the player each
+// tick (slows smoothly as it closes; no normalisation/distance needed).
+physics ChasePlayer @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && self.creature_type == Enemy) {
+    // Constant-speed homing: unit direction toward the player × enemy_speed
+    // (units/tick). Normalised via the tower_defense march form v*(speed/|v|).
+    let pp = agents.pos(self.engaged_with);
+    let to_player = pp - self.pos;
+    let d = distance(self.pos, pp);
+    if (d > 0.001) {
+      // Per-enemy move_speed (set by the drain per enemy type), unit direction.
+      let step = to_player * (self.move_speed / d);
+      let raw = self.pos + step;
+      // Radial arena clamp: scale back inside arena_radius (min keeps it <= 1).
+      let center = vec3(0.0, 0.0, 0.0);
+      let r = distance(center, raw);
+      let factor = min(1.0, config.vs.arena_radius / (r + 0.001));
+      agents.set_pos(self, raw * factor);
+    }
+  }
+}
+
+@spatial(radius = config.vs.nova_radius, kind = [Agent])
+@top_k(32)
+query enemies_in_radius(self: Agent) -> [Agent]
+sort_by distance(self, _) limit 32 {
+  candidate != self
+  && candidate.alive
+  && candidate.creature_type == Enemy
+}
+
+// Bolt: every bolt_period ticks, the player strikes the nearest enemy.
+physics BoltFire @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && self.creature_type == Player
+                    && world.tick % (config.vs.bolt_period - config.ctl.bolt_rate_level) == 0) {
+    for target in spatial.closest_enemy(self) {
+      // Guard against under-filled top_k yielding a slot-0 sentinel (which
+      // would self-damage the player): only strike a genuine live enemy.
+      if (target.alive
+          && target.creature_type == Enemy) {
+        emit Damaged { source: self, target: target, amount: config.vs.bolt_damage + config.ctl.bolt_level * config.vs.bolt_dmg_per_level + xp(self) * config.vs.bolt_ramp }
+      }
+    }
+  }
+}
+
+// @phase(per_agent); player bursts every nova_period ticks, damaging all enemies in radius.
+physics NovaFire @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && self.creature_type == Player
+                    && world.tick % config.vs.nova_period == 0) {
+    for target in spatial.enemies_in_radius(self) {
+      // Guard against under-filled top_k yielding a slot-0 sentinel.
+      if (target.alive
+          && target.creature_type == Enemy) {
+        emit Damaged { source: self, target: target, amount: config.vs.nova_damage + config.ctl.nova_level * config.vs.nova_damage_per_level }
+      }
+    }
+  }
+}
+
+// XP-on-kill: attributed to the agent that dealt the killing blow.
+@materialized(on_event = [Killed])
+view xp(by: Agent) -> f32 {
+  initial: 0.0,
+  on Killed { by: p, prey: _, pos: _ } { self += 1.0 }
+  clamp: [0.0, 1000000.0],
+}
+
+// ---------------------------------------------------------------------------
+// New weapons (Plan 3) — gated by host-driven config.ctl level fields.
+// Replaces the old auto-ChooseUpgrade probe: upgrades are now host-driven via
+// the ctl input channel (the level-up menu writes config.ctl.<weapon>_level).
+// ---------------------------------------------------------------------------
+
+// Garlic aura: continuous radial damage to every enemy in a tight radius, each
+// tick, once garlic_level > 0.
+@spatial(radius = config.vs.garlic_radius, kind = [Agent])
+@top_k(32)
+query garlic_targets(self: Agent) -> [Agent]
+sort_by distance(self, _) limit 32 {
+  candidate != self
+  && candidate.alive
+  && candidate.creature_type == Enemy
+}
+
+physics GarlicAura @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && self.creature_type == Player
+                    && config.ctl.garlic_level > 0.0) {
+    for target in spatial.garlic_targets(self) {
+      if (target.alive
+          && target.creature_type == Enemy) {
+        emit Damaged { source: self, target: target, amount: config.vs.garlic_damage * config.ctl.garlic_level }
+      }
+    }
+  }
+}
+
+// Whip sweep: a wider periodic radial burst, once whip_level > 0.
+@spatial(radius = config.vs.whip_range, kind = [Agent])
+@top_k(16)
+query whip_targets(self: Agent) -> [Agent]
+sort_by distance(self, _) limit 16 {
+  candidate != self
+  && candidate.alive
+  && candidate.creature_type == Enemy
+}
+
+physics WhipSweep @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && self.creature_type == Player
+                    && config.ctl.whip_level > 0.0
+                    && world.tick % config.vs.whip_period == 0) {
+    for target in spatial.whip_targets(self) {
+      if (target.alive
+          && target.creature_type == Enemy) {
+        emit Damaged { source: self, target: target, amount: config.vs.whip_damage * config.ctl.whip_level }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Spawner Summon verbs — Phase A: tier-ramped enemy waves every wave_period ticks.
+// The Player casts the waves on itself (`target == self`); the host drain places
+// the summoned enemies in a ring around the player. Ability slot indices are
+// 1-based, alphabetically sorted from assets/ability_test/vampire_survivors/:
+//   SpawnHorde.ability  → slot 1 (summon 64)
+//   SpawnLarge.ability  → slot 2 (summon 32)
+//   SpawnMedium.ability → slot 3 (summon 16)
+//   SpawnSmall.ability  → slot 4 (summon 8)
+// ---------------------------------------------------------------------------
+
+verb SpawnSmall(self, target: Agent) =
+  action SpawnSmallAction
+  when (self.alive
+        && target == self
+        && self.creature_type == Player
+        && (world.tick < config.vs.small_to_medium)
+        && (world.tick % config.vs.wave_period == 0))
+  apply_ability 4 by self target self
+  score 500.0
+
+verb SpawnMedium(self, target: Agent) =
+  action SpawnMediumAction
+  when (self.alive
+        && target == self
+        && self.creature_type == Player
+        && (world.tick >= config.vs.small_to_medium)
+        && (world.tick < config.vs.medium_to_large)
+        && (world.tick % config.vs.wave_period == 0))
+  apply_ability 3 by self target self
+  score 500.0
+
+verb SpawnLarge(self, target: Agent) =
+  action SpawnLargeAction
+  when (self.alive
+        && target == self
+        && self.creature_type == Player
+        && (world.tick >= config.vs.medium_to_large)
+        && (world.tick < config.vs.large_to_horde)
+        && (world.tick % config.vs.wave_period == 0))
+  apply_ability 2 by self target self
+  score 500.0
+
+verb SpawnHorde(self, target: Agent) =
+  action SpawnHordeAction
+  when (self.alive
+        && target == self
+        && self.creature_type == Player
+        && (world.tick >= config.vs.large_to_horde)
+        && (world.tick % config.vs.wave_period == 0))
+  apply_ability 1 by self target self
+  score 500.0
+
+// On Damaged: subtract HP; at <=0 mark dead and credit the killer (source s).
+@phase(post)
+physics ApplyDamage {
+  on Damaged { source: s, target: t, amount: a } {
+    let new_hp = agents.hp(t) - a;
+    agents.set_hp(t, new_hp);
+    if (new_hp <= 0.0) {
+      agents.set_alive(t, false);
+      emit Killed { by: s, prey: t, pos: agents.pos(t) }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Plan A — player-facing descriptor blocks. The compiler lowers each to a
+// &'static str JSON descriptor on the generated runtime (render/controls via
+// engine_play_api, ui via engine_ui), consumed by the generic player. Agents
+// are classified by `creature_type` subkind (Player = 0, Enemy = 1), the same
+// discriminant the rule guards use.
+// ---------------------------------------------------------------------------
+
+// Player intent: WASD writes config.ctl.move_{x,y}.
+controls {
+  key "w" -> ctl.move_y:  1.0
+  key "s" -> ctl.move_y: -1.0
+  key "a" -> ctl.move_x: -1.0
+  key "d" -> ctl.move_x:  1.0
+}
+
+// Camera follows the Player subkind; enemies render orange, player cyan.
+// Nova bursts a ring; bolt beams to the nearest enemy.
+render {
+  arena_radius 42.0
+  camera follow when creature_type is Player
+  agent when creature_type is Player { color (0, 220, 220) }
+  agent when creature_type is Enemy { color (220, 80, 40) }
+  vfx on NovaFire period 40 { ring radius 6.0 color (255, 255, 120) }
+  vfx on BoltFire period 12 { beam_to_nearest when creature_type is Enemy color (120, 200, 255) }
+}
+
+// HUD bars + run text, a level-up upgrade menu (full pool; host samples 3),
+// and the death screen. Bind keys (hp/xp_into/level/...) resolve against the
+// viewer's per-frame UiData. Mirrors viewer_runtime::vs_ui's hand-built model.
+ui {
+  hud {
+    bar "HP" value hp max hp_max color (220, 40, 40)
+    bar "XP" value xp_into max xp_per_level color (40, 160, 240)
+    text "Lv {level}   Kills {kills}   {time}s   Enemies {enemies}"
+  }
+  menu level_up "Level Up!" {
+    card "Bolt Damage +" -> bolt_level
+    card "Bolt Rate +" -> bolt_rate_level
+    card "Nova +" -> nova_level
+    card "Move Speed +" -> move_level
+    card "Garlic +" -> garlic_level
+    card "Whip +" -> whip_level
+  }
+  screen dead "You Died" { summary time level kills  restart "Restart (R)" }
+}

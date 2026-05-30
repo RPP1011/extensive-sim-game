@@ -65,12 +65,19 @@
 //! iteration appears in any code path. The
 //! `wgsl_emit_is_deterministic` test pins this contract.
 
+// Plan A — player-facing descriptor emitters. Each lowers its parsed AST
+// block to a `&'static str` JSON descriptor matching the engine_play_api /
+// engine_ui serde shapes. `json` holds shared escape + f32-format helpers.
+pub mod controls;
 pub mod cross_cutting;
 pub mod invariants;
+pub mod json;
 pub mod kernel;
 pub mod metrics;
 pub mod probes;
 pub mod program;
+pub mod render;
+pub mod ui_model;
 /// Spatial-grid configuration shared between compiler emit and per-
 /// fixture runtime crates. See `spatial::compose_spatial_prelude` for
 /// the kernel-side WGSL prelude; runtime crates consume `cells_bytes`

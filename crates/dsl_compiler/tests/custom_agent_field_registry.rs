@@ -90,6 +90,9 @@ fn populate_registers_field_decls_from_program() {
             }),
         ],
         terrain: None,
+        controls: None,
+        render: None,
+        ui: None,
     };
     let ids = populate(&program);
     assert_eq!(ids.len(), 3);
@@ -195,6 +198,7 @@ fn synthesize_runtime_allocates_agent_buf_for_custom_field() {
         "custom_field_registry_test",
         &artifacts,
         &[],
+        &[],
         &std::collections::BTreeMap::new(),
         &[],
         &[],
@@ -207,6 +211,9 @@ fn synthesize_runtime_allocates_agent_buf_for_custom_field() {
         0,
         false,
         None,
+        "{\"bindings\":[]}",
+        "{\"arena_radius\":0.0,\"camera\":\"Observer\",\"agents\":[],\"vfx\":[]}",
+        "{\"hud\":[],\"screens\":[]}",
     );
     // The runtime struct must own the per-agent buffer for each
     // custom field, sized `agent_count * elem_bytes` via the

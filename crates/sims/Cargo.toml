@@ -15,6 +15,10 @@ build = "build.rs"
 
 [dependencies]
 engine = { path = "../engine" }
+# Plan A — the frozen runtime/player seam. The generated runtime cores
+# `impl engine_play_api::PlayableRuntime for GeneratedRuntime`, and
+# `make_playable()` boxes each fixture as a `dyn PlayableRuntime`.
+engine_play_api = { path = "../engine_play_api" }
 # Voxel terrain + GPU mirror for fixtures whose .sim binds `voxel_grid`
 # (e.g. hill_raid's `terrain.line_of_sight` gate). Auto-emitted
 # `GeneratedRuntime` references `engine_voxel::VoxelTerrain` and
@@ -45,6 +49,10 @@ engine_data = { path = "../engine_data" }
 # edgeworld_render (Task 6) dumps top-down PNG frames of the survival sim.
 # png-only build (no jpeg/tiff/codecs) keeps the dev build lean.
 image = { version = "0.25", default-features = false, features = ["png"] }
+# Plan A — the playable_registry test parses the emitted ui_descriptor()
+# through engine_ui::UiModel::from_json. Dev-only so the sims lib itself
+# stays free of any UI/egui dependency.
+engine_ui = { path = "../engine_ui" }
 
 [build-dependencies]
 dsl_ast = { path = "../dsl_ast" }

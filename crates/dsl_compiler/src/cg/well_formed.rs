@@ -240,6 +240,23 @@ pub enum CgError {
         word_offset_in_payload: u32,
     },
 
+    /// A reference to `self` (the per-agent identity) appears in a
+    /// physics rule that dispatches [`super::dispatch::DispatchShape::PerEvent`].
+    /// `self` lowers to `agent_id` (or `agent_<field>[agent_id]`), but a
+    /// PerEvent kernel iterates the event ring — its preamble binds
+    /// `event_idx`, not `agent_id`. Such a rule used to lower + emit
+    /// green and then fail naga validation at runtime with "no
+    /// definition in scope for identifier: agent_id". The fix is to
+    /// phase the rule `@phase(per_agent)` (so it sweeps agents and binds
+    /// `self`), or to reference an event-provided agent (`actor` /
+    /// the event's target binder) instead of `self`. This is the read-
+    /// side mirror of the `P6Violation` self-*write* check.
+    SelfRefInPerEventBody {
+        op: OpId,
+        kind_label: &'static str,
+        shape_label: &'static str,
+    },
+
 }
 
 impl fmt::Display for HandleConsistencyReason {
@@ -388,6 +405,15 @@ impl fmt::Display for CgError {
                 f,
                 "op#{}: EventField(event#{}, word_off#{}) in {} body with dispatch shape {} — only per_event dispatch binds `event_idx`",
                 op.0, event_kind.0, word_offset_in_payload, kind_label, shape_label
+            ),
+            CgError::SelfRefInPerEventBody {
+                op,
+                kind_label,
+                shape_label,
+            } => write!(
+                f,
+                "op#{}: `self` referenced in {} body with dispatch shape {} — a PerEvent rule has no per-agent `self` (it would emit an undeclared `agent_id`). Phase the rule `@phase(per_agent)`, or reference an event-provided agent (`actor` / the event's target binder) instead of `self`",
+                op.0, kind_label, shape_label
             ),
         }
     }
@@ -939,6 +965,10 @@ fn check_op(
     // --- EventField scope: only legal in PerEvent-shaped bodies ------
 
     event_field_scope_check_op(op, op_id, prog, errors);
+
+    // --- `self` scope: illegal in PerEvent physics bodies (G2) -------
+
+    self_ref_scope_check_op(op, op_id, prog, errors);
 
     // --- Kind/shape compatibility ------------------------------------
 
@@ -1963,6 +1993,170 @@ fn event_field_scope_check_op(
     let kind = kind_label(&op.kind);
     let shape = DispatchShapeLabel::from_shape(&op.shape).snake();
     event_field_scope_walk_list(body, op_id, kind, shape, prog, errors);
+}
+
+// ---------------------------------------------------------------------------
+// `self` scope: illegal in PerEvent physics bodies (G2)
+// ---------------------------------------------------------------------------
+
+/// Walk a PerEvent-dispatched physics rule's body and surface a
+/// [`CgError::SelfRefInPerEventBody`] for any reference to `self` — the
+/// per-agent identity. `self` lowers to `CgExpr::AgentSelfId` (emits
+/// `agent_id`) or a `CgExpr::Read(DataHandle::AgentField { target:
+/// AgentRef::Self_, .. })` (emits `agent_<field>[agent_id]`); neither
+/// `agent_id` binding exists in a PerEvent kernel (it binds `event_idx`).
+/// This is the read-side mirror of the `P6Violation` self-*write* check
+/// (which already rejects `agents.set_<field>(self, …)`): together they
+/// make any `self` use in a PerEvent rule a compile error instead of
+/// WGSL that fails naga validation at runtime.
+///
+/// Scoped to [`ComputeOpKind::PhysicsRule`] under
+/// [`DispatchShape::PerEvent`]. `ViewFold` is also PerEvent but its
+/// `self` is the fold accumulator (never `AgentSelfId`), and views key
+/// on `observer_slot`, so they are not in scope here.
+fn self_ref_scope_check_op(
+    op: &ComputeOp,
+    op_id: OpId,
+    prog: &CgProgram,
+    errors: &mut Vec<CgError>,
+) {
+    if !matches!(op.shape, DispatchShape::PerEvent { .. }) {
+        return;
+    }
+    let body = match &op.kind {
+        ComputeOpKind::PhysicsRule { body, .. } => *body,
+        ComputeOpKind::ViewFold { .. }
+        | ComputeOpKind::MaskPredicate { .. }
+        | ComputeOpKind::ScoringArgmax { .. }
+        | ComputeOpKind::SpatialQuery { .. }
+        | ComputeOpKind::Plumbing { .. }
+        | ComputeOpKind::ViewDecay { .. }
+        | ComputeOpKind::BeliefSocialMerge { .. } => return,
+    };
+    let kind = kind_label(&op.kind);
+    let shape = DispatchShapeLabel::from_shape(&op.shape).snake();
+    self_ref_scope_walk_list(body, op_id, kind, shape, prog, errors);
+}
+
+fn self_ref_scope_walk_list(
+    list_id: CgStmtListId,
+    op_id: OpId,
+    kind_label: &'static str,
+    shape_label: &'static str,
+    prog: &CgProgram,
+    errors: &mut Vec<CgError>,
+) {
+    let Some(list) = prog.stmt_lists.get(list_id.0 as usize) else {
+        return;
+    };
+    for stmt_id in &list.stmts {
+        let Some(stmt) = prog.stmts.get(stmt_id.0 as usize) else {
+            continue;
+        };
+        match stmt {
+            CgStmt::Assign { value, .. } | CgStmt::Let { value, .. } => {
+                self_ref_scope_walk_expr(*value, op_id, kind_label, shape_label, prog, errors);
+            }
+            CgStmt::ForEachAgent { init, projection, .. }
+            | CgStmt::ForEachNeighbor { init, projection, .. } => {
+                self_ref_scope_walk_expr(*init, op_id, kind_label, shape_label, prog, errors);
+                self_ref_scope_walk_expr(*projection, op_id, kind_label, shape_label, prog, errors);
+            }
+            CgStmt::ForEachNeighborBody { body, .. } | CgStmt::ForEachAgentBody { body, .. } => {
+                self_ref_scope_walk_list(*body, op_id, kind_label, shape_label, prog, errors);
+            }
+            CgStmt::Emit { fields, .. } => {
+                for (_, expr_id) in fields {
+                    self_ref_scope_walk_expr(*expr_id, op_id, kind_label, shape_label, prog, errors);
+                }
+            }
+            CgStmt::If { cond, then, else_ } => {
+                self_ref_scope_walk_expr(*cond, op_id, kind_label, shape_label, prog, errors);
+                self_ref_scope_walk_list(*then, op_id, kind_label, shape_label, prog, errors);
+                if let Some(else_id) = else_ {
+                    self_ref_scope_walk_list(*else_id, op_id, kind_label, shape_label, prog, errors);
+                }
+            }
+            CgStmt::Match { scrutinee, arms } => {
+                self_ref_scope_walk_expr(*scrutinee, op_id, kind_label, shape_label, prog, errors);
+                for arm in arms {
+                    self_ref_scope_walk_list(arm.body, op_id, kind_label, shape_label, prog, errors);
+                }
+            }
+            CgStmt::ApplyAbility { ability, caster, target, with_aoe_dispatch: _ } => {
+                self_ref_scope_walk_expr(*caster, op_id, kind_label, shape_label, prog, errors);
+                self_ref_scope_walk_expr(*target, op_id, kind_label, shape_label, prog, errors);
+                self_ref_scope_walk_expr(*ability, op_id, kind_label, shape_label, prog, errors);
+            }
+            CgStmt::ViewStorageAppend { fields, .. } => {
+                for (_, expr_id) in fields {
+                    self_ref_scope_walk_expr(*expr_id, op_id, kind_label, shape_label, prog, errors);
+                }
+            }
+        }
+    }
+}
+
+fn self_ref_scope_walk_expr(
+    expr_id: super::data_handle::CgExprId,
+    op_id: OpId,
+    kind_label: &'static str,
+    shape_label: &'static str,
+    prog: &CgProgram,
+    errors: &mut Vec<CgError>,
+) {
+    let Some(node) = prog.exprs.get(expr_id.0 as usize) else {
+        return;
+    };
+    match node {
+        // `self` as an agent-id value (`emit Foo { who: self }`,
+        // `spatial.closest(self)`, etc.).
+        CgExpr::AgentSelfId => {
+            errors.push(CgError::SelfRefInPerEventBody { op: op_id, kind_label, shape_label });
+        }
+        // `self.<field>` read (`self.pos`, `self.alive`, …).
+        CgExpr::Read(crate::cg::data_handle::DataHandle::AgentField {
+            target: crate::cg::data_handle::AgentRef::Self_,
+            ..
+        }) => {
+            errors.push(CgError::SelfRefInPerEventBody { op: op_id, kind_label, shape_label });
+        }
+        CgExpr::Binary { lhs, rhs, .. } => {
+            self_ref_scope_walk_expr(*lhs, op_id, kind_label, shape_label, prog, errors);
+            self_ref_scope_walk_expr(*rhs, op_id, kind_label, shape_label, prog, errors);
+        }
+        CgExpr::Unary { arg, .. } => {
+            self_ref_scope_walk_expr(*arg, op_id, kind_label, shape_label, prog, errors);
+        }
+        CgExpr::Builtin { args, .. } => {
+            for a in args {
+                self_ref_scope_walk_expr(*a, op_id, kind_label, shape_label, prog, errors);
+            }
+        }
+        CgExpr::Select { cond, then, else_, .. } => {
+            self_ref_scope_walk_expr(*cond, op_id, kind_label, shape_label, prog, errors);
+            self_ref_scope_walk_expr(*then, op_id, kind_label, shape_label, prog, errors);
+            self_ref_scope_walk_expr(*else_, op_id, kind_label, shape_label, prog, errors);
+        }
+        CgExpr::NamespaceCall { args, .. } => {
+            for a in args {
+                self_ref_scope_walk_expr(*a, op_id, kind_label, shape_label, prog, errors);
+            }
+        }
+        CgExpr::TableLookup { index, .. } => {
+            self_ref_scope_walk_expr(*index, op_id, kind_label, shape_label, prog, errors);
+        }
+        // Non-self reads (Actor / EventTarget / Target / ViewStorage /
+        // EventRing), event-payload reads, and all remaining leaves are
+        // legal in PerEvent.
+        CgExpr::Read(_)
+        | CgExpr::Lit(_)
+        | CgExpr::Rng { .. }
+        | CgExpr::PerPairCandidateId
+        | CgExpr::ReadLocal { .. }
+        | CgExpr::EventField { .. }
+        | CgExpr::NamespaceField { .. } => {}
+    }
 }
 
 fn event_field_scope_walk_list(

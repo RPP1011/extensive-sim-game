@@ -29,6 +29,8 @@ use voxel_engine::voxel::material::{MaterialPalette, MaterialType, PaletteEntry}
 
 pub mod dungeon;
 pub mod mesh_renderer;
+pub mod vs;
+pub mod vs_ui;
 
 use dungeon::{Dungeon, GRID_X, GRID_Y, GRID_Z, N_HEROES, ROOM_INTERIOR_Z};
 

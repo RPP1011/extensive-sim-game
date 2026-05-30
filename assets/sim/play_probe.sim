@@ -1,0 +1,76 @@
+// play_probe — the minimal end-to-end fixture for the generic `play`
+// binary (Plan D). It declares all three player-facing blocks
+// (`controls`/`render`/`ui`) plus exactly one host-driven movement rule,
+// so `sims::make_playable("play_probe", seed, agents)` yields a runtime
+// the generic player can drive headlessly (the `play_probe_end_to_end`
+// gate) without depending on either real game's migration (Plans E/F).
+//
+// Roles (mana band, matching the VS / viewer `role_for_mana` idiom):
+//   * player  ∈ mana [0.5, 1.5]  — moved by config.ctl.move_*; camera follows.
+//   * static  ∈ mana [1.5, 2.5]  — no rule touches it, so it never moves.
+//
+// Seeding: `init { mana: slot }` fills agent SoA column `mana` with the
+// per-slot index (slot 0 → 0.0, slot 1 → 1.0, slot 2 → 2.0, …). With the
+// default agent count the player is slot 1 (mana 1.0, the [0.5,1.5] band)
+// and slot 2 is a static enemy-band agent (mana 2.0). All slots start
+// alive at hp 100 so `agent_snapshot` returns live agents and the
+// camera-follow band has a member.
+
+event Tick { }
+
+// Host-writable player intent. WASD writes config.ctl.move_{x,y}; the
+// PlayerMove rule reads them as `cfg.config_ctl_move_*` uniforms each tick.
+config ctl {
+  move_x: f32 = 0.0 @runtime,   // player intent X, normalized [-1,1]
+  move_y: f32 = 0.0 @runtime,   // player intent Y, normalized [-1,1]
+}
+
+config probe {
+  player_speed: f32 = 1.0,
+}
+
+// All slots: alive, hp 100, mana = slot index (banded roles, see header).
+init {
+  alive: 1,
+  hp:    100,
+  mana:  slot,
+}
+
+// The single host-driven rule: the player-band agent (mana ∈ [0.5,1.5])
+// steps by the human intent each tick. @phase(per_agent) + the player-band
+// where-guard keeps it disjoint from every other agent (statics never
+// move), mirroring VS's PlayerControl idiom.
+physics PlayerMove @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && self.mana >= 0.5
+                    && self.mana <= 1.5) {
+    let step = vec3(config.ctl.move_x, config.ctl.move_y, 0.0) * config.probe.player_speed;
+    agents.set_pos(self, self.pos + step);
+  }
+}
+
+// Camera follows the player band; player cyan, static enemy-band orange.
+render {
+  arena_radius 24.0
+  camera follow when mana in [0.5, 1.5]
+  agent when mana in [0.5, 1.5] { color (0, 220, 220) }
+  agent when mana in [1.5, 2.5] { color (220, 80, 40) }
+}
+
+// WASD → player intent.
+controls {
+  key "w" -> ctl.move_y:  1.0
+  key "s" -> ctl.move_y: -1.0
+  key "a" -> ctl.move_x: -1.0
+  key "d" -> ctl.move_x:  1.0
+}
+
+// One HP bar + a status line. No level/death machine wiring needed for the
+// probe (the player loop's `view_value("xp", ..)` returns 0.0 with no xp
+// view, so the level stays 0 and no modal opens).
+ui {
+  hud {
+    bar "HP" value hp max hp_max color (220, 40, 40)
+    text "Probe — Enemies {enemies}"
+  }
+}

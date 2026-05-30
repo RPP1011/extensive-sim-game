@@ -1,0 +1,39 @@
+[package]
+name = "engine_play"
+version = "0.1.0"
+edition = "2021"
+
+# The generic player. A descriptor-driven voxel renderer (EngineBridge),
+# a controls→input mapper (ControlsMapper), and the player loop + `play`
+# binary. Built and tested against `engine_play_api`'s frozen contract +
+# sample descriptor fixtures and a MockRuntime — no dependency on the
+# compiler emitting anything yet. This is presentation/runtime code that
+# *replaces* the per-game `vs_*` viewer files going forward.
+
+[dependencies]
+# The frozen authoring/player contract (trait + descriptors + AgentView).
+engine_play_api = { path = "../engine_play_api" }
+# Declarative game-UI layer (HUD widgets / menu / death screens).
+engine_ui = { path = "../engine_ui" }
+# The compiled-`.sim` registry (`make_playable`). Acyclic:
+# engine_play_api ← sims ← engine_play (sims depends on the contract, the
+# binary depends on the registry; the contract crate depends on neither).
+sims = { path = "../sims" }
+
+# voxel_engine path dep with `app-harness` enabled (winit + egui).
+# Path matches the dep in viewer_runtime so cargo unifies the build.
+voxel_engine = { path = "/home/ricky/Projects/voxel_engine", features = ["app-harness"] }
+
+# Must match the version voxel_engine's `app-harness` feature pulls in.
+egui = "0.33"
+winit = "0.30"
+# Bridge types for the egui overlay path (vk::CommandPool / queue).
+# Must match voxel_engine's ash version.
+ash = "0.38"
+glam = "0.29"
+anyhow = "1"
+serde_json = "1"
+
+[[bin]]
+name = "play"
+path = "src/bin/play.rs"

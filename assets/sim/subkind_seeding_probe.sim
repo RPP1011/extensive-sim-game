@@ -1,0 +1,52 @@
+// subkind_seeding_probe — the runtime gate for declarative subkind seeding
+// (Plan A). Declares two entity subkinds and seeds an initial population by
+// subkind via `init { spawn … }`: a small `Hero` group at the origin and a
+// larger `Mob` group scattered in a disc. The headless `subkind_seeding_exec`
+// test reads back the seeded buffers and asserts:
+//   * per-subkind counts (Hero range + Mob range),
+//   * each seeded agent's creature_type == its subkind's ordinal,
+//   * Hero hp == 100 (f32 init value), Mob alive == 0 (pool override),
+//   * Mob positions are within the scatter radius of the origin,
+//   * two `try_new(seed)` runs produce byte-identical positions (P5).
+//
+// Subkind ordinals are declaration order: Hero = 0, Mob = 1 (the same value
+// the `self.creature_type == <Subkind>` rule guard compares against).
+
+event Tick { }
+
+config probe {
+  drift: f32 = 0.0 @runtime,
+}
+
+entity Hero : Agent { }
+entity Mob  : Agent { }
+
+// Seed two subkind populations. Hero: 4 at origin, hp 100 (f32). Mob: 16
+// scattered in a radius-40 disc, alive 0 (a dormant pool). The compiler
+// stamps creature_type (Hero=0 / Mob=1) + alive=1 (Hero) automatically;
+// Mob overrides alive to 0.
+init {
+  spawn Hero count 4  { hp: 100.0, pos: origin }
+  spawn Mob  count 16 { alive: 0, pos: scatter(40.0) }
+}
+
+// A trivial host-driven rule so `pos` / `creature_type` / `alive` / `hp`
+// become owned bindings (the alloc loop only allocates columns a kernel
+// references). Heroes drift by a runtime-tunable amount; the guard reads
+// creature_type + alive + the seeded pos.
+physics HeroDrift @phase(per_agent) {
+  on Tick {} where (self.alive && self.creature_type == Hero) {
+    let step = vec3(config.probe.drift, 0.0, 0.0);
+    agents.set_pos(self, self.pos + step);
+    agents.set_hp(self, self.hp);
+  }
+}
+
+// Render by subkind — exercises the `creature_type is <Subkind>` selector
+// in a real fixture (lowered to creature_type field ranges, lo==hi==ordinal).
+render {
+  arena_radius 48.0
+  camera observer
+  agent when creature_type is Hero { color (0, 220, 220) }
+  agent when creature_type is Mob  { color (220, 80, 40) }
+}

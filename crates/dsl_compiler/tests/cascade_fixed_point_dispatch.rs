@@ -118,6 +118,7 @@ fn synthesize(artifacts: &EmittedArtifacts) -> String {
         "cascade_fp_dispatch_test",
         artifacts,
         &[],
+        &[],
         &std::collections::BTreeMap::new(),
         &[],
         &[],
@@ -130,6 +131,9 @@ fn synthesize(artifacts: &EmittedArtifacts) -> String {
         0,
         false,
         None,
+        "{\"bindings\":[]}",
+        "{\"arena_radius\":0.0,\"camera\":\"Observer\",\"agents\":[],\"vfx\":[]}",
+        "{\"hud\":[],\"screens\":[]}",
     )
 }
 

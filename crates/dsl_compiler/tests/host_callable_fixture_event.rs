@@ -100,6 +100,7 @@ fn host_callable_fixture_event_emits_typed_injector_with_sequential_kind_id() {
         "plague_city_smoke",
         &artifacts,
         &[],
+        &[],
         &std::collections::BTreeMap::new(),
         &[],
         &events,
@@ -112,6 +113,9 @@ fn host_callable_fixture_event_emits_typed_injector_with_sequential_kind_id() {
         0,
         false,
         None,
+        "{\"bindings\":[]}",
+        "{\"arena_radius\":0.0,\"camera\":\"Observer\",\"agents\":[],\"vfx\":[]}",
+        "{\"hud\":[],\"screens\":[]}",
     );
 
     // No `cargo:warning` codepath should fire — the typed method must
@@ -207,6 +211,7 @@ fn host_callable_engine_aliased_event_still_uses_engine_kind_id() {
         "mixed_smoke",
         &artifacts,
         &[],
+        &[],
         &std::collections::BTreeMap::new(),
         &[],
         &events,
@@ -219,6 +224,9 @@ fn host_callable_engine_aliased_event_still_uses_engine_kind_id() {
         0,
         false,
         None,
+        "{\"bindings\":[]}",
+        "{\"arena_radius\":0.0,\"camera\":\"Observer\",\"agents\":[],\"vfx\":[]}",
+        "{\"hud\":[],\"screens\":[]}",
     );
 
     // Fixture-defined event uses sequential id (index 0 → 0).

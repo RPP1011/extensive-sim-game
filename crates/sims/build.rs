@@ -47,6 +47,7 @@ fn main() {
                 | "boids"
                 | "cooldown_probe"
                 | "for_each_agent_probe"
+                | "input_probe"
                 | "target_chaser"
                 | "stochastic_probe"
                 | "quest_probe"
@@ -138,6 +139,13 @@ fn main() {
                 | "navgrid_probe"
                 | "terrain_probe"
                 | "terrain_probe_imported"
+                | "vampire_survivors"
+                // Plan D — minimal end-to-end probe for the generic `play`
+                // binary (all three player-facing blocks + one host-driven
+                // movement rule). Drives `sims::make_playable("play_probe")`.
+                | "play_probe"
+                // Subkind seeding (Plan A) — `init { spawn … }` runtime gate.
+                | "subkind_seeding_probe"
         ) {
             continue;
         }
@@ -204,6 +212,41 @@ fn main() {
         }
         stub.push_str("}\n\n");
     }
+
+    // Plan A — the `make_playable` registry. Maps a fixture name to a boxed
+    // `dyn engine_play_api::PlayableRuntime`, so one generic player binary can
+    // construct any compiled `.sim`'s runtime by name. Each fixture's
+    // `GeneratedRuntime::try_new(seed, agents)` returns `Option<Self>` (GPU
+    // init can fail headless), so the box is `Option`. The match is built from
+    // the same auto-discovered fixture list as the module stubs above.
+    stub.push_str(
+        "/// Construct a compiled `.sim` runtime by fixture name, boxed behind\n\
+         /// the `engine_play_api::PlayableRuntime` seam. Returns `None` for an\n\
+         /// unknown name or when GPU init fails (headless without an adapter).\n\
+         pub fn make_playable(\n\
+         \x20   name: &str,\n\
+         \x20   seed: u64,\n\
+         \x20   agents: u32,\n\
+         ) -> Option<Box<dyn engine_play_api::PlayableRuntime>> {\n\
+         \x20   match name {\n",
+    );
+    for f in &fixtures {
+        stub.push_str(&format!(
+            "        \"{f}\" => Some(Box::new({f}::GeneratedRuntime::try_new(seed, agents)?)),\n",
+        ));
+    }
+    stub.push_str(
+        "        _ => None,\n\
+         \x20   }\n\
+         }\n\n\
+         /// The set of fixture names `make_playable` recognises (sorted).\n\
+         pub const PLAYABLE_FIXTURES: &[&str] = &[\n",
+    );
+    for f in &fixtures {
+        stub.push_str(&format!("    \"{f}\",\n"));
+    }
+    stub.push_str("];\n");
+
     fs::write(out_dir.join("sim_modules.rs"), stub)
         .unwrap_or_else(|e| panic!("write sim_modules.rs: {e}"));
 }
