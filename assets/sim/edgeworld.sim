@@ -25,6 +25,18 @@ event WolfSpotted {
   observer: AgentId,
 }
 
+// Born — emitted by a well-fed breeder Survivor (Reproduce) when it elects
+// to revive its pre-linked offspring slot. `parent` is the breeder's own
+// slot; `child` is the breeder's unique `engaged_with` offspring slot. The
+// BornRevive @phase(post) consumer flips the child's alive 0→1 and seeds it.
+// Modelled exactly on trade_caravans.sim::Born / BornRevive (the proven
+// revive-via-engaged_with path).
+@replayable @gpu_amenable
+event Born {
+  parent: AgentId,
+  child:  AgentId,
+}
+
 entity FoodNode : Agent {
   pos: vec3,
   vel: vec3,
@@ -153,6 +165,19 @@ config edgeworld {
   // 4th sighting tick (reaction lag), and once the wolf leaves it decays back
   // under 1.5 within ~2-3 ticks (lingering fear, then calm forage resumes).
   fear_threshold:   f32 = 1.5,
+  // Phase 3 Task 1 — REPRODUCTION. A breeder only births while it is
+  // well-fed (hunger strictly below this). Kept low so a hungry survivor
+  // spends its food on itself, not offspring.
+  birth_hunger_max: f32 = 0.3,
+  // Birth cadence — a breeder fires Reproduce only on ticks divisible by
+  // this, so a well-fed breeder revives its (dead) offspring once per period
+  // (not every tick). Phase 3 Task 2 tuned this 60 -> 30 so the breeding core
+  // RE-REVIVES culled offspring twice as often: after the wolf pack thins the
+  // population, the survivors recover faster, sustaining the bounded
+  // grow→cull→hold oscillation (edgeworld_population_oscillates) rather than a
+  // single slow decay. (The Task-1 reproduction pin only asserts growth, so a
+  // faster cadence still satisfies it.)
+  birth_cooldown:   u32 = 30,
 }
 
 // Per-Survivor hunger accrual. creature_type == 1 is Survivor.
@@ -450,4 +475,50 @@ belief threats(observer: Agent) -> f32 {
   initial: 0.0,
   on WolfSpotted { observer: o } where (o == observer) { self += 1.0 }
   clamp: [0.0, 100.0],
+}
+
+// Reproduce — each alive, WELL-FED Survivor (creature_type 1, hunger below
+// birth_hunger_max) emits a Born record on the cadence tick. The child slot
+// is the breeder's own pre-linked offspring slot read from the engaged_with
+// column (`agents.engaged_with(self)`) — proven in trade_caravans.sim::OnDied.
+// Each breeder is wired 1:1 to a UNIQUE offspring slot at seed time, so no
+// two breeders ever emit Born for the same child — the revive in BornRevive
+// is allocation-race-free. `world.tick % birth_cooldown == 0` paces births.
+physics Reproduce @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && self.creature_type == 1
+                    && agents.hunger(self) < config.edgeworld.birth_hunger_max
+                    && (world.tick % config.edgeworld.birth_cooldown == 0)) {
+    let child = agents.engaged_with(self);
+    emit Born { parent: self, child: child }
+  }
+}
+
+// BornRevive — @phase(post) consumer of Born. Revives the offspring slot:
+// alive 0→1 (the BIRTH path, mirroring trade_caravans.sim::BornRevive), and
+// seeds the newborn at hunger 0 on the PARENT's position so it spawns in the
+// fed cluster (foraging dynamics then apply to it like any survivor).
+//
+// DSL FINDINGS (Phase 3 Task 1, verified on-GPU):
+//   * `agents.set_alive(c, true)` from a post consumer drives 0→1 (the
+//     scalar write that anchors the kernel — vec3-only would be DCE'd).
+//   * `agents.alive(c)` GATE in an `if` reads the NON-self child's alive
+//     flag — proven in among_us.sim::ApplyWitness. Used here so a live
+//     child is NOT reset/teleported each cadence tick (only dead slots
+//     are (re)born). Without this gate a long cooldown still re-cradles a
+//     live child harmlessly, but the gate makes it exact.
+//   * `agents.pos(p)` reads the parent's vec3 in a post consumer + writes
+//     the child's vec3 via `agents.set_pos(c, …)` — the cross-agent
+//     pos read/write pattern proven in among_us.sim::ApplyWitness /
+//     tom_probe.sim. creature_type is left as the seeded value (offspring
+//     slots are seeded type 1 already), so no set_creature_type is needed.
+@phase(post)
+physics BornRevive {
+  on Born { parent: p, child: c } {
+    if (agents.alive(c) == false) {
+      agents.set_alive(c, true);
+      agents.set_hunger(c, 0.0);
+      agents.set_pos(c, agents.pos(p));
+    }
+  }
 }

@@ -41,28 +41,39 @@ use edgeworld_common::*;
 
 const SEED: u64 = 0xED6E_0006;
 
-// Tuned to the Phase 2 coexistence scenario (mirrors edgeworld_pin.rs
-// edgeworld_predators_reduce_remnant / edgeworld_coexistence_at_600:
-// N_SURV=50, N_FOODN=50, N_WOLVES=3): an over-seeded survivor crowd over a
-// broad larder, a 3-wolf pack on the rim. The seeded overshoot starves
-// (50 -> 42), the pack reaches the cluster ~tick 22 and culls hard
-// (42 -> 12), then the faster prey escape to a defensible foraging remnant
-// while the pack persists on the feast: the run ends in a STABLE MIXED
-// EQUILIBRIUM (both survivors and wolves alive at tick 600) — a real
-// bounded ecosystem. (NOTE: this render reads agent buffers every frame,
-// which perturbs the GPU trajectory slightly vs the pins' end-only reads —
-// a known determinism sensitivity — so the per-frame counts here may differ
-// in detail from the pin trajectory, but the qualitative saga is the same.)
-const N_FOOD: usize = 50;
-const N_SURVIVORS: usize = 50;
-const N_WOLVES: usize = 3;
-const N_TOTAL: usize = N_FOOD + N_SURVIVORS + N_WOLVES; // 103
+// Tuned to the Phase 3 Task 2 OSCILLATION scenario (mirrors edgeworld_pin.rs
+// edgeworld_population_oscillates: N_BREEDERS=32, N_FOODN=64, N_WOLVES=4,
+// WORLD_HALF=10): a band of well-fed BREEDERS over a broad larder, each
+// pre-linked 1:1 to a DEAD offspring slot, plus a 4-wolf pack on the rim.
+// The living cycle: every birth_cooldown (30) tick each breeder with a dead
+// offspring slot REVIVES it at its position — the population PULSES UP
+// (32 breeders -> ~43 alive survivors as the offspring are born). Newborns
+// spawn at fear 0, so when the rim pack reaches the field they are caught
+// during the ~3-tick fear reaction-lag window — the population is CULLED DOWN
+// (43 -> ~19). The faster, fearful breeders out-run the pack
+// (flee_speed 0.25 > wolf_move_speed 0.18) and persist, foraging the larder
+// and re-reviving culled offspring, so the run settles into a bounded MIXED
+// EQUILIBRIUM (survivors AND wolves both alive at tick 600) — a LIVING
+// ecosystem that grew, got culled, and held. Slot layout (shared seeder):
+// [0..N_FOOD) food, [N_FOOD..+N_BREEDERS) breeders, then N_BREEDERS dead
+// offspring slots, then N_WOLVES wolves.
+//
+// (NOTE: this render reads agent buffers every frame, which perturbs the GPU
+// trajectory slightly vs the pins' end-only reads — a known determinism
+// sensitivity — so the per-frame counts here may differ in detail from the
+// pin trajectory, but the qualitative saga is the same.)
+const N_FOOD: usize = 64;
+const N_BREEDERS: usize = 32;
+const N_WOLVES: usize = 4;
+const N_TOTAL: usize = N_FOOD + 2 * N_BREEDERS + N_WOLVES; // 164
 
 // Slot layout matches the shared seeder: [0..N_FOOD) food, then
-// survivors, then wolves. Used only for the render-side fan-out offset.
+// breeders, then offspring slots, then wolves. Used only for the
+// render-side survivor fan-out offset (breeders + offspring are both
+// survivors, type 1).
 const SURVIVOR_BASE: usize = N_FOOD;
 
-const WORLD_HALF: f32 = 11.0; // seed spread half-extent (initial layout only;
+const WORLD_HALF: f32 = 10.0; // seed spread half-extent (initial layout only;
                               // the render viewport is computed per-frame)
 
 const TICKS: u32 = 600;
@@ -86,7 +97,15 @@ const IMG_SIZE: u32 = 256;
 // visible) — while a survivor in an active clinch flares full WHITE. Values
 // above 8 clamp to white (the cornered remnant), which honestly reads as
 // "permanently wary", matching the bounded predator-prey clinch.
-const FEAR_TINT_MAX: f32 = 8.0;
+// In the Phase 3 oscillation world the survivors live cheek-by-jowl with a
+// 4-wolf pack, so the decaying FEAR column (read_fear) saturates HIGH — the
+// observed per-frame max climbs to ~45-54 once the clinch sets in. Normalize
+// the amber→white tint over that real band (40, not the old 8) so the
+// gradient is legible rather than every survivor pinning to pure white: a
+// freshly-born / momentarily-safe survivor glows amber-orange, and only a
+// survivor with the whole pack bearing down (fear ≳ 40) flares full white.
+// This keeps the calm/spike contrast visible across the grow→cull→hold saga.
+const FEAR_TINT_MAX: f32 = 40.0;
 
 #[test]
 fn edgeworld_render_frames() {
@@ -98,7 +117,7 @@ fn edgeworld_render_frames() {
         }
     };
 
-    seed_world(&mut state, N_SURVIVORS, N_FOOD, N_WOLVES, WORLD_HALF);
+    seed_full_world(&mut state, N_BREEDERS, N_FOOD, N_WOLVES, WORLD_HALF);
 
     let frames_dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
         .parent()
@@ -233,7 +252,7 @@ fn edgeworld_render_frames() {
         // small deterministic per-slot ring offset so the lockstep pack
         // reads as a legible cluster of distinct predators. Visualization
         // only; sim positions are untouched.
-        let wolf_base = N_FOOD + N_SURVIVORS;
+        let wolf_base = N_FOOD + 2 * N_BREEDERS;
         for i in 0..N_TOTAL {
             if types[i] != CT_WOLF || alive[i] == 0 {
                 continue;
@@ -298,7 +317,7 @@ fn edgeworld_render_frames() {
     println!();
     println!("==== edgeworld population trace ====");
     println!(
-        "  seed world: {}×{} (half {WORLD_HALF}), {N_FOOD} food + {N_SURVIVORS} survivors + {N_WOLVES} wolves, {TICKS} ticks (dynamic viewport)",
+        "  seed world: {}×{} (half {WORLD_HALF}), {N_FOOD} food + {N_BREEDERS} breeders (+{N_BREEDERS} offspring slots) + {N_WOLVES} wolves, {TICKS} ticks (dynamic viewport)",
         (WORLD_HALF * 2.0) as i32,
         (WORLD_HALF * 2.0) as i32,
     );
