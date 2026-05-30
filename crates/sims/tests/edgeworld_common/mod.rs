@@ -188,10 +188,40 @@ pub fn seed_repro_world(
     n_food: usize,
     world_half: f32,
 ) {
-    let n = n_food + 2 * n_breeders;
+    seed_full_world(state, n_breeders, n_food, 0, world_half);
+}
+
+/// Seed a FULL ecosystem world deterministically (Phase 3 Task 2):
+/// reproduction (breeders + pre-linked dead offspring slots) AND predators
+/// (a wolf pack on the rim) together, so the population can both GROW (via
+/// births) and be CULLED (via predation + starvation) — the living
+/// oscillation cycle.
+///
+/// Slot layout (total N = `n_food + 2 * n_breeders + n_wolves`):
+///   `[0..n_food)`                              FoodNodes (type 0, alive),
+///   `[n_food..n_food+n_breeders)`              Breeders (type 1, alive,
+///                                              hunger 0, on the oasis),
+///   `[n_food+n_breeders..n_food+2*n_breeders)` Offspring slots (type 1,
+///                                              **alive = 0**, hunger 0),
+///   `[..+n_wolves)`                            Wolves (type 2, alive,
+///                                              hunger 0, on the world rim).
+///
+/// Breeder N is wired 1:1 to offspring slot N via `engaged_with` (raw u32
+/// absolute slot index). Wolves are placed exactly as in `seed_world`:
+/// evenly spaced on the rim at radius ~`world_half*0.95`. Deterministic,
+/// no rng / time.
+pub fn seed_full_world(
+    state: &mut GeneratedRuntime,
+    n_breeders: usize,
+    n_food: usize,
+    n_wolves: usize,
+    world_half: f32,
+) {
+    let n = n_food + 2 * n_breeders + n_wolves;
     let food_base = 0usize;
     let breeder_base = n_food;
     let offspring_base = n_food + n_breeders;
+    let wolf_base = n_food + 2 * n_breeders;
 
     let mut positions: Vec<[f32; 4]> = vec![[0.0; 4]; n];
     let mut types: Vec<u32> = vec![CT_FOOD; n];
@@ -201,26 +231,42 @@ pub fn seed_repro_world(
     let hp: Vec<f32> = vec![1.0f32; n];
     let mut engaged: Vec<u32> = vec![0u32; n];
 
-    // Food on a tight oasis ring near the origin so the breeders co-located
-    // with it stay well-fed (hunger below the birth threshold).
-    let food_span = 2.0;
+    // Food spread BROADLY across the inner world on a golden-angle spiral
+    // (full larder). A wide food field — rather than one tight oasis — lets
+    // the breeders disperse over the arena instead of stacking on a single
+    // pixel, so an arriving wolf cannot wipe the whole breeding core in one
+    // pass: it culls the locals and the rest flee. Every breeder always has
+    // food within perception/eat range, so the core stays well-fed (hunger
+    // below birth_hunger_max) and keeps re-reviving culled offspring — the
+    // recovery half of the cycle.
+    let food_rim = world_half * 0.5; // food field half-extent (inside the
+                                     // 0.95*world_half wolf rim).
+    let golden = std::f32::consts::PI * (3.0 - (5.0_f32).sqrt()); // ~2.399963
+    let fdenom = (n_food.max(1)) as f32;
     for f in 0..n_food {
         let slot = food_base + f;
-        let theta = (f as f32) / (n_food.max(1) as f32) * std::f32::consts::TAU;
-        let r = if n_food <= 1 { 0.0 } else { food_span };
+        let frac = ((f as f32) + 0.5) / fdenom;
+        let r = if n_food <= 1 { 0.0 } else { food_rim * frac.sqrt() };
+        let theta = (f as f32) * golden;
         positions[slot] = [r * theta.cos(), 0.0, r * theta.sin(), 0.0];
         types[slot] = CT_FOOD;
         mana[slot] = FOOD_MAX; // full larder — breeders never go hungry.
     }
 
-    // Breeders clustered tightly on the oasis (inside eat_radius) at zero
-    // hunger, alive. Each points at its unique offspring slot.
-    let breeder_span = 1.0;
-    let denom = (n_breeders.max(1)) as f32;
+    // Breeders spread across the SAME inner field on an interleaved spiral at
+    // zero hunger, alive. Each points at its unique offspring slot. Spreading
+    // them (rather than stacking) gives them room to flee a closing wolf
+    // (flee_speed > wolf_move_speed), so the breeding core survives the cull
+    // and persists to re-revive offspring.
+    let breeder_rim = world_half * 0.34;
+    let bdenom = (n_breeders.max(1)) as f32;
     for b in 0..n_breeders {
         let slot = breeder_base + b;
-        let theta = (b as f32) / denom * std::f32::consts::TAU;
-        let r = if n_breeders <= 1 { 0.0 } else { breeder_span };
+        let frac = ((b as f32) + 0.5) / bdenom;
+        let r = if n_breeders <= 1 { 0.0 } else { breeder_rim * frac.sqrt() };
+        // Offset the breeder spiral half a golden step off the food spiral so
+        // breeders interleave with — rather than land exactly on — food nodes.
+        let theta = (b as f32) * golden + 0.5 * golden;
         positions[slot] = [r * theta.cos(), 0.0, r * theta.sin(), 0.0];
         types[slot] = CT_SURVIVOR;
         // engaged_with = absolute offspring slot index (raw, no sentinel).
@@ -228,14 +274,28 @@ pub fn seed_repro_world(
     }
 
     // Offspring slots: type 1, DEAD (alive = 0), hunger 0. Parked off the
-    // oasis so they don't pre-feed; BornRevive teleports them onto the
-    // parent's position on birth.
+    // field so they don't pre-feed; BornRevive teleports them onto the
+    // parent's position on birth (so a newborn spawns in its parent's fed
+    // neighbourhood, then forages/flees like any survivor).
     for o in 0..n_breeders {
         let slot = offspring_base + o;
-        let theta = (o as f32) / denom * std::f32::consts::TAU;
+        let theta = (o as f32) / bdenom * std::f32::consts::TAU;
         positions[slot] = [world_half * 0.5 * theta.cos(), 0.0, world_half * 0.5 * theta.sin(), 0.0];
         types[slot] = CT_SURVIVOR;
         alive[slot] = 0; // dead until a breeder revives it.
+    }
+
+    // Wolves on the world rim, evenly spaced around the perimeter at radius
+    // ~world_half*0.95 — well outside the central breeder/offspring cluster.
+    // Zero hunger, alive. Identical placement to seed_world's wolf layout.
+    let wolf_r = world_half * 0.95;
+    let w_denom = (n_wolves.max(1)) as f32;
+    for w in 0..n_wolves {
+        let slot = wolf_base + w;
+        let theta = (w as f32) / w_denom * std::f32::consts::TAU;
+        positions[slot] = [wolf_r * theta.cos(), 0.0, wolf_r * theta.sin(), 0.0];
+        types[slot] = CT_WOLF;
+        // hunger already 0 (vec init); alive already 1.
     }
 
     let q = &state.gpu.queue;

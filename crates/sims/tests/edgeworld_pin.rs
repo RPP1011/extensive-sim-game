@@ -846,3 +846,111 @@ fn edgeworld_reproduction_grows_population() {
         "population should grow past {start_survivors} breeders via reproduction, got {end_survivors}"
     );
 }
+
+// Phase 3 Task 2 — A LIVING POPULATION THAT OSCILLATES. Breeders +
+// offspring slots + a wolf pack together: births push the alive-survivor
+// count UP when food is plentiful, predation + starvation pull it DOWN, and
+// the breeders RECOVER it by re-reviving culled offspring. Over 600 ticks
+// the alive-survivor count must show a genuine CYCLE — a high-water mark
+// clearly above the seeded breeder count (growth) AND a later dip below that
+// peak (a cull) — and BOTH species (survivors + wolves) must still be alive
+// at tick 600 (the ecosystem persists, not a flip to extinction).
+//
+// DETERMINISM (load-bearing): GPU readback between steps perturbs the
+// trajectory (accepted as hardware-inherent — see the project note). We read
+// SPARSELY (every 20 ticks) so the cull/recover signal survives the
+// perturbation rather than chasing bit-determinism.
+//
+// MECHANISM (observed at the tuned config): breeders cluster on a broad
+// oasis and stay well-fed (hunger < birth_hunger_max), so every
+// birth_cooldown tick each breeder with a DEAD offspring slot revives it at
+// its position (the population pulses UP). Newborns spawn at fear 0, so when
+// the rim wolf pack reaches the cluster they are caught during the ~3-tick
+// fear reaction-lag window (the population is culled DOWN). Breeders
+// themselves build fear and out-run the pack (flee_speed 0.25 >
+// wolf_move_speed 0.18), so the breeding core persists and re-revives the
+// culled offspring on the next cooldown — the grow→cull→recover cycle. The
+// wolves coast on the steady supply of fresh, fearless newborns, so the pack
+// persists too.
+#[test]
+fn edgeworld_population_oscillates() {
+    const N_BREEDERS: usize = 32;
+    const N_FOODN: usize = 64;
+    const N_WOLVES: usize = 4;
+    const WORLD_HALF: f32 = 10.0;
+    const N: usize = N_FOODN + 2 * N_BREEDERS + N_WOLVES;
+    const OSC_SEED: u64 = 0xED6E_0003;
+
+    let mut state = match GeneratedRuntime::try_new(OSC_SEED, N as u32) {
+        Some(s) => s,
+        None => {
+            eprintln!("[edgeworld] skip oscillation: no adapter.");
+            return;
+        }
+    };
+    seed_full_world(&mut state, N_BREEDERS, N_FOODN, N_WOLVES, WORLD_HALF);
+
+    // Baseline alive survivors at seed (= n_breeders; offspring start dead).
+    let types0 = read_creature_types(&mut state, N);
+    let alive0 = read_alive(&mut state, N);
+    let start: u32 = (0..N)
+        .filter(|&i| types0[i] == CT_SURVIVOR && alive0[i] == 1)
+        .count() as u32;
+
+    let mut samples: Vec<u32> = Vec::new();
+    let mut wolf_samples: Vec<u32> = Vec::new();
+    for tick in 0..600u32 {
+        if tick % 20 == 0 {
+            let alive = read_alive(&mut state, N);
+            let types = read_creature_types(&mut state, N);
+            let surv = (0..N)
+                .filter(|&i| types[i] == CT_SURVIVOR && alive[i] == 1)
+                .count() as u32;
+            let wolves = (0..N)
+                .filter(|&i| types[i] == CT_WOLF && alive[i] == 1)
+                .count() as u32;
+            samples.push(surv);
+            wolf_samples.push(wolves);
+        }
+        state.step();
+    }
+    // Final sample at tick 600.
+    let alive_f = read_alive(&mut state, N);
+    let types_f = read_creature_types(&mut state, N);
+    let final_surv = (0..N)
+        .filter(|&i| types_f[i] == CT_SURVIVOR && alive_f[i] == 1)
+        .count() as u32;
+    let final_wolves = (0..N)
+        .filter(|&i| types_f[i] == CT_WOLF && alive_f[i] == 1)
+        .count() as u32;
+    samples.push(final_surv);
+    wolf_samples.push(final_wolves);
+
+    // Locate the peak and the deepest dip AFTER the peak.
+    let peak = *samples.iter().max().unwrap();
+    let peak_idx = samples.iter().position(|&v| v == peak).unwrap();
+    let min_after_peak = samples[peak_idx..].iter().copied().min().unwrap();
+
+    println!(
+        "[edgeworld] oscillation: start={start} peak={peak} (@sample {peak_idx}) \
+         min_after_peak={min_after_peak} final_surv={final_surv} final_wolves={final_wolves}"
+    );
+    println!("[edgeworld] survivor trace: {samples:?}");
+    println!("[edgeworld] wolf trace:     {wolf_samples:?}");
+
+    // GROWTH: births pushed the population clearly above the seeded breeders.
+    assert!(
+        peak as f32 > start as f32 * 1.3,
+        "expected growth via births (peak {peak} > start {start} * 1.3)"
+    );
+    // CULL: after the peak the population dipped well below it.
+    assert!(
+        (min_after_peak as f32) < peak as f32 * 0.8,
+        "expected a cull (min_after_peak {min_after_peak} < peak {peak} * 0.8)"
+    );
+    // PERSISTENCE: both species alive at tick 600 (a living ecosystem).
+    assert!(
+        final_surv > 0 && final_wolves > 0,
+        "ecosystem should persist (survivors {final_surv} & wolves {final_wolves} both > 0 at 600)"
+    );
+}

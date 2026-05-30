@@ -170,9 +170,14 @@ config edgeworld {
   // spends its food on itself, not offspring.
   birth_hunger_max: f32 = 0.3,
   // Birth cadence — a breeder fires Reproduce only on ticks divisible by
-  // this, so a well-fed breeder revives its offspring once per period
-  // (not every tick).
-  birth_cooldown:   u32 = 60,
+  // this, so a well-fed breeder revives its (dead) offspring once per period
+  // (not every tick). Phase 3 Task 2 tuned this 60 -> 30 so the breeding core
+  // RE-REVIVES culled offspring twice as often: after the wolf pack thins the
+  // population, the survivors recover faster, sustaining the bounded
+  // grow→cull→hold oscillation (edgeworld_population_oscillates) rather than a
+  // single slow decay. (The Task-1 reproduction pin only asserts growth, so a
+  // faster cadence still satisfies it.)
+  birth_cooldown:   u32 = 30,
 }
 
 // Per-Survivor hunger accrual. creature_type == 1 is Survivor.
