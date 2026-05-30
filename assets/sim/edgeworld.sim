@@ -36,3 +36,22 @@ physics Hunger @phase(per_agent) {
     agents.set_hunger(self, prev + config.edgeworld.hunger_rate);
   }
 }
+
+// Starvation. When hunger crosses the max, the survivor dies.
+//
+// DEATH PATH: direct alive-clear (`agents.set_alive(self, false)`)
+// from a per-agent physics rule — the PRIMARY shape. This is the
+// channel forest_fire.sim's Reaper (line 194) and trophic_3tier.sim's
+// EnergyDecay (line 282) already use: a `@phase(per_agent)` rule whose
+// `where` reads self fields + hunger and clears alive. The compiler
+// accepts it directly, so no hp-damage fallback / .ability file is
+// needed. (Fixtures spell the bool literal `false`, not `0`.) The
+// `self.alive` guard makes the clear idempotent — once dead the rule
+// stops re-firing.
+physics Starvation @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && self.creature_type == 1
+                    && agents.hunger(self) >= config.edgeworld.hunger_max) {
+    agents.set_alive(self, false);
+  }
+}
