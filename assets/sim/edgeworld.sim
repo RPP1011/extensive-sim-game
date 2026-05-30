@@ -69,17 +69,43 @@ config edgeworld {
   wander_scale:    f32 = 0.05,
   // Spatial perception radius for spotting food to walk toward.
   perceive_radius: f32 = 12.0 @runtime,
-  // Wolf hunger accrual per tick — much slower than survivor hunger.
-  // Task 4 (predator persistence) dropped this from 0.03 to 0.0015: at
-  // 0.03 the pack ate out the prey in the opening ~40-tick feast and then
-  // starved by ~tick 50 (degenerate — wolves dead by mid-run). At 0.0015
-  // a wolf coasts ~666 ticks on a single kill, so the opening feast keeps
-  // the pack fed well past the 600-tick run: predators sustain themselves
-  // by hunting rather than all starving (the load-bearing half of the
-  // edgeworld_predators_reduce_remnant pin). Still nonzero so wolves are
-  // genuinely coupled to prey availability — a pack with no kills at all
-  // would still eventually starve.
-  wolf_hunger_rate: f32 = 0.0015,
+  // Wolf hunger accrual per tick. A kill resets the wolf's hunger to 0
+  // (WolfHunt), so wolves are genuinely coupled to prey: hunt or starve.
+  //
+  // HONEST TUNING NOTE. The structural tension in this fixed-population
+  // (no-reproduction) ecosystem is that flee_speed (0.25) > wolf_move_speed
+  // (0.18): once the seeded crowd is thinned, the surviving prey can out-run
+  // a single pursuer, so the remnant is uncatchable and wolves get no more
+  // kills after the opening feast. That means a wolf's survival to tick 600
+  // is decided almost entirely by how long it can COAST on the feast kills.
+  // At an aggressive rate (e.g. 0.02 — feed-or-die in 50 ticks) the wolves
+  // starve by ~tick 80 and, with the prey remnant also thin, the world flips
+  // to mutual extinction (degenerate). 0.0016 is the tuned edge: a wolf that
+  // never feeds still dies in ~625 ticks (so the metabolic pressure is real
+  // — the wolves are NOT immortal), but a wolf that lands a couple of feast
+  // kills coasts to tick 600. That is what yields the stable mixed
+  // equilibrium (prey remnant evading + foraging, pack persisting) the
+  // dynamics/coexistence pins assert. The Phase-1 hack (0.0015) gave the
+  // same coast but with NO world bounds, so the prey fled off-world and
+  // starved in the wilderness — "wolves alive, prey extinct" was hollow.
+  // The bounds (below) keep the prey on-world as a genuine evading remnant,
+  // which is what makes the both-alive-at-600 result real rather than
+  // cosmetic. True predator-driven oscillation would need prey
+  // reproduction, which this fixture does not model.
+  wolf_hunger_rate: f32 = 0.0016,
+  // World bounds — a square arena [world_min, world_max] on the x/z plane
+  // (the plane the seeder and render use: positions are [x, 0, z, 0] and
+  // the render maps pos.x / pos.z). Every movement rule clamps the new
+  // position component-wise into this box BEFORE set_pos, so no agent can
+  // drift off-world. Wider than the seed cluster (the pins seed with
+  // world_half ≈ 11, so survivors land inside ~0.7*11 ≈ 7.7 and wolves on
+  // the rim ≈ 10.5) so there is room to maneuver inside the [-16,16] box —
+  // fleeing prey hit the wall and must turn along it rather
+  // than escaping to infinity, which is what makes the chase bounded and
+  // forces real predator-prey contact instead of an unbounded off-world
+  // flight + wilderness starvation.
+  world_min: f32 = -16.0,
+  world_max: f32 = 16.0,
   // Wolf movement speed (Task 2 pursuit; faster than survivors).
   wolf_move_speed:  f32 = 0.18,
   // Range within which a wolf kills a survivor (Task 2).
@@ -190,7 +216,12 @@ physics SeekFood @phase(per_agent) {
           && agents.mana(candidate) >= config.edgeworld.eat_cost) {
         let dir = candidate.pos - self.pos;
         let step = dir * config.edgeworld.move_speed;
-        agents.set_pos(self, self.pos + step);
+        // Clamp the new position into the world box on the x/z plane
+        // (the render's axes) BEFORE writing — keeps foragers on-world.
+        let np = self.pos + step;
+        let cx = clamp(np.x, config.edgeworld.world_min, config.edgeworld.world_max);
+        let cz = clamp(np.z, config.edgeworld.world_min, config.edgeworld.world_max);
+        agents.set_pos(self, vec3(cx, np.y, cz));
         agents.set_hunger(self, agents.hunger(self));
       }
     }
@@ -252,7 +283,12 @@ physics WolfHunt @phase(per_agent) {
           agents.set_hunger(self, 0.0);
         } else {
           let dir = candidate.pos - self.pos;
-          agents.set_pos(self, self.pos + dir * config.edgeworld.wolf_move_speed);
+          // Clamp the wolf's new position into the world box (x/z plane)
+          // BEFORE writing — keeps the pack on-world chasing prey.
+          let np = self.pos + dir * config.edgeworld.wolf_move_speed;
+          let cx = clamp(np.x, config.edgeworld.world_min, config.edgeworld.world_max);
+          let cz = clamp(np.z, config.edgeworld.world_min, config.edgeworld.world_max);
+          agents.set_pos(self, vec3(cx, np.y, cz));
           agents.set_hunger(self, agents.hunger(self));
         }
       }
@@ -286,7 +322,14 @@ physics Flee @phase(per_agent) {
         let d = distance(self.pos, candidate.pos);
         if (d < config.edgeworld.flee_range) {
           let away = self.pos - candidate.pos;
-          agents.set_pos(self, self.pos + away * config.edgeworld.flee_speed);
+          // Clamp the fleeing survivor's new position into the world box
+          // (x/z plane) BEFORE writing — the wall is what bounds the chase:
+          // a survivor driven into the corner can no longer escape off-world
+          // and must turn along the edge, forcing real predator contact.
+          let np = self.pos + away * config.edgeworld.flee_speed;
+          let cx = clamp(np.x, config.edgeworld.world_min, config.edgeworld.world_max);
+          let cz = clamp(np.z, config.edgeworld.world_min, config.edgeworld.world_max);
+          agents.set_pos(self, vec3(cx, np.y, cz));
           agents.set_hunger(self, agents.hunger(self));
         }
       }

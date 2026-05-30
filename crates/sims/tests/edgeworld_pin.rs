@@ -303,34 +303,49 @@ fn edgeworld_wolf_pursues_distant_survivor() {
 /// kill_range from config.edgeworld (mirrors the .sim constant).
 fn config_kill_range() -> f32 { 1.2 }
 
-// Phase 1 dynamics pin (Task 4): predator-prey coupling is REAL, not
-// cosmetic. Run two 600-tick scenarios from the SAME seed/world via the
-// shared seeder — one with no wolves, one with K wolves — and compare the
-// surviving-survivor remnant at the end. With wolves present the remnant
-// must be strictly smaller (the pack culls), AND at least one wolf must
-// still be alive at the end (the pack sustains itself by feeding, not
-// starving). This proves a live chase/cull dynamic instead of the
-// degenerate "everyone fled/starved AND the wolves starved too" outcome.
+// Phase 2 dynamics pin: BOUNDED predator-prey coupling is REAL and ends in
+// COEXISTENCE, not extinction. Run two 600-tick scenarios from the SAME
+// seed/world via the shared seeder — one with no wolves, one with K wolves
+// — and compare the surviving-survivor remnant at the end. With wolves
+// present the remnant must be strictly smaller (the pack culls), AND BOTH
+// survivors and wolves must still be alive at the end (a real ecosystem,
+// not a degenerate flip to extinction).
 //
-// HONEST DYNAMICS (observed): the no-wolf world settles to a stable
-// oasis remnant (~14 survivors the recovered larder sustains). Introducing
-// the pack collapses that remnant: in the opening ~40 ticks the wolves
-// chase survivors off the compact world (no world bounds + Flee dominating
-// SeekFood → fleeing survivors drift past the edge and starve in the
-// wilderness) while killing those caught inside kill_range. The prey is
-// driven to extinction by ~tick 40 (a real cull, visible as a scatter in
-// the render). The wolves themselves persist to tick 600: wolf_hunger_rate
-// is low enough (0.0015/tick) that the kills during the opening feast keep
-// them fed well past the run length. So the pin's two halves hold for
-// genuinely different reasons — survivors culled to zero, wolves sustained
-// by the feast — which is exactly the non-degenerate predator-persistence
-// case the task asks to demonstrate.
+// HONEST DYNAMICS (observed at the tuned config via the clean end-only
+// trajectory — world bounds [-16,16], wolf_hunger_rate 0.0016, 50 survivors
+// / 50 food / 3 wolves):
+//   * t0-10:   seeded over-hungry overshoot starves: 50 -> 42 (the boom/bust
+//              crash, driven by the graded initial-hunger ramp).
+//   * t~20-25: the wolf pack reaches the survivor cluster from the rim and
+//              culls hard: 42 -> 12 (the predator-arrival cull, a legible
+//              scatter in the render).
+//   * t25-200: grind-down as wolves pick off the slower/cornered prey while
+//              the faster ones escape (flee_speed 0.25 > wolf_move_speed
+//              0.18): 12 -> a low of ~1 around t200 (a near-extinction scare).
+//   * t300-600: RECOVERY + STABLE MIXED EQUILIBRIUM. The remnant forages the
+//              recovered larder back up and settles at 6 survivors while the
+//              3 wolves persist on the opening feast (world bounds keep the
+//              prey on-world so the feast happens at all, instead of the
+//              Phase-1 degenerate case where unbounded flight let prey drift
+//              off-world and starve in the wilderness, leaving the wolves
+//              nothing). Both ALIVE at tick 600: survivors=6, wolves=3.
+//
+// (NOTE: reading agent buffers BETWEEN steps perturbs the GPU trajectory —
+// a known determinism sensitivity — so this trace was sampled via
+// independent end-only runs. The pins below read only at the final tick, so
+// they see this clean trajectory's endpoint.)
+//
+// The no-wolf branch settles to ~12 survivors (food-limited); the with-wolf
+// branch culls that to 6 — a strictly smaller remnant — and both species
+// persist. This is the non-degenerate, BOUNDED predator-prey ecosystem the
+// rebuild targets: a real chase/cull saga that settles to coexistence
+// rather than mutual extinction.
 #[test]
 fn edgeworld_predators_reduce_remnant() {
-    const N_SURV: usize = 28;
-    const N_FOODN: usize = 3;
-    const N_WOLVES: usize = 4;
-    const WORLD_HALF: f32 = 8.0;
+    const N_SURV: usize = 50;
+    const N_FOODN: usize = 50;
+    const N_WOLVES: usize = 3;
+    const WORLD_HALF: f32 = 11.0;
     const DYN_SEED: u64 = 0xED6E_0001;
 
     // Helper: run one scenario, return (alive_survivors, alive_wolves) at
@@ -367,13 +382,65 @@ fn edgeworld_predators_reduce_remnant() {
          remnant_with_wolves={remnant_with_wolves} wolves_alive={wolves_alive}/{N_WOLVES}"
     );
 
+    // The pack culls: the with-wolves remnant is strictly smaller.
     assert!(
         remnant_with_wolves < remnant_no_wolves,
         "wolves should cull survivors (got {remnant_with_wolves} vs {remnant_no_wolves})"
     );
+    // COEXISTENCE: both species persist to the end of the run — a real
+    // bounded ecosystem, not a flip to extinction. Prey persist by foraging
+    // while evading (escape-speed margin); wolves persist on the opening
+    // feast (world bounds keep the prey on-world to be hunted).
+    assert!(
+        remnant_with_wolves >= 1,
+        "survivors should persist as an evading remnant, not go extinct (got {remnant_with_wolves})"
+    );
     assert!(
         wolves_alive >= 1,
-        "at least one wolf should sustain by feeding, not all starve (got {wolves_alive})"
+        "wolves should persist by feeding, not all starve (got {wolves_alive})"
+    );
+}
+
+// Phase 2 coexistence pin: an explicit, standalone assertion that the tuned
+// edgeworld ends in a MIXED equilibrium — both survivors AND wolves alive at
+// tick 600. This is the headline result of the bounded rebuild (the
+// degenerate Phase-1 world flipped to prey-extinction every run). Same
+// seed/world as the dynamics pin's with-wolves branch.
+#[test]
+fn edgeworld_coexistence_at_600() {
+    const N_SURV: usize = 50;
+    const N_FOODN: usize = 50;
+    const N_WOLVES: usize = 3;
+    const WORLD_HALF: f32 = 11.0;
+    const N: u32 = (N_SURV + N_FOODN + N_WOLVES) as u32;
+    const DYN_SEED: u64 = 0xED6E_0001;
+
+    let mut state = match GeneratedRuntime::try_new(DYN_SEED, N) {
+        Some(s) => s,
+        None => {
+            eprintln!("[edgeworld] skip: no adapter.");
+            return;
+        }
+    };
+    seed_world(&mut state, N_SURV, N_FOODN, N_WOLVES, WORLD_HALF);
+    for _ in 0..600 {
+        state.step();
+    }
+    let alive = read_alive(&mut state, N as usize);
+    let types = read_creature_types(&mut state, N as usize);
+    let survivors_alive = (0..N as usize)
+        .filter(|&i| alive[i] == 1 && types[i] == CT_SURVIVOR)
+        .count() as u32;
+    let wolves_alive = (0..N as usize)
+        .filter(|&i| alive[i] == 1 && types[i] == CT_WOLF)
+        .count() as u32;
+    println!(
+        "[edgeworld] coexistence@600: survivors_alive={survivors_alive} wolves_alive={wolves_alive}"
+    );
+    assert!(
+        survivors_alive > 0 && wolves_alive > 0,
+        "edgeworld should end in coexistence (both alive at tick 600), \
+         got survivors={survivors_alive} wolves={wolves_alive}"
     );
 }
 

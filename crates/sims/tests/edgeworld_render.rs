@@ -9,14 +9,13 @@
 //!   * Survivor  → amber dot (dead survivors are skipped)
 //!   * Wolf      → red blob (the predators; Task 4)
 //!
-//! FRAME BOUNDS ARE DYNAMIC. Phase 1 has no world bounds and Flee
-//! dominates SeekFood, so chased survivors drift well past the seeded
-//! world edge (observed |coord| ~12.6 against a world half of 8) before
-//! they starve in the wilderness. A fixed `WORLD_HALF` viewport would push
-//! the most interesting part of the hunt off-frame. Instead each frame
-//! computes a square viewport that fits every alive agent (plus a margin),
-//! so the scatter stays legible no matter how far the chase ranges. The
-//! seed world-half is retained only for the initial-spread seeding.
+//! FRAME BOUNDS ARE DYNAMIC but now effectively static: Phase 2 added world
+//! bounds (config.edgeworld.world_min/max = [-16, 16] on the x/z plane), so
+//! every agent is clamped on-world and no agent drifts off-frame. The
+//! per-frame viewport still fits every alive agent (plus a margin) floored
+//! at the seed WORLD_HALF, but since positions are bounded it stays stable
+//! (no ballooning), so the bounded chase + forage saga reads cleanly frame
+//! to frame.
 //!
 //! It also records the alive-survivor count per frame and prints a
 //! population trace + ASCII sparkline.
@@ -31,28 +30,35 @@ use edgeworld_common::*;
 
 const SEED: u64 = 0xED6E_0006;
 
-// Tuned to the Phase 1 predator scenario (mirrors edgeworld_pin.rs
-// edgeworld_predators_reduce_remnant: N_SURV=28, N_FOODN=3, N_WOLVES=4):
-// an over-seeded survivor crowd at the oasis, a 4-wolf pack on the rim.
-// The pack chases survivors off-world and culls them to extinction in the
-// opening ~40 ticks; the wolves then persist (low wolf_hunger_rate).
-const N_FOOD: usize = 3;
-const N_SURVIVORS: usize = 28;
-const N_WOLVES: usize = 4;
-const N_TOTAL: usize = N_FOOD + N_SURVIVORS + N_WOLVES; // 35
+// Tuned to the Phase 2 coexistence scenario (mirrors edgeworld_pin.rs
+// edgeworld_predators_reduce_remnant / edgeworld_coexistence_at_600:
+// N_SURV=50, N_FOODN=50, N_WOLVES=3): an over-seeded survivor crowd over a
+// broad larder, a 3-wolf pack on the rim. The seeded overshoot starves
+// (50 -> 42), the pack reaches the cluster ~tick 22 and culls hard
+// (42 -> 12), then the faster prey escape to a defensible foraging remnant
+// while the pack persists on the feast: the run ends in a STABLE MIXED
+// EQUILIBRIUM (both survivors and wolves alive at tick 600) — a real
+// bounded ecosystem. (NOTE: this render reads agent buffers every frame,
+// which perturbs the GPU trajectory slightly vs the pins' end-only reads —
+// a known determinism sensitivity — so the per-frame counts here may differ
+// in detail from the pin trajectory, but the qualitative saga is the same.)
+const N_FOOD: usize = 50;
+const N_SURVIVORS: usize = 50;
+const N_WOLVES: usize = 3;
+const N_TOTAL: usize = N_FOOD + N_SURVIVORS + N_WOLVES; // 103
 
 // Slot layout matches the shared seeder: [0..N_FOOD) food, then
 // survivors, then wolves. Used only for the render-side fan-out offset.
 const SURVIVOR_BASE: usize = N_FOOD;
 
-const WORLD_HALF: f32 = 8.0; // seed spread half-extent (initial layout only;
-                             // the render viewport is computed per-frame)
+const WORLD_HALF: f32 = 11.0; // seed spread half-extent (initial layout only;
+                              // the render viewport is computed per-frame)
 
 const TICKS: u32 = 600;
-// The whole hunt (28 → 0 survivors) plays out in the opening ~40 ticks
-// as the pack chases the crowd off-world. Sample densely early so the
-// chase is captured frame-to-frame, then coarsely once it is just the
-// surviving pack idling near the oasis.
+// The chase/cull (60 → 6 survivors) plays out in the opening ~50 ticks as
+// the pack reaches the cluster and culls; the run then settles to the 6+3
+// coexistence remnant. Sample densely early so the cull is captured
+// frame-to-frame, then coarsely once the mixed equilibrium has settled.
 const FRAME_EVERY: u32 = 5;
 const IMG_SIZE: u32 = 256;
 
