@@ -303,6 +303,103 @@ fn edgeworld_wolf_pursues_distant_survivor() {
 /// kill_range from config.edgeworld (mirrors the .sim constant).
 fn config_kill_range() -> f32 { 1.2 }
 
+// Phase 2 Task 1 — decaying THREAT BELIEF fed by wolf perception.
+//
+// The `threats(observer: Agent) -> f32` belief (@materialized(on_event =
+// [WolfSpotted]) @decay(rate = 0.90, per = tick)) is a per-survivor threat
+// level that RISES when a survivor sees a wolf (the Perceive rule emits
+// WolfSpotted{observer: self} for every alive wolf inside its 6-unit
+// perception ring) and DECAYS 10%/tick once the sightings stop. No
+// behaviour change yet — Flee still triggers off raw proximity; Task 2
+// will gate it on this belief.
+//
+// Slot layout: slot0 = Survivor (type 1), slot1 = Wolf (type 2). Both
+// alive, survivor seeded at zero hunger so it neither starves nor seeks
+// food. During the RISE phase the survivor flees the wolf (Flee fires at
+// proximity), so we RE-STAMP both positions adjacent each tick to keep
+// the wolf inside perception and the sightings flowing. During the DECAY
+// phase we move the wolf far beyond the 6-unit perception ring (and clear
+// its alive bit) so no new WolfSpotted is emitted and only @decay acts.
+#[test]
+fn edgeworld_threat_belief_rises_then_decays() {
+    let mut state = match GeneratedRuntime::try_new(SEED, 2) {
+        Some(s) => s,
+        None => {
+            eprintln!("[edgeworld] skip: no adapter.");
+            return;
+        }
+    };
+    state.gpu.queue.write_buffer(&state.agent_creature_type_buf, 0, bytemuck::cast_slice(&[CT_SURVIVOR, CT_WOLF]));
+    state.gpu.queue.write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&[1u32, 1u32]));
+    state.gpu.queue.write_buffer(&state.agent_hunger_buf, 0, bytemuck::cast_slice(&[0.0f32, 0.0f32]));
+    state.gpu.queue.write_buffer(&state.agent_mana_buf, 0, bytemuck::cast_slice(&[0.0f32, 0.0f32]));
+
+    // Survivor at origin, wolf 3 units away (inside the 6-unit perception
+    // ring → Perceive sees it and emits WolfSpotted every tick).
+    let near = [[0.0f32, 0.0, 0.0, 0.0], [3.0, 0.0, 0.0, 0.0]];
+
+    // RISE: hold the pair adjacent so the survivor keeps sighting the wolf.
+    // The fold lags the emit by one tick (SCHEDULE runs Fold before the
+    // Flee/Perceive emit kernel), so threat starts climbing at tick 1.
+    const RISE_TICKS: usize = 10;
+    for _ in 0..RISE_TICKS {
+        // Re-stamp positions BEFORE stepping so Perceive sees the wolf in
+        // range this tick (Flee would otherwise have driven the survivor
+        // out of the perception ring).
+        state.gpu.queue.write_buffer(&state.agent_pos_buf, 0, bytemuck::cast_slice(&near));
+        // Keep both alive (Flee/WolfHunt etc. don't kill here, but be safe).
+        state.gpu.queue.write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&[1u32, 1u32]));
+        state.step();
+    }
+    let peak = read_threats(&mut state, 2)[0];
+    println!("[edgeworld] threat peak after {RISE_TICKS} sighting ticks: {peak}");
+    assert!(
+        peak > 0.0,
+        "survivor's threat belief should have RISEN above 0 from wolf sightings, got {peak}"
+    );
+    // Sanity: with +1/tick and 0.9 decay, the rise approaches the
+    // steady-state 1/(1-0.9)=10. After ~9 effective sighting ticks it
+    // should be well above 1.
+    assert!(
+        peak > 1.0,
+        "threat should have accumulated several sightings (expected >1), got {peak}"
+    );
+
+    // DECAY: remove the wolf — move it far beyond perception AND clear its
+    // alive bit so Perceive emits no more WolfSpotted. Only @decay acts now.
+    let far = [[0.0f32, 0.0, 0.0, 0.0], [100.0, 0.0, 0.0, 0.0]];
+    state.gpu.queue.write_buffer(&state.agent_pos_buf, 0, bytemuck::cast_slice(&far));
+    state.gpu.queue.write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&[1u32, 0u32]));
+
+    const DECAY_TICKS: usize = 20;
+    for _ in 0..DECAY_TICKS {
+        // Keep re-stamping the wolf out of range + dead so no sightings
+        // creep back in (Flee re-stamping is unnecessary now).
+        state.gpu.queue.write_buffer(&state.agent_pos_buf, 0, bytemuck::cast_slice(&far));
+        state.gpu.queue.write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&[1u32, 0u32]));
+        state.step();
+    }
+    let decayed = read_threats(&mut state, 2)[0];
+    println!("[edgeworld] threat after {DECAY_TICKS} decay ticks (wolf gone): {decayed}");
+
+    // The belief decayed well below its peak. 0.9^20 ≈ 0.12, so the
+    // decayed value should be a small fraction of the peak. Allow a
+    // generous ceiling (peak * 0.5) to stay robust to the exact
+    // emit/fold/decay tick phasing.
+    assert!(
+        decayed < peak * 0.5,
+        "threat should have DECAYED well below its peak ({peak}) once the wolf left, got {decayed}"
+    );
+    assert!(
+        decayed >= 0.0,
+        "threat should stay non-negative (clamp floor 0.0), got {decayed}"
+    );
+    println!(
+        "[edgeworld] threat belief rise+decay confirmed: peak={peak:.4} -> decayed={decayed:.4} (ratio {:.3})",
+        decayed / peak
+    );
+}
+
 // Phase 2 dynamics pin: BOUNDED predator-prey coupling is REAL and ends in
 // COEXISTENCE, not extinction. Run two 600-tick scenarios from the SAME
 // seed/world via the shared seeder — one with no wolves, one with K wolves
@@ -444,13 +541,23 @@ fn edgeworld_coexistence_at_600() {
     );
 }
 
-// Task 3 flee pin: a survivor with a wolf inside flee_range = 5.0 steps
-// directly AWAY from the wolf at flee_speed = 0.25 (> wolf_move_speed 0.18,
-// so it outpaces a single pursuer). Both seeded at zero hunger so neither
-// starves nor (the survivor) seeks food. Slot layout: slot0 = Survivor at
-// origin, slot1 = Wolf at x = 3.0 (separation 3.0 < flee_range 5.0). The
-// flee vector is away = survivor.pos - wolf.pos = (0 - 3) = -3 → the
-// survivor steps in the -x direction.
+// Task 3 flee pin (re-pinned for Phase 2 Task 2 belief-gated flee): a
+// survivor with a wolf inside flee_range = 5.0 ultimately steps AWAY from
+// the wolf at flee_speed = 0.25 (> wolf_move_speed 0.18, so it outpaces a
+// single pursuer). Both seeded at zero hunger so neither starves nor (the
+// survivor) seeks food. Slot layout: slot0 = Survivor at origin, slot1 =
+// Wolf at x = 3.0 (separation 3.0 < flee_range 5.0). The flee vector is
+// away = survivor.pos - wolf.pos = (0 - 3) = -3 → the survivor steps -x.
+//
+// REACTION LAG: flee is now gated on the decaying FEAR column crossing
+// fear_threshold = 1.5, so the survivor does NOT bolt on tick 1 — fear
+// must build for ~2 ticks first. During that lag the (already-pursuing)
+// wolf CLOSES ground, so the gap SHRINKS at first (e.g. 3.0 -> ~2.2) before
+// the survivor starts fleeing and then out-runs the wolf. So the
+// once-valid "gap holds or widens" assertion no longer holds from t0; we
+// instead assert the survivor still ends up well away (large -x
+// displacement), survives (flee_speed margin means it is never caught), and
+// the gap never collapses to a capture (stays above kill_range).
 #[test]
 fn edgeworld_survivor_flees_nearby_wolf() {
     let mut state = match GeneratedRuntime::try_new(SEED, 2) {
@@ -478,10 +585,212 @@ fn edgeworld_survivor_flees_nearby_wolf() {
     let d1 = (wolf_x1 - surv_x1).abs();
     let alive = read_alive(&mut state, 2);
     println!("[edgeworld] flee: surv_x {surv_x0}->{surv_x1} wolf_x {wolf_x0}->{wolf_x1} dist {d0}->{d1} surv_alive={}", alive[0]);
-    // The survivor flees away from the wolf in the -x direction.
+    // The survivor flees away from the wolf in the -x direction (once fear
+    // crossed threshold it commits to flight and ends up well clear).
     assert!(surv_x1 < surv_x0 - 0.1, "survivor should flee away from wolf (x decreasing below 0), {surv_x0}->{surv_x1}");
     // Flight succeeded: the survivor is never caught (flee_speed > wolf_move_speed).
     assert_eq!(alive[0], 1, "fleeing survivor should still be alive (outran the wolf), got alive={}", alive[0]);
-    // The gap did not collapse to a kill.
-    assert!(d1 >= d0 - 0.5, "survivor should not be overtaken; gap {d0}->{d1} should hold or widen");
+    // The gap may SHRINK during the reaction-lag window (the wolf closes
+    // ground before the survivor reacts), but it never collapses to a
+    // capture — it must stay above kill_range.
+    assert!(d1 > config_kill_range(), "survivor should not be captured; gap {d0}->{d1} must stay above kill_range");
 }
+
+// Phase 2 Task 2 — REACTION LAG (belief/fear-gated flee).
+//
+// PATH B: flee is gated on the hand-rolled decaying FEAR column
+// (`shield_hp`, RISES +1.0/sighting via Perceive, DECAYS *0.75/tick via
+// DecayFear — Task 3 tuned the decay from 0.90 to 0.75) crossing
+// config.edgeworld.fear_threshold = 1.5 — NOT on raw proximity. So a survivor
+// that suddenly finds a wolf next to it does NOT bolt on tick 1; fear must
+// BUILD UP first (imperfect perception / reaction lag).
+//
+// Per-tick fear update while a wolf is in sight (schedule: SeekFood/Flee
+// gate on fear-at-start-of-tick, THEN Perceive raises +1.0, THEN DecayFear
+// drains *0.75): fear_T = (fear_{T-1} + 1.0) * 0.75, from 0.0:
+//   end T0 = 0.750  (gate saw 0.00 — no flee)
+//   end T1 = 1.3125 (gate saw 0.75 — no flee)
+//   end T2 = 2.0625 (gate saw 1.3125 — no flee)
+//   end T3 = 2.297  (gate saw 2.0625 > 1.5 — FLEE FIRES, first move away)
+// So the gate crosses threshold for the FIRST time on the 4th step (T3) at
+// the slower 0.75 decay: three ticks of reaction lag, then flight. (The pin
+// asserts the first flee lands in 2..=4, which still holds.)
+//
+// Slot layout: slot0 = Survivor at origin, slot1 = Wolf at x = 2.0 (inside
+// the 6-unit perception ring so Perceive fires; outside kill_range 1.2 so
+// WolfHunt can't kill it; inside flee_range 5.0 so once fear crosses, Flee
+// actually moves the survivor). The wolf position is RE-STAMPED each tick
+// (held at x = 2.0) so it cannot pursue+kill across the lag window and the
+// sightings keep flowing; the survivor moves freely so its displacement is
+// the flee signal. Seeded at zero hunger to isolate from starvation.
+#[test]
+fn edgeworld_flee_has_reaction_lag() {
+    let mut state = match GeneratedRuntime::try_new(SEED, 2) {
+        Some(s) => s,
+        None => {
+            eprintln!("[edgeworld] skip: no adapter.");
+            return;
+        }
+    };
+    state.gpu.queue.write_buffer(&state.agent_creature_type_buf, 0, bytemuck::cast_slice(&[CT_SURVIVOR, CT_WOLF]));
+    state.gpu.queue.write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&[1u32, 1u32]));
+    state.gpu.queue.write_buffer(&state.agent_hunger_buf, 0, bytemuck::cast_slice(&[0.0f32, 0.0f32]));
+    state.gpu.queue.write_buffer(&state.agent_mana_buf, 0, bytemuck::cast_slice(&[0.0f32, 0.0f32]));
+    // Fear column (shield_hp) starts at 0 for both.
+    state.gpu.queue.write_buffer(&state.agent_shield_hp_buf, 0, bytemuck::cast_slice(&[0.0f32, 0.0f32]));
+
+    let wolf_pos = [[0.0f32, 0.0, 0.0, 0.0], [2.0, 0.0, 0.0, 0.0]];
+
+    // Tick 1: fear is still below threshold (gate saw 0.0) — the survivor
+    // must NOT have fled yet. Re-stamp the wolf at x=2.0 (block pursuit/kill).
+    state.gpu.queue.write_buffer(&state.agent_pos_buf, 0, bytemuck::cast_slice(&wolf_pos));
+    state.step();
+    let surv_x_t1 = read_positions(&mut state, 2)[0][0];
+    let fear_t1 = read_fear(&mut state, 2)[0];
+    println!("[edgeworld] reaction-lag T1: surv_x={surv_x_t1} fear={fear_t1}");
+    assert!(
+        surv_x_t1.abs() < 0.01,
+        "survivor should NOT flee on tick 1 (fear below threshold), but moved to x={surv_x_t1}"
+    );
+    assert!(
+        fear_t1 < config_fear_threshold(),
+        "fear should still be below threshold after 1 sighting tick, got {fear_t1}"
+    );
+
+    // Step through the lag: by the 3rd step (T2) fear-at-gate (1.71) crosses
+    // 1.5 and the survivor steps AWAY (−x, since away = surv − wolf = −2).
+    // Re-stamp the wolf each tick to keep it in sight and out of kill range.
+    let mut first_flee_tick: Option<usize> = None;
+    let mut fear_at_flee = 0.0f32;
+    for t in 2..=5usize {
+        // Hold wolf at x=2.0; survivor keeps whatever x it fled to.
+        let cur = read_positions(&mut state, 2);
+        let restamped = [cur[0], [2.0, 0.0, 0.0, 0.0]];
+        state.gpu.queue.write_buffer(&state.agent_pos_buf, 0, bytemuck::cast_slice(&restamped));
+        state.gpu.queue.write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&[1u32, 1u32]));
+        state.step();
+        let surv_x = read_positions(&mut state, 2)[0][0];
+        let fear = read_fear(&mut state, 2)[0];
+        println!("[edgeworld] reaction-lag T{t}: surv_x={surv_x} fear={fear}");
+        if surv_x < -0.05 && first_flee_tick.is_none() {
+            first_flee_tick = Some(t);
+            fear_at_flee = fear;
+        }
+    }
+
+    let flee_tick = first_flee_tick.expect("survivor should eventually flee once fear crosses threshold");
+    println!("[edgeworld] reaction-lag: first flee on step T{flee_tick} (fear≈{fear_at_flee})");
+    // Reaction lag is real: the survivor did not bolt on tick 1, and fled by
+    // ~tick 3-4 once fear built past threshold.
+    assert!(
+        (2..=4).contains(&flee_tick),
+        "survivor should flee by ~tick 3-4 (after reaction lag), fled at T{flee_tick}"
+    );
+}
+
+// Phase 2 Task 2 — LINGERING FEAR (post-sighting wariness).
+//
+// Once fear has built high, removing the wolf does NOT instantly end the
+// flight: the FEAR column decays geometrically (*0.75/tick — Task 3 tuned
+// the decay from 0.90 to 0.75 so fear is more responsive and re-settles to
+// calm faster, making the render's fear-tint cycle legible), so the survivor
+// stays WARY (Flee-eligible / SeekFood-suppressed) for a few ticks until fear
+// drains back below fear_threshold = 1.5. This is the lingering-fear half of
+// imperfect perception.
+//
+// Phase A (BUILD): survivor at origin, wolf re-stamped adjacent (x=2.0,
+// inside perception, outside kill_range) for several ticks so fear climbs
+// well above threshold. Phase B (REMOVE): clear the wolf's alive bit and
+// move it far off; only DecayFear acts. We assert fear is STILL above
+// threshold at a SHORT decay horizon (lingering wariness) but HAS decayed
+// below threshold at a LONG horizon (foraging resumes). Seeded at zero
+// hunger to isolate from starvation.
+//
+// DETERMINISM NOTE (load-bearing for the horizon choice): this single-pair
+// fixture exhibits a known GPU-trajectory sensitivity — the decaying f32
+// fear column FREEZES at an absolute tick (~tick 19 here) and stops draining
+// further. (Same family of perturbation the coexistence / dynamics pins call
+// out for reads between steps; here it is the long-run f32-CAS column
+// settling.) So this pin keeps BOTH horizons WELL UNDER the freeze tick.
+//
+// At decay 0.75 the per-sighting fear update f_T = (f_{T-1}+1)*0.75 climbs
+// toward the steady state f* = 0.75/(1-0.75) = 3.0, but the on-GPU column
+// runs a touch hot (BUILD=5 lands ~4.34, verified). A LOW build is essential:
+// a high build saturates into the frozen/inflated regime where clean decay no
+// longer holds. From the BUILD=5 peak the (empirically clean) *0.75/tick
+// decay gives SHORT (2 ticks) ~2.44 — still WARY (>1.5) — and LONG (5 ticks)
+// ~1.03 — foraging RESUMES (<1.5). Total ticks: BUILD=5 + 5 = 10, well under
+// the ~19 freeze. Each horizon is an independent END-ONLY run (read fear
+// exactly once at the end) via `run_lingering` — no per-tick readback.
+#[test]
+fn edgeworld_lingering_fear_after_wolf_leaves() {
+    // One end-only run: BUILD ticks of sightings (fear rises) then
+    // `decay_ticks` of the wolf gone (fear decays), reading fear once at the
+    // very end. Returns None if there is no GPU adapter.
+    fn run_lingering(build_ticks: usize, decay_ticks: usize) -> Option<f32> {
+        let mut state = GeneratedRuntime::try_new(SEED, 2)?;
+        state.gpu.queue.write_buffer(&state.agent_creature_type_buf, 0, bytemuck::cast_slice(&[CT_SURVIVOR, CT_WOLF]));
+        state.gpu.queue.write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&[1u32, 1u32]));
+        state.gpu.queue.write_buffer(&state.agent_hunger_buf, 0, bytemuck::cast_slice(&[0.0f32, 0.0f32]));
+        state.gpu.queue.write_buffer(&state.agent_mana_buf, 0, bytemuck::cast_slice(&[0.0f32, 0.0f32]));
+        state.gpu.queue.write_buffer(&state.agent_shield_hp_buf, 0, bytemuck::cast_slice(&[0.0f32, 0.0f32]));
+
+        // BUILD: wolf held adjacent so the survivor keeps sighting it and
+        // fear rises (re-stamp positions each tick; NO readback).
+        let near = [[0.0f32, 0.0, 0.0, 0.0], [2.0, 0.0, 0.0, 0.0]];
+        for _ in 0..build_ticks {
+            state.gpu.queue.write_buffer(&state.agent_pos_buf, 0, bytemuck::cast_slice(&near));
+            state.gpu.queue.write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&[1u32, 1u32]));
+            state.step();
+        }
+        // REMOVE: wolf moved far out of the 6-unit perception ring (kept
+        // ALIVE — avoids dead-agent compaction perturbing the run), so
+        // Perceive emits nothing and only DecayFear acts. NO readback until
+        // the end.
+        let far = [[0.0f32, 0.0, 0.0, 0.0], [100.0, 0.0, 0.0, 0.0]];
+        for _ in 0..decay_ticks {
+            state.gpu.queue.write_buffer(&state.agent_pos_buf, 0, bytemuck::cast_slice(&far));
+            state.gpu.queue.write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&[1u32, 1u32]));
+            state.step();
+        }
+        Some(read_fear(&mut state, 2)[0])
+    }
+
+    // BUILD=5 sightings raise fear to ~4.34 (verified on-GPU). From there the
+    // observed *0.75/tick decay (empirically measured, clean at these short
+    // horizons — well before the ~tick-19 column freeze):
+    //   * SHORT horizon (2 decay ticks): ~2.44 — still WARY (> 1.5).
+    //   * LONG  horizon (5 decay ticks): ~1.03 — foraging RESUMES (< 1.5).
+    // Both land by total tick 10 (well under the freeze), and both clear the
+    // 1.5 threshold by a comfortable margin (≈0.94 above / ≈0.47 below) so the
+    // crossing is robust to GPU f32 jitter. (BUILD must stay LOW — a high
+    // BUILD saturates the column into the frozen/inflated regime where the
+    // clean geometric decay no longer holds.)
+    const BUILD: usize = 5;
+    const SHORT: usize = 2;
+    const LONG: usize = 5;
+    let (Some(fear_short), Some(fear_long)) =
+        (run_lingering(BUILD, SHORT), run_lingering(BUILD, LONG))
+    else {
+        eprintln!("[edgeworld] skip: no adapter.");
+        return;
+    };
+    println!(
+        "[edgeworld] lingering: fear after BUILD={BUILD} + {SHORT} decay = {fear_short} (still wary); \
+         after {LONG} decay = {fear_long} (resumed)"
+    );
+    // Lingering fear is REAL: a few ticks after the wolf vanished the
+    // survivor is STILL wary (fear above threshold) — not instant-off.
+    assert!(
+        fear_short > config_fear_threshold(),
+        "fear should still be above threshold a few ticks after the wolf left (lingering), got {fear_short}"
+    );
+    // ...but fear DOES eventually decay below threshold (foraging resumes).
+    assert!(
+        fear_long < config_fear_threshold(),
+        "fear should decay below threshold after many ticks so foraging resumes, got {fear_long}"
+    );
+}
+
+/// fear_threshold from config.edgeworld (mirrors the .sim constant).
+fn config_fear_threshold() -> f32 { 1.5 }

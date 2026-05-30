@@ -12,6 +12,19 @@
 
 event Tick { }
 
+// WolfSpotted — emitted by a Survivor (Perceive) when it sees an alive
+// Wolf inside its perception ring. The `observer` field is the spotting
+// survivor's own slot; the `threats` belief folds +1.0 into
+// `threats(observer)` for every WolfSpotted whose observer matches.
+// Modelled on assassination_threat_test.sim::ThreatSighted (a perception
+// rule emitting a replayable/gpu_amenable event that a decaying belief
+// folds over). Phase 2 Task 1: belief RISE + DECAY only, no behaviour
+// wiring (Task 2 gates Flee on this belief).
+@replayable @gpu_amenable
+event WolfSpotted {
+  observer: AgentId,
+}
+
 entity FoodNode : Agent {
   pos: vec3,
   vel: vec3,
@@ -114,6 +127,32 @@ config edgeworld {
   flee_speed:       f32 = 0.25,
   // Range at which a survivor notices a wolf and flees (Task 2).
   flee_range:       f32 = 5.0,
+  // Phase 2 Task 2 — fear threshold on the decaying FEAR column.
+  //
+  // PATH B (hand-rolled fear column). DSL COVERAGE FINDING: reading the
+  // decaying `threats` belief from a @phase(per_agent) PHYSICS rule does
+  // NOT work — `threats.intensity_at(self)` lowers cleanly (no compile
+  // error) but the ViewCall read is SILENTLY ELIDED from the physics
+  // kernel: with the clause in Flee's where-guard, the emitted
+  // fused_Flee.wgsl guard collapsed to `(alive && creature_type == 1)`
+  // with zero references to any threats/view_storage binding (the
+  // view-read prelude is only wired into SCORING kernels, not physics
+  // kernels). This matches the `assassination_threat_test.sim` "no belief
+  // read from physics rule" gap. So the belief's VALUE is not readable
+  // where the gate needs it. We hand-roll the same decaying threat as a
+  // free survivor f32 SoA column (`shield_hp`, unused by edgeworld) using
+  // proven column reads/writes: Perceive RISES it +1.0/sighting, DecayFear
+  // drains it *0.90/tick, and Flee/SeekFood gate on it crossing this
+  // threshold. The `threats` belief stays live as the host-readable fear
+  // signal for Task 3's render fear-tint (read via read_threats).
+  //
+  // With +1.0/sighting and 0.75 decay (Task 3 tuned 0.90 -> 0.75 so fear is
+  // more responsive and re-settles to calm faster — the legible render cycle)
+  // the column climbs 0 -> 0.75 -> 1.31 -> 2.06 (saturating at the steady
+  // state f* = 0.75/(1-0.75) = 3.0); 1.5 lands the gate crossing on the 3rd-
+  // 4th sighting tick (reaction lag), and once the wolf leaves it decays back
+  // under 1.5 within ~2-3 ticks (lingering fear, then calm forage resumes).
+  fear_threshold:   f32 = 1.5,
 }
 
 // Per-Survivor hunger accrual. creature_type == 1 is Survivor.
@@ -209,7 +248,8 @@ spatial_query food_in_sight(self: AgentId, candidate: AgentId) =
 physics SeekFood @phase(per_agent) {
   on Tick {} where (self.alive
                     && self.creature_type == 1
-                    && agents.hunger(self) > 0.2) {
+                    && agents.hunger(self) > 0.2
+                    && agents.shield_hp(self) <= config.edgeworld.fear_threshold) {
     for candidate in spatial.food_in_sight(self) {
       if (candidate.alive
           && candidate.creature_type == 0
@@ -316,7 +356,9 @@ spatial_query threat_in_sight(self: AgentId, candidate: AgentId) =
 // stage, so writing the current hunger back is a true no-op that merely
 // marks the rule effectful).
 physics Flee @phase(per_agent) {
-  on Tick {} where (self.alive && self.creature_type == 1) {
+  on Tick {} where (self.alive
+                    && self.creature_type == 1
+                    && agents.shield_hp(self) > config.edgeworld.fear_threshold) {
     for candidate in spatial.threat_in_sight(self) {
       if (candidate.alive && candidate.creature_type == 2) {
         let d = distance(self.pos, candidate.pos);
@@ -335,4 +377,77 @@ physics Flee @phase(per_agent) {
       }
     }
   }
+}
+
+// Perceive — each alive Survivor (creature_type 1) walks its perception
+// ring (reuse threat_in_sight, the same 6-unit ring Flee uses) and, for
+// each alive Wolf (creature_type 2) it sees, emits a WolfSpotted record
+// tagged with its OWN slot as the observer. The `threats` belief below
+// folds those records into a per-survivor decaying threat level (the
+// host-readable fear signal for Task 3's render fear-tint). This is the
+// perception SOURCE. Task 2: it ALSO raises the hand-rolled FEAR column
+// (shield_hp) +1.0 per sighting — the value the behaviour gates actually
+// read, since the belief's value is not readable from a physics rule (see
+// PATH B finding at the fear_threshold config). The column self-write is
+// the observable scalar effect, so no DCE anchor is needed.
+physics Perceive @phase(per_agent) {
+  on Tick {} where (self.alive && self.creature_type == 1) {
+    for candidate in spatial.threat_in_sight(self) {
+      if (candidate.alive && candidate.creature_type == 2) {
+        emit WolfSpotted { observer: self }
+        // PATH B fear RISE: in addition to the (host-readable, but
+        // physics-unreadable) `threats` belief, raise the survivor's own
+        // FEAR column by +1.0 per wolf sighting. This is the value the
+        // behaviour gates read (proven self-write column), mirroring the
+        // belief's +1.0 fold so the two track. This self-write also makes
+        // the rule effectful without a DCE anchor.
+        let f = agents.shield_hp(self);
+        agents.set_shield_hp(self, f + 1.0);
+      }
+    }
+  }
+}
+
+// DecayFear — drain each survivor's FEAR column by 25%/tick, matching the
+// `threats` belief's @decay(rate = 0.75) (Task 3 tuned 0.90 -> 0.75 so fear
+// re-settles to calm faster — the legible render fear-tint cycle). Runs every
+// tick on every alive survivor (no spatial query). Pairs with Perceive's
+// RISE: when a wolf is in sight fear climbs toward steady-state 3.0 (rise +1
+// vs the 25% drain); once sightings stop it decays geometrically (lingering
+// fear) back under fear_threshold within ~2-3 ticks, at which point Flee
+// stops firing and SeekFood resumes. Proven scalar self-write column.
+physics DecayFear @phase(per_agent) {
+  on Tick {} where (self.alive && self.creature_type == 1) {
+    let f = agents.shield_hp(self);
+    agents.set_shield_hp(self, f * 0.75);
+  }
+}
+
+// threats — first-class decaying belief: a per-survivor threat level
+// that RISES (+1.0) on every WolfSpotted whose observer matches this
+// slot, and DECAYS by the @decay rate each tick BEFORE the fold runs.
+// View name MUST be exactly `threats` (the scoring wire-up keys on it —
+// Task 2 reads it). Single-Agent key → single-key (N cells) storage at
+// view_storage_threats_primary_buf, read back like threat_stresstest_pin.
+//
+// DISPATCH CHOICE — this is the load-bearing decision for Task 1.
+// The dodger_probe / threats_with_decay_probe `@dispatch(per_agent_event_scan)`
+// shape does NOT read emitted events: its fold pair-scans (observer,
+// source) agent slots and gates on the omniscient `agent_busy_with_ability_id`
+// column — it ignores `emit WolfSpotted` entirely (verified: the
+// generated fold_threats.wgsl never touches event_ring; it loops gid.x/gid.y
+// over agent slots). To get a belief that genuinely RISES from spatial
+// wolf SIGHTINGS (the Perceive emit), use the `@materialized(on_event=[...])`
+// per-event dispatch instead — the same shape plague_city's
+// `contagion_pressure(source: Agent) -> f32` and trade_market_probe's
+// `trader_volume(buyer: Agent) -> f32` use: it dispatches per emitted
+// event, reads the payload's `observer` field, and folds +1.0 into that
+// observer's cell. @decay then drains it each tick. (Belief keyword +
+// single-Agent f32 + @materialized + @decay all compose; see plague_city.)
+@materialized(on_event = [WolfSpotted])
+@decay(rate = 0.75, per = tick)
+belief threats(observer: Agent) -> f32 {
+  initial: 0.0,
+  on WolfSpotted { observer: o } where (o == observer) { self += 1.0 }
+  clamp: [0.0, 100.0],
 }
