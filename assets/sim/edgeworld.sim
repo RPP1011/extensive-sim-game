@@ -146,10 +146,12 @@ config edgeworld {
   // threshold. The `threats` belief stays live as the host-readable fear
   // signal for Task 3's render fear-tint (read via read_threats).
   //
-  // With +1.0/sighting and 0.90 decay the column climbs 0 -> ~1 (after the
-  // 1st sighting tick) -> ~1.9 -> ~2.7; 1.5 lands the crossing on the
-  // 2nd-3rd sighting tick (reaction lag), and once the wolf leaves it
-  // decays back under 1.5 a few ticks later (lingering fear).
+  // With +1.0/sighting and 0.75 decay (Task 3 tuned 0.90 -> 0.75 so fear is
+  // more responsive and re-settles to calm faster — the legible render cycle)
+  // the column climbs 0 -> 0.75 -> 1.31 -> 2.06 (saturating at the steady
+  // state f* = 0.75/(1-0.75) = 3.0); 1.5 lands the gate crossing on the 3rd-
+  // 4th sighting tick (reaction lag), and once the wolf leaves it decays back
+  // under 1.5 within ~2-3 ticks (lingering fear, then calm forage resumes).
   fear_threshold:   f32 = 1.5,
 }
 
@@ -406,17 +408,18 @@ physics Perceive @phase(per_agent) {
   }
 }
 
-// DecayFear — drain each survivor's FEAR column by 10%/tick, matching the
-// `threats` belief's @decay(rate = 0.90). Runs every tick on every alive
-// survivor (no spatial query). Pairs with Perceive's RISE: when wolves are
-// in sight fear climbs toward steady-state ~10 (rise +1 dominates the 10%
-// drain); once sightings stop it decays geometrically (lingering fear)
-// back under fear_threshold over a handful of ticks, at which point Flee
+// DecayFear — drain each survivor's FEAR column by 25%/tick, matching the
+// `threats` belief's @decay(rate = 0.75) (Task 3 tuned 0.90 -> 0.75 so fear
+// re-settles to calm faster — the legible render fear-tint cycle). Runs every
+// tick on every alive survivor (no spatial query). Pairs with Perceive's
+// RISE: when a wolf is in sight fear climbs toward steady-state 3.0 (rise +1
+// vs the 25% drain); once sightings stop it decays geometrically (lingering
+// fear) back under fear_threshold within ~2-3 ticks, at which point Flee
 // stops firing and SeekFood resumes. Proven scalar self-write column.
 physics DecayFear @phase(per_agent) {
   on Tick {} where (self.alive && self.creature_type == 1) {
     let f = agents.shield_hp(self);
-    agents.set_shield_hp(self, f * 0.90);
+    agents.set_shield_hp(self, f * 0.75);
   }
 }
 
@@ -442,7 +445,7 @@ physics DecayFear @phase(per_agent) {
 // observer's cell. @decay then drains it each tick. (Belief keyword +
 // single-Agent f32 + @materialized + @decay all compose; see plague_city.)
 @materialized(on_event = [WolfSpotted])
-@decay(rate = 0.90, per = tick)
+@decay(rate = 0.75, per = tick)
 belief threats(observer: Agent) -> f32 {
   initial: 0.0,
   on WolfSpotted { observer: o } where (o == observer) { self += 1.0 }

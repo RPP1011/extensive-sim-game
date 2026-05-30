@@ -599,20 +599,22 @@ fn edgeworld_survivor_flees_nearby_wolf() {
 // Phase 2 Task 2 — REACTION LAG (belief/fear-gated flee).
 //
 // PATH B: flee is gated on the hand-rolled decaying FEAR column
-// (`shield_hp`, RISES +1.0/sighting via Perceive, DECAYS *0.90/tick via
-// DecayFear) crossing config.edgeworld.fear_threshold = 1.5 — NOT on raw
-// proximity. So a survivor that suddenly finds a wolf next to it does NOT
-// bolt on tick 1; fear must BUILD UP first (imperfect perception /
-// reaction lag).
+// (`shield_hp`, RISES +1.0/sighting via Perceive, DECAYS *0.75/tick via
+// DecayFear — Task 3 tuned the decay from 0.90 to 0.75) crossing
+// config.edgeworld.fear_threshold = 1.5 — NOT on raw proximity. So a survivor
+// that suddenly finds a wolf next to it does NOT bolt on tick 1; fear must
+// BUILD UP first (imperfect perception / reaction lag).
 //
 // Per-tick fear update while a wolf is in sight (schedule: SeekFood/Flee
 // gate on fear-at-start-of-tick, THEN Perceive raises +1.0, THEN DecayFear
-// drains *0.90): fear_T = (fear_{T-1} + 1.0) * 0.90, from 0.0:
-//   end T0 = 0.90   (gate saw 0.00 — no flee)
-//   end T1 = 1.71   (gate saw 0.90 — no flee)
-//   end T2 = 2.439  (gate saw 1.71 > 1.5 — FLEE FIRES, first move away)
-// So the gate crosses threshold for the FIRST time on the 3rd step (T2):
-// two ticks of reaction lag, then flight.
+// drains *0.75): fear_T = (fear_{T-1} + 1.0) * 0.75, from 0.0:
+//   end T0 = 0.750  (gate saw 0.00 — no flee)
+//   end T1 = 1.3125 (gate saw 0.75 — no flee)
+//   end T2 = 2.0625 (gate saw 1.3125 — no flee)
+//   end T3 = 2.297  (gate saw 2.0625 > 1.5 — FLEE FIRES, first move away)
+// So the gate crosses threshold for the FIRST time on the 4th step (T3) at
+// the slower 0.75 decay: three ticks of reaction lag, then flight. (The pin
+// asserts the first flee lands in 2..=4, which still holds.)
 //
 // Slot layout: slot0 = Survivor at origin, slot1 = Wolf at x = 2.0 (inside
 // the 6-unit perception ring so Perceive fires; outside kill_range 1.2 so
@@ -689,10 +691,12 @@ fn edgeworld_flee_has_reaction_lag() {
 // Phase 2 Task 2 — LINGERING FEAR (post-sighting wariness).
 //
 // Once fear has built high, removing the wolf does NOT instantly end the
-// flight: the FEAR column decays geometrically (*0.90/tick), so the
-// survivor stays WARY (Flee-eligible / SeekFood-suppressed) for several
-// ticks until fear drains back below fear_threshold = 1.5. This is the
-// lingering-fear half of imperfect perception.
+// flight: the FEAR column decays geometrically (*0.75/tick — Task 3 tuned
+// the decay from 0.90 to 0.75 so fear is more responsive and re-settles to
+// calm faster, making the render's fear-tint cycle legible), so the survivor
+// stays WARY (Flee-eligible / SeekFood-suppressed) for a few ticks until fear
+// drains back below fear_threshold = 1.5. This is the lingering-fear half of
+// imperfect perception.
 //
 // Phase A (BUILD): survivor at origin, wolf re-stamped adjacent (x=2.0,
 // inside perception, outside kill_range) for several ticks so fear climbs
@@ -704,14 +708,20 @@ fn edgeworld_flee_has_reaction_lag() {
 //
 // DETERMINISM NOTE (load-bearing for the horizon choice): this single-pair
 // fixture exhibits a known GPU-trajectory sensitivity — the decaying f32
-// fear column FREEZES at an absolute tick (~tick 19 here, observed at
-// 3.0819714 for a saturated build) and stops draining further. (Same family
-// of perturbation the coexistence / dynamics pins call out for reads between
-// steps; here it is the long-run f32-CAS column settling.) So this pin keeps
-// BOTH horizons WELL UNDER the freeze tick: a modest BUILD=3 peak (~4.1) and
-// short (4) / long (10) decay horizons, all landing by total tick 13. Each
-// horizon is an independent END-ONLY run (read fear exactly once at the end)
-// via `run_lingering` — no per-tick readback.
+// fear column FREEZES at an absolute tick (~tick 19 here) and stops draining
+// further. (Same family of perturbation the coexistence / dynamics pins call
+// out for reads between steps; here it is the long-run f32-CAS column
+// settling.) So this pin keeps BOTH horizons WELL UNDER the freeze tick.
+//
+// At decay 0.75 the per-sighting fear update f_T = (f_{T-1}+1)*0.75 climbs
+// toward the steady state f* = 0.75/(1-0.75) = 3.0, but the on-GPU column
+// runs a touch hot (BUILD=5 lands ~4.34, verified). A LOW build is essential:
+// a high build saturates into the frozen/inflated regime where clean decay no
+// longer holds. From the BUILD=5 peak the (empirically clean) *0.75/tick
+// decay gives SHORT (2 ticks) ~2.44 — still WARY (>1.5) — and LONG (5 ticks)
+// ~1.03 — foraging RESUMES (<1.5). Total ticks: BUILD=5 + 5 = 10, well under
+// the ~19 freeze. Each horizon is an independent END-ONLY run (read fear
+// exactly once at the end) via `run_lingering` — no per-tick readback.
 #[test]
 fn edgeworld_lingering_fear_after_wolf_leaves() {
     // One end-only run: BUILD ticks of sightings (fear rises) then
@@ -746,20 +756,28 @@ fn edgeworld_lingering_fear_after_wolf_leaves() {
         Some(read_fear(&mut state, 2)[0])
     }
 
-    // BUILD=3 sightings raise fear to ~4.1. From there *0.90/tick:
-    //   * SHORT horizon (4 decay ticks): ~2.72 — still WARY (> 1.5).
-    //   * LONG  horizon (10 decay ticks): ~1.45 — foraging RESUMES (< 1.5).
-    // Both land before the ~tick-19 column freeze, so the crossing is real.
-    const BUILD: usize = 3;
+    // BUILD=5 sightings raise fear to ~4.34 (verified on-GPU). From there the
+    // observed *0.75/tick decay (empirically measured, clean at these short
+    // horizons — well before the ~tick-19 column freeze):
+    //   * SHORT horizon (2 decay ticks): ~2.44 — still WARY (> 1.5).
+    //   * LONG  horizon (5 decay ticks): ~1.03 — foraging RESUMES (< 1.5).
+    // Both land by total tick 10 (well under the freeze), and both clear the
+    // 1.5 threshold by a comfortable margin (≈0.94 above / ≈0.47 below) so the
+    // crossing is robust to GPU f32 jitter. (BUILD must stay LOW — a high
+    // BUILD saturates the column into the frozen/inflated regime where the
+    // clean geometric decay no longer holds.)
+    const BUILD: usize = 5;
+    const SHORT: usize = 2;
+    const LONG: usize = 5;
     let (Some(fear_short), Some(fear_long)) =
-        (run_lingering(BUILD, 4), run_lingering(BUILD, 10))
+        (run_lingering(BUILD, SHORT), run_lingering(BUILD, LONG))
     else {
         eprintln!("[edgeworld] skip: no adapter.");
         return;
     };
     println!(
-        "[edgeworld] lingering: fear after BUILD={BUILD} + 4 decay = {fear_short} (still wary); \
-         after 10 decay = {fear_long} (resumed)"
+        "[edgeworld] lingering: fear after BUILD={BUILD} + {SHORT} decay = {fear_short} (still wary); \
+         after {LONG} decay = {fear_long} (resumed)"
     );
     // Lingering fear is REAL: a few ticks after the wolf vanished the
     // survivor is STILL wary (fear above threshold) — not instant-off.
