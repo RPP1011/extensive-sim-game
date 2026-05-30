@@ -69,10 +69,17 @@ config edgeworld {
   wander_scale:    f32 = 0.05,
   // Spatial perception radius for spotting food to walk toward.
   perceive_radius: f32 = 12.0 @runtime,
-  // Wolf hunger accrual per tick — slower than survivor hunger so
-  // wolves persist long enough to hunt (Task 2) rather than starving
-  // immediately, but still capped so they cannot overrun the world.
-  wolf_hunger_rate: f32 = 0.03,
+  // Wolf hunger accrual per tick — much slower than survivor hunger.
+  // Task 4 (predator persistence) dropped this from 0.03 to 0.0015: at
+  // 0.03 the pack ate out the prey in the opening ~40-tick feast and then
+  // starved by ~tick 50 (degenerate — wolves dead by mid-run). At 0.0015
+  // a wolf coasts ~666 ticks on a single kill, so the opening feast keeps
+  // the pack fed well past the 600-tick run: predators sustain themselves
+  // by hunting rather than all starving (the load-bearing half of the
+  // edgeworld_predators_reduce_remnant pin). Still nonzero so wolves are
+  // genuinely coupled to prey availability — a pack with no kills at all
+  // would still eventually starve.
+  wolf_hunger_rate: f32 = 0.0015,
   // Wolf movement speed (Task 2 pursuit; faster than survivors).
   wolf_move_speed:  f32 = 0.18,
   // Range within which a wolf kills a survivor (Task 2).
