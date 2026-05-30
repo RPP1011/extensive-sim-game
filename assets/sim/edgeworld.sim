@@ -27,6 +27,16 @@ config edgeworld {
   hunger_rate:     f32 = 0.05,
   // Starvation threshold — hunger at or above this kills.
   hunger_max:      f32 = 1.0,
+  // Hunger removed per eat tick (survivor side).
+  eat_amount:      f32 = 0.20,
+  // Food quantity consumed per eat tick (FoodNode side).
+  eat_cost:        f32 = 0.20,
+  // FoodNode regrowth per tick.
+  regrow_rate:     f32 = 0.02,
+  // FoodNode quantity ceiling.
+  food_max:        f32 = 5.0,
+  // Spatial perception radius for eating (matches @spatial below).
+  eat_radius:      f32 = 1.5 @runtime,
 }
 
 // Per-Survivor hunger accrual. creature_type == 1 is Survivor.
@@ -34,6 +44,51 @@ physics Hunger @phase(per_agent) {
   on Tick {} where (self.alive && self.creature_type == 1) {
     let prev = agents.hunger(self);
     agents.set_hunger(self, prev + config.edgeworld.hunger_rate);
+  }
+}
+
+// Spatial-grid filter — body-form pattern (same as
+// detective_investigation / predator_prey_real / trophic_3tier).
+// The body-side `if` does the actual creature_type + quantity filter.
+@spatial(radius = 1.5, kind = [Agent])
+spatial_query nearby_food(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// Eat — each alive, hungry Survivor walks its 27-cell neighbourhood
+// and feeds off any co-located FoodNode that still has quantity.
+//
+// EAT PATH: PRIMARY shape (direct in-loop neighbour write). The
+// survivor lowers its OWN hunger (self-write, proven) AND directly
+// depletes the FoodNode's `mana` quantity column via
+// `agents.set_mana(candidate, ...)` from inside the spatial loop.
+// (FoodNode quantity is repurposed onto the `mana` f32 SoA column —
+// see Task 4 repurpose decision.)
+physics Eat @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && self.creature_type == 1
+                    && agents.hunger(self) > 0.0) {
+    for candidate in spatial.nearby_food(self) {
+      if (candidate.alive
+          && candidate.creature_type == 0
+          && agents.mana(candidate) >= config.edgeworld.eat_cost) {
+        let h = agents.hunger(self);
+        let new_h = if (h > config.edgeworld.eat_amount) { h - config.edgeworld.eat_amount } else { 0.0 };
+        agents.set_hunger(self, new_h);
+        let q = agents.mana(candidate);
+        agents.set_mana(candidate, q - config.edgeworld.eat_cost);
+      }
+    }
+  }
+}
+
+// Regrow — each alive FoodNode trickles its `mana` quantity back up
+// per tick, capped at food_max.
+physics Regrow @phase(per_agent) {
+  on Tick {} where (self.alive && self.creature_type == 0) {
+    let q = agents.mana(self);
+    let grown = q + config.edgeworld.regrow_rate;
+    let capped = if (grown > config.edgeworld.food_max) { config.edgeworld.food_max } else { grown };
+    agents.set_mana(self, capped);
   }
 }
 

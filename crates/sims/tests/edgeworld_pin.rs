@@ -70,6 +70,63 @@ fn edgeworld_starvation_kills() {
     assert_eq!(n_alive, 0, "all survivors should have starved with no food");
 }
 
+#[test]
+fn edgeworld_eating_feeds_and_depletes() {
+    let mut state = match GeneratedRuntime::try_new(SEED, 2) {
+        Some(s) => s,
+        None => {
+            eprintln!("[edgeworld] skip: no adapter.");
+            return;
+        }
+    };
+    // slot 0 = FoodNode (type 0), slot 1 = Survivor (type 1), co-located within eat_radius.
+    state.gpu.queue.write_buffer(&state.agent_creature_type_buf, 0, bytemuck::cast_slice(&[0u32, 1u32]));
+    state.gpu.queue.write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&[1u32, 1u32]));
+    state.gpu.queue.write_buffer(&state.agent_pos_buf, 0,
+        bytemuck::cast_slice(&[[0.0f32,0.0,0.0,0.0],[0.5,0.0,0.0,0.0]]));
+    state.gpu.queue.write_buffer(&state.agent_hunger_buf, 0, bytemuck::cast_slice(&[0.0f32, 0.6f32]));
+    state.gpu.queue.write_buffer(&state.agent_mana_buf, 0, bytemuck::cast_slice(&[5.0f32, 0.0f32]));
+    for _ in 0..3 {
+        state.step();
+    }
+    let hunger = read_hunger(&mut state, 2);
+    let mana = read_mana(&mut state, 2);
+    println!("[edgeworld] survivor hunger={} node quantity={}", hunger[1], mana[0]);
+    assert!(hunger[1] < 0.6, "survivor should have eaten and lowered hunger, got {}", hunger[1]);
+    assert!(mana[0] < 5.0, "food node should have been depleted by eating, got {}", mana[0]);
+}
+
+/// Staging-buffer readback of `state.agent_mana_buf` as f32 — the
+/// FoodNode-quantity twin of `read_hunger` (quantity is repurposed
+/// onto the `mana` f32 SoA column per the Task 4 decision).
+fn read_mana(state: &mut GeneratedRuntime, count: usize) -> Vec<f32> {
+    let bytes = (count as u64 * 4).max(16);
+    let staging = state.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("edgeworld::mana_staging"),
+        size: bytes,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut encoder = state.gpu.device.create_command_encoder(
+        &wgpu::CommandEncoderDescriptor {
+            label: Some("edgeworld::mana_readback"),
+        },
+    );
+    let buf = state.agent_mana_buf.clone();
+    encoder.copy_buffer_to_buffer(&buf, 0, &staging, 0, bytes);
+    state.gpu.queue.submit(Some(encoder.finish()));
+    let slice = staging.slice(..bytes);
+    slice.map_async(wgpu::MapMode::Read, |r| r.expect("map_async"));
+    state.gpu.device.poll(wgpu::PollType::Wait).expect("poll");
+    let out = {
+        let view = slice.get_mapped_range();
+        let words: &[f32] = bytemuck::cast_slice(&view);
+        words[..count].to_vec()
+    };
+    staging.unmap();
+    out
+}
+
 /// Staging-buffer readback of `state.agent_alive_buf` as u32 — the
 /// `read_hunger` helper's integer twin.
 fn read_alive(state: &mut GeneratedRuntime, count: usize) -> Vec<u32> {
