@@ -42,6 +42,9 @@ dsl_compiler = { path = "../dsl_compiler" }
 # cpu_determinism_forest_fire integration test uses engine_data::events::Event
 # and engine_data::ids::AgentId directly to drive the CPU fold path.
 engine_data = { path = "../engine_data" }
+# edgeworld_render (Task 6) dumps top-down PNG frames of the survival sim.
+# png-only build (no jpeg/tiff/codecs) keeps the dev build lean.
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 [build-dependencies]
 dsl_ast = { path = "../dsl_ast" }

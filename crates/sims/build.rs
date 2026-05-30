@@ -117,6 +117,7 @@ fn main() {
                 | "squad_skirmish"
                 | "plague_city"
                 | "detective_investigation"
+                | "edgeworld"
                 | "among_us"
                 | "dungeon_layout"
                 | "dungeon_stealth"

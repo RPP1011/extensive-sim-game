@@ -1,0 +1,182 @@
+// edgeworld — zero-player survival world sim. Phase 0: a band of
+// Survivors forage FoodNodes against rising hunger; food regrows;
+// starvation kills. FoodNode is declared `: Agent` (not `: Item`)
+// so survivors can read/deplete its quantity via the spatial-
+// neighbour SoA-read pattern proven in detective_investigation.sim
+// (the Item-SoA cross-entity field read is still a gap — see
+// foraging_colony.sim:59-67).
+//
+// Entity decl order is alphabetical → FoodNode = 0, Survivor = 1.
+
+event Tick { }
+
+entity FoodNode : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Survivor : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config edgeworld {
+  // Hunger units added per tick per survivor. At 0.05/tick a
+  // survivor that never eats crosses the starvation threshold
+  // (1.0) in 20 ticks.
+  hunger_rate:     f32 = 0.05,
+  // Starvation threshold — hunger at or above this kills.
+  hunger_max:      f32 = 1.0,
+  // Hunger removed per eat tick (survivor side). Bounded per tick (the
+  // survivor lowers its own hunger by this much each eat) so a survivor
+  // seeded far above the starvation threshold cannot be pulled back
+  // under 1.0 in time — those over-hungry survivors are the overshoot
+  // and are culled in the opening ticks (the boom/bust crash). The
+  // depth of the cull is set by how many seeded survivors start above
+  // what `n_food * eat_amount` can rescue per tick.
+  eat_amount:      f32 = 0.12,
+  // Food quantity consumed per eat tick (FoodNode side). Below
+  // eat_amount so the recovered larder feeds the surviving remnant
+  // efficiently and sustains it at carrying capacity after the crash.
+  eat_cost:        f32 = 0.10,
+  // FoodNode regrowth per tick. Tuned so the larder (n_food nodes)
+  // recovers to a level that stably sustains the post-crash remnant —
+  // higher (~0.015) keeps everyone alive (no crash), lower (~0.013)
+  // lets even the remnant slowly starve to extinction; 0.014 is the
+  // stable-remnant edge.
+  regrow_rate:     f32 = 0.014,
+  // FoodNode quantity ceiling.
+  food_max:        f32 = 5.0,
+  // Spatial perception radius for eating (matches @spatial below).
+  eat_radius:      f32 = 1.5,
+  // SeekFood movement: fraction of the (food - self) vector a hungry
+  // survivor steps each tick toward the first food in perception. Kept
+  // gentle so the surviving remnant drifts toward — but does not all
+  // collapse onto — the same food pixel, keeping the rendered remnant
+  // legible as distinct dots rather than one stacked blob. (Eating in
+  // Phase 0 is effectively position-independent — the spatial-neighbour
+  // query spans the compact world — so survivors need not converge to
+  // feed.)
+  move_speed:      f32 = 0.15,
+  // Idle wander magnitude (reserved; Phase 0 steering is deterministic).
+  wander_scale:    f32 = 0.05,
+  // Spatial perception radius for spotting food to walk toward.
+  perceive_radius: f32 = 12.0 @runtime,
+}
+
+// Per-Survivor hunger accrual. creature_type == 1 is Survivor.
+physics Hunger @phase(per_agent) {
+  on Tick {} where (self.alive && self.creature_type == 1) {
+    let prev = agents.hunger(self);
+    agents.set_hunger(self, prev + config.edgeworld.hunger_rate);
+  }
+}
+
+// Spatial-grid filter — body-form pattern (same as
+// detective_investigation / predator_prey_real / trophic_3tier).
+// The body-side `if` does the actual creature_type + quantity filter.
+@spatial(radius = 1.5, kind = [Agent])
+spatial_query nearby_food(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// Eat — each alive, hungry Survivor walks its 27-cell neighbourhood
+// and feeds off any co-located FoodNode that still has quantity.
+//
+// EAT PATH: PRIMARY shape (direct in-loop neighbour write). The
+// survivor lowers its OWN hunger (self-write, proven) AND directly
+// depletes the FoodNode's `mana` quantity column via
+// `agents.set_mana(candidate, ...)` from inside the spatial loop.
+// (FoodNode quantity is repurposed onto the `mana` f32 SoA column —
+// see Task 4 repurpose decision.)
+physics Eat @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && self.creature_type == 1
+                    && agents.hunger(self) > 0.0) {
+    for candidate in spatial.nearby_food(self) {
+      if (candidate.alive
+          && candidate.creature_type == 0
+          && agents.mana(candidate) >= config.edgeworld.eat_cost) {
+        let h = agents.hunger(self);
+        let new_h = if (h > config.edgeworld.eat_amount) { h - config.edgeworld.eat_amount } else { 0.0 };
+        agents.set_hunger(self, new_h);
+        let q = agents.mana(candidate);
+        agents.set_mana(candidate, q - config.edgeworld.eat_cost);
+      }
+    }
+  }
+}
+
+// Regrow — each alive FoodNode trickles its `mana` quantity back up
+// per tick, capped at food_max.
+physics Regrow @phase(per_agent) {
+  on Tick {} where (self.alive && self.creature_type == 0) {
+    let q = agents.mana(self);
+    let grown = q + config.edgeworld.regrow_rate;
+    let capped = if (grown > config.edgeworld.food_max) { config.edgeworld.food_max } else { grown };
+    agents.set_mana(self, capped);
+  }
+}
+
+// Wider spatial-grid filter for SeekFood — same body-form pattern as
+// nearby_food, just a larger radius so survivors spot food before they
+// are close enough to eat it.
+@spatial(radius = 12.0, kind = [Agent])
+spatial_query food_in_sight(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// SeekFood — each alive, hungry Survivor walks toward the first FoodNode
+// it can see. Neighbour vec3 position is read via FIELD ACCESS
+// (`candidate.pos`) — the proven form: `candidate.pos - self.pos` lowers
+// to `agent_pos[per_pair_candidate] - agent_pos[agent_id]` and the
+// `dir * move_speed` vec3 scalar-mul emits cleanly (same neighbour-pos
+// arithmetic crowd_navigation.sim uses). Unnormalised steering
+// (`dir * move_speed`) is fine for Phase 0; first-in-range (not nearest)
+// is acceptable.
+//
+// DCE ANCHOR (Phase-0 finding): a spatial-loop rule whose ONLY write is
+// the vec3 `agents.set_pos(self, …)` (or `set_vel`) is silently dropped
+// — no kernel, no diagnostic — because the scheduler does not count a
+// vec3 self-write as an observable effect. Pairing it with a recognised
+// scalar/atomic self-write keeps the rule live and the `set_pos` store
+// emits as `agent_pos[agent_id] = (agent_pos[agent_id] + local_3)`. The
+// identity `set_hunger(self, agents.hunger(self))` is that anchor: it
+// writes the current hunger back unchanged (Hunger runs in an earlier
+// kernel stage, so this is a true no-op) purely to mark the rule as
+// effectful. Remove it and SeekFood vanishes from the schedule. Carry
+// this forward to Phase 1 — predators steering toward prey via `set_pos`
+// in a spatial loop need the same anchor.
+physics SeekFood @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && self.creature_type == 1
+                    && agents.hunger(self) > 0.2) {
+    for candidate in spatial.food_in_sight(self) {
+      if (candidate.alive
+          && candidate.creature_type == 0
+          && agents.mana(candidate) >= config.edgeworld.eat_cost) {
+        let dir = candidate.pos - self.pos;
+        let step = dir * config.edgeworld.move_speed;
+        agents.set_pos(self, self.pos + step);
+        agents.set_hunger(self, agents.hunger(self));
+      }
+    }
+  }
+}
+
+// Starvation. When hunger crosses the max, the survivor dies.
+//
+// DEATH PATH: direct alive-clear (`agents.set_alive(self, false)`)
+// from a per-agent physics rule — the PRIMARY shape. This is the
+// channel forest_fire.sim's Reaper (line 194) and trophic_3tier.sim's
+// EnergyDecay (line 282) already use: a `@phase(per_agent)` rule whose
+// `where` reads self fields + hunger and clears alive. The compiler
+// accepts it directly, so no hp-damage fallback / .ability file is
+// needed. (Fixtures spell the bool literal `false`, not `0`.) The
+// `self.alive` guard makes the clear idempotent — once dead the rule
+// stops re-firing.
+physics Starvation @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && self.creature_type == 1
+                    && agents.hunger(self) >= config.edgeworld.hunger_max) {
+    agents.set_alive(self, false);
+  }
+}
