@@ -133,7 +133,7 @@ fn edgeworld_boom_then_bust_then_remnant() {
     let mut state = match GeneratedRuntime::try_new(0xED6E_0001, N_SCEN) {
         Some(s) => s, None => { eprintln!("[edgeworld] skip: no adapter."); return; }
     };
-    seed_world(&mut state, N_SURV, N_FOODN, 8.0);
+    seed_world(&mut state, N_SURV, N_FOODN, 0, 8.0);
     let mut min_alive = u32::MAX;
     let mut max_alive = 0u32;
     let mut samples = Vec::new();
@@ -151,4 +151,61 @@ fn edgeworld_boom_then_bust_then_remnant() {
     assert!(max_alive >= 6, "expected a sustained early population (boom/hold), got max {max_alive}");
     assert!(min_alive < max_alive, "expected a crash (min < max), got flat {min_alive}");
     assert!(final_alive >= 1, "expected a surviving remnant, got extinction");
+}
+
+// Wolf-presence smoke: with the Wolf entity added (creature_type 2),
+// a mixed world of survivors + food + wolves seeds and steps cleanly,
+// the three creature_types are distinguishable, and nothing dies in a
+// short window (5 ticks is well under any starvation horizon).
+#[test]
+fn edgeworld_wolves_present() {
+    const N_SURV: usize = 6;
+    const N_FOOD: usize = 2;
+    const N_WOLF: usize = 2;
+    const N: u32 = (N_SURV + N_FOOD + N_WOLF) as u32; // 10
+
+    let mut state = match GeneratedRuntime::try_new(SEED, N) {
+        Some(s) => s,
+        None => {
+            eprintln!("[edgeworld] skip: no adapter.");
+            return;
+        }
+    };
+    seed_world(&mut state, N_SURV, N_FOOD, N_WOLF, 8.0);
+    // seed_world applies a graded hunger ramp (up to 2.8) to survivors to
+    // drive the boom/bust crash. This smoke test only checks that the new
+    // Wolf entity seeds + steps cleanly and the three types coexist, so
+    // override all agent hunger to a benign 0.0 — nothing should die in
+    // the short window from starvation, and Task 2 (wolves hunt) is not
+    // yet implemented so no wolf kills occur.
+    state.gpu.queue.write_buffer(
+        &state.agent_hunger_buf,
+        0,
+        bytemuck::cast_slice(&vec![0.0f32; N as usize]),
+    );
+
+    for _ in 0..5 {
+        state.step();
+    }
+
+    let alive = read_alive(&mut state, N as usize);
+    let types = read_creature_types(&mut state, N as usize);
+
+    let count = |ct: u32| {
+        (0..N as usize)
+            .filter(|&i| alive[i] == 1 && types[i] == ct)
+            .count()
+    };
+    let survivors = count(CT_SURVIVOR);
+    let wolves = count(CT_WOLF);
+    let food = count(CT_FOOD);
+    println!("[edgeworld] survivors={survivors} wolves={wolves} food={food} types={types:?}");
+
+    assert_eq!(survivors, N_SURV, "all survivors should be alive after 5 ticks");
+    assert_eq!(wolves, N_WOLF, "all wolves should be alive after 5 ticks");
+    assert_eq!(food, N_FOOD, "all food nodes should be present after 5 ticks");
+
+    // The three creature_types must be distinguishable.
+    assert!(types.contains(&CT_FOOD) && types.contains(&CT_SURVIVOR) && types.contains(&CT_WOLF),
+        "all three creature_types should be present, got {types:?}");
 }

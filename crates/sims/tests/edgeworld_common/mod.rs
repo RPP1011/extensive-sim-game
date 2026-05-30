@@ -17,6 +17,9 @@ use sims::edgeworld::GeneratedRuntime;
 pub const CT_FOOD: u32 = 0;
 /// creature_type discriminant for `Survivor` (= 1).
 pub const CT_SURVIVOR: u32 = 1;
+/// creature_type discriminant for `Wolf` (= 2; W sorts after Survivor so
+/// the existing `== 1` survivor guards keep their discriminant).
+pub const CT_WOLF: u32 = 2;
 
 /// FoodNode quantity ceiling used by the seeder (mirrors
 /// `config.edgeworld.food_max`). Frame brightness in the render test
@@ -33,7 +36,10 @@ pub const FOOD_SEED: f32 = 4.0;
 /// Slot layout: `[0..n_food)` are FoodNodes spread on a grid across the
 /// inner world at full quantity; `[n_food..n_food+n_survivors)` are
 /// Survivors arranged in concentric rings near the centre (inside the
-/// ~6-unit perception ring of the inner food grid) at zero hunger.
+/// ~6-unit perception ring of the inner food grid) at zero hunger;
+/// `[n_food+n_survivors..+n_wolves)` are Wolves placed on the world rim
+/// (radius ~world_half*0.95) away from the central survivor cluster, at
+/// zero hunger and alive.
 ///
 /// Both the boom/bust pin and the render test call this so the seeding
 /// stays DRY and identical. `world_half` is the half-extent of the
@@ -42,11 +48,13 @@ pub fn seed_world(
     state: &mut GeneratedRuntime,
     n_survivors: usize,
     n_food: usize,
+    n_wolves: usize,
     world_half: f32,
 ) {
-    let n = n_food + n_survivors;
+    let n = n_food + n_survivors + n_wolves;
     let food_base = 0usize;
     let survivor_base = n_food;
+    let wolf_base = n_food + n_survivors;
 
     let mut positions: Vec<[f32; 4]> = vec![[0.0; 4]; n];
     let mut types: Vec<u32> = vec![CT_FOOD; n];
@@ -112,6 +120,21 @@ pub fn seed_world(
         positions[slot] = [sx, 0.0, sz, 0.0];
         types[slot] = CT_SURVIVOR;
         hunger[slot] = ramp_top * (s as f32) / denom;
+    }
+
+    // Wolves on the world rim, evenly spaced around the perimeter at
+    // radius ~world_half*0.95 — well outside the central survivor
+    // cluster (rim 0.7*world_half). Zero hunger, alive. Deterministic.
+    let wolf_r = world_half * 0.95;
+    let w_denom = (n_wolves.max(1)) as f32;
+    for w in 0..n_wolves {
+        let slot = wolf_base + w;
+        let theta = (w as f32) / w_denom * std::f32::consts::TAU;
+        let wx = wolf_r * theta.cos();
+        let wz = wolf_r * theta.sin();
+        positions[slot] = [wx, 0.0, wz, 0.0];
+        types[slot] = CT_WOLF;
+        hunger[slot] = 0.0;
     }
 
     state

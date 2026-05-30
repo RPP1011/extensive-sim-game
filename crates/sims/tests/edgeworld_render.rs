@@ -52,7 +52,7 @@ fn edgeworld_render_frames() {
         }
     };
 
-    seed_world(&mut state, N_SURVIVORS, N_FOOD, WORLD_HALF);
+    seed_world(&mut state, N_SURVIVORS, N_FOOD, 0, WORLD_HALF);
 
     let frames_dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
         .parent()

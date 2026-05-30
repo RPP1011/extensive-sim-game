@@ -6,7 +6,9 @@
 // (the Item-SoA cross-entity field read is still a gap — see
 // foraging_colony.sim:59-67).
 //
-// Entity decl order is alphabetical → FoodNode = 0, Survivor = 1.
+// Entity decl order is alphabetical → FoodNode = 0, Survivor = 1,
+// Wolf = 2. Wolf MUST sort after Survivor so the existing
+// creature_type == 1 (Survivor) guards stay valid.
 
 event Tick { }
 
@@ -16,6 +18,11 @@ entity FoodNode : Agent {
 }
 
 entity Survivor : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Wolf : Agent {
   pos: vec3,
   vel: vec3,
 }
@@ -62,6 +69,18 @@ config edgeworld {
   wander_scale:    f32 = 0.05,
   // Spatial perception radius for spotting food to walk toward.
   perceive_radius: f32 = 12.0 @runtime,
+  // Wolf hunger accrual per tick — slower than survivor hunger so
+  // wolves persist long enough to hunt (Task 2) rather than starving
+  // immediately, but still capped so they cannot overrun the world.
+  wolf_hunger_rate: f32 = 0.03,
+  // Wolf movement speed (Task 2 pursuit; faster than survivors).
+  wolf_move_speed:  f32 = 0.18,
+  // Range within which a wolf kills a survivor (Task 2).
+  kill_range:       f32 = 1.2,
+  // Survivor flee speed when a wolf is near (Task 2).
+  flee_speed:       f32 = 0.25,
+  // Range at which a survivor notices a wolf and flees (Task 2).
+  flee_range:       f32 = 5.0,
 }
 
 // Per-Survivor hunger accrual. creature_type == 1 is Survivor.
@@ -69,6 +88,15 @@ physics Hunger @phase(per_agent) {
   on Tick {} where (self.alive && self.creature_type == 1) {
     let prev = agents.hunger(self);
     agents.set_hunger(self, prev + config.edgeworld.hunger_rate);
+  }
+}
+
+// Per-Wolf hunger accrual. creature_type == 2 is Wolf. Wolves use
+// their own (slower) rate so they don't starve before they can hunt.
+physics WolfHunger @phase(per_agent) {
+  on Tick {} where (self.alive && self.creature_type == 2) {
+    let p = agents.hunger(self);
+    agents.set_hunger(self, p + config.edgeworld.wolf_hunger_rate);
   }
 }
 
@@ -173,9 +201,11 @@ physics SeekFood @phase(per_agent) {
 // needed. (Fixtures spell the bool literal `false`, not `0`.) The
 // `self.alive` guard makes the clear idempotent — once dead the rule
 // stops re-firing.
+// creature_type != 0 → both Survivors (1) and Wolves (2) starve at the
+// max; FoodNodes (0) never starve.
 physics Starvation @phase(per_agent) {
   on Tick {} where (self.alive
-                    && self.creature_type == 1
+                    && self.creature_type != 0
                     && agents.hunger(self) >= config.edgeworld.hunger_max) {
     agents.set_alive(self, false);
   }
