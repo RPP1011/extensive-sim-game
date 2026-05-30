@@ -27,19 +27,37 @@ config edgeworld {
   hunger_rate:     f32 = 0.05,
   // Starvation threshold — hunger at or above this kills.
   hunger_max:      f32 = 1.0,
-  // Hunger removed per eat tick (survivor side).
-  eat_amount:      f32 = 0.20,
-  // Food quantity consumed per eat tick (FoodNode side).
-  eat_cost:        f32 = 0.20,
-  // FoodNode regrowth per tick.
-  regrow_rate:     f32 = 0.02,
+  // Hunger removed per eat tick (survivor side). Bounded per tick (the
+  // survivor lowers its own hunger by this much each eat) so a survivor
+  // seeded far above the starvation threshold cannot be pulled back
+  // under 1.0 in time — those over-hungry survivors are the overshoot
+  // and are culled in the opening ticks (the boom/bust crash). The
+  // depth of the cull is set by how many seeded survivors start above
+  // what `n_food * eat_amount` can rescue per tick.
+  eat_amount:      f32 = 0.12,
+  // Food quantity consumed per eat tick (FoodNode side). Below
+  // eat_amount so the recovered larder feeds the surviving remnant
+  // efficiently and sustains it at carrying capacity after the crash.
+  eat_cost:        f32 = 0.10,
+  // FoodNode regrowth per tick. Tuned so the larder (n_food nodes)
+  // recovers to a level that stably sustains the post-crash remnant —
+  // higher (~0.015) keeps everyone alive (no crash), lower (~0.013)
+  // lets even the remnant slowly starve to extinction; 0.014 is the
+  // stable-remnant edge.
+  regrow_rate:     f32 = 0.014,
   // FoodNode quantity ceiling.
   food_max:        f32 = 5.0,
   // Spatial perception radius for eating (matches @spatial below).
   eat_radius:      f32 = 1.5,
   // SeekFood movement: fraction of the (food - self) vector a hungry
-  // survivor steps each tick toward the first food in perception.
-  move_speed:      f32 = 0.3,
+  // survivor steps each tick toward the first food in perception. Kept
+  // gentle so the surviving remnant drifts toward — but does not all
+  // collapse onto — the same food pixel, keeping the rendered remnant
+  // legible as distinct dots rather than one stacked blob. (Eating in
+  // Phase 0 is effectively position-independent — the spatial-neighbour
+  // query spans the compact world — so survivors need not converge to
+  // feed.)
+  move_speed:      f32 = 0.15,
   // Idle wander magnitude (reserved; Phase 0 steering is deterministic).
   wander_scale:    f32 = 0.05,
   // Spatial perception radius for spotting food to walk toward.

@@ -11,6 +11,12 @@ use edgeworld_common::*;
 const SEED: u64 = 0xED6E_0001;
 const N_TOTAL: u32 = 4;
 
+// Boom/bust scenario sizing. Overshoot: seed more survivors than the
+// (scarce, slow-regrowing) food can sustain → strip → cull → remnant.
+const N_SURV: usize = 28;
+const N_FOODN: usize = 3;
+const N_SCEN: u32 = (N_SURV + N_FOODN) as u32;
+
 #[test]
 fn edgeworld_runtime_constructs() {
     let state = match GeneratedRuntime::try_new(SEED, N_TOTAL) {
@@ -120,4 +126,29 @@ fn edgeworld_seekfood_moves_toward_food() {
     let end = read_positions(&mut state, 2)[1][0];
     println!("[edgeworld] survivor x: {start} -> {end}");
     assert!(end < start - 1.0, "hungry survivor should move toward food (x decreasing), {start}->{end}");
+}
+
+#[test]
+fn edgeworld_boom_then_bust_then_remnant() {
+    let mut state = match GeneratedRuntime::try_new(0xED6E_0001, N_SCEN) {
+        Some(s) => s, None => { eprintln!("[edgeworld] skip: no adapter."); return; }
+    };
+    seed_world(&mut state, N_SURV, N_FOODN, 8.0);
+    let mut min_alive = u32::MAX;
+    let mut max_alive = 0u32;
+    let mut samples = Vec::new();
+    for tick in 0..600 {
+        if tick % 20 == 0 {
+            let alive = read_alive(&mut state, N_SCEN as usize);
+            let types = read_creature_types(&mut state, N_SCEN as usize);
+            let a: u32 = (0..N_SCEN as usize).filter(|&i| alive[i]==1 && types[i]==CT_SURVIVOR).count() as u32;
+            min_alive = min_alive.min(a); max_alive = max_alive.max(a); samples.push(a);
+        }
+        state.step();
+    }
+    let final_alive = *samples.last().unwrap();
+    println!("[edgeworld] max={max_alive} min={min_alive} final={final_alive} trace={samples:?}");
+    assert!(max_alive >= 6, "expected a sustained early population (boom/hold), got max {max_alive}");
+    assert!(min_alive < max_alive, "expected a crash (min < max), got flat {min_alive}");
+    assert!(final_alive >= 1, "expected a surviving remnant, got extinction");
 }

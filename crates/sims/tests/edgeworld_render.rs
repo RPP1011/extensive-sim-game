@@ -24,17 +24,19 @@ use edgeworld_common::*;
 
 const SEED: u64 = 0xED6E_0006;
 
-const N_FOOD: usize = 8;
-const N_SURVIVORS: usize = 12;
-const N_TOTAL: usize = N_FOOD + N_SURVIVORS; // 20
+// Tuned to the Phase 0 boom/bust scenario (mirrors edgeworld_pin.rs:
+// N_SURV=28, N_FOODN=3): an over-seeded survivor crowd strips the food
+// and a starvation wave culls the population down to a stable remnant
+// at carrying capacity.
+const N_FOOD: usize = 3;
+const N_SURVIVORS: usize = 28;
+const N_TOTAL: usize = N_FOOD + N_SURVIVORS; // 31
 
-// Slot layout: [0..8) = FoodNode, [8..20) = Survivor. Kept consistent
-// everywhere below.
-const FOOD_BASE: usize = 0;
+// Slot layout matches the shared seeder: [0..N_FOOD) food, the rest
+// survivors. Used only for the render-side fan-out offset.
 const SURVIVOR_BASE: usize = N_FOOD;
 
 const WORLD_HALF: f32 = 8.0; // world spans [-8, 8], 16 wide
-const FOOD_MAX: f32 = 5.0;
 
 const TICKS: u32 = 600;
 const FRAME_EVERY: u32 = 30;
@@ -95,7 +97,20 @@ fn edgeworld_render_frames() {
             }
             let color = [240u8, 170u8, 40u8]; // amber
             let (px, py) = world_to_px(positions[i], WORLD_HALF, IMG_SIZE);
-            draw_blob(&mut img, IMG_SIZE, px, py, color);
+            // Render-only fan-out: the surviving remnant converges onto a
+            // single food node (SeekFood is first-candidate + the eat
+            // query spans the compact world), so co-located survivors
+            // would stack on one pixel and undercount the remnant
+            // visually. Spread each survivor by a small deterministic
+            // per-slot offset on a ring so the huddle reads as a legible
+            // cluster of distinct dots. This is a visualization choice
+            // only — the simulation positions are untouched.
+            let s_idx = i.saturating_sub(SURVIVOR_BASE);
+            let ang = (s_idx as f32) * 2.399_963; // golden angle
+            let ring = 3.0 + 2.0 * ((s_idx % 3) as f32); // 3..7 px
+            let jx = (px as i32 + (ring * ang.cos()) as i32).clamp(0, (IMG_SIZE - 1) as i32) as u32;
+            let jy = (py as i32 + (ring * ang.sin()) as i32).clamp(0, (IMG_SIZE - 1) as i32) as u32;
+            draw_blob(&mut img, IMG_SIZE, jx, jy, color);
         }
 
         // Flatten to RGB bytes and write PNG.
@@ -145,94 +160,6 @@ fn edgeworld_render_frames() {
     );
     println!("  frames written to: {}", frames_dir.display());
     println!();
-}
-
-/// Seed a compact survival world. Slots `[0..n_food)` are FoodNodes
-/// spread across the world on a grid at full quantity; slots
-/// `[n_food..n_food+n_survivors)` are Survivors clustered near the
-/// center (inside the ~6-unit perception ring of some food) at zero
-/// hunger. Deterministic — explicit math only, no rng.
-fn seed_world(
-    state: &mut GeneratedRuntime,
-    n_survivors: usize,
-    n_food: usize,
-    world_half: f32,
-) {
-    let n = n_food + n_survivors;
-    let mut positions: Vec<[f32; 4]> = vec![[0.0; 4]; n];
-    let mut types: Vec<u32> = vec![CT_FOOD; n];
-    let mut alive: Vec<u32> = vec![1u32; n];
-    let mut hunger: Vec<f32> = vec![0.0f32; n];
-    let mut mana: Vec<f32> = vec![0.0f32; n];
-    let hp: Vec<f32> = vec![1.0f32; n]; // for the starvation fallback path
-
-    // Food on a near-uniform grid spanning ~[-half/2, half/2] so every
-    // node sits within a survivor's perception ring of the centre
-    // cluster. 8 nodes → 4×2 grid.
-    let cols = 4usize;
-    let rows = (n_food + cols - 1) / cols; // 2
-    let span = world_half * 0.75; // food occupies inner [-6, 6]
-    for f in 0..n_food {
-        let slot = FOOD_BASE + f;
-        let cx = f % cols;
-        let cy = f / cols;
-        let fx = if cols > 1 {
-            -span + 2.0 * span * (cx as f32) / ((cols - 1) as f32)
-        } else {
-            0.0
-        };
-        let fz = if rows > 1 {
-            -span * 0.6 + 1.2 * span * (cy as f32) / ((rows - 1) as f32)
-        } else {
-            0.0
-        };
-        positions[slot] = [fx, 0.0, fz, 0.0];
-        types[slot] = CT_FOOD;
-        mana[slot] = FOOD_MAX;
-    }
-
-    // Survivors clustered near origin in a small ring so they fan out
-    // toward different food nodes. Radius 2.0 keeps them inside the
-    // perception ring of the inner food grid.
-    for s in 0..n_survivors {
-        let slot = SURVIVOR_BASE + s;
-        let theta = (s as f32) / (n_survivors as f32) * std::f32::consts::TAU;
-        let r = 2.0;
-        let sx = r * theta.cos();
-        let sz = r * theta.sin();
-        positions[slot] = [sx, 0.0, sz, 0.0];
-        types[slot] = CT_SURVIVOR;
-        hunger[slot] = 0.0;
-    }
-
-    state
-        .gpu
-        .queue
-        .write_buffer(&state.agent_pos_buf, 0, bytemuck::cast_slice(&positions));
-    state.gpu.queue.write_buffer(
-        &state.agent_creature_type_buf,
-        0,
-        bytemuck::cast_slice(&types),
-    );
-    state
-        .gpu
-        .queue
-        .write_buffer(&state.agent_alive_buf, 0, bytemuck::cast_slice(&alive));
-    state
-        .gpu
-        .queue
-        .write_buffer(&state.agent_hunger_buf, 0, bytemuck::cast_slice(&hunger));
-    state
-        .gpu
-        .queue
-        .write_buffer(&state.agent_mana_buf, 0, bytemuck::cast_slice(&mana));
-    state
-        .gpu
-        .queue
-        .write_buffer(&state.agent_hp_buf, 0, bytemuck::cast_slice(&hp));
-
-    // Silence unused-mut warnings on vecs we only write once.
-    let _ = (&mut alive, &mut hunger, &mut mana, &mut types, &mut positions);
 }
 
 /// Map a world position `[x,_,z,_]` to pixel coords on an `img_size`
