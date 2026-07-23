@@ -1,5 +1,0 @@
-webband_campaign soak digest v1
-fixture=0xb654b4aa3aa930a0
-campaign=0xc9fffa8a6ec8882b
-log=0xeb5202222f05241c
-raids=4 won=1 lost=3 windfalls=0 caravans=1 joins=1 departures=9 hungry=92/437 gold=7 renown=0 day=61

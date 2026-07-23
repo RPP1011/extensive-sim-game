@@ -3034,9 +3034,6 @@ dependencies = [
  "glam",
  "image",
  "pollster",
- "serde_json",
- "webband_app",
- "webband_bridge",
  "wgpu",
 ]
 
@@ -3846,39 +3843,6 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "webband_app"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "webband_bridge"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "serde",
- "serde_json",
- "sims",
- "webband_app",
- "wgpu",
-]
-
-[[package]]
-name = "webband_play"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "engine_play",
- "engine_play_api",
- "engine_ui",
- "serde_json",
- "webband_app",
- "webband_bridge",
 ]
 
 [[package]]

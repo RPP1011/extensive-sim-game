@@ -6,11 +6,13 @@
 //! and the `apply_ability` dispatcher stamps records with those ids.
 //! User event kind ids used to be a bare source-order index, so a `.sim`
 //! with more than 26 non-aliased events had one silently aliased onto a
-//! dispatcher tag — payload words and all. `webband_colony.sim` declares
-//! 60 user events; its 27th (`PickedBench`) WAS kind 26, i.e. the
-//! dispatcher's `EffectDamageApplied` tag, which is why the Webband port
-//! could not express combat through `.ability` programs (S5 report in
-//! `docs/superpowers/plans/webband-port.md`).
+//! dispatcher tag — payload words and all. The defect was found by a game
+//! fixture with 60 user events whose 27th WAS kind 26, i.e. the dispatcher's
+//! `EffectDamageApplied` tag, which is why that game could not express combat
+//! through `.ability` programs. That game moved to its own repository on
+//! 2026-07-23 (see `docs/superpowers/plans/webband-port.md`); the subject
+//! here is now `many_events_ability.sim`, the synthetic built to reproduce
+//! it and kept for that purpose.
 //!
 //! These tests pin the fixed allocation at the resolve/lower level:
 //! ids skip the reserved discriminants, stay distinct, and — the
@@ -78,30 +80,38 @@ fn assert_no_collisions(label: &str, comp: &dsl_ast::ir::Compilation) -> Vec<u32
     ids
 }
 
-/// The natural subject: 60 user events, well past the reserved floor.
+/// The subject: a fixture past the reserved floor.
+///
+/// This pin was originally taken on `webband_colony.sim` (60 user events),
+/// the fixture that FOUND the defect. The game left this repo on 2026-07-23
+/// (see docs/superpowers/plans/webband-port.md), so the pin now runs on
+/// `many_events_ability.sim` — the synthetic that was purpose-built for
+/// exactly this and kept for exactly this reason. Its 27th event is named
+/// `PadWouldCollide` because under the old policy it WAS kind 26, the
+/// dispatcher's `EffectDamageApplied` tag.
 #[test]
-fn webband_colony_user_events_avoid_reserved_kinds() {
-    let comp = resolve_sim("assets/sim/webband_colony.sim");
+fn many_events_user_events_avoid_reserved_kinds() {
+    let comp = resolve_sim("assets/sim/many_events_ability.sim");
     assert!(
         comp.events.len() > 25,
         "this pin is only meaningful past the reserved floor; \
-         webband_colony declares {} events",
+         many_events_ability declares {} events",
         comp.events.len(),
     );
-    let ids = assert_no_collisions("webband_colony", &comp);
+    let ids = assert_no_collisions("many_events_ability", &comp);
 
-    // The exact pre-fix symptom, named: source index 26 is `PickedBench`
-    // and it used to be allocated kind 26 == EffectDamageApplied.
+    // The exact pre-fix symptom, named: source index 26 used to be
+    // allocated kind 26 == EffectDamageApplied.
     let (idx, ev) = comp
         .events
         .iter()
         .enumerate()
-        .find(|(_, e)| e.name == "PickedBench")
-        .expect("webband_colony declares PickedBench");
-    assert_eq!(idx, 26, "PickedBench is the fixture's 27th event");
+        .find(|(_, e)| e.name == "PadWouldCollide")
+        .expect("many_events_ability declares PadWouldCollide");
+    assert_eq!(idx, 26, "PadWouldCollide is the fixture's 27th event");
     assert_ne!(
         ids[idx], 26,
-        "PickedBench is back on the dispatcher's EffectDamageApplied tag",
+        "PadWouldCollide is back on the dispatcher's EffectDamageApplied tag",
     );
     assert!(ev.engine_kind_id.is_none());
 

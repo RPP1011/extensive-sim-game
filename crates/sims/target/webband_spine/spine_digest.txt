@@ -1,5 +1,0 @@
-webband_spine digest v1
-fixture=0x0075cb35ba827f35
-campaign=0x856af4820128d498
-log=0xeb1af0d5dd3f78bb
-days=16 day=17 gold=3 renown=8 roster=12 built=5 raids=1/1 chronicle=7
