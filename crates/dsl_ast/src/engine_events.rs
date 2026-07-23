@@ -26,15 +26,42 @@
 //! a new effect → event mapping, this table must grow the matching
 //! entry too — otherwise the consumer/dispatcher kind tags drift again.
 //!
-//! ## Collision policy
+//! ## Collision policy (RESERVED-ID SKIPPING, fixed 2026-07-22)
 //!
-//! User-declared events that don't match a known engine name keep their
-//! sequential `EventKindId(i)` (where `i` is the position in
-//! `comp.events`). For now there is no `.sim` with enough user events
-//! to risk a sequential id colliding with an aliased engine
-//! discriminant (the smallest engine alias is 26). If a future sim
-//! pushes past ~25 user events and risks collisions, the resolver
-//! could be adjusted to skip aliased ids when assigning sequentials.
+//! User-declared events that don't match a known engine name are
+//! allocated ids sequentially in declaration order, **skipping every
+//! discriminant this table reserves**. See [`assign_event_kind_ids`],
+//! which is the ONE allocator every consumer calls
+//! (`dsl_compiler::cg::lower::driver::populate_event_kinds`,
+//! `driver::resolve_event_ref`, and the `@host_callable` injector in
+//! `dsl_compiler::build_helper`).
+//!
+//! The old policy was plain `EventKindId(i)` with no skipping, on the
+//! stated assumption that no `.sim` would ever declare more than ~25
+//! user events. `assets/sim/webband_colony.sim` declares 60: its 27th
+//! event (`PickedBench`) was assigned kind 26 — i.e. the same tag the
+//! `apply_ability` dispatcher stamps on `EffectDamageApplied` records.
+//! A single dispatcher damage record would then have been consumed by
+//! the fixture's haul rule with the payload words aligned
+//! (actor/target land in who/what), so any fixture past ~25 user
+//! events was locked out of `apply_ability` entirely. (The same
+//! collision also makes a large fixture unable to DECLARE an aliased
+//! engine event at all — two events would intern the same
+//! `EventKindId` and the builder rejects with `DuplicateInternEntry`.)
+//!
+//! Scope of the reservation, stated precisely: only the ids in this
+//! table are reserved, because those are the only chronicle kinds an
+//! engine-side emitter writes into a fixture's GPU event ring (the
+//! `apply_ability` dispatcher, via `EFFECT_KIND_TO_EVENT_KIND_ID`).
+//! The engine's `EventKindId` enum ALSO names 0..=25 and 33..=38
+//! (`AgentMoved`, `CastDepthExceeded`, `FearSpread`, …), but nothing
+//! writes those into the ring on this path, and every existing fixture
+//! already allocates from 0 upward — reserving them would renumber
+//! every fixture in the tree for no correctness gain. Consequence, and
+//! the property that keeps this fix cheap: a fixture with 26 or fewer
+//! non-aliased events gets exactly the ids it got before. Adding a new
+//! alias below only ever shifts ids for fixtures past that point, and
+//! ids are a compile-time internal (nothing persists them).
 
 /// All chronicle-bearing engine event names, paired with their
 /// hardcoded `EventKindId` discriminant. Mirrors
@@ -286,6 +313,74 @@ pub fn engine_event_kind_id_for_name(name: &str) -> Option<u32> {
         .map(|(_, id)| *id)
 }
 
+/// True when `id` is the hardcoded discriminant of one of the aliased
+/// engine chronicle events above — i.e. an id the `apply_ability`
+/// dispatcher can stamp on a record it writes into the shared event
+/// ring. Sequential allocation for user events must never hand this
+/// id out (see the collision policy in the module docs).
+pub fn is_reserved_engine_kind_id(id: u32) -> bool {
+    ENGINE_EVENT_KIND_IDS.iter().any(|(_, k)| *k == id)
+}
+
+/// THE allocator for chronicle `EventKindId`s, over one compilation's
+/// events in declaration order.
+///
+/// `engine_aliases` yields each event's
+/// [`crate::ir::EventIR::engine_kind_id`] (i.e. `Some(discriminant)`
+/// for an engine-aliased name, `None` for a user-declared or
+/// compiler-synthesised one), and the returned vector holds the id for
+/// the event at the same position:
+///
+/// * `Some(id)` → the hardcoded engine discriminant, verbatim, so the
+///   kernel filter constant matches what the dispatcher writes.
+/// * `None` → the next sequential id that is NOT reserved by
+///   [`ENGINE_EVENT_KIND_IDS`].
+///
+/// The allocation is a pure function of declaration order (no
+/// interior state, no hashing) so it is stable across runs and across
+/// the three call sites that mirror it. Note that an alias never
+/// consumes a sequential slot: two fixtures differing only in an
+/// added `event EffectDamageApplied` keep the same ids for every
+/// other event.
+pub fn assign_event_kind_ids<I>(engine_aliases: I) -> Vec<u32>
+where
+    I: IntoIterator<Item = Option<u32>>,
+{
+    let mut out = Vec::new();
+    let mut next: u32 = 0;
+    for alias in engine_aliases {
+        match alias {
+            Some(id) => out.push(id),
+            None => {
+                while is_reserved_engine_kind_id(next) {
+                    next += 1;
+                }
+                out.push(next);
+                next += 1;
+            }
+        }
+    }
+    out
+}
+
+/// [`assign_event_kind_ids`] over a resolved event table.
+pub fn event_kind_ids(events: &[crate::ir::EventIR]) -> Vec<u32> {
+    assign_event_kind_ids(events.iter().map(|e| e.engine_kind_id))
+}
+
+/// The chronicle kind id of `events[index]`, mirroring
+/// [`assign_event_kind_ids`] exactly. Returns `None` when `index` is
+/// out of bounds. Allocation only depends on the prefix `..=index`,
+/// so this is safe to call against a partially-grown event table (the
+/// verb-expansion pass appends synthesised events after resolve).
+pub fn event_kind_id_at(events: &[crate::ir::EventIR], index: usize) -> Option<u32> {
+    if index >= events.len() {
+        return None;
+    }
+    assign_event_kind_ids(events[..=index].iter().map(|e| e.engine_kind_id))
+        .pop()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -348,5 +443,61 @@ mod tests {
         assert_eq!(engine_event_kind_id_for_name("Tick"), None);
         assert_eq!(engine_event_kind_id_for_name("MyCustomEvent"), None);
         assert_eq!(engine_event_kind_id_for_name(""), None);
+    }
+
+    #[test]
+    fn reserved_predicate_covers_exactly_the_alias_table() {
+        for (_, id) in ENGINE_EVENT_KIND_IDS {
+            assert!(is_reserved_engine_kind_id(*id), "alias {id} must be reserved");
+        }
+        // Ids the engine enum names but no aliased chronicle emitter
+        // writes — deliberately NOT reserved (see the module docs).
+        for id in [0u32, 1, 25, 33, 34, 35, 36, 37, 38, 81, 128] {
+            assert!(!is_reserved_engine_kind_id(id), "{id} must stay allocatable");
+        }
+    }
+
+    /// The regression this fix exists for: the 27th user event used to
+    /// land on 26 (`EffectDamageApplied`, the dispatcher's damage tag).
+    #[test]
+    fn user_ids_skip_the_reserved_range() {
+        let ids = assign_event_kind_ids(std::iter::repeat(None).take(60));
+        assert_eq!(ids.len(), 60);
+        // First 26 unchanged from the old sequential policy — this is
+        // what keeps every existing fixture byte-identical.
+        for (i, id) in ids.iter().take(26).enumerate() {
+            assert_eq!(*id as usize, i);
+        }
+        // Then the alias block is stepped over: 26..=32 and 39..=80 are
+        // reserved, 33..=38 are not.
+        assert_eq!(&ids[26..34], &[33, 34, 35, 36, 37, 38, 81, 82]);
+        for id in &ids {
+            assert!(!is_reserved_engine_kind_id(*id), "user id {id} collides with an engine alias");
+        }
+        // Distinctness (a duplicate would trip DuplicateInternEntry).
+        let mut sorted = ids.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), ids.len());
+    }
+
+    #[test]
+    fn aliases_keep_their_discriminant_and_consume_no_sequential_slot() {
+        // Tick, EffectDamageApplied, then two user events.
+        let ids = assign_event_kind_ids([None, Some(26), None, None]);
+        assert_eq!(ids, vec![0, 26, 1, 2]);
+    }
+
+    #[test]
+    fn allocation_is_prefix_stable() {
+        // `event_kind_id_at` recomputes from the prefix; it must agree
+        // with the batch allocator for every index, which is what lets
+        // the verb-expansion pass append synthesised events later.
+        let aliases = [None, None, Some(39), None, Some(26), None];
+        let all = assign_event_kind_ids(aliases);
+        for i in 0..aliases.len() {
+            let prefix = assign_event_kind_ids(aliases[..=i].iter().copied());
+            assert_eq!(prefix.last().copied(), Some(all[i]), "index {i}");
+        }
     }
 }

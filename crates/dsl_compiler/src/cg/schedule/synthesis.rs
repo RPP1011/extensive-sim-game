@@ -357,6 +357,17 @@ pub struct ScheduleSynthesisResult {
     /// only kind is
     /// [`ScheduleDiagnosticKind::IndirectProducerMissing`].
     pub schedule_diagnostics: Vec<ScheduleDiagnostic>,
+    /// Findings from the event-ring order validator
+    /// ([`super::ring_order::validate_ring_order`]) run against the
+    /// FINISHED stage order. Empty is the healthy state.
+    ///
+    /// This channel exists because a mis-ordered chronicle consumer is
+    /// otherwise completely silent — it reads an unwritten ring, folds
+    /// nothing, and the feature it implements just stops working. Build
+    /// scripts print every entry and promote
+    /// [`super::ring_order::RingOrderSeverity::Bug`] entries to hard
+    /// errors under `SIM_REQUIRE_ALL_RULES`.
+    pub ring_order_issues: Vec<super::ring_order::RingOrderIssue>,
 }
 
 // ---------------------------------------------------------------------------
@@ -437,11 +448,37 @@ pub fn synthesize_schedule_with_registry(
         });
     }
 
+    // Validate the FINISHED order, not the sort's internal reasoning:
+    // two of the three shipped instances of "chronicle consumer ran
+    // before its producer" were dep-graph EDGE-CONSTRUCTION bugs, which
+    // no guard inside the sort can see. Checking the output against the
+    // program's own event facts catches ordering bugs, edge bugs, and
+    // future fusion re-orderings alike. See `super::ring_order`.
+    let stage_order: Vec<OpId> = schedule_op_order(&stages);
+    let ring_order_issues = super::ring_order::validate_ring_order(prog, &deps, &stage_order);
+
     ScheduleSynthesisResult {
         schedule: ComputeSchedule { stages },
         fusion_diagnostics,
         schedule_diagnostics,
+        ring_order_issues,
     }
+}
+
+/// Flatten a stage list into the op order it dispatches in. Ops fused
+/// into one kernel share a stage; the validator only cares about
+/// relative STAGE position, so listing them in intra-stage order is
+/// correct (a fused kernel's ops all run in the same dispatch, and a
+/// ring producer/consumer pair is never fused into one kernel — fusion
+/// rule 4 splits them).
+fn schedule_op_order(stages: &[ComputeStage]) -> Vec<OpId> {
+    let mut out = Vec::new();
+    for stage in stages {
+        for kernel in &stage.kernels {
+            out.extend(kernel.ops());
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------

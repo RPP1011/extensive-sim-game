@@ -568,9 +568,11 @@ pub struct EventIR {
     pub span: Span,
     /// Engine-aliased `EventKindId` discriminant for events whose name
     /// matches a hardcoded engine event (`EffectDamageApplied = 26`,
-    /// etc.). `None` for user-declared events — the lowering driver
-    /// then falls back to sequential allocation (`EventKindId(i)` where
-    /// `i` is the position in `Compilation::events`).
+    /// etc.). `None` for user-declared events — those are allocated
+    /// sequentially by `crate::engine_events::assign_event_kind_ids`,
+    /// which SKIPS every reserved engine discriminant (a plain
+    /// `EventKindId(i)` aliased the 27th user event onto the
+    /// dispatcher's damage tag; fixed 2026-07-22).
     ///
     /// Populated by `dsl_ast::resolve` from
     /// `crate::engine_events::engine_event_kind_id_for_name`. The
@@ -578,7 +580,8 @@ pub struct EventIR {
     /// so the kernel's filter constant matches the dispatcher's
     /// hardcoded write tag (closed loop for the chronicle pipeline).
     /// See `assets/sim/apply_ability_chronicle_consumer.sim` for the
-    /// motivating fixture.
+    /// motivating fixture and `assets/sim/many_events_ability.sim` for
+    /// the >25-event collision pin.
     pub engine_kind_id: Option<u32>,
 }
 

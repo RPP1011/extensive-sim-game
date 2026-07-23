@@ -67,7 +67,7 @@ fn packed_q8_emits_per_word_byte_loop_in_decay_wgsl() {
     //    binds `word_idx` (not `k`) and the bound check fires against
     //    the word count.
     assert!(
-        decay_wgsl.contains("let word_idx = gid.x;"),
+        decay_wgsl.contains("let word_idx = gid.x + gid.y * 4194240u;"),
         "expected per-WORD preamble; got:\n{decay_wgsl}"
     );
     assert!(
@@ -197,7 +197,7 @@ fn packed_q8_with_gate_inlines_predicate_per_byte() {
 
     // 1. Still per-WORD preamble (gate doesn't change the dispatch shape).
     assert!(
-        decay_wgsl.contains("let word_idx = gid.x;"),
+        decay_wgsl.contains("let word_idx = gid.x + gid.y * 4194240u;"),
         "gate + q8 should keep per-WORD preamble; got:\n{decay_wgsl}"
     );
     // 2. The gate-mask BeliefStateColumn handle walk extends the kernel

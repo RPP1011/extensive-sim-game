@@ -116,6 +116,7 @@ fn host_callable_fixture_event_emits_typed_injector_with_sequential_kind_id() {
         "{\"bindings\":[]}",
         "{\"arena_radius\":0.0,\"camera\":\"Observer\",\"agents\":[],\"vfx\":[]}",
         "{\"hud\":[],\"screens\":[]}",
+        dsl_compiler::cg::lower::DebugDepth::Off,
     );
 
     // No `cargo:warning` codepath should fire — the typed method must
@@ -227,6 +228,7 @@ fn host_callable_engine_aliased_event_still_uses_engine_kind_id() {
         "{\"bindings\":[]}",
         "{\"arena_radius\":0.0,\"camera\":\"Observer\",\"agents\":[],\"vfx\":[]}",
         "{\"hud\":[],\"screens\":[]}",
+        dsl_compiler::cg::lower::DebugDepth::Off,
     );
 
     // Fixture-defined event uses sequential id (index 0 → 0).

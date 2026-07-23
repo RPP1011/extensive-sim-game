@@ -1,0 +1,19 @@
+// many_events_ability — the only ability in the corpus, so it takes
+// registry slot 1 (build.rs and the runtime both enumerate the corpus
+// dir alphabetically, so the slot ids line up). The .sim dispatches it
+// as a self-cast once per tick per alive agent; the fixture's whole
+// point is that the resulting `EffectDamageApplied` chronicle record
+// (engine kind 26) reaches the right consumer in a fixture with 33
+// user events.
+//
+// `target: ally` (hostile_only = false) because the cast targets the
+// caster itself. Shape otherwise mirrors hill_raid/Strike.ability.
+
+ability SelfStrike {
+    target: ally
+    range: 50.0
+    cooldown: 0
+    hint: damage
+
+    damage 4.0 [PHYSICAL: 100]
+}

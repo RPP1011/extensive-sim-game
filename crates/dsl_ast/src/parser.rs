@@ -402,7 +402,13 @@ fn agent_field_decl(
         .map_err(|e| e.with_context("parsing field decl (expected `:` after name)"))?;
     c.skip_ws();
     let ty_name = ident(c).map_err(|e| e.with_context("parsing field type"))?;
-    c.skip_ws();
+    // INLINE ws only: a newline-crossing skip here would leave the cursor
+    // past the line end, defeating `absorb_trailing_annotations`' same-line
+    // guard — the NEXT decl's leading `@phase(per_agent)` would be absorbed
+    // as this field's trailing annotation, and the robbed rule would then
+    // lower PerEvent so every `self` read fails well-formedness. A trailing
+    // semicolon terminating this decl is on this line by definition.
+    skip_inline_ws(c);
     // Optional trailing semicolon for visual symmetry with `let`
     // statements; not required.
     if c.starts_with_char(';') {

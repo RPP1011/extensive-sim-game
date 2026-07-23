@@ -740,6 +740,33 @@ post phase   (@phase(post) rules; ground-snap, overhear scan,
 metric sinks updated; alerts emitted
 ```
 
+**Same-tick event-ring ordering (schedule contract).** Every stage above that
+READS this tick's event ring — `physics on <Event>` consumers, `view fold on
+<Event>` handlers, and `merge from <Event>` belief kernels — is scheduled AFTER
+every stage that APPENDS the kind it reads. This is a hard contract, not a
+best effort, because breaking it is completely silent: the consumer scans a
+ring segment its producer has not written, matches zero rows, and the feature
+it implements simply stops existing (no panic, no WGSL error, no diagnostic).
+
+The compiler enforces it in two places:
+
+* `cg::schedule::topology::topological_sort_best_effort` — when a dependency
+  cycle stalls Kahn's queue, the forced pick NEVER selects a ring consumer
+  that still has an unemitted ring producer. If the ring sub-relation itself
+  is cyclic and no legal pick exists, the break is taken INSIDE the cycle
+  (deterministically, smallest OpId sharing an SCC with its own pending
+  producer) and reported as a `ForcedRingBreak`.
+* `cg::schedule::ring_order::validate_ring_order` — runs on EVERY
+  `synthesize_schedule` call and re-checks the finished stage order against
+  the program's own event facts. Findings print as
+  `cargo:warning=[<fixture> ring order] …`; the ones no cycle explains are
+  compiler defects and are promoted to a hard build error under
+  `SIM_REQUIRE_ALL_RULES=1` (see § the silent-drop discipline / `// SKIP`
+  convention above — same posture, applied to ordering). The validator also
+  flags a subscription whose `EventKindId` has no name in the event-kind
+  interner, which is how a mis-keyed `merge from` (no dep-graph edge at all,
+  so no ordering guard can help) surfaces.
+
 **Ground-snap phase** — a post-MovementApplied cascade rule for ground-locked `creature_type`s:
 
 ```

@@ -1083,17 +1083,23 @@ fn populate_event_kinds(
         });
     }
 
+    // Engine-aliased events (e.g. `EffectDamageApplied = 26`) use their
+    // hardcoded discriminant so the kernel filter constant matches what
+    // the `apply_ability` dispatcher writes. User events get the next
+    // sequential id that is NOT reserved by the alias table — see
+    // `dsl_ast::engine_events::assign_event_kind_ids`, the single
+    // allocator `resolve_event_ref` and `build_helper`'s
+    // `@host_callable` injector both mirror. (Pre-2026-07-22 this was a
+    // bare `unwrap_or(i)`, and any fixture past ~25 user events had an
+    // event silently aliased onto the dispatcher's damage tag.) See
+    // `assets/sim/apply_ability_chronicle_consumer.sim` for the
+    // motivating fixture and `assets/sim/many_events_ability.sim` for
+    // the >25-event regression pin.
+    let allocated_kind_ids = dsl_ast::engine_events::event_kind_ids(&comp.events);
+
     let mut ring_ids = Vec::with_capacity(comp.events.len());
     for (i, event) in comp.events.iter().enumerate() {
-        // Engine-aliased events (e.g. `EffectDamageApplied = 26`) use
-        // their hardcoded discriminant so the kernel filter constant
-        // matches what the dispatcher writes. User events keep the
-        // sequential `EventKindId(i)` allocation. The `engine_kind_id`
-        // field is populated by `dsl_ast::resolve` from
-        // `engine_events::engine_event_kind_id_for_name`. See
-        // `assets/sim/apply_ability_chronicle_consumer.sim` for the
-        // motivating fixture.
-        let kind_id = EventKindId(event.engine_kind_id.unwrap_or(i as u32));
+        let kind_id = EventKindId(allocated_kind_ids[i]);
         ring_ids.push(shared_ring);
 
         ctx.register_event_kind(event.name.clone(), kind_id);
@@ -2972,8 +2978,12 @@ fn build_physics_handler_resolution(
 ///   field. This makes the kernel filter constant agree with the
 ///   dispatcher's hardcoded write tag (closed loop for the chronicle
 ///   pipeline).
-/// - User-declared events fall back to the source-order index
-///   (`EventKindId(event_ref.0)`).
+/// - User-declared events take the next sequential id that is not
+///   reserved by the engine alias table.
+///
+/// Both cases go through `dsl_ast::engine_events::event_kind_id_at`,
+/// which is the same allocator `populate_event_kinds` runs in batch —
+/// so the two can't drift.
 ///
 /// A ref pointing past the table surfaces as a typed diagnostic.
 fn resolve_event_ref(
@@ -2990,10 +3000,12 @@ fn resolve_event_ref(
             span,
         }
     })?;
-    let kind_id = events
-        .get(i)
-        .and_then(|e| e.engine_kind_id)
-        .unwrap_or(i as u32);
+    let kind_id = dsl_ast::engine_events::event_kind_id_at(events, i).ok_or_else(|| {
+        LoweringError::UnresolvedEventPattern {
+            event_name: name.to_string(),
+            span,
+        }
+    })?;
     Ok((EventKindId(kind_id), ring))
 }
 

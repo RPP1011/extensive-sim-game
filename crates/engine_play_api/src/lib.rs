@@ -25,6 +25,15 @@ pub trait PlayableRuntime {
     fn agent_snapshot(&mut self) -> Vec<AgentView>;
     /// Materialized-view value at an agent slot (e.g. "xp"); 0.0 if unknown.
     fn view_value(&mut self, view: &str, slot: u32) -> f32;
+    /// S13 — the TEXT half of `view_value`: a named STRING the HUD may print
+    /// (`None` = this runtime has no text under that name, and the numeric
+    /// channel answers instead). DEFAULTED, so every existing implementor —
+    /// including every generated `.sim` runtime — is unaffected; a host that
+    /// carries prose (`webband_play`'s petition, the selected colonist's
+    /// name) overrides it.
+    fn view_text(&mut self, _view: &str) -> Option<String> {
+        None
+    }
     fn render_descriptor(&self) -> &'static str;
     fn controls_descriptor(&self) -> &'static str;
     fn ui_descriptor(&self) -> &'static str;

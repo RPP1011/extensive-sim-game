@@ -1243,6 +1243,62 @@ fn compose_wgsl_file(
     out
 }
 
+/// Threads covered by ONE full-width row of a **wide 1-D dispatch**.
+///
+/// `max_compute_workgroups_per_dimension` is 65535 (the WebGPU spec
+/// minimum, and exactly what every device in this corpus reports), so a
+/// single-axis `dispatch_workgroups(n, 1, 1)` tops out at
+/// `65535 x 64 = 4_194_240` threads. The pair-keyed domains
+/// (`agent_cap^2` — belief fold/decay storage and PerPair fused masks)
+/// pass that at **agent_cap 2048** (`2048^2 / 64 = 65_536` workgroups,
+/// one over the limit) and wgpu kills the process with a validation
+/// error rather than clamping.
+///
+/// The fix is a chunked dispatch expressed as full-width rows: emit
+/// `dispatch_workgroups(65535, ceil(wg / 65535), 1)` and have the WGSL
+/// preamble reconstruct the flat index as
+/// `gid.y * WIDE_DISPATCH_ROW_THREADS + gid.x`. Because every row is
+/// EXACTLY this wide, the reconstruction needs no uniform (no free cfg
+/// slot exists on the ViewFold layout) and no host-side loop.
+///
+/// Determinism is untouched: each thread still owns exactly one slot,
+/// the serial-scan folds still walk the radix-sorted ring in ring
+/// order, and rows past the domain early-return on the same bounds
+/// guard as before. Sub-4M domains emit `(wg, 1, 1)` exactly as they
+/// did — `gid.y` is 0 there, so the added term is a no-op and existing
+/// digests cannot move.
+pub(crate) const WIDE_DISPATCH_ROW_THREADS: u32 = 65_535 * 64;
+
+/// WGSL fragment reconstructing a wide 1-D dispatch's flat thread index
+/// (see [`WIDE_DISPATCH_ROW_THREADS`]). Appended to every generated
+/// preamble whose `gid.x` is a flat index into a domain that can be
+/// chunked into y rows.
+pub(crate) fn wide_index_term() -> String {
+    format!(" + gid.y * {WIDE_DISPATCH_ROW_THREADS}u")
+}
+
+/// Emit the `pass.dispatch_workgroups(...)` lines for a wide 1-D
+/// domain of `count_expr` threads at workgroup_size.x = 64.
+/// See [`WIDE_DISPATCH_ROW_THREADS`] for why and for the determinism
+/// argument.
+fn compose_wide_1d_dispatch(count_expr: &str) -> String {
+    format!(
+        "        // Wide 1-D dispatch — `max_compute_workgroups_per_dimension`\n        \
+         // is 65535, so domains past {WIDE_DISPATCH_ROW_THREADS} threads (the\n        \
+         // agent_cap^2 pair map at cap >= 2048) are folded into FULL-WIDTH y\n        \
+         // rows; the WGSL preamble rebuilds the flat index as\n        \
+         // `gid.y * {WIDE_DISPATCH_ROW_THREADS}u + gid.x`. One row => identical\n        \
+         // to the historical single-axis dispatch.\n        \
+         let __wide_wg = ({count_expr} + 63u32) / 64u32;\n        \
+         let (__wide_x, __wide_y) = if __wide_wg <= 65535u32 {{\n            \
+         (__wide_wg, 1u32)\n        \
+         }} else {{\n            \
+         (65535u32, (__wide_wg + 65534u32) / 65535u32)\n        \
+         }};\n        \
+         pass.dispatch_workgroups(__wide_x, __wide_y, 1);\n"
+    )
+}
+
 /// Pull the dispatch shape off a topology — handles all variants by
 /// returning the per-stage shape stored on the topology. Used by
 /// `compose_wgsl_file` to switch between the standard
@@ -2544,7 +2600,11 @@ fn compose_view_fold_record_method(spec: &KernelSpec) -> String {
             "        pass.dispatch_workgroups((agent_cap + 7u32) / 8u32, (agent_cap + 7u32) / 8u32, 1);\n",
         );
     } else {
-        out.push_str("        pass.dispatch_workgroups((agent_cap + 63u32) / 64u32, 1, 1);\n");
+        // Wide 1-D: pair-keyed folds are dispatched over the FULL pair
+        // domain (`agent_count * K`, see `view_kernel_domain_expr` in
+        // build_helper.rs), which passes the 65535-workgroup axis limit
+        // at agent_cap 2048.
+        out.push_str(&compose_wide_1d_dispatch("agent_cap"));
     }
     out.push_str("    }\n");
     out
@@ -2591,6 +2651,15 @@ fn compose_dispatch_call(topology: &KernelTopology, spec: &KernelSpec) -> String
             wg_x = wg_x,
             wg_x_minus_one = wg_x - 1
         ),
+        DispatchShape::PerAgent | DispatchShape::PerEvent { .. }
+            if matches!(spec.kind, KernelKind::ViewDecay) && wg_x == 64 =>
+        {
+            // ViewDecay over a pair-keyed view sweeps `agent_count * K`
+            // cells (the call site passes that domain, see
+            // `view_kernel_domain_expr`), so it hits the same
+            // 65535-workgroup axis limit the folds do at cap 2048.
+            compose_wide_1d_dispatch("agent_cap")
+        }
         DispatchShape::PerAgent
         | DispatchShape::PerEvent { .. } => format!(
             "        pass.dispatch_workgroups((agent_cap + {wg_x_minus_one}u32) / {wg_x}u32, 1, 1);\n",
@@ -2607,13 +2676,15 @@ fn compose_dispatch_call(topology: &KernelTopology, spec: &KernelSpec) -> String
             // threads against the 256-pair grid; mask bits only got set
             // for agents whose `pair / agent_cap` landed in 0..63/16. The
             // fix dispatches `(agent_cap² + wg-1) / wg` workgroups so
-            // the kernel sees the full pair walk. Chunked dispatch for
-            // exceeding `max_compute_workgroups_per_dimension` stays a
-            // future concern (cfg._pad0 = pair_offset still works for it).
-            "        let pair_count = agent_cap * agent_cap;\n        \
-             pass.dispatch_workgroups((pair_count + {wg_x_minus_one}u32) / {wg_x}u32, 1, 1);\n",
-            wg_x = wg_x,
-            wg_x_minus_one = wg_x - 1
+            // the kernel sees the full pair walk. 2026-07-22: that
+            // single-axis form dies at agent_cap 2048 (65536 workgroups
+            // vs the 65535 limit) — the count is now folded into
+            // full-width y rows and the preamble adds `gid.y *
+            // WIDE_DISPATCH_ROW_THREADS` (the `cfg._pad0 = pair_offset`
+            // host-chunking hook is untouched and still composes: rows
+            // and offset simply add).
+            "        let pair_count = agent_cap * agent_cap;\n{wide}",
+            wide = compose_wide_1d_dispatch("pair_count"),
         ),
         DispatchShape::PerCell => {
             // PerCell: one workgroup per spatial-grid cell. The cell

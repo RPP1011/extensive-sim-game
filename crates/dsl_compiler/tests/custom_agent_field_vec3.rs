@@ -206,6 +206,7 @@ fn synthesize_runtime_allocates_vec3_buf() {
         "{\"bindings\":[]}",
         "{\"arena_radius\":0.0,\"camera\":\"Observer\",\"agents\":[],\"vfx\":[]}",
         "{\"hud\":[],\"screens\":[]}",
+        dsl_compiler::cg::lower::DebugDepth::Off,
     );
 
     // The runtime struct must own the per-agent buffer for the

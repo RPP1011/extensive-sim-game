@@ -29,6 +29,8 @@ pub struct MockRuntime {
     pub last_input: Vec<(String, f32)>,
     /// Materialized-view values keyed `(view, slot)`. Defaults to 0.0.
     pub views: std::collections::HashMap<(String, u32), f32>,
+    /// S13: named TEXTS this runtime answers `view_text` with.
+    pub texts: std::collections::HashMap<String, String>,
 }
 
 impl MockRuntime {
@@ -58,6 +60,7 @@ impl MockRuntime {
             ],
             last_input: Vec::new(),
             views: std::collections::HashMap::new(),
+            texts: std::collections::HashMap::new(),
         }
     }
 
@@ -95,6 +98,9 @@ impl PlayableRuntime for MockRuntime {
             .get(&(view.to_string(), slot))
             .copied()
             .unwrap_or(0.0)
+    }
+    fn view_text(&mut self, view: &str) -> Option<String> {
+        self.texts.get(view).cloned()
     }
     fn render_descriptor(&self) -> &'static str {
         MOCK_RENDER

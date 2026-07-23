@@ -114,22 +114,26 @@ render {
     let json = render::render_decl_to_json(p.render.as_ref().unwrap(), &ords);
     let d = RenderDescriptor::from_json(&json)
         .unwrap_or_else(|e| panic!("render from_json failed ({e}) for:\n{json}"));
-    // Camera follow on Player → creature_type field, lo == hi == 0.
+    // Camera follow on Player → creature_type field, half-open [0, 1):
+    // the bridge's in_range is [lo, hi), so hi must be ordinal + 1 or the
+    // selector matches nothing (the pre-fix lo == hi emission was the
+    // defect the webband port's S8-prep found — every subkind-keyed
+    // render block was invisible).
     match d.camera {
         CameraSpec::Follow(r) => {
             assert_eq!(r.field, "creature_type");
             assert_eq!(r.lo, 0.0);
-            assert_eq!(r.hi, 0.0);
+            assert_eq!(r.hi, 1.0);
         }
         _ => panic!("expected Follow camera"),
     }
     assert_eq!(d.agents.len(), 2);
     assert_eq!(d.agents[0].when.field, "creature_type");
     assert_eq!(d.agents[0].when.lo, 0.0);
-    assert_eq!(d.agents[0].when.hi, 0.0);
+    assert_eq!(d.agents[0].when.hi, 1.0);
     assert_eq!(d.agents[1].when.field, "creature_type");
     assert_eq!(d.agents[1].when.lo, 1.0);
-    assert_eq!(d.agents[1].when.hi, 1.0);
+    assert_eq!(d.agents[1].when.hi, 2.0);
 }
 
 #[test]

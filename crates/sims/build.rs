@@ -140,6 +140,27 @@ fn main() {
                 | "terrain_probe"
                 | "terrain_probe_imported"
                 | "vampire_survivors"
+                // Webband spike fixtures (2026-07-21): the colony-loop
+                // trajectory pin (crates/sims/tests/webband_colony.rs —
+                // carries the pair-keyed belief fold NUMERIC pin) and the
+                // custom-agent-fields probe.
+                | "webband_colony"
+                | "webband_fields_probe"
+                // Perf slice (2026-07-22) — the tick-rate scaling bench.
+                // `webband_bench` is webband_colony with the colonist
+                // spawn count raised to 500 (live population dialled at
+                // runtime via agent_alive_buf); `webband_bench_nopair`
+                // is the same fixture minus the four pair_map beliefs,
+                // the bisection that attributes the O(agent_cap^2)
+                // pair-fold cost. Driven by
+                // crates/sims/examples/webband_bench.rs.
+                | "webband_bench"
+                | "webband_bench_nopair"
+                // S5b (2026-07-22) — >25-user-event `apply_ability`
+                // regression pin (crates/sims/tests/many_events_ability_pin.rs).
+                // Compiles only because user event kind ids now skip the
+                // engine's reserved chronicle discriminants.
+                | "many_events_ability"
                 // Plan D — minimal end-to-end probe for the generic `play`
                 // binary (all three player-facing blocks + one host-driven
                 // movement rule). Drives `sims::make_playable("play_probe")`.

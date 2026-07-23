@@ -36,6 +36,27 @@ pub struct PlayerConfig {
     /// `@runtime` field prefix that host upgrade counters write to (e.g.
     /// `"ctl"` → `Increment("bolt_level")` writes `ctl.bolt_level`).
     pub upgrade_block: String,
+    /// EXTRA HUD VALUES, fixture-agnostic (S12). Each name is queried once
+    /// per frame via [`PlayableRuntime::view_value`] at [`Self::player_slot`]
+    /// and published into the frame's [`UiData`] under the SAME name, so a
+    /// `ui {}` (or a host-built [`UiModel`]) can write `{my_value}` in a
+    /// `Text` template or point a `Bar` at it.
+    ///
+    /// Why it exists: S8's [`observer_ui_model`] could honestly print only
+    /// the tick and an agent count, because those are the only numbers the
+    /// frozen `PlayableRuntime` trait exposes generically — and `view_value`
+    /// is the one seam a runtime can answer ANY named scalar through. A
+    /// campaign host (`webband_play`) answers "wb_day"/"wb_gold"/"wb_raiders"
+    /// from its own state; a plain fixture answers with its materialized
+    /// views. Empty by default: no existing caller changes behaviour.
+    pub hud_views: Vec<String>,
+    /// EXTRA HUD TEXTS, fixture-agnostic (S13). Each name is queried once per
+    /// frame via [`PlayableRuntime::view_text`] and published into the frame's
+    /// [`UiData`] text channel under the SAME name, so a `Text` template can
+    /// write `{my_line}` and get PROSE. Empty by default; a runtime that does
+    /// not override `view_text` answers `None` and the numeric channel is
+    /// used exactly as before.
+    pub hud_texts: Vec<String>,
 }
 
 impl Default for PlayerConfig {
@@ -46,6 +67,8 @@ impl Default for PlayerConfig {
             xp_per_level: 5.0,
             player_hp_max: 100.0,
             upgrade_block: "ctl".into(),
+            hud_views: Vec::new(),
+            hud_texts: Vec::new(),
         }
     }
 }
@@ -179,8 +202,14 @@ pub fn update(
     // 4. Level / death machine + HUD data.
     let xp = rt.view_value(&host.cfg.level_view, host.cfg.player_slot);
     let lv = host.level(xp);
+    // An `Observer` camera declares a fixture with NO player agent (a colony
+    // sim, an ecology, a crowd). The level/death machine is only meaningful
+    // for `Follow` fixtures: without this gate `followed()` is permanently
+    // `None`, the death screen opens on frame ONE and the sim is frozen
+    // behind a "You Died" modal forever. Observer fixtures run unmodalled.
+    let has_player = matches!(bridge.descriptor().camera, engine_play_api::CameraSpec::Follow(_));
     let player_alive = bridge.followed(&agents).is_some();
-    if host.active_screen.is_none() {
+    if has_player && host.active_screen.is_none() {
         if player_alive && lv > host.last_level {
             host.active_screen = Some("level_up".into());
         } else if !player_alive {
@@ -191,6 +220,7 @@ pub fn update(
 
     let hp = bridge.followed(&agents).map(|a| a.hp).unwrap_or(0.0);
     let enemies = agents.len();
+    let alive = agents.iter().filter(|a| a.alive).count();
     host.ui_data
         .set("hp", hp)
         .set("hp_max", host.cfg.player_hp_max)
@@ -200,7 +230,30 @@ pub fn update(
         .set("xp_per_level", host.cfg.xp_per_level)
         .set("kills", xp)
         .set("time", tick as f32 * 0.1)
-        .set("enemies", enemies as f32);
+        .set("enemies", enemies as f32)
+        // Fixture-agnostic observer values: the raw tick and how many agents
+        // the snapshot reports alive. Everything else in this block assumes a
+        // followed player agent, which an `Observer` fixture does not have.
+        .set("tick", tick as f32)
+        .set("alive", alive as f32)
+        .set("agents", enemies as f32);
+
+    // 4b. Host-declared extra HUD values (S12): any scalar the runtime can
+    // name through `view_value` becomes a `{key}` the UI model can print.
+    // Queried AFTER the built-ins so a host can deliberately override one.
+    for name in &host.cfg.hud_views {
+        let v = rt.view_value(name, host.cfg.player_slot);
+        host.ui_data.set(name, v);
+    }
+
+    // 4c. Host-declared HUD TEXTS (S13): the same seam for prose. Queried
+    // after the scalars, and a text key wins over a numeric one of the same
+    // name inside `UiData::fill`.
+    for name in &host.cfg.hud_texts {
+        if let Some(s) = rt.view_text(name) {
+            host.ui_data.set_text(name, s);
+        }
+    }
 
     // 5. Draw the UI in the provided context, capturing the action.
     let model = &host.ui_model;
@@ -267,6 +320,23 @@ pub fn mock_ui_model() -> UiModel {
                 },
             },
         ],
+    }
+}
+
+/// A HUD for fixtures that declare an `Observer` camera and ship an EMPTY
+/// `ui {}` block (`{"hud":[],"screens":[]}` — the compiler's default). Such a
+/// fixture would otherwise render with no HUD at all, and the player-shaped
+/// [`mock_ui_model`] would lie (an HP bar for a colony with no player).
+/// Fixture-agnostic on purpose: only the tick and the snapshot's alive count.
+/// A fixture that wants real numbers (day, colonists, food) should declare
+/// them in its own `ui {}` block; this is the honest fallback.
+pub fn observer_ui_model() -> UiModel {
+    use engine_ui::Widget;
+    UiModel {
+        hud: vec![Widget::Text {
+            template: "tick {tick}   agents alive {alive} / {agents}".into(),
+        }],
+        screens: vec![],
     }
 }
 
@@ -629,6 +699,9 @@ mod shell {
                 Some(lower)
             }
             Key::Named(NamedKey::Space) => Some("space".into()),
+            // S13: selection needs a "next" key that is not a letter a game
+            // might want; Tab is the conventional one.
+            Key::Named(NamedKey::Tab) => Some("tab".into()),
             Key::Named(NamedKey::ArrowUp) => Some("arrowup".into()),
             Key::Named(NamedKey::ArrowDown) => Some("arrowdown".into()),
             Key::Named(NamedKey::ArrowLeft) => Some("arrowleft".into()),
@@ -756,6 +829,76 @@ mod tests {
             &mut last_cells,
         );
         assert_eq!(rt.last_input_for("ctl.bolt_level"), Some(1.0));
+    }
+
+    #[test]
+    fn hud_views_publish_named_runtime_scalars() {
+        // S12: `PlayerConfig::hud_views` is the fixture-agnostic seam a host
+        // (or a fixture's own materialized views) uses to put real numbers on
+        // the HUD — `view_value(name)` in, `UiData[name]` out.
+        let (mut rt, bridge, mut host, controls) = setup();
+        host.cfg.hud_views = vec!["wb_day".to_string(), "wb_gold".to_string()];
+        rt.views.insert(("wb_day".into(), 0), 7.0);
+        rt.views.insert(("wb_gold".into(), 0), 203.0);
+        let ectx = egui::Context::default();
+        let mut grid = Painted::new();
+        let mut last_cells = Vec::new();
+        let _ = update(
+            &mut rt,
+            &bridge,
+            &mut host,
+            &controls,
+            &HashSet::new(),
+            &HashSet::new(),
+            &ectx,
+            &mut grid,
+            &mut last_cells,
+        );
+        assert_eq!(host.ui_data.get("wb_day"), 7.0);
+        assert_eq!(host.ui_data.get("wb_gold"), 203.0);
+        assert_eq!(
+            host.ui_data.fill("Day {wb_day} gold {wb_gold}"),
+            "Day 7 gold 203"
+        );
+        // An unlisted name is never queried, so it stays at UiData's zero.
+        assert_eq!(host.ui_data.get("wb_absent"), 0.0);
+    }
+
+    #[test]
+    fn hud_texts_publish_named_runtime_prose() {
+        // S13: the TEXT twin of the seam above. A campaign host carries prose
+        // the f32 channel cannot express — the open petition and its deadline,
+        // the selected colonist's name — and this is how it reaches the HUD.
+        let (mut rt, bridge, mut host, controls) = setup();
+        host.cfg.hud_texts = vec!["wb_ask".to_string(), "wb_sel".to_string()];
+        host.cfg.hud_views = vec!["wb_day".to_string()];
+        rt.views.insert(("wb_day".into(), 0), 7.0);
+        rt.texts.insert(
+            "wb_ask".into(),
+            "Hallowmere asks for 5 hands — 3 days left".into(),
+        );
+        rt.texts.insert("wb_sel".into(), "Alard the Quiet".into());
+        let ectx = egui::Context::default();
+        let mut grid = Painted::new();
+        let mut last_cells = Vec::new();
+        let _ = update(
+            &mut rt,
+            &bridge,
+            &mut host,
+            &controls,
+            &HashSet::new(),
+            &HashSet::new(),
+            &ectx,
+            &mut grid,
+            &mut last_cells,
+        );
+        assert_eq!(
+            host.ui_data.fill("Day {wb_day} | {wb_sel} | {wb_ask}"),
+            "Day 7 | Alard the Quiet | Hallowmere asks for 5 hands — 3 days left"
+        );
+        // A runtime that answers None (every generated fixture, by the trait's
+        // default) leaves the key on the numeric channel.
+        assert_eq!(host.ui_data.fill("{wb_unnamed}"), "0");
     }
 
     #[test]

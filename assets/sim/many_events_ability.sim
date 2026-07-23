@@ -1,0 +1,144 @@
+// many_events_ability — the >25-user-event `apply_ability` regression
+// fixture (S5b, 2026-07-22).
+//
+// **What it pins.** The engine aliases its chronicle events to hardcoded
+// `EventKindId` discriminants (`EffectDamageApplied = 26`, … `= 80`;
+// see `crates/dsl_ast/src/engine_events.rs`), and the `apply_ability`
+// dispatcher stamps records with those ids. User event kind ids used to
+// be allocated as a bare source-order index, so the 27th user event in a
+// `.sim` was silently assigned kind 26 — the dispatcher's damage tag.
+// Any fixture past ~25 user events was therefore locked out of
+// `apply_ability`: one damage record would be consumed by whatever
+// unrelated user rule happened to sit at index 26, with the payload
+// words aligned (actor/target land in the first two `AgentId` slots).
+// `assets/sim/webband_colony.sim` (60 user events) hit exactly this and
+// had to express combat as plain verbs with hardcoded numbers.
+//
+// The fix makes user ids skip every reserved discriminant
+// (`dsl_ast::engine_events::assign_event_kind_ids`). This fixture is the
+// executable proof, and it is deliberately built so that the OLD policy
+// cannot even compile it:
+//
+//   idx  0        Tick               -> kind 0
+//   idx  1..25    Pad01..Pad25       -> kinds 1..25
+//   idx 26        PadWouldCollide    -> OLD kind 26 (== EffectDamageApplied!)
+//                                       NEW kind 33 (first id past the alias block)
+//   idx 27..32    Pad27..Pad32       -> NEW kinds 34,35,36,37,38,81
+//   idx 33        EffectDamageApplied-> kind 26 (engine alias, both policies)
+//
+// Under the old policy `PadWouldCollide` and `EffectDamageApplied` both
+// intern `EventKindId(26)` and the CG builder rejects with
+// `DuplicateInternEntry` — i.e. this file is a compile-time canary as
+// well as a runtime one. Under the fix it compiles, and the runtime pin
+// (`crates/sims/tests/many_events_ability_pin.rs`) asserts the two
+// halves that matter:
+//
+//   * the dispatcher's `EffectDamageApplied` records reach the REAL
+//     consumer — every agent's hp falls by `damage` per tick, so
+//     `apply_ability` demonstrably functions in a >25-event fixture;
+//   * `MarkCollider` (the rule that used to sit on kind 26) never fires
+//     — `collided_marker` stays 0.0 for every slot.
+//
+// Pads carry no producer and no consumer on purpose: they exist to push
+// the sequential allocator through the reserved range. They surface as
+// `DeclaredEventNeverEmitted` warnings, which is correct and harmless.
+//
+// Companion `.ability` corpus at `assets/ability_test/many_events_ability/`:
+//   - Strike.ability (id 1 — the only file, so it takes registry slot 1)
+
+event Tick { }
+
+// -- 25 pads: kinds 1..25, the last ids below the reserved block. ------
+event Pad01 { }
+event Pad02 { }
+event Pad03 { }
+event Pad04 { }
+event Pad05 { }
+event Pad06 { }
+event Pad07 { }
+event Pad08 { }
+event Pad09 { }
+event Pad10 { }
+event Pad11 { }
+event Pad12 { }
+event Pad13 { }
+event Pad14 { }
+event Pad15 { }
+event Pad16 { }
+event Pad17 { }
+event Pad18 { }
+event Pad19 { }
+event Pad20 { }
+event Pad21 { }
+event Pad22 { }
+event Pad23 { }
+event Pad24 { }
+event Pad25 { }
+
+// THE SUBJECT: the 27th user event. Old policy -> kind 26, i.e. the
+// dispatcher's `EffectDamageApplied` tag. Its payload is shaped like a
+// damage record's first two words on purpose (actor/target), which is
+// what made the old collision silent rather than loud at runtime.
+@replayable @gpu_amenable
+event PadWouldCollide {
+  actor: AgentId,
+  target: AgentId,
+}
+
+// -- 6 more pads: they walk the allocator over the rest of the reserved
+// -- block (33..38 are free, 39..80 are aliased) and out the far side.
+event Pad27 { }
+event Pad28 { }
+event Pad29 { }
+event Pad30 { }
+event Pad31 { }
+event Pad32 { }
+
+// Engine-side chronicle event written by the `apply_ability` dispatcher
+// at hardcoded EventKindId 26. Declared last to prove position does not
+// matter for an aliased name.
+@replayable @gpu_amenable
+event EffectDamageApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+entity Fighter : Agent { }
+
+// Observable state. `collided_marker` is written ONLY by the rule that
+// used to sit on the dispatcher's kind — a nonzero value anywhere means
+// the collision is back.
+field collided_marker: f32
+field damage_records:  f32
+
+// Every alive agent self-casts Strike (registry id 1) once per tick.
+// Self-cast is the `apply_ability_chronicle_consumer` shape: it keeps
+// the fixture free of spatial queries and target scoring, so the only
+// thing under test is the chronicle kind tag.
+physics DispatchStrike @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    apply_ability 1 by self target self
+  }
+}
+
+// The REAL consumer: chronicle damage -> hp. This is the closed loop
+// that a >25-event fixture could not previously have.
+@phase(post)
+physics ApplyChronicleDamage {
+  on EffectDamageApplied { actor: a, target: t, amount: amt } {
+    agents.set_hp(t, agents.hp(t) - amt);
+    agents.set_damage_records(t, agents.damage_records(t) + 1.0);
+  }
+}
+
+// The canary: pre-fix this rule shared kind 26 with the dispatcher and
+// would have consumed every damage record as a `PadWouldCollide`,
+// reading the record's actor/target words as its own. Post-fix it sits
+// on kind 33 and, since nothing emits `PadWouldCollide`, must never run.
+@phase(post)
+physics MarkCollider {
+  on PadWouldCollide { actor: _, target: t } {
+    agents.set_collided_marker(t, 1.0);
+  }
+}

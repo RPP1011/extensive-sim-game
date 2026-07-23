@@ -22,10 +22,11 @@ use super::json::{json_escape, json_f32};
 ///
 /// Subkind selectors (`when creature_type is <Subkind>`) resolve the
 /// subkind name to its declaration-order `creature_type` ordinal via
-/// `entity_ordinals` and emit `field:"creature_type", lo == hi == ordinal`
-/// — the exact value the `self.creature_type == <Subkind>` rule guard
-/// compares against (so the player's existing field-range renderer matches
-/// the seeded agents; no new descriptor variant).
+/// `entity_ordinals` and emit `field:"creature_type", lo = ordinal,
+/// hi = ordinal + 1` — the bridge's in_range test is half-open [lo, hi),
+/// so the +1 selects exactly this ordinal (lo == hi would match nothing;
+/// that latent defect hid every subkind-keyed render block until the
+/// webband port's S8-prep caught it).
 fn field_range_json(r: &FieldRangeDecl, entity_ordinals: &BTreeMap<String, u32>) -> String {
     if let Some(subkind) = &r.subkind {
         let ord = entity_ordinals.get(subkind).copied().unwrap_or_else(|| {
@@ -35,11 +36,14 @@ fn field_range_json(r: &FieldRangeDecl, entity_ordinals: &BTreeMap<String, u32>)
                 entity_ordinals.keys().collect::<Vec<_>>(),
             )
         });
+        // The bridge's in_range is half-open [lo, hi): lo == hi matches
+        // NOTHING, so a subkind selector must emit hi = ordinal + 1 to
+        // select exactly its ordinal (webband-port S8-prep finding).
         let ord_f = ord as f32;
         return format!(
             "{{\"field\":\"creature_type\",\"lo\":{lo},\"hi\":{hi}}}",
             lo = json_f32(ord_f),
-            hi = json_f32(ord_f),
+            hi = json_f32(ord_f + 1.0),
         );
     }
     format!(

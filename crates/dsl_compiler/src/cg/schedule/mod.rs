@@ -28,10 +28,14 @@
 //! Phase 3, for the design rationale.
 
 pub mod fusion;
+pub mod ring_order;
 pub mod strategy;
 pub mod synthesis;
 pub mod topology;
 
+pub use ring_order::{
+    validate_ring_order, RingOrderIssue, RingOrderIssueKind, RingOrderSeverity,
+};
 pub use fusion::{
     dispatch_shape_key, fusion_candidates, fusion_candidates_with_registry, fusion_decisions,
     fusion_decisions_with_registry, DispatchShapeKey, FusibilityClass, FusionDiagnostic,
@@ -46,5 +50,6 @@ pub use synthesis::{
     KernelTopology, ScheduleDiagnostic, ScheduleDiagnosticKind, ScheduleSynthesisResult,
 };
 pub use topology::{
-    dependency_graph, topological_sort, topological_sort_best_effort, CycleError, DepGraph,
+    dependency_graph, topological_sort, topological_sort_best_effort,
+    topological_sort_best_effort_reporting, CycleError, DepGraph, ForcedRingBreak,
 };

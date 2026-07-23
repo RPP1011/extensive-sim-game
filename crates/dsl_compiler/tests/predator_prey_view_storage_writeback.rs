@@ -50,7 +50,7 @@ fn predator_prey_kill_count_fold_emits_storage_writeback() {
 
     // Serial PerAgent scan: one thread per observer slot.
     assert!(
-        fold_wgsl.contains("let observer_slot = gid.x;"),
+        fold_wgsl.contains("let observer_slot = gid.x + gid.y * 4194240u;"),
         "fold_kill_count should use observer_slot as the outer index — got:\n{fold_wgsl}"
     );
     assert!(

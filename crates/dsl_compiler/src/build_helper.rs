@@ -102,6 +102,54 @@ pub fn check_required_rules<E: std::fmt::Display>(
     Err(msg)
 }
 
+/// Print + gate the event-ring order validator's findings.
+///
+/// ALWAYS prints every finding as a `cargo:warning=[<fixture> ring
+/// order] …` line — that is the whole point: this bug class has only
+/// ever been silent, and its cost has been measured in debug cycles,
+/// not in broken builds (see
+/// [`crate::cg::schedule::ring_order`]'s module docs for the three
+/// shipped instances).
+///
+/// Returns `Err(message)` — suitable for `panic!` in a build script —
+/// when at least one finding carries
+/// [`crate::cg::schedule::ring_order::RingOrderSeverity::Bug`] AND
+/// `SIM_REQUIRE_ALL_RULES` is truthy. `Bug` means "no dependency cycle
+/// explains this ordering", i.e. a compiler defect rather than a
+/// fixture shape the scheduler had to compromise on; `Forced` (a real
+/// cycle) and `Info` findings are printed but never promoted, so a
+/// fixture with a genuinely cyclic ring relation still builds — loudly.
+///
+/// Split out of [`emit_into`] so tests can assert the gate semantics
+/// without a build-script environment (mirrors
+/// [`check_required_rules`]).
+pub fn check_ring_order(
+    fixture_name: &str,
+    issues: &[crate::cg::schedule::ring_order::RingOrderIssue],
+) -> Result<(), String> {
+    use crate::cg::schedule::ring_order::RingOrderSeverity;
+    for i in issues {
+        println!("cargo:warning=[{fixture_name} ring order] {i}");
+    }
+    let bugs: Vec<_> = issues
+        .iter()
+        .filter(|i| i.severity == RingOrderSeverity::Bug)
+        .collect();
+    if bugs.is_empty() || !require_all_rules_enabled() {
+        return Ok(());
+    }
+    let mut msg = format!(
+        "[{fixture_name} ring order] {} event-ring ordering defect(s) with \
+         {REQUIRE_ALL_RULES_ENV}=1; promoting to build error (a chronicle consumer that \
+         runs before its producer reads an unwritten ring and silently folds nothing):\n",
+        bugs.len(),
+    );
+    for b in bugs {
+        msg.push_str(&format!("  - {}\n", b.message));
+    }
+    Err(msg)
+}
+
 /// Standard build-script body for any per-fixture runtime crate.
 ///
 /// `fixture_name` is the basename used to:
@@ -330,6 +378,29 @@ fn emit_into(
             crate::cg::lower::DebugDepth::DslMapped
         }
     };
+    // BUILD-TIME OVERRIDE (2026-07-22): `SIM_DEBUG_DEPTH=<0..4>` raises any
+    // fixture to the requested instrumentation level without editing its
+    // `.sim`. This is what makes per-kernel attribution available for EVERY
+    // allowlisted fixture rather than only ones that happened to author a
+    // `debug { depth: kernel }` block — the D1-D4 helpers had no call site
+    // at all until now, so a perf investigation had to build a bisection
+    // fixture instead of reading a per-kernel table. A fixture's own block
+    // still wins when it asks for MORE than the env does.
+    let lower_debug_depth = match std::env::var("SIM_DEBUG_DEPTH")
+        .ok()
+        .and_then(|v| v.trim().parse::<u8>().ok())
+    {
+        Some(v) => {
+            let env_depth = crate::cg::lower::DebugDepth::from(v);
+            if env_depth > lower_debug_depth {
+                env_depth
+            } else {
+                lower_debug_depth
+            }
+        }
+        None => lower_debug_depth,
+    };
+    println!("cargo:rerun-if-env-changed=SIM_DEBUG_DEPTH");
     let lower_debug_wgsl = crate::cg::lower::DebugWgslFlags {
         event_kind_histogram: debug_wgsl_event_kind_histogram,
         mask_hit_rate: debug_wgsl_mask_hit_rate,
@@ -525,6 +596,21 @@ fn emit_into(
         strategy,
         built_registry.as_ref().map(|r| &r.registry),
     );
+    // Event-ring order validation. A chronicle consumer scheduled ahead
+    // of its producer reads an unwritten ring and the feature it
+    // implements dies SILENTLY — three shipped instances (Gap
+    // dungeon_stealth#5, webband_colony S5 + S5b), each found only
+    // because someone happened to have a numeric pin on the feature.
+    // These lines are that missing signal: every finding is printed on
+    // every build, and the ones no dependency cycle can explain (i.e.
+    // compiler defects) are promoted to hard errors under
+    // SIM_REQUIRE_ALL_RULES alongside the lower diagnostics.
+    if let Err(msg) = check_ring_order(fixture_name, &schedule_result.ring_order_issues) {
+        panic!("{msg}");
+    }
+    for d in &schedule_result.schedule_diagnostics {
+        println!("cargo:warning=[{fixture_name} schedule diag] {}", d.message);
+    }
     let mut artifacts = crate::cg::emit::emit_cg_program_with_debug(
         &schedule_result.schedule,
         &cg,
@@ -823,6 +909,7 @@ fn emit_into(
         &controls_json,
         &render_json,
         &ui_json,
+        lower_debug_depth,
     );
     fs::write(out_dir.join("runtime_core.rs"), runtime_core)
         .unwrap_or_else(|e| panic!("write runtime_core.rs: {e}"));
@@ -1758,8 +1845,17 @@ pub fn synthesize_runtime_core_a2(
     controls_json: &str,
     render_json: &str,
     ui_json: &str,
+    // D1-D4 instrumentation level this fixture was lowered at (from its
+    // `debug { depth: ... }` block, or the SIM_DEBUG_DEPTH build override).
+    // At D1+ the emitted `step()` routes every per-kernel dispatch through
+    // `dispatch::record_<name>_timing` whenever timings are switched on at
+    // runtime — see `emits_timestamps` below.
+    debug_depth: crate::cg::lower::DebugDepth,
 ) -> String {
     let kernel_count = artifacts.kernel_index.len();
+    // The DebugTimings surface (`dispatch.rs`'s D1+ block) is only
+    // EMITTED at D1+, so every call site below is gated on the same flag.
+    let emits_timings = debug_depth.emits_timestamps();
     let mut out = String::new();
     out.push_str(&format!(
         "// Plan E-A3.1 — placeholder generated runtime core for `{fixture_name}`.\n\
@@ -1845,6 +1941,7 @@ pub fn synthesize_runtime_core_a2(
         controls_json,
         render_json,
         ui_json,
+        emits_timings,
     ));
 
     out
@@ -2453,6 +2550,10 @@ fn synthesize_generated_runtime_struct(
     controls_json: &str,
     render_json: &str,
     ui_json: &str,
+    // D1+ (see `synthesize_runtime_core_a2`): emit the per-kernel timing
+    // field, its construction, the `record_<name>_timing` routing and the
+    // readback accessor. False at D0, where none of that code exists.
+    emits_timings: bool,
 ) -> String {
     use crate::kernel_binding_ir::BgSource;
     use std::collections::BTreeMap;
@@ -2475,6 +2576,98 @@ fn synthesize_generated_runtime_struct(
         .iter()
         .map(|v| (v.name.as_str(), (v.ring_k, v.cell_stride_u32)))
         .collect();
+
+    // Dispatch-domain expression for view-storage kernels (ViewFold /
+    // ViewDecay). Single-key views cover `agent_count` slots, but a
+    // pair-keyed view's storage is `agent_count * K` CELLS (K =
+    // agent_count for an Agent second key, or the static Item/Group/
+    // Quest/KeyTyped population) — the exact shape
+    // `slot_count_expr_for_view_buf` sizes the buffer with. The
+    // serial-scan fold body owns ONE CELL per thread (its
+    // `observer_slot` is the flattened pair index `k1 * K + k2`), and
+    // the decay body likewise owns one cell per thread — so the
+    // dispatch grid and the in-kernel bounds guard must both cover the
+    // FULL pair domain for pair-keyed views. Dispatching only
+    // `agent_count` threads left every pair cell with flat index >=
+    // agent_count numerically DEAD (the webband_colony spike measured
+    // 36k Brawl events folding to a 0.0 pair-map sum while the
+    // single-key spelling of the same fold worked); the bespoke
+    // per-fixture runtimes hand-size this dispatch, which is why the
+    // tom_probe pins never caught it, and belief_smoke_probe asserts
+    // buffer SIZING only.
+    //
+    // Determinism: widening the dispatch changes no ordering contract —
+    // each serial-scan thread still walks the (radix-sorted) ring in
+    // ring order and remains the sole writer of its own cell; per-event
+    // CAS folds are bounded by `cfg.event_count` and simply early-return
+    // on the extra threads.
+    //
+    // NOTE: this stays a single-shot dispatch — 65535 workgroups/dim ×
+    // 64 threads caps the pair domain at ~4.19M cells (agent_count 2048
+    // for Agent×Agent). No fixture in the corpus approaches that today;
+    // the PerPair fused-mask `pair_offset` chunking is the template if
+    // one ever does.
+    // Render one kernel's dispatch call. At D1+ the call is routed
+    // through the instrumented `record_<name>_timing` helper WHEN the
+    // runtime has timings switched on (`SIM_KERNEL_TIMINGS=1`), and
+    // through the plain `dispatch_<name>` otherwise — the two record the
+    // identical dispatch, so switching timings on cannot change what the
+    // sim computes. At D0 (every fixture unless it declares `debug {
+    // depth: ... }` or the build sets SIM_DEBUG_DEPTH) this emits exactly
+    // the historical single call.
+    let dispatch_call = |spec_name: &str, count_expr: &str, indent: &str| -> String {
+        let fname = spec_name.to_lowercase();
+        let mut out = String::new();
+        if !emits_timings {
+        out.push_str(&format!("{indent}dispatch::dispatch_{fname}(\n"));
+        out.push_str(&format!("{indent}    &mut self.cache,\n"));
+        out.push_str(&format!("{indent}    &bindings,\n"));
+        out.push_str(&format!("{indent}    &self.gpu.device,\n"));
+        out.push_str(&format!("{indent}    &mut encoder,\n"));
+        out.push_str(&format!("{indent}    {count_expr},\n"));
+        out.push_str(&format!("{indent});\n"));
+            return out;
+        }
+        // Same dispatch either way — `record_<name>_timing` brackets it
+        // in two `write_timestamp` calls and nothing else, so a timed run
+        // and an untimed run compute identical state.
+        out.push_str(&format!("{indent}match self.debug_timings.as_ref() {{\n"));
+        out.push_str(&format!("{indent}    Some(__t) => dispatch::record_{fname}_timing(\n"));
+        out.push_str(&format!("{indent}        &mut self.cache,\n"));
+        out.push_str(&format!("{indent}        __t,\n"));
+        out.push_str(&format!("{indent}        &bindings,\n"));
+        out.push_str(&format!("{indent}        &self.gpu.device,\n"));
+        out.push_str(&format!("{indent}        &mut encoder,\n"));
+        out.push_str(&format!("{indent}        {count_expr},\n"));
+        out.push_str(&format!("{indent}    ),\n"));
+        out.push_str(&format!("{indent}    None => dispatch::dispatch_{fname}(\n"));
+        out.push_str(&format!("{indent}        &mut self.cache,\n"));
+        out.push_str(&format!("{indent}        &bindings,\n"));
+        out.push_str(&format!("{indent}        &self.gpu.device,\n"));
+        out.push_str(&format!("{indent}        &mut encoder,\n"));
+        out.push_str(&format!("{indent}        {count_expr},\n"));
+        out.push_str(&format!("{indent}    ),\n"));
+        out.push_str(&format!("{indent}}}\n"));
+        out
+    };
+    let view_kernel_domain_expr = |spec: &crate::kernel_binding_ir::KernelSpec| -> String {
+        use crate::kernel_binding_ir::KernelKind;
+        if matches!(spec.kind, KernelKind::ViewFold | KernelKind::ViewDecay) {
+            if let Some(view) = view_name_from_kernel_spec(spec) {
+                if let Some(Some(pk)) = view_pair_keyed.get(view).map(|o| o.as_ref()) {
+                    let k = match pk {
+                        PairKeyedSecondKey::Agent => "self.agent_count".to_string(),
+                        PairKeyedSecondKey::Item(n)
+                        | PairKeyedSecondKey::Group(n)
+                        | PairKeyedSecondKey::Quest(n)
+                        | PairKeyedSecondKey::KeyTyped(n) => format!("{n}u32"),
+                    };
+                    return format!("self.agent_count * {k}");
+                }
+            }
+        }
+        "self.agent_count".to_string()
+    };
 
     // Fold consumer detection. Used to decide
     // whether to allocate the `prev_event_tail_buf` snapshot side
@@ -2682,6 +2875,19 @@ fn synthesize_generated_runtime_struct(
          \x20   pub registry_gpu: engine::ability::registry_gpu::PackedAbilityRegistryGpu,\n\
          \x20   pub cache: dispatch::KernelCache,\n",
     );
+    // D1+ per-kernel GPU timestamps (2026-07-22). The `DebugTimings`
+    // surface has existed in dispatch.rs since the D1-D4 work but NOTHING
+    // called it — the generated step() only ever called plain
+    // `dispatch_<name>`, so no allowlisted fixture could be attributed per
+    // kernel and the 2026-07-22 perf slice had to bisect by building a
+    // second fixture. This field is the missing call site's home.
+    // `Some` only when the process asks (`SIM_KERNEL_TIMINGS=1`) AND the
+    // adapter exposes TIMESTAMP_QUERY, so a debug-lowered build nobody
+    // switches on allocates no query set and pays one `Option` check per
+    // dispatch; a D0 build (every fixture by default) emits none of this.
+    if emits_timings {
+        out.push_str("    pub debug_timings: Option<dispatch::DebugTimings>,\n");
+    }
     for (name, _ty) in &owned {
         out.push_str(&format!("    pub {name}_buf: wgpu::Buffer,\n"));
     }
@@ -3188,8 +3394,22 @@ fn synthesize_generated_runtime_struct(
             ));
         }
     }
+    if emits_timings {
+        out.push_str(
+            "        // D1+ timing instrumentation, OFF unless asked for.\n\
+             \x20       // `SIM_KERNEL_TIMINGS=1` + a TIMESTAMP_QUERY-capable adapter.\n\
+             \x20       let debug_timings = if std::env::var_os(\"SIM_KERNEL_TIMINGS\").is_some() {\n\
+             \x20           dispatch::DebugTimings::new(&gpu)\n\
+             \x20       } else {\n\
+             \x20           None\n\
+             \x20       };\n",
+        );
+    }
     out.push_str("        Some(Self {\n");
     out.push_str("            gpu,\n");
+    if emits_timings {
+        out.push_str("            debug_timings,\n");
+    }
     out.push_str("            agent_count,\n");
     out.push_str("            seed,\n");
     out.push_str("            tick: 0,\n");
@@ -3575,6 +3795,13 @@ fn synthesize_generated_runtime_struct(
          \x20   /// Per-kernel dispatch arms land in A4.1.\n\
          \x20   pub fn step(&mut self) {\n",
     );
+    if emits_timings {
+        out.push_str(
+            "        // D1+ timing: reset the per-tick timestamp cursor. No-op\n\
+             \x20       // (and no branch cost worth naming) when timings are off.\n\
+             \x20       if let Some(t) = self.debug_timings.as_ref() { t.begin_tick(); }\n",
+        );
+    }
     // Voxel mirror flush — re-uploads any host-side `set_cell` writes
     // since the last step before any kernel reads `voxel_grid`. Cheap
     // when nothing's dirty (early-return on empty set inside
@@ -3683,23 +3910,64 @@ fn synthesize_generated_runtime_struct(
     // Per-kernel slot-3 override for ViewFold kernels in sort-enabled
     // fixtures.  The serial PerAgent scan body reads `cfg.agent_cap`
     // (slot 3) as the per-thread bounds check.  The initial cfg_words
-    // write sets slot 3 = 0; override it to `agent_count` for every
-    // fold kernel so the scan body's `if (observer_slot >= cfg.agent_cap)
-    // { return; }` guard is correct at runtime.
+    // write sets slot 3 = 0; override it to the kernel's SLOT DOMAIN so
+    // the scan body's `if (observer_slot >= cfg.agent_cap) { return; }`
+    // guard is correct at runtime: `agent_count` for single-key folds,
+    // `agent_count * K` for pair-keyed folds (whose `observer_slot` is
+    // the flattened pair-cell index `k1 * K + k2`, range agent_count*K).
+    // Writing plain `agent_count` here was half of the dead-pair-fold
+    // bug (the other half was the matching under-dispatch in the
+    // per-kernel arm below): only pair cells with flat index <
+    // agent_count — i.e. row k1 = 0 — ever computed.
     if needs_sort {
         for spec in &artifacts.kernel_specs {
             if !matches!(spec.kind, crate::kernel_binding_ir::KernelKind::ViewFold) {
                 continue;
             }
+            let domain = view_kernel_domain_expr(spec);
             out.push_str(&format!(
-                "        // ViewFold slot-3 override — sets cfg.agent_cap = agent_count for `{kname}`.\n\
+                "        // ViewFold slot-3 override — sets cfg.agent_cap = {domain} (the\n\
+                 \x20       // fold's slot domain: pair-keyed folds cover the full pair map)\n\
+                 \x20       // for `{kname}`.\n\
                  \x20       {{\n\
-                 \x20           let ac_bytes: [u8; 4] = self.agent_count.to_le_bytes();\n\
+                 \x20           let ac_bytes: [u8; 4] = ({domain}).to_le_bytes();\n\
                  \x20           self.gpu.queue.write_buffer(&self.cfg_{kname}_buf, 12u64, &ac_bytes);\n\
                  \x20       }}\n",
                 kname = spec.name,
             ));
         }
+    }
+    // Per-kernel slot-2 override for ViewDecay kernels — their cfg
+    // shape is `{ agent_cap, tick, slot_count, _pad0 }` and the decay
+    // body guards `if (k >= cfg.slot_count) { return; }`, but the
+    // uniform cfg_words write above puts the per-agent layout's SEED in
+    // slot 2. That only ever worked by accident (every corpus seed is
+    // larger than its agent cap, so the guard never clipped), and it
+    // carries two real defects:
+    //   * a pair-keyed view's decay must cover `agent_count * K` cells,
+    //     not `agent_count` — with the seed-as-bound accident the decay
+    //     coverage was set by the DISPATCH width (agent_count), leaving
+    //     every pair cell past agent_count undecayed;
+    //   * the trailing threads of the last workgroup (dispatch rounds
+    //     up to 64) pass the huge-seed guard and index past the live
+    //     slot range — robustness-clamped writes that can double-decay
+    //     the last cell nondeterministically.
+    // Write the true slot count: `agent_count` for single-key views,
+    // `agent_count * K` for pair-keyed views (matching the buffer shape
+    // from `slot_count_expr_for_view_buf`).
+    for spec in &artifacts.kernel_specs {
+        if !matches!(spec.kind, crate::kernel_binding_ir::KernelKind::ViewDecay) {
+            continue;
+        }
+        let domain = view_kernel_domain_expr(spec);
+        out.push_str(&format!(
+            "        // ViewDecay slot-2 override — sets cfg.slot_count = {domain} for `{kname}`.\n\
+             \x20       {{\n\
+             \x20           let sc_bytes: [u8; 4] = ({domain}).to_le_bytes();\n\
+             \x20           self.gpu.queue.write_buffer(&self.cfg_{kname}_buf, 8u64, &sc_bytes);\n\
+             \x20       }}\n",
+            kname = spec.name,
+        ));
     }
     // Indirect-consumer event-ring lifecycle — closes gaps 3 + 4
     // from commit 353527e6's Indirect-arm doc block, and folds in the
@@ -4171,7 +4439,6 @@ fn synthesize_generated_runtime_struct(
                 ));
             }
             let body = binding_fields.join("\n");
-            let dispatch_fn = format!("dispatch_{}", spec.name.to_lowercase());
             // Indirect-consumer kernels match BOTH `Kernel(...)` AND
             // `Indirect { kernel, .. }` arms (the latter is what the
             // synthesized SCHEDULE actually contains for a chronicle
@@ -4253,6 +4520,13 @@ fn synthesize_generated_runtime_struct(
             } else {
                 (String::new(), String::new())
             };
+            // Thread-count argument: `dispatch_<kernel>` sizes the 1-D
+            // grid as `ceil(count / 64)` workgroups. View kernels over
+            // pair-keyed storage must span the full pair domain
+            // (`agent_count * K` cells) — see the
+            // `view_kernel_domain_expr` doc block for the dead-pair-fold
+            // bug this closes. Every other kernel keeps `agent_count`.
+            let dispatch_count = view_kernel_domain_expr(spec);
             out.push_str(&format!(
                 "                {arm_pattern} => {{\n\
                  {cfg_copy_block}\
@@ -4260,17 +4534,13 @@ fn synthesize_generated_runtime_struct(
                  \x20                   let bindings = {kname}::{pascal}Bindings {{\n\
                  {body}\n\
                  \x20                   }};\n\
-                 \x20                   dispatch::{dispatch_fn}(\n\
-                 \x20                       &mut self.cache,\n\
-                 \x20                       &bindings,\n\
-                 \x20                       &self.gpu.device,\n\
-                 \x20                       &mut encoder,\n\
-                 \x20                       self.agent_count,\n\
-                 \x20                   );\n\
+                 {dispatch_line}\
                  {loop_close}\
                  \x20               }}\n",
                 kname = spec.name,
                 pascal = spec.pascal,
+                dispatch_line =
+                    dispatch_call(&spec.name, &dispatch_count, "                    "),
             ));
             continue;
         }
@@ -4331,7 +4601,6 @@ fn synthesize_generated_runtime_struct(
             ));
         }
         let extras_body = extras_fields.join("\n");
-        let dispatch_fn = format!("dispatch_{}", spec.name.to_lowercase());
         // Indirect-consumer or-pattern (see the parallel block above for
         // the rationale). Both `Kernel(...)` and `Indirect { kernel, .. }`
         // dispatch through the same `dispatch::dispatch_<name>` helper;
@@ -4392,6 +4661,11 @@ fn synthesize_generated_runtime_struct(
         } else {
             (String::new(), String::new())
         };
+        // Thread-count argument — same rule as the direct-Bindings arm
+        // path above: pair-keyed view kernels (ViewDecay lands here via
+        // its Extras helper) span the full pair domain, everything else
+        // dispatches over `agent_count`.
+        let dispatch_count = view_kernel_domain_expr(spec);
         out.push_str(&format!(
             "                {arm_pattern} => {{\n\
              {cfg_copy_block}\
@@ -4402,17 +4676,12 @@ fn synthesize_generated_runtime_struct(
              \x20                   let bindings = {kname}::{pascal}Bindings::from_context_with_extras(\n\
              \x20                       &_ctx, &extras,\n\
              \x20                   );\n\
-             \x20                   dispatch::{dispatch_fn}(\n\
-             \x20                       &mut self.cache,\n\
-             \x20                       &bindings,\n\
-             \x20                       &self.gpu.device,\n\
-             \x20                       &mut encoder,\n\
-             \x20                       self.agent_count,\n\
-             \x20                   );\n\
+             {dispatch_line}\
              {loop_close}\
              \x20               }}\n",
             kname = spec.name,
             pascal = spec.pascal,
+            dispatch_line = dispatch_call(&spec.name, &dispatch_count, "                    "),
         ));
     }
     // Catch-all for unhandled DispatchOp variants. Status (2026-05-12):
@@ -4462,11 +4731,41 @@ fn synthesize_generated_runtime_struct(
          \x20               _ => {}\n\
          \x20           }\n\
          \x20       }\n\
-         \x20\n\
-         \x20       self.gpu.queue.submit(Some(encoder.finish()));\n\
+         \x20\n",
+    );
+    if emits_timings {
+        out.push_str(
+            "        // D1+ timing: resolve this tick's timestamp pairs into the\n\
+             \x20       // readback buffer BEFORE the submit that flushes them.\n\
+             \x20       if let Some(t) = self.debug_timings.as_ref() { t.finalise_tick(&mut encoder); }\n",
+        );
+    }
+    out.push_str(
+        "        self.gpu.queue.submit(Some(encoder.finish()));\n\
          \x20       self.tick += 1;\n\
          \x20   }\n",
     );
+    if emits_timings {
+        out.push_str(
+            "\n\
+             \x20   /// Per-kernel GPU wall time for the most recently completed\n\
+             \x20   /// tick, in dispatch order. Empty unless the runtime was built\n\
+             \x20   /// with `SIM_KERNEL_TIMINGS=1` in the environment AND the\n\
+             \x20   /// adapter exposes TIMESTAMP_QUERY. Call after the step's work\n\
+             \x20   /// has been polled to completion.\n\
+             \x20   pub fn kernel_timings(&self) -> Vec<dispatch::KernelTiming> {\n\
+             \x20       match self.debug_timings.as_ref() {\n\
+             \x20           Some(t) => t.read_kernel_timings_with(&self.gpu.device),\n\
+             \x20           None => Vec::new(),\n\
+             \x20       }\n\
+             \x20   }\n\
+             \x20\n\
+             \x20   /// True when per-kernel timings are live on this runtime.\n\
+             \x20   pub fn kernel_timings_enabled(&self) -> bool {\n\
+             \x20       self.debug_timings.is_some()\n\
+             \x20   }\n",
+        );
+    }
 
     // Generic host-side chronicle injection helper. Provides a single
     // primitive every fixture can call to inject a synthetic chronicle
@@ -4508,10 +4807,10 @@ fn synthesize_generated_runtime_struct(
     //   1. Builds a 10-word chronicle record from typed args:
     //      slot 0 = kind id — engine alias via `EventIR.engine_kind_id`
     //               when present, else the fixture-allocated sequential
-    //               `EventKindId(i)` where `i` is the event's position in
-    //               `comp.events` (mirrors `cg::lower::driver::
-    //               populate_event_kinds`'s allocation so the dispatcher's
-    //               filter constant matches),
+    //               id that skips the engine's reserved discriminants
+    //               (`dsl_ast::engine_events::event_kind_id_at`, the same
+    //               allocator `cg::lower::driver::populate_event_kinds`
+    //               runs, so the dispatcher's filter constant matches),
     //      slot 1 = self.tick as u32,
     //      slot 2..= = each declared field, packed in declaration order.
     //   2. Calls `self.inject_chronicle_record(&record)` to write it
@@ -4545,14 +4844,16 @@ fn synthesize_generated_runtime_struct(
         //      engine_event_kind_id_for_name`. Use it directly so the
         //      injector's `record[0]` matches the dispatcher's filter
         //      constant.
-        //   2. Fixture-defined events (no engine alias) get a sequential
-        //      `EventKindId(i)` where `i` is the position in
-        //      `comp.events` — same allocation the lowering driver
-        //      performs. The dispatcher already handles arbitrary kinds
-        //      via the unified event ring; the previous engine-aliased-
-        //      only gate dropped fixture-defined `@host_callable` events
+        //   2. Fixture-defined events (no engine alias) get the next
+        //      sequential id that is NOT reserved by the engine alias
+        //      table — same allocation the lowering driver performs,
+        //      via the same `dsl_ast::engine_events` allocator. The
+        //      dispatcher already handles arbitrary kinds via the
+        //      unified event ring; the previous engine-aliased-only
+        //      gate dropped fixture-defined `@host_callable` events
         //      with a `cargo:warning` (Gap plague_city#P-B).
-        let kind_id = ev.engine_kind_id.unwrap_or(event_index as u32);
+        let kind_id = dsl_ast::engine_events::event_kind_id_at(events, event_index)
+            .expect("event_index is in-bounds by construction (enumerate over `events`)");
         let method_name = crate::snake_case(&ev.name);
         let mut params: Vec<String> = Vec::new();
         let mut slot_writes: Vec<String> = Vec::new();
@@ -4895,6 +5196,7 @@ mod tests {
             "{\"bindings\":[]}",
             "{\"arena_radius\":0.0,\"camera\":\"Observer\",\"agents\":[],\"vfx\":[]}",
             "{\"hud\":[],\"screens\":[]}",
+            crate::cg::lower::DebugDepth::Off,
         );
 
         // Braces balance.
@@ -4987,6 +5289,7 @@ mod tests {
             "{\"bindings\":[]}",
             "{\"arena_radius\":0.0,\"camera\":\"Observer\",\"agents\":[],\"vfx\":[]}",
             "{\"hud\":[],\"screens\":[]}",
+            crate::cg::lower::DebugDepth::Off,
         );
 
         // Typed signature with snake_case method name + matching params.
@@ -5061,6 +5364,7 @@ mod tests {
             "{\"bindings\":[]}",
             "{\"arena_radius\":0.0,\"camera\":\"Observer\",\"agents\":[],\"vfx\":[]}",
             "{\"hud\":[],\"screens\":[]}",
+            crate::cg::lower::DebugDepth::Off,
         );
 
         // The generic helper still lands.

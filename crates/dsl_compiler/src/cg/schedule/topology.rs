@@ -46,6 +46,28 @@
 //!   (`Read` / `Drain`) on ring identity alone — the access kind is
 //!   intentionally collapsed so dependency edges close across the
 //!   read/append boundary.
+//!
+//! # The event-ring ordering invariant
+//!
+//! **No op that reads this tick's event ring is ever emitted before an
+//! op that appends the kind it reads — unless the ring sub-relation is
+//! itself cyclic, in which case the break is taken inside the cycle,
+//! deterministically, and reported.**
+//!
+//! Ordinary Kahn pops trivially satisfy it (an op leaves the queue only
+//! once every predecessor is emitted). The one way to violate it is
+//! [`topological_sort_best_effort`]'s cycle-stall FORCED pick, which is
+//! why that pick skips ring consumers with pending ring producers and
+//! why its last-resort branch records a [`ForcedRingBreak`].
+//!
+//! The invariant is worth this much care because violating it is
+//! **silent**: the consumer reads an unwritten ring, folds nothing, and
+//! the feature it implements stops existing with no error anywhere.
+//! Note the limit of what this file can promise — the guard can only
+//! honour edges that EXIST, so a mis-keyed subscription (no edge at
+//! all) walks straight past it. That door is closed by the schedule
+//! validator in [`super::ring_order`], which checks the FINISHED order
+//! against the program's own event facts on every emit.
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
@@ -431,17 +453,17 @@ pub fn dependency_graph(prog: &CgProgram) -> DepGraph {
 /// `on_event` field (if any).
 ///
 /// Empty / `None` for ops that don't subscribe to or emit events.
-struct EventRingKindFacts {
+pub(super) struct EventRingKindFacts {
     /// Set of [`EventKindId`]s this op writes to the chronicle ring,
     /// either via direct `CgStmt::Emit` statements or via the
     /// `apply_ability` dispatcher's effect-event emits.
-    emitted: BTreeSet<EventKindId>,
+    pub(super) emitted: BTreeSet<EventKindId>,
     /// The single [`EventKindId`] this op subscribes to (from
     /// `PhysicsRule.on_event` / `ViewFold.on_event`). `None` for ops
     /// that don't read the ring or that have no kind-tagged
     /// subscription (e.g. per-agent rules whose `on_event` lowers to
     /// `None`, plumbing ops, mask predicates).
-    consumed: Option<EventKindId>,
+    pub(super) consumed: Option<EventKindId>,
 }
 
 /// Engine event kinds the `apply_ability` dispatcher emits per
@@ -478,7 +500,7 @@ fn apply_ability_emitted_kinds() -> Vec<EventKindId> {
         .collect()
 }
 
-fn compute_event_ring_kind_facts(
+pub(super) fn compute_event_ring_kind_facts(
     op: &crate::cg::op::ComputeOp,
     prog: &CgProgram,
 ) -> EventRingKindFacts {
@@ -673,6 +695,33 @@ pub fn topological_sort(graph: &DepGraph) -> Result<Vec<OpId>, CycleError> {
     }
 }
 
+/// One place the best-effort sort had to schedule an event-ring
+/// CONSUMER ahead of a still-unemitted event-ring PRODUCER of the same
+/// kind, because every remaining op was in that position (a genuine
+/// ring cycle). Never produced on an acyclic-in-the-ring graph — the
+/// forced pick skips ring consumers with pending producers.
+///
+/// Surfaced so callers can turn the break into a LOUD diagnostic: a
+/// same-tick chronicle read that runs before its writer silently reads
+/// an empty ring, which is the single most expensive failure mode this
+/// scheduler has shipped (see the `topological_sort_best_effort` doc
+/// comment).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ForcedRingBreak {
+    /// The ring consumer that was forced into the order early.
+    pub consumer: OpId,
+    /// Ring producers of `consumer` that were still unemitted at the
+    /// moment of the force. Sorted by [`OpId`].
+    pub pending_producers: Vec<OpId>,
+    /// `true` when at least one pending producer sits in the same
+    /// strongly-connected component as the consumer — i.e. the break
+    /// was genuinely unavoidable. `false` means the sort ran out of
+    /// legal candidates for a reason the analysis could not attribute
+    /// to a cycle; that is a compiler bug and should be reported as
+    /// such.
+    pub cyclic: bool,
+}
+
 /// Best-effort variant of [`topological_sort`]. Always returns an order
 /// of length `graph.op_count`; reports any cycles encountered as a
 /// secondary signal.
@@ -697,7 +746,25 @@ pub fn topological_sort(graph: &DepGraph) -> Result<Vec<OpId>, CycleError> {
 /// Returns `(order, cycles)`. `cycles` is `Some` when at least one
 /// non-trivial SCC was found; the caller can surface a diagnostic
 /// without re-running Tarjan's.
+///
+/// Callers that need to know whether the sort had to sacrifice a
+/// same-tick ring ordering to break a cycle should use
+/// [`topological_sort_best_effort_reporting`] — this wrapper drops that
+/// third channel.
 pub fn topological_sort_best_effort(graph: &DepGraph) -> (Vec<OpId>, Option<CycleError>) {
+    let (order, cycles, _breaks) = topological_sort_best_effort_reporting(graph);
+    (order, cycles)
+}
+
+/// [`topological_sort_best_effort`] plus the forced-ring-break report.
+///
+/// The third element is empty for every graph whose event-ring
+/// producer/consumer sub-relation is acyclic — which is every shipped
+/// fixture. A non-empty vector means the schedule contains a same-tick
+/// chronicle read placed before its writer; see [`ForcedRingBreak`].
+pub fn topological_sort_best_effort_reporting(
+    graph: &DepGraph,
+) -> (Vec<OpId>, Option<CycleError>, Vec<ForcedRingBreak>) {
     let n = graph.op_count;
 
     let mut in_degree: Vec<u32> = vec![0; n];
@@ -720,6 +787,14 @@ pub fn topological_sort_best_effort(graph: &DepGraph) -> (Vec<OpId>, Option<Cycl
 
     let mut order: Vec<OpId> = Vec::with_capacity(n);
     let mut cycles_observed = false;
+    // Lazily-computed per-op list of EVENT-RING predecessors — only
+    // materialized on the first stall (cycle-free graphs never pay).
+    let mut ring_pred: Option<Vec<Vec<u32>>> = None;
+    // Lazily-computed SCC id per op — only materialized if the
+    // ring-consumer guard ever runs out of legal candidates (i.e. a
+    // real ring cycle). Cycle-free-in-the-ring graphs never pay.
+    let mut scc_of: Option<Vec<usize>> = None;
+    let mut ring_breaks: Vec<ForcedRingBreak> = Vec::new();
 
     while order.len() < n {
         // Drain the Kahn's-ready queue first.
@@ -752,12 +827,110 @@ pub fn topological_sort_best_effort(graph: &DepGraph) -> (Vec<OpId>, Option<Cycl
         // No op has in_degree == 0 but ops remain → cycle. Force the
         // smallest-OpId not-yet-emitted op into the order (preserves
         // the user's source order within the SCC) and continue
-        // Kahn's. The forced op's outgoing edges drop their target
-        // in-degrees just like a normal pop.
+        // Kahn's — EXCEPT ops that consume the EVENT RING and still
+        // have an unemitted ring PRODUCER: those are skipped by the
+        // forced pick.
+        //
+        // The ring-consumer guard is load-bearing (found 2026-07-22,
+        // S5 webband_colony): the queue stalls whenever every
+        // remaining op sits at or downstream of a cycle, and the
+        // remaining set then contains INNOCENT ring consumers whose
+        // producers are merely stuck behind the SCC. The old
+        // unconditional global-smallest pick emitted webband_colony's
+        // BeliefSocialMerge op 65 stages before the physics rule that
+        // emits its trigger event — the same-tick live-tail merge
+        // then read a ring with no SupperTale rows and supper gossip
+        // went silently dead. Same-tick event flow is the one
+        // ordering that can never be sacrificed to a cycle break.
+        // The guard is deliberately NARROW (ring edges only): field-
+        // edge order inside SCCs keeps the historic global-smallest
+        // pick, because shipped fixtures' pins are calibrated to it
+        // (edgeworld's 9-op hunger SCC regressed under a broader
+        // force-only-cycle-members rule and was reverted).
         cycles_observed = true;
-        let forced = (0..n)
-            .find(|&i| !emitted[i])
-            .expect("len < n implies at least one un-emitted op");
+        if ring_pred.is_none() {
+            // predecessor lists restricted to edges that carry an
+            // EventRing reason (producer -> ring-consumer edges).
+            let mut preds: Vec<Vec<u32>> = vec![Vec::new(); n];
+            for ((p, c), reasons) in graph.edge_reasons.iter() {
+                if reasons.iter().any(|r| matches!(r, CycleEdgeKey::Ring(_))) {
+                    let ci = c.0 as usize;
+                    if ci < n {
+                        preds[ci].push(p.0);
+                    }
+                }
+            }
+            ring_pred = Some(preds);
+        }
+        let preds = ring_pred.as_ref().expect("just populated");
+        let legal = (0..n).find(|&i| {
+            !emitted[i] && !preds[i].iter().any(|&p| !emitted[p as usize])
+        });
+        let forced = match legal {
+            Some(i) => i,
+            None => {
+                // Every remaining op is a ring consumer whose producer
+                // is also still pending: the event-ring sub-relation
+                // itself is cyclic and SOMETHING has to give. Break it
+                // deterministically and INSIDE the cycle — prefer the
+                // smallest remaining op that shares an SCC with one of
+                // its own pending ring producers, so an innocent
+                // downstream consumer is never the one sacrificed. The
+                // break is recorded in `ring_breaks` and surfaces as a
+                // loud schedule diagnostic (see `ForcedRingBreak`).
+                //
+                // This branch is unreachable for every fixture in the
+                // corpus (proved by
+                // `ring_order::validate_ring_order` running on every
+                // emit); it exists so a future genuinely-cyclic
+                // fixture degrades loudly and reproducibly instead of
+                // silently.
+                if scc_of.is_none() {
+                    let mut ids = vec![usize::MAX; n];
+                    for (sid, scc) in find_cycles(graph).iter().enumerate() {
+                        for op in scc {
+                            let i = op.0 as usize;
+                            if i < n {
+                                ids[i] = sid;
+                            }
+                        }
+                    }
+                    scc_of = Some(ids);
+                }
+                let sccs = scc_of.as_ref().expect("just populated");
+                let in_cycle_with_producer = (0..n).find(|&i| {
+                    !emitted[i]
+                        && preds[i].iter().any(|&p| {
+                            !emitted[p as usize]
+                                && sccs[i] != usize::MAX
+                                && sccs[i] == sccs[p as usize]
+                        })
+                });
+                let pick = in_cycle_with_producer.unwrap_or_else(|| {
+                    (0..n)
+                        .find(|&i| !emitted[i])
+                        .expect("len < n implies at least one un-emitted op")
+                });
+                let sccs_ok = sccs[pick] != usize::MAX;
+                let mut pending: Vec<OpId> = preds[pick]
+                    .iter()
+                    .filter(|&&p| !emitted[p as usize])
+                    .map(|&p| OpId(p))
+                    .collect();
+                pending.sort();
+                pending.dedup();
+                let cyclic = sccs_ok
+                    && pending
+                        .iter()
+                        .any(|p| sccs[p.0 as usize] == sccs[pick]);
+                ring_breaks.push(ForcedRingBreak {
+                    consumer: OpId(pick as u32),
+                    pending_producers: pending,
+                    cyclic,
+                });
+                pick
+            }
+        };
         let forced_op = OpId(forced as u32);
         emitted[forced] = true;
         order.push(forced_op);
@@ -790,7 +963,7 @@ pub fn topological_sort_best_effort(graph: &DepGraph) -> (Vec<OpId>, Option<Cycl
         None
     };
 
-    (order, cycles)
+    (order, cycles, ring_breaks)
 }
 
 // ---------------------------------------------------------------------------
@@ -805,7 +978,7 @@ pub fn topological_sort_best_effort(graph: &DepGraph) -> (Vec<OpId>, Option<Cycl
 /// [`DepGraph`] directly. The two implementations stay in sync because
 /// they share the algorithm; promotion to a single shared helper is a
 /// Phase-3 cleanup deferred until Task 3.2 also needs it.
-fn find_cycles(graph: &DepGraph) -> Vec<Vec<OpId>> {
+pub(super) fn find_cycles(graph: &DepGraph) -> Vec<Vec<OpId>> {
     let n = graph.op_count;
     if n == 0 {
         return Vec::new();
@@ -1317,5 +1490,87 @@ mod tests {
             "within-SCC source-order tie-break: {:?}",
             order
         );
+    }
+
+    // --- ring-cycle fallback (S10) -------------------------------------
+
+    /// Hand-build a graph: `ring_edge(a, b)` for each pair.
+    fn ring_graph(op_count: usize, ring: &[(u32, u32)]) -> DepGraph {
+        let mut edges: BTreeMap<OpId, BTreeSet<OpId>> = BTreeMap::new();
+        let mut reasons: BTreeMap<(OpId, OpId), Vec<CycleEdgeKey>> = BTreeMap::new();
+        for &(p, c) in ring {
+            edges.entry(OpId(p)).or_default().insert(OpId(c));
+            reasons
+                .entry((OpId(p), OpId(c)))
+                .or_default()
+                .push(CycleEdgeKey::Ring(crate::cg::data_handle::EventRingId(0)));
+        }
+        DepGraph {
+            op_count,
+            edges,
+            edge_reasons: reasons,
+        }
+    }
+
+    #[test]
+    fn ring_cycle_fallback_breaks_inside_the_cycle_not_on_an_innocent_consumer() {
+        // op1 ↔ op2 is a RING cycle; op0 is an innocent ring consumer of
+        // op2 that happens to carry the smallest OpId. Every remaining op
+        // has a pending ring producer, so the guard runs out of legal
+        // candidates and the fallback decides who gets sacrificed.
+        //
+        // The old fallback took the global smallest — op0, the innocent
+        // one, whose same-tick read would then be dead for a cycle it is
+        // not even part of. The shipped fallback breaks inside the SCC.
+        let graph = ring_graph(3, &[(1, 2), (2, 1), (2, 0)]);
+        let (order, cycles, breaks) = topological_sort_best_effort_reporting(&graph);
+
+        assert_eq!(order.len(), 3);
+        assert!(cycles.is_some(), "op1 ↔ op2 is a cycle");
+        assert_eq!(breaks.len(), 1, "exactly one forced ring break: {breaks:?}");
+        assert!(
+            breaks[0].cyclic,
+            "the break must be attributed to the real cycle: {:?}",
+            breaks[0]
+        );
+        assert!(
+            breaks[0].consumer == OpId(1) || breaks[0].consumer == OpId(2),
+            "the break must land on a cycle member, not the innocent op0: {:?}",
+            breaks[0]
+        );
+
+        let pos = |op: u32| order.iter().position(|x| x.0 == op).unwrap();
+        assert!(
+            pos(2) < pos(0),
+            "op0's producer (op2) must still precede it: {order:?}"
+        );
+    }
+
+    #[test]
+    fn acyclic_ring_relation_never_reports_a_forced_break() {
+        // A field-only cycle (op0 ↔ op1) plus a ring chain op2 → op3.
+        // The stall happens, the force-pick runs, and the ring edge is
+        // still honoured with no break reported.
+        let (mut prog, ids) = program_with_blank_ops(4);
+        prog.ops[ids[0].0 as usize].record_read(hp_handle());
+        prog.ops[ids[0].0 as usize].record_write(mana_handle());
+        prog.ops[ids[1].0 as usize].record_read(mana_handle());
+        prog.ops[ids[1].0 as usize].record_write(hp_handle());
+        let ring = EventRingId(3);
+        prog.ops[ids[2].0 as usize].record_write(DataHandle::EventRing {
+            ring,
+            kind: EventRingAccess::Append,
+        });
+        prog.ops[ids[3].0 as usize].record_read(DataHandle::EventRing {
+            ring,
+            kind: EventRingAccess::Read,
+        });
+
+        let graph = dependency_graph(&prog);
+        let (order, cycles, breaks) = topological_sort_best_effort_reporting(&graph);
+        assert!(cycles.is_some());
+        assert!(breaks.is_empty(), "no ring break expected: {breaks:?}");
+        let pos = |op: OpId| order.iter().position(|x| *x == op).unwrap();
+        assert!(pos(ids[2]) < pos(ids[3]), "{order:?}");
     }
 }

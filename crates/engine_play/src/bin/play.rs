@@ -15,7 +15,8 @@
 //! `play_probe_end_to_end` registry gate).
 
 use engine_play::mock::MockRuntime;
-use engine_play::player::{mock_ui_model, Player, PlayerConfig};
+use engine_play::player::{mock_ui_model, observer_ui_model, Player, PlayerConfig};
+use engine_play_api::{CameraSpec, RenderDescriptor};
 use engine_ui::UiModel;
 
 /// Default run parameters when the user omits them.
@@ -69,7 +70,7 @@ fn main() -> anyhow::Result<()> {
     // Build the HUD model from the runtime's own `ui` descriptor; fall back
     // to the default model on a parse error (P10 — never hard-fail the player
     // on a malformed descriptor; degrade to a sane HUD).
-    let ui_model = match UiModel::from_json(rt.ui_descriptor()) {
+    let mut ui_model = match UiModel::from_json(rt.ui_descriptor()) {
         Ok(m) => m,
         Err(e) => {
             eprintln!(
@@ -78,6 +79,21 @@ fn main() -> anyhow::Result<()> {
             mock_ui_model()
         }
     };
+    // A fixture with no `ui {}` block emits `{"hud":[],"screens":[]}`, i.e. no
+    // HUD at all. Substitute a fixture-agnostic tick/agent-count line so the
+    // window at least states that the sim is running — the player-shaped
+    // default (HP/XP bars) would be a lie for an `Observer` fixture.
+    if ui_model.hud.is_empty() && ui_model.screens.is_empty() {
+        let observer = RenderDescriptor::from_json(rt.render_descriptor())
+            .map(|d| matches!(d.camera, CameraSpec::Observer))
+            .unwrap_or(false);
+        eprintln!(
+            "[engine_play] {name:?} declares no `ui {{}}` widgets; using the built-in \
+             {} HUD.",
+            if observer { "observer" } else { "default" }
+        );
+        ui_model = if observer { observer_ui_model() } else { mock_ui_model() };
+    }
 
     let player = Player::new(rt, PlayerConfig::default(), ui_model)?;
     player.run()

@@ -2937,7 +2937,15 @@ fn try_build_serial_scan_body(
     }
 
     let mut out = String::new();
-    out.push_str("    let observer_slot = gid.x;\n");
+    // Wide 1-D index: the pair-keyed fold domain (`agent_count * K`)
+    // exceeds one 65535-workgroup x-row at agent_cap >= 2048, so the
+    // dispatch is chunked into full-width y rows. `gid.y` is 0 for every
+    // sub-4M domain, which keeps this byte-identical to the historical
+    // `gid.x` form. See `program::WIDE_DISPATCH_ROW_THREADS`.
+    out.push_str(&format!(
+        "    let observer_slot = gid.x{wide};\n",
+        wide = crate::cg::emit::program::wide_index_term(),
+    ));
     out.push_str("    if (observer_slot >= cfg.agent_cap) { return; }\n");
     out.push_str("    let tick = cfg.tick;\n");
     out.push_str(
@@ -3072,7 +3080,16 @@ fn build_view_fold_wgsl_body(
         }
     }
     let mut out = String::new();
-    out.push_str("    let event_idx = gid.x;\n");
+    // Wide 1-D index — this CAS path shares the ViewFold record method,
+    // whose dispatch is chunked into full-width y rows for pair-keyed
+    // domains (see `program::WIDE_DISPATCH_ROW_THREADS`). Without the
+    // `gid.y` term every extra row would re-walk events `0..event_count`
+    // and fold each one TWICE. With it, rows past the event count
+    // early-return on the existing guard.
+    out.push_str(&format!(
+        "    let event_idx = gid.x{wide};\n",
+        wide = crate::cg::emit::program::wide_index_term(),
+    ));
     out.push_str("    if (event_idx >= cfg.event_count) { return; }\n");
     // Bind `tick` (no underscore) so `CgExpr::NamespaceField { ns: World,
     // field: "tick", access: PreambleLocal { local_name: "tick" } }` reads
@@ -4378,7 +4395,13 @@ fn build_view_decay_wgsl_body_inner(
     }
 
     let mut out = String::new();
-    out.push_str("    let k = gid.x;\n");
+    // Wide 1-D index — see `program::WIDE_DISPATCH_ROW_THREADS`. A
+    // pair-keyed view's decay sweeps `agent_count * K` cells, past one
+    // x-row at agent_cap >= 2048; `gid.y` is 0 below that.
+    out.push_str(&format!(
+        "    let k = gid.x{wide};\n",
+        wide = crate::cg::emit::program::wide_index_term(),
+    ));
     // `cfg.slot_count` is the over-allocated slot count for PairMap
     // views (= agent_cap × second_pop); for single-key views the
     // runtime sets `slot_count == agent_cap`, so the early-return
@@ -4457,7 +4480,14 @@ fn build_view_decay_wgsl_body_inner_q8(
 ) -> String {
     let mut out = String::new();
     out.push_str("    // q8-packed decay: one thread per WORD; 4 cells per word.\n");
-    out.push_str("    let word_idx = gid.x;\n");
+    // Wide 1-D index (see `program::WIDE_DISPATCH_ROW_THREADS`): the
+    // ViewDecay dispatch is chunked into full-width y rows for pair-keyed
+    // domains. Without the `gid.y` term the extra rows would re-decay
+    // words `0..slot_count` a second time; with it they early-return.
+    out.push_str(&format!(
+        "    let word_idx = gid.x{wide};\n",
+        wide = crate::cg::emit::program::wide_index_term(),
+    ));
     out.push_str("    if (word_idx >= cfg.slot_count) { return; }\n");
     out.push_str("    // `cfg.slot_count` is the WORD count when packing = Q8.\n");
     out.push_str("    // The logical cell count is conveyed via `cfg.agent_cap *\n");
@@ -6416,11 +6446,20 @@ fn thread_indexing_preamble(dispatch: &DispatchShape) -> String {
             // single-shot dispatch — adding 0 preserves prior behaviour
             // bit-for-bit. megaswarm_10000 uses this to walk the 100M
             // pair grid in ~32 chunks of ~50000 workgroups each.
-            "let pair = gid.x + cfg._pad0;\n\
-             let tick = cfg.tick;\n\
-             let seed = cfg.seed;\n\
-             // PerPair: agent + cand resolution computed against per_pair_candidates.\n\n"
-                .to_string()
+            // 2026-07-22: `+ gid.y * WIDE_DISPATCH_ROW_THREADS` folds in
+            // the wide-dispatch row index — the agent_cap^2 pair grid
+            // needs more than one 65535-workgroup x-row at cap >= 2048
+            // (65536 workgroups = a wgpu validation error that KILLS the
+            // process). Rows and `pair_offset` compose: a host-chunked
+            // runtime keeps working unchanged, and every sub-4M grid has
+            // gid.y == 0 so nothing existing moves.
+            format!(
+                "let pair = gid.x{wide} + cfg._pad0;\n\
+                 let tick = cfg.tick;\n\
+                 let seed = cfg.seed;\n\
+                 // PerPair: agent + cand resolution computed against per_pair_candidates.\n\n",
+                wide = crate::cg::emit::program::wide_index_term(),
+            )
         }
         DispatchShape::OneShot => {
             "if (gid.x != 0u) { return; }\n\n".to_string()
@@ -8448,7 +8487,13 @@ mod tests {
         };
         let ctx = EmitCtx::structural(&prog);
         let (_spec, body) = kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
-        assert!(body.contains("let event_idx = gid.x;"), "body: {body}");
+        // `gid.x + gid.y * <row>` — the wide-dispatch flat index (2026-07-22).
+        // `gid.y` is 0 for every domain that fits one 65535-workgroup row,
+        // so this is the historical `gid.x` for all existing fixtures.
+        assert!(
+            body.contains("let event_idx = gid.x + gid.y * 4194240u;"),
+            "body: {body}"
+        );
         assert!(
             body.contains("if (event_idx >= cfg.event_count)"),
             "body: {body}"

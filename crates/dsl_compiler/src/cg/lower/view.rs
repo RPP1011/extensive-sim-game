@@ -379,8 +379,35 @@ pub fn lower_view(
             // Op-id ordering. The kernel body is a stub (TODO marker)
             // until I.4b lands the per-cell merge dispatch.
             for merge in &ir.social_merges {
+                // THE KIND ID IS NOT THE SOURCE INDEX. It used to be
+                // taken as `EventKindId(event_ref.0)`, which happened
+                // to be right only while user events were allocated
+                // ids equal to their declaration index. Two things
+                // break that: an engine-aliased event name (kind 26+
+                // since 2026-05-06) and — since the reserved-range
+                // skip (2026-07-22, `dsl_ast::engine_events::
+                // assign_event_kind_ids`) — ANY event past the 26th in
+                // a big fixture. A wrong id here is silent and nasty:
+                // the interner has no name for it, so the kernel is
+                // named `merge_<view>_event_<n>_<op>`, the
+                // `ctx.event_layouts` lookup below misses (payload
+                // offset falls back to 2), and — worst — the dep graph's
+                // kind-refined EventRing edge never forms, so the merge
+                // op is force-picked ahead of its producer on a cycle
+                // stall and the same-tick live-tail read sees an empty
+                // ring (webband_colony's supper gossip went dead
+                // exactly this way). Resolve through the same
+                // name → id table `Emit` lowering uses.
                 let event_kind_id = match merge.pattern.event {
-                    Some(event_ref) => crate::cg::op::EventKindId(event_ref.0 as u32),
+                    Some(_) => match ctx.event_kind_ids.get(&merge.pattern.name) {
+                        Some(kind) => *kind,
+                        None => {
+                            return Err(LoweringError::UnresolvedEventPattern {
+                                event_name: merge.pattern.name.clone(),
+                                span: merge.span,
+                            })
+                        }
+                    },
                     None => continue,
                 };
                 let op_discriminant: u8 = match merge.op {

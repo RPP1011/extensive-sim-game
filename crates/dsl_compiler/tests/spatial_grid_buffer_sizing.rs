@@ -127,6 +127,7 @@ fn synthesize_spatial_fixture() -> String {
         "{\"bindings\":[]}",
         "{\"arena_radius\":0.0,\"camera\":\"Observer\",\"agents\":[],\"vfx\":[]}",
         "{\"hud\":[],\"screens\":[]}",
+        dsl_compiler::cg::lower::DebugDepth::Off,
     )
 }
 
