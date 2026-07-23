@@ -22,7 +22,7 @@ sims = { path = "../sims" }
 
 # voxel_engine path dep with `app-harness` enabled (winit + egui).
 # Path matches the dep in viewer_runtime so cargo unifies the build.
-voxel_engine = { path = "/home/ricky/Projects/voxel_engine", features = ["app-harness"] }
+voxel_engine = { git = "https://github.com/RPP1011/voxel_engine", rev = "a85f195834e056bf842167974f1b510308318b46", features = ["app-harness"] }
 
 # Must match the version voxel_engine's `app-harness` feature pulls in.
 egui = "0.33"

@@ -33,7 +33,7 @@ egui = "0.33"
 # rather than building two copies. The `app-harness` feature is
 # additive — `engine_voxel` builds with default features, viewer adds
 # the harness for windowing.
-voxel_engine = { path = "/home/ricky/Projects/voxel_engine", features = ["app-harness"] }
+voxel_engine = { git = "https://github.com/RPP1011/voxel_engine", rev = "a85f195834e056bf842167974f1b510308318b46", features = ["app-harness"] }
 
 glam = "0.29"
 anyhow = "1"

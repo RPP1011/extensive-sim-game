@@ -21,7 +21,7 @@ edition = "2021"
 
 [dependencies]
 engine = { path = "../engine" }
-voxel_engine = { path = "/home/ricky/Projects/voxel_engine", default-features = false }
+voxel_engine = { git = "https://github.com/RPP1011/voxel_engine", rev = "a85f195834e056bf842167974f1b510308318b46", default-features = false }
 glam = "0.29"
 # Phase C — GPU-resident voxel mirror needs `wgpu::Buffer` + `bytemuck`
 # slice casts. wgpu version pinned to match `engine`'s `=26.0.1` so we
