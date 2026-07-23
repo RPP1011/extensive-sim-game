@@ -1,0 +1,142 @@
+// webband_fields_probe — single-question probe (2026-07-21, Webband port
+// de-risk follow-up to webband_colony.sim):
+//
+//   Can `verb` masks (`when`) and `score` expressions read CUSTOM agent
+//   `field` declarations — and can @phase(per_agent) physics WRITE them?
+//
+// The corpus never combines the two surfaces: every `field` user
+// (maze_explorer*, dungeon_stealth/horde/layout) is verb-free, and every
+// verb fixture stays on the built-in SoA columns (webband_colony.sim's
+// header states the repurpose-table workaround outright). A colony port
+// needs many per-colonist stats (mood, carrying, skillXP, priorities…),
+// so whether `field` reaches the utility-AI surface decides the porting
+// strategy.
+//
+// DESIGN — a three-band timeline over 100 ticks makes both reads
+// observable as event COUNTS (all state changes flow through views, the
+// verb_fire_probe pattern):
+//
+//   * field mood  rises 1.0/tick (physics write via agents.set_mood)
+//   * field skill rises 0.5/tick (physics write via agents.set_skill)
+//   * verb Work:  when mood >= 60  (MASK reads a custom field),
+//                 score 1000 — top band, wins the argmax whenever legal.
+//   * verb Study: always legal, score self.skill (SCORE reads the other
+//                 custom field) — beats Loaf's constant 20 once
+//                 skill > 20, i.e. from tick ~40.
+//   * verb Loaf:  always legal, score 20 constant — the floor.
+//
+// Expected per-agent counts after 100 ticks: Loaf ≈ 40 (ticks 0..40),
+// Study ≈ 20 (ticks 40..60), Work ≈ 40 (ticks 60..100). That 40/20/40
+// split is only explicable if BOTH custom-field reads lower and run:
+// a dead mask read (always-true) makes Work ≈ 100; a mask that never
+// passes makes Work = 0; a dead score read (0/NaN) makes Study 0 or
+// degenerate. The Rust test additionally seeds one agent's mood to
+// -1000 (never crosses the gate → Work = 0 for that slot only) and one
+// to +1000 (gate open from tick 0 → Work ≈ 100) by direct buffer write,
+// pinning that the mask reads the PER-AGENT value, not a global.
+//
+// Sub-question 2 (physics writes) is asserted directly: after 100 ticks
+// agent_mood_buf ≈ 100 and agent_skill_buf ≈ 50 for unseeded slots.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Worked {
+  who: AgentId,
+}
+
+@replayable @gpu_amenable
+event Studied {
+  who: AgentId,
+}
+
+@replayable @gpu_amenable
+event Loafed {
+  who: AgentId,
+}
+
+entity Worker : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+// THE PROBE SUBJECTS — two custom per-agent SoA columns, exactly the
+// shape a colony port multiplies (mood, carrying, skillXP, …). Buffers
+// are zero-initialised at spawn (wgpu create_buffer zeroes; no init
+// override needed).
+field mood:  f32
+field skill: f32
+
+config probe {
+  mood_rise:  f32 = 1.0,
+  skill_rise: f32 = 0.5,
+  mood_gate:  f32 = 60.0,
+  work_score: f32 = 1000.0,
+  loaf_score: f32 = 20.0,
+}
+
+// Founding: 8 workers near the origin (slot 0 is the AgentId sentinel;
+// spawns fill slots 1..=8).
+init {
+  spawn Worker count 8 { hp: 100.0, hunger: 50.0, mana: 0.0, pos: scatter(4.0) }
+}
+
+// SUB-QUESTION 2: per-agent physics WRITING custom fields. Reads the
+// current value back through the same custom-field accessor family
+// (`self.mood` reader + `agents.set_mood` setter — the maze_explorer
+// idiom on custom columns).
+physics StatDrift @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    agents.set_mood(self, self.mood + config.probe.mood_rise);
+    agents.set_skill(self, self.skill + config.probe.skill_rise);
+  }
+}
+
+// SUB-QUESTION 1a: the MASK reads a custom field. Top score band —
+// whenever the gate passes, Work wins the argmax outright, so
+// worked_total counts exactly the ticks the mask was true.
+verb Work(self) =
+  action WorkAction
+  when  (self.alive && self.mood >= config.probe.mood_gate)
+  emit  Worked { who: self }
+  score config.probe.work_score
+
+// SUB-QUESTION 1b: the SCORE reads the other custom field. Always
+// legal; beats Loaf once skill > loaf_score (tick ~40), loses to Work
+// once the mood gate opens (tick ~60).
+verb Study(self) =
+  action StudyAction
+  when  self.alive
+  emit  Studied { who: self }
+  score self.skill
+
+// The constant floor both custom-field reads are measured against.
+verb Loaf(self) =
+  action LoafAction
+  when  self.alive
+  emit  Loafed { who: self }
+  score config.probe.loaf_score
+
+// ---------------------------------------------------------------------
+// OBSERVABILITY — per-agent counters of each verb's event (the
+// verb_fire_probe accumulator shape; the Rust test reads these back).
+@materialized(on_event = [Worked])
+view worked_total(who: Agent) -> f32 {
+  initial: 0.0,
+  on Worked { who: w } where (w == who) { self += 1.0 }
+  clamp: [0.0, 1000000.0],
+}
+
+@materialized(on_event = [Studied])
+view studied_total(who: Agent) -> f32 {
+  initial: 0.0,
+  on Studied { who: w } where (w == who) { self += 1.0 }
+  clamp: [0.0, 1000000.0],
+}
+
+@materialized(on_event = [Loafed])
+view loafed_total(who: Agent) -> f32 {
+  initial: 0.0,
+  on Loafed { who: w } where (w == who) { self += 1.0 }
+  clamp: [0.0, 1000000.0],
+}

@@ -53,6 +53,21 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # through engine_ui::UiModel::from_json. Dev-only so the sims lib itself
 # stays free of any UI/egui dependency.
 engine_ui = { path = "../engine_ui" }
+# S6 (webband port) — the campaign bridge test (webband_campaign.rs)
+# drives the webband_colony fixture day by day through webband_app's
+# storyteller/dawn-fold and injects the resolved tropes back through the
+# fixture's seams. Dev-only ON PURPOSE: the sims lib never depends on
+# the host layer, and webband_app never depends on the engine — the
+# bridge lives in the test, which is the only place both meet.
+webband_app = { path = "../webband_app" }
+# S12 — the bridge was PROMOTED out of `tests/webband_bridge/mod.rs` into a
+# real library so the playable binary (`crates/webband_play`) drives the same
+# campaign loop the tests pin. This is a dev-dependency CYCLE
+# (webband_bridge -> sims -> [dev] webband_bridge); cargo permits it because
+# dev-dependencies never participate in a library build, and it is the shape
+# that keeps `cargo test -p sims --test webband_campaign` working unchanged.
+webband_bridge = { path = "../webband_bridge" }
+serde_json = "1"
 
 [build-dependencies]
 dsl_ast = { path = "../dsl_ast" }

@@ -1,0 +1,21 @@
+[package]
+name = "webband_play"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[dependencies]
+webband_bridge = { path = "../webband_bridge" }
+webband_app = { path = "../webband_app" }
+engine_play = { path = "../engine_play" }
+engine_play_api = { path = "../engine_play_api" }
+engine_ui = { path = "../engine_ui" }
+anyhow = "1"
+# The digest hashes the serialized campaign (the same shape the spine's
+# cross-process pin uses); float_roundtrip so a saved f64 hashes identically
+# to the live one.
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[[bin]]
+name = "webband_play"
+path = "src/main.rs"
