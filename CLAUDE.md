@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 
 ## Project
 
-Deterministic tactical orchestration RPG built in Rust. Combat sim is a 100ms fixed-tick deterministic engine. The `Backend` trait in `crates/engine/src/backend.rs` is the CPU/GPU split point; concrete impls land per the compiler-first roadmap (Plan B1' Task 11+). Rules-as-data: a custom DSL under `assets/sim/*.sim` is compiled by `crates/dsl_compiler` and consumed by per-runtime build.rs scripts (each `crates/*_runtime` crate compiles its own `.sim` source into `OUT_DIR`). The `.ability` corpus lives under `dataset/abilities/lol_heroes/` for parser regression coverage; the `assets/hero_templates/` hero-template layer was retired and is not coming back.
+Deterministic tactical orchestration RPG built in Rust. Combat sim is a 100ms fixed-tick deterministic engine. The `ComputeBackend` trait in `crates/engine/src/backend.rs` is the CPU/GPU split point; concrete impls land per the compiler-first roadmap (Plan B1' Task 11+). Rules-as-data: a custom DSL under `assets/sim/*.sim` is compiled by `crates/dsl_compiler`. Most fixtures are auto-discovered and compiled into the `crates/sims` mega-crate — its `build.rs` scans `assets/sim/*.sim` and emits `sims::<fixture>::GeneratedRuntime` for every migrated stem (see the match arm list in `crates/sims/build.rs`); adding a fixture is "drop a `.sim` file, add its stem to that list, rebuild" — no new crate. A couple of fixtures still live in their own legacy `crates/*_runtime` crate (each compiling its own `.sim` via its own build.rs into `OUT_DIR`) from before the mega-crate consolidation. The `.ability` corpus lives under `dataset/abilities/lol_heroes/` for parser regression coverage; the `assets/hero_templates/` hero-template layer was retired and is not coming back.
 
 ## Constitution
 
@@ -17,23 +17,38 @@ cargo build                    # Debug build
 cargo build --release          # Release build
 cargo test                     # All tests
 cargo test -p engine           # Tests in the engine crate only
+cargo test -p sims             # Fixture pin/determinism tests (crates/sims/tests/*_pin.rs etc.)
 cargo test -- --test-threads=1 # Serial execution (for determinism tests)
 ```
 
-### Per-sim runtime binaries
+### Running a sim fixture
 
 There is no `xtask` umbrella binary today (retired in Phase 7 wolf-sim
-wipe, 2026-05-02). Each `crates/*_runtime` crate compiles to its own
-`*_app` binary; e.g. `cargo run -p boids_runtime --bin boids_app`. List
-all of them with `cargo build --bin foo 2>&1 | head` (cargo prints the
-available bin targets when you give it an unknown name).
+wipe, 2026-05-02). Almost every fixture lives inside the `sims` crate
+(`sims::<fixture>::GeneratedRuntime`) rather than its own binary — the
+main way to exercise one is its pin test under `crates/sims/tests/`.
+
+`crates/sim_app` hosts the remaining runnable binaries, each gated behind
+a `bin-<name>` cargo feature so unrelated per-fixture deps aren't pulled
+in by default:
+
+```bash
+cargo run -p sim_app --bin viz_app --features bin-viz_app -- <sim_name>       # terminal visualizer
+cargo run -p sim_app --bin tom_probe_app --features bin-tom_probe_app
+```
+
+`viz_app` with no args lists the sims it currently knows how to drive (its
+`SIMS` table in `crates/sim_app/src/viz_app.rs`); most fixtures haven't been
+wired into that table yet even though they compile and have pin tests.
+`crates/tom_probe_runtime` and `crates/viewer_runtime` are the last
+crates still following the old one-crate-per-fixture pattern.
 
 ## Where to look
 
 - **Reading order:** start with `docs/llms.txt`, fetch the docs you need.
 - **What's built:** `docs/engine/status.md` (live per-subsystem implementation status).
 - **What's coming:** `docs/ROADMAP.md` (comprehensive future-work index).
-- **Contract:** `docs/spec/` (canonical specification, 6 files: `engine.md`, `dsl.md`, `state.md`, `ability.md`, `economy.md`, `README.md`).
+- **Contract:** `docs/spec/` (canonical specification; `README.md` is the index/reading order).
 - **Active plans:** `docs/superpowers/plans/`.
 - **Locked decisions:** `docs/adr/`.
 
@@ -49,5 +64,5 @@ available bin targets when you give it an unknown name).
 ## Tooling caveats
 
 - This is a Rust workspace; the root `Cargo.toml` is a virtual manifest (no `[package]`).
-- Workspace members: see `Cargo.toml` `[workspace] members` — `crates/dsl_ast`, `crates/dsl_compiler`, `crates/engine`, `crates/engine_data`, `crates/engine_gpu_rules`, plus ~40 `crates/*_runtime` per-sim crates and `crates/sim_app`. `crates/ability_operator` and a few research crates are excluded.
+- Workspace members: see `Cargo.toml` `[workspace] members` — `dsl_ast`, `dsl_compiler`, `engine`, `engine_data`, `engine_gpu_rules`, `engine_play`, `engine_play_api`, `engine_ui`, `engine_voxel`, `sim_app`, `sims`, `tom_probe_runtime`, `viewer_runtime`. `ability_operator`, `ability-vae`, `combat-trainer` and `world_sim_bench` (ML training / benchmarking crates) are excluded from the default workspace build.
 - All simulation randomness MUST flow through `per_agent_u32(seed, agent_id, tick, purpose)` — see P5.
