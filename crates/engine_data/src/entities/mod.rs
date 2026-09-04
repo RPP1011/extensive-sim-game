@@ -36,6 +36,15 @@ impl CreatureType {
         }
     }
 
+    /// Inverse of the `#[repr(u8)]` discriminant cast (`ct as u8`). Single
+    /// source of truth for decoding a stored/wire discriminant back to a
+    /// variant — callers (e.g. `engine::snapshot::format`) must not
+    /// hand-duplicate this match; `ALL` is what stays authoritative if a
+    /// species is ever added/removed/reordered here.
+    pub fn from_disc(v: u8) -> Option<Self> {
+        Self::ALL.iter().copied().find(|ct| *ct as u8 == v)
+    }
+
     /// Pairwise hostility predicate. Symmetric closure of the
     /// `predator_prey.{prey_of, preys_on}` lists in `assets/sim/entities.sim`.
     pub fn is_hostile_to(self, other: CreatureType) -> bool {

@@ -722,12 +722,12 @@ fn build_mesh_pipeline(
         .layout(layout)
         .render_pass(render_pass)
         .subpass(0);
+    // voxel_engine's VulkanContext has no pipeline-cache accessor — every
+    // pipeline-creation call site inside voxel_engine itself (graphics and
+    // compute alike) passes vk::PipelineCache::null() directly; match that
+    // convention here instead of relying on a method that doesn't exist.
     let pipeline = unsafe {
-        device.create_graphics_pipelines(
-            ctx.pipeline_cache(),
-            &[pipeline_ci],
-            None,
-        )
+        device.create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_ci], None)
     }
     .map_err(|(_, e)| e)
     .context("create_graphics_pipelines (mesh)")?[0];

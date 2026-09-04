@@ -354,16 +354,12 @@ fn movement_mode_from_disc(v: u8) -> Result<MovementMode, SnapshotError> {
 }
 
 fn creature_from_disc(v: u8) -> Result<CreatureType, SnapshotError> {
-    match v {
-        0 => Ok(CreatureType::Human),
-        1 => Ok(CreatureType::Wolf),
-        2 => Ok(CreatureType::Deer),
-        3 => Ok(CreatureType::Dragon),
-        v => Err(SnapshotError::InvalidDiscriminant {
-            what: "CreatureType",
-            value: v,
-        }),
-    }
+    // Delegates to engine_data — the crate that actually owns the creature
+    // vocabulary — instead of hand-duplicating its discriminant mapping here.
+    CreatureType::from_disc(v).ok_or(SnapshotError::InvalidDiscriminant {
+        what: "CreatureType",
+        value: v,
+    })
 }
 
 fn status_kind_from_disc(v: u8) -> Result<StatusEffectKind, SnapshotError> {

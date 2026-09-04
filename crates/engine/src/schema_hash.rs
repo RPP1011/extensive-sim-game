@@ -3,14 +3,13 @@
 //! catch unintended schema drift. When the schema intentionally changes, update
 //! the baseline file.
 
+use engine_data::entities::CreatureType;
 use sha2::{Digest, Sha256};
 
 pub fn schema_hash() -> [u8; 32] {
     let mut h = Sha256::new();
-    // SimState SoA layout — expanded by the 2026-04-19 state-port plan to
-    // cover state.md's full agent catalogue. Hot fields are read every tick;
-    // cold fields land on spawn/chronicle/debug paths. See
-    // `docs/superpowers/plans/2026-04-19-engine-plan-state-port.md`.
+    // SimState SoA layout. Hot fields are read every tick; cold fields land
+    // on spawn/chronicle/debug paths. See `docs/spec/state.md`.
     h.update(b"SimState:SoA{");
     h.update(b"hot_pos=vec3,hot_hp=f32,hot_max_hp=f32,hot_alive=bool,hot_movement_mode=u8,");
     h.update(b"hot_level=u32,hot_move_speed=f32,hot_move_speed_mult=f32,");
@@ -39,7 +38,13 @@ pub fn schema_hash() -> [u8; 32] {
     h.update(b"Event:AgentMoved,AgentAttacked,AgentDied,AgentFled,AgentAte,AgentDrank,AgentRested,AgentCast{caster,ability,target,depth=u8,tick},AgentUsedItem,AgentHarvested,AgentPlacedTile,AgentPlacedVoxel,AgentHarvestedVoxel,AgentConversed,AgentSharedStory,AgentCommunicated,InformationRequested,AgentRemembered,QuestPosted,QuestAccepted,BidPlaced,AnnounceEmitted,RecordMemory,OpportunityAttackTriggered,EffectDamageApplied,EffectHealApplied,EffectShieldApplied,EffectStunApplied,EffectSlowApplied,EffectGoldTransfer,EffectStandingDelta,CastDepthExceeded,EngagementCommitted{actor,target,tick},EngagementBroken{actor,former_target,reason=u8,tick},FearSpread{observer,dead_kin,tick},PackAssist{observer,target,tick},RallyCall{observer,wounded_kin,tick},EffectSelfDamageApplied{actor,target,amount,tick},EffectLifeStealApplied{actor,target,expires_at_tick,fraction_q8=i16,tick},EffectDamageModifyApplied{actor,target,expires_at_tick,multiplier_q8=i16,tick},EffectExecuteApplied{actor,target,hp_threshold=f32,tick},EffectRootApplied{actor,target,expires_at_tick,tick},EffectSilenceApplied{actor,target,expires_at_tick,tick},EffectFearApplied{actor,target,expires_at_tick,tick},EffectTauntApplied{actor,target,expires_at_tick,tick},EffectDashApplied{actor,distance=f32,tick},EffectBlinkApplied{actor,distance=f32,tick},EffectKnockbackApplied{actor,target,distance=f32,tick},EffectPullApplied{actor,target,distance=f32,tick},EffectDamageOverTimeApplied{actor,target,amount_per_tick=f32,duration_ticks=u32,tick},EffectHealOverTimeApplied{actor,target,amount_per_tick=f32,duration_ticks=u32,tick},EffectTimedShieldApplied{actor,target,amount=f32,duration_ticks=u32,tick},EffectStealthApplied{actor,duration_ticks=u32,tick},EffectCharmApplied{actor,target,duration_ticks=u32,tick},EffectGroundedApplied{actor,target,duration_ticks=u32,tick},EffectSuppressApplied{actor,target,duration_ticks=u32,tick},EffectBuffApplied{actor,target,stat_ordinal=u8,magnitude_q8=i16,duration_ticks=u32,tick},EffectHarvestApplied{actor,kind_hash=u32,amount=u32,tick},EffectPlaceVoxelApplied{actor,kind_hash=u32,tick},EffectReflectApplied{actor,target,duration_ticks=u32,fraction_q8=i16,tick},EffectSummonApplied{actor,template_hash=u32,count=u8,lifetime_ticks=u32,tick},EffectPlantBeliefApplied{actor,target,subject_idx=u32,fact_bit_mask=u32,tick},EffectObserveApplied{actor,target,target_observer=u8,tick},EffectScryApplied{actor,subject,target_observer=u8,subject_idx=u32,tick},EffectRevealApplied{actor,subject,subject_idx=u32,tick},EffectDisguiseApplied{actor,fake_type=u8,duration_ticks=u32,tick},EffectDecoyApplied{actor,target,subject_idx=u32,fake_pos=u32,tick},EffectEraseBeliefApplied{actor,target,subject_idx=u32,fields=u8,tick},EffectTravelToApplied{actor,dest_x_q8=i16,dest_y_q8=i16,eta_ticks=u32,tick},EffectRecipeApplied{actor,recipe_id=u16,target_tool=u8,tick},EffectWearToolApplied{actor,tool_kind=u8,amount=u16,tick},EffectProposeApplied{actor,target,contract_kind=u8,expires_at_tick=u32,tick},EffectAnnounceApplied{actor,announcement_kind=u8,radius_q8=u16,tick},EffectGainSkillApplied{actor,skill_id=u8,amount_q8=u16,tick},EffectCreateObligationApplied{actor,target,obligation_id=u16,kind=u8,tick},EffectCastBeginApplied{actor,ability_id=u16,duration_ticks=u16,target_slot=u32,target_x_q8=i16,target_y_q8=i16,tick},CastBegan{actor,ability_id=u16,duration_ticks=u16,target_slot=u32,target_x_q8=i16,target_y_q8=i16,tick},CastResolved{actor,ability_id=u16,tick},CastInterrupted{actor,ability_id=u16,interrupt_kind=u8,tick},ChronicleEntry");
     h.update(b"MicroKind:Hold,MoveToward,Flee,Attack,Cast,UseItem,Harvest,Eat,Drink,Rest,PlaceTile,PlaceVoxel,HarvestVoxel,Converse,ShareStory,Communicate,Ask,Remember");
     h.update(b"CommunicationChannel:Speech,PackSignal,Pheromone,Song,Telepathy,Testimony");
-    h.update(b"CreatureType:Human,Wolf,Deer,Dragon");
+    // Built from engine_data::entities::CreatureType::ALL, not hand-copied,
+    // so this can't silently drift from the vocabulary engine_data actually
+    // owns. Byte-identical to the old literal today (Human,Wolf,Deer,Dragon
+    // in ALL's declared order) — no baseline bump.
+    h.update(b"CreatureType:");
+    let creature_names: Vec<&str> = CreatureType::ALL.iter().map(|ct| ct.name()).collect();
+    h.update(creature_names.join(",").as_bytes());
     h.update(b"MovementMode:Walk,Fly,Swim,Climb");
     h.update(b"MacroKind:NoOp,PostQuest,AcceptQuest,Bid,Announce");
     h.update(b"AnnounceAudience:Group,Area,Anyone");
@@ -75,9 +80,8 @@ pub fn schema_hash() -> [u8; 32] {
     // Adding/reordering variants is a determinism-breaking change
     // requiring a schema-hash bump. WGSL prelude
     // (`RNG_WGSL_PRELUDE` in `dsl_compiler::cg::emit::program`)
-    // mirrors this exact mapping. Slice ζ (2026-05-07) added
-    // `Chance=10` for the apply_ability dispatcher's per-effect
-    // chance gate (CPU/GPU PCG parity).
+    // mirrors this exact mapping. `Chance=10` is for the apply_ability
+    // dispatcher's per-effect chance gate (CPU/GPU PCG parity).
     h.update(b"RngPurpose:Action=1,Sample=2,Shuffle=3,Conception=4,Uniform=5,Gauss=6,Coin=7,UniformInt=8,GaussB=9,Chance=10");
     // GPU chronicle record layout (compiler-emitted in
     // `cg::emit::wgsl_body::emit_chronicle_arm_chain`). Per-record
@@ -85,11 +89,10 @@ pub fn schema_hash() -> [u8; 32] {
     //   [0]=kind_tag, [1]=tick, [2]=actor, [3]=target,
     //   [4..6]=per-variant payload, [6]=ability_id, [7..9]=reserved,
     //   [10]=seq (sort-then-fold sequence trailer, written by producers).
-    // Slot 6 was added 2026-05-12 (Gap detective#6) so chronicle
-    // consumers can discriminate ability source. Slot 10 (seq) was
-    // added for the sort-then-fold pass. Bumping any of these values
-    // requires updating every per-arm `atomicStore` in
-    // `emit_chronicle_arm_chain` AND the CPU reference in
+    // Slot 6 holds ability_id so chronicle consumers can discriminate ability
+    // source. Slot 10 (seq) is the sort-then-fold pass sequence trailer.
+    // Bumping any of these values requires updating every per-arm `atomicStore`
+    // in `emit_chronicle_arm_chain` AND the CPU reference in
     // `cpu_chronicle_reference::apply_event_to_chronicle_record`.
     h.update(b"ChronicleRecord:stride=11u32{kind=0,tick=1,actor=2,target=3,payload_a=4,payload_b=5,ability_id=6,reserved=7..=9,seq=10}");
     // Plan 3 surface — snapshot format, observation packer, probe harness.

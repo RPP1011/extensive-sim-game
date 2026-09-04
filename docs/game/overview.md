@@ -53,30 +53,20 @@ The hard rule: **engine contains zero game logic**. A balance change, a new crea
 | "Spatial queries use 16m uniform grid" | Engine (primitive choice) |
 | "Schema hash covers state + events + rules + scoring" | Both (compiler emits, engine validates) |
 
-## Where the game currently lives (2026-04-19)
+## Where the game currently lives
 
-The DSL compiler does not yet exist. All game rules are hand-written Rust inside `crates/engine/src/ability/*.rs`, `creature.rs`, `policy/utility.rs`, and balance constants in `step.rs` — legacy tech debt from pre-split development.
+This section originally described a compiler-first migration plan dated 2026-04-19, when the DSL compiler didn't exist yet. It now exists and has substantially replaced the legacy hand-written Rust it targeted: per `compiler_progress.md`'s live milestone tracker, milestones 0–6 (`event`, `physics`, `mask`, `scoring`, `entity`, `view`) and 13 (`config`) are **done** — the wolves+humans scenario runs entirely on DSL-emitted code, not the legacy `ability/*.rs`/`creature.rs`/`policy/utility.rs`/`step.rs` handlers this section used to point at. Milestones 7–12 (`verb`, `invariant`, `probe`, `metric`, Python/SPIR-V emission) are not started.
 
-**Plan: compiler-first.** We grow the DSL compiler incrementally, one milestone at a time. When a milestone lands, the legacy code it replaces is deleted in the same commit. No parallel hand-written emission-target crate; no parity-diff ritual. Every line of game logic that lands in the new codebase arrives through the compiler.
+Two structural facts from that original plan no longer hold and shouldn't be relied on if you're reading old commits or docs:
 
-Sequence:
+- **No `engine_rules` crate.** The plan called for compiler output landing in `crates/engine_rules/`; that crate was deleted in the Phase 7 wolf-sim wipe (2026-05-02) and never recreated. Compiler output today is emitted per-fixture, mostly into `crates/sims`' generated `GeneratedRuntime` modules (build-time only, not checked in) or, for the last couple of legacy per-fixture crates, into that crate's own `OUT_DIR`.
+- **No `xtask` umbrella binary.** `cargo run --bin xtask -- compile-dsl` and `cargo run --bin xtask -- world-sim` were retired in the same wipe. See the root `CLAUDE.md` for the current build/test/run commands.
 
-1. **Milestone 0** — compiler scaffold: empty program compiles to empty module.
-2. **Milestone 1** — `event` declarations emit Event enum variants.
-3. **Milestone 2** — `physics` rules emit `CascadeHandler` impls; legacy handlers retire.
-4. **Milestone 3** — `mask` predicates emit validity fns.
-5. **Milestone 4** — `scoring` emits utility-table rows; legacy utility backend retires.
-6. **Milestone 5** — `entity` emits creature spawn templates; legacy hostility matrix retires.
-7. **Milestones 6–10** — `view`, `verb`, `invariant`, `probe`, `metric`.
-8. **Milestones 11–12** — Python dataclass emission, SPIR-V kernel emission.
-
-At milestone 4, the wolves+humans scenario should be fully DSL-owned: DSL source in `assets/sim/`, compiler-emitted Rust in `crates/engine_rules/`, legacy engine handlers deleted. See `compiler_progress.md` for the live tracker, `feature_flow.md` for how each milestone lands.
-
-The existing `world-sim` visualization keeps running on legacy code until the relevant milestone retires that slice. The interim is acceptable; the endpoint is not negotiable.
+See `compiler_progress.md` for the live milestone tracker (including "what's still allowed as hand-written" and why there's no parallel bootstrap crate), `feature_flow.md` for how a milestone lands.
 
 ## The first end-to-end: wolves + humans
 
-The scope anchor is the existing `world-sim` visualization binary. It runs a DF-style sim of humans and wolves with the following loop:
+The scope anchor was the `world-sim` visualization binary described below; that specific binary no longer exists post-wipe, but the wolves+humans scenario itself lives on as a `.sim` fixture in `crates/sims` (parity-pinned against a committed baseline — see `crates/engine/tests/wolves_and_humans_parity.rs`). It runs a DF-style sim of humans and wolves with the following loop:
 
 - Humans and wolves spawn on voxel terrain
 - Wolves hunt humans (predator/prey hostility)

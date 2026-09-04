@@ -9,6 +9,10 @@ resolver = "2"
 # `engine_data` were restored on 2026-05-02 (commit TBD): they hold the
 # general data-structure infrastructure (Agent SoA, event ring, snapshot,
 # spatial hash, RNG) the new minimum DSL fixture needs to actually run.
-# They are coupled to the wolf-sim type set today (CreatureType,
-# wolf-flavored Event variants); trim toward the new fixture as the
-# compiler-emitted output catches up.
+# `engine` no longer hand-duplicates the wolf-sim CreatureType vocabulary
+# (schema_hash.rs and snapshot/format.rs now delegate to
+# engine_data::entities::CreatureType::{ALL,from_disc} instead of hardcoding
+# it a second time — trimmed 2026-09-03). `engine_data` itself still
+# hand-maintains a fixed 4-species CreatureType enum with no live DSL/codegen
+# source behind it; making that generic is unstarted, separate work (see
+# crates/engine_data/CLAUDE.md, "Provenance").

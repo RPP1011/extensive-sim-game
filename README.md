@@ -1,152 +1,62 @@
-# Deterministic Tactical Orchestration Game
+# Deterministic Agent Simulation Engine
 
-A tactical crisis-management RPG built in **Rust**. Players manage a hero roster across a contested overworld, resolve flashpoint crises through multi-room missions, and command squads in deterministic real-time combat. A DF-style world simulation runs 167 systems to produce emergent narratives with zero scripted events.
+A Rust engine and DSL compiler for large-scale, deterministic, tick-based multi-agent simulation. Rules — what events exist, which physics rules react to them, how views accumulate, how agents score actions — are written in a custom DSL (`.sim` files under `assets/sim/`), not hand-written Rust. A compiler lowers that DSL to a CPU reference implementation and a GPU compute-graph (WGSL), so the same rules run identically on both backends. The hard architectural rule, stated in `docs/game/overview.md`: **the engine itself contains zero game logic.**
 
-> **Status:** Active development — Rust-native architecture. Not ready to play.
+This repo is not itself a shipped game. It ships a corpus of ~107 `.sim` demo/regression fixtures spanning many genres (predator/prey, dungeon crawling, duels, boids, diplomacy, crafting, belief/theory-of-mind probes, an Among Us clone, and more) that exercise the DSL and compiler, plus a handful of runtime/viewer crates that drive them. An earlier version of this README described a specific "tactical crisis-management RPG" — hero roster, contested overworld, flashpoint crises, 167 world-sim systems. That description was aspirational; no such campaign/overworld/mission layer is evidenced in the current codebase beyond the fixtures below (`wolves_and_humans`, `dungeon_horde`'s real hero/class system, `squad_skirmish`, `hill_raid`, and similar). What's actually implemented, subsystem by subsystem, is tracked live in `docs/engine/status.md`.
 
-## Nifty Diagram for illustrating the perils of AI native development.
+One real game has been built on top of this engine and lives in its own repo, pulling this one in as a pinned `git` dependency: **Mount & Blade: Webband** (github.com/RPP1011/webband, private) — see `docs/superpowers/plans/webband-port.md` for how that split happened and what stayed here as engine fixes.
+
+> **Status:** Active development.
+
+## Nifty diagram illustrating the perils of AI-native development
 <img src="spaget.svg">
 
 ## Documentation
 
-All documentation lives in `docs/` as standalone HTML pages served via GitHub Pages. The entry point is [`docs/index.html`](docs/index.html).
+Start at [`docs/llms.txt`](docs/llms.txt) — an index with reading order into everything else. Highlights:
 
-### Structure
+- [`docs/overview.md`](docs/overview.md) — five-minute architectural intro (rules-as-data, the DSL→engine→GPU pipeline, the deterministic tick).
+- [`docs/engine/status.md`](docs/engine/status.md) — **start here** for what's actually built: live per-subsystem ✅/⚠️/❌ status, known weak tests, open verification questions.
+- [`docs/spec/`](docs/spec/) — the canonical specification (DSL grammar, engine runtime contract, field catalog, ability DSL, economy). The spec is the contract; other docs cross-reference it rather than restate it.
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — comprehensive future-work index.
+- [`docs/adr/`](docs/adr/) — locked architecture decisions.
+- [`docs/game/`](docs/game/) — the DSL-compiler migration: `compiler_progress.md` is the live milestone tracker (which hand-written legacy code has been replaced by compiler output and which hasn't), `wolves_and_humans.md` is the canonical worked fixture.
 
-```
-docs/
-├── index.html                  # Landing page — links to everything
-├── architecture.html           # Three-layer sim, workspace, module map
-├── simulation.html             # Core step(), state, determinism, events
-├── effects.html                # Effect system & five composable dimensions
-├── dsl.html                    # Ability DSL syntax, parser pipeline
-├── ai.html                     # AI decision pipeline (squad, GOAP, transformer)
-├── game.html                   # Campaign, factions, missions, room gen
-├── ml.html                     # ML training pipeline, entity encoder, RL
-├── heroes.html                 # Hero templates, LoL imports
-├── tooling.html                # CLI, scenario runner, sim_bridge
-├── development.html            # Testing, contributing
-├── roadmap.html                # Project roadmap
-├── mechanics/                  # Game mechanics wiki (combat, effects, heroes)
-│   └── index.html
-├── blog_*.html                 # Dev log posts
-└── OLD/                        # Archived posts & ML concept pages
-```
+Every crate, plus several top-level data/tooling directories (`assets/`, `dataset/`, `stdlib/`, `scripts/`, ...), also carries its own `CLAUDE.md` with AI-agent-oriented depth this README doesn't repeat.
 
-### Adding new documentation
-
-Documentation pages are self-contained HTML files with inline CSS. There is no build step or static site generator.
-
-**To add a new doc page:**
-
-1. Copy an existing page (e.g. `docs/architecture.html`) as a starting template
-2. The shared style lives inline in each file's `<style>` block — keep the CSS variables (`:root { --bg, --surface, ... }`) and font imports consistent
-3. Include a `<a href="index.html">← Back</a>` link at the top
-4. Add a card entry in `docs/index.html` under the appropriate section (Project Documentation, Dev Log, or ML Concepts)
-
-**To add a new blog/dev log post:**
-
-1. Copy `docs/blog_burn_migration.html` as a template — it has the full article style (header, subtitle, stat cards, code blocks, tables, callouts)
-2. Name the file `docs/blog_<slug>.html`
-3. Add a card to the "Dev Log" section in `docs/index.html` with date, title, description, and tags
-
-**Style reference:**
-
-| Element | Class/Pattern |
-|---------|--------------|
-| Info callout | `<div class="callout">` |
-| Error/bug callout | `<div class="callout bug">` |
-| Success callout | `<div class="callout success">` |
-| Green metric | `<td class="good">` |
-| Red metric | `<td class="bad">` |
-| Warning metric | `<td class="warn">` |
-| Inline code | `<code>` (auto-styled in `p`, `li`, `td`) |
-| Code block | `<pre><code>` |
-| Stat cards (header) | `.stats > .stat > .value + .label` |
-
-## Build & Run
+## Build & test
 
 ```bash
 cargo build                    # Debug build
 cargo build --release          # Release build
 cargo test                     # All tests (workspace)
-cargo test -p engine           # World-sim engine tests only (~210)
-cargo test -p engine --release # Release build; required for 2s-budget acceptance tests
+cargo test -p engine           # Engine crate tests only
+cargo test -p sims             # Fixture pin/determinism tests (crates/sims/tests/*_pin.rs etc.)
+cargo test -- --test-threads=1 # Serial execution (for determinism tests)
 ```
 
-### Running the world-sim viz
+A few `crates/sims` test files need a larger stack (`RUST_MIN_STACK=33554432`) — see `crates/sims/CLAUDE.md` if you hit a stack-overflow failure there.
 
-The world-sim engine ships with a visualization harness at `crates/viz/` that renders a running `SimState` via `voxel_engine`'s Vulkan path. Three sample scenarios under `crates/viz/scenarios/`:
+`ability_operator`, `ability-vae`, `combat-trainer`, and `world_sim_bench` are excluded from the default workspace build (ML training/benchmarking crates addressed via `--manifest-path`, not `-p`) — see each crate's own `CLAUDE.md` before assuming they build; a couple currently don't (dangling dependency on a deleted crate).
+
+## Running a fixture
+
+Most of the ~107 fixtures aren't wired into any runnable binary and are exercised only through their pin/determinism test under `crates/sims/tests/` — that's the primary way to verify one works (`cargo test -p sims <fixture>_pin`). A handful have a runnable front end:
 
 ```bash
-cargo run -p viz -- crates/viz/scenarios/viz_basic.toml     # 5 humans vs 1 wolf
-cargo run -p viz -- crates/viz/scenarios/viz_attack.toml    # targeted melee
-cargo run -p viz -- crates/viz/scenarios/viz_announce.toml  # announce cascade (no macros from default backend yet)
+# Terminal ASCII visualizer / non-interactive assertion harness
+cargo run -p sim_app --bin viz_app --features bin-viz_app -- <sim_name>
+cargo run -p sim_app --bin tom_probe_app --features bin-tom_probe_app
+
+# Windowed Vulkan viewers for two specific pilot fixtures
+cargo run -p viewer_runtime --bin viewer_app --release [SEED]   # dungeon_horde
+cargo run -p viewer_runtime --bin vs_viewer --release [SEED]    # vampire_survivors
+
+# Generic windowed player for any compiled fixture, via voxel_engine + egui
+cargo run -p engine_play --bin play -- <fixture> [seed] [agents]
 ```
 
-**Controls:**
-
-| Key | Action |
-|---|---|
-| `Space` | Pause / resume |
-| `.` (Period) | Single step (while paused) |
-| `R` | Reset to initial scenario |
-| `[` / `]` | Slow down / speed up tick rate |
-| `W` `A` `S` `D` | Pan camera in XY plane |
-| `Q` / `E` | Raise / lower camera |
-| Middle-mouse drag | Orbit around scene centroid |
-| Right-mouse drag | Look (mouselook) |
-| Scroll | Zoom in / out |
-| `Esc` | Exit |
-
-**Voxel palette:**
-
-| Color | Meaning |
-|---|---|
-| Gray floor | Ground plane |
-| **Blue** | Alive human |
-| **Red** (dark) | Alive wolf |
-| Tan | Alive deer |
-| Orange | Alive dragon |
-| **Bright red / salmon** | Attack overlay (5-tick TTL from `AgentAttacked`) |
-| **Black** | Death marker (persistent from `AgentDied`) |
-| **White** ring | Announce propagation (expanding over 3 ticks) |
-
-When multiple agents share a voxel cell (the engine has no geometric body collision by design — see `docs/engine/status.md`), agents are **vertically stacked** so all are visible.
-
-Stdout HUD prints `tick=N alive=A/T overlays=O fps=F eye=(x,y,z) lookAt=(x,y,z)` every second.
-
-### Per-sim runtime binaries
-
-The legacy `xtask` umbrella binary (with its `scenario run/bench/generate`
-subcommands) was retired in the Phase 7 wolf-sim wipe (2026-05-02).
-Each sim now lives in its own `crates/*_runtime` crate that compiles
-to a `*_app` binary:
-
-```bash
-cargo run -p boids_runtime --bin boids_app
-cargo run -p duel_abilities_runtime --bin duel_abilities_app
-# (cargo lists every available `*_app` if you give it an unknown name)
-```
-
-### Engine spec + status
-
-- `docs/engine/spec.md` — 26-section runtime contract (Serial + GPU backends)
-- `docs/engine/status.md` — **start here**: per-subsystem implementation state, known weak tests, visual-check criteria, open verification questions
-- `docs/engine/verification_audit_2026-04-19.md` — prior audit (HIGH + MEDIUM findings all resolved)
-- `docs/audit_2026-04-19.md` — repository-wide audit (plans queue + state-catalog gap + consolidation proposals)
-- `docs/superpowers/plans/` — per-plan implementation intent (MVP through Combat Foundation)
-
-### Throughput baseline
-
-From `cargo bench -p engine --bench tick_throughput -- --quick` (single-threaded; GPU backend not yet built):
-
-| Policy | 100 agents × 1000 ticks | Steps/sec |
-|---|---:|---:|
-| `UtilityBackend` | ~5.7 ms | ~175k |
-| `MixedPolicy` (Drink/Rest/Attack/Move/Communicate) | ~11.1 ms | ~90k |
-
-At n=500 the mixed-action workload lands ~8.6k steps/sec — bound by single-threaded mask predicates and apply-action dispatch. `ComputeBackend` trait extraction + rayon + GPU kernel porting are planned (see `docs/engine/spec.md` §25, Plans 5 + 6+).
+See each crate's `CLAUDE.md` for exact fixture names, controls, and gotchas.
 
 ## Project Management
 
