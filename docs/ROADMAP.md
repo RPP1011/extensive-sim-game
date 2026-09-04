@@ -16,8 +16,7 @@
   Single-dispatch tick path; perf-sweep done at N=200k, optimization ongoing. `plans/gpu_megakernel_plan.md`, `plans/gpu_megakernel_perf.md`.
 - **GPU cold-state replay (Subsystem 2) — Phases 2–4**
   Phase 1 (DSL-compiler view annotations) done; Phase 2 (chronicle) done; Phase 3 (gold + standing) done; Phases 2–4 umbrella plan kept for future per-phase plans. `plans/2026-04-22-gpu-cold-state-replay.md`.
-- **Kernel dispatch-emit abstraction**
-  Compiler-emit GPU kernel wrappers + buffer ownership + Schedule into new sibling crate `engine_gpu_rules/`. Migrates all 14 hand-written kernels in one plan; folds in pick_ability (Subsystem 3 Group B). Subsumes Plan 6. `plans/2026-04-26-kernel-dispatch-emit-impl.md`, `specs/2026-04-26-kernel-dispatch-emit-design.md`.
+- **Kernel dispatch-emit abstraction** — *stalled/reverted, not active.* The plan called for compiler-emitted GPU kernel wrappers landing in a new sibling crate, `engine_gpu_rules/`. That crate exists today but is an empty placeholder (see `crates/engine_gpu_rules/CLAUDE.md`) — its generated kernel-module content was deleted in the Phase 7 wolf-sim wipe (2026-05-02) along with the DSL inputs it was emitted from, and there is currently no live regeneration path (`xtask compile-dsl --cg-canonical` doesn't exist anymore). This item should not be read as in-flight without someone first deciding whether to revive it. `plans/2026-04-26-kernel-dispatch-emit-impl.md`, `specs/2026-04-26-kernel-dispatch-emit-design.md`.
 
 ## Drafted (spec exists, plan does not)
 
@@ -62,7 +61,7 @@ Documented at a high level in `docs/overview.md`; not yet plan-decomposed. Most 
 - **Mission system** — multi-room dungeons / sieges / flashpoints; drops into combat sim.
 - **Viz harness extensions** — scenario authoring UI, replay debugger, in-window HUD (currently stdout-only).
 - **ML training pipelines** — external pytorch; engine emits dataclasses + Dataset over trace format. Spec §10.
-- **Voxel backend** — `crates/engine_voxel/` placeholder (does not yet exist); ability DSL voxel ops depend on it.
+- **Voxel backend** — `crates/engine_voxel/` exists and is substantially built (adapter crate over `voxel_engine`, `VoxelTerrain`/`TerrainQuery`, chronicle-driven place/harvest mutation, `VoxelMirror` GPU-resident buffer — see `crates/engine_voxel/CLAUDE.md`). Ability DSL voxel ops still depend on the ability-DSL-to-GPU work below.
 
 ## Open technical debt / verification questions
 

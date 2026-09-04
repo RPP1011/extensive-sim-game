@@ -35,7 +35,7 @@
   - P10 (No Runtime Panic): PASS / N/A
   - P11 (Reduction Determinism): PASS / N/A
 
-- **Runtime gate:** every plan that touches engine, engine_gpu, engine_rules, or any per-tick code path MUST include at least one task that runs the changed code path and asserts an observable post-condition (tick advance, event count, byte equality). Compile-clean is not runtime-clean. List the gate test(s) here:
+- **Runtime gate:** every plan that touches `engine`, `dsl_compiler`, `engine_data`, or any per-tick code path MUST include at least one task that runs the changed code path and asserts an observable post-condition (tick advance, event count, byte equality). Compile-clean is not runtime-clean. List the gate test(s) here:
   - `<test name>` at `<crates/.../tests/...rs>` — `<one-line invariant>`
   (Or "N/A — pure docs / pure types" if literally no code path runs.)
 

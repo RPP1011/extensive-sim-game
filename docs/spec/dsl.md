@@ -1148,7 +1148,7 @@ A stdlib addition bumps the compiler vocabulary, the schema hash, and requires b
 
 ## 8. Scoring grammar specifics — field-id mapping
 
-The compiler-emitted scoring table (`engine_rules::scoring`) encodes every predicate as a `PredicateDescriptor` with a `field_id: u16`. This section pins the mapping from DSL field reference to the integer id the scorer's `read_field` function dispatches on.
+The scoring table (`engine_data::scoring`) — hand-maintained since the Phase 7 wolf-sim wipe (2026-05-02) retired the `xtask compile-dsl` emission path that used to generate it — encodes every predicate as a `PredicateDescriptor` with a `field_id: u16`. This section pins the mapping from DSL field reference to the integer id the scorer's `read_field` function dispatches on.
 
 Changing this table breaks the committed `SCORING_TABLE` constants and bumps `SCORING_HASH`. Treat every row as a stable contract.
 

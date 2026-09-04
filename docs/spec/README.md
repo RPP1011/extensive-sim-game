@@ -13,6 +13,9 @@ to GPU dispatch.
 | `dsl.md` | DSL language reference — grammar, types, expressions, statements, stdlib namespaces, scoring grammar, compiler architecture | [`audit-language-stdlib`](../superpowers/notes/2026-04-26-audit-language-stdlib.md) |
 | `ability.md` | `.ability` DSL — ability definitions, IR, lowering to `EffectOp` | [`audit-ability`](../superpowers/notes/2026-04-26-audit-ability.md) |
 | `economy.md` | Economic system — recipes, contracts, labor, market structure, macro dynamics. Three-phase implementation; extends `ability.md` `EffectOp` catalog | [`audit-economy`](../superpowers/notes/2026-04-26-audit-economy.md) |
+| `ability_dsl_unified.md` | A later (2026-05-04) **design** doc that proposes consolidating `ability.md`, `economy.md`, and `dsl.md §2.6` into one GPU-lowered ability spec (every `EffectOp`/condition/registry lookup compiling to WGSL, vs. `ability.md`'s CPU `AbilityRegistry`). Marked "Design", not "implemented" — as of this writing `crates/dsl_compiler`'s actual `.ability` lowering (`ability_lower.rs`/`ability_registry.rs`) still bypasses the GPU compute-graph pipeline entirely and targets engine runtime structs directly, closer to what `ability.md` describes than to this doc's proposed shape. Treat `ability.md` as the still-current implementation reference until this design actually lands. | — |
+| `ability_dsl_test_sims.md` | Companion to `ability_dsl_unified.md` — the test-sim acceptance sequence for validating that design wave-by-wave, once implemented. | — |
+| `belief-primitive.md` | Maintenance cheatsheet for the `belief <name>(...) -> T { ... }` DSL surface (Theory-of-Mind). Describes the current shape, not a locked contract in the same sense as the files above. | — |
 
 ## What used to live elsewhere
 

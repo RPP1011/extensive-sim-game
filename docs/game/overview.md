@@ -55,7 +55,7 @@ The hard rule: **engine contains zero game logic**. A balance change, a new crea
 
 ## Where the game currently lives
 
-This section originally described a compiler-first migration plan dated 2026-04-19, when the DSL compiler didn't exist yet. It now exists and has substantially replaced the legacy hand-written Rust it targeted: per `compiler_progress.md`'s live milestone tracker, milestones 0–6 (`event`, `physics`, `mask`, `scoring`, `entity`, `view`) and 13 (`config`) are **done** — the wolves+humans scenario runs entirely on DSL-emitted code, not the legacy `ability/*.rs`/`creature.rs`/`policy/utility.rs`/`step.rs` handlers this section used to point at. Milestones 7–12 (`verb`, `invariant`, `probe`, `metric`, Python/SPIR-V emission) are not started.
+This section originally described a compiler-first migration plan dated 2026-04-19, when the DSL compiler didn't exist yet. It now exists and has substantially replaced the legacy hand-written Rust it targeted: per `compiler_progress.md`'s live milestone tracker, milestones 0–6 (`event`, `physics`, `mask`, `scoring`, `entity`, `view`) and 13 (`config`) are **done** — that compiler capability was proved out by porting the wolves+humans scenario to DSL entirely, replacing the legacy `ability/*.rs`/`creature.rs`/`policy/utility.rs`/`step.rs` handlers this section used to point at. The wolves+humans scenario itself no longer exists in the repo (deleted along with its `.sim` sources and parity test in the Phase 7 wolf-sim wipe, 2026-05-02 — see the next section) but the compiler capability it proved remains, exercised today by the ~107-fixture corpus in `assets/sim/`. Milestones 7–12 (`verb`, `invariant`, `probe`, `metric`, Python/SPIR-V emission) are not started.
 
 Two structural facts from that original plan no longer hold and shouldn't be relied on if you're reading old commits or docs:
 
@@ -64,9 +64,11 @@ Two structural facts from that original plan no longer hold and shouldn't be rel
 
 See `compiler_progress.md` for the live milestone tracker (including "what's still allowed as hand-written" and why there's no parallel bootstrap crate), `feature_flow.md` for how a milestone lands.
 
-## The first end-to-end: wolves + humans
+## The first end-to-end: wolves + humans (historical)
 
-The scope anchor was the `world-sim` visualization binary described below; that specific binary no longer exists post-wipe, but the wolves+humans scenario itself lives on as a `.sim` fixture in `crates/sims` (parity-pinned against a committed baseline — see `crates/engine/tests/wolves_and_humans_parity.rs`). It runs a DF-style sim of humans and wolves with the following loop:
+**Status: gone, not just renamed.** The scope anchor was the `world-sim` visualization binary described below. Commit `c624896c` ("chore: nuke wolf-sim — DSL fixtures, legacy emitters, runtime crates", the Phase 7 wolf-sim wipe, 2026-05-02) deleted the `world-sim` binary, all 9 wolf-sim `.sim` files under `assets/sim/`, and `crates/engine/tests/wolves_and_humans_parity.rs` — there is no current fixture, test, or binary by this name anywhere in the repo. `crates/engine` and `crates/engine_data` were restored the same day as generic infrastructure crates with zero wolves+humans-specific code. The closest living relative is the `predator_prey` fixture family (`assets/sim/predator_prey*.sim`, compiled via `crates/sims`) — but it's a different species pairing (wolf vs. hare/sheep, not wolf vs. human) built from scratch, not a continuation of this one. See `docs/game/wolves_and_humans.md` for the full historical account.
+
+The rest of this section is kept as a historical record of the scenario's design — it described a DF-style sim of humans and wolves with the following loop:
 
 - Humans and wolves spawn on voxel terrain
 - Wolves hunt humans (predator/prey hostility)

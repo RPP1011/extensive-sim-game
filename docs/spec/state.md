@@ -191,7 +191,7 @@ Personality-weighted need-gap vector, 100-tick horizon bias. Recomputed every 50
 
 ### Memory
 
-> ⚠️ **Audit 2026-04-26 (shape narrowed):** Memory storage was retired to a `@per_entity_ring(K=64)` view in `engine_rules/src/views/memory.rs`. The view's `MemoryEntry` has only 3 fields (`source: u32, value: f32, anchor_tick: u32`) versus the 7 typed fields documented below (tick, MemEventType enum, location vec3, entity_ids, emotional_impact f32, Source enum, confidence f32). `MemEventType` enum, `Source` enum, location, entity_ids, and emotional_impact are absent. The `Memory.beliefs: Vec<Belief>` layer is entirely absent.
+> ⚠️ **Audit 2026-04-26 (shape narrowed):** Memory storage was retired to a `@per_entity_ring(K=64)` view, exposed as `state.views.memory` (compiler-emitted per fixture by `dsl_compiler`; the `engine_rules` crate that formerly checked in this generated code — including `views/memory.rs` — was retired in the Phase 7 wolf-sim wipe, 2026-05-02, and no longer exists). The view's `MemoryEntry` has only 3 fields (`source: u32, value: f32, anchor_tick: u32`) versus the 7 typed fields documented below (tick, MemEventType enum, location vec3, entity_ids, emotional_impact f32, Source enum, confidence f32). `MemEventType` enum, `Source` enum, location, entity_ids, and emotional_impact are absent. The `Memory.beliefs: Vec<Belief>` layer is entirely absent.
 > See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
 
 Event log + semantic beliefs.

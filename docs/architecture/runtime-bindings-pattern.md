@@ -1,8 +1,13 @@
 # Runtime Bindings Pattern
 
 How per-runtime `step()` code constructs and dispatches compiler-emitted GPU
-kernels. Adopted across all `crates/*_runtime` crates as of the Phase 4
-migration (PRs #62-#78).
+kernels. Adopted as of the Phase 4 migration (PRs #62-#78), when most
+per-fixture `crates/*_runtime` crates still existed independently; today
+almost all of that generated code lives inside the `crates/sims` mega-crate
+(one `OUT_DIR` module per fixture) instead, with `crates/tom_probe_runtime`
+and `crates/viewer_runtime` the last standalone holdouts — see
+`crates/sims/CLAUDE.md`. The pattern itself is unchanged by that
+consolidation; only the crate each `step()` lives in has moved.
 
 ## Goal
 
@@ -13,9 +18,11 @@ The dsl_compiler emits, into each runtime's `OUT_DIR/generated.rs`, a
 buffers). Per-runtime dispatch uses the constructor — never a hand-written
 `Bindings { ... }` literal.
 
-Hand-written literals fan out across ~40 runtime crates: every new SoA column
-or compiler-emitted buffer would have to be threaded through every dispatch
-site. The constructor pattern keeps that fan-out inside the compiler.
+Hand-written literals would fan out across every fixture's `step()` (100+
+today, mostly generated modules inside `crates/sims`, plus the two
+standalone legacy runtime crates): every new SoA column or compiler-emitted
+buffer would have to be threaded through every dispatch site. The
+constructor pattern keeps that fan-out inside the compiler.
 
 ## The pattern
 

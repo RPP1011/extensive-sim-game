@@ -13,14 +13,16 @@ docs/
 
   spec/          — canonical specification (the contract)
     README.md    — spec index, reading order, cross-ref convention
-    language.md  — world-sim DSL grammar + semantics
+    engine.md    — engine runtime + GPU backend contract (absorbed the old
+                   runtime.md and gpu.md, 2026-04-26 consolidation)
+    dsl.md       — world-sim DSL grammar, semantics, stdlib, compiler
+                   architecture, scoring field-id mapping (absorbed the old
+                   language.md, stdlib.md, compiler.md, scoring_fields.md)
     state.md     — field catalog (every SoA field, who reads, who writes)
-    stdlib.md    — pinned built-ins
-    scoring_fields.md — `field_id` ABI table
-    runtime.md   — engine runtime contract §§1–26
-    compiler.md  — DSL → Rust + SPIR-V + Python lowering
-    gpu.md       — GPU backend contract (resident cascade, sim-state, cold-state, ability eval, pipeline)
     ability.md   — `.ability` DSL — ability definitions + IR
+    ability_dsl_unified.md — unified ability-DSL reference
+    ability_dsl_test_sims.md — ability-DSL test-fixture catalog
+    belief-primitive.md — Theory-of-Mind belief primitive spec
     economy.md   — economic system (recipes, contracts, labor, market)
 
   engine/

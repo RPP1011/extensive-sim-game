@@ -1233,7 +1233,7 @@ Per `.sim`/`.ability` row that produces a kernel, the compiler emits
 shared infrastructure files.
 
 ```
-xtask compile-dsl
+cargo build -p sims
    ↓
 .sim + .ability files
    ↓
@@ -1249,6 +1249,11 @@ emit:
 ```
 
 Both Rust and WGSL committed. Build is a pure compile step.
+
+`xtask compile-dsl` (shown above) was retired in the Phase 7 wolf-sim
+wipe (2026-05-02); `cargo build -p sims`'s `build.rs` now invokes
+`dsl_compiler` directly, with no standalone compile-only command (see
+`crates/sims/CLAUDE.md`).
 
 ---
 
