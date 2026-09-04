@@ -1,8 +1,6 @@
 //! View lowering — `ViewIR → ComputeOpKind::ViewFold | … | ()`.
 //!
-//! Phase 2, Task 2.3 of the Compute-Graph IR pipeline (see
-//! `docs/superpowers/plans/2026-04-29-dsl-compute-graph-ir.md`). Each
-//! `view <Name>` decl in the resolved DSL IR resolves to one of two
+//! Each `view <Name>` decl in the resolved DSL IR resolves to one of two
 //! shapes:
 //!
 //! - **Materialized** (`@materialized(...)`, `ViewBodyIR::Fold`): one

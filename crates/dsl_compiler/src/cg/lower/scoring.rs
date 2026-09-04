@@ -1,12 +1,10 @@
 //! Scoring lowering — `ScoringIR → ComputeOpKind::ScoringArgmax`.
 //!
-//! Phase 2, Task 2.5 of the Compute-Graph IR pipeline (see
-//! `docs/superpowers/plans/2026-04-29-dsl-compute-graph-ir.md`). Each
-//! `scoring { … }` decl in the resolved DSL IR produces ONE
-//! [`ComputeOpKind::ScoringArgmax`] op (per the plan: "one op per
-//! scoring (typically one per agent kind, since scoring is per-action
-//! argmax)"), dispatched [`crate::cg::dispatch::DispatchShape::PerAgent`]
-//! over the agent population. The op carries every row from both
+//! Each `scoring { … }` decl in the resolved DSL IR produces ONE
+//! [`ComputeOpKind::ScoringArgmax`] op (one per scoring, typically one
+//! per agent kind since scoring is per-action argmax), dispatched
+//! [`crate::cg::dispatch::DispatchShape::PerAgent`] over the agent
+//! population. The op carries every row from both
 //! [`dsl_ast::ir::ScoringIR::entries`] (standard rows) and
 //! [`dsl_ast::ir::ScoringIR::per_ability_rows`].
 //!

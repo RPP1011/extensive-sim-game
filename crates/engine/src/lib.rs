@@ -29,17 +29,14 @@ pub mod probe;
 pub mod rng;
 pub mod schema_hash;
 /// Per-tick scratch buffers (MaskBuffer, TargetMask, actions, shuffle_idx).
-/// Moved here from `step.rs` (deleted, Plan B1' Task 11) so the type
-/// survives as a storage primitive. Rule-aware tick logic lives in
-/// `engine_rules::step` once Task 11 lands.
+/// A storage primitive; rule-aware tick logic lives in `engine_rules::step`.
 pub mod scratch;
 /// `CompiledSim` trait — the uniform interface per-fixture runtime crates
 /// expose to the generic application layer. See module doc for the contract.
 pub mod sim_trait;
 /// Compile-only unimplemented!() stubs for `step`, `step_full`, etc. so the
 /// many `#[ignore]`d tests that still import `engine::step::*` compile cleanly.
-/// Remove this module when Task 11 lands and test imports migrate to
-/// `engine_rules::step`.
+/// The real implementation lives in `engine_rules::step`.
 pub mod step;
 pub mod snapshot;
 pub mod spatial;

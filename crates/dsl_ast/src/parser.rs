@@ -3012,8 +3012,7 @@ fn parse_scoring_entry(c: &mut Cursor) -> PResult<ScoringEntry> {
 /// required. Order is not pinned; each clause is keyed by its identifier
 /// and followed by `:`.
 ///
-/// Added 2026-04-23 (GPU ability evaluation subsystem Phase 2). See
-/// `docs/spec/engine.md §11`.
+/// See `docs/spec/engine.md §11` for the GPU ability evaluation subsystem.
 fn parse_per_ability_row(c: &mut Cursor) -> PResult<PerAbilityRow> {
     let start = c.pos;
     expect_keyword(c, "row").map_err(|e| e.with_context("parsing `row` keyword"))?;
@@ -3081,13 +3080,10 @@ fn parse_per_ability_row(c: &mut Cursor) -> PResult<PerAbilityRow> {
             }
             // Design-target fixtures use `base:` + `weights:` clauses
             // for the utility-table form of scoring rows. The lowerer
-            // composes the row's utility as `base + weights` (both
-            // F32). `base:` doubles as the score field; `weights:` is
-            // captured into a sibling `weights` slot the IR / lowerer
-            // consume. Closes Gap C from `gaps_observed.md` (2026-05-11):
-            // pre-fix the parser parse-and-discarded `weights:` so the
-            // personality-weighted scoring rows contributed nothing to
-            // argmax. See `cg::lower::scoring::lower_per_ability_row`.
+            // composes the row's utility as `base + weights` (both F32).
+            // `base:` doubles as the score field; `weights:` is captured
+            // into a sibling `weights` slot the IR / lowerer consume.
+            // See `cg::lower::scoring::lower_per_ability_row`.
             "base" => {
                 if score.is_some() {
                     return Err(ParseErr::at(
@@ -4180,10 +4176,9 @@ fn parse_stmt(c: &mut Cursor) -> PResult<Stmt> {
         if c.starts_with("else") {
             c.bump("else".len());
             c.skip_ws();
-            // `else if (cond) { ... }` sugar (Gap dungeon_stealth#4,
-            // 2026-05-12): fold a bare `if` after `else` into the
-            // equivalent `else { if (cond) { ... } [else ...] }`. The
-            // recursive `parse_stmt` call consumes the entire if-stmt
+            // `else if (cond) { ... }` sugar: fold a bare `if` after `else`
+            // into the equivalent `else { if (cond) { ... } [else ...] }`.
+            // The recursive `parse_stmt` call consumes the entire if-stmt
             // (including any nested else/else-if tail), so chains of
             // arbitrary length compose without further special-casing.
             if c.starts_with("if ") {
@@ -4336,13 +4331,13 @@ fn parse_apply_ability_stmt(c: &mut Cursor) -> PResult<crate::ast::ApplyAbilityS
             || ck.starts_with("target\t")
             || ck.starts_with("target\n")
     })?;
-    // Symbolic ability-name surface (2026-05-12): when the parsed ability
-    // operand is a bare PascalCase identifier (e.g. `Strike`, `Volley`),
-    // capture it as a name for the lowerer to resolve against the
-    // fixture's ability-name registry. Numeric (`apply_ability 3`),
-    // lowercase locals (`apply_ability a` — local from `on Event { …: a }`),
-    // and complex expressions (`agents.level(self)`, `self.action_ability`)
-    // keep their existing expression-only path.
+    // Symbolic ability-name surface: when the parsed ability operand is a
+    // bare PascalCase identifier (e.g. `Strike`, `Volley`), capture it as a
+    // name for the lowerer to resolve against the fixture's ability-name
+    // registry. Numeric (`apply_ability 3`), lowercase locals (`apply_ability a`
+    // — local from `on Event { …: a }`), and complex expressions
+    // (`agents.level(self)`, `self.action_ability`) keep their existing
+    // expression-only path.
     //
     // The PascalCase gate matches the existing DSL convention:
     //   - Ability filenames are PascalCase (`Strike.ability`).
@@ -4351,12 +4346,9 @@ fn parse_apply_ability_stmt(c: &mut Cursor) -> PResult<crate::ast::ApplyAbilityS
     //   - Reserved namespaces (`agents`, `world`, `config`, …) are lowercase
     //     so they never collide with the PascalCase gate.
     //
-    // Closes the silent-mis-dispatch footgun documented in commit
-    // 08cc223e (squad_skirmish): the registry sorts filenames
-    // alphabetically, so `apply_ability 1` is NOT necessarily the
-    // verb-author's "first" ability. With this surface, authors write
-    // `apply_ability Strike` and the lowerer resolves the slot for them
-    // (or surfaces a typed `UnknownAbilityName` error).
+    // Authors write `apply_ability Strike` and the lowerer resolves the
+    // ability-name registry slot (or surfaces a typed `UnknownAbilityName`
+    // error if not found).
     let ability_name = if let ExprKind::Ident(name) = &ability.kind {
         if name
             .chars()
@@ -5758,7 +5750,7 @@ fn peek_number(c: &Cursor) -> bool {
 
 /// Parse a numeric literal. Returns `(value, is_float)`.
 ///
-/// Surface forms (task #225 added hex + suffixes — 2026-05-08):
+/// Supported numeric literal surface forms:
 /// - Decimal: `123`, `1_000_000`, `1.5`, `2.5e-3`
 /// - Hex: `0xFF`, `0xDEAD_BEEF` (any case, `_` separators allowed)
 /// - Integer suffix: trailing `(u|i)(8|16|32|64)?` is consumed and

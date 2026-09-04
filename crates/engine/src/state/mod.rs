@@ -96,20 +96,17 @@ pub struct SimState {
     hot_ambition:       Vec<f32>,
     hot_altruism:       Vec<f32>,
     hot_curiosity:      Vec<f32>,
-    // Combat Foundation Task 1: who this agent is currently locked in melee
-    // with. `engaged_with[a] == Some(b)` iff `engaged_with[b] == Some(a)`
-    // after `ability::expire::tick_start` runs (bidirectional invariant).
-    // `None` means disengaged. Storage here; enforcement in Task 3.
+    // Who this agent is currently locked in melee with.
+    // `engaged_with[a] == Some(b)` iff `engaged_with[b] == Some(a)`
+    // (bidirectional invariant enforced at tick_start).
+    // `None` means disengaged.
     hot_engaged_with:   Vec<Option<AgentId>>,
-    // Combat Foundation Task 2 + Task 143: timed status fields stored as
-    // absolute expiry ticks. `stun_expires_at_tick == 0` means not stunned
-    // (a real expiry always sits at `state.tick + duration > 0`); same
-    // for slow. `slow_factor_q8` is a q8 fixed-point speed multiplier
-    // (e.g. 51 ≈ 0.2× speed, 204 ≈ 0.8× speed) read through the
-    // `slow_factor` lazy view which zeroes it once the expiry has
-    // elapsed. Cooldown is an absolute tick too; mask compares against
-    // `state.tick`. Task 143 retired the per-tick `tick_start_timers`
-    // decrement — expiry is now a synthetic boundary: `state.tick <
+    // Timed status fields stored as absolute expiry ticks. `stun_expires_at_tick == 0`
+    // means not stunned (a real expiry always sits at `state.tick + duration > 0`);
+    // same for slow. `slow_factor_q8` is a q8 fixed-point speed multiplier (e.g.
+    // 51 ≈ 0.2× speed, 204 ≈ 0.8× speed) read through the `slow_factor` lazy view
+    // which zeroes it once the expiry has elapsed. Cooldown is an absolute tick too;
+    // mask compares against `state.tick`. Expiry is a synthetic boundary: `state.tick <
     // expires_at_tick` means active.
     hot_stun_expires_at_tick:     Vec<u32>,
     hot_slow_expires_at_tick:     Vec<u32>,
@@ -168,11 +165,9 @@ pub struct SimState {
     cold_memberships:    Vec<SmallVec<[Membership; 4]>>,
     // Inventory (state.md §Inventory) — one per agent.
     cold_inventory:      Vec<Inventory>,
-    // Memory retired 2026-04-23 by Subsystem 2 Phase 4 — see
-    // `state.views.memory` (`@per_entity_ring(K=64)` view). The DSL
-    // `agents.record_memory(...)` stdlib call lowers directly to
-    // `state.views.memory.push(...)`. GPU driver at
-    // `crates/engine_gpu/src/view_storage_per_entity_ring.rs` owns
+    // Memory lives in `state.views.memory` (`@per_entity_ring(K=64)` view).
+    // DSL `agents.record_memory(...)` lowers to `state.views.memory.push(...)`.
+    // GPU driver at `crates/engine_gpu/src/view_storage_per_entity_ring.rs` owns
     // the resident-path mirror; readback rehydrates `state.views.memory`.
     // Relationships (state.md §Relationship) — capped at 8 (state.md caps
     // at 20; the stub uses 8 inline as a smaller default; eviction is a
@@ -184,10 +179,9 @@ pub struct SimState {
     cold_creditor_ledger:   Vec<SmallVec<[Creditor; 16]>>,
     // Mentor lineage (state.md §Relationships mentor_lineage) — 8-deep chain.
     cold_mentor_lineage:    Vec<[Option<AgentId>; 8]>,
-    // Theory-of-Mind Phase 1 (Plan 2026-04-25): per-agent belief map keyed by
-    // observed AgentId.  Capacity N=8 (spec §3.1).  `BeliefState` is emitted by
-    // the DSL compiler in Task 3; this field is intentionally forward-declared
-    // here so the SoA layout is established before the type lands.
+    // Per-agent belief map keyed by observed AgentId. Capacity N=8 (spec §3.1).
+    // `BeliefState` is emitted by the DSL compiler; this field is intentionally
+    // forward-declared here so the SoA layout is established before the type lands.
     // Gated: zero-cost when the `theory-of-mind` feature is off.
     #[cfg(feature = "theory-of-mind")]
     cold_beliefs: Vec<crate::pool::BoundedMap<AgentId, engine_data::belief::BeliefState, 8>>,
@@ -195,15 +189,12 @@ pub struct SimState {
     /// tick when this specific ability slot next becomes ready;
     /// `0` means ready now (or never cast). Gated together with
     /// `hot_cooldown_next_ready_tick` (global GCD) by
-    /// `SimState::can_cast_ability` (added in a later task).
-    ///
-    /// Added 2026-04-22 to fix a shared-cursor bug where all
-    /// abilities on one agent were gated by the single global cursor.
-    /// Read only on cast-gate evaluation, so grouped with the cold
-    /// SoA fields.
+    /// `SimState::can_cast_ability`. Per-slot cooldowns prevent abilities on
+    /// one agent from all sharing a single global cursor. Read only on cast-gate
+    /// evaluation, so grouped with the cold SoA fields.
     pub ability_cooldowns: Vec<[u32; MAX_ABILITIES]>,
-    // Per-pair standing retired 2026-04-23 — see `state.views.standing`
-    // (Task 3.1 `@materialized` view, K=8 symmetric pair top-k).
+    // Standing is managed via `state.views.standing`
+    // (`@materialized` view, K=8 symmetric pair top-k).
 
     // Spatial index — incremental uniform-grid hash. Mutators
     // (`spawn_agent`, `kill_agent`, `set_agent_pos`,
@@ -214,10 +205,9 @@ pub struct SimState {
     // regression at N=500.
     spatial: SpatialHash,
 
-    // `views: ViewRegistry` field deleted along with engine/src/generated/.
-    // Callers now thread `&mut ViewRegistry` separately as a `step` parameter.
-    // Tests that referenced `state.views.*` are #[ignore]d until Task 11 emits
-    // the new view-as-parameter handler signatures into engine_rules.
+    // `views: ViewRegistry` field deleted; callers now thread `&mut ViewRegistry`
+    // separately as a `step` parameter. Tests that referenced `state.views.*` are
+    // `#[ignore]`d until the new view-as-parameter handler signatures land.
 
     /// Ability program registry — append-only table of compiled ability
     /// programs, looked up by `AbilityId` during cast dispatch and mask
@@ -388,12 +378,10 @@ impl SimState {
     pub fn spawn_agent(&mut self, spec: AgentSpawn) -> Option<AgentId> {
         let id = self.pool.alloc_agent()?;
         let slot = AgentSlotPool::slot_of_agent(id);
-        // Task 150: `max_hp` is an independent cap carried on `AgentSpawn`.
-        // Callers that want a wounded spawn pass `hp: 30.0, max_hp: 100.0`
-        // — the cap stays at 100 and `hp_pct = 0.3` so target-selection
-        // scoring can see the agent is wounded. Previously `max_hp` was
-        // written as `spec.hp.max(1.0)` which made every freshly-spawned
-        // agent report `hp_pct = 1.0` and silently broke pct-based rows.
+        // `max_hp` is an independent cap carried on `AgentSpawn`. Callers that
+        // want a wounded spawn pass `hp: 30.0, max_hp: 100.0` — the cap stays
+        // at 100 and `hp_pct = 0.3` so target-selection scoring can see the
+        // agent is wounded.
         //
         // `max_hp` must be ≥ 1 so downstream `hp / max_hp` never divides
         // by zero. If a caller accidentally passes `max_hp < hp` we clamp
@@ -469,8 +457,8 @@ impl SimState {
         self.cold_class_definitions[slot] = [ClassSlot::default(); 4];
         self.cold_creditor_ledger[slot].clear();
         self.cold_mentor_lineage[slot] = [None; 8];
-        // Theory-of-Mind Phase 1: clear belief map on (re)spawn so a recycled
-        // slot doesn't carry stale beliefs from the previous occupant.
+        // Clear belief map on (re)spawn so a recycled slot doesn't carry stale
+        // beliefs from the previous occupant.
         #[cfg(feature = "theory-of-mind")]
         { self.cold_beliefs[slot]      = crate::pool::BoundedMap::new(); }
         self.ability_cooldowns[slot]   = [0u32; MAX_ABILITIES];
@@ -952,9 +940,9 @@ impl SimState {
     /// Writes use saturating arithmetic; near-`u32::MAX` ticks clamp
     /// rather than wrapping, keeping the cooldown gate monotonic.
     ///
-    /// Added 2026-04-22 by the ability-cooldowns subsystem — previously
-    /// only the global cursor was written (with the ability's own
-    /// cooldown), which was the shared-cursor bug this helper fixes.
+    /// Sets both global (GCD) and per-slot local cooldowns. Per-slot
+    /// cooldowns prevent all abilities on one agent from sharing a
+    /// single global cursor.
     pub fn record_cast_cooldowns(
         &mut self,
         caster: AgentId,
@@ -990,9 +978,8 @@ impl SimState {
         }
     }
 
-    // Per-pair standing retired 2026-04-23 — read / mutate via the
-    // `@materialized` `standing` view: `state.views.standing.get(a, b)`
-    // and `state.views.standing.adjust(a, b, delta, tick)`.
+    // Standing is managed via the `@materialized` `standing` view:
+    // `state.views.standing.get(a, b)` and `state.views.standing.adjust(a, b, delta, tick)`.
 
     // Memberships (Task G).
     pub fn agent_memberships(&self, id: AgentId) -> Option<&[Membership]> {
@@ -1029,8 +1016,7 @@ impl SimState {
         }
     }
 
-    // Memory (Task I) retired 2026-04-23 by Subsystem 2 Phase 4.
-    // Read/mutate via the `@per_entity_ring(K=64)` `memory` view:
+    // Memory is managed via the `@per_entity_ring(K=64)` `memory` view:
     // `state.views.memory.push(observer.raw(), MemoryEntry { .. })`
     // and `state.views.memory.entries(observer)`.
 

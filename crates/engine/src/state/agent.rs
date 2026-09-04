@@ -19,9 +19,7 @@ pub struct AgentSpawn {
     /// Maximum HP — the cap used by `hp_pct = hp / max_hp` scoring and
     /// by any healing that restores up to full. Independent of `hp` so
     /// a "wounded" spawn can start at `hp=10, max_hp=100` and report a
-    /// low `hp_pct` for target-selection. Task 150 split this out of
-    /// `spec.hp.max(1.0)`, which made freshly-spawned agents always
-    /// report `hp_pct = 1.0` and broke pct-based scoring.
+    /// low `hp_pct` for target-selection.
     pub max_hp:        f32,
 }
 

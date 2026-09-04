@@ -751,13 +751,10 @@ pub enum EntityRoot {
     Group,
     /// Quest-rooted entity. Spec table at `docs/spec/dsl.md:653-663`
     /// lists `Quest` alongside `Agent`/`Item`/`Group`. Today the
-    /// declaration parses + lowers as a declare-only entity (no
-    /// per-Quest SoA storage, no `quests.field(idx)` accessor) — the
-    /// `populate_entity_field_catalog` driver skips Quest entries the
-    /// same way it skips Agent ones. Closes Gap A from
-    /// `docs/superpowers/notes/2026-05-04-quest_probe.md`. Future
-    /// extension: add `EntityFieldCatalog::quests` when a fixture
-    /// surfaces a `quests.<field>(idx)` call site.
+    /// declaration parses + lowers as declare-only (no per-Quest SoA
+    /// storage, no `quests.field(idx)` accessor); `populate_entity_field_catalog`
+    /// skips Quest entries like Agent ones. Future: add
+    /// `EntityFieldCatalog::quests` when a fixture needs `quests.<field>(idx)`.
     Quest,
 }
 
@@ -1213,11 +1210,10 @@ pub struct ScoringDecl {
     pub entries: Vec<ScoringEntry>,
     /// `row <name> per_ability { guard: ..., score: ..., target: ... }`
     /// rows. The scoring kernel iterates each agent's ability slots and
-    /// produces one score per (agent, ability) pair. Added 2026-04-23
-    /// (GPU ability evaluation Phase 2). Kept as a sibling list rather
-    /// than folded into `entries` so legacy emitters that walk `entries`
-    /// stay untouched — Phase 3 wires a dedicated CPU lowering for the
-    /// `PerAbilityRow` shape.
+    /// produces one score per (agent, ability) pair. Kept as a sibling list
+    /// rather than folded into `entries` so legacy emitters that walk
+    /// `entries` stay untouched; downstream lowering wires a dedicated path
+    /// for the `PerAbilityRow` shape.
     pub per_ability_rows: Vec<PerAbilityRow>,
     pub span: Span,
 }
@@ -1245,9 +1241,9 @@ pub struct ScoringEntry {
 ///   `score + weights` (both F32). Optional; design-target fixtures
 ///   (predator_prey, crowd_navigation, squad_skirmish) use the
 ///   `base: <const>, weights: <expr>` shape where `base:` doubles as
-///   the score field. Closes Gap C from `docs/architecture/gaps_observed.md`
-///   (2026-05-11): pre-fix the parser parse-and-discarded `weights:`
-///   so personality-weighted scoring contributed nothing to argmax.
+///   the score field. The parser captures both `base` and `weights`
+///   (rather than discarding `weights`) so personality-weighted scoring
+///   correctly contributes to ability selection.
 ///
 /// See `docs/spec/engine.md §11`
 /// §Architecture.
@@ -2092,11 +2088,9 @@ pub enum EffectLifetime {
     /// `damageable_hp(N)` — voxel-style damage budget; effect dies
     /// when this HP pool is depleted.
     DamageableHp { hp: f32, span: Span },
-    /// `break_on_damage` — effect ends when caster takes damage.
-    /// Used by stealth-style abilities (LoL: Akali/Elise/MonkeyKing
-    /// stealth-for-3s-break_on_damage). Spec drift: not in spec §6.1
-    /// originally; surface added 2026-05-04 to close the LoL-corpus
-    /// long tail (#85 follow-up — last 25/172 files used this token).
+    /// `break_on_damage` — effect ends when caster takes damage. Used by
+    /// stealth-style abilities (LoL: Akali/Elise/MonkeyKing). Spec drift:
+    /// not in spec §6.1 but required for LoL-corpus compatibility.
     BreakOnDamage { span: Span },
 }
 
@@ -2324,11 +2318,8 @@ pub struct StructureDecl {
 //
 // AST types for the new `cast { duration; telegraph; interrupts }`
 // block form, the `interrupts:` set syntax, and the `cooldown @
-// phase` qualifier. The parser additions land in a follow-up
-// commit; this commit defines the types so downstream lowering
-// (Plan G phases G2+) can be sketched against a stable shape.
-//
-// See `docs/superpowers/plans/2026-05-09-cast-state-and-threat-zones.md`.
+// phase` qualifier. The parser surface and lowering will consume these
+// types. See `docs/superpowers/plans/2026-05-09-cast-state-and-threat-zones.md`.
 
 /// One step of an ability's deferred-resolution program. New
 /// `.ability` files can author a sequence:

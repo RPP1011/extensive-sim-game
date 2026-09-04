@@ -26,7 +26,7 @@
 //! a new effect → event mapping, this table must grow the matching
 //! entry too — otherwise the consumer/dispatcher kind tags drift again.
 //!
-//! ## Collision policy (RESERVED-ID SKIPPING, fixed 2026-07-22)
+//! ## Collision policy (RESERVED-ID SKIPPING)
 //!
 //! User-declared events that don't match a known engine name are
 //! allocated ids sequentially in declaration order, **skipping every
@@ -76,22 +76,9 @@ pub const ENGINE_EVENT_KIND_IDS: &[(&str, u32)] = &[
     ("EffectSlowApplied",       30),
     ("EffectGoldTransfer",      31),
     ("EffectStandingDelta",     32),
-    // Bleed verb swap (Task #138 follow-on, 2026-05-06): SelfDamage
-    // = 17 → EventKindId::EffectSelfDamageApplied = 39 (slot 39, after
-    // RallyCall=38 in the engine's `EventKindId` enum).
     ("EffectSelfDamageApplied", 39),
-    // Vampirize verb swap (Task #138 follow-on, mirror of Bleed at
-    // `486eb08f`): LifeSteal = 18 → EventKindId::EffectLifeStealApplied
-    // = 40 (slot 40, after EffectSelfDamageApplied=39).
     ("EffectLifeStealApplied",  40),
-    // Fortify verb swap (Task #138 follow-on, mirror of Vampirize at
-    // `60115f64`): DamageModify = 19 → EventKindId::EffectDamageModifyApplied
-    // = 41 (slot 41, after EffectLifeStealApplied=40).
     ("EffectDamageModifyApplied", 41),
-    // Reap verb swap (Task #138 follow-on, mirror of Fortify at
-    // `001ae9a6`): Execute = 16 → EventKindId::EffectExecuteApplied = 42
-    // (slot 42, after EffectDamageModifyApplied=41). Closes the slice
-    // across all 8 duel_abilities verbs.
     ("EffectExecuteApplied", 42),
     // Wave 2 piece 1 — control statuses (Root/Silence/Fear/Taunt). Each
     // mirrors Stun's shape (target agent + u32 expires_at_tick), packed
@@ -457,8 +444,8 @@ mod tests {
         }
     }
 
-    /// The regression this fix exists for: the 27th user event used to
-    /// land on 26 (`EffectDamageApplied`, the dispatcher's damage tag).
+    /// User event IDs must skip reserved ranges. Id 26 is reserved for
+    /// `EffectDamageApplied` (the dispatcher's damage tag).
     #[test]
     fn user_ids_skip_the_reserved_range() {
         let ids = assign_event_kind_ids(std::iter::repeat(None).take(60));

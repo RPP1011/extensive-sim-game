@@ -308,13 +308,10 @@ fn seed_topology(state: &mut GeneratedRuntime) {
         bytemuck::cast_slice(&ambition),
     );
 
-    // Gap G workaround removed (2026-05-11): build_helper init lowering
-    // now routes `init { hp: 100, max_hp: 100 }` by the target column's
-    // primitive type, so the .sim init block correctly emits
-    // `vec![100.0_f32; agent_count]` for the f32 hp + max_hp columns
-    // (was: `vec![100u32; ...]` which bytemuck-cast the u32 bit-pattern
-    // 0x64 into the f32 buffer — functionally zero). The previous
-    // host-side overwrite is no longer required.
+    // build_helper init lowering routes `init { hp: 100, max_hp: 100 }`
+    // by the target column's primitive type, so the .sim init block
+    // correctly emits `vec![100.0_f32; agent_count]` for the f32 hp +
+    // max_hp columns. No host-side overwrite is required here.
 }
 
 fn count_alive_of_team(state: &mut GeneratedRuntime, team: u32) -> u32 {

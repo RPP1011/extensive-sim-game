@@ -1,8 +1,7 @@
-//! Plan E-A1 — shared build-script helper for `crates/*_runtime/build.rs`.
+//! Shared build-script helper for `crates/*_runtime/build.rs`.
 //!
-//! Before this helper, every `*_runtime/build.rs` was a 100-150-line
-//! file structurally identical to its 60 siblings except for the
-//! fixture name string. Each duplicated:
+//! This helper collapses boilerplate that was once duplicated across
+//! every `*_runtime/build.rs`, each following the same pipeline:
 //!
 //! * Workspace-root resolution + `assets/sim/<fixture>.sim` read.
 //! * `dsl_compiler::parse → resolve → cg::lower → schedule → emit`.
@@ -11,20 +10,16 @@
 //!   wrappers per emitted Rust file.
 //! * `cargo:warning` emit-stats lines (kernel name + size + binding count).
 //!
-//! That sprawl violated the "runtime crates contain no behavior"
-//! direction the project is moving toward — and it was the load-bearing
-//! reason every `.sim` change required touching N runtime crates by hand.
-//! This helper collapses the entire build script to:
+//! The entire build script is now:
 //!
 //! ```ignore
 //! fn main() { dsl_compiler::build_helper::emit("dodger_probe"); }
 //! ```
 //!
-//! The behaviour is exactly what each runtime did by hand. The only
-//! per-fixture-knob today is the fixture name; if any fixture later
+//! The only per-fixture knob is the fixture name; if a fixture later
 //! needs a divergent emit-stats prefix or extra `cargo:warning` shape,
 //! add a parameter here rather than re-introducing per-runtime build.rs
-//! sprawl.
+//! duplication.
 
 use std::env;
 use std::fs;

@@ -1,10 +1,8 @@
 //! Regression: a `field` decl must not swallow the NEXT declaration's
 //! leading annotation.
 //!
-//! `absorb_trailing_annotations` deliberately keeps trailing annotations on
-//! the declaration's own source line (`skip_inline_ws`). `agent_field_decl`
-//! used to end with a newline-crossing `skip_ws`, which put the cursor past
-//! the line break before that guard ran — so
+//! A field's trailing annotations must stay on the declaration's own source line.
+//! Without this guard:
 //!
 //! ```text
 //! field mood: f32
@@ -12,11 +10,9 @@
 //! physics Drift { ... }
 //! ```
 //!
-//! parsed as "field with a trailing @phase" plus an UNANNOTATED physics rule.
-//! The robbed rule then lowered PerEvent and every `self` read failed
-//! well-formedness, with nothing in the error pointing back at the field.
-//! Found by the webband port's S5b slice; no shipped fixture hit it, because
-//! fixtures happened to separate their field blocks from annotated rules.
+//! would parse as "field with a trailing @phase" plus an UNANNOTATED physics rule.
+//! The robbed rule would then fail well-formedness checks on every `self` read,
+//! with no error pointing back at the field.
 
 use dsl_ast::ast::Decl;
 

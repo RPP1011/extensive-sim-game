@@ -41,10 +41,10 @@ use engine_data::events::Event;
 // ---------------------------------------------------------------------------
 // Layout note: EffectOp size
 // ---------------------------------------------------------------------------
-// `engine::ability::program::EffectOp::TransferGold` uses `i32` (narrowed
-// for GPU atomics on 2026-04-22) while `dsl_ast::eval::EffectOp::TransferGold`
-// uses `i64`. The two enums are intentionally different sizes; the conversion
-// below widens `i32 → i64`. No compile-time size assertion here.
+// `engine::ability::program::EffectOp::TransferGold` uses `i32` while
+// `dsl_ast::eval::EffectOp::TransferGold` uses `i64`. The two enums are
+// intentionally different sizes; the conversion below widens `i32 → i64`.
+// No compile-time size assertion here.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------

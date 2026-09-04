@@ -1,13 +1,7 @@
 // crates/engine/src/mask.rs
 //
 // Storage primitives for the action mask: MicroKind enum, TargetMask, and
-// MaskBuffer. Rule-aware mask-build methods (mark_hold_allowed,
-// mark_move_allowed_from_candidates, mark_attack_allowed_from_candidates,
-// mark_flee_allowed_if_threat_exists, mark_needs_allowed,
-// mark_domain_hook_micros_allowed) and the inferred_cast_target helper are
-// DELETED in Plan B1' Task 11 — they called into generated mask functions and
-// belong to the rule layer. `engine_rules::step` (emitted in Task 11) will
-// own those calls. Only storage primitives remain here.
+// MaskBuffer. Rule-aware mask-build logic lives in `engine_rules::step`.
 //
 // Interpreter dispatch helpers live in `mod interp` below (feature-gated on
 // `interpreted-rules`). They are called from `engine_rules::mask_fill` (the

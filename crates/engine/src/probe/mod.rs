@@ -6,9 +6,9 @@
 //! `SimState`, run `p.spawn` to populate agents, tick the pipeline
 //! `p.ticks` times, and call `p.assert` with the final state + events.
 //!
-//! NOTE: `run_probe` is UNIMPLEMENTED pending Plan B1' Task 11, which
-//! emits `engine_rules::step::step`. Until then, callers of `run_probe`
-//! (e.g. `probe_determinism` test) are `#[ignore]`d.
+//! NOTE: `run_probe` is UNIMPLEMENTED; the tick driver lives in
+//! `engine_rules::step::step`. Callers of `run_probe` (e.g. `probe_determinism`
+//! test) are `#[ignore]`d.
 //!
 //! See `docs/engine/spec.md` §18.
 
@@ -42,14 +42,10 @@ pub const DEFAULT_EVENT_CAP: usize = 4096;
 
 /// Run a probe.
 ///
-/// UNIMPLEMENTED: `engine::step::step` is deleted (Plan B1' Task 11).
-/// `engine_rules::step::step` replaces it. Until Task 11 lands, callers
-/// of this function must be `#[ignore]`d.
-///
-/// Re-enable after B1' Task 11 emits engine_rules::step::step.
+/// UNIMPLEMENTED: the tick driver lives in `engine_rules::step::step`.
+/// Callers of this function must be `#[ignore]`d.
 pub fn run_probe(_p: &Probe) -> Result<(), String> {
     unimplemented!(
-        "engine::probe::run_probe: step::step deleted (Plan B1' Task 11). \
-         Re-enable after engine_rules::step::step is emitted."
+        "engine::probe::run_probe: the tick driver is engine_rules::step::step"
     )
 }

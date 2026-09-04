@@ -1,11 +1,9 @@
 //! Belief state — per-(observer, target) fact tuple maintained by the
 //! Theory-of-Mind subsystem. Stored in `SimState.cold_beliefs[observer]`
-//! as a `BoundedMap<AgentId, BeliefState, 8>` per Plan ToM Task 2.
+//! as a `BoundedMap<AgentId, BeliefState, 8>`.
 //!
-//! Hand-written; not DSL-emitted (see Task 3 deviation note: T3 originally
-//! planned to extend the DSL struct emitter, but because `SimState` is also
-//! hand-written (discovered in T2), we land `BeliefState` as hand-written
-//! code matching the same approach).
+//! Hand-written (not DSL-emitted), matching `SimState` which is also
+//! hand-written in `engine`.
 
 use crate::entities::CreatureType;
 use glam::Vec3;

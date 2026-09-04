@@ -316,10 +316,8 @@ pub enum IrExpr {
     /// `ability::tag(TAG_NAME)` — reads the named tag's power rating
     /// off the currently-scored ability. Returns f32; 0.0 if the
     /// ability has no entry for the tag. Only meaningful inside a
-    /// `per_ability` scoring row (where "the currently-scored
-    /// ability" has a binding) — Phase 3 enforces this at emit time.
-    ///
-    /// Added 2026-04-23 (GPU ability evaluation Phase 2).
+    /// `per_ability` scoring row (where "the currently-scored ability"
+    /// has a binding). Emit time enforces this at Phase 3.
     AbilityTag { tag: AbilityTag },
     /// `ability::hint` — reads the coarse hint category of the
     /// currently-scored ability. Compared for equality against a
@@ -570,9 +568,8 @@ pub struct EventIR {
     /// matches a hardcoded engine event (`EffectDamageApplied = 26`,
     /// etc.). `None` for user-declared events — those are allocated
     /// sequentially by `crate::engine_events::assign_event_kind_ids`,
-    /// which SKIPS every reserved engine discriminant (a plain
-    /// `EventKindId(i)` aliased the 27th user event onto the
-    /// dispatcher's damage tag; fixed 2026-07-22).
+    /// which SKIPS every reserved engine discriminant to avoid collisions
+    /// with the dispatcher's hardcoded event tags.
     ///
     /// Populated by `dsl_ast::resolve` from
     /// `crate::engine_events::engine_event_kind_id_for_name`. The
@@ -798,7 +795,6 @@ pub struct ScoringIR {
     /// Standard per-agent rows: `Head = expression`.
     pub entries: Vec<ScoringEntryIR>,
     /// `row <name> per_ability { ... }` rows. See `PerAbilityRowIR`.
-    /// Added 2026-04-23 (GPU ability evaluation subsystem Phase 2).
     pub per_ability_rows: Vec<PerAbilityRowIR>,
     pub annotations: Vec<Annotation>,
     pub span: Span,
@@ -1270,11 +1266,9 @@ pub enum NamespaceId {
     Abilities,
     /// `terrain.*` — sim-wide accessor for the `TerrainQuery` backend
     /// living on `SimState`. Methods: `terrain.line_of_sight(from, to)
-    /// -> bool`. Registered 2026-04-23 (Task 81 terrain integration
-    /// MVP). Deliberately tiny surface — MVP slice only exposes LOS;
-    /// `height_at` / `walkable` stay engine-internal for now and can be
-    /// lifted into the DSL in a follow-up once a concrete scoring /
-    /// mask row needs them.
+    /// -> bool`. Deliberately tiny MVP surface — only LOS is exposed;
+    /// `height_at` / `walkable` stay engine-internal and can be lifted into
+    /// the DSL in a follow-up once a concrete scoring / mask row needs them.
     Terrain,
     /// `membership::*` — Subsystem §1 (roadmap.md:161-211). Predicates on
     /// per-agent `cold_memberships` SmallVec. Methods are `is_group_member`,
@@ -1340,17 +1334,12 @@ pub enum NamespaceId {
     ///   * `events.kind_count(kind: EventKindId) -> u32` — count of
     ///     events of a given kind in the current tick.
     ///
-    /// Registered 2026-05-11 to close the migration gap blocking
-    /// `crowd_navigation` + `predator_prey` from the `sims/`
-    /// mega-crate. The events namespace is META-LEVEL: today it
-    /// resolves cleanly into `IrExpr::NamespaceField` /
-    /// `IrExpr::NamespaceCall` so metric/invariant/probe shape
-    /// classifiers see a structured node and emit per-name SKIP
-    /// setters (the runtime fills in the actual count). Physics /
-    /// view bodies that reach for `events.*` will fail at lowering
-    /// with `UnsupportedNamespaceCall` — that's intentional: the
-    /// trace consumer surface stays host-side until a future plan
-    /// wires real GPU-side ring scans.
+    /// The events namespace is META-LEVEL: resolves cleanly into
+    /// `IrExpr::NamespaceField` / `IrExpr::NamespaceCall` so
+    /// metric/invariant/probe shape classifiers see a structured node
+    /// and emit per-name SKIP setters (the runtime fills in the actual
+    /// count). Physics / view bodies cannot use `events.*` (not yet
+    /// GPU-side); lowering surfaces `UnsupportedNamespaceCall`.
     ///
     /// Distinct from the singular `event` namespace which carries
     /// the per-handler currently-firing event accessors (`event.kind`,

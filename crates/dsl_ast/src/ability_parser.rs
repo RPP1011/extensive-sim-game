@@ -2279,7 +2279,7 @@ fn peek_number_or_sign(c: &Cursor) -> bool {
 /// digits with `_` separators, optional fractional part, optional
 /// exponent.
 ///
-/// Surface forms (task #225 added hex + suffixes — 2026-05-08):
+/// Supported numeric literal surface forms:
 /// - Decimal: `123`, `1_000_000`, `1.5`, `2.5e-3`
 /// - Hex: `0xFF`, `0xDEAD_BEEF` (any case, `_` separators allowed)
 /// - Integer suffix: trailing `(u|i)(8|16|32|64)?` is consumed and

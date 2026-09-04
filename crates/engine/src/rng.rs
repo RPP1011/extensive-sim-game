@@ -130,8 +130,7 @@ fn rng_mix32(x: u32) -> u32 {
 /// - GPU-emitted kernel bodies → the WGSL `per_agent_u32(...)` call;
 ///   host code that needs to reproduce the same draw uses this.
 ///
-/// See `docs/superpowers/notes/2026-05-04-stochastic_probe.md` (Gap
-/// #2) for the discovery doc.
+/// See `docs/superpowers/notes/` for the canonical RNG behavior contract.
 pub fn per_agent_u32_pcg(world_seed: u32, agent_id: u32, tick: u32, purpose_id: u32) -> u32 {
     let mut s = rng_mix32(world_seed ^ 0x9E37_79B9);
     s = rng_mix32(s ^ agent_id);

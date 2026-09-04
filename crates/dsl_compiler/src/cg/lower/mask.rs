@@ -1,8 +1,6 @@
 //! Mask lowering — `MaskIR → ComputeOpKind::MaskPredicate`.
 //!
-//! Phase 2, Task 2.2 of the Compute-Graph IR pipeline (see
-//! `docs/superpowers/plans/2026-04-29-dsl-compute-graph-ir.md`). Each
-//! `mask <Name>` decl in the resolved DSL IR becomes one
+//! Each `mask <Name>` decl in the resolved DSL IR becomes one
 //! [`crate::cg::op::ComputeOp`] whose [`ComputeOpKind`] is
 //! [`ComputeOpKind::MaskPredicate`].
 //!

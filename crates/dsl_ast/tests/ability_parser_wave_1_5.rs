@@ -153,9 +153,9 @@ fn parses_when_with_parens_in_cond() {
     assert_eq!(cond.when_cond, "(target.hp < 30 or target.shield_hp == 0)");
 }
 
-// Task #227 — compound predicates (`&&` / `||` / `!`). These verify
-// the parser captures the verbatim source text correctly; structured
-// extraction lives in dsl_compiler's lowering pass.
+// Compound predicates (`&&` / `||` / `!`): parser must capture verbatim
+// source text correctly; structured extraction lives in dsl_compiler's
+// lowering pass.
 
 #[test]
 fn parses_when_with_and() {
@@ -217,10 +217,10 @@ fn parses_when_existing_atomic_still_works() {
     assert_eq!(cond.when_cond, "target.hp < 30");
 }
 
-// Task #228 — `when A else B` per-effect predicate clause. The `else`
-// branch is a full condition expression (no leading `when`); both
-// branches are captured verbatim so lowering can re-parse them through
-// the same predicate vocabulary as the `when` branch.
+// `when A else B` per-effect predicate clause: the `else` branch is a full
+// condition expression (no leading `when`); both branches are captured verbatim
+// so lowering can re-parse them through the same predicate vocabulary as the
+// `when` branch.
 
 #[test]
 fn when_else_parses_simple_atoms() {

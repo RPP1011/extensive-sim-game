@@ -1,21 +1,16 @@
 //! Shared enum vocabulary referenced by compiler-emitted event structs.
 //!
-//! Moved out of `engine::policy::macro_kind` at the milestone-2 integration
-//! step. These enums appear as field types on `engine_rules::events::Event`
+//! These enums appear as field types on `engine_rules::events::Event`
 //! variants (e.g. `QuestPosted { category, resolution, .. }`), and
 //! `engine_rules` doesn't depend on `engine` — so the types have to live
-//! here. The old locations in `engine::policy::macro_kind` re-export from
-//! this module so existing `use engine::policy::QuestCategory` call sites
-//! keep compiling.
+//! here. The old locations in `engine::policy::macro_kind` and
+//! `engine::channel` / `engine::creature` re-export from this module so
+//! existing `use engine::policy::QuestCategory` and `use engine::CommunicationChannel`
+//! call sites keep compiling.
 //!
-//! When the compiler grows entity / enum declaration emission in a later
-//! milestone, these definitions become compiler output.
-//!
-//! Milestone 6 (2026-04-19) additionally moved `CommunicationChannel`,
-//! `ChannelSet`, and `LanguageId` here from `engine::channel` / `engine::creature`
+//! `CommunicationChannel`, `ChannelSet`, and `LanguageId` are defined here
 //! so the compiler-emitted `Capabilities` struct can reference them without
-//! inverting the `engine → engine_rules` dependency direction. The engine's
-//! `channel.rs` / `creature.rs` re-export from this module.
+//! inverting the `engine → engine_rules` dependency direction.
 
 use smallvec::SmallVec;
 use std::num::NonZeroU16;

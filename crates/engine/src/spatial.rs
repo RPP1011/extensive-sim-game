@@ -327,10 +327,9 @@ impl SpatialHash {
 /// out-of-range `mover` returns `None`.
 ///
 /// Ties on distance are broken on raw `AgentId` ascending — matches the
-/// legacy hand-written `engagement::recompute_engagement_for` discipline
-/// (Task 163 moves that function to a DSL rule; the wolves+humans
-/// baseline pins the exact tie-break outcome so this helper must preserve
-/// it bit-for-bit). The iteration order over `SpatialHash::within_radius`
+/// legacy hand-written `engagement::recompute_engagement_for` discipline.
+/// The tie-break outcome must be preserved bit-for-bit so the test fixtures
+/// remain deterministic. The iteration order over `SpatialHash::within_radius`
 /// is the same — that helper already sorts by raw id before returning, so
 /// "first candidate with equal distance wins" collapses to "lowest raw
 /// id wins".

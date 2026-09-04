@@ -76,19 +76,18 @@ pub enum ResolveError {
     /// kernels (one row per candidate), so pattern-matching control flow
     /// and unbounded iteration are forbidden — use quantifiers
     /// (`forall`/`exists`) or bounded aggregates (`count`/`sum`/…) instead.
-    /// Task 155 (commit 9ba805c6) expanded the *physics* surface to
-    /// include `for`/`match`, but mask bodies stayed restricted by design
-    /// since they lower to SPIR-V kernels.
+    /// Physics bodies allow `for`/`match`, but mask bodies stay restricted by
+    /// design since they lower to SPIR-V kernels.
     UdfInMaskBody {
         mask_name: String,
         offending_construct: String,
         span: Span,
     },
     /// A `scoring { <Action>(...) = <expr> }` entry uses a construct
-    /// outside the closed operator set. Scoring rows share the same
-    /// GPU kernel surface as mask predicates: no `match`, no `for`, no
-    /// user-defined helpers. Task 155 confirmed this stays the contract
-    /// even as physics bodies gained the richer CPU surface.
+    /// outside the closed operator set. Scoring rows share the same GPU
+    /// kernel surface as mask predicates: no `match`, no `for`, no
+    /// user-defined helpers. This constraint persists even as physics
+    /// bodies gained the richer CPU surface.
     UdfInScoringBody {
         offending_construct: String,
         span: Span,
@@ -127,21 +126,19 @@ pub enum ResolveError {
         span: Span,
     },
     /// A `spatial_query <name>(<params>) = ...` declaration's first
-    /// two positional binders are not named `self` and `candidate`.
-    /// Phase 7 Task 4 fixes the convention: `self` is the querying
-    /// agent and `candidate` is the per-pair neighbour the filter
-    /// inspects; downstream lowering (Task 5) reaches into the
-    /// `target_local` flag via the `candidate` binder.
+    /// two positional binders must be named `self` (the querying agent)
+    /// and `candidate` (the per-pair neighbour the filter inspects).
+    /// Downstream lowering reaches into the `target_local` flag via the
+    /// `candidate` binder.
     SpatialQueryRequiresSelfCandidateBinders {
         decl_name: String,
         span: Span,
     },
     /// A `from spatial.<name>(...)` reference (or its
     /// `spatial::<name>(...)` flat sibling) names a query no
-    /// `spatial_query <name>` declaration supplies. Phase 7 Task 4
-    /// surfaces this as a typed defect rather than a silent
-    /// `NamespaceCall` carry-through; the lowering pass needs a
-    /// resolved declaration.
+    /// `spatial_query <name>` declaration supplies. This is a typed
+    /// defect (not a silent `NamespaceCall` carry-through) because the
+    /// lowering pass needs a resolved declaration.
     UnknownSpatialQuery {
         name: String,
         span: Span,

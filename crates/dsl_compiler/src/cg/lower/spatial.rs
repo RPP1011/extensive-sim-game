@@ -1,9 +1,7 @@
 //! Spatial-query lowering — driver-supplied [`SpatialQueryKind`] list →
 //! one [`ComputeOpKind::SpatialQuery`] op per entry.
 //!
-//! Phase 2, Task 2.6 of the Compute-Graph IR pipeline (see
-//! `docs/superpowers/plans/2026-04-29-dsl-compute-graph-ir.md`). Unlike
-//! the mask / view / physics / scoring passes, this pass does NOT
+//! Unlike the mask / view / physics / scoring passes, this pass does NOT
 //! consume an AST IR sub-tree: the DSL surface today has no
 //! `@spatial query` annotation type, and the only spatial-query-bearing
 //! AST shape is the `from query.nearby_agents(...)` clause on masks
@@ -11,8 +9,7 @@
 //! resolves a [`crate::cg::dispatch::PerPairSource::SpatialQuery`]).
 //!
 //! Instead, the pass takes a driver-supplied list of
-//! [`SpatialQueryKind`] values that the schedule synthesizer (Phase 3)
-//! will need ops for: each variant produces ONE
+//! [`SpatialQueryKind`] values: each variant produces ONE
 //! [`crate::cg::op::ComputeOp`] whose [`ComputeOpKind`] is
 //! [`ComputeOpKind::SpatialQuery`]. Reads and writes for each op are
 //! auto-derived by [`crate::cg::op::ComputeOpKind::compute_dependencies`]

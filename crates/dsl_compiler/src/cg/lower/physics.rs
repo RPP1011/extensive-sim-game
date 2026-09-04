@@ -1,9 +1,7 @@
 //! Physics-rule lowering — `PhysicsIR → ComputeOpKind::PhysicsRule`.
 //!
-//! Phase 2, Task 2.4 of the Compute-Graph IR pipeline (see
-//! `docs/superpowers/plans/2026-04-29-dsl-compute-graph-ir.md`). Each
-//! `physics <name> @phase(...) { on <Event> { ... } ... }` decl in the
-//! resolved DSL IR produces one [`ComputeOpKind::PhysicsRule`] op per
+//! Each `physics <name> @phase(...) { on <Event> { ... } ... }` decl in
+//! the resolved DSL IR produces one [`ComputeOpKind::PhysicsRule`] op per
 //! `on <Event>` handler, dispatched [`DispatchShape::PerEvent`] over
 //! the handler's source event ring. Each op's body is a
 //! [`crate::cg::stmt::CgStmtList`] lowered from the handler's

@@ -140,15 +140,15 @@ fn main() {
                 | "terrain_probe"
                 | "terrain_probe_imported"
                 | "vampire_survivors"
-                // The four `webband_*` fixtures left with the game on
-                // 2026-07-23 (RPP1011/webband — it compiles them itself
-                // through this same build_helper, from its own
-                // assets/sim/). `many_events_ability` below is what keeps
-                // a large-user-event subject in this corpus.
-                // S5b (2026-07-22) — >25-user-event `apply_ability`
-                // regression pin (crates/sims/tests/many_events_ability_pin.rs).
-                // Compiles only because user event kind ids now skip the
-                // engine's reserved chronicle discriminants.
+                // The four `webband_*` fixtures left with the game
+                // (RPP1011/webband — it compiles them itself through this
+                // same build_helper, from its own assets/sim/).
+                // `many_events_ability` below is what keeps a
+                // large-user-event subject in this corpus: a >25-user-event
+                // `apply_ability` regression pin
+                // (crates/sims/tests/many_events_ability_pin.rs). Compiles
+                // only because user event kind ids skip the engine's
+                // reserved chronicle discriminants.
                 | "many_events_ability"
                 // Plan D — minimal end-to-end probe for the generic `play`
                 // binary (all three player-facing blocks + one host-driven

@@ -448,8 +448,8 @@ fn seed_topology(state: &mut GeneratedRuntime) {
         bytemuck::cast_slice(&engaged),
     );
 
-    // Per-Item base_price — Gap T2 fix (2026-05-12): the binding is
-    // FIELD-keyed (`item_base_price_buf`) and sized to one slot per
+    // Per-Item base_price: the binding is FIELD-keyed
+    // (`item_base_price_buf`) and sized to one slot per
     // declared Item-rooted entity (3: Grain=0, Spice=1, Silk=2 in
     // declaration order among Items). Each `items.base_price(N)` read
     // in the .sim now resolves to the right slot in this shared

@@ -135,18 +135,17 @@ fn lower_interrupt_set(set: &InterruptSet) -> InterruptMask {
     }
 }
 
-/// Plan G G3e (2026-05-09) — parse the verbatim telegraph source slice
-/// (e.g. `"circle(self.pos, radius: 4)"` or
-/// `"line(self.pos, target.pos, width: 2)"`) into a `(TelegraphKind,
-/// [f32; 4])` tuple ready for the packed registry's
-/// `telegraph_kind` / `telegraph_params` columns.
+/// Parse the verbatim telegraph source slice (e.g.
+/// `"circle(self.pos, radius: 4)"` or `"line(self.pos, target.pos,
+/// width: 2)"`) into a `(TelegraphKind, [f32; 4])` tuple ready for the
+/// packed registry's `telegraph_kind` / `telegraph_params` columns.
 ///
-/// MVP scope: recognises only `circle(...)` and `line(...)` shape names
-/// and pulls the single named numeric arg (`radius:` for circles,
-/// `width:` for lines) into `params[0]`. Position arguments
-/// (`self.pos`, `target.pos`) are NOT parsed here — they're implicit
-/// in the threats fold's projection step (centre = caster pos for
-/// circle; endpoints = caster + target pos for line).
+/// Recognises only `circle(...)` and `line(...)` shape names and pulls
+/// the single named numeric arg (`radius:` for circles, `width:` for
+/// lines) into `params[0]`. Position arguments (`self.pos`, `target.pos`)
+/// are NOT parsed here — they're implicit in the threats fold's
+/// projection step (centre = caster pos for circle; endpoints = caster +
+/// target pos for line).
 ///
 /// Returns `None` for unparseable text (unknown shape, missing named
 /// arg, malformed literal). Caller treats `None` as "no telegraph"
@@ -361,8 +360,7 @@ pub enum LowerError {
     /// Wave 1.5#7 GPU eval: a `when <cond>` modifier carried a
     /// construct outside the restricted predicate vocab the
     /// dispatcher (CPU + GPU) evaluates today. Compound predicates
-    /// (`&&` / `||` / `!`) ARE supported as of task #227. Deferred
-    /// branches — open task #163-followup:
+    /// (`&&` / `||` / `!`) are supported. Deferred branches:
     ///   * `else <cond>` clause
     ///   * field-vs-field comparisons (`target.hp < self.hp`)
     ///   * non-`<binder>.<field> <op> <literal>` atom shapes
@@ -527,7 +525,7 @@ impl std::fmt::Display for LowerError {
             ),
             LowerError::WhenConditionUnsupported { ability, clause, reason, .. } => write!(
                 f,
-                "ability `{ability}`'s `{clause}` clause uses an unsupported construct: {reason} (Wave 1.5#7 supports only `<binder>.<field> <op> <literal>` with binder ∈ {{self, target}}; deferred — open task #163-followup)"
+                "ability `{ability}`'s `{clause}` clause uses an unsupported construct: {reason} (supported: `<binder>.<field> <op> <literal>` with binder ∈ {{self, target}}; other forms deferred)"
             ),
             LowerError::WhenConditionUnsupportedField { ability, clause, field, .. } => write!(
                 f,
@@ -723,13 +721,11 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     for header in &decl.headers {
         match header {
             AbilityHeader::Target(mode) => {
-                // All eight target modes per spec §4.3 now lower into
-                // engine IR (#127, post Wave 1.1 headers ea3af642+).
-                // `gate.hostile_only` only encodes the historical
-                // Enemy/Self/Ally distinction — apply handlers read
-                // `program.target_mode` for the richer routing
-                // (position/directional/global) which today doesn't
-                // dispatch (deferred — registry-driven apply, #125).
+                // All eight target modes per spec §4.3 lower into engine IR.
+                // `gate.hostile_only` only encodes the Enemy/Self/Ally
+                // distinction — apply handlers read `program.target_mode` for
+                // the richer routing (position/directional/global) which today
+                // doesn't dispatch (deferred — registry-driven apply).
                 let (kind, hostile) = match mode {
                     TargetMode::Enemy     => (TargetModeKind::Enemy,     true),
                     TargetMode::Self_     => (TargetModeKind::SelfCast,  false),
@@ -997,8 +993,8 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     > = SmallVec::new();
     let mut any_scaling = false;
 
-    // Plan G (G2.6 + option D, 2026-05-09) — abilities authored with
-    // the new `cast { … } effect { … }` program shape lower into:
+    // Abilities authored with the new `cast { … } effect { … }`
+    // program shape lower into:
     //   * `effects`          = a single `EffectOp::CastBegin` op (the
     //                          IMMEDIATE-cast IR), and
     //   * `pending_program`  = the lowered op stream from each
@@ -1009,17 +1005,16 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     //
     // The parser guarantees mutual exclusion: when `decl.program` is
     // `Some`, `decl.effects` is empty, so the legacy effect loop below
-    // is a no-op for this branch. For the MVP slice we emit only the
-    // first `Cast` step; multi-stage programs
-    // (cast→effect→cast→effect chains) lower to additional `CastBegin`
-    // ops in a follow-up slice.
+    // is a no-op for this branch. Currently we emit only the first
+    // `Cast` step; multi-stage programs (cast→effect→cast→effect chains)
+    // lower to additional `CastBegin` ops in a follow-up slice.
     //
     // `ability_id` and `target_slot` on the CastBegin op are
     // placeholders at lowering time — the apply path overrides them at
     // dispatch via runtime context (caster/target plumbed by
     // `apply_ability`). The q8 target position fields are likewise
-    // zeroed; G2.7 wires the BusyTargetPos SoA write at the cast site
-    // for shape-aware threats lookup.
+    // zeroed; they are wired by the BusyTargetPos SoA write at the cast
+    // site for shape-aware threats lookup.
     //
     // **Per-effect modifier slots on pending_program** (chances /
     // scalings / lifetimes / etc.) are NOT captured today — we emit
@@ -1028,11 +1023,11 @@ pub fn lower_ability_decl(decl: &AbilityDecl) -> Result<AbilityProgram, LowerErr
     // slots; deferring keeps this slice small.
     let mut pending_effects: SmallVec<[EffectOp; MAX_EFFECTS_PER_PROGRAM]> = SmallVec::new();
     let mut cast_interrupt_mask: Option<InterruptMask> = None;
-    // Plan G G3e (2026-05-09) — telegraph metadata, populated from the
-    // first cast{}'s `telegraph: <shape>(...)` field. Defaults to the
-    // none-sentinel + zero params when no cast{} block (or no telegraph
-    // field) is authored. The threats fold (G3g) reads the packed
-    // companion columns to project per-caster zones.
+    // Telegraph metadata, populated from the first cast{}'s
+    // `telegraph: <shape>(...)` field. Defaults to the none-sentinel +
+    // zero params when no cast{} block (or no telegraph field) is
+    // authored. The threats fold reads the packed companion columns to
+    // project per-caster zones.
     let mut telegraph_kind: u8 = TELEGRAPH_KIND_NONE;
     let mut telegraph_params: [f32; 4] = [0.0; 4];
     if let Some(steps) = &decl.program {

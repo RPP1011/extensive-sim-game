@@ -2,14 +2,12 @@
 //! [`PlumbingKind`] ops that the schedule needs but the DSL surface
 //! does not name.
 //!
-//! Phase 2, Task 2.7 of the Compute-Graph IR pipeline (see
-//! `docs/superpowers/plans/2026-04-29-dsl-compute-graph-ir.md`). Unlike
-//! the mask / view / physics / scoring / spatial passes, this pass does
-//! NOT consume an AST IR sub-tree: plumbing ops have no DSL surface.
+//! Unlike the mask / view / physics / scoring / spatial passes, this pass
+//! does NOT consume an AST IR sub-tree: plumbing ops have no DSL surface.
 //! Instead the pass takes a list of [`PlumbingKind`] values (typically
 //! produced by [`synthesize_plumbing_ops`] from the user-facing ops
-//! already in the program) and pushes one
-//! [`crate::cg::op::ComputeOp`] per entry onto the builder.
+//! already in the program) and pushes one [`crate::cg::op::ComputeOp`]
+//! per entry onto the builder.
 //!
 //! # Two entry points
 //!

@@ -139,11 +139,9 @@ mod stdlib {
             // Ability-registry accessor: `is_known(id)`, `cooldown_ticks(id)`,
             // `effects(id)`. Used by the `cast` physics rule.
             ("abilities", NamespaceId::Abilities),
-            // Singular alias for `abilities`. Added 2026-04-22 (ability-
-            // cooldowns subsystem, Task 7) so designers can write
-            // `ability::on_cooldown(<slot>)` in mask / physics predicates
-            // with the natural singular form. Shares the same method
-            // schema as `abilities::`.
+            // Singular alias for `abilities` — lets designers write the
+            // natural singular form `ability::on_cooldown(<slot>)` in mask /
+            // physics predicates. Shares the same method schema as `abilities::`.
             ("ability", NamespaceId::Abilities),
             // Terrain backend accessor — MVP Task 81. Sole method:
             // `terrain.line_of_sight(from, to) -> bool`. Routed through
@@ -193,10 +191,8 @@ mod stdlib {
             // today: shape classifiers in `cg::emit::{metrics,probes,
             // invariants}` recognise the IR node + emit per-name SKIP
             // setters the runtime fills in. Physics / view bodies that
-            // reach for `events.*` will fail at CG lowering with
-            // `UnsupportedNamespaceCall`. Registered 2026-05-11 to
-            // close the migration gap blocking `crowd_navigation` +
-            // `predator_prey` from the `sims/` mega-crate.
+            // reach for `events.*` fail at lowering with
+            // `UnsupportedNamespaceCall` (not yet GPU-side).
             ("events", NamespaceId::Events),
             // Static lookup tables — `tables.<name>(<idx>)` reads a
             // u32 cell from a `table <name>: u32[N] = […]` decl.
@@ -208,8 +204,7 @@ mod stdlib {
             // Voxel-region-indices spec Phase 4b — navgrid index reads.
             // `navgrid.walkable(cx, cz) -> bool` resolves the per-region
             // navgrid the engine_voxel::build_navgrid built at host time.
-            // Registered 2026-05-16. Phase 5 fixture uses this in a
-            // physics rule to gate movement by terrain walkability.
+            // Used in physics rules to gate movement by terrain walkability.
             ("navgrid", NamespaceId::Navgrid),
         ] {
             symbols.stdlib_namespaces.insert(name.to_string(), id);
@@ -455,10 +450,9 @@ mod stdlib {
             // literal slot index and lets the mask / physics predicate
             // phrase gates as `ability::on_cooldown(s)` (returns `true`
             // when the slot is still on cooldown — the natural "gate
-            // blocks" reading). Added 2026-04-22 (ability-cooldowns
-            // subsystem, Task 7). The implicit subject is the rule's
-            // `self`; the slot arg coerces to `u8` via the argument
-            // lowering in the emitter.
+            // blocks" reading). The implicit subject is the rule's
+            // `self`; the slot arg coerces to `u8` via argument lowering
+            // in the emitter.
             (NamespaceId::Abilities, "on_cooldown") => Some((1, IrType::Bool)),
             (NamespaceId::Abilities, "hostile_only") => Some((1, IrType::Bool)),
             (NamespaceId::Abilities, "range") => Some((1, IrType::F32)),
@@ -1615,9 +1609,9 @@ fn resolve_bodies(
                 let head = resolve_action_head(&d.head, &mut scope, symbols);
                 let predicate = resolve_expr(&d.predicate, &mut scope, symbols)?;
                 // Closed-operator-set validation (spec §2.5). Mask
-                // predicates compile to GPU boolean kernels; task 155
-                // (commit 9ba805c6) kept this restriction intentional
-                // even as physics bodies gained `for`/`match`.
+                // predicates compile to GPU boolean kernels and stay
+                // restricted by design, even as physics bodies gained
+                // `for`/`match`.
                 validate_mask_body(&d.head.name, &predicate)?;
                 if let Some(cs) = &candidate_source {
                     validate_mask_body(&d.head.name, cs)?;
@@ -5590,14 +5584,13 @@ fn expr_references_cascade_ceiling(e: &IrExprNode) -> bool {
 // scalar surface (SPIR-V boolean / f32 kernels). The closed operator set
 // mirrors the fold-body restriction minus the `self +=` family: pure
 // expressions over stdlib accessors + bounded aggregates + quantifiers +
-// view calls, with `if/else` as the only control flow. Task 155
-// (commit 9ba805c6) expanded the *physics* surface to include `for` and
-// `match`, but mask/scoring contexts stayed restricted on purpose — they
-// compile to per-row GPU kernels where unbounded iteration and variant
+// view calls, with `if/else` as the only control flow. Physics bodies allow
+// `for` and `match`, but mask/scoring contexts stay restricted by design —
+// they compile to per-row GPU kernels where unbounded iteration and variant
 // dispatch aren't available. The validators are expression-only; `for`
-// statements can't reach these slots (the parser rejects `for` in
-// expression position), so the validators primarily catch `match`
-// expressions — the one forbidden shape that *does* parse as an expr.
+// statements can't reach these slots (the parser rejects `for` in expression
+// position), so the validators primarily catch `match` expressions — the one
+// forbidden shape that *does* parse as an expr.
 
 fn validate_mask_body(mask_name: &str, e: &IrExprNode) -> Result<(), ResolveError> {
     match &e.kind {

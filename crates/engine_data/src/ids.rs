@@ -1,13 +1,10 @@
 //! Niche-optimised ID newtypes — struct bodies live here transitionally.
 //!
-//! **Plan B1' Task 3 (transitional):** The canonical *public* path for these
-//! types is `engine::ids::*` (re-exported from here). Once Task 5 settles the
-//! dep direction (`engine_data → engine` as a regular Cargo dep), this file
-//! will shrink to `pub use engine::ids::*;` and the struct declarations will
-//! move permanently into `crates/engine/src/ids.rs`.
-//!
-//! Until then: this file holds the struct bodies; `engine::ids` re-exports
-//! them; all external callers use the `engine::` path.
+//! The canonical *public* path for these types is `engine::ids::*`
+//! (re-exported from here). This file holds the struct bodies; `engine::ids`
+//! re-exports them; all external callers use the `engine::` path.
+//! Once the dep direction settles, this file will shrink to `pub use engine::ids::*;`
+//! and the struct declarations will move into `crates/engine/src/ids.rs`.
 //!
 //! Byte-for-byte parity with the target `engine::ids`: same `NonZeroU32`
 //! niche, same `raw()`/`new()` APIs.

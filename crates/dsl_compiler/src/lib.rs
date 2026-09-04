@@ -5,13 +5,13 @@
 //! owns the Compute-Graph (CG) IR + lowering + WGSL emission. Emitted
 //! files land on disk via the xtask `compile-dsl` subcommand.
 //!
-//! **Phase 7 wolf-sim wipe (2026-05-02):** the legacy emitter modules
-//! (`emit_mask`, `emit_view*`, `emit_scoring*`, `emit_physics*`,
-//! `emit_movement_kernel`, `emit_step`, `emit_pick_ability_kernel`,
-//! `emit_megakernel`, `emit_spatial_kernel`, etc.) and the legacy
-//! `EmittedArtifacts` API have been removed. The compute-graph path
-//! (`cg::*`) is the sole supported emission pipeline. Build a new DSL
-//! fixture under `assets/sim/` to exercise it.
+//! The compute-graph path (`cg::*`) is the sole supported emission
+//! pipeline. Legacy per-declaration-kind emitters (`emit_mask`,
+//! `emit_view*`, `emit_scoring*`, `emit_physics*`, `emit_movement_kernel`,
+//! `emit_step`, `emit_pick_ability_kernel`, `emit_megakernel`,
+//! `emit_spatial_kernel`, etc.) and the legacy `EmittedArtifacts` API do
+//! not exist in this codebase. Build a new DSL fixture under
+//! `assets/sim/` to exercise it.
 
 // Frontend re-exports
 pub use dsl_ast::ast;

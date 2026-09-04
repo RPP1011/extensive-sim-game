@@ -41,8 +41,6 @@ impl AnnounceAudience {
 }
 
 // `Resolution` and `QuestCategory` live in `engine_data::types`.
-// Task 4 (Plan B1') dropped the re-export shims; callers import directly
-// from `engine_data::types`.
 use engine_data::types::{QuestCategory, Resolution};
 
 /// Parameterised macro action emitted by a policy.

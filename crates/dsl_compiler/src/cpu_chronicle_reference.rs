@@ -16,16 +16,10 @@
 //! dispatcher would write for it. Pairing the two gives a complete
 //! CPU pipeline equivalent to the GPU dispatch path.
 //!
-//! **Slice ε update.** Originally (slice γ), the GPU dispatcher
-//! hardcoded `agent_id` for both actor + target (self-cast). After
-//! slice ε plumbed explicit `caster` + `target` operands through
-//! `CgStmt::ApplyAbility` (commits `92572af8` / `d0bc37fd`), the
-//! dispatcher writes whichever ids the lowering supplies.
-//!
-//! This reference mirrors that: takes `caster_id` and `target_id`
-//! separately and writes them into actor (slot 2) and target (slot 3)
-//! respectively. For self-cast callers, pass `target_id == caster_id`
-//! to preserve the prior chronicle byte layout.
+//! The GPU dispatcher writes `caster_id` and `target_id` separately
+//! into actor (slot 2) and target (slot 3) respectively — this reference
+//! mirrors that behavior. For self-cast callers, pass `target_id ==
+//! caster_id` to match the chronicle byte layout.
 //!
 //! Pin contract:
 //!   - Each entry of [`EFFECT_KIND_TO_EVENT_KIND_ID`] (in
@@ -58,7 +52,7 @@ pub const CHRONICLE_RECORD_STRIDE_U32: usize = 11;
 ///   - `[0]`  = kind tag (e.g. `26` for EffectDamageApplied)
 ///   - `[1]`  = tick
 ///   - `[2..6]` = per-variant payload (see variant arms below)
-///   - `[6]`  = ability_id (Gap detective#6, 2026-05-12)
+///   - `[6]`  = ability_id
 ///   - `[7..9]` = reserved (zero)
 ///   - `[10]` = seq trailer: `(kernel_id << 24) | (thread_id << 4) | emit_idx`
 ///

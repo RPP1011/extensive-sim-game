@@ -1,10 +1,8 @@
-//! Simulation backend abstraction (GPU-megakernel plan, Phase 0).
+//! Simulation backend abstraction.
 //!
 //! Defines [`ComputeBackend`] — the narrow trait both CPU and GPU tick drivers
-//! implement. `CpuBackend` (the thin wrapper around `step::step`) is DELETED
-//! in Plan B1' Task 11; `engine_rules` will emit `SerialBackend` as the CPU
-//! implementation. Until then callers that need a CPU tick driver should call
-//! `engine_rules::step::step` directly once Task 11 lands.
+//! implement. Concrete implementations (`SerialBackend` for CPU) live in
+//! per-fixture runtime crates; the real tick driver is `engine_rules::step::step`.
 //!
 //! ## Trait shape & genericity
 //!
@@ -27,9 +25,6 @@ use crate::state::SimState;
 ///
 /// The method is generic over `B: PolicyBackend`; this is not a dyn-dispatch
 /// trait.
-///
-/// NOTE: `CpuBackend` is deleted (Plan B1' Task 11). `engine_rules` will emit
-/// `SerialBackend` implementing this trait once Task 11 lands.
 pub trait ComputeBackend {
     /// The event type this backend drives (e.g. `engine_data::events::Event`).
     type Event: EventLike;

@@ -350,17 +350,16 @@ fn dungeon_stealth_500_tick_clear_report() {
     }
     println!("==========================================");
 
-    // Load-bearing pins. Task A retune (2026-05-12): TICKS bumped
-    // 100→500 + per-creature-type HP overrides. Verdict can land at
-    // TPK / DUNGEON CLEARED / PARTY ADVANCING / PARTY EXPLORING
-    // depending on the seed; the pin asserts only structural invariants
-    // (NaN-free, stealth round-trip fires, combat happens). A wipe at
-    // the boss room is now an *expected* outcome on bad rolls, not a
-    // wiring regression.
+    // Load-bearing pins. TICKS=500 with per-creature-type HP overrides.
+    // Verdict can land at TPK / DUNGEON CLEARED / PARTY ADVANCING /
+    // PARTY EXPLORING depending on the seed; the pin asserts only
+    // structural invariants (NaN-free, stealth round-trip fires, combat
+    // happens). A wipe at the boss room is an *expected* outcome on bad
+    // rolls, not a wiring regression.
     assert_eq!(nan_count, 0, "found {nan_count} NaN positions after {TICKS} ticks");
 
-    // Stealth pin (load-bearing — Gap dungeon_stealth#5 closed
-    // 2026-05-12). RogueStealth fires every 20 ticks; cd=20, duration=50.
+    // Stealth pin (load-bearing). RogueStealth fires every 20 ticks;
+    // cd=20, duration=50.
     // The chronicle dispatcher emits kind=54 records and
     // ApplyStealthFromChronicle writes `stealth_until_tick = world.tick
     // + 50`.

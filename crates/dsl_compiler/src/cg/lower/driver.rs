@@ -1,12 +1,11 @@
 //! End-to-end DSL → CgProgram lowering driver.
 //!
-//! Phase 2, Task 2.8 of the Compute-Graph IR pipeline (see
-//! `docs/superpowers/plans/2026-04-29-dsl-compute-graph-ir.md`). Wires
-//! every prior per-construct lowering pass (mask, view, physics,
+//! Wires every per-construct lowering pass (mask, view, physics,
 //! scoring, spatial, plumbing) behind a single entry point —
 //! [`lower_compilation_to_cg`] — that consumes a resolved
 //! [`dsl_ast::ir::Compilation`] and returns a fully-built
-//! [`CgProgram`].
+//! [`CgProgram`]. See `docs/spec/dsl.md` §9 for the canonical
+//! specification.
 //!
 //! # Phases
 //!

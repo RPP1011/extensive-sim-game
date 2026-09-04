@@ -30,7 +30,7 @@ fn flat_init_back_compat_int_and_slot() {
 
 #[test]
 fn flat_init_accepts_float_values() {
-    // Task 1: float fills used to error; now they lower to InitExpr::Float.
+    // Float fills lower to InitExpr::Float.
     let init = first_init("init { hp: 100.0, mana: 0.5 }\n");
     assert_eq!(init.stmts[0].field, "hp");
     assert_eq!(init.stmts[0].expr, InitExpr::Float(100.0));
@@ -39,7 +39,7 @@ fn flat_init_accepts_float_values() {
 
 #[test]
 fn spawn_blocks_parse_count_and_fields() {
-    // Task 2: two population blocks with literal + config counts.
+    // Test two population blocks with literal + config counts.
     let src = "\
         config waves { cap: i32 = 511 }\n\
         init {\n\
@@ -68,7 +68,7 @@ fn spawn_blocks_parse_count_and_fields() {
 
 #[test]
 fn position_builtins_parse() {
-    // Task 4: origin / scatter(r) / ring(r) as pos values.
+    // Position builtins parse as init field values.
     let src = "\
         init {\n\
           spawn A count 1 { pos: origin }\n\
@@ -108,9 +108,9 @@ fn config_ref_init_values_parse() {
 
 #[test]
 fn render_creature_type_is_subkind_parses() {
-    // Task 5: `agent when creature_type is <Subkind>` render selector. The
-    // parser records the subkind name; the JSON emitter resolves it to the
-    // creature_type ordinal (declaration order).
+    // The `agent when creature_type is <Subkind>` render selector: the parser
+    // records the subkind name; the JSON emitter resolves it to the creature_type
+    // ordinal (declaration order).
     let src = "\
         entity Hare : Agent {}\n\
         entity Wolf : Agent {}\n\

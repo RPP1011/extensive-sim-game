@@ -176,8 +176,8 @@ fn visit(
     }
     if let Some(t) = program.terrain {
         if merged_terrain.is_some() {
-            // Singleton collision — handled by Task 7's collision pass,
-            // but emit the same error here so it surfaces at parse time.
+            // Singleton collision — emit error here so it surfaces at
+            // parse time.
             return Err(ImportError::DuplicateDefinition {
                 kind: "terrain".to_string(),
                 name: "<singleton>".to_string(),

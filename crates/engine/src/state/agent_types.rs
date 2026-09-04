@@ -1,8 +1,7 @@
 //! Stub types for `SimState` cold-collection fields. These are minimal
 //! Pod-friendly shells that reserve the shape state.md commits to; subsequent
-//! plans attach typed payloads and cascade handlers. See
-//! `docs/superpowers/plans/2026-04-19-engine-plan-state-port.md` for the
-//! full inventory and rationale.
+//! plans attach typed payloads and cascade handlers. See `docs/spec/state.md`
+//! for the full specification.
 
 use crate::ids::{AgentId, GroupId};
 
@@ -65,9 +64,8 @@ pub struct Membership {
 // ---- Task H: Inventory ---------------------------------------------------
 
 /// Portable commodity storage, one per agent. `gold` is signed (`i32`) so debt
-/// is representable as a negative balance. Narrowed from i64 on 2026-04-22 so
-/// `transfer_gold` can run on GPU (WGSL has no atomic i64). i32's ±2.1B range
-/// is well above any practical economic-sim value.
+/// is representable as a negative balance. i32's ±2.1B range is well above any
+/// practical economic-sim value.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Inventory {
     pub gold:        i32,
@@ -124,8 +122,6 @@ pub struct MentorLink {
     pub discipline: u8,
 }
 
-// Combat Foundation Task 1 `SparseStandings` — retired 2026-04-23 in
-// favour of the `@materialized` `standing` view
-// (`crate::generated::views::standing::Standing`, K=8 per owner). DSL
-// `agents.adjust_standing(...)` lowers directly to
-// `state.views.standing.adjust(...)`.
+// Standing is managed via the `@materialized` `standing` view
+// (K=8 top-k per owner). DSL `agents.adjust_standing(...)` lowers directly
+// to `state.views.standing.adjust(...)`.
