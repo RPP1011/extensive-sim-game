@@ -146,13 +146,22 @@ pub struct InitDecl {
     pub span: Span,
 }
 
-/// A `spawn <Subkind> count <N> { <field: value,>* }` population block.
+/// A `spawn <Subkind> count <N> [export <NAME>] { <field: value,>* }`
+/// population block.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SpawnBlock {
     /// The `entity X : Agent` subkind name; resolved to its declaration-order
     /// `creature_type` ordinal when stamping seeded agents.
     pub subkind: String,
     pub count: CountExpr,
+    /// `export <NAME>` — emits `pub const <NAME>: u32 = <count>;` at module
+    /// scope in the generated runtime, so host code that needs to know a
+    /// fixture's compile-time population size (a pool cap, a reserved rank)
+    /// reads a compiler-generated constant instead of a hand-copied literal
+    /// that can silently drift from the `.sim` source. Only valid on a
+    /// `CountExpr::Lit` count — `resolve`/`build_helper` reject it on a
+    /// `config.*`-driven count, since that isn't a compile-time constant.
+    pub export: Option<String>,
     /// Per-block field fills (int/f32/slot/pos), applied to the block's
     /// slot range on top of the auto-stamped `creature_type` + `alive`.
     pub fields: Vec<InitStmt>,

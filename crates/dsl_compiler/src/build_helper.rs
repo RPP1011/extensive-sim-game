@@ -843,6 +843,15 @@ fn emit_into(
                     entity_ordinals.keys().collect::<Vec<_>>(),
                 )
             });
+            if sb.export.is_some() && !matches!(sb.count, dsl_ast::ast::CountExpr::Lit(_)) {
+                panic!(
+                    "init `spawn {} count config.* export {}`: `export` only makes sense on a \
+                     literal count — a `config.*` count is a `@runtime`-overridable default, \
+                     not a compile-time constant, in {fixture_name}.sim",
+                    sb.subkind,
+                    sb.export.as_deref().unwrap_or(""),
+                );
+            }
             let count = match &sb.count {
                 dsl_ast::ast::CountExpr::Lit(n) => *n,
                 dsl_ast::ast::CountExpr::Config(dotted) => {
@@ -892,6 +901,7 @@ fn emit_into(
                 subkind: sb.subkind.clone(),
                 creature_type_ord,
                 count,
+                export: sb.export.clone(),
                 fields,
             }
         })
@@ -963,6 +973,9 @@ pub struct ResolvedSpawnBlock {
     pub subkind: String,
     pub creature_type_ord: u32,
     pub count: u32,
+    /// `export <NAME>` carried through from `ast::SpawnBlock` — see its doc
+    /// comment. `None` for the common case of an un-exported spawn block.
+    pub export: Option<String>,
     pub fields: Vec<dsl_ast::ast::InitStmt>,
 }
 
@@ -1917,6 +1930,27 @@ pub fn synthesize_runtime_core_a2(
          #[allow(dead_code)]\n\
          pub const KERNEL_COUNT: usize = {kernel_count};\n\n",
     ));
+
+    // `spawn <Subkind> count <N> export <NAME> { ... }` — a compile-time
+    // population count a `.sim` author wants host code to reference instead
+    // of hand-copying. Emitted here (module scope, alongside FIXTURE_NAME/
+    // KERNEL_COUNT above) rather than inside `emit_spawn_seeding`'s
+    // statement-level slot-range code, which lives inside a fn body.
+    // `build_helper`'s resolve pass above already rejects `export` on a
+    // `config.*`-driven count, so every value here is a true compile-time
+    // literal from the `.sim` source.
+    for sb in init_spawns {
+        let Some(name) = &sb.export else { continue };
+        out.push_str(&format!(
+            "#[allow(dead_code, non_upper_case_globals)]\n\
+             pub const {name}: u32 = {count}; // spawn {subkind} count {count} export {name}\n",
+            count = sb.count,
+            subkind = sb.subkind,
+        ));
+    }
+    if init_spawns.iter().any(|sb| sb.export.is_some()) {
+        out.push('\n');
+    }
 
     // Plan E-A3.2 — emit GeneratedRuntime struct + try_new constructor.
     //

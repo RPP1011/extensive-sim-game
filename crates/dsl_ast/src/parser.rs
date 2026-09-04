@@ -1129,6 +1129,17 @@ fn init_decl(
                     "expected integer literal or config.<block>.<field> as spawn count",
                 ));
             };
+            // Optional `export <NAME>` — a compile-time-constant escape
+            // hatch: the generated runtime emits `pub const <NAME>: u32 =
+            // <count>;` at module scope so host code can reference a
+            // fixture's population size instead of hand-copying it.
+            c.skip_ws();
+            let export = if starts_with_keyword(c, "export") {
+                c.bump("export".len());
+                Some(ident(c).map_err(|e| e.with_context("parsing `spawn` export name"))?)
+            } else {
+                None
+            };
             expect_char(c, '{')
                 .map_err(|e| e.with_context("parsing spawn block body `{`"))?;
             let mut fields = Vec::new();
@@ -1147,6 +1158,7 @@ fn init_decl(
             spawns.push(SpawnBlock {
                 subkind,
                 count,
+                export,
                 fields,
                 span: Span::new(spawn_start, c.pos),
             });
